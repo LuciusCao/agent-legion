@@ -15,8 +15,8 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.code_dispatch import resolve_code_manifest_config
+from server.app.agent_workers import CODE_PROTOCOL_VERSION
 from server.app.routes.agent_workers_contracts import (
-    AGENT_WORKER_PROTOCOL_VERSION,
     AgentClaimResponse,
     AgentHeartbeatResponse,
     ClaimAgentExecutionRequest,
@@ -90,7 +90,7 @@ def create_agent_worker_claim_router(
         # Protocol v2 (batch 2): the body carries explicit cancellations for
         # this Worker's claimed kind='code' executions. v1 Workers keep the
         # legacy empty 204 (they cannot hold code executions anyway).
-        if int(worker["protocol_version"]) >= AGENT_WORKER_PROTOCOL_VERSION:
+        if int(worker["protocol_version"]) >= CODE_PROTOCOL_VERSION:
             cancelled = broker.cancelled_code_executions(str(worker["worker_id"]))
             return AgentHeartbeatResponse(cancelled_execution_ids=cancelled)
         return Response(status_code=204)

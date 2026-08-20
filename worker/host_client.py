@@ -15,13 +15,13 @@ import requests
 
 from worker.host_transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
 
-# Batch-2 protocol: kind='code' claims, dual capacity pools, heartbeat
+# Protocol v3: runtime-scoped model declarations. Batch-2 fields remain
 # cancel bodies. Mirrors AGENT_WORKER_PROTOCOL_VERSION in
 # server/app/routes/agent_workers_contracts.py — bump both together.
 # Compatibility is field-default based: an old Host never returns
 # kind='code' claims and keeps answering 204 heartbeats (parsed as no
 # cancellations), so this Worker degrades to agent-only.
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 
 DEFAULT_TIMEOUT = 30
 

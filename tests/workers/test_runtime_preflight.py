@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from worker import binary_resolution
+from worker import binary_resolution, runtime_setup
 from worker import executor as agent_worker
 from worker.binary_resolution import resolve_binary
 from worker.runtime_preflight import preflight_error
@@ -54,6 +54,23 @@ def test_preflight_rejects_missing_binary_with_actionable_error(
 def test_preflight_passes_when_binaries_present(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
     assert preflight_error(["pi", "velites"]) is None
+
+
+@pytest.mark.no_db
+def test_prepare_runtime_models_injects_effective_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
+    effective = [{"runtime": "velites", "provider": "sqai", "model": "kimi"}]
+    monkeypatch.setattr(
+        runtime_setup,
+        "discover_effective_models",
+        lambda _config: (effective, {}),
+    )
+    config = {"runtimes": ["velites"], "models": []}
+
+    assert runtime_setup.prepare_runtime_models(config) is None
+    assert config["models"] == effective
 
 
 @pytest.mark.no_db

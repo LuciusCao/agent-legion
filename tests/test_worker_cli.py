@@ -75,7 +75,7 @@ def test_configure_accepts_models_capabilities_and_token_file(tmp_path: Path) ->
             "--capability",
             "review",
             "--model",
-            "openai/gpt-5",
+            "velites:openai/gpt-5",
             "--register-token-file",
             str(token_file),
         ]
@@ -83,7 +83,7 @@ def test_configure_accepts_models_capabilities_and_token_file(tmp_path: Path) ->
 
     assert configure_payload(args) == {
         "capabilities": ["review"],
-        "models": [{"provider": "openai", "model": "gpt-5"}],
+        "models": [{"runtime": "velites", "provider": "openai", "model": "gpt-5"}],
         "register_token": "host-issued-token",
     }
 

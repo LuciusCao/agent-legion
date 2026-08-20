@@ -115,12 +115,10 @@ def test_velites_command_exact_argv() -> None:
         assert flag not in cmd
 
 
-def test_velites_command_maps_named_provider_to_gateway() -> None:
-    # pi 命名 provider（deepseek 等）在 velites 侧收敛为 gateway 单出口；
-    # 协议名原样透传。
+def test_velites_command_preserves_named_provider_for_runtime_registry() -> None:
     named = _execution(MANIFEST, provider="deepseek")
     cmd = _dispatch(named)
-    assert cmd[cmd.index("--provider") + 1] == "gateway"
+    assert cmd[cmd.index("--provider") + 1] == "deepseek"
     for native in ("gateway", "openai_compat", "stub"):
         passthrough = _execution(MANIFEST, provider=native)
         assert _dispatch(passthrough)[cmd.index("--provider") + 1] == native

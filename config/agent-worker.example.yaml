@@ -21,9 +21,13 @@ max_concurrency: 10
 claim_enabled: false
 # 必须与 workflow 节点现有的 capability 完全匹配。
 capabilities: [write_script, review_questions]
-# 只有 provider 和 model 都匹配时才会领取任务。
+# Runtime 启动时各自发现本机模型（velites: `velites models list --json`；其他
+# runtime 走各自 adapter）。这里是可选 allowlist，不是可执行能力的事实源：最终
+# 注册集合 = runtime 发现结果 ∩ 本列表；留空表示允许该 runtime 发现的全部模型。
+# 推荐显式写 runtime；旧 provider/model 写法会扩展到当前全部 runtimes。
 models:
-  - provider: openai
+  - runtime: velites
+    provider: openai
     model: gpt-5.2
 labels:
   os: macos

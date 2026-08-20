@@ -31,7 +31,7 @@ PoC（pi_agent_rust 替换验证）同时证明了两件事：
 - 完整复刻 Host 侧消费的事件流契约（见 §4），Host 三处消费方（日志渲染、token 计量、
   失败判定）零改动切换；
 - skill 注入（显式 `--skill` 目录）+ `read`/`write`/`bash` 三工具；
-- OpenAI 兼容 streaming chat（SSE）对接自建 LLM gateway；
+- OpenAI-compatible Chat Completions 与 Anthropic Messages streaming；
 - **可控性内建**（§5）：预算、优雅取消、输出自检、零自动发现；
 - 单进程单执行，进程模型与现状一致（worker 隔离语义不变）。
 
@@ -39,7 +39,7 @@ PoC（pi_agent_rust 替换验证）同时证明了两件事：
 
 - TUI / 交互模式 / 会话恢复；
 - 插件、扩展、MCP、prompt template、主题（Pi 的这些我们本就全部 `--no-*` 关闭）；
-- 多 provider 原生适配（只认 OpenAI 兼容 endpoint，其余由 gateway 收敛）；
+- 除 OpenAI-compatible / Anthropic Messages 外的更多原生协议；
 - 通用开源 harness 产品化（velites 是 Agent Legion 的专用配件；schema 稳定后再评估）。
 
 ## 3. 仓库组织与总体架构
@@ -55,10 +55,11 @@ velites/                 # Cargo crate（本仓库根下新目录）
     cli.rs               # 参数定义
     agent.rs             # agent loop
     events.rs            # 事件 schema 定义（serde）+ emitter
-    config.rs            # gateway 凭据（文件 + env 覆盖，§7）
+    models.rs            # ~/.velites/models.json provider/model registry
+    config.rs            # 旧 gateway 凭据迁移桥
     session.rs           # session.jsonl 镜像落盘（--session-dir）
     tools/{mod,read,write,bash,command_guard,truncate}.rs
-    provider/{mod,openai_compat,retry,stub}.rs
+    provider/{mod,openai_compat,anthropic,retry,stub}.rs
     skill.rs             # SKILL.md 加载
     budget.rs            # 预算治理
     cancel.rs            # 取消/信号
@@ -262,13 +263,15 @@ velites --mode json \
         --session-dir <run>/session \
         --skill <dir> \
         --tools read,write,bash \
-        --provider gateway --model <m> --thinking low \
+        --provider <provider-key> --model <model-id> --thinking low \
         [--max-turns N] [--max-tokens N] [--require-output f ...] \
         [--no-sandbox] \
         @<run>/prompt.md "Execute the attached node instructions."
 ```
 
-- provider `gateway`：base URL 与 key 来自 velites 配置文件（见 §7 凭据配置）；
+- provider/model 必须存在于 `~/.velites/models.json`；provider 名称从 Host 原样传递；
+- `velites models list --json` 输出本机可执行的 provider/model，供 Worker runtime
+  adapter 动态发现；
 - `--mode` 只有 `json`（headless 唯一形态）；
 - 未知 flag 直接报错退出（与 Pi/pi_agent_rust 的静默吞掉相反，防止配置漂移）；
 - `--name` 保留（仅标识用途，写入 `session` 事件）。
@@ -293,12 +296,14 @@ fail-closed 报错，内置节点不受影响。
 
 ## 7. Provider 层
 
-- 仅实现 OpenAI chat completions（SSE streaming）；请求/重试/usage 解析一处收敛；
+- `Provider` trait 下实现 OpenAI-compatible Chat Completions 与 Anthropic Messages；
+  两者分别收敛请求、streaming、tool 和 usage 方言，共用 retry/agent loop；
 - usage 口径对齐 pi：`input = prompt_tokens − cacheRead`（provider 的 `prompt_tokens`
   **含**缓存命中部分，pi 的 `input` 不含；缓存部分只经 `cacheRead` 单列计费，直接透传
   `prompt_tokens` 会把缓存部分双重计费——2026-08-01 生产数据核对：pi input 27.5k +
   cache 420k = velites 修复前 input 447k），`saturating_sub` 兜底异常网关；
-- `thinking` 参数按 provider 映射（初期只支持 gateway 现有映射，PoC 已验证）；
+- `thinking` 按 driver 映射：OpenAI 使用 `reasoning_effort`；Anthropic 使用模型配置的
+  `thinkingBudgets` 生成 `thinking.budget_tokens`；
 - 已知边界：严格要求 SSE——gateway 上只回 `application/json` 的模型不可用
   （PoC P2 发现）；模型接入约束由实例级外部服务连接与 gateway 运维策略控制，
   不再通过 `config/workflow.yaml` 维护（split yaml 已退役）。
@@ -314,16 +319,16 @@ fail-closed 报错，内置节点不受影响。
   发 `content: null`——gateway 收到后先回 200 再立即掐断连接（0 字节），重试
   无果；thinking-only 消息（thinking 不回传）序列化降级为 `""`。
 
-### 凭据配置（简化版，评审确认）
+### Provider/model 与凭据配置
 
-- 初期：velites 自有配置文件（`~/.velites/config.json`，含 gateway `base_url` +
-  `api_key`），文件权限 0600。**明文文件是权宜之计，不作为长期方案**；
-- env 注入（已实现）：固定环境变量 `VELITES_BASE_URL` / `VELITES_API_KEY`
-  （`velites/src/config.rs`）按字段覆盖文件值，env 全量提供时可完全免去配置
-  文件；无 `--api-key-env` flag；
-- 后续扩展：与 Agent Legion vault 打通（env 覆盖即预留的接入缝），优先级
-  env > 文件；
-- 保留的底线仅一条：secret 不上命令行（`ps` 可见）。不做启动强校验等其他治理。
+- 单一事实源是 `~/.velites/models.json`（测试/部署可用 `VELITES_MODELS_PATH` 覆盖），
+  provider 定义协议、base URL、API key 引用和有限的模型方言参数；完整格式及 Worker
+  动态发现见 [velites-model-registry.md](./velites-model-registry.md)；
+- `apiKey` 支持 `$ENV` / `${ENV}` 精确引用；模型发现即解析引用，缺失时 fail-closed，
+  Worker 不会广播该 runtime 的模型；文件可能含字面 secret，因此权限应为 0600；
+- 旧 `~/.velites/config.json` 与 `VELITES_BASE_URL/VELITES_API_KEY` 仅在没有 models 文件
+  且直接运行 `gateway/openai_compat` 时作为迁移桥，不参与 Worker capability discovery；
+- secret 不上命令行或 Host manifest。
 
 ## 8. 工具实现
 

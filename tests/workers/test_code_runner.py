@@ -12,6 +12,7 @@ import io
 import json
 import shutil
 import stat
+import sys
 import tarfile
 import threading
 import time
@@ -203,6 +204,7 @@ def test_build_sandbox_argv_structure() -> None:
     )
     assert argv[:4] == ["/usr/bin/velites", "sandbox", "wrap", "--cwd"]
     separator = argv.index("--")
+    assert argv[separator + 1] == str(Path(sys.executable).resolve())
     assert argv[separator + 1 : separator + 4][1:] == ["-m", "workspace_libs.code_child"]
     wrapped = argv[:separator]
     assert "--allow-network" in wrapped

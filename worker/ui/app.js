@@ -158,7 +158,7 @@ function fillForm(config) {
     } else if (key === "capabilities") {
       form.elements.capabilities.value = value.join("\n");
     } else if (key === "models") {
-      form.elements.models.value = value.map((item) => `${item.provider}/${item.model}`).join("\n");
+      form.elements.models.value = value.map((item) => `${item.runtime ? `${item.runtime}:` : ""}${item.provider}/${item.model}`).join("\n");
     } else if (key === "labels") {
       form.elements.labels.value = Object.entries(value).map(([label, item]) => `${label}=${item}`).join("\n");
     } else if (form.elements[key]) {
@@ -329,9 +329,13 @@ export function linesFromText(text) {
 
 export function modelsFromText(text) {
   return linesFromText(text).map((line) => {
-    const separator = line.indexOf("/");
-    if (separator < 1 || separator === line.length - 1) throw new Error(`模型必须使用 provider/model 格式：${line}`);
-    return { provider: line.slice(0, separator).trim(), model: line.slice(separator + 1).trim() };
+    const colon = line.indexOf(":");
+    const scoped = colon < 0 ? line : line.slice(colon + 1);
+    const separator = scoped.indexOf("/");
+    if (separator < 1 || separator === scoped.length - 1) throw new Error(`模型必须使用 [runtime:]provider/model 格式：${line}`);
+    const item = { provider: scoped.slice(0, separator).trim(), model: scoped.slice(separator + 1).trim() };
+    if (colon >= 0) item.runtime = line.slice(0, colon).trim();
+    return item;
   });
 }
 

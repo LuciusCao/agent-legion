@@ -6,10 +6,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-# Current Agent Worker protocol version (batch 2). Backward compatibility is
-# field-default based: a v1 Worker never declares code capacity, never
+# Current Agent Worker protocol version. v3 adds runtime-scoped model
+# declarations; backward compatibility remains field-default based: a v1
+# Worker never declares code capacity, never
 # receives kind='code' claims, and keeps the legacy 204 heartbeat.
-AGENT_WORKER_PROTOCOL_VERSION = 2
+AGENT_WORKER_PROTOCOL_VERSION = 3
 
 
 class RegisterAgentWorkerRequest(BaseModel):

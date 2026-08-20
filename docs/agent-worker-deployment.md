@@ -30,12 +30,19 @@ chmod 600 deploy/secrets/postgres_password deploy/secrets/postgres_pgpass deploy
 
 ## 2. 部署机准备挂载目录
 
-设置 Agent skills 和 Pi 配置目录。Pi 配置中继续使用已验证可用的 provider/model 与 LLM gateway 地址。
+设置 Agent skills、Pi 配置和 velites provider/model registry 目录。不同 runtime
+各自拥有模型事实源，Worker 启动时通过 runtime adapter 动态发现。
 
 ```bash
 export AGENT_SKILLS_DIR="$PWD/skills"
 export PI_CONFIG_DIR="$HOME/.pi/agent"
+export VELITES_CONFIG_DIR="$HOME/.velites"
 ```
+
+`$VELITES_CONFIG_DIR/models.json` 至少声明 provider 的 `api`（`openai-completions` 或
+`anthropic-messages`）、`baseUrl`、`apiKey` 和模型列表；完整格式见
+`docs/architecture/velites-model-registry.md`。建议 `apiKey` 使用 `$ENV` 引用并将文件设为
+0600。容器通过 `VELITES_CONFIG_DIR` 只读挂载到 `/root/.velites`。
 
 如果 Worker 机器要通过 Tailscale 等 overlay 网络访问 Host，将监听地址设为部署机的 overlay 网络 IP：
 
@@ -50,7 +57,9 @@ echo 'LLM_GATEWAY_TOKEN=<gateway-token>' >> deploy/.env
 chmod 600 deploy/.env
 ```
 
-不要把它写进 Compose YAML、worker.yaml 或命令行。Worker supervisor 会把它透传给 Pi 子进程；上游 LLM provider 凭证本身只存在于 gateway 进程，不经过 Worker。
+不要把它写进 Compose YAML、worker.yaml 或命令行。Pi 可从自己的 `models.json`
+插值该变量；velites 可在自己的 `models.json` 中把 `apiKey` 配成
+`$LLM_GATEWAY_TOKEN`。上游 LLM provider 凭证本身只存在于 gateway 进程。
 
 ## 3. 启动部署机的 stack
 
@@ -125,7 +134,11 @@ make stack-logs STACK=worker
 
 页面保存配置后会原子写入控制卷。身份、能力、可用模型或注册 Token 变化时会重启执行进程并重新注册；领取开关和最大并发会热更新。每次 Worker 执行进程启动（包括服务启动、手动重启和崩溃后的自动重启）都会先把 claim 置为关闭，即使上次退出前处于开启状态也不会自动恢复；用户必须在控制台点击「开始领取」，或执行 `workerctl claim enable`，之后 Worker 才会按本机 `max_concurrency` 拉取任务。
 
-Worker 必须声明自己支持的 `capabilities` 和 `models`。这里的 capability 与 workflow 节点已有的 `capability` 是同一个值，不存在额外的 `required_worker_capabilities` 字段；只有 runtime、capability、provider 和 model 都匹配时，Host 才会把该节点任务交给 Worker。没有兼容 Worker 时任务保持排队，不会被不兼容的机器领取。
+Worker 必须声明 `capabilities`；`models` 是可选的 runtime-scoped allowlist，不再是
+模型事实源。启动时 Worker 对每个选中的 runtime 执行其发现 adapter（velites 使用
+`velites models list --json`），最终注册集合 = 发现结果 ∩ allowlist；该 runtime 没有
+allowlist 条目时允许其全部发现结果。只有 runtime、capability、provider、model 全部匹配，
+Host 才会下发任务。
 
 ### code 节点执行池（协议 v2）
 
@@ -143,7 +156,10 @@ Worker 必须声明自己支持的 `capabilities` 和 `models`。这里的 capab
 
 **secret 边界**：节点 secret（vault 解出的连接凭据）只在 claim 响应里经既有 HTTPS 通道注入——落库的 manifest 与 bundle 都不含 secret；Worker 仅内存持有、经 stdin 传给沙箱子进程，任何持久化前强制剔除（`strip_secret_config`），secret 不接触 Worker 文件系统与日志。随 manifest 下发的 settings 快照按 section 白名单过滤（`node_safe_settings_config`）——白名单当前为空（`NODE_SETTINGS_CONFIG_SECTIONS = ()`，业务 section 已随业务节点迁出），vault/auth/database/agent_workers 等实例级 section 不落库、不下发、不进沙箱 stdin。
 
-**协议兼容**：当前协议版本为 v2（新增 `kind: "code"` claim 与 heartbeat 取消 body）。注册时声明 `max_code_concurrency > 0` 必须是 v2（v1 注册带 code 容量会被 400 拒绝；claim 评估对存量行再查一次协议版本兜底）；v1 Worker 在 v2 Host 上保持 agent-only（收不到 code claim，heartbeat 仍是空 204）；v2 Worker 对 v1 Host 自动降级为 agent-only。Host 的 `min_protocol_version` 仍为 1。
+**协议兼容**：当前协议版本为 v3（新增 runtime-scoped model triples）；v2 的 code claim
+和 heartbeat 取消 body 语义不变。Host 把旧 Worker 的二元 provider/model 声明解释成
+runtime wildcard；新 Worker 总是发送显式 runtime。注册时 code 容量仍只要求协议 >= v2。
+Host 的 `min_protocol_version` 仍为 1。
 
 节点的 provider、model、thinking 和 prompt 可以继续在 workflow 编辑器中修改。只修改这些运行配置会更新当前 revision，而不会创建新版本；已创建但尚未领取的 Job 会在领取时使用其 revision 的最新运行配置。任务一旦领取，就固定使用领取时下发的配置。
 

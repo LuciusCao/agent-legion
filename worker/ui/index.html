@@ -170,7 +170,7 @@
                   <div class="form-section-heading"><div><h3>能力与模型</h3><p>每行一项，保存后由 Worker 重新向 Host 登记。</p></div></div>
                   <div class="form-grid">
                     <label class="wide">Worker 能力 <span class="hint">与节点 capability 完全匹配</span><textarea name="capabilities" rows="5" placeholder="generate_key_info&#10;review_key_info"></textarea></label>
-                    <label>可用模型 <span class="hint">provider/model</span><textarea name="models" rows="5" placeholder="openai/gpt-5"></textarea></label>
+                    <label>模型 allowlist <span class="hint">[runtime:]provider/model；留空允许 runtime 已发现的全部模型</span><textarea name="models" rows="5" placeholder="velites:openai/gpt-5"></textarea></label>
                     <label>标签 <span class="hint">key=value</span><textarea name="labels" rows="5" placeholder="os=linux&#10;arch=arm64"></textarea></label>
                   </div>
                 </div>

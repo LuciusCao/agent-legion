@@ -30,9 +30,9 @@ test("linesFromText 去空行并去重", () => {
   assert.deepEqual(linesFromText("gpu\n\n gpu \nreview"), ["gpu", "review"]);
 });
 
-test("modelsFromText 解析 provider/model 并保留模型路径", () => {
-  assert.deepEqual(modelsFromText("openai/gpt-5\nvertex/google/gemini"), [
-    { provider: "openai", model: "gpt-5" },
+test("modelsFromText 解析 runtime-scoped allowlist 并保留模型路径", () => {
+  assert.deepEqual(modelsFromText("velites:openai/gpt-5\nvertex/google/gemini"), [
+    { runtime: "velites", provider: "openai", model: "gpt-5" },
     { provider: "vertex", model: "google/gemini" },
   ]);
   assert.throws(() => modelsFromText("missing-model/"), /provider\/model/);

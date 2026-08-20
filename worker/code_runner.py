@@ -25,6 +25,7 @@ import json
 import os
 import pickle
 import shutil
+import site
 import subprocess
 import sys
 import tarfile
@@ -217,8 +218,10 @@ def child_env(libs_root: Path) -> dict[str, str]:
     for key, value in os.environ.items():
         if key == "LANG" or key.startswith("LC_"):
             env[key] = value
-    python_path = os.environ.get("PYTHONPATH")
-    env["PYTHONPATH"] = f"{libs_root}{os.pathsep}{python_path}" if python_path else str(libs_root)
+    python_paths = [str(libs_root), *(str(Path(p).resolve()) for p in site.getsitepackages())]
+    if python_path := os.environ.get("PYTHONPATH"):
+        python_paths.append(python_path)
+    env["PYTHONPATH"] = os.pathsep.join(python_paths)
     return env
 
 
@@ -256,7 +259,7 @@ def build_sandbox_argv(
         command.append("--allow-network")
     command += [
         "--",
-        sys.executable,
+        str(Path(sys.executable).resolve()),
         "-m",
         "workspace_libs.code_child",
         str(result_path),

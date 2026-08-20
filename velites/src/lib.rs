@@ -10,6 +10,7 @@ pub mod cancel;
 pub mod cli;
 pub mod config;
 pub mod events;
+pub mod models;
 pub mod provider;
 pub mod sandbox;
 pub mod session;
@@ -103,20 +104,13 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
 
     let model = match cli.model.clone() {
         Some(model) => model,
-        None => match cli.provider.as_str() {
-            "stub" => "stub".to_string(),
-            // Fail fast: a gateway run without --model used to fall back to
-            // the literal string "unknown", surfacing only later as a
-            // provider-side model error.
-            "gateway" | "openai_compat" => {
-                return Err(anyhow!(
-                    "--provider {} requires --model <model-id>",
-                    cli.provider
-                ))
-            }
-            // Unknown providers fail below with their own error message.
-            _ => "unknown".to_string(),
-        },
+        None if cli.provider == "stub" => "stub".to_string(),
+        None => {
+            return Err(anyhow!(
+                "--provider {} requires --model <model-id>",
+                cli.provider
+            ))
+        }
     };
 
     let config = agent::AgentConfig {
@@ -150,48 +144,81 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
             let provider = provider::stub::StubProvider::from_fixture(fixture)?;
             agent::run(config, &provider, &mut sink).await
         }
-        "gateway" | "openai_compat" => {
-            let credentials = config::resolve()?;
-            // No HTTP-layer total timeout: long generations stream for many
-            // minutes; the run wall-clock budget (cli.timeout_seconds, §5)
-            // lives in the agent loop's deadline, not here.
-            let provider = provider::openai_compat::OpenAiCompatProvider::new(
-                cli.provider.clone(),
-                credentials.base_url,
-                credentials.api_key,
-            )?;
-            // Pi-compatible retry observability: each failed transient
-            // attempt emits `message_end`(error) + `auto_retry_start` before
-            // the backoff sleep, straight to stdout. The sink is stateless,
-            // and ordering against the agent loop's sink is guaranteed
-            // because the loop is awaiting this call while the callback runs.
-            let provider_name = config.provider_name.clone();
-            let model = config.model.clone();
-            let retrying = provider::retry::RetryProvider::new(
-                provider,
-                cli.max_retries,
-                std::time::Duration::from_millis(DEFAULT_RETRY_BASE_DELAY_MS),
-            )
-            .with_on_attempt_failed(move |attempt, max_attempts, delay, err| {
-                let events = events::retry_attempt_events(
-                    &provider_name,
-                    &model,
-                    attempt,
-                    max_attempts,
-                    delay.as_millis() as u64,
-                    &err.to_string(),
-                );
-                let mut sink = StdoutJsonlSink::new();
-                for event in &events {
-                    sink.emit(event);
+        provider_name => {
+            let path = models::default_path()?;
+            if path.exists() {
+                let registry = models::load(&path)?;
+                let resolved = models::resolve(&registry, provider_name, &config.model)?;
+                match resolved.api {
+                    models::ApiKind::OpenAiCompletions => {
+                        let provider = provider::openai_compat::OpenAiCompatProvider::new(
+                            resolved.name,
+                            resolved.base_url,
+                            resolved.api_key,
+                        )?;
+                        run_real_provider(config, provider, cli.max_retries, &mut sink).await
+                    }
+                    models::ApiKind::AnthropicMessages => {
+                        let provider = provider::anthropic::AnthropicProvider::new(
+                            resolved.name,
+                            resolved.base_url,
+                            resolved.api_key,
+                            resolved.anthropic_version,
+                            resolved.model.max_output_tokens,
+                            resolved.model.thinking_budgets,
+                        )?;
+                        run_real_provider(config, provider, cli.max_retries, &mut sink).await
+                    }
                 }
-            });
-            agent::run(config, &retrying, &mut sink).await
+            } else if matches!(provider_name, "gateway" | "openai_compat") {
+                // One-release migration bridge for direct invocations. Worker
+                // discovery never advertises this implicit provider because it
+                // has no bounded model catalog.
+                let credentials = config::resolve()?;
+                let provider = provider::openai_compat::OpenAiCompatProvider::new(
+                    provider_name.to_string(),
+                    credentials.base_url,
+                    credentials.api_key,
+                )?;
+                run_real_provider(config, provider, cli.max_retries, &mut sink).await
+            } else {
+                Err(anyhow!(
+                    "models registry {} does not exist; configure provider/model there",
+                    path.display()
+                ))
+            }
         }
-        other => Err(anyhow!(
-            "unknown provider `{other}`; available: stub, gateway, openai_compat"
-        )),
     }
+}
+
+async fn run_real_provider<P: provider::Provider>(
+    config: agent::AgentConfig,
+    provider: P,
+    max_retries: u32,
+    sink: &mut dyn EventSink,
+) -> anyhow::Result<u8> {
+    let provider_name = config.provider_name.clone();
+    let model = config.model.clone();
+    let retrying = provider::retry::RetryProvider::new(
+        provider,
+        max_retries,
+        std::time::Duration::from_millis(DEFAULT_RETRY_BASE_DELAY_MS),
+    )
+    .with_on_attempt_failed(move |attempt, max_attempts, delay, err| {
+        let events = events::retry_attempt_events(
+            &provider_name,
+            &model,
+            attempt,
+            max_attempts,
+            delay.as_millis() as u64,
+            &err.to_string(),
+        );
+        let mut sink = StdoutJsonlSink::new();
+        for event in &events {
+            sink.emit(event);
+        }
+    });
+    agent::run(config, &retrying, sink).await
 }
 
 /// Base delay for the internal exponential backoff on transient provider
