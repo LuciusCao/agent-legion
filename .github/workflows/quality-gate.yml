@@ -423,6 +423,8 @@ jobs:
         run: >-
           uv run pytest -q
           tests/workers/test_workflow_worker_thread_local.py::test_make_workflow_worker_runs_demo_intake_local_node
+        env:
+          TMPDIR: /var/tmp
 
       - name: Backend PostgreSQL tests (shard 2/3)
         run: |
