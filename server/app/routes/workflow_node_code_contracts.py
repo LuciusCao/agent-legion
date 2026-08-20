@@ -4,11 +4,11 @@ from pydantic import BaseModel
 
 
 class WorkflowNodeCodeResponse(BaseModel):
-    # builtin = the global factory seed (demo nodes, #96); custom = the
-    # workspace's published version; none = start from the SDK template.
+    # builtin = a system-seeded workspace version; custom = a user-published
+    # workspace version; none = start from the SDK template.
     origin: Literal["builtin", "custom", "none"]
     code: str
-    # Published custom version serving the node (origin=custom only).
+    # Published user version serving the node (origin=custom only).
     version: int | None = None
     has_draft: bool = False
     # Current draft content, when one exists (drafts are editable user data).

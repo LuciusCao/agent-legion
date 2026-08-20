@@ -2,8 +2,8 @@
 
 Extracted from ``schedule.py`` to keep it within its size budget. Every
 executor-routed node is code-routed (P-0.5): the code text resolves the
-currently published version (workspace scope first, then the global factory
-seed; EXEC-CODE-002 — since #115 ordinary jobs no longer honor the frozen
+currently published workspace version (EXEC-CODE-002 — since #115 ordinary
+jobs no longer honor the frozen
 intake/snapshot pins, only quality-replay batches do), and a node without
 any published code fails fast as a configuration error.
 """
@@ -46,6 +46,6 @@ def resolve_code_node_dispatch(
     if node_code is None:
         raise ValueError(
             f"capability {node.capability!r} has no published node code "
-            "(workspace version or global factory seed, EXEC-CODE-002)"
+            "(workspace version, EXEC-CODE-002)"
         )
     return node_code

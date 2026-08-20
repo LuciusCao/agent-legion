@@ -48,7 +48,7 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 
 | 脚本 | 用途 |
 |------|------|
-| `import-demo.sh` | 导入示例 workflow（`education_video_problems_generation`）的 4 个示例 skill：复制 `examples/skills/*` 到本机 skill 源目录并逐目录 `git init` + 初始 commit + 打 tag `v1.0.0`（幂等，已有 tag 的 skill 跳过不覆盖）。由 `make import-demo` 调用；测试可用 `AGENT_LEGION_DEMO_SKILLS_DIR` 覆盖目标根目录。 |
+| `import-demo.sh` / `seed_demo.py` | `make import-demo` 的两阶段实现：前者把 4 个示例 skill 复制成本机 Git 仓库并打 `v1.0.0` tag；后者先创建或复用绑定 demo workflow 的 workspace，再写入 demo skill source/lock，并把节点代码、Agent 和 DAG revision 注入该 workspace。两阶段均幂等；测试可用 `AGENT_LEGION_DEMO_SKILLS_DIR` 覆盖 skill 目标根目录。 |
 
 ## 迁移与工具
 

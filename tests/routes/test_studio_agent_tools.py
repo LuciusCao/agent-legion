@@ -239,7 +239,7 @@ def test_get_node_code_state_reads_builtin(client, job_db) -> None:
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    # origin=builtin is backed by the global factory seed since #96 (no path).
+    # origin=builtin is backed by a system-seeded workspace version (no path).
     assert payload["origin"] == "builtin"
     assert payload["code"]
     assert "path" not in payload

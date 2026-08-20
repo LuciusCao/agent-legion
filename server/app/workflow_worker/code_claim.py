@@ -78,8 +78,7 @@ def try_claim_code_worker_node(
 
     batch_payload = cached_batch_payload(worker, job)
     # Same resolution order as the local path (#115): the currently
-    # published code — workspace published first, then the global factory
-    # seed; the frozen pins (job snapshot node_code_pins, then batch
+    # published workspace code; the frozen pins (job snapshot node_code_pins, then batch
     # node_code_versions) apply only to quality-replay batches
     # (resolve_dispatch_node_code, EXEC-CODE-002).
     try:
@@ -92,7 +91,7 @@ def try_claim_code_worker_node(
             frozen_dispatch_pin(job.get("node_code_pins"), batch_payload, node.key),
         )
         if code_text is None:
-            # No published code at either scope: nothing to ship to a Worker;
+            # No published workspace code: nothing to ship to a Worker;
             # the local executor reports the missing code (EXEC-CODE-002).
             return False
     except (ValueError, OSError) as exc:
@@ -151,8 +150,7 @@ def try_claim_code_worker_node(
                 log_path=log_path,
                 inputs=inputs,
                 code_text=code_text,
-                # All node code is DB-published since #96 (workspace version
-                # or global factory seed); the flag stays for protocol
+                # All node code is DB-published since #96; the flag stays for protocol
                 # stability and is always True now.
                 custom_code=True,
                 config=config,

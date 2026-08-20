@@ -24,7 +24,7 @@ from server.app.routes.auth import create_auth_router
 from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
 from server.app.services.artifact_store import ArtifactStore
-from server.app.services.demo_node_seed import seed_demo_node_codes
+from server.app.services.demo_node_migration import migrate_demo_node_codes_to_workspaces
 from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.job_intake_queue import JobIntakeQueue
@@ -61,10 +61,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # Hydrate instance-level settings from the DB before any service reads
     # them (executor runtime, cleanup/monitoring config).
     apply_instance_settings(settings, job_db.path)
-    # Executor definitions are retired (schema v47, P-0.5); only the demo
-    # workflow's global node_code versions still seed from the git-reviewed
-    # workflow_nodes/ sources (#96).
-    seed_demo_node_codes(settings)
+    # Executor definitions are retired (schema v47, P-0.5). Demo node code is
+    # workspace-scoped; upgrade legacy global factory rows into every bound
+    # demo workspace, then archive the global rows.
+    migrate_demo_node_codes_to_workspaces(settings, job_db)
     # Agent definitions are workspace-scoped (schema v46): there is no global
     # seed. Workspaces initialized from the sample template get the factory
     # agent templates instantiated seed-if-absent at creation time

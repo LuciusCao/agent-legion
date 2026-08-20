@@ -1,8 +1,8 @@
 """The code executor: run DB-published Python node code as DAG nodes.
 
 All node code arrives as text on ``ExecutionContext.node_code`` — resolved at
-dispatch from the frozen job version, the workspace's published version, or
-the global factory seed (EXEC-CODE-002, #96: the legacy capability ``path``
+dispatch from the workspace's published version, or from a frozen historical
+version for quality replay (EXEC-CODE-002, #96: the legacy capability ``path``
 binding to repo files is retired). The loader contract is a module-level
 ``run(job, job_dir, runtime)`` (or a ``def run(ctx)`` business function
 decorated with the node SDK's ``@entrypoint``).

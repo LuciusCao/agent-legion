@@ -1,8 +1,8 @@
 """Dispatch-time node code resolution (EXEC-CODE-002, post-#96/#115).
 
-Ordinary jobs resolve the currently published code: workspace published
-version → global factory seed. Only quality-replay batches honor the frozen
-intake/snapshot pins. With the gate disabled nothing resolves and the node
+Ordinary jobs resolve only the currently published workspace code. Only
+quality-replay batches honor frozen intake/snapshot pins, including historical
+legacy-global versions. With the gate disabled nothing resolves and the node
 fails closed.
 """
 
@@ -195,8 +195,8 @@ def test_dispatch_fails_closed_when_gate_disabled(tmp_path: Path) -> None:
     worker.stop()
 
 
-def test_dispatch_capability_without_any_published_code_fails(tmp_path: Path) -> None:
-    """No workspace version and no global seed: a clear config error."""
+def test_dispatch_capability_without_published_workspace_code_fails(tmp_path: Path) -> None:
+    """No published workspace version produces a clear config error."""
     node = _local_node("fetch")
     job_db, ws = _prepare_job(tmp_path, node)
     executor = RecordingExecutor("code-default")
@@ -213,9 +213,8 @@ def test_dispatch_capability_without_any_published_code_fails(tmp_path: Path) ->
     worker.stop()
 
 
-def test_dispatch_uses_global_factory_seed_when_workspace_has_none(tmp_path: Path) -> None:
-    """The global factory-seeded version (demo nodes) serves workspaces
-    without their own published code (#96)."""
+def test_dispatch_does_not_use_legacy_global_code(tmp_path: Path) -> None:
+    """Legacy global rows cannot leak code into an unrelated workspace."""
     node = _local_node("fetch")
     job_db, ws = _prepare_job(tmp_path, node)
     codes = NodeCodeService(TEST_DATABASE_URL)
@@ -224,14 +223,16 @@ def test_dispatch_uses_global_factory_seed_when_workspace_has_none(tmp_path: Pat
     worker = _make_worker(tmp_path, job_db, executor, [_make_definition([node])])
     executor.block_event.set()
 
-    _dispatch(tmp_path, worker)
+    worker._poll()
 
-    assert executor.contexts[0].node_code == CUSTOM_V1
+    assert executor.contexts == []
+    job = job_db.list_jobs(workspace_id=ws["id"])[0]
+    assert job_db.get_job_node(job["id"], "fetch")["status"] == "failed"
     worker.stop()
 
 
-def test_workspace_published_shadows_global_seed(tmp_path: Path) -> None:
-    """A workspace's own published version wins over the global factory seed."""
+def test_workspace_published_runs_even_when_legacy_global_exists(tmp_path: Path) -> None:
+    """Workspace code remains authoritative while an old global row exists."""
     node = _local_node("fetch")
     job_db, ws = _prepare_job(tmp_path, node)
     codes = NodeCodeService(TEST_DATABASE_URL)
@@ -248,15 +249,40 @@ def test_workspace_published_shadows_global_seed(tmp_path: Path) -> None:
     worker.stop()
 
 
-def test_frozen_pin_resolves_global_seed_version(tmp_path: Path) -> None:
-    """A batch pin pointing at the global seed is ignored like any other
-    ordinary-job pin (#115); dispatch resolves the global factory seed as
-    the latest published code (workspace miss → global hit)."""
+def test_ordinary_job_pin_does_not_enable_legacy_global_code(tmp_path: Path) -> None:
+    """An ordinary-job audit pin cannot re-enable global runtime fallback."""
     node = _local_node("fetch")
     codes = NodeCodeService(TEST_DATABASE_URL)
     assert codes.seed_global("test", "fetch", CUSTOM_V1, "test seed")
     frozen = {"fetch": {"version": 1, "code_hash": code_hash(CUSTOM_V1)}}
     job_db, ws = _prepare_job(tmp_path, node, batch_payload={"node_code_versions": frozen})
+    executor = RecordingExecutor("code-default")
+    worker = _make_worker(tmp_path, job_db, executor, [_make_definition([node])])
+    executor.block_event.set()
+
+    worker._poll()
+
+    assert executor.contexts == []
+    job = job_db.list_jobs(workspace_id=ws["id"])[0]
+    assert job_db.get_job_node(job["id"], "fetch")["status"] == "failed"
+    worker.stop()
+
+
+def test_quality_replay_can_resolve_archived_legacy_global_pin(tmp_path: Path) -> None:
+    """Historical quality replays keep resolving their exact legacy pin."""
+    node = _local_node("fetch")
+    codes = NodeCodeService(TEST_DATABASE_URL)
+    assert codes.seed_global("test", "fetch", CUSTOM_V1, "legacy seed")
+    codes.archive_all(None, "test", "fetch")
+    frozen = {"fetch": {"version": 1, "code_hash": code_hash(CUSTOM_V1)}}
+    job_db, ws = _prepare_job(
+        tmp_path,
+        node,
+        batch_payload={
+            "quality_replay": {"replay_id": "r1"},
+            "node_code_versions": frozen,
+        },
+    )
     executor = RecordingExecutor("code-default")
     worker = _make_worker(tmp_path, job_db, executor, [_make_definition([node])])
     executor.block_event.set()

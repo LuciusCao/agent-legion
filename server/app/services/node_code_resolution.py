@@ -1,7 +1,7 @@
 """Dispatch-time node code resolution (EXEC-CODE-002, split from
 ``node_codes`` for the size budget): intake freeze pins and the dispatch
-chain. Since #115 ordinary jobs resolve the currently published code
-(workspace → global factory seed); the frozen pins are honored only for
+chain. Since #115 ordinary jobs resolve the currently published workspace
+code; the frozen pins are honored only for
 quality-replay batches (``frozen_dispatch_pin`` gates on the marker).
 """
 
@@ -28,9 +28,8 @@ def freeze_node_code_versions(
 ) -> dict[str, dict[str, Any]]:
     """Intake freeze: published ``{node_key: {version, code_hash}}`` pins.
 
-    Covers workspace-scoped published versions and (as fallback) global
-    factory-seeded ones, so jobs pin the exact code they start with. Nodes
-    with no published code at either scope simply do not appear; the gate
+    Covers workspace-scoped published versions, so jobs pin the exact code
+    they start with. Nodes with no published code simply do not appear; the gate
     short-circuits to an empty mapping so intake never touches the table when
     the feature is off.
     """
@@ -44,18 +43,6 @@ def freeze_node_code_versions(
             "version": entity.version,
             "code_hash": entity.definition_hash,
         }
-    workspace_pinned = set(pins)
-    missing_keys = [
-        key
-        for key, node_key in zip(keys, node_keys, strict=True)
-        if node_key not in workspace_pinned
-    ]
-    if missing_keys:
-        for entity in store.list_published_keys(None, missing_keys):
-            pins[_split_entity_key(entity.entity_key)[1]] = {
-                "version": entity.version,
-                "code_hash": entity.definition_hash,
-            }
     return pins
 
 
@@ -66,7 +53,7 @@ def _get_pinned_rows(
     node_key: str,
     version: int,
 ) -> list[dict[str, Any]]:
-    """The frozen version's row at BOTH scopes (workspace and global seed)."""
+    """Rows matching a frozen pin; legacy global rows remain replay-readable."""
     rows = []
     row = service.get_code_by_version(workspace_id, workflow_key, node_key, version)
     if row is not None:
@@ -85,8 +72,8 @@ def resolve_dispatch_node_code(
     node_key: str,
     frozen: dict[str, Any] | None,
 ) -> str | None:
-    """Dispatch-time code text: latest workspace published → global factory
-    seed → None (unrunnable; the caller fails the node). A *frozen* pin is
+    """Dispatch-time code text: latest workspace published → None
+    (unrunnable; the caller fails the node). A *frozen* pin is
     only ever passed for quality-replay batches (#115) and fails closed: a
     hash mismatch raises, and a pinned version missing at BOTH scopes is data
     corruption and raises too — never silently substituted.
@@ -113,7 +100,7 @@ def resolve_dispatch_node_code(
             raise ValueError(
                 f"frozen node code hash mismatch for {workflow_key}/{node_key} v{frozen['version']}"
             )
-        # The frozen version vanished at BOTH scopes: versioned entities are
+        # The frozen version vanished at both current and legacy scopes: versioned entities are
         # immutable, so this means data corruption. Fail closed — silently
         # substituting the current published code would run code the job
         # never froze.
@@ -122,6 +109,4 @@ def resolve_dispatch_node_code(
             f"v{frozen.get('version')} (data corruption)"
         )
     published = service.get_effective_code(workspace_id, workflow_key, node_key)
-    if published is None:
-        published = service.get_global_published(workflow_key, node_key)
     return str(published["code"]) if published is not None else None

@@ -2,10 +2,10 @@
 
 One table (``versioned_entities``) backs the draft → published → archived
 lifecycle of every versioned definition: custom node codes (``node_code``),
-Agent definitions (``agent``), and executor definitions (``executor``).
-``workspace_id`` is NULL for global entities (executors, factory demo node
-codes); Agent definitions are workspace-scoped since schema v46 and node
-codes stay workspace-scoped. Versions are immutable:
+Agent definitions (``agent``), and retired executor definitions
+(``executor``). New entities are workspace-scoped; ``workspace_id`` is NULL
+only for historical global rows retained for migration/replay compatibility.
+Versions are immutable:
 publishing archives the previously published row (the partial unique index
 guarantees at most one published row per entity), and rollback re-publishes
 an old definition as a new version.
