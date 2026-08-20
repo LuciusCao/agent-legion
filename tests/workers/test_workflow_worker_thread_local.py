@@ -341,7 +341,11 @@ def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkey
 
     node = queries.get_job_node(job["id"], "intake_knowledge_points")
     assert node is not None
-    assert node["status"] == "completed"
+    log_path = node.get("log_path")
+    log = (
+        Path(log_path).read_text(encoding="utf-8") if log_path and Path(log_path).is_file() else ""
+    )
+    assert node["status"] == "completed", {"node": node, "log": log[-2000:]}
     assert (tmp_path / job["storage_dir"] / "knowledge_point.json").exists()
 
     worker.stop()

@@ -14,8 +14,11 @@ test('在 job 详情页通过重跑对话框重跑节点', async ({ page }) => {
 
   const createDialog = page.getByRole('dialog')
   await createDialog.getByLabel('Workspace 名称').fill(WORKSPACE_NAME)
-  await createDialog.getByRole('combobox', { name: '工作流' }).click()
-  await page.getByRole('option', { name: '题目审题信息生成 DAG' }).click()
+  await createDialog
+    .getByRole('checkbox', {
+      name: '从示例模板初始化（教学视频脚本与题目生成）',
+    })
+    .check()
   await createDialog.getByRole('button', { name: '创建' }).click()
   await expect(createDialog).toBeHidden()
 
@@ -24,9 +27,7 @@ test('在 job 详情页通过重跑对话框重跑节点', async ({ page }) => {
 
   await page.getByRole('button', { name: '添加' }).click()
   const addDialog = page.getByRole('dialog')
-  await addDialog.getByRole('combobox', { name: '导入模式' }).click()
-  await page.getByRole('option', { name: '按题目ID批量' }).click()
-  await addDialog.getByRole('textbox', { name: '按题目ID批量' }).fill('Q1')
+  await addDialog.getByRole('textbox', { name: '按知识点批量' }).fill('Q1')
   await addDialog.getByRole('button', { name: '加入队列' }).click()
 
   const jobRow = page.locator('[data-job]').first()
@@ -43,7 +44,7 @@ test('在 job 详情页通过重跑对话框重跑节点', async ({ page }) => {
   await expect(
     rerunDialog.getByRole('heading', { name: '选择重跑节点' })
   ).toBeVisible()
-  await rerunDialog.getByTestId('rerun-chip-review_key_info').click()
+  await rerunDialog.getByRole('button', { name: '评审练习题' }).click()
   await rerunDialog.getByRole('button', { name: '确认重跑' }).click()
 
   // No worker runs in this environment, so nodes stay pending; the rerun
