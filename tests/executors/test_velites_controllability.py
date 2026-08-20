@@ -327,7 +327,13 @@ def test_no_auto_discovery(tmp_path: Path, velites_binary: Path) -> None:
                 "--no-sandbox",
                 "@prompt.md",
             ],
-            env_extra={"VELITES_BASE_URL": base_url, "VELITES_API_KEY": "test-key"},
+            env_extra={
+                "VELITES_BASE_URL": base_url,
+                "VELITES_API_KEY": "test-key",
+                # This test exercises the explicit legacy env bridge and must
+                # not inherit a developer's real ~/.velites/models.json.
+                "VELITES_MODELS_PATH": str(tmp_path / "missing-models.json"),
+            },
         )
     finally:
         server.shutdown()
