@@ -237,12 +237,12 @@ jobs:
       # velites' Linux filesystem sandbox (EXEC-HARNESS-SANDBOX-001) is
       # fail-closed: the postgres tier's velites sandbox tests need a real
       # bubblewrap binary on the runner. Ubuntu 24.04 restricts unprivileged
-      # userns via AppArmor ("bwrap: setting up uid map: Permission denied");
-      # setuid bwrap sidesteps that on the CI VM.
+      # userns via AppArmor; current bubblewrap no longer supports the legacy
+      # setuid mode, so the disposable CI VM must explicitly enable userns.
       - name: Install bubblewrap (velites sandbox backend)
         run: |
           sudo apt-get update && sudo apt-get install -y bubblewrap
-          sudo chmod u+s "$(command -v bwrap)"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       # api:check boots create_app to export the OpenAPI schema, so it lives
       # in this job (Python env + Postgres) instead of backend-unit or the
@@ -414,7 +414,7 @@ jobs:
       - name: Install bubblewrap (velites sandbox backend)
         run: |
           sudo apt-get update && sudo apt-get install -y bubblewrap
-          sudo chmod u+s "$(command -v bwrap)"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       # Run the real namespace + Python-child integration before the long
       # coverage shard. Inside the hash shard the test self-skips so it is
@@ -516,7 +516,7 @@ jobs:
       - name: Install bubblewrap (velites sandbox backend)
         run: |
           sudo apt-get update && sudo apt-get install -y bubblewrap
-          sudo chmod u+s "$(command -v bwrap)"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Backend PostgreSQL tests (shard 3/3)
         run: |
@@ -882,12 +882,12 @@ jobs:
           workspaces: velites
 
       # Enables the bwrap-gated sandbox integration tests in cargo test.
-      # Ubuntu 24.04 restricts unprivileged userns via AppArmor ("bwrap:
-      # setting up uid map: Permission denied"); setuid bwrap sidesteps it.
+      # Ubuntu 24.04 restricts unprivileged userns via AppArmor; enable it on
+      # the disposable CI VM (modern bubblewrap has no setuid mode).
       - name: Install bubblewrap (velites sandbox backend)
         run: |
           sudo apt-get update && sudo apt-get install -y bubblewrap
-          sudo chmod u+s "$(command -v bwrap)"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: cargo fmt
         run: cargo fmt --all -- --check
