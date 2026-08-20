@@ -12,8 +12,9 @@ with everything those workflows need to run on another instance:
   whose capability is referenced by an exported workflow, collected from the
   source workspaces
 - node_codes[]: published custom node code texts for nodes of the exported
-  workflows (workspace-scoped versions from the source workspaces, falling
-  back to global factory-seeded versions); ``--node-code capability=path``
+  workflows (workspace-scoped versions from the source workspaces, with a
+  read-only compatibility fallback for legacy global rows);
+  ``--node-code capability=path``
   overrides any node's code text with a local file instead
 - skills{}: the instance's skill_sources / skill_lock documents
 

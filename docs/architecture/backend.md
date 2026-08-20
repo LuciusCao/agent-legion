@@ -516,7 +516,7 @@ server/app/
 - `server.app.main:create_app(data_dir, start_worker)` 是 FastAPI 应用工厂。
 - 当 `start_worker=True` 时，生命周期内启动 `WorkflowWorkerThread`：
   - 在 DB 实例设置 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
-  - 节点按 capability 分发：DB 发布的 code 节点（EXEC-CODE-002/003，demo 节点走 global 出厂种子）进入本地 code 池或 Worker code 池；agent 节点（pi / velites runtime）经 broker 派发给 Worker。
+  - 节点按 capability 分发：DB 中按 workspace 发布的 code 节点（EXEC-CODE-002/003，demo 节点在 workspace 初始化时注入）进入本地 code 池或 Worker code 池；agent 节点（pi / velites runtime）经 broker 派发给 Worker。
 - worker 默认处于**暂停**状态；调用 `POST /api/worker/resume` 开始处理。
 - 内置示例 workflow `education_video_problems_generation` 的节点序列
   （完整 DAG 定义见 `server/app/workflows/builtin_demo.py`）：

@@ -3,6 +3,7 @@ from typing import Any
 from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.services.agent_service import published_agent_definitions
+from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.vault import VaultService
 from server.app.services.workflow_definitions import (
@@ -21,6 +22,7 @@ from server.app.services.workspace_settings_schemas import (
 from server.app.services.workspace_stats import build_workspace_stats
 from server.app.settings import Settings
 from server.app.workflows.builtin_demo import DEMO_WORKFLOW_KEY
+from server.app.workflows.definition import WorkflowDefinition
 
 
 def _build_intake_config(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
@@ -61,6 +63,13 @@ class WorkspaceConfigurationService:
             workspace,
         )
 
+    def _ensure_active_revision(self, workspace_id: str, definition: WorkflowDefinition) -> None:
+        if definition.key == DEMO_WORKFLOW_KEY:
+            seed_demo_workspace_node_codes(self.settings, workspace_id)
+        WorkflowRevisionService(
+            self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
+        ).ensure_active_revision(workspace_id, definition)
+
     def list_workspaces(self) -> list[dict[str, Any]]:
         return self.job_db.list_workspaces()
 
@@ -87,9 +96,7 @@ class WorkspaceConfigurationService:
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
         if definition is not None:
-            WorkflowRevisionService(
-                self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
-            ).ensure_active_revision(workspace["id"], definition)
+            self._ensure_active_revision(str(workspace["id"]), definition)
         return workspace
 
     def get(self, workspace_id: str) -> dict[str, Any]:
@@ -196,9 +203,7 @@ class WorkspaceConfigurationService:
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
         if workflow is not None:
-            WorkflowRevisionService(
-                self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
-            ).ensure_active_revision(workspace_id, workflow)
+            self._ensure_active_revision(workspace_id, workflow)
         return {
             "workspace": saved_workspace,
             "settings": self._payload(saved_workspace),
@@ -234,9 +239,7 @@ class WorkspaceConfigurationService:
             if workflow_key:
                 definition = self._definition_for_seed(workspace_id, str(workflow_key))
                 if definition is not None:
-                    WorkflowRevisionService(
-                        self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
-                    ).ensure_active_revision(workspace_id, definition)
+                    self._ensure_active_revision(workspace_id, definition)
         elif section == "nodes":
             workspace = update_workspace_node_config(
                 self.job_db,

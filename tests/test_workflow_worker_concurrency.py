@@ -140,17 +140,21 @@ def _make_worker(
     # Post-#96 every code node needs published code to dispatch; the
     # FakeExecutor never reads the text, so a global no-op seed is enough.
     if seed_code:
+        from server.app.services.node_code_seeding import seed_workspace_node_code
         from server.app.services.node_codes import NodeCodeService
 
         codes = NodeCodeService(str(db_path))
-        for definition in definitions:
-            for node in definition.nodes.values():
-                codes.seed_global(
-                    definition.key,
-                    node.key,
-                    "def run(job, job_dir, runtime):\n    pass\n",
-                    "test seed",
-                )
+        for workspace in job_db.list_workspaces():
+            for definition in definitions:
+                for node in definition.nodes.values():
+                    seed_workspace_node_code(
+                        codes,
+                        str(workspace["id"]),
+                        definition.key,
+                        node.key,
+                        "def run(job, job_dir, runtime):\n    pass\n",
+                        "test seed",
+                    )
     worker._scan_entries = scan_entries(*definitions)
     return worker
 

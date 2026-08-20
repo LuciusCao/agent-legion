@@ -12,7 +12,8 @@ from pathlib import Path
 
 from server.app import agent_catalog_builtin
 from server.app.jobs import JobQueries
-from server.app.services.demo_node_seed import seed_demo_node_codes
+from server.app.services.demo_node_migration import migrate_demo_node_codes_to_workspaces
+from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.skill_source_store import SkillSourceStore
 from server.app.services.workflow_revisions import WorkflowRevisionService
@@ -149,13 +150,9 @@ def seed_demo(
 ) -> SeedDemoResult:
     job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
     apply_instance_settings(settings, job_db.path)
-    node_codes_added = len(seed_demo_node_codes(settings))
 
-    seed_skill_sources(settings.database_url, settings.root_dir)
-    store = SkillSourceStore(settings.database_url)
-    sources, sources_added = _merge_demo_sources(store, _desired_sources(skill_root))
-    locks_updated = _lock_local_demo_sources(store, sources)
-
+    # Establish the target first, then hydrate the workflow assets into that
+    # workspace. Nothing in this onboarding path creates global node code.
     workspaces = [
         workspace
         for workspace in job_db.list_workspaces()
@@ -172,6 +169,13 @@ def seed_demo(
         )
     )
     workspace_id = str(workspace["id"])
+
+    seed_skill_sources(settings.database_url, settings.root_dir)
+    store = SkillSourceStore(settings.database_url)
+    sources, sources_added = _merge_demo_sources(store, _desired_sources(skill_root))
+    locks_updated = _lock_local_demo_sources(store, sources)
+    node_codes_added = migrate_demo_node_codes_to_workspaces(settings, job_db)
+    node_codes_added += len(seed_demo_workspace_node_codes(settings, workspace_id))
 
     # Older demo workspaces may have a revision but lack one of the factory
     # Agents, so seed the two resources independently.

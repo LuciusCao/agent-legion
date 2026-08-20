@@ -17,7 +17,7 @@ from cryptography.fernet import Fernet
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.connection_tokens import ConnectionTokenService
 from server.app.services.connections import ConnectionService, connection_secret_name
-from server.app.services.demo_node_seed import seed_demo_node_codes
+from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_node_config import update_workspace_node_config
@@ -37,13 +37,11 @@ def vault_key(monkeypatch):
 
 @pytest.mark.full_gate
 def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -> None:
-    # The bare settings fixture does not hydrate executor definitions
-    # (create_app does); the node config schema chain needs the seeded catalog.
-    seed_demo_node_codes(settings)
     workspace = job_db.create_workspace(
         "vault-full", default_workflow_key="education_video_problems_generation"
     )
     workspace_id = str(workspace["id"])
+    seed_demo_workspace_node_codes(settings, workspace_id)
     definition = load_builtin_definition("education_video_problems_generation")
     WorkflowRevisionService(job_db).ensure_active_revision(workspace_id, definition)
 

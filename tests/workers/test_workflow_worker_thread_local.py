@@ -280,8 +280,8 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
 
 def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkeypatch) -> None:
     # intake_knowledge_points runs on the code-default executor inside the
-    # velites sandbox (post-#96: the demo node code is the global factory
-    # seed, executed from the DB text): it maps the job's source_id to a
+    # velites sandbox (post-#96: the demo node code is a workspace seed,
+    # executed from the DB text): it maps the job's source_id to a
     # knowledge-point markdown under examples/education-video-problems-
     # generation/ (pure stdlib, no network) and writes knowledge_point.json
     # for the downstream agent nodes.
@@ -318,14 +318,12 @@ def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkey
 
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     worker, definition = make_workflow_worker(tmp_path, queries)
-    # The demo node code rides the global factory seed (seed-if-absent from
-    # the git-reviewed workflow_nodes/ sources).
-    from server.app.services.demo_node_seed import seed_demo_node_codes
-
-    seed_demo_node_codes(worker.settings)
     workspace = queries.create_workspace(
         "test_ws", default_workflow_key="education_video_problems_generation"
     )
+    from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
+
+    seed_demo_workspace_node_codes(worker.settings, workspace["id"])
     job = queries.create_job(
         workflow_key="education_video_problems_generation",
         source_type="question",

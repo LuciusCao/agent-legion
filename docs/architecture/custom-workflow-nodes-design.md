@@ -2,8 +2,9 @@
 
 状态：已实现（M1–M3）；**#96（2026-08-17）已退役「内置节点 path 绑定」**：
 capability 不再声明 `path`，所有节点代码（含 demo 两个节点）统一以 DB
-发布文本在 velites 沙箱执行；demo 节点的出厂代码经 global 作用域
-（workspace_id NULL）node_code 种子下发（`services/demo_node_seed.py`），
+发布文本在 velites 沙箱执行；demo 节点的出厂代码在 workspace 初始化时写入
+workspace 作用域（`services/demo_node_seed.py`），旧 global 记录只作为一次性
+迁移输入和历史 replay 数据，
 `workflow_nodes/` 只剩这两个 git 评审的种子源文件。本文 §2 的双类治理表、
 解析优先级第 3 级「内置路径」、§6/§7 中基于 path 的表述均为历史记录；
 现行语义以 `config/architecture/architecture-invariants.yaml` 的

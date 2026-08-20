@@ -664,9 +664,9 @@ create unique index if not exists workflow_node_codes_published
 -- Versioned entities (schema v26): unified draft → published → archived
 -- lifecycle storage for custom node codes ('node_code') and Agent definitions
 -- ('agent'; executor definitions joined at v30 and retired at v47).
--- workspace_id is NULL for global entities (factory demo node codes); Agents
--- are workspace-scoped since schema v46. NULLS NOT DISTINCT keeps the
--- uniqueness guarantees meaningful for those rows (PostgreSQL 15+).
+-- New node-code and Agent entities are workspace-scoped. workspace_id may be
+-- NULL only on legacy node-code rows retained for historical replay. NULLS
+-- NOT DISTINCT keeps uniqueness meaningful for those rows (PostgreSQL 15+).
 create table if not exists versioned_entities (
   id text primary key,
   entity_type text not null check(entity_type in ('node_code', 'agent')),

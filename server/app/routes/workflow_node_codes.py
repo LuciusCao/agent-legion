@@ -46,12 +46,6 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
             raise HTTPException(status_code=404, detail=f"Unknown workflow node: {node_key}")
         return node.capability
 
-    def _read_factory_code(workflow_key: str, node_key: str) -> str | None:
-        """Global factory-seeded node code (demo nodes, #96); None when the
-        node has no factory version."""
-        row = _service().get_global_published(workflow_key, node_key)
-        return str(row["code"]) if row is not None else None
-
     @router.get(
         "/workflow-node-code-template",
         response_model=WorkflowNodeCodeTemplateResponse,
@@ -84,15 +78,13 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
             )
 
         if published is not None:
+            if published["created_by"] == "system":
+                return _response(origin="builtin", code=str(published["code"]))
             return _response(
                 origin="custom", code=str(published["code"]), version=int(published["version"])
             )
-        factory = _read_factory_code(workflow_key, node_key)
-        if factory is None:
-            # No factory seed (custom-code-only capability): nothing to show;
-            # the section starts from the SDK template instead.
-            return _response(origin="none", code="")
-        return _response(origin="builtin", code=factory)
+        # No workspace-published version: start from the SDK template.
+        return _response(origin="none", code="")
 
     @router.put(
         "/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code",

@@ -42,8 +42,8 @@ def validate_workflow_for_publish(
     """Publish validation: Agent routing uniqueness + code resolvability.
 
     P-0.5: non-Agent-routed nodes all run on the implicit code pool, so the
-    publish gate is "resolvable published node code" (workspace version or
-    global factory seed), not executor binding/allocation checks.
+    publish gate is "resolvable published workspace node code", not executor
+    binding/allocation checks.
     """
     errors: list[str] = []
     capability_counts: dict[str, int] = {}
@@ -70,6 +70,6 @@ def validate_workflow_for_publish(
         if node_code is None:
             errors.append(
                 f"no published node code for {definition.key}.{node.key} "
-                "(publish a workspace version or a global factory seed first, EXEC-CODE-002)"
+                "(publish a workspace version first, EXEC-CODE-002)"
             )
     return errors

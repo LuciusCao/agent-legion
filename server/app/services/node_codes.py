@@ -4,12 +4,10 @@ Node code is data, not a repo asset: versions live in the
 ``versioned_entities`` table (entity_type ``node_code``, schema v26), are
 immutable, and take effect only through the publish flow
 (draft → published → archived). At most one published version exists per
-``(workspace, workflow, node)`` (partial unique index). Codes are
-workspace-scoped; the open-source demo workflow's two nodes additionally
-have a **global** factory version (``workspace_id`` NULL) seeded at startup
-from the git-reviewed ``workflow_nodes/`` sources (#96), so the demo runs on
-a fresh deployment without per-workspace setup. Resolution order:
-frozen job pin → workspace published → global published.
+``(workspace, workflow, node)`` (partial unique index). Runtime code is
+workspace-scoped. Historical global versions (``workspace_id`` NULL) remain
+readable only for compatibility with old quality-replay pins; new demo seeds
+are published into their target workspace.
 
 The feature is gated by ``workflows.custom_nodes_enabled`` (default on in this
 phase, design §7); every public entry point checks the gate before validating
@@ -111,7 +109,7 @@ class NodeCodeService:
         return _to_row(entity) if entity else None
 
     def get_global_published(self, workflow_key: str, node_key: str) -> dict[str, Any] | None:
-        """Return the global (factory-seeded) published row, or None."""
+        """Return a legacy global published row, or None (migration only)."""
         self._require_enabled()
         entity = self._store.get_published(_entity_key(workflow_key, node_key), None)
         return _to_row(entity) if entity else None
@@ -189,9 +187,8 @@ class NodeCodeService:
         )
         return _to_row(entity)
 
-    def archive_all(self, workspace_id: str, workflow_key: str, node_key: str) -> int:
-        """Archive every workspace version; the node falls back to the global
-        factory version when one exists (demo nodes), else becomes unrunnable."""
+    def archive_all(self, workspace_id: str | None, workflow_key: str, node_key: str) -> int:
+        """Archive every version in one workspace or a legacy global scope."""
         self._require_enabled()
         return self._store.archive_all(_entity_key(workflow_key, node_key), workspace_id)
 

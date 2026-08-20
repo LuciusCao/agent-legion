@@ -94,15 +94,12 @@ class StudioAgentNodeCodeTools:
             "draft_version": int(draft["version"]) if draft is not None else None,
         }
         if published is not None:
+            if published["created_by"] == "system":
+                return {**state, "origin": "builtin", "code": str(published["code"])}
             return {
                 **state,
                 "origin": "custom",
                 "code": str(published["code"]),
                 "version": int(published["version"]),
             }
-        # Global factory-seeded node code (#96); None when the node has none.
-        factory = self._service().get_global_published(workflow_key, node_key)
-        if factory is None:
-            # No factory seed: the node starts from the SDK template.
-            return {**state, "origin": "none", "code": ""}
-        return {**state, "origin": "builtin", "code": str(factory["code"])}
+        return {**state, "origin": "none", "code": ""}

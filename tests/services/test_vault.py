@@ -9,7 +9,7 @@ from cryptography.fernet import Fernet
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.services.agent_service import AgentService, published_agent_definitions
-from server.app.services.demo_node_seed import seed_demo_node_codes
+from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.node_secrets import node_secret_name
 from server.app.services.vault import (
@@ -167,12 +167,10 @@ def test_resolve_secret_refs_without_master_key_raises(job_db, monkeypatch):
 
 
 def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
-    # The bare settings fixture does not seed the demo node codes
-    # (create_app does); the intake freeze needs them.
-    seed_demo_node_codes(settings)
     workspace = job_db.create_workspace(
         "vault-freeze", default_workflow_key="education_video_problems_generation"
     )
+    seed_demo_workspace_node_codes(settings, workspace["id"])
     definition = load_builtin_definition("education_video_problems_generation")
     # ensure_active_revision seeds the demo agents into this workspace (v46).
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)

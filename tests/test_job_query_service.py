@@ -7,7 +7,6 @@ import pytest
 
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.jobs.storage_layout import job_shard
-from server.app.services.demo_node_seed import seed_demo_node_codes
 from server.app.services.job_queries import JobQueryService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_executor_configuration import (
@@ -23,9 +22,6 @@ from tests.helpers import (
 
 @pytest.fixture
 def query_service(job_db, settings):
-    # The bare settings fixture does not hydrate executor definitions
-    # (create_app does); executor kind resolution needs the seeded catalog.
-    seed_demo_node_codes(settings)
     return JobQueryService(
         job_db,
         settings,

@@ -48,7 +48,7 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 
 | 脚本 | 用途 |
 |------|------|
-| `import-demo.sh` / `seed_demo.py` | `make import-demo` 的两阶段实现：前者把 4 个示例 skill 复制成本机 Git 仓库并打 `v1.0.0` tag；后者写入 demo skill source/lock、seed 全局节点代码，并在没有绑定 demo workflow 的 workspace 时创建一个。两阶段均幂等；测试可用 `AGENT_LEGION_DEMO_SKILLS_DIR` 覆盖 skill 目标根目录。 |
+| `import-demo.sh` / `seed_demo.py` | `make import-demo` 的两阶段实现：前者把 4 个示例 skill 复制成本机 Git 仓库并打 `v1.0.0` tag；后者先创建或复用绑定 demo workflow 的 workspace，再写入 demo skill source/lock，并把节点代码、Agent 和 DAG revision 注入该 workspace。两阶段均幂等；测试可用 `AGENT_LEGION_DEMO_SKILLS_DIR` 覆盖 skill 目标根目录。 |
 
 ## 迁移与工具
 

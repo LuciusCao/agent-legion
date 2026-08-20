@@ -91,18 +91,21 @@ def make_worker(
         settings=settings,
     )
     # Every non-Agent-routed node runs as code (P-0.5) and needs published
-    # code to dispatch; the fake executors in these tests never read the
-    # text, so seed a global no-op version for every scanned node.
+    # workspace code to dispatch; the fake executors never read the text.
+    from server.app.services.node_code_seeding import seed_workspace_node_code
     from server.app.services.node_codes import NodeCodeService
 
     codes = NodeCodeService(str(db_path))
-    for definition in definitions:
-        for node in definition.nodes.values():
-            codes.seed_global(
-                definition.key,
-                node.key,
-                "def run(job, job_dir, runtime):\n    pass\n",
-                "test seed",
-            )
+    for workspace in job_db.list_workspaces():
+        for definition in definitions:
+            for node in definition.nodes.values():
+                seed_workspace_node_code(
+                    codes,
+                    str(workspace["id"]),
+                    definition.key,
+                    node.key,
+                    "def run(job, job_dir, runtime):\n    pass\n",
+                    "test seed",
+                )
     worker._scan_entries = scan_entries(*definitions)
     return worker

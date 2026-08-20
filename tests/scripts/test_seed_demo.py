@@ -4,8 +4,11 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from scripts.seed_demo import DEMO_WORKFLOW_KEY, seed_demo
 from server.app.services.agent_service import published_agent_definitions
+from server.app.services.node_codes import NodeCodeService
 from server.app.services.skill_source_store import SkillSourceStore
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -41,6 +44,10 @@ def test_seed_demo_creates_complete_workspace_once(settings, job_db, tmp_path: P
     assert [workspace["id"] for workspace in matching] == [first.workspace_id]
     assert job_db.get_active_workflow_revision(first.workspace_id, DEMO_WORKFLOW_KEY) is not None
     assert len(published_agent_definitions(settings.database_url, first.workspace_id)) == 4
+    codes = NodeCodeService(settings.database_url)
+    for node_key in ("intake_knowledge_points", "publish_content"):
+        assert codes.get_effective_code(first.workspace_id, DEMO_WORKFLOW_KEY, node_key) is not None
+        assert codes.get_global_published(DEMO_WORKFLOW_KEY, node_key) is None
 
     store = SkillSourceStore(settings.database_url)
     sources = store.get_sources()
@@ -70,3 +77,20 @@ def test_seed_demo_reuses_existing_bound_workspace(settings, job_db, tmp_path: P
     assert result.workspace_created is False
     assert result.workspace_id == existing["id"]
     assert job_db.get_active_workflow_revision(existing["id"], DEMO_WORKFLOW_KEY) is not None
+
+
+def test_seed_demo_establishes_workspace_before_injecting_assets(
+    settings, job_db, tmp_path: Path
+) -> None:
+    missing_skills = tmp_path / "missing-skills"
+
+    with pytest.raises(RuntimeError, match="demo skill repo is missing"):
+        seed_demo(settings, skill_root=missing_skills)
+
+    matching = [
+        workspace
+        for workspace in job_db.list_workspaces()
+        if workspace["default_workflow_key"] == DEMO_WORKFLOW_KEY
+    ]
+    assert len(matching) == 1
+    assert job_db.get_active_workflow_revision(matching[0]["id"], DEMO_WORKFLOW_KEY) is None
