@@ -66,8 +66,8 @@ def test_reap_terminal_bundles_removes_done_bundles_and_stale_archives(job_db, t
     broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir, data_dir=tmp_path)
     # The queued request's bundle must survive; the terminal one (finished_at
     # NULL, covered by the startup full scan) is reaped.
-    _insert_request(job_db, execution_id="exec-live", state="queued", bundle_name="live.tar.gz")
-    _insert_request(job_db, execution_id="exec-done", state="done", bundle_name="done.tar.gz")
+    _insert_request(job_db, execution_id="live", state="queued", bundle_name="live.tar.gz")
+    _insert_request(job_db, execution_id="done", state="done", bundle_name="done.tar.gz")
 
     reaped = broker.reap_terminal_bundles()
 
@@ -114,7 +114,7 @@ def test_reap_terminal_bundles_incremental_uses_done_and_cancelled_branches(
         (bundle_dir / f"{state}.tar.gz").write_bytes(b"bundle")
         _insert_request(
             job_db,
-            execution_id=f"exec-{state}",
+            execution_id=state,
             state=state,
             bundle_name=f"{state}.tar.gz",
             finished_at=datetime.now(UTC),
@@ -139,14 +139,10 @@ def test_reap_incremental_query_never_seq_scans(job_db, tmp_path) -> None:
     assert watermark is not None
 
     query = (
-        "select case when manifest_json is json"
-        " then manifest_json::jsonb->>'bundle_name' end as bundle_name"
-        " from agent_execution_requests"
+        "select execution_id || '.tar.gz' as bundle_name from agent_execution_requests"
         " where state='done' and finished_at >= %s"
         " union all"
-        " select case when manifest_json is json"
-        " then manifest_json::jsonb->>'bundle_name' end as bundle_name"
-        " from agent_execution_requests"
+        " select execution_id || '.tar.gz' as bundle_name from agent_execution_requests"
         " where state='cancelled' and finished_at >= %s"
     )
     with job_db.connect() as conn:
@@ -169,7 +165,7 @@ def test_startup_full_scan_streams_in_chunks(job_db, tmp_path, monkeypatch) -> N
     for index in range(5):
         (bundle_dir / f"done-{index}.tar.gz").write_bytes(b"bundle")
         _insert_request(
-            job_db, execution_id=f"exec-{index}", state="done", bundle_name=f"done-{index}.tar.gz"
+            job_db, execution_id=f"done-{index}", state="done", bundle_name=f"done-{index}.tar.gz"
         )
 
     with patch.object(
@@ -184,8 +180,8 @@ def test_startup_full_scan_streams_in_chunks(job_db, tmp_path, monkeypatch) -> N
     assert stream_spy.call_count == 1
     assert stream_spy.call_args.kwargs["chunk_size"] == 2
     query = stream_spy.call_args.args[2]
-    assert "manifest_json::jsonb->>'bundle_name'" in query
-    assert "select manifest_json from" not in query
+    assert "execution_id || '.tar.gz'" in query
+    assert "manifest_json" not in query
     assert broker._reap_watermark is not None
     assert before <= broker._reap_watermark <= after
 
@@ -203,12 +199,31 @@ def test_startup_full_scan_bad_manifest_does_not_abort_later_chunks(
     # Inserted first so the poisoned row leads the scan; chunk size 1 puts it
     # in an earlier fetch batch than the valid row.
     _insert_request(
-        job_db, execution_id="exec-bad", state="done", bundle_name="", manifest_text="not json"
+        job_db, execution_id="bad", state="done", bundle_name="", manifest_text="not json"
     )
     (bundle_dir / "good.tar.gz").write_bytes(b"bundle")
-    _insert_request(job_db, execution_id="exec-good", state="done", bundle_name="good.tar.gz")
+    _insert_request(job_db, execution_id="good", state="done", bundle_name="good.tar.gz")
 
     reaped = broker.reap_terminal_bundles()
 
     assert reaped == 1
     assert not (bundle_dir / "good.tar.gz").exists()
+
+
+def test_startup_full_scan_ignores_json_nul_escape(job_db, tmp_path) -> None:
+    """A legal JSON NUL escape elsewhere in the manifest must not abort GC."""
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    bundle = bundle_dir / "nul.tar.gz"
+    bundle.write_bytes(b"bundle")
+    _insert_request(
+        job_db,
+        execution_id="nul",
+        state="done",
+        bundle_name=bundle.name,
+        manifest_text=json.dumps({"bundle_name": bundle.name, "prompt": "\x00"}),
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir, data_dir=tmp_path)
+
+    assert broker.reap_terminal_bundles() == 1
+    assert not bundle.exists()

@@ -26,13 +26,10 @@ _SAFE_BUNDLE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 _REAP_OVERLAP = timedelta(seconds=60)
 
 # Startup-scan fetch batch: a plain psycopg cursor buffers the whole result
-# client-side (#128: ~1M terminal manifests ≈ 1GB OOM-killed backend startup),
-# so the scan streams through a server-side cursor instead.
+# client-side (#128), so stream only the small authoritative execution id.
 _SCAN_CHUNK_SIZE = 1000
 
-_BUNDLE_NAME_PROJECTION = (
-    "case when manifest_json is json then manifest_json::jsonb->>'bundle_name' end as bundle_name"
-)
+_BUNDLE_NAME_PROJECTION = "execution_id || '.tar.gz' as bundle_name"
 
 
 def reap_terminal_bundles(
