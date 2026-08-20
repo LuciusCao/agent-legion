@@ -139,10 +139,14 @@ def test_reap_incremental_query_never_seq_scans(job_db, tmp_path) -> None:
     assert watermark is not None
 
     query = (
-        "select manifest_json from agent_execution_requests"
+        "select case when manifest_json is json"
+        " then manifest_json::jsonb->>'bundle_name' end as bundle_name"
+        " from agent_execution_requests"
         " where state='done' and finished_at >= %s"
         " union all"
-        " select manifest_json from agent_execution_requests"
+        " select case when manifest_json is json"
+        " then manifest_json::jsonb->>'bundle_name' end as bundle_name"
+        " from agent_execution_requests"
         " where state='cancelled' and finished_at >= %s"
     )
     with job_db.connect() as conn:
@@ -179,6 +183,9 @@ def test_startup_full_scan_streams_in_chunks(job_db, tmp_path, monkeypatch) -> N
     assert not list(bundle_dir.glob("done-*.tar.gz"))
     assert stream_spy.call_count == 1
     assert stream_spy.call_args.kwargs["chunk_size"] == 2
+    query = stream_spy.call_args.args[2]
+    assert "manifest_json::jsonb->>'bundle_name'" in query
+    assert "select manifest_json from" not in query
     assert broker._reap_watermark is not None
     assert before <= broker._reap_watermark <= after
 
