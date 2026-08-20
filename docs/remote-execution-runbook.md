@@ -150,14 +150,15 @@ essentials, for orientation:
   `/api/agent-executions/{id}/heartbeat` and `/api/agent-executions/{id}/result`.
   Registration carries `protocol_version` and `image_version`; the Host rejects
   workers below `agent_workers.min_protocol_version` (DB instance settings,
-  `/api/admin/instance-settings`). Current protocol is **v2**: it adds
-  `kind: "code"` claims (see below) and heartbeat response bodies carrying
-  explicit cancellation lists. Compatibility matrix:
+  `/api/admin/instance-settings`). Current protocol is **v3**: v2 added
+  `kind: "code"` claims and heartbeat cancellation bodies; v3 adds
+  runtime-scoped model declarations plus a `host_protocol_version`
+  registration handshake. Compatibility matrix:
 
-  | Host \ Worker | v1 Worker | v2 Worker |
-  | --- | --- | --- |
-  | **v1 Host** | agent-only (unchanged) | agent-only — the v2 Worker degrades gracefully (extra register/claim fields ignored, heartbeat 204 accepted) |
-  | **v2 Host** | agent-only — never receives code claims, heartbeat stays an empty 204 | full — agent + code pools, heartbeat 200 + cancellation body |
+  | Host \ Worker | v1 Worker | v2 Worker | v3 Worker |
+  | --- | --- | --- | --- |
+  | **pre-v3 Host** | agent-only (unchanged) | v2 behavior | rejected before claim — upgrade Host first |
+  | **v3 Host** | agent-only | agent + code; legacy model declarations expand to declared runtimes | full runtime-scoped Agent + code pools |
 
   The Host's `min_protocol_version` remains 1; raising it is an emergency
   escape hatch, not part of a normal upgrade.
@@ -167,7 +168,9 @@ essentials, for orientation:
   `max_code_concurrency` only (code requests do not consume workspace Agent
   capacity). The Host accounts and enforces the two pools separately, so long
   code tasks never starve Agent claims. Upgrade order is Host first, then
-  Workers.
+  Workers. A v3 Worker treats a missing/older `host_protocol_version` as a
+  terminal registration error and exits 2, so it cannot let a pre-v3 Host
+  erase model runtimes and misroute claims.
 
 **Capacity planning.** Budget ~200 MB RAM per concurrent Agent process
 (measured pi RSS: settled ~150 MB, peak ~187 MB, 90-second sample). Long-run

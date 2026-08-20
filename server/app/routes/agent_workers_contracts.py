@@ -6,12 +6,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-# Current Agent Worker protocol version. v3 adds runtime-scoped model
-# declarations; backward compatibility remains field-default based: a v1
-# Worker never declares code capacity, never
-# receives kind='code' claims, and keeps the legacy 204 heartbeat.
-AGENT_WORKER_PROTOCOL_VERSION = 3
-
 
 class RegisterAgentWorkerRequest(BaseModel):
     worker_id: str = Field(min_length=1, max_length=64)
@@ -30,6 +24,9 @@ class RegisterAgentWorkerRequest(BaseModel):
 
 class RegisterAgentWorkerResponse(BaseModel):
     worker_token: str
+    # Negotiated Host capability level. A v3 Worker must not continue against
+    # an older Host that would erase runtime-scoped model declarations.
+    host_protocol_version: int = 3
     # Server-resolved workspace admission scope; [] means all workspaces.
     allowed_workspaces: list[str]
 

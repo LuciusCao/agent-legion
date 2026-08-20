@@ -22,6 +22,11 @@ services:
       - worker-control:/var/lib/agent-legion-worker-control
     ports:
       - ${AGENT_WORKER_UI_BIND:-127.0.0.1}:8787:8787
+    # Optional provider credentials referenced by /root/.velites/models.json.
+    # Keep them in a dedicated 0600, git-ignored file instead of Compose YAML.
+    env_file:
+      - path: ${VELITES_PROVIDER_ENV_FILE:-./velites-provider.env}
+        required: false
     environment:
       # Optional shared token for the tailnet-bound LLM gateway; the worker
       # supervisor passes it through to Pi subprocesses. Set it in deploy/.env

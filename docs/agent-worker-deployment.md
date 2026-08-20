@@ -44,6 +44,21 @@ export VELITES_CONFIG_DIR="$HOME/.velites"
 `docs/architecture/velites-model-registry.md`。建议 `apiKey` 使用 `$ENV` 引用并将文件设为
 0600。容器通过 `VELITES_CONFIG_DIR` 只读挂载到 `/root/.velites`。
 
+Docker Worker 使用独立、git-ignored 的 env file 注入这些引用变量。不要误以为 Compose
+用于自身插值的 `deploy/.env` 会自动进入容器：复制示例文件，写入
+`models.json` 实际引用的变量，并限制权限；也可以用绝对路径覆盖默认位置：
+
+```bash
+cp deploy/velites-provider.env.example deploy/velites-provider.env
+chmod 600 deploy/velites-provider.env
+# 编辑 deploy/velites-provider.env，填入 ANTHROPIC_API_KEY / SQAI_API_KEY 等引用变量
+export VELITES_PROVIDER_ENV_FILE="$PWD/deploy/velites-provider.env"
+```
+
+两个 Compose 入口都会可选加载该文件；文件不存在时不影响只使用字面 `apiKey` 或
+`LLM_GATEWAY_TOKEN` 的部署。凭据只写入该 0600 文件，不写 Compose YAML、Worker 配置
+或命令行。
+
 如果 Worker 机器要通过 Tailscale 等 overlay 网络访问 Host，将监听地址设为部署机的 overlay 网络 IP：
 
 ```bash
@@ -159,7 +174,10 @@ Host 才会下发任务。
 **协议兼容**：当前协议版本为 v3（新增 runtime-scoped model triples）；v2 的 code claim
 和 heartbeat 取消 body 语义不变。Host 把旧 Worker 的二元 provider/model 声明解释成
 runtime wildcard；新 Worker 总是发送显式 runtime。注册时 code 容量仍只要求协议 >= v2。
-Host 的 `min_protocol_version` 仍为 1。
+Host 的 `min_protocol_version` 仍为 1。升级必须遵循 **Host first, Worker second**：v3
+注册响应携带 `host_protocol_version`，新 Worker 若发现 Host 低于 v3（旧响应缺少该字段
+也视为旧 Host）会以退出码 2 fail-closed，不进入 claim，避免旧 Host 把 runtime-scoped
+模型降成二元 provider/model 后误投到另一个 runtime。确认 Host 健康后再逐台重启 Worker。
 
 节点的 provider、model、thinking 和 prompt 可以继续在 workflow 编辑器中修改。只修改这些运行配置会更新当前 revision，而不会创建新版本；已创建但尚未领取的 Job 会在领取时使用其 revision 的最新运行配置。任务一旦领取，就固定使用领取时下发的配置。
 

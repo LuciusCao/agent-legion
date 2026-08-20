@@ -100,3 +100,109 @@ async fn sends_messages_headers_tools_and_folds_stream() {
     assert_eq!(body["thinking"]["budget_tokens"], 4096);
     assert_eq!(body["tools"][0]["input_schema"]["type"], "object");
 }
+
+#[tokio::test]
+async fn round_trips_private_thinking_blocks_after_tool_use() {
+    let tool_response = sse_body(&[
+        json!({"type":"message_start","message":{"usage":{"input_tokens":3}}}),
+        json!({"type":"content_block_start","index":0,
+            "content_block":{"type":"thinking","thinking":""}}),
+        json!({"type":"content_block_delta","index":0,
+            "delta":{"type":"thinking_delta","thinking":"Need a file."}}),
+        json!({"type":"content_block_delta","index":0,
+            "delta":{"type":"signature_delta","signature":"signed-thinking"}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"content_block_start","index":1,
+            "content_block":{"type":"redacted_thinking","data":"encrypted-thinking"}}),
+        json!({"type":"content_block_stop","index":1}),
+        json!({"type":"content_block_start","index":2,
+            "content_block":{"type":"tool_use","id":"call-1","name":"read",
+                "input":{"path":"a.txt"}}}),
+        json!({"type":"content_block_stop","index":2}),
+        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},
+            "usage":{"output_tokens":9}}),
+        json!({"type":"message_stop"}),
+    ]);
+    let final_response = sse_body(&[
+        json!({"type":"message_start","message":{"usage":{"input_tokens":12}}}),
+        json!({"type":"content_block_start","index":0,
+            "content_block":{"type":"text","text":"done"}}),
+        json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},
+            "usage":{"output_tokens":1}}),
+        json!({"type":"message_stop"}),
+    ]);
+    let server = MockServer::start(vec![
+        MockResponse::sse(tool_response),
+        MockResponse::sse(final_response),
+    ])
+    .await;
+    let provider = AnthropicProvider::new(
+        "anthropic".into(),
+        server.url.clone(),
+        "sk-ant-test".into(),
+        "2023-06-01".into(),
+        Some(8192),
+        BTreeMap::from([("high".into(), 4096)]),
+    )
+    .unwrap();
+    let tools = vec![ToolSpec {
+        name: "read".into(),
+        description: "Read a file".into(),
+        parameters: json!({"type":"object"}),
+    }];
+    let mut messages = vec![Message::user("Use the tool".into())];
+    let assistant = provider
+        .complete(&CompletionRequest {
+            model: "claude-sonnet",
+            system: "",
+            messages: &messages,
+            tools: &tools,
+            thinking: Some("high"),
+        })
+        .await
+        .unwrap();
+
+    let public_message = serde_json::to_string(&assistant).unwrap();
+    assert!(!public_message.contains("signed-thinking"));
+    assert!(!public_message.contains("encrypted-thinking"));
+    messages.push(assistant);
+    messages.push(Message::tool_result(
+        "call-1".into(),
+        "read".into(),
+        vec![ContentBlock::Text {
+            text: "contents".into(),
+        }],
+        false,
+    ));
+    provider
+        .complete(&CompletionRequest {
+            model: "claude-sonnet",
+            system: "",
+            messages: &messages,
+            tools: &tools,
+            thinking: Some("high"),
+        })
+        .await
+        .unwrap();
+
+    let recorded = server.recorded();
+    let continuation = recorded[1].body_json();
+    let assistant_content = continuation["messages"][1]["content"].as_array().unwrap();
+    assert_eq!(
+        assistant_content[0],
+        json!({
+            "type":"thinking",
+            "thinking":"Need a file.",
+            "signature":"signed-thinking",
+        })
+    );
+    assert_eq!(
+        assistant_content[1],
+        json!({"type":"redacted_thinking","data":"encrypted-thinking"})
+    );
+    assert_eq!(assistant_content[2]["type"], "tool_use");
+    assert_eq!(
+        continuation["messages"][2]["content"][0]["type"],
+        "tool_result"
+    );
+}

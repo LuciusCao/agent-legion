@@ -3886,6 +3886,11 @@ export interface components {
     RegisterAgentWorkerResponse: {
       /** Allowed Workspaces */
       allowed_workspaces: string[]
+      /**
+       * Host Protocol Version
+       * @default 3
+       */
+      host_protocol_version: number
       /** Worker Token */
       worker_token: string
     }

@@ -16,11 +16,10 @@ import requests
 from worker.host_transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
 
 # Protocol v3: runtime-scoped model declarations. Batch-2 fields remain
-# cancel bodies. Mirrors AGENT_WORKER_PROTOCOL_VERSION in
+# cancel bodies. Mirrors RegisterAgentWorkerResponse.host_protocol_version in
 # server/app/routes/agent_workers_contracts.py — bump both together.
-# Compatibility is field-default based: an old Host never returns
-# kind='code' claims and keeps answering 204 heartbeats (parsed as no
-# cancellations), so this Worker degrades to agent-only.
+# Registration negotiates this version with the Host. In particular, a v3
+# Worker must fail closed against an older Host that erases model runtimes.
 PROTOCOL_VERSION = 3
 
 DEFAULT_TIMEOUT = 30
@@ -108,7 +107,12 @@ class Client(TransferOperations):
             )
         if status != 201:
             raise RuntimeError(f"Agent Worker registration failed: HTTP {status}: {body[:300]!r}")
-        self.token = str(json.loads(body)["worker_token"])
+        document = json.loads(body)
+        if int(document.get("host_protocol_version", 0)) < PROTOCOL_VERSION:
+            raise WorkerAuthError(
+                "Host protocol does not support runtime-scoped models; upgrade Host before Worker"
+            )
+        self.token = str(document["worker_token"])
         return self.token
 
     def revoke(self, worker_id: str, management_token: str) -> None:

@@ -60,6 +60,7 @@ def _register(client: TestClient, credential: str = "management-secret", **overr
         json=payload,
     )
     assert response.status_code == 201, response.text
+    assert response.json()["host_protocol_version"] == 3
     return dict(response.json())
 
 

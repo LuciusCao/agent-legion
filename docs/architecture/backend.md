@@ -259,7 +259,7 @@ server/app/
 | AgentVersionsResponse | BaseModel | versions: list[AgentVersionSummary] | app/routes/agent_definition_contracts.py |
 | AgentArchiveResponse | BaseModel | archived: int | app/routes/agent_definition_contracts.py |
 | RegisterAgentWorkerRequest | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
-| RegisterAgentWorkerResponse | BaseModel | worker_token: str, allowed_workspaces: list[str] | app/routes/agent_workers_contracts.py |
+| RegisterAgentWorkerResponse | BaseModel | worker_token: str, host_protocol_version: int, allowed_workspaces: list[str] | app/routes/agent_workers_contracts.py |
 | CreateAgentRegisterTokenRequest | BaseModel | workspace_id: str | None, label: str | app/routes/agent_workers_contracts.py |
 | AgentRegisterTokenCreatedResponse | BaseModel | token_id: str, register_token: str, workspace_id: str | None, label: str | app/routes/agent_workers_contracts.py |
 | AgentRegisterTokenSummary | BaseModel | token_id: str, workspace_id: str | None, label: str, created_at: str, revoked... | app/routes/agent_workers_contracts.py |

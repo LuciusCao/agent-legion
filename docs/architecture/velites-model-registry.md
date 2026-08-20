@@ -37,6 +37,9 @@ velites 的单一事实源是 `~/.velites/models.json`（`VELITES_MODELS_PATH` �
 
 `apiKey` 可为 0600 文件中的字面值；推荐使用精确的 `$ENV` / `${ENV}` 引用。模型发现
 会解析凭据引用：引用缺失即探测失败，该 runtime 不广播任何模型，不会领取 Agent 任务。
+Docker 部署通过 `VELITES_PROVIDER_ENV_FILE` 指向的独立 0600 env file 把这些引用变量
+注入 Worker；默认可选读取 git-ignored 的 `deploy/velites-provider.env`。Compose 自身的
+`deploy/.env` 仅负责变量插值，不能替代该容器凭据注入通道。
 
 ## Runtime adapters
 
@@ -60,6 +63,10 @@ models:
 某 runtime 没有 allowlist 条目时允许它发现的全部模型。旧的 `provider/model` 条目在加载时
 扩展到当时启用的全部 runtime。Worker 协议 v3 注册三元组；Host 读取缺少 runtime 的旧行时
 按 runtime wildcard 兼容，但所有新 Worker 都发送显式 runtime。
+
+注册响应同时返回 `host_protocol_version`。v3 Worker 拒绝缺少该字段或版本低于 v3 的
+Host，因此滚动发布必须先升级 Host、再升级 Worker；这避免旧 Host 接受 v3 请求后静默
+丢弃 `runtime`，把仅属于 velites 的 provider/model 错投给 Pi。
 
 ## Provider drivers
 

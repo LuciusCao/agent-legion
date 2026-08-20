@@ -27,6 +27,7 @@ deploy/worker.host.yaml
 deploy/worker.remote.yaml
 deploy/compose.local.yaml
 deploy/compose.worker.local.yaml
+deploy/velites-provider.env
 config/agent-worker.yaml
 htmlcov/
 htmlcov_backend/

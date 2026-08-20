@@ -141,7 +141,9 @@ impl Provider for AnthropicProvider {
             }
         };
         let mut aggregate = aggregate;
-        let mut message = Message::bare(Role::Assistant, aggregate.take_content());
+        let (content, provider_data) = aggregate.take_content();
+        let mut message = Message::bare(Role::Assistant, content);
+        message.provider_data = provider_data;
         message.provider = Some(self.name.clone());
         message.model = Some(req.model.to_string());
         message.stop_reason = Some(stop_reason);
@@ -196,6 +198,14 @@ fn wire_message(message: &Message) -> Value {
         Role::ToolResult => json!({"role": "user", "content": [tool_result_block(message)]}),
         Role::Assistant => {
             let mut content = Vec::new();
+            if let Some(blocks) = message
+                .provider_data
+                .as_ref()
+                .and_then(|data| data.get("anthropicThinkingBlocks"))
+                .and_then(Value::as_array)
+            {
+                content.extend(blocks.iter().cloned());
+            }
             let text = joined_text(message);
             if !text.is_empty() {
                 content.push(json!({"type": "text", "text": text}));
@@ -249,6 +259,8 @@ struct AnthropicBlock {
     id: String,
     name: String,
     partial_json: String,
+    signature: String,
+    data: String,
 }
 
 impl Aggregate {
@@ -268,6 +280,8 @@ impl Aggregate {
                 target.text.push_str(&string_field(block, "text"));
                 target.id = string_field(block, "id");
                 target.name = string_field(block, "name");
+                target.signature = string_field(block, "signature");
+                target.data = string_field(block, "data");
                 if let Some(input) = block.get("input").filter(|value| {
                     !value.is_null() && value.as_object().is_none_or(|object| !object.is_empty())
                 }) {
@@ -285,7 +299,9 @@ impl Aggregate {
                     "input_json_delta" => target
                         .partial_json
                         .push_str(&string_field(delta, "partial_json")),
-                    "signature_delta" => {}
+                    "signature_delta" => {
+                        target.signature.push_str(&string_field(delta, "signature"))
+                    }
                     other => {
                         return Err(ProviderError::Call(format!(
                             "unknown Anthropic content delta {other:?}"
@@ -345,15 +361,27 @@ impl Aggregate {
         Ok(())
     }
 
-    fn take_content(&mut self) -> Vec<ContentBlock> {
+    fn take_content(&mut self) -> (Vec<ContentBlock>, Option<Value>) {
         let blocks = std::mem::take(&mut self.blocks);
         let mut content = Vec::new();
+        let mut thinking_blocks = Vec::new();
         for block in blocks {
             match block.kind.as_str() {
                 "text" => content.push(ContentBlock::Text { text: block.text }),
-                "thinking" => content.push(ContentBlock::Thinking {
-                    thinking: block.text,
-                }),
+                "thinking" => {
+                    thinking_blocks.push(json!({
+                        "type": "thinking",
+                        "thinking": block.text,
+                        "signature": block.signature,
+                    }));
+                    content.push(ContentBlock::Thinking {
+                        thinking: block.text,
+                    });
+                }
+                "redacted_thinking" => thinking_blocks.push(json!({
+                    "type": "redacted_thinking",
+                    "data": block.data,
+                })),
                 "tool_use" => content.push(ContentBlock::ToolCall {
                     id: block.id,
                     name: block.name,
@@ -368,7 +396,12 @@ impl Aggregate {
                 text: String::new(),
             });
         }
-        content
+        let provider_data = (!thinking_blocks.is_empty()).then(|| {
+            json!({
+                "anthropicThinkingBlocks": thinking_blocks,
+            })
+        });
+        (content, provider_data)
     }
 }
 
@@ -546,7 +579,7 @@ mod tests {
         }
         assert_eq!(aggregate.stop_reason.as_deref(), Some("tool_use"));
         assert_eq!(aggregate.cache_read_tokens, 4);
-        let content = aggregate.take_content();
+        let (content, _) = aggregate.take_content();
         assert!(matches!(&content[0], ContentBlock::Text { text } if text == "Hi"));
         assert!(
             matches!(&content[1], ContentBlock::ToolCall { arguments, .. } if arguments == &json!({"path":"a"}))

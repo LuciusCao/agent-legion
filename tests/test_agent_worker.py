@@ -491,7 +491,10 @@ def test_client_registration_declares_protocol_v3_and_code_capacity() -> None:
     seen: list[dict] = []
     client.request = lambda *a, **k: (  # type: ignore[method-assign]
         seen.append(json.loads(k["data"])),
-        (201, b'{"worker_token": "tok", "allowed_workspaces": []}'),
+        (
+            201,
+            b'{"worker_token": "tok", "host_protocol_version": 3, "allowed_workspaces": []}',
+        ),
     )[1]
 
     client.register(
@@ -506,6 +509,22 @@ def test_client_registration_declares_protocol_v3_and_code_capacity() -> None:
 
     assert seen[0]["protocol_version"] == 3
     assert seen[0]["max_code_concurrency"] == 3
+
+
+def test_client_registration_rejects_old_host_before_claiming() -> None:
+    client = agent_worker.Client("http://unused")
+    client.request = lambda *a, **k: (  # type: ignore[method-assign]
+        201,
+        b'{"worker_token": "old-host-token", "allowed_workspaces": []}',
+    )
+
+    with pytest.raises(agent_worker.WorkerAuthError, match="upgrade Host before Worker"):
+        client.register(
+            {"worker_id": "w1", "runtimes": ["pi", "velites"], "max_concurrency": 1},
+            "management-token",
+        )
+
+    assert client.token == ""
 
 
 def test_client_registration_rejects_permanent_http_errors() -> None:
