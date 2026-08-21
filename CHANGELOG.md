@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Fixed
+
+- `agent_execution_requests` TOAST bloat (#142): the queued kind='code'
+  manifest persists only a lightweight `runtime_context` audit stub
+  (job/workspace ids + `batch_id`/`batch_hash`); the full DB-derived payloads
+  (job, workspace, intake batch, skill_versions) are rebuilt on the
+  claim-response path in memory, never persisted. Terminal code rows are
+  slimmed back to the stub automatically; `scripts/trim_terminal_code_manifests.py`
+  drains legacy pre-fix rows (ops-side `VACUUM FULL`/`pg_repack` still needed
+  to reclaim disk).
+
 ## [0.1.0] - 2026-08-19
 
 Initial open-source release.

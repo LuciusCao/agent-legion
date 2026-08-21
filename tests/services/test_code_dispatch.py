@@ -25,6 +25,7 @@ from server.app.agent_broker.code_dispatch import (
     split_manifest_config,
 )
 from server.app.agent_broker.code_eligibility import is_worker_eligible
+from server.app.agent_broker.code_manifest import resolve_code_runtime_context
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.executors.contracts import CodeCapabilityConfig
 from server.app.services.artifact_store import ArtifactStore
@@ -239,7 +240,9 @@ def test_enqueue_strips_instance_settings_from_manifest_and_child_payload(job_db
     """VAULT-SECRET-001: no settings sections ride the manifest today — the
     whitelist is empty after the business sections retired, so the vault
     master key, DB DSN and register token never persist nor cross into the
-    Worker sandbox stdin payload."""
+    Worker sandbox stdin payload. Issue #142: the persisted manifest carries
+    only the lightweight runtime_context audit stub; the full payloads are
+    rebuilt on the claim-response path (memory only)."""
     _insert_job(job_db)
     service = _service(job_db, tmp_path, config=_SENSITIVE_CONFIG)
 
@@ -265,15 +268,88 @@ def test_enqueue_strips_instance_settings_from_manifest_and_child_payload(job_db
     with job_db._connect_read() as conn:
         row = conn.execute("select manifest_json from agent_execution_requests").fetchone()
     manifest = json.loads(row["manifest_json"])
-    settings_config = manifest["runtime_context"]["settings_config"]
-    assert settings_config == {}
+    # Only lightweight audit references persist (issue #142) — never payloads.
+    assert manifest["runtime_context"] == {
+        "job_id": "job-1",
+        "workspace_id": "test-workspace",
+        "batch_id": None,
+        "batch_hash": None,
+    }
+    assert "job_batch" not in manifest["runtime_context"]
     # The manifest log_path is data-dir-relative, not a Host path leak.
     assert manifest["log_path"] == "logs/jobs/job-1-package.log"
     for leaked in ("fernet-key-material", "bootstrap-pw", "db-pw", "management-secret"):
         assert leaked not in row["manifest_json"]
-    # The sandbox child payload inherits the same whitelist end to end.
-    payload = build_child_payload(manifest, _CODE, tmp_path / "child")
-    assert payload["runtime"]["settings_config"] == settings_config
+    # The claim-response path rebuilds the full runtime_context in memory
+    # (never persisted); the whitelist holds end to end into the sandbox
+    # child payload.
+    resolved = resolve_code_runtime_context(manifest, TEST_DATABASE_URL, _SENSITIVE_CONFIG)
+    assert resolved["runtime_context"]["settings_config"] == {}
+    payload = build_child_payload(resolved, _CODE, tmp_path / "child")
+    assert payload["runtime"]["settings_config"] == {}
+
+
+def test_enqueue_persists_lightweight_reference_and_claim_rebuilds_full_context(
+    job_db, tmp_path
+) -> None:
+    """Issue #142: the queued manifest stores only batch_id + batch_hash; the
+    full batch payload and skill_versions are rebuilt on the claim-response
+    path so the Worker still gets the exact runtime the local executor builds."""
+    _insert_job(job_db)
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into job_batches(id, workspace_id, workflow_key, source_kind,"
+            " source_payload_json) values ('batch-1', 'test-workspace', 'questions',"
+            " 'question', '{\"rows\": 42, \"marker_142\": true}')"
+        )
+        conn.execute("update jobs set batch_id='batch-1' where id='job-1'")
+        conn.execute(
+            "insert into node_runs(job_id, node_key, status, skill_version)"
+            " values ('job-1', 'other', 'completed', 'v2')"
+        )
+    service = _service(job_db, tmp_path)
+    assert (
+        service.enqueue(
+            capability="package",
+            capability_config=CodeCapabilityConfig(),
+            workspace={"id": "test-workspace"},
+            job={"id": "job-1", "batch_id": "batch-1"},
+            workflow_key="questions",
+            node=_node(),
+            job_dir=tmp_path / "job",
+            log_path=tmp_path / "logs" / "jobs" / "job-1-package.log",
+            inputs=(),
+            code_text=_CODE,
+            custom_code=False,
+            config={},
+            secret_config={},
+        )
+        is True
+    )
+
+    with job_db._connect_read() as conn:
+        row = conn.execute("select manifest_json from agent_execution_requests").fetchone()
+    manifest = json.loads(row["manifest_json"])
+    stub = manifest["runtime_context"]
+    assert stub["job_id"] == "job-1"
+    assert stub["workspace_id"] == "test-workspace"
+    assert stub["batch_id"] == "batch-1"
+    assert len(stub["batch_hash"]) == 64
+    # The heavy batch payload never lands in the DB — this is the whole issue.
+    assert "job_batch" not in stub
+    assert "marker_142" not in row["manifest_json"]
+
+    resolved = resolve_code_runtime_context(manifest, TEST_DATABASE_URL, {})
+    ctx = resolved["runtime_context"]
+    assert ctx["job"]["id"] == "job-1"
+    assert ctx["workspace"]["id"] == "test-workspace"
+    assert ctx["job_batch"]["id"] == "batch-1"
+    assert ctx["job_batch"]["source_payload_json"] == '{"rows": 42, "marker_142": true}'
+    assert ctx["skill_versions"] == {"other": "v2"}
+    # End-to-end: the rebuilt context feeds the sandbox child payload.
+    payload = build_child_payload(resolved, _CODE, tmp_path / "child")
+    assert payload["runtime"]["job_batch"] == ctx["job_batch"]
+    assert payload["runtime"]["skill_versions"] == {"other": "v2"}
 
 
 def _register_probe_worker(

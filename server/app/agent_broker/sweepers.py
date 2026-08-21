@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from server.app.agent_broker.claim import cancel_request
+from server.app.agent_broker.code_manifest import CODE_MANIFEST_TRIM
 from server.app.db.transaction import write_transaction
 from server.app.executors._failed_node_recording import record_failed_node_without_execution
 from server.app.services import failure_classification
@@ -21,6 +22,14 @@ if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
 
 logger = logging.getLogger(__name__)
+
+# Shared terminal 'done' write for the sweep paths: closes the request and
+# slims the code manifest back to the audit stub in the same statement
+# (CODE_MANIFEST_TRIM, issue #142).
+_SWEEP_DONE_SQL = (
+    "update agent_execution_requests set state='done', outcome_json=%s,"
+    " finished_at=current_timestamp, manifest_json=" + CODE_MANIFEST_TRIM + " where execution_id=%s"
+)
 
 
 def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
@@ -52,8 +61,9 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 # just-completed node.
                 conn.execute(
                     "update agent_execution_requests set state='done',"
-                    " finished_at=current_timestamp"
-                    " where execution_id=%s and state in ('claimed', 'reporting')",
+                    " finished_at=current_timestamp, manifest_json="
+                    + CODE_MANIFEST_TRIM
+                    + " where execution_id=%s and state in ('claimed', 'reporting')",
                     (row["execution_id"],),
                 )
                 released.append((str(row["worker_id"]), str(row["workspace_id"])))
@@ -98,11 +108,7 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                     f" attempt={row['attempt']} limit={broker.requeue_limit})"
                 )
                 outcome = {"status": "failed", "exit_code": 1, "error_message": error_message}
-                conn.execute(
-                    "update agent_execution_requests set state='done', outcome_json=%s,"
-                    " finished_at=current_timestamp where execution_id=%s",
-                    (json.dumps(outcome), row["execution_id"]),
-                )
+                conn.execute(_SWEEP_DONE_SQL, (json.dumps(outcome), row["execution_id"]))
                 conn.execute(
                     "update job_nodes set status='failed', finished_at=current_timestamp,"
                     " error_message=%s where job_id=%s and node_key=%s",
@@ -157,11 +163,7 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
                 "failed", None, error
             )
             outcome = {"status": "failed", "exit_code": 1, "error_message": error}
-            conn.execute(
-                "update agent_execution_requests set state='done', outcome_json=%s,"
-                " finished_at=current_timestamp where execution_id=%s",
-                (json.dumps(outcome), row["execution_id"]),
-            )
+            conn.execute(_SWEEP_DONE_SQL, (json.dumps(outcome), row["execution_id"]))
             updated = record_failed_node_without_execution(
                 conn,
                 job_id=str(row["job_id"]),

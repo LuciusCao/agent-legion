@@ -5,6 +5,7 @@ from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime
 from typing import Protocol
 
+from server.app.agent_broker.code_manifest import CODE_MANIFEST_TRIM
 from server.app.db.connection import DatabaseConnection
 from server.app.db.transaction import write_transaction
 from server.app.workflows.sharding import delete_shards
@@ -22,6 +23,15 @@ class _AtomicMutationQueries(Protocol):
 
 def _timestamp(value: datetime) -> datetime:
     return value.astimezone(UTC)
+
+
+def _cancel_queued_sql(placeholders: str) -> str:
+    """Rerun-path cancel SQL; slims code manifests in the same statement (#142)."""
+    return (
+        "update agent_execution_requests set state='cancelled', finished_at=current_timestamp,"
+        f" manifest_json={CODE_MANIFEST_TRIM} where job_id=%s and node_key in ({placeholders})"
+        " and state='queued'"
+    )
 
 
 @contextmanager
@@ -84,11 +94,7 @@ def apply_run_to(
         (job_id, *sorted(closure)),
     )
     # 已入队的 queued agent 请求不复查上游，重置节点前必须取消（见 mark_nodes_for_rerun）。
-    conn.execute(
-        "update agent_execution_requests set state='cancelled', finished_at=current_timestamp"
-        f" where job_id=%s and node_key in ({placeholders}) and state='queued'",
-        (job_id, *sorted(closure)),
-    )
+    conn.execute(_cancel_queued_sql(placeholders), (job_id, *sorted(closure)))
     delete_shards(conn, job_id, closure)
     set_run_to_control(conn, job_id, target_node_key)
 
@@ -161,11 +167,7 @@ def mark_nodes_for_rerun(
     # （stale 会放行），不复查上游；rerun 又已删除下游产出，不取消就会在
     # 输入未重生成前抢跑（generate_possible_errors 缺输入失败事故）。
     # claimed/reporting 的请求持有 active lease，lease_guarded_mutation 已拦。
-    conn.execute(
-        "update agent_execution_requests set state='cancelled', finished_at=current_timestamp"
-        f" where job_id=%s and node_key in ({placeholders}) and state='queued'",
-        (job_id, *sorted(affected_nodes)),
-    )
+    conn.execute(_cancel_queued_sql(placeholders), (job_id, *sorted(affected_nodes)))
     conn.execute(
         """
         update jobs
