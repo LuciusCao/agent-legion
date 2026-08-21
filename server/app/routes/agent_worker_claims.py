@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.code_dispatch import resolve_code_manifest_config
+from server.app.agent_broker.code_manifest import resolve_code_runtime_context
 from server.app.agent_workers import CODE_PROTOCOL_VERSION
 from server.app.routes.agent_workers_contracts import (
     AgentClaimResponse,
@@ -52,18 +53,22 @@ def create_agent_worker_claim_router(
             # Secret injection happens on the response path only: the queued
             # manifest keeps vault references, the resolved plaintext crosses
             # the HTTPS channel and is never persisted (VAULT-SECRET-001).
+            # Issue #142: the queued manifest persists only the lightweight
+            # runtime_context audit stub — rebuild the full DB-derived
+            # payloads here, in memory, never persisted.
             try:
                 manifest = resolve_code_manifest_config(
+                    manifest, broker.database_dsn, settings.config
+                )
+                manifest = resolve_code_runtime_context(
                     manifest, broker.database_dsn, settings.config
                 )
             except Exception as exc:
                 # The claim already committed; a 500 lets the Worker drop the
                 # attempt and the sweeper requeues after the lease expires.
-                logger.exception(
-                    "code manifest secret resolution failed for %s", claimed.execution_id
-                )
+                logger.exception("code manifest resolution failed for %s", claimed.execution_id)
                 raise HTTPException(
-                    status_code=500, detail="code manifest secret resolution failed"
+                    status_code=500, detail="code manifest resolution failed"
                 ) from exc
         return AgentClaimResponse(
             execution_id=claimed.execution_id,

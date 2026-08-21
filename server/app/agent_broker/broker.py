@@ -22,6 +22,7 @@ from server.app.agent_broker.claim import (
     ClaimRacedError,
     claim_in_transaction,
 )
+from server.app.agent_broker.code_manifest import CODE_MANIFEST_TRIM
 from server.app.agent_broker.empty import EmptyClaimTrigger
 from server.app.agent_broker.enqueue import enqueue_request
 from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
@@ -247,7 +248,9 @@ class AgentExecutionBroker:
                 return None
             conn.execute(
                 "update agent_execution_requests set state='done', outcome_json=%s,"
-                " finished_at=current_timestamp where execution_id=%s",
+                " finished_at=current_timestamp, manifest_json="
+                + CODE_MANIFEST_TRIM
+                + " where execution_id=%s",
                 (json.dumps(dict(outcome), ensure_ascii=False), execution_id),
             )
             touch_worker(conn, worker_id)

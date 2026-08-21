@@ -211,6 +211,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/services/test_code_claim.py",
         "tests/services/test_code_claim_sweeper.py",
         "tests/services/test_code_dispatch.py",
+        "tests/services/test_code_manifest_trim.py",
         "tests/services/test_artifact_store.py",
         "tests/services/test_job_rerun_batch.py",
         "tests/services/test_job_rerun_preview.py",

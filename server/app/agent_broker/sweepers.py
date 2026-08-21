@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from server.app.agent_broker.claim import cancel_request
+from server.app.agent_broker.code_manifest import CODE_MANIFEST_TRIM
 from server.app.db.transaction import write_transaction
 from server.app.executors._failed_node_recording import record_failed_node_without_execution
 from server.app.services import failure_classification
@@ -100,7 +101,9 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 outcome = {"status": "failed", "exit_code": 1, "error_message": error_message}
                 conn.execute(
                     "update agent_execution_requests set state='done', outcome_json=%s,"
-                    " finished_at=current_timestamp where execution_id=%s",
+                    " finished_at=current_timestamp, manifest_json="
+                    + CODE_MANIFEST_TRIM
+                    + " where execution_id=%s",
                     (json.dumps(outcome), row["execution_id"]),
                 )
                 conn.execute(
