@@ -327,7 +327,14 @@ def test_no_auto_discovery(tmp_path: Path, velites_binary: Path) -> None:
                 "--no-sandbox",
                 "@prompt.md",
             ],
-            env_extra={"VELITES_BASE_URL": base_url, "VELITES_API_KEY": "test-key"},
+            # HOME is pinned to the tmp workdir so a user-level
+            # ~/.velites/models.json cannot change provider resolution —
+            # the test must see the built-in defaults everywhere.
+            env_extra={
+                "VELITES_BASE_URL": base_url,
+                "VELITES_API_KEY": "test-key",
+                "HOME": str(tmp_path),
+            },
         )
     finally:
         server.shutdown()
