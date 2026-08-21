@@ -41,6 +41,36 @@ Docker 部署通过 `VELITES_PROVIDER_ENV_FILE` 指向的独立 0600 env file �
 注入 Worker；默认可选读取 git-ignored 的 `deploy/velites-provider.env`。Compose 自身的
 `deploy/.env` 仅负责变量插值，不能替代该容器凭据注入通道。
 
+### 从 0.1.x 迁移
+
+0.1.x 的 `~/.velites/config.json` 只有 `base_url` / `api_key`，不能为 Worker
+声明可领取的 provider/model。升级到 0.2.0 时：
+
+1. 先升级 Host，再升级 Worker；
+2. 保留旧文件作备份，新建 0600 的 `~/.velites/models.json`；
+3. 将 `base_url` 迁到 provider 的 `baseUrl`，`api_key` 迁到 `apiKey`，
+   并显式填入 `api` 方言与可用模型；provider 名必须与 Agent 节点及
+   Worker allowlist 中的名称一致；
+4. 运行 `velites models list --json` 验证，然后重启 Worker 触发重新发现。
+
+例如旧配置对应 `sqai` 且 Worker 允许两个模型，可以用 `jq` 避免在
+终端回显密钥：
+
+```bash
+cp -p ~/.velites/config.json ~/.velites/config.json.pre-v0.2.0.bak
+tmp="$(mktemp)"
+jq '{providers:{sqai:{api:"openai-completions",baseUrl:.base_url,apiKey:.api_key,
+  models:["deepseek-v4-flash","kimi-k2.6"]}}}' \
+  ~/.velites/config.json > "$tmp"
+install -m 600 "$tmp" ~/.velites/models.json
+rm -f "$tmp"
+velites models list --json
+```
+
+旧 `config.json` 可以暂时保留；一旦 `models.json` 存在，Worker 发现只以新 registry
+为准。如果 `apiKey` 改用 `$ENV` 引用，原生 Worker 需在启动环境中提供该
+变量；Docker Worker 按上文使用 `VELITES_PROVIDER_ENV_FILE`。
+
 ## Runtime adapters
 
 - velites：`velites models list --json`；
