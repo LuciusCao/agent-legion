@@ -12,6 +12,7 @@ import json
 from typing import TYPE_CHECKING
 
 from server.app.agent_broker import agent_claim_compatibility
+from server.app.agent_broker.code_manifest import CODE_MANIFEST_TRIM
 from server.app.agent_broker.unclaimable_reasons import WorkerDeclarations, unmatched_reasons
 from server.app.db.transaction import write_transaction
 from server.app.executors._failed_node_recording import record_failed_node_without_execution
@@ -95,7 +96,9 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             outcome = {"status": "failed", "exit_code": 1, "error_message": error}
             conn.execute(
                 "update agent_execution_requests set state='done', outcome_json=%s,"
-                " finished_at=current_timestamp where execution_id=%s",
+                " finished_at=current_timestamp, manifest_json="
+                + CODE_MANIFEST_TRIM
+                + " where execution_id=%s",
                 (json.dumps(outcome), row["execution_id"]),
             )
             updated = record_failed_node_without_execution(

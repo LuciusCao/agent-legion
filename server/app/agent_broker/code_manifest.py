@@ -30,8 +30,10 @@ logger = logging.getLogger(__name__)
 
 # SQL fragment: replace the heavy runtime_context of a kind='code' row with
 # the lightweight audit stub. Applied on every terminal-state transition
-# (mark_done / cancel_request / requeue-limit-exceeded); the qualified table
-# name keeps the correlated jobs lookup unambiguous inside each UPDATE.
+# (broker mark_done, cancel_request, requeue-limit-exceeded, zombie-claim
+# close, agent-disabled and unclaimable sweeps, rerun cancellation in
+# jobs/atomic_mutations.py); the qualified table name keeps the correlated
+# jobs lookup unambiguous inside each UPDATE.
 CODE_MANIFEST_TRIM = """
 case when kind = 'code' then
   jsonb_set(
