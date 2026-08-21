@@ -115,8 +115,8 @@ validation:
   capability. Zero or two published agents for one capability both fail
   validation.
 - CODE node: every node without an Agent route runs on the implicit code
-  pool (P-0.5); publish validation requires resolvable published node code
-  (workspace version or global factory seed). Otherwise validation reports
+  pool (P-0.5); publish validation requires a published workspace node-code
+  version. Otherwise validation reports
   `no published node code for <workflow_key>.<node_key>` — publish the code
   with `save_node_code_draft` (skeleton draft + `expected_capability`) first.
 

@@ -2,6 +2,7 @@ import pytest
 
 from server.app.jobs.storage_layout import job_storage_dir
 from server.app.services import job_intake_chunks
+from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.workflow_revisions import WorkflowRevisionService
@@ -13,6 +14,7 @@ def _create_workspace_with_revision(
 ):
     workspace = job_db.create_workspace("default", default_workflow_key=workflow_key)
     definition = load_builtin_definition(workflow_key)
+    seed_demo_workspace_node_codes(settings, workspace["id"])
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     return workspace
 
@@ -250,15 +252,16 @@ def test_job_intake_freezes_node_code_versions(job_db, settings):
 
     payload = json.loads(batch["source_payload_json"])
     pins = payload["node_code_versions"]
-    assert pins["intake_knowledge_points"]["version"] == 1
+    # Workspace initialization published factory v1; this user publish is v2.
+    assert pins["intake_knowledge_points"]["version"] == 2
     assert len(pins["intake_knowledge_points"]["code_hash"]) == 64
-    # Nodes without published custom code are not pinned.
+    # Agent-routed nodes are not code-pinned.
     assert "write_script" not in pins
 
 
-def test_job_intake_freezes_global_factory_seed_pins(job_db, settings):
-    """Post-#96: the demo workflow's global factory-seeded node codes are
-    pinned like workspace-published ones; post-#115 the intake pins are an
+def test_job_intake_freezes_workspace_factory_seed_pins(job_db, settings):
+    """The demo workflow's workspace factory-seeded node codes are pinned;
+    post-#115 the intake pins are an
     audit record and the quality-replay pin source (ordinary jobs dispatch
     the latest published code); agent nodes are never pinned."""
     _create_workspace_with_revision(job_db, settings)

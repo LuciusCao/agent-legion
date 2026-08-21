@@ -170,8 +170,8 @@ def try_claim_and_submit(
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
 
     # Node code (EXEC-CODE-002): since #115 ordinary jobs dispatch the
-    # currently published code — workspace published first, then the global
-    # factory seed; the frozen pins (job snapshot's node_code_pins, then the
+    # currently published workspace code; the frozen pins (job snapshot's
+    # node_code_pins, then the
     # intake batch's node_code_versions) are honored only for quality-replay
     # batches, where a hash mismatch fails the node (fail closed,
     # EXEC-CODE-003).

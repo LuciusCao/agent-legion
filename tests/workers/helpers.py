@@ -132,8 +132,8 @@ def _seed_trivial_node_code(
 ) -> None:
     """Publish a no-op node code so a code-executor node can dispatch.
 
-    Since #96 every code node requires published code (workspace version or
-    global factory seed); the RecordingExecutor never reads the text.
+    Since #96 every code node requires published workspace code; the
+    RecordingExecutor never reads the text.
     """
     from server.app.services.node_codes import NodeCodeService
 

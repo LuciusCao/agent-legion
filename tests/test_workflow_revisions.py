@@ -586,13 +586,15 @@ def test_publish_revision_records_node_code_pins(tmp_path: Path) -> None:
     workflow_definition_from_dict(payload)
 
 
-def test_publish_revision_pins_global_factory_seed_codes(tmp_path: Path) -> None:
-    """Post-#96: the demo workflow's global factory seeds are pinned into
-    revision publishes exactly like workspace-published custom codes."""
+def test_publish_revision_pins_workspace_factory_seed_codes(tmp_path: Path, settings) -> None:
+    """Workspace factory seeds are pinned into revision publishes."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace(
         "ws-no-pins", default_workflow_key="education_video_problems_generation"
     )
+    from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
+
+    seed_demo_workspace_node_codes(settings, workspace["id"])
     definition = load_builtin_definition("education_video_problems_generation")
     service = WorkflowRevisionService(queries)
 

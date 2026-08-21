@@ -104,7 +104,7 @@ def test_code_claim_secret_failure_500_then_sweeper_requeue_retries(
 
         failed = _claim(client, token)
         assert failed.status_code == 500
-        assert failed.json()["detail"] == "code manifest secret resolution failed"
+        assert failed.json()["detail"] == "code manifest resolution failed"
 
         # The claim committed before injection failed: the request is not
         # lost, it sits claimed behind the expired-soon lease.

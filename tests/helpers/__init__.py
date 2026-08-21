@@ -7,7 +7,7 @@ from typing import Any
 
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
-from server.app.settings import Settings
+from server.app.settings import Settings, load_settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.builtin import load_builtin_workflow
 from server.app.workflows.definition import WorkflowDefinition
@@ -30,8 +30,10 @@ def publish_builtin_revision(
     directly use this so definition resolution (workspace active revision,
     schema v50) sees the DAG.
     """
+    from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
     from server.app.services.workflow_revisions import WorkflowRevisionService
 
+    seed_demo_workspace_node_codes(load_settings(), workspace_id)
     return WorkflowRevisionService(job_db).ensure_active_revision(
         workspace_id, load_builtin_workflow(workflow_key)
     )
@@ -63,11 +65,6 @@ def make_workflow_worker(
 
     definition = load_builtin_definition(workflow_key)
     settings = app_main.load_settings(data_dir=tmp_path)
-    # Executor definitions are retired (P-0.5); only the demo node codes
-    # still seed (the app does this in create_app; this helper mirrors it).
-    from server.app.services.demo_node_seed import seed_demo_node_codes
-
-    seed_demo_node_codes(settings)
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
             "workflows": {
@@ -134,9 +131,11 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
         )
 
     monkeypatch.setattr(app_main, "load_settings", fake_load_settings)
-    # The fake root has no workflow_nodes/: skip the demo node-code seeding
+    # The fake root has no workflow_nodes/: skip the compatibility migration
     # (SPA tests never dispatch jobs).
-    monkeypatch.setattr(app_main, "seed_demo_node_codes", lambda settings: None)
+    monkeypatch.setattr(
+        app_main, "migrate_demo_node_codes_to_workspaces", lambda settings, job_db: 0
+    )
     return root_dir, data_dir
 
 

@@ -371,7 +371,7 @@ invariants:
         gate: quick
 
   - id: EXEC-CODE-001
-    statement: "The capability 'path' binding to repo-tracked node files is retired (#96): no code-execution parameter carrier ever carries a path key (the pydantic model rejects it), the repo-file module loader and the bare multiprocessing child are gone, and the Studio repo-file viewer (routes/services workflow_node_files) is deleted. The only repo-tracked node code left is the demo workflow's two seed sources under workflow_nodes/ — git-reviewed, CI-gated, read-only for every runtime path — published at startup as global (workspace-NULL) node_code versions via seed-if-absent (server/app/services/demo_node_seed.py), so the demo runs on a fresh deployment with zero per-workspace setup. Executor definitions themselves retired at schema v47 (P-0.5): the single implicit code pool runs every non-Agent-routed node."
+    statement: "The capability 'path' binding to repo-tracked node files is retired (#96): no code-execution parameter carrier ever carries a path key (the pydantic model rejects it), the repo-file module loader and the bare multiprocessing child are gone, and the Studio repo-file viewer (routes/services workflow_node_files) is deleted. The only repo-tracked node code left is the demo workflow's two seed sources under workflow_nodes/ — git-reviewed, CI-gated, read-only for every runtime path — copied into workspace-scoped node_code versions when a demo workspace is initialized (server/app/services/demo_node_seed.py). Startup compatibility migration copies any active legacy global demo code into every bound demo workspace before archiving the global rows. Executor definitions themselves retired at schema v47 (P-0.5): the single implicit code pool runs every non-Agent-routed node."
     owner: workspace-executor
     risk: high
     evidence:
@@ -386,7 +386,7 @@ invariants:
         gate: quick
 
   - id: EXEC-CODE-002
-    statement: "Workflow node code lives only in the DB (versioned_entities, entity_type 'node_code'), takes effect exclusively through the publish flow (draft → published → archived), versions are immutable, and no runtime path may write repo workflow_nodes/ files. Codes are workspace-scoped with a global (workspace-NULL) factory-seed scope for the demo nodes (#96). Since #115 ordinary jobs no longer freeze the code version they started with: dispatch resolves the currently published code (workspace published → global published), so a republish takes effect on the next node execution of an in-flight job — same for Agent definitions, which ordinary jobs never pinned (dispatch always resolved the workspace's currently published definition). The intake batch's node_code_versions and the revision snapshot's node_code_pins survive as audit records and as the pin source for quality replays: only a batch carrying the quality_replay marker dispatches its frozen pin (snapshot pins first, batch pins as the legacy fallback), failing closed on hash drift. A capability with no published code at either scope fails the node with a config error. The feature is gated by workflows.custom_nodes_enabled."
+    statement: "Workflow node code lives only in the DB (versioned_entities, entity_type 'node_code'), takes effect exclusively through the publish flow (draft → published → archived), versions are immutable, and no runtime path may write repo workflow_nodes/ files. All active node code is workspace-scoped; legacy global (workspace-NULL) rows are migration input and historical replay data only. Since #115 ordinary jobs no longer freeze the code version they started with: dispatch resolves only the workspace's currently published code, so a republish takes effect on the next node execution of an in-flight job — same for Agent definitions, which ordinary jobs never pinned (dispatch always resolved the workspace's currently published definition). The intake batch's node_code_versions and the revision snapshot's node_code_pins survive as audit records and as the pin source for quality replays: only a batch carrying the quality_replay marker dispatches its frozen pin (snapshot pins first, batch pins as the legacy fallback), failing closed on hash drift; historical replays may resolve an archived legacy-global pin by exact version and hash. A capability with no published workspace code fails the node with a config error. The feature is gated by workflows.custom_nodes_enabled."
     owner: workspace-executor
     risk: high
     evidence:
@@ -469,6 +469,21 @@ invariants:
         gate: quick
       - kind: contract
         target: tests/workflow_nodes/test_node_sdk.py
+        gate: quick
+
+  - id: EXEC-CODE-MANIFEST-001
+    statement: "The queued kind='code' manifest never embeds the heavy runtime_context payloads (issue #142): agent_execution_requests.manifest_json persists only a lightweight audit stub (job_id, workspace_id, batch_id, batch_hash — server/app/agent_broker/code_manifest.py::runtime_context_stub), and the claim-response path rebuilds the full runtime_context (job, workspace, settings_config, job_batch, skill_versions) in memory from the database before shipping the manifest to the Worker (code_manifest.py::resolve_code_runtime_context, invoked from routes/agent_worker_claims.py) — never persisted. Code rows reaching a terminal state are slimmed back to the stub in the same transition (CODE_MANIFEST_TRIM, applied by every terminal write path: broker mark_done, cancel_request, requeue-limit-exceeded, zombie-claim close, agent-disabled and unclaimable sweeps, rerun cancellation in jobs/atomic_mutations.py), so legacy pre-fix rows drain automatically. Design: docs/architecture/node-sdk-and-worker-execution-design.md."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_code_dispatch.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_code_manifest_trim.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_agent_workers.py::test_code_claim_injects_secrets_into_response_manifest
         gate: quick
 
   - id: EXEC-CODE-WORKER-001

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from tests.helpers import load_builtin_definition
 
@@ -18,6 +19,7 @@ CUSTOM_V2 = "def run(job, job_dir, runtime):\n    return 'v2'\n"
 def workspace_with_revision(client, job_db, settings):
     job_db.create_workspace("default", default_workflow_key=WF)
     definition = load_builtin_definition(WF)
+    seed_demo_workspace_node_codes(settings, "default")
     WorkflowRevisionService(job_db).ensure_active_revision("default", definition)
     return client
 
@@ -29,7 +31,7 @@ def test_get_builtin_code(workspace_with_revision) -> None:
     body = response.json()
     assert body["origin"] == "builtin"
     assert "path" not in body
-    # origin=builtin is now backed by the global factory seed (#96).
+    # origin=builtin is a system-seeded version inside this workspace.
     assert "def run(" in body["code"]
     assert body["version"] is None
     assert body["has_draft"] is False
@@ -39,7 +41,7 @@ def test_draft_publish_get_flow(workspace_with_revision) -> None:
     draft = workspace_with_revision.put(BASE, json={"code": CUSTOM_V1, "change_note": "v1"})
     assert draft.status_code == 200
     body = draft.json()
-    assert body["version"] == 1
+    assert body["version"] == 2
     assert body["status"] == "draft"
     assert body["created_by"].startswith("user:")
     assert body["change_note"] == "v1"
@@ -58,7 +60,7 @@ def test_draft_publish_get_flow(workspace_with_revision) -> None:
     effective = workspace_with_revision.get(BASE).json()
     assert effective["origin"] == "custom"
     assert effective["code"] == CUSTOM_V1
-    assert effective["version"] == 1
+    assert effective["version"] == 2
 
 
 def test_versions_and_rollback(workspace_with_revision) -> None:
@@ -68,22 +70,23 @@ def test_versions_and_rollback(workspace_with_revision) -> None:
     workspace_with_revision.post(f"{BASE}/publish")
 
     versions = workspace_with_revision.get(f"{BASE}/versions").json()["versions"]
-    assert [row["version"] for row in versions] == [2, 1]
+    assert [row["version"] for row in versions] == [3, 2, 1]
     assert {row["version"]: row["status"] for row in versions} == {
         1: "archived",
-        2: "published",
+        2: "archived",
+        3: "published",
     }
     # The list stays lean: no code text in version summaries.
     assert "code" not in versions[0]
 
-    rolled = workspace_with_revision.post(f"{BASE}/rollback", json={"version": 1})
+    rolled = workspace_with_revision.post(f"{BASE}/rollback", json={"version": 2})
     assert rolled.status_code == 200
-    assert rolled.json()["version"] == 3
+    assert rolled.json()["version"] == 4
     assert rolled.json()["code"] == CUSTOM_V1
     assert workspace_with_revision.get(BASE).json()["code"] == CUSTOM_V1
 
 
-def test_delete_archives_and_falls_back_to_builtin(workspace_with_revision) -> None:
+def test_delete_archives_workspace_code_without_global_fallback(workspace_with_revision) -> None:
     workspace_with_revision.put(BASE, json={"code": CUSTOM_V1})
     workspace_with_revision.post(f"{BASE}/publish")
 
@@ -91,7 +94,7 @@ def test_delete_archives_and_falls_back_to_builtin(workspace_with_revision) -> N
 
     assert deleted.status_code == 200
     assert deleted.json()["archived"] == 1
-    assert workspace_with_revision.get(BASE).json()["origin"] == "builtin"
+    assert workspace_with_revision.get(BASE).json()["origin"] == "none"
 
 
 def test_publish_without_draft_is_404(workspace_with_revision) -> None:
@@ -144,7 +147,7 @@ def test_get_returns_draft_content(workspace_with_revision) -> None:
     assert body["origin"] == "builtin"  # not published yet
     assert body["has_draft"] is True
     assert body["draft_code"] == CUSTOM_V1
-    assert body["draft_version"] == 1
+    assert body["draft_version"] == 2
 
 
 def test_get_version_returns_code_for_any_status(workspace_with_revision) -> None:
@@ -153,11 +156,11 @@ def test_get_version_returns_code_for_any_status(workspace_with_revision) -> Non
     workspace_with_revision.put(BASE, json={"code": CUSTOM_V2})
     workspace_with_revision.post(f"{BASE}/publish")
 
-    # Archived v1 is still readable.
-    v1 = workspace_with_revision.get(f"{BASE}/versions/1")
-    assert v1.status_code == 200
-    assert v1.json()["code"] == CUSTOM_V1
-    assert v1.json()["status"] == "archived"
+    # Archived user version remains readable (v1 is the factory seed).
+    v2 = workspace_with_revision.get(f"{BASE}/versions/2")
+    assert v2.status_code == 200
+    assert v2.json()["code"] == CUSTOM_V1
+    assert v2.json()["status"] == "archived"
 
     assert workspace_with_revision.get(f"{BASE}/versions/99").status_code == 404
 

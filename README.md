@@ -92,21 +92,20 @@ worker 按设计默认关闭任务领取，到 worker 控制台 http://127.0.0.1
 评审，最后模拟发布（不发网络请求）。
 
 ```bash
-make import-demo      # 把 demo skill 安装为本地 git 仓库（必需，只需一次）
-make skills-lock      # 把 demo skill 的 commit 锁进 DB
+make import-demo      # 安装并锁定 demo skills；不存在时创建并 seed demo workspace
 ```
 
 然后在控制台里：
 
-1. 用 **demo** 模板创建 workspace（自动绑定示例 workflow 及其 agent
-   定义）。
+1. 打开命令输出中的 demo workspace（重复运行不会创建第二个）。
 2. 在 workspace **设置 → Agent 默认配置** 里填入你的 LLM 端点提供的
    provider/model。
-3. 提交一批任务：`POST /api/workspaces/{id}/job-batches`，body 为
+3. 打开 workspace 的自动调度，并在 Worker 控制台打开 claim。
+4. 提交一批任务：`POST /api/workspaces/{id}/job-batches`，body 为
    `{"workflow_key": "education_video_problems_generation",
    "source_kind": "direct_ids", "knowledge_point_ids": ["triangle-area"]}`
    ——或使用 intake 界面。
-4. 看 DAG 实时点亮；每个节点完成后可以查看它的完整执行痕迹与产物。
+5. 看 DAG 实时点亮；每个节点完成后可以查看它的完整执行痕迹与产物。
 
 ### 下一步
 

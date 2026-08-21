@@ -164,8 +164,9 @@ audit: ## 依赖漏洞审计 (pip-audit + npm audit)
 
 # Skill 维护
 .PHONY: import-demo
-import-demo: ## 导入示例 workflow 的 4 个示例 skill 到本机 skill 源目录并初始化 git/tag（幂等）
+import-demo: ## 幂等导入 demo skills，并确保 skill lock、节点代码及示例 workspace 已 seed
 	./scripts/import-demo.sh
+	PYTHONPATH=. $(UV) run python -m scripts.seed_demo
 
 .PHONY: skills-lock
 skills-lock: ## 刷新 DB skill lock（global_settings skill_lock 文档）
@@ -189,4 +190,3 @@ api-generate: ## 重新生成前端 API 类型
 .PHONY: install-hooks
 install-hooks: ## 安装 worktree 兼容的本地质量门钩子
 	./scripts/install-git-hooks.sh
-

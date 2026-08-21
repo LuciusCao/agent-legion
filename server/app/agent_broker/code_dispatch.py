@@ -6,7 +6,9 @@ or frozen custom version, resolved exactly like ``resolve_dispatch_node_code``)
 plus a ``workspace_libs`` snapshot ride the bundle; the queued manifest carries
 only non-secret config plus vault ``secret_ref`` markers, and the claim
 response re-resolves secrets on the fly (VAULT-SECRET-001: secrets never hit
-the DB, the bundle, or logs).
+the DB, the bundle, or logs). The persisted ``runtime_context`` is likewise
+only a lightweight audit stub (issue #142); the claim response rebuilds the
+full DB-derived payloads in memory (``code_manifest.resolve_code_runtime_context``).
 """
 
 from __future__ import annotations
@@ -31,10 +33,10 @@ from server.app.agent_broker.agent_bundle import (
 )
 from server.app.agent_broker.broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.claim_paths import claim_log_path
+from server.app.agent_broker.code_manifest import runtime_context_stub
 from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
 from server.app.agent_workers import CODE_PROTOCOL_VERSION as _CODE_PROTOCOL_VERSION
 from server.app.agent_workers import ONLINE_THRESHOLD_SECONDS as _ONLINE_THRESHOLD_SECONDS
-from server.app.config_schema import node_safe_settings_config
 from server.app.db.transaction import read_connection
 from server.app.executors.contracts import CodeCapabilityConfig
 from server.app.executors.models import ExecutionContext
@@ -260,18 +262,13 @@ class CodeDispatchService:
             "sandbox_network": capability_config.sandbox_network,
             "log_path": claim_log_path({"log_path": str(log_path)}, self.settings.data_dir),
             # Runtime context the Worker uses to rebuild the same runtime
-            # dict the local executor hands to node code (design §3); DB
-            # rows cross as JSON-safe copies (datetimes become ISO strings).
-            # settings_config is section-whitelisted (VAULT-SECRET-001): the
-            # full settings carry the vault master key, DB DSN and register
-            # token, which must never persist or leave the Host.
-            "runtime_context": {
-                "job": _json_safe(dict(job)),
-                "workspace": _json_safe(dict(workspace)),
-                "settings_config": _json_safe(node_safe_settings_config(self.settings.config)),
-                "job_batch": self._prefetch_job_batch(job),
-                "skill_versions": self._prefetch_skill_versions(str(job["id"])),
-            },
+            # dict the local executor hands to node code (design §3). Issue
+            # #142: only lightweight audit references persist (batch_id +
+            # hash) — embedding the full job_batch payload cost ~1.7MB per
+            # row and grew agent_execution_requests to ~198G of TOAST. The
+            # claim-response path rebuilds the payloads in memory
+            # (resolve_code_runtime_context); nothing heavy is persisted.
+            "runtime_context": runtime_context_stub(job, workspace, self._prefetch_job_batch(job)),
         }
         context = ExecutionContext(
             execution_id=execution_id,
@@ -322,7 +319,11 @@ class CodeDispatchService:
             return queued is not None
 
     def _prefetch_job_batch(self, job: dict[str, Any]) -> Any:
-        """The intake batch row (node SDK ``ctx.batch``), JSON-safe or None."""
+        """The intake batch row (node SDK ``ctx.batch``), JSON-safe or None.
+
+        Only the audit hash of the row is persisted (issue #142); the full
+        payload is re-fetched on the claim-response path instead.
+        """
         batch_id = str(job.get("batch_id") or "")
         if not batch_id:
             return None
@@ -332,22 +333,3 @@ class CodeDispatchService:
             logger.debug("get_batch failed for job %s", job.get("id"), exc_info=True)
             return None
         return _json_safe(dict(batch)) if batch else None
-
-    def _prefetch_skill_versions(self, job_id: str) -> dict[str, str]:
-        """Collect ``node_key -> skill_version`` from this job's node runs.
-
-        Best-effort like the local executor's prefetch: a transient DB error
-        degrades to an empty mapping instead of failing the dispatch.
-        """
-        if not job_id:
-            return {}
-        try:
-            runs = self.job_db.list_node_runs(job_id)
-        except Exception:
-            logger.debug("list_node_runs failed for job %s", job_id, exc_info=True)
-            return {}
-        return {
-            str(run["node_key"]): str(run["skill_version"])
-            for run in runs
-            if run.get("node_key") and run.get("skill_version")
-        }

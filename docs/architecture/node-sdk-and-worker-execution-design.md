@@ -13,6 +13,12 @@ binding 概念整体退役——非 Agent 路由节点一律进隐含 code 池�
 `config_schema:` 块（executor 兜底已删），现行语义以 invariants 的
 EXEC-CODE-POOL-001 / EXEC-CAPACITY-001 为准；本文「executor 契约」
 相关表述指收敛后的 `executors/code.py` + `executors/contracts.py`。
+**2026-08-21 更新（#142）**：入队落盘的 `runtime_context` 只保留轻量审计
+引用（job/workspace id + `batch_id`/`batch_hash`，EXEC-CODE-MANIFEST-001，
+`server/app/agent_broker/code_manifest.py`）——完整 batch 负载曾导致
+`agent_execution_requests` TOAST 膨胀至 198G；完整的 job/workspace/batch/
+skill_versions 改在 claim 响应路径从 DB 重建（内存态，随 secret 注入一同
+下发，永不落盘），终态 code 行自动瘦身回引用。
 日期：2026-08-12
 关联：Issue #30（code 节点 Host→Worker）、Issue #82（节点 SDK）、
 EXEC-CODE-001/002/003、CONFIG-MANIFEST-001、VAULT-SECRET-001、

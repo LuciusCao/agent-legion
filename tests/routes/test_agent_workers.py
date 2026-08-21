@@ -812,6 +812,8 @@ def test_code_claim_injects_secrets_into_response_manifest(tmp_path: Path, monke
     assert json.loads(stored["manifest_json"])["secret_config"] == {
         "token": {"secret_ref": "api-token"}
     }
+    assert manifest["runtime_context"]["job_batch"] is None
+    assert "runtime_context" not in json.loads(stored["manifest_json"])
     # The bundle endpoint serves the code bundle like any other.
     with TestClient(app) as client:
         bundle = client.get(

@@ -62,6 +62,3 @@ done
 
 echo
 echo "完成：导入 ${imported} 个，跳过 ${skipped} 个（目标根目录：${TARGET_ROOT}）。"
-echo "下一步："
-echo "  1. 重启 backend（首次启动会把示例 skill 源种子进 DB）"
-echo "  2. make skills-lock（或 admin 设置 → Skill 源管理 → relock）解析示例 skill 的 commit 锁"

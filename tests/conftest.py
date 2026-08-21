@@ -1,7 +1,6 @@
 import json
 import os
 from contextlib import contextmanager
-from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
@@ -41,27 +40,6 @@ from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_
 # Test executor catalog: none. Executor definitions are retired (schema v47,
 # P-0.5): the v47 migration harvests their declarations onto workflow
 # revision nodes, and the runtime registry is the single implicit code pool.
-
-
-# Test demo node codes: the demo workflow's two code nodes are global
-# (workspace-NULL) factory seeds since #96, mirroring the app startup seed
-# (seed_demo_node_codes) so dispatch and Studio reads see them after every
-# TRUNCATE.
-def _seed_demo_node_codes() -> None:
-    from server.app.services.node_codes import NodeCodeService
-
-    repo_root = Path(__file__).resolve().parents[1]
-    codes = NodeCodeService(TEST_DATABASE_URL)
-    for node_key, relative in (
-        ("intake_knowledge_points", "workflow_nodes/example_intake.py"),
-        ("publish_content", "workflow_nodes/example_publish.py"),
-    ):
-        codes.seed_global(
-            "education_video_problems_generation",
-            node_key,
-            (repo_root / relative).read_text(encoding="utf-8"),
-            "test seed",
-        )
 
 
 # Test skill sources: the built-in constants (retired config/skills.yaml +
@@ -233,6 +211,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/services/test_code_claim.py",
         "tests/services/test_code_claim_sweeper.py",
         "tests/services/test_code_dispatch.py",
+        "tests/services/test_code_manifest_trim.py",
         "tests/services/test_artifact_store.py",
         "tests/services/test_job_rerun_batch.py",
         "tests/services/test_job_rerun_preview.py",
@@ -536,7 +515,6 @@ def _isolate_postgres_database(request):
     if fresh:
         _rebuild_schema()
         reset_published_agent_cache()
-        _seed_demo_node_codes()
         _seed_skill_sources()
         _capture_seed_snapshot()
     else:
@@ -544,7 +522,6 @@ def _isolate_postgres_database(request):
         replayed = _reset_schema_data()
         reset_published_agent_cache()
         if not replayed:
-            _seed_demo_node_codes()
             _seed_skill_sources()
             _capture_seed_snapshot()
     yield
