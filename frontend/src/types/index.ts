@@ -150,6 +150,8 @@ export type ArtifactResponse = ApiSchemas['ArtifactResponse']
 
 export type CreateJobBatchInput = ApiSchemas['JobBatchRequest']
 
+export type * from './materialTypes'
+
 export type {
   SocraticOption,
   AnswerBlank,
