@@ -24,7 +24,7 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
         workflow_key: str,
         source_type: str,
         source_id: str,
-        batch_id: str,
+        run_id: str,
         title: str,
         node_keys: list[str],
         workspace_id: str,
@@ -50,14 +50,14 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
             conn.execute(
                 """
                 insert into jobs(
-                  id, workspace_id, workflow_key, source_type, source_id, batch_id, title, storage_dir, stem,
+                  id, workspace_id, workflow_key, source_type, source_id, run_id, title, storage_dir, stem,
                   workflow_revision_id, workflow_version, workflow_definition_hash, workflow_definition_snapshot_json
                 )
                 values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 on conflict(id) do update set
                   title=excluded.title,
                   stem=excluded.stem,
-                  batch_id=excluded.batch_id,
+                  run_id=excluded.run_id,
                   updated_at=current_timestamp
                 """,
                 (
@@ -66,7 +66,7 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
                     workflow_key,
                     source_type,
                     source_id,
-                    batch_id,
+                    run_id,
                     title,
                     make_data_relative(storage_dir, self.jobs_dir.parent),
                     stem,

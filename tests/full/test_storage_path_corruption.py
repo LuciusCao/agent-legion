@@ -49,7 +49,7 @@ def _job_settings(tmp_path: Path) -> Settings:
 
 def _create_job_with_malicious_storage(job_db: JobQueries, malicious_storage_dir: str) -> dict:
     workspace = job_db.create_workspace("corrupt-ws", default_workflow_key="demo_workflow")
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "demo_workflow",
         "batch_by_ids",
         {"question_ids": ["CORRUPT001"]},

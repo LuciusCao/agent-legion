@@ -45,7 +45,7 @@ def _create_job_in_workspace(
         workflow_key=workflow_key,
         source_type="question",
         source_id=f"src-{uuid.uuid4().hex[:8]}",
-        batch_id="",
+        run_id="",
         title="Test Job",
         node_keys=node_keys or [node_key],
         workspace_id=workspace_id,

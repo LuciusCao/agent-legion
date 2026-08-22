@@ -1,7 +1,7 @@
 """Per-run Agent version pins (schema v29, quality replay).
 
 A quality replay freezes ``agent_versions[node_key]`` with ``{agent_id,
-version, definition_hash}`` into the copy batch's intake payload so the copy
+version, definition_hash}`` into the copy run's frozen pins so the copy
 job dispatches one explicit immutable Agent version — draft, published, or
 archived (comparing old or candidate versions is the point of the quality
 loop) — instead of whatever is published when the node is claimed. Pin
@@ -21,13 +21,13 @@ from server.app.services.versioned_entities import VersionedEntityStore
 
 
 def agent_version_pin(
-    batch_payload: Mapping[str, Any] | None,
+    run_payload: Mapping[str, Any] | None,
     node_key: str,
 ) -> dict[str, Any] | None:
-    """Read one node's frozen Agent-version pin from an intake batch payload."""
-    if not isinstance(batch_payload, Mapping):
+    """Read one node's frozen Agent-version pin from a run's frozen pins."""
+    if not isinstance(run_payload, Mapping):
         return None
-    pins = batch_payload.get("agent_versions")
+    pins = run_payload.get("agent_versions")
     if not isinstance(pins, Mapping):
         return None
     pin = pins.get(node_key)

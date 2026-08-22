@@ -61,7 +61,7 @@ def _seed_old_root(old_root: Path) -> None:
             """
             insert into jobs(
                 id, workspace_id, workflow_key, source_type, source_id,
-                batch_id, title, storage_dir, status
+                run_id, title, storage_dir, status
             )
             values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,

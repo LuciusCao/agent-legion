@@ -39,7 +39,7 @@ def _create_job(job_db, workspace, source_id: str) -> dict[str, Any]:
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id=source_id,
-        batch_id="",
+        run_id="",
         title=f"Question {source_id}",
         node_keys=list(NODE_KEYS),
         workspace_id=workspace["id"],

@@ -94,6 +94,9 @@ class JobQueryService:
         job = resolve_record_paths(job, self.settings.data_dir, {"storage_dir"})
         return {
             **job,
+            # Wire compatibility: the API field keeps the legacy name while
+            # the column is jobs.run_id (schema v53); the value is the run id.
+            "batch_id": str(job.get("run_id") or ""),
             "workflow_revision_id": job.get("workflow_revision_id", ""),
             "workflow_version": job_workflow_version,
             "workflow_definition_hash": job.get("workflow_definition_hash", ""),

@@ -298,11 +298,14 @@ def test_enqueue_persists_lightweight_reference_and_claim_rebuilds_full_context(
     _insert_job(job_db)
     with job_db.connect() as conn:
         conn.execute(
-            "insert into job_batches(id, workspace_id, workflow_key, source_kind,"
-            " source_payload_json) values ('batch-1', 'test-workspace', 'questions',"
-            " 'question', '{\"rows\": 42, \"marker_142\": true}')"
+            "insert into runs(id, workspace_id, workflow_key, source_kind, frozen_pins_json)"
+            " values ('batch-1', 'test-workspace', 'questions', 'question',"
+            ' \'{"node_code_versions": {"package": {"version": 3, "marker_142": true}}}\')'
         )
-        conn.execute("update jobs set batch_id='batch-1' where id='job-1'")
+        conn.execute(
+            "update jobs set run_id='batch-1',"
+            " frozen_config_json='{\"package\": {\"rows\": 42}}' where id='job-1'"
+        )
         conn.execute(
             "insert into node_runs(job_id, node_key, status, skill_version)"
             " values ('job-1', 'other', 'completed', 'v2')"
@@ -313,7 +316,7 @@ def test_enqueue_persists_lightweight_reference_and_claim_rebuilds_full_context(
             capability="package",
             capability_config=CodeCapabilityConfig(),
             workspace={"id": "test-workspace"},
-            job={"id": "job-1", "batch_id": "batch-1"},
+            job=job_db.get_job("job-1"),
             workflow_key="questions",
             node=_node(),
             job_dir=tmp_path / "job",
@@ -344,7 +347,14 @@ def test_enqueue_persists_lightweight_reference_and_claim_rebuilds_full_context(
     assert ctx["job"]["id"] == "job-1"
     assert ctx["workspace"]["id"] == "test-workspace"
     assert ctx["job_batch"]["id"] == "batch-1"
-    assert ctx["job_batch"]["source_payload_json"] == '{"rows": 42, "marker_142": true}'
+    # The SDK-facing payload is rebuilt from the run/job freeze columns
+    # (RUN-FREEZE-001), keeping the legacy wire shape.
+    rebuilt = json.loads(ctx["job_batch"]["source_payload_json"])
+    assert rebuilt == {
+        "node_code_versions": {"package": {"version": 3, "marker_142": True}},
+        "node_config": {"package": {"rows": 42}},
+        "task_candidates": [],
+    }
     assert ctx["skill_versions"] == {"other": "v2"}
     # End-to-end: the rebuilt context feeds the sandbox child payload.
     payload = build_child_payload(resolved, _CODE, tmp_path / "child")
@@ -437,3 +447,82 @@ def test_online_probe_caches_per_capability_within_ttl(job_db, tmp_path) -> None
     assert service.online_code_worker_available("package", "test-workspace") is True
     service._online_probe.clear()
     assert service.online_code_worker_available("package", "test-workspace") is False
+
+
+class _ClaimFakeStorage:
+    """Only the claim-time surface resolve_code_runtime_context needs."""
+
+    def __init__(self) -> None:
+        self.presigned_gets: list[str] = []
+
+    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
+        self.presigned_gets.append(storage_key)
+        return f"https://s3.test/download/{storage_key}?sig=fake"
+
+
+def test_claim_runtime_context_injects_material_block(job_db, tmp_path, monkeypatch) -> None:
+    """Design §6.2: a material-input job's claim response carries the material
+    descriptor with a presigned GET URL (memory only — the persisted manifest
+    keeps the audit stub; storage_key never crosses to the Worker)."""
+    _insert_job(job_db)
+    payload = b"claim-material"
+    digest = hashlib.sha256(payload).hexdigest()
+    storage_key = f"test-workspace/{digest}/input.csv"
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into materials("
+            " id, workspace_id, content_hash, filename, content_type,"
+            " size_bytes, storage_key, status, created_by"
+            ") values ('mat-1', 'test-workspace', %s, 'input.csv', 'text/csv', %s, %s,"
+            " 'ready', 'user-1')",
+            (digest, len(payload), storage_key),
+        )
+        conn.execute(
+            "update jobs set input_json=%s where id='job-1'",
+            (json.dumps({"type": "material", "material_id": "mat-1"}),),
+        )
+    fake = _ClaimFakeStorage()
+    monkeypatch.setattr("server.app.services.material_cache.build_s3_storage", lambda: fake)
+    manifest = {
+        "job_id": "job-1",
+        "workspace_id": "test-workspace",
+        "runtime_context": {"job_id": "job-1", "workspace_id": "test-workspace"},
+    }
+
+    resolved = resolve_code_runtime_context(manifest, TEST_DATABASE_URL, {})
+
+    material = resolved["runtime_context"]["material"]
+    assert material is not None
+    assert material["material_id"] == "mat-1"
+    assert material["filename"] == "input.csv"
+    assert material["content_hash"] == digest
+    assert material["size_bytes"] == len(payload)
+    assert material["download_url"].startswith("https://s3.test/download/")
+    assert "storage_key" not in material
+    assert fake.presigned_gets == [storage_key]
+    # The material block is an execution input, not config: it never merges
+    # into the manifest config (CONFIG-MANIFEST-001 stays orthogonal).
+    assert "material" not in resolved.get("config", {})
+
+
+def test_claim_runtime_context_material_none_for_ref_input(job_db, monkeypatch) -> None:
+    _insert_job(job_db)
+    with job_db.connect() as conn:
+        conn.execute(
+            "update jobs set input_json=%s where id='job-1'",
+            (json.dumps({"type": "ref", "external_id": "q-1"}),),
+        )
+    # No storage configured: a ref input must not even probe it.
+    monkeypatch.setattr(
+        "server.app.services.material_cache.build_s3_storage",
+        lambda: (_ for _ in ()).throw(AssertionError("storage must not be probed")),
+    )
+    manifest = {
+        "job_id": "job-1",
+        "workspace_id": "test-workspace",
+        "runtime_context": {},
+    }
+
+    resolved = resolve_code_runtime_context(manifest, TEST_DATABASE_URL, {})
+
+    assert resolved["runtime_context"]["material"] is None

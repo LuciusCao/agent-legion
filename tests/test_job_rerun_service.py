@@ -30,7 +30,7 @@ def job(job_db):
         "default", default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
@@ -40,7 +40,7 @@ def job(job_db):
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title="Question 1",
         node_keys=[
             "intake_knowledge_points",
@@ -60,7 +60,7 @@ def running_job(job_db):
         "default", default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
@@ -70,7 +70,7 @@ def running_job(job_db):
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title="Question 1",
         node_keys=["intake_knowledge_points"],
         workspace_id=workspace["id"],
@@ -395,7 +395,7 @@ def test_batch_rerun_returns_results_in_request_order(rerun_service, job_db):
         "default", default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1", "Q2"]},
@@ -408,7 +408,7 @@ def test_batch_rerun_returns_results_in_request_order(rerun_service, job_db):
                 workflow_key="education_video_problems_generation",
                 source_type="question",
                 source_id=qid,
-                batch_id=batch["id"],
+                run_id=batch["id"],
                 title=f"Question {qid}",
                 node_keys=["intake_knowledge_points", "write_script"],
                 workspace_id=workspace["id"],
@@ -428,7 +428,7 @@ def test_batch_rerun_node_not_found_for_one_job(rerun_service, job_db):
         "default", default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
@@ -438,7 +438,7 @@ def test_batch_rerun_node_not_found_for_one_job(rerun_service, job_db):
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title="Question 1",
         node_keys=["intake_knowledge_points"],
         workspace_id=workspace["id"],
@@ -487,7 +487,7 @@ def test_batch_rerun_from_failed_node_per_job(rerun_service):
         "default", default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1", "Q2"]},
@@ -500,7 +500,7 @@ def test_batch_rerun_from_failed_node_per_job(rerun_service):
                 workflow_key="education_video_problems_generation",
                 source_type="question",
                 source_id=qid,
-                batch_id=batch["id"],
+                run_id=batch["id"],
                 title=f"Question {qid}",
                 node_keys=["intake_knowledge_points", "write_script", "review_script"],
                 workspace_id=workspace["id"],
@@ -527,13 +527,13 @@ def test_batch_rerun_mixed_workflows(rerun_service, job_db):
         "default", default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    q_batch = job_db.create_batch(
+    q_batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
         workspace_id=workspace["id"],
     )
-    r_batch = job_db.create_batch(
+    r_batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q2"]},
@@ -543,7 +543,7 @@ def test_batch_rerun_mixed_workflows(rerun_service, job_db):
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id=q_batch["id"],
+        run_id=q_batch["id"],
         title="Question 1",
         node_keys=["intake_knowledge_points", "write_script"],
         workspace_id=workspace["id"],
@@ -552,7 +552,7 @@ def test_batch_rerun_mixed_workflows(rerun_service, job_db):
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q2",
-        batch_id=r_batch["id"],
+        run_id=r_batch["id"],
         title="Reading Q2",
         node_keys=["intake_knowledge_points"],
         workspace_id=workspace["id"],
@@ -579,7 +579,7 @@ def test_rerun_from_intake_resets_not_applicable_downstream(job_db, rerun_servic
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id="batch1",
+        run_id="batch1",
         title="Question 1",
         node_keys=list(definition.nodes),
         workspace_id=workspace["id"],

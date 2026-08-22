@@ -13,7 +13,7 @@ def test_workspace_jobs_snapshot_returns_jobs_stats_and_revision(client_factory)
             workflow_key="education_video_problems_generation",
             source_type="question_id",
             source_id="q1",
-            batch_id="",
+            run_id="",
             title="Question 1",
             node_keys=["fetch_question_context"],
         )
@@ -49,7 +49,7 @@ def test_workspace_jobs_snapshot_paginates_with_cursor(client_factory):
                 workflow_key="education_video_problems_generation",
                 source_type="question_id",
                 source_id=f"q{i}",
-                batch_id="",
+                run_id="",
                 title=f"Question {i}",
                 node_keys=["fetch_question_context"],
             )
@@ -99,7 +99,7 @@ def test_workspace_jobs_snapshot_returns_newest_first(client_factory):
                 workflow_key="education_video_problems_generation",
                 source_type="question_id",
                 source_id=f"q{i}",
-                batch_id="",
+                run_id="",
                 title=f"Question {i}",
                 node_keys=["fetch_question_context"],
             )
@@ -131,7 +131,7 @@ def test_workspace_jobs_snapshot_batches_active_revision_lookup(client_factory, 
                 workflow_key="education_video_problems_generation",
                 source_type="question_id",
                 source_id=f"q{i}",
-                batch_id="",
+                run_id="",
                 title=f"Question {i}",
                 node_keys=["fetch_question_context"],
             )

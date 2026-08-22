@@ -81,12 +81,23 @@ def _prepare_job(tmp_path: Path, node: WorkflowNode, batch_payload: dict | None 
     ws = job_db.create_workspace("Test WS", default_workflow_key="test")
     batch_id = ""
     if batch_payload is not None:
-        batch_id = str(job_db.create_batch("test", "batch_by_ids", batch_payload, ws["id"])["id"])
+        # The payload is only the id digest input; the pin keys persist as the
+        # run's frozen pins (RUN-FREEZE-001).
+        pins = {
+            key: batch_payload[key]
+            for key in ("node_code_versions", "agent_versions", "quality_replay")
+            if key in batch_payload
+        }
+        batch_id = str(
+            job_db.create_run("test", "batch_by_ids", batch_payload, ws["id"], frozen_pins=pins)[
+                "id"
+            ]
+        )
     job_db.create_job(
         workflow_key="test",
         source_type="question",
         source_id="Q1",
-        batch_id=batch_id,
+        run_id=batch_id,
         title="Q1",
         node_keys=[node.key],
         workspace_id=ws["id"],

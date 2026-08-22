@@ -54,7 +54,7 @@ def _setup(
             workflow_key="test",
             source_type="question",
             source_id=f"Q{i}",
-            batch_id="",
+            run_id="",
             title=f"Q{i}",
             node_keys=["fetch"],
             workspace_id=ws["id"],

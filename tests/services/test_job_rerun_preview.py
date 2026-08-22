@@ -30,7 +30,7 @@ def _seed_failed_jobs(job_db, count: int) -> tuple[str, list[str]]:
         "preview-perf", default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": [f"Q{i}" for i in range(count)]},
@@ -42,7 +42,7 @@ def _seed_failed_jobs(job_db, count: int) -> tuple[str, list[str]]:
             workflow_key="education_video_problems_generation",
             source_type="question",
             source_id=f"Q{i}",
-            batch_id=batch["id"],
+            run_id=batch["id"],
             title=f"Q{i}",
             node_keys=_NODE_KEYS,
             workspace_id=workspace["id"],

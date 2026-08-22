@@ -80,6 +80,12 @@ create table if not exists workspace_agent_capacities (
   updated_at timestamptz not null default current_timestamp
 );
 
+-- job_batches (retired at schema v53, materials-and-runs design §5.2/§8):
+-- still created here so the historical data migrations that replay against it
+-- (e.g. migrate_external_connections' payload rewrite) keep working on fresh
+-- databases; migrate_runs harvests every row into runs + jobs freeze columns
+-- and drops the table at the end of the migration chain (same pattern as the
+-- executor allocation/binding tables retired at v47).
 create table if not exists job_batches (
   id text primary key,
   workspace_id text not null references workspaces(id) on delete cascade,
@@ -92,13 +98,38 @@ create table if not exists job_batches (
   created_at timestamptz not null default current_timestamp
 );
 
+-- Runs (schema v53, route A rename of job_batches): one run = a batch of
+-- items x one workflow execution. frozen_pins_json carries the quality-replay
+-- pins (node_code_versions / agent_versions / quality_replay marker);
+-- queue_payload_json is the async intake working state (input values, chunk
+-- cursor), only set for queued/processing intake runs and retired with the
+-- intake queue (INTAKE-RETIRE-001). Per-job frozen inputs/configs live on the
+-- jobs row itself (RUN-FREEZE-001).
+create table if not exists runs (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  workflow_key text not null,
+  source_kind text not null default '',
+  status text not null default 'created',
+  frozen_pins_json text not null default '{}',
+  stats_json text not null default '{}',
+  queue_payload_json text not null default '',
+  created_count integer not null default 0,
+  error_message text not null default '',
+  created_by text not null default '',
+  created_at timestamptz not null default current_timestamp,
+  updated_at timestamptz not null default current_timestamp
+);
+
 create table if not exists jobs (
   id text primary key,
   workspace_id text not null references workspaces(id) on delete cascade,
   workflow_key text not null,
   source_type text not null,
   source_id text not null,
-  batch_id text not null default '',
+  run_id text not null default '',
+  input_json text,
+  frozen_config_json text,
   title text not null default '',
   status text not null default 'queued',
   storage_dir text not null default '',
@@ -389,6 +420,9 @@ alter table job_batches
   add column if not exists updated_at timestamptz not null default current_timestamp;
 create index if not exists idx_job_batches_intake_queue
   on job_batches(status, updated_at) where status in ('queued', 'processing');
+create index if not exists idx_runs_workspace on runs(workspace_id, created_at);
+create index if not exists idx_runs_intake_queue
+  on runs(status, updated_at) where status in ('queued', 'processing');
 create index if not exists idx_jobs_workflow_status on jobs(workflow_key, status);
 -- Workflow worker incremental scan (list_changed_job_marks) filters by
 -- workflow_key and updated_at > watermark on every poll pass.
@@ -870,3 +904,27 @@ create unique index if not exists idx_studio_chat_messages_seq
   on studio_chat_messages(seq);
 create index if not exists idx_studio_chat_messages_session
   on studio_chat_messages(session_id, seq);
+
+-- Materials (schema v52, materials-and-runs design §5.1): browser-uploaded
+-- files. Bytes live in the instance S3-compatible object store under
+-- storage_key; this row is the metadata. content_hash is '' when the client
+-- did not compute one, so the dedup uniqueness is a partial unique index
+-- over declared hashes only.
+create table if not exists materials (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  content_hash text not null default '',
+  filename text not null default '',
+  content_type text not null default '',
+  size_bytes bigint not null default 0,
+  storage_key text not null,
+  status text not null default 'uploading'
+    check(status in ('uploading', 'ready', 'failed', 'expired')),
+  created_by text not null default '',
+  created_at timestamptz not null default current_timestamp,
+  expires_at timestamptz
+);
+create unique index if not exists idx_materials_workspace_content_hash
+  on materials(workspace_id, content_hash) where content_hash <> '';
+create index if not exists idx_materials_workspace_created
+  on materials(workspace_id, created_at desc);

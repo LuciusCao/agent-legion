@@ -25,6 +25,8 @@ from typing import Any
 
 from server.app.config_schema import node_safe_settings_config
 from server.app.db.transaction import read_connection
+from server.app.services.material_cache import material_claim_block
+from server.app.services.run_payload import sdk_batch_row
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +47,8 @@ case when kind = 'code' then
       'batch_id', coalesce(
         nullif(manifest_json::jsonb #>> '{runtime_context,batch_id}', ''),
         nullif(manifest_json::jsonb #>> '{runtime_context,job,batch_id}', ''),
-        (select nullif(j.batch_id, '') from jobs j where j.id = agent_execution_requests.job_id)
+        nullif(manifest_json::jsonb #>> '{runtime_context,job,run_id}', ''),
+        (select nullif(j.run_id, '') from jobs j where j.id = agent_execution_requests.job_id)
       ),
       'batch_hash', nullif(manifest_json::jsonb #>> '{runtime_context,batch_hash}', '')
     )
@@ -74,8 +77,10 @@ def runtime_context_stub(
 
     Only references persist — the full payloads are rebuilt on the
     claim-response path by ``resolve_code_runtime_context`` (memory only).
+    The wire field names (``batch_id`` / ``batch_hash``) are unchanged; the
+    id now denotes the job's run.
     """
-    batch_id = str(job.get("batch_id") or "")
+    batch_id = str(job.get("run_id") or "")
     batch_hash = ""
     if batch:
         batch_id = batch_id or str(batch.get("id") or "")
@@ -111,20 +116,24 @@ def resolve_code_runtime_context(
     stub = manifest.get("runtime_context") or {}
     batch_id = str(stub.get("batch_id") or "")
     if not batch_id and job:
-        batch_id = str(job.get("batch_id") or "")
+        batch_id = str(job.get("run_id") or "")
     job_batch = None
     if batch_id:
         try:
-            batch = _fetch_row(database_dsn, "select * from job_batches where id=%s", batch_id)
+            run = _fetch_row(database_dsn, "select * from runs where id=%s", batch_id)
         except Exception:
-            logger.debug("claim-time get_batch failed for batch %s", batch_id, exc_info=True)
-            batch = None
-        if batch is not None:
-            job_batch = _json_safe(batch)
+            logger.debug("claim-time get_run failed for run %s", batch_id, exc_info=True)
+            run = None
+        # The SDK-facing batch row: run columns plus the payload rebuilt from
+        # the run/job freeze columns (RUN-FREEZE-001); the wire field name
+        # ``job_batch`` and its legacy shape are unchanged.
+        job_batch = sdk_batch_row(run, job or {})
+        if job_batch is not None:
+            job_batch = _json_safe(job_batch)
             recorded_hash = str(stub.get("batch_hash") or "")
             if recorded_hash and _batch_hash(job_batch) != recorded_hash:
                 logger.warning(
-                    "batch %s changed since enqueue (hash mismatch) for job %s", batch_id, job_id
+                    "run %s changed since enqueue (hash mismatch) for job %s", batch_id, job_id
                 )
     return {
         **manifest,
@@ -134,6 +143,12 @@ def resolve_code_runtime_context(
             "settings_config": _json_safe(node_safe_settings_config(settings_config or {})),
             "job_batch": job_batch,
             "skill_versions": _claim_time_skill_versions(database_dsn, job_id),
+            # Material descriptor with a presigned GET URL (design §6.2):
+            # memory-only like the rest of this context, so the URL and the
+            # storage_key it signs never persist. The Worker materializes
+            # from the URL into its own cache; failures here fail the claim
+            # (500 → sweeper requeue, same loop as secret resolution).
+            "material": material_claim_block(database_dsn, workspace_id, job or {}),
         },
     }
 

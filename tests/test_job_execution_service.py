@@ -38,7 +38,7 @@ def _create_job(
     source_id: str = "Q1",
     workflow_key: str = "education_video_problems_generation",
 ) -> dict[str, Any]:
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         workflow_key,
         "batch_by_ids",
         {"question_ids": [source_id]},
@@ -49,7 +49,7 @@ def _create_job(
         workflow_key=workflow_key,
         source_type="question",
         source_id=source_id,
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title=f"Question {source_id}",
         node_keys=list(definition.nodes),
         workspace_id=workspace_id,

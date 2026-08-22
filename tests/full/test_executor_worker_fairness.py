@@ -92,7 +92,7 @@ def test_shared_capacity_and_round_robin_fairness(tmp_path: Path) -> None:
                 workflow_key="test",
                 source_type="question",
                 source_id=f"{prefix}{i}",
-                batch_id="",
+                run_id="",
                 title=f"{prefix}{i}",
                 node_keys=["fetch"],
                 workspace_id=ws["id"],

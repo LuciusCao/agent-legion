@@ -106,12 +106,12 @@ def test_workspace_default_entity_is_used_when_batch_omits_entity(tmp_path):
             },
         )
         body = response.json()
-        batch = app.state.job_db.get_batch(body["batch"]["id"])
 
     assert response.status_code == 200
     assert body["jobs"][0]["source_type"] == "question"
-    payload = json.loads(batch["source_payload_json"])
-    assert payload["entity"] == "question"
+    # The entity lands on the job's input document (RUN-FREEZE-001).
+    input_doc = json.loads(body["jobs"][0]["input_json"])
+    assert input_doc["entity_type"] == "question"
 
 
 def test_batch_with_entity_question(tmp_path):
@@ -138,9 +138,9 @@ def test_batch_with_entity_question(tmp_path):
     assert body["created_count"] == 2
     assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
     assert [job["source_id"] for job in body["jobs"]] == ["Q001", "Q002"]
-    payload = json.loads(body["batch"]["source_payload_json"])
-    assert payload["entity"] == "question"
-    assert [c["entity_id"] for c in payload["task_candidates"]] == ["Q001", "Q002"]
+    inputs = [json.loads(job["input_json"]) for job in body["jobs"]]
+    assert [doc["entity_type"] for doc in inputs] == ["question", "question"]
+    assert [doc["external_id"] for doc in inputs] == ["Q001", "Q002"]
 
 
 def test_batch_unsupported_entity_mode(tmp_path):
@@ -240,10 +240,9 @@ def test_batch_with_entity_question_direct_ids(tmp_path):
     assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
     assert [job["source_id"] for job in body["jobs"]] == ["Q1", "Q2"]
     assert [job["title"] for job in body["jobs"]] == ["Question Q1", "Question Q2"]
-    payload = json.loads(body["batch"]["source_payload_json"])
-    assert payload["entity"] == "question"
-    assert [c["entity_id"] for c in payload["task_candidates"]] == ["Q1", "Q2"]
-    assert [c["entity_type"] for c in payload["task_candidates"]] == ["question", "question"]
+    inputs = [json.loads(job["input_json"]) for job in body["jobs"]]
+    assert [doc["external_id"] for doc in inputs] == ["Q1", "Q2"]
+    assert [doc["entity_type"] for doc in inputs] == ["question", "question"]
 
 
 def test_workflow_response_no_task_entity(tmp_path):
