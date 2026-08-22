@@ -121,7 +121,7 @@ def test_intake_queue_chunk_jobs_notify(job_db, settings, monkeypatch) -> None:
     assert calls == []
 
     queue = JobIntakeQueue(job_db, settings)
-    claimed = job_db.claim_intake_batch()
+    claimed = job_db.claim_intake_run()
     assert claimed is not None
     queue._consume_chunk(claimed)
 

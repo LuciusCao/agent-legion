@@ -31,7 +31,7 @@ from server.app.services.node_execution_config import (
     resolved_code_capability,
 )
 from server.app.services.vault import VaultError, VaultService
-from server.app.workflow_worker.agent_claim import cached_batch_payload, fail_node_config
+from server.app.workflow_worker.agent_claim import cached_run_payload, fail_node_config
 from server.app.workflows.definition import WorkflowNode
 
 if TYPE_CHECKING:
@@ -76,10 +76,10 @@ def try_claim_code_worker_node(
         # re-evaluates as the stock drains.
         return False
 
-    batch_payload = cached_batch_payload(worker, job)
+    run_payload = cached_run_payload(worker, job)
     # Same resolution order as the local path (#115): the currently
-    # published workspace code; the frozen pins (job snapshot node_code_pins, then batch
-    # node_code_versions) apply only to quality-replay batches
+    # published workspace code; the frozen pins (job snapshot node_code_pins, then the run's
+    # node_code_versions) apply only to quality-replay runs
     # (resolve_dispatch_node_code, EXEC-CODE-002).
     try:
         code_text = resolve_dispatch_node_code(
@@ -88,7 +88,7 @@ def try_claim_code_worker_node(
             workspace_id,
             workflow_key,
             node.key,
-            frozen_dispatch_pin(job.get("node_code_pins"), batch_payload, node.key),
+            frozen_dispatch_pin(job.get("node_code_pins"), run_payload, node.key),
         )
         if code_text is None:
             # No published workspace code: nothing to ship to a Worker;
@@ -106,7 +106,7 @@ def try_claim_code_worker_node(
     reserved_defaults = node_config_reserved_defaults(node.config)
     try:
         unresolved = dispatch_effective_config(
-            schema, node, workflow_key, workspace, batch_payload, reserved_defaults
+            schema, node, workflow_key, workspace, run_payload, reserved_defaults
         )
         config, secret_config = split_manifest_config(schema, unresolved)
     except PlaintextSecretError:

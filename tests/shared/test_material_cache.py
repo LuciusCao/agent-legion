@@ -1,0 +1,163 @@
+"""shared/material_cache.py：内容寻址物化缓存的命中/未命中/原子性/并发/淘汰。"""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import os
+import threading
+import time
+from pathlib import Path
+
+import pytest
+
+from shared.material_cache import (
+    DEFAULT_CACHE_MAX_BYTES,
+    MaterializeError,
+    cache_file_path,
+    cache_max_bytes,
+    evict_to_capacity,
+    materialize_stream,
+)
+
+pytestmark = pytest.mark.no_db
+
+PAYLOAD = b"material-bytes" * 100
+HASH = hashlib.sha256(PAYLOAD).hexdigest()
+
+
+def _stream(payload: bytes = PAYLOAD) -> io.BytesIO:
+    return io.BytesIO(payload)
+
+
+def test_miss_downloads_into_content_addressed_path(tmp_path: Path) -> None:
+    path = materialize_stream(
+        tmp_path, HASH, "notes.txt", _stream, expected_sha256=HASH, expected_size=len(PAYLOAD)
+    )
+
+    assert path == tmp_path / HASH[:2] / HASH / "notes.txt"
+    assert path.read_bytes() == PAYLOAD
+
+
+def test_hit_skips_the_stream_and_refreshes_mtime(tmp_path: Path) -> None:
+    path = materialize_stream(tmp_path, HASH, "notes.txt", _stream, expected_sha256=HASH)
+    old = time.time() - 3600
+    os.utime(path, (old, old))
+
+    def _forbidden() -> io.BytesIO:
+        raise AssertionError("cache hit must not open the stream")
+
+    again = materialize_stream(tmp_path, HASH, "notes.txt", _forbidden, expected_sha256=HASH)
+
+    assert again == path
+    assert time.time() - path.stat().st_mtime < 60
+
+
+def test_hash_mismatch_raises_and_caches_nothing(tmp_path: Path) -> None:
+    with pytest.raises(MaterializeError, match="sha256"):
+        materialize_stream(
+            tmp_path, HASH, "notes.txt", lambda: _stream(b"tampered"), expected_sha256=HASH
+        )
+
+    assert not (tmp_path / HASH[:2] / HASH / "notes.txt").exists()
+    # 临时文件不残留。
+    assert list(tmp_path.rglob("*.part")) == []
+
+
+def test_size_mismatch_raises(tmp_path: Path) -> None:
+    with pytest.raises(MaterializeError, match="size"):
+        materialize_stream(tmp_path, HASH, "notes.txt", _stream, expected_size=len(PAYLOAD) + 1)
+
+
+def test_filename_is_sanitized_to_a_basename(tmp_path: Path) -> None:
+    path = cache_file_path(tmp_path, HASH, "../../etc/passwd")
+    assert path == tmp_path / HASH[:2] / HASH / "passwd"
+    assert cache_file_path(tmp_path, HASH, "").name == "blob"
+
+
+def test_empty_address_rejected(tmp_path: Path) -> None:
+    with pytest.raises(MaterializeError, match="address"):
+        cache_file_path(tmp_path, "  ", "notes.txt")
+
+
+def test_concurrent_materializers_converge_on_one_file(tmp_path: Path) -> None:
+    downloads = 0
+    lock = threading.Lock()
+
+    def _slow_stream() -> io.BytesIO:
+        nonlocal downloads
+        with lock:
+            downloads += 1
+        # 拉长下载窗口，让并发者真实撞上在途下载。
+        time.sleep(0.05)
+        return _stream()
+
+    results: list[Path] = []
+    errors: list[BaseException] = []
+
+    def _worker() -> None:
+        try:
+            results.append(
+                materialize_stream(tmp_path, HASH, "notes.txt", _slow_stream, expected_sha256=HASH)
+            )
+        except BaseException as exc:  # noqa: BLE001 - 汇聚后统一断言
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_worker) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert not errors
+    assert len(results) == 8
+    final = tmp_path / HASH[:2] / HASH / "notes.txt"
+    assert all(path == final for path in results)
+    assert final.read_bytes() == PAYLOAD
+    assert list(tmp_path.rglob("*.part")) == []
+
+
+def test_eviction_removes_oldest_first(tmp_path: Path) -> None:
+    entries = []
+    for index in range(4):
+        payload = f"payload-{index}".encode() * 10
+        digest = hashlib.sha256(payload).hexdigest()
+        path = materialize_stream(
+            tmp_path, digest, f"file-{index}.bin", lambda p=payload: _stream(p)
+        )
+        # 手动拉开 mtime：index 越小越旧。
+        mtime = time.time() - (100 - index)
+        os.utime(path, (mtime, mtime))
+        entries.append((path, len(payload)))
+
+    total = sum(size for _, size in entries)
+    # 容量只够留下最新的两个。
+    evict_to_capacity(tmp_path, entries[2][1] + entries[3][1])
+
+    assert not entries[0][0].exists()
+    assert not entries[1][0].exists()
+    assert entries[2][0].exists()
+    assert entries[3][0].exists()
+    assert total > entries[2][1] + entries[3][1]
+
+
+def test_eviction_failure_only_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = materialize_stream(tmp_path, HASH, "notes.txt", _stream)
+    warnings: list[str] = []
+
+    def _failing_unlink(self: Path, missing_ok: bool = False) -> None:  # noqa: ARG001
+        raise OSError("read-only filesystem")
+
+    monkeypatch.setattr(Path, "unlink", _failing_unlink)
+    evict_to_capacity(tmp_path, 1, log=warnings.append)
+
+    assert warnings, "eviction failure must surface as a warning"
+    assert path.exists()
+
+
+def test_cache_max_bytes_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert cache_max_bytes() == DEFAULT_CACHE_MAX_BYTES
+    monkeypatch.setenv("AGENT_LEGION_MATERIAL_CACHE_MAX_BYTES", "1024")
+    assert cache_max_bytes() == 1024
+    monkeypatch.setenv("AGENT_LEGION_MATERIAL_CACHE_MAX_BYTES", "not-a-number")
+    assert cache_max_bytes() == DEFAULT_CACHE_MAX_BYTES

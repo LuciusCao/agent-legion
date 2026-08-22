@@ -1,0 +1,60 @@
+.summary {
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.file-list {
+  display: grid;
+  gap: 6px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-size {
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.status-pending {
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.status-done {
+  color: #15803d;
+  white-space: nowrap;
+}
+
+.status-failed {
+  color: #ba1a1a;
+  white-space: nowrap;
+}
+
+.error-hint {
+  color: #ba1a1a;
+  font-size: 13px;
+}
+
+.total-count {
+  color: #4b5563;
+  font-size: 13px;
+  margin-right: 8px;
+}

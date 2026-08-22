@@ -14,7 +14,9 @@
 ## 使用指南
 
 - **想了解系统当前怎么工作的** → 看 `docs/architecture/`
-- **部署与运维** → 看 `docs/` 下的部署文档与 runbook
+- **部署与运维** → 看 `docs/` 下的部署文档与 runbook（Host/Worker 见
+  [agent-worker-deployment.md](agent-worker-deployment.md)；材料存储
+  RustFS/S3 见 [materials-storage-deployment.md](materials-storage-deployment.md)）
 - **想了解 `data/` 运行时目录布局** → 看 [data-layout.md](data-layout.md)
 
 ## 维护规则

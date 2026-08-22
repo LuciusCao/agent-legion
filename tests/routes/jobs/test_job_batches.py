@@ -71,10 +71,10 @@ def test_async_batch_returns_queued_and_consumes_in_chunks(tmp_path, monkeypatch
         assert body["created_count"] == 0
         assert body["jobs"] == []
 
-        claimed = app.state.job_db.claim_intake_batch()
+        claimed = app.state.job_db.claim_intake_run()
         assert claimed is not None
         intake_queue._consume_chunk(claimed)
-        first = app.state.job_db.get_batch(body["batch"]["id"])
+        first = app.state.job_db.get_run(body["batch"]["id"])
         assert first is not None
         assert first["status"] == "queued"
         assert first["created_count"] == 2
@@ -83,10 +83,10 @@ def test_async_batch_returns_queued_and_consumes_in_chunks(tmp_path, monkeypatch
             "Q002",
         }
 
-        claimed = app.state.job_db.claim_intake_batch()
+        claimed = app.state.job_db.claim_intake_run()
         assert claimed is not None
         intake_queue._consume_chunk(claimed)
-        completed = app.state.job_db.get_batch(body["batch"]["id"])
+        completed = app.state.job_db.get_run(body["batch"]["id"])
         assert completed is not None
         assert completed["status"] == "completed"
         assert completed["created_count"] == 3
@@ -117,7 +117,7 @@ def test_async_batch_claim_is_atomic_across_consumers(tmp_path, monkeypatch):
         assert response.status_code == 200
 
         with ThreadPoolExecutor(max_workers=2) as pool:
-            claims = list(pool.map(lambda _: app.state.job_db.claim_intake_batch(), range(2)))
+            claims = list(pool.map(lambda _: app.state.job_db.claim_intake_run(), range(2)))
 
     assert len([claim for claim in claims if claim is not None]) == 1
 
@@ -142,8 +142,9 @@ def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
 
     assert response.status_code == 200
     body = response.json()
-    payload = json.loads(body["batch"]["source_payload_json"])
-    assert [c["entity_id"] for c in payload["task_candidates"]] == ["Q001", "Q002"]
+    # Normalized (trimmed, deduped) candidates land one per job input.
+    inputs = [json.loads(job["input_json"]) for job in body["jobs"]]
+    assert [doc["external_id"] for doc in inputs] == ["Q001", "Q002"]
     assert body["created_count"] == 2
 
 
@@ -174,15 +175,16 @@ def test_create_workspace_job_batch_from_direct_ids_uses_opaque_title(tmp_path):
 
     assert response.status_code == 200
     body = response.json()
-    payload = json.loads(body["batch"]["source_payload_json"])
     assert body["created_count"] == 2
     assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
     assert [job["title"] for job in body["jobs"]] == ["Question Q001", "Question Q002"]
-    assert [c["title"] for c in payload["task_candidates"]] == [
+    inputs = [json.loads(job["input_json"]) for job in body["jobs"]]
+    assert [doc["title"] for doc in inputs] == [
         "Question Q001",
         "Question Q002",
     ]
-    assert all(c["source"]["kind"] == "direct_ids" for c in payload["task_candidates"])
+    # The source kind survives on the run row (legacy display field).
+    assert body["batch"]["source_kind"] == "direct_ids"
 
 
 def test_create_workspace_job_batch_rejects_empty_ids(tmp_path):
@@ -254,10 +256,10 @@ def test_async_batch_resubmit_after_job_deletion_requeues_and_rebuilds(tmp_path,
         assert response.status_code == 200
         batch_id = response.json()["batch"]["id"]
 
-        claimed = app.state.job_db.claim_intake_batch()
+        claimed = app.state.job_db.claim_intake_run()
         assert claimed is not None
         intake_queue._consume_chunk(claimed)
-        completed = app.state.job_db.get_batch(batch_id)
+        completed = app.state.job_db.get_run(batch_id)
         assert completed is not None
         assert completed["status"] == "completed"
         assert completed["created_count"] == 2
@@ -278,12 +280,12 @@ def test_async_batch_resubmit_after_job_deletion_requeues_and_rebuilds(tmp_path,
         assert body["created_count"] == 0
         # The guarded transition is a no-op once the batch is no longer
         # completed (already requeued, or claimed by the intake consumer).
-        assert app.state.job_db.requeue_completed_batch_if_depleted(batch_id, {}, 1) is None
+        assert app.state.job_db.requeue_completed_run_if_depleted(batch_id, {}, 1) is None
 
-        claimed = app.state.job_db.claim_intake_batch()
+        claimed = app.state.job_db.claim_intake_run()
         assert claimed is not None
         intake_queue._consume_chunk(claimed)
-        rebuilt = app.state.job_db.get_batch(batch_id)
+        rebuilt = app.state.job_db.get_run(batch_id)
         assert rebuilt is not None
         assert rebuilt["status"] == "completed"
         assert rebuilt["created_count"] == 2
@@ -322,7 +324,7 @@ def test_async_batch_resubmit_without_deletion_keeps_idempotency(tmp_path, monke
         assert response.status_code == 200
         batch_id = response.json()["batch"]["id"]
 
-        claimed = app.state.job_db.claim_intake_batch()
+        claimed = app.state.job_db.claim_intake_run()
         assert claimed is not None
         intake_queue._consume_chunk(claimed)
 
@@ -332,7 +334,7 @@ def test_async_batch_resubmit_without_deletion_keeps_idempotency(tmp_path, monke
         assert body["batch"]["id"] == batch_id
         assert body["batch"]["status"] == "completed"
         assert body["created_count"] == 2
-        assert app.state.job_db.claim_intake_batch() is None
+        assert app.state.job_db.claim_intake_run() is None
         assert len(app.state.job_db.list_jobs(workspace_id=ws_id)) == 2
 
 
@@ -384,11 +386,11 @@ def test_async_batch_chunk_failure_is_recorded_and_remaining_chunks_continue(tmp
         batch_id = response.json()["batch"]["id"]
 
         for _ in range(3):
-            claimed = app.state.job_db.claim_intake_batch()
+            claimed = app.state.job_db.claim_intake_run()
             assert claimed is not None
             intake_queue._consume_chunk(claimed)
 
-        completed = app.state.job_db.get_batch(batch_id)
+        completed = app.state.job_db.get_run(batch_id)
         assert completed is not None
         assert completed["status"] == "completed"
         assert completed["created_count"] == 2

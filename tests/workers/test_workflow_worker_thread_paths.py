@@ -24,7 +24,7 @@ def test_poll_persists_relative_log_path_and_keeps_context_absolute(tmp_path: Pa
         workflow_key="test",
         source_type="question",
         source_id="Q1",
-        batch_id="",
+        run_id="",
         title="Q1",
         node_keys=["fetch"],
         workspace_id=ws["id"],

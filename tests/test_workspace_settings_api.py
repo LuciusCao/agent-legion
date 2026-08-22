@@ -22,7 +22,7 @@ def test_workspace_settings_round_trip(tmp_path):
         connection = c.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",
             json={
-                "nodeConfig": {"intake_knowledge_points": {"knowledge_dir": "examples/custom"}},
+                "nodeConfig": {"intake_knowledge_points": {"timeout_seconds": 120}},
             },
         )
         intake = c.patch(
@@ -46,7 +46,7 @@ def test_workspace_settings_round_trip(tmp_path):
     assert "cmsUrl" not in settings
     assert "cmsToken" not in settings
     assert "resources" not in settings
-    assert settings["nodeConfig"]["intake_knowledge_points"]["knowledge_dir"] == "examples/custom"
+    assert settings["nodeConfig"]["intake_knowledge_points"]["timeout_seconds"] == 120
     assert settings["entityType"] == "video"
     assert settings["intakeModes"] == ["direct_ids"]
     assert settings["labelOverrides"] == {"direct_ids": "输入 ID"}
@@ -252,12 +252,12 @@ def test_workspace_settings_nodes_round_trip(tmp_path):
 
         saved_executor = c.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",
-            json={"nodeConfig": {"intake_knowledge_points": {"knowledge_dir": "examples/custom"}}},
+            json={"nodeConfig": {"intake_knowledge_points": {"timeout_seconds": 120}}},
         )
         assert saved_executor.status_code == 200
         assert saved_executor.json()["settings"]["nodeConfig"] == {
             "write_script": {"max_items": 5},
-            "intake_knowledge_points": {"knowledge_dir": "examples/custom"},
+            "intake_knowledge_points": {"timeout_seconds": 120},
         }
 
         cleared = c.patch(
@@ -323,15 +323,15 @@ def test_workspace_settings_node_config_is_schema_validated(tmp_path):
         fetched = c.get(f"/api/workspaces/{workspace_id}/settings")
         assert fetched.status_code == 200
         node_schemas = fetched.json()["settings"]["nodeConfigSchemas"]
-        assert "knowledge_dir" in node_schemas["intake_knowledge_points"]["properties"]
-        # The intake node's schema carries the repo-relative knowledge dir
-        # factory default (node/workspace can override).
-        knowledge_dir = node_schemas["intake_knowledge_points"]["properties"]["knowledge_dir"]
-        assert knowledge_dir["default"] == "examples/education-video-problems-generation"
+        # The intake node declares no tunables of its own (materials-and-runs
+        # §9 removed knowledge_dir); the platform execution keys are merged
+        # into every code node's effective schema (default 600 here).
+        timeout = node_schemas["intake_knowledge_points"]["properties"]["timeout_seconds"]
+        assert timeout["default"] == 600
 
         bad_type = c.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",
-            json={"nodeConfig": {"intake_knowledge_points": {"knowledge_dir": 5}}},
+            json={"nodeConfig": {"intake_knowledge_points": {"timeout_seconds": "fast"}}},
         )
         unknown_key = c.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",
@@ -339,14 +339,14 @@ def test_workspace_settings_node_config_is_schema_validated(tmp_path):
         )
         ok = c.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",
-            json={"nodeConfig": {"intake_knowledge_points": {"knowledge_dir": "examples/custom"}}},
+            json={"nodeConfig": {"intake_knowledge_points": {"timeout_seconds": 120}}},
         )
 
     assert bad_type.status_code == 400
     assert unknown_key.status_code == 400
     assert ok.status_code == 200
     assert ok.json()["settings"]["nodeConfig"]["intake_knowledge_points"] == {
-        "knowledge_dir": "examples/custom"
+        "timeout_seconds": 120
     }
 
 
@@ -394,7 +394,7 @@ def test_node_override_validation_uses_workspace_active_revision(tmp_path):
         )
         surviving = c.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",
-            json={"nodeConfig": {"intake_knowledge_points": {"knowledge_dir": "examples/custom"}}},
+            json={"nodeConfig": {"intake_knowledge_points": {"timeout_seconds": 120}}},
         )
 
     assert removed.status_code == 400

@@ -327,7 +327,7 @@ def test_create_job_stores_workflow_revision_snapshot(tmp_path: Path) -> None:
         workflow_key=definition.key,
         source_type="question",
         source_id="Q1",
-        batch_id="batch1",
+        run_id="batch1",
         title="Question 1",
         node_keys=list(definition.nodes),
         workspace_id=workspace["id"],

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from server.app import agent_catalog_builtin
 from server.app.jobs import JobQueries
+from server.app.services.demo_material_seed import seed_demo_workspace_materials
 from server.app.services.demo_node_migration import migrate_demo_node_codes_to_workspaces
 from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 from server.app.services.instance_settings import apply_instance_settings
@@ -42,6 +43,7 @@ class SeedDemoResult:
     locks_updated: int
     node_codes_added: int
     agents_added: int
+    materials_added: int
 
 
 def _factory_sources() -> dict[str, SkillSourceConfig]:
@@ -184,6 +186,9 @@ def seed_demo(
             settings.database_url, workspace_id
         )
     )
+    # Sample materials (design §9): seed-if-absent; skipped with a warning
+    # when object storage is not configured on this instance.
+    materials_added = len(seed_demo_workspace_materials(settings, workspace_id))
     WorkflowRevisionService(
         job_db,
         settings.executor_runtime.workflows.custom_nodes_enabled,
@@ -196,6 +201,7 @@ def seed_demo(
         locks_updated=locks_updated,
         node_codes_added=node_codes_added,
         agents_added=agents_added,
+        materials_added=materials_added,
     )
 
 
@@ -222,7 +228,8 @@ def main() -> None:
     print(
         f"[demo seed] workspace {action}: {result.workspace_id}; "
         f"skill source 新增 {result.sources_added}，lock 更新 {result.locks_updated}，"
-        f"node code 新增 {result.node_codes_added}，Agent 新增 {result.agents_added}"
+        f"node code 新增 {result.node_codes_added}，Agent 新增 {result.agents_added}，"
+        f"材料新增 {result.materials_added}"
     )
     print(
         "[demo seed] 接下来配置 workspace 的 provider/model，并开启 workspace 自动调度与 "

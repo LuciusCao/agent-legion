@@ -189,7 +189,7 @@ def test_create_jobs_bulk_creates_shard_dir_for_new_jobs(job_db, settings) -> No
     jobs = job_db.create_jobs_bulk(
         candidates=[_bulk_candidate("q-new")],
         workflow_key="wf",
-        batch_id="batch-1",
+        run_id="batch-1",
         node_keys=["node-a"],
         workspace_id="ws",
         revision=_REVISION,
@@ -223,7 +223,7 @@ def test_create_jobs_bulk_resubmit_does_not_precreate_shard_dir(job_db, settings
     jobs = job_db.create_jobs_bulk(
         candidates=[_bulk_candidate("q-legacy")],
         workflow_key="wf",
-        batch_id="batch-2",
+        run_id="batch-2",
         node_keys=["node-a"],
         workspace_id="ws",
         revision=_REVISION,

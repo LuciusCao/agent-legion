@@ -43,17 +43,17 @@ def resolve_dispatch_node_config(
     workflow_key: str,
     workspace_id: str,
     workspace: Mapping[str, Any] | None,
-    batch_payload: Mapping[str, Any] | None,
+    run_payload: Mapping[str, Any] | None,
 ) -> tuple[dict[str, Any], str]:
     """Effective node config (secrets/connection resolved) plus the JSON audit
     snapshot of the non-secret resolved values (pre-vault: refs stay refs),
     persisted onto node_runs by the lease claim (CONFIG-RUNTIME-MUTABLE-001)."""
     config_schema = merge_reserved_execution_schema(node.config_schema)
-    # Frozen batches predating the reserved keys are padded from the node's
+    # Frozen configs predating the reserved keys are padded from the node's
     # own declared config values (the v47 harvest target); frozen wins.
     fallback_defaults = node_config_reserved_defaults(node.config)
     node_config = dispatch_effective_config(
-        config_schema, node, workflow_key, workspace, batch_payload, fallback_defaults
+        config_schema, node, workflow_key, workspace, run_payload, fallback_defaults
     )
     snapshot_json = json.dumps(
         manifest_safe_config(config_schema, node_config), sort_keys=True, default=str

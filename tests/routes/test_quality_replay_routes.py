@@ -55,7 +55,7 @@ def _seed(client_tmp_path):
         workflow_key="test",
         source_type="question",
         source_id="Q1",
-        batch_id="",
+        run_id="",
         title="Q1",
         node_keys=list(definition.nodes),
         workspace_id=workspace_id,

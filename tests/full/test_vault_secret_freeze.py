@@ -115,11 +115,15 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
             "knowledge_point_ids": ["Q1"],
         },
     )
-    batch = job_db.get_batch(str(result["batch"]["id"]))
-    payload_text = str(batch["source_payload_json"])
+    batch = job_db.get_run(str(result["batch"]["id"]))
+    assert batch is not None
+    # The freeze lives on the job row (RUN-FREEZE-001): the connection key is
+    # frozen, never the plaintext or a ref marker.
+    job_row = job_db.get_job(str(result["jobs"][0]["id"]))
+    payload_text = str(job_row["frozen_config_json"])
     assert PLAINTEXT not in payload_text
     assert ref_name not in payload_text
-    frozen = json.loads(payload_text)["node_config"]["write_script"]
+    frozen = json.loads(payload_text)["write_script"]
     assert frozen["connection"] == CONNECTION_KEY
 
     # Runtime resolve: the dispatch chain sees the plaintext in memory.

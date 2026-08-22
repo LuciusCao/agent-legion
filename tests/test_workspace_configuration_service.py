@@ -108,7 +108,7 @@ def _code_job(job_db, workspace_id: str, source_id: str):
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id=source_id,
-        batch_id="",
+        run_id="",
         title=f"Job {source_id}",
         node_keys=["fetch"],
         workspace_id=workspace_id,

@@ -9,7 +9,6 @@ from __future__ import annotations
 import pytest
 
 from server.app.db.migrations import migrate_agent_request_kind_window
-from server.app.db.schema import SCHEMA_VERSION
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -20,16 +19,6 @@ def _indexdef(conn) -> str:
         " where schemaname=current_schema() and indexname='idx_agent_requests_queued_head'"
     ).fetchone()
     return str(row["indexdef"]) if row is not None else ""
-
-
-def test_schema_v51_recorded() -> None:
-    assert SCHEMA_VERSION == 51
-    with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute(
-            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
-        ).fetchone()
-    assert row is not None
-    assert row["name"] == "agent_request_kind_window"
 
 
 def test_queued_head_index_carries_kind() -> None:

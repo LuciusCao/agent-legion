@@ -12,7 +12,7 @@ import pytest
 
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.skills.errors import SkillRepoError
-from server.app.workflow_worker.agent_claim import cached_batch_payload
+from server.app.workflow_worker.agent_claim import cached_run_payload
 from server.app.workflow_worker.agent_gate import AgentPassState
 from server.app.workflow_worker.agent_stock import AgentStockConfig, StockBucket, StockSnapshot
 from server.app.workflow_worker.maintenance import WorkflowMaintenance
@@ -64,7 +64,7 @@ def test_executor_capacity_gate_skips_batch_lookup(tmp_path: Path) -> None:
         worker,
         {"id": "ws1"},
         _definition(node),
-        {"id": "job1", "batch_id": "b1"},
+        {"id": "job1", "run_id": "b1"},
         node,
         tmp_path,
         None,
@@ -72,30 +72,43 @@ def test_executor_capacity_gate_skips_batch_lookup(tmp_path: Path) -> None:
         _snapshot(global_remaining=0),
     )
     assert claimed is False
-    worker.job_db.get_batch.assert_not_called()
+    worker.job_db.get_run.assert_not_called()
 
 
-def test_batch_payload_memoized_within_pass(tmp_path: Path) -> None:
+def test_run_payload_memoized_within_pass(tmp_path: Path) -> None:
     worker = MagicMock()
     worker._batch_payload_cache = {}
-    worker.job_db.get_batch.return_value = {
-        "source_payload_json": '{"node_config": {"fetch": {"bank_version": "frozen"}}}'
+    worker.job_db.get_run.return_value = {"id": "b1", "frozen_pins_json": "{}"}
+    job_a: dict[str, Any] = {
+        "id": "job-a",
+        "run_id": "b1",
+        "frozen_config_json": '{"fetch": {"bank_version": "frozen"}}',
     }
-    job_a: dict[str, Any] = {"id": "job-a", "batch_id": "b1"}
-    job_b: dict[str, Any] = {"id": "job-b", "batch_id": "b1"}
+    job_b: dict[str, Any] = {
+        "id": "job-b",
+        "run_id": "b1",
+        "frozen_config_json": '{"fetch": {"bank_version": "frozen"}}',
+    }
 
-    first = cached_batch_payload(worker, job_a)
-    second = cached_batch_payload(worker, job_b)
+    first = cached_run_payload(worker, job_a)
+    second = cached_run_payload(worker, job_b)
 
-    assert first == second == {"node_config": {"fetch": {"bank_version": "frozen"}}}
-    worker.job_db.get_batch.assert_called_once_with("b1")
+    assert (
+        first
+        == second
+        == {
+            "node_config": {"fetch": {"bank_version": "frozen"}},
+            "task_candidates": [],
+        }
+    )
+    worker.job_db.get_run.assert_called_once_with("b1")
 
 
-def test_batch_payload_none_without_batch_id(tmp_path: Path) -> None:
+def test_run_payload_none_without_run_id(tmp_path: Path) -> None:
     worker = MagicMock()
     worker._batch_payload_cache = {}
-    assert cached_batch_payload(worker, {"id": "job-a", "batch_id": ""}) is None
-    worker.job_db.get_batch.assert_not_called()
+    assert cached_run_payload(worker, {"id": "job-a", "run_id": ""}) is None
+    worker.job_db.get_run.assert_not_called()
 
 
 def test_agent_active_request_gate_skips_config_and_enqueue(tmp_path: Path) -> None:
@@ -108,7 +121,7 @@ def test_agent_active_request_gate_skips_config_and_enqueue(tmp_path: Path) -> N
         worker,
         {"id": "ws1"},
         _definition(node),
-        {"id": "job1", "batch_id": "b1"},
+        {"id": "job1", "run_id": "b1"},
         node,
         tmp_path,
         None,
@@ -118,7 +131,7 @@ def test_agent_active_request_gate_skips_config_and_enqueue(tmp_path: Path) -> N
 
     assert claimed is False
     worker.agent_dispatch.enqueue.assert_not_called()
-    worker.job_db.get_batch.assert_not_called()
+    worker.job_db.get_run.assert_not_called()
 
 
 def test_agent_pool_full_flag_skips_rest_of_pass(tmp_path: Path) -> None:
@@ -130,7 +143,7 @@ def test_agent_pool_full_flag_skips_rest_of_pass(tmp_path: Path) -> None:
         worker,
         {"id": "ws1"},
         _definition(node),
-        {"id": "job1", "batch_id": "b1"},
+        {"id": "job1", "run_id": "b1"},
         node,
         tmp_path,
         None,
@@ -141,7 +154,7 @@ def test_agent_pool_full_flag_skips_rest_of_pass(tmp_path: Path) -> None:
     assert claimed is False
     # Cheap skip: no pool submission, no batch lookup, no enqueue.
     worker.agent_dispatch.enqueue_pool.submit.assert_not_called()
-    worker.job_db.get_batch.assert_not_called()
+    worker.job_db.get_run.assert_not_called()
     worker.agent_dispatch.enqueue.assert_not_called()
 
 
@@ -157,7 +170,7 @@ def test_agent_stock_gate_skips_when_stocked_to_target(tmp_path: Path) -> None:
         worker,
         {"id": "ws1"},
         _definition(node),
-        {"id": "job1", "batch_id": "b1"},
+        {"id": "job1", "run_id": "b1"},
         node,
         tmp_path,
         None,
@@ -168,20 +181,20 @@ def test_agent_stock_gate_skips_when_stocked_to_target(tmp_path: Path) -> None:
     assert claimed is False
     assert worker._agent_pass.stock_gated == 1
     worker.agent_dispatch.enqueue_pool.submit.assert_not_called()
-    worker.job_db.get_batch.assert_not_called()
+    worker.job_db.get_run.assert_not_called()
 
 
 def test_agent_enqueue_counts_pass_claim(tmp_path: Path) -> None:
     node = _node()
     worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
     worker.agent_dispatch.enqueue_pool.submit.return_value = True
-    worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}
+    worker.job_db.get_run.return_value = {"frozen_pins_json": "{}"}
 
     claimed = try_claim_and_submit(
         worker,
         {"id": "ws1"},
         _definition(node),
-        {"id": "job1", "batch_id": "b1"},
+        {"id": "job1", "run_id": "b1"},
         node,
         tmp_path,
         None,
@@ -207,13 +220,13 @@ def test_agent_in_flight_submission_blocks_duplicate(tmp_path: Path) -> None:
     node = _node()
     worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
     worker.agent_dispatch.enqueue_pool.submit.return_value = True
-    worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}
+    worker.job_db.get_run.return_value = {"frozen_pins_json": "{}"}
 
     first = try_claim_and_submit(
         worker,
         {"id": "ws1"},
         _definition(node),
-        {"id": "job1", "batch_id": "b1"},
+        {"id": "job1", "run_id": "b1"},
         node,
         tmp_path,
         None,
@@ -225,7 +238,7 @@ def test_agent_in_flight_submission_blocks_duplicate(tmp_path: Path) -> None:
         worker,
         {"id": "ws1"},
         _definition(node),
-        {"id": "job1", "batch_id": "b1"},
+        {"id": "job1", "run_id": "b1"},
         node,
         tmp_path,
         None,
@@ -246,7 +259,7 @@ def test_agent_stock_gate_uses_enqueued_counter_within_window(tmp_path: Path) ->
     node = _node()
     worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
     worker.agent_dispatch.enqueue_pool.submit.return_value = True
-    worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}
+    worker.job_db.get_run.return_value = {"frozen_pins_json": "{}"}
     # Frozen snapshot: nothing stocked yet, target 1 (min_stock floor).
     worker._agent_pass.stock_snapshot = StockSnapshot(
         config=AgentStockConfig(min_stock=1, max_stock=10),
@@ -257,7 +270,7 @@ def test_agent_stock_gate_uses_enqueued_counter_within_window(tmp_path: Path) ->
         worker,
         {"id": "ws1"},
         _definition(node),
-        {"id": "job1", "batch_id": "b1"},
+        {"id": "job1", "run_id": "b1"},
         node,
         tmp_path,
         None,
@@ -287,13 +300,13 @@ def test_agent_enqueue_skipped_when_pool_full(tmp_path: Path) -> None:
     node = _node()
     worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
     worker.agent_dispatch.enqueue_pool.submit.return_value = False
-    worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}
+    worker.job_db.get_run.return_value = {"frozen_pins_json": "{}"}
 
     claimed = try_claim_and_submit(
         worker,
         {"id": "ws1"},
         _definition(node),
-        {"id": "job1", "batch_id": "b1"},
+        {"id": "job1", "run_id": "b1"},
         node,
         tmp_path,
         None,
@@ -315,14 +328,14 @@ def test_agent_enqueue_config_error_fails_node(tmp_path: Path) -> None:
     worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
     worker.agent_dispatch.enqueue_pool.submit.return_value = True
     worker.agent_dispatch.enqueue.side_effect = ValueError("bad route")
-    worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}
+    worker.job_db.get_run.return_value = {"frozen_pins_json": "{}"}
 
     assert (
         try_claim_and_submit(
             worker,
             {"id": "ws1"},
             _definition(node),
-            {"id": "job1", "batch_id": "b1"},
+            {"id": "job1", "run_id": "b1"},
             node,
             tmp_path,
             None,
@@ -342,14 +355,14 @@ def test_agent_enqueue_skill_repo_error_fails_node(tmp_path: Path) -> None:
     worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
     worker.agent_dispatch.enqueue_pool.submit.return_value = True
     worker.agent_dispatch.enqueue.side_effect = SkillRepoError("git fetch failed")
-    worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}
+    worker.job_db.get_run.return_value = {"frozen_pins_json": "{}"}
 
     assert (
         try_claim_and_submit(
             worker,
             {"id": "ws1"},
             _definition(node),
-            {"id": "job1", "batch_id": "b1"},
+            {"id": "job1", "run_id": "b1"},
             node,
             tmp_path,
             None,
@@ -368,7 +381,7 @@ def test_agent_enqueue_skill_repo_error_fails_node(tmp_path: Path) -> None:
 def test_executor_claim_counts_pass_claim(tmp_path: Path) -> None:
     node = _node()
     worker = _worker(tmp_path, NodeRoute("executor", target_id="code"), node)
-    worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}
+    worker.job_db.get_run.return_value = {"frozen_pins_json": "{}"}
 
     with (
         patch("server.app.workflow_worker.schedule.claim_executor_node", return_value=True),
@@ -381,7 +394,7 @@ def test_executor_claim_counts_pass_claim(tmp_path: Path) -> None:
             worker,
             {"id": "ws1"},
             _definition(node),
-            {"id": "job1", "batch_id": "b1"},
+            {"id": "job1", "run_id": "b1"},
             node,
             tmp_path,
             None,

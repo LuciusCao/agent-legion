@@ -29,20 +29,18 @@ class JobIntakeQueue:
         self.job_event_buffer = job_event_buffer
 
     def consume_once(self) -> bool:
-        batch = self.job_db.claim_intake_batch()
+        batch = self.job_db.claim_intake_run()
         if batch is None:
             return False
         try:
             self._consume_chunk(batch)
         except Exception as exc:
             logger.exception("async intake batch %s failed", batch["id"])
-            self.job_db.update_intake_batch(
-                str(batch["id"]), status="failed", error_message=str(exc)
-            )
+            self.job_db.update_intake_run(str(batch["id"]), status="failed", error_message=str(exc))
         return True
 
     def _consume_chunk(self, batch: dict[str, Any]) -> None:
-        payload = json.loads(str(batch["source_payload_json"]))
+        payload = json.loads(str(batch["queue_payload_json"]))
         queue_state = payload["_intake_queue"]
         input_values = [str(value) for value in queue_state["input_values"]]
         start = int(queue_state.get("next_index", 0))
@@ -93,10 +91,10 @@ class JobIntakeQueue:
             f"chunk {error['chunk_start']}: {error['error']}" for error in chunk_errors[-5:]
         )[:1000]
         status = "completed" if end >= len(input_values) else "queued"
-        self.job_db.update_intake_batch(
+        self.job_db.update_intake_run(
             str(batch["id"]),
-            source_payload=payload,
-            created_count=self.job_db.count_jobs_in_batch(str(batch["id"])),
+            queue_payload=payload,
+            created_count=self.job_db.count_jobs_in_run(str(batch["id"])),
             status=status,
             error_message=error_message,
         )
@@ -128,10 +126,11 @@ class JobIntakeQueue:
         jobs = self.job_db.create_jobs_bulk(
             candidates=candidates,
             workflow_key=str(batch["workflow_key"]),
-            batch_id=str(batch["id"]),
+            run_id=str(batch["id"]),
             node_keys=list(definition.nodes),
             workspace_id=str(batch["workspace_id"]),
             revision=revision,
+            frozen_config=payload.get("node_config") or {},
         )
         if jobs:
             notify_schedulable_work()

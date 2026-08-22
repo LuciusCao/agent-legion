@@ -38,22 +38,24 @@ def enqueue_intake_batch(
             },
         }
     )
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         workflow_key,
         source_kind,
         source_payload,
         workspace_id=workspace_id,
         status="queued",
+        frozen_pins={"node_code_versions": node_code_versions or {}},
+        queue_payload=source_payload,
     )
-    # Re-submitting identical input collides with the deterministic batch id and
-    # the upsert above is a no-op for a completed batch. When jobs from that
-    # batch have since been deleted (current count below the created_count
-    # recorded at completion), requeue the batch from the start so the consumer
+    # Re-submitting identical input collides with the deterministic run id and
+    # the upsert above is a no-op for a completed run. When jobs from that
+    # run have since been deleted (current count below the created_count
+    # recorded at completion), requeue the run from the start so the consumer
     # rebuilds the missing jobs; job-level dedup filters the ones still present.
     if str(batch["status"]) == "completed":
         source_payload["_intake_queue"]["next_index"] = 0
         source_payload["_intake_queue"].pop("chunk_errors", None)
-        requeued = job_db.requeue_completed_batch_if_depleted(
+        requeued = job_db.requeue_completed_run_if_depleted(
             str(batch["id"]), source_payload, int(batch["created_count"] or 0)
         )
         if requeued is not None:
