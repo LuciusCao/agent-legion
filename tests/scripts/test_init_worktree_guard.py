@@ -234,6 +234,41 @@ def test_nonbare_main_repo_is_skipped_as_base(tmp_path: Path) -> None:
     assert "AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_flat" in env_text
 
 
+def test_s3_bucket_derived_from_worktree_name(tmp_path: Path) -> None:
+    """.env 缺 AGENT_LEGION_S3_BUCKET 时按 worktree 名派生并写入（幂等）。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    script_path = main / ".worktrees/flat/scripts/init-worktree.sh"
+
+    result = _run(script_path, bin_dir)
+    assert result.returncode == 0, result.stderr
+    env_text = (main / ".worktrees/flat/.env").read_text()
+    assert "AGENT_LEGION_S3_BUCKET=agent-legion-flat" in env_text
+
+    # 重跑不重复追加。
+    result = _run(script_path, bin_dir)
+    assert result.returncode == 0, result.stderr
+    env_text = (main / ".worktrees/flat/.env").read_text()
+    assert env_text.count("AGENT_LEGION_S3_BUCKET=") == 1
+
+
+def test_s3_bucket_existing_value_is_preserved(tmp_path: Path) -> None:
+    """.env 已配置 AGENT_LEGION_S3_BUCKET 时保留原值，不覆盖为派生名。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("AGENT_LEGION_S3_BUCKET=custom-bucket\n")
+
+    result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    env_text = (main / ".worktrees/flat/.env").read_text()
+    assert "AGENT_LEGION_S3_BUCKET=custom-bucket" in env_text
+    assert "agent-legion-flat" not in env_text
+
+
 def test_missing_env_fails_fast_without_side_effects(tmp_path: Path) -> None:
     """无法复制 .env 时 fail-fast：缺 .env 会让后端回落共享默认库（prod）。
 

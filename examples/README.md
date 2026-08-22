@@ -5,7 +5,10 @@
 
 - `education-video-problems-generation/`：10 个通用中小学数学知识点
   markdown，是示例 intake 节点（`intake_knowledge_points`）的输入素材。
-  每个文件名主干（如 `fraction-addition-subtraction`）即 intake 的输入值。
+  绑定示例 workflow 的 workspace 会把这些文件播种为**示例材料**
+  （seed-if-absent，需实例配置 `AGENT_LEGION_S3_*` 对象存储；未配置则
+  跳过并记 warning，可后续手动上传），intake 节点从 job 的材料输入
+  （`ctx.material`）读取 markdown——每个材料一个 job。
 - `skills/`：4 个示例 agent skill（`write-script` / `review-script` /
   `generate-questions` / `review-questions`），随仓库版本化。运行
   `make import-demo` 把它们导入本机 skill 源目录
@@ -24,8 +27,9 @@ generate_questions → review_questions → publish_content（模拟入库，
 （workspace Settings 的 `default_agent_provider` /
 `default_agent_model`），同时开启 workspace 自动调度和 Worker claim。
 
-两个 code 节点（intake/publish）的出厂代码随后端启动自动发布为全局
-node_code 版本（seed-if-absent，源自 `workflow_nodes/` 的 git 评审文件）；
-它们与其他 code 节点一样在 velites 沙箱内执行（#96），因此运行示例的
-Host 需要 velites 二进制在 PATH（或用 `scripts/ensure-velites.sh` 安装到
-`data/bin/`）且 macOS `sandbox-exec` / Linux `bwrap` 可用。
+两个 code 节点（intake/publish）的出厂代码在绑定示例 workflow 时发布为
+workspace 作用域 node_code 版本（seed-if-absent，源自 `workflow_nodes/` 的
+git 评审文件）；它们与其他 code 节点一样在 velites 沙箱内执行（#96），
+因此运行示例的 Host 需要 velites 二进制在 PATH（或用
+`scripts/ensure-velites.sh` 安装到 `data/bin/`）且 macOS `sandbox-exec` /
+Linux `bwrap` 可用。
