@@ -280,6 +280,25 @@ def test_upload_max_concurrency_is_hot_updated_without_restart(tmp_path: Path) -
     assert supervisor.restarts == 0
 
 
+def test_max_code_concurrency_is_hot_updated_without_restart(tmp_path: Path) -> None:
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config(_config()))
+    supervisor = FakeSupervisor(store)
+    app = create_app(supervisor, tmp_path)
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/config",
+            json={"max_code_concurrency": 8},
+            headers=_auth(store),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["restarted"] is False
+    assert response.json()["config"]["max_code_concurrency"] == 8
+    assert supervisor.restarts == 0
+
+
 def test_local_api_rejects_unknown_runtime(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")
     store.write(validate_config(_config()))
