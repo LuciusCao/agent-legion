@@ -1552,6 +1552,75 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/materials': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Materials */
+    get: operations['list_materials_api_workspaces__workspace_id__materials_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/materials/presign': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Presign Material */
+    post: operations['presign_material_api_workspaces__workspace_id__materials_presign_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/materials/{material_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Material */
+    get: operations['get_material_api_workspaces__workspace_id__materials__material_id__get']
+    put?: never
+    post?: never
+    /** Delete Material */
+    delete: operations['delete_material_api_workspaces__workspace_id__materials__material_id__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/materials/{material_id}/complete': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Complete Material */
+    post: operations['complete_material_api_workspaces__workspace_id__materials__material_id__complete_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/members': {
     parameters: {
       query?: never
@@ -1582,6 +1651,23 @@ export interface paths {
     post?: never
     /** Delete Member */
     delete: operations['delete_member_api_workspaces__workspace_id__members__user_id__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/node-runs': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Workspace Runs */
+    get: operations['list_workspace_runs_api_workspaces__workspace_id__node_runs_get']
+    put?: never
+    post?: never
+    delete?: never
     options?: never
     head?: never
     patch?: never
@@ -1767,8 +1853,26 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** List Workspace Runs */
-    get: operations['list_workspace_runs_api_workspaces__workspace_id__runs_get']
+    /** List Runs */
+    get: operations['list_runs_api_workspaces__workspace_id__runs_get']
+    put?: never
+    /** Create Run */
+    post: operations['create_run_api_workspaces__workspace_id__runs_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/runs/{run_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Run */
+    get: operations['get_run_api_workspaces__workspace_id__runs__run_id__get']
     put?: never
     post?: never
     delete?: never
@@ -3357,6 +3461,73 @@ export interface components {
     LoginResponse: {
       user: components['schemas']['UserResponse']
     }
+    /** MaterialDeleteResponse */
+    MaterialDeleteResponse: {
+      /** Deleted */
+      deleted: string
+    }
+    /** MaterialListResponse */
+    MaterialListResponse: {
+      /** Limit */
+      limit: number
+      /** Materials */
+      materials: components['schemas']['MaterialRecord'][]
+      /** Offset */
+      offset: number
+      /** Total */
+      total: number
+    }
+    /** MaterialPresignRequest */
+    MaterialPresignRequest: {
+      /** Content Hash */
+      content_hash?: string | null
+      /**
+       * Content Type
+       * @default
+       */
+      content_type: string
+      /** Filename */
+      filename: string
+      /** Size Bytes */
+      size_bytes: number
+    }
+    /** MaterialPresignResponse */
+    MaterialPresignResponse: {
+      /** Deduplicated */
+      deduplicated: boolean
+      material: components['schemas']['MaterialRecord']
+      /** Upload Expires In Seconds */
+      upload_expires_in_seconds: number
+      /** Upload Url */
+      upload_url: string | null
+    }
+    /** MaterialRecord */
+    MaterialRecord: {
+      /** Content Hash */
+      content_hash: string
+      /** Content Type */
+      content_type: string
+      /** Created At */
+      created_at: string | null
+      /** Created By */
+      created_by: string
+      /** Expires At */
+      expires_at: string | null
+      /** Filename */
+      filename: string
+      /** Id */
+      id: string
+      /** Size Bytes */
+      size_bytes: number
+      /** Status */
+      status: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** MaterialResponse */
+    MaterialResponse: {
+      material: components['schemas']['MaterialRecord']
+    }
     /** MeResponse */
     MeResponse: {
       user: components['schemas']['UserResponse']
@@ -3893,6 +4064,102 @@ export interface components {
       host_protocol_version: number
       /** Worker Token */
       worker_token: string
+    }
+    /** RunCreateRequest */
+    RunCreateRequest: {
+      /** Items */
+      items: (
+        | components['schemas']['RunItemMaterial']
+        | components['schemas']['RunItemRef']
+      )[]
+      /** Workflow Key */
+      workflow_key: string
+    }
+    /** RunCreateResponse */
+    RunCreateResponse: {
+      /** Created Count */
+      created_count: number
+      /** Jobs */
+      jobs: {
+        [key: string]: unknown
+      }[]
+      run: components['schemas']['RunRecord']
+    }
+    /** RunDetailResponse */
+    RunDetailResponse: {
+      job_stats: components['schemas']['RunJobStats']
+      run: components['schemas']['RunRecord']
+    }
+    /** RunItemMaterial */
+    RunItemMaterial: {
+      /** Material Id */
+      material_id: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'material'
+    }
+    /** RunItemRef */
+    RunItemRef: {
+      /** Connection Key */
+      connection_key: string
+      /** External Id */
+      external_id: string
+      /** Params */
+      params?: {
+        [key: string]: unknown
+      }
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'ref'
+    }
+    /** RunJobStats */
+    RunJobStats: {
+      /** By Status */
+      by_status: {
+        [key: string]: number
+      }
+      /** Total */
+      total: number
+    }
+    /** RunListResponse */
+    RunListResponse: {
+      /** Runs */
+      runs: components['schemas']['RunRecord'][]
+    }
+    /** RunRecord */
+    RunRecord: {
+      /** Created At */
+      created_at: string | null
+      /** Created By */
+      created_by: string
+      /** Created Count */
+      created_count: number
+      /** Error Message */
+      error_message: string
+      /** Frozen Pins */
+      frozen_pins: {
+        [key: string]: unknown
+      }
+      /** Id */
+      id: string
+      /** Source Kind */
+      source_kind: string
+      /** Stats */
+      stats: {
+        [key: string]: unknown
+      }
+      /** Status */
+      status: string
+      /** Updated At */
+      updated_at: string | null
+      /** Workflow Key */
+      workflow_key: string
+      /** Workspace Id */
+      workspace_id: string
     }
     /** RunToRequest */
     RunToRequest: {
@@ -8561,6 +8828,171 @@ export interface operations {
       }
     }
   }
+  list_materials_api_workspaces__workspace_id__materials_get: {
+    parameters: {
+      query?: {
+        limit?: number
+        offset?: number
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['MaterialListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  presign_material_api_workspaces__workspace_id__materials_presign_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MaterialPresignRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['MaterialPresignResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_material_api_workspaces__workspace_id__materials__material_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        material_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['MaterialResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  delete_material_api_workspaces__workspace_id__materials__material_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        material_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['MaterialDeleteResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  complete_material_api_workspaces__workspace_id__materials__material_id__complete_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        material_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['MaterialResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   list_members_api_workspaces__workspace_id__members_get: {
     parameters: {
       query?: never
@@ -8646,6 +9078,42 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['MembersResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_workspace_runs_api_workspaces__workspace_id__node_runs_get: {
+    parameters: {
+      query?: {
+        status?: string | null
+        node_key?: string | null
+        job_id?: string | null
+        limit?: number
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceRunsResponse']
         }
       }
       /** @description Validation Error */
@@ -9091,12 +9559,9 @@ export interface operations {
       }
     }
   }
-  list_workspace_runs_api_workspaces__workspace_id__runs_get: {
+  list_runs_api_workspaces__workspace_id__runs_get: {
     parameters: {
       query?: {
-        status?: string | null
-        node_key?: string | null
-        job_id?: string | null
         limit?: number
       }
       header?: never
@@ -9113,7 +9578,74 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['WorkspaceRunsResponse']
+          'application/json': components['schemas']['RunListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_run_api_workspaces__workspace_id__runs_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RunCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RunCreateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_run_api_workspaces__workspace_id__runs__run_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        run_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RunDetailResponse']
         }
       }
       /** @description Validation Error */

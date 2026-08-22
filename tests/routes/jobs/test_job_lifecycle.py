@@ -254,7 +254,7 @@ def test_list_workspace_runs_returns_joined_job_metadata(tmp_path):
         )
         app.state.job_db.finish_node_run(run["id"], "completed", 0, "")
 
-        response = c.get(f"/api/workspaces/{ws_id}/runs")
+        response = c.get(f"/api/workspaces/{ws_id}/node-runs")
 
     assert response.status_code == 200
     body = response.json()
@@ -293,7 +293,9 @@ def test_list_workspace_runs_filters_by_status_and_node(tmp_path):
         run2 = app.state.job_db.start_node_run(job_id, "publish_content", ["local"], "logs/b.log")
         app.state.job_db.finish_node_run(run2["id"], "failed", 1, "boom")
 
-        response = c.get(f"/api/workspaces/{ws_id}/runs?status=failed&node_key=publish_content")
+        response = c.get(
+            f"/api/workspaces/{ws_id}/node-runs?status=failed&node_key=publish_content"
+        )
 
     assert response.status_code == 200
     runs = response.json()["runs"]
