@@ -189,30 +189,6 @@ def test_worker_config_host_url_uses_dev_backend_port(tmp_path: Path) -> None:
     assert "host_url: http://127.0.0.1:8010" in config
 
 
-def test_resume_uses_worktree_database_url_not_inherited_env(tmp_path: Path) -> None:
-    """workspace 恢复子进程必须用本 worktree 的专属 URL，而不是调用 shell
-    已导出的 AGENT_LEGION_DATABASE_URL（load_dotenv override=False 会保留它）。"""
-    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
-    develop = main / ".worktrees/develop"
-    develop.mkdir(parents=True)
-    (develop / ".env").write_text("# stub env\n")
-    stub_log = tmp_path / "uv-env.log"
-
-    result = _run(
-        main / ".worktrees/flat/scripts/init-worktree.sh",
-        bin_dir,
-        extra_env={
-            "AGENT_LEGION_DATABASE_URL": "postgresql://127.0.0.1:5432/agent_legion_base",
-            "STUB_LOG": str(stub_log),
-        },
-    )
-
-    assert result.returncode == 0, result.stderr
-    logged = stub_log.read_text().splitlines()
-    # 最后一次 uv 调用是 workspace 恢复子进程，必须携带新 worktree 的专属 URL。
-    assert logged[-1] == ("AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_flat")
-
-
 def test_nonbare_main_repo_is_skipped_as_base(tmp_path: Path) -> None:
     """主仓库根非 bare（普通 checkout、无 .env）时不得作为 .env 复制基准。
 

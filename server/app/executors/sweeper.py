@@ -34,8 +34,11 @@ class SweeperThread:
         if self._thread is not None:
             return
         # The startup sweep runs synchronously so stale state left by a previous
-        # process is cleaned before the server starts accepting work.
-        self._sweep_once()
+        # process is cleaned before the server starts accepting work. Terminal-
+        # bundle reap is excluded (#139): it is idempotent GC, and its first
+        # pass scans every terminal request in history — far too expensive for
+        # the readiness-critical startup path. It runs in the loop below.
+        self._sweep_once(reap_bundles=False)
 
         def _loop() -> None:
             while not self._stop_event.wait(self._interval_seconds):
@@ -44,7 +47,7 @@ class SweeperThread:
         self._thread = threading.Thread(target=_loop, name="executor-lease-sweeper", daemon=True)
         self._thread.start()
 
-    def _sweep_once(self) -> None:
+    def _sweep_once(self, *, reap_bundles: bool = True) -> None:
         now = datetime.now(UTC)
         try:
             self._broker.sweep_expired_claims()
@@ -61,12 +64,13 @@ class SweeperThread:
                 logger.warning("failed unclaimable Agent requests: %s", ", ".join(unclaimable))
         except Exception:
             logger.exception("Agent stale-request sweep failed")
-        try:
-            reaped = self._broker.reap_terminal_bundles()
-            if reaped:
-                logger.info("reaped %d terminal Agent bundle/archive files", reaped)
-        except Exception:
-            logger.exception("Agent bundle reap failed")
+        if reap_bundles:
+            try:
+                reaped = self._broker.reap_terminal_bundles()
+                if reaped:
+                    logger.info("reaped %d terminal Agent bundle/archive files", reaped)
+            except Exception:
+                logger.exception("Agent bundle reap failed")
         try:
             expired = self._leases.expire_stale(now)
             if expired:

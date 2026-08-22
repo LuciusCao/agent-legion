@@ -55,14 +55,18 @@ else
         > data/logs/prod-worker.log 2>&1 &
 fi
 
-# 4. 健康等待
-for i in $(seq 1 30); do
+# 4. 健康等待：最多 5 分钟（#127——冷启动时 PG 冷缓存、schema 引导等
+# 仍可能超过 1 分钟；等待期间每 30s 输出一次进度，避免误报启动失败）。
+for i in $(seq 1 150); do
     backend_ok=false; worker_ok=false
     curl -sS -m 2 "http://127.0.0.1:$BACKEND_PORT/api/health" >/dev/null 2>&1 && backend_ok=true
     curl -sS -m 2 "http://127.0.0.1:$WORKER_PORT/api/health" >/dev/null 2>&1 && worker_ok=true
     if $backend_ok && $worker_ok; then
         echo "原生环境已就绪：后端 http://127.0.0.1:$BACKEND_PORT （含前端 SPA），Worker 控制台 http://127.0.0.1:$WORKER_PORT"
         exit 0
+    fi
+    if (( i % 15 == 0 )); then
+        echo "等待就绪中（已 $((i * 2))s）：backend_ok=$backend_ok worker_ok=$worker_ok"
     fi
     sleep 2
 done
