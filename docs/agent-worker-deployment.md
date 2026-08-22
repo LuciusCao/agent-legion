@@ -147,7 +147,7 @@ make stack-logs STACK=worker
 - 注册令牌允许接入的 Workspace 范围；
 - 运行时、并发数、标签和最近日志。
 
-页面保存配置后会原子写入控制卷。身份、能力、可用模型或注册 Token 变化时会重启执行进程并重新注册；领取开关和最大并发会热更新。每次 Worker 执行进程启动（包括服务启动、手动重启和崩溃后的自动重启）都会先把 claim 置为关闭，即使上次退出前处于开启状态也不会自动恢复；用户必须在控制台点击「开始领取」，或执行 `workerctl claim enable`，之后 Worker 才会按本机 `max_concurrency` 拉取任务。
+页面保存配置后会原子写入控制卷。身份、能力、可用模型或注册 Token 变化时会重启执行进程并重新注册；领取开关和三个容量参数（`max_concurrency` / `max_code_concurrency` / `upload_max_concurrency`）都会热更新，无需重启。每次 Worker 执行进程启动（包括服务启动、手动重启和崩溃后的自动重启）都会先把 claim 置为关闭，即使上次退出前处于开启状态也不会自动恢复；用户必须在控制台点击「开始领取」，或执行 `workerctl claim enable`，之后 Worker 才会按本机 `max_concurrency` 拉取任务。
 
 Worker 必须声明 `capabilities`；`models` 是可选的 runtime-scoped allowlist，不再是
 模型事实源。启动时 Worker 对每个选中的 runtime 执行其发现 adapter（velites 使用
@@ -161,7 +161,7 @@ Host 才会下发任务。
 
 - **code capability 声明**：与 agent 一样写在 `capabilities` 列表里（同一通道，Host 按 capability 匹配，不看 model）；
 - **容量**：`max_code_concurrency`（默认 0 = 不领取 code 任务），与 `max_concurrency` 是两个独立池，Host 分开记账、分开强制，长 code 任务不会挤占 agent 容量；code 任务也不占 workspace 级 Agent 并发上限；
-- **刻意不做热更**：`max_code_concurrency` 不在热更新字段里——经控制台或 `PUT /api/config` 修改后执行进程会重启，让启动预检重新生效；预检发现 code 容量 >0 而找不到 `velites` 二进制时拒绝启动（退出码 2，不自动重启），避免热开后 code 任务在 Host 侧空转重试；
+- **热更新**：`max_code_concurrency` 与 `max_concurrency` 一样经控制台或 `PUT /api/config` 热生效，不重启执行进程、不打断在跑执行；调大立即放行新 claim，调小在运行数降到新上限以下前停止继续 claim。唯一例外是 0→>0 的热开启要求本机可解析 `velites` 二进制（启动预检的同一道 fail-closed 守卫，EXEC-CODE-003）：缺失时循环内拒绝热开并打日志提示，装好 velites 后下一轮循环自动生效，避免热开后 code 任务在 Host 侧空转重试；
 - **回落语义**：没有声明该 capability 的在线 code Worker 时（探测按 capability 匹配，含 `"*"` 通配），dispatch 直接回落 Host 本地 executor 执行，code 任务不会滞留在队列里等 Worker。
 
 **velites 二进制来源（Worker 自带沙箱）**：Worker 解析 velites 的顺序是「自带副本 `<仓库根>/data/bin/velites` 优先，PATH 兜底」，启动预检与 code 执行共用同一解析逻辑；两处都找不到才 fail-closed。因此 Worker 机器**不需要预装 velites**：
@@ -276,7 +276,7 @@ curl -b <登录 cookie> -H 'X-CSRF-Token: <csrf-token>' http://192.0.2.1:8000/ap
 
 响应中应同时看到 `host-local-1` 和 `remote-worker-1`。每个 Worker 还带 `allowed_workspaces`：为空（展示为「全部」）表示用全局 token 注册、可承接所有 workspace 的任务；否则列出 scoped token 授权的唯一 workspace。提交工作流后，Job 详情会分别显示逻辑 `agent_id` 和实际承接任务的 `worker_id`。
 
-并发只受两层约束：每个 workspace 的 Agent 并发上限，以及各 Worker 本机的 `max_concurrency`。workspace 级上限在 workspace 设置页的「Agent 并发上限」配置（随主保存按钮一起保存），对该 workspace 的全部 Agent 节点统一生效——不再按节点单独设置。例如上限 20、三个 Worker 各 10 时，该 workspace 最多并行 20 个 Agent 执行，不要求三个 Worker 都跑满。Worker 只能 claim 其 `allowed_workspaces` 范围内 workspace 的任务。控制台修改 `max_concurrency` 会热生效，无需重启；调低容量不会终止在途任务，而是在运行数降到新上限以下前停止继续 claim。关闭「任务领取」同样只阻止新 claim，不影响已经领取的任务。code 节点任务是独立的第二个池：只受 Worker 本机 `max_code_concurrency` 约束（不占 workspace 级 Agent 上限），且刻意不热更——修改后执行进程重启并经启动预检（见 §5「code 节点执行池」）。
+并发只受两层约束：每个 workspace 的 Agent 并发上限，以及各 Worker 本机的 `max_concurrency`。workspace 级上限在 workspace 设置页的「Agent 并发上限」配置（随主保存按钮一起保存），对该 workspace 的全部 Agent 节点统一生效——不再按节点单独设置。例如上限 20、三个 Worker 各 10 时，该 workspace 最多并行 20 个 Agent 执行，不要求三个 Worker 都跑满。Worker 只能 claim 其 `allowed_workspaces` 范围内 workspace 的任务。控制台修改 `max_concurrency` 会热生效，无需重启；调低容量不会终止在途任务，而是在运行数降到新上限以下前停止继续 claim。关闭「任务领取」同样只阻止新 claim，不影响已经领取的任务。code 节点任务是独立的第二个池：只受 Worker 本机 `max_code_concurrency` 约束（不占 workspace 级 Agent 上限），同样热更新免重启（0→>0 需本机已装 velites，见 §5「code 节点执行池」）。
 
 ## 7. Tailnet 冒烟验证（上线前必须执行）
 
