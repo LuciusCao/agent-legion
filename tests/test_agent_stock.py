@@ -302,6 +302,11 @@ def test_tier_rows_query_never_seq_scans(job_db) -> None:
     partial index and seq-scanned the whole agent_execution_requests table
     on every stock pass (production: 630k rows, once per workflow pass)."""
     with job_db.connect() as conn:
+        # enable_seqscan=off：测试表是空/小表，seq scan 本就是合理最优，
+        # 裸 EXPLAIN 的断言会随残留统计与调度顺序抖动；本测试钉的是索引
+        # 可用性（谓词退化到无索引可用时仍会回落 seq scan 并在此失败），
+        # 与 tests/db/test_job_nodes_unclaimable_index.py 同一手法。
+        conn.execute("set enable_seqscan=off")
         rows = conn.execute(f"explain {TIER_ROWS_SQL}", (1800, 1800)).fetchall()
 
     plan = "\n".join(str(row[0]) for row in rows)

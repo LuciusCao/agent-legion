@@ -265,6 +265,9 @@ def test_full_marks_query_never_seq_scans(job_db: JobQueries) -> None:
     from server.app.jobs.queries.job_scan_marks import ACTIVE_MARKS_SQL
 
     with job_db.connect() as conn:
+        # enable_seqscan=off：见 test_agent_stock.py 同名钉扎测试的注释——
+        # 小表上裸 EXPLAIN 会随统计/调度抖动，本测试钉的是索引可用性。
+        conn.execute("set enable_seqscan=off")
         rows = conn.execute(f"explain {ACTIVE_MARKS_SQL}", ("questions",)).fetchall()
 
     plan = "\n".join(str(row[0]) for row in rows)
