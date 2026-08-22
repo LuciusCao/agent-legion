@@ -35,9 +35,11 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+from shared.material_cache import MATERIALS_CACHE_DIRNAME
 from worker._atomic import atomic_write
 from worker.binary_resolution import resolve_binary
 from worker.bundle_io import download_input_artifacts, safe_extract_tree
+from worker.material_fetch import materialize_claim_material
 from worker.process_lifecycle import AGENT_PGID_FILENAME, terminate, wait_for_exit
 from worker.upload_queue import UploadTask
 
@@ -164,14 +166,22 @@ def prepare_code_execution(
     return PreparedCode(manifest=manifest, code_text=code_text, libs_root=extracted)
 
 
-def build_child_payload(manifest: dict[str, Any], code_text: str, job_dir: Path) -> dict[str, Any]:
+def build_child_payload(
+    manifest: dict[str, Any],
+    code_text: str,
+    job_dir: Path,
+    *,
+    materials: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Stdin pickle payload for ``workspace_libs.code_child`` (memory only).
 
     Rebuilds the runtime dict the Host-side ``build_runtime``
     (server/app/executors/_code_runtime.py) hands to node code, sourced from
     the manifest's prefetched ``runtime_context`` — the child never gets a
     database handle. ``node_config`` carries resolved secrets; that is why
-    the payload rides stdin and is never written to disk."""
+    the payload rides stdin and is never written to disk. ``materials`` is
+    the local materialization block for a material-input job (design §6.2),
+    mirroring the Host-side ``runtime["materials"]``."""
     context = manifest.get("runtime_context")
     context = dict(context) if isinstance(context, Mapping) else {}
     node_config = manifest.get("config")
@@ -194,6 +204,8 @@ def build_child_payload(manifest: dict[str, Any], code_text: str, job_dir: Path)
     }
     if context.get("job_batch") is not None:
         runtime["job_batch"] = context["job_batch"]
+    if materials is not None:
+        runtime["materials"] = materials
     return {
         "code": code_text,
         "job": runtime["job"],
@@ -225,14 +237,18 @@ def child_env(libs_root: Path) -> dict[str, str]:
     return env
 
 
-def _read_roots(libs_root: Path) -> list[str]:
+def _read_roots(libs_root: Path, materials_cache_root: Path | None = None) -> list[str]:
     """Read-only allowlist: the bundle snapshot plus interpreter prefixes.
 
     Copied/adapted from ``_code_sandbox.py::_read_roots`` (keep in sync); the
     Host side allow-lists repo subdirs, the Worker side only the extracted
     bundle (node_code.py + workspace_libs) — nothing else of the Worker
-    filesystem is needed by node code."""
+    filesystem is needed by node code. The materials cache root (design
+    §6.2) is the only material path node code may read: a static root,
+    never a per-material dynamic grant (MATERIAL-ACCESS-001)."""
     roots = [str(libs_root)]
+    if materials_cache_root is not None and materials_cache_root.is_dir():
+        roots.append(str(materials_cache_root))
     for prefix in {sys.prefix, sys.base_prefix}:
         if prefix:
             roots.append(str(Path(prefix).resolve()))
@@ -246,6 +262,7 @@ def build_sandbox_argv(
     result_path: Path,
     *,
     sandbox_network: bool,
+    materials_cache_root: Path | None = None,
 ) -> list[str]:
     """``velites sandbox wrap`` argv for one code node (EXEC-CODE-003).
 
@@ -253,7 +270,7 @@ def build_sandbox_argv(
     in sync): on the Worker every code execution — builtin or custom — goes
     through the sandbox (batch 2 design §7.2)."""
     command = [velites, "sandbox", "wrap", "--cwd", str(job_dir)]
-    for root in _read_roots(libs_root):
+    for root in _read_roots(libs_root, materials_cache_root):
         command += ["--allow-read", root]
     if sandbox_network:
         command.append("--allow-network")
@@ -402,14 +419,21 @@ def execute_code(
         (job_dir / AUTH_FAILURE_MARKER_PATH).unlink(missing_ok=True)
         log_path = execution_dir / CODE_RESULT_LOG_MEMBER
         timeout = float(manifest.get("timeout_seconds") or 1800)
+        # Material input (design §6.2): materialize into the work-root cache
+        # before spawning — the sandboxed child only ever reads the local
+        # path through the static allow-read grant (MATERIAL-ACCESS-001).
+        materials = materialize_claim_material(manifest, execution_dir)
         command = build_sandbox_argv(
             velites,
             job_dir,
             prepared.libs_root,
             result_path,
             sandbox_network=bool(manifest.get("sandbox_network")),
+            materials_cache_root=execution_dir.parent / MATERIALS_CACHE_DIRNAME,
         )
-        payload = pickle.dumps(build_child_payload(manifest, prepared.code_text, job_dir))
+        payload = pickle.dumps(
+            build_child_payload(manifest, prepared.code_text, job_dir, materials=materials)
+        )
         status.set_phase(execution_id, "running")
         log_fd = os.open(str(log_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
         try:

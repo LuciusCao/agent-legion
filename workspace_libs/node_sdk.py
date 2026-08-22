@@ -5,8 +5,9 @@ Design: ``docs/architecture/node-sdk-and-worker-execution-design.md``.
 A code node exposes a module-level ``run`` entry; the SDK is the adaptation
 layer nodes use *inside* ``run`` so they never hand-roll the scaffolding:
 JSON artifact IO, config merging, cancellation checkpoints, prefetched
-inputs, and the auth-failure back-channel. The preferred shape is a plain
-business function decorated with ``@entrypoint``::
+inputs (including the materialized local file for material-type job
+inputs, ``ctx.material``), and the auth-failure back-channel. The preferred
+shape is a plain business function decorated with ``@entrypoint``::
 
     from workspace_libs.node_sdk import NodeContext, entrypoint
 
@@ -131,21 +132,39 @@ class NodeContext:
 
     @property
     def batch(self) -> dict[str, Any] | None:
-        """The prefetched batch row (replaces the retired ``job_db`` read)."""
+        """The prefetched run row (replaces the retired ``job_db`` read)."""
         batch = self._runtime.get("job_batch")
         return dict(batch) if isinstance(batch, Mapping) else None
 
     @property
     def batch_payload(self) -> dict[str, Any]:
-        """Parsed ``source_payload_json`` of the prefetched batch row.
+        """Parsed ``source_payload_json`` of the prefetched run row.
 
-        The dispatch layer prefetches the batch row (nodes hold no database
-        handle, EXEC-CODE-004); runtimes without a prefetch yield ``{}``.
+        The dispatch layer prefetches the run row and synthesizes the legacy
+        payload from the authoritative run/job freeze columns (RUN-FREEZE-001;
+        nodes hold no database handle, EXEC-CODE-004); runtimes without a
+        prefetch yield ``{}``.
         """
         batch = self.batch
         if not batch:
             return {}
         return parse_json_object(batch.get("source_payload_json"))
+
+    @property
+    def material(self) -> dict[str, Any] | None:
+        """The materialized local file for a material-type job input.
+
+        Jobs whose input is a material item carry ``runtime["materials"]``:
+        the dispatching parent (Host or Worker) has already downloaded the
+        object into the content-addressed materials cache, so the block's
+        ``path`` is a local read-only file the node opens directly (the
+        cache root is statically allow-read in the sandbox,
+        MATERIAL-ACCESS-001). Keys: ``material_id`` / ``path`` /
+        ``filename`` / ``content_type`` / ``size_bytes`` / ``content_hash``.
+        Non-material inputs yield ``None``.
+        """
+        block = self._runtime.get("materials")
+        return dict(block) if isinstance(block, Mapping) else None
 
     @property
     def root_dir(self) -> Path | None:
