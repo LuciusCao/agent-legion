@@ -129,38 +129,12 @@ if [[ ! -f config/agent-worker.yaml ]]; then
     fi
 fi
 
-# 5. 恢复 workspace 调度：后端每次启动都把全部 workspace 重置为暂停（刻意设计，
-#    防止重启后任务不受控自跑），且 unknown workspace 默认暂停。只有后端已建表
-#    并 seed 过 workspaces 时这步才能生效；否则在首次启动后端后重跑本脚本（幂等）。
-if [[ -f .env ]]; then
-    # 显式传入本 worktree 的专属 URL：load_settings() 以 override=False 加载 .env，
-    # 调用 shell 若已导出 AGENT_LEGION_DATABASE_URL（指向基准/生产实例）会盖过新
-    # .env，导致在错误数据库里恢复调度。
-    if PYTHONPATH="$ROOT" AGENT_LEGION_DATABASE_URL="$DB_URL" UV_CACHE_DIR=.uv-cache uv run python - <<'PY'
-from server.app.db.transaction import read_connection
-from server.app.settings import load_settings
-from server.app.worker_control import WorkspaceWorkerControl
-
-settings = load_settings()
-control = WorkspaceWorkerControl(settings.database_url)
-with read_connection(settings.database_url) as conn:
-    rows = conn.execute("select id from workspaces").fetchall()
-for row in rows:
-    control.resume(str(row["id"]))
-    print(f"已恢复 workspace 调度: {row['id']}")
-PY
-    then
-        :
-    else
-        echo "提示: workspace 恢复未执行（后端可能尚未首次启动建表），" >&2
-        echo "      请在启动后端后重跑本脚本，或在控制台手动恢复。" >&2
-    fi
-fi
-
 cat <<EOF
 完成。剩余手工步骤（如未做过）：
   - frontend: cd frontend && npm ci
   - 质量门: ./scripts/check-quick.sh
+  - workspace 调度: 后端每次启动把全部 workspace 重置为暂停（刻意设计），
+    首次启动建表后按需执行 ./scripts/resume-workspaces.sh（或控制台手动恢复）
   - worker: claim 默认关闭（刻意设计），启动后经 worker 控制台（默认 8789）
     或 PUT /api/config 打开 claim_enabled；capabilities/models 已在
     config/agent-worker.yaml 种子配置中声明，首次导入后修改要走控制台/API
