@@ -14,6 +14,7 @@ _ENV_VARS = (
     "AGENT_LEGION_S3_ACCESS_KEY_FILE",
     "AGENT_LEGION_S3_SECRET_KEY",
     "AGENT_LEGION_S3_SECRET_KEY_FILE",
+    "AGENT_LEGION_S3_PUBLIC_ENDPOINT",
 )
 
 
@@ -38,6 +39,7 @@ def test_bucket_marks_configured_with_defaults(monkeypatch) -> None:
     assert settings.bucket == "materials-test"
     assert settings.region == _DEFAULT_REGION
     assert settings.endpoint_url == ""
+    assert settings.public_endpoint_url == ""
     assert settings.access_key == ""
     assert settings.secret_key == ""
 
@@ -49,6 +51,7 @@ def test_full_env_configuration(monkeypatch) -> None:
     monkeypatch.setenv("AGENT_LEGION_S3_REGION", "cn-north-1")
     monkeypatch.setenv("AGENT_LEGION_S3_ACCESS_KEY", "ak")
     monkeypatch.setenv("AGENT_LEGION_S3_SECRET_KEY", "sk")
+    monkeypatch.setenv("AGENT_LEGION_S3_PUBLIC_ENDPOINT", "http://203.0.113.10:9000")
 
     settings = load_s3_settings()
 
@@ -57,6 +60,7 @@ def test_full_env_configuration(monkeypatch) -> None:
     assert settings.region == "cn-north-1"
     assert settings.access_key == "ak"
     assert settings.secret_key == "sk"
+    assert settings.public_endpoint_url == "http://203.0.113.10:9000"
 
 
 @pytest.mark.no_db

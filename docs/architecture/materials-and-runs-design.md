@@ -138,7 +138,8 @@ run_id            由 batch_id 改名，值不变
 ```
 
 `jobs.source_type/source_id` 保留作展示与兼容（material → filename /
-ref → external_id），不再承担输入寻址职责。
+ref → `connection_key:external_id`，身份按连接限定：同一 external_id 跨
+连接是不同条目，去重键与 job id 同样按此派生），不再承担输入寻址职责。
 
 ### 5.4 退役
 
@@ -207,6 +208,12 @@ SigV4 presigned PUT 无法约束 Content-Length，size/hash 一律由 complete �
 服务端 HEAD + 流式校验强制（v1 实现为完整读自算 sha256，简单可靠；上传端
 带 checksum 头后可免读）。`(workspace_id, content_hash)` 的 dedup 唯一性
 以部分唯一索引实现（`content_hash` 可选，空串不参与唯一）。
+
+签发地址与直连地址分离：后端用内部 endpoint（`AGENT_LEGION_S3_ENDPOINT`，
+compose 内 `http://rustfs:9000`）做 HEAD/GET/DELETE；签发给浏览器 /
+remote worker 的 presigned URL 用 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`
+（未配置则回落内部 endpoint）——SigV4 把 Host 签进签名，URL 必须以
+客户端实际可达的地址签发，不能签后改写 host。
 
 文件夹上传用 `webkitdirectory` 递归读，逐文件走同一协议，客户端并发控制。
 

@@ -274,3 +274,58 @@ def test_migrate_runs_is_reentrant() -> None:
     assert first == second
     assert first_job == second_job
     assert _json(second_job["input_json"])["external_id"] == "Q1"
+
+
+@pytest.mark.fresh_schema
+def test_migrate_runs_set_based_edge_shapes() -> None:
+    """Set-based backfill keeps the old per-row semantics on edge shapes.
+
+    Duplicate ``entity_id`` candidates keep the last occurrence (dict
+    overwrite), a non-object JSON payload degrades like the corrupt case, and
+    jobs already carrying ``input_json`` / ``frozen_config_json`` are left
+    untouched (the ``is null`` guards are the re-entrancy contract).
+    """
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        _rebuild_v52_shape(conn)
+        conn.execute(
+            "insert into workspaces(id, name, default_workflow_key)"
+            " values ('ws-run', 'runs-ws', 'wf_demo')"
+        )
+        _seed_batch(
+            conn,
+            "b-dup",
+            {
+                "node_config": {"n1": {"k": "v"}},
+                "task_candidates": [
+                    {"entity_id": "Q1", "entity_type": "question", "title": "first"},
+                    {"entity_id": "Q1", "entity_type": "question", "title": "last"},
+                ],
+            },
+        )
+        _seed_job(conn, "j-dup", "b-dup", "Q1")
+        _seed_batch(conn, "b-array", "[1, 2]")
+        _seed_job(conn, "j-array", "b-array", "Q11")
+        # A job that already carries freeze columns must keep them.
+        _seed_job(conn, "j-preset", "b-dup", "Q2")
+        conn.execute("alter table jobs add column if not exists input_json text")
+        conn.execute("alter table jobs add column if not exists frozen_config_json text")
+        conn.execute(
+            "update jobs set input_json=%s, frozen_config_json=%s where id='j-preset'",
+            (
+                json.dumps({"type": "text", "text": "keep me"}),
+                json.dumps({"n1": {"preset": True}}),
+            ),
+        )
+        migrate_runs(conn)
+        dup = _job_row(conn, "j-dup")
+        assert _json(dup["input_json"])["title"] == "last"
+        assert _json(_run_row(conn, "b-array")["frozen_pins_json"]) == {}
+        assert _json(_job_row(conn, "j-array")["input_json"]) == {
+            "type": "ref",
+            "connection_key": "",
+            "external_id": "Q11",
+            "legacy": True,
+        }
+        preset = _job_row(conn, "j-preset")
+        assert _json(preset["input_json"]) == {"type": "text", "text": "keep me"}
+        assert _json(preset["frozen_config_json"]) == {"n1": {"preset": True}}

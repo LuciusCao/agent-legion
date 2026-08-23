@@ -230,8 +230,13 @@ def test_s3_bucket_derived_from_worktree_name(tmp_path: Path) -> None:
     assert env_text.count("AGENT_LEGION_S3_BUCKET=") == 1
 
 
-def test_s3_bucket_existing_value_is_preserved(tmp_path: Path) -> None:
-    """.env 已配置 AGENT_LEGION_S3_BUCKET 时保留原值，不覆盖为派生名。"""
+def test_s3_bucket_existing_value_is_rewritten(tmp_path: Path) -> None:
+    """.env 已含 AGENT_LEGION_S3_BUCKET（从基准复制而来）时改写为派生名。
+
+    .env 复制自基准 worktree，本就带着基准的 bucket；保留原值会让所有
+    派生 worktree 共享基准 bucket，违背 per-worktree 隔离——与
+    AGENT_LEGION_DATABASE_URL 同一模式，无条件改写为派生值。
+    """
     main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
     develop = main / ".worktrees/develop"
     develop.mkdir(parents=True)
@@ -241,8 +246,8 @@ def test_s3_bucket_existing_value_is_preserved(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     env_text = (main / ".worktrees/flat/.env").read_text()
-    assert "AGENT_LEGION_S3_BUCKET=custom-bucket" in env_text
-    assert "agent-legion-flat" not in env_text
+    assert "AGENT_LEGION_S3_BUCKET=agent-legion-flat" in env_text
+    assert "custom-bucket" not in env_text
 
 
 def test_missing_env_fails_fast_without_side_effects(tmp_path: Path) -> None:

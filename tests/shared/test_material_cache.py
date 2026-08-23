@@ -141,6 +141,51 @@ def test_eviction_removes_oldest_first(tmp_path: Path) -> None:
     assert total > entries[2][1] + entries[3][1]
 
 
+def test_materialize_pins_the_fresh_file_against_its_own_eviction(tmp_path: Path) -> None:
+    # 单个材料大于容量上限时，物化后回收不得删掉刚写入的文件。
+    path = materialize_stream(
+        tmp_path, HASH, "notes.txt", _stream, expected_sha256=HASH, max_bytes=1
+    )
+
+    assert path.exists()
+    assert path.read_bytes() == PAYLOAD
+    assert len(PAYLOAD) > 1
+
+
+def test_materialize_eviction_keeps_pin_but_evicts_older_entries(tmp_path: Path) -> None:
+    old_payload = b"old" * 10
+    old_digest = hashlib.sha256(old_payload).hexdigest()
+    old_path = materialize_stream(tmp_path, old_digest, "old.bin", lambda: _stream(old_payload))
+    mtime = time.time() - 3600
+    os.utime(old_path, (mtime, mtime))
+
+    # 容量装不下两个文件：旧文件被回收，新文件（pin）即使超预算也保留。
+    new_path = materialize_stream(
+        tmp_path, HASH, "notes.txt", _stream, expected_sha256=HASH, max_bytes=len(PAYLOAD)
+    )
+
+    assert not old_path.exists()
+    assert new_path.exists()
+    assert new_path.read_bytes() == PAYLOAD
+
+
+def test_eviction_never_unlinks_pinned_paths(tmp_path: Path) -> None:
+    first = materialize_stream(tmp_path, HASH, "notes.txt", _stream, expected_sha256=HASH)
+    second_payload = b"second" * 50
+    second_digest = hashlib.sha256(second_payload).hexdigest()
+    second = materialize_stream(
+        tmp_path, second_digest, "second.bin", lambda: _stream(second_payload)
+    )
+    mtime = time.time() - 3600
+    os.utime(first, (mtime, mtime))
+
+    # pin 住最旧的文件：它必须存活，即使总量因此留在预算之上。
+    evict_to_capacity(tmp_path, 1, pin={first})
+
+    assert first.exists()
+    assert not second.exists()
+
+
 def test_eviction_failure_only_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = materialize_stream(tmp_path, HASH, "notes.txt", _stream)
     warnings: list[str] = []

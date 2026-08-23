@@ -54,6 +54,17 @@ class RunQueriesMixin(RunQueueQueriesMixin, JobQueriesBase):
             raise RuntimeError("run upsert did not return a row")
         return dict(row)
 
+    def delete_run_without_jobs(self, run_id: str) -> None:
+        """Delete a run only while it owns no jobs (creation compensation)."""
+        # create_run commits before create_jobs_bulk runs; when job creation
+        # fails the run row would otherwise be orphaned. The not-exists guard
+        # keeps a deterministic-id resubmission that already owns jobs.
+        with self.connect() as conn:
+            conn.execute(
+                "delete from runs where id=%s and not exists (select 1 from jobs where run_id=%s)",
+                (run_id, run_id),
+            )
+
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         if not run_id:
             return None

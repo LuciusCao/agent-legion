@@ -118,10 +118,47 @@ def test_ref_item_creates_job_with_verbatim_input(service, job_db) -> None:
 
     job = result["jobs"][0]
     assert job["source_type"] == "ref"
-    assert job["source_id"] == "Q-42"
+    # Ref identity is connection-scoped: source_id carries the connection key.
+    assert job["source_id"] == "cms-main:Q-42"
     assert job["title"] == "Q-42"
     stored = _fetch_job(job_db, job["id"])
     assert json.loads(stored["input_json"]) == item
+
+
+def test_ref_identity_includes_connection_key(service, job_db) -> None:
+    _insert_connection(job_db, "cms-a")
+    _insert_connection(job_db, "cms-b")
+
+    # The same external_id reachable through two connections is two items.
+    result = service.create_run(
+        WORKSPACE_ID,
+        workflow_key=WORKFLOW_KEY,
+        items=[_ref_item("cms-a", "Q-1"), _ref_item("cms-b", "Q-1")],
+    )
+
+    assert result["created_count"] == 2
+    assert {job["source_id"] for job in result["jobs"]} == {"cms-a:Q-1", "cms-b:Q-1"}
+
+
+def test_ref_dedup_is_scoped_per_connection(service, job_db) -> None:
+    _insert_connection(job_db, "cms-a")
+    _insert_connection(job_db, "cms-b")
+    first = service.create_run(
+        WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_ref_item("cms-a", "Q-1")]
+    )
+    assert first["created_count"] == 1
+
+    # Same external_id via another connection is fresh, not a duplicate.
+    second = service.create_run(
+        WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_ref_item("cms-b", "Q-1")]
+    )
+    assert second["created_count"] == 1
+
+    # The identical (connection_key, external_id) pair dedups like any item.
+    with pytest.raises(InvalidOperationError, match="No tasks were resolved"):
+        service.create_run(
+            WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_ref_item("cms-a", "Q-1")]
+        )
 
 
 def test_mixed_items_create_one_job_each(service, job_db) -> None:
@@ -214,6 +251,42 @@ def test_validation_failures_leave_no_run_behind(service, job_db) -> None:
 
     assert service.list_runs(WORKSPACE_ID) == []
     assert job_db.list_job_dedup_keys(WORKSPACE_ID) == set()
+
+
+def test_intra_request_job_id_collision_leaves_no_run(service, job_db) -> None:
+    # ``col/a`` and ``col_a`` normalize to the same job id (``_job_id`` maps
+    # "/" to "_"); the collision surfaces only inside create_jobs_bulk, after
+    # the run row already committed.
+    _insert_material(job_db, WORKSPACE_ID, "col/a")
+    _insert_material(job_db, WORKSPACE_ID, "col_a")
+
+    with pytest.raises(InvalidOperationError, match="Job identity collision"):
+        service.create_run(
+            WORKSPACE_ID,
+            workflow_key=WORKFLOW_KEY,
+            items=[_material_item("col/a"), _material_item("col_a")],
+        )
+
+    assert service.list_runs(WORKSPACE_ID) == []
+    assert job_db.list_job_dedup_keys(WORKSPACE_ID) == set()
+
+
+def test_cross_request_job_id_collision_compensates_the_new_run(service, job_db) -> None:
+    _insert_material(job_db, WORKSPACE_ID, "col/a")
+    _insert_material(job_db, WORKSPACE_ID, "col_a")
+    first = service.create_run(
+        WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_material_item("col/a")]
+    )
+    assert first["created_count"] == 1
+
+    # Different dedup key but the same job id as the existing row:
+    # create_jobs_bulk fails inside its transaction and the fresh run row
+    # must be compensated without touching the earlier run.
+    with pytest.raises(InvalidOperationError, match="Job identity collision"):
+        service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_material_item("col_a")])
+
+    assert [run["id"] for run in service.list_runs(WORKSPACE_ID)] == [first["run"]["id"]]
+    assert job_db.list_job_dedup_keys(WORKSPACE_ID) == {("material", "col/a")}
 
 
 def test_missing_workspace_and_revision_are_rejected(service) -> None:

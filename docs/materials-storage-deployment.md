@@ -11,9 +11,10 @@ Agent Legion 的材料（用户上传文件）与后续的 job 产物统一存�
 | 项 | 值 | 说明 |
 |---|---|---|
 | 服务 | compose `rustfs`（`deploy/compose.host.yaml`） | S3 API `:9000`，Web console `:9001`，数据卷 `rustfs-data` |
-| `AGENT_LEGION_S3_ENDPOINT` | `http://rustfs:9000`（compose 内自动注入） | 留空 = AWS S3 |
+| `AGENT_LEGION_S3_ENDPOINT` | `http://rustfs:9000`（compose 内自动注入） | 后端直连地址；留空 = AWS S3 |
+| `AGENT_LEGION_S3_PUBLIC_ENDPOINT` | compose 默认 `http://127.0.0.1:9000` | presigned URL 的签发地址，必须浏览器 / remote worker 可达；留空则回落用内部 endpoint 签发 |
 | `AGENT_LEGION_S3_BUCKET` | 默认 `agent-legion` | 每个部署实例一个 bucket；dev worktree 派生 `agent-legion-<worktree>` |
-| `AGENT_LEGION_S3_ACCESS_KEY` / `AGENT_LEGION_S3_SECRET_KEY` | **必填，无默认值** | 可用 `_FILE` 变体；compose 同时把它注入 rustfs 容器作为其 root 凭据 |
+| `AGENT_LEGION_S3_ACCESS_KEY` / `AGENT_LEGION_S3_SECRET_KEY` | **必填，无默认值** | compose 只做 `${}` 字面插值，`deploy/.env` 必须写字面值；`_FILE` 变体仅原生形态可用。compose 同时把它注入 rustfs 容器作为其 root 凭据 |
 | `AGENT_LEGION_MATERIAL_CACHE_MAX_BYTES` | 默认 50GiB | 节点物化缓存（`data/materials_cache/`）容量上限，LRU 淘汰 |
 
 凭据是实例级 infra 配置（与 `database.url` 同级），env-only 注入，不落
@@ -28,24 +29,33 @@ tracked yaml、DB、API 或日志（MATERIAL-SECRET-001）。
 
 ### 2.1 准备凭据与配置
 
+compose 对 host 与 rustfs 都是 `${AGENT_LEGION_S3_ACCESS_KEY}` 字面插值，
+**不支持 `_FILE` 变体**（写了会把路径字符串当 access key 注入）。凭据
+直接以字面值写进 `deploy/.env`（该文件已被 git/docker 忽略，与
+`LLM_GATEWAY_TOKEN` 同一通道）：
+
 ```bash
 cd <prod worktree>
-openssl rand -hex 20 > deploy/secrets/s3_access_key
-openssl rand -hex 40 > deploy/secrets/s3_secret_key
-chmod 600 deploy/secrets/s3_access_key deploy/secrets/s3_secret_key
+umask 077
+cat >> deploy/.env <<EOF
+AGENT_LEGION_S3_BUCKET=agent-legion
+AGENT_LEGION_S3_ACCESS_KEY=$(openssl rand -hex 20)
+AGENT_LEGION_S3_SECRET_KEY=$(openssl rand -hex 40)
+EOF
+chmod 600 deploy/.env
 ```
 
-在 `deploy/.env` 写入（compose 读取）：
+浏览器 / remote worker 从宿主机外访问时，再把 presigned URL 的签发地址
+覆盖为可达地址（默认 `http://127.0.0.1:9000`，匹配 rustfs 端口映射）：
 
 ```bash
-AGENT_LEGION_S3_BUCKET=agent-legion
-AGENT_LEGION_S3_ACCESS_KEY_FILE=/run/secrets/s3_access_key   # 或直接写值
-AGENT_LEGION_S3_SECRET_KEY_FILE=/run/secrets/s3_secret_key
+echo 'AGENT_LEGION_S3_PUBLIC_ENDPOINT=http://<宿主机地址>:9000' >> deploy/.env
 ```
 
 （原生形态 `make prod-up` 不经 compose：把同名变量写进 prod worktree 根
-的 `.env`，并自行运行一个 RustFS 进程/容器，`AGENT_LEGION_S3_ENDPOINT`
-指向它。）
+的 `.env`——原生加载支持 `_FILE` 变体——并自行运行一个 RustFS 进程/容器，
+`AGENT_LEGION_S3_ENDPOINT` 指向它；`AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向
+浏览器 / remote worker 可达的地址。）
 
 ### 2.2 启动与建 bucket
 
@@ -77,6 +87,19 @@ try:
 except ClientError:
     client.create_bucket(Bucket=s.bucket)
     print(f"已创建 bucket: {s.bucket}")
+# 浏览器直传要求 bucket CORS 放行前端 origin 的 PUT/GET 并暴露 ETag；
+# AllowedOrigins 按实际前端地址调整（prod 页面与 rustfs 不同源）。
+client.put_bucket_cors(
+    Bucket=s.bucket,
+    CORSConfiguration={"CORSRules": [{
+        "AllowedOrigins": ["http://127.0.0.1:8000"],
+        "AllowedMethods": ["PUT", "GET", "HEAD"],
+        "AllowedHeaders": ["*"],
+        "ExposeHeaders": ["ETag"],
+        "MaxAgeSeconds": 3600,
+    }]},
+)
+print("已配置 bucket CORS")
 EOF
 ```
 
@@ -112,7 +135,7 @@ EOF
 | 症状 | 排查 |
 |---|---|
 | 材料 API 503 | `AGENT_LEGION_S3_BUCKET` 未配置或服务启动时 env 未生效 |
-| 上传 PUT 失败（浏览器） | rustfs `:9000` 对浏览器可达性（CORS/绑定地址）；presigned URL 过期（1h） |
+| 上传 PUT 失败（浏览器） | presigned URL 的 host 是否浏览器可达（`AGENT_LEGION_S3_PUBLIC_ENDPOINT` 未配或配错时 URL 会指向 compose 内部地址）；bucket CORS 是否放行前端 origin；presigned URL 过期（1h） |
 | complete 422 | 实际上传字节与声明 size/hash 不符，重新上传 |
 | 节点报 "material storage is not configured" | Host/Worker 侧 env 缺失；Worker 路径靠 Host 签发的 presigned GET（1h 有效），失败会由 sweeper 重排队换新 URL |
 | 缓存目录膨胀 | 调低 `AGENT_LEGION_MATERIAL_CACHE_MAX_BYTES` 或手动清空 |

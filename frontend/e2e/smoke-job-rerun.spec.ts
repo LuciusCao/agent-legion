@@ -26,7 +26,11 @@ test('在 job 详情页通过重跑对话框重跑节点', async ({ page }) => {
   await expect(page).toHaveURL(/\/workspaces\/[^/]+$/)
 
   await page.getByRole('button', { name: '添加' }).click()
-  const addDialog = page.getByRole('dialog')
+  // 添加 now opens AddItemsDialog; the demo workflow still declares a legacy
+  // intake mode, so 旧版接入模式 leads back to the old AddDialog flow.
+  const addItemsDialog = page.getByRole('dialog', { name: '添加条目' })
+  await addItemsDialog.getByRole('button', { name: '旧版接入模式' }).click()
+  const addDialog = page.getByRole('dialog', { name: '添加资源' })
   await addDialog.getByRole('textbox', { name: '按知识点批量' }).fill('Q1')
   await addDialog.getByRole('button', { name: '加入队列' }).click()
 

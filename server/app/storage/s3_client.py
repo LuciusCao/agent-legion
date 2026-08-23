@@ -1,11 +1,9 @@
 """S3-compatible object storage client (boto3).
 
-The code programs against the S3 API only (presign/HEAD/GET/DELETE) — no
-RustFS-specific features — so the backend can swap between RustFS, MinIO,
-and AWS S3 by configuration alone (materials-and-runs design §6.6).
-
-``ObjectStorage`` is the protocol the materials service depends on; tests
-inject a fake implementation instead of touching the network.
+Programs against the S3 API only (presign/HEAD/GET/DELETE) so the backend
+swaps between RustFS / MinIO / AWS S3 by configuration alone
+(materials-and-runs design §6.6). ``ObjectStorage`` is the protocol the
+materials service depends on; tests inject a fake instead of the network.
 """
 
 from __future__ import annotations
@@ -69,6 +67,28 @@ class S3StorageClient:
     def __init__(self, settings: S3Settings, client: Any | None = None) -> None:
         self._settings = settings
         self._client = client if client is not None else _build_boto3_client(settings)
+        self._presign_client: Any | None = None
+
+    def _signing_client(self) -> Any:
+        """Client used to presign URLs handed to browsers / remote workers.
+
+        With a public endpoint configured the URL is signed against it via a
+        dedicated client (not host rewriting — SigV4 signs the Host header).
+        """
+        public = self._settings.public_endpoint_url
+        if public and self._presign_client is None:
+            self._presign_client = _build_boto3_client(self._settings, endpoint_override=public)
+        return self._presign_client if public else self._client
+
+    def _presign(self, operation: str, storage_key: str, expires_seconds: int, **extra: Any) -> str:
+        return str(
+            self._signing_client().generate_presigned_url(
+                operation,
+                Params={"Bucket": self._settings.bucket, "Key": storage_key},
+                ExpiresIn=expires_seconds,
+                **extra,
+            )
+        )
 
     def presign_put(
         self,
@@ -79,14 +99,7 @@ class S3StorageClient:
         # SigV4 presigned PUT cannot constrain Content-Length (that requires a
         # presigned POST policy); size is enforced server-side at completion
         # via head_object instead.
-        return str(
-            self._client.generate_presigned_url(
-                "put_object",
-                Params={"Bucket": self._settings.bucket, "Key": storage_key},
-                ExpiresIn=expires_seconds,
-                HttpMethod="PUT",
-            )
-        )
+        return self._presign("put_object", storage_key, expires_seconds, HttpMethod="PUT")
 
     def presign_get(
         self,
@@ -96,13 +109,7 @@ class S3StorageClient:
         # Issued on the claim-response path only (memory, never persisted):
         # the Worker downloads the material bytes over this URL and needs no
         # storage credentials of its own.
-        return str(
-            self._client.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": self._settings.bucket, "Key": storage_key},
-                ExpiresIn=expires_seconds,
-            )
-        )
+        return self._presign("get_object", storage_key, expires_seconds)
 
     def head_object(self, storage_key: str) -> ObjectHead | None:
         from botocore.exceptions import ClientError
@@ -114,33 +121,27 @@ class S3StorageClient:
             if code in ("404", "NoSuchKey", "NotFound"):
                 return None
             raise
-        return ObjectHead(
-            size_bytes=int(response.get("ContentLength", 0)),
-            etag=str(response.get("ETag", "")).strip('"'),
-        )
+        size = int(response.get("ContentLength", 0))
+        return ObjectHead(size_bytes=size, etag=str(response.get("ETag", "")).strip('"'))
 
     def open_stream(self, storage_key: str) -> BinaryIO:
         response = self._client.get_object(Bucket=self._settings.bucket, Key=storage_key)
         return cast(BinaryIO, response["Body"])
 
     def put_object(self, storage_key: str, data: bytes, content_type: str = "") -> None:
-        self._client.put_object(
-            Bucket=self._settings.bucket,
-            Key=storage_key,
-            Body=data,
-            **({"ContentType": content_type} if content_type else {}),
-        )
+        extra = {"ContentType": content_type} if content_type else {}
+        self._client.put_object(Bucket=self._settings.bucket, Key=storage_key, Body=data, **extra)
 
     def delete_object(self, storage_key: str) -> None:
         self._client.delete_object(Bucket=self._settings.bucket, Key=storage_key)
 
 
-def _build_boto3_client(settings: S3Settings) -> Any:
+def _build_boto3_client(settings: S3Settings, *, endpoint_override: str | None = None) -> Any:
     import boto3
 
     kwargs: dict[str, Any] = {"region_name": settings.region}
-    if settings.endpoint_url:
-        kwargs["endpoint_url"] = settings.endpoint_url
+    if endpoint := (endpoint_override if endpoint_override is not None else settings.endpoint_url):
+        kwargs["endpoint_url"] = endpoint
     if settings.access_key:
         kwargs["aws_access_key_id"] = settings.access_key
         kwargs["aws_secret_access_key"] = settings.secret_key

@@ -12,6 +12,7 @@ retirement slice.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -27,6 +28,8 @@ from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import workflow_definition_from_dict
+
+logger = logging.getLogger(__name__)
 
 # Runs created from items carry this marker in source_kind; legacy rows keep
 # their intake source_kind for display (design §5.2).
@@ -153,10 +156,17 @@ class RunService:
                 revision=active_revision,
                 frozen_config=node_config,
             )
-        except ValueError as exc:
-            # A fresh item can still collide with a job created by the legacy
-            # path under a different source_type but the same source_id.
-            raise InvalidOperationError(str(exc)) from exc
+        except Exception as exc:
+            # A fresh item can still collide at insert time: two items can
+            # normalize to the same job id (``a/b`` vs ``a_b``), or an item
+            # can hit a legacy-path job with a different source_type but the
+            # same source_id. The run row already committed (create_jobs_bulk
+            # runs in its own transaction), so compensate instead of leaving
+            # a half-created run behind.
+            self._discard_empty_run(str(run["id"]))
+            if isinstance(exc, ValueError):
+                raise InvalidOperationError(str(exc)) from exc
+            raise
         if jobs:
             notify_schedulable_work()
         # Persist the final creation progress so the run row alone answers
@@ -179,6 +189,14 @@ class RunService:
             stats = self.job_db.count_jobs_by_status(workspace_id)
             self.job_event_manager.broadcast_jobs_created(workspace_id, jobs, stats)
         return {"run": _run_record(run), "created_count": len(jobs), "jobs": jobs}
+
+    def _discard_empty_run(self, run_id: str) -> None:
+        # Best-effort cleanup of the run row after job creation failed;
+        # never mask the original failure.
+        try:
+            self.job_db.delete_run_without_jobs(run_id)
+        except Exception:
+            logger.warning("run %s left orphaned after job creation failed", run_id)
 
     def list_runs(self, workspace_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
         rows = self.job_db.list_runs(workspace_id, limit)
@@ -249,9 +267,14 @@ class RunService:
             ).fetchone()
         if row is None:
             raise InvalidOperationError(f"Unknown connection key: {connection_key}")
+        # Ref identity is connection-scoped: the same external_id reachable
+        # through two connections denotes two distinct items, so the dedup
+        # key, the job id and cross-request dedup all derive from
+        # connection_key + external_id (a bare external_id would silently
+        # drop the second connection's item as a duplicate).
         return {
             "entity_type": "ref",
-            "entity_id": external_id,
+            "entity_id": f"{connection_key}:{external_id}",
             "title": external_id,
             "stem": "",
             "input": dict(item),

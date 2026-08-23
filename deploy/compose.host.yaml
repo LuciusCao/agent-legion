@@ -60,6 +60,12 @@ services:
       AGENT_LEGION_VAULT_MASTER_KEY_FILE: /run/secrets/vault_master_key
       AGENT_LEGION_DATA_DIR: /var/lib/agent-legion
       AGENT_LEGION_S3_ENDPOINT: http://rustfs:9000
+      # presigned URL 的签发地址：浏览器直传与 compose 网络外的 remote worker
+      # 都访问不到内部地址 rustfs:9000，必须用客户端可达地址签发（SigV4 把
+      # Host 签进签名，不能签后改写）。默认值匹配 rustfs 的端口映射
+      # （${AGENT_LEGION_S3_BIND:-127.0.0.1}:9000）；非本机访问时在
+      # deploy/.env 覆盖为外部可达地址。
+      AGENT_LEGION_S3_PUBLIC_ENDPOINT: ${AGENT_LEGION_S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
       AGENT_LEGION_S3_BUCKET: ${AGENT_LEGION_S3_BUCKET:-agent-legion}
       AGENT_LEGION_S3_ACCESS_KEY: ${AGENT_LEGION_S3_ACCESS_KEY:?set AGENT_LEGION_S3_ACCESS_KEY in deploy/.env}
       AGENT_LEGION_S3_SECRET_KEY: ${AGENT_LEGION_S3_SECRET_KEY:?set AGENT_LEGION_S3_SECRET_KEY in deploy/.env}

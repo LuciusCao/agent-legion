@@ -9,6 +9,12 @@ never tracked yaml, the DB, API payloads, or logs. Secret values support the
 An unconfigured store (no bucket) is a valid state: ``load_s3_settings``
 returns None and the materials API degrades to 503 without affecting the
 rest of the service.
+
+``AGENT_LEGION_S3_PUBLIC_ENDPOINT`` is the optional presigning endpoint:
+the backend talks to ``endpoint_url`` (often only reachable inside the
+deployment network, e.g. compose's ``http://rustfs:9000``), but presigned
+URLs handed to browsers / remote workers must be signed against an address
+they can actually dial.
 """
 
 from __future__ import annotations
@@ -29,6 +35,9 @@ class S3Settings:
     region: str = _DEFAULT_REGION
     access_key: str = ""
     secret_key: str = ""
+    # Client-reachable endpoint used only to sign presigned URLs; empty signs
+    # with endpoint_url (fine when clients can already reach that address).
+    public_endpoint_url: str = ""
 
 
 def _read_secret(env: str) -> str:
@@ -58,4 +67,5 @@ def load_s3_settings() -> S3Settings | None:
         region=os.environ.get("AGENT_LEGION_S3_REGION", "").strip() or _DEFAULT_REGION,
         access_key=_read_secret("AGENT_LEGION_S3_ACCESS_KEY"),
         secret_key=_read_secret("AGENT_LEGION_S3_SECRET_KEY"),
+        public_endpoint_url=os.environ.get("AGENT_LEGION_S3_PUBLIC_ENDPOINT", "").strip(),
     )
