@@ -10,7 +10,7 @@ from server.app.settings import Settings
 def create_workspace_runs_router(service: JobQueryService, settings: Settings) -> APIRouter:
     router = APIRouter()
 
-    @router.get("/workspaces/{workspace_id}/runs", response_model=WorkspaceRunsResponse)
+    @router.get("/workspaces/{workspace_id}/node-runs", response_model=WorkspaceRunsResponse)
     def list_workspace_runs(
         workspace_id: str,
         status: str | None = None,

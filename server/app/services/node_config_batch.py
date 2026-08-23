@@ -1,21 +1,25 @@
-"""Intake batch payload readers for frozen node configs (spec D8).
+"""Frozen node config readers (RUN-FREEZE-001).
 
-Split from ``node_config`` for the file-size budget: these helpers decode
-the per-node config snapshot frozen into the intake batch source payload.
+Split from ``node_config`` for the file-size budget. Since schema v53 the
+authoritative freeze lives on the run/job columns (``runs.frozen_pins_json``,
+``jobs.frozen_config_json``); the "payload" these helpers decode is the
+equivalent dict rebuilt from those columns by
+``server.app.services.run_payload``, never a stored batch payload.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from typing import Any
+
+from server.app.services.run_payload import reconstruct_batch_payload
 
 
 def frozen_node_config(
     batch_payload: Mapping[str, Any] | None,
     node_key: str,
 ) -> dict[str, Any] | None:
-    """Read one node's frozen config from an intake batch payload, if present."""
+    """Read one node's frozen config from a reconstructed run payload."""
     if not isinstance(batch_payload, Mapping):
         return None
     node_config = batch_payload.get("node_config")
@@ -25,16 +29,12 @@ def frozen_node_config(
     return dict(values) if isinstance(values, Mapping) else None
 
 
-def batch_source_payload(job_db: Any, job: Mapping[str, Any]) -> dict[str, Any] | None:
-    """Decode the source payload of the job's intake batch, if available."""
-    batch_id = job.get("batch_id")
-    if not batch_id:
+def run_frozen_payload(job_db: Any, job: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The job's frozen run payload, rebuilt from the run + job columns."""
+    run_id = job.get("run_id")
+    if not run_id:
         return None
-    batch = job_db.get_batch(str(batch_id))
-    if not batch:
+    run = job_db.get_run(str(run_id))
+    if run is None:
         return None
-    try:
-        payload = json.loads(str(batch.get("source_payload_json") or ""))
-    except (TypeError, json.JSONDecodeError):
-        return None
-    return payload if isinstance(payload, dict) else None
+    return reconstruct_batch_payload(run, job)

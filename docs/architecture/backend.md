@@ -147,6 +147,11 @@ server/app/
 | POST | `/workspaces/{workspace_id}/jobs/batch-upgrade-workflow` | `batch_upgrade_jobs_workflow` | routes/job_workflow_upgrade_batch.py |
 | GET | `/workspaces/{workspace_id}/jobs` | `list_workspace_jobs` | routes/jobs.py |
 | GET | `/jobs/{job_id}` | `get_job` | routes/jobs.py |
+| POST | `/workspaces/{workspace_id}/materials/presign` | `presign_material` | routes/materials.py |
+| POST | `/workspaces/{workspace_id}/materials/{material_id}/complete` | `complete_material` | routes/materials.py |
+| GET | `/workspaces/{workspace_id}/materials` | `list_materials` | routes/materials.py |
+| GET | `/workspaces/{workspace_id}/materials/{material_id}` | `get_material` | routes/materials.py |
+| DELETE | `/workspaces/{workspace_id}/materials/{material_id}` | `delete_material` | routes/materials.py |
 | GET | `/metrics/overview` | `get_metrics_overview` | routes/metrics.py |
 | GET | `/workspaces/{workspace_id}/packages` | `list_workspace_packages` | routes/packages.py |
 | DELETE | `/workspaces/{workspace_id}/packages/{package_id:int}` | `delete_workspace_package_route` | routes/packages.py |
@@ -162,6 +167,9 @@ server/app/
 | POST | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays` | `create_replay` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays` | `list_replays` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/quality/replays/{replay_id}` | `get_replay` | routes/quality_replays.py |
+| POST | `/workspaces/{workspace_id}/runs` | `create_run` | routes/runs.py |
+| GET | `/workspaces/{workspace_id}/runs` | `list_runs` | routes/runs.py |
+| GET | `/workspaces/{workspace_id}/runs/{run_id}` | `get_run` | routes/runs.py |
 | GET | `/executors/skills/{skill_key:path}` | `get_skill` | routes/skill_catalog_route.py |
 | GET | `/admin/skill-sources` | `get_skill_sources` | routes/skill_sources.py |
 | PUT | `/admin/skill-sources/{skill_key:path}` | `put_skill_source` | routes/skill_sources.py |
@@ -218,7 +226,7 @@ server/app/
 | PUT | `/workspaces/{workspace_id}/configuration` | `replace_workspace_configuration` | routes/workspace_configuration.py |
 | GET | `/executors` | `get_executors` | routes/workspace_executors.py |
 | GET | `/workspaces/{workspace_id}/executor-configuration` | `get_workspace_executor_configuration` | routes/workspace_executors.py |
-| GET | `/workspaces/{workspace_id}/runs` | `list_workspace_runs` | routes/workspace_runs.py |
+| GET | `/workspaces/{workspace_id}/node-runs` | `list_workspace_runs` | routes/workspace_runs.py |
 | GET | `/workspaces/{workspace_id}/dag` | `get_workspace_dag` | routes/workspace_runs.py |
 | GET | `/workspaces/{workspace_id}/secrets` | `list_workspace_secrets` | routes/workspace_secrets.py |
 | PUT | `/workspaces/{workspace_id}/secrets/{name}` | `put_workspace_secret` | routes/workspace_secrets.py |
@@ -286,7 +294,8 @@ server/app/
 | MemberResponse | BaseModel | id: str, username: str, display_name: str, user_role: Literal['admin', 'membe... | app/routes/auth_contracts.py |
 | MembersResponse | BaseModel | members: list[MemberResponse] | app/routes/auth_contracts.py |
 | MemberPutRequest | BaseModel | user_id: str, role: Literal['editor', 'viewer'] | app/routes/auth_contracts.py |
-| HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None | app/routes/common.py |
+| StorageStatus | BaseModel | configured: bool, reachable: bool | app/routes/common.py |
+| HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None, storage: StorageStatus | None | app/routes/common.py |
 | ConnectionCreate | BaseModel | key: str, type: str, display_name: str, config: dict[str, Any] | app/routes/connections_contracts.py |
 | ConnectionUpdate | BaseModel | display_name: str | None, config: dict[str, Any] | None, enabled: bool | None | app/routes/connections_contracts.py |
 | ConnectionTokenStatus | BaseModel | expires_at: str | None, refreshed_at: str | None | app/routes/connections_contracts.py |
@@ -353,6 +362,12 @@ server/app/
 | LogEventResponse | BaseModel | type: str, title: str, detail: str, truncated: bool | app/routes/job_view_contracts.py |
 | JobLogResponse | BaseModel | run_id: int, log: str, truncated: bool, structured: list[LogEventResponse] | ... | app/routes/job_view_contracts.py |
 | JobDetailResponse | BaseModel | job: JobSummaryResponse, nodes: list[JobNodeResponse], runs: list[NodeRunResp... | app/routes/job_view_contracts.py |
+| MaterialPresignRequest | BaseModel | filename: str, size_bytes: int, content_hash: str | None, content_type: str | app/routes/materials.py |
+| MaterialRecord | BaseModel | id: str, workspace_id: str, content_hash: str, filename: str, content_type: s... | app/routes/materials.py |
+| MaterialPresignResponse | BaseModel | material: MaterialRecord, upload_url: str | None, upload_expires_in_seconds: ... | app/routes/materials.py |
+| MaterialResponse | BaseModel | material: MaterialRecord | app/routes/materials.py |
+| MaterialListResponse | BaseModel | materials: list[MaterialRecord], total: int, limit: int, offset: int | app/routes/materials.py |
+| MaterialDeleteResponse | BaseModel | deleted: str | app/routes/materials.py |
 | MetricBucket | BaseModel | bucket_start: str, online_workers: int, online_workers_max: int, active_execu... | app/routes/metrics_contracts.py |
 | OpsMetricsResponse | BaseModel | granularity: Literal['6h', '24h', '30d'], buckets: list[MetricBucket], summar... | app/routes/metrics_contracts.py |
 | QueueSummary | BaseModel | queued: int, oldest_queued_at: str | None, recent_hour_unclaimable_failed: int | app/routes/metrics_queue_contracts.py |
@@ -387,6 +402,14 @@ server/app/
 | QualityConfusionMatrix | BaseModel | tp: int, fp: int, fn: int, tn: int, precision: float | None, recall: float | ... | app/routes/quality_contracts.py |
 | QualityStatsGroup | BaseModel | node_key: str, skill_version: str, provider: str, model: str, runs: int, succ... | app/routes/quality_contracts.py |
 | QualityBatchStatsResponse | BaseModel | batch_id: str, groups: list[QualityStatsGroup] | app/routes/quality_contracts.py |
+| RunItemMaterial | BaseModel | type: Literal['material'], material_id: str | app/routes/run_contracts.py |
+| RunItemRef | BaseModel | type: Literal['ref'], connection_key: str, external_id: str, params: dict[str... | app/routes/run_contracts.py |
+| RunCreateRequest | BaseModel | workflow_key: str, items: list[RunItem] | app/routes/run_contracts.py |
+| RunRecord | BaseModel | id: str, workspace_id: str, workflow_key: str, source_kind: str, status: str,... | app/routes/run_contracts.py |
+| RunCreateResponse | BaseModel | run: RunRecord, created_count: int, jobs: list[dict[str, Any]] | app/routes/run_contracts.py |
+| RunListResponse | BaseModel | runs: list[RunRecord] | app/routes/run_contracts.py |
+| RunJobStats | BaseModel | total: int, by_status: dict[str, int] | app/routes/run_contracts.py |
+| RunDetailResponse | BaseModel | run: RunRecord, job_stats: RunJobStats | app/routes/run_contracts.py |
 | SkillFileResponse | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/skill_contracts.py |
 | SkillDetailResponse | BaseModel | key: str, ref: str, commit: str, available: bool, files: list[SkillFileRespon... | app/routes/skill_contracts.py |
 | SkillValidateRequest | BaseModel | path: str | app/routes/skill_contracts.py |

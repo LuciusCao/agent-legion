@@ -1,6 +1,7 @@
 """Open-source demo workflow DAG: ``education_video_problems_generation``.
 
-Knowledge-point markdown (``examples/education-video-problems-generation/``)
+Knowledge-point material (the ``examples/education-video-problems-generation/``
+markdown, seeded into the demo workspace as sample materials — design §9)
 → teaching-video script + review → five exercises + review → simulated
 publish. No external service required; see ``examples/README.md``. Kept in
 its own module so the business DAGs in ``builtin.py`` stay untouched by demo
@@ -22,9 +23,10 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
     "schema_version": 2,
     "intake": {
         "modes": {
-            # entity "question" + mode "direct_ids" resolves through the
-            # platform's direct.question_ids resolver: one job per input
-            # value, the value being a knowledge-point file stem.
+            # Legacy intake mode (retired in a later slice): the demo's main
+            # path is material items — the user uploads (or picks the seeded
+            # sample) knowledge-point markdown and each material becomes one
+            # job; the intake node reads it via ctx.material.
             "direct_ids": {
                 "label": "按知识点批量",
                 "input_field": "knowledge_point_ids",
@@ -38,18 +40,6 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
             "after": [],
             "inputs": [],
             "outputs": ["knowledge_point.json"],
-            # Node-declared tunables (P-0.5): travels with the revision
-            # snapshot, overridable via node config / workspace overrides.
-            "config_schema": {
-                "type": "object",
-                "properties": {
-                    "knowledge_dir": {
-                        "type": "string",
-                        "default": "examples/education-video-problems-generation",
-                        "description": "知识点 markdown 目录（相对路径按 Host 根目录解析；出厂默认值，可被节点/workspace 覆盖）",
-                    },
-                },
-            },
         },
         "write_script": {
             "label": "撰写教学视频脚本",

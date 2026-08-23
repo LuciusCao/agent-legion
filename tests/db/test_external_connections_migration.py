@@ -183,11 +183,34 @@ def test_workspace_vault_token_becomes_static_bearer(monkeypatch) -> None:
         assert values == {"bank_version": "v5", "connection": "cms-internal"}
 
 
+@pytest.mark.fresh_schema
 def test_batch_payloads_gain_connection(monkeypatch) -> None:
+    """v34 rewrite path: legacy job_batches payloads gain the connection ref.
+
+    The v53 baseline dropped job_batches (migrate_runs harvested it), so this
+    test rebuilds the historical table first — on a real v33→v53 upgrade the
+    schema file still creates it and the rewrite runs before the harvest.
+    """
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.setenv("CMS_TOKEN", "env-token")
     with write_transaction(TEST_DATABASE_URL) as conn:
         _insert_workspace(conn, "ws-mig-batch", {})
+        conn.execute(
+            """
+            create table job_batches (
+              id text primary key,
+              workspace_id text not null references workspaces(id) on delete cascade,
+              workflow_key text not null,
+              source_kind text not null,
+              source_payload_json text not null default '{}',
+              status text not null default 'created',
+              created_count integer not null default 0,
+              error_message text not null default '',
+              created_at timestamptz not null default current_timestamp,
+              updated_at timestamptz not null default current_timestamp
+            )
+            """
+        )
         conn.execute(
             "insert into job_batches(id, workspace_id, workflow_key, source_kind,"
             " source_payload_json) values ('b1', 'ws-mig-batch', 'question_comprehension_info',"

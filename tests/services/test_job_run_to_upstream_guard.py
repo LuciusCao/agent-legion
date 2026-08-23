@@ -31,7 +31,7 @@ def execution_service(job_db: JobQueries, settings):
 
 
 def _create_job(job_db: JobQueries, workspace_id: str, source_id: str) -> dict[str, Any]:
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": [source_id]},
@@ -42,7 +42,7 @@ def _create_job(job_db: JobQueries, workspace_id: str, source_id: str) -> dict[s
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id=source_id,
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title=source_id,
         node_keys=list(definition.nodes),
         workspace_id=workspace_id,

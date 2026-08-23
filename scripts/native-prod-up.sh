@@ -30,6 +30,22 @@ port_listening() {
     lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
 }
 
+# 1.5 材料对象存储（RustFS）：原生形态下后端/worker 是本机进程，rustfs 仍
+# 由 docker compose 托管（compose.host.yaml 里只起 rustfs 单服务）。幂等：
+# 已在运行则 no-op。docker 不可用或启动失败仅告警——未配置/未就绪 S3 时
+# 材料 API 降级为 503，其余功能不受影响。
+if command -v docker >/dev/null 2>&1; then
+    COMPOSE_FILES=(-f deploy/compose.host.yaml)
+    [[ -f deploy/compose.local.yaml ]] && COMPOSE_FILES+=(-f deploy/compose.local.yaml)
+    if docker compose "${COMPOSE_FILES[@]}" up -d rustfs >/dev/null 2>&1; then
+        echo "RustFS（材料对象存储）已就绪"
+    else
+        echo "警告: rustfs 启动失败，材料相关功能将不可用（详见 deploy 文档）" >&2
+    fi
+else
+    echo "提示: 未检测到 docker，跳过 RustFS 启动；如需材料功能请自行启动 S3 兼容存储" >&2
+fi
+
 # 2. 后端
 if port_listening "$BACKEND_PORT"; then
     echo "后端已在 :$BACKEND_PORT 运行，跳过"

@@ -68,8 +68,14 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-resume", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/rerun-by-failure", None),
     ("POST", "/api/workspaces/{workspace_id}/job-batches", None),
+    # Run creation from items (materials-and-runs design §4).
+    ("POST", "/api/workspaces/{workspace_id}/runs", None),
     ("POST", "/api/jobs/{job_id}/upgrade-workflow", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-upgrade-workflow", None),
+    # Materials upload lifecycle (materials-and-runs design §6.4).
+    ("POST", "/api/workspaces/{workspace_id}/materials/presign", None),
+    ("POST", "/api/workspaces/{workspace_id}/materials/{material_id}/complete", None),
+    ("DELETE", "/api/workspaces/{workspace_id}/materials/{material_id}", None),
     # Workspace, secret, package, member and settings writes.
     ("POST", "/api/workspaces", None),
     ("PATCH", "/api/workspaces/{workspace_id}", None),
@@ -189,6 +195,7 @@ _PATH_PARAM_VALUES = {
     "token_id": "token-x",
     "session_id": "session-x",
     "request_id": "request-x",
+    "material_id": "mat-x",
 }
 
 

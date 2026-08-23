@@ -13,6 +13,7 @@ from ..jobs import JobQueries
 from ..services.artifact_store import ArtifactStore
 from ..services.executor_catalog import ExecutorCatalogService
 from ..services.job_packages import JobPackageService
+from ..services.materials import MaterialsService
 from ..services.ops_metrics import OpsMetricsService
 from ..services.quality_labels import QualityLabelService
 from ..services.quality_replays import QualityReplayService
@@ -31,6 +32,7 @@ from .common import create_common_router
 from .connections import create_connections_router
 from .instance_settings import create_instance_settings_router
 from .job_route_group import include_job_routes
+from .materials import create_materials_router
 from .metrics import create_metrics_router
 from .packages import create_packages_router
 from .quality import create_quality_router
@@ -75,6 +77,7 @@ def create_router(
     quality_stats: QualityStatsService | None = None,
     quality_replays: QualityReplayService | None = None,
     studio_chat_service: StudioChatService | None = None,
+    materials_service: MaterialsService | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
@@ -117,6 +120,8 @@ def create_router(
     )
     secured(workspaces_router)
     secured(create_workspace_settings_router(workspace_configuration, settings))
+    if materials_service is not None:
+        secured(create_materials_router(materials_service))
     studio_secured(create_workflow_revisions_router(job_db, settings))
     studio_secured(create_workflow_node_codes_router(job_db, settings))
     studio_secured(create_agent_definitions_router(job_db, settings))

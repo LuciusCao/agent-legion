@@ -11,6 +11,7 @@ import shutil
 import time
 from pathlib import Path
 
+from shared.material_cache import MATERIALS_CACHE_DIRNAME
 from worker.upload_queue import PENDING_FILENAME
 
 STALE_EXECUTION_MAX_AGE_SECONDS = 24 * 3600
@@ -51,9 +52,11 @@ def sweep_stale_executions(
     subtree, not the top-level dir's mtime (see _subtree_latest_mtime).
 
     Dirs with a pending-upload marker are skipped: they hold unreported
-    results and the UploadQueue owns their lifecycle. Anything else this
-    old is a leftover of a crashed run and holds no value (its events.jsonl
-    alone can reach 100MB+).
+    results and the UploadQueue owns their lifecycle. The materials cache
+    (design §6.2) is also skipped — capacity-based eviction owns it, and a
+    cold cache is still a valid one. Anything else this old is a leftover
+    of a crashed run and holds no value (its events.jsonl alone can reach
+    100MB+).
     """
     now = time.time() if now is None else now
     try:
@@ -65,7 +68,11 @@ def sweep_stale_executions(
         if child.is_symlink():
             child.unlink(missing_ok=True)
             continue
-        if not child.is_dir() or (child / PENDING_FILENAME).is_file():
+        if (
+            not child.is_dir()
+            or child.name == MATERIALS_CACHE_DIRNAME
+            or (child / PENDING_FILENAME).is_file()
+        ):
             continue
         try:
             latest = child.stat().st_mtime

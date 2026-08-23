@@ -37,7 +37,7 @@ def execution_context(tmp_path: Path) -> ExecutionContext:
             "workflow_key": "demo_video_workflow",
             "source_type": "video",
             "source_id": "v-1",
-            "batch_id": "",
+            "run_id": "",
             "title": "Video 1",
             "storage_dir": str(tmp_path),
             "stem": "",

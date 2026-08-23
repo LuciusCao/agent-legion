@@ -16,6 +16,7 @@ from server.app.db.migrations import (
     migrate_hmac_connection_type,
     migrate_local_executor_removal,
     migrate_node_cms_config,
+    migrate_runs,
     migrate_scoped_token_origin,
     migrate_studio_chat_context,
     migrate_studio_chat_tables,
@@ -29,7 +30,7 @@ from server.app.db.migrations.job_status_counts import (
 )
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 51
+SCHEMA_VERSION = 53
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 
@@ -76,8 +77,12 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             migrate_executor_retirement(conn)
             migrate_workflow_catalog_retirement(conn)
             migrate_agent_request_kind_window(conn)
+            # Runs cutover (v53) goes last: earlier migrations still replay
+            # against job_batches (e.g. the external-connections payload
+            # rewrite), then every row is harvested and the table dropped.
+            migrate_runs(conn)
             conn.execute("alter table workspaces drop column if exists cms_config_json")
             conn.execute(
                 "insert into schema_migrations(version, name) values (%s, %s)",
-                (SCHEMA_VERSION, "agent_request_kind_window"),
+                (SCHEMA_VERSION, "runs"),
             )

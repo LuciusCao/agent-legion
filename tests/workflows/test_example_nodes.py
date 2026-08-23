@@ -1,7 +1,9 @@
 """Unit tests for the demo workflow code nodes (example_intake/example_publish).
 
 Pure node-level tests: build the job dict + runtime map the code executor
-would pass, run the node against a tmp job_dir. No database.
+would pass, run the node against a tmp job_dir. No database. The intake
+node's input is a materialized material file (``runtime["materials"]``,
+design §6.2) — tests fake that block with a tmp file.
 """
 
 from __future__ import annotations
@@ -27,75 +29,92 @@ _JOB = {
     "workflow_definition_hash": "hash-1",
 }
 
+_DEMO_MARKDOWN = (
+    "# 演示知识点\n"
+    "\n"
+    "- 适用年级：小学三年级\n"
+    "- 学科：小学数学\n"
+    "\n"
+    "## 核心概念\n"
+    "\n"
+    "第一段概念。\n"
+    "\n"
+    "第二段概念。\n"
+    "\n"
+    "## 常见易错点\n"
+    "\n"
+    "- 易错点甲\n"
+    "- 易错点乙\n"
+)
 
-def _runtime(node_config: dict | None = None) -> dict:
-    return {"node_key": "intake_knowledge_points", "node_config": node_config or {}}
+
+def _material_runtime(path: Path, material_id: str = "mat-1") -> dict:
+    """The runtime map build_runtime assembles for a material-input job."""
+    return {
+        "node_key": "intake_knowledge_points",
+        "materials": {
+            "material_id": material_id,
+            "path": str(path),
+            "filename": path.name,
+            "content_type": "text/markdown",
+            "size_bytes": path.stat().st_size,
+            "content_hash": "",
+        },
+    }
 
 
-def test_intake_reads_repo_examples_by_default(tmp_path: Path) -> None:
-    """Default knowledge_dir resolves against the repo root examples tree."""
-    example_intake.run(dict(_JOB), tmp_path, _runtime())
+def _write_material(tmp_path: Path, text: str, name: str = "demo-point.md") -> Path:
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return path
 
-    payload = json.loads((tmp_path / "knowledge_point.json").read_text(encoding="utf-8"))
+
+def test_intake_reads_material_input(tmp_path: Path) -> None:
+    material = _write_material(tmp_path, _DEMO_MARKDOWN)
+
+    example_intake.run(dict(_JOB), tmp_path / "job", _material_runtime(material))
+
+    payload = json.loads((tmp_path / "job" / "knowledge_point.json").read_text(encoding="utf-8"))
+    point = payload["knowledge_point"]
+    assert point["id"] == "demo-point"
+    assert point["title"] == "演示知识点"
+    assert point["grade"] == "小学三年级"
+    assert point["summary"] == "第一段概念。\n\n第二段概念。"
+    assert point["common_mistakes"] == ["易错点甲", "易错点乙"]
+    assert payload["source"]["file"] == "demo-point.md"
+    assert payload["source"]["material_id"] == "mat-1"
+
+
+def test_intake_parses_repo_example_material(tmp_path: Path) -> None:
+    """The seeded sample materials keep the repo markdown contract."""
+    material = (
+        REPO_ROOT
+        / "examples"
+        / "education-video-problems-generation"
+        / ("fraction-addition-subtraction.md")
+    )
+
+    example_intake.run(dict(_JOB), tmp_path / "job", _material_runtime(material))
+
+    payload = json.loads((tmp_path / "job" / "knowledge_point.json").read_text(encoding="utf-8"))
     point = payload["knowledge_point"]
     assert point["id"] == "fraction-addition-subtraction"
     assert point["title"] == "分数加减法"
     assert point["grade"] == "小学五年级"
     assert "通分" in point["summary"]
     assert len(point["common_mistakes"]) >= 3
-    assert payload["source"]["file"] == "fraction-addition-subtraction.md"
-    assert Path(payload["source"]["knowledge_dir"]).is_dir()
 
 
-def test_intake_honors_knowledge_dir_override(tmp_path: Path) -> None:
-    knowledge_dir = tmp_path / "points"
-    knowledge_dir.mkdir()
-    (knowledge_dir / "demo-point.md").write_text(
-        "# 演示知识点\n"
-        "\n"
-        "- 适用年级：小学三年级\n"
-        "- 学科：小学数学\n"
-        "\n"
-        "## 核心概念\n"
-        "\n"
-        "第一段概念。\n"
-        "\n"
-        "第二段概念。\n"
-        "\n"
-        "## 常见易错点\n"
-        "\n"
-        "- 易错点甲\n"
-        "- 易错点乙\n",
-        encoding="utf-8",
-    )
-    job = {**_JOB, "source_id": "demo-point"}
-    runtime = _runtime({"knowledge_dir": str(knowledge_dir)})
-
-    example_intake.run(job, tmp_path / "job", runtime)
-
-    payload = json.loads((tmp_path / "job" / "knowledge_point.json").read_text(encoding="utf-8"))
-    point = payload["knowledge_point"]
-    assert point["title"] == "演示知识点"
-    assert point["summary"] == "第一段概念。\n\n第二段概念。"
-    assert point["common_mistakes"] == ["易错点甲", "易错点乙"]
-
-
-def test_intake_missing_file_lists_available_ids(tmp_path: Path) -> None:
-    job = {**_JOB, "source_id": "no-such-point"}
-    with pytest.raises(RuntimeError, match="知识点文件不存在") as excinfo:
-        example_intake.run(job, tmp_path, _runtime())
-    # The error guides the user to the available intake values.
-    assert "fraction-addition-subtraction" in str(excinfo.value)
+def test_intake_requires_material_input(tmp_path: Path) -> None:
+    """A job without a material input fails with a user-readable error."""
+    with pytest.raises(RuntimeError, match="material"):
+        example_intake.run(dict(_JOB), tmp_path, {"node_key": "intake_knowledge_points"})
 
 
 def test_intake_rejects_malformed_markdown(tmp_path: Path) -> None:
-    knowledge_dir = tmp_path / "points"
-    knowledge_dir.mkdir()
-    (knowledge_dir / "broken.md").write_text("# 只有标题\n", encoding="utf-8")
-    job = {**_JOB, "source_id": "broken"}
-    runtime = _runtime({"knowledge_dir": str(knowledge_dir)})
+    material = _write_material(tmp_path, "# 只有标题\n", name="broken.md")
     with pytest.raises(ValueError, match="核心概念"):
-        example_intake.run(job, tmp_path / "job", runtime)
+        example_intake.run(dict(_JOB), tmp_path / "job", _material_runtime(material))
 
 
 def _write_publish_inputs(job_dir: Path) -> None:

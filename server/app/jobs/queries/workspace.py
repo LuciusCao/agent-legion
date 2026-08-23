@@ -250,7 +250,7 @@ class WorkspaceQueriesMixin(JobQueriesBase):
                 (workspace_id,),
             )
             conn.execute(
-                "delete from job_batches where workspace_id = %s",
+                "delete from runs where workspace_id = %s",
                 (workspace_id,),
             )
             conn.execute(

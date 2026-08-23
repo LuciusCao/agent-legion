@@ -19,7 +19,7 @@ def pause_service(job_db):
 
 
 def _create_job(job_db, workspace_id: str, source_id: str) -> dict[str, Any]:
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": [source_id]},
@@ -29,7 +29,7 @@ def _create_job(job_db, workspace_id: str, source_id: str) -> dict[str, Any]:
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id=source_id,
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title=source_id,
         node_keys=_NODE_KEYS,
         workspace_id=workspace_id,

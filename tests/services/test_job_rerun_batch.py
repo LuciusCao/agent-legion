@@ -31,7 +31,7 @@ def rerun_service(job_db, settings):
 
 
 def _create_job(job_db, workspace_id: str, source_id: str) -> dict[str, Any]:
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": [source_id]},
@@ -41,7 +41,7 @@ def _create_job(job_db, workspace_id: str, source_id: str) -> dict[str, Any]:
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id=source_id,
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title=source_id,
         node_keys=_NODE_KEYS,
         workspace_id=workspace_id,
@@ -282,7 +282,7 @@ def test_batch_rerun_read_queries_bounded(rerun_service, job_db, monkeypatch) ->
     )
     publish_builtin_revision(job_db, str(ws["id"]))
     ws_id = str(ws["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": [f"P{i}" for i in range(300)]},
@@ -294,7 +294,7 @@ def test_batch_rerun_read_queries_bounded(rerun_service, job_db, monkeypatch) ->
             workflow_key="education_video_problems_generation",
             source_type="question",
             source_id=f"P{i}",
-            batch_id=batch["id"],
+            run_id=batch["id"],
             title=f"P{i}",
             node_keys=_NODE_KEYS,
             workspace_id=ws_id,

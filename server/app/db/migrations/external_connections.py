@@ -188,7 +188,12 @@ def _rewrite_batch_payloads(conn: Any, binding: dict[str, str]) -> None:
     Legacy keys stay (the node ignores them once a connection is injected);
     the workspace vault entries they may reference are deliberately kept. Each
     batch binds to its workspace's own credential group when one exists.
+    job_batches is harvested into runs at schema v53 (later in the chain), so
+    on databases where the harvest already happened there is nothing to
+    rewrite — the frozen configs now live on jobs.frozen_config_json.
     """
+    if not conn.execute("select to_regclass('job_batches')").fetchone()["to_regclass"]:
+        return
     rows = conn.execute(
         "select id, workspace_id, source_payload_json from job_batches"
         " where workflow_key in ('question_comprehension_info', 'video_knowledge')"

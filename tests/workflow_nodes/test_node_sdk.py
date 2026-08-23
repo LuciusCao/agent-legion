@@ -261,6 +261,30 @@ def test_root_dir_reads_runtime_key(tmp_path: Path) -> None:
     assert _ctx(tmp_path, {"root_dir": ""}).root_dir is None
 
 
+def test_material_reads_runtime_block(tmp_path: Path) -> None:
+    block = {
+        "material_id": "mat-1",
+        "path": "/data/materials_cache/ab/abcdef/notes.txt",
+        "filename": "notes.txt",
+        "content_type": "text/plain",
+        "size_bytes": 42,
+        "content_hash": "abcdef",
+    }
+    ctx = _ctx(tmp_path, {"materials": block})
+
+    material = ctx.material
+    assert material == block
+    # 返回拷贝：节点改不动 runtime 本体。
+    assert material is not None
+    material["path"] = "/tampered"
+    assert ctx.material is not None and ctx.material["path"] == block["path"]
+
+
+def test_material_defaults_to_none(tmp_path: Path) -> None:
+    assert _ctx(tmp_path, {}).material is None
+    assert _ctx(tmp_path, {"materials": "not-a-mapping"}).material is None
+
+
 # ---------------------------------------------------------------------------
 # entrypoint
 

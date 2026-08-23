@@ -22,6 +22,8 @@ from server.app.config_schema import node_safe_settings_config
 from server.app.executors.cancellation import CancellationToken
 from server.app.executors.models import ExecutionContext
 from server.app.services.connection_tokens import ConnectionTokenService
+from server.app.services.material_cache import prefetch_material_block
+from server.app.services.run_payload import sdk_batch_row
 from workspace_libs.node_sdk import AUTH_FAILURE_MARKER_PATH
 
 if TYPE_CHECKING:
@@ -56,12 +58,18 @@ def build_runtime(
         "cancellation": token,
     }
     if executor.job_db is not None:
-        batch_id = str(context.job.get("batch_id") or "")
-        if batch_id:
-            batch = executor.job_db.get_batch(batch_id)
-            if batch:
-                runtime["job_batch"] = dict(batch)
+        run_id = str(context.job.get("run_id") or "")
+        if run_id:
+            run = executor.job_db.get_run(run_id)
+            # SDK-facing batch row: run columns plus the payload rebuilt from
+            # the authoritative run/job freeze columns (RUN-FREEZE-001).
+            batch_row = sdk_batch_row(run, context.job)
+            if batch_row:
+                runtime["job_batch"] = batch_row
         runtime["skill_versions"] = _prefetch_skill_versions(executor, context)
+    materials = prefetch_material_block(executor, context.job, str(context.workspace_id))
+    if materials is not None:
+        runtime["materials"] = materials
     return runtime
 
 

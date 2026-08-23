@@ -17,6 +17,7 @@ from server.app.settings import Settings
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.workflow_worker.agent_gate import request_restock
 from server.app.workflow_worker.thread import WorkflowWorkerThread
+from shared.material_cache import MATERIALS_CACHE_DIRNAME
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,9 @@ def start_worker_threads(
         settings_config=settings.config,
         job_db=job_db,
         cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
+        # Materialization cache lives under the instance data dir (design
+        # §6.2) so it is covered by the same data-volume lifecycle.
+        materials_cache_root=settings.data_dir / MATERIALS_CACHE_DIRNAME,
     )
     execution_runtime = ExecutionRuntime(
         executor_leases,

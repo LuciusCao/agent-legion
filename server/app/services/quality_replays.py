@@ -30,7 +30,7 @@ from server.app.jobs.atomic_mutations import prepare_replay_copy
 from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
-from server.app.services.node_config_batch import batch_source_payload, frozen_node_config
+from server.app.services.node_config_batch import frozen_node_config, run_frozen_payload
 from server.app.services.quality_labels import artifact_contents
 from server.app.services.versioned_entities import VersionedEntityStore
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
@@ -271,20 +271,35 @@ class QualityReplayService:
             "definition_json": str(job["workflow_definition_snapshot_json"] or ""),
         }
         # Frozen intake state keeps the replay faithful to the original run.
-        original_payload = batch_source_payload(self.job_db, job)
+        original_payload = run_frozen_payload(self.job_db, job)
         frozen = frozen_node_config(original_payload, node.key)
-        source_payload = {
-            "quality_replay": {
-                "replay_id": replay_id,
-                "item_id": str(item["id"]),
-                "source_job_id": str(job["id"]),
-            },
-            "node_config": {node.key: frozen} if frozen is not None else {},
-            "node_code_versions": (original_payload or {}).get("node_code_versions") or {},
-            "agent_versions": {node.key: pin} if pin is not None else {},
+        quality_replay = {
+            "replay_id": replay_id,
+            "item_id": str(item["id"]),
+            "source_job_id": str(job["id"]),
         }
-        batch = self.job_db.create_batch(
-            workflow_key, "quality_replay", source_payload, workspace_id
+        node_code_versions = (original_payload or {}).get("node_code_versions") or {}
+        agent_versions = {node.key: pin} if pin is not None else {}
+        # The digest payload mirrors the retired batch payload so the
+        # deterministic run id is stable across the cutover; the authoritative
+        # pins land on the run row and the frozen config on the copy job
+        # (RUN-FREEZE-001).
+        digest_payload = {
+            "quality_replay": quality_replay,
+            "node_config": {node.key: frozen} if frozen is not None else {},
+            "node_code_versions": node_code_versions,
+            "agent_versions": agent_versions,
+        }
+        batch = self.job_db.create_run(
+            workflow_key,
+            "quality_replay",
+            digest_payload,
+            workspace_id,
+            frozen_pins={
+                "quality_replay": quality_replay,
+                "node_code_versions": node_code_versions,
+                "agent_versions": agent_versions,
+            },
         )
         candidate = {
             "entity_id": f"replay-{replay_id}",
@@ -295,10 +310,11 @@ class QualityReplayService:
         copy_job = self.job_db.create_jobs_bulk(
             candidates=[candidate],
             workflow_key=workflow_key,
-            batch_id=str(batch["id"]),
+            run_id=str(batch["id"]),
             node_keys=list(definition.nodes),
             workspace_id=workspace_id,
             revision=revision,
+            frozen_config={node.key: frozen} if frozen is not None else {},
         )[0]
         copy_job_id = str(copy_job["id"])
         try:

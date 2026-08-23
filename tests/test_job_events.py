@@ -490,7 +490,7 @@ def test_run_to_broadcasts_job_updated(manager, tmp_path):
             """
             insert into jobs(
                 id, workspace_id, workflow_key, source_type, source_id,
-                batch_id, title, storage_dir
+                run_id, title, storage_dir
             )
             values ('j1', 'ws1', 'p1', 'test', 's1', 'b1', 'J1', %s)
             """,
@@ -662,7 +662,7 @@ def test_record_job_update_uses_event_buffer(fake_job_db):
 def test_job_query_service_lists_patch_summaries_by_ids(job_patch_query_service, job_db):
     job_db.create_workspace("ws1", default_workflow_key="education_video_problems_generation")
     publish_builtin_revision(job_db, "ws1")
-    batch1 = job_db.create_batch(
+    batch1 = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["q1"]},
@@ -673,11 +673,11 @@ def test_job_query_service_lists_patch_summaries_by_ids(job_patch_query_service,
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="q1",
-        batch_id=batch1["id"],
+        run_id=batch1["id"],
         title="Question 1",
         node_keys=["question_understanding"],
     )
-    batch2 = job_db.create_batch(
+    batch2 = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["q2"]},
@@ -688,7 +688,7 @@ def test_job_query_service_lists_patch_summaries_by_ids(job_patch_query_service,
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="q2",
-        batch_id=batch2["id"],
+        run_id=batch2["id"],
         title="Question 2",
         node_keys=["question_understanding"],
     )

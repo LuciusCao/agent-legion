@@ -355,14 +355,15 @@ def test_custom_sandbox_denies_network_by_default(
     assert "Operation not permitted" not in allowed.error_message
 
 
-def test_repo_read_subdirs_include_sdk_and_examples() -> None:
+def test_repo_read_subdirs_include_sdk_but_not_examples() -> None:
     """Node code imports workspace_libs (the node SDK) inside the sandbox, so
-    the deny-default sandbox must keep read access to it; examples/ is
-    read-allowed for the demo intake node's knowledge markdown (#96)."""
+    the deny-default sandbox must keep read access to it; examples/ is no
+    longer read-allowed — the demo intake node consumes its knowledge
+    markdown as a material via the static cache root (design §9)."""
     from server.app.executors._code_sandbox import _REPO_READ_SUBDIRS
 
     assert "workspace_libs" in _REPO_READ_SUBDIRS
-    assert "examples" in _REPO_READ_SUBDIRS
+    assert "examples" not in _REPO_READ_SUBDIRS
 
 
 def test_read_result_validates_json_schema(tmp_path: Path) -> None:
@@ -442,10 +443,10 @@ class _FakeJobDb:
         self.jobs_dir = "/fake"
         self._runs_error = runs_error
 
-    def get_batch(self, batch_id: str) -> dict | None:
-        if not batch_id:
+    def get_run(self, run_id: str) -> dict | None:
+        if not run_id:
             return None
-        return {"id": batch_id, "source_payload_json": "{}"}
+        return {"id": run_id, "frozen_pins_json": "{}"}
 
     def list_node_runs(self, job_id: str) -> list[dict]:
         if self._runs_error:
@@ -467,14 +468,20 @@ def test_build_runtime_prefetches_inputs_and_hides_db(
 
     executor = _executor()
     executor.job_db = _FakeJobDb()
-    ctx = replace(context, job={**context.job, "batch_id": "b-1"})
+    ctx = replace(context, job={**context.job, "run_id": "b-1"})
 
     runtime = build_runtime(executor, ctx, CancellationToken())
 
     assert "_job_db_path" not in runtime
     assert "_jobs_dir" not in runtime
     assert "job_db" not in runtime
-    assert runtime["job_batch"] == {"id": "b-1", "source_payload_json": "{}"}
+    # The SDK-facing batch row is the run row plus the payload synthesized
+    # from the run/job freeze columns (RUN-FREEZE-001).
+    assert runtime["job_batch"] == {
+        "id": "b-1",
+        "frozen_pins_json": "{}",
+        "source_payload_json": '{"node_config": {}, "task_candidates": []}',
+    }
     assert runtime["skill_versions"] == {"fetch_items": "abc123"}
     assert runtime["root_dir"] == str(REPO_ROOT)
 
@@ -634,14 +641,18 @@ def test_sandboxed_custom_node_can_use_node_sdk(
     executor.job_db = _FakeJobDb()
 
     result = executor.execute(
-        replace(context, node_code=custom_source, job={**context.job, "batch_id": "b-1"})
+        replace(context, node_code=custom_source, job={**context.job, "run_id": "b-1"})
     )
 
     assert result.status == "completed"
     import json
 
     data = json.loads((context.job_dir / "out.json").read_text(encoding="utf-8"))
-    assert data["batch"] == {"id": "b-1", "source_payload_json": "{}"}
+    assert data["batch"] == {
+        "id": "b-1",
+        "frozen_pins_json": "{}",
+        "source_payload_json": '{"node_config": {}, "task_candidates": []}',
+    }
     assert data["skill_versions"] == {"fetch_items": "abc123"}
 
 

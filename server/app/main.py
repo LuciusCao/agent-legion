@@ -29,6 +29,7 @@ from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
+from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
 from server.app.services.quality_labels import QualityLabelService
 from server.app.services.quality_replays import QualityReplayService
@@ -44,6 +45,7 @@ from server.app.skills.runtime import build_skill_manager
 from server.app.skills.seed import seed_skill_sources
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
+from server.app.storage import build_s3_storage_checked
 from server.app.studio_chat.service import StudioChatService
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.worker_startup import start_worker_threads
@@ -189,6 +191,11 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.studio_chat_service = studio_chat_service
     app.state.event_bus = job_event_manager.bus
     app.state.job_event_buffer = job_event_buffer
+    # Materials object storage is env-only infra config (AGENT_LEGION_S3_*):
+    # unconfigured instances keep the API up and degrade materials to 503.
+    # build_s3_storage_checked logs one startup self-check line (OK/DEGRADED/
+    # configured=false); a failed probe never blocks startup.
+    app.state.materials_service = MaterialsService(job_db.path, build_s3_storage_checked())
     app.state.workspace_event_aggregator = workspace_event_aggregator
     executor_catalog = ExecutorCatalogService(settings)
     workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db, settings)
@@ -217,6 +224,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             quality_stats=QualityStatsService(job_db.path),
             quality_replays=QualityReplayService(job_db, artifact_store),
             studio_chat_service=studio_chat_service,
+            materials_service=app.state.materials_service,
         )
     )
     mount_spa(app, settings.root_dir / "frontend" / "dist")
