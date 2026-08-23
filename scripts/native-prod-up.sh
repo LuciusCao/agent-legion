@@ -31,19 +31,35 @@ port_listening() {
 }
 
 # 1.5 材料对象存储（RustFS）：原生形态下后端/worker 是本机进程，rustfs 仍
-# 由 docker compose 托管（compose.host.yaml 里只起 rustfs 单服务）。幂等：
-# 已在运行则 no-op。docker 不可用或启动失败仅告警——未配置/未就绪 S3 时
-# 材料 API 降级为 503，其余功能不受影响。
-if command -v docker >/dev/null 2>&1; then
-    COMPOSE_FILES=(-f deploy/compose.host.yaml)
-    [[ -f deploy/compose.local.yaml ]] && COMPOSE_FILES+=(-f deploy/compose.local.yaml)
-    if docker compose "${COMPOSE_FILES[@]}" up -d rustfs >/dev/null 2>&1; then
-        echo "RustFS（材料对象存储）已就绪"
+# 由 docker compose 托管（compose.host.yaml 里只起 rustfs 单服务，挂在
+# materials-local profile 下，显式指定服务名时 profile 自动启用）。是否启动
+# 由 AGENT_LEGION_LOCAL_S3=auto|always|never（默认 auto）三态开关决策，判断
+# 逻辑见 scripts/local-s3-decide.sh（auto：endpoint 指向本机或未配置 S3 →
+# 启动；endpoint 远程或只配 bucket/凭据 → 跳过并输出原因）。幂等：已在运行
+# 则 no-op。docker 不可用或启动失败仅告警——未配置/未就绪 S3 时材料 API
+# 降级为 503，其余功能不受影响。
+LOCAL_S3_DECISION="skip"
+local_s3_rc=0
+LOCAL_S3_DECISION="$(scripts/local-s3-decide.sh .env deploy/.env)" || local_s3_rc=$?
+if [[ "$local_s3_rc" -eq 2 ]]; then
+    exit 2  # 开关值非法是配置错误，fail fast（原因已由脚本写到 stderr）
+fi
+if [[ "$LOCAL_S3_DECISION" == "start" ]]; then
+    if command -v docker >/dev/null 2>&1; then
+        COMPOSE_FILES=(-f deploy/compose.host.yaml)
+        [[ -f deploy/compose.local.yaml ]] && COMPOSE_FILES+=(-f deploy/compose.local.yaml)
+        if docker compose "${COMPOSE_FILES[@]}" up -d rustfs >/dev/null 2>&1; then
+            echo "RustFS（材料对象存储）已就绪"
+        else
+            echo "警告: rustfs 启动失败，材料相关功能将不可用（详见 deploy 文档）" >&2
+        fi
     else
-        echo "警告: rustfs 启动失败，材料相关功能将不可用（详见 deploy 文档）" >&2
+        echo "提示: 未检测到 docker，跳过 RustFS 启动；如需材料功能请自行启动 S3 兼容存储" >&2
     fi
-else
-    echo "提示: 未检测到 docker，跳过 RustFS 启动；如需材料功能请自行启动 S3 兼容存储" >&2
+elif [[ "$local_s3_rc" -ne 0 ]]; then
+    # 决策为 start 但凭据未配齐：原生形态降级为告警（与 docker 不可用同级），
+    # 不阻断后端启动。
+    echo "警告: 跳过本地 RustFS 启动（原因见上方），材料相关功能将不可用" >&2
 fi
 
 # 2. 后端
