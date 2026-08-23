@@ -16,6 +16,9 @@ def _job_id(workspace_id: str, workflow_key: str, source_id: str) -> str:
     return f"{workspace_id}_{workflow_key}_{safe_source_id}"
 
 
+_MATERIAL_LOCK_SQL = "select id from materials where id=%s and workspace_id=%s for key share"
+
+
 class JobBulkQueriesMixin(JobQueriesBase):
     jobs_dir: Path
 
@@ -48,6 +51,7 @@ class JobBulkQueriesMixin(JobQueriesBase):
         job_ids: list[str] = []
         identities: dict[str, tuple[str, str]] = {}
         storage_dirs: dict[str, Path] = {}
+        material_ids: list[str] = []
         for candidate in candidates:
             source_id = str(candidate["entity_id"])
             job_id = _job_id(workspace_id, workflow_key, source_id)
@@ -62,6 +66,9 @@ class JobBulkQueriesMixin(JobQueriesBase):
             storage_dir = job_storage_dir(self.jobs_dir, workspace_id, job_id)
             storage_dirs[job_id] = storage_dir
             job_ids.append(job_id)
+            input_doc = candidate_input(candidate)
+            if input_doc.get("type") == "material":
+                material_ids.append(str(input_doc.get("material_id") or ""))
             rows.append(
                 (
                     job_id,
@@ -77,12 +84,22 @@ class JobBulkQueriesMixin(JobQueriesBase):
                     int(revision["version"]),
                     revision["definition_hash"],
                     revision["definition_json"],
-                    json.dumps(candidate_input(candidate), ensure_ascii=False),
+                    json.dumps(input_doc, ensure_ascii=False),
                     frozen_config_json,
                 )
             )
 
         with self.connect() as conn:
+            # Material inputs FOR KEY SHARE their materials row so a concurrent
+            # material delete (FOR UPDATE, materials service) serializes with
+            # this insert: the delete either blocks until these jobs commit
+            # (its reference check then rejects it with 409) or commits first
+            # and the row is gone here. A missing row fails the whole run
+            # creation (run service maps ValueError to 400 + compensation).
+            for material_id in dict.fromkeys(material_ids):
+                locked = conn.execute(_MATERIAL_LOCK_SQL, (material_id, workspace_id)).fetchone()
+                if locked is None:
+                    raise ValueError(f"Material not found: {material_id}")
             placeholders = ",".join("%s" for _ in job_ids)
             existing = conn.execute(
                 f"select * from jobs where id in ({placeholders})", job_ids

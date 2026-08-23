@@ -15,6 +15,7 @@ from server.app.auth.workspace_access import require_workspace_access
 from server.app.routes.job_http import raise_job_http_error
 from server.app.services.job_errors import JobServiceError
 from server.app.services.materials import (
+    MaterialInUseError,
     MaterialsService,
     MaterialStorageUnavailableError,
     MaterialVerificationError,
@@ -70,6 +71,8 @@ def _raise_material_http_error(error: JobServiceError) -> Never:
         raise HTTPException(status_code=503, detail=str(error)) from error
     if isinstance(error, MaterialVerificationError):
         raise HTTPException(status_code=422, detail=str(error)) from error
+    if isinstance(error, MaterialInUseError):
+        raise HTTPException(status_code=409, detail=str(error)) from error
     raise_job_http_error(error)
 
 

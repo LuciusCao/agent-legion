@@ -38,6 +38,10 @@ class MaterialVerificationError(JobServiceError):
     """Stored object does not match the declared size/hash (routes map to 422)."""
 
 
+class MaterialInUseError(JobServiceError):
+    """Material is still referenced by a job input (routes map to 409)."""
+
+
 def _timestamp(value: Any) -> str | None:
     if value is None:
         return None
@@ -258,16 +262,32 @@ class MaterialsService:
         return _record(self._fetch_row(workspace_id, material_id))
 
     def delete(self, workspace_id: str, material_id: str) -> None:
-        """Delete the object and its row.
-
-        TODO(materials): enforce reference counting before physical deletion
-        (design §10) once jobs reference materials — a later slice.
-        """
+        """Delete the object and its row unless a job input references it."""
         storage = self._require_storage()
-        row = self._fetch_row(workspace_id, material_id)
-        storage.delete_object(str(row["storage_key"]))
+        # 检查与删除在同一事务，先 FOR UPDATE 锁材料行，与 run 创建侧
+        # （create_jobs_bulk 对引用材料行的 FOR KEY SHARE）串行化：delete 先
+        # 持锁则 run 侧阻塞至行消失后报错；run 侧先持锁则 delete 阻塞至 job
+        # 插入提交，下面的引用检查随之看到它。
+        # v1 blunt guard: any referencing job blocks deletion — queued jobs,
+        # failure re-runs and quality replays re-resolve the row at dispatch
+        # time and would fail with "material not found". Design §10 reference
+        # counting replaces this guard in a later slice.
         with write_transaction(self._dsn) as conn:
-            conn.execute(
-                "delete from materials where id=%s and workspace_id=%s",
+            row = conn.execute(
+                "select * from materials where id=%s and workspace_id=%s for update",
                 (material_id, workspace_id),
-            )
+            ).fetchone()
+            if row is None:
+                raise NotFoundError(f"Material not found: {material_id}")
+            referencing = conn.execute(
+                "select id from jobs where workspace_id=%s"
+                " and input_json::jsonb ->> 'type' = 'material'"
+                " and input_json::jsonb ->> 'material_id' = %s limit 1",
+                (workspace_id, material_id),
+            ).fetchone()
+            if referencing is not None:
+                raise MaterialInUseError(f"Material is referenced by job {referencing['id']}")
+            # 先删对象再删行（保持既有顺序）：对象删除失败则事务回滚、行仍在
+            # 可重试；行已删而对象残留才是不可恢复方向。
+            storage.delete_object(str(row["storage_key"]))
+            conn.execute("delete from materials where id=%s", (material_id,))

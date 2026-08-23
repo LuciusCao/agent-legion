@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 
 import pytest
 
+from server.app.db.connection import connect_database
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
@@ -287,6 +290,49 @@ def test_cross_request_job_id_collision_compensates_the_new_run(service, job_db)
 
     assert [run["id"] for run in service.list_runs(WORKSPACE_ID)] == [first["run"]["id"]]
     assert job_db.list_job_dedup_keys(WORKSPACE_ID) == {("material", "col/a")}
+
+
+def test_material_deleted_mid_creation_fails_and_compensates_run(service, job_db) -> None:
+    """TOCTOU 串行化（delete 先持锁方向）：材料删除已删行但未提交时，
+    create_run 的无锁候选校验仍看到旧行，而 create_jobs_bulk 的 FOR KEY
+    SHARE 阻塞到删除提交、行已消失 → InvalidOperationError（400），先行
+    提交的 run 行由既有补偿逻辑删除，不留孤儿。"""
+    _insert_material(job_db, WORKSPACE_ID, "mat-gone")
+
+    outcome: list[str] = []
+    entered = threading.Event()
+
+    def _create() -> None:
+        entered.set()
+        try:
+            service.create_run(
+                WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_material_item("mat-gone")]
+            )
+            outcome.append("created")
+        except InvalidOperationError:
+            outcome.append("invalid")
+        except Exception as exc:  # 线程内意外失败也要带回主线程定位
+            outcome.append(f"error:{exc!r}")
+
+    holder = connect_database(job_db.path)
+    try:
+        with holder:
+            # 模拟进行中的材料删除：行已删但事务未提交。
+            holder.execute("delete from materials where id=%s", ("mat-gone",))
+            thread = threading.Thread(target=_create)
+            thread.start()
+            assert entered.wait(timeout=5)
+            time.sleep(0.5)  # create_run 线程应正阻塞在 FOR KEY SHARE 上
+            assert thread.is_alive()
+        # holder 提交删除，释放行锁
+        thread.join(timeout=15)
+    finally:
+        holder.close()
+
+    assert not thread.is_alive()
+    assert outcome == ["invalid"]
+    assert service.list_runs(WORKSPACE_ID) == []
+    assert job_db.list_job_dedup_keys(WORKSPACE_ID) == set()
 
 
 def test_missing_workspace_and_revision_are_rejected(service) -> None:

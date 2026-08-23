@@ -117,6 +117,76 @@ def test_default_endpoint_models_compose_injection(tmp_path: Path) -> None:
     assert result.stdout.strip() == "start"
 
 
+def test_explicit_empty_endpoint_skips_docker_entry(tmp_path: Path) -> None:
+    """docker 入口：显式空 endpoint = AWS 默认端点（与 compose ${VAR-default}
+    语义一致），不得被 --default-endpoint 兜底误判为本机 RustFS（无凭据时
+    原先会 rc 3 阻断启动）。"""
+    env_file = _write_env(tmp_path, "AGENT_LEGION_S3_ENDPOINT=\n")
+    result = _run("--default-endpoint", _RUSTFS_ENDPOINT, str(env_file))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "skip"
+    assert "显式置空" in result.stderr
+
+
+def test_explicit_empty_endpoint_with_bucket_skips(tmp_path: Path) -> None:
+    """显式空 endpoint + 配了 bucket：同样按外部对象存储 skip。"""
+    env_file = _write_env(tmp_path, "AGENT_LEGION_S3_ENDPOINT=\nAGENT_LEGION_S3_BUCKET=b\n")
+    result = _run("--default-endpoint", _RUSTFS_ENDPOINT, str(env_file))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "skip"
+
+
+def test_explicit_empty_endpoint_skips_native_entry(tmp_path: Path) -> None:
+    """native-prod-up.sh 不传 --default-endpoint：显式空值同样 skip，
+    而不是回落「未配置外部 S3 → start」。"""
+    env_file = _write_env(tmp_path, "AGENT_LEGION_S3_ENDPOINT=\n")
+    result = _run(str(env_file))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "skip"
+
+
+def test_explicit_empty_endpoint_from_process_env_skips(tmp_path: Path) -> None:
+    """进程环境里 set-but-empty 同样算「出现」。"""
+    result = _run(
+        "--default-endpoint",
+        _RUSTFS_ENDPOINT,
+        str(tmp_path / "missing.env"),
+        env_extra={"AGENT_LEGION_S3_ENDPOINT": ""},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "skip"
+
+
+def test_process_env_empty_endpoint_overrides_local_file_value(tmp_path: Path) -> None:
+    """进程显式空 endpoint（=AWS 默认端点）优先于文件里的本机地址：
+    首次出现即生效，空值也是值，不得回退到文件取值。"""
+    env_file = _write_env(
+        tmp_path,
+        "AGENT_LEGION_S3_ENDPOINT=http://127.0.0.1:9000\n"
+        "AGENT_LEGION_S3_ACCESS_KEY=a\n"
+        "AGENT_LEGION_S3_SECRET_KEY=b\n",
+    )
+    result = _run(str(env_file), env_extra={"AGENT_LEGION_S3_ENDPOINT": ""})
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "skip"
+    assert "显式置空" in result.stderr
+
+
+def test_earlier_file_empty_endpoint_wins_over_later_local(tmp_path: Path) -> None:
+    """文件 A 显式空 + 文件 B 本机地址：A 先出现即生效 → skip。"""
+    first = _write_env(tmp_path, "AGENT_LEGION_S3_ENDPOINT=\n", name="first.env")
+    second = _write_env(
+        tmp_path,
+        "AGENT_LEGION_S3_ENDPOINT=http://127.0.0.1:9000\n"
+        "AGENT_LEGION_S3_ACCESS_KEY=a\n"
+        "AGENT_LEGION_S3_SECRET_KEY=b\n",
+        name="second.env",
+    )
+    result = _run(str(first), str(second))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "skip"
+
+
 def test_start_requires_keys(tmp_path: Path) -> None:
     """已表达本地存储意图（本机 endpoint）但凭据未配齐 → 配置错误。"""
     env_file = _write_env(tmp_path, "AGENT_LEGION_S3_ENDPOINT=http://127.0.0.1:9000\n")

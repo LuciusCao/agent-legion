@@ -11,6 +11,9 @@
 #             - endpoint 指向本机（127.0.0.1 / localhost / ::1 / compose 内部
 #               名 rustfs）→ start
 #             - endpoint 指向外部地址 → skip
+#             - endpoint 键出现但显式置空（AGENT_LEGION_S3_ENDPOINT=，AWS S3
+#               默认端点写法，与 compose ${VAR-default} 语义一致）→ skip，
+#               不再套用编排层注入的 --default-endpoint
 #             - 未配 endpoint 但配了 bucket 或凭据（AWS S3 默认端点写法）→ skip
 #             - 完全未配置 S3 → start（零配置默认后端；此时凭据缺失不做硬校验，
 #               RustFS 只绑 loopback、后端未配 bucket 时材料 API 降级 503，
@@ -69,20 +72,44 @@ lookup() {
         [[ -f "$file" ]] || continue
         line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" "$file" 2>/dev/null | head -n 1 || true)"
         [[ -n "$line" ]] || continue
-        value="${line#*=}"
-        # 去首尾空白与一层配对的引号（与 dotenv 解析对齐）
-        value="$(printf '%s' "$value" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-        if [[ ${#value} -ge 2 && "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
-            value="${value:1:${#value}-2}"
-        elif [[ ${#value} -ge 2 && "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
-            value="${value:1:${#value}-2}"
-        fi
+        value="$(_dotenv_value "$line")"
         if [[ -n "$value" ]]; then
             printf '%s' "$value"
             return 0
         fi
     done
     return 0
+}
+
+# 解析 env 行的值部分：去 = 前缀、首尾空白与一层配对的引号（与 dotenv 对齐）。
+_dotenv_value() {
+    local value="${1#*=}"
+    value="$(printf '%s' "$value" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+    if [[ ${#value} -ge 2 && "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
+        value="${value:1:${#value}-2}"
+    elif [[ ${#value} -ge 2 && "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
+        value="${value:1:${#value}-2}"
+    fi
+    printf '%s' "$value"
+}
+
+# endpoint 专用，严格 dotenv 语义：按优先级（进程环境 > 文件按传入顺序）
+# 找第一个出现该键的来源并用它的值（哪怕为空）——空值也是值，不回退更低
+# 优先级来源；完全未出现返回 1。bucket/凭据/开关保持空=未配置，仍走 lookup。
+lookup_first() {
+    local key="$1" file line
+    if printenv "$key" >/dev/null 2>&1; then
+        printenv "$key"
+        return 0
+    fi
+    for file in ${ENV_FILES[@]+"${ENV_FILES[@]}"}; do
+        [[ -f "$file" ]] || continue
+        line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" "$file" 2>/dev/null | head -n 1 || true)"
+        [[ -n "$line" ]] || continue
+        _dotenv_value "$line"
+        return 0
+    done
+    return 1
 }
 
 endpoint_is_local() {
@@ -142,8 +169,13 @@ case "$MODE" in
         emit skip "AGENT_LEGION_LOCAL_S3=never（使用外部对象存储）"
         ;;
     auto)
-        endpoint="$(lookup AGENT_LEGION_S3_ENDPOINT)"
-        [[ -n "$endpoint" ]] || endpoint="$DEFAULT_ENDPOINT"
+        endpoint_present=false
+        if endpoint="$(lookup_first AGENT_LEGION_S3_ENDPOINT)"; then
+            endpoint_present=true
+        else
+            # 键完全未出现才允许编排层注入的默认 endpoint 兜底。
+            endpoint="$DEFAULT_ENDPOINT"
+        fi
         if [[ -n "$endpoint" ]]; then
             if endpoint_is_local "$endpoint"; then
                 require_keys
@@ -151,6 +183,8 @@ case "$MODE" in
             else
                 emit skip "AGENT_LEGION_S3_ENDPOINT=${endpoint} 指向外部地址，使用外部对象存储"
             fi
+        elif $endpoint_present; then
+            emit skip "AGENT_LEGION_S3_ENDPOINT 显式置空（AWS S3 默认端点写法），使用外部对象存储"
         else
             bucket="$(lookup AGENT_LEGION_S3_BUCKET)"
             access_key="$(lookup AGENT_LEGION_S3_ACCESS_KEY)"
