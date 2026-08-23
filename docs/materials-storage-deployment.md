@@ -134,8 +134,8 @@ EOF
 ### 2.3 启动后检查
 
 - 后端启动时自动执行 schema 迁移（`job_batches` → `runs`，旧 payload
-  解析下沉到 jobs）。**生产库有 26 万+ jobs，迁移 UPDATE 可能耗时数
-  分钟，务必先备份数据库并在低峰执行**；迁移幂等可重入，中断后重启
+  解析下沉到 jobs）。**存量 jobs 较多时迁移 UPDATE 可能耗时数分钟，
+  务必先备份数据库并在低峰执行**；迁移幂等可重入，中断后重启
   会继续。
 - 上传一个文件验证闭环：`POST /api/workspaces/{id}/materials/presign`
   → PUT → `complete`，材料状态变 `ready`。
