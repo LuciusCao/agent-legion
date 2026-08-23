@@ -81,8 +81,8 @@ COMPOSE_HOST_FILES  := -f deploy/compose.host.yaml $(if $(wildcard deploy/compos
 COMPOSE_WORKER_FILES := -f deploy/compose.worker.yaml $(if $(wildcard deploy/compose.worker.local.yaml),-f deploy/compose.worker.local.yaml,)
 
 .PHONY: stack-host-up
-stack-host-up: ## 部署机：启动 PostgreSQL + Agent Legion Host + 本机 Worker
-	docker compose $(COMPOSE_HOST_FILES) up -d --build
+stack-host-up: ## 部署机：启动 PostgreSQL + Agent Legion Host + 本机 Worker（本地 RustFS 由 local-s3-decide.sh 按 AGENT_LEGION_LOCAL_S3 决策，skip 时输出为空）
+	docker compose $(COMPOSE_HOST_FILES) $$(./scripts/local-s3-decide.sh --compose-flags --default-endpoint http://rustfs:9000 deploy/.env) up -d --build
 
 # 生产环境启停（仅 prod worktree 使用）：默认本机原生形态（后端 8000 含 SPA +
 # worker 8787）；Docker stack 形态收编为参数 `make prod-up docker` /

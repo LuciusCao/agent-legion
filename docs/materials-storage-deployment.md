@@ -10,20 +10,22 @@ Agent Legion 的材料（用户上传文件）与后续的 job 产物统一存�
 
 | 项 | 值 | 说明 |
 |---|---|---|
-| 服务 | compose `rustfs`（`deploy/compose.host.yaml`） | S3 API `:9000`，Web console `:9001`，数据卷 `rustfs-data` |
-| `AGENT_LEGION_S3_ENDPOINT` | `http://rustfs:9000`（compose 内自动注入） | 后端直连地址；留空 = AWS S3 |
+| 服务 | compose `rustfs`（`deploy/compose.host.yaml`，挂 `materials-local` profile） | S3 API `:9000`，Web console `:9001`，数据卷 `rustfs-data`；默认 `docker compose up` 不拉起，由 prod-up 入口按 `AGENT_LEGION_LOCAL_S3` 决策后加 `--profile materials-local` |
+| `AGENT_LEGION_LOCAL_S3` | `auto`（默认）/ `always` / `never` | 本地 RustFS 三态开关，判断逻辑见 `scripts/local-s3-decide.sh`（所有 prod-up / stack 入口共用）。`auto`：endpoint 指向本机或未配置任何 S3 → 启动；endpoint 远程，或只配 bucket/凭据不配 endpoint（AWS 默认端点写法）→ 跳过并打一行原因日志 |
+| `AGENT_LEGION_S3_ENDPOINT` | docker stack 默认注入 `http://rustfs:9000`（可在 `deploy/.env` 覆盖；显式空值 = AWS S3 默认端点） | 后端直连地址；远程地址会让 `auto` 跳过本地 rustfs |
 | `AGENT_LEGION_S3_PUBLIC_ENDPOINT` | compose 默认 `http://127.0.0.1:9000` | presigned URL 的签发地址，必须浏览器 / remote worker 可达；留空则回落用内部 endpoint 签发 |
 | `AGENT_LEGION_S3_BUCKET` | 默认 `agent-legion` | 每个部署实例一个 bucket；dev worktree 派生 `agent-legion-<worktree>` |
-| `AGENT_LEGION_S3_ACCESS_KEY` / `AGENT_LEGION_S3_SECRET_KEY` | **必填，无默认值** | compose 只做 `${}` 字面插值，`deploy/.env` 必须写字面值；`_FILE` 变体仅原生形态可用。compose 同时把它注入 rustfs 容器作为其 root 凭据 |
+| `AGENT_LEGION_S3_ACCESS_KEY` / `AGENT_LEGION_S3_SECRET_KEY` | 本地 RustFS 形态必填；外部 S3 走默认凭据链时留空 | compose 只做 `${}` 字面插值，`deploy/.env` 必须写字面值；`_FILE` 变体仅原生形态可用。compose 同时把它注入 rustfs 容器作为其 root 凭据 |
 | `AGENT_LEGION_MATERIAL_CACHE_MAX_BYTES` | 默认 50GiB | 节点物化缓存（`data/materials_cache/`）容量上限，LRU 淘汰 |
 
 凭据是实例级 infra 配置（与 `database.url` 同级），env-only 注入，不落
 tracked yaml、DB、API 或日志（MATERIAL-SECRET-001）。
 
 未配置 `AGENT_LEGION_S3_BUCKET` 时服务整体照常启动，只有 materials/runs
-上传相关 API 返回 503（优雅降级）；但 **Docker 形态下 compose 因
-`${AGENT_LEGION_S3_ACCESS_KEY:?}` 必填占位直接拒绝启动**——部署前必须
-先配好 `deploy/.env`。
+上传相关 API 返回 503（优雅降级）。**Docker 形态下决策为启动本地 RustFS
+但凭据未配齐时，prod-up 入口（`scripts/local-s3-decide.sh`）fail-fast**
+——RustFS 留空凭据会回落镜像默认的公开凭据，必须拦住；部署前先配好
+`deploy/.env`。
 
 ## 2. 首次部署 / 升级启用步骤
 
@@ -53,12 +55,33 @@ echo 'AGENT_LEGION_S3_PUBLIC_ENDPOINT=http://<宿主机地址>:9000' >> deploy/.
 ```
 
 （原生形态 `make prod-up` 的后端/worker 是本机进程，不经 compose：把同名
-变量写进 prod worktree 根的 `.env`——原生加载支持 `_FILE` 变体。
-RustFS 容器不用手工起：`native-prod-up.sh` 会自动
+变量写进 prod worktree 根的 `.env`——原生加载支持 `_FILE` 变体；注意
+compose 插值只读 `deploy/.env`，rustfs 容器的 root 凭据以 `deploy/.env`
+为准，两处要写同一组值。RustFS 容器不用手工起：`native-prod-up.sh` 经
+`scripts/local-s3-decide.sh` 决策后自动
 `docker compose -f deploy/compose.host.yaml up -d rustfs`（幂等；docker
 不可用或启动失败仅告警，材料 API 降级为 503，其余功能不受影响）。
 原生形态的 `AGENT_LEGION_S3_ENDPOINT` 指向 `http://127.0.0.1:9000`，
 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向浏览器 / remote worker 可达的地址。）
+
+### 2.1.1 使用外部对象存储（AWS S3 / MinIO / Garage）
+
+代码只对 S3 API 编程，外部存储只需改配置，不需要改代码：
+
+1. 在 `deploy/.env`（docker 形态，compose 插值只读它）或根 `.env`
+   （原生形态）配置外部存储：
+   - 自建 S3 兼容服务：`AGENT_LEGION_S3_ENDPOINT=https://<外部地址>` +
+     bucket + 凭据；
+   - AWS S3：显式留空 endpoint（`AGENT_LEGION_S3_ENDPOINT=`，docker 形态
+     空值会盖掉 compose 注入的 rustfs 默认值）+ bucket，凭据写静态
+     key 或全留空走 boto3 默认凭据链（IAM role 等）；
+   - `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 同步指向客户端可达地址（AWS 默认
+     端点场景同样显式留空）。
+2. 本地 RustFS 会随 `auto` 决策自动跳过（endpoint 远程或只配 bucket/凭据
+   时 skip，并打一行原因日志）；也可用 `AGENT_LEGION_LOCAL_S3=never`
+   显式关闭，`always` 则恢复旧版无条件启动。
+3. auto 误判不会静默失败：后端启动自检（probe 的 DEGRADED 日志）与
+   `/api/health` 的 `storage.reachable` 会暴露。
 
 ### 2.2 启动与建 bucket
 
@@ -128,7 +151,8 @@ EOF
 - **缓存**：`data/materials_cache/` 是可淘汰缓存，可随时清空（下次
   dispatch 重新下载）；worker 侧在 `{work_root}/materials_cache`。
 - **迁移后端**（RustFS → AWS S3 或反向）：改 `deploy/.env` 的
-  endpoint/凭据，数据用 `aws s3 sync s3://old s3://new` 或 `rclone`
+  endpoint/凭据（`AGENT_LEGION_LOCAL_S3=auto` 会据此自动启停本地
+  rustfs），数据用 `aws s3 sync s3://old s3://new` 或 `rclone`
   搬迁；`materials.storage_key` 与后端无关，无需改库。
 - **demo 材料播种**：S3 配好后，新建/绑定 demo workspace 时自动播种
   `examples/` 演示材料；`make import-demo` 同样触发。

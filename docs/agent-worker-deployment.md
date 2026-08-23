@@ -83,7 +83,7 @@ make stack-host-up
 curl http://192.0.2.1:8000/api/health
 ```
 
-该命令启动 PostgreSQL、Host 和部署机本地 Worker。它们使用 [compose.host.yaml](../deploy/compose.host.yaml) 编排。
+该命令启动 PostgreSQL、Host 和部署机本地 Worker。它们使用 [compose.host.yaml](../deploy/compose.host.yaml) 编排。本地 RustFS（材料对象存储）是否随 stack 启动由 `AGENT_LEGION_LOCAL_S3`（默认 `auto`）经 `scripts/local-s3-decide.sh` 决策：配置外部 S3 后自动跳过，详见 [materials-storage-deployment.md](materials-storage-deployment.md)。
 
 ## 4. Worker 机器准备
 
