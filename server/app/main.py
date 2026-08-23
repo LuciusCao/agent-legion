@@ -45,7 +45,7 @@ from server.app.skills.runtime import build_skill_manager
 from server.app.skills.seed import seed_skill_sources
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
-from server.app.storage import build_s3_storage
+from server.app.storage import build_s3_storage_checked
 from server.app.studio_chat.service import StudioChatService
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.worker_startup import start_worker_threads
@@ -193,7 +193,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.job_event_buffer = job_event_buffer
     # Materials object storage is env-only infra config (AGENT_LEGION_S3_*):
     # unconfigured instances keep the API up and degrade materials to 503.
-    app.state.materials_service = MaterialsService(job_db.path, build_s3_storage())
+    # build_s3_storage_checked logs one startup self-check line (OK/DEGRADED/
+    # configured=false); a failed probe never blocks startup.
+    app.state.materials_service = MaterialsService(job_db.path, build_s3_storage_checked())
     app.state.workspace_event_aggregator = workspace_event_aggregator
     executor_catalog = ExecutorCatalogService(settings)
     workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db, settings)

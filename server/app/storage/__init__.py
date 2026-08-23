@@ -1,5 +1,6 @@
 """Instance object storage: S3 settings (env-only) and the boto3 client."""
 
+from server.app.storage.probe import build_s3_storage_checked
 from server.app.storage.s3_client import (
     ObjectHead,
     ObjectStorage,
@@ -14,5 +15,6 @@ __all__ = [
     "S3Settings",
     "S3StorageClient",
     "build_s3_storage",
+    "build_s3_storage_checked",
     "load_s3_settings",
 ]

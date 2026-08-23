@@ -294,7 +294,8 @@ server/app/
 | MemberResponse | BaseModel | id: str, username: str, display_name: str, user_role: Literal['admin', 'membe... | app/routes/auth_contracts.py |
 | MembersResponse | BaseModel | members: list[MemberResponse] | app/routes/auth_contracts.py |
 | MemberPutRequest | BaseModel | user_id: str, role: Literal['editor', 'viewer'] | app/routes/auth_contracts.py |
-| HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None | app/routes/common.py |
+| StorageStatus | BaseModel | configured: bool, reachable: bool | app/routes/common.py |
+| HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None, storage: StorageStatus | None | app/routes/common.py |
 | ConnectionCreate | BaseModel | key: str, type: str, display_name: str, config: dict[str, Any] | app/routes/connections_contracts.py |
 | ConnectionUpdate | BaseModel | display_name: str | None, config: dict[str, Any] | None, enabled: bool | None | app/routes/connections_contracts.py |
 | ConnectionTokenStatus | BaseModel | expires_at: str | None, refreshed_at: str | None | app/routes/connections_contracts.py |

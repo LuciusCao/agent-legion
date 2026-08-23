@@ -2965,6 +2965,7 @@ export interface components {
     HealthResponse: {
       /** Ok */
       ok: boolean
+      storage?: components['schemas']['StorageStatus'] | null
       /** Workers */
       workers?: {
         [key: string]: string
@@ -4298,6 +4299,13 @@ export interface components {
       tags?: string[]
       /** Valid */
       valid: boolean
+    }
+    /** StorageStatus */
+    StorageStatus: {
+      /** Configured */
+      configured: boolean
+      /** Reachable */
+      reachable: boolean
     }
     /**
      * StudioAgentActiveWorkflowResponse
