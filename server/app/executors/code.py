@@ -35,6 +35,8 @@ from server.app.executors.models import (
     ExecutionContext,
     ExecutionResult,
 )
+from server.app.storage import build_s3_storage
+from shared.material_cache import MATERIALS_CACHE_DIRNAME
 
 logger = logging.getLogger(__name__)
 
@@ -61,20 +63,39 @@ class CodeExecutor:
         settings_config: Mapping[str, Any] | None = None,
         job_db: Any | None = None,
         cancellation_grace_seconds: float = 5,
+        materials_cache_root: Path | None = None,
     ) -> None:
         self._repo_root = Path(repo_root).resolve()
         self.settings_config = dict(settings_config) if settings_config is not None else {}
         self.job_db = job_db
         self.cancellation_grace_seconds = cancellation_grace_seconds
+        # Materialization cache (design §6.2): the composition root passes
+        # ``settings.data_dir / materials_cache``; DB-less contexts (tests)
+        # fall back under the repo's data dir. Statically allow-read in the
+        # sandbox (MATERIAL-ACCESS-001).
+        self._materials_cache_root = (
+            Path(materials_cache_root)
+            if materials_cache_root is not None
+            else self._repo_root / "data" / MATERIALS_CACHE_DIRNAME
+        )
         self._cancelled: set[str] = set()
         self._velites_probed = False
         self._velites_path: str | None = None
+        self._storage_probed = False
+        self._object_storage: Any | None = None
 
     def supports(self, capability: str) -> bool:
         # Single implicit code pool (P-0.5): the adapter runs any capability;
         # dispatch fails nodes without published node code earlier
         # (EXEC-CODE-002), so there is no capability allowlist left here.
         return True
+
+    def _object_store(self) -> Any | None:
+        """Instance object storage for materialization, probed lazily."""
+        if not self._storage_probed:
+            self._storage_probed = True
+            self._object_storage = build_s3_storage()
+        return self._object_storage
 
     def execute(self, context: ExecutionContext) -> ExecutionResult:
         if context.execution_id in self._cancelled:

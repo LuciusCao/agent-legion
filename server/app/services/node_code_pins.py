@@ -32,21 +32,20 @@ def node_code_pins_from_job_snapshot(job: dict) -> dict[str, Any]:
 
 def frozen_dispatch_pin(
     snapshot_pins: dict[str, Any] | None,
-    batch_payload: dict[str, Any] | None,
+    run_payload: dict[str, Any] | None,
     node_key: str,
 ) -> dict[str, Any] | None:
-    """The frozen pin dispatch resolves — quality-replay batches only (#115).
+    """The frozen pin dispatch resolves — quality-replay runs only (#115).
 
     Ordinary jobs return None here so dispatch resolves the latest published
-    code; only a batch carrying the ``quality_replay`` marker pins, taking
-    the job snapshot pins first and the intake batch payload's
-    ``node_code_versions`` as the fallback for jobs whose snapshot carries
-    no pins (legacy rows).
+    code; only a run carrying the ``quality_replay`` marker pins, taking
+    the job snapshot pins first and the run's frozen ``node_code_versions``
+    as the fallback for jobs whose snapshot carries no pins (legacy rows).
     """
-    if not isinstance(batch_payload, dict) or not batch_payload.get("quality_replay"):
+    if not isinstance(run_payload, dict) or not run_payload.get("quality_replay"):
         return None
     pin = (snapshot_pins or {}).get(node_key)
     if pin is not None:
         return cast("dict[str, Any]", pin)
-    batch_pins: dict[str, Any] = batch_payload.get("node_code_versions") or {}
-    return cast("dict[str, Any] | None", batch_pins.get(node_key))
+    run_pins: dict[str, Any] = run_payload.get("node_code_versions") or {}
+    return cast("dict[str, Any] | None", run_pins.get(node_key))

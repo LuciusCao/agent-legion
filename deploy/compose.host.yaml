@@ -17,6 +17,40 @@ services:
       timeout: 3s
       retries: 20
 
+  rustfs:
+    # 材料对象存储（materials-and-runs 设计 §6.1）：S3 兼容，代码只对 S3 API
+    # 编程，可平替 MinIO/Garage/AWS S3。RustFS 尚无 GA tag（1.0.0-alpha/beta），
+    # 用 latest 跟随官方文档；凭据从 deploy/.env 注入（勿用官方示例的
+    # rustfsadmin 默认值），host 经同一组 AGENT_LEGION_S3_* 访问。
+    #
+    # 挂在 materials-local profile 下：默认 docker compose up 不拉起，由
+    # scripts/local-s3-decide.sh（AGENT_LEGION_LOCAL_S3=auto|always|never）
+    # 决策后给 compose 加 --profile materials-local；配置外部 S3 时不再启动。
+    # 凭据插值不能用 :? 强校验——profile 未启用时 compose 仍会解析插值，
+    # 会误伤不配静态凭据的外部 S3 用户；凭据齐备性由 local-s3-decide.sh
+    # 在 start 决策时 fail-fast（直接绕开 prod-up 入口徒手 compose 且启用
+    # profile 时，留空凭据会回落镜像默认的公开凭据，不要这么做）。
+    profiles: ["materials-local"]
+    image: rustfs/rustfs:latest
+    restart: unless-stopped
+    command: ["/data"]
+    environment:
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: ${AGENT_LEGION_S3_ACCESS_KEY:-}
+      RUSTFS_SECRET_KEY: ${AGENT_LEGION_S3_SECRET_KEY:-}
+    volumes:
+      - rustfs-data:/data
+    ports:
+      - ${AGENT_LEGION_S3_BIND:-127.0.0.1}:9000:9000
+      - ${AGENT_LEGION_S3_BIND:-127.0.0.1}:9001:9001
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:9000/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+
   host:
     build:
       context: ..
@@ -26,12 +60,31 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # rustfs 不在此处：它挂在 materials-local profile 下，depends_on 指向
+      # 未启用 profile 的服务会让 compose 直接报 "depends on undefined
+      # service" 拒绝启动；且 S3 是软依赖（不可达时材料 API 降级 503，
+      # 启动自检 probe 会持续暴露，见 server/app/storage/probe.py）。
     environment:
       AGENT_LEGION_DATABASE_URL: postgresql://agent_legion@postgres:5432/agent_legion
       PGPASSFILE: /run/secrets/postgres_pgpass
       AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE: /run/secrets/agent_worker_register_token
       AGENT_LEGION_VAULT_MASTER_KEY_FILE: /run/secrets/vault_master_key
       AGENT_LEGION_DATA_DIR: /var/lib/agent-legion
+      # 无冒号的 ${VAR-默认值} 形式：deploy/.env 显式写 AGENT_LEGION_S3_ENDPOINT=
+      # （空值）时生效为「AWS 默认端点」，不会被默认值盖掉；外部 S3 在这里
+      # 配远程地址后，local-s3-decide.sh 会同步跳过本地 rustfs。
+      AGENT_LEGION_S3_ENDPOINT: ${AGENT_LEGION_S3_ENDPOINT-http://rustfs:9000}
+      # presigned URL 的签发地址：浏览器直传与 compose 网络外的 remote worker
+      # 都访问不到内部地址 rustfs:9000，必须用客户端可达地址签发（SigV4 把
+      # Host 签进签名，不能签后改写）。默认值匹配 rustfs 的端口映射
+      # （${AGENT_LEGION_S3_BIND:-127.0.0.1}:9000）；非本机访问时在
+      # deploy/.env 覆盖为外部可达地址。
+      AGENT_LEGION_S3_PUBLIC_ENDPOINT: ${AGENT_LEGION_S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
+      AGENT_LEGION_S3_BUCKET: ${AGENT_LEGION_S3_BUCKET:-agent-legion}
+      # 留空 = boto3 默认凭据链（IAM role 等外部 S3 场景）；本地 RustFS 形态
+      # 的凭据齐备性由 scripts/local-s3-decide.sh 在 prod-up 入口 fail-fast。
+      AGENT_LEGION_S3_ACCESS_KEY: ${AGENT_LEGION_S3_ACCESS_KEY:-}
+      AGENT_LEGION_S3_SECRET_KEY: ${AGENT_LEGION_S3_SECRET_KEY:-}
     secrets: [agent_worker_register_token, postgres_pgpass, vault_master_key]
     volumes:
       - host-data:/var/lib/agent-legion
@@ -103,6 +156,7 @@ secrets:
 
 volumes:
   postgres-data:
+  rustfs-data:
   host-data:
   worker-data:
   worker-control:

@@ -85,7 +85,7 @@ def test_fairness_under_randomized_insertion_order(tmp_path: Path, seed: int) ->
             workflow_key="test",
             source_type="question",
             source_id=source_id,
-            batch_id="",
+            run_id="",
             title=source_id,
             node_keys=["fetch"],
             workspace_id=workspace_id,

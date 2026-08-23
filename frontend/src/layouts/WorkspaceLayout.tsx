@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Outlet, useLocation } from 'react-router-dom'
 import { IconButton } from '@mui/material'
 import { useCurrentWorkspace } from '../hooks/useWorkspaces'
@@ -8,6 +8,7 @@ import { useUiStore } from '../stores/uiStore'
 import { AppShell } from './AppShell'
 import { AppBar } from '../components/AppBar'
 import { AddDialog } from '../components/AddDialog'
+import { AddItemsDialog } from '../components/AddItemsDialog'
 import { AgentStatusIndicator } from '../components/AgentStatusIndicator'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { WorkflowStudioButton } from '../components/WorkflowStudioButton'
@@ -19,7 +20,6 @@ export default function WorkspaceLayout() {
 
   const { fetchWorkerStatus } = useAgentsStore()
   const {
-    openAddDialog,
     addDialogOpen,
     closeAddDialog,
     addDialogContext,
@@ -32,6 +32,7 @@ export default function WorkspaceLayout() {
   } = useUiStore()
   const selectMode = useJobStore((state) => state.selectMode)
   const toggleSelectMode = useJobStore((state) => state.toggleSelectMode)
+  const [addItemsOpen, setAddItemsOpen] = useState(false)
   const isDetailPage =
     workspaceId &&
     location.pathname.startsWith(`/workspaces/${workspaceId}/jobs/`)
@@ -83,7 +84,7 @@ export default function WorkspaceLayout() {
                   aria-label="添加"
                   onClick={() => {
                     if (workspaceId) {
-                      openAddDialog({ context: 'workspace', workspaceId })
+                      setAddItemsOpen(true)
                     }
                   }}
                 >
@@ -134,6 +135,11 @@ export default function WorkspaceLayout() {
       mainClassName="workspace-main"
     >
       <Outlet />
+      <AddItemsDialog
+        open={addItemsOpen}
+        onClose={() => setAddItemsOpen(false)}
+        workspaceId={workspaceId}
+      />
       <AddDialog
         open={addDialogOpen}
         onClose={closeAddDialog}

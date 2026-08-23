@@ -65,8 +65,10 @@ def _session_token(script_path: Path) -> str:
     new_session = next(
         e["received"] for e in sink if e.get("received", {}).get("method") == "session/new"
     )
-    env = {item["name"]: item["value"] for item in new_session["params"]["mcpServers"][0]["env"]}
-    return str(env["AGENT_LEGION_STUDIO_AGENT_TOKEN"])
+    headers = {
+        item["name"]: item["value"] for item in new_session["params"]["mcpServers"][0]["headers"]
+    }
+    return headers["Authorization"].removeprefix("Bearer ")
 
 
 def _context_url(session_id: str) -> str:

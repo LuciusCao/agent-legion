@@ -1,10 +1,12 @@
 """Bundle-dir garbage collection for terminal Agent executions.
 
 Called by the sweeper every few seconds, so it cannot re-read every terminal
-manifest in history. First call after startup scans all terminal rows
-(streamed in chunks, so scan memory stays independent of table size); later
-calls read only rows finished within a trailing overlap window
-(``broker._reap_watermark``). Reaping is idempotent.
+manifest in history. The first call of a process scans all terminal rows
+(streamed in chunks, so scan memory stays independent of table size); that
+first call is deferred to the background sweeper loop (#139) so the full
+scan never blocks startup readiness. Later calls read only rows finished
+within a trailing overlap window (``broker._reap_watermark``). Reaping is
+idempotent.
 """
 
 from __future__ import annotations

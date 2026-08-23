@@ -72,7 +72,7 @@ class _Env:
             workflow_key="test",
             source_type="question",
             source_id="Q1",
-            batch_id="",
+            run_id="",
             title="Q1",
             node_keys=list(definition.nodes),
             workspace_id=self.workspace_id,
@@ -133,10 +133,10 @@ class _Env:
                 (status, error, job_id),
             )
 
-    def copy_batch_payload(self, replay: dict) -> dict:
+    def copy_run_pins(self, replay: dict) -> dict:
         copy_job = self.job_db.get_job(str(replay["replay_job_id"]))
-        batch = self.job_db.get_batch(str(copy_job["batch_id"]))
-        return json.loads(str(batch["source_payload_json"]))
+        run = self.job_db.get_run(str(copy_job["run_id"]))
+        return json.loads(str(run["frozen_pins_json"]))
 
 
 @pytest.fixture
@@ -283,7 +283,7 @@ def test_default_pin_uses_current_published(agent_env) -> None:
     replay = agent_env.service().create_replay(agent_env.workspace_id, "item-1")
     assert replay["agent_id"] == AGENT_ID
     assert replay["agent_version"] == 1
-    pin = agent_env.copy_batch_payload(replay)["agent_versions"]["generate"]
+    pin = agent_env.copy_run_pins(replay)["agent_versions"]["generate"]
     assert pin["agent_id"] == AGENT_ID
     assert pin["version"] == 1
     published = AgentService(TEST_DATABASE_URL, agent_env.workspace_id).get_published(AGENT_ID)
@@ -294,7 +294,7 @@ def test_explicit_draft_version_pin(agent_env) -> None:
     draft = _save_draft(agent_env.workspace_id)
     replay = agent_env.service().create_replay(agent_env.workspace_id, "item-1", agent_version=2)
     assert replay["agent_version"] == 2
-    pin = agent_env.copy_batch_payload(replay)["agent_versions"]["generate"]
+    pin = agent_env.copy_run_pins(replay)["agent_versions"]["generate"]
     assert pin["version"] == 2
     assert pin["definition_hash"] == draft.definition_hash()
 
@@ -305,7 +305,7 @@ def test_archived_version_pin_allowed(agent_env) -> None:
     _save_draft(agent_env.workspace_id)
     service.publish(AGENT_ID)  # v2 published, v1 archived
     replay = agent_env.service().create_replay(agent_env.workspace_id, "item-1", agent_version=1)
-    pin = agent_env.copy_batch_payload(replay)["agent_versions"]["generate"]
+    pin = agent_env.copy_run_pins(replay)["agent_versions"]["generate"]
     assert pin["version"] == 1
     assert pin["definition_hash"] == published_v1.definition_hash
 

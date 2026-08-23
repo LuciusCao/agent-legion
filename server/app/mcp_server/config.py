@@ -23,6 +23,11 @@ from dataclasses import dataclass
 API_BASE_ENV = "AGENT_LEGION_MCP_API_BASE"
 TOKEN_ENV = "AGENT_LEGION_STUDIO_AGENT_TOKEN"
 SESSION_ID_ENV = "AGENT_LEGION_MCP_SESSION_ID"
+# HTTP transport (in-app streamable-HTTP endpoint): the scoped token rides the
+# standard Authorization Bearer header; the chat session binding rides this
+# custom header. Both live only inside the ACP session/new request — never
+# persisted, never logged (STUDIO-AGENT-001).
+SESSION_ID_HEADER = "x-agent-legion-mcp-session-id"
 DEFAULT_API_BASE = "http://127.0.0.1:8000"
 
 
@@ -47,3 +52,17 @@ class McpServerConfig:
         api_base = env.get(API_BASE_ENV, "").strip() or DEFAULT_API_BASE
         session_id = env.get(SESSION_ID_ENV, "").strip() or None
         return cls(api_base=api_base.rstrip("/"), token=token, session_id=session_id)
+
+    @classmethod
+    def from_headers(cls, headers: Mapping[str, str], *, api_base: str) -> McpServerConfig:
+        """Build the per-request config of the in-app HTTP transport.
+
+        Header lookups are case-insensitive per HTTP semantics; callers pass a
+        case-insensitive mapping (e.g. Starlette ``Headers``).
+        """
+        authorization = headers.get("authorization", "").strip()
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise McpConfigError("missing Authorization Bearer scoped token")
+        session_id = headers.get(SESSION_ID_HEADER, "").strip() or None
+        return cls(api_base=api_base.rstrip("/"), token=token.strip(), session_id=session_id)

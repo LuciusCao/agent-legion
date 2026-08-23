@@ -65,7 +65,7 @@ LAYER1_TABLES: tuple[str, ...] = (
 )
 
 # Layer 2: rows tied to the sampled jobs. Order matters on load (FK parents
-# first): job_batches/artifacts before jobs is not required, but
+# first): runs/artifacts before jobs is not required, but
 # node_run_token_usage must follow node_runs and artifact_refs must follow
 # both jobs and artifacts.
 SAMPLE_SUBQUERY = (
@@ -79,9 +79,8 @@ SAMPLE_SUBQUERY = (
 # the SAMPLE_SUBQUERY text.
 LAYER2_QUERIES: tuple[tuple[str, str], ...] = (
     (
-        "job_batches",
-        "id IN (SELECT DISTINCT batch_id FROM public.jobs "
-        "WHERE id IN ({sample}) AND batch_id <> '')",
+        "runs",
+        "id IN (SELECT DISTINCT run_id FROM public.jobs WHERE id IN ({sample}) AND run_id <> '')",
     ),
     ("artifacts", "hash IN (SELECT hash FROM public.artifact_refs WHERE job_id IN ({sample}))"),
     ("jobs", "id IN ({sample})"),
@@ -95,7 +94,7 @@ LAYER2_QUERIES: tuple[tuple[str, str], ...] = (
 # Target-side tables wiped before layer 2 loads. CASCADE also clears runtime
 # tables referencing jobs (agent_execution_requests, executor_leases), which
 # is intended: they would point at nonexistent jobs after a partial copy.
-LAYER2_TRUNCATE = ("jobs", "job_batches", "artifacts")
+LAYER2_TRUNCATE = ("jobs", "runs", "artifacts")
 
 
 class SeedError(RuntimeError):
@@ -399,7 +398,7 @@ def seed_layer2_db(
         return loaded
 
     truncate = ", ".join(f'public."{t}"' for t in LAYER2_TRUNCATE)
-    log("第 2 层：目标侧 TRUNCATE jobs/job_batches/artifacts（CASCADE，含 runtime 引用表）")
+    log("第 2 层：目标侧 TRUNCATE jobs/runs/artifacts（CASCADE，含 runtime 引用表）")
     target_psql(psql, dsn, f"TRUNCATE {truncate} CASCADE")
 
     for table, _where in LAYER2_QUERIES:

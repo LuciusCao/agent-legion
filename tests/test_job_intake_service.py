@@ -247,11 +247,10 @@ def test_job_intake_freezes_node_code_versions(job_db, settings):
         },
     )
 
-    batch = job_db.get_batch(str(result["jobs"][0]["batch_id"]))
+    batch = job_db.get_run(str(result["jobs"][0]["batch_id"]))
     import json
 
-    payload = json.loads(batch["source_payload_json"])
-    pins = payload["node_code_versions"]
+    pins = json.loads(batch["frozen_pins_json"])["node_code_versions"]
     # Workspace initialization published factory v1; this user publish is v2.
     assert pins["intake_knowledge_points"]["version"] == 2
     assert len(pins["intake_knowledge_points"]["code_hash"]) == 64
@@ -277,11 +276,10 @@ def test_job_intake_freezes_workspace_factory_seed_pins(job_db, settings):
         },
     )
 
-    batch = job_db.get_batch(str(result["jobs"][0]["batch_id"]))
+    batch = job_db.get_run(str(result["jobs"][0]["batch_id"]))
     import json
 
-    payload = json.loads(batch["source_payload_json"])
-    pins = payload["node_code_versions"]
+    pins = json.loads(batch["frozen_pins_json"])["node_code_versions"]
     assert set(pins) == {"intake_knowledge_points", "publish_content"}
     for pin in pins.values():
         assert pin["version"] == 1

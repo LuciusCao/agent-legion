@@ -46,6 +46,7 @@ from server.app.services.connection_tokens import (
     ConnectionTokenService,
     inject_connection_config,
 )
+from server.app.services.run_payload import sdk_batch_row
 from server.app.services.vault import VaultService
 from server.app.settings import Settings
 from server.app.workflows.definition import WorkflowNode
@@ -319,17 +320,18 @@ class CodeDispatchService:
             return queued is not None
 
     def _prefetch_job_batch(self, job: dict[str, Any]) -> Any:
-        """The intake batch row (node SDK ``ctx.batch``), JSON-safe or None.
+        """The SDK-facing run row (node SDK ``ctx.batch``), JSON-safe or None.
 
         Only the audit hash of the row is persisted (issue #142); the full
         payload is re-fetched on the claim-response path instead.
         """
-        batch_id = str(job.get("batch_id") or "")
-        if not batch_id:
+        run_id = str(job.get("run_id") or "")
+        if not run_id:
             return None
         try:
-            batch = self.job_db.get_batch(batch_id)
+            run = self.job_db.get_run(run_id)
         except Exception:
-            logger.debug("get_batch failed for job %s", job.get("id"), exc_info=True)
+            logger.debug("get_run failed for job %s", job.get("id"), exc_info=True)
             return None
-        return _json_safe(dict(batch)) if batch else None
+        batch_row = sdk_batch_row(run, job)
+        return _json_safe(batch_row) if batch_row else None

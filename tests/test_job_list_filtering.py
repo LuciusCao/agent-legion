@@ -11,13 +11,13 @@ def _make_workspace(job_db, slug):
     return workspace
 
 
-def _make_job(job_db, workspace_id, source_id, title="", batch_id="", node_keys=("n1", "n2")):
+def _make_job(job_db, workspace_id, source_id, title="", run_id="", node_keys=("n1", "n2")):
     return job_db.create_job(
         workspace_id=workspace_id,
         workflow_key=WORKFLOW_KEY,
         source_type="question_id",
         source_id=source_id,
-        batch_id=batch_id,
+        run_id=run_id,
         title=title,
         node_keys=list(node_keys),
     )
@@ -77,7 +77,7 @@ def test_search_filter_matches_across_fields_case_insensitively(client_factory):
         workspace = _make_workspace(job_db, "filter-search-ws")
         by_title = _make_job(job_db, workspace["id"], "q-title", title="Algebra Question")
         by_source = _make_job(job_db, workspace["id"], "q-SourceId")
-        by_batch = _make_job(job_db, workspace["id"], "q-batch", batch_id="Batch-77")
+        by_batch = _make_job(job_db, workspace["id"], "q-batch", run_id="Batch-77")
         _make_job(job_db, workspace["id"], "q-other", title="Geometry")
 
         by_title_hit = _snapshot(client, workspace["id"], "?search=algebra")

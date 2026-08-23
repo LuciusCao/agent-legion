@@ -36,6 +36,7 @@ from server.app.executors._code_runtime import (
 )
 from server.app.executors.cancellation import CancellationToken
 from server.app.executors.models import ExecutionContext, ExecutionResult
+from shared.material_cache import MaterializeError
 
 if TYPE_CHECKING:
     from server.app.executors.code import CodeExecutor
@@ -48,13 +49,15 @@ _SERVER_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # Repo subdirectories the child must READ: import roots (server helpers,
 # yaml-independent config modules, workspace_libs) plus the demo workflow's
-# example assets (workflow_nodes holds the demo seed sources, examples/ holds
-# the demo knowledge markdown). Deliberately excludes the repo root itself,
+# git-reviewed seed sources (workflow_nodes/). Node code never reads
+# examples/ — the demo intake node consumes its knowledge markdown as a
+# material through the allow-read materialization cache (design §9,
+# MATERIAL-ACCESS-001). Deliberately excludes the repo root itself,
 # `.env`, `deploy/` and `data/` (secrets and runtime data). The `config`
 # entry relies on CONFIG-YAML-001: tracked config yaml must never carry
 # secret values (they live in the vault / instance settings), so granting the
 # sandbox read access to `config/` exposes no credentials.
-_REPO_READ_SUBDIRS = ("server", "workflow_nodes", "config", "workspace_libs", "examples")
+_REPO_READ_SUBDIRS = ("server", "workflow_nodes", "config", "workspace_libs")
 
 _RESULT_BASENAME = ".custom_node_result.json"
 
@@ -111,6 +114,12 @@ def _read_roots(executor: CodeExecutor) -> list[str]:
             candidate = repo_root / subdir
             if candidate.is_dir():
                 roots.append(str(candidate))
+    # Materialization cache (design §6.2): the ONLY material path node code
+    # may read — a static root, never a per-material dynamic grant
+    # (MATERIAL-ACCESS-001).
+    cache_root = executor._materials_cache_root
+    if cache_root.is_dir():
+        roots.append(str(cache_root))
     for prefix in {sys.prefix, sys.base_prefix}:
         if prefix:
             roots.append(str(Path(prefix).resolve()))
@@ -178,7 +187,17 @@ def execute_custom_sandboxed(
     # multiprocessing token cannot cross an exec boundary and is dropped.
     # DB-derived inputs (job_batch, skill_versions) are prefetched inside
     # build_runtime: children never get a database handle (EXEC-CODE-003).
-    runtime = build_runtime(executor, context, CancellationToken(threading.Event()))
+    # A material input is materialized there too — a failure is a clean
+    # node-facing error, not a crashed dispatch.
+    try:
+        runtime = build_runtime(executor, context, CancellationToken(threading.Event()))
+    except MaterializeError as exc:
+        return ExecutionResult(
+            status="failed",
+            exit_code=1,
+            error_message=str(exc),
+            log_path=str(context.log_path),
+        )
     runtime.pop("cancellation", None)
     # The payload rides stdin: node_config may hold resolved secrets, and
     # those must never touch the (job-dir) filesystem (VAULT-SECRET-001).
@@ -208,7 +227,7 @@ def execute_custom_sandboxed(
     ]
     # worker/code_runner.py 的 build_sandbox_argv/child_env/_read_roots 从本
     # 文件复制适配（Worker 上全部 code 执行统一过沙箱，批次 2）——改 argv/
-    # 环境/payload 契约时两边同步。
+    # 环境/payload 契约（含 materials 缓存根的静态 allow-read）时两边同步。
 
     log_fd = os.open(str(context.log_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
     try:

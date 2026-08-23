@@ -16,7 +16,7 @@ from server.app.services.agent_version_pins import (
     resolve_dispatch_agent_definition,
 )
 from server.app.services.node_config import dispatch_effective_config
-from server.app.services.node_config_batch import batch_source_payload
+from server.app.services.node_config_batch import run_frozen_payload
 from server.app.skills.errors import SkillRepoError
 from server.app.workflow_worker.agent_gate import agent_claim_allowed
 from server.app.workflows.definition import WorkflowNode
@@ -25,18 +25,16 @@ if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 
-def cached_batch_payload(
-    worker: WorkflowWorkerThread, job: dict[str, Any]
-) -> dict[str, Any] | None:
-    """Per-pass memoized ``batch_source_payload``: jobs share a handful of
-    intake batches, so one lookup per batch per pass replaces one per candidate."""
-    batch_id = job.get("batch_id")
-    if not batch_id:
+def cached_run_payload(worker: WorkflowWorkerThread, job: dict[str, Any]) -> dict[str, Any] | None:
+    """Per-pass memoized ``run_frozen_payload``: jobs share a handful of
+    runs, so one lookup per run per pass replaces one per candidate."""
+    run_id = job.get("run_id")
+    if not run_id:
         return None
     cache = worker._batch_payload_cache
-    key = str(batch_id)
+    key = str(run_id)
     if key not in cache:
-        cache[key] = batch_source_payload(worker.job_db, job)
+        cache[key] = run_frozen_payload(worker.job_db, job)
     return cache[key]
 
 
@@ -85,10 +83,10 @@ def claim_agent_node(
     # candidates must stay cheap: no batch-payload or definition reads.
     if not agent_claim_allowed(worker, str(workspace_id), str(job["id"]), node.key, agent_id):
         return False
-    batch_payload = cached_batch_payload(worker, job)
+    run_payload = cached_run_payload(worker, job)
     # Quality replay (schema v29): a frozen per-run Agent version pin in the
-    # intake batch payload wins over the currently published definition.
-    pin = agent_version_pin(batch_payload, node.key)
+    # run's frozen pins wins over the currently published definition.
+    pin = agent_version_pin(run_payload, node.key)
     try:
         definition_config = resolve_dispatch_agent_definition(
             worker.settings.database_url, str(workspace_id), agent_id, pin
@@ -124,7 +122,7 @@ def claim_agent_node(
             node,
             workflow_key,
             workspace,
-            batch_payload,
+            run_payload,
         )
     except ValueError as exc:
         # Config drift must fail THIS node, not abort the whole poll pass.

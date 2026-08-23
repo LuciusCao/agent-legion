@@ -17,6 +17,7 @@ from server.app.services.job_pause import JobPauseService
 from server.app.services.job_queries import JobQueryService
 from server.app.services.job_rerun import JobRerunService
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
+from server.app.services.run_service import RunService
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
@@ -41,6 +42,12 @@ class JobServices:
             job_event_buffer=job_event_buffer,
         )
         self.intake = JobIntakeService(
+            job_db,
+            settings,
+            job_event_manager=job_event_manager,
+            job_event_buffer=job_event_buffer,
+        )
+        self.runs = RunService(
             job_db,
             settings,
             job_event_manager=job_event_manager,

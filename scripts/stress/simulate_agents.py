@@ -161,7 +161,7 @@ class StressSimulator:
                 workflow_key=_STRESS_WORKFLOW_KEY,
                 source_type="question",
                 source_id=source_id,
-                batch_id=f"{self.workspace_id}-batch",
+                run_id=f"{self.workspace_id}-batch",
                 title=f"Stress job {i + 1}",
                 node_keys=node_keys,
                 workspace_id=self.workspace_id,

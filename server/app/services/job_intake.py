@@ -152,25 +152,32 @@ class JobIntakeService:
             "input_field": mode.input_field,
         }
         source_payload["task_candidates"] = candidates
-        batch = self.job_db.create_batch(
+        # The payload only derives the deterministic run id; the authoritative
+        # freeze lands on the run/jobs columns (RUN-FREEZE-001).
+        batch = self.job_db.create_run(
             workflow_key,
             payload["source_kind"],
             source_payload,
             workspace_id=workspace_id,
+            frozen_pins={"node_code_versions": node_code_versions},
         )
         jobs = self.job_db.create_jobs_bulk(
             candidates=candidates,
             workflow_key=workflow_key,
-            batch_id=batch["id"],
+            run_id=batch["id"],
             node_keys=list(definition.nodes),
             workspace_id=workspace_id,
             revision=active_revision,
+            frozen_config=node_config,
         )
         if jobs:
             notify_schedulable_work()
 
         for job in jobs:
             job["storage_dir"] = str(resolve_job_dir(job, self.settings.jobs_dir))
+            # Wire compatibility: API/SSE consumers still read ``batch_id``
+            # (route renames are a later slice); the value is the run id.
+            job["batch_id"] = str(job.get("run_id") or "")
 
         batch["created_count"] = len(jobs)
         if self.job_event_buffer is not None:

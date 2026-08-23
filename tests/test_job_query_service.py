@@ -36,7 +36,7 @@ def create_question_job(job_db, source_id: str) -> dict[str, Any]:
     # Jobs created without an intake snapshot resolve their definition from
     # the workspace's active revision (schema v50), so publish it.
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": [source_id]},
@@ -46,7 +46,7 @@ def create_question_job(job_db, source_id: str) -> dict[str, Any]:
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id=source_id,
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title=f"Question {source_id}",
         node_keys=["question_understanding", "assemble_package"],
         workspace_id=workspace["id"],
@@ -93,7 +93,7 @@ def test_list_jobs_exposes_job_workflow_version_and_outdated_status(query_servic
     revision_service = WorkflowRevisionService(job_db)
     original = revision_service.publish_workspace_revision(workspace["id"], definition)
     current = revision_service.publish_workspace_revision(workspace["id"], definition)
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
@@ -103,7 +103,7 @@ def test_list_jobs_exposes_job_workflow_version_and_outdated_status(query_servic
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title="Question 1",
         node_keys=list(definition.nodes),
         workspace_id=workspace["id"],
@@ -126,7 +126,7 @@ def test_list_jobs_orders_node_summaries_by_workflow_dag(query_service, job_db):
         "default", default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
@@ -136,7 +136,7 @@ def test_list_jobs_orders_node_summaries_by_workflow_dag(query_service, job_db):
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title="Question 1",
         node_keys=[
             "publish_content",
@@ -220,7 +220,7 @@ def test_job_query_service_detail_enriches_nodes(query_service, job_db):
         "default", default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
@@ -230,7 +230,7 @@ def test_job_query_service_detail_enriches_nodes(query_service, job_db):
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title="Question 1",
         node_keys=["question_understanding", "assemble_package"],
         workspace_id=workspace["id"],
@@ -253,7 +253,7 @@ def test_job_query_service_detail_orders_nodes_and_uses_edge_dependencies(query_
         "default", default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
@@ -263,7 +263,7 @@ def test_job_query_service_detail_orders_nodes_and_uses_edge_dependencies(query_
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title="Question 1",
         node_keys=[
             "publish_content",
@@ -293,7 +293,7 @@ def test_job_query_service_detail_lists_artifacts_from_relative_storage_dir(
         "default", default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
@@ -303,7 +303,7 @@ def test_job_query_service_detail_lists_artifacts_from_relative_storage_dir(
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title="Question 1",
         node_keys=["question_understanding"],
         workspace_id=workspace["id"],
@@ -325,7 +325,7 @@ def test_job_detail_projects_agent_route_over_code_pool(query_service, job_db):
         "default", default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
@@ -335,7 +335,7 @@ def test_job_detail_projects_agent_route_over_code_pool(query_service, job_db):
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title="Question 1",
         node_keys=["question_understanding", "assemble_package"],
         workspace_id=workspace["id"],
@@ -362,7 +362,7 @@ def test_workspace_run_service_filters_runs(query_service, job_db):
         "default", default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
@@ -372,7 +372,7 @@ def test_workspace_run_service_filters_runs(query_service, job_db):
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title="Question 1",
         node_keys=["assemble_package"],
         workspace_id=workspace["id"],
@@ -392,7 +392,7 @@ def test_workspace_dag_preserves_status_buckets(query_service, job_db):
     publish_builtin_revision(job_db, workspace["id"])
     definition = load_builtin_definition(workspace["default_workflow_key"])
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
-    job_db.create_batch(
+    job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
@@ -414,7 +414,7 @@ def _create_job_with_node_run(job_db, settings, workspace_id: str = "default") -
         workspace_id, default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
@@ -424,7 +424,7 @@ def _create_job_with_node_run(job_db, settings, workspace_id: str = "default") -
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title="Question 1",
         node_keys=["assemble_package"],
         workspace_id=workspace["id"],
@@ -503,7 +503,7 @@ def test_detail_preserves_empty_optional_run_dirs(query_service, job_db, setting
         "default", default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
@@ -513,7 +513,7 @@ def test_detail_preserves_empty_optional_run_dirs(query_service, job_db, setting
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title="Question 1",
         node_keys=["assemble_package"],
         workspace_id=workspace["id"],
@@ -555,7 +555,7 @@ def test_job_detail_includes_workflow_revision_and_outcome(query_service, job_db
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id="batch1",
+        run_id="batch1",
         title="Question 1",
         node_keys=["fetch_items"],
         workspace_id=workspace["id"],
@@ -580,7 +580,7 @@ def _create_two_node_job(job_db) -> dict[str, Any]:
         "default", default_workflow_key="education_video_problems_generation"
     )
     publish_builtin_revision(job_db, workspace["id"])
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
@@ -590,7 +590,7 @@ def _create_two_node_job(job_db) -> dict[str, Any]:
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title="Question 1",
         node_keys=["question_understanding", "assemble_package"],
         workspace_id=workspace["id"],

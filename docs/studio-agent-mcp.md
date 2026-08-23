@@ -33,11 +33,18 @@ curl -b /tmp/al-cookies.txt -X DELETE \
 
 ## 2. 配置 MCP 客户端
 
+> Studio 对话（Workflow Studio 聊天面板）不走这条 stdio 入口：kimi ≥ 0.38 的
+> ACP `session/new` 只接受 `type: "http" | "sse"` 的 MCP server，因此对话会话改由
+> 后端内嵌的 streamable-HTTP 端点 `/api/studio-agent/mcp` 承载（scoped token 走
+> `Authorization: Bearer` header、会话绑定走 `x-agent-legion-mcp-session-id`
+> header，随 `session/new` 自动注入，无需任何手工配置）。本节的 stdio 配置只面向
+> 自助接入的外部 agent。
+
 服务入口：`uv run python -m server.app.mcp_server`（在仓库根目录下运行）。三个环境变量：
 
 - `AGENT_LEGION_STUDIO_AGENT_TOKEN`（必填，缺失即启动失败）
 - `AGENT_LEGION_MCP_API_BASE`（可选，默认 `http://127.0.0.1:8000`）
-- `AGENT_LEGION_MCP_SESSION_ID`（可选，Studio 对话场景由后端自动注入，支撑 `get_studio_context` 工具；自助配置不设置即可，该工具会返回未绑定提示）
+- `AGENT_LEGION_MCP_SESSION_ID`（可选；自助配置不设置即可，`get_studio_context` 工具会返回未绑定提示）
 
 ### Kimi Code
 

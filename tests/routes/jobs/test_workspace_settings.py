@@ -74,14 +74,14 @@ def test_workspace_settings_returns_node_config(client_factory):
         ws_id = _create_workspace(c)
         saved = c.patch(
             f"/api/workspaces/{ws_id}/settings/nodes",
-            json={"nodeConfig": {"intake_knowledge_points": {"knowledge_dir": "examples/custom"}}},
+            json={"nodeConfig": {"intake_knowledge_points": {"timeout_seconds": 120}}},
         )
         assert saved.status_code == 200, saved.text
         response = c.get(f"/api/workspaces/{ws_id}/settings")
 
     assert response.status_code == 200
     settings = response.json()["settings"]
-    assert settings["nodeConfig"]["intake_knowledge_points"]["knowledge_dir"] == "examples/custom"
+    assert settings["nodeConfig"]["intake_knowledge_points"]["timeout_seconds"] == 120
 
 
 def test_patch_settings_nodes_saves_node_config(client_factory):
@@ -89,12 +89,12 @@ def test_patch_settings_nodes_saves_node_config(client_factory):
         ws_id = _create_workspace(c)
         response = c.patch(
             f"/api/workspaces/{ws_id}/settings/nodes",
-            json={"nodeConfig": {"intake_knowledge_points": {"knowledge_dir": "examples/custom"}}},
+            json={"nodeConfig": {"intake_knowledge_points": {"timeout_seconds": 120}}},
         )
         fetched = c.get(f"/api/workspaces/{ws_id}/settings")
 
     assert response.status_code == 200
     assert (
-        fetched.json()["settings"]["nodeConfig"]["intake_knowledge_points"]["knowledge_dir"]
-        == "examples/custom"
+        fetched.json()["settings"]["nodeConfig"]["intake_knowledge_points"]["timeout_seconds"]
+        == 120
     )

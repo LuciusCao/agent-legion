@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 import pytest
-from acp.schema import McpServerStdio
+from acp.schema import HttpMcpServer
 
 from server.app.auth.scoped_tokens import authenticate_scoped_token
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
@@ -227,14 +227,23 @@ def _prompt_texts(sink: list[dict]) -> list[str]:
     return texts
 
 
-def _new_session_mcp_env(sink: list[dict]) -> dict[str, str]:
+def _new_session_mcp_headers(sink: list[dict]) -> dict[str, str]:
     for entry in sink:
         message = entry.get("received", {})
         if message.get("method") == "session/new":
             servers = message["params"].get("mcpServers", [])
             assert servers, "session/new carried no MCP servers"
-            return {item["name"]: item["value"] for item in servers[0].get("env", [])}
+            server = servers[0]
+            # kimi >= 0.38 rejects ACP stdio MCP entries: the injection must
+            # be the in-app HTTP endpoint with credentials in headers.
+            assert server.get("type") == "http"
+            assert str(server.get("url", "")).endswith("/api/studio-agent/mcp")
+            return {item["name"]: item["value"] for item in server.get("headers", [])}
     raise AssertionError("session/new never reached the fake agent")
+
+
+def _bearer_token(headers: dict[str, str]) -> str:
+    return headers["Authorization"].removeprefix("Bearer ")
 
 
 def test_run_token_is_bound_to_the_session_workspace(chat, job_db) -> None:
@@ -244,20 +253,20 @@ def test_run_token_is_bound_to_the_session_workspace(chat, job_db) -> None:
     script_path = register(TEXT_SCRIPT)
     service.create_session(workspace_id, user_id, "fake-agent")
 
-    token = _new_session_mcp_env(_read_sink(script_path))["AGENT_LEGION_STUDIO_AGENT_TOKEN"]
+    token = _bearer_token(_new_session_mcp_headers(_read_sink(script_path)))
     resolved = authenticate_scoped_token(job_db, token)
     assert resolved is not None
     assert resolved["scoped_workspace_id"] == workspace_id
 
 
-def test_mcp_env_carries_the_chat_session_id(chat) -> None:
-    """The get_studio_context tool resolves its session through this env."""
+def test_mcp_headers_carry_the_chat_session_id(chat) -> None:
+    """The get_studio_context tool resolves its session through this header."""
     service, _bus, register, workspace_id, user_id = chat
     script_path = register(TEXT_SCRIPT)
     session = service.create_session(workspace_id, user_id, "fake-agent")
 
-    env = _new_session_mcp_env(_read_sink(script_path))
-    assert env["AGENT_LEGION_MCP_SESSION_ID"] == session["id"]
+    headers = _new_session_mcp_headers(_read_sink(script_path))
+    assert headers["x-agent-legion-mcp-session-id"] == session["id"]
 
 
 def test_set_selected_node_roundtrip(chat) -> None:
@@ -305,7 +314,7 @@ def test_session_lifecycle_turn_and_token_revocation(chat, job_db) -> None:
     sink = _read_sink(script_path)
     # First prompt carries the built-in authoring bootstrap (decision 8).
     assert _prompt_texts(sink)[0].startswith(STUDIO_AUTHORING_BOOTSTRAP)
-    token = _new_session_mcp_env(sink)["AGENT_LEGION_STUDIO_AGENT_TOKEN"]
+    token = _bearer_token(_new_session_mcp_headers(sink))
     # The minted scoped token is live for the session's lifetime...
     assert authenticate_scoped_token(job_db, token) is not None
 
@@ -689,7 +698,7 @@ def test_handle_cancel_after_loop_closed_is_a_noop() -> None:
         command=sys.executable,
         args=[],
         cwd=".",
-        mcp_server=McpServerStdio(name="x", command="x", args=[], env=[]),
+        mcp_server=HttpMcpServer(type="http", name="x", url="http://x/mcp", headers=[]),
         env=None,
         callbacks=_NoopCallbacks(),
     )

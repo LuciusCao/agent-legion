@@ -29,6 +29,7 @@ export {
 export { compareWorkflowDraft, fetchActiveWorkflowRevision, fetchWorkflowRevisionDetail, fetchWorkflowRevisions } from './workflowRevisions'
 export { publishWorkflowDraft, validateWorkflowDraft } from './workflows'
 export { fetchOpsMetrics } from './metrics'
+export { presignMaterial, completeMaterial, createRun } from './materialsApi'
 // prettier-ignore
 export type { MetricBucket, OpsGranularity, OpsMetricsParams, OpsMetricsResponse } from './metrics'
 // prettier-ignore

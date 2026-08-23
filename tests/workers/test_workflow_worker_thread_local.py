@@ -54,7 +54,7 @@ def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
         workflow_key="test",
         source_type="question",
         source_id="Q1",
-        batch_id="",
+        run_id="",
         title="Q1",
         node_keys=["fetch"],
         workspace_id=ws["id"],
@@ -86,7 +86,7 @@ def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
         workflow_key="test",
         source_type="question",
         source_id="Q1",
-        batch_id="",
+        run_id="",
         title="Q1",
         node_keys=["fetch"],
         workspace_id=ws["id"],
@@ -117,7 +117,7 @@ def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
         workflow_key="test",
         source_type="question",
         source_id="Q1",
-        batch_id="",
+        run_id="",
         title="Q1",
         node_keys=["fetch"],
         workspace_id=ws["id"],
@@ -149,7 +149,7 @@ def test_poll_fails_node_without_published_code(tmp_path: Path) -> None:
         workflow_key="test",
         source_type="question",
         source_id="Q1",
-        batch_id="",
+        run_id="",
         title="Q1",
         node_keys=["fetch"],
         workspace_id=ws["id"],
@@ -191,7 +191,7 @@ def test_poll_skips_paused_job(tmp_path: Path) -> None:
         workflow_key="test",
         source_type="question",
         source_id="Q1",
-        batch_id="",
+        run_id="",
         title="Q1",
         node_keys=["fetch"],
         workspace_id=ws["id"],
@@ -229,7 +229,7 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
         workflow_key="test",
         source_type="question",
         source_id="Q1",
-        batch_id="",
+        run_id="",
         title="Q1",
         node_keys=["root", "left", "target", "right"],
         workspace_id=ws["id"],
@@ -281,13 +281,16 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
 def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkeypatch) -> None:
     # intake_knowledge_points runs on the code-default executor inside the
     # velites sandbox (post-#96: the demo node code is a workspace seed,
-    # executed from the DB text): it maps the job's source_id to a
-    # knowledge-point markdown under examples/education-video-problems-
-    # generation/ (pure stdlib, no network) and writes knowledge_point.json
-    # for the downstream agent nodes.
+    # executed from the DB text): it reads the job's material input — a
+    # knowledge-point markdown materialized into the local cache from a fake
+    # object store (design §6.2; pure stdlib, no network) — and writes
+    # knowledge_point.json for the downstream agent nodes.
     if os.environ.get("GATE_SHARD"):
         pytest.skip("CI hash shard runs this OS sandbox integration in its isolated step")
 
+    import hashlib
+    import io
+    import json
     import shutil
     import subprocess
     import sys
@@ -324,15 +327,49 @@ def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkey
     from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 
     seed_demo_workspace_node_codes(worker.settings, workspace["id"])
+
+    # Material input: the repo's sample markdown as a ready materials row plus
+    # a fake object store holding its bytes (no real S3 in tests).
+    workspace_id = str(workspace["id"])
+    filename = "fraction-addition-subtraction.md"
+    payload = (
+        REPO_ROOT / "examples" / "education-video-problems-generation" / filename
+    ).read_bytes()
+    digest = hashlib.sha256(payload).hexdigest()
+    storage_key = f"{workspace_id}/{digest}/{filename}"
+
+    class _FakeStorage:
+        def open_stream(self, key: str) -> io.BytesIO:
+            assert key == storage_key
+            return io.BytesIO(payload)
+
+    executor = worker.runtime.executor
+    executor._storage_probed = True
+    executor._object_storage = _FakeStorage()
+    executor._materials_cache_root = tmp_path / "materials_cache"
+
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into materials("
+            " id, workspace_id, content_hash, filename, content_type,"
+            " size_bytes, storage_key, status, created_by"
+            ") values ('mat-demo-1', %s, %s, %s, 'text/markdown', %s, %s, 'ready', 'system')",
+            (workspace_id, digest, filename, len(payload), storage_key),
+        )
     job = queries.create_job(
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="fraction-addition-subtraction",
-        batch_id="",
+        run_id="",
         title="fraction-addition-subtraction",
         node_keys=list(definition.nodes),
-        workspace_id=workspace["id"],
+        workspace_id=workspace_id,
     )
+    with queries.connect() as conn:
+        conn.execute(
+            "update jobs set input_json=%s where id=%s",
+            (json.dumps({"type": "material", "material_id": "mat-demo-1"}), job["id"]),
+        )
 
     processed = worker._poll()
 
@@ -420,7 +457,7 @@ def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
         workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
-        batch_id="",
+        run_id="",
         title="Q1",
         node_keys=list(v1_definition.nodes),
         workspace_id=ws["id"],

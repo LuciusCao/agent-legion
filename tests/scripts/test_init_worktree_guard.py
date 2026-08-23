@@ -189,30 +189,6 @@ def test_worker_config_host_url_uses_dev_backend_port(tmp_path: Path) -> None:
     assert "host_url: http://127.0.0.1:8010" in config
 
 
-def test_resume_uses_worktree_database_url_not_inherited_env(tmp_path: Path) -> None:
-    """workspace 恢复子进程必须用本 worktree 的专属 URL，而不是调用 shell
-    已导出的 AGENT_LEGION_DATABASE_URL（load_dotenv override=False 会保留它）。"""
-    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
-    develop = main / ".worktrees/develop"
-    develop.mkdir(parents=True)
-    (develop / ".env").write_text("# stub env\n")
-    stub_log = tmp_path / "uv-env.log"
-
-    result = _run(
-        main / ".worktrees/flat/scripts/init-worktree.sh",
-        bin_dir,
-        extra_env={
-            "AGENT_LEGION_DATABASE_URL": "postgresql://127.0.0.1:5432/agent_legion_base",
-            "STUB_LOG": str(stub_log),
-        },
-    )
-
-    assert result.returncode == 0, result.stderr
-    logged = stub_log.read_text().splitlines()
-    # 最后一次 uv 调用是 workspace 恢复子进程，必须携带新 worktree 的专属 URL。
-    assert logged[-1] == ("AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_flat")
-
-
 def test_nonbare_main_repo_is_skipped_as_base(tmp_path: Path) -> None:
     """主仓库根非 bare（普通 checkout、无 .env）时不得作为 .env 复制基准。
 
@@ -232,6 +208,46 @@ def test_nonbare_main_repo_is_skipped_as_base(tmp_path: Path) -> None:
     env_text = (main / ".worktrees/flat/.env").read_text()
     assert "# stub env" in env_text  # 复制自 develop 而非主仓库根
     assert "AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_flat" in env_text
+
+
+def test_s3_bucket_derived_from_worktree_name(tmp_path: Path) -> None:
+    """.env 缺 AGENT_LEGION_S3_BUCKET 时按 worktree 名派生并写入（幂等）。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    script_path = main / ".worktrees/flat/scripts/init-worktree.sh"
+
+    result = _run(script_path, bin_dir)
+    assert result.returncode == 0, result.stderr
+    env_text = (main / ".worktrees/flat/.env").read_text()
+    assert "AGENT_LEGION_S3_BUCKET=agent-legion-flat" in env_text
+
+    # 重跑不重复追加。
+    result = _run(script_path, bin_dir)
+    assert result.returncode == 0, result.stderr
+    env_text = (main / ".worktrees/flat/.env").read_text()
+    assert env_text.count("AGENT_LEGION_S3_BUCKET=") == 1
+
+
+def test_s3_bucket_existing_value_is_rewritten(tmp_path: Path) -> None:
+    """.env 已含 AGENT_LEGION_S3_BUCKET（从基准复制而来）时改写为派生名。
+
+    .env 复制自基准 worktree，本就带着基准的 bucket；保留原值会让所有
+    派生 worktree 共享基准 bucket，违背 per-worktree 隔离——与
+    AGENT_LEGION_DATABASE_URL 同一模式，无条件改写为派生值。
+    """
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("AGENT_LEGION_S3_BUCKET=custom-bucket\n")
+
+    result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    env_text = (main / ".worktrees/flat/.env").read_text()
+    assert "AGENT_LEGION_S3_BUCKET=agent-legion-flat" in env_text
+    assert "custom-bucket" not in env_text
 
 
 def test_missing_env_fails_fast_without_side_effects(tmp_path: Path) -> None:

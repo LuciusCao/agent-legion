@@ -18,7 +18,7 @@ from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.services.job_errors import JobServiceError
 from server.app.services.vault import VaultError
 from server.app.workflow_worker.agent_claim import (
-    cached_batch_payload,
+    cached_run_payload,
     claim_agent_node,
     fail_node_config,
 )
@@ -157,14 +157,14 @@ def try_claim_and_submit(
         return False
 
     try:
-        batch_payload = cached_batch_payload(worker, job)
+        run_payload = cached_run_payload(worker, job)
         # Frozen snapshot (runtime-mutable keys re-resolved live) → vault
         # secret_refs → connection config + token; all in-memory only
         # (VAULT-SECRET-001, CONFIG-MANIFEST-001). The non-secret snapshot is
         # persisted onto the node_runs row as the dispatch-time audit
         # (CONFIG-RUNTIME-MUTABLE-001).
         node_config, config_snapshot_json = resolve_dispatch_node_config(
-            worker, node, workflow_key, workspace_id, workspace, batch_payload
+            worker, node, workflow_key, workspace_id, workspace, run_payload
         )
     except (ValueError, VaultError, JobServiceError) as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
@@ -177,7 +177,7 @@ def try_claim_and_submit(
     # EXEC-CODE-003).
     try:
         node_code = resolve_code_node_dispatch(
-            worker, workspace_id, workflow_key, node, batch_payload, job.get("node_code_pins")
+            worker, workspace_id, workflow_key, node, run_payload, job.get("node_code_pins")
         )
     except ValueError as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))

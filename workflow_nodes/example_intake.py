@@ -1,33 +1,29 @@
-"""Demo workflow intake node: expand one knowledge-point markdown into job input.
+"""Demo workflow intake node: parse one knowledge-point material into job input.
 
 First node of the ``education_video_problems_generation`` example workflow
 (capability ``intake_knowledge_points``).
 
-How job parameters reach this node (the intake fan-out contract):
+How job input reaches this node (materials-and-runs design §4/§6.2):
 
-- The DAG's intake mode (``direct_ids``) fans out one job per input value at
-  intake time via the platform's direct resolver
-  (``server/app/services/job_intake_resolution.py::resolve_direct_candidates``);
-  no external service is consulted.
-- The input value becomes the job's ``source_id`` (``create_jobs_bulk`` maps
-  the candidate ``entity_id`` onto it). For this workflow the value is a
-  knowledge-point file stem, e.g. ``fraction-addition-subtraction``.
-- This node maps ``source_id`` to ``<knowledge_dir>/<source_id>.md``, parses
-  the markdown, and writes ``knowledge_point.json`` for the downstream agent
-  nodes.
+- The job's input is a **material item**: a knowledge-point markdown the user
+  uploaded to the workspace (``jobs.input_json`` =
+  ``{"type": "material", "material_id": ...}``). The demo workspace is seeded
+  with the repo's ``examples/`` markdown as ready-to-use sample materials
+  (``server/app/services/demo_material_seed.py``, seed-if-absent).
+- The dispatching parent has already materialized the object into the local
+  content-addressed cache, so the node simply reads
+  ``ctx.material["path"]`` — a local read-only file inside the sandbox's
+  static allow-read cache root (MATERIAL-ACCESS-001). No ``knowledge_dir``
+  configuration, no repo ``examples/`` access: the node works identically on
+  the Host and on a remote Worker.
+- The node parses the markdown and writes ``knowledge_point.json`` for the
+  downstream agent nodes; the material file stem doubles as the knowledge
+  point id.
 
-``knowledge_dir`` is declared in the capability's config_schema and arrives
-via ``ctx.config`` (schema default → node config → workspace override, frozen
-at intake). The default is a repo-relative path resolved against the host
-root from the runtime (``ctx.root_dir``, injected by the parent executor) —
-this works for Host-local execution; on a remote Worker the bundle carries
-no ``examples/`` tree, so a Worker-bound deployment must point
-``knowledge_dir`` at a path that exists on the Worker host.
-
-This file is the git-reviewed **seed source** of the demo intake node: at
-startup it is published as a global node_code version (EXEC-CODE-002, #96)
-and executes from the DB text inside the velites sandbox. Pure stdlib + node
-SDK: no business imports, no network.
+This file is the git-reviewed **seed source** of the demo intake node: when
+a workspace binds the demo workflow it is published as a workspace node_code
+version (EXEC-CODE-002, #96) and executes from the DB text inside the
+velites sandbox. Pure stdlib + node SDK: no business imports, no network.
 """
 
 from __future__ import annotations
@@ -37,27 +33,11 @@ from typing import Any
 
 from workspace_libs.node_sdk import NodeContext, entrypoint
 
-DEFAULT_KNOWLEDGE_DIR = "examples/education-video-problems-generation"
-
 _HEADING_1 = "# "
 _HEADING_2 = "## "
 _META_BULLET = "- "
 _CONCEPT_SECTION = "核心概念"
 _MISTAKES_SECTION = "常见易错点"
-
-
-def _resolve_knowledge_dir(ctx: NodeContext) -> Path:
-    configured = str(ctx.config.get("knowledge_dir") or DEFAULT_KNOWLEDGE_DIR).strip()
-    path = Path(configured).expanduser()
-    if not path.is_absolute():
-        path = (ctx.root_dir or Path.cwd()) / path
-    return path
-
-
-def _available_ids(knowledge_dir: Path) -> list[str]:
-    if not knowledge_dir.is_dir():
-        return []
-    return sorted(path.stem for path in knowledge_dir.glob("*.md"))
 
 
 def _parse_knowledge_markdown(text: str, source_id: str) -> dict[str, Any]:
@@ -122,20 +102,19 @@ def run(ctx: NodeContext) -> None:
     log = ctx.logger
     ctx.checkpoint()
 
-    source_id = str(ctx.job["source_id"])
-    knowledge_dir = _resolve_knowledge_dir(ctx)
-    source_file = knowledge_dir / f"{source_id}.md"
-    log.info(
-        "example_intake: source_id=%s knowledge_dir=%s",
-        source_id,
-        knowledge_dir,
-    )
-    if not source_file.is_file():
-        available = _available_ids(knowledge_dir)
+    material = ctx.material
+    if material is None:
         raise RuntimeError(
-            f"知识点文件不存在: {source_file}"
-            f"（可用知识点: {', '.join(available) if available else '无——请确认 knowledge_dir 配置'}）"
+            "example_intake 需要 material 类型的 job 输入：请上传知识点 markdown"
+            "材料（demo workspace 已预置示例材料）后创建运行；当前 job 没有材料输入"
         )
+    source_file = Path(str(material["path"]))
+    source_id = source_file.stem or str(ctx.job.get("source_id") or "")
+    log.info(
+        "example_intake: material_id=%s file=%s",
+        material.get("material_id", ""),
+        source_file.name,
+    )
 
     knowledge_point = _parse_knowledge_markdown(source_file.read_text(encoding="utf-8"), source_id)
     ctx.checkpoint()
@@ -145,7 +124,7 @@ def run(ctx: NodeContext) -> None:
             "knowledge_point": knowledge_point,
             "source": {
                 "file": source_file.name,
-                "knowledge_dir": str(knowledge_dir),
+                "material_id": str(material.get("material_id") or ""),
             },
         },
     )

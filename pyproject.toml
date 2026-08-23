@@ -8,6 +8,9 @@ dependencies = [
   # (server/app/studio_chat): asyncio client/agent schemas + stdio transport.
   # Not to be confused with the unrelated `acp-sdk` package (IBM/BeeAI ACP).
   "agent-client-protocol>=0.12,<1",
+  # S3-compatible object storage for materials (server/app/storage); the code
+  # programs against the S3 API only, so RustFS/MinIO/AWS S3 all qualify.
+  "boto3>=1.35",
   "cryptography",
   "fastapi",
   "filelock",

@@ -18,6 +18,11 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.sweeper import SweeperThread
 from server.app.http_middleware import add_http_middleware
 from server.app.jobs import JobQueries
+from server.app.mcp_server.http_app import (
+    MCP_MOUNT_PATH,
+    StudioMcpRelay,
+    create_studio_mcp_http_app,
+)
 from server.app.openclaw_agents import list_openclaw_agents
 from server.app.routes import create_router
 from server.app.routes.auth import create_auth_router
@@ -29,6 +34,7 @@ from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
+from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
 from server.app.services.quality_labels import QualityLabelService
 from server.app.services.quality_replays import QualityReplayService
@@ -44,6 +50,8 @@ from server.app.skills.runtime import build_skill_manager
 from server.app.skills.seed import seed_skill_sources
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
+from server.app.storage import build_s3_storage_checked
+from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.service import StudioChatService
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.worker_startup import start_worker_threads
@@ -109,6 +117,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # Studio chat (phase 3 chunk 4): ACP conversation sessions, one agent
     # subprocess per session; in-process only, reaped in the lifespan finally.
     studio_chat_service = StudioChatService(job_db, settings, job_event_manager.bus)
+    # Studio chat injects the tool surface into ACP sessions by URL (kimi
+    # >= 0.38 dropped stdio MCP in session/new); served in-app. The MCP app
+    # itself is built per lifespan entry (single-use session manager).
+    studio_mcp_relay = StudioMcpRelay()
     # PATH-level availability of every registered chat agent: warms the probe
     # cache and logs the entries the picker will hide on this host.
     studio_chat_service.warm_availability_probe()
@@ -157,8 +169,15 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 artifact_gc_thread = ArtifactOrphanGcThread(artifact_store)
                 artifact_gc_thread.start()
         background_tasks.start(app)
+        studio_mcp, studio_mcp_app = create_studio_mcp_http_app(
+            job_db, str(StudioAgentRegistryStore(job_db.path).get()["api_base"])
+        )
+        studio_mcp_relay.set(studio_mcp_app)
         try:
-            yield
+            # Mounted sub-app lifespans do not propagate: run the MCP session
+            # manager inside the host lifespan (kimi holds long-lived streams).
+            async with studio_mcp.session_manager.run():
+                yield
         finally:
             await background_tasks.stop(app)
             # Reap chat sessions before closing DB pools: teardown revokes
@@ -189,6 +208,11 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.studio_chat_service = studio_chat_service
     app.state.event_bus = job_event_manager.bus
     app.state.job_event_buffer = job_event_buffer
+    # Materials object storage is env-only infra config (AGENT_LEGION_S3_*):
+    # unconfigured instances keep the API up and degrade materials to 503.
+    # build_s3_storage_checked logs one startup self-check line (OK/DEGRADED/
+    # configured=false); a failed probe never blocks startup.
+    app.state.materials_service = MaterialsService(job_db.path, build_s3_storage_checked())
     app.state.workspace_event_aggregator = workspace_event_aggregator
     executor_catalog = ExecutorCatalogService(settings)
     workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db, settings)
@@ -217,8 +241,12 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             quality_stats=QualityStatsService(job_db.path),
             quality_replays=QualityReplayService(job_db, artifact_store),
             studio_chat_service=studio_chat_service,
+            materials_service=app.state.materials_service,
         )
     )
+    # After the API routers so /api/studio-agent/tools/* routes match first;
+    # the mount only receives /api/studio-agent/mcp.
+    app.mount(MCP_MOUNT_PATH, studio_mcp_relay)
     mount_spa(app, settings.root_dir / "frontend" / "dist")
     return app
 

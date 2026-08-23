@@ -7,9 +7,9 @@ Last node of the ``education_video_problems_generation`` example workflow
 deliberately **no network requests**: a fresh open-source checkout has no
 external content service, so "publish" is demonstrated as a local payload.
 
-This file is the git-reviewed **seed source** of the demo publish node: at
-startup it is published as a global node_code version (EXEC-CODE-002, #96)
-and executes from the DB text inside the velites sandbox. Pure stdlib + node
+This file is the git-reviewed **seed source** of the demo publish node: it
+is published as a workspace node_code version (EXEC-CODE-002, #96) and
+executes from the DB text inside the velites sandbox. Pure stdlib + node
 SDK.
 """
 

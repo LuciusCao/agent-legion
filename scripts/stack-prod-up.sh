@@ -15,6 +15,16 @@ if [[ -f deploy/compose.local.yaml ]]; then
     COMPOSE+=(-f deploy/compose.local.yaml)
 fi
 
+# 本地 RustFS 三态开关（AGENT_LEGION_LOCAL_S3=auto|always|never，默认 auto；
+# 判断逻辑见 scripts/local-s3-decide.sh）。compose 插值只读 deploy/.env，
+# 且 host 的 endpoint 默认注入 http://rustfs:9000（--default-endpoint 如实
+# 反映该注入）；决策为 start 时经 --profile materials-local 启用 rustfs
+# 服务。决策失败（开关值非法 / 决策启动但凭据未配齐）fail fast，原因由
+# 脚本写到 stderr——与旧版 compose 的 :? 强校验同级。
+if [[ "$(scripts/local-s3-decide.sh --default-endpoint http://rustfs:9000 deploy/.env)" == "start" ]]; then
+    COMPOSE+=(--profile materials-local)
+fi
+
 # 1. secrets
 missing=0
 for f in postgres_password postgres_pgpass agent_worker_register_token vault_master_key; do

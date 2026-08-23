@@ -24,10 +24,19 @@ from worker.supervisor import WorkerConfigStore, WorkerSupervisor, public_config
 logger = logging.getLogger(__name__)
 
 
-# max_code_concurrency 刻意不做热更：开启 code 容量要求 velites 二进制可解析
-# （自带副本 data/bin 优先、PATH 兜底，runtime_preflight 启动预检），走重启
-# 路径才能让预检拦截缺失部署，避免热开后 code 任务在 Host 侧空转重试。
-_HOT_CONFIG_FIELDS = {"claim_enabled", "max_concurrency", "upload_max_concurrency"}
+# 三个容量参数（max_concurrency / max_code_concurrency /
+# upload_max_concurrency）与 claim 开关全部热更：executor 主循环每轮
+# 重读状态副本，调大立即放行新 claim、调小不杀在跑执行，新容量随下一次
+# claim 上报 Host，无需重新注册或重启。code 容量 0→>0 的 velites 守卫由
+# 循环内 hot_code_concurrency fail-closed 执行（缺失 velites 时拒绝热开
+# 并打日志），不依赖重启预检。host_url / worker_id / runtimes 等进程级
+# 配置仍走重启路径。
+_HOT_CONFIG_FIELDS = {
+    "claim_enabled",
+    "max_concurrency",
+    "max_code_concurrency",
+    "upload_max_concurrency",
+}
 
 
 def _public_config_response(store: WorkerConfigStore, config: dict[str, Any]) -> dict[str, Any]:

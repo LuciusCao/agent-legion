@@ -4,6 +4,8 @@
 #   1. 从基准 worktree 复制 .env（若本 worktree 缺失；无法复制则 fail-fast——
 #      缺 .env 会让后端回落共享默认库/prod）
 #   2. 把 AGENT_LEGION_DATABASE_URL 指向按 worktree 名派生的专属 Postgres 库并尝试建库
+#   2.5 按 worktree 名派生 AGENT_LEGION_S3_BUCKET 写入 .env，endpoint 可达时
+#       建 bucket 并配置浏览器直传所需的前端 dev origin CORS
 #   3. 生成缺失的 deploy/secrets（agent_worker_register_token / vault_master_key）
 # 用法: scripts/init-worktree.sh [基准 worktree 路径]（默认取第一个非 bare 且非当前的 worktree）
 set -euo pipefail
@@ -94,6 +96,86 @@ else
     echo "提示: 未找到 createdb，请手动创建数据库 ${DB}" >&2
 fi
 
+# 2.5 专属 S3 bucket（材料存储，materials-and-runs 设计 §6.3）：开发机共享一个
+#     RustFS 实例，bucket 按 worktree 名派生并无条件改写 .env（与专属
+#     Postgres 库同一模式）；endpoint 与凭据随 .env 整体从基准 worktree 继承。
+#     endpoint 不可达时跳过建 bucket / 配 CORS（warning，不 fail——离线/CI
+#     场景），此后材料 API 仅降级为 503。
+BUCKET="agent-legion-$(printf '%s' "$(basename "$ROOT")" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9-' '-')"
+# 无条件改写为派生值（与上方 DATABASE_URL 块同一模式）：.env 是从基准
+# worktree 复制的，本就带着基准的 bucket，「保留原值」会让所有派生
+# worktree 共享基准 bucket，违背 per-worktree 隔离。
+if grep -qE '^(export )?AGENT_LEGION_S3_BUCKET=' .env; then
+    replace_in_place "s|^(export )?AGENT_LEGION_S3_BUCKET=.*|\1AGENT_LEGION_S3_BUCKET=${BUCKET}|" .env
+else
+    echo "AGENT_LEGION_S3_BUCKET=${BUCKET}" >> .env
+fi
+echo "AGENT_LEGION_S3_BUCKET -> ${BUCKET}"
+# 建 bucket：复用 server/app/storage 的 env 加载（.env 经 load_dotenv 生效，
+# override=False——调用 shell 已导出的同名变量优先）。任何失败（endpoint
+# 不可达、boto3 缺失、凭据错误）都降级为提示，不阻断初始化。
+if PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run python - <<'PY'
+from dotenv import load_dotenv
+
+load_dotenv(override=False)
+
+import boto3
+from botocore.exceptions import ClientError
+
+from server.app.storage import load_s3_settings
+
+settings = load_s3_settings()
+if settings is None:
+    print("提示: AGENT_LEGION_S3_BUCKET 未配置，跳过建 bucket")
+    raise SystemExit(0)
+kwargs = {"region_name": settings.region}
+if settings.endpoint_url:
+    kwargs["endpoint_url"] = settings.endpoint_url
+if settings.access_key:
+    kwargs["aws_access_key_id"] = settings.access_key
+    kwargs["aws_secret_access_key"] = settings.secret_key
+client = boto3.client("s3", **kwargs)
+try:
+    client.head_bucket(Bucket=settings.bucket)
+except ClientError as exc:
+    code = str(exc.response.get("Error", {}).get("Code", ""))
+    if code not in ("404", "NoSuchBucket", "NotFound"):
+        raise
+    client.create_bucket(Bucket=settings.bucket)
+    print(f"已创建 S3 bucket: {settings.bucket}")
+else:
+    print(f"S3 bucket 已存在: {settings.bucket}")
+# 浏览器直传要求 bucket CORS 放行前端 dev server origin 的 PUT/GET，并暴露
+# ETag（前端 complete 校验用）。端口约定见 Makefile：prod 前端 5173，dev
+# worktree 默认 5174（DEV_FRONTEND_PORT）。幂等覆写，已存在的 bucket 也补齐。
+client.put_bucket_cors(
+    Bucket=settings.bucket,
+    CORSConfiguration={
+        "CORSRules": [
+            {
+                "AllowedOrigins": [
+                    "http://127.0.0.1:5173",
+                    "http://localhost:5173",
+                    "http://127.0.0.1:5174",
+                    "http://localhost:5174",
+                ],
+                "AllowedMethods": ["PUT", "GET", "HEAD"],
+                "AllowedHeaders": ["*"],
+                "ExposeHeaders": ["ETag"],
+                "MaxAgeSeconds": 3600,
+            }
+        ]
+    },
+)
+print(f"已配置 bucket CORS（前端 dev origin 直传）: {settings.bucket}")
+PY
+then
+    :
+else
+    echo "提示: S3 endpoint 不可达或未配置，跳过建 bucket（材料 API 将降级为 503；" >&2
+    echo "      启动共享 RustFS 后重跑本脚本即可补齐）。" >&2
+fi
+
 # 3. deploy/secrets
 mkdir -p deploy/secrets
 if [[ ! -s deploy/secrets/agent_worker_register_token ]]; then
@@ -129,38 +211,15 @@ if [[ ! -f config/agent-worker.yaml ]]; then
     fi
 fi
 
-# 5. 恢复 workspace 调度：后端每次启动都把全部 workspace 重置为暂停（刻意设计，
-#    防止重启后任务不受控自跑），且 unknown workspace 默认暂停。只有后端已建表
-#    并 seed 过 workspaces 时这步才能生效；否则在首次启动后端后重跑本脚本（幂等）。
-if [[ -f .env ]]; then
-    # 显式传入本 worktree 的专属 URL：load_settings() 以 override=False 加载 .env，
-    # 调用 shell 若已导出 AGENT_LEGION_DATABASE_URL（指向基准/生产实例）会盖过新
-    # .env，导致在错误数据库里恢复调度。
-    if PYTHONPATH="$ROOT" AGENT_LEGION_DATABASE_URL="$DB_URL" UV_CACHE_DIR=.uv-cache uv run python - <<'PY'
-from server.app.db.transaction import read_connection
-from server.app.settings import load_settings
-from server.app.worker_control import WorkspaceWorkerControl
-
-settings = load_settings()
-control = WorkspaceWorkerControl(settings.database_url)
-with read_connection(settings.database_url) as conn:
-    rows = conn.execute("select id from workspaces").fetchall()
-for row in rows:
-    control.resume(str(row["id"]))
-    print(f"已恢复 workspace 调度: {row['id']}")
-PY
-    then
-        :
-    else
-        echo "提示: workspace 恢复未执行（后端可能尚未首次启动建表），" >&2
-        echo "      请在启动后端后重跑本脚本，或在控制台手动恢复。" >&2
-    fi
-fi
-
 cat <<EOF
 完成。剩余手工步骤（如未做过）：
   - frontend: cd frontend && npm ci
   - 质量门: ./scripts/check-quick.sh
+  - 材料存储: 若上方提示跳过了建 bucket，先启动共享 RustFS
+    （deploy/compose.host.yaml 的 rustfs 服务）再重跑本脚本；未配置 S3 时
+    材料 API 降级为 503，其余功能不受影响
+  - workspace 调度: 后端每次启动把全部 workspace 重置为暂停（刻意设计），
+    首次启动建表后按需执行 ./scripts/resume-workspaces.sh（或控制台手动恢复）
   - worker: claim 默认关闭（刻意设计），启动后经 worker 控制台（默认 8789）
     或 PUT /api/config 打开 claim_enabled；capabilities/models 已在
     config/agent-worker.yaml 种子配置中声明，首次导入后修改要走控制台/API

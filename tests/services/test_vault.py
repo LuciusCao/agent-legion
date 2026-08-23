@@ -221,10 +221,13 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
         },
     )
 
-    batch = job_db.get_batch(str(result["batch"]["id"]))
-    payload_text = str(batch["source_payload_json"])
+    batch = job_db.get_run(str(result["batch"]["id"]))
+    assert batch is not None
+    # The freeze now lives on the job row (RUN-FREEZE-001): secret_ref only.
+    job_row = job_db.get_job(str(result["jobs"][0]["id"]))
+    payload_text = str(job_row["frozen_config_json"])
     payload = json.loads(payload_text)
-    frozen = payload["node_config"]["write_script"]
+    frozen = payload["write_script"]
     name = node_secret_name("education_video_problems_generation", "write_script", "token")
     assert frozen["token"] == {"secret_ref": name}
     assert frozen["api_url"] == "http://cms.example.com/question/detail"

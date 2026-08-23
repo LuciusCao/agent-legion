@@ -240,9 +240,10 @@ def test_full_conversation_flow_and_token_hygiene(client, tmp_path) -> None:
     new_session = next(
         e["received"] for e in sink if e.get("received", {}).get("method") == "session/new"
     )
-    env = {item["name"]: item["value"] for item in new_session["params"]["mcpServers"][0]["env"]}
-    token = env["AGENT_LEGION_STUDIO_AGENT_TOKEN"]
-    assert env["AGENT_LEGION_MCP_API_BASE"] == "http://127.0.0.1:8000"
+    mcp_server = new_session["params"]["mcpServers"][0]
+    headers = {item["name"]: item["value"] for item in mcp_server["headers"]}
+    token = headers["Authorization"].removeprefix("Bearer ")
+    assert mcp_server["url"] == "http://127.0.0.1:8000/api/studio-agent/mcp"
     tools = client.get(
         f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active",
         headers={"Authorization": f"Bearer {token}"},
@@ -343,13 +344,14 @@ def test_context_update_route_roundtrip_and_scope_guard(client, tmp_path) -> Non
         new_session = next(
             e["received"] for e in sink if e.get("received", {}).get("method") == "session/new"
         )
-        env = {
-            item["name"]: item["value"] for item in new_session["params"]["mcpServers"][0]["env"]
+        headers = {
+            item["name"]: item["value"]
+            for item in new_session["params"]["mcpServers"][0]["headers"]
         }
         scoped = client.put(
             f"{url}/context",
             json={"selected_node_key": "node-b"},
-            headers={"Authorization": f"Bearer {env['AGENT_LEGION_STUDIO_AGENT_TOKEN']}"},
+            headers={"Authorization": headers["Authorization"]},
         )
         assert scoped.status_code == 403
         assert client.get(url).json()["session"]["selected_node_key"] is None

@@ -3,6 +3,7 @@ from typing import Any
 from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.services.agent_service import published_agent_definitions
+from server.app.services.demo_material_seed import seed_demo_workspace_materials
 from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.vault import VaultService
@@ -66,6 +67,9 @@ class WorkspaceConfigurationService:
     def _ensure_active_revision(self, workspace_id: str, definition: WorkflowDefinition) -> None:
         if definition.key == DEMO_WORKFLOW_KEY:
             seed_demo_workspace_node_codes(self.settings, workspace_id)
+            # Demo materials (design §9): seed-if-absent, skipped with a
+            # warning when object storage is not configured.
+            seed_demo_workspace_materials(self.settings, workspace_id)
         WorkflowRevisionService(
             self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
         ).ensure_active_revision(workspace_id, definition)

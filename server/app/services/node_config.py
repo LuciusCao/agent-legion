@@ -164,22 +164,22 @@ def dispatch_effective_config(
     node: Any,
     workflow_key: str,
     workspace: Mapping[str, Any] | None,
-    batch_payload: Mapping[str, Any] | None,
+    run_payload: Mapping[str, Any] | None,
     fallback_defaults: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Effective config at dispatch time: frozen intake snapshot wins.
+    """Effective config at dispatch time: the job's frozen config wins.
 
-    Jobs intaken before this mechanism existed (or replayed without a batch)
-    fall back to live resolution from the node and workspace layers. Frozen
-    snapshots predating the reserved execution keys get *fallback_defaults*
-    underneath (frozen values always win), so in-flight old jobs keep their
-    node-declared timeout/network behavior (P-0.5).
+    Jobs intaken before this mechanism existed (or replayed without a frozen
+    config) fall back to live resolution from the node and workspace layers.
+    Frozen snapshots predating the reserved execution keys get
+    *fallback_defaults* underneath (frozen values always win), so in-flight
+    old jobs keep their node-declared timeout/network behavior (P-0.5).
 
     Frozen snapshots are overlaid with a live re-resolution of the keys
     declared ``runtime_mutable: true`` (CONFIG-RUNTIME-MUTABLE-001); everything
     else — including the platform-reserved execution keys — stays frozen.
     """
-    frozen = frozen_node_config(batch_payload, node.key)
+    frozen = frozen_node_config(run_payload, node.key)
     if frozen is None:
         overrides = workspace_node_overrides(workspace, workflow_key)
         return resolve_node_config(config_schema, node.config, overrides.get(node.key, {}))

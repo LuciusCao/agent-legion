@@ -88,8 +88,10 @@ worker 按设计默认关闭任务领取，到 worker 控制台 http://127.0.0.1
 
 仓库自带一个极简 demo workflow
 **`education_video_problems_generation`**：`examples/` 下 10 个通用中小学
-数学知识点各自展开为一个 job——撰写教学视频脚本、评审、生成 5 道练习题、
-评审，最后模拟发布（不发网络请求）。
+数学知识点 markdown 随 demo workspace 播种为示例材料（需配置
+`AGENT_LEGION_S3_*` 对象存储，未配置则跳过播种），每个材料展开为一个
+job——撰写教学视频脚本、评审、生成 5 道练习题、评审，最后模拟发布
+（不发网络请求）。
 
 ```bash
 make import-demo      # 安装并锁定 demo skills；不存在时创建并 seed demo workspace
@@ -101,10 +103,8 @@ make import-demo      # 安装并锁定 demo skills；不存在时创建并 seed
 2. 在 workspace **设置 → Agent 默认配置** 里填入你的 LLM 端点提供的
    provider/model。
 3. 打开 workspace 的自动调度，并在 Worker 控制台打开 claim。
-4. 提交一批任务：`POST /api/workspaces/{id}/job-batches`，body 为
-   `{"workflow_key": "education_video_problems_generation",
-   "source_kind": "direct_ids", "knowledge_point_ids": ["triangle-area"]}`
-   ——或使用 intake 界面。
+4. 提交一批任务：在 workspace 里「添加条目」上传知识点 markdown（或粘贴
+   已播种的示例材料 ID），确认后创建运行——每个材料一个 job。
 5. 看 DAG 实时点亮；每个节点完成后可以查看它的完整执行痕迹与产物。
 
 ### 下一步

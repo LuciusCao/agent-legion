@@ -73,7 +73,7 @@ def test_rerun_rmw_node_keeps_artifact_and_stays_reschedulable(
     job_db, settings, rerun_service, rmw_definition
 ):
     workspace = job_db.create_workspace("default", default_workflow_key="rmw_workflow")
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "rmw_workflow",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
@@ -83,7 +83,7 @@ def test_rerun_rmw_node_keeps_artifact_and_stays_reschedulable(
         workflow_key="rmw_workflow",
         source_type="question",
         source_id="Q1",
-        batch_id=batch["id"],
+        run_id=batch["id"],
         title="Question 1",
         node_keys=["produce", "publish"],
         workspace_id=workspace["id"],

@@ -1,4 +1,4 @@
-"""Thin MCP (stdio) wrapper over the studio-agent tool surface.
+"""Thin MCP wrapper over the studio-agent tool surface.
 
 Agent Legion backend via ``tool_client.ToolClient``, authenticated with a
 studio-agent scoped token (STUDIO-AGENT-001). Tools return the response body
@@ -6,11 +6,19 @@ as text; non-2xx responses come back as ``HTTP <code>: <body>`` text instead
 of raising. The only exception is ``get_authoring_guide``, which serves the
 built-in authoring playbook (``authoring_guide.AUTHORING_GUIDE``) locally
 without an HTTP call.
+
+Two transports share this registration: the stdio entry point
+(``python -m server.app.mcp_server``, external self-service agents, static
+env config) and the in-app streamable-HTTP endpoint (``http_app.py``, Studio
+chat sessions, per-request header config). Both pass a config resolver; the
+HTTP one re-resolves on every tool call so each request runs under its own
+scoped token and session binding.
 """
 
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -19,11 +27,17 @@ from server.app.mcp_server.authoring_guide import AUTHORING_GUIDE
 from server.app.mcp_server.config import McpConfigError, McpServerConfig
 from server.app.mcp_server.tool_client import ToolClient
 
+ConfigResolver = Callable[[], McpServerConfig]
 
-def create_mcp_server(config: McpServerConfig) -> FastMCP:
+
+def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
     """Build the FastMCP server exposing the studio-agent tools."""
+    resolve: ConfigResolver = config if callable(config) else (lambda: config)
     mcp = FastMCP("agent-legion-studio")
-    client = ToolClient(config)
+
+    def _client() -> tuple[McpServerConfig, ToolClient]:
+        resolved = resolve()
+        return resolved, ToolClient(resolved)
 
     @mcp.tool()
     def get_authoring_guide() -> str:
@@ -41,6 +55,7 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
         currently has selected in Studio (live value on every call). Takes no
         workspace_id — the session binding decides which workspace you operate
         on. Call this first when you need workspace or selection context."""
+        config, client = _client()
         if config.session_id is None:
             return "get_studio_context is unavailable: no chat session bound"
         return client.call("GET", f"/chat-sessions/{config.session_id}/context")
@@ -52,6 +67,7 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
         on what is actually live. No published workflow yet yields a structured
         empty state ({"state": "empty"}) instead of an error — the signal to
         start the from-scratch flow (see get_authoring_guide)."""
+        _, client = _client()
         return client.call("GET", f"/workspaces/{workspace_id}/workflow/active")
 
     @mcp.tool()
@@ -59,6 +75,7 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
         """Validate a workflow definition YAML draft against the publish
         validation set. Persists nothing. Always validate a draft before
         asking the human to review or apply it."""
+        _, client = _client()
         return client.call(
             "POST",
             f"/workspaces/{workspace_id}/workflow/validate",
@@ -71,6 +88,7 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
         revision: per-node changes, risk summary, whether it would create a new
         revision. With no published baseline the result is a full-draft preview
         (everything added, base_revision null). Persists nothing."""
+        _, client = _client()
         return client.call(
             "POST",
             f"/workspaces/{workspace_id}/workflow/compare",
@@ -95,6 +113,7 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
         body: dict[str, Any] = {"code": code, "change_note": change_note or None}
         if expected_capability is not None:
             body["expected_capability"] = expected_capability
+        _, client = _client()
         return client.call(
             "PUT",
             f"/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft",
@@ -105,6 +124,7 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
     def get_node_code(workspace_id: str, workflow_key: str, node_key: str) -> str:
         """Read the current code state of a workflow code node: builtin source,
         published custom code, and any pending draft."""
+        _, client = _client()
         return client.call(
             "GET",
             f"/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code",
@@ -122,6 +142,7 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
         """Save a draft Agent definition (workspace-scoped) binding a capability
         to a runtime and skill. runtime is one of: pi, openclaw, velites.
         Draft only — a human publishes it in Studio before any job can use it."""
+        _, client = _client()
         return client.call(
             "PUT",
             f"/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",

@@ -108,8 +108,11 @@ ACP 生态验证（哪些 agent 支持、协议成熟度）是 chunk 4 改造的
   对缺失项告警；用不可用 agent 建 session 在 spawn 前明确报错、不留孤儿行。
   注册表独立成文档而非并入 `instance` 大文档：后者是整体替换语义且前端按字段
   重建 payload，并入会被无关保存冲掉。
-- session/new 现铸 scoped token（origin='run'，TTL 2h 固定）经 MCP env 注入，
-  只出现在 session/new 请求里；session 关闭即吊销；不落库/日志/消息/SSE。
+- session/new 现铸 scoped token（origin='run'，TTL 2h 固定）经 MCP HTTP header 注入
+  （kimi ≥ 0.38 的 ACP session/new 不再接受 stdio MCP server，工具面改为后端内嵌
+  streamable-HTTP 端点 `/api/studio-agent/mcp`，token 走 Authorization Bearer、
+  会话绑定走 `x-agent-legion-mcp-session-id` header），只出现在 session/new 请求里；
+  session 关闭即吊销；不落库/日志/消息/SSE。
 - schema v43：`studio_chat_sessions`（capability 快照、allow_all_permissions、
   mcp_status）+ `studio_chat_messages`（kind: text/tool_call/plan/permission/status，
   identity seq 排序）；升级语句在 schema 文件 + migrations 幂等兜底。

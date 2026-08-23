@@ -610,7 +610,7 @@ invariants:
         gate: quick
 
   - id: STUDIO-AGENT-002
-    statement: "Studio chat sessions (phase 3 chunk 4) run user-selected ACP agents whose command lines come only from the admin-maintained instance-level registry (global_settings key 'studio_agents'); non-admin users pick an agent by id and the picker API never exposes command/args and only lists agents whose command currently resolves on this host (PATH-level probe, ~60s TTL cache, warmed at backend startup); creating a session with an unavailable agent fails with a clear error before any spawn. Each session mints one scoped token (origin='run', fixed TTL) that crosses the process boundary only as an MCP env entry inside the ACP session/new request — never persisted, never logged, never present in message or SSE payloads — and is revoked when the session closes. Permission requests for agent-legion MCP tools auto-approve (the scoped token is the authority boundary), and local read-only ACP tool kinds (read/search — the Read/Glob/Grep class) auto-approve as side-effect-free; all other tool calls default to human confirmation (auto-denied after a 120s timeout so an abandoned tab cannot park a turn) with a per-session allow-all switch, and cancelling a turn settles every pending permission as denied."
+    statement: "Studio chat sessions (phase 3 chunk 4) run user-selected ACP agents whose command lines come only from the admin-maintained instance-level registry (global_settings key 'studio_agents'); non-admin users pick an agent by id and the picker API never exposes command/args and only lists agents whose command currently resolves on this host (PATH-level probe, ~60s TTL cache, warmed at backend startup); creating a session with an unavailable agent fails with a clear error before any spawn. Each session mints one scoped token (origin='run', fixed TTL) that crosses the process boundary only as an HTTP header inside the ACP session/new request — kimi >= 0.38 accepts only http/sse MCP servers there, so the tool surface is served in-app as a streamable-HTTP endpoint at /api/studio-agent/mcp guarded solely by an ASGI-level studio-agent scoped-token check (the Mount bypasses route-layer auth dependencies), with the token riding Authorization Bearer and the chat session binding riding x-agent-legion-mcp-session-id — never persisted, never logged, never present in message or SSE payloads — and is revoked when the session closes. Permission requests for agent-legion MCP tools auto-approve (the scoped token is the authority boundary), and local read-only ACP tool kinds (read/search — the Read/Glob/Grep class) auto-approve as side-effect-free; all other tool calls default to human confirmation (auto-denied after a 120s timeout so an abandoned tab cannot park a turn) with a per-session allow-all switch, and cancelling a turn settles every pending permission as denied."
     owner: security
     risk: high
     evidence:
@@ -628,6 +628,9 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/services/test_studio_chat_availability.py
+        gate: quick
+      - kind: integration
+        target: tests/mcp_server/test_http_app.py
         gate: quick
 
   - id: CONFIG-MANIFEST-001
@@ -953,4 +956,43 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/routes/test_studio_agent_tools.py
+        gate: quick
+
+  - id: MATERIAL-ACCESS-001
+    statement: "Node code accesses materials only through the materialization cache: the dispatching parent (Host build_runtime / Worker code_runner) downloads the object into a content-addressed local cache (shared/material_cache.py, atomic tmp+rename, oldest-mtime eviction towards a byte budget) and both sandbox argv builders grant a single STATIC allow-read root for that cache directory (server/app/executors/_code_sandbox.py, worker/code_runner.py — kept in sync); dynamically allow-reading arbitrary host paths (per-material grants, user-supplied roots) is forbidden, and the node SDK exposes only the materialized local path (ctx.material)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_material_dispatch.py
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_material_fetch.py
+        gate: quick
+      - kind: integration
+        target: tests/shared/test_material_cache.py
+        gate: quick
+
+  - id: MATERIAL-SECRET-001
+    statement: "Material object-storage configuration is platform infrastructure injected env-only (AGENT_LEGION_S3_* with _FILE variants for the access/secret keys, same pattern as the vault master key): credentials never land in tracked yaml, the database, API payloads, or logs; an unconfigured instance (no bucket) keeps every other feature up and degrades only the materials API to 503."
+    owner: security
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_s3_settings.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_materials_routes.py
+        gate: quick
+
+  - id: RUN-FREEZE-001
+    statement: "Frozen inputs, node configs and pins are authoritative on the run/job columns (runs.frozen_pins_json, jobs.input_json, jobs.frozen_config_json): dispatch and the node SDK rebuild the legacy batch-payload shape from those columns via server.app.services.run_payload, and no runtime path reads a stored batch payload (job_batches is dropped at schema v53; the async intake queue keeps only its working state in runs.queue_payload_json)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/db/test_runs_migration.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_run_payload.py
         gate: quick

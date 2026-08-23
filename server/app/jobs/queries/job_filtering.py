@@ -60,7 +60,7 @@ def filter_clauses(f: JobListFilter) -> tuple[list[str], list[Any]]:
         term = f"%{_escape_like(f.search.strip())}%"
         clauses.append(
             "(id ilike %s escape '\\' or source_id ilike %s escape '\\'"
-            " or batch_id ilike %s escape '\\' or title ilike %s escape '\\')"
+            " or run_id ilike %s escape '\\' or title ilike %s escape '\\')"
         )
         params.extend([term, term, term, term])
     if f.workflow_version is not None:

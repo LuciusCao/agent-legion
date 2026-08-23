@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from cryptography.fernet import Fernet
@@ -74,14 +75,14 @@ def _prepare_job(
     node: WorkflowNode,
     *,
     workspace: dict | None = None,
-    batch_id: str = "",
+    run_id: str = "",
 ) -> tuple[dict, dict]:
     ws = workspace or job_db.create_workspace("Test WS", default_workflow_key="test")
     job = job_db.create_job(
         workflow_key="test",
         source_type="question",
         source_id="Q1",
-        batch_id=batch_id,
+        run_id=run_id,
         title="Q1",
         node_keys=[node.key],
         workspace_id=ws["id"],
@@ -135,13 +136,19 @@ def test_dispatch_prefers_frozen_batch_node_config(tmp_path: Path) -> None:
         "fetch",
     )
     ws = job_db.create_workspace("Test WS", default_workflow_key="test")
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "test",
         "batch_by_ids",
         {"node_config": {"fetch": {"bank_version": "frozen"}}},
         ws["id"],
     )
-    _ws, _job = _prepare_job(job_db, node, workspace=ws, batch_id=str(batch["id"]))
+    _ws, _job = _prepare_job(job_db, node, workspace=ws, run_id=str(batch["id"]))
+    # The freeze lives on the job row (RUN-FREEZE-001), not the run payload.
+    with job_db.connect() as conn:
+        conn.execute(
+            "update jobs set frozen_config_json=%s where id=%s",
+            (json.dumps({"fetch": {"bank_version": "frozen"}}), _job["id"]),
+        )
     job_db.update_workspace(ws["id"], node_config={"test": {"fetch": {"bank_version": "v9"}}})
     worker = _make_worker(tmp_path, executor, [_make_definition([node])])
     executor.block_event.set()
@@ -175,13 +182,18 @@ def test_dispatch_pads_frozen_batch_with_node_declared_reserved_values(tmp_path:
         outputs=["output.json"],
     )
     ws = job_db.create_workspace("Test WS", default_workflow_key="test")
-    batch = job_db.create_batch(
+    batch = job_db.create_run(
         "test",
         "batch_by_ids",
         {"node_config": {"fetch": {"bank_version": "frozen"}}},
         ws["id"],
     )
-    _ws, _job = _prepare_job(job_db, node, workspace=ws, batch_id=str(batch["id"]))
+    _ws, _job = _prepare_job(job_db, node, workspace=ws, run_id=str(batch["id"]))
+    with job_db.connect() as conn:
+        conn.execute(
+            "update jobs set frozen_config_json=%s where id=%s",
+            (json.dumps({"fetch": {"bank_version": "frozen"}}), _job["id"]),
+        )
     worker = _make_worker(tmp_path, executor, [_make_definition([node])])
     executor.block_event.set()
 

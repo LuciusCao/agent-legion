@@ -71,8 +71,10 @@ def test_intake_freeze_and_manifest_whitelist(job_db) -> None:
         {"id": "rev-1"},
         resolved,
     )
-    batch = job_db.get_batch(str(result["batch"]["id"]))
-    payload = json.loads(str(batch["source_payload_json"]))
+    batch = job_db.get_run(str(result["batch"]["id"]))
+    # Async runs carry the working state (incl. the resolved node_config the
+    # consumer freezes onto each job) in queue_payload_json.
+    payload = json.loads(str(batch["queue_payload_json"]))
     frozen = payload["node_config"]["generate"]
     assert frozen == {"page_size": 5, "subject_id": "math", "api_key": "sekret"}
 
@@ -141,8 +143,8 @@ def test_node_layered_config_freeze_and_manifest(job_db) -> None:
         {"id": "rev-1"},
         resolved,
     )
-    batch = job_db.get_batch(str(result["batch"]["id"]))
-    payload = json.loads(str(batch["source_payload_json"]))
+    batch = job_db.get_run(str(result["batch"]["id"]))
+    payload = json.loads(str(batch["queue_payload_json"]))
     frozen = payload["node_config"]["fetch"]
     assert frozen == {
         "bank_version": "v9",
@@ -208,8 +210,8 @@ def test_node_declared_schema_freeze_and_manifest(job_db) -> None:
         {"id": "rev-1"},
         resolved,
     )
-    batch = job_db.get_batch(str(result["batch"]["id"]))
-    payload = json.loads(str(batch["source_payload_json"]))
+    batch = job_db.get_run(str(result["batch"]["id"]))
+    payload = json.loads(str(batch["queue_payload_json"]))
     frozen = payload["node_config"]["intake"]
     assert frozen == {"knowledge_dir": "custom", "timeout_seconds": 30, "sandbox_network": False}
 
