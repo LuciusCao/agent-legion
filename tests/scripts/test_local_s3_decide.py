@@ -157,6 +157,36 @@ def test_explicit_empty_endpoint_from_process_env_skips(tmp_path: Path) -> None:
     assert result.stdout.strip() == "skip"
 
 
+def test_process_env_empty_endpoint_overrides_local_file_value(tmp_path: Path) -> None:
+    """进程显式空 endpoint（=AWS 默认端点）优先于文件里的本机地址：
+    首次出现即生效，空值也是值，不得回退到文件取值。"""
+    env_file = _write_env(
+        tmp_path,
+        "AGENT_LEGION_S3_ENDPOINT=http://127.0.0.1:9000\n"
+        "AGENT_LEGION_S3_ACCESS_KEY=a\n"
+        "AGENT_LEGION_S3_SECRET_KEY=b\n",
+    )
+    result = _run(str(env_file), env_extra={"AGENT_LEGION_S3_ENDPOINT": ""})
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "skip"
+    assert "显式置空" in result.stderr
+
+
+def test_earlier_file_empty_endpoint_wins_over_later_local(tmp_path: Path) -> None:
+    """文件 A 显式空 + 文件 B 本机地址：A 先出现即生效 → skip。"""
+    first = _write_env(tmp_path, "AGENT_LEGION_S3_ENDPOINT=\n", name="first.env")
+    second = _write_env(
+        tmp_path,
+        "AGENT_LEGION_S3_ENDPOINT=http://127.0.0.1:9000\n"
+        "AGENT_LEGION_S3_ACCESS_KEY=a\n"
+        "AGENT_LEGION_S3_SECRET_KEY=b\n",
+        name="second.env",
+    )
+    result = _run(str(first), str(second))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "skip"
+
+
 def test_start_requires_keys(tmp_path: Path) -> None:
     """已表达本地存储意图（本机 endpoint）但凭据未配齐 → 配置错误。"""
     env_file = _write_env(tmp_path, "AGENT_LEGION_S3_ENDPOINT=http://127.0.0.1:9000\n")

@@ -5,9 +5,12 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import threading
+import time
 
 import pytest
 
+from server.app.db.connection import connect_database
 from server.app.services.job_errors import ConflictError, NotFoundError
 from server.app.services.materials import (
     MaterialInUseError,
@@ -303,3 +306,47 @@ def test_delete_ignores_unrelated_job_inputs(service, storage, job_db) -> None:
     assert storage.deleted == [storage_key]
     with pytest.raises(NotFoundError):
         service.get(WORKSPACE_ID, material_id)
+
+
+def test_delete_blocked_by_key_share_sees_committed_reference(service, storage, job_db) -> None:
+    """TOCTOU 串行化（run 创建侧先持锁方向）：run 创建对材料行持 FOR KEY
+    SHARE（未提交）时，delete 的 FOR UPDATE 阻塞到对方提交；随后引用检查
+    看到对方已提交的 job → MaterialInUseError，对象与行都保留。"""
+    result = service.presign(WORKSPACE_ID, filename="n.txt", size_bytes=2)
+    material_id = result["material"]["id"]
+    storage.objects[f"{WORKSPACE_ID}/{material_id}/n.txt"] = b"ok"
+
+    outcome: list[str] = []
+    entered = threading.Event()
+
+    def _delete() -> None:
+        entered.set()
+        try:
+            service.delete(WORKSPACE_ID, material_id)
+            outcome.append("deleted")
+        except MaterialInUseError:
+            outcome.append("in-use")
+        except Exception as exc:  # 线程内意外失败也要带回主线程定位
+            outcome.append(f"error:{exc!r}")
+
+    holder = connect_database(job_db.path)
+    try:
+        with holder:
+            # 模拟 run 创建侧：对材料行持 KEY SHARE（未提交）。
+            holder.execute("select id from materials where id=%s for key share", (material_id,))
+            thread = threading.Thread(target=_delete)
+            thread.start()
+            assert entered.wait(timeout=5)
+            time.sleep(0.5)  # delete 线程应正阻塞在 FOR UPDATE 上
+            assert thread.is_alive()
+            # 对方提交前，run 创建的引用 job 已落库并提交。
+            _insert_job_referencing(job_db, material_id)
+        # holder 提交，释放 KEY SHARE
+        thread.join(timeout=15)
+    finally:
+        holder.close()
+
+    assert not thread.is_alive()
+    assert outcome == ["in-use"]
+    assert storage.deleted == []
+    assert service.get(WORKSPACE_ID, material_id)["id"] == material_id
