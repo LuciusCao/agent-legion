@@ -33,9 +33,9 @@ from acp.schema import (
 )
 from acp.schema import (
     ClientCapabilities,
-    EnvVariable,
+    HttpHeader,
+    HttpMcpServer,
     Implementation,
-    McpServerStdio,
     RequestPermissionResponse,
     TextContentBlock,
 )
@@ -43,6 +43,8 @@ from acp.schema import (
     DeniedOutcome as AcpDeniedOutcome,
 )
 
+from server.app.mcp_server.config import SESSION_ID_HEADER
+from server.app.mcp_server.http_app import MCP_URL_PATH
 from server.app.studio_chat.capabilities import capability_snapshot
 
 logger = logging.getLogger(__name__)
@@ -127,7 +129,7 @@ class AcpSessionHandle:
         command: str,
         args: list[str],
         cwd: str,
-        mcp_server: McpServerStdio,
+        mcp_server: HttpMcpServer,
         env: Mapping[str, str] | None,
         callbacks: AcpSessionCallbacks,
     ) -> None:
@@ -280,23 +282,22 @@ class AcpSessionHandle:
         asyncio.get_running_loop().create_task(drain())
 
 
-def build_mcp_server_spec(
-    *, token: str, api_base: str, python_executable: str, session_id: str
-) -> McpServerStdio:
+def build_mcp_server_spec(*, token: str, api_base: str, session_id: str) -> HttpMcpServer:
     """The session-scoped agent-legion MCP entry injected into session/new.
 
-    The raw scoped token crosses only as an MCP env entry inside the ACP
-    session/new request — never persisted, never logged (STUDIO-AGENT-001).
-    The chat session id rides along (AGENT_LEGION_MCP_SESSION_ID) so the
-    get_studio_context tool can resolve this session's live context.
+    kimi ≥ 0.38 only accepts http/sse MCP servers over ACP, so the backend
+    serves the tool surface itself (server.app.mcp_server.http_app) and the
+    session points at that URL. The raw scoped token crosses only as an HTTP
+    header inside the ACP session/new request — never persisted, never logged
+    (STUDIO-AGENT-001). The chat session id rides along (SESSION_ID_HEADER)
+    so the get_studio_context tool can resolve this session's live context.
     """
-    return McpServerStdio(
+    return HttpMcpServer(
+        type="http",
         name="agent-legion-studio",
-        command=python_executable,
-        args=["-m", "server.app.mcp_server"],
-        env=[
-            EnvVariable(name="AGENT_LEGION_STUDIO_AGENT_TOKEN", value=token),
-            EnvVariable(name="AGENT_LEGION_MCP_API_BASE", value=api_base),
-            EnvVariable(name="AGENT_LEGION_MCP_SESSION_ID", value=session_id),
+        url=f"{api_base}{MCP_URL_PATH}",
+        headers=[
+            HttpHeader(name="Authorization", value=f"Bearer {token}"),
+            HttpHeader(name=SESSION_ID_HEADER, value=session_id),
         ],
     )

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 import threading
 from datetime import UTC, datetime
 from typing import Any
@@ -128,7 +127,6 @@ class StudioChatService:
                 mcp_server=build_mcp_server_spec(
                     token=token,
                     api_base=str(self._registry.get()["api_base"]),
-                    python_executable=sys.executable,
                     session_id=session_id,
                 ),
                 env=None,
