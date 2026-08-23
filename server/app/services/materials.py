@@ -38,6 +38,10 @@ class MaterialVerificationError(JobServiceError):
     """Stored object does not match the declared size/hash (routes map to 422)."""
 
 
+class MaterialInUseError(JobServiceError):
+    """Material is still referenced by a job input (routes map to 409)."""
+
+
 def _timestamp(value: Any) -> str | None:
     if value is None:
         return None
@@ -258,13 +262,22 @@ class MaterialsService:
         return _record(self._fetch_row(workspace_id, material_id))
 
     def delete(self, workspace_id: str, material_id: str) -> None:
-        """Delete the object and its row.
-
-        TODO(materials): enforce reference counting before physical deletion
-        (design §10) once jobs reference materials — a later slice.
-        """
+        """Delete the object and its row unless a job input references it."""
         storage = self._require_storage()
         row = self._fetch_row(workspace_id, material_id)
+        # v1 blunt guard: any referencing job blocks deletion — queued jobs,
+        # failure re-runs and quality replays re-resolve the row at dispatch
+        # time and would fail with "material not found". Design §10 reference
+        # counting replaces this guard in a later slice.
+        with read_connection(self._dsn) as conn:
+            referencing = conn.execute(
+                "select id from jobs where workspace_id=%s"
+                " and input_json::jsonb ->> 'type' = 'material'"
+                " and input_json::jsonb ->> 'material_id' = %s limit 1",
+                (workspace_id, material_id),
+            ).fetchone()
+        if referencing is not None:
+            raise MaterialInUseError(f"Material is referenced by job {referencing['id']}")
         storage.delete_object(str(row["storage_key"]))
         with write_transaction(self._dsn) as conn:
             conn.execute(

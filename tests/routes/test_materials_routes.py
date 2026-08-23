@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 
 import pytest
 
@@ -183,3 +184,30 @@ def test_delete_removes_material_and_object(client, storage) -> None:
     assert response.json()["deleted"] == material_id
     assert storage.deleted == [storage_key]
     assert client.get(f"/api/workspaces/{workspace_id}/materials/{material_id}").status_code == 404
+
+
+def test_delete_referenced_material_returns_409(client, storage, job_db) -> None:
+    """被 job input_json 引用的材料拒删（409），对象与行保留。"""
+    workspace_id = _create_workspace(client)
+    result = _presign(client, workspace_id)
+    material_id = result["material"]["id"]
+    storage_key = f"{workspace_id}/{material_id}/doc.txt"
+    storage.objects[storage_key] = b"12345"
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into jobs(id, workspace_id, workflow_key, source_type,"
+            " source_id, input_json)"
+            " values ('job-refs-material', %s, 'demo_workflow', 'material', %s, %s)",
+            (
+                workspace_id,
+                material_id,
+                json.dumps({"type": "material", "material_id": material_id}),
+            ),
+        )
+
+    response = client.delete(f"/api/workspaces/{workspace_id}/materials/{material_id}")
+
+    assert response.status_code == 409, response.text
+    assert "referenced by job" in response.json()["detail"]
+    assert storage.deleted == []
+    assert client.get(f"/api/workspaces/{workspace_id}/materials/{material_id}").status_code == 200

@@ -11,6 +11,9 @@
 #             - endpoint 指向本机（127.0.0.1 / localhost / ::1 / compose 内部
 #               名 rustfs）→ start
 #             - endpoint 指向外部地址 → skip
+#             - endpoint 键出现但显式置空（AGENT_LEGION_S3_ENDPOINT=，AWS S3
+#               默认端点写法，与 compose ${VAR-default} 语义一致）→ skip，
+#               不再套用编排层注入的 --default-endpoint
 #             - 未配 endpoint 但配了 bucket 或凭据（AWS S3 默认端点写法）→ skip
 #             - 完全未配置 S3 → start（零配置默认后端；此时凭据缺失不做硬校验，
 #               RustFS 只绑 loopback、后端未配 bucket 时材料 API 降级 503，
@@ -85,6 +88,23 @@ lookup() {
     return 0
 }
 
+# 只探测「键是否出现」，不看值是否为空。endpoint 用它区分 absent 与
+# present-but-empty（显式空值 = AWS 默认端点，与 compose ${VAR-default}
+# 语义一致）；其余键保持空=未配置的语义，仍走 lookup。
+lookup_present() {
+    local key="$1" file
+    if printenv "$key" >/dev/null 2>&1; then
+        return 0
+    fi
+    for file in ${ENV_FILES[@]+"${ENV_FILES[@]}"}; do
+        [[ -f "$file" ]] || continue
+        if grep -qE "^[[:space:]]*(export[[:space:]]+)?${key}=" "$file" 2>/dev/null; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 endpoint_is_local() {
     local host="$1"
     host="${host#*://}"      # 去 scheme
@@ -142,8 +162,14 @@ case "$MODE" in
         emit skip "AGENT_LEGION_LOCAL_S3=never（使用外部对象存储）"
         ;;
     auto)
-        endpoint="$(lookup AGENT_LEGION_S3_ENDPOINT)"
-        [[ -n "$endpoint" ]] || endpoint="$DEFAULT_ENDPOINT"
+        endpoint_present=false
+        if lookup_present AGENT_LEGION_S3_ENDPOINT; then
+            endpoint_present=true
+            endpoint="$(lookup AGENT_LEGION_S3_ENDPOINT)"
+        else
+            # 键完全未出现才允许编排层注入的默认 endpoint 兜底。
+            endpoint="$DEFAULT_ENDPOINT"
+        fi
         if [[ -n "$endpoint" ]]; then
             if endpoint_is_local "$endpoint"; then
                 require_keys
@@ -151,6 +177,8 @@ case "$MODE" in
             else
                 emit skip "AGENT_LEGION_S3_ENDPOINT=${endpoint} 指向外部地址，使用外部对象存储"
             fi
+        elif $endpoint_present; then
+            emit skip "AGENT_LEGION_S3_ENDPOINT 显式置空（AWS S3 默认端点写法），使用外部对象存储"
         else
             bucket="$(lookup AGENT_LEGION_S3_BUCKET)"
             access_key="$(lookup AGENT_LEGION_S3_ACCESS_KEY)"

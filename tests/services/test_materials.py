@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 
 import pytest
 
 from server.app.services.job_errors import ConflictError, NotFoundError
 from server.app.services.materials import (
+    MaterialInUseError,
     MaterialsService,
     MaterialStorageUnavailableError,
     MaterialVerificationError,
@@ -234,3 +236,70 @@ def test_delete_removes_object_and_row(service, storage) -> None:
     assert storage.deleted == [storage_key]
     with pytest.raises(NotFoundError):
         service.get(WORKSPACE_ID, result["material"]["id"])
+
+
+def _insert_job_referencing(job_db, material_id: str, *, status: str = "queued") -> str:
+    """Insert a job whose input_json is a material item naming material_id."""
+    job_id = f"job-{material_id[:8]}-{status}"
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into jobs(id, workspace_id, workflow_key, source_type,"
+            " source_id, status, input_json)"
+            " values (%s, %s, 'demo_workflow', 'material', %s, %s, %s)",
+            (
+                job_id,
+                WORKSPACE_ID,
+                material_id,
+                status,
+                json.dumps({"type": "material", "material_id": material_id}),
+            ),
+        )
+    return job_id
+
+
+def test_delete_rejects_material_referenced_by_job(service, storage, job_db) -> None:
+    result = service.presign(WORKSPACE_ID, filename="k.txt", size_bytes=2)
+    material_id = result["material"]["id"]
+    storage_key = f"{WORKSPACE_ID}/{material_id}/k.txt"
+    storage.objects[storage_key] = b"ok"
+    job_id = _insert_job_referencing(job_db, material_id)
+
+    with pytest.raises(MaterialInUseError, match=job_id):
+        service.delete(WORKSPACE_ID, material_id)
+
+    # 对象与行都保留：job 后续 dispatch / 重跑仍可物化。
+    assert storage.deleted == []
+    assert storage_key in storage.objects
+    assert service.get(WORKSPACE_ID, material_id)["id"] == material_id
+
+
+def test_delete_rejects_material_referenced_by_terminal_job(service, storage, job_db) -> None:
+    """v1 任何引用都拒删：终结态 job 的引用同样阻断（质量回放仍要物化）。"""
+    result = service.presign(WORKSPACE_ID, filename="l.txt", size_bytes=2)
+    material_id = result["material"]["id"]
+    _insert_job_referencing(job_db, material_id, status="completed")
+
+    with pytest.raises(MaterialInUseError):
+        service.delete(WORKSPACE_ID, material_id)
+
+
+def test_delete_ignores_unrelated_job_inputs(service, storage, job_db) -> None:
+    """其他材料的 job 与非 material 输入不阻断删除。"""
+    result = service.presign(WORKSPACE_ID, filename="m.txt", size_bytes=2)
+    material_id = result["material"]["id"]
+    storage_key = f"{WORKSPACE_ID}/{material_id}/m.txt"
+    storage.objects[storage_key] = b"ok"
+    _insert_job_referencing(job_db, "other-material")
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into jobs(id, workspace_id, workflow_key, source_type,"
+            " source_id, input_json)"
+            " values ('job-ref-item', %s, 'demo_workflow', 'ref', 'conn:ext', %s)",
+            (WORKSPACE_ID, json.dumps({"type": "ref", "connection_key": "c"})),
+        )
+
+    service.delete(WORKSPACE_ID, material_id)
+
+    assert storage.deleted == [storage_key]
+    with pytest.raises(NotFoundError):
+        service.get(WORKSPACE_ID, material_id)
