@@ -52,10 +52,13 @@ chmod 600 deploy/.env
 echo 'AGENT_LEGION_S3_PUBLIC_ENDPOINT=http://<宿主机地址>:9000' >> deploy/.env
 ```
 
-（原生形态 `make prod-up` 不经 compose：把同名变量写进 prod worktree 根
-的 `.env`——原生加载支持 `_FILE` 变体——并自行运行一个 RustFS 进程/容器，
-`AGENT_LEGION_S3_ENDPOINT` 指向它；`AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向
-浏览器 / remote worker 可达的地址。）
+（原生形态 `make prod-up` 的后端/worker 是本机进程，不经 compose：把同名
+变量写进 prod worktree 根的 `.env`——原生加载支持 `_FILE` 变体。
+RustFS 容器不用手工起：`native-prod-up.sh` 会自动
+`docker compose -f deploy/compose.host.yaml up -d rustfs`（幂等；docker
+不可用或启动失败仅告警，材料 API 降级为 503，其余功能不受影响）。
+原生形态的 `AGENT_LEGION_S3_ENDPOINT` 指向 `http://127.0.0.1:9000`，
+`AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向浏览器 / remote worker 可达的地址。）
 
 ### 2.2 启动与建 bucket
 
