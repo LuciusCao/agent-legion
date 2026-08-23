@@ -21,7 +21,7 @@ source_kind / intake mode 才能提交任务。这带来三个问题：
 2. **用户概念负担**：intake、source_kind、batch 都是内部机制泄漏到用户面的
    概念。新用户的心智只有一句「我给一批条目，每个条目给我一份结果」。
 3. **产物体积失控**：历史 job 产物全量保留，packages 为全量 zip 拷贝且
-   无过期机制（prod 单 workspace 打包快照超 6G）。打包整体重设计见
+   无过期机制（单 workspace 的打包快照可膨胀至数 GB）。打包整体重设计见
    Issue #120，本文档只负责把存储底座统一（§6.5），不在此解决。
 
 ## 2. 设计决策总览
@@ -327,7 +327,7 @@ Host 沙箱 allow-read 碰巧含 `examples/`（Worker 上根本不存在该目�
 - 材料侧 TTL 仍属本文档范围：bucket lifecycle + `materials.expires_at`，
   引用计数为 0 才物理删除；
 - job_dir 作为可淘汰缓存配容量上限即可，历史 job 产物全量保留的问题
-  随产物上云自然消解；prod 存量 6G 在 #120 落地前手动清理。
+  随产物上云自然消解；本地存量在 #120 落地前手动清理。
 
 ## 11. 分阶段实施
 

@@ -234,6 +234,10 @@ CodeExecutor(...).execute(context)
   `vault` / `auth` 段为 env-only，写进任何 split yaml 会触发 owned-key 校验失败
   （CONFIG-YAML-001）。
 - OpenClaw / Pi 命令模板来自本地配置，不要把 API key 写进命令行或日志。
+- 开源卫生：tracked 文档、commit message、PR body 不得携带任一部署实例的
+  生产数据规模与内部运维事实（具体 job 数、DB/产物体积、节点执行量、成功率、
+  停机窗口安排等）；设计依据与运维指引一律用通用量级表述（如「存量较多时」
+  「数 GB 级」）。
 
 ## 9. Where to look next
 
