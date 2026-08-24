@@ -6,6 +6,7 @@ import { WorkflowNodeDataContractSection } from './WorkflowNodeDataContractSecti
 import { WorkflowNodeDependencySection } from './WorkflowNodeDependencySection'
 import { WorkflowNodeEditorSection } from './WorkflowNodeEditorSection'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
+import { WorkflowNodeStartSection } from './WorkflowNodeStartSection'
 
 export type InspectorSectionProps = {
   details: SelectedWorkflowNodeDetails
@@ -21,6 +22,12 @@ export type InspectorSectionProps = {
 // immediately outside the draft/publish flow), then read-only structure.
 export function WorkflowNodeInspectorSections(props: InspectorSectionProps) {
   const { node } = props.details
+  // Start nodes carry the entry contract (type: start) and never execute:
+  // the capability/execution/code editors do not apply (the backend 404s
+  // their node-code endpoints), so show the read-only contract instead.
+  if (node.node_type === 'start') {
+    return <WorkflowNodeStartSection details={props.details} />
+  }
   return (
     <>
       <WorkflowNodeEditorSection

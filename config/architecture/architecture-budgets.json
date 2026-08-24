@@ -393,6 +393,7 @@
     "frontend/src/pages/workflowStudio/WorkflowNodeInspectorSections.tsx": 70,
     "frontend/src/pages/workflowStudio/WorkflowNodeRuntimeSettings.module.css": 14,
     "frontend/src/pages/workflowStudio/WorkflowNodeRuntimeSettings.tsx": 95,
+    "frontend/src/pages/workflowStudio/WorkflowNodeStartSection.tsx": 34,
     "frontend/src/pages/workflowStudio/WorkflowPromptPreviewDialog.module.css": 27,
     "frontend/src/pages/workflowStudio/WorkflowPromptPreviewDialog.tsx": 33,
     "frontend/src/pages/workflowStudio/WorkflowRevisionSelect.module.css": 29,

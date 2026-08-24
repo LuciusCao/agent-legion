@@ -256,6 +256,19 @@ def test_get_node_code_state_404_for_unknown_node(client, job_db) -> None:
     assert response.status_code == 404
 
 
+def test_node_code_tools_404_for_start_node(client, job_db) -> None:
+    # The injected `_start` entry node never executes: reading its code or
+    # saving a draft for it gets the same 404 as an unknown node.
+    workspace_id = _create_workspace(client)
+    scoped, _ = _scoped_client(client, job_db)
+    base = (
+        f"/api/studio-agent/tools/workspaces/{workspace_id}"
+        f"/workflows/{_WORKFLOW_KEY}/nodes/_start/code"
+    )
+    assert scoped.get(base).status_code == 404
+    assert scoped.put(f"{base}/draft", json={"code": _NODE_CODE}).status_code == 404
+
+
 def test_save_node_code_draft_attributes_studio_agent(client, job_db) -> None:
     workspace_id = _create_workspace(client)
     scoped, admin_id = _scoped_client(client, job_db)
