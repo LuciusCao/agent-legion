@@ -119,7 +119,7 @@ def test_tool_call_forwards_token_and_session_binding(client, job_db, monkeypatc
 
     captured: dict = {}
 
-    def fake_call(self, method: str, path: str, body=None) -> str:
+    async def fake_call(self, method: str, path: str, body=None) -> str:
         captured["authorization"] = self._headers["Authorization"]
         captured["method"] = method
         captured["path"] = path

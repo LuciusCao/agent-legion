@@ -313,6 +313,12 @@ class StudioChatService:
                 self._append_stream_chunk(session_id, runtime, slot, text)
             return
         if kind in ("tool_call", "tool_call_update"):
+            # A tool call interrupts the agent's prose: close the open
+            # text/thought slots so the next chunk starts a fresh message row
+            # below the tool card instead of folding into the row above it.
+            if runtime is not None:
+                with runtime.lock:
+                    runtime.stream.reset()
             if self._is_agent_legion_tool_call(update) and runtime is not None:
                 with runtime.lock:
                     if not runtime.mcp_observed:
@@ -321,6 +327,9 @@ class StudioChatService:
             self._append_message(session_id, "tool_call", "agent", update)
             return
         if kind and str(kind).startswith("plan"):
+            if runtime is not None:
+                with runtime.lock:
+                    runtime.stream.reset()
             self._append_message(session_id, "plan", "agent", update)
             return
         # user_message_chunk / mode / usage updates: not persisted.
@@ -328,6 +337,10 @@ class StudioChatService:
     def _on_permission_request(
         self, session_id: str, tool_call: dict[str, Any], options: list[dict[str, Any]]
     ) -> dict[str, Any]:
+        runtime = self._runtime(session_id)
+        if runtime is not None:
+            with runtime.lock:
+                runtime.stream.reset()
         return handle_permission_request(self, session_id, tool_call, options)
 
     def _on_turn_end(self, session_id: str, stop_reason: str) -> None:
