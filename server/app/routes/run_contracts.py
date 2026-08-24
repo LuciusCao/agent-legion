@@ -21,7 +21,14 @@ class RunItemRef(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
-RunItem = Annotated[RunItemMaterial | RunItemRef, Field(discriminator="type")]
+class RunItemBundle(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["bundle"]
+    bundle_id: str = Field(min_length=1)
+
+
+RunItem = Annotated[RunItemMaterial | RunItemRef | RunItemBundle, Field(discriminator="type")]
 
 
 class RunCreateRequest(BaseModel):

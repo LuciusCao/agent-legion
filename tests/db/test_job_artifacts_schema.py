@@ -3,24 +3,13 @@
 The manifest table for job artifacts in object storage: the authoritative
 bytes live under ``jobs/{workspace_id}/{job_id}/{name}`` in the instance
 bucket; the local job_dir copy is an evictable cache. The latest-migration
-record pin lives here (moved from tests/db/test_runs_migration.py, v53).
+record pin moved to tests/db/test_material_bundles_schema.py (v55).
 """
 
 from __future__ import annotations
 
-from server.app.db.schema import SCHEMA_VERSION
 from server.app.db.transaction import read_connection
 from tests.postgres_support import TEST_DATABASE_URL
-
-
-def test_schema_v54_recorded() -> None:
-    assert SCHEMA_VERSION == 54
-    with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute(
-            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
-        ).fetchone()
-    assert row is not None
-    assert row["name"] == "job_artifacts"
 
 
 def test_job_artifacts_table_shape() -> None:

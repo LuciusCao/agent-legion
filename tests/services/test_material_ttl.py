@@ -19,6 +19,7 @@ import pytest
 from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.instance_settings_store import InstanceSettingsStore
+from server.app.services.material_bundles import MaterialBundlesService
 from server.app.services.material_cache import material_claim_block
 from server.app.services.material_ttl import (
     DELETE_GRACE_SECONDS,
@@ -254,6 +255,29 @@ def test_collect_keeps_referenced_material(service: MaterialsService, storage: F
     row = _material_row(material_id)
     assert row["status"] == "expired"  # 行保留（引用中的 job 不强行失效）
     assert str(row["storage_key"]) in storage.objects
+
+
+def test_collect_keeps_bundle_member(service: MaterialsService, storage: FakeStorage) -> None:
+    """bundle 成员算引用（#156）：对象先删、行删除被外键回滚的方向不可接受。"""
+    material_id = _ready_material(service, storage, "member.txt")
+    bundle = MaterialBundlesService(TEST_DATABASE_URL).create(
+        WORKSPACE_ID,
+        name="folder",
+        members=[{"material_id": material_id, "path": "member.txt"}],
+        created_by="user-1",
+    )
+    _set_expires_at(material_id, f"-{DELETE_GRACE_SECONDS + 60} seconds")
+    expire_due_materials(TEST_DATABASE_URL)
+
+    assert collect_expired_materials(TEST_DATABASE_URL, storage) == 0
+
+    row = _material_row(material_id)
+    assert row["status"] == "expired"  # 行与对象都保留，bundle 仍可解析成员
+    assert str(row["storage_key"]) in storage.objects
+    # bundle 删除后守卫解除，下一轮正常回收。
+    MaterialBundlesService(TEST_DATABASE_URL).delete(WORKSPACE_ID, bundle["id"])
+    assert collect_expired_materials(TEST_DATABASE_URL, storage) == 1
+    assert storage.objects == {}
 
 
 def test_collect_keeps_material_within_grace(

@@ -162,6 +162,11 @@ class NodeContext:
         MATERIAL-ACCESS-001). Keys: ``material_id`` / ``path`` /
         ``filename`` / ``content_type`` / ``size_bytes`` / ``content_hash``.
         Non-material inputs yield ``None``.
+
+        A ``material_bundle`` input (#156) adds ``kind: "bundle"`` and
+        ``entries`` (per-member ``path`` / ``size_bytes`` / ``content_hash``);
+        ``path`` then points at the materialized **directory** whose
+        relative layout matches the uploaded folder.
         """
         block = self._runtime.get("materials")
         return dict(block) if isinstance(block, Mapping) else None

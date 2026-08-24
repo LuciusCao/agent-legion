@@ -155,6 +155,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/db/test_job_artifacts_schema.py",
         "tests/db/test_job_status_counts_migration.py",
         "tests/db/test_materials_schema.py",
+        "tests/db/test_material_bundles_schema.py",
         "tests/db/test_monitoring_hotpath_indexes.py",
         "tests/db/test_node_cms_config_migration.py",
         "tests/db/test_postgres_runtime.py",
