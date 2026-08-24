@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   Button,
   Dialog,
@@ -7,7 +7,6 @@ import {
   DialogTitle,
   Tab,
   Tabs,
-  TextField,
 } from '@mui/material'
 import { useQuery } from '@tanstack/react-query'
 import { api, createRun } from '../api'
@@ -15,28 +14,13 @@ import { useUiStore } from '../stores/uiStore'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { useWorkflowDefinitionQuery } from '../hooks/useWorkflowDefinitionQuery'
 import { acceptedItemTypes } from '../lib/acceptedItemTypes'
-import {
-  fileTypeGroup,
-  formatBytes,
-  parseRefIds,
-  uploadMaterialFile,
-} from '../lib/addItems'
+import { parseRefIds } from '../lib/addItems'
 import type { RunItem, WorkspaceResponse } from '../types'
 import { AddItemsExistingMaterials } from './AddItemsExistingMaterials'
+import { AddItemsRefPanel } from './AddItemsRefPanel'
+import { AddItemsUploadPanel } from './AddItemsUploadPanel'
+import { useMaterialUploads } from './useMaterialUploads'
 import styles from './AddItemsDialog.module.css'
-
-type UploadStatus = 'pending' | 'uploading' | 'done' | 'failed'
-
-type UploadEntry = {
-  key: string
-  name: string
-  size: number
-  group: string
-  status: UploadStatus
-  error: string | null
-  materialId: string | null
-  deduplicated: boolean
-}
 
 type AddItemsDialogProps = {
   open: boolean
@@ -44,17 +28,13 @@ type AddItemsDialogProps = {
   workspaceId?: string
 }
 
-const UPLOAD_CONCURRENCY = 4
-
-const STATUS_LABELS: Record<UploadStatus, string> = {
-  pending: '待传',
-  uploading: '上传中',
-  done: '完成',
-  failed: '失败',
-}
-
 type TabKey = 'upload' | 'ref' | 'existing'
 
+/**
+ * 添加条目对话框：按条目类型各一个面板组件（上传材料 / 粘贴 ID /
+ * 已有材料），可用的类型由 workflow start 节点的入口契约决定
+ * （EXEC-WORKFLOW-START-001）。
+ */
 export function AddItemsDialog({
   open,
   onClose,
@@ -62,16 +42,20 @@ export function AddItemsDialog({
 }: AddItemsDialogProps) {
   const { showToast } = useUiStore()
   const [tab, setTab] = useState<TabKey>('upload')
-  const [entries, setEntries] = useState<UploadEntry[]>([])
   const [refText, setRefText] = useState('')
   const [connectionKey, setConnectionKey] = useState('')
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const filesRef = useRef(new Map<string, { file: File; name: string }>())
-  const queueRef = useRef<string[]>([])
-  const activeRef = useRef(0)
-  const keySeqRef = useRef(0)
+  const {
+    doneEntries,
+    hasActiveUploads,
+    addFiles,
+    retryEntry,
+    removeEntry,
+    resetUploads,
+    entries,
+  } = useMaterialUploads(workspaceId)
 
   const enabled = open && Boolean(workspaceId)
   const workspaceQuery = useQuery({
@@ -96,91 +80,6 @@ export function AddItemsDialog({
   const tabAllowed = tab === 'ref' ? refAccepted : materialAccepted
   const activeTab = tabAllowed ? tab : fallbackTab
 
-  const updateEntry = useCallback(
-    (key: string, patch: Partial<UploadEntry>) => {
-      setEntries((prev) =>
-        prev.map((entry) =>
-          entry.key === key ? { ...entry, ...patch } : entry
-        )
-      )
-    },
-    []
-  )
-
-  const pumpRef = useRef<() => void>(() => {})
-  const pump = useCallback(() => {
-    while (activeRef.current < UPLOAD_CONCURRENCY && queueRef.current.length) {
-      const key = queueRef.current.shift()!
-      const record = filesRef.current.get(key)
-      if (!record || !workspaceId) continue
-      activeRef.current += 1
-      updateEntry(key, { status: 'uploading', error: null })
-      void uploadMaterialFile(workspaceId, record.file, record.name)
-        .then((result) => {
-          updateEntry(key, {
-            status: 'done',
-            materialId: result.materialId,
-            deduplicated: result.deduplicated,
-          })
-        })
-        .catch((err: unknown) => {
-          updateEntry(key, {
-            status: 'failed',
-            error: err instanceof Error ? err.message : '上传失败',
-          })
-        })
-        .finally(() => {
-          activeRef.current -= 1
-          pumpRef.current()
-        })
-    }
-  }, [workspaceId, updateEntry])
-  useEffect(() => {
-    pumpRef.current = pump
-  }, [pump])
-
-  const addFiles = useCallback(
-    (fileList: FileList | null) => {
-      if (!fileList || fileList.length === 0) return
-      const next: UploadEntry[] = []
-      for (const file of Array.from(fileList)) {
-        const key = `f${++keySeqRef.current}`
-        const name =
-          (file as File & { webkitRelativePath?: string }).webkitRelativePath ||
-          file.name
-        filesRef.current.set(key, { file, name })
-        queueRef.current.push(key)
-        next.push({
-          key,
-          name,
-          size: file.size,
-          group: fileTypeGroup(name, file.type),
-          status: 'pending',
-          error: null,
-          materialId: null,
-          deduplicated: false,
-        })
-      }
-      setEntries((prev) => [...prev, ...next])
-      pump()
-    },
-    [pump]
-  )
-
-  const retryEntry = useCallback(
-    (key: string) => {
-      updateEntry(key, { status: 'pending', error: null })
-      queueRef.current.push(key)
-      pump()
-    },
-    [pump, updateEntry]
-  )
-
-  const removeEntry = useCallback((key: string) => {
-    filesRef.current.delete(key)
-    setEntries((prev) => prev.filter((entry) => entry.key !== key))
-  }, [])
-
   const toggleMaterial = useCallback((materialId: string) => {
     setSelectedMaterialIds((prev) =>
       prev.includes(materialId)
@@ -190,37 +89,16 @@ export function AddItemsDialog({
   }, [])
 
   const resetState = useCallback(() => {
-    setEntries([])
+    resetUploads()
     setRefText('')
     setConnectionKey('')
     setSelectedMaterialIds([])
     setTab('upload')
-    filesRef.current.clear()
-    queueRef.current = []
-  }, [])
+  }, [resetUploads])
 
   const refIds = useMemo(() => parseRefIds(refText), [refText])
-  const doneEntries = useMemo(
-    () =>
-      entries.filter((entry) => entry.status === 'done' && entry.materialId),
-    [entries]
-  )
-  const hasActiveUploads = entries.some(
-    (entry) => entry.status === 'pending' || entry.status === 'uploading'
-  )
   const totalItems =
     doneEntries.length + selectedMaterialIds.length + refIds.length
-  const totalSize = useMemo(
-    () => entries.reduce((sum, entry) => sum + entry.size, 0),
-    [entries]
-  )
-  const groupCounts = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const entry of entries) {
-      counts.set(entry.group, (counts.get(entry.group) ?? 0) + 1)
-    }
-    return Array.from(counts.entries())
-  }, [entries])
 
   const handleClose = useCallback(() => {
     resetState()
@@ -307,120 +185,20 @@ export function AddItemsDialog({
             </div>
           )}
           {activeTab === 'upload' && (
-            <>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <Button variant="outlined" component="label">
-                  选择文件
-                  <input
-                    type="file"
-                    multiple
-                    hidden
-                    data-testid="add-items-file-input"
-                    onChange={(event) => {
-                      addFiles(event.target.files)
-                      event.target.value = ''
-                    }}
-                  />
-                </Button>
-                <Button variant="outlined" component="label">
-                  选择文件夹
-                  <input
-                    type="file"
-                    multiple
-                    hidden
-                    data-testid="add-items-folder-input"
-                    {...{ webkitdirectory: '' }}
-                    onChange={(event) => {
-                      addFiles(event.target.files)
-                      event.target.value = ''
-                    }}
-                  />
-                </Button>
-              </div>
-              {entries.length > 0 && (
-                <>
-                  <div className={styles.summary} data-testid="upload-summary">
-                    {groupCounts
-                      .map(([group, count]) => `${group} × ${count}`)
-                      .join('，')}
-                    ，共 {formatBytes(totalSize)}
-                  </div>
-                  <div className={styles.fileList}>
-                    {entries.map((entry) => (
-                      <div className={styles.fileRow} key={entry.key}>
-                        <span className={styles.fileName} title={entry.name}>
-                          {entry.name}
-                        </span>
-                        <span className={styles.fileSize}>
-                          {formatBytes(entry.size)}
-                        </span>
-                        <span
-                          className={
-                            entry.status === 'failed'
-                              ? styles.statusFailed
-                              : entry.status === 'done'
-                                ? styles.statusDone
-                                : styles.statusPending
-                          }
-                        >
-                          {STATUS_LABELS[entry.status]}
-                          {entry.deduplicated && entry.status === 'done'
-                            ? '（已存在）'
-                            : ''}
-                        </span>
-                        {entry.status === 'failed' && (
-                          <Button
-                            size="small"
-                            onClick={() => retryEntry(entry.key)}
-                          >
-                            重试
-                          </Button>
-                        )}
-                        {(entry.status === 'failed' ||
-                          entry.status === 'pending') && (
-                          <Button
-                            size="small"
-                            onClick={() => removeEntry(entry.key)}
-                          >
-                            移除
-                          </Button>
-                        )}
-                      </div>
-                    ))}
-                    {entries.some((entry) => entry.status === 'failed') && (
-                      <div className={styles.errorHint}>
-                        失败文件不会包含在本次运行中，可重试或移除。
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </>
+            <AddItemsUploadPanel
+              entries={entries}
+              onAddFiles={addFiles}
+              onRetry={retryEntry}
+              onRemove={removeEntry}
+            />
           )}
           {activeTab === 'ref' && (
-            <>
-              <TextField
-                label="连接 Key"
-                placeholder="workflow 绑定的外部服务连接 key"
-                value={connectionKey}
-                onChange={(event) => setConnectionKey(event.target.value)}
-                fullWidth
-              />
-              <TextField
-                multiline
-                rows={8}
-                label="外部 ID"
-                placeholder="一行一个 ID"
-                value={refText}
-                onChange={(event) => setRefText(event.target.value)}
-                fullWidth
-              />
-              {refIds.length > 0 && (
-                <div className={styles.summary} data-testid="ref-summary">
-                  已解析 {refIds.length} 条引用
-                </div>
-              )}
-            </>
+            <AddItemsRefPanel
+              connectionKey={connectionKey}
+              refText={refText}
+              onConnectionKeyChange={setConnectionKey}
+              onRefTextChange={setRefText}
+            />
           )}
           {activeTab === 'existing' && (
             <AddItemsExistingMaterials
