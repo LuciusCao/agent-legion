@@ -12,7 +12,11 @@ Two transports share this registration: the stdio entry point
 env config) and the in-app streamable-HTTP endpoint (``http_app.py``, Studio
 chat sessions, per-request header config). Both pass a config resolver; the
 HTTP one re-resolves on every tool call so each request runs under its own
-scoped token and session binding.
+scoped token and session binding. Loopback tools are ``async def`` and go
+through ``ToolClient.acall``: the HTTP transport executes tools on the
+uvicorn event loop, so the blocking HTTP call must offload to a thread —
+a sync tool would deadlock the single-worker backend against its own
+loopback request (``get_authoring_guide`` stays sync: it never blocks).
 """
 
 from __future__ import annotations
@@ -49,7 +53,7 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         return AUTHORING_GUIDE
 
     @mcp.tool()
-    def get_studio_context() -> str:
+    async def get_studio_context() -> str:
         """Current Studio session context: the bound workspace, its active
         workflow structure (nodes and capabilities), and the node the human
         currently has selected in Studio (live value on every call). Takes no
@@ -58,45 +62,45 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         config, client = _client()
         if config.session_id is None:
             return "get_studio_context is unavailable: no chat session bound"
-        return client.call("GET", f"/chat-sessions/{config.session_id}/context")
+        return await client.acall("GET", f"/chat-sessions/{config.session_id}/context")
 
     @mcp.tool()
-    def get_active_workflow(workspace_id: str) -> str:
+    async def get_active_workflow(workspace_id: str) -> str:
         """Get the active workflow revision of a workspace, including the full
         definition YAML. Read this before drafting changes so the draft builds
         on what is actually live. No published workflow yet yields a structured
         empty state ({"state": "empty"}) instead of an error — the signal to
         start the from-scratch flow (see get_authoring_guide)."""
         _, client = _client()
-        return client.call("GET", f"/workspaces/{workspace_id}/workflow/active")
+        return await client.acall("GET", f"/workspaces/{workspace_id}/workflow/active")
 
     @mcp.tool()
-    def validate_workflow(workspace_id: str, definition_yaml: str) -> str:
+    async def validate_workflow(workspace_id: str, definition_yaml: str) -> str:
         """Validate a workflow definition YAML draft against the publish
         validation set. Persists nothing. Always validate a draft before
         asking the human to review or apply it."""
         _, client = _client()
-        return client.call(
+        return await client.acall(
             "POST",
             f"/workspaces/{workspace_id}/workflow/validate",
             {"definition_yaml": definition_yaml},
         )
 
     @mcp.tool()
-    def compare_workflow(workspace_id: str, definition_yaml: str) -> str:
+    async def compare_workflow(workspace_id: str, definition_yaml: str) -> str:
         """Diff a workflow definition YAML draft against the workspace's active
         revision: per-node changes, risk summary, whether it would create a new
         revision. With no published baseline the result is a full-draft preview
         (everything added, base_revision null). Persists nothing."""
         _, client = _client()
-        return client.call(
+        return await client.acall(
             "POST",
             f"/workspaces/{workspace_id}/workflow/compare",
             {"definition_yaml": definition_yaml},
         )
 
     @mcp.tool()
-    def save_node_code_draft(
+    async def save_node_code_draft(
         workspace_id: str,
         workflow_key: str,
         node_key: str,
@@ -114,24 +118,24 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         if expected_capability is not None:
             body["expected_capability"] = expected_capability
         _, client = _client()
-        return client.call(
+        return await client.acall(
             "PUT",
             f"/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft",
             body,
         )
 
     @mcp.tool()
-    def get_node_code(workspace_id: str, workflow_key: str, node_key: str) -> str:
+    async def get_node_code(workspace_id: str, workflow_key: str, node_key: str) -> str:
         """Read the current code state of a workflow code node: builtin source,
         published custom code, and any pending draft."""
         _, client = _client()
-        return client.call(
+        return await client.acall(
             "GET",
             f"/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code",
         )
 
     @mcp.tool()
-    def save_agent_definition_draft(
+    async def save_agent_definition_draft(
         workspace_id: str,
         agent_id: str,
         capability: str,
@@ -143,7 +147,7 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         to a runtime and skill. runtime is one of: pi, openclaw, velites.
         Draft only — a human publishes it in Studio before any job can use it."""
         _, client = _client()
-        return client.call(
+        return await client.acall(
             "PUT",
             f"/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
             {

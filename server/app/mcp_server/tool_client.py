@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import anyio
 import requests
 
 from server.app.mcp_server.config import McpServerConfig
@@ -41,3 +42,11 @@ class ToolClient:
         if 200 <= response.status_code < 300:
             return response.text
         return f"HTTP {response.status_code}: {response.text}"
+
+    async def acall(self, method: str, path: str, body: dict[str, Any] | None = None) -> str:
+        # ``call`` is blocking (requests); the in-app HTTP transport executes
+        # tools inline on the uvicorn event loop (FastMCP has no to_thread for
+        # sync tools), so a sync loopback deadlocks the single-worker backend
+        # against its own event loop — every call hangs to the 30s read
+        # timeout. Async tools offload the loopback to a worker thread.
+        return await anyio.to_thread.run_sync(self.call, method, path, body)

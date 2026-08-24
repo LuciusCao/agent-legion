@@ -8,7 +8,9 @@ config contract (missing scoped token refuses startup).
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
+import threading
 
 import pytest
 import requests
@@ -22,6 +24,7 @@ from server.app.mcp_server.config import (
     McpServerConfig,
 )
 from server.app.mcp_server.server import create_mcp_server, main
+from server.app.mcp_server.tool_client import ToolClient
 
 pytestmark = pytest.mark.no_db
 
@@ -70,6 +73,42 @@ def test_get_authoring_guide_is_served_locally(recorded) -> None:
         "Common errors",
     ):
         assert section in text
+
+
+def test_loopback_tools_are_async() -> None:
+    # The in-app HTTP transport executes tools inline on the uvicorn event
+    # loop (FastMCP runs sync tools without to_thread), so a sync loopback
+    # tool deadlocks the single-worker backend against its own request —
+    # the prod symptom was every tool call hanging to the 30s read timeout.
+    server = create_mcp_server(_CONFIG)
+    tools = server._tool_manager._tools  # pinned mcp==1.29 internals
+    for name in (
+        "get_studio_context",
+        "get_active_workflow",
+        "validate_workflow",
+        "compare_workflow",
+        "save_node_code_draft",
+        "get_node_code",
+        "save_agent_definition_draft",
+    ):
+        assert inspect.iscoroutinefunction(tools[name].fn), name
+    # The local-only playbook tool never blocks, so it stays sync.
+    assert not inspect.iscoroutinefunction(tools["get_authoring_guide"].fn)
+
+
+def test_acall_offloads_the_blocking_call_to_a_worker_thread(monkeypatch) -> None:
+    main_thread = threading.get_ident()
+    seen: dict[str, int] = {}
+
+    def fake_request(method, url, json=None, headers=None, timeout=None):  # noqa: A002
+        seen["thread"] = threading.get_ident()
+        return _FakeResponse(200, {"echo": True})
+
+    monkeypatch.setattr("server.app.mcp_server.tool_client.requests.request", fake_request)
+    client = ToolClient(_CONFIG)
+    text = asyncio.run(client.acall("GET", "/workspaces/ws-1/workflow/active"))
+    assert json.loads(text) == {"echo": True}
+    assert seen["thread"] != main_thread
 
 
 def test_get_active_workflow(recorded) -> None:

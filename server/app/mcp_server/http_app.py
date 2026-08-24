@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 
+import anyio
 from mcp.server.fastmcp import FastMCP
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -46,10 +47,13 @@ class _ScopedTokenAuthApp:
             await self._app(scope, receive, send)
             return
         headers = {str(k, "latin-1"): str(v, "latin-1") for k, v in scope["headers"]}
-        scheme, _, token = headers.get("authorization", "").partition(" ")
+        scheme, _, raw_token = headers.get("authorization", "").partition(" ")
+        token = raw_token.strip()
+        # authenticate_scoped_token is a blocking DB query; keep it off the
+        # event loop so it cannot stall every request on this worker.
         user = (
-            authenticate_scoped_token(self._db, token.strip())
-            if scheme.lower() == "bearer" and token.strip()
+            await anyio.to_thread.run_sync(authenticate_scoped_token, self._db, token)
+            if scheme.lower() == "bearer" and token
             else None
         )
         if user is None or user.get("actor_scope") != STUDIO_AGENT_SCOPE:
