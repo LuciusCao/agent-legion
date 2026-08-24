@@ -19,6 +19,7 @@ from server.app.services.workflow_definitions import require_workspace_active_de
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.execution_control import ExecutionControlError, ancestor_closure
+from server.app.workflows.start_node import START_NODE_TYPE
 from server.app.workflows.workflow_branching import downstream_nodes
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,15 @@ class JobExecutionService:
                 target_node_key,
                 "node_not_found",
                 f"Node {target_node_key} not found in workflow",
+            )
+        if definition.nodes[target_node_key].node_type == START_NODE_TYPE:
+            raise JobOperationError(
+                job_id,
+                "run_to",
+                "failed",
+                target_node_key,
+                "node_not_executable",
+                f"Node {target_node_key} is an entry (type: start) node and never executes",
             )
 
         try:
@@ -195,6 +205,15 @@ class JobExecutionService:
                 target_node_key,
                 "node_not_found",
                 f"Start node {start_node_key} not found in workflow",
+            )
+        if definition.nodes[start_node_key].node_type == START_NODE_TYPE:
+            raise JobOperationError(
+                job_id,
+                "run_to",
+                "failed",
+                target_node_key,
+                "node_not_executable",
+                f"Node {start_node_key} is an entry (type: start) node and never executes",
             )
 
         if start_node_key not in closure:

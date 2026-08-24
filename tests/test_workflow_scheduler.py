@@ -232,3 +232,92 @@ nodes:
     result = evaluate_branches(definition, statuses, tmp_path)
 
     assert result.not_applicable == set()
+
+
+def test_start_node_is_treated_as_completed_and_never_ready(tmp_path):
+    """EXEC-WORKFLOW-START-001: the demo DAG has an explicit start node; it never
+    enters the ready set and its outgoing edge is always satisfied."""
+    definition = _definition()
+    # Simulate a real job: job_nodes only ever cover executable nodes, so the
+    # start node is absent from the status map entirely.
+    statuses = {key: "pending" for key in definition.executable_nodes}
+
+    ready = find_ready_nodes(definition, statuses, artifact_dir=tmp_path)
+
+    assert [node.key for node in ready] == ["intake_knowledge_points"]
+    assert definition.start_node is not None
+    assert definition.start_node.key not in statuses
+
+
+def test_legacy_snapshot_without_start_keeps_readiness_behavior(tmp_path):
+    """D3 regression: a pre-start definition (no start in the snapshot) gets a
+    synthetic start injected; root readiness is unchanged."""
+    path = tmp_path / "legacy.yaml"
+    path.write_text(
+        """
+key: legacy
+label: Legacy
+schema_version: 2
+nodes:
+  root:
+    label: Root
+    capability: root
+  child:
+    label: Child
+    capability: child
+edges:
+  - {from: root, to: child}
+""",
+        encoding="utf-8",
+    )
+    definition = load_workflow_definition(path)
+    assert definition.start_node is not None
+    # job_nodes for a legacy in-flight job hold only the business nodes.
+    statuses = {"root": "pending", "child": "pending"}
+
+    assert [node.key for node in find_ready_nodes(definition, statuses, tmp_path)] == ["root"]
+
+    statuses["root"] = "completed"
+    assert [node.key for node in find_ready_nodes(definition, statuses, tmp_path)] == ["child"]
+
+
+def test_evaluate_branches_treats_injected_start_as_completed(tmp_path):
+    """The injected start's unconditional outgoing edges never mark targets
+    not_applicable, even though the start has no job_nodes row."""
+    path = tmp_path / "legacy.yaml"
+    path.write_text(
+        """
+key: legacy
+label: Legacy
+nodes:
+  root:
+    capability: root
+  child:
+    capability: child
+    after: [root]
+""",
+        encoding="utf-8",
+    )
+    definition = load_workflow_definition(path)
+
+    result = evaluate_branches(definition, {"root": "pending", "child": "pending"}, tmp_path)
+
+    assert result.not_applicable == set()
+
+
+def test_allowed_nodes_exclude_start() -> None:
+    from server.app.workflows.execution_control import allowed_nodes
+
+    definition = _definition()
+    start_key = definition.start_node.key
+
+    full = allowed_nodes(definition, {"execution_mode": "full"})
+    assert start_key not in full
+    assert set(full) == set(definition.executable_nodes)
+
+    until = allowed_nodes(
+        definition,
+        {"execution_mode": "until_node", "target_node_key": "review_script"},
+    )
+    assert start_key not in until
+    assert until == frozenset({"intake_knowledge_points", "write_script", "review_script"})

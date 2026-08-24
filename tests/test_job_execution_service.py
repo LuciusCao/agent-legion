@@ -51,7 +51,7 @@ def _create_job(
         source_id=source_id,
         run_id=batch["id"],
         title=f"Question {source_id}",
-        node_keys=list(definition.nodes),
+        node_keys=list(definition.executable_nodes),
         workspace_id=workspace_id,
     )
 
@@ -262,6 +262,37 @@ def test_run_to_rejects_unknown_target(
     assert exc_info.value.reason_code == "node_not_found"
 
 
+def test_run_to_rejects_start_node_target(
+    execution_service: JobExecutionService, job_db: JobQueries, workspace
+):
+    job = _create_job(job_db, workspace["id"])
+
+    with pytest.raises(JobOperationError) as exc_info:
+        execution_service.run_to(workspace["id"], job["id"], "_start")
+
+    assert exc_info.value.status == "failed"
+    assert exc_info.value.reason_code == "node_not_executable"
+    assert "_start" in (exc_info.value.message or "")
+
+
+def test_run_to_rejects_start_node_as_start(
+    execution_service: JobExecutionService, job_db: JobQueries, workspace
+):
+    job = _create_job(job_db, workspace["id"])
+
+    with pytest.raises(JobOperationError) as exc_info:
+        execution_service.run_to(
+            workspace["id"],
+            job["id"],
+            "intake_knowledge_points",
+            start_node_key="_start",
+        )
+
+    assert exc_info.value.status == "failed"
+    assert exc_info.value.reason_code == "node_not_executable"
+    assert "_start" in (exc_info.value.message or "")
+
+
 def test_run_to_rejects_active_lease(
     execution_service: JobExecutionService, job_db: JobQueries, workspace
 ):
@@ -302,7 +333,9 @@ def test_run_to_uses_atomic_execution_control_mutation(
         (
             job["id"],
             "write_script",
-            frozenset({"intake_knowledge_points", "write_script"}),
+            # The graph closure includes the start node; apply_run_to treats it
+            # as a no-op (start never enters job_nodes, EXEC-WORKFLOW-START-001).
+            frozenset({"_start", "intake_knowledge_points", "write_script"}),
         )
     ]
 

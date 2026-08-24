@@ -1,7 +1,12 @@
 import type { DagNodeData } from './DagNode'
 import styles from './DagNodeDefinitionMeta.module.css'
 
-const TOPOLOGY_LABEL = { entry: '入口', branch: '分支', terminal: '终点' }
+const TOPOLOGY_LABEL = {
+  start: '起点',
+  entry: '入口',
+  branch: '分支',
+  terminal: '终点',
+}
 
 export function DagNodeDefinitionMeta({ data }: { data: DagNodeData }) {
   return (

@@ -46,10 +46,11 @@ def allowed_nodes(
     """
     mode = execution_control.get("execution_mode", "full")
     if mode == "full":
-        return frozenset(definition.nodes)
+        return frozenset(key for key, node in definition.nodes.items() if node.node_type != "start")
     if mode == "until_node":
         target = execution_control.get("target_node_key")
         if not target:
             raise ExecutionControlError("target_node_key is required for until_node execution mode")
-        return ancestor_closure(definition, target)
+        closure = ancestor_closure(definition, target)
+        return frozenset(key for key in closure if definition.nodes[key].node_type != "start")
     raise ExecutionControlError(f"Invalid execution_mode: {mode!r}")

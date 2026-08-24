@@ -44,7 +44,7 @@ def _create_job(job_db: JobQueries, workspace_id: str, source_id: str) -> dict[s
         source_id=source_id,
         run_id=batch["id"],
         title=source_id,
-        node_keys=list(definition.nodes),
+        node_keys=list(definition.executable_nodes),
         workspace_id=workspace_id,
     )
 

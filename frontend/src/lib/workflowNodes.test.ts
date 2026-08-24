@@ -5,6 +5,7 @@ import {
   excludedJobs,
   type WorkflowNodesByKey,
 } from './workflowNodes'
+import { partitionJobsForNodeRerun } from '../components/JobRerunDialog/rerunEligibility'
 import type { JobSummary, WorkflowDefinitionRecord } from '../types'
 
 function makeJob(overrides: Partial<JobSummary> = {}): JobSummary {
@@ -103,6 +104,24 @@ const workflowNodesByKey: WorkflowNodesByKey = {
   other_workflow: otherWorkflow,
 }
 
+// Definitions parsed after the start-node feature always carry a synthetic
+// `_start` entry node that never executes and never appears in job_nodes.
+const workflowWithStart: WorkflowDefinitionRecord = {
+  ...workflow,
+  nodes: [
+    {
+      key: '_start',
+      label: '入口',
+      after: [],
+      capability: '',
+      inputs: [] as string[],
+      outputs: [] as string[],
+      node_type: 'start',
+    },
+    ...workflow.nodes,
+  ],
+}
+
 describe('workflowNodes', () => {
   describe('nodesForJob', () => {
     it('returns nodes from workflowNodesByKey when available', () => {
@@ -125,6 +144,13 @@ describe('workflowNodes', () => {
     it('returns null when workflow is unknown', () => {
       const job = makeJob({ workflow_key: 'unknown' })
       expect(nodesForJob(job, workflowNodesByKey, workflow)).toBeNull()
+    })
+
+    it('filters out start nodes', () => {
+      const job = makeJob({ workflow_key: 'question_content' })
+      const nodes = nodesForJob(job, null, workflowWithStart)
+      expect(nodes).toEqual(workflow.nodes)
+      expect(nodes?.some((n) => n.key === '_start')).toBe(false)
     })
   })
 
@@ -169,6 +195,46 @@ describe('workflowNodes', () => {
       ]
       const result = computeOrderedNodes(jobs, workflow, workflowNodesByKey)
       expect(result.map((n) => n.key)).toEqual(['extract'])
+    })
+
+    it('excludes start nodes so rerun/run-to dialogs default to an executable node', () => {
+      const jobs = [makeJob({ workflow_key: 'question_content' })]
+      const result = computeOrderedNodes(jobs, workflowWithStart, null)
+      expect(result.map((n) => n.key)).toEqual([
+        'extract',
+        'generate',
+        'review',
+      ])
+      expect(result[0].key).not.toBe('_start')
+    })
+
+    it('keeps rerun grouping intact when the definition contains a start node', () => {
+      const jobs = [
+        makeJob({
+          id: 'j1',
+          workflow_key: 'question_content',
+          node_summaries: [
+            {
+              node_key: 'extract',
+              label: '提取',
+              status: 'completed',
+              error_message: '',
+            },
+          ],
+        }),
+        makeJob({
+          id: 'j2',
+          workflow_key: 'question_content',
+          node_summaries: [],
+        }),
+      ]
+      const excluded = excludedJobs(jobs, 'extract', null, workflowWithStart)
+      expect(excluded).toHaveLength(0)
+      const { runnableJobs, notStartedJobs, runningJobs } =
+        partitionJobsForNodeRerun(jobs, 'extract', excluded)
+      expect(runnableJobs.map((j) => j.id)).toEqual(['j1'])
+      expect(notStartedJobs.map((j) => j.id)).toEqual(['j2'])
+      expect(runningJobs).toHaveLength(0)
     })
   })
 

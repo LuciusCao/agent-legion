@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.node_codes import NodeCodeService
 from server.app.workflows.definition import workflow_definition_from_dict
+from server.app.workflows.start_node import START_NODE_TYPE
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -40,7 +41,11 @@ class StudioAgentNodeCodeTools:
             return None
         definition = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
         node = definition.nodes.get(node_key)
-        return node.capability if node is not None else None
+        if node is None or node.node_type == START_NODE_TYPE:
+            # Start nodes never execute: treat them as unknown so no orphan
+            # node-code draft can be saved for them.
+            return None
+        return node.capability
 
     def _require_known_node(self, workspace_id: str, workflow_key: str, node_key: str) -> None:
         revision = self._job_db.get_active_workflow_revision(workspace_id, workflow_key)

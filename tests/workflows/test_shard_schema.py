@@ -134,7 +134,12 @@ def test_snapshot_round_trip_preserves_shard():
         "label": wf.label,
         "schema_version": wf.schema_version,
         "intake": {},
-        "nodes": raw["nodes"],
+        # wf.nodes carries the injected start node; without it the injected
+        # start edges below would reference an unknown node.
+        "nodes": {
+            key: {"node_type": node.node_type, **raw["nodes"].get(key, {})}
+            for key, node in wf.nodes.items()
+        },
         "edges": [{"from": e.source, "to": e.target} for e in wf.edges],
     }
     restored = workflow_definition_from_dict(snapshot)

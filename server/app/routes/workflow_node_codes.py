@@ -21,6 +21,7 @@ from server.app.services.node_code_template import NODE_CODE_TEMPLATE
 from server.app.services.node_codes import NodeCodeService
 from server.app.settings import Settings
 from server.app.workflows.definition import workflow_definition_from_dict
+from server.app.workflows.start_node import START_NODE_TYPE
 
 
 def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) -> APIRouter:
@@ -42,7 +43,9 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
             raise HTTPException(status_code=404, detail="No active workflow revision")
         definition = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
         node = definition.nodes.get(node_key)
-        if node is None:
+        if node is None or node.node_type == START_NODE_TYPE:
+            # Start nodes never execute: there is no code to edit (same 404
+            # semantics as an unknown node).
             raise HTTPException(status_code=404, detail=f"Unknown workflow node: {node_key}")
         return node.capability
 

@@ -129,7 +129,7 @@ class JobIntakeQueue:
             candidates=candidates,
             workflow_key=str(batch["workflow_key"]),
             run_id=str(batch["id"]),
-            node_keys=list(definition.nodes),
+            node_keys=list(definition.executable_nodes),
             workspace_id=str(batch["workspace_id"]),
             revision=revision,
             frozen_config=payload.get("node_config") or {},

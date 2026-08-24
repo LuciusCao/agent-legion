@@ -86,6 +86,27 @@ describe('workflowStudioYamlDraft node patches', () => {
     )
     expect(inherited).not.toContain('execution:')
   })
+
+  it('preserves start-node type and accepted_item_types through patches', () => {
+    // start 节点的入口契约字段不得像 config_schema 那样在 yaml 往返中丢失。
+    const yamlWithStart = `key: demo
+label: Demo
+nodes:
+  _start:
+    type: start
+    accepted_item_types:
+      - material
+  fetch:
+    label: Fetch
+    capability: fetch_items
+    after:
+      - _start
+`
+    const changed = patchWorkflowNodeLabel(yamlWithStart, 'fetch', 'Fetch v2')
+    expect(changed).toContain('type: start')
+    expect(changed).toContain('accepted_item_types:')
+    expect(changed).toContain('- material')
+  })
 })
 
 const yamlWithEdges = `key: demo

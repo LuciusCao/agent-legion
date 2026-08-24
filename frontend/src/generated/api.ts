@@ -5194,6 +5194,8 @@ export interface components {
     }
     /** WorkflowNodeResponse */
     WorkflowNodeResponse: {
+      /** Accepted Item Types */
+      accepted_item_types?: string[]
       /** After */
       after: string[]
       /** Capability */
@@ -5205,6 +5207,8 @@ export interface components {
       key: string
       /** Label */
       label: string
+      /** Node Type */
+      node_type?: string
       /** Outputs */
       outputs: string[]
       terminal?: components['schemas']['WorkflowTerminalResponse'] | null

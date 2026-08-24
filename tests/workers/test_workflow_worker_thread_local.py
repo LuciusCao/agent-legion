@@ -362,7 +362,7 @@ def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkey
         source_id="fraction-addition-subtraction",
         run_id="",
         title="fraction-addition-subtraction",
-        node_keys=list(definition.nodes),
+        node_keys=list(definition.executable_nodes),
         workspace_id=workspace_id,
     )
     with queries.connect() as conn:

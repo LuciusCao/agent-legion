@@ -320,7 +320,7 @@ class QualityReplayService:
                 candidates=[candidate],
                 workflow_key=workflow_key,
                 run_id=str(batch["id"]),
-                node_keys=list(definition.nodes),
+                node_keys=list(definition.executable_nodes),
                 workspace_id=workspace_id,
                 revision=revision,
                 frozen_config={node.key: frozen} if frozen is not None else {},
@@ -334,7 +334,12 @@ class QualityReplayService:
         try:
             self._copy_frozen_inputs(job, copy_job, node)
             self._copy_artifact_refs(str(job["id"]), copy_job_id, definition, node.key)
-            ancestors = sorted(ancestor_closure(definition, node.key) - {node.key})
+            # The start node never enters job_nodes (EXEC-WORKFLOW-START-001), so it
+            # must not reach prepare_replay_copy's completed_nodes either.
+            ancestors = sorted(
+                (ancestor_closure(definition, node.key) - {node.key})
+                & definition.executable_nodes.keys()
+            )
             downstream = sorted(downstream_nodes(definition, node.key))
             with write_transaction(self.db_path) as conn:
                 prepare_replay_copy(

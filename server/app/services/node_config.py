@@ -81,7 +81,7 @@ def workflow_node_config_schemas(
     agent_schemas = _agent_schemas(agent_definitions)
     agent_capabilities = {d.capability for d in agent_definitions.values()}
     schemas: dict[str, dict[str, Any]] = {}
-    for node in definition.nodes.values():
+    for node in definition.executable_nodes.values():
         schema = _node_config_schema(node, agent_schemas, agent_capabilities)
         if schema:
             schemas[node.key] = schema
@@ -147,7 +147,7 @@ def resolve_workflow_node_configs(
     agent_capabilities = {d.capability for d in agent_definitions.values()}
     overrides = workspace_node_overrides(workspace, definition.key)
     resolved: dict[str, dict[str, Any]] = {}
-    for node in definition.nodes.values():
+    for node in definition.executable_nodes.values():
         node_schema = _node_config_schema(node, agent_schemas, agent_capabilities)
         workspace_override = overrides.get(node.key, {})
         if not node_schema and not node.config and not workspace_override:

@@ -69,7 +69,9 @@ def test_upgrade_job_workflow_updates_revision_and_rebuilds_nodes(tmp_path: Path
     assert upgraded["workflow_version"] == current["version"]
     assert upgraded["workflow_definition_hash"] == current["definition_hash"]
     assert upgraded["status"] == "queued"
-    assert {node["node_key"] for node in queries.list_job_nodes(job["id"])} == set(definition.nodes)
+    assert {node["node_key"] for node in queries.list_job_nodes(job["id"])} == set(
+        definition.executable_nodes
+    )
     assert {node["status"] for node in queries.list_job_nodes(job["id"])} == {"pending"}
 
 
@@ -123,7 +125,7 @@ def test_upgrade_job_workflow_skips_current_revision(tmp_path: Path) -> None:
         source_id="Q1",
         run_id="batch1",
         title="Question 1",
-        node_keys=list(definition.nodes),
+        node_keys=list(definition.executable_nodes),
         workspace_id=workspace["id"],
         workflow_revision_id=current["id"],
         workflow_version=current["version"],
