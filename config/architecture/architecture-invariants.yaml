@@ -985,6 +985,36 @@ invariants:
         target: tests/routes/test_materials_routes.py
         gate: quick
 
+  - id: MATERIAL-BUNDLE-001
+    statement: "A bundle (materials-and-runs design §5, #156) is a folder uploaded as ONE run item: member files flow through the regular materials presign/complete upload and one create call freezes an immutable manifest (material_bundles + material_bundle_members, schema v55) of member material ids + relative paths. The manifest is reference-only — members stay ordinary materials, so deletion is guarded both directions (a material referenced by any bundle refuses delete; a bundle referenced by any run item refuses delete), and the TTL collector applies the same bundle-membership guard before deleting any expired member object. Dispatch materializes a bundle into the content-addressed cache as a hardlink directory tree at a deterministic bundle address derived from the member set (shared/material_bundle.py, identical on Host and Worker; member paths reject control characters so the manifest hash encoding stays unambiguous): the whole member set plus the tree root stays pinned across every member's eviction pass, and cache eviction operates at entry granularity — a tree dir is evicted atomically, never partially unlinked, keeping the 'existing dir means complete' invariant sound. The Worker fetches members through the same claim-injected presigned channel as plain materials — no second transfer protocol. The item/contract type is the single literal 'bundle' everywhere (item type, accepted_item_types, entity_type); the start-node DEFAULT contract stays ('material','ref'), so legacy workspaces reject bundle items fail-closed until they opt in."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_material_bundles.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_bundle_materialize.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_material_bundles_api.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_runs_bundle_api.py
+        gate: quick
+      - kind: integration
+        target: tests/shared/test_material_bundle.py
+        gate: quick
+      - kind: integration
+        target: tests/shared/test_material_cache.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_material_ttl.py
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_bundle_fetch.py
+        gate: quick
+
   - id: RUN-FREEZE-001
     statement: "Frozen inputs, node configs and pins are authoritative on the run/job columns (runs.frozen_pins_json, jobs.input_json, jobs.frozen_config_json): dispatch and the node SDK rebuild the legacy batch-payload shape from those columns via server.app.services.run_payload, and no runtime path reads a stored batch payload (job_batches is dropped at schema v53; the async intake queue keeps only its working state in runs.queue_payload_json)."
     owner: workspace-executor

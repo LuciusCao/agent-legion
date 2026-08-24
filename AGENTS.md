@@ -97,7 +97,11 @@
   唯一例外是 `type: start` 的入口节点：恰好一个、豁免 capability、承载入口契约
   `accepted_item_types`、永不执行（调度视为恒 completed、不进 job_nodes、不 dispatch）、
   不可删（无 start 的存量定义由 loader 自动注入合成 start），`RunService.create_run`
-  按它校验条目类型（EXEC-WORKFLOW-START-001）。
+  按它校验条目类型（EXEC-WORKFLOW-START-001）。条目类型三种：`material`（单文件）、
+  `ref`（外部引用）、`bundle`（文件夹整体一个条目，manifest 引用式：成员走常规材料
+  上传后一次创建冻结 `material_bundles`，删除双向守卫，物化为确定性地址的硬链接
+  目录树，MATERIAL-BUNDLE-001）；DEFAULT 契约保持 `("material","ref")`，存量
+  workspace 对 bundle 条目 fail-closed。
 - Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.runtime` / `.contracts`。
 - code 节点：capability 不再声明 `path`（#96 已退役该绑定）；所有节点代码以
   DB 发布文本（`versioned_entities` entity_type `node_code`）为准，经发布流生效、版本不可变。
