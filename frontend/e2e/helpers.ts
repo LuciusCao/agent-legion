@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test'
+import yaml from 'js-yaml'
 
 // Deterministic admin account shared by the smoke specs. The runner resets
 // the E2E database before each run, so the first spec bootstraps and later
@@ -39,4 +40,42 @@ export async function ensureAdminSession(page: Page): Promise<void> {
     data: { username: ADMIN.username, password: ADMIN.password },
   })
   expect(response.ok()).toBeTruthy()
+}
+
+/**
+ * The demo workflow's start node accepts material items only
+ * (EXEC-WORKFLOW-START-001). Smoke specs exercise the ref (粘贴 ID) path, so
+ * they widen the entry contract by publishing a revision accepting both item
+ * types before driving AddItemsDialog. API-driven to keep the UI smoke fast;
+ * callers should reload the page afterwards so cached definitions refetch.
+ */
+export async function widenDemoWorkflowItemTypes(
+  page: Page,
+  workspaceId: string
+): Promise<void> {
+  const active = await page.request.get(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/workflow-revisions/active`
+  )
+  expect(active.ok()).toBeTruthy()
+  const { definition_yaml: definitionYaml } = (await active.json()) as {
+    definition_yaml: string
+  }
+  const definition = yaml.load(definitionYaml) as {
+    nodes: Record<string, { type?: string; accepted_item_types?: string[] }>
+  }
+  const start = Object.values(definition.nodes).find(
+    (node) => node.type === 'start'
+  )
+  expect(start).toBeTruthy()
+  start!.accepted_item_types = ['material', 'ref']
+  const publish = await page.request.post(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/workflow-drafts/publish`,
+    {
+      headers: CSRF_HEADERS,
+      data: { definition_yaml: yaml.dump(definition) },
+    }
+  )
+  expect(publish.ok()).toBeTruthy()
+  const result = (await publish.json()) as { valid: boolean; errors: string[] }
+  expect(result.errors).toEqual([])
 }

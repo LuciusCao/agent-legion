@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { ensureAdminSession } from './helpers'
+import { ensureAdminSession, widenDemoWorkflowItemTypes } from './helpers'
 
 const WORKSPACE_NAME = 'E2E 重跑工作区'
 
@@ -24,6 +24,12 @@ test('在 job 详情页通过重跑对话框重跑节点', async ({ page }) => {
 
   await page.getByText(WORKSPACE_NAME).first().click()
   await expect(page).toHaveURL(/\/workspaces\/[^/]+$/)
+
+  // The demo workflow is material-only (start node accepted_item_types); the
+  // ref path below needs the contract widened first (EXEC-WORKFLOW-START-001).
+  const workspaceId = page.url().split('/workspaces/')[1]
+  await widenDemoWorkflowItemTypes(page, workspaceId)
+  await page.reload()
 
   await page.getByRole('button', { name: '添加' }).click()
   // 添加 opens AddItemsDialog; the legacy intake entry is retired (#154), so
