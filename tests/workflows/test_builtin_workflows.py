@@ -35,9 +35,8 @@ def test_demo_workflow_shape() -> None:
         "publish_content",
     ]
     assert definition.nodes["publish_content"].terminal is not None
-    assert definition.intake is not None
-    mode = definition.intake.modes["direct_ids"]
-    assert mode.input_field == "knowledge_point_ids"
+    # Legacy intake modes are retired (#154): the demo DAG declares none.
+    assert definition.intake.modes == {}
 
 
 def test_load_builtin_workflow_validates_and_matches_key() -> None:

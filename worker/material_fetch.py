@@ -64,7 +64,6 @@ def materialize_claim_material(
     path = materialize_stream(
         cache_root,
         content_hash or material_id,
-        filename,
         lambda: _open_download(url),
         expected_sha256=content_hash,
         expected_size=expected_size,

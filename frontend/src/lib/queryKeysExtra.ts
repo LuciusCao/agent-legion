@@ -6,10 +6,13 @@ const k = (name: string, id: string) => [name, id] as const
 
 export const extraQueryKeys = {
   users: () => ['users'] as const,
-  // 单个 workspace 记录（AddDialog 与 useWorkspaceDisplayName 共享）。
+  // 单个 workspace 记录（AddItemsDialog 与 useWorkspaceDisplayName 共享）。
   workspace: (id: string) => k('workspace', id),
   workspaceMembers: (workspaceId: string) =>
     ['workspaceMembers', workspaceId] as const,
+  // 添加条目面板「已有材料」tab 的材料列表。
+  workspaceMaterials: (workspaceId: string) =>
+    ['workspaceMaterials', workspaceId] as const,
   workerTokens: () => ['workerTokens'] as const,
   tokenUsagePricing: () => ['tokenUsagePricing'] as const,
   instanceSettings: () => ['instanceSettings'] as const,

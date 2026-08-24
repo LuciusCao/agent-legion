@@ -18,6 +18,46 @@ def load_builtin_definition(workflow_key: str) -> WorkflowDefinition:
     return load_builtin_workflow(workflow_key)
 
 
+def load_demo_legacy_intake_definition() -> WorkflowDefinition:
+    """Demo DAG plus the legacy intake block retired in issue #154.
+
+    The demo workflow no longer declares intake modes; tests that still
+    exercise the job-batches intake service publish this variant so
+    ``source_kind: direct_ids`` resolves against the active revision.
+    """
+    from dataclasses import replace
+
+    from server.app.workflows.definition import WorkflowIntake, WorkflowIntakeMode
+
+    definition = load_builtin_workflow("education_video_problems_generation")
+    return replace(
+        definition,
+        intake=WorkflowIntake(
+            modes={
+                "direct_ids": WorkflowIntakeMode(
+                    key="direct_ids",
+                    label="按知识点批量",
+                    input_field="knowledge_point_ids",
+                )
+            }
+        ),
+    )
+
+
+def publish_legacy_intake_revision(job_db: JobQueries, workspace_id: str) -> dict[str, Any]:
+    """Publish the legacy-intake demo variant as the workspace's active revision.
+
+    API workspace creation seeds the intake-less demo revision; tests that
+    post job-batches call this right after creation so the legacy intake
+    service path keeps resolving ``direct_ids``.
+    """
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+
+    return WorkflowRevisionService(job_db).publish_workspace_revision(
+        workspace_id, load_demo_legacy_intake_definition()
+    )
+
+
 def publish_builtin_revision(
     job_db: JobQueries,
     workspace_id: str,

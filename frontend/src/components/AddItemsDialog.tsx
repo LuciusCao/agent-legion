@@ -12,7 +12,6 @@ import {
 import { useQuery } from '@tanstack/react-query'
 import { api, createRun } from '../api'
 import { useUiStore } from '../stores/uiStore'
-import { useWorkflowDefinitionQuery } from '../hooks/useWorkflowDefinitionQuery'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import {
   fileTypeGroup,
@@ -20,11 +19,8 @@ import {
   parseRefIds,
   uploadMaterialFile,
 } from '../lib/addItems'
-import type {
-  RunItem,
-  WorkflowIntakeModeRecord,
-  WorkspaceResponse,
-} from '../types'
+import type { RunItem, WorkspaceResponse } from '../types'
+import { AddItemsExistingMaterials } from './AddItemsExistingMaterials'
 import styles from './AddItemsDialog.module.css'
 
 type UploadStatus = 'pending' | 'uploading' | 'done' | 'failed'
@@ -55,16 +51,19 @@ const STATUS_LABELS: Record<UploadStatus, string> = {
   failed: '失败',
 }
 
+type TabKey = 'upload' | 'ref' | 'existing'
+
 export function AddItemsDialog({
   open,
   onClose,
   workspaceId,
 }: AddItemsDialogProps) {
-  const { showToast, openAddDialog } = useUiStore()
-  const [tab, setTab] = useState<'upload' | 'ref'>('upload')
+  const { showToast } = useUiStore()
+  const [tab, setTab] = useState<TabKey>('upload')
   const [entries, setEntries] = useState<UploadEntry[]>([])
   const [refText, setRefText] = useState('')
   const [connectionKey, setConnectionKey] = useState('')
+  const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const filesRef = useRef(new Map<string, { file: File; name: string }>())
@@ -82,23 +81,7 @@ export function AddItemsDialog({
     enabled,
   })
   const workspace = workspaceQuery.data?.workspace ?? null
-  const workflowQuery = useWorkflowDefinitionQuery(
-    enabled ? workspaceId : undefined
-  )
-  const workflow = workflowQuery.data ?? null
   const workflowKey = workspace?.default_workflow_key ?? ''
-
-  // 与 AddDialog 同一套 legacy intake modes 判定：workflow 声明且 workspace 启用。
-  const legacyModes = useMemo<WorkflowIntakeModeRecord[]>(() => {
-    if (!workflow?.intake?.modes) return []
-    const rawEnabledModes = workspace?.intake_config?.enabled_modes
-    if (rawEnabledModes === undefined) return workflow.intake.modes
-    if (!Array.isArray(rawEnabledModes) || rawEnabledModes.length === 0)
-      return []
-    return workflow.intake.modes.filter((mode) =>
-      rawEnabledModes.includes(mode.key)
-    )
-  }, [workflow, workspace])
 
   const updateEntry = useCallback(
     (key: string, patch: Partial<UploadEntry>) => {
@@ -185,10 +168,19 @@ export function AddItemsDialog({
     setEntries((prev) => prev.filter((entry) => entry.key !== key))
   }, [])
 
+  const toggleMaterial = useCallback((materialId: string) => {
+    setSelectedMaterialIds((prev) =>
+      prev.includes(materialId)
+        ? prev.filter((id) => id !== materialId)
+        : [...prev, materialId]
+    )
+  }, [])
+
   const resetState = useCallback(() => {
     setEntries([])
     setRefText('')
     setConnectionKey('')
+    setSelectedMaterialIds([])
     setTab('upload')
     filesRef.current.clear()
     queueRef.current = []
@@ -203,7 +195,8 @@ export function AddItemsDialog({
   const hasActiveUploads = entries.some(
     (entry) => entry.status === 'pending' || entry.status === 'uploading'
   )
-  const totalItems = doneEntries.length + refIds.length
+  const totalItems =
+    doneEntries.length + selectedMaterialIds.length + refIds.length
   const totalSize = useMemo(
     () => entries.reduce((sum, entry) => sum + entry.size, 0),
     [entries]
@@ -221,18 +214,16 @@ export function AddItemsDialog({
     onClose()
   }, [resetState, onClose])
 
-  const handleOpenLegacy = useCallback(() => {
-    resetState()
-    onClose()
-    openAddDialog({ context: 'workspace', workspaceId })
-  }, [resetState, onClose, openAddDialog, workspaceId])
-
   const handleSubmit = useCallback(async () => {
     if (!workspaceId || !workflowKey || totalItems === 0) return
     const items: RunItem[] = [
       ...doneEntries.map((entry) => ({
         type: 'material' as const,
         material_id: entry.materialId!,
+      })),
+      ...selectedMaterialIds.map((materialId) => ({
+        type: 'material' as const,
+        material_id: materialId,
       })),
       ...refIds.map((id) => ({
         type: 'ref' as const,
@@ -260,6 +251,7 @@ export function AddItemsDialog({
     workflowKey,
     totalItems,
     doneEntries,
+    selectedMaterialIds,
     refIds,
     connectionKey,
     showToast,
@@ -282,12 +274,10 @@ export function AddItemsDialog({
       <DialogTitle>添加条目</DialogTitle>
       <DialogContent>
         <div style={{ display: 'grid', gap: '12px', minWidth: '500px' }}>
-          <Tabs
-            value={tab}
-            onChange={(_event, value: 'upload' | 'ref') => setTab(value)}
-          >
+          <Tabs value={tab} onChange={(_event, value: TabKey) => setTab(value)}>
             <Tab label="上传材料" value="upload" />
             <Tab label="粘贴 ID" value="ref" />
+            <Tab label="已有材料" value="existing" />
           </Tabs>
           {tab === 'upload' && (
             <>
@@ -405,6 +395,14 @@ export function AddItemsDialog({
               )}
             </>
           )}
+          {tab === 'existing' && (
+            <AddItemsExistingMaterials
+              workspaceId={workspaceId}
+              enabled={enabled}
+              selectedIds={selectedMaterialIds}
+              onToggle={toggleMaterial}
+            />
+          )}
           {!workflowKey && !workspaceQuery.isLoading && (
             <div className={styles.errorHint}>
               当前工作空间尚未发布 workflow，无法创建运行。
@@ -413,15 +411,6 @@ export function AddItemsDialog({
         </div>
       </DialogContent>
       <DialogActions>
-        {legacyModes.length > 0 && (
-          <Button
-            variant="text"
-            onClick={handleOpenLegacy}
-            sx={{ marginRight: 'auto' }}
-          >
-            旧版接入模式
-          </Button>
-        )}
         <span className={styles.totalCount} data-testid="total-count">
           共 {totalItems} 个条目
         </span>

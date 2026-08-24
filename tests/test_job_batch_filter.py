@@ -1,6 +1,7 @@
 """Batch job operations selected by a server-side list filter."""
 
 from server.app.storage_paths import resolve_job_dir
+from tests.helpers import publish_legacy_intake_revision
 
 WORKFLOW_KEY = "education_video_problems_generation"
 
@@ -10,7 +11,11 @@ def _create_workspace(client, name: str) -> str:
         "/api/workspaces", json={"name": name, "default_workflow_key": WORKFLOW_KEY}
     )
     assert response.status_code == 200
-    return response.json()["workspace"]["id"]
+    workspace_id = response.json()["workspace"]["id"]
+    # The demo workflow no longer declares intake modes (#154); these tests
+    # post job-batches, so publish the legacy-intake variant.
+    publish_legacy_intake_revision(client.app.state.job_db, workspace_id)
+    return workspace_id
 
 
 def _create_jobs(client, workspace_id: str, question_ids: list[str]) -> list[str]:

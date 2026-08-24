@@ -10,7 +10,7 @@ export function useWorkspaceDisplayName(workspaceId: string | undefined) {
     (workspace) => workspace.id === workspaceId
   )?.name
 
-  // 列表里没有该 workspace 时的单条回退加载；与 AddDialog 共享同一 key。
+  // 列表里没有该 workspace 时的单条回退加载；与 AddItemsDialog 共享同一 key。
   const { data: loadedName } = useQuery({
     queryKey: extraQueryKeys.workspace(workspaceId ?? ''),
     queryFn: () =>

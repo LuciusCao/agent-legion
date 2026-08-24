@@ -368,3 +368,21 @@ def test_replay_labels(env) -> None:
 
     detail = service.get_replay_detail(env.workspace_id, str(replay["id"]))
     assert [row["verdict"] for row in detail["labels"]] == ["bad"]
+
+
+def test_copy_job_creation_failure_compensates_run(env, monkeypatch) -> None:
+    """create_run commits before create_jobs_bulk; a bulk failure must not
+    leave the replay run orphaned in 'created' with no jobs."""
+
+    def fail_bulk(**kwargs):
+        raise RuntimeError("bulk insert boom")
+
+    monkeypatch.setattr(env.job_db, "create_jobs_bulk", fail_bulk)
+
+    with pytest.raises(InvalidOperationError, match="replay setup failed"):
+        env.service().create_replay(env.workspace_id, "item-1")
+
+    assert env.job_db.list_runs(env.workspace_id) == []
+    # The failed attempt is recorded and does not block a later retry.
+    (replay,) = env.service().list_replays(env.workspace_id, "item-1")
+    assert replay["status"] == "failed"

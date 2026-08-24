@@ -26,16 +26,17 @@ test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }) =
   await expect(page).toHaveURL(/\/workspaces\/[^/]+$/)
 
   await page.getByRole('button', { name: '添加' }).click()
-  // 添加 now opens AddItemsDialog; the demo workflow still declares a legacy
-  // intake mode, so 旧版接入模式 leads back to the old AddDialog flow.
+  // 添加 opens AddItemsDialog; the legacy intake entry is retired (#154), so
+  // the smoke path uses the 粘贴 ID tab with the seeded `cms-internal`
+  // external connection (ref items only require the connection to exist).
   const addItemsDialog = page.getByRole('dialog', { name: '添加条目' })
-  await addItemsDialog.getByRole('button', { name: '旧版接入模式' }).click()
-  const addDialog = page.getByRole('dialog', { name: '添加资源' })
-  await addDialog.getByRole('textbox', { name: '按知识点批量' }).fill('Q1')
-  await addDialog.getByRole('button', { name: '加入队列' }).click()
+  await addItemsDialog.getByRole('tab', { name: '粘贴 ID' }).click()
+  await addItemsDialog.getByLabel('连接 Key').fill('cms-internal')
+  await addItemsDialog.getByLabel('外部 ID').fill('Q1')
+  await addItemsDialog.getByRole('button', { name: '创建运行' }).click()
 
-  // Intake runs in the server background queue; no workflow worker is
-  // started, so the job appears with all nodes still pending.
+  // The runs API creates jobs synchronously; no workflow worker is started,
+  // so the job appears with all nodes still pending.
   const jobRow = page.locator('[data-job]').first()
   await expect(jobRow).toBeVisible({ timeout: 30_000 })
   await jobRow.click()

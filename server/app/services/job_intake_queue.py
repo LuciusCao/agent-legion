@@ -111,7 +111,9 @@ class JobIntakeQueue:
         revision: dict[str, Any],
         values: list[str],
     ) -> None:
-        existing_keys = self.job_db.list_job_dedup_keys(str(batch["workspace_id"]))
+        existing_keys = self.job_db.list_job_dedup_keys(
+            str(batch["workspace_id"]), str(batch["workflow_key"])
+        )
         candidates, _ = resolve_fresh_candidates(
             spec,
             entity,

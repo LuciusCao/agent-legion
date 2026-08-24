@@ -109,11 +109,14 @@ def run(ctx: NodeContext) -> None:
             "材料（demo workspace 已预置示例材料）后创建运行；当前 job 没有材料输入"
         )
     source_file = Path(str(material["path"]))
-    source_id = source_file.stem or str(ctx.job.get("source_id") or "")
+    # 缓存路径是内容寻址的（路径名即 hash），source_id 与展示文件名从
+    # runtime material 块的原始 filename 取，不用物化后的本地路径名。
+    filename = str(material.get("filename") or "")
+    source_id = Path(filename).stem or str(ctx.job.get("source_id") or "")
     log.info(
         "example_intake: material_id=%s file=%s",
         material.get("material_id", ""),
-        source_file.name,
+        filename or source_file.name,
     )
 
     knowledge_point = _parse_knowledge_markdown(source_file.read_text(encoding="utf-8"), source_id)
@@ -123,7 +126,7 @@ def run(ctx: NodeContext) -> None:
         {
             "knowledge_point": knowledge_point,
             "source": {
-                "file": source_file.name,
+                "file": filename or source_file.name,
                 "material_id": str(material.get("material_id") or ""),
             },
         },

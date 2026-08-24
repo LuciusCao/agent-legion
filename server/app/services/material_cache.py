@@ -110,7 +110,6 @@ def material_runtime_block(
         path = materialize_stream(
             cache_root,
             address,
-            filename,
             lambda: storage.open_stream(str(row["storage_key"])),
             expected_sha256=content_hash,
             expected_size=size_bytes,

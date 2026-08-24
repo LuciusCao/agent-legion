@@ -253,7 +253,7 @@ def test_validation_failures_leave_no_run_behind(service, job_db) -> None:
         )
 
     assert service.list_runs(WORKSPACE_ID) == []
-    assert job_db.list_job_dedup_keys(WORKSPACE_ID) == set()
+    assert job_db.list_job_dedup_keys(WORKSPACE_ID, WORKFLOW_KEY) == set()
 
 
 def test_intra_request_job_id_collision_leaves_no_run(service, job_db) -> None:
@@ -271,7 +271,7 @@ def test_intra_request_job_id_collision_leaves_no_run(service, job_db) -> None:
         )
 
     assert service.list_runs(WORKSPACE_ID) == []
-    assert job_db.list_job_dedup_keys(WORKSPACE_ID) == set()
+    assert job_db.list_job_dedup_keys(WORKSPACE_ID, WORKFLOW_KEY) == set()
 
 
 def test_cross_request_job_id_collision_compensates_the_new_run(service, job_db) -> None:
@@ -289,7 +289,7 @@ def test_cross_request_job_id_collision_compensates_the_new_run(service, job_db)
         service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_material_item("col_a")])
 
     assert [run["id"] for run in service.list_runs(WORKSPACE_ID)] == [first["run"]["id"]]
-    assert job_db.list_job_dedup_keys(WORKSPACE_ID) == {("material", "col/a")}
+    assert job_db.list_job_dedup_keys(WORKSPACE_ID, WORKFLOW_KEY) == {("material", "col/a")}
 
 
 def test_material_deleted_mid_creation_fails_and_compensates_run(service, job_db) -> None:
@@ -332,7 +332,7 @@ def test_material_deleted_mid_creation_fails_and_compensates_run(service, job_db
     assert not thread.is_alive()
     assert outcome == ["invalid"]
     assert service.list_runs(WORKSPACE_ID) == []
-    assert job_db.list_job_dedup_keys(WORKSPACE_ID) == set()
+    assert job_db.list_job_dedup_keys(WORKSPACE_ID, WORKFLOW_KEY) == set()
 
 
 def test_missing_workspace_and_revision_are_rejected(service) -> None:

@@ -254,8 +254,6 @@ describe('WorkspaceMainPage', () => {
       workerPausedByWorkspace: {},
     })
     useUiStore.setState({
-      addDialogOpen: false,
-      addContentType: 'knowledge',
       workspacePackageDialogOpen: false,
       tokenUsageDialogOpen: false,
       toast: null,

@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from server.app.routes.packages import create_packages_router
 from server.app.services.job_packages import JobPackageService, WorkspacePackageLockedError
 from server.app.storage_paths import resolve_job_dir
+from tests.helpers import publish_legacy_intake_revision
 
 
 @pytest.fixture
@@ -23,6 +24,9 @@ def workspace_client(client_factory, monkeypatch):
 
 
 def _create_completed_job(client: TestClient, workspace_id: str, question_id: str = "Q001"):
+    # The demo workflow no longer declares intake modes (#154); publish the
+    # legacy-intake variant so the job-batches path resolves direct_ids.
+    publish_legacy_intake_revision(client.app.state.job_db, workspace_id)
     created = client.post(
         f"/api/workspaces/{workspace_id}/job-batches",
         json={
@@ -119,6 +123,7 @@ def test_create_workspace_package_job_rejects_incomplete_jobs(workspace_client):
     )
     ws_id = ws.json()["workspace"]["id"]
 
+    publish_legacy_intake_revision(workspace_client.app.state.job_db, ws_id)
     created = workspace_client.post(
         f"/api/workspaces/{ws_id}/job-batches",
         json={

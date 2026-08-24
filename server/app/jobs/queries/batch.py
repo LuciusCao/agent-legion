@@ -26,8 +26,11 @@ class RunQueriesMixin(RunQueueQueriesMixin, JobQueriesBase):
         no-op (the upsert clause requeues only failed runs). Frozen pins
         (node_code_versions / agent_versions / quality_replay) persist on the
         run row; per-job frozen configs/inputs land on the jobs rows created
-        by the caller (RUN-FREEZE-001). ``queue_payload`` is the async intake
-        working state and stays empty for synchronous runs.
+        by the caller (RUN-FREEZE-001). On an id conflict the pins refresh
+        only while the existing run owns no jobs (jobs deleted after a
+        republish, or the async intake carrier before its first chunk); a run
+        with live jobs keeps the pins those jobs were created with.
+        ``queue_payload`` is the async intake working state, empty for sync runs.
         """
         payload_json = json.dumps(digest_payload, ensure_ascii=False, sort_keys=True)
         payload_digest = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()[:16]

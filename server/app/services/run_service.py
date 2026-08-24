@@ -120,9 +120,9 @@ class RunService:
         )
 
         # Same dedup contract as intake: items whose (source_type, source_id)
-        # already has a job in this workspace drop out; accepted keys grow the
+        # already has a job in this workflow drop out; accepted keys grow the
         # set so intra-request duplicates filter exactly like pre-existing jobs.
-        existing_keys = self.job_db.list_job_dedup_keys(workspace_id)
+        existing_keys = self.job_db.list_job_dedup_keys(workspace_id, workflow_key)
         fresh: list[dict[str, Any]] = []
         for candidate in candidates:
             key = (str(candidate["entity_type"]), str(candidate["entity_id"]))

@@ -21,18 +21,10 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
     "key": DEMO_WORKFLOW_KEY,
     "label": "教学视频脚本与题目生成（示例）",
     "schema_version": 2,
-    "intake": {
-        "modes": {
-            # Legacy intake mode (retired in a later slice): the demo's main
-            # path is material items — the user uploads (or picks the seeded
-            # sample) knowledge-point markdown and each material becomes one
-            # job; the intake node reads it via ctx.material.
-            "direct_ids": {
-                "label": "按知识点批量",
-                "input_field": "knowledge_point_ids",
-            },
-        },
-    },
+    # No legacy intake modes (retired in #154): the demo's only path is
+    # material/ref items — the user uploads (or picks the seeded sample)
+    # knowledge-point markdown and each material becomes one job; the intake
+    # node reads it via ctx.material.
     "nodes": {
         "intake_knowledge_points": {
             "label": "读取知识点",

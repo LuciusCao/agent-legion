@@ -1,14 +1,19 @@
 import json
 
+from tests.helpers import publish_legacy_intake_revision
 from tests.helpers.auth import authenticate_client
 
 
 def _create_workspace(
     client, name="default", default_workflow_key="education_video_problems_generation"
 ):
-    return client.post(
+    workspace_id = client.post(
         "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
     ).json()["workspace"]["id"]
+    # The demo workflow no longer declares intake modes (#154); these tests
+    # post job-batches, so publish the legacy-intake variant.
+    publish_legacy_intake_revision(client.app.state.job_db, workspace_id)
+    return workspace_id
 
 
 def test_workspace_batch_delete_removes_jobs(tmp_path):
@@ -62,6 +67,7 @@ def test_workspace_intake_config_rejects_disabled_mode(tmp_path):
             },
         )
         workspace_id = workspace_response.json()["workspace"]["id"]
+        publish_legacy_intake_revision(c.app.state.job_db, workspace_id)
 
         response = c.post(
             f"/api/workspaces/{workspace_id}/job-batches",
@@ -96,6 +102,7 @@ def test_workspace_default_entity_is_used_when_batch_omits_entity(tmp_path):
             },
         )
         workspace_id = workspace_response.json()["workspace"]["id"]
+        publish_legacy_intake_revision(c.app.state.job_db, workspace_id)
 
         response = c.post(
             f"/api/workspaces/{workspace_id}/job-batches",
@@ -256,6 +263,7 @@ def test_workflow_response_no_task_entity(tmp_path):
         created = c.post("/api/workspaces", json={"name": "Intake Shape"})
         assert created.status_code == 200, created.text
         workspace_id = created.json()["workspace"]["id"]
+        publish_legacy_intake_revision(c.app.state.job_db, workspace_id)
         response = c.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
 
     assert response.status_code == 200
@@ -281,6 +289,7 @@ def test_batch_delete_skips_not_found_and_running_jobs(tmp_path):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
@@ -314,6 +323,7 @@ def test_batch_delete_skips_running_job(tmp_path):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
