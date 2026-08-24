@@ -267,3 +267,100 @@ def test_missing_env_fails_fast_without_side_effects(tmp_path: Path) -> None:
     worktree = main / ".worktrees/flat"
     assert not (worktree / ".env").exists()
     assert not (worktree / "deploy").exists()
+
+
+# S3 建桶块的 heredoc 桩：uv stub 把 `uv run python -` 转给真实 python3，
+# PYTHONPATH 前置探针模块——dotenv 桩对无参 load_dotenv() 抛
+# AssertionError（复现 find_dotenv 在 stdin heredoc 下的崩溃），boto3 桩
+# 把 head_bucket 记进 STUB_LOG 作为「越过 load_dotenv」的证据。
+_DOTENV_PROBE = """
+def load_dotenv(dotenv_path=None, override=False):
+    if dotenv_path is None:
+        raise AssertionError("bare load_dotenv() crashes under `python -` stdin")
+    return True
+"""
+
+_BOTO3_PROBE = """
+import os
+
+
+class _Client:
+    def head_bucket(self, Bucket):
+        with open(os.environ["STUB_LOG"], "a") as fh:
+            fh.write(f"head_bucket {Bucket}\\n")
+
+    def create_bucket(self, Bucket):
+        pass
+
+    def put_bucket_cors(self, Bucket, CORSConfiguration):
+        pass
+
+
+def client(*args, **kwargs):
+    return _Client()
+"""
+
+_BOTOCORE_EXCEPTIONS_PROBE = """
+class ClientError(Exception):
+    def __init__(self, response=None, operation_name=""):
+        super().__init__(response)
+        self.response = response or {}
+"""
+
+_STORAGE_PROBE = """
+from types import SimpleNamespace
+
+
+def load_s3_settings():
+    return SimpleNamespace(
+        bucket="agent-legion-flat",
+        endpoint_url="http://stub",
+        region="us-east-1",
+        access_key="",
+        secret_key="",
+        public_endpoint_url="",
+    )
+"""
+
+_UV_STUB_REAL_HEREDOC = """#!/usr/bin/env bash
+if [[ "$1" == "run" && "$2" == "python" && "$3" == "-" ]]; then
+  PYTHONPATH="{pystub}:${{PYTHONPATH:-}}" exec python3 -
+fi
+echo "stub-vault-master-key"
+"""
+
+
+def test_s3_bucket_step_loads_dotenv_with_explicit_path(tmp_path: Path) -> None:
+    """回归：S3 建桶块的 load_dotenv 必须显式传路径。
+
+    无参 load_dotenv() 走 find_dotenv 的调用栈探测，在脚本的 stdin
+    heredoc（uv run python - <<PY）模式下必抛 AssertionError，被外层
+    降级吞成「endpoint 不可达」的误导性提示（2026-08-24 实测）。本测试
+    用真实 python3 执行 heredoc + 探针桩，断言执行确实越过 load_dotenv
+    到达 head_bucket。
+    """
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    pystub = tmp_path / "pystub"
+    (pystub / "botocore").mkdir(parents=True)
+    (pystub / "server/app/storage").mkdir(parents=True)
+    (pystub / "dotenv.py").write_text(_DOTENV_PROBE)
+    (pystub / "boto3.py").write_text(_BOTO3_PROBE)
+    (pystub / "botocore/__init__.py").write_text("")
+    (pystub / "botocore/exceptions.py").write_text(_BOTOCORE_EXCEPTIONS_PROBE)
+    (pystub / "server/__init__.py").write_text("")
+    (pystub / "server/app/__init__.py").write_text("")
+    (pystub / "server/app/storage/__init__.py").write_text(_STORAGE_PROBE)
+    _write_stub(bin_dir / "uv", _UV_STUB_REAL_HEREDOC.format(pystub=pystub))
+    stub_log = tmp_path / "stub.log"
+
+    result = _run(
+        main / ".worktrees/flat/scripts/init-worktree.sh",
+        bin_dir,
+        extra_env={"STUB_LOG": str(stub_log)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "head_bucket agent-legion-flat" in stub_log.read_text()
