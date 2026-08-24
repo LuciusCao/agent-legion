@@ -94,6 +94,10 @@
   （`server/app/workflows/builtin.py`）只是创建 workspace 时可选的示例模板种子，blank
   workspace 首次成功 publish 认领草稿的 key。
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
+  唯一例外是 `type: start` 的入口节点：恰好一个、豁免 capability、承载入口契约
+  `accepted_item_types`、永不执行（调度视为恒 completed、不进 job_nodes、不 dispatch）、
+  不可删（无 start 的存量定义由 loader 自动注入合成 start），`RunService.create_run`
+  按它校验条目类型（EXEC-WORKFLOW-START-001）。
 - Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.runtime` / `.contracts`。
 - code 节点：capability 不再声明 `path`（#96 已退役该绑定）；所有节点代码以
   DB 发布文本（`versioned_entities` entity_type `node_code`）为准，经发布流生效、版本不可变。

@@ -246,8 +246,10 @@ def test_load_stock_snapshot_derives_priorities_from_workflow_dag(job_db) -> Non
         priorities=snapshot.priorities,
     )
 
-    assert snapshot.priorities[("ws1", "agent-gen")] == 0
-    assert snapshot.priorities[("ws1", "agent-assess")] == 2
+    # 注入的 start 节点占 depth 0（EXEC-WORKFLOW-START-001），业务节点深度整体 +1；
+    # 层级顺序与池分配语义不变。
+    assert snapshot.priorities[("ws1", "agent-gen")] == 1
+    assert snapshot.priorities[("ws1", "agent-assess")] == 3
     assert ("ws1", "agent-y") not in snapshot.priorities
     # Deeper node draws the full pool; the shallow one only sees leftovers.
     assert snapshot.target(("ws1", "agent-assess")) == 128

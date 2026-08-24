@@ -193,6 +193,7 @@ def test_load_demo_workflow_capabilities():
     assert set(definition.intake.modes) == set()
 
     assert list(definition.nodes) == [
+        "_start",
         "intake_knowledge_points",
         "write_script",
         "review_script",
@@ -200,6 +201,10 @@ def test_load_demo_workflow_capabilities():
         "review_questions",
         "publish_content",
     ]
+    start = definition.nodes["_start"]
+    assert start.node_type == "start"
+    assert start.accepted_item_types == ("material",)
+    assert definition.start_node is start
     assert definition.nodes["intake_knowledge_points"].capability == "intake_knowledge_points"
     assert definition.nodes["write_script"].capability == "write_script"
     assert definition.nodes["review_script"].after == ["write_script"]

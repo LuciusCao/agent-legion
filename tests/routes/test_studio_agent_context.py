@@ -99,6 +99,9 @@ def test_bound_token_reads_own_session_context(client, job_db, tmp_path) -> None
         assert workflow["version"] >= 1
         assert workflow["nodes"] and {node["capability"] for node in workflow["nodes"]}
         assert all(set(node) == {"key", "capability"} for node in workflow["nodes"])
+        # The synthetic start node carries no capability: the chat agent only
+        # sees executable nodes.
+        assert "_start" not in {node["key"] for node in workflow["nodes"]}
     finally:
         client.delete(f"/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}")
 

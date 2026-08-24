@@ -10,6 +10,8 @@ export type WorkflowYamlObject = {
 }
 
 export type WorkflowYamlNode = {
+  type?: 'start' | 'node'
+  accepted_item_types?: string[]
   label?: string
   capability?: string
   after?: string[]

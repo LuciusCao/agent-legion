@@ -1,7 +1,10 @@
+import type { WorkflowNodeRecord } from '../types'
+
 export interface DagNode {
   key: string
   label?: string | null
   after?: string[] | null
+  node_type?: WorkflowNodeRecord['node_type']
 }
 
 export function ancestorClosure(nodes: DagNode[], targetKey: string): string[] {

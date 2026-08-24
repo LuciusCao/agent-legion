@@ -89,7 +89,7 @@ class JobWorkflowUpgradeService:
                     workflow_version=int(active["version"]),
                     workflow_definition_hash=str(active["definition_hash"]),
                     workflow_definition_snapshot_json=str(active["definition_json"]),
-                    node_keys=list(definition.nodes),
+                    node_keys=list(definition.executable_nodes),
                 )
         except JobMutationConflict as exc:
             return self._result(job_id, "skipped", exc.reason_code, str(exc))

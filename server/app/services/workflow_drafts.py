@@ -43,7 +43,8 @@ def validate_workflow_for_publish(
 
     P-0.5: non-Agent-routed nodes all run on the implicit code pool, so the
     publish gate is "resolvable published workspace node code", not executor
-    binding/allocation checks.
+    binding/allocation checks. Start nodes carry no capability and never
+    execute (EXEC-WORKFLOW-START-001), so they skip both checks.
     """
     errors: list[str] = []
     capability_counts: dict[str, int] = {}
@@ -51,7 +52,7 @@ def validate_workflow_for_publish(
         capability_counts[agent_definition.capability] = (
             capability_counts.get(agent_definition.capability, 0) + 1
         )
-    for node in definition.nodes.values():
+    for node in definition.executable_nodes.values():
         count = capability_counts.get(node.capability, 0)
         if count > 0:
             if count != 1:

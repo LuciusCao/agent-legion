@@ -33,5 +33,5 @@ export function resolveEmptyTemplateYaml(
   const workspace = data.workspaces.find((w) => w.id === workspaceId)
   if (!workspace) return null
   const key = workspace.default_workflow_key
-  return `key: ${key}\nlabel: ${key}\nnodes:\n  start:\n    capability: start\n`
+  return `key: ${key}\nlabel: ${key}\nnodes:\n  _start:\n    type: start\n  intake:\n    capability: intake\n    after: [_start]\n`
 }

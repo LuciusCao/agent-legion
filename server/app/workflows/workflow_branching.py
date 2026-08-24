@@ -9,6 +9,21 @@ from server.app.workflows.definition import WorkflowDefinition, WorkflowEdge
 RUNNABLE_STATUSES = {"pending", "ready", "stale"}
 
 
+def effective_node_statuses(
+    definition: WorkflowDefinition, node_statuses: dict[str, str]
+) -> dict[str, str]:
+    """Node statuses with start nodes overlaid as completed (EXEC-WORKFLOW-START-001).
+
+    Start nodes never enter job_nodes, so their row is always absent; the
+    overlay makes their outgoing edges satisfiable without a dispatch path.
+    """
+    statuses = dict(node_statuses)
+    for node in definition.nodes.values():
+        if node.node_type == "start":
+            statuses[node.key] = "completed"
+    return statuses
+
+
 @dataclass(frozen=True)
 class BranchEvaluation:
     not_applicable: set[str]
@@ -35,6 +50,7 @@ def evaluate_branches(
     artifact_dir: Path,
 ) -> BranchEvaluation:
     not_applicable: set[str] = set()
+    node_statuses = effective_node_statuses(definition, node_statuses)
     outgoing: dict[str, list[WorkflowEdge]] = {key: [] for key in definition.nodes}
     for edge in definition.edges:
         outgoing[edge.source].append(edge)

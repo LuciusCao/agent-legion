@@ -116,6 +116,14 @@ def test_unknown_node_is_404(workspace_with_revision) -> None:
     assert workspace_with_revision.get(url).status_code == 404
 
 
+def test_start_node_is_404(workspace_with_revision) -> None:
+    # The synthetic `_start` entry node never executes: no code to read or
+    # draft (same 404 semantics as an unknown node).
+    url = f"/api/workspaces/default/workflows/{WF}/nodes/_start/code"
+    assert workspace_with_revision.get(url).status_code == 404
+    assert workspace_with_revision.put(url, json={"code": CUSTOM_V1}).status_code == 404
+
+
 def test_gate_disabled_is_403(workspace_with_revision, monkeypatch) -> None:
     # client is the worker-session shared app: monkeypatch restores the flag
     # after the test instead of leaking custom_nodes_enabled=False into it.

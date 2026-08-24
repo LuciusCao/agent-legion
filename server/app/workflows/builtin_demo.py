@@ -26,6 +26,14 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
     # knowledge-point markdown and each material becomes one job; the intake
     # node reads it via ctx.material.
     "nodes": {
+        # Entry contract (EXEC-WORKFLOW-START-001): the demo runs on uploaded
+        # knowledge-point materials only — ref items are rejected at run
+        # creation and the AddItemsDialog "粘贴 ID" tab is disabled.
+        "_start": {
+            "label": "入口",
+            "type": "start",
+            "accepted_item_types": ["material"],
+        },
         "intake_knowledge_points": {
             "label": "读取知识点",
             "capability": "intake_knowledge_points",
@@ -77,6 +85,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         },
     },
     "edges": [
+        {"from": "_start", "to": "intake_knowledge_points"},
         {"from": "intake_knowledge_points", "to": "write_script"},
         {"from": "intake_knowledge_points", "to": "generate_questions"},
         {"from": "write_script", "to": "review_script"},

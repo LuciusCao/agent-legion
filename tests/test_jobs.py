@@ -185,10 +185,10 @@ def test_mark_node_for_rerun_marks_downstream_stale(tmp_path):
         source_id="Q200",
         run_id="",
         title="Question Q200",
-        node_keys=list(definition.nodes),
+        node_keys=list(definition.executable_nodes),
         workspace_id="default",
     )
-    for node_key in definition.nodes:
+    for node_key in definition.executable_nodes:
         queries.update_job_node(job["id"], node_key, status="completed", error_message="old error")
 
     queries.mark_node_for_rerun(

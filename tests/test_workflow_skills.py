@@ -32,7 +32,7 @@ def test_all_agent_nodes_map_to_complete_skill_contracts(
 ) -> None:
     definition = load_builtin_definition(workflow_key)
 
-    for node in definition.nodes.values():
+    for node in definition.executable_nodes.values():
         if node.capability in local_capabilities:
             continue
         skill_key = f"{workflow_key}/{node.capability}"
