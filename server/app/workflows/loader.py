@@ -18,6 +18,7 @@ from server.app.workflows.schema import (
     WorkflowShardSpec,
     WorkflowTerminal,
 )
+from server.app.workflows.start_node import ensure_start_node, load_start_fields
 from server.app.workflows.validator import _validate_acyclic
 from server.app.workflows.workflow_node_execution import load_node_execution
 
@@ -118,15 +119,21 @@ def _load_edges(
     raw: dict[str, Any], nodes: dict[str, WorkflowNode], schema_version: int
 ) -> list[WorkflowEdge]:
     if schema_version == 1:
-        return [
+        edges = [
             WorkflowEdge(source=dep, target=node.key)
             for node in nodes.values()
             for dep in node.after
         ]
-    raw_edges = raw.get("edges")
-    if not isinstance(raw_edges, list):
-        raise WorkflowDefinitionError("Workflow schema_version 2 requires edges")
-    edges: list[WorkflowEdge] = []
+        # Snapshots carry materialized edges — including loader-injected start
+        # edges that ``after`` cannot express; keep any beyond the derived set.
+        known = {(edge.source, edge.target) for edge in edges}
+        raw_edges = raw.get("edges") or []
+    else:
+        raw_edges = raw.get("edges")
+        if not isinstance(raw_edges, list):
+            raise WorkflowDefinitionError("Workflow schema_version 2 requires edges")
+        edges = []
+        known = set()
     for index, raw_edge in enumerate(raw_edges):
         edge_name = f"edges[{index}]"
         if not isinstance(raw_edge, dict):
@@ -137,6 +144,9 @@ def _load_edges(
             raise WorkflowDefinitionError(f"Unknown edge source {source!r}")
         if not isinstance(target, str) or target not in nodes:
             raise WorkflowDefinitionError(f"Unknown edge target {target!r}")
+        if schema_version == 1 and (source, target) in known:
+            continue
+        known.add((source, target))
         edges.append(
             WorkflowEdge(
                 source=source,
@@ -202,8 +212,9 @@ def _load_nodes(
         if not isinstance(node_label, str) or not node_label:
             raise WorkflowDefinitionError(f"Node {node_key} label must be a non-empty string")
 
+        node_type, accepted_item_types = load_start_fields(raw_node, node_key)
         capability = raw_node.get("capability", "")
-        if not isinstance(capability, str) or not capability:
+        if not isinstance(capability, str) or (not capability and node_type != "start"):
             raise WorkflowDefinitionError(f"Node {node_key} capability must be a non-empty string")
 
         inputs = _string_list(raw_node.get("inputs"), "inputs", node_key)
@@ -232,6 +243,8 @@ def _load_nodes(
             config_schema=load_node_config_schema(raw_node, node_key),
             shard=_load_shard(raw_node, node_key, inputs),
             reduce=_load_reduce(raw_node, node_key),
+            node_type=node_type,
+            accepted_item_types=accepted_item_types,
         )
 
     for node in nodes.values():
@@ -277,6 +290,7 @@ def workflow_definition_from_mapping(
     intake = _load_intake(raw)
     nodes = _load_nodes(raw_nodes)
     edges = _load_edges(raw, nodes, schema_version)
+    nodes, edges = ensure_start_node(nodes, edges)
     _validate_acyclic(nodes, edges)
     return WorkflowDefinition(
         key=key,
@@ -303,6 +317,17 @@ def workflow_definition_from_dict(
     }
     for node_key, node in (payload.get("nodes") or {}).items():
         raw_node = dict(node)
+        # Snapshots store the dataclass field name; the yaml spelling is ``type``.
+        if "node_type" in raw_node:
+            raw_node["type"] = raw_node.pop("node_type")
+        # asdict snapshots carry every field on every node: strip the empty
+        # placeholders a start node must not declare, and the default contract
+        # copy on non-start nodes (only a start node may declare it).
+        if raw_node.get("type") == "start":
+            for placeholder in ("capability", "execution", "shard", "reduce", "terminal"):
+                raw_node.pop(placeholder, None)
+        else:
+            raw_node.pop("accepted_item_types", None)
         terminal = raw_node.get("terminal")
         if terminal is not None:
             raw_node["terminal"] = dict(terminal)

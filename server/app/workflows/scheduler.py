@@ -8,6 +8,7 @@ from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 from server.app.workflows.workflow_branching import (
     RUNNABLE_STATUSES,
     _incoming_edges,
+    effective_node_statuses,
 )
 
 TERMINAL_SUCCESS_STATUSES = {"completed", "not_applicable"}
@@ -40,6 +41,9 @@ def find_ready_nodes(
 ) -> list[WorkflowNode]:
     ready: list[WorkflowNode] = []
     incoming = _incoming_edges(definition)
+    # Start nodes are definitionally completed: never runnable themselves,
+    # and their outgoing edges are always satisfied (EXEC-WORKFLOW-START-001).
+    node_statuses = effective_node_statuses(definition, node_statuses)
     for node in definition.nodes.values():
         if node_statuses.get(node.key, "pending") not in RUNNABLE_STATUSES:
             continue

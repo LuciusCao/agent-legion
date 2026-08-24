@@ -387,12 +387,21 @@ def test_compare_workflow_without_baseline_returns_full_draft_preview(client, jo
     assert payload["creates_revision"] is True
     assert payload["summary"]["node_changes"] == [
         {
+            # 草稿未声明 start：loader 注入合成 start（EXEC-WORKFLOW-START-001），
+            # 无基线对比下它也作为新增节点出现。
+            "type": "added",
+            "node_key": "_start",
+            "label": "Start",
+            "fields": [],
+            "risk": "info",
+        },
+        {
             "type": "added",
             "node_key": "publish_content",
             "label": "publish_content",
             "fields": [],
             "risk": "info",
-        }
+        },
     ]
     assert any(flag["code"] == "no_baseline" for flag in payload["summary"]["risk_flags"])
 

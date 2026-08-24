@@ -8,6 +8,10 @@ class WorkflowDefinitionError(ValueError):
     """Raised when a workflow YAML file is invalid."""
 
 
+#: Item types a start node may accept; also the default contract (D1).
+DEFAULT_ACCEPTED_ITEM_TYPES = ("material", "ref")
+
+
 @dataclass(frozen=True)
 class WorkflowCondition:
     artifact: str
@@ -66,6 +70,9 @@ class WorkflowNode:
     config_schema: dict[str, Any] = field(default_factory=dict)
     shard: WorkflowShardSpec | None = None
     reduce: WorkflowReduceSpec | None = None
+    # ``start`` nodes carry the entry contract and never execute (EXEC-WORKFLOW-START-001).
+    node_type: str = "node"
+    accepted_item_types: tuple[str, ...] = DEFAULT_ACCEPTED_ITEM_TYPES
 
 
 @dataclass(frozen=True)
@@ -105,3 +112,13 @@ class WorkflowDefinition:
     def terminal_nodes(self) -> list[str]:
         referenced = {edge.source for edge in self.edges}
         return [key for key in self.nodes if key not in referenced]
+
+    @property
+    def start_node(self) -> WorkflowNode | None:
+        """The single ``type: start`` node; the loader injects one when absent."""
+        return next((node for node in self.nodes.values() if node.node_type == "start"), None)
+
+    @property
+    def executable_nodes(self) -> dict[str, WorkflowNode]:
+        """Nodes that run as job nodes — every node except the start node."""
+        return {key: node for key, node in self.nodes.items() if node.node_type != "start"}

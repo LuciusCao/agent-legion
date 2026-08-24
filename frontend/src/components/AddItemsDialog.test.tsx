@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 
 import { AddItemsDialog } from './AddItemsDialog'
-import { api, createRun } from '../api'
+import { api, createRun, fetchActiveWorkflowRevision } from '../api'
 import { uploadMaterialFile } from '../lib/addItems'
 import { useUiStore } from '../stores/uiStore'
 import { TestQueryProvider } from '../testing/testQueryClient'
@@ -12,6 +12,7 @@ import type { MaterialListResponse } from '../types'
 vi.mock('../api', () => ({
   api: vi.fn(),
   createRun: vi.fn(),
+  fetchActiveWorkflowRevision: vi.fn(),
 }))
 
 vi.mock('../lib/addItems', async (importOriginal) => {
@@ -22,6 +23,7 @@ vi.mock('../lib/addItems', async (importOriginal) => {
 const mockApi = vi.mocked(api)
 const mockCreateRun = vi.mocked(createRun)
 const mockUpload = vi.mocked(uploadMaterialFile)
+const mockFetchRevision = vi.mocked(fetchActiveWorkflowRevision)
 
 function renderWithClient(ui: ReactElement) {
   return render(<TestQueryProvider>{ui}</TestQueryProvider>)
@@ -69,6 +71,11 @@ describe('AddItemsDialog', () => {
     mockApi.mockReset()
     mockCreateRun.mockReset()
     mockUpload.mockReset()
+    mockFetchRevision.mockReset()
+    // 默认：workspace 未发布 revision（404）→ 入口契约缺省全接受。
+    mockFetchRevision.mockRejectedValue(
+      Object.assign(new Error('No active workflow revision'), { status: 404 })
+    )
     useUiStore.setState({ toast: null })
     mockMaterials([])
     mockWorkspace()
@@ -290,5 +297,62 @@ describe('AddItemsDialog', () => {
       ],
     })
     await waitFor(() => expect(onClose).toHaveBeenCalled())
+  })
+
+  function mockRevisionWithAcceptedTypes(accepted: string[]) {
+    mockFetchRevision.mockResolvedValue({
+      definition_yaml: '',
+      revision: { id: 'r1', version: 1 },
+      workflow: {
+        key: 'demo_workflow',
+        label: 'demo',
+        intake: { modes: [] },
+        nodes: [
+          {
+            key: '_start',
+            label: '入口',
+            capability: '',
+            node_type: 'start',
+            accepted_item_types: accepted,
+            after: [],
+            inputs: [],
+            outputs: [],
+          },
+        ],
+        edges: [],
+      },
+    } as never)
+  }
+
+  it('disables the ref tab when the start node accepts materials only', async () => {
+    mockRevisionWithAcceptedTypes(['material'])
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: '粘贴 ID' })).toBeDisabled()
+    )
+    expect(screen.getByRole('tab', { name: '上传材料' })).toBeEnabled()
+    expect(screen.getByRole('tab', { name: '已有材料' })).toBeEnabled()
+    expect(screen.getByTestId('item-type-hint')).toHaveTextContent('材料条目')
+  })
+
+  it('disables the material tabs when the start node accepts refs only', async () => {
+    mockRevisionWithAcceptedTypes(['ref'])
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+
+    // 默认选中的 upload tab 被禁用后应落到可用的 ref tab。
+    await waitFor(() =>
+      expect(screen.getByLabelText('外部 ID')).toBeInTheDocument()
+    )
+    expect(screen.getByRole('tab', { name: '上传材料' })).toBeDisabled()
+    expect(screen.getByRole('tab', { name: '已有材料' })).toBeDisabled()
+    expect(screen.getByRole('tab', { name: '粘贴 ID' })).toBeEnabled()
+    expect(screen.getByTestId('item-type-hint')).toHaveTextContent(
+      '外部引用条目'
+    )
   })
 })

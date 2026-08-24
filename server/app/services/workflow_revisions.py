@@ -39,7 +39,7 @@ class WorkflowRevisionService:
             self.custom_nodes_enabled,
             workspace_id,
             definition.key,
-            [node.key for node in definition.nodes.values()],
+            list(definition.executable_nodes),
         )
         stored_json = definition_json
         if pins:

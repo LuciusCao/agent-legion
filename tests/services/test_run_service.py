@@ -22,11 +22,26 @@ WORKSPACE_ID = "ws-run-service"
 OTHER_WORKSPACE_ID = "ws-run-service-other"
 
 
-def _workspace_with_revision(job_db, settings, workspace_id: str = WORKSPACE_ID) -> dict:
+def _definition_accepting(*item_types: str):
+    """Demo DAG with a widened start-node entry contract (default: material only)."""
+    import copy
+
+    from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION
+    from server.app.workflows.definition import workflow_definition_from_dict
+
+    raw = copy.deepcopy(DEMO_WORKFLOW_DEFINITION)
+    raw["nodes"]["_start"]["accepted_item_types"] = list(item_types)
+    return workflow_definition_from_dict(raw)
+
+
+def _workspace_with_revision(
+    job_db, settings, workspace_id: str = WORKSPACE_ID, definition=None
+) -> dict:
     workspace = job_db.create_workspace(workspace_id, default_workflow_key=WORKFLOW_KEY)
-    definition = load_builtin_definition(WORKFLOW_KEY)
     seed_demo_workspace_node_codes(settings, workspace["id"])
-    WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
+    WorkflowRevisionService(job_db).ensure_active_revision(
+        workspace["id"], definition or load_builtin_definition(WORKFLOW_KEY)
+    )
     return workspace
 
 
@@ -66,6 +81,13 @@ def _insert_connection(job_db, key: str) -> None:
 @pytest.fixture
 def service(job_db, settings) -> RunService:
     _workspace_with_revision(job_db, settings)
+    return RunService(job_db, settings)
+
+
+@pytest.fixture
+def service_all_types(job_db, settings) -> RunService:
+    """Workspace whose start node accepts both item types (default: material only)."""
+    _workspace_with_revision(job_db, settings, definition=_definition_accepting("material", "ref"))
     return RunService(job_db, settings)
 
 
@@ -113,11 +135,11 @@ def test_material_item_creates_job_with_frozen_input(service, job_db, settings) 
     assert json.loads(stored["frozen_config_json"]) == expected_config
 
 
-def test_ref_item_creates_job_with_verbatim_input(service, job_db) -> None:
+def test_ref_item_creates_job_with_verbatim_input(service_all_types, job_db) -> None:
     _insert_connection(job_db, "cms-main")
     item = _ref_item("cms-main", "Q-42", params={"lang": "zh"})
 
-    result = service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[item])
+    result = service_all_types.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[item])
 
     job = result["jobs"][0]
     assert job["source_type"] == "ref"
@@ -128,12 +150,12 @@ def test_ref_item_creates_job_with_verbatim_input(service, job_db) -> None:
     assert json.loads(stored["input_json"]) == item
 
 
-def test_ref_identity_includes_connection_key(service, job_db) -> None:
+def test_ref_identity_includes_connection_key(service_all_types, job_db) -> None:
     _insert_connection(job_db, "cms-a")
     _insert_connection(job_db, "cms-b")
 
     # The same external_id reachable through two connections is two items.
-    result = service.create_run(
+    result = service_all_types.create_run(
         WORKSPACE_ID,
         workflow_key=WORKFLOW_KEY,
         items=[_ref_item("cms-a", "Q-1"), _ref_item("cms-b", "Q-1")],
@@ -143,32 +165,32 @@ def test_ref_identity_includes_connection_key(service, job_db) -> None:
     assert {job["source_id"] for job in result["jobs"]} == {"cms-a:Q-1", "cms-b:Q-1"}
 
 
-def test_ref_dedup_is_scoped_per_connection(service, job_db) -> None:
+def test_ref_dedup_is_scoped_per_connection(service_all_types, job_db) -> None:
     _insert_connection(job_db, "cms-a")
     _insert_connection(job_db, "cms-b")
-    first = service.create_run(
+    first = service_all_types.create_run(
         WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_ref_item("cms-a", "Q-1")]
     )
     assert first["created_count"] == 1
 
     # Same external_id via another connection is fresh, not a duplicate.
-    second = service.create_run(
+    second = service_all_types.create_run(
         WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_ref_item("cms-b", "Q-1")]
     )
     assert second["created_count"] == 1
 
     # The identical (connection_key, external_id) pair dedups like any item.
     with pytest.raises(InvalidOperationError, match="No tasks were resolved"):
-        service.create_run(
+        service_all_types.create_run(
             WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_ref_item("cms-a", "Q-1")]
         )
 
 
-def test_mixed_items_create_one_job_each(service, job_db) -> None:
+def test_mixed_items_create_one_job_each(service_all_types, job_db) -> None:
     _insert_material(job_db, WORKSPACE_ID, "mat-1")
     _insert_connection(job_db, "cms-main")
 
-    result = service.create_run(
+    result = service_all_types.create_run(
         WORKSPACE_ID,
         workflow_key=WORKFLOW_KEY,
         items=[_material_item("mat-1"), _ref_item("cms-main", "Q-1")],
@@ -200,9 +222,9 @@ def test_cross_workspace_material_is_rejected(service, job_db, settings) -> None
         )
 
 
-def test_unknown_connection_key_is_rejected(service) -> None:
+def test_unknown_connection_key_is_rejected(service_all_types) -> None:
     with pytest.raises(InvalidOperationError, match="Unknown connection key"):
-        service.create_run(
+        service_all_types.create_run(
             WORKSPACE_ID,
             workflow_key=WORKFLOW_KEY,
             items=[_ref_item("missing-conn", "Q-1")],
@@ -243,16 +265,16 @@ def test_intra_request_duplicates_create_one_job(service, job_db) -> None:
     assert result["created_count"] == 1
 
 
-def test_validation_failures_leave_no_run_behind(service, job_db) -> None:
+def test_validation_failures_leave_no_run_behind(service_all_types, job_db) -> None:
     _insert_material(job_db, WORKSPACE_ID, "mat-1")
     with pytest.raises(InvalidOperationError, match="Unknown connection key"):
-        service.create_run(
+        service_all_types.create_run(
             WORKSPACE_ID,
             workflow_key=WORKFLOW_KEY,
             items=[_material_item("mat-1"), _ref_item("missing-conn", "Q-1")],
         )
 
-    assert service.list_runs(WORKSPACE_ID) == []
+    assert service_all_types.list_runs(WORKSPACE_ID) == []
     assert job_db.list_job_dedup_keys(WORKSPACE_ID, WORKFLOW_KEY) == set()
 
 
@@ -368,3 +390,44 @@ def test_list_and_get_run(service, job_db) -> None:
         service.get_run(OTHER_WORKSPACE_ID, run_id)
     with pytest.raises(NotFoundError, match="Run not found"):
         service.get_run(WORKSPACE_ID, "missing-run")
+
+
+def test_ref_item_rejected_under_material_only_contract(service, job_db) -> None:
+    """D4: the demo start node accepts only materials; a ref item is rejected
+    before any write (no run row, no dedup keys)."""
+    _insert_connection(job_db, "cms-main")
+
+    with pytest.raises(InvalidOperationError, match="not accepted by this workflow"):
+        service.create_run(
+            WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_ref_item("cms-main", "Q-1")]
+        )
+
+    assert service.list_runs(WORKSPACE_ID) == []
+    assert job_db.list_job_dedup_keys(WORKSPACE_ID, WORKFLOW_KEY) == set()
+
+
+def test_unsupported_item_type_rejected_by_entry_contract(service) -> None:
+    """Unknown item types hit the entry contract before type dispatch."""
+    with pytest.raises(InvalidOperationError, match="not accepted by this workflow"):
+        service.create_run(
+            WORKSPACE_ID,
+            workflow_key=WORKFLOW_KEY,
+            items=[{"type": "folder", "material_ids": ["m1"]}],
+        )
+
+
+def test_material_item_accepted_under_material_only_contract(service, job_db) -> None:
+    _insert_material(job_db, WORKSPACE_ID, "mat-1")
+
+    result = service.create_run(
+        WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_material_item("mat-1")]
+    )
+
+    assert result["created_count"] == 1
+    job = result["jobs"][0]
+    # The start node never enters job_nodes (EXEC-WORKFLOW-START-001).
+    with job_db.connect() as conn:
+        rows = conn.execute(
+            "select node_key from job_nodes where job_id=%s order by node_key", (job["id"],)
+        ).fetchall()
+    assert "_start" not in [row["node_key"] for row in rows]

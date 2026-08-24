@@ -39,6 +39,9 @@ def check_workflow_raw_definitions(definitions: dict[str, Any]) -> list[str]:
                     f"{source}: node {node_key}: field 'agent' was removed; "
                     "invocation details belong to Executor capabilities"
                 )
+            # start 节点豁免 capability（入口契约载体，EXEC-WORKFLOW-START-001）。
+            if node.get("type") == "start":
+                continue
             capability = node.get("capability", "")
             if not isinstance(capability, str) or not capability:
                 errors.append(f"{source}: node {node_key} must declare a non-empty capability")

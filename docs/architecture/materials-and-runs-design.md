@@ -93,6 +93,32 @@ source_kind / intake mode 才能提交任务。这带来三个问题：
   执行阶段。提交时的「标题展示」只是 best-effort 后台 enrichment（拉不到
   就显示原始 ID），不是架构路径。
 
+### 4.1 入口契约：start 节点与 accepted_item_types（EXEC-WORKFLOW-START-001）
+
+Workflow 定义必须恰好包含一个 `type: start` 节点，它是条目类型契约的结构化
+家（Dify 式画布内 Start 节点）：
+
+```yaml
+nodes:
+  _start:
+    type: start                      # 豁免 capability；不得声明 execution/shard/reduce/terminal
+    accepted_item_types: [material]  # 可选；缺省 [material, ref]（向后兼容）
+```
+
+- **不执行**：start 永不进入 `job_nodes`，调度器（`find_ready_nodes` /
+  `evaluate_branches`）把它视为恒 completed，出边天然满足，首节点立即 ready；
+  `allowed_nodes`、publish 校验（code 可解析性 / Agent 唯一性）、节点配置解析
+  一律跳过它。
+- **不可删**：loader 对没有 start 的存量定义（旧 revision、进行中 job 的快照）
+  自动注入合成 start——缺省全接受、出边指向所有无入边节点（旧语义的隐式根），
+  parse→serialize 对新旧定义对称，hash 与结构比较不受影响，零迁移。
+- **创建期校验**：`RunService.create_run` 在任何写库之前按 start 的
+  `accepted_item_types` 拒绝未接受的条目类型（400）；前端 AddItemsDialog 按
+  active revision 的同一契约禁用对应 Tab。legacy `intake.modes` 与 start 正交，
+  只约束 `/job-batches` 旧路径直至退役。
+- 后续切片（folder 整体式/bundle 等新条目类型）的配置也挂在 start 节点上——
+  这正是 start 存在的意义。
+
 ## 5. 数据模型
 
 ### 5.1 `materials` 表（新增）

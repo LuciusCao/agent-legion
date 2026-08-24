@@ -13,6 +13,8 @@ import { useQuery } from '@tanstack/react-query'
 import { api, createRun } from '../api'
 import { useUiStore } from '../stores/uiStore'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
+import { useWorkflowDefinitionQuery } from '../hooks/useWorkflowDefinitionQuery'
+import { acceptedItemTypes } from '../lib/acceptedItemTypes'
 import {
   fileTypeGroup,
   formatBytes,
@@ -82,6 +84,17 @@ export function AddItemsDialog({
   })
   const workspace = workspaceQuery.data?.workspace ?? null
   const workflowKey = workspace?.default_workflow_key ?? ''
+
+  // 入口契约：active revision 的 start 节点决定哪些条目类型可用
+  // （EXEC-WORKFLOW-START-001）；取不到定义时缺省全接受。
+  const workflowQuery = useWorkflowDefinitionQuery(open ? workspaceId : null)
+  const acceptedTypes = acceptedItemTypes(workflowQuery.data)
+  const materialAccepted = acceptedTypes.includes('material')
+  const refAccepted = acceptedTypes.includes('ref')
+  // 当前 tab 不被契约接受时落到可用 tab（派生值，不触发额外渲染循环）。
+  const fallbackTab: TabKey = materialAccepted ? 'upload' : 'ref'
+  const tabAllowed = tab === 'ref' ? refAccepted : materialAccepted
+  const activeTab = tabAllowed ? tab : fallbackTab
 
   const updateEntry = useCallback(
     (key: string, patch: Partial<UploadEntry>) => {
@@ -274,12 +287,26 @@ export function AddItemsDialog({
       <DialogTitle>添加条目</DialogTitle>
       <DialogContent>
         <div style={{ display: 'grid', gap: '12px', minWidth: '500px' }}>
-          <Tabs value={tab} onChange={(_event, value: TabKey) => setTab(value)}>
-            <Tab label="上传材料" value="upload" />
-            <Tab label="粘贴 ID" value="ref" />
-            <Tab label="已有材料" value="existing" />
+          <Tabs
+            value={activeTab}
+            onChange={(_event, value: TabKey) => setTab(value)}
+          >
+            <Tab label="上传材料" value="upload" disabled={!materialAccepted} />
+            <Tab label="粘贴 ID" value="ref" disabled={!refAccepted} />
+            <Tab
+              label="已有材料"
+              value="existing"
+              disabled={!materialAccepted}
+            />
           </Tabs>
-          {tab === 'upload' && (
+          {(!materialAccepted || !refAccepted) && (
+            <div className={styles.errorHint} data-testid="item-type-hint">
+              当前 workflow 只接受
+              {materialAccepted ? '材料条目' : '外部引用条目'}
+              （start 节点 accepted_item_types）。
+            </div>
+          )}
+          {activeTab === 'upload' && (
             <>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <Button variant="outlined" component="label">
@@ -370,7 +397,7 @@ export function AddItemsDialog({
               )}
             </>
           )}
-          {tab === 'ref' && (
+          {activeTab === 'ref' && (
             <>
               <TextField
                 label="连接 Key"
@@ -395,7 +422,7 @@ export function AddItemsDialog({
               )}
             </>
           )}
-          {tab === 'existing' && (
+          {activeTab === 'existing' && (
             <AddItemsExistingMaterials
               workspaceId={workspaceId}
               enabled={enabled}

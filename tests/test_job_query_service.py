@@ -105,7 +105,7 @@ def test_list_jobs_exposes_job_workflow_version_and_outdated_status(query_servic
         source_id="Q1",
         run_id=batch["id"],
         title="Question 1",
-        node_keys=list(definition.nodes),
+        node_keys=list(definition.executable_nodes),
         workspace_id=workspace["id"],
         workflow_revision_id=original["id"],
         workflow_version=original["version"],

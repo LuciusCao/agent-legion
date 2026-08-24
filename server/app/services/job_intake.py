@@ -91,7 +91,7 @@ class JobIntakeService:
             self.settings.executor_runtime.workflows.custom_nodes_enabled,
             workspace_id,
             workflow_key,
-            [node.key for node in definition.nodes.values()],
+            list(definition.executable_nodes),
         )
 
         if payload.get("async_processing"):
@@ -166,7 +166,7 @@ class JobIntakeService:
                 candidates=candidates,
                 workflow_key=workflow_key,
                 run_id=batch["id"],
-                node_keys=list(definition.nodes),
+                node_keys=list(definition.executable_nodes),
                 workspace_id=workspace_id,
                 revision=active_revision,
                 frozen_config=node_config,

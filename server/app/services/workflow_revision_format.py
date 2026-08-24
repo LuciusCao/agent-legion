@@ -59,6 +59,8 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
                 "key": node.key,
                 "label": node.label,
                 "capability": node.capability,
+                "node_type": node.node_type,
+                "accepted_item_types": list(node.accepted_item_types),
                 "after": node.after,
                 "inputs": node.inputs,
                 "outputs": node.outputs,
@@ -107,13 +109,16 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
         "edges": [],
     }
     for key, node in definition.nodes.items():
-        raw_node: dict[str, Any] = {
-            "label": node.label,
-            "capability": node.capability,
-            "after": node.after,
-            "inputs": node.inputs,
-            "outputs": node.outputs,
-        }
+        # Start nodes carry the entry contract, never a capability (D1).
+        raw_node: dict[str, Any] = {"label": node.label}
+        if node.node_type == "start":
+            raw_node["type"] = "start"
+            raw_node["accepted_item_types"] = list(node.accepted_item_types)
+        else:
+            raw_node["capability"] = node.capability
+        raw_node["after"] = node.after
+        raw_node["inputs"] = node.inputs
+        raw_node["outputs"] = node.outputs
         if node.terminal is not None:
             raw_node["terminal"] = {"outcome": node.terminal.outcome}
         execution = {key: value for key, value in asdict(node.execution).items() if value}

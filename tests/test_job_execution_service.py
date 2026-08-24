@@ -51,7 +51,7 @@ def _create_job(
         source_id=source_id,
         run_id=batch["id"],
         title=f"Question {source_id}",
-        node_keys=list(definition.nodes),
+        node_keys=list(definition.executable_nodes),
         workspace_id=workspace_id,
     )
 
@@ -302,7 +302,9 @@ def test_run_to_uses_atomic_execution_control_mutation(
         (
             job["id"],
             "write_script",
-            frozenset({"intake_knowledge_points", "write_script"}),
+            # The graph closure includes the start node; apply_run_to treats it
+            # as a no-op (start never enters job_nodes, EXEC-WORKFLOW-START-001).
+            frozenset({"_start", "intake_knowledge_points", "write_script"}),
         )
     ]
 
