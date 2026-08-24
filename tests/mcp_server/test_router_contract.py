@@ -34,11 +34,21 @@ class _FakeResponse:
 def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
     calls: list[dict] = []
 
-    def fake_request(method, url, json=None, headers=None, timeout=None):  # noqa: A002
-        calls.append({"method": method, "url": url})
-        return _FakeResponse()
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            pass
 
-    monkeypatch.setattr("server.app.mcp_server.tool_client.requests.request", fake_request)
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def request(self, method, url, json=None, headers=None):  # noqa: A002
+            calls.append({"method": method, "url": url})
+            return _FakeResponse()
+
+    monkeypatch.setattr("server.app.mcp_server.tool_client.httpx.AsyncClient", FakeAsyncClient)
     server = create_mcp_server(_CONFIG)
 
     tools = asyncio.run(server.list_tools())

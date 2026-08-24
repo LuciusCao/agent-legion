@@ -10,10 +10,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import threading
 
+import httpx
 import pytest
-import requests
 
 from server.app.mcp_server.config import (
     API_BASE_ENV,
@@ -37,6 +36,25 @@ class _FakeResponse:
         self.text = text or json.dumps(payload if payload is not None else {"ok": True})
 
 
+def _patch_http_client(monkeypatch, handler) -> None:
+    """Patch httpx.AsyncClient so ToolClient.call runs ``handler`` inline."""
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            self._timeout = kwargs.get("timeout")
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def request(self, method, url, json=None, headers=None):  # noqa: A002
+            return handler(method, url, json=json, headers=headers, timeout=self._timeout)
+
+    monkeypatch.setattr("server.app.mcp_server.tool_client.httpx.AsyncClient", FakeAsyncClient)
+
+
 def _run_tool(server, name: str, args: dict) -> str:
     blocks, _result = asyncio.run(server.call_tool(name, args))
     return "".join(block.text for block in blocks if block.type == "text")
@@ -44,7 +62,7 @@ def _run_tool(server, name: str, args: dict) -> str:
 
 @pytest.fixture
 def recorded(monkeypatch):
-    """Mock requests.request; returns (server, calls) with canned 200 JSON."""
+    """Mock the httpx loopback; returns (server, calls) with canned 200 JSON."""
     calls: list[dict] = []
 
     def fake_request(method, url, json=None, headers=None, timeout=None):  # noqa: A002
@@ -53,7 +71,7 @@ def recorded(monkeypatch):
         )
         return _FakeResponse(200, {"echo": True})
 
-    monkeypatch.setattr("server.app.mcp_server.tool_client.requests.request", fake_request)
+    _patch_http_client(monkeypatch, fake_request)
     return create_mcp_server(_CONFIG), calls
 
 
@@ -96,19 +114,20 @@ def test_loopback_tools_are_async() -> None:
     assert not inspect.iscoroutinefunction(tools["get_authoring_guide"].fn)
 
 
-def test_acall_offloads_the_blocking_call_to_a_worker_thread(monkeypatch) -> None:
-    main_thread = threading.get_ident()
-    seen: dict[str, int] = {}
+def test_loopback_call_is_fully_async(monkeypatch) -> None:
+    # True async I/O, no thread offload: the loopback target's sync handlers
+    # run on the same shared anyio worker pool, so anyio.to_thread would let
+    # concurrent tool calls occupy every worker while the handler they wait
+    # on can never start (thread-pool deadlock under concurrency).
+    assert inspect.iscoroutinefunction(ToolClient.call)
 
     def fake_request(method, url, json=None, headers=None, timeout=None):  # noqa: A002
-        seen["thread"] = threading.get_ident()
         return _FakeResponse(200, {"echo": True})
 
-    monkeypatch.setattr("server.app.mcp_server.tool_client.requests.request", fake_request)
+    _patch_http_client(monkeypatch, fake_request)
     client = ToolClient(_CONFIG)
-    text = asyncio.run(client.acall("GET", "/workspaces/ws-1/workflow/active"))
+    text = asyncio.run(client.call("GET", "/workspaces/ws-1/workflow/active"))
     assert json.loads(text) == {"echo": True}
-    assert seen["thread"] != main_thread
 
 
 def test_get_active_workflow(recorded) -> None:
@@ -209,7 +228,7 @@ def test_get_studio_context_uses_the_bound_session(monkeypatch) -> None:
         calls.append({"method": method, "url": url})
         return _FakeResponse(200, {"workspace_id": "ws-1"})
 
-    monkeypatch.setattr("server.app.mcp_server.tool_client.requests.request", fake_request)
+    _patch_http_client(monkeypatch, fake_request)
     config = McpServerConfig(api_base="http://backend.test:9000", token="t", session_id="sess-1")
     server = create_mcp_server(config)
     assert json.loads(_run_tool(server, "get_studio_context", {})) == {"workspace_id": "ws-1"}
@@ -232,7 +251,7 @@ def test_non_2xx_returns_http_text(monkeypatch) -> None:
     def fake_request(method, url, json=None, headers=None, timeout=None):  # noqa: A002
         return _FakeResponse(403, text='{"detail":"Studio agent scoped token required"}')
 
-    monkeypatch.setattr("server.app.mcp_server.tool_client.requests.request", fake_request)
+    _patch_http_client(monkeypatch, fake_request)
     server = create_mcp_server(_CONFIG)
     text = _run_tool(server, "get_active_workflow", {"workspace_id": "ws-1"})
     assert text.startswith("HTTP 403: ")
@@ -241,9 +260,9 @@ def test_non_2xx_returns_http_text(monkeypatch) -> None:
 
 def test_connection_error_returns_text_not_exception(monkeypatch) -> None:
     def fake_request(method, url, json=None, headers=None, timeout=None):  # noqa: A002
-        raise requests.ConnectionError("refused")
+        raise httpx.ConnectError("refused")
 
-    monkeypatch.setattr("server.app.mcp_server.tool_client.requests.request", fake_request)
+    _patch_http_client(monkeypatch, fake_request)
     server = create_mcp_server(_CONFIG)
     text = _run_tool(server, "get_active_workflow", {"workspace_id": "ws-1"})
     assert text.startswith("request failed: ")

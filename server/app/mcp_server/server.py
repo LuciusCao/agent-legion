@@ -13,10 +13,11 @@ env config) and the in-app streamable-HTTP endpoint (``http_app.py``, Studio
 chat sessions, per-request header config). Both pass a config resolver; the
 HTTP one re-resolves on every tool call so each request runs under its own
 scoped token and session binding. Loopback tools are ``async def`` and go
-through ``ToolClient.acall``: the HTTP transport executes tools on the
-uvicorn event loop, so the blocking HTTP call must offload to a thread —
-a sync tool would deadlock the single-worker backend against its own
-loopback request (``get_authoring_guide`` stays sync: it never blocks).
+through the fully-async ``ToolClient.call`` (httpx): the HTTP transport
+executes tools on the uvicorn event loop, so the loopback must be true async
+I/O — a sync tool deadlocks the single-worker backend against its own
+request, and a thread-pool offload can starve the loopback's sync handlers
+sharing that pool (``get_authoring_guide`` stays sync: it never blocks).
 """
 
 from __future__ import annotations
@@ -62,7 +63,7 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         config, client = _client()
         if config.session_id is None:
             return "get_studio_context is unavailable: no chat session bound"
-        return await client.acall("GET", f"/chat-sessions/{config.session_id}/context")
+        return await client.call("GET", f"/chat-sessions/{config.session_id}/context")
 
     @mcp.tool()
     async def get_active_workflow(workspace_id: str) -> str:
@@ -72,7 +73,7 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         empty state ({"state": "empty"}) instead of an error — the signal to
         start the from-scratch flow (see get_authoring_guide)."""
         _, client = _client()
-        return await client.acall("GET", f"/workspaces/{workspace_id}/workflow/active")
+        return await client.call("GET", f"/workspaces/{workspace_id}/workflow/active")
 
     @mcp.tool()
     async def validate_workflow(workspace_id: str, definition_yaml: str) -> str:
@@ -80,7 +81,7 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         validation set. Persists nothing. Always validate a draft before
         asking the human to review or apply it."""
         _, client = _client()
-        return await client.acall(
+        return await client.call(
             "POST",
             f"/workspaces/{workspace_id}/workflow/validate",
             {"definition_yaml": definition_yaml},
@@ -93,7 +94,7 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         revision. With no published baseline the result is a full-draft preview
         (everything added, base_revision null). Persists nothing."""
         _, client = _client()
-        return await client.acall(
+        return await client.call(
             "POST",
             f"/workspaces/{workspace_id}/workflow/compare",
             {"definition_yaml": definition_yaml},
@@ -118,7 +119,7 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         if expected_capability is not None:
             body["expected_capability"] = expected_capability
         _, client = _client()
-        return await client.acall(
+        return await client.call(
             "PUT",
             f"/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft",
             body,
@@ -129,7 +130,7 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         """Read the current code state of a workflow code node: builtin source,
         published custom code, and any pending draft."""
         _, client = _client()
-        return await client.acall(
+        return await client.call(
             "GET",
             f"/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code",
         )
@@ -147,7 +148,7 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         to a runtime and skill. runtime is one of: pi, openclaw, velites.
         Draft only — a human publishes it in Studio before any job can use it."""
         _, client = _client()
-        return await client.acall(
+        return await client.call(
             "PUT",
             f"/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
             {
