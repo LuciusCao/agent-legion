@@ -7,6 +7,7 @@ picked up through the workflow catalog's declared node outputs (see
 """
 
 import json
+import shutil
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -70,7 +71,12 @@ def create_workspace_package(
                 elif object_store is not None and object_store.enabled:
                     row = object_store.lookup(str(job["id"]), name)
                     if row is not None:
-                        zf.writestr(f"{job['id']}/{name}", object_store.open_stream(row).read())
+                        # 流式拷贝：大对象不得整个读进内存。
+                        with (
+                            zf.open(f"{job['id']}/{name}", mode="w", force_zip64=True) as dest,
+                            object_store.open_stream(row) as src,
+                        ):
+                            shutil.copyfileobj(src, dest, 1 << 20)
                         wrote = True
             if job_dir.exists() or wrote:
                 job_count += 1

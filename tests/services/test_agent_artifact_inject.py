@@ -77,6 +77,7 @@ def _manifest() -> dict:
     return {
         "job_id": "job-1",
         "workspace_id": "ws-1",
+        "execution_id": "exec-1",
         "expected_outputs": ["out.json"],
         "input_artifacts": {"q.json": f"sha256:{HASH}"},
     }
@@ -101,8 +102,8 @@ def test_inject_adds_uploads_and_upgrades_staged_inputs(tmp_path: Path) -> None:
     inject_artifact_object_block(store, manifest)
 
     uploads = manifest["artifact_uploads"]
-    assert uploads["out.json"]["storage_key"] == "jobs/ws-1/job-1/out.json"
-    assert uploads["out.json"]["url"].endswith("jobs/ws-1/job-1/out.json?sig=put")
+    assert uploads["out.json"]["storage_key"] == "jobs-staging/ws-1/job-1/exec-1/out.json"
+    assert uploads["out.json"]["url"].endswith("jobs-staging/ws-1/job-1/exec-1/out.json?sig=put")
     ref = manifest["input_artifacts"]["q.json"]
     assert ref["sha256"] == HASH
     assert ref["url"].endswith("jobs/ws-1/job-1/q.json?sig=get")
@@ -142,7 +143,9 @@ def test_inject_keeps_cas_form_for_inputs_without_row() -> None:
 
     inject_artifact_object_block(store, manifest)
 
-    assert manifest["artifact_uploads"]["out.json"]["storage_key"] == "jobs/ws-1/job-1/out.json"
+    assert manifest["artifact_uploads"]["out.json"]["storage_key"] == (
+        "jobs-staging/ws-1/job-1/exec-1/out.json"
+    )
     # 没有 job_artifacts 行（legacy job）→ 保留旧 CAS 形态。
     assert manifest["input_artifacts"] == {"q.json": f"sha256:{HASH}"}
 
@@ -173,6 +176,7 @@ def test_code_claim_rebuild_injects_object_block() -> None:
     manifest = {
         "job_id": "job-1",
         "workspace_id": "ws-1",
+        "execution_id": "exec-1",
         "expected_outputs": ["out.json"],
         "input_artifacts": {"q.json": f"sha256:{HASH}"},
         "runtime_context": {"job_id": "job-1", "workspace_id": "ws-1"},
@@ -180,6 +184,8 @@ def test_code_claim_rebuild_injects_object_block() -> None:
 
     resolved = resolve_code_runtime_context(manifest, TEST_DATABASE_URL, {}, store)
 
-    assert resolved["artifact_uploads"]["out.json"]["storage_key"] == ("jobs/ws-1/job-1/out.json")
+    assert resolved["artifact_uploads"]["out.json"]["storage_key"] == (
+        "jobs-staging/ws-1/job-1/exec-1/out.json"
+    )
     # 持久化的原 manifest 不被改写（内存态 copy）。
     assert "artifact_uploads" not in manifest

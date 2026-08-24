@@ -17,7 +17,7 @@ from typing import Any, BinaryIO
 
 import pytest
 
-from worker import artifact_upload, bundle_io
+from worker import artifact_download, artifact_upload
 from worker.artifact_upload import DirectUploadError, upload_artifact_direct
 from worker.bundle_io import download_input_artifacts
 from worker.code_runner import prepare_code_result
@@ -28,7 +28,10 @@ pytestmark = pytest.mark.no_db
 
 PAYLOAD = b"artifact-bytes" * 100
 HASH = hashlib.sha256(PAYLOAD).hexdigest()
-SPEC = {"storage_key": "jobs/ws-1/job-1/output.json", "url": "https://s3.test/put/x?sig=1"}
+SPEC = {
+    "storage_key": "jobs-staging/ws-1/job-1/exec-1/output.json",
+    "url": "https://s3.test/put/x?sig=1",
+}
 
 
 def _fake_put(monkeypatch: pytest.MonkeyPatch, statuses: list[int]) -> list[bytes]:
@@ -252,7 +255,7 @@ def _fake_open_download(monkeypatch: pytest.MonkeyPatch, payload: bytes) -> list
         urls.append(url)
         return io.BytesIO(payload)
 
-    monkeypatch.setattr(bundle_io, "_open_download", _open)
+    monkeypatch.setattr(artifact_download, "_open_download", _open)
     return urls
 
 

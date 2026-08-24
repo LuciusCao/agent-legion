@@ -17,7 +17,6 @@ import pytest
 
 from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
-from server.app.services.instance_settings import materials_ttl_days
 from server.app.services.instance_settings_store import InstanceSettingsStore
 from server.app.services.material_cache import material_claim_block
 from server.app.services.material_ttl import (
@@ -25,6 +24,7 @@ from server.app.services.material_ttl import (
     MaterialTtlSweeperThread,
     collect_expired_materials,
     expire_due_materials,
+    materials_ttl_days,
 )
 from server.app.services.materials import MaterialsService
 from server.app.storage import ObjectHead

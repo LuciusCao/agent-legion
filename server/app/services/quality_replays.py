@@ -31,7 +31,7 @@ from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.services.node_config_batch import frozen_node_config, run_frozen_payload
-from server.app.services.quality_labels import artifact_contents
+from server.app.services.quality_artifact_contents import artifact_contents
 from server.app.services.versioned_entities import VersionedEntityStore
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.storage_paths import resolve_job_dir

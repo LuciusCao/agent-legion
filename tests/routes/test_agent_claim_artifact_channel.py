@@ -79,6 +79,7 @@ def _manifest() -> dict[str, Any]:
     return {
         "job_id": "job-1",
         "workspace_id": "ws-1",
+        "execution_id": "exec-1",
         "expected_outputs": ["out.json"],
         "input_artifacts": {"q.json": f"sha256:{HASH}"},
         "execution": {"provider": "p", "model": "m"},
@@ -141,7 +142,7 @@ def test_agent_claim_injects_object_channel() -> None:
     manifest = _claim(client)
 
     uploads = manifest["artifact_uploads"]
-    assert uploads["out.json"]["storage_key"] == "jobs/ws-1/job-1/out.json"
+    assert uploads["out.json"]["storage_key"] == "jobs-staging/ws-1/job-1/exec-1/out.json"
     assert uploads["out.json"]["url"].endswith("?sig=put")
     ref = manifest["input_artifacts"]["q.json"]
     assert ref["url"].endswith("?sig=get")

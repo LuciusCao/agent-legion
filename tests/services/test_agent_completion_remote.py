@@ -1,7 +1,9 @@
 """AgentCompletionHandler 接收 Worker 直传 S3 的产物引用（#160 D12）。
 
-新形态 ref → 先全部 HEAD 核验，再统一下载落 job_dir（原子 rename，只落
-expected_outputs 白名单）+ record_remote 登记；任一失败整个 result 判
+Worker 直传到每次 execution 唯一的 staging key（jobs-staging/...）；Host
+先全部核验（staging 布局绑定本 execution、HEAD size、下载 hash），再统一
+服务端 copy 提升到权威 key + 原子落盘（只落 expected_outputs 白名单）+
+record_remote 登记 + best-effort 删 staging；任一失败整个 result 判
 failed，且不留半应用状态。旧形态 str ref 的 add_ref 路径不变（回归由
 tests/test_agent_completion_validation.py 覆盖）。
 """
@@ -22,7 +24,8 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 PAYLOAD = b"remote-artifact-bytes"
 HASH = hashlib.sha256(PAYLOAD).hexdigest()
-KEY = "jobs/ws-1/job-1/out.json"
+STAGING_KEY = "jobs-staging/ws-1/job-1/exec-1/out.json"
+AUTHORITY_KEY = "jobs/ws-1/job-1/out.json"
 
 
 class FakeStorage:
@@ -56,6 +59,9 @@ class FakeStorage:
     def delete_object(self, storage_key: str) -> None:
         self.objects.pop(storage_key, None)
 
+    def copy_object(self, source_key: str, destination_key: str) -> None:
+        self.objects[destination_key] = self.objects[source_key]
+
 
 class _StubJobDb:
     def __init__(self, job: dict[str, Any]) -> None:
@@ -84,7 +90,11 @@ class _StubArtifactStore:
         self.refs.append((job_id, node_key, name, digest))
 
 
-def _remote_ref(key: str = KEY, size: int | None = None, content_hash: str = HASH) -> dict:
+def _staging_key(name: str, execution_id: str = "exec-1") -> str:
+    return f"jobs-staging/ws-1/job-1/{execution_id}/{name}"
+
+
+def _remote_ref(key: str = STAGING_KEY, size: int | None = None, content_hash: str = HASH) -> dict:
     return {
         "storage_key": key,
         "size_bytes": len(PAYLOAD) if size is None else size,
@@ -123,21 +133,23 @@ def _make_handler(
     return handler, leases, artifact_store, object_store, job_dir
 
 
-def _finish(handler: AgentCompletionHandler, artifacts: dict[str, Any]) -> None:
+def _finish(
+    handler: AgentCompletionHandler, artifacts: dict[str, Any], *, status: str = "completed"
+) -> None:
     handler.finish(
         lease_id="lease-1",
         worker_id="worker-1",
         job_id="job-1",
         node_key="node_a",
-        manifest={"expected_outputs": ["out.json"]},
-        outcome=AgentOutcome(status="completed", exit_code=0, output_artifacts=artifacts),
+        manifest={"expected_outputs": ["out.json"], "execution_id": "exec-1"},
+        outcome=AgentOutcome(status=status, exit_code=0, output_artifacts=artifacts),
         archive_name="",
     )
 
 
-def test_finish_remote_ref_downloads_and_registers(tmp_path: Path) -> None:
+def test_finish_remote_ref_promotes_downloads_and_registers(tmp_path: Path) -> None:
     storage = FakeStorage()
-    storage.objects[KEY] = PAYLOAD
+    storage.objects[STAGING_KEY] = PAYLOAD
     handler, leases, artifact_store, object_store, job_dir = _make_handler(tmp_path, storage)
 
     _finish(handler, {"out.json": _remote_ref()})
@@ -145,9 +157,11 @@ def test_finish_remote_ref_downloads_and_registers(tmp_path: Path) -> None:
     assert leases.results[0].status == "completed"
     assert leases.results[0].produced_artifacts == ("out.json",)
     assert (job_dir / "out.json").read_bytes() == PAYLOAD
+    # 服务端 copy 提升到权威 key，staging 对象被 best-effort 删除。
+    assert storage.objects == {AUTHORITY_KEY: PAYLOAD}
     row = object_store.lookup("job-1", "out.json")
     assert row is not None
-    assert row["storage_key"] == KEY
+    assert row["storage_key"] == AUTHORITY_KEY
     assert row["content_hash"] == HASH
     assert artifact_store.refs == []  # 新通道不登记 CAS ref
     assert storage.put_calls == 0  # 已在 S3，不做 D12 镜像重传
@@ -168,7 +182,7 @@ def test_finish_remote_ref_missing_object_fails(tmp_path: Path) -> None:
 
 def test_finish_remote_ref_size_mismatch_fails(tmp_path: Path) -> None:
     storage = FakeStorage()
-    storage.objects[KEY] = PAYLOAD
+    storage.objects[STAGING_KEY] = PAYLOAD
     handler, leases, _, _, _ = _make_handler(tmp_path, storage)
 
     _finish(handler, {"out.json": _remote_ref(size=len(PAYLOAD) + 1)})
@@ -178,12 +192,26 @@ def test_finish_remote_ref_size_mismatch_fails(tmp_path: Path) -> None:
     assert "size" in result.error_message
 
 
-def test_finish_remote_ref_unexpected_key_fails(tmp_path: Path) -> None:
+def test_finish_remote_ref_stale_execution_key_fails(tmp_path: Path) -> None:
+    """旧 execution 的 staging key（lease 丢失重排队后的迟发产物）被拒。"""
     storage = FakeStorage()
-    storage.objects[KEY] = PAYLOAD
+    storage.objects[_staging_key("out.json", execution_id="stale-exec")] = PAYLOAD
     handler, leases, _, _, _ = _make_handler(tmp_path, storage)
 
-    _finish(handler, {"out.json": _remote_ref(key="jobs/ws-1/other-job/out.json")})
+    _finish(handler, {"out.json": _remote_ref(key=_staging_key("out.json", "stale-exec"))})
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert "storage key" in result.error_message
+
+
+def test_finish_remote_ref_authority_key_fails(tmp_path: Path) -> None:
+    """dict ref 直报权威 key（绕过 staging）同样被拒。"""
+    storage = FakeStorage()
+    storage.objects[AUTHORITY_KEY] = PAYLOAD
+    handler, leases, _, _, _ = _make_handler(tmp_path, storage)
+
+    _finish(handler, {"out.json": _remote_ref(key=AUTHORITY_KEY)})
 
     result = leases.results[0]
     assert result.status == "failed"
@@ -192,7 +220,7 @@ def test_finish_remote_ref_unexpected_key_fails(tmp_path: Path) -> None:
 
 def test_finish_remote_ref_hash_mismatch_on_download_fails(tmp_path: Path) -> None:
     storage = FakeStorage()
-    storage.objects[KEY] = PAYLOAD
+    storage.objects[STAGING_KEY] = PAYLOAD
     handler, leases, _, _, job_dir = _make_handler(tmp_path, storage)
     ref = _remote_ref(content_hash="0" * 64)  # HEAD 通过，下载字节对不上
 
@@ -202,12 +230,13 @@ def test_finish_remote_ref_hash_mismatch_on_download_fails(tmp_path: Path) -> No
     assert result.status == "failed"
     assert "hash mismatch" in result.error_message
     assert not (job_dir / "out.json").exists()
+    assert AUTHORITY_KEY not in storage.objects  # 未提升
 
 
 def test_finish_remote_refs_are_all_verified_before_any_apply(tmp_path: Path) -> None:
-    """第二个 ref HEAD 失败时，第一个 ref 不得落盘或登记（无半应用状态）。"""
+    """第二个 ref HEAD 失败时，第一个 ref 不得提升/落盘/登记（无半应用）。"""
     storage = FakeStorage()
-    first_key = "jobs/ws-1/job-1/a.json"
+    first_key = _staging_key("a.json")
     storage.objects[first_key] = PAYLOAD
     handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
     artifacts = {
@@ -220,7 +249,7 @@ def test_finish_remote_refs_are_all_verified_before_any_apply(tmp_path: Path) ->
         worker_id="worker-1",
         job_id="job-1",
         node_key="node_a",
-        manifest={"expected_outputs": ["a.json", "out.json"]},
+        manifest={"expected_outputs": ["a.json", "out.json"], "execution_id": "exec-1"},
         outcome=AgentOutcome(status="completed", exit_code=0, output_artifacts=artifacts),
         archive_name="",
     )
@@ -228,6 +257,37 @@ def test_finish_remote_refs_are_all_verified_before_any_apply(tmp_path: Path) ->
     assert leases.results[0].status == "failed"
     assert not (job_dir / "a.json").exists()
     assert object_store.lookup("job-1", "a.json") is None
+    assert storage.objects == {first_key: PAYLOAD}  # 无 copy 提升、无删除
+
+
+def test_finish_remote_refs_hash_failure_leaves_no_partial_outputs(tmp_path: Path) -> None:
+    """第二个产物下载 hash 不符：job_dir 无任何新文件、无登记、无提升。"""
+    storage = FakeStorage()
+    first_key = _staging_key("a.json")
+    storage.objects[first_key] = PAYLOAD
+    storage.objects[STAGING_KEY] = PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
+    artifacts = {
+        "a.json": _remote_ref(key=first_key),
+        "out.json": _remote_ref(content_hash="0" * 64),
+    }
+
+    handler.finish(
+        lease_id="lease-1",
+        worker_id="worker-1",
+        job_id="job-1",
+        node_key="node_a",
+        manifest={"expected_outputs": ["a.json", "out.json"], "execution_id": "exec-1"},
+        outcome=AgentOutcome(status="completed", exit_code=0, output_artifacts=artifacts),
+        archive_name="",
+    )
+
+    assert leases.results[0].status == "failed"
+    assert not (job_dir / "a.json").exists()
+    assert not (job_dir / "out.json").exists()
+    assert object_store.lookup("job-1", "a.json") is None
+    assert "jobs/ws-1/job-1/a.json" not in storage.objects
+    assert AUTHORITY_KEY not in storage.objects
 
 
 def test_finish_remote_ref_without_object_storage_fails(tmp_path: Path) -> None:
@@ -240,9 +300,23 @@ def test_finish_remote_ref_without_object_storage_fails(tmp_path: Path) -> None:
     assert "not configured" in result.error_message
 
 
+def test_finish_cancelled_registers_without_download(tmp_path: Path) -> None:
+    """cancelled run：产物登记+提升但不落 job_dir（与 tar 路径 parity）。"""
+    storage = FakeStorage()
+    storage.objects[STAGING_KEY] = PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
+
+    _finish(handler, {"out.json": _remote_ref()}, status="cancelled")
+
+    assert leases.results[0].status == "cancelled"
+    assert not (job_dir / "out.json").exists()
+    assert object_store.lookup("job-1", "out.json") is not None
+    assert storage.objects == {AUTHORITY_KEY: PAYLOAD}
+
+
 def test_finish_mixed_refs_registers_both_channels(tmp_path: Path) -> None:
     storage = FakeStorage()
-    storage.objects[KEY] = PAYLOAD
+    storage.objects[STAGING_KEY] = PAYLOAD
     legacy_hash = "b" * 64
     handler, leases, artifact_store, object_store, job_dir = _make_handler(tmp_path, storage)
 

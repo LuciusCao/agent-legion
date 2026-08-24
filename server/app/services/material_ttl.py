@@ -22,15 +22,49 @@ from __future__ import annotations
 
 import logging
 import threading
+from typing import Any
 
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
+from server.app.services.instance_settings_store import InstanceSettingsStore
 from server.app.storage import ObjectStorage
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_SWEEP_INTERVAL_SECONDS = 3600.0
 DELETE_GRACE_SECONDS = 600
+
+
+def materials_ttl_days(database_dsn: DatabaseDsn) -> int:
+    """Effective materials TTL in days (0 = disabled); read fresh per call.
+
+    Unlike the restart-hydrated instance scalars, the TTL is consumed at
+    material completion/sweep time, so it is read from the DB document on
+    every use — edits take effect without a restart. Defensive against
+    out-of-band writes: anything but a positive int degrades to 0.
+    """
+    stored = InstanceSettingsStore(database_dsn).get()
+    if stored is None:
+        return 0
+    value = stored.get("materials_ttl_days", 0)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
+
+
+def mark_ready(conn: Any, database_dsn: DatabaseDsn, material_id: str) -> None:
+    """Mark a verified material ready, stamping expires_at from the TTL.
+
+    The TTL is read fresh from the instance document at every completion —
+    0/absent disables expiry (``expires_at`` stays NULL).
+    """
+    ttl_days = materials_ttl_days(database_dsn)
+    conn.execute(
+        "update materials set status='ready',"
+        " expires_at = case when %s > 0 then now() + make_interval(days => %s) end"
+        " where id=%s",
+        (ttl_days, ttl_days, material_id),
+    )
 
 
 def expire_due_materials(database_dsn: DatabaseDsn) -> int:

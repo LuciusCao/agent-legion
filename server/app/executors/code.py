@@ -30,6 +30,10 @@ from pathlib import Path
 from typing import Any
 
 from server.app.executors._code_sandbox import execute_custom_sandboxed
+from server.app.executors.artifact_mirror import (
+    build_artifact_object_store,
+    upload_produced_artifacts,
+)
 from server.app.executors.models import (
     CODE_EXECUTOR_ID,
     ExecutionContext,
@@ -102,37 +106,23 @@ class CodeExecutor:
     def _artifact_object_store(self) -> JobArtifactObjectStore | None:
         """Artifact upload service (D12); None without storage or a DB handle."""
         if self._artifact_objects is None:
-            storage = self._object_store()
-            dsn = getattr(self.job_db, "path", None)
-            if storage is not None and dsn is not None:
-                self._artifact_objects = JobArtifactObjectStore(dsn, storage)
+            self._artifact_objects = build_artifact_object_store(
+                self._object_store(), getattr(self.job_db, "path", None)
+            )
         return self._artifact_objects
 
     def _upload_artifacts(self, context: ExecutionContext, produced: tuple[str, ...]) -> None:
         """Best-effort upload of produced artifacts (D12): a storage outage
         never fails the node — the local copy stays and the maintenance
         reconciler re-uploads later (EXEC-ARTIFACT-STORE-001)."""
-        store = self._artifact_object_store()
-        if store is None:
-            return
-        for name in produced:
-            try:
-                store.upload(
-                    workspace_id=str(context.workspace_id),
-                    job_id=str(context.job_id),
-                    node_key=str(context.node_key),
-                    name=name,
-                    local_path=context.job_dir / name,
-                )
-            except Exception:
-                logger.warning(
-                    "artifact upload failed for job %s node %s artifact %s; "
-                    "local copy kept for the reconciler",
-                    context.job_id,
-                    context.node_key,
-                    name,
-                    exc_info=True,
-                )
+        upload_produced_artifacts(
+            self._artifact_object_store(),
+            workspace_id=str(context.workspace_id),
+            job_id=str(context.job_id),
+            node_key=str(context.node_key),
+            job_dir=context.job_dir,
+            produced=produced,
+        )
 
     def execute(self, context: ExecutionContext) -> ExecutionResult:
         if context.execution_id in self._cancelled:

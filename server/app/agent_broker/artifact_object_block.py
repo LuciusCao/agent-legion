@@ -21,12 +21,15 @@ def inject_artifact_object_block(
     """Add the object-storage artifact channel to a claim manifest (#160 D12).
 
     When object storage is configured the Worker uploads declared outputs
-    straight to S3 (``artifact_uploads``: name → presigned PUT) and downloads
-    upstream artifacts straight from S3 (``input_artifacts`` value →
-    ``{"url": presigned_get, "sha256": content_hash}``; ``storage_key`` never
-    crosses the wire). Inputs without a ``job_artifacts`` row (never uploaded,
-    legacy jobs) keep the legacy ``sha256:<hash>`` CAS form; Workers that see
-    no ``artifact_uploads`` fall back to the legacy per-file POST channel.
+    straight to S3 (``artifact_uploads``: name → presigned PUT on a
+    per-execution staging key — the Host promotes server-side after
+    verification, so a stale Worker's late PUT can never overwrite the
+    authority copy) and downloads upstream artifacts straight from S3
+    (``input_artifacts`` value → ``{"url": presigned_get, "sha256":
+    content_hash}``; ``storage_key`` never crosses the wire). Inputs without
+    a ``job_artifacts`` row (never uploaded, legacy jobs) keep the legacy
+    ``sha256:<hash>`` CAS form; Workers that see no ``artifact_uploads``
+    fall back to the legacy per-file POST channel.
 
     Degradation: any storage error leaves the manifest on the legacy channel
     (all-or-nothing — the new keys are built in locals and assigned once), so
@@ -36,11 +39,19 @@ def inject_artifact_object_block(
         return
     job_id = str(manifest.get("job_id") or "")
     workspace_id = str(manifest.get("workspace_id") or "")
+    execution_id = str(manifest.get("execution_id") or "")
+    if not execution_id:
+        # Staging keys are per-execution; a manifest without one cannot use
+        # the object channel (the Host would reject the reported keys).
+        return
     try:
         uploads: dict[str, dict[str, str]] = {}
         for name in manifest.get("expected_outputs") or ():
             storage_key, url = object_store.presign_put(
-                workspace_id=workspace_id, job_id=job_id, name=str(name)
+                workspace_id=workspace_id,
+                job_id=job_id,
+                name=str(name),
+                execution_id=execution_id,
             )
             uploads[str(name)] = {"storage_key": storage_key, "url": url}
         inputs: dict[str, Any] = {}

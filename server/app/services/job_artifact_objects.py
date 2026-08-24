@@ -31,10 +31,19 @@ _DEFAULT_PRESIGN_EXPIRY_SECONDS = 3600
 # Bucket key prefix for job artifacts (materials keys live at the bucket
 # root); the prefix lets bucket lifecycle rules target artifacts separately.
 KEY_PREFIX = "jobs"
+# Workers upload to a per-execution staging prefix; the Host promotes onto
+# the authority key server-side after verification (#160, so a stale Worker's
+# late PUT can never overwrite the authority copy). Lifecycle rules should
+# give this prefix a short retention (orphans are the failure residue).
+STAGING_KEY_PREFIX = "jobs-staging"
 
 
 def artifact_storage_key(workspace_id: str, job_id: str, name: str) -> str:
     return f"{KEY_PREFIX}/{workspace_id}/{job_id}/{name}"
+
+
+def artifact_staging_key(workspace_id: str, job_id: str, execution_id: str, name: str) -> str:
+    return f"{STAGING_KEY_PREFIX}/{workspace_id}/{job_id}/{execution_id}/{name}"
 
 
 def valid_artifact_name(name: str) -> bool:
@@ -123,16 +132,22 @@ class JobArtifactObjectStore:
         name: str,
         storage_key: str,
         size_bytes: int,
+        execution_id: str | None = None,
     ) -> None:
         """HEAD-verify a Worker-reported object WITHOUT registering it.
 
         The validation half of ``record_remote``: the result-commit path
         verifies ALL reported refs before applying ANY (no half-applied
-        state), then registers/downloads them in the apply phase.
+        state), then registers/downloads them in the apply phase. With
+        ``execution_id`` the expected key is the per-execution staging key
+        (Worker uploads); without it, the authority key.
         """
         if self.storage is None:
             raise ValueError("object storage is not configured")
-        expected_key = artifact_storage_key(workspace_id, job_id, name)
+        if execution_id:
+            expected_key = artifact_staging_key(workspace_id, job_id, execution_id, name)
+        else:
+            expected_key = artifact_storage_key(workspace_id, job_id, name)
         if storage_key != expected_key:
             raise ValueError(f"unexpected artifact storage key: {storage_key!r}")
         head = self.storage.head_object(storage_key)
@@ -143,6 +158,33 @@ class JobArtifactObjectStore:
                 f"uploaded object size {head.size_bytes} does not match "
                 f"the declared size {size_bytes} for {name!r}"
             )
+
+    def promote_remote(
+        self,
+        *,
+        workspace_id: str,
+        job_id: str,
+        name: str,
+        storage_key: str,
+    ) -> str:
+        """Copy a verified staging object onto the authority key (server-side).
+
+        Returns the authority key. Callers register the row and then delete
+        the staging object best-effort (orphans are lifecycle's backstop).
+        """
+        assert self.storage is not None
+        authority_key = artifact_storage_key(workspace_id, job_id, name)
+        self.storage.copy_object(storage_key, authority_key)
+        return authority_key
+
+    def discard_staging(self, storage_key: str) -> None:
+        """Best-effort staging-object cleanup after promotion."""
+        if self.storage is None:
+            return
+        try:
+            self.storage.delete_object(storage_key)
+        except Exception:
+            logger.warning("failed to delete staging object %s", storage_key, exc_info=True)
 
     def record_remote(
         self,
@@ -231,10 +273,19 @@ class JobArtifactObjectStore:
         name: str,
         size_bytes: int = 0,
         expires_seconds: int = _DEFAULT_PRESIGN_EXPIRY_SECONDS,
+        execution_id: str | None = None,
     ) -> tuple[str, str]:
-        """(storage_key, presigned PUT URL) for direct Worker upload."""
+        """(storage_key, presigned PUT URL) for direct Worker upload.
+
+        With ``execution_id`` the key is the per-execution staging key
+        (the Host promotes after verification); without it, the authority
+        key (server-side callers only).
+        """
         assert self.storage is not None
-        storage_key = artifact_storage_key(workspace_id, job_id, name)
+        if execution_id:
+            storage_key = artifact_staging_key(workspace_id, job_id, execution_id, name)
+        else:
+            storage_key = artifact_storage_key(workspace_id, job_id, name)
         url = self.storage.presign_put(storage_key, size_bytes, expires_seconds)
         return storage_key, url
 

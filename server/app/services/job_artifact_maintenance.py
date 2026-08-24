@@ -6,17 +6,20 @@ discipline:
 
 - ``reupload_missing`` — the completion hooks upload best-effort and never
   fail a node on a storage outage; this pass finds declared outputs of
-  recently completed nodes that have no ``job_artifacts`` row yet and
-  uploads them from the local job_dir copy.
+  recently completed nodes whose ``job_artifacts`` row is missing OR stale
+  (a node re-run produced new bytes while the upload failed) and
+  (re-)uploads them from the local job_dir copy.
 - ``evict_cache_to_capacity`` — the local job_dir is an evictable cache
   under ``AGENT_LEGION_JOB_CACHE_MAX_BYTES``. Only files with a confirmed
-  manifest row (i.e. durably stored) are ever unlinked, only for
-  ``completed`` jobs without an active lease (running/failed jobs may still
-  schedule or re-run nodes against the local copies), oldest mtime first.
+  manifest row (i.e. durably stored, recorded size still matching the local
+  file) are ever unlinked, only for ``completed`` jobs without an active
+  lease (running/failed jobs may still schedule or re-run nodes against the
+  local copies), oldest mtime first.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import threading
@@ -52,6 +55,30 @@ def job_cache_max_bytes(env: Any = None) -> int:
     return DEFAULT_JOB_CACHE_MAX_BYTES
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _row_stale(row: dict[str, Any], local_path: Path) -> bool:
+    """True when the local file no longer matches the manifest row.
+
+    A node re-run can produce new bytes while the best-effort upload fails;
+    the old row must not suppress the re-upload forever (and must never
+    certify the new local file for cache eviction).
+    """
+    try:
+        if int(row["size_bytes"]) != local_path.stat().st_size:
+            return True
+    except OSError:
+        return False
+    recorded = str(row.get("content_hash") or "")
+    return bool(recorded) and recorded != _file_sha256(local_path)
+
+
 def reupload_missing(
     store: JobArtifactObjectStore,
     job_db: JobQueries,
@@ -59,7 +86,7 @@ def reupload_missing(
     *,
     window_days: int = _REUPLOAD_WINDOW_DAYS,
 ) -> int:
-    """Upload declared outputs of recently completed nodes that lack a row.
+    """Upload declared outputs of recently completed nodes with no/stale row.
 
     Returns the number of artifacts (re)uploaded. Per-file failures are
     logged and skipped — the next pass retries.
@@ -95,11 +122,14 @@ def reupload_missing(
             if node is None:
                 continue
             for name in node.outputs:
-                if store.row_for_node(job_id, node_key, name) is not None:
-                    continue
                 local_path = job_dir / name
                 if not local_path.is_file():
                     continue
+                manifest_row = store.row_for_node(job_id, node_key, name)
+                if manifest_row is not None and not _row_stale(manifest_row, local_path):
+                    continue
+                # 行缺失或已过期（rerun 产出新字节而上传失败）：（重新）上传，
+                # upsert 刷新清单行。
                 try:
                     store.upload(
                         workspace_id=str(job["workspace_id"]),
@@ -137,7 +167,14 @@ def _eviction_candidates(
     job_db: JobQueries,
     settings: Settings,
 ) -> list[tuple[float, int, Path]]:
-    """(mtime, size, path) of confirmed-uploaded root files of completed jobs."""
+    """(mtime, size, path) of confirmed-uploaded root files of completed jobs.
+
+    Confirmed = a manifest row exists AND its recorded size still matches the
+    local file — a stale row (re-run produced new bytes, upload failed) must
+    never certify the new local copy for eviction. The hash-mismatch-at-
+    same-size window is covered by the reconciler, which runs before
+    eviction in the same pass (see run_once).
+    """
     with read_connection(job_db.path) as conn:
         rows = conn.execute(
             "select id, workspace_id, storage_dir from jobs"
@@ -151,8 +188,12 @@ def _eviction_candidates(
     for row in rows:
         job = dict(row)
         job_id = str(job["id"])
-        confirmed = store.names_for_job(job_id)
-        if not confirmed:
+        confirmed_sizes: dict[str, set[int]] = {}
+        for manifest_row in store.rows_for_job(job_id):
+            confirmed_sizes.setdefault(str(manifest_row["name"]), set()).add(
+                int(manifest_row["size_bytes"])
+            )
+        if not confirmed_sizes:
             continue
         try:
             job_dir = resolve_job_dir(job, settings.jobs_dir)
@@ -161,12 +202,15 @@ def _eviction_candidates(
         if not job_dir.is_dir():
             continue
         for entry in job_dir.iterdir():
-            if entry.name not in confirmed or not entry.is_file():
+            sizes = confirmed_sizes.get(entry.name)
+            if sizes is None or not entry.is_file():
                 continue
             try:
                 stat = entry.stat()
             except OSError:
                 continue
+            if stat.st_size not in sizes:
+                continue  # size 不符 = 行未确认这份本地字节，不淘汰
             candidates.append((stat.st_mtime, stat.st_size, entry))
     candidates.sort(key=lambda item: item[0])
     return candidates
@@ -237,6 +281,9 @@ class JobArtifactMaintenanceThread:
     def run_once(self) -> None:
         if not self._store.enabled:
             return
+        # 顺序纪律：reupload 先行修复缺失/过期清单行（rerun 新字节刷新行），
+        # eviction 再凭「行存在且 size 相符」淘汰本地缓存——反向会让旧行
+        # 淘汰掉尚未上传的新文件。
         uploaded = reupload_missing(self._store, self._job_db, self._settings)
         if uploaded:
             logger.info("job artifact reconciler uploaded %d artifacts", uploaded)

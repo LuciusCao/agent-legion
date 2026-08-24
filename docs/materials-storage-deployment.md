@@ -156,9 +156,12 @@ EOF
   引用计数为 0 时物理删除（先删 S3 对象再删行，对象删除失败留到下轮
   重试）。bucket lifecycle 规则是孤儿对象兜底：材料 key 在 bucket 根
   （`{workspace_id}/{content_hash}/{filename}`），产物在 `jobs/` 前缀
-  下，两条前缀分开配规则——材料侧按你们对上传内容的数据分级策略设
-  保留期（务必显著长于 `materials_ttl_days`，让 DB 侧先完成引用检查），
-  `jobs/` 前缀按产物保留策略另设。手工清理可用 console（`:9001`）。
+  下，Worker 直传的暂存对象在 `jobs-staging/` 前缀下（Host 核验后服务端
+  copy 提升到 `jobs/` 权威 key 并 best-effort 删除暂存对象），三条前缀
+  分开配规则——材料侧按你们对上传内容的数据分级策略设保留期（务必
+  显著长于 `materials_ttl_days`，让 DB 侧先完成引用检查），`jobs/`
+  前缀按产物保留策略另设，`jobs-staging/` 配短保留（如 1 天，孤儿
+  暂存对象只是失败残留）。手工清理可用 console（`:9001`）。
 - **缓存**：`data/materials_cache/` 是可淘汰缓存，可随时清空（下次
   dispatch 重新下载）；worker 侧在 `{work_root}/materials_cache`。
 - **迁移后端**（RustFS → AWS S3 或反向）：改 `deploy/.env` 的

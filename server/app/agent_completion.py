@@ -5,13 +5,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from server.app.agent_broker.remote_artifacts import apply_remote_artifact_refs
+from server.app.agent_broker.remote_artifacts import apply_worker_artifact_refs
 from server.app.agent_broker.result_unpack import (
     code_result_log_target,
     safe_relative_dir,
     unpack_agent_result,
 )
 from server.app.db.connection import DatabaseDsn
+from server.app.executors.artifact_mirror import upload_produced_artifacts
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, ExecutionStatus
 from server.app.services.artifact_store import ArtifactStore
@@ -118,11 +119,13 @@ class AgentCompletionHandler:
                         runner=worker_id,
                     ),
                 )
-        # #160 D12: dict-form refs mean the Worker uploaded straight to S3;
-        # verify ALL refs, then download + register (no half-applied state).
-        # Any failure flips the whole result to failed.
-        remote_names, remote_error = apply_remote_artifact_refs(
+        # #160 D12: dict-form refs mean the Worker uploaded straight to S3
+        # (per-execution staging keys); verify ALL refs, then promote +
+        # download + register (no half-applied state). Any failure flips the
+        # whole result to failed.
+        remote_names, remote_failure = apply_worker_artifact_refs(
             self.object_store,
+            runner=worker_id,
             workspace_id=str(job["workspace_id"]),
             job_id=job_id,
             node_key=node_key,
@@ -130,17 +133,10 @@ class AgentCompletionHandler:
             expected=expected,
             output_artifacts=outcome.output_artifacts,
             download=not cancelled,
+            execution_id=str(manifest.get("execution_id") or ""),
         )
-        if remote_error is not None:
-            return self.leases.finish(
-                lease_id,
-                ExecutionResult(
-                    status="failed",
-                    exit_code=1,
-                    error_message=remote_error,
-                    runner=worker_id,
-                ),
-            )
+        if remote_failure is not None:
+            return self.leases.finish(lease_id, remote_failure)
         for name, ref in outcome.output_artifacts.items():
             if name not in remote_names:
                 self.artifact_store.add_ref(job_id, node_key, name, str(ref).split(":", 1)[-1])
@@ -160,29 +156,16 @@ class AgentCompletionHandler:
                 status, exit_code, error = "failed", 1, validation_error
         # D12: mirror produced artifacts into object storage (best-effort —
         # a storage outage never flips the node; the reconciler retries).
-        # Names the Worker uploaded directly are already there (registered
-        # above), so only legacy-channel outputs are mirrored here.
-        if status == "completed" and produced and self.object_store is not None:
-            for name in produced:
-                if name in remote_names:
-                    continue
-                try:
-                    self.object_store.upload(
-                        workspace_id=str(job["workspace_id"]),
-                        job_id=job_id,
-                        node_key=node_key,
-                        name=name,
-                        local_path=job_dir / name,
-                    )
-                except Exception:
-                    logger.warning(
-                        "artifact upload failed for job %s node %s artifact %s; "
-                        "local copy kept for the reconciler",
-                        job_id,
-                        node_key,
-                        name,
-                        exc_info=True,
-                    )
+        if status == "completed" and produced:
+            upload_produced_artifacts(
+                self.object_store,
+                workspace_id=str(job["workspace_id"]),
+                job_id=job_id,
+                node_key=node_key,
+                job_dir=job_dir,
+                produced=produced,
+                skip=remote_names,
+            )
         return self.leases.finish(
             lease_id,
             ExecutionResult(

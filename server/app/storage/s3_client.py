@@ -70,6 +70,10 @@ class ObjectStorage(Protocol):
         """Delete the object; missing objects are not an error."""
         ...
 
+    def copy_object(self, source_key: str, destination_key: str) -> None:
+        """Server-side copy within the bucket (Worker staging → authority key)."""
+        ...
+
 
 class S3StorageClient:
     """boto3-backed ObjectStorage."""
@@ -154,6 +158,13 @@ class S3StorageClient:
 
     def delete_object(self, storage_key: str) -> None:
         self._client.delete_object(Bucket=self._settings.bucket, Key=storage_key)
+
+    def copy_object(self, source_key: str, destination_key: str) -> None:
+        self._client.copy_object(
+            Bucket=self._settings.bucket,
+            CopySource={"Bucket": self._settings.bucket, "Key": source_key},
+            Key=destination_key,
+        )
 
 
 def _build_boto3_client(settings: S3Settings, *, endpoint_override: str | None = None) -> Any:

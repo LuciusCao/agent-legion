@@ -2,7 +2,8 @@
 
 旧形态 ``"sha256:<64 hex>"`` 与对象存储形态
 ``{"storage_key", "size_bytes", "content_hash"}`` 并存；新形态严格校验
-（jobs/ 前缀、无 ..、非负 int size、hash 为空或 64 位小写 hex）。
+（jobs-staging/ 暂存前缀、无 ..、非负 int size、hash 为空或 64 位小写
+hex）。
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ pytestmark = pytest.mark.no_db
 
 _HASH = "a" * 64
 _REMOTE_REF = {
-    "storage_key": "jobs/ws-1/job-1/out.json",
+    "storage_key": "jobs-staging/ws-1/job-1/exec-1/out.json",
     "size_bytes": 3,
     "content_hash": _HASH,
 }
@@ -59,10 +60,11 @@ def test_mixed_ref_forms_accepted() -> None:
     [
         "sha256:nothex",  # 旧形态 hash 非法
         123,  # 非 str/dict
-        ["jobs/ws/job/out.json"],  # list 非法
-        {**_REMOTE_REF, "storage_key": "other/ws/job/out.json"},  # 前缀必须 jobs/
-        {**_REMOTE_REF, "storage_key": "jobs/ws/../out.json"},  # 禁止 ..
-        {**_REMOTE_REF, "storage_key": "/jobs/ws/job/out.json"},  # 绝对路径
+        ["jobs-staging/ws/job/out.json"],  # list 非法
+        {**_REMOTE_REF, "storage_key": "other/ws/job/out.json"},  # 前缀必须 jobs-staging/
+        {**_REMOTE_REF, "storage_key": "jobs/ws-1/job-1/out.json"},  # 权威 key 不收
+        {**_REMOTE_REF, "storage_key": "jobs-staging/ws/../out.json"},  # 禁止 ..
+        {**_REMOTE_REF, "storage_key": "/jobs-staging/ws/job/out.json"},  # 绝对路径
         {**_REMOTE_REF, "storage_key": ""},
         {**_REMOTE_REF, "size_bytes": -1},
         {**_REMOTE_REF, "size_bytes": True},  # bool 不是 int
