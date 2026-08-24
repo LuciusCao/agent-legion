@@ -11,10 +11,11 @@ discipline:
   (re-)uploads them from the local job_dir copy.
 - ``evict_cache_to_capacity`` — the local job_dir is an evictable cache
   under ``AGENT_LEGION_JOB_CACHE_MAX_BYTES``. Only files with a confirmed
-  manifest row (i.e. durably stored, recorded size still matching the local
-  file) are ever unlinked, only for ``completed`` jobs without an active
-  lease (running/failed jobs may still schedule or re-run nodes against the
-  local copies), oldest mtime first.
+  manifest row (i.e. durably stored, recorded size and content hash still
+  matching the local file) are ever unlinked, only for ``completed`` jobs
+  without an active lease (re-checked per job right before unlinking:
+  running/failed jobs may still schedule or re-run nodes against the local
+  copies), oldest mtime first.
 """
 
 from __future__ import annotations
@@ -166,14 +167,17 @@ def _eviction_candidates(
     store: JobArtifactObjectStore,
     job_db: JobQueries,
     settings: Settings,
-) -> list[tuple[float, int, Path]]:
-    """(mtime, size, path) of confirmed-uploaded root files of completed jobs.
+) -> list[tuple[float, int, str, Path]]:
+    """(mtime, size, job_id, path) of confirmed-uploaded root files.
 
     Confirmed = a manifest row exists AND its recorded size still matches the
-    local file — a stale row (re-run produced new bytes, upload failed) must
-    never certify the new local copy for eviction. The hash-mismatch-at-
-    same-size window is covered by the reconciler, which runs before
-    eviction in the same pass (see run_once).
+    local file AND — whenever the manifest rows carry a content hash — the
+    local file's sha256 equals one of them. A stale row (re-run produced new
+    bytes while the upload failed) must never certify the new local copy for
+    eviction: a same-size re-run is invisible to a size-only check, and the
+    reconciler's re-upload is itself best-effort, so eviction re-hashes
+    instead of trusting the row. The hash cost is only paid here — i.e. when
+    the cache is already over budget and eviction is actually needed.
     """
     with read_connection(job_db.path) as conn:
         rows = conn.execute(
@@ -184,16 +188,16 @@ def _eviction_candidates(
             "   where l.job_id = jobs.id and l.status = 'active'"
             " )"
         ).fetchall()
-    candidates: list[tuple[float, int, Path]] = []
+    candidates: list[tuple[float, int, str, Path]] = []
     for row in rows:
         job = dict(row)
         job_id = str(job["id"])
-        confirmed_sizes: dict[str, set[int]] = {}
+        confirmed: dict[str, list[tuple[int, str]]] = {}
         for manifest_row in store.rows_for_job(job_id):
-            confirmed_sizes.setdefault(str(manifest_row["name"]), set()).add(
-                int(manifest_row["size_bytes"])
+            confirmed.setdefault(str(manifest_row["name"]), []).append(
+                (int(manifest_row["size_bytes"]), str(manifest_row.get("content_hash") or ""))
             )
-        if not confirmed_sizes:
+        if not confirmed:
             continue
         try:
             job_dir = resolve_job_dir(job, settings.jobs_dir)
@@ -202,18 +206,42 @@ def _eviction_candidates(
         if not job_dir.is_dir():
             continue
         for entry in job_dir.iterdir():
-            sizes = confirmed_sizes.get(entry.name)
-            if sizes is None or not entry.is_file():
+            manifest_entries = confirmed.get(entry.name)
+            if manifest_entries is None or not entry.is_file():
                 continue
             try:
                 stat = entry.stat()
             except OSError:
                 continue
-            if stat.st_size not in sizes:
+            if stat.st_size not in {size for size, _hash in manifest_entries}:
                 continue  # size 不符 = 行未确认这份本地字节，不淘汰
-            candidates.append((stat.st_mtime, stat.st_size, entry))
+            hashes = {hash_ for _size, hash_ in manifest_entries if hash_}
+            if hashes and _file_sha256(entry) not in hashes:
+                continue  # 同长度 rerun 新字节：hash 不符不得认证淘汰
+            candidates.append((stat.st_mtime, stat.st_size, job_id, entry))
     candidates.sort(key=lambda item: item[0])
     return candidates
+
+
+def _job_still_evictable(job_db: JobQueries, job_id: str) -> bool:
+    """Per-unlink re-check of the eviction precondition for one job.
+
+    The candidate snapshot is taken once; between snapshot and unlink a user
+    re-run puts the job back to queued and re-executes nodes against the
+    local copies. Never evict bytes for a job that is no longer ``completed``
+    or has acquired an active lease in the meantime.
+    """
+    with read_connection(job_db.path) as conn:
+        row = conn.execute(
+            "select 1 from jobs"
+            " where id=%s and status='completed'"
+            " and not exists ("
+            "   select 1 from executor_leases l"
+            "   where l.job_id = jobs.id and l.status = 'active'"
+            " )",
+            (job_id,),
+        ).fetchone()
+    return row is not None
 
 
 def evict_cache_to_capacity(
@@ -236,9 +264,17 @@ def evict_cache_to_capacity(
     if total <= budget:
         return 0
     evicted = 0
-    for _mtime, size, path in _eviction_candidates(store, job_db, settings):
+    rechecked: dict[str, bool] = {}
+    for _mtime, size, job_id, path in _eviction_candidates(store, job_db, settings):
         if total <= budget:
             break
+        # 快照到 unlink 之间 job 可能被 rerun 置回 queued 并重新执行：
+        # 每个 job 首删前重查一次前提（每 job 只查一次，缓存结论），不再
+        # 成立就跳过该 job 的剩余文件。
+        if job_id not in rechecked:
+            rechecked[job_id] = _job_still_evictable(job_db, job_id)
+        if not rechecked[job_id]:
+            continue
         try:
             path.unlink()
             total -= size

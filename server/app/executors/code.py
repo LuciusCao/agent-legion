@@ -34,6 +34,7 @@ from server.app.executors.artifact_mirror import (
     build_artifact_object_store,
     upload_produced_artifacts,
 )
+from server.app.executors.artifact_restore import restore_missing_inputs
 from server.app.executors.models import (
     CODE_EXECUTOR_ID,
     ExecutionContext,
@@ -106,9 +107,15 @@ class CodeExecutor:
     def _artifact_object_store(self) -> JobArtifactObjectStore | None:
         """Artifact upload service (D12); None without storage or a DB handle."""
         if self._artifact_objects is None:
-            self._artifact_objects = build_artifact_object_store(
-                self._object_store(), getattr(self.job_db, "path", None)
-            )
+            # Settings/storage misconfiguration (e.g. a missing secret file
+            # surfaced by load_s3_settings) must never fail the node
+            # (EXEC-ARTIFACT-STORE-001): disable mirroring instead.
+            try:
+                self._artifact_objects = build_artifact_object_store(
+                    self._object_store(), getattr(self.job_db, "path", None)
+                )
+            except Exception:
+                logger.warning("artifact store unavailable; mirroring disabled", exc_info=True)
         return self._artifact_objects
 
     def _upload_artifacts(self, context: ExecutionContext, produced: tuple[str, ...]) -> None:
@@ -147,6 +154,24 @@ class CodeExecutor:
         timeout = context.node_config.get("timeout_seconds")
         if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout < 1:
             timeout = _DEFAULT_TIMEOUT_SECONDS
+        if context.inputs:
+            # The local job_dir is an evictable cache (EXEC-ARTIFACT-STORE-001):
+            # a targeted rerun may find declared inputs reclaimed, so restore
+            # them from object storage best-effort first. Failures never change
+            # node semantics — the node errors on the missing input itself.
+            try:
+                restore_missing_inputs(
+                    self._artifact_object_store(),
+                    job_id=str(context.job_id),
+                    job_dir=context.job_dir,
+                    inputs=context.inputs,
+                )
+            except Exception:
+                logger.warning(
+                    "input restore failed for job %s; continuing with local files only",
+                    context.job_id,
+                    exc_info=True,
+                )
         return execute_custom_sandboxed(self, context, timeout)
 
     def cancel(self, execution_id: str) -> None:

@@ -65,6 +65,7 @@ class AgentCompletionHandler:
         bundle_dir: Path,
         skill_manager: SkillManager | None = None,
         object_store: JobArtifactObjectStore | None = None,
+        max_archive_bytes: int | None = None,
     ) -> None:
         self.leases = leases
         self.artifact_store = artifact_store
@@ -72,6 +73,10 @@ class AgentCompletionHandler:
         self.bundle_dir = bundle_dir
         self.skill_manager = skill_manager
         self.object_store = object_store
+        # Instance size ceiling (agent_workers.max_archive_bytes), applied to
+        # Worker-direct S3 uploads the same way the legacy archive channel
+        # enforces it; None = no ceiling.
+        self.max_archive_bytes = max_archive_bytes
 
     def finish(
         self,
@@ -134,6 +139,7 @@ class AgentCompletionHandler:
             output_artifacts=outcome.output_artifacts,
             download=not cancelled,
             execution_id=str(manifest.get("execution_id") or ""),
+            max_size_bytes=self.max_archive_bytes,
         )
         if remote_failure is not None:
             return self.leases.finish(lease_id, remote_failure)

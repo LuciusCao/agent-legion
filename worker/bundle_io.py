@@ -15,8 +15,13 @@ import threading
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from worker._retry import run_with_retry
 from worker.artifact_download import download_object_artifact
 from worker.host_client import Client
+
+# 与 host_transfer 同一 retry 语义：transient 失败指数退避，上限 3 次。
+_RETRY_BACKOFF_BASE_SECONDS = 1.0
+_RETRY_MAX_ATTEMPTS = 3
 
 
 def safe_extract_tree(archive: Path, destination: Path) -> None:
@@ -64,7 +69,17 @@ def download_input_artifacts(
             raise ValueError(f"unsafe input artifact name: {name!r}")
         target = job_dir / relative
         if isinstance(ref, dict):
-            download_object_artifact(str(ref.get("url") or ""), target)
+            url = str(ref.get("url") or "")
+            with download_slots:
+                # 与 CAS 分支对齐：信号量限流 + 退避重试；每次重试重新打开
+                # 下载流，.part 截断重写由 download_object_artifact 的
+                # temp+rename 保证。
+                run_with_retry(
+                    lambda url=url, target=target: download_object_artifact(url, target),
+                    retriable=(RuntimeError,),
+                    base_seconds=_RETRY_BACKOFF_BASE_SECONDS,
+                    max_attempts=_RETRY_MAX_ATTEMPTS,
+                )
             declared = str(ref.get("sha256") or "")
             if declared and sha256_file(target) != declared:
                 raise RuntimeError(f"artifact digest mismatch: {name}")

@@ -29,11 +29,15 @@ class FakeStorage:
 
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
+        self.put_expiries: list[int] = []
+        self.get_expiries: list[int] = []
 
     def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
+        self.put_expiries.append(expires_seconds)
         return f"https://s3.test/upload/{storage_key}?sig=put"
 
     def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
+        self.get_expiries.append(expires_seconds)
         return f"https://s3.test/download/{storage_key}?sig=get"
 
     def head_object(self, storage_key: str) -> ObjectHead | None:
@@ -189,3 +193,64 @@ def test_code_claim_rebuild_injects_object_block() -> None:
     )
     # 持久化的原 manifest 不被改写（内存态 copy）。
     assert "artifact_uploads" not in manifest
+
+
+def test_inject_presign_expiry_follows_code_node_timeout(tmp_path: Path) -> None:
+    """长超时节点：presign TTL = max(3600, timeout + 900)，PUT/GET 同值。"""
+    _make_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    source = tmp_path / "q.json"
+    source.write_bytes(PAYLOAD)
+    store.upload(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="upstream",
+        name="q.json",
+        local_path=source,
+    )
+    manifest = _manifest()
+    manifest["timeout_seconds"] = 7200  # kind='code' manifest 顶层键
+
+    inject_artifact_object_block(store, manifest)
+
+    assert storage.put_expiries == [8100]
+    assert storage.get_expiries == [8100]
+
+
+def test_inject_presign_expiry_follows_agent_execution_timeout(tmp_path: Path) -> None:
+    """agent manifest 的 timeout 嵌在 execution 块下。"""
+    _make_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    source = tmp_path / "q.json"
+    source.write_bytes(PAYLOAD)
+    store.upload(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="upstream",
+        name="q.json",
+        local_path=source,
+    )
+    manifest = _manifest()
+    manifest["execution"] = {"provider": "p", "model": "m", "timeout_seconds": 10000}
+
+    inject_artifact_object_block(store, manifest)
+
+    assert storage.put_expiries == [10900]
+    assert storage.get_expiries == [10900]
+
+
+def test_inject_presign_expiry_defaults_to_one_hour() -> None:
+    """manifest 无 timeout：TTL 落回 3600 下限（短 timeout 也被下限兜住）。"""
+    _make_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    inject_artifact_object_block(store, _manifest())
+    assert storage.put_expiries == [3600]
+
+    short = _manifest()
+    short["timeout_seconds"] = 60
+    inject_artifact_object_block(store, short)
+    assert storage.put_expiries == [3600, 3600]

@@ -66,6 +66,12 @@ describe('InstanceSettingsSection', () => {
     expect(screen.getByLabelText('心跳失败阈值')).toHaveValue(3)
     expect(screen.getByLabelText('最低协议版本')).toHaveValue(2)
     expect(screen.getByLabelText('材料保留天数（0 关闭）')).toHaveValue(0)
+    // 材料 TTL 热读生效：字段级 hint 覆盖统一的重启文案，且带 max 上界。
+    expect(screen.getByLabelText('材料保留天数（0 关闭）')).toHaveAttribute(
+      'max',
+      '36500'
+    )
+    expect(screen.getByText('保存后立即生效，无需重启')).toBeInTheDocument()
     expect(screen.getByLabelText('启用 sweeper')).toBeChecked()
     expect(screen.getByLabelText('启用工作流')).toBeChecked()
     expect(screen.getByText(/需重启服务才能生效/)).toBeInTheDocument()

@@ -23,6 +23,7 @@ from typing import Any, BinaryIO
 import requests
 
 from worker._retry import run_with_retry
+from worker.artifact_download import describe_transfer_error
 from worker.bundle_io import sha256_file
 
 _PUT_TIMEOUT_SECONDS = 120
@@ -61,6 +62,12 @@ def upload_artifact_direct(
     stays and the next startup falls back to the legacy channel, since the
     presigned spec is never persisted).
     """
+    if not isinstance(spec, Mapping):
+        # Host bug / 协议错配：spec.get 会抛 AttributeError 逃逸出调用方的
+        # DirectUploadError 捕获；归一为 DirectUploadError 走 CAS 回落。
+        raise DirectUploadError(
+            f"artifact upload spec has unexpected type {type(spec).__name__} for {path.name!r}"
+        )
     url = str(spec.get("url") or "")
     storage_key = str(spec.get("storage_key") or "")
     if not url or not storage_key:
@@ -73,7 +80,8 @@ def upload_artifact_direct(
             with path.open("rb") as stream:
                 status = _put_stream(url, stream, size_bytes)
         except _TRANSIENT_ERRORS as exc:
-            raise _TransientUploadError(str(exc) or type(exc).__name__) from exc
+            # str(exc) 含完整签名 URL；只保留类型名，防止经 error_message 落库泄漏。
+            raise _TransientUploadError(describe_transfer_error(exc)) from exc
         if status >= 500:
             raise _TransientUploadError(f"HTTP {status}")
         if status >= 400:

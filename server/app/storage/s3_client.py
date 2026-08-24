@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, BinaryIO, Protocol, cast
 
-from server.app.storage.s3_settings import S3Settings
+from server.app.storage.s3_settings import S3Settings, load_s3_settings
 
 _DEFAULT_PRESIGN_EXPIRY_SECONDS = 3600
 
@@ -169,8 +169,13 @@ class S3StorageClient:
 
 def _build_boto3_client(settings: S3Settings, *, endpoint_override: str | None = None) -> Any:
     import boto3
+    from botocore.config import Config
 
-    kwargs: dict[str, Any] = {"region_name": settings.region}
+    # Bounded data-plane timeouts: a storage outage must not park a code-pool
+    # lease slot for minutes. botocore retries stay off — the upload path
+    # already retries with its own bound (job_artifact_objects).
+    config = Config(connect_timeout=10, read_timeout=120, retries={"max_attempts": 1})
+    kwargs: dict[str, Any] = {"region_name": settings.region, "config": config}
     if endpoint := (endpoint_override if endpoint_override is not None else settings.endpoint_url):
         kwargs["endpoint_url"] = endpoint
     if settings.access_key:
@@ -181,8 +186,6 @@ def _build_boto3_client(settings: S3Settings, *, endpoint_override: str | None =
 
 def build_s3_storage() -> S3StorageClient | None:
     """Build the instance object store from env; None when not configured."""
-    from server.app.storage.s3_settings import load_s3_settings
-
     settings = load_s3_settings()
     if settings is None:
         return None

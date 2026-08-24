@@ -51,6 +51,28 @@ MAX_ERROR_MESSAGE_CHARS = 4000
 _HEARTBEAT_JOIN_SECONDS = 5.0
 
 
+def _failed_metadata(task: UploadTask, error_message: str) -> dict[str, Any]:
+    # failed 上报的统一载荷（prepare 失败 / CAS 4xx 终态共用）。
+    return {
+        "status": "failed",
+        "exit_code": 1,
+        "error_message": error_message[:MAX_ERROR_MESSAGE_CHARS],
+        "command": list(task.command),
+        "output_artifacts": {},
+    }
+
+
+def _prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
+    # prepare_result + 失败降级为 failed 上报；直传回落后按清空的
+    # artifact_uploads 重跑，tar 随之内嵌产物。
+    try:
+        return prepare_result(task)
+    except Exception as exc:
+        archive = task.execution_dir / "result.tar.gz"
+        write_empty_archive(archive)
+        return _failed_metadata(task, f"result preparation failed: {exc}"), archive, []
+
+
 @dataclass
 class UploadTask:
     """Everything needed to deliver one execution's result to the Host."""
@@ -244,49 +266,47 @@ class UploadQueue:
             return False  # never started; marker intact for the next startup
         self._status.set_phase(task.execution_id, "uploading")
         job_dir = task.execution_dir / "job"
-        try:
-            metadata, archive, outputs = prepare_result(task)
-        except Exception as exc:
-            metadata = {
-                "status": "failed",
-                "exit_code": 1,
-                "error_message": f"result preparation failed: {exc}"[:MAX_ERROR_MESSAGE_CHARS],
-                "command": list(task.command),
-                "output_artifacts": {},
-            }
-            archive = task.execution_dir / "result.tar.gz"
-            write_empty_archive(archive)
-            outputs = []
-        uploaded: dict[str, Any] = {}
+        metadata, archive, outputs = _prepare_or_failed(task)
         # #160 D12：manifest 带 artifact_uploads 且每个产出都有上传规格时走
         # 直传 S3 通道；否则整体回落旧通道（CAS POST + tar 内嵌，tar 已在
         # prepare_result 按同一条件决定是否内嵌）。
         direct = bool(task.artifact_uploads) and all(
             name in task.artifact_uploads for name in outputs
         )
-        for name in outputs:
-            try:
-                if direct:
-                    ref = upload_artifact_direct(
-                        job_dir / PurePosixPath(name), task.artifact_uploads[name], stop=self._stop
-                    )
-                else:
-                    ref = self._upload_with_retry(job_dir / PurePosixPath(name))
-            except (HostRequestError, DirectUploadError) as exc:
-                # Terminal 4xx on the artifact itself: report the run failed
-                # instead of looping forever on a verdict that cannot change.
-                metadata = {
-                    "status": "failed",
-                    "exit_code": 1,
-                    "error_message": str(exc)[:MAX_ERROR_MESSAGE_CHARS],
-                    "command": list(task.command),
-                    "output_artifacts": {},
-                }
-                uploaded = {}
+        while True:
+            uploaded: dict[str, Any] = {}
+            restart = False
+            for name in outputs:
+                try:
+                    if direct:
+                        ref = upload_artifact_direct(
+                            job_dir / PurePosixPath(name),
+                            task.artifact_uploads[name],
+                            stop=self._stop,
+                        )
+                    else:
+                        ref = self._upload_with_retry(job_dir / PurePosixPath(name))
+                except DirectUploadError as exc:
+                    # 直传失败（4xx / 重试耗尽 / 规格畸形）不判 run failed：清掉
+                    # 上传规格重跑 prepare（tar 自动内嵌产物），重启循环走无限
+                    # 重试的 CAS 通道，与无规格任务同一语义。
+                    print(f"direct upload failed for {task.execution_id}: {exc}", flush=True)
+                    task.artifact_uploads = {}
+                    metadata, archive, outputs = _prepare_or_failed(task)
+                    direct = False
+                    restart = True
+                    break
+                except HostRequestError as exc:
+                    # Terminal 4xx on the artifact itself: report the run failed
+                    # instead of looping forever on a verdict that cannot change.
+                    metadata = _failed_metadata(task, str(exc))
+                    uploaded = {}
+                    break
+                if ref is None:
+                    return False  # shutting down mid-upload; marker stays for restore
+                uploaded[name] = ref
+            if not restart:
                 break
-            if ref is None:
-                return False  # shutting down mid-upload; marker stays for restore
-            uploaded[name] = ref
         metadata["output_artifacts"] = uploaded
         task.prepared_metadata = metadata
         task.prepared_archive = archive

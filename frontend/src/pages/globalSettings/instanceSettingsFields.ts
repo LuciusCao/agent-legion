@@ -7,6 +7,10 @@ export interface NumberFieldDef {
   integer: boolean
   // 允许 0（语义为「关闭」的字段，如材料 TTL）；缺省要求 > 0。
   allowZero?: boolean
+  // input 的 max 属性（与后端契约上界一致）；缺省不设。
+  max?: number
+  // 字段级提示，覆盖卡片顶部的统一文案（如热读字段无需重启）。
+  hint?: string
 }
 
 export interface ToggleDef {
@@ -104,6 +108,8 @@ export const FIELD_GROUPS: FieldGroup[] = [
         label: '材料保留天数（0 关闭）',
         integer: true,
         allowZero: true,
+        max: 36500,
+        hint: '保存后立即生效，无需重启',
       },
     ],
     toggles: [],

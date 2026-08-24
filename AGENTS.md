@@ -178,8 +178,11 @@
 - Job 产物存储（#160，D12，schema v54）：权威副本在实例对象存储
   （`jobs/{workspace_id}/{job_id}/{name}` key + `job_artifacts` 清单表，
   `server/app/services/job_artifact_objects.py`），本地 job_dir 只是执行
-  暂存与可淘汰缓存——淘汰只删清单已确认的文件（EXEC-ARTIFACT-STORE-001），读
-  路径本地命中直读、缺失回退对象存储。Worker 产物回传只走 claim 注入的
+  暂存与可淘汰缓存——淘汰只删清单已确认的文件（行有 content_hash 时复核
+  本地 sha256 一致，unlink 前重查 job 仍 completed 且无 active lease，
+  EXEC-ARTIFACT-STORE-001），读
+  路径本地命中直读、缺失回退对象存储（quality artifact_contents 是刻意的
+  manifest-first 例外，反映持久化记录）。Worker 产物回传只走 claim 注入的
   presigned S3 通道（Host HEAD 核验后登记落盘），禁止新增独立回传协议
   （EXEC-ARTIFACT-WORKER-001）；`/api/artifacts` 本地 CAS 是 legacy 兼容路径，
   不要给它加新功能。

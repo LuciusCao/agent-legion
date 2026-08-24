@@ -16,8 +16,9 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 import pytest
+import requests
 
-from worker import artifact_download, artifact_upload
+from worker import artifact_download, artifact_upload, bundle_io
 from worker.artifact_upload import DirectUploadError, upload_artifact_direct
 from worker.bundle_io import download_input_artifacts
 from worker.code_runner import prepare_code_result
@@ -95,6 +96,37 @@ def test_upload_artifact_direct_rejects_incomplete_spec(tmp_path: Path) -> None:
     path.write_bytes(PAYLOAD)
     with pytest.raises(DirectUploadError, match="incomplete"):
         upload_artifact_direct(path, {"storage_key": "jobs/ws/job-1/output.json"})
+
+
+def test_upload_artifact_direct_rejects_non_mapping_spec(tmp_path: Path) -> None:
+    path = tmp_path / "output.json"
+    path.write_bytes(PAYLOAD)
+    with pytest.raises(DirectUploadError, match="unexpected type"):
+        upload_artifact_direct(path, "not-a-mapping")  # type: ignore[arg-type]
+
+
+def test_upload_artifact_direct_error_hides_presigned_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """requests 网络异常的 str(exc) 含完整签名 URL；落库前必须只留类型名。"""
+    path = tmp_path / "output.json"
+    path.write_bytes(PAYLOAD)
+    monkeypatch.setattr(artifact_upload, "_RETRY_BASE_SECONDS", 0.01)
+
+    def _put(url: str, stream: BinaryIO, size_bytes: int) -> int:
+        raise requests.ConnectionError(
+            "HTTPSConnectionPool(host='s3.test', port=443): Max retries exceeded"
+            " with url: /put/x?X-Amz-Credential=AKID&X-Amz-Signature=abc123"
+        )
+
+    monkeypatch.setattr(artifact_upload, "_put_stream", _put)
+    with pytest.raises(DirectUploadError) as excinfo:
+        upload_artifact_direct(path, dict(SPEC))
+    message = str(excinfo.value)
+    assert "ConnectionError" in message
+    assert "X-Amz-Signature" not in message
+    assert "X-Amz-Credential" not in message
+    assert "s3.test" not in message
 
 
 class QueueFakeClient:
@@ -205,6 +237,46 @@ def test_queue_without_upload_spec_keeps_legacy_channel(tmp_path: Path) -> None:
     assert "output.json" in members  # 旧通道 tar 内嵌产物
 
 
+def test_queue_direct_upload_failure_falls_back_to_cas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """直传 4xx（DirectUploadError）不判 run failed：清规格重跑 prepare，
+    tar 内嵌产物，整体走 CAS 通道上报 completed。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _fake_put(monkeypatch, [403])  # 终态 verdict → DirectUploadError
+    client = QueueFakeClient()
+    queue = _queue(client)
+
+    queue.submit(_task(work_root, artifact_uploads={"output.json": dict(SPEC)}))
+    queue.shutdown()
+
+    assert len(client.uploads) == 1  # 回落 CAS POST 通道
+    report = client.reports[0]
+    assert report["status"] == "completed"
+    assert report["output_artifacts"]["output.json"] == f"sha256:{HASH}"
+    members = _archive_members(client, tmp_path)
+    assert "output.json" in members  # 回落后 tar 内嵌产物
+
+
+def test_queue_malformed_upload_spec_falls_back_to_cas(tmp_path: Path) -> None:
+    """非 Mapping 的畸形 spec 归一为 DirectUploadError，同样回落 CAS。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = QueueFakeClient()
+    queue = _queue(client)
+
+    queue.submit(_task(work_root, artifact_uploads={"output.json": "not-a-mapping"}))
+    queue.shutdown()
+
+    assert len(client.uploads) == 1
+    report = client.reports[0]
+    assert report["status"] == "completed"
+    assert report["output_artifacts"]["output.json"] == f"sha256:{HASH}"
+    members = _archive_members(client, tmp_path)
+    assert "output.json" in members
+
+
 def test_prepare_code_result_skips_outputs_on_direct_channel(tmp_path: Path) -> None:
     execution_dir = tmp_path / "exec-1"
     job_dir = execution_dir / "job"
@@ -303,4 +375,57 @@ def test_download_input_artifacts_string_form_keeps_cas_channel(
 
     assert client.requests == [f"/api/artifacts/{HASH}"]
     assert urls == []
+    assert (tmp_path / "job" / "inputs" / "q.json").read_bytes() == PAYLOAD
+
+
+def test_open_download_error_hides_presigned_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """下载侧同样：requests 异常的 str(exc) 含签名 URL，包装后只留类型名。"""
+
+    def _get(url: str, **kwargs: Any) -> Any:
+        raise requests.ConnectionError(
+            "HTTPSConnectionPool(host='s3.test', port=443): Max retries exceeded"
+            " with url: /get/x?X-Amz-Credential=AKID&X-Amz-Signature=abc123"
+        )
+
+    monkeypatch.setattr(artifact_download.requests, "get", _get)
+    with pytest.raises(RuntimeError) as excinfo:
+        artifact_download.download_object_artifact(
+            "https://s3.test/get/x?X-Amz-Signature=abc123", tmp_path / "job" / "q.json"
+        )
+    message = str(excinfo.value)
+    assert "ConnectionError" in message
+    assert "X-Amz-Signature" not in message
+    assert "X-Amz-Credential" not in message
+    assert "s3.test" not in message
+
+
+def test_download_input_artifacts_dict_form_retries_with_semaphore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """dict 分支与 CAS 分支对齐：download_slots 限流 + transient 退避重试。"""
+    monkeypatch.setattr(bundle_io, "_RETRY_BACKOFF_BASE_SECONDS", 0.01)
+    slots = threading.Semaphore(1)
+    calls: list[str] = []
+
+    def _open(url: str) -> io.BytesIO:
+        assert not slots.acquire(blocking=False)  # 信号量必须已持有
+        calls.append(url)
+        if len(calls) < 3:
+            raise RuntimeError("artifact download failed: ConnectionError")
+        return io.BytesIO(PAYLOAD)
+
+    monkeypatch.setattr(artifact_download, "_open_download", _open)
+    client = _DownloadFakeClient({})
+    manifest = {
+        "input_artifacts": {
+            "inputs/q.json": {"url": "https://s3.test/get/x?sig=1", "sha256": HASH},
+        }
+    }
+
+    download_input_artifacts(client, manifest, tmp_path / "job", slots)  # type: ignore[arg-type]
+
+    assert len(calls) == 3  # 每次重试重新打开下载流
+    assert client.requests == []
     assert (tmp_path / "job" / "inputs" / "q.json").read_bytes() == PAYLOAD

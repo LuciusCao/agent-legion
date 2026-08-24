@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+from datetime import UTC, datetime
 from typing import BinaryIO
 
 import pytest
@@ -189,6 +190,40 @@ def test_expired_material_rejected_at_claim_resolution(
 
     with pytest.raises(MaterializeError, match="not ready"):
         material_claim_block(TEST_DATABASE_URL, WORKSPACE_ID, job, storage=storage)
+
+
+def test_expired_material_revived_by_same_hash_presign(
+    service: MaterialsService, storage: FakeStorage
+) -> None:
+    """复活链路：ready → expired → 同 hash presign 重置 uploading →
+    complete 重新打 expires_at（materials.py presign 的 stale-row 分支）。"""
+    InstanceSettingsStore(TEST_DATABASE_URL).put({"materials_ttl_days": 7})
+    material_id = _ready_material(service, storage, "revive.txt")
+    _set_expires_at(material_id, "-1 hour")
+    assert expire_due_materials(TEST_DATABASE_URL) == 1
+    assert _material_row(material_id)["status"] == "expired"
+
+    payload = PAYLOAD + b"revive.txt"
+    content_hash = hashlib.sha256(payload).hexdigest()
+    result = service.presign(
+        WORKSPACE_ID,
+        filename="revive.txt",
+        size_bytes=len(payload),
+        content_hash=content_hash,
+        created_by="user-1",
+    )
+    assert result["material"]["id"] == material_id
+    assert result["deduplicated"] is False
+    assert result["upload_url"] is not None
+    assert _material_row(material_id)["status"] == "uploading"
+
+    service.complete(WORKSPACE_ID, material_id)
+
+    row = _material_row(material_id)
+    assert row["status"] == "ready"
+    assert row["expires_at"] is not None
+    expires_at = datetime.fromisoformat(str(row["expires_at"]))
+    assert expires_at > datetime.now(UTC)
 
 
 def test_collect_deletes_unreferenced_past_grace(

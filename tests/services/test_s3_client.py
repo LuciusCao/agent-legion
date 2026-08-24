@@ -78,3 +78,17 @@ def test_presign_signature_is_present_on_public_urls() -> None:
 
     # SigV2 (old botocore) signs with "Signature=", SigV4 with "X-Amz-Signature=".
     assert "Signature=" in url
+
+
+def test_data_plane_client_has_bounded_timeouts_and_no_botocore_retries() -> None:
+    """A storage outage must not park a code-pool lease slot for minutes:
+    bounded connect/read timeouts, and botocore retries stay off — the
+    upload path retries with its own bound (job_artifact_objects)."""
+    storage = S3StorageClient(_settings())
+
+    config = storage._client.meta.config
+
+    assert config.connect_timeout == 10
+    assert config.read_timeout == 120
+    # botocore normalizes max_attempts=1 (one retry) to total_max_attempts.
+    assert config.retries["total_max_attempts"] == 2

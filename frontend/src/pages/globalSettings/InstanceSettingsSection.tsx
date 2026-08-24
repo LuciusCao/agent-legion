@@ -178,6 +178,7 @@ function InstanceSettingsEditor({
                 className={styles.currencyInput}
                 type="number"
                 min="0"
+                max={field.max}
                 step={field.integer ? '1' : 'any'}
                 value={String(values[field.path] ?? '')}
                 onChange={(e) =>
@@ -187,6 +188,7 @@ function InstanceSettingsEditor({
                   }))
                 }
               />
+              {field.hint && <span className={styles.hint}>{field.hint}</span>}
             </div>
           ))}
           {group.toggles.map((toggle) => (

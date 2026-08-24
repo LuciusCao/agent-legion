@@ -33,11 +33,15 @@ class FakeStorage:
 
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
+        self.put_expiries: list[int] = []
+        self.get_expiries: list[int] = []
 
     def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
+        self.put_expiries.append(expires_seconds)
         return f"https://s3.test/upload/{storage_key}?sig=put"
 
     def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
+        self.get_expiries.append(expires_seconds)
         return f"https://s3.test/download/{storage_key}?sig=get"
 
     def head_object(self, storage_key: str) -> ObjectHead | None:
@@ -169,3 +173,44 @@ def test_agent_claim_without_object_storage_unchanged() -> None:
 
     assert "artifact_uploads" not in manifest
     assert manifest["input_artifacts"] == {"q.json": f"sha256:{HASH}"}
+
+
+def test_agent_claim_presign_expiry_follows_execution_timeout() -> None:
+    """presign TTL 从 execution.timeout_seconds 派生：max(3600, t + 900)。"""
+    _seed()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    storage.objects["jobs/ws-1/job-1/q.json"] = PAYLOAD
+    store.record_remote(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="upstream",
+        name="q.json",
+        storage_key="jobs/ws-1/job-1/q.json",
+        size_bytes=len(PAYLOAD),
+        content_hash=hashlib.sha256(PAYLOAD).hexdigest(),
+    )
+    broker = MagicMock()
+    long_timeout = _manifest()
+    long_timeout["execution"]["timeout_seconds"] = 7200
+    broker.claim.side_effect = [
+        _claimed(long_timeout),  # 长 timeout → TTL 拉长
+        _claimed(_manifest()),  # 无 timeout → 3600 下限
+    ]
+    app = FastAPI()
+    app.include_router(
+        create_agent_worker_claim_router(
+            broker,
+            MagicMock(),
+            lambda request, worker_id=None: {"worker_id": "w1", "protocol_version": 3},
+            lambda request: "lease-1",
+            store,
+        )
+    )
+    client = TestClient(app)
+
+    _claim(client)
+    _claim(client)
+
+    assert storage.put_expiries == [8100, 3600]
+    assert storage.get_expiries == [8100, 3600]

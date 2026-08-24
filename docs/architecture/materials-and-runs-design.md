@@ -239,7 +239,23 @@ remote worker 的 presigned URL 用 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`
 - 产物进对象存储后，打包重设计（#120，§10）的「选择性打包部分
   artifacts」就是「按清单从 bucket 取文件生成 zip」，天然成立。
 - 迁移期兼容：老 job 的产物仍在本地 job_dir，读路径按「本地缓存命中
-  直读、缺失回退对象存储」解析，不搬历史数据。
+  直读、缺失回退对象存储」解析，不搬历史数据。例外是 quality
+  artifact_contents：刻意 manifest-first，直接读对象存储的持久化记录
+  （回退 legacy CAS），不读本地 job_dir，保证质量评审反映落盘权威副本。
+
+评审修复后的加固语义（#162）：
+
+- 淘汰守卫收紧：除 size 匹配外，清单行带 content_hash 时复核本地
+  sha256 一致才认证；每个 job 首次 unlink 前重查 job 仍为 completed
+  且无 active lease。
+- presign PUT/GET 过期时间按节点 timeout 派生
+  （`max(3600, timeout_seconds + 900)`，缺省 600），只在 claim 时内存态
+  注入，不进日志/DB；Host HEAD 核验含体积上限（实例设置
+  `agent_workers.max_archive_bytes`）；cancelled 结果的部分产物经 Host
+  流式 sha256 核验后登记。
+- Worker 直传失败（或 spec 畸形）清 `artifact_uploads` 后回落 CAS
+  通道；本地 rerun 沙箱运行前把缺失的声明输入从对象存储回填
+  （`server/app/executors/artifact_restore.py`，hash 校验、逐文件容错）。
 
 ### 6.6 可平行迁移到 Amazon S3
 

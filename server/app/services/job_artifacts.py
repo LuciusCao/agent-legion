@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -5,6 +6,8 @@ from server.app.jobs import JobQueries
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.storage_paths import resolve_job_dir
+
+logger = logging.getLogger(__name__)
 
 
 class JobArtifactService:
@@ -40,15 +43,31 @@ class JobArtifactService:
         row = self.object_store.lookup(job_id, artifact_name)
         if row is None:
             return None
-        stream = self.object_store.open_stream(row)
-        content = stream.read().decode("utf-8")
+        try:
+            stream = self.object_store.open_stream(row)
+            content = stream.read().decode("utf-8")
+        except Exception:
+            # 对象可能被 bucket lifecycle 删除（NoSuchKey）或存储暂时不可用：
+            # 按未找到处理，让 read() 落到 404 而不是冒泡 500。
+            logger.warning(
+                "failed to read artifact %s of job %s from object storage",
+                artifact_name,
+                job_id,
+                exc_info=True,
+            )
+            return None
         return {"name": artifact_name, "content": content}
 
     def read(self, job_id: str, artifact_name: str) -> dict[str, Any]:
         job = self._job_or_404(job_id)
         path = self._artifact_path(job, artifact_name)
         if path.exists() and path.is_file():
-            return {"name": artifact_name, "content": path.read_text(encoding="utf-8")}
+            try:
+                return {"name": artifact_name, "content": path.read_text(encoding="utf-8")}
+            except OSError:
+                # TOCTOU：淘汰线程可能在 exists() 与 read_text() 之间 unlink，
+                # 落到对象存储副本而不是冒泡 500。
+                pass
         stored = self._read_object(job_id, artifact_name)
         if stored is not None:
             return stored

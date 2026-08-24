@@ -142,6 +142,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         settings.data_dir / "agent_bundles",
         skill_manager=skill_manager,
         object_store=job_artifact_objects,
+        max_archive_bytes=settings.executor_runtime.agent_workers.max_archive_bytes,
     )
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None

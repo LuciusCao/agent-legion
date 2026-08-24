@@ -199,6 +199,7 @@ def test_eviction_skips_files_whose_size_no_longer_matches(tmp_path: Path) -> No
 
 
 def test_eviction_removes_confirmed_files(tmp_path: Path) -> None:
+    """行有 hash 且本地文件匹配 → 正常淘汰（upload 始终记录 content_hash）。"""
     job = _complete_job()
     storage = FakeStorage()
     store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
@@ -212,3 +213,81 @@ def test_eviction_removes_confirmed_files(tmp_path: Path) -> None:
 
     assert evict_cache_to_capacity(store, _job_db(job), _settings(tmp_path), max_bytes=0) == 1
     assert not confirmed.exists()
+
+
+def test_eviction_skips_same_size_hash_mismatch_when_reupload_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """核心回归：rerun 同长度新字节 + reconciler 重传再失败 → 旧行的 size
+    相符不得认证新字节，淘汰必须跳过，否则新字节永久丢失。"""
+    job = _complete_job()
+    _definition(monkeypatch)
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    job_dir = tmp_path / "jobs" / "ws" / "job-1"
+    job_dir.mkdir(parents=True)
+    local = job_dir / "out.json"
+    local.write_bytes(b"aaaa")
+    store.upload(
+        workspace_id="ws-1", job_id="job-1", node_key="n1", name="out.json", local_path=local
+    )
+    local.write_bytes(b"bbbb")  # 同长度新字节，行 size 仍相符但 hash 不符
+
+    def _fail_upload(**kwargs: Any) -> None:
+        raise RuntimeError("storage down")
+
+    monkeypatch.setattr(store, "upload", _fail_upload)
+    reupload_missing(store, _job_db(job), _settings(tmp_path))  # 重传失败被吞
+    evicted = evict_cache_to_capacity(store, _job_db(job), _settings(tmp_path), max_bytes=0)
+
+    assert evicted == 0
+    assert local.read_bytes() == b"bbbb"
+
+
+def _add_active_lease() -> None:
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        run_id = conn.execute("select id from node_runs where job_id='job-1'").fetchone()["id"]
+        conn.execute(
+            "insert into executor_leases("
+            " id, execution_id, executor_id, workspace_id, job_id, workflow_key,"
+            " node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at)"
+            " values ('lease-1', 'exec-1', 'code', 'ws-1', 'job-1', 'wf', 'n1', %s,"
+            " 'active', now(), now(), now() + make_interval(hours => 1))",
+            (run_id,),
+        )
+
+
+def _confirmed_cache_file(tmp_path: Path) -> tuple[JobArtifactObjectStore, Path]:
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    job_dir = tmp_path / "jobs" / "ws" / "job-1"
+    job_dir.mkdir(parents=True)
+    confirmed = job_dir / "out.json"
+    confirmed.write_bytes(OLD_PAYLOAD)
+    store.upload(
+        workspace_id="ws-1", job_id="job-1", node_key="n1", name="out.json", local_path=confirmed
+    )
+    return store, confirmed
+
+
+def test_eviction_skips_job_with_active_lease(tmp_path: Path) -> None:
+    """job 持有 active lease（可能正在 rerun 写新产物）→ 不淘汰。"""
+    job = _complete_job()
+    _add_active_lease()
+    store, confirmed = _confirmed_cache_file(tmp_path)
+
+    evicted = evict_cache_to_capacity(store, _job_db(job), _settings(tmp_path), max_bytes=0)
+
+    assert evicted == 0
+    assert confirmed.is_file()
+
+
+def test_eviction_skips_non_completed_job(tmp_path: Path) -> None:
+    """非 completed 的 job（queued/running 可能重跑节点）→ 不淘汰。"""
+    job = _seed_job(status="queued")
+    store, confirmed = _confirmed_cache_file(tmp_path)
+
+    evicted = evict_cache_to_capacity(store, _job_db(job), _settings(tmp_path), max_bytes=0)
+
+    assert evicted == 0
+    assert confirmed.is_file()

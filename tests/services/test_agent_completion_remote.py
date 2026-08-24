@@ -15,6 +15,9 @@ import io
 from pathlib import Path
 from typing import Any, BinaryIO
 
+import pytest
+from psycopg import IntegrityError
+
 from server.app.agent_completion import AgentCompletionHandler, AgentOutcome
 from server.app.db.schema import init_db
 from server.app.db.transaction import write_transaction
@@ -103,7 +106,7 @@ def _remote_ref(key: str = STAGING_KEY, size: int | None = None, content_hash: s
 
 
 def _make_handler(
-    tmp_path: Path, storage: FakeStorage | None
+    tmp_path: Path, storage: FakeStorage | None, max_archive_bytes: int | None = None
 ) -> tuple[AgentCompletionHandler, _StubLeases, _StubArtifactStore, JobArtifactObjectStore, Path]:
     init_db(TEST_DATABASE_URL)
     with write_transaction(TEST_DATABASE_URL) as conn:
@@ -129,6 +132,7 @@ def _make_handler(
         tmp_path / "bundles",
         skill_manager=None,
         object_store=object_store,
+        max_archive_bytes=max_archive_bytes,
     )
     return handler, leases, artifact_store, object_store, job_dir
 
@@ -329,3 +333,88 @@ def test_finish_mixed_refs_registers_both_channels(tmp_path: Path) -> None:
     assert (job_dir / "out.json").read_bytes() == PAYLOAD
     assert object_store.lookup("job-1", "out.json") is not None
     assert artifact_store.refs == [("job-1", "node_a", "extra.json", legacy_hash)]
+
+
+def test_finish_remote_ref_size_over_limit_fails(tmp_path: Path) -> None:
+    """直传通道套用 max_archive_bytes 体积上限（与 legacy 通道 parity）。"""
+    storage = FakeStorage()
+    storage.objects[STAGING_KEY] = PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(
+        tmp_path, storage, max_archive_bytes=len(PAYLOAD) - 1
+    )
+
+    _finish(handler, {"out.json": _remote_ref()})
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert "size limit" in result.error_message
+    assert not (job_dir / "out.json").exists()
+    assert object_store.lookup("job-1", "out.json") is None
+    assert storage.objects == {STAGING_KEY: PAYLOAD}  # 未提升、未删除
+
+
+def test_finish_cancelled_hash_mismatch_fails(tmp_path: Path) -> None:
+    """cancelled 路径同样 digest 核验 staging 字节：自报 hash 不符整批失败。"""
+    storage = FakeStorage()
+    storage.objects[STAGING_KEY] = PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
+
+    _finish(handler, {"out.json": _remote_ref(content_hash="0" * 64)}, status="cancelled")
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert "hash mismatch" in result.error_message
+    assert not (job_dir / "out.json").exists()
+    assert object_store.lookup("job-1", "out.json") is None
+    assert AUTHORITY_KEY not in storage.objects  # 未提升
+
+
+def test_finish_cancelled_empty_hash_registers_host_computed(tmp_path: Path) -> None:
+    """cancelled 且 worker 未报 hash：登记 Host 流式算出的 digest。"""
+    storage = FakeStorage()
+    storage.objects[STAGING_KEY] = PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
+
+    _finish(handler, {"out.json": _remote_ref(content_hash="")}, status="cancelled")
+
+    assert leases.results[0].status == "cancelled"
+    assert not (job_dir / "out.json").exists()
+    row = object_store.lookup("job-1", "out.json")
+    assert row is not None
+    assert row["content_hash"] == HASH  # Host 计算值，不是空串
+    assert storage.objects == {AUTHORITY_KEY: PAYLOAD}
+
+
+def test_record_remote_many_rolls_back_on_mid_batch_failure(tmp_path: Path) -> None:
+    """批量登记单事务：第二行写入失败（FK）时整批回滚，无部分行。"""
+    storage = FakeStorage()
+    other_key = "jobs/ws-1/job-2/other.json"
+    storage.objects[AUTHORITY_KEY] = PAYLOAD
+    storage.objects[other_key] = PAYLOAD
+    _, _, _, object_store, _ = _make_handler(tmp_path, storage)
+    rows = [
+        {
+            "workspace_id": "ws-1",
+            "job_id": "job-1",
+            "node_key": "node_a",
+            "name": "out.json",
+            "storage_key": AUTHORITY_KEY,
+            "size_bytes": len(PAYLOAD),
+            "content_hash": HASH,
+        },
+        {
+            "workspace_id": "ws-1",
+            # job-2 不存在：insert 触发 FK 违例，验证整批回滚。
+            "job_id": "job-2",
+            "node_key": "node_a",
+            "name": "other.json",
+            "storage_key": other_key,
+            "size_bytes": len(PAYLOAD),
+            "content_hash": HASH,
+        },
+    ]
+
+    with pytest.raises(IntegrityError):
+        object_store.record_remote_many(rows)
+
+    assert object_store.lookup("job-1", "out.json") is None

@@ -129,6 +129,13 @@ def test_put_rejects_invalid_materials_ttl(client) -> None:
     payload = _payload()
     payload["materials_ttl_days"] = "thirty"
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+    # 上界 36500（约 100 年）：超过会让 complete 的 now() + make_interval 溢出。
+    payload = _payload()
+    payload["materials_ttl_days"] = 36501
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+    payload = _payload()
+    payload["materials_ttl_days"] = 36500
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200
 
 
 def test_put_materials_ttl_roundtrip(client) -> None:

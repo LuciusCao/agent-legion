@@ -56,7 +56,8 @@ class JobQueryService:
 
     def _artifact_names(self, job: dict[str, Any]) -> list[str]:
         names = set(artifact_names(job, self.settings))
-        if self.object_store is not None:
+        # enabled 门控：实例摘掉存储配置后清单里的名字读不到，不再列出。
+        if self.object_store is not None and self.object_store.enabled:
             names |= self.object_store.names_for_job(str(job["id"]))
         return sorted(names)
 

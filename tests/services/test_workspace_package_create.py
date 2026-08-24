@@ -189,6 +189,48 @@ def test_workspace_package_streams_object_storage_artifacts(tmp_path):
         assert zf.read("job_1/result.json") == payload
 
 
+def test_workspace_package_skips_missing_object_entries(tmp_path):
+    """对象缺失/读取失败时跳过该条目（log warning），打包整体成功。"""
+
+    class _FakeObjectStore:
+        enabled = True
+
+        def lookup(self, job_id: str, name: str) -> dict:
+            return {"storage_key": f"jobs/ws/{job_id}/{name}"}
+
+        def open_stream(self, row: dict) -> io.BytesIO:
+            if row["storage_key"].endswith("bad.json"):
+                raise RuntimeError("NoSuchKey")
+            return io.BytesIO(b"good-bytes")
+
+    jobs_dir = tmp_path / "jobs"
+    packages_dir = tmp_path / "packages"
+    jobs = [
+        {
+            "id": "job_1",
+            "source_id": "S1",
+            "workflow_key": "demo_workflow",
+            "status": "completed",
+            "storage_dir": "",
+        }
+    ]
+
+    package_path, job_count = create_workspace_package(
+        jobs,
+        packages_dir,
+        jobs_dir,
+        artifact_names=["good.json", "bad.json"],
+        object_store=_FakeObjectStore(),
+    )
+
+    assert package_path.exists()
+    assert job_count == 1
+    with zipfile.ZipFile(package_path) as zf:
+        names = set(zf.namelist())
+        assert "job_1/good.json" in names
+        assert "job_1/bad.json" not in names
+
+
 def test_workspace_package_explicit_artifact_names(tmp_path):
     jobs_dir = tmp_path / "jobs"
     packages_dir = tmp_path / "packages"

@@ -3,9 +3,9 @@
 The authoritative copy of every declared node artifact lives in the instance
 S3-compatible object store under ``jobs/{workspace_id}/{job_id}/{name}``;
 ``job_artifacts`` is the manifest table and the local job_dir copy is an
-evictable cache (EXEC-ARTIFACT-STORE-001). Reads resolve object-storage-first with
-a local fallback so legacy jobs (never uploaded) keep working without data
-migration. With no bucket configured the whole feature is inert: writes are
+evictable cache (EXEC-ARTIFACT-STORE-001). Reads resolve local-first with the
+object store as fallback so legacy jobs (never uploaded) keep working without
+data migration. With no bucket configured the whole feature is inert: writes are
 no-ops and lookups return None, so callers fall back to the local job_dir.
 """
 
@@ -26,7 +26,21 @@ logger = logging.getLogger(__name__)
 _HASH_CHUNK_BYTES = 1024 * 1024
 _UPLOAD_ATTEMPTS = 3
 _UPLOAD_BACKOFF_SECONDS = 0.5
-_DEFAULT_PRESIGN_EXPIRY_SECONDS = 3600
+# Public: the claim-time injector derives longer presign TTLs from the node
+# timeout on top of this floor (agent_broker.remote_artifact_support).
+DEFAULT_PRESIGN_EXPIRY_SECONDS = 3600
+
+_UPSERT_ROW_SQL = """
+insert into job_artifacts(
+  job_id, node_key, name, storage_key, size_bytes, content_hash
+) values (%s, %s, %s, %s, %s, %s)
+on conflict (job_id, node_key, name) do update
+set storage_key=excluded.storage_key,
+    size_bytes=excluded.size_bytes,
+    content_hash=excluded.content_hash,
+    uploaded_at=current_timestamp
+returning *
+"""
 
 # Bucket key prefix for job artifacts (materials keys live at the bucket
 # root); the prefix lets bucket lifecycle rules target artifacts separately.
@@ -133,6 +147,7 @@ class JobArtifactObjectStore:
         storage_key: str,
         size_bytes: int,
         execution_id: str | None = None,
+        max_size_bytes: int | None = None,
     ) -> None:
         """HEAD-verify a Worker-reported object WITHOUT registering it.
 
@@ -140,10 +155,17 @@ class JobArtifactObjectStore:
         verifies ALL reported refs before applying ANY (no half-applied
         state), then registers/downloads them in the apply phase. With
         ``execution_id`` the expected key is the per-execution staging key
-        (Worker uploads); without it, the authority key.
+        (Worker uploads); without it, the authority key. ``max_size_bytes``
+        applies the same size ceiling the legacy archive channel enforces
+        (instance setting ``agent_workers.max_archive_bytes``).
         """
         if self.storage is None:
             raise ValueError("object storage is not configured")
+        if max_size_bytes is not None and size_bytes > max_size_bytes:
+            raise ValueError(
+                f"uploaded object size {size_bytes} exceeds the artifact size "
+                f"limit {max_size_bytes} for {name!r}"
+            )
         if execution_id:
             expected_key = artifact_staging_key(workspace_id, job_id, execution_id, name)
         else:
@@ -158,33 +180,6 @@ class JobArtifactObjectStore:
                 f"uploaded object size {head.size_bytes} does not match "
                 f"the declared size {size_bytes} for {name!r}"
             )
-
-    def promote_remote(
-        self,
-        *,
-        workspace_id: str,
-        job_id: str,
-        name: str,
-        storage_key: str,
-    ) -> str:
-        """Copy a verified staging object onto the authority key (server-side).
-
-        Returns the authority key. Callers register the row and then delete
-        the staging object best-effort (orphans are lifecycle's backstop).
-        """
-        assert self.storage is not None
-        authority_key = artifact_storage_key(workspace_id, job_id, name)
-        self.storage.copy_object(storage_key, authority_key)
-        return authority_key
-
-    def discard_staging(self, storage_key: str) -> None:
-        """Best-effort staging-object cleanup after promotion."""
-        if self.storage is None:
-            return
-        try:
-            self.storage.delete_object(storage_key)
-        except Exception:
-            logger.warning("failed to delete staging object %s", storage_key, exc_info=True)
 
     def record_remote(
         self,
@@ -219,6 +214,32 @@ class JobArtifactObjectStore:
             size_bytes=size_bytes,
             content_hash=content_hash,
         )
+
+    def record_remote_many(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+        """Batch variant of ``record_remote``: ONE write transaction.
+
+        The promote phase of the Worker-direct channel registers every
+        already-verified ref atomically — a mid-batch failure rolls the whole
+        batch back instead of leaving a half-registered manifest (no
+        half-applied outputs). Callers verify all refs first; each row
+        carries workspace_id/job_id/node_key/name/storage_key/size_bytes/
+        content_hash.
+        """
+        if self.storage is None:
+            return None
+        with write_transaction(self._dsn) as conn:
+            return [
+                self._upsert_row_tx(
+                    conn,
+                    job_id=str(row["job_id"]),
+                    node_key=str(row["node_key"]),
+                    name=str(row["name"]),
+                    storage_key=str(row["storage_key"]),
+                    size_bytes=int(row["size_bytes"]),
+                    content_hash=str(row.get("content_hash") or ""),
+                )
+                for row in rows
+            ]
 
     def lookup(self, job_id: str, name: str) -> dict[str, Any] | None:
         """Latest manifest row for an artifact name (internal: has storage_key)."""
@@ -258,37 +279,6 @@ class JobArtifactObjectStore:
         assert self.storage is not None
         return self.storage.open_stream(str(row["storage_key"]))
 
-    def presign_get(
-        self, row: dict[str, Any], expires_seconds: int = _DEFAULT_PRESIGN_EXPIRY_SECONDS
-    ) -> str:
-        """Presigned GET for Worker input staging (claim path, memory only)."""
-        assert self.storage is not None
-        return self.storage.presign_get(str(row["storage_key"]), expires_seconds)
-
-    def presign_put(
-        self,
-        *,
-        workspace_id: str,
-        job_id: str,
-        name: str,
-        size_bytes: int = 0,
-        expires_seconds: int = _DEFAULT_PRESIGN_EXPIRY_SECONDS,
-        execution_id: str | None = None,
-    ) -> tuple[str, str]:
-        """(storage_key, presigned PUT URL) for direct Worker upload.
-
-        With ``execution_id`` the key is the per-execution staging key
-        (the Host promotes after verification); without it, the authority
-        key (server-side callers only).
-        """
-        assert self.storage is not None
-        if execution_id:
-            storage_key = artifact_staging_key(workspace_id, job_id, execution_id, name)
-        else:
-            storage_key = artifact_storage_key(workspace_id, job_id, name)
-        url = self.storage.presign_put(storage_key, size_bytes, expires_seconds)
-        return storage_key, url
-
     def delete_objects(self, rows: list[dict[str, Any]]) -> None:
         """Best-effort object deletion for manifest rows snapshot before a
         job deletion (the rows themselves cascade away with the job row, so
@@ -316,19 +306,32 @@ class JobArtifactObjectStore:
         content_hash: str,
     ) -> dict[str, Any]:
         with write_transaction(self._dsn) as conn:
-            row = conn.execute(
-                """
-                insert into job_artifacts(
-                  job_id, node_key, name, storage_key, size_bytes, content_hash
-                ) values (%s, %s, %s, %s, %s, %s)
-                on conflict (job_id, node_key, name) do update
-                set storage_key=excluded.storage_key,
-                    size_bytes=excluded.size_bytes,
-                    content_hash=excluded.content_hash,
-                    uploaded_at=current_timestamp
-                returning *
-                """,
-                (job_id, node_key, name, storage_key, size_bytes, content_hash),
-            ).fetchone()
+            return self._upsert_row_tx(
+                conn,
+                job_id=job_id,
+                node_key=node_key,
+                name=name,
+                storage_key=storage_key,
+                size_bytes=size_bytes,
+                content_hash=content_hash,
+            )
+
+    @staticmethod
+    def _upsert_row_tx(
+        conn: Any,
+        *,
+        job_id: str,
+        node_key: str,
+        name: str,
+        storage_key: str,
+        size_bytes: int,
+        content_hash: str,
+    ) -> dict[str, Any]:
+        """Single upsert inside an already-open transaction (shared by
+        ``_upsert_row`` and the atomic batch ``record_remote_many``)."""
+        row = conn.execute(
+            _UPSERT_ROW_SQL,
+            (job_id, node_key, name, storage_key, size_bytes, content_hash),
+        ).fetchone()
         assert row is not None
         return dict(row)
