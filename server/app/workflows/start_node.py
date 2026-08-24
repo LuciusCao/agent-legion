@@ -70,6 +70,14 @@ def ensure_start_node(
         raise WorkflowDefinitionError(
             f"Start node {start_key} must have at least one outgoing edge"
         )
+    # A start node never executes, so a ``when`` artifact referenced by a
+    # conditional outgoing edge can never exist: the edge would never be
+    # selected and the whole branch would be marked not_applicable. Reject
+    # the condition at load time instead of silently running nothing.
+    if any(edge.source == start_key and edge.condition is not None for edge in edges):
+        raise WorkflowDefinitionError(
+            f"Start node {start_key} must not have conditional outgoing edges"
+        )
     return nodes, edges
 
 

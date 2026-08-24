@@ -93,6 +93,25 @@ def test_start_without_outgoing_edge_is_rejected() -> None:
         )
 
 
+def test_start_with_conditional_outgoing_edge_is_rejected() -> None:
+    # Start never executes, so a ``when`` artifact can never exist; the
+    # conditional edge would silently mark the whole branch not_applicable.
+    with pytest.raises(WorkflowDefinitionError, match="conditional outgoing edges"):
+        _definition(
+            {
+                "_start": _start_node(),
+                "intake": {"capability": "intake"},
+            },
+            [
+                {
+                    "from": "_start",
+                    "to": "intake",
+                    "when": {"artifact": "a.json", "path": "$.ok", "equals": True},
+                }
+            ],
+        )
+
+
 @pytest.mark.parametrize("field", ["capability", "execution", "shard", "reduce", "terminal"])
 def test_start_must_not_declare_execution_fields(field: str) -> None:
     value: Any = (
