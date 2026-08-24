@@ -39,7 +39,7 @@ source_kind / intake mode 才能提交任务。这带来三个问题：
 | D9 | by_knowledge | 退役；只接受精确 ID 列表，一条目一 job 一实体成为不变量 |
 | D10 | connector | = external_connection（配置）+ 首节点拉取代码（逻辑），不新增实体类型；连接声明方向（source/sink），用户不选 connector，由 workflow 绑定 |
 | D11 | 产物治理 | 不在本文档范围：打包整体重设计见 Issue #120 |
-| D12 | 产物存储 | job 产物与材料统一走对象存储；job_dir 仅为执行暂存与本地缓存 |
+| D12 | 产物存储 | job 产物与材料统一走对象存储；job_dir 仅为执行暂存与本地缓存（已落地，#160 / schema v54，§6.5） |
 | D13 | 存储路径 | 无 filesystem fallback，只走 S3 API；开发机共享一个 RustFS，按 worktree 派生 bucket |
 | D14 | demo seed | 示例 workflow 同步迁移：示例材料随 demo workspace 播种，example_intake 改读材料输入 |
 
@@ -253,18 +253,43 @@ remote worker 的 presigned URL 用 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`
 
 ### 6.5 job 产物统一进对象存储（D12）
 
-材料与产物是同一种东西的两端——都是「workflow 要读写的字节」。统一存储后：
+**已落地（#160，schema v54）**。材料与产物是同一种东西的两端——都是
+「workflow 要读写的字节」。统一存储后：
 
 - **job_dir 降级为执行暂存**：沙箱 `--cwd` 语义不变，节点照常写 job_dir；
-  节点/job 完成时由执行面（Host 或 Worker）把产物上传对象存储
-  （key 前缀按 `workspace/job/` 组织）。本地 job_dir 成为可淘汰缓存，
+  节点完成时由执行面把产物上传对象存储（key 布局
+  `jobs/{workspace_id}/{job_id}/{name}`，`job_artifacts` 表为权威清单）。
+  本地 job_dir 成为可淘汰缓存：淘汰只删 `job_artifacts` 已确认的文件、
+  只限 completed 且无活跃 lease 的 job，容量配置
+  `AGENT_LEGION_JOB_CACHE_MAX_BYTES`（默认 50 GiB，对照材料缓存先例）。
   体积治理从「给文件系统打补丁」变成「给缓存配容量」。
-- **remote worker 的产物回传与材料下发走同一条 S3 通道**，不再有
-  「产物怎么从 worker 回 host」的独立协议。
+- **上传时机与失败语义（#160 决策）**：节点完成即传（增量持久化）；
+  上传失败不 fail 节点——本地副本保留，后台 reconciler 补传；S3 未配置
+  时全特性惰性关闭。产物清单维持节点声明制（`outputs`），不做全量上传。
+- **remote worker 的产物回传与材料下发走同一条 S3 通道**（presigned
+  PUT/GET 随 claim 注入，Host HEAD 核验后登记并落盘 job_dir），不再有
+  「产物怎么从 worker 回 host」的独立协议；`/api/artifacts` 的本地 CAS
+  路径保留供旧 Worker 与 legacy blob 读取，标注 deprecated。
 - 产物进对象存储后，打包重设计（#120，§10）的「选择性打包部分
   artifacts」就是「按清单从 bucket 取文件生成 zip」，天然成立。
-- 迁移期兼容：老 job 的产物仍在本地 job_dir，读路径按「对象存储优先、
-  本地回退」解析，不搬历史数据。
+- 迁移期兼容：老 job 的产物仍在本地 job_dir，读路径按「本地缓存命中
+  直读、缺失回退对象存储」解析，不搬历史数据。例外是 quality
+  artifact_contents：刻意 manifest-first，直接读对象存储的持久化记录
+  （回退 legacy CAS），不读本地 job_dir，保证质量评审反映落盘权威副本。
+
+评审修复后的加固语义（#162）：
+
+- 淘汰守卫收紧：除 size 匹配外，清单行带 content_hash 时复核本地
+  sha256 一致才认证；每个 job 首次 unlink 前重查 job 仍为 completed
+  且无 active lease。
+- presign PUT/GET 过期时间按节点 timeout 派生
+  （`max(3600, timeout_seconds + 900)`，缺省 600），只在 claim 时内存态
+  注入，不进日志/DB；Host HEAD 核验含体积上限（实例设置
+  `agent_workers.max_archive_bytes`）；cancelled 结果的部分产物经 Host
+  流式 sha256 核验后登记。
+- Worker 直传失败（或 spec 畸形）清 `artifact_uploads` 后回落 CAS
+  通道；本地 rerun 沙箱运行前把缺失的声明输入从对象存储回填
+  （`server/app/executors/artifact_restore.py`，hash 校验、逐文件容错）。
 
 ### 6.6 可平行迁移到 Amazon S3
 
@@ -358,8 +383,10 @@ Host 沙箱 allow-read 碰巧含 `examples/`（Worker 上根本不存在该目�
 
 - 产物统一进对象存储（§6.5）后，选择性打包 = 按清单从 bucket 取文件
   生成 zip，出站回传 = sink 节点直读产物 key，两者都不依赖本地 job_dir；
-- 材料侧 TTL 仍属本文档范围：bucket lifecycle + `materials.expires_at`，
-  引用计数为 0 才物理删除；
+- 材料侧 TTL（已随 #160 落地）：实例设置 `materials_ttl_days`（默认 0
+  关闭）→ complete 写 `materials.expires_at` → sweeper 到期翻 `expired`、
+  引用计数为 0 且过 grace 才物理删除；bucket lifecycle 为孤儿兜底
+  （运维细节见 docs/materials-storage-deployment.md）；
 - job_dir 作为可淘汰缓存配容量上限即可，历史 job 产物全量保留的问题
   随产物上云自然消解；本地存量在 #120 落地前手动清理。
 

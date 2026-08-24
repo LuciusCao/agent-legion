@@ -1,3 +1,4 @@
+import io
 import json
 import zipfile
 
@@ -148,6 +149,86 @@ def test_workspace_package_includes_only_whitelisted_artifacts(tmp_path):
         assert manifest["jobs"][0]["id"] == "job_1"
         assert manifest["jobs"][0]["source_id"] == "S1"
         assert manifest["jobs"][0]["workflow_key"] == "demo_workflow"
+
+
+def test_workspace_package_streams_object_storage_artifacts(tmp_path):
+    """D12 fallback: object bytes stream into the zip (no whole-object read)."""
+
+    class _FakeObjectStore:
+        enabled = True
+
+        def __init__(self, payload: bytes) -> None:
+            self._payload = payload
+
+        def lookup(self, job_id: str, name: str) -> dict:
+            return {"storage_key": f"jobs/ws/{job_id}/{name}"}
+
+        def open_stream(self, row: dict) -> io.BytesIO:
+            return io.BytesIO(self._payload)
+
+    jobs_dir = tmp_path / "jobs"
+    packages_dir = tmp_path / "packages"
+    # 3 MiB：跨越 1 MiB 拷贝块边界；job_dir 不存在，走对象存储回退。
+    payload = b"streamed-artifact" * 200000
+    jobs = [
+        {
+            "id": "job_1",
+            "source_id": "S1",
+            "workflow_key": "demo_workflow",
+            "status": "completed",
+            "storage_dir": "",
+        }
+    ]
+
+    package_path, job_count = create_workspace_package(
+        jobs, packages_dir, jobs_dir, object_store=_FakeObjectStore(payload)
+    )
+
+    assert job_count == 1
+    with zipfile.ZipFile(package_path) as zf:
+        assert zf.read("job_1/result.json") == payload
+
+
+def test_workspace_package_skips_missing_object_entries(tmp_path):
+    """对象缺失/读取失败时跳过该条目（log warning），打包整体成功。"""
+
+    class _FakeObjectStore:
+        enabled = True
+
+        def lookup(self, job_id: str, name: str) -> dict:
+            return {"storage_key": f"jobs/ws/{job_id}/{name}"}
+
+        def open_stream(self, row: dict) -> io.BytesIO:
+            if row["storage_key"].endswith("bad.json"):
+                raise RuntimeError("NoSuchKey")
+            return io.BytesIO(b"good-bytes")
+
+    jobs_dir = tmp_path / "jobs"
+    packages_dir = tmp_path / "packages"
+    jobs = [
+        {
+            "id": "job_1",
+            "source_id": "S1",
+            "workflow_key": "demo_workflow",
+            "status": "completed",
+            "storage_dir": "",
+        }
+    ]
+
+    package_path, job_count = create_workspace_package(
+        jobs,
+        packages_dir,
+        jobs_dir,
+        artifact_names=["good.json", "bad.json"],
+        object_store=_FakeObjectStore(),
+    )
+
+    assert package_path.exists()
+    assert job_count == 1
+    with zipfile.ZipFile(package_path) as zf:
+        names = set(zf.namelist())
+        assert "job_1/good.json" in names
+        assert "job_1/bad.json" not in names
 
 
 def test_workspace_package_explicit_artifact_names(tmp_path):

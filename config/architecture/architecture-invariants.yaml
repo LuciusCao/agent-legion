@@ -997,6 +997,39 @@ invariants:
         target: tests/services/test_run_payload.py
         gate: quick
 
+  - id: EXEC-ARTIFACT-STORE-001
+    statement: "The durable copy of every declared job artifact lives in the instance object store under jobs/{workspace_id}/{job_id}/{name} with job_artifacts (schema v54) as the authoritative manifest; the local job_dir is execution staging plus an evictable cache — eviction (AGENT_LEGION_JOB_CACHE_MAX_BYTES, server/app/services/job_artifact_maintenance.py) only ever unlinks a file whose manifest row exists, whose recorded size still matches the local file, and whose content_hash (when the row carries one) re-verifies against the local sha256; immediately before each job's first unlink it re-checks that the job is still completed with no active lease. Read paths (JobArtifactService, artifact listing, workspace packages) resolve local-cache-first with an object-storage fallback so legacy jobs that were never uploaded keep working without data migration; quality artifact_contents is a deliberate manifest-first exception (server/app/services/quality_artifact_contents.py) that reads the persisted object-storage record and never the local job_dir, so quality review reflects the durable record. Worker uploads never write the authority key directly: they PUT to a per-execution jobs-staging/{workspace_id}/{job_id}/{execution_id}/{name} key and the Host promotes server-side after verification, so a stale Worker's late PUT cannot overwrite the authority copy."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_agent_completion_remote.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_job_artifacts_schema.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_job_artifact_maintenance.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_agent_claim_artifact_channel.py
+        gate: quick
+
+  - id: EXEC-ARTIFACT-WORKER-001
+    statement: "Worker artifact transfer shares the materials S3 channel instead of a dedicated return protocol: the Host injects presigned PUT specs (artifact_uploads) and presigned GET input refs into the claim manifest (memory-only on the code path — presigned URLs live only in the claim-time manifest, are never persisted to DB or logged, and their expiry is derived from the node timeout as max(3600, timeout_seconds + 900); worker-side error messages scrub the URL to the exception type name), the Worker streams outputs straight to the object store and reports {storage_key, size_bytes, content_hash} refs, and the Host HEAD-verifies every ref — including a size cap (instance setting agent_workers.max_archive_bytes) — before recording it and staging the bytes into the job_dir; partial artifacts of cancelled results are recorded only after a Host-side streaming sha256 verification (must equal the worker-reported hash; an empty hash records the Host-computed value). result.tar.gz no longer embeds artifact bytes on this path. Both directions stay compatible with the legacy content-addressed /api/artifacts protocol (mixed ref forms accepted; missing artifact_uploads falls back to the CAS upload), and no new return protocol may be introduced."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/workers/test_artifact_object_channel.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifact_inject.py
+        gate: quick
+      - kind: contract
+        target: tests/routes/test_agent_worker_result_metadata.py
+        gate: quick
+
   - id: EXEC-WORKFLOW-START-001
     statement: "Every workflow definition carries exactly one start node (type: start) holding the entry contract accepted_item_types; the loader injects a synthetic accept-all start pointing at the implicit roots when none is declared, so legacy definitions keep their readiness behavior. The start node never executes: it is excluded from job_nodes seeds, node-config resolution, publish code-resolution checks and allowed_nodes, and the scheduler treats it as definitionally completed. Its edges are constrained at load time: no incoming edges, at least one outgoing edge, and no conditional outgoing edges (a when artifact can never exist). RunService.create_run rejects items of unaccepted types with InvalidOperationError before any write."
     owner: workspace-executor

@@ -485,6 +485,8 @@ def execute_code(
             expected_outputs=tuple(str(name) for name in manifest.get("expected_outputs", [])),
             command=tuple(command),
             code_result=outcome,
+            # #160 D12：直传 S3 的上传规格（空 = 旧 CAS 通道）。
+            artifact_uploads=dict(manifest.get("artifact_uploads") or {}),
         )
     finally:
         if proc is not None and proc.poll() is None:
@@ -514,9 +516,13 @@ def prepare_code_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[st
     auth_failure = str(outcome.get("auth_failure_connection") or "").strip()
     if auth_failure:
         metadata["auth_failure_connection"] = auth_failure
+    # #160 D12：直传判定与 upload_queue._bulk_transfer 一致；直传时产物不
+    # 内嵌归档（字节走 presigned PUT），node.log 照常携带。
+    direct = bool(task.artifact_uploads) and all(name in task.artifact_uploads for name in outputs)
     with tarfile.open(archive, "w:gz") as tar:
-        for name in outputs:
-            tar.add(job_dir / PurePosixPath(name), arcname=name)
+        if not direct:
+            for name in outputs:
+                tar.add(job_dir / PurePosixPath(name), arcname=name)
         node_log = task.execution_dir / CODE_RESULT_LOG_MEMBER
         if node_log.is_file():
             tar.add(node_log, arcname=CODE_RESULT_LOG_MEMBER)

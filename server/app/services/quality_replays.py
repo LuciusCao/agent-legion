@@ -31,7 +31,7 @@ from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.services.node_config_batch import frozen_node_config, run_frozen_payload
-from server.app.services.quality_labels import artifact_contents
+from server.app.services.quality_artifact_contents import artifact_contents
 from server.app.services.versioned_entities import VersionedEntityStore
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.storage_paths import resolve_job_dir
@@ -50,9 +50,15 @@ _REPLAY_COLUMNS = (
 
 
 class QualityReplayService:
-    def __init__(self, job_db: JobQueries, artifact_store: ArtifactStore | None = None) -> None:
+    def __init__(
+        self,
+        job_db: JobQueries,
+        artifact_store: ArtifactStore | None = None,
+        object_store: Any = None,
+    ) -> None:
         self.job_db = job_db
         self.artifact_store = artifact_store
+        self.object_store = object_store
 
     @property
     def db_path(self) -> str:
@@ -164,7 +170,9 @@ class QualityReplayService:
         return {
             "replay": replay,
             "labels": [dict(label) for label in labels],
-            "artifacts": artifact_contents(self.artifact_store, replay["replay_job_id"], node_key),
+            "artifacts": artifact_contents(
+                self.artifact_store, replay["replay_job_id"], node_key, self.object_store
+            ),
             "input_artifacts": self._input_artifacts(replay["replay_job_id"], node_key),
         }
 
@@ -450,11 +458,18 @@ class QualityReplayService:
 
     def _input_artifacts(self, replay_job_id: str, node_key: str) -> list[dict[str, Any]]:
         """Frozen upstream inputs shared with the copy job (comparison aid)."""
-        if self.artifact_store is None or not replay_job_id:
+        if not replay_job_id:
             return []
-        upstream = {
-            str(ref["node_key"]) for ref in self.artifact_store.refs_for_job(replay_job_id)
-        } - {node_key}
+        upstream: set[str] = set()
+        if self.artifact_store is not None:
+            upstream = {
+                str(ref["node_key"]) for ref in self.artifact_store.refs_for_job(replay_job_id)
+            }
+        if self.object_store is not None and self.object_store.enabled:
+            upstream |= {
+                str(row["node_key"]) for row in self.object_store.rows_for_job(replay_job_id)
+            }
+        upstream -= {node_key}
         if not upstream:
             return []
-        return artifact_contents(self.artifact_store, replay_job_id, upstream)
+        return artifact_contents(self.artifact_store, replay_job_id, upstream, self.object_store)

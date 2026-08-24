@@ -33,14 +33,8 @@ def _json(raw) -> dict:
     return json.loads(str(raw))
 
 
-def test_schema_v53_recorded() -> None:
-    assert SCHEMA_VERSION == 53
-    with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute(
-            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
-        ).fetchone()
-    assert row is not None
-    assert row["name"] == "runs"
+# The latest-migration record pin (SCHEMA_VERSION + recorded name) moved to
+# tests/db/test_job_artifacts_schema.py (v54).
 
 
 def test_runs_baseline_shape() -> None:
@@ -244,7 +238,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "runs"
+    assert migration["name"] == "job_artifacts"
 
 
 @pytest.mark.fresh_schema

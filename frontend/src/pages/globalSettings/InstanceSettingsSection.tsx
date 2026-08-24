@@ -40,6 +40,7 @@ function toFormValues(doc: InstanceSettingsResponse): FormValues {
     sweeper_enabled: doc.sweeper_enabled,
     sweeper_interval_seconds: String(doc.sweeper_interval_seconds),
     code_capacity: String(doc.code_capacity),
+    materials_ttl_days: String(doc.materials_ttl_days),
     'workflows.enabled': doc.workflows.enabled,
     'agent_workers.max_archive_bytes': String(
       doc.agent_workers.max_archive_bytes
@@ -55,12 +56,21 @@ function parseNumber(values: FormValues, path: string): number {
   const def = fieldDef(path)
   const raw = String(values[path] ?? '').trim()
   const parsed = Number(raw)
-  if (!raw || !Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error(`${def.label} 必须是大于 0 的数字`)
+  if (
+    !raw ||
+    !Number.isFinite(parsed) ||
+    parsed < 0 ||
+    (!def.allowZero && parsed === 0)
+  ) {
+    throw new Error(
+      `${def.label} 必须是${def.allowZero ? '非负' : '大于 0 的'}数字`
+    )
   }
   const value = def.integer ? Math.round(parsed) : parsed
-  if (def.integer && value < 1) {
-    throw new Error(`${def.label} 必须是不小于 1 的整数`)
+  if (def.integer && value < (def.allowZero ? 0 : 1)) {
+    throw new Error(
+      `${def.label} 必须是${def.allowZero ? '非负整数' : '不小于 1 的整数'}`
+    )
   }
   return value
 }
@@ -94,6 +104,7 @@ function buildPayload(values: FormValues): InstanceSettingsUpdate {
     sweeper_enabled: Boolean(values.sweeper_enabled),
     sweeper_interval_seconds: parseNumber(values, 'sweeper_interval_seconds'),
     code_capacity: parseNumber(values, 'code_capacity'),
+    materials_ttl_days: parseNumber(values, 'materials_ttl_days'),
     workflows: { enabled: Boolean(values['workflows.enabled']) },
     agent_workers: {
       max_archive_bytes: parseNumber(values, 'agent_workers.max_archive_bytes'),
@@ -167,6 +178,7 @@ function InstanceSettingsEditor({
                 className={styles.currencyInput}
                 type="number"
                 min="0"
+                max={field.max}
                 step={field.integer ? '1' : 'any'}
                 value={String(values[field.path] ?? '')}
                 onChange={(e) =>
@@ -176,6 +188,7 @@ function InstanceSettingsEditor({
                   }))
                 }
               />
+              {field.hint && <span className={styles.hint}>{field.hint}</span>}
             </div>
           ))}
           {group.toggles.map((toggle) => (

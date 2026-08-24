@@ -1,10 +1,12 @@
 """Database-backed storage for the instance-level settings document.
 
 Instance-level tunables (cleanup/monitoring policy, lease/heartbeat/sweeper
-timing, agent worker limits, workflows feature gate) are product settings:
-they live only in the ``global_settings`` table under the ``instance`` key
-and are edited through the admin API; no yaml fallback exists
-(config/app.yaml and the workflow.yaml runtime sections are retired).
+timing, agent worker limits, workflows feature gate, materials TTL) are
+product settings: they live only in the ``global_settings`` table under the
+``instance`` key and are edited through the admin API; no yaml fallback
+exists (config/app.yaml and the workflow.yaml runtime sections are retired).
+Most values hydrate into Settings at startup; ``materials_ttl_days`` is read
+fresh from this document at material completion/sweep time instead.
 """
 
 from __future__ import annotations

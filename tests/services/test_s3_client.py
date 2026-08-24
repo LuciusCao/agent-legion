@@ -50,6 +50,27 @@ def test_presign_uses_public_endpoint_when_configured() -> None:
     assert storage._client.meta.endpoint_url == _INTERNAL
 
 
+def test_copy_object_uses_bucket_scoped_copy_source() -> None:
+    """Server-side copy (Worker staging → authority key) stays in-bucket."""
+    calls: list[dict] = []
+
+    class _FakeBoto:
+        def copy_object(self, **kwargs: object) -> None:
+            calls.append(kwargs)
+
+    storage = S3StorageClient(_settings(), client=_FakeBoto())
+
+    storage.copy_object("jobs-staging/w/j/e/out.json", "jobs/w/j/out.json")
+
+    assert calls == [
+        {
+            "Bucket": "materials-test",
+            "CopySource": {"Bucket": "materials-test", "Key": "jobs-staging/w/j/e/out.json"},
+            "Key": "jobs/w/j/out.json",
+        }
+    ]
+
+
 def test_presign_signature_is_present_on_public_urls() -> None:
     storage = S3StorageClient(_settings(public_endpoint_url=_PUBLIC))
 
@@ -57,3 +78,17 @@ def test_presign_signature_is_present_on_public_urls() -> None:
 
     # SigV2 (old botocore) signs with "Signature=", SigV4 with "X-Amz-Signature=".
     assert "Signature=" in url
+
+
+def test_data_plane_client_has_bounded_timeouts_and_no_botocore_retries() -> None:
+    """A storage outage must not park a code-pool lease slot for minutes:
+    bounded connect/read timeouts, and botocore retries stay off — the
+    upload path retries with its own bound (job_artifact_objects)."""
+    storage = S3StorageClient(_settings())
+
+    config = storage._client.meta.config
+
+    assert config.connect_timeout == 10
+    assert config.read_timeout == 120
+    # botocore normalizes max_attempts=1 (one retry) to total_max_attempts.
+    assert config.retries["total_max_attempts"] == 2

@@ -36,6 +36,7 @@ from typing import Any
 from worker import upload_heartbeat
 from worker._atomic import atomic_write
 from worker._retry import run_with_retry
+from worker.artifact_upload import DirectUploadError, upload_artifact_direct
 from worker.host_transfer import HostRequestError
 from worker.runtime_controls import MAX_DYNAMIC_CONCURRENCY
 from worker.upload_prepare import prepare_result, write_empty_archive
@@ -48,6 +49,28 @@ _RETRY_BASE_SECONDS = 2.0
 _RETRY_CAP_SECONDS = 60.0
 MAX_ERROR_MESSAGE_CHARS = 4000
 _HEARTBEAT_JOIN_SECONDS = 5.0
+
+
+def _failed_metadata(task: UploadTask, error_message: str) -> dict[str, Any]:
+    # failed 上报的统一载荷（prepare 失败 / CAS 4xx 终态共用）。
+    return {
+        "status": "failed",
+        "exit_code": 1,
+        "error_message": error_message[:MAX_ERROR_MESSAGE_CHARS],
+        "command": list(task.command),
+        "output_artifacts": {},
+    }
+
+
+def _prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
+    # prepare_result + 失败降级为 failed 上报；直传回落后按清空的
+    # artifact_uploads 重跑，tar 随之内嵌产物。
+    try:
+        return prepare_result(task)
+    except Exception as exc:
+        archive = task.execution_dir / "result.tar.gz"
+        write_empty_archive(archive)
+        return _failed_metadata(task, f"result preparation failed: {exc}"), archive, []
 
 
 @dataclass
@@ -72,6 +95,11 @@ class UploadTask:
     expected_outputs: tuple[str, ...] = ()
     command: tuple[str, ...] = ()
     prebuilt_metadata: dict[str, Any] | None = None
+    # #160 D12: claim manifest 的 artifact_uploads（name → {storage_key, url}
+    # presigned PUT）。非空时产物直传 S3、result.tar.gz 不再内嵌产物；
+    # 空 = 旧通道（CAS POST + tar 内嵌）。不持久化：presigned URL 会过期，
+    # 崩溃恢复的任务从 bulk 车道重进时走旧通道（Host 两种形态都收）。
+    artifact_uploads: dict[str, Any] = field(default_factory=dict)
     heartbeat_stop: threading.Event = field(default_factory=threading.Event)
     heartbeat_thread: threading.Thread | None = None
     # bulk 车道产物，交给 report 车道；运行时状态，不持久化——崩溃恢复的任务
@@ -238,38 +266,47 @@ class UploadQueue:
             return False  # never started; marker intact for the next startup
         self._status.set_phase(task.execution_id, "uploading")
         job_dir = task.execution_dir / "job"
-        try:
-            metadata, archive, outputs = prepare_result(task)
-        except Exception as exc:
-            metadata = {
-                "status": "failed",
-                "exit_code": 1,
-                "error_message": f"result preparation failed: {exc}"[:MAX_ERROR_MESSAGE_CHARS],
-                "command": list(task.command),
-                "output_artifacts": {},
-            }
-            archive = task.execution_dir / "result.tar.gz"
-            write_empty_archive(archive)
-            outputs = []
-        uploaded: dict[str, str] = {}
-        for name in outputs:
-            try:
-                ref = self._upload_with_retry(job_dir / PurePosixPath(name))
-            except HostRequestError as exc:
-                # Terminal 4xx on the artifact itself: report the run failed
-                # instead of looping forever on a verdict that cannot change.
-                metadata = {
-                    "status": "failed",
-                    "exit_code": 1,
-                    "error_message": str(exc)[:MAX_ERROR_MESSAGE_CHARS],
-                    "command": list(task.command),
-                    "output_artifacts": {},
-                }
-                uploaded = {}
+        metadata, archive, outputs = _prepare_or_failed(task)
+        # #160 D12：manifest 带 artifact_uploads 且每个产出都有上传规格时走
+        # 直传 S3 通道；否则整体回落旧通道（CAS POST + tar 内嵌，tar 已在
+        # prepare_result 按同一条件决定是否内嵌）。
+        direct = bool(task.artifact_uploads) and all(
+            name in task.artifact_uploads for name in outputs
+        )
+        while True:
+            uploaded: dict[str, Any] = {}
+            restart = False
+            for name in outputs:
+                try:
+                    if direct:
+                        ref = upload_artifact_direct(
+                            job_dir / PurePosixPath(name),
+                            task.artifact_uploads[name],
+                            stop=self._stop,
+                        )
+                    else:
+                        ref = self._upload_with_retry(job_dir / PurePosixPath(name))
+                except DirectUploadError as exc:
+                    # 直传失败（4xx / 重试耗尽 / 规格畸形）不判 run failed：清掉
+                    # 上传规格重跑 prepare（tar 自动内嵌产物），重启循环走无限
+                    # 重试的 CAS 通道，与无规格任务同一语义。
+                    print(f"direct upload failed for {task.execution_id}: {exc}", flush=True)
+                    task.artifact_uploads = {}
+                    metadata, archive, outputs = _prepare_or_failed(task)
+                    direct = False
+                    restart = True
+                    break
+                except HostRequestError as exc:
+                    # Terminal 4xx on the artifact itself: report the run failed
+                    # instead of looping forever on a verdict that cannot change.
+                    metadata = _failed_metadata(task, str(exc))
+                    uploaded = {}
+                    break
+                if ref is None:
+                    return False  # shutting down mid-upload; marker stays for restore
+                uploaded[name] = ref
+            if not restart:
                 break
-            if ref is None:
-                return False  # shutting down mid-upload; marker stays for restore
-            uploaded[name] = ref
         metadata["output_artifacts"] = uploaded
         task.prepared_metadata = metadata
         task.prepared_archive = archive

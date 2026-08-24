@@ -3,7 +3,8 @@
 Materials hold browser-upload metadata; bytes live in the instance
 S3-compatible object store. (workspace_id, content_hash) dedups uploads via a
 partial unique index over declared hashes ('' rows never collide). The
-latest-migration record pin moved to tests/db/test_runs_migration.py (v53).
+latest-migration record pin moved to tests/db/test_job_artifacts_schema.py
+(v54).
 """
 
 from __future__ import annotations

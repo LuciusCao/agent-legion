@@ -32,10 +32,14 @@ class JobQueryService:
         job_db: JobQueries,
         settings: Settings,
         workspace_executor_config: WorkspaceExecutorConfigurationService,
+        object_store: Any = None,
     ):
         self.job_db = job_db
         self.settings = settings
         self.workspace_executor_config = workspace_executor_config
+        # D12: artifact listing is the local job_dir ∪ the object-storage
+        # manifest (evicted cache entries stay listed).
+        self.object_store = object_store
 
     def _job_or_404(self, job_id: str) -> dict[str, Any]:
         job = self.job_db.get_job(job_id)
@@ -49,6 +53,13 @@ class JobQueryService:
         return definition_from_job_snapshot(job) or require_workspace_active_definition(
             self.job_db, str(job["workspace_id"]), str(job["workflow_key"])
         )
+
+    def _artifact_names(self, job: dict[str, Any]) -> list[str]:
+        names = set(artifact_names(job, self.settings))
+        # enabled 门控：实例摘掉存储配置后清单里的名字读不到，不再列出。
+        if self.object_store is not None and self.object_store.enabled:
+            names |= self.object_store.names_for_job(str(job["id"]))
+        return sorted(names)
 
     def _job_summary(
         self,
@@ -154,7 +165,7 @@ class JobQueryService:
                 resolve_record_paths(run, self.settings.data_dir, _RUN_PATH_FIELDS)
                 for run in self.job_db.list_node_runs(job_id)
             ],
-            "artifacts": artifact_names(job, self.settings),
+            "artifacts": self._artifact_names(job),
         }
 
     def workspace_runs(
