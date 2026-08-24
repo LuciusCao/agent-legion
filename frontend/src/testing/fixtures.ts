@@ -19,19 +19,12 @@ export function createMockAgentsState(
 
 export function createMockUiState(partial: Partial<UiState> = {}): UiState {
   return {
-    addDialogOpen: false,
-    addContentType: 'knowledge',
-    addDialogContext: 'workspace',
-    addDialogWorkspaceId: undefined,
     workspacePackageDialogOpen: false,
     tokenUsageDialogOpen: false,
     toast: null,
     pageTitle: null,
     pageSubtitle: null,
     detailPageActions: null,
-    openAddDialog: vi.fn(),
-    closeAddDialog: vi.fn(),
-    setAddContentType: vi.fn(),
     setWorkspacePackageDialogOpen: vi.fn(),
     setTokenUsageDialogOpen: vi.fn(),
     showToast: vi.fn(),

@@ -109,10 +109,9 @@ Then in the console:
    LLM endpoint serves.
 3. Enable automatic scheduling for the workspace and claiming in the Worker
    console.
-4. Submit a batch: `POST /api/workspaces/{id}/job-batches` with
-   `{"workflow_key": "education_video_problems_generation",
-   "source_kind": "direct_ids", "knowledge_point_ids": ["triangle-area"]}`
-   — or use the intake UI.
+4. Submit items through the workspace console's **添加条目** (add) panel:
+   upload the knowledge-point markdown as materials (one material becomes one
+   job), or paste external IDs bound to a configured connection.
 5. Watch the DAG light up in real time, and inspect each node's trace and
    artifacts when it finishes.
 

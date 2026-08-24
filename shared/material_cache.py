@@ -6,9 +6,11 @@ materializes it into a local cache directory that is statically allow-read
 in the sandbox (MATERIAL-ACCESS-001). Both execution sides share the exact
 same cache rules via this module:
 
-- layout: ``{cache_root}/{address[:2]}/{address}/{filename}`` where
-  ``address`` is the material's content hash (falling back to its id), so
-  repeated jobs over the same content download once;
+- layout: ``{cache_root}/{address[:2]}/{address}`` where ``address`` is
+  the material's content hash (falling back to its id) — the address
+  itself is the file name, so content addressing dedups naturally and
+  the original filename never shapes the cache (it stays available in
+  the runtime material block for display/identity use);
 - a hit is returned as-is (mtime refreshed for the LRU);
 - a miss streams the bytes into a unique sibling temp file and atomically
   renames it into place, so concurrent materializers (processes or threads)
@@ -62,24 +64,17 @@ def cache_max_bytes() -> int:
     return DEFAULT_CACHE_MAX_BYTES
 
 
-def _safe_filename(filename: str) -> str:
-    """Basename-only cache member name; never a path segment sequence."""
-    name = Path(str(filename)).name.strip()
-    return name or "blob"
-
-
-def cache_file_path(cache_root: Path, address: str, filename: str) -> Path:
+def cache_file_path(cache_root: Path, address: str) -> Path:
     """The deterministic cache location for one addressed material."""
     address = str(address).strip()
     if not address:
         raise MaterializeError("material cache address is empty")
-    return Path(cache_root) / address[:2] / address / _safe_filename(filename)
+    return Path(cache_root) / address[:2] / address
 
 
 def materialize_stream(
     cache_root: Path,
     address: str,
-    filename: str,
     stream_factory: Callable[[], BinaryIO],
     *,
     expected_sha256: str = "",
@@ -100,7 +95,7 @@ def materialize_stream(
     back to the caller always exists — even when it alone exceeds the byte
     budget (the budget is a target, not a hard ceiling for one material).
     """
-    final = cache_file_path(cache_root, address, filename)
+    final = cache_file_path(cache_root, address)
     if final.is_file():
         # Refresh the LRU clock; a vanished file between the check and the
         # touch just skips the refresh.

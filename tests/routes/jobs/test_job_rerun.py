@@ -1,13 +1,18 @@
 from server.app.storage_paths import resolve_job_dir
+from tests.helpers import publish_legacy_intake_revision
 from tests.helpers.auth import authenticate_client
 
 
 def _create_workspace(
     client, name="default", default_workflow_key="education_video_problems_generation"
 ):
-    return client.post(
+    workspace_id = client.post(
         "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
     ).json()["workspace"]["id"]
+    # The demo workflow no longer declares intake modes (#154); these tests
+    # post job-batches, so publish the legacy-intake variant.
+    publish_legacy_intake_revision(client.app.state.job_db, workspace_id)
+    return workspace_id
 
 
 def test_rerun_node_marks_downstream_stale(tmp_path):
@@ -100,6 +105,7 @@ def test_batch_rerun_skips_not_found_and_running_jobs(tmp_path):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
@@ -222,6 +228,7 @@ def test_rerun_node_errors(tmp_path):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
@@ -254,6 +261,7 @@ def test_rerun_node_rejects_running_job(tmp_path):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
@@ -290,6 +298,7 @@ def test_rerun_node_cleanup_failed(tmp_path, monkeypatch):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
@@ -324,6 +333,7 @@ def test_rerun_node_mark_for_rerun_value_error(tmp_path, monkeypatch):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
@@ -387,6 +397,7 @@ def test_batch_rerun_node_not_found_for_one_job(tmp_path):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
@@ -427,6 +438,7 @@ def test_batch_rerun_mixed_node_availability(tmp_path):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
@@ -478,6 +490,7 @@ def test_batch_rerun_request_order_preserved(tmp_path):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
@@ -517,6 +530,7 @@ def test_rerun_node_rejects_active_lease(tmp_path):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
@@ -573,6 +587,7 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
@@ -630,6 +645,7 @@ def test_rerun_node_rollback_on_db_failure(tmp_path, monkeypatch):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={

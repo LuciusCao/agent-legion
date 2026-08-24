@@ -99,7 +99,7 @@ def test_runtime_block_materializes_and_hits_cache(
     assert block["content_type"] == "text/plain"
     assert block["content_hash"] == HASH
     path = Path(block["path"])
-    assert path == tmp_path / HASH[:2] / HASH / "notes.txt"
+    assert path == tmp_path / HASH[:2] / HASH
     assert path.read_bytes() == PAYLOAD
     assert storage.opened == 1
 

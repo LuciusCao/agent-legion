@@ -32,22 +32,22 @@ def _stream(payload: bytes = PAYLOAD) -> io.BytesIO:
 
 def test_miss_downloads_into_content_addressed_path(tmp_path: Path) -> None:
     path = materialize_stream(
-        tmp_path, HASH, "notes.txt", _stream, expected_sha256=HASH, expected_size=len(PAYLOAD)
+        tmp_path, HASH, _stream, expected_sha256=HASH, expected_size=len(PAYLOAD)
     )
 
-    assert path == tmp_path / HASH[:2] / HASH / "notes.txt"
+    assert path == tmp_path / HASH[:2] / HASH
     assert path.read_bytes() == PAYLOAD
 
 
 def test_hit_skips_the_stream_and_refreshes_mtime(tmp_path: Path) -> None:
-    path = materialize_stream(tmp_path, HASH, "notes.txt", _stream, expected_sha256=HASH)
+    path = materialize_stream(tmp_path, HASH, _stream, expected_sha256=HASH)
     old = time.time() - 3600
     os.utime(path, (old, old))
 
     def _forbidden() -> io.BytesIO:
         raise AssertionError("cache hit must not open the stream")
 
-    again = materialize_stream(tmp_path, HASH, "notes.txt", _forbidden, expected_sha256=HASH)
+    again = materialize_stream(tmp_path, HASH, _forbidden, expected_sha256=HASH)
 
     assert again == path
     assert time.time() - path.stat().st_mtime < 60
@@ -55,29 +55,21 @@ def test_hit_skips_the_stream_and_refreshes_mtime(tmp_path: Path) -> None:
 
 def test_hash_mismatch_raises_and_caches_nothing(tmp_path: Path) -> None:
     with pytest.raises(MaterializeError, match="sha256"):
-        materialize_stream(
-            tmp_path, HASH, "notes.txt", lambda: _stream(b"tampered"), expected_sha256=HASH
-        )
+        materialize_stream(tmp_path, HASH, lambda: _stream(b"tampered"), expected_sha256=HASH)
 
-    assert not (tmp_path / HASH[:2] / HASH / "notes.txt").exists()
+    assert not (tmp_path / HASH[:2] / HASH).exists()
     # 临时文件不残留。
     assert list(tmp_path.rglob("*.part")) == []
 
 
 def test_size_mismatch_raises(tmp_path: Path) -> None:
     with pytest.raises(MaterializeError, match="size"):
-        materialize_stream(tmp_path, HASH, "notes.txt", _stream, expected_size=len(PAYLOAD) + 1)
-
-
-def test_filename_is_sanitized_to_a_basename(tmp_path: Path) -> None:
-    path = cache_file_path(tmp_path, HASH, "../../etc/passwd")
-    assert path == tmp_path / HASH[:2] / HASH / "passwd"
-    assert cache_file_path(tmp_path, HASH, "").name == "blob"
+        materialize_stream(tmp_path, HASH, _stream, expected_size=len(PAYLOAD) + 1)
 
 
 def test_empty_address_rejected(tmp_path: Path) -> None:
     with pytest.raises(MaterializeError, match="address"):
-        cache_file_path(tmp_path, "  ", "notes.txt")
+        cache_file_path(tmp_path, "  ")
 
 
 def test_concurrent_materializers_converge_on_one_file(tmp_path: Path) -> None:
@@ -97,9 +89,7 @@ def test_concurrent_materializers_converge_on_one_file(tmp_path: Path) -> None:
 
     def _worker() -> None:
         try:
-            results.append(
-                materialize_stream(tmp_path, HASH, "notes.txt", _slow_stream, expected_sha256=HASH)
-            )
+            results.append(materialize_stream(tmp_path, HASH, _slow_stream, expected_sha256=HASH))
         except BaseException as exc:  # noqa: BLE001 - 汇聚后统一断言
             errors.append(exc)
 
@@ -111,7 +101,7 @@ def test_concurrent_materializers_converge_on_one_file(tmp_path: Path) -> None:
 
     assert not errors
     assert len(results) == 8
-    final = tmp_path / HASH[:2] / HASH / "notes.txt"
+    final = tmp_path / HASH[:2] / HASH
     assert all(path == final for path in results)
     assert final.read_bytes() == PAYLOAD
     assert list(tmp_path.rglob("*.part")) == []
@@ -122,9 +112,7 @@ def test_eviction_removes_oldest_first(tmp_path: Path) -> None:
     for index in range(4):
         payload = f"payload-{index}".encode() * 10
         digest = hashlib.sha256(payload).hexdigest()
-        path = materialize_stream(
-            tmp_path, digest, f"file-{index}.bin", lambda p=payload: _stream(p)
-        )
+        path = materialize_stream(tmp_path, digest, lambda p=payload: _stream(p))
         # 手动拉开 mtime：index 越小越旧。
         mtime = time.time() - (100 - index)
         os.utime(path, (mtime, mtime))
@@ -143,9 +131,7 @@ def test_eviction_removes_oldest_first(tmp_path: Path) -> None:
 
 def test_materialize_pins_the_fresh_file_against_its_own_eviction(tmp_path: Path) -> None:
     # 单个材料大于容量上限时，物化后回收不得删掉刚写入的文件。
-    path = materialize_stream(
-        tmp_path, HASH, "notes.txt", _stream, expected_sha256=HASH, max_bytes=1
-    )
+    path = materialize_stream(tmp_path, HASH, _stream, expected_sha256=HASH, max_bytes=1)
 
     assert path.exists()
     assert path.read_bytes() == PAYLOAD
@@ -155,13 +141,13 @@ def test_materialize_pins_the_fresh_file_against_its_own_eviction(tmp_path: Path
 def test_materialize_eviction_keeps_pin_but_evicts_older_entries(tmp_path: Path) -> None:
     old_payload = b"old" * 10
     old_digest = hashlib.sha256(old_payload).hexdigest()
-    old_path = materialize_stream(tmp_path, old_digest, "old.bin", lambda: _stream(old_payload))
+    old_path = materialize_stream(tmp_path, old_digest, lambda: _stream(old_payload))
     mtime = time.time() - 3600
     os.utime(old_path, (mtime, mtime))
 
     # 容量装不下两个文件：旧文件被回收，新文件（pin）即使超预算也保留。
     new_path = materialize_stream(
-        tmp_path, HASH, "notes.txt", _stream, expected_sha256=HASH, max_bytes=len(PAYLOAD)
+        tmp_path, HASH, _stream, expected_sha256=HASH, max_bytes=len(PAYLOAD)
     )
 
     assert not old_path.exists()
@@ -170,12 +156,10 @@ def test_materialize_eviction_keeps_pin_but_evicts_older_entries(tmp_path: Path)
 
 
 def test_eviction_never_unlinks_pinned_paths(tmp_path: Path) -> None:
-    first = materialize_stream(tmp_path, HASH, "notes.txt", _stream, expected_sha256=HASH)
+    first = materialize_stream(tmp_path, HASH, _stream, expected_sha256=HASH)
     second_payload = b"second" * 50
     second_digest = hashlib.sha256(second_payload).hexdigest()
-    second = materialize_stream(
-        tmp_path, second_digest, "second.bin", lambda: _stream(second_payload)
-    )
+    second = materialize_stream(tmp_path, second_digest, lambda: _stream(second_payload))
     mtime = time.time() - 3600
     os.utime(first, (mtime, mtime))
 
@@ -187,7 +171,7 @@ def test_eviction_never_unlinks_pinned_paths(tmp_path: Path) -> None:
 
 
 def test_eviction_failure_only_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    path = materialize_stream(tmp_path, HASH, "notes.txt", _stream)
+    path = materialize_stream(tmp_path, HASH, _stream)
     warnings: list[str] = []
 
     def _failing_unlink(self: Path, missing_ok: bool = False) -> None:  # noqa: ARG001

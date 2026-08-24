@@ -1,3 +1,4 @@
+from tests.helpers import publish_legacy_intake_revision
 from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -71,6 +72,9 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
             json={"name": "Other", "default_workflow_key": "education_video_problems_generation"},
         )
         other_id = other_response.json()["workspace"]["id"]
+        # The demo workflow no longer declares intake modes (#154); this test
+        # posts job-batches, so publish the legacy-intake variant.
+        publish_legacy_intake_revision(c.app.state.job_db, workspace_id)
         created = c.post(
             f"/api/workspaces/{workspace_id}/job-batches",
             json={
@@ -143,6 +147,7 @@ def test_delete_workspace_rejects_when_jobs_running(tmp_path):
             },
         ).json()
         ws_id = ws["workspace"]["id"]
+        publish_legacy_intake_revision(c.app.state.job_db, ws_id)
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
@@ -176,6 +181,7 @@ def test_delete_workspace_cascades_and_returns_deleted_id(tmp_path):
             },
         ).json()
         ws_id = ws["workspace"]["id"]
+        publish_legacy_intake_revision(c.app.state.job_db, ws_id)
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={

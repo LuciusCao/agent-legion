@@ -12,7 +12,7 @@ from server.app.scheduler_wakeup import (
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from tests.helpers import load_builtin_definition
+from tests.helpers import load_demo_legacy_intake_definition
 from tests.postgres_support import TEST_DATABASE_URL
 from tests.workers.helpers import RecordingExecutor, _make_worker
 
@@ -75,7 +75,9 @@ def _create_workspace_with_revision(job_db, settings):
     workspace = job_db.create_workspace(
         "default", default_workflow_key="education_video_problems_generation"
     )
-    definition = load_builtin_definition("education_video_problems_generation")
+    # The demo workflow no longer declares intake modes (#154); these tests
+    # exercise the job-batches intake service, so seed the legacy variant.
+    definition = load_demo_legacy_intake_definition()
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     return workspace
 

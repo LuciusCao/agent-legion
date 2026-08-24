@@ -307,15 +307,21 @@ class QualityReplayService:
             "title": f"Quality replay of {job['title'] or job['id']}",
             "stem": str(job["stem"] or ""),
         }
-        copy_job = self.job_db.create_jobs_bulk(
-            candidates=[candidate],
-            workflow_key=workflow_key,
-            run_id=str(batch["id"]),
-            node_keys=list(definition.nodes),
-            workspace_id=workspace_id,
-            revision=revision,
-            frozen_config={node.key: frozen} if frozen is not None else {},
-        )[0]
+        try:
+            copy_job = self.job_db.create_jobs_bulk(
+                candidates=[candidate],
+                workflow_key=workflow_key,
+                run_id=str(batch["id"]),
+                node_keys=list(definition.nodes),
+                workspace_id=workspace_id,
+                revision=revision,
+                frozen_config={node.key: frozen} if frozen is not None else {},
+            )[0]
+        except Exception:
+            # create_run committed before create_jobs_bulk ran; compensate the
+            # orphaned run row like the items/sync-intake paths do.
+            self._discard_empty_run(str(batch["id"]))
+            raise
         copy_job_id = str(copy_job["id"])
         try:
             self._copy_frozen_inputs(job, copy_job, node)
@@ -327,6 +333,9 @@ class QualityReplayService:
                     conn, copy_job_id, completed_nodes=ancestors, skipped_nodes=downstream
                 )
         except Exception:
+            # Best-effort: the not-exists guard keeps the run once the copy
+            # job exists, so this only cleans up if job creation rolled back.
+            self._discard_empty_run(str(batch["id"]))
             # Never leave a fully-pending copy job behind: the scheduler would
             # run the whole workflow. Fail it so it drops out of the scan.
             with write_transaction(self.db_path) as conn:
@@ -339,6 +348,14 @@ class QualityReplayService:
                 )
             raise
         return copy_job_id
+
+    def _discard_empty_run(self, run_id: str) -> None:
+        # Best-effort cleanup of the run row after copy-job creation failed;
+        # never mask the original failure.
+        try:
+            self.job_db.delete_run_without_jobs(run_id)
+        except Exception:
+            logger.warning("run %s left orphaned after replay setup failed", run_id)
 
     def _copy_frozen_inputs(
         self, job: dict[str, Any], copy_job: dict[str, Any], node: WorkflowNode

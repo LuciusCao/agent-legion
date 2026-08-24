@@ -2,15 +2,20 @@ import json
 from pathlib import Path
 
 from server.app.storage_paths import resolve_job_dir
+from tests.helpers import publish_legacy_intake_revision
 from tests.helpers.auth import authenticate_client
 
 
 def _create_workspace(
     client, name="default", default_workflow_key="education_video_problems_generation"
 ):
-    return client.post(
+    workspace_id = client.post(
         "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
     ).json()["workspace"]["id"]
+    # The demo workflow no longer declares intake modes (#154); these tests
+    # post job-batches, so publish the legacy-intake variant.
+    publish_legacy_intake_revision(client.app.state.job_db, workspace_id)
+    return workspace_id
 
 
 def test_get_job_detail_and_artifact_when_enabled(tmp_path):
@@ -320,6 +325,7 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path):
                 "default_workflow_key": "education_video_problems_generation",
             },
         ).json()["workspace"]["id"]
+        publish_legacy_intake_revision(c.app.state.job_db, ws_id)
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
@@ -370,6 +376,7 @@ def test_get_job_run_log_returns_redacted_tail(tmp_path):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
@@ -411,6 +418,7 @@ def test_get_job_run_log_returns_404_for_missing_run(tmp_path):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
@@ -436,6 +444,7 @@ def test_get_job_run_log_rejects_escape(tmp_path):
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
@@ -479,6 +488,7 @@ def test_job_detail_includes_node_inputs_outputs(tmp_path):
             "/api/workspaces",
             json={"name": "WS", "default_workflow_key": "education_video_problems_generation"},
         )
+        publish_legacy_intake_revision(c.app.state.job_db, "ws")
         batch = c.post(
             "/api/workspaces/ws/job-batches",
             json={

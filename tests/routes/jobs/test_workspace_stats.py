@@ -1,9 +1,16 @@
+from tests.helpers import publish_legacy_intake_revision
+
+
 def _create_workspace(
     client, name="default", default_workflow_key="education_video_problems_generation"
 ):
-    return client.post(
+    workspace_id = client.post(
         "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
     ).json()["workspace"]["id"]
+    # The demo workflow no longer declares intake modes (#154); these tests
+    # post job-batches, so publish the legacy-intake variant.
+    publish_legacy_intake_revision(client.app.state.job_db, workspace_id)
+    return workspace_id
 
 
 def test_workspace_stats_hidden_when_workflows_disabled(client_factory):
@@ -22,6 +29,7 @@ def test_workspace_stats_returns_counts_and_executor_status(client_factory):
             },
         ).json()
         ws_id = ws["workspace"]["id"]
+        publish_legacy_intake_revision(c.app.state.job_db, ws_id)
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
@@ -55,6 +63,7 @@ def test_workspace_stats_code_pool_reflects_leases(client_factory):
             },
         ).json()
         ws_id = ws["workspace"]["id"]
+        publish_legacy_intake_revision(c.app.state.job_db, ws_id)
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
