@@ -6,6 +6,7 @@ folded into the monolithic instance settings document). Admin-only: this is
 where agent command lines enter the system.
 """
 
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
@@ -17,7 +18,9 @@ from server.app.routes.studio_agents_admin_contracts import (
     StudioAgentRegistryUpdate,
 )
 from server.app.studio_chat.availability import AgentAvailabilityProbe
-from server.app.studio_chat.registry import StudioAgentRegistryStore
+from server.app.studio_chat.registry import StudioAgentRegistryStore, api_base_host_is_internal
+
+logger = logging.getLogger(__name__)
 
 
 def create_studio_agents_admin_router(job_db: JobQueries) -> APIRouter:
@@ -44,6 +47,15 @@ def create_studio_agents_admin_router(job_db: JobQueries) -> APIRouter:
         _admin: Annotated[dict[str, Any], Depends(require_admin)],
     ) -> StudioAgentRegistryResponse:
         document = payload.model_dump()
+        # api_base is the egress target for per-session scoped tokens (#158):
+        # an external host is allowed (remote deployments) but loud, because a
+        # misconfiguration here leaks tokens outside the network.
+        if not api_base_host_is_internal(str(document["api_base"])):
+            logger.warning(
+                "studio agent registry api_base points outside the internal network: %s "
+                "(scoped session tokens will be sent to this host)",
+                document["api_base"],
+            )
         store.put(document)
         return _response(document)
 

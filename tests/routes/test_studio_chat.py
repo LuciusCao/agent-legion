@@ -366,3 +366,41 @@ def test_create_session_with_unknown_agent_is_400(client, tmp_path) -> None:
         f"/api/workspaces/{workspace_id}/studio-chat/sessions", json={"agent_id": "nope"}
     )
     assert response.status_code == 400
+
+
+def test_scoped_token_reads_are_bound_to_session_workspace(client, tmp_path) -> None:
+    """#158: a workspace-bound run token may read its own workspace's chat
+    data but gets 403 on any other workspace the initiating user can see."""
+    script_path = _register_fake_agent(client, tmp_path)
+    workspace_a = _create_workspace(client, "WS A")
+    workspace_b = _create_workspace(client, "WS B")
+    session_id = _create_session(client, workspace_a)
+    url_a = _session_url(workspace_a, session_id)
+    try:
+        sink = [
+            json.loads(line)
+            for line in Path(str(script_path) + ".sink.jsonl").read_text().splitlines()
+        ]
+        new_session = next(
+            e["received"] for e in sink if e.get("received", {}).get("method") == "session/new"
+        )
+        headers = {
+            item["name"]: item["value"]
+            for item in new_session["params"]["mcpServers"][0]["headers"]
+        }
+        scoped = {"Authorization": headers["Authorization"]}
+        base_a = f"/api/workspaces/{workspace_a}/studio-chat"
+        assert client.get(f"{base_a}/sessions", headers=scoped).status_code == 200
+        assert client.get(url_a, headers=scoped).status_code == 200
+        assert client.get(f"{url_a}/messages", headers=scoped).status_code == 200
+        base_b = f"/api/workspaces/{workspace_b}/studio-chat"
+        assert client.get(f"{base_b}/sessions", headers=scoped).status_code == 403
+        assert client.get(_session_url(workspace_b, session_id), headers=scoped).status_code == 403
+        assert (
+            client.get(
+                _session_url(workspace_b, session_id) + "/messages", headers=scoped
+            ).status_code
+            == 403
+        )
+    finally:
+        client.delete(url_a)

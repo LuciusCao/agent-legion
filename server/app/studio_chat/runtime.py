@@ -35,6 +35,10 @@ class SessionRuntime:
         self.token = token
         self.lock = threading.Lock()
         self.pending_permissions: dict[str, PendingPermission] = {}
+        # Set under lock by teardown before the pending-permission settle
+        # sweep: a permission request that parks afterwards (it takes the same
+        # lock) denies immediately instead of hanging to the timeout (#158).
+        self.closed = False
         # Streaming chunk coalescing (agent text + thought): each kind folds
         # into one message row per turn; the slots are reset at turn START
         # (send_message), so trailing chunks of a finished turn still fold
@@ -49,18 +53,31 @@ def teardown_runtime(
     runtimes_lock: threading.Lock,
     session_id: str,
     runtime: SessionRuntime | None,
+    *,
+    close_handle: bool = True,
 ) -> None:
-    """Deny pending permissions, stop the subprocess, revoke the token."""
+    """Deny pending permissions, stop the subprocess, revoke the token.
+
+    close_handle=False is for the agent-death path (#158): _on_exit runs on
+    the ACP thread itself, where handle.close()'s thread join would deadlock
+    (self-join) — the subprocess is already gone, so only the registry entry,
+    pending permissions, and the token need cleanup.
+    """
     with runtimes_lock:
         current = runtimes.pop(session_id, None)
     runtime = current if current is not None else runtime
     if runtime is None:
         return
     with runtime.lock:
-        for pending in runtime.pending_permissions.values():
+        runtime.closed = True
+        # Pop each waiter so a respond racing the settle finds the request
+        # gone (dict membership is the not-yet-settled criterion, #158).
+        while runtime.pending_permissions:
+            _request_id, pending = runtime.pending_permissions.popitem()
             pending.decision = {"deny": True}
             pending.event.set()
-    runtime.handle.close()
+    if close_handle:
+        runtime.handle.close()
     try:
         revoke_scoped_token(db, runtime.token)
     except Exception:

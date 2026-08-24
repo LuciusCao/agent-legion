@@ -18,6 +18,9 @@ _SESSION_COLUMNS = (
     " selected_node_key, error_detail, created_at, updated_at, closed_at"
 )
 
+# Advisory-lock key serializing session creation against the active cap.
+_CAP_LOCK_KEY = "studio_chat_session_cap"
+
 
 def _session_record(row: Any) -> dict[str, Any]:
     record = dict(row)
@@ -25,18 +28,75 @@ def _session_record(row: Any) -> dict[str, Any]:
     return record
 
 
+def _build_session_updates(fields: dict[str, Any]) -> dict[str, Any]:
+    """Whitelist + serialize caller-supplied session fields for UPDATE."""
+    allowed = {
+        "title",
+        "status",
+        "acp_session_id",
+        "allow_all_permissions",
+        "mcp_status",
+        "selected_node_key",
+        "error_detail",
+        "closed_at",
+    }
+    updates: dict[str, Any] = {}
+    for key, value in fields.items():
+        if key == "capability_snapshot":
+            updates["capability_snapshot_json"] = json.dumps(value)
+        elif key in allowed:
+            updates[key] = value
+        else:
+            raise ValueError(f"unsupported studio chat session field: {key}")
+    return updates
+
+
 class StudioChatQueriesMixin(StudioChatMessageQueriesMixin):
     """CRUD for studio_chat_sessions (messages via the inherited mixin)."""
 
-    def create_studio_chat_session(self, workspace_id: str, user_id: str, agent_id: str) -> str:
+    def create_studio_chat_session(
+        self, workspace_id: str, user_id: str, agent_id: str, *, max_active: int | None = None
+    ) -> str | None:
+        """Insert a session row; with ``max_active``, None when the cap is hit.
+
+        The cap check and the INSERT share one transaction under a
+        transaction-scoped advisory lock (#158): a plain count-then-insert
+        would let concurrent creators all observe a below-cap count and each
+        spawn an agent subprocess.
+        """
         session_id = uuid4().hex
         with self.connect() as conn:
+            if max_active is not None:
+                conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (_CAP_LOCK_KEY,))
+                row = conn.execute(
+                    "select count(*) as n from studio_chat_sessions"
+                    " where status in ('starting', 'idle', 'running', 'awaiting_permission')",
+                ).fetchone()
+                if row is not None and int(row["n"]) >= max_active:
+                    return None
             conn.execute(
                 "insert into studio_chat_sessions(id, workspace_id, user_id, agent_id)"
                 " values (%s, %s, %s, %s)",
                 (session_id, workspace_id, user_id, agent_id),
             )
         return session_id
+
+    def reap_zombie_studio_chat_sessions(self) -> int:
+        """Mark leftover live-status rows as error; returns the reaped count.
+
+        Sessions are in-process only: after a crash or restart their runtimes
+        are gone, so starting/idle/running/awaiting_permission rows are
+        zombies that would otherwise count against the active-session cap
+        forever (#158 review). Runs once at backend startup; idempotent.
+        """
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "update studio_chat_sessions set status='error',"
+                " error_detail='backend restarted before the session ended',"
+                " updated_at=current_timestamp"
+                " where status in ('starting', 'idle', 'running', 'awaiting_permission')",
+            )
+            return cursor.rowcount
 
     def get_studio_chat_session(self, session_id: str) -> dict[str, Any] | None:
         with self._connect_read() as conn:
@@ -57,24 +117,7 @@ class StudioChatQueriesMixin(StudioChatMessageQueriesMixin):
 
     def update_studio_chat_session(self, session_id: str, **fields: Any) -> None:
         """Update whitelisted session columns; capability_snapshot is serialized here."""
-        allowed = {
-            "title",
-            "status",
-            "acp_session_id",
-            "allow_all_permissions",
-            "mcp_status",
-            "selected_node_key",
-            "error_detail",
-            "closed_at",
-        }
-        updates: dict[str, Any] = {}
-        for key, value in fields.items():
-            if key == "capability_snapshot":
-                updates["capability_snapshot_json"] = json.dumps(value)
-            elif key in allowed:
-                updates[key] = value
-            else:
-                raise ValueError(f"unsupported studio chat session field: {key}")
+        updates = _build_session_updates(fields)
         if not updates:
             return
         assignments = ", ".join(f"{key}=%s" for key in updates)
@@ -84,6 +127,43 @@ class StudioChatQueriesMixin(StudioChatMessageQueriesMixin):
                 " updated_at=current_timestamp where id=%s",
                 (*updates.values(), session_id),
             )
+
+    def update_studio_chat_session_if(
+        self,
+        session_id: str,
+        *,
+        status_in: tuple[str, ...] | None = None,
+        status_not_in: tuple[str, ...] | None = None,
+        **fields: Any,
+    ) -> bool:
+        """Guarded update: apply only while the current status matches (#158).
+
+        The status predicate rides the same UPDATE (atomic check-and-set), so
+        a concurrent close/error transition landing between a caller's read
+        and this write cannot be overwritten back to a live state. Returns
+        True when a row was actually updated.
+        """
+        updates = _build_session_updates(fields)
+        if not updates:
+            return False
+        assignments = ", ".join(f"{key}=%s" for key in updates)
+        clauses = ["id=%s"]
+        params: list[Any] = [*updates.values(), session_id]
+        if status_in:
+            placeholders = ",".join("%s" for _ in status_in)
+            clauses.append(f"status in ({placeholders})")
+            params.extend(status_in)
+        if status_not_in:
+            placeholders = ",".join("%s" for _ in status_not_in)
+            clauses.append(f"status not in ({placeholders})")
+            params.extend(status_not_in)
+        with self.connect() as conn:
+            row = conn.execute(
+                f"update studio_chat_sessions set {assignments},"
+                f" updated_at=current_timestamp where {' and '.join(clauses)} returning id",
+                tuple(params),
+            ).fetchone()
+        return row is not None
 
     def claim_studio_chat_turn(self, session_id: str) -> bool:
         """Atomically move a session idle -> running; False when not idle.

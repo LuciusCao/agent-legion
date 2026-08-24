@@ -19,6 +19,7 @@ token and enforces the workspace binding.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
 import anyio
 from mcp.server.fastmcp import FastMCP
@@ -70,17 +71,28 @@ class _ScopedTokenAuthApp:
         await self._app(scope, receive, send)
 
 
-def create_studio_mcp_http_app(job_db: JobQueries, api_base: str) -> tuple[FastMCP, ASGIApp]:
+def create_studio_mcp_http_app(
+    job_db: JobQueries, api_base_resolver: Callable[[], str]
+) -> tuple[FastMCP, ASGIApp]:
     """Build the mountable MCP app. The returned FastMCP instance must have
     its session manager run inside the host app's lifespan (mounted sub-app
     lifespans do not propagate). The session manager is single-use, so a
     lifespan re-entry must rebuild the pair — mount a StudioMcpRelay and swap
-    the app in on every entry instead of mounting this app directly."""
+    the app in on every entry instead of mounting this app directly.
 
-    def resolve_config() -> McpServerConfig:
+    ``api_base_resolver`` is consulted per request (#158): freezing the
+    registry's api_base at lifespan while chat sessions read it fresh at
+    create time leaves the loopback and the injected MCP URL pointing at
+    different backends after an admin registry edit. The resolver may do
+    blocking I/O (registry DB read): it is awaited via ``anyio.to_thread``
+    so the uvicorn event loop never stalls on it.
+    """
+
+    async def resolve_config() -> McpServerConfig:
         request = mcp.get_context().request_context.request
         if request is None:
             raise RuntimeError("studio MCP HTTP transport has no active request")
+        api_base = await anyio.to_thread.run_sync(api_base_resolver)
         return McpServerConfig.from_headers(request.headers, api_base=api_base)
 
     mcp = create_mcp_server(resolve_config)
