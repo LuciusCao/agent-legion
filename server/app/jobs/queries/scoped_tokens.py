@@ -36,9 +36,8 @@ class ScopedTokenQueriesMixin(JobQueriesBase):
     def get_scoped_token_user(self, token_hash: str) -> dict[str, Any] | None:
         """Resolve a scoped token digest to its user row plus scope, or None.
 
-        Fixed TTL: unlike sessions there is no sliding expiry. Returns None for
-        unknown, revoked, or expired tokens and for users disabled since the
-        token was minted.
+        Returns None for unknown, revoked, or expired tokens and for users
+        disabled since the token was minted.
         """
         with self._connect_read() as conn:
             row = conn.execute(
@@ -63,4 +62,21 @@ class ScopedTokenQueriesMixin(JobQueriesBase):
                 "update auth_scoped_tokens set revoked_at=current_timestamp"
                 " where token_hash=%s and revoked_at is null",
                 (token_hash,),
+            )
+
+    def extend_scoped_token_expiry(
+        self, token_hash: str, new_expires_at: datetime, if_expiring_before: datetime
+    ) -> None:
+        """Slide a live token's expiry forward, only when it is close to expiry.
+
+        Single conditional UPDATE: a revoked token stays revoked, and a token
+        with more life than ``if_expiring_before`` is left untouched (#158 —
+        long studio chat sessions renew at turn start instead of dying mid-
+        conversation at the fixed TTL).
+        """
+        with self.connect() as conn:
+            conn.execute(
+                "update auth_scoped_tokens set expires_at=%s"
+                " where token_hash=%s and revoked_at is null and expires_at < %s",
+                (new_expires_at, token_hash, if_expiring_before),
             )

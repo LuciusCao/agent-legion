@@ -24,7 +24,11 @@ import threading
 from datetime import UTC, datetime
 from typing import Any
 
-from server.app.auth.scoped_tokens import mint_scoped_token, revoke_scoped_token
+from server.app.auth.scoped_tokens import (
+    mint_scoped_token,
+    renew_scoped_token,
+    revoke_scoped_token,
+)
 from server.app.events.bus import EventBus
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
@@ -52,6 +56,12 @@ logger = logging.getLogger(__name__)
 
 # Time to wait for the agent subprocess to finish initialize + session/new.
 SESSION_START_TIMEOUT_SECONDS = 60
+
+# Global cap on live chat sessions (#158): every session owns an agent
+# subprocess, a dedicated thread/event loop, and a minted scoped token, so
+# unbounded creation is a resource-DoS surface. Closed/errored sessions do
+# not count; the check re-reads the DB at create time.
+MAX_ACTIVE_STUDIO_CHAT_SESSIONS = 32
 
 
 def studio_chat_channel(session_id: str) -> str:
@@ -104,6 +114,11 @@ class StudioChatService:
     def create_session(self, workspace_id: str, user_id: str, agent_id: str) -> dict[str, Any]:
         if self._shutdown:
             raise ConflictError("Studio chat service is shutting down")
+        if self._db.count_active_studio_chat_sessions() >= MAX_ACTIVE_STUDIO_CHAT_SESSIONS:
+            raise ConflictError(
+                f"Too many active studio chat sessions (limit {MAX_ACTIVE_STUDIO_CHAT_SESSIONS});"
+                " close an existing session first"
+            )
         agent = self._registry.find_agent(agent_id)
         if agent is None:
             raise InvalidOperationError(f"Unknown studio agent: {agent_id}")
@@ -144,10 +159,12 @@ class StudioChatService:
                 raise InvalidOperationError(f"Studio agent failed to start: {detail}")
         except Exception as exc:
             # One cleanup path for every startup failure: no half-applied
-            # 'starting' row, no leaked token, no orphaned runtime.
+            # 'starting' row, no leaked token, no orphaned runtime. The status
+            # write is guarded (#158): a close that raced the startup window
+            # already owns the final 'closed' state.
             detail = str(exc) or exc.__class__.__name__
-            self._db.update_studio_chat_session(
-                session_id, status="error", error_detail=detail[:500]
+            self._db.update_studio_chat_session_if(
+                session_id, status_not_in=("closed",), status="error", error_detail=detail[:500]
             )
             if runtime is None:
                 # The handle never materialized: nothing to tear down, but a
@@ -193,8 +210,17 @@ class StudioChatService:
         self._publish_session(session_id)
         return self.get_session(session_id)
 
-    def _teardown_runtime(self, session_id: str, runtime: SessionRuntime | None) -> None:
-        teardown_runtime(self._db, self._runtimes, self._runtimes_lock, session_id, runtime)
+    def _teardown_runtime(
+        self, session_id: str, runtime: SessionRuntime | None, *, close_handle: bool = True
+    ) -> None:
+        teardown_runtime(
+            self._db,
+            self._runtimes,
+            self._runtimes_lock,
+            session_id,
+            runtime,
+            close_handle=close_handle,
+        )
 
     # -- messaging ---------------------------------------------------------
 
@@ -214,6 +240,10 @@ class StudioChatService:
             if status == "closed":
                 raise ConflictError("Chat session is closed")
             raise ConflictError(f"Chat session is busy ({status})")
+        # Token renewal at turn start (#158): chat sessions outlive the fixed
+        # scoped-token TTL and the agent's MCP headers cannot be re-pointed
+        # mid-session, so a still-live token near expiry is slid forward.
+        renew_scoped_token(self._db, runtime.token)
         # New turn, new stream rows: reset the coalescing slots at turn START
         # (not at turn end) so trailing chunks of the finished turn — the ACP
         # SDK can deliver them after turn_end — keep folding into that turn's
@@ -224,7 +254,10 @@ class StudioChatService:
         self._publish_session(session_id)
         prompt_text = (STUDIO_AUTHORING_BOOTSTRAP + text) if first_prompt else text
         if not runtime.handle.send_prompt(prompt_text):
-            self._db.update_studio_chat_session(session_id, status="error")
+            # Guarded (#158): a close racing this turn owns the final state.
+            self._db.update_studio_chat_session_if(
+                session_id, status_not_in=("closed",), status="error"
+            )
             raise ConflictError("Chat session agent is not running")
         return message
 
@@ -241,8 +274,10 @@ class StudioChatService:
             with runtime.lock:
                 # A cancelled turn must not leave a permission prompt hanging:
                 # settle every pending request as denied before signalling the
-                # agent (AGENTS.md half-applied-state discipline).
-                for pending in runtime.pending_permissions.values():
+                # agent (AGENTS.md half-applied-state discipline). Pop each
+                # entry so a respond racing the cancel finds it gone (#158).
+                while runtime.pending_permissions:
+                    _request_id, pending = runtime.pending_permissions.popitem()
                     pending.decision = {"deny": True}
                     pending.event.set()
             runtime.handle.cancel()
@@ -282,22 +317,29 @@ class StudioChatService:
     ) -> None:
         self.get_session(session_id, workspace_id)
         runtime = self._runtime(session_id)
-        pending = runtime.pending_permissions.get(request_id) if runtime else None
-        if pending is None:
+        if runtime is None:
             raise NotFoundError("Permission request not found or already resolved")
-        pending.decision = {"deny": True} if deny else {"option_id": option_id}
-        pending.event.set()
+        with runtime.lock:
+            # Dict membership is the not-yet-settled criterion (#158): the
+            # timeout/teardown/cancel settlers pop under this same lock, so a
+            # respond that loses the race finds the request gone and 404s
+            # instead of writing an orphan decision and faking success.
+            pending = runtime.pending_permissions.pop(request_id, None)
+            if pending is None:
+                raise NotFoundError("Permission request not found or already resolved")
+            pending.decision = {"deny": True} if deny else {"option_id": option_id}
+            pending.event.set()
 
     # -- callbacks from the ACP session thread -----------------------------
 
     def _on_ready(self, session_id: str, capabilities: dict[str, Any], acp_session_id: str) -> None:
         # A close that raced the startup window already owns the final status;
-        # readiness must not resurrect a closed (or failed) session.
-        current = self._db.get_studio_chat_session(session_id) or {}
-        if current.get("status") in ("closed", "error"):
-            return
-        self._db.update_studio_chat_session(
+        # readiness must not resurrect a closed (or failed) session. The guard
+        # rides the UPDATE itself (#158): a re-read-then-write would leave a
+        # check-and-set window for close to land in between.
+        self._db.update_studio_chat_session_if(
             session_id,
+            status_not_in=("closed", "error"),
             status="idle",
             capability_snapshot=capabilities,
             acp_session_id=acp_session_id,
@@ -364,30 +406,44 @@ class StudioChatService:
         self._append_message(
             session_id, "status", "system", {"event": "turn_end", "stop_reason": stop_reason}
         )
-        current = self._db.get_studio_chat_session(session_id) or {}
-        if current.get("status") in ("running", "awaiting_permission"):
-            self._db.update_studio_chat_session(session_id, status="idle")
+        # Guarded (#158): turn_end only moves a live turn back to idle; a
+        # concurrent close/error owns the final state.
+        self._db.update_studio_chat_session_if(
+            session_id, status_in=("running", "awaiting_permission"), status="idle"
+        )
         self._publish_session(session_id)
 
     def _on_error(self, session_id: str, detail: str, *, fatal: bool) -> None:
         self._append_message(session_id, "status", "system", {"event": "error", "detail": detail})
-        current = self._db.get_studio_chat_session(session_id) or {}
-        if current.get("status") == "closed":
-            return
         if fatal:
-            self._db.update_studio_chat_session(
-                session_id, status="error", error_detail=detail[:500]
+            # Guarded (#158): a close owns the final 'closed' state. Runtime
+            # teardown happens in _on_exit, which the ACP thread always runs
+            # after this callback.
+            self._db.update_studio_chat_session_if(
+                session_id, status_not_in=("closed",), status="error", error_detail=detail[:500]
             )
-        elif current.get("status") in ("running", "awaiting_permission"):
-            self._db.update_studio_chat_session(session_id, status="idle")
+        else:
+            self._db.update_studio_chat_session_if(
+                session_id, status_in=("running", "awaiting_permission"), status="idle"
+            )
         self._publish_session(session_id)
 
     def _on_exit(self, session_id: str) -> None:
+        # Agent death teardown (#158): runs on the ACP thread itself, so the
+        # handle close must be skipped (self-join); the subprocess is already
+        # gone. Still pops the registry entry, settles parked permissions, and
+        # revokes the scoped token instead of leaving them to the TTL/timeout
+        # backstops. Idempotent: a close-initiated teardown already popped the
+        # runtime, making this a no-op.
+        self._teardown_runtime(session_id, self._runtime(session_id), close_handle=False)
         current = self._db.get_studio_chat_session(session_id) or {}
         if current.get("status") in ("closed", "error"):
             return
-        self._db.update_studio_chat_session(
-            session_id, status="error", error_detail="agent process exited"
+        self._db.update_studio_chat_session_if(
+            session_id,
+            status_not_in=("closed", "error"),
+            status="error",
+            error_detail="agent process exited",
         )
         self._append_message(
             session_id, "status", "system", {"event": "error", "detail": "agent process exited"}

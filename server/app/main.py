@@ -169,8 +169,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 artifact_gc_thread = ArtifactOrphanGcThread(artifact_store)
                 artifact_gc_thread.start()
         background_tasks.start(app)
+        studio_registry = StudioAgentRegistryStore(job_db.path)
         studio_mcp, studio_mcp_app = create_studio_mcp_http_app(
-            job_db, str(StudioAgentRegistryStore(job_db.path).get()["api_base"])
+            job_db, lambda: str(studio_registry.get()["api_base"])
         )
         studio_mcp_relay.set(studio_mcp_app)
         try:

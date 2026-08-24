@@ -203,13 +203,18 @@ class AcpSessionHandle:
 
     def _kill_process(self) -> None:
         with self._state_lock:
-            loop, process = self._loop, self._process
+            process = self._process
         # Re-validate identity and liveness right before the cross-process
         # action: only kill the child this handle spawned, only while alive.
-        if loop is None or process is None or process.returncode is not None:
+        if process is None or process.returncode is not None:
             return
+        # Kill synchronously (#158): routing process.kill through
+        # loop.call_soon_threadsafe never fires when the loop itself is
+        # wedged — exactly the case this escalation exists for — and the child
+        # would leak as an orphan. Process.kill() is a plain signal send and
+        # safe to issue off-loop.
         with contextlib.suppress(Exception):
-            loop.call_soon_threadsafe(process.kill)
+            process.kill()
 
     def _thread_main(self) -> None:
         try:

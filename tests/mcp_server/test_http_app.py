@@ -14,6 +14,7 @@ import json
 from server.app.auth.scoped_tokens import mint_scoped_token, revoke_scoped_token
 from server.app.mcp_server.config import SESSION_ID_HEADER
 from server.app.mcp_server.tool_client import ToolClient
+from server.app.studio_chat.registry import StudioAgentRegistryStore
 
 MCP_URL = "/api/studio-agent/mcp"
 
@@ -143,3 +144,33 @@ def test_tool_call_forwards_token_and_session_binding(client, job_db, monkeypatc
     assert content[0]["text"] == "ok"
     assert captured["authorization"] == f"Bearer {token}"
     assert captured["path"].endswith("/chat-sessions/sess-xyz/context")
+
+
+def test_loopback_api_base_follows_registry_edits(client, job_db, monkeypatch) -> None:
+    """#158: the loopback api_base resolves per request, so an admin registry
+    edit cannot split it from the URL injected into new chat sessions."""
+    token = _mint(job_db)
+    mcp_session = _open_session(client, token)
+
+    captured: dict = {}
+
+    async def fake_call(self, method: str, path: str, body=None) -> str:
+        captured["api_base"] = self._api_base
+        return "ok"
+
+    monkeypatch.setattr(ToolClient, "call", fake_call)
+    StudioAgentRegistryStore(job_db.path).put({"api_base": "http://10.0.0.9:9000", "agents": []})
+    response = _post(
+        client,
+        token,
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "get_studio_context", "arguments": {}},
+        },
+        session_id="sess-xyz",
+        mcp_session=mcp_session,
+    )
+    assert response.status_code == 200, response.text
+    assert captured["api_base"] == "http://10.0.0.9:9000"

@@ -25,6 +25,29 @@ def _session_record(row: Any) -> dict[str, Any]:
     return record
 
 
+def _build_session_updates(fields: dict[str, Any]) -> dict[str, Any]:
+    """Whitelist + serialize caller-supplied session fields for UPDATE."""
+    allowed = {
+        "title",
+        "status",
+        "acp_session_id",
+        "allow_all_permissions",
+        "mcp_status",
+        "selected_node_key",
+        "error_detail",
+        "closed_at",
+    }
+    updates: dict[str, Any] = {}
+    for key, value in fields.items():
+        if key == "capability_snapshot":
+            updates["capability_snapshot_json"] = json.dumps(value)
+        elif key in allowed:
+            updates[key] = value
+        else:
+            raise ValueError(f"unsupported studio chat session field: {key}")
+    return updates
+
+
 class StudioChatQueriesMixin(StudioChatMessageQueriesMixin):
     """CRUD for studio_chat_sessions (messages via the inherited mixin)."""
 
@@ -57,24 +80,7 @@ class StudioChatQueriesMixin(StudioChatMessageQueriesMixin):
 
     def update_studio_chat_session(self, session_id: str, **fields: Any) -> None:
         """Update whitelisted session columns; capability_snapshot is serialized here."""
-        allowed = {
-            "title",
-            "status",
-            "acp_session_id",
-            "allow_all_permissions",
-            "mcp_status",
-            "selected_node_key",
-            "error_detail",
-            "closed_at",
-        }
-        updates: dict[str, Any] = {}
-        for key, value in fields.items():
-            if key == "capability_snapshot":
-                updates["capability_snapshot_json"] = json.dumps(value)
-            elif key in allowed:
-                updates[key] = value
-            else:
-                raise ValueError(f"unsupported studio chat session field: {key}")
+        updates = _build_session_updates(fields)
         if not updates:
             return
         assignments = ", ".join(f"{key}=%s" for key in updates)
@@ -84,6 +90,52 @@ class StudioChatQueriesMixin(StudioChatMessageQueriesMixin):
                 " updated_at=current_timestamp where id=%s",
                 (*updates.values(), session_id),
             )
+
+    def update_studio_chat_session_if(
+        self,
+        session_id: str,
+        *,
+        status_in: tuple[str, ...] | None = None,
+        status_not_in: tuple[str, ...] | None = None,
+        **fields: Any,
+    ) -> bool:
+        """Guarded update: apply only while the current status matches (#158).
+
+        The status predicate rides the same UPDATE (atomic check-and-set), so
+        a concurrent close/error transition landing between a caller's read
+        and this write cannot be overwritten back to a live state. Returns
+        True when a row was actually updated.
+        """
+        updates = _build_session_updates(fields)
+        if not updates:
+            return False
+        assignments = ", ".join(f"{key}=%s" for key in updates)
+        clauses = ["id=%s"]
+        params: list[Any] = [*updates.values(), session_id]
+        if status_in:
+            placeholders = ",".join("%s" for _ in status_in)
+            clauses.append(f"status in ({placeholders})")
+            params.extend(status_in)
+        if status_not_in:
+            placeholders = ",".join("%s" for _ in status_not_in)
+            clauses.append(f"status not in ({placeholders})")
+            params.extend(status_not_in)
+        with self.connect() as conn:
+            row = conn.execute(
+                f"update studio_chat_sessions set {assignments},"
+                f" updated_at=current_timestamp where {' and '.join(clauses)} returning id",
+                tuple(params),
+            ).fetchone()
+        return row is not None
+
+    def count_active_studio_chat_sessions(self) -> int:
+        """Live sessions across all workspaces (spawn-cap accounting, #158)."""
+        with self._connect_read() as conn:
+            row = conn.execute(
+                "select count(*) as n from studio_chat_sessions"
+                " where status in ('starting', 'idle', 'running', 'awaiting_permission')",
+            ).fetchone()
+        return int(row["n"]) if row is not None else 0
 
     def claim_studio_chat_turn(self, session_id: str) -> bool:
         """Atomically move a session idle -> running; False when not idle.

@@ -114,3 +114,21 @@ def require_studio_agent_workspace(
     if bound and bound != workspace_id:
         raise HTTPException(status_code=403, detail="Scoped token bound to another workspace")
     return user
+
+
+def enforce_scoped_workspace_binding(
+    workspace_id: str,
+    user: Annotated[dict[str, Any], Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Read-side guard for mixed audiences (#158): full sessions pass through,
+    a workspace-bound scoped token may only read its own workspace.
+
+    The effecting surface refuses scoped tokens outright
+    (``reject_studio_agent_scope``); chat reads stay reachable for the agent's
+    own session, but without this check a leaked run token could read every
+    workspace the initiating user can see (messages and the SSE stream).
+    """
+    bound = user.get("scoped_workspace_id")
+    if bound and bound != workspace_id:
+        raise HTTPException(status_code=403, detail="Scoped token bound to another workspace")
+    return user
