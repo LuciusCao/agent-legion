@@ -5,6 +5,8 @@ export interface NumberFieldDef {
   path: string
   label: string
   integer: boolean
+  // 允许 0（语义为「关闭」的字段，如材料 TTL）；缺省要求 > 0。
+  allowZero?: boolean
 }
 
 export interface ToggleDef {
@@ -92,6 +94,18 @@ export const FIELD_GROUPS: FieldGroup[] = [
   {
     title: '代码池',
     fields: [{ path: 'code_capacity', label: 'code 池容量', integer: true }],
+    toggles: [],
+  },
+  {
+    title: '材料',
+    fields: [
+      {
+        path: 'materials_ttl_days',
+        label: '材料保留天数（0 关闭）',
+        integer: true,
+        allowZero: true,
+      },
+    ],
     toggles: [],
   },
   {

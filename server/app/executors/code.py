@@ -35,6 +35,7 @@ from server.app.executors.models import (
     ExecutionContext,
     ExecutionResult,
 )
+from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.storage import build_s3_storage
 from shared.material_cache import MATERIALS_CACHE_DIRNAME
 
@@ -83,6 +84,7 @@ class CodeExecutor:
         self._velites_path: str | None = None
         self._storage_probed = False
         self._object_storage: Any | None = None
+        self._artifact_objects: JobArtifactObjectStore | None = None
 
     def supports(self, capability: str) -> bool:
         # Single implicit code pool (P-0.5): the adapter runs any capability;
@@ -96,6 +98,41 @@ class CodeExecutor:
             self._storage_probed = True
             self._object_storage = build_s3_storage()
         return self._object_storage
+
+    def _artifact_object_store(self) -> JobArtifactObjectStore | None:
+        """Artifact upload service (D12); None without storage or a DB handle."""
+        if self._artifact_objects is None:
+            storage = self._object_store()
+            dsn = getattr(self.job_db, "path", None)
+            if storage is not None and dsn is not None:
+                self._artifact_objects = JobArtifactObjectStore(dsn, storage)
+        return self._artifact_objects
+
+    def _upload_artifacts(self, context: ExecutionContext, produced: tuple[str, ...]) -> None:
+        """Best-effort upload of produced artifacts (D12): a storage outage
+        never fails the node — the local copy stays and the maintenance
+        reconciler re-uploads later (EXEC-ARTIFACT-STORE-001)."""
+        store = self._artifact_object_store()
+        if store is None:
+            return
+        for name in produced:
+            try:
+                store.upload(
+                    workspace_id=str(context.workspace_id),
+                    job_id=str(context.job_id),
+                    node_key=str(context.node_key),
+                    name=name,
+                    local_path=context.job_dir / name,
+                )
+            except Exception:
+                logger.warning(
+                    "artifact upload failed for job %s node %s artifact %s; "
+                    "local copy kept for the reconciler",
+                    context.job_id,
+                    context.node_key,
+                    name,
+                    exc_info=True,
+                )
 
     def execute(self, context: ExecutionContext) -> ExecutionResult:
         if context.execution_id in self._cancelled:
@@ -155,6 +192,7 @@ class CodeExecutor:
         produced = tuple(
             name for name in context.expected_outputs if (context.job_dir / name).is_file()
         )
+        self._upload_artifacts(context, produced)
         return ExecutionResult(
             status="completed",
             exit_code=0,

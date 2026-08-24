@@ -13,6 +13,7 @@ from server.app.db.migrations.executor_entity_type import migrate_executor_entit
 from server.app.db.migrations.executor_retirement import migrate_executor_retirement
 from server.app.db.migrations.external_connections import migrate_external_connections
 from server.app.db.migrations.hmac_connection_type import migrate_hmac_connection_type
+from server.app.db.migrations.job_artifacts import migrate_job_artifacts
 from server.app.db.migrations.local_executor_removal import migrate_local_executor_removal
 from server.app.db.migrations.node_cms_config import migrate_node_cms_config
 from server.app.db.migrations.runs import migrate_runs
@@ -36,6 +37,7 @@ __all__ = [
     "migrate_executor_retirement",
     "migrate_external_connections",
     "migrate_hmac_connection_type",
+    "migrate_job_artifacts",
     "migrate_local_executor_removal",
     "migrate_node_cms_config",
     "migrate_runs",

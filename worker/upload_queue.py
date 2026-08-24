@@ -36,6 +36,7 @@ from typing import Any
 from worker import upload_heartbeat
 from worker._atomic import atomic_write
 from worker._retry import run_with_retry
+from worker.artifact_upload import DirectUploadError, upload_artifact_direct
 from worker.host_transfer import HostRequestError
 from worker.runtime_controls import MAX_DYNAMIC_CONCURRENCY
 from worker.upload_prepare import prepare_result, write_empty_archive
@@ -72,6 +73,11 @@ class UploadTask:
     expected_outputs: tuple[str, ...] = ()
     command: tuple[str, ...] = ()
     prebuilt_metadata: dict[str, Any] | None = None
+    # #160 D12: claim manifest 的 artifact_uploads（name → {storage_key, url}
+    # presigned PUT）。非空时产物直传 S3、result.tar.gz 不再内嵌产物；
+    # 空 = 旧通道（CAS POST + tar 内嵌）。不持久化：presigned URL 会过期，
+    # 崩溃恢复的任务从 bulk 车道重进时走旧通道（Host 两种形态都收）。
+    artifact_uploads: dict[str, Any] = field(default_factory=dict)
     heartbeat_stop: threading.Event = field(default_factory=threading.Event)
     heartbeat_thread: threading.Thread | None = None
     # bulk 车道产物，交给 report 车道；运行时状态，不持久化——崩溃恢复的任务
@@ -251,11 +257,22 @@ class UploadQueue:
             archive = task.execution_dir / "result.tar.gz"
             write_empty_archive(archive)
             outputs = []
-        uploaded: dict[str, str] = {}
+        uploaded: dict[str, Any] = {}
+        # #160 D12：manifest 带 artifact_uploads 且每个产出都有上传规格时走
+        # 直传 S3 通道；否则整体回落旧通道（CAS POST + tar 内嵌，tar 已在
+        # prepare_result 按同一条件决定是否内嵌）。
+        direct = bool(task.artifact_uploads) and all(
+            name in task.artifact_uploads for name in outputs
+        )
         for name in outputs:
             try:
-                ref = self._upload_with_retry(job_dir / PurePosixPath(name))
-            except HostRequestError as exc:
+                if direct:
+                    ref = upload_artifact_direct(
+                        job_dir / PurePosixPath(name), task.artifact_uploads[name], stop=self._stop
+                    )
+                else:
+                    ref = self._upload_with_retry(job_dir / PurePosixPath(name))
+            except (HostRequestError, DirectUploadError) as exc:
                 # Terminal 4xx on the artifact itself: report the run failed
                 # instead of looping forever on a verdict that cannot change.
                 metadata = {

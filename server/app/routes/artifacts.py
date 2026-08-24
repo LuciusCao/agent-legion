@@ -1,3 +1,11 @@
+"""Worker-facing artifact upload/download routes.
+
+Deprecated (#160 D12): current Workers upload/download job artifacts
+directly through the object-storage channel (presigned URLs on the claim
+manifest). This router stays for legacy Workers (per-file POST) and for
+reading legacy CAS blobs (GET); new Worker code must not call POST here.
+"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request

@@ -50,9 +50,15 @@ _REPLAY_COLUMNS = (
 
 
 class QualityReplayService:
-    def __init__(self, job_db: JobQueries, artifact_store: ArtifactStore | None = None) -> None:
+    def __init__(
+        self,
+        job_db: JobQueries,
+        artifact_store: ArtifactStore | None = None,
+        object_store: Any = None,
+    ) -> None:
         self.job_db = job_db
         self.artifact_store = artifact_store
+        self.object_store = object_store
 
     @property
     def db_path(self) -> str:
@@ -164,7 +170,9 @@ class QualityReplayService:
         return {
             "replay": replay,
             "labels": [dict(label) for label in labels],
-            "artifacts": artifact_contents(self.artifact_store, replay["replay_job_id"], node_key),
+            "artifacts": artifact_contents(
+                self.artifact_store, replay["replay_job_id"], node_key, self.object_store
+            ),
             "input_artifacts": self._input_artifacts(replay["replay_job_id"], node_key),
         }
 
@@ -445,11 +453,18 @@ class QualityReplayService:
 
     def _input_artifacts(self, replay_job_id: str, node_key: str) -> list[dict[str, Any]]:
         """Frozen upstream inputs shared with the copy job (comparison aid)."""
-        if self.artifact_store is None or not replay_job_id:
+        if not replay_job_id:
             return []
-        upstream = {
-            str(ref["node_key"]) for ref in self.artifact_store.refs_for_job(replay_job_id)
-        } - {node_key}
+        upstream: set[str] = set()
+        if self.artifact_store is not None:
+            upstream = {
+                str(ref["node_key"]) for ref in self.artifact_store.refs_for_job(replay_job_id)
+            }
+        if self.object_store is not None and self.object_store.enabled:
+            upstream |= {
+                str(row["node_key"]) for row in self.object_store.rows_for_job(replay_job_id)
+            }
+        upstream -= {node_key}
         if not upstream:
             return []
-        return artifact_contents(self.artifact_store, replay_job_id, upstream)
+        return artifact_contents(self.artifact_store, replay_job_id, upstream, self.object_store)

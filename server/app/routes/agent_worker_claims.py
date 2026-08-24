@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from server.app.agent_broker import AgentExecutionBroker
+from server.app.agent_broker.artifact_object_block import inject_artifact_object_block
 from server.app.agent_broker.code_dispatch import resolve_code_manifest_config
 from server.app.agent_broker.code_manifest import resolve_code_runtime_context
 from server.app.agent_workers import CODE_PROTOCOL_VERSION
@@ -32,6 +33,7 @@ def create_agent_worker_claim_router(
     settings: Settings,
     authorize_worker: Callable[..., dict[str, Any]],
     require_lease_id: Callable[[Request], str],
+    job_artifact_objects: Any = None,
 ) -> APIRouter:
     router = APIRouter(tags=["agent-workers"])
 
@@ -61,7 +63,7 @@ def create_agent_worker_claim_router(
                     manifest, broker.database_dsn, settings.config
                 )
                 manifest = resolve_code_runtime_context(
-                    manifest, broker.database_dsn, settings.config
+                    manifest, broker.database_dsn, settings.config, job_artifact_objects
                 )
             except Exception as exc:
                 # The claim already committed; a 500 lets the Worker drop the
@@ -70,6 +72,15 @@ def create_agent_worker_claim_router(
                 raise HTTPException(
                     status_code=500, detail="code manifest resolution failed"
                 ) from exc
+        else:
+            # #160 D12: agent manifests persist only CAS refs (dispatch never
+            # embeds URLs); the object-storage artifact channel (presigned
+            # PUT for outputs, presigned GET for staged inputs) is injected
+            # here, on the per-claim freshly deserialized manifest — memory
+            # only, so URLs never persist and never expire in the queue. A
+            # storage error degrades to the legacy CAS channel inside the
+            # helper; the claim never fails over injection.
+            inject_artifact_object_block(job_artifact_objects, manifest)
         return AgentClaimResponse(
             execution_id=claimed.execution_id,
             lease_id=claimed.lease_id,

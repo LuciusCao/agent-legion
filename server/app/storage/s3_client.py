@@ -56,6 +56,16 @@ class ObjectStorage(Protocol):
         """Store bytes directly (server-side writes: demo material seed)."""
         ...
 
+    def put_stream(
+        self,
+        storage_key: str,
+        stream: BinaryIO,
+        size_bytes: int,
+        content_type: str = "",
+    ) -> None:
+        """Store bytes from a file-like object (server-side artifact uploads)."""
+        ...
+
     def delete_object(self, storage_key: str) -> None:
         """Delete the object; missing objects are not an error."""
         ...
@@ -131,6 +141,16 @@ class S3StorageClient:
     def put_object(self, storage_key: str, data: bytes, content_type: str = "") -> None:
         extra = {"ContentType": content_type} if content_type else {}
         self._client.put_object(Bucket=self._settings.bucket, Key=storage_key, Body=data, **extra)
+
+    def put_stream(
+        self,
+        storage_key: str,
+        stream: BinaryIO,
+        size_bytes: int,
+        content_type: str = "",
+    ) -> None:
+        extra = {"ContentType": content_type} if content_type else {}
+        self._client.put_object(Bucket=self._settings.bucket, Key=storage_key, Body=stream, **extra)
 
     def delete_object(self, storage_key: str) -> None:
         self._client.delete_object(Bucket=self._settings.bucket, Key=storage_key)

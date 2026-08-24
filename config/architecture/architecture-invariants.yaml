@@ -996,3 +996,30 @@ invariants:
       - kind: integration
         target: tests/services/test_run_payload.py
         gate: quick
+
+  - id: EXEC-ARTIFACT-STORE-001
+    statement: "The durable copy of every declared job artifact lives in the instance object store under jobs/{workspace_id}/{job_id}/{name} with job_artifacts (schema v54) as the authoritative manifest; the local job_dir is execution staging plus an evictable cache — eviction (AGENT_LEGION_JOB_CACHE_MAX_BYTES, server/app/services/job_artifact_maintenance.py) only ever unlinks a file whose manifest row exists, only for completed jobs without an active lease, and read paths (JobArtifactService, artifact listing, quality artifact_contents, workspace packages) resolve local-cache-first with an object-storage fallback so legacy jobs that were never uploaded keep working without data migration."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_agent_completion_remote.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_job_artifacts_schema.py
+        gate: quick
+
+  - id: EXEC-ARTIFACT-WORKER-001
+    statement: "Worker artifact transfer shares the materials S3 channel instead of a dedicated return protocol: the Host injects presigned PUT specs (artifact_uploads) and presigned GET input refs into the claim manifest (memory-only on the code path), the Worker streams outputs straight to the object store and reports {storage_key, size_bytes, content_hash} refs, and the Host HEAD-verifies every ref before recording it and staging the bytes into the job_dir — result.tar.gz no longer embeds artifact bytes on this path. Both directions stay compatible with the legacy content-addressed /api/artifacts protocol (mixed ref forms accepted; missing artifact_uploads falls back to the CAS upload), and no new return protocol may be introduced."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/workers/test_artifact_object_channel.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifact_inject.py
+        gate: quick
+      - kind: contract
+        target: tests/routes/test_agent_worker_result_metadata.py
+        gate: quick

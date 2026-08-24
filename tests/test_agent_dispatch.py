@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -171,6 +172,19 @@ def test_enqueue_builds_an_immutable_manifest_and_bundle(harness: SimpleNamespac
     assert context.runtime["node_execution"]["prompt"] == "Answer carefully"
     assert (harness.broker.bundle_dir / manifest["bundle_name"]).exists()
     harness.manager.cleanup_execution.assert_called_once_with(_EXECUTION_ID)
+
+
+def test_enqueue_persists_no_object_storage_urls(harness: SimpleNamespace) -> None:
+    """#160 D12: presigned URLs are injected at claim time, never persisted —
+    the queued manifest and bundle carry no artifact_uploads and no URL."""
+    assert _enqueue(harness) is True
+
+    request = harness.broker.enqueue.call_args.args[0]
+    manifest = dict(request.manifest)
+    assert "artifact_uploads" not in manifest
+    assert "https://" not in json.dumps(manifest)
+    bundled = harness.build_agent_bundle.call_args.kwargs["manifest"]
+    assert "artifact_uploads" not in bundled
 
 
 def test_enqueue_removes_bundle_when_broker_rejects_the_request(

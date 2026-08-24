@@ -27,6 +27,7 @@ def create_workspace_package(
     packages_dir: Path,
     jobs_base_dir: Path,
     artifact_names: list[str] | None = None,
+    object_store: Any = None,
 ) -> tuple[Path, int]:
     packages_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
@@ -57,11 +58,20 @@ def create_workspace_package(
                 job_dir = resolve_job_dir(job, jobs_base_dir)
             except ManagedPathError:
                 continue
-            if not job_dir.exists():
-                continue
+            # D12: the local job_dir is an evictable cache — missing entries
+            # fall back to the object-storage manifest. A job only counts
+            # when its dir exists (legacy semantics) or an entry was written.
+            wrote = False
             for name in names:
                 path = job_dir / name
-                if path.exists():
+                if job_dir.exists() and path.exists():
                     zf.write(path, f"{job['id']}/{name}")
-            job_count += 1
+                    wrote = True
+                elif object_store is not None and object_store.enabled:
+                    row = object_store.lookup(str(job["id"]), name)
+                    if row is not None:
+                        zf.writestr(f"{job['id']}/{name}", object_store.open_stream(row).read())
+                        wrote = True
+            if job_dir.exists() or wrote:
+                job_count += 1
     return package_path, job_count

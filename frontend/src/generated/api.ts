@@ -3030,6 +3030,8 @@ export interface components {
       heartbeat_interval_seconds: number
       /** Lease Ttl Seconds */
       lease_ttl_seconds: number
+      /** Materials Ttl Days */
+      materials_ttl_days: number
       monitoring: components['schemas']['InstanceMonitoringSettings']
       openclaw: components['schemas']['InstanceOpenClawSettings']
       /** Sweeper Enabled */
@@ -3050,6 +3052,8 @@ export interface components {
       heartbeat_interval_seconds: number
       /** Lease Ttl Seconds */
       lease_ttl_seconds: number
+      /** Materials Ttl Days */
+      materials_ttl_days: number
       monitoring: components['schemas']['InstanceMonitoringSettings']
       openclaw: components['schemas']['InstanceOpenClawSettings']
       /** Sweeper Enabled */

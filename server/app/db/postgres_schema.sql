@@ -400,6 +400,20 @@ create table if not exists artifact_refs (
   primary key(job_id, node_key, name)
 );
 
+-- Job artifacts uploaded to the instance object store (schema v54, D12):
+-- the authoritative manifest of produced artifacts; the local job_dir copy
+-- is an evictable cache. storage_key never leaves the server.
+create table if not exists job_artifacts (
+  job_id text not null references jobs(id) on delete cascade,
+  node_key text not null,
+  name text not null,
+  storage_key text not null,
+  size_bytes bigint not null,
+  content_hash text not null default '',
+  uploaded_at timestamptz not null default current_timestamp,
+  primary key(job_id, node_key, name)
+);
+
 create table if not exists node_shards (
   job_id text not null references jobs(id) on delete cascade,
   node_key text not null,

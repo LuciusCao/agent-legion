@@ -1,0 +1,52 @@
+"""Schema v54: job_artifacts table (materials-and-runs design §6.5, D12, #160).
+
+The manifest table for job artifacts in object storage: the authoritative
+bytes live under ``jobs/{workspace_id}/{job_id}/{name}`` in the instance
+bucket; the local job_dir copy is an evictable cache. The latest-migration
+record pin lives here (moved from tests/db/test_runs_migration.py, v53).
+"""
+
+from __future__ import annotations
+
+from server.app.db.schema import SCHEMA_VERSION
+from server.app.db.transaction import read_connection
+from tests.postgres_support import TEST_DATABASE_URL
+
+
+def test_schema_v54_recorded() -> None:
+    assert SCHEMA_VERSION == 54
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute(
+            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
+        ).fetchone()
+    assert row is not None
+    assert row["name"] == "job_artifacts"
+
+
+def test_job_artifacts_table_shape() -> None:
+    # The autouse fixture already ran init_db at the current SCHEMA_VERSION.
+    with read_connection(TEST_DATABASE_URL) as conn:
+        columns = {
+            str(row["column_name"])
+            for row in conn.execute(
+                "select column_name from information_schema.columns"
+                " where table_schema=current_schema() and table_name='job_artifacts'"
+            ).fetchall()
+        }
+        pk = conn.execute(
+            "select conname from pg_constraint c"
+            " join pg_class t on t.oid = c.conrelid"
+            " join pg_namespace n on n.oid = t.relnamespace"
+            " where n.nspname=current_schema() and t.relname='job_artifacts'"
+            " and c.contype='p'"
+        ).fetchone()
+    assert {
+        "job_id",
+        "node_key",
+        "name",
+        "storage_key",
+        "size_bytes",
+        "content_hash",
+        "uploaded_at",
+    } <= columns
+    assert pk is not None

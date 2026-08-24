@@ -57,6 +57,9 @@ def default_instance_document() -> dict[str, Any]:
             "max_archive_bytes": runtime.agent_workers.max_archive_bytes,
             "min_protocol_version": runtime.agent_workers.min_protocol_version,
         },
+        # Materials TTL (design §10): 0 = disabled; read fresh from the DB at
+        # material completion/sweep time, never hydrated into Settings.
+        "materials_ttl_days": 0,
     }
     for key in _EXECUTOR_SCALAR_KEYS:
         document[key] = getattr(runtime, key)
@@ -79,6 +82,23 @@ def effective_instance_document(stored: dict[str, Any] | None) -> dict[str, Any]
     if stored is None:
         return default_instance_document()
     return _merge(default_instance_document(), stored)
+
+
+def materials_ttl_days(database_dsn: DatabaseDsn) -> int:
+    """Effective materials TTL in days (0 = disabled); read fresh per call.
+
+    Unlike the restart-hydrated scalars above, the TTL is consumed at
+    material completion/sweep time, so it is read from the DB document on
+    every use — edits take effect without a restart. Defensive against
+    out-of-band writes: anything but a positive int degrades to 0.
+    """
+    stored = InstanceSettingsStore(database_dsn).get()
+    if stored is None:
+        return 0
+    value = stored.get("materials_ttl_days", 0)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
 
 
 def apply_instance_settings(settings: Settings, database_dsn: DatabaseDsn) -> None:

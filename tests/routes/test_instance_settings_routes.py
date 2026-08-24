@@ -32,6 +32,7 @@ def _payload() -> dict:
         "sweeper_enabled": True,
         "sweeper_interval_seconds": 5.0,
         "code_capacity": 16,
+        "materials_ttl_days": 0,
         "workflows": {"enabled": True},
         "agent_workers": {"max_archive_bytes": 64 * 1024 * 1024, "min_protocol_version": 1},
         "openclaw": {
@@ -119,6 +120,26 @@ def test_put_rejects_out_of_range_values(client) -> None:
     payload = _payload()
     payload["openclaw"]["command_template"] = []
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+
+
+def test_put_rejects_invalid_materials_ttl(client) -> None:
+    payload = _payload()
+    payload["materials_ttl_days"] = -1
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+    payload = _payload()
+    payload["materials_ttl_days"] = "thirty"
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+
+
+def test_put_materials_ttl_roundtrip(client) -> None:
+    payload = _payload()
+    payload["materials_ttl_days"] = 30
+    response = client.put(INSTANCE_SETTINGS_URL, json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["materials_ttl_days"] == 30
+
+    response = client.get(INSTANCE_SETTINGS_URL)
+    assert response.json()["materials_ttl_days"] == 30
 
 
 def test_put_rejects_skill_safety_ref(client) -> None:

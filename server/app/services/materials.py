@@ -17,6 +17,7 @@ from typing import Any
 
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
+from server.app.services.instance_settings import materials_ttl_days
 from server.app.services.job_errors import (
     ConflictError,
     JobServiceError,
@@ -191,6 +192,9 @@ class MaterialsService:
         if row["status"] == "expired":
             raise ConflictError(f"Material is expired: {material_id}")
         failure = self._verify_object(storage, row)
+        # TTL (design §10): read fresh from the instance document at every
+        # completion — 0/absent disables expiry (expires_at stays NULL).
+        ttl_days = materials_ttl_days(self._dsn) if failure is None else 0
         with write_transaction(self._dsn) as conn:
             if failure is not None:
                 conn.execute(
@@ -199,8 +203,11 @@ class MaterialsService:
                 )
             else:
                 conn.execute(
-                    "update materials set status='ready' where id=%s",
-                    (material_id,),
+                    "update materials set status='ready',"
+                    " expires_at = case when %s > 0"
+                    " then now() + make_interval(days => %s) end"
+                    " where id=%s",
+                    (ttl_days, ttl_days, material_id),
                 )
         if failure is not None:
             raise MaterialVerificationError(failure)

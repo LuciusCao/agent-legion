@@ -26,6 +26,7 @@ const settings: InstanceSettingsResponse = {
   sweeper_enabled: true,
   sweeper_interval_seconds: 60,
   code_capacity: 16,
+  materials_ttl_days: 0,
   workflows: { enabled: true },
   agent_workers: { max_archive_bytes: 104857600, min_protocol_version: 2 },
   openclaw: {
@@ -64,6 +65,7 @@ describe('InstanceSettingsSection', () => {
     expect(screen.getByLabelText('租约 TTL（秒）')).toHaveValue(90)
     expect(screen.getByLabelText('心跳失败阈值')).toHaveValue(3)
     expect(screen.getByLabelText('最低协议版本')).toHaveValue(2)
+    expect(screen.getByLabelText('材料保留天数（0 关闭）')).toHaveValue(0)
     expect(screen.getByLabelText('启用 sweeper')).toBeChecked()
     expect(screen.getByLabelText('启用工作流')).toBeChecked()
     expect(screen.getByText(/需重启服务才能生效/)).toBeInTheDocument()
