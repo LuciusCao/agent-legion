@@ -8,11 +8,15 @@ export function nodesForJob(
   workflowNodesByKey?: WorkflowNodesByKey | null,
   workflowDefinition?: WorkflowDefinitionRecord | null
 ): DagNode[] | null {
+  // `type: start` entry nodes never execute and never appear in job_nodes;
+  // hide them from job views (rerun / run-to pickers, DAG ordering).
+  const executable = (nodes: DagNode[]) =>
+    nodes.filter((node) => node.node_type !== 'start')
   if (workflowNodesByKey && job.workflow_key in workflowNodesByKey) {
-    return workflowNodesByKey[job.workflow_key].nodes
+    return executable(workflowNodesByKey[job.workflow_key].nodes)
   }
   if (workflowDefinition && job.workflow_key === workflowDefinition.key) {
-    return workflowDefinition.nodes
+    return executable(workflowDefinition.nodes)
   }
   return null
 }
