@@ -1,5 +1,7 @@
 import { api } from './core'
 import type {
+  MaterialBundleCreateRequest,
+  MaterialBundleResponse,
   MaterialPresignRequest,
   MaterialPresignResponse,
   MaterialResponse,
@@ -24,6 +26,16 @@ export async function completeMaterial(
   return api<MaterialResponse>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/materials/${encodeURIComponent(materialId)}/complete`,
     { method: 'POST' }
+  )
+}
+
+export async function createMaterialBundle(
+  workspaceId: string,
+  request: MaterialBundleCreateRequest
+): Promise<MaterialBundleResponse> {
+  return api<MaterialBundleResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/material-bundles`,
+    { method: 'POST', body: JSON.stringify(request) }
   )
 }
 

@@ -41,6 +41,23 @@ export function fileTypeGroup(filename: string, contentType: string): string {
   return ext ? `.${ext}` : '其他'
 }
 
+/**
+ * webkitdirectory 的相对路径（root/sub/file.txt）拆成 bundle 根名与成员
+ * 相对路径；没有目录段时根名为空（调用方自行兜底命名）。
+ */
+export function splitBundleRelativePath(relativePath: string): {
+  root: string
+  memberPath: string
+} {
+  const normalized = relativePath.replace(/\\/g, '/').replace(/^\/+/, '')
+  const slash = normalized.indexOf('/')
+  if (slash === -1) return { root: '', memberPath: normalized }
+  return {
+    root: normalized.slice(0, slash),
+    memberPath: normalized.slice(slash + 1),
+  }
+}
+
 export async function computeFileSha256(file: File): Promise<string | null> {
   if (file.size > SHA256_MAX_BYTES) return null
   if (typeof crypto === 'undefined' || !crypto.subtle) return null

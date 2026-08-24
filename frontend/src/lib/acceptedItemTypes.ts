@@ -1,6 +1,6 @@
 import type { WorkflowDefinitionRecord } from '../types'
 
-export type AcceptedItemType = 'material' | 'ref'
+export type AcceptedItemType = 'material' | 'ref' | 'bundle'
 
 /**
  * 入口契约：active revision 的 start 节点声明的 accepted_item_types。
