@@ -169,6 +169,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 artifact_gc_thread = ArtifactOrphanGcThread(artifact_store)
                 artifact_gc_thread.start()
         background_tasks.start(app)
+        studio_chat_service.reap_zombie_sessions()
         studio_registry = StudioAgentRegistryStore(job_db.path)
         studio_mcp, studio_mcp_app = create_studio_mcp_http_app(
             job_db, lambda: str(studio_registry.get()["api_base"])

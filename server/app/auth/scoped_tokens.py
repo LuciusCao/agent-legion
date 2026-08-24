@@ -83,7 +83,9 @@ def renew_scoped_token(
     Called at studio chat turn start (#158): chat sessions outlive the fixed
     TTL, and the agent's MCP headers cannot be re-pointed mid-session, so the
     same token is kept alive while the human keeps prompting. No-op for
-    revoked tokens and tokens with more than ``threshold`` life left.
+    revoked tokens, tokens with more than ``threshold`` life left, and —
+    deliberately — already-expired tokens: an idle session's leaked token
+    must not spring back to life on the next prompt.
     """
     current = now or datetime.now(UTC)
     queries.extend_scoped_token_expiry(hash_token(token), current + ttl, current + threshold)

@@ -184,6 +184,59 @@ def test_fresh_token_is_not_rewritten_at_turn_start(chat, job_db) -> None:
     _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
 
 
+def test_expired_token_is_not_revived_at_turn_start(chat, job_db) -> None:
+    """A token that already expired while the session sat idle must stay dead:
+    turn start must not resurrect it (leaked-token guarantee, #158 review)."""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(TEXT_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    token = _session_token(script_path)
+    with job_db.connect() as conn:
+        conn.execute(
+            "update auth_scoped_tokens"
+            " set expires_at = current_timestamp - interval '1 minute'"
+            " where token_hash=%s",
+            (hash_token(token),),
+        )
+    assert authenticate_scoped_token(job_db, token) is None
+    service.send_message(session["id"], workspace_id, "hi")
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select expires_at < current_timestamp as still_expired"
+            " from auth_scoped_tokens where token_hash=%s",
+            (hash_token(token),),
+        ).fetchone()
+    assert row["still_expired"]
+    assert authenticate_scoped_token(job_db, token) is None
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+
+
+def test_capped_session_insert_enforces_cap_atomically(chat, job_db) -> None:
+    """Cap accounting rides the same transaction as the INSERT (#158 review)."""
+    _service, _bus, _register, workspace_id, user_id = chat
+    first = job_db.create_studio_chat_session(workspace_id, user_id, "agent-x", max_active=1)
+    assert first is not None
+    assert job_db.create_studio_chat_session(workspace_id, user_id, "agent-x", max_active=1) is None
+    # Closed/errored rows do not count against the cap.
+    job_db.update_studio_chat_session(first, status="closed")
+    assert job_db.create_studio_chat_session(workspace_id, user_id, "agent-x", max_active=1)
+
+
+def test_reap_zombie_sessions_marks_live_rows_error(chat, job_db) -> None:
+    """Rows left in a live status by a crashed backend are zombies; startup
+    reconcile marks them error so the cap and the session list stay honest."""
+    service, _bus, _register, workspace_id, user_id = chat
+    zombie = job_db.create_studio_chat_session(workspace_id, user_id, "agent-x")
+    closed = job_db.create_studio_chat_session(workspace_id, user_id, "agent-x")
+    job_db.update_studio_chat_session(closed, status="closed")
+    service.reap_zombie_sessions()
+    assert job_db.get_studio_chat_session(zombie)["status"] == "error"
+    assert job_db.get_studio_chat_session(zombie)["error_detail"]
+    assert job_db.get_studio_chat_session(closed)["status"] == "closed"
+    # Idempotent: a second run finds nothing to reap.
+    assert job_db.reap_zombie_studio_chat_sessions() == 0
+
+
 def test_agent_exit_tears_down_runtime_and_revokes_token(chat, job_db) -> None:
     """Agent death pops the runtime and revokes the token instead of relying
     on the TTL/timeout backstops (#4)."""

@@ -83,14 +83,17 @@ def create_studio_mcp_http_app(
     ``api_base_resolver`` is consulted per request (#158): freezing the
     registry's api_base at lifespan while chat sessions read it fresh at
     create time leaves the loopback and the injected MCP URL pointing at
-    different backends after an admin registry edit.
+    different backends after an admin registry edit. The resolver may do
+    blocking I/O (registry DB read): it is awaited via ``anyio.to_thread``
+    so the uvicorn event loop never stalls on it.
     """
 
-    def resolve_config() -> McpServerConfig:
+    async def resolve_config() -> McpServerConfig:
         request = mcp.get_context().request_context.request
         if request is None:
             raise RuntimeError("studio MCP HTTP transport has no active request")
-        return McpServerConfig.from_headers(request.headers, api_base=api_base_resolver())
+        api_base = await anyio.to_thread.run_sync(api_base_resolver)
+        return McpServerConfig.from_headers(request.headers, api_base=api_base)
 
     mcp = create_mcp_server(resolve_config)
     return mcp, _ScopedTokenAuthApp(mcp.streamable_http_app(), job_db)

@@ -114,11 +114,6 @@ class StudioChatService:
     def create_session(self, workspace_id: str, user_id: str, agent_id: str) -> dict[str, Any]:
         if self._shutdown:
             raise ConflictError("Studio chat service is shutting down")
-        if self._db.count_active_studio_chat_sessions() >= MAX_ACTIVE_STUDIO_CHAT_SESSIONS:
-            raise ConflictError(
-                f"Too many active studio chat sessions (limit {MAX_ACTIVE_STUDIO_CHAT_SESSIONS});"
-                " close an existing session first"
-            )
         agent = self._registry.find_agent(agent_id)
         if agent is None:
             raise InvalidOperationError(f"Unknown studio agent: {agent_id}")
@@ -128,7 +123,17 @@ class StudioChatService:
                 f"Studio agent '{agent_id}' is not available on this host"
                 f" (command not found: {command})"
             )
-        session_id = self._db.create_studio_chat_session(workspace_id, user_id, agent_id)
+        # The cap check rides the same transaction as the INSERT under an
+        # advisory lock (#158 review): a separate count-then-insert would let
+        # concurrent creators all pass and each spawn a subprocess.
+        session_id = self._db.create_studio_chat_session(
+            workspace_id, user_id, agent_id, max_active=MAX_ACTIVE_STUDIO_CHAT_SESSIONS
+        )
+        if session_id is None:
+            raise ConflictError(
+                f"Too many active studio chat sessions (limit {MAX_ACTIVE_STUDIO_CHAT_SESSIONS});"
+                " close an existing session first"
+            )
         token: str | None = None
         runtime: SessionRuntime | None = None
         try:
@@ -451,6 +456,16 @@ class StudioChatService:
         self._publish_session(session_id)
 
     # -- shutdown ------------------------------------------------------------
+
+    def reap_zombie_sessions(self) -> None:
+        """Startup reconcile (#158 review): sessions are in-process only, so
+        rows left in a live status by a crashed or killed backend are
+        zombies — their runtimes, tokens' owners, and agent subprocesses are
+        gone. Marking them error at startup keeps the active-session cap
+        honest and the session list truthful."""
+        reaped = self._db.reap_zombie_studio_chat_sessions()
+        if reaped:
+            logger.warning("reaped %d zombie studio chat session(s) at startup", reaped)
 
     def shutdown(self) -> None:
         """Close every live session (backend shutdown hook)."""

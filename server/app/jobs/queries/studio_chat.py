@@ -18,6 +18,9 @@ _SESSION_COLUMNS = (
     " selected_node_key, error_detail, created_at, updated_at, closed_at"
 )
 
+# Advisory-lock key serializing session creation against the active cap.
+_CAP_LOCK_KEY = "studio_chat_session_cap"
+
 
 def _session_record(row: Any) -> dict[str, Any]:
     record = dict(row)
@@ -51,15 +54,49 @@ def _build_session_updates(fields: dict[str, Any]) -> dict[str, Any]:
 class StudioChatQueriesMixin(StudioChatMessageQueriesMixin):
     """CRUD for studio_chat_sessions (messages via the inherited mixin)."""
 
-    def create_studio_chat_session(self, workspace_id: str, user_id: str, agent_id: str) -> str:
+    def create_studio_chat_session(
+        self, workspace_id: str, user_id: str, agent_id: str, *, max_active: int | None = None
+    ) -> str | None:
+        """Insert a session row; with ``max_active``, None when the cap is hit.
+
+        The cap check and the INSERT share one transaction under a
+        transaction-scoped advisory lock (#158): a plain count-then-insert
+        would let concurrent creators all observe a below-cap count and each
+        spawn an agent subprocess.
+        """
         session_id = uuid4().hex
         with self.connect() as conn:
+            if max_active is not None:
+                conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (_CAP_LOCK_KEY,))
+                row = conn.execute(
+                    "select count(*) as n from studio_chat_sessions"
+                    " where status in ('starting', 'idle', 'running', 'awaiting_permission')",
+                ).fetchone()
+                if row is not None and int(row["n"]) >= max_active:
+                    return None
             conn.execute(
                 "insert into studio_chat_sessions(id, workspace_id, user_id, agent_id)"
                 " values (%s, %s, %s, %s)",
                 (session_id, workspace_id, user_id, agent_id),
             )
         return session_id
+
+    def reap_zombie_studio_chat_sessions(self) -> int:
+        """Mark leftover live-status rows as error; returns the reaped count.
+
+        Sessions are in-process only: after a crash or restart their runtimes
+        are gone, so starting/idle/running/awaiting_permission rows are
+        zombies that would otherwise count against the active-session cap
+        forever (#158 review). Runs once at backend startup; idempotent.
+        """
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "update studio_chat_sessions set status='error',"
+                " error_detail='backend restarted before the session ended',"
+                " updated_at=current_timestamp"
+                " where status in ('starting', 'idle', 'running', 'awaiting_permission')",
+            )
+            return cursor.rowcount
 
     def get_studio_chat_session(self, session_id: str) -> dict[str, Any] | None:
         with self._connect_read() as conn:
@@ -127,15 +164,6 @@ class StudioChatQueriesMixin(StudioChatMessageQueriesMixin):
                 tuple(params),
             ).fetchone()
         return row is not None
-
-    def count_active_studio_chat_sessions(self) -> int:
-        """Live sessions across all workspaces (spawn-cap accounting, #158)."""
-        with self._connect_read() as conn:
-            row = conn.execute(
-                "select count(*) as n from studio_chat_sessions"
-                " where status in ('starting', 'idle', 'running', 'awaiting_permission')",
-            ).fetchone()
-        return int(row["n"]) if row is not None else 0
 
     def claim_studio_chat_turn(self, session_id: str) -> bool:
         """Atomically move a session idle -> running; False when not idle.
