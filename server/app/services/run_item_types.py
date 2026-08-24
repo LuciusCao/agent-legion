@@ -20,7 +20,11 @@ def validate_run_item_types(definition: WorkflowDefinition, items: list[dict[str
         return
     accepted = sorted(start.accepted_item_types)
     for item in items:
-        item_type = item.get("type") if isinstance(item, dict) else None
+        if not isinstance(item, dict):
+            # Same contract as _resolve_items; check shape before type so a
+            # non-object item does not surface as "type None not accepted".
+            raise InvalidOperationError("Each item must be an object")
+        item_type = item.get("type")
         if item_type not in start.accepted_item_types:
             raise InvalidOperationError(
                 f"Item type {item_type!r} is not accepted by this workflow "

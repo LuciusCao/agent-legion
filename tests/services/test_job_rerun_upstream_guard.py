@@ -62,6 +62,21 @@ def _node_statuses(job_db, job_id: str) -> dict[str, str]:
     return {str(n["node_key"]): str(n["status"]) for n in job_db.list_job_nodes(job_id)}
 
 
+def test_rerun_rejects_start_node(rerun_service, job_db):
+    """`_start` 是定义层入口契约、永不执行：rerun 必须显式拒绝而不是落到
+    泛泛的 "not found for job"。"""
+    ws_id = _seed_workspace(job_db)
+    job = _create_job(job_db, ws_id, "Q-start")
+
+    with pytest.raises(JobOperationError) as exc_info:
+        rerun_service.rerun(ws_id, job["id"], "_start")
+
+    err = exc_info.value
+    assert err.status == "failed"
+    assert err.reason_code == "node_not_executable"
+    assert "_start" in err.message
+
+
 def test_rerun_rejects_target_with_failed_direct_upstream(rerun_service, job_db):
     ws_id = _seed_workspace(job_db)
     job = _create_job(job_db, ws_id, "Q-stuck")

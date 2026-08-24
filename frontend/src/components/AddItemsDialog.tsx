@@ -97,8 +97,10 @@ export function AddItemsDialog({
   }, [resetUploads])
 
   const refIds = useMemo(() => parseRefIds(refText), [refText])
+  // 契约解析后收窄的窗口期：隐藏面板里残留的条目不计数、不提交。
   const totalItems =
-    doneEntries.length + selectedMaterialIds.length + refIds.length
+    (materialAccepted ? doneEntries.length + selectedMaterialIds.length : 0) +
+    (refAccepted ? refIds.length : 0)
 
   const handleClose = useCallback(() => {
     resetState()
@@ -108,15 +110,15 @@ export function AddItemsDialog({
   const handleSubmit = useCallback(async () => {
     if (!workspaceId || !workflowKey || totalItems === 0) return
     const items: RunItem[] = [
-      ...doneEntries.map((entry) => ({
+      ...(materialAccepted ? doneEntries : []).map((entry) => ({
         type: 'material' as const,
         material_id: entry.materialId!,
       })),
-      ...selectedMaterialIds.map((materialId) => ({
+      ...(materialAccepted ? selectedMaterialIds : []).map((materialId) => ({
         type: 'material' as const,
         material_id: materialId,
       })),
-      ...refIds.map((id) => ({
+      ...(refAccepted ? refIds : []).map((id) => ({
         type: 'ref' as const,
         connection_key: connectionKey.trim(),
         external_id: id,
@@ -141,6 +143,8 @@ export function AddItemsDialog({
     workspaceId,
     workflowKey,
     totalItems,
+    materialAccepted,
+    refAccepted,
     doneEntries,
     selectedMaterialIds,
     refIds,

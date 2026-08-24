@@ -997,9 +997,8 @@ invariants:
         target: tests/services/test_run_payload.py
         gate: quick
 
-
   - id: EXEC-WORKFLOW-START-001
-    statement: "Every workflow definition carries exactly one start node (type: start) holding the entry contract accepted_item_types; the loader injects a synthetic accept-all start pointing at the implicit roots when none is declared, so legacy definitions keep their readiness behavior. The start node never executes: it is excluded from job_nodes seeds, node-config resolution, publish code-resolution checks and allowed_nodes, and the scheduler treats it as definitionally completed. RunService.create_run rejects items of unaccepted types with InvalidOperationError before any write."
+    statement: "Every workflow definition carries exactly one start node (type: start) holding the entry contract accepted_item_types; the loader injects a synthetic accept-all start pointing at the implicit roots when none is declared, so legacy definitions keep their readiness behavior. The start node never executes: it is excluded from job_nodes seeds, node-config resolution, publish code-resolution checks and allowed_nodes, and the scheduler treats it as definitionally completed. Its edges are constrained at load time: no incoming edges, at least one outgoing edge, and no conditional outgoing edges (a when artifact can never exist). RunService.create_run rejects items of unaccepted types with InvalidOperationError before any write."
     owner: workspace-executor
     risk: high
     evidence:

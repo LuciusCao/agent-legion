@@ -112,7 +112,10 @@ def test_start_with_conditional_outgoing_edge_is_rejected() -> None:
         )
 
 
-@pytest.mark.parametrize("field", ["capability", "execution", "shard", "reduce", "terminal"])
+@pytest.mark.parametrize(
+    "field",
+    ["capability", "execution", "shard", "reduce", "terminal", "config", "config_schema"],
+)
 def test_start_must_not_declare_execution_fields(field: str) -> None:
     value: Any = (
         {"outcome": "done"} if field == "terminal" else ({} if field != "capability" else "x")
@@ -216,6 +219,42 @@ def test_injected_start_survives_snapshot_round_trip_symmetrically() -> None:
     restored = workflow_definition_from_dict(json.loads(serialize_definition(first)))
     assert restored == first
     assert serialize_definition(restored) == serialize_definition(first)
+
+
+def test_injected_start_round_trip_with_multiple_derived_edges_keeps_edge_set() -> None:
+    """≥2 after-derived edges + non-alphabetical writing order: the first
+    round trip preserves the edge SET and all node data, but NOT the edge
+    ORDER — serialize_definition sorts node keys, so the reload derives
+    after-edges in alphabetical node order instead of the original writing
+    order. This is pre-existing v1 behavior: readiness semantics depend on
+    the edge set (scheduler readiness + acyclicity), not its order, and the
+    snapshot is a fixed point from the second parse onward."""
+    from server.app.services.workflow_revision_format import serialize_definition
+
+    raw = {
+        "key": "wf",
+        "label": "Wf",
+        "nodes": {
+            # Deliberately non-alphabetical writing order.
+            "zeta": {"capability": "zeta"},
+            "alpha": {"capability": "alpha"},
+            "mid": {"capability": "mid", "after": ["zeta"]},
+            "leaf": {"capability": "leaf", "after": ["mid", "alpha"]},
+        },
+    }
+    first = workflow_definition_from_mapping(raw)
+    restored = workflow_definition_from_dict(json.loads(serialize_definition(first)))
+
+    # Same nodes and same edge set; only the derived-edge order may differ.
+    assert restored.nodes == first.nodes
+    assert {(edge.source, edge.target) for edge in restored.edges} == {
+        (edge.source, edge.target) for edge in first.edges
+    }
+
+    # From the second parse on the snapshot is a fixed point.
+    again = workflow_definition_from_dict(json.loads(serialize_definition(restored)))
+    assert again == restored
+    assert serialize_definition(again) == serialize_definition(restored)
 
 
 def test_start_survives_yaml_export_round_trip() -> None:

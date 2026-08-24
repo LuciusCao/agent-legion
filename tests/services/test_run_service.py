@@ -416,6 +416,17 @@ def test_unsupported_item_type_rejected_by_entry_contract(service) -> None:
         )
 
 
+def test_non_object_item_reports_shape_error_first(service) -> None:
+    """A non-dict item must surface the shape error (aligned with
+    ``_resolve_items``), not a misleading "type None not accepted"."""
+    with pytest.raises(InvalidOperationError, match="Each item must be an object"):
+        service.create_run(
+            WORKSPACE_ID,
+            workflow_key=WORKFLOW_KEY,
+            items=["not-an-object"],  # type: ignore[list-item]
+        )
+
+
 def test_material_item_accepted_under_material_only_contract(service, job_db) -> None:
     _insert_material(job_db, WORKSPACE_ID, "mat-1")
 

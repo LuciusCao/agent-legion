@@ -73,7 +73,7 @@ source_kind / intake mode 才能提交任务。这带来三个问题：
 
 ```
 条目（item）                     job 的唯一输入，一条目一 job
- ├─ file 材料（material）        字节存对象存储，内容寻址，一等资源
+ ├─ 材料（material）             字节存对象存储，内容寻址，一等资源
  └─ 外部引用（ref）              {connection_key, external_id, params?}
                                   无字节，执行时经 connector 拉取
 
@@ -89,7 +89,7 @@ source_kind / intake mode 才能提交任务。这带来三个问题：
   实体」退役后，结果展示、打包、质量标注的粒度假设统一。
 - **提交即同步返回**（D5）。创建 run 只做：格式校验、拆行、内容 hash dedup、
   建 runs + jobs。不调外部接口，不解析内容。
-- **解析永远在执行时**。ref 的内容拉取、file 的物化都发生在 dispatch/节点
+- **解析永远在执行时**。ref 的内容拉取、material 的物化都发生在 dispatch/节点
   执行阶段。提交时的「标题展示」只是 best-effort 后台 enrichment（拉不到
   就显示原始 ID），不是架构路径。
 
@@ -101,10 +101,13 @@ Workflow 定义必须恰好包含一个 `type: start` 节点，它是条目类�
 ```yaml
 nodes:
   _start:
-    type: start                      # 豁免 capability；不得声明 execution/shard/reduce/terminal
+    type: start                      # 豁免 capability；不得声明 execution/shard/reduce/terminal/config/config_schema
     accepted_item_types: [material]  # 可选；缺省 [material, ref]（向后兼容）
 ```
 
+- **边约束**：start 不得有入边、必须至少有一条出边、出边不得带
+  condition——start 永不执行，`when` 引用的产物永远不会存在，条件出边
+  只会让整支静默 not_applicable，loader 直接 fail-fast。
 - **不执行**：start 永不进入 `job_nodes`，调度器（`find_ready_nodes` /
   `evaluate_branches`）把它视为恒 completed，出边天然满足，首节点立即 ready；
   `allowed_nodes`、publish 校验（code 可解析性 / Agent 唯一性）、节点配置解析
@@ -116,6 +119,11 @@ nodes:
   `accepted_item_types` 拒绝未接受的条目类型（400）；前端 AddItemsDialog 按
   active revision 的同一契约禁用对应 Tab。legacy `intake.modes` 与 start 正交，
   只约束 `/job-batches` 旧路径直至退役。
+- **v1 `edges:` 键**：无 `schema_version` 的 v1 定义里手写的 `edges:` 键
+  原为静默忽略；现改为解析合并——`after` 派生边优先、重复边（同
+  source/target）去重且 condition 以派生边为准（重复显式边上的 condition
+  静默丢弃）。这是快照重载对称的前提：快照携带的物化边（含注入的 start
+  出边）能与派生边集正确合并。
 - 后续切片（folder 整体式/bundle 等新条目类型）的配置也挂在 start 节点上——
   这正是 start 存在的意义。
 
@@ -174,7 +182,7 @@ ref → `connection_key:external_id`，身份按连接限定：同一 external_i
   `intake.modes` 声明随之退役。
 - `JobIntakeService` 重构为 `RunService`（校验 + 建 run + 建 jobs），
   异步队列（queued batch 消费）语义平移到 run。
-- workflow 定义改声明**输入契约**：接受的条目类型（file/ref）、文件类型
+- workflow 定义改声明**输入契约**：接受的条目类型（material/ref）、文件类型
   白名单、ref 绑定的 connection key（固定值，非用户选择，见 §7 的方向
   约束）。
 

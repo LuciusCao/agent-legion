@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, act } from '@testing-library/react'
 import type { ReactElement } from 'react'
 
 import { AddItemsDialog } from './AddItemsDialog'
@@ -354,5 +354,75 @@ describe('AddItemsDialog', () => {
     expect(screen.getByTestId('item-type-hint')).toHaveTextContent(
       '外部引用条目'
     )
+  })
+
+  it('drops hidden-panel items when the resolved contract narrows', async () => {
+    // 竞态：契约查询未 resolve 时缺省全接受，用户已粘贴 ref id 并完成
+    // 上传；契约随后 resolve 为仅 material——隐藏面板残留的 ref 条目
+    // 不计数、不提交。
+    let resolveRevision!: (value: unknown) => void
+    mockFetchRevision.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRevision = resolve
+      }) as never
+    )
+    mockUpload.mockResolvedValue({ materialId: 'm1', deduplicated: false })
+    mockCreateRun.mockResolvedValue({
+      run: { id: 'r1' },
+      created_count: 1,
+      jobs: [],
+    } as never)
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+
+    pickFiles('add-items-file-input', [new File(['a'], 'a.txt')])
+    await waitFor(() => expect(screen.getByText('完成')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('tab', { name: '粘贴 ID' }))
+    fireEvent.change(screen.getByLabelText('连接 Key'), {
+      target: { value: 'cms' },
+    })
+    fireEvent.change(screen.getByLabelText('外部 ID'), {
+      target: { value: 'q1' },
+    })
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 2 个条目')
+
+    await act(async () => {
+      resolveRevision({
+        definition_yaml: '',
+        revision: { id: 'r1', version: 1 },
+        workflow: {
+          key: 'demo_workflow',
+          label: 'demo',
+          intake: { modes: [] },
+          nodes: [
+            {
+              key: '_start',
+              label: '入口',
+              capability: '',
+              node_type: 'start',
+              accepted_item_types: ['material'],
+              after: [],
+              inputs: [],
+              outputs: [],
+            },
+          ],
+          edges: [],
+        },
+      })
+    })
+
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: '粘贴 ID' })).toBeDisabled()
+    )
+    // 残留的 ref 条目不再计数，剩下的上传条目仍可提交。
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 1 个条目')
+    fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
+
+    await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
+    expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
+      workflow_key: 'demo_workflow',
+      items: [{ type: 'material', material_id: 'm1' }],
+    })
   })
 })

@@ -976,7 +976,7 @@
     "server/app/services/job_deletion.py": 194,
     "server/app/services/job_dir_index.py": 76,
     "server/app/services/job_errors.py": 22,
-    "server/app/services/job_execution.py": 292,
+    "server/app/services/job_execution.py": 310,
     "server/app/services/job_intake.py": 168,
     "server/app/services/job_intake_chunks.py": 60,
     "server/app/services/job_intake_enqueue.py": 55,

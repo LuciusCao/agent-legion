@@ -60,8 +60,11 @@ def _active_workflow_summary(job_db: JobQueries, workspace_id: str) -> dict[str,
     return {
         "workflow_key": workflow_key,
         "version": int(revision["version"]),
+        # The chat agent only needs executable nodes; the synthetic start
+        # node carries no capability and would just be noise.
         "nodes": [
-            {"key": key, "capability": node.capability} for key, node in definition.nodes.items()
+            {"key": key, "capability": node.capability}
+            for key, node in definition.executable_nodes.items()
         ],
         "edges": [{"source": edge.source, "target": edge.target} for edge in definition.edges],
     }

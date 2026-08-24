@@ -262,6 +262,37 @@ def test_run_to_rejects_unknown_target(
     assert exc_info.value.reason_code == "node_not_found"
 
 
+def test_run_to_rejects_start_node_target(
+    execution_service: JobExecutionService, job_db: JobQueries, workspace
+):
+    job = _create_job(job_db, workspace["id"])
+
+    with pytest.raises(JobOperationError) as exc_info:
+        execution_service.run_to(workspace["id"], job["id"], "_start")
+
+    assert exc_info.value.status == "failed"
+    assert exc_info.value.reason_code == "node_not_executable"
+    assert "_start" in (exc_info.value.message or "")
+
+
+def test_run_to_rejects_start_node_as_start(
+    execution_service: JobExecutionService, job_db: JobQueries, workspace
+):
+    job = _create_job(job_db, workspace["id"])
+
+    with pytest.raises(JobOperationError) as exc_info:
+        execution_service.run_to(
+            workspace["id"],
+            job["id"],
+            "intake_knowledge_points",
+            start_node_key="_start",
+        )
+
+    assert exc_info.value.status == "failed"
+    assert exc_info.value.reason_code == "node_not_executable"
+    assert "_start" in (exc_info.value.message or "")
+
+
 def test_run_to_rejects_active_lease(
     execution_service: JobExecutionService, job_db: JobQueries, workspace
 ):

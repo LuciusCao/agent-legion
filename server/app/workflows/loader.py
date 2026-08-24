@@ -324,7 +324,15 @@ def workflow_definition_from_dict(
         # placeholders a start node must not declare, and the default contract
         # copy on non-start nodes (only a start node may declare it).
         if raw_node.get("type") == "start":
-            for placeholder in ("capability", "execution", "shard", "reduce", "terminal"):
+            for placeholder in (
+                "capability",
+                "execution",
+                "shard",
+                "reduce",
+                "terminal",
+                "config",
+                "config_schema",
+            ):
                 raw_node.pop(placeholder, None)
         else:
             raw_node.pop("accepted_item_types", None)

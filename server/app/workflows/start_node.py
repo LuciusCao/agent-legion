@@ -20,7 +20,10 @@ from server.app.workflows.schema import (
 )
 
 START_NODE_TYPE = "start"
-_FORBIDDEN_START_FIELDS = ("capability", "execution", "shard", "reduce", "terminal")
+_EXECUTION_FIELDS = ("capability", "execution", "shard", "reduce", "terminal")
+# Never executed: config tunables would be silently inert too.
+_CONFIG_FIELDS = ("config", "config_schema")
+_FORBIDDEN_START_FIELDS = _EXECUTION_FIELDS + _CONFIG_FIELDS
 
 
 def load_start_fields(raw_node: dict[str, Any], node_key: str) -> tuple[str, tuple[str, ...]]:
