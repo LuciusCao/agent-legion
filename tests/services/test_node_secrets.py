@@ -12,7 +12,6 @@ from server.app.services.node_secrets import (
     secret_config_fields,
     strip_secret_fields,
 )
-from server.app.services.vault import VaultMasterKeyMissingError
 
 SCHEMA = {
     "type": "object",
@@ -123,50 +122,6 @@ def test_apply_node_secret_fields_rejects_non_string_value() -> None:
     vault = _FakeVault()
     with pytest.raises(ConfigSchemaError, match="nodeConfig.fetch.token must be a string"):
         apply_node_secret_fields(vault, WORKSPACE, "wf", "fetch", SCHEMA, {"token": 123}, {})
-
-
-def test_inherited_legacy_plaintext_is_vaulted_on_absent_field() -> None:
-    vault = _FakeVault()
-    current = {"token": "legacy-plaintext"}
-    result = apply_node_secret_fields(
-        vault, WORKSPACE, "wf", "fetch", SCHEMA, {"api_url": "http://new"}, current
-    )
-    assert result == {"api_url": "http://new", "token": {"secret_ref": NAME}}
-    assert vault.store[(WORKSPACE, NAME)] == "legacy-plaintext"
-
-
-def test_inherited_legacy_plaintext_is_vaulted_on_masked_echo() -> None:
-    vault = _FakeVault()
-    current = {"token": "legacy-plaintext"}
-    result = apply_node_secret_fields(
-        vault, WORKSPACE, "wf", "fetch", SCHEMA, {"token": {"secret_set": True}}, current
-    )
-    assert result["token"] == {"secret_ref": NAME}
-    assert vault.store[(WORKSPACE, NAME)] == "legacy-plaintext"
-
-
-def test_inherited_legacy_blank_plaintext_is_cleared() -> None:
-    vault = _FakeVault()
-    vault.store[(WORKSPACE, NAME)] = "old"
-    current = {"token": "   "}
-    result = apply_node_secret_fields(
-        vault, WORKSPACE, "wf", "fetch", SCHEMA, {"token": {"secret_set": True}}, current
-    )
-    assert "token" not in result
-    assert (WORKSPACE, NAME) not in vault.store
-
-
-def test_inherit_vaulting_without_master_key_fails_closed() -> None:
-    class _NoKeyVault(_FakeVault):
-        def set(self, workspace_id: str, name: str, plaintext: str) -> None:
-            raise VaultMasterKeyMissingError("vault master key missing")
-
-    vault = _NoKeyVault()
-    current = {"token": "legacy-plaintext"}
-    with pytest.raises(VaultMasterKeyMissingError):
-        apply_node_secret_fields(
-            vault, WORKSPACE, "wf", "fetch", SCHEMA, {"api_url": "http://new"}, current
-        )
 
 
 def test_mask_node_config_secrets_marks_set_and_unset() -> None:

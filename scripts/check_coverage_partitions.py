@@ -60,12 +60,6 @@ PARTITIONS: tuple[Partition, ...] = (
         70.0,
     ),
     Partition(
-        "backend worker package",
-        "backend",
-        ("worker/",),
-        90.0,
-    ),
-    Partition(
         "backend skill version fallbacks",
         "backend",
         ("server/app/workflows/skill_version_fallbacks.py",),

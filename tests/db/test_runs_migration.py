@@ -239,7 +239,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "node_secret_sweep"
+    assert migration["name"] == "job_node_status_counts"
 
 
 @pytest.mark.fresh_schema

@@ -67,21 +67,12 @@ def apply_node_secret_fields(
     - field absent → the stored value is inherited so saving other fields
       does not silently drop the secret
     - anything else (e.g. null) → ``ConfigSchemaError``
-
-    A stored value that is still a legacy plaintext string (pre-v19 intake)
-    is vaulted on inheritance instead of being carried forward; without a
-    master key this fails the save (VAULT-SECRET-001: plaintext must not
-    persist, and it cannot be re-encrypted without the key).
     """
     result = dict(values)
     for field in secret_config_fields(config_schema):
         if field not in result:
             if field in current_values:
-                inherited = _inherit_or_vault(
-                    vault, workspace_id, workflow_key, node_key, field, current_values[field]
-                )
-                if inherited is not None:
-                    result[field] = inherited
+                result[field] = current_values[field]
             continue
         name = node_secret_name(workflow_key, node_key, field)
         value = result[field]
@@ -96,44 +87,12 @@ def apply_node_secret_fields(
             pass
         elif isinstance(value, dict) and set(value) == {"secret_set"}:
             if field in current_values:
-                inherited = _inherit_or_vault(
-                    vault, workspace_id, workflow_key, node_key, field, current_values[field]
-                )
-                if inherited is not None:
-                    result[field] = inherited
-                else:
-                    result.pop(field)
+                result[field] = current_values[field]
             else:
                 result.pop(field)
         else:
             raise ConfigSchemaError(f"nodeConfig.{node_key}.{field} must be a string")
     return result
-
-
-def _inherit_or_vault(
-    vault: VaultService,
-    workspace_id: str,
-    workflow_key: str,
-    node_key: str,
-    field: str,
-    current: Any,
-) -> Any:
-    """Inherit a stored secret-field value, vaulting legacy plaintext.
-
-    Ref markers pass through unchanged. A plaintext string (the pre-vault
-    storage shape) is encrypted into the vault and replaced by its ref
-    marker, so a save that touches unrelated fields cannot silently extend
-    the plaintext's lifetime. Vault writes without a master key raise
-    ``VaultMasterKeyMissingError`` and fail the save (fail-closed).
-    """
-    if not isinstance(current, str):
-        return current
-    name = node_secret_name(workflow_key, node_key, field)
-    if current.strip():
-        vault.set(workspace_id, name, current)
-        return {"secret_ref": name}
-    vault.delete(workspace_id, name)
-    return None
 
 
 def mask_node_config_secrets(

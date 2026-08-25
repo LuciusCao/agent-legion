@@ -4,8 +4,8 @@ Issue #121: the workspace DAG endpoint counted node statuses with a
 join+group-by over job_nodes ⋈ jobs — O(workspace job_nodes) per call, 48s
 measured at 260k jobs / 2.9M job_nodes. The counter table
 (DB-JOB-NODE-STATUS-COUNTS-001) turns the read into a PK-prefix lookup.
-The latest-migration record pin moved to
-tests/db/test_node_secret_sweep_migration.py (v57).
+The latest-migration record pin lives here (moved from
+tests/db/test_material_bundles_schema.py, v55).
 """
 
 from __future__ import annotations
@@ -13,9 +13,20 @@ from __future__ import annotations
 from server.app.db.migrations.job_node_status_counts import (
     migrate_workspace_job_node_status_counts,
 )
+from server.app.db.schema import SCHEMA_VERSION
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.jobs import JobQueries
 from tests.postgres_support import TEST_DATABASE_URL
+
+
+def test_schema_v56_recorded() -> None:
+    assert SCHEMA_VERSION == 56
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute(
+            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
+        ).fetchone()
+    assert row is not None
+    assert row["name"] == "job_node_status_counts"
 
 
 def _seed_workspace(conn, workspace_id: str) -> None:

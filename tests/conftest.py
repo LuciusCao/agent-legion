@@ -159,7 +159,6 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/db/test_material_bundles_schema.py",
         "tests/db/test_monitoring_hotpath_indexes.py",
         "tests/db/test_node_cms_config_migration.py",
-        "tests/db/test_node_secret_sweep_migration.py",
         "tests/db/test_postgres_runtime.py",
         "tests/db/test_quality_loop_schema.py",
         "tests/db/test_runs_migration.py",

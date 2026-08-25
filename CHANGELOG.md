@@ -6,30 +6,6 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
-### Security
-
-- Vault plaintext compatibility window closed (VAULT-SECRET-001): schema v57
-  sweeps legacy plaintext node-config secrets from
-  `workspaces.node_config_json` and `jobs.frozen_config_json` into the
-  workspace vault (dropped with a warning when no master key is configured);
-  the node-config save chain vaults inherited legacy plaintext instead of
-  carrying it forward; workflow publish validation rejects secret-marked node
-  config fields holding plaintext (only `{"secret_ref": ...}` markers are
-  accepted).
-- Skill source git argument-injection hardened: option-shaped or
-  transport-helper repo values (`--upload-pack=...`, `ext::...`), invalid
-  refnames, and non-hex locked commits are rejected before any git subprocess
-  is spawned; `clone`/`fetch`/`checkout` positionals are `--`-separated.
-- Removed the dead `vault_resources.py` module (unimportable since the
-  resource-providers retirement).
-- The `worker/` package now rides the 85% coverage floor with `server/`
-  (measured baseline 93%), with a dedicated 90% per-partition floor.
-
-### Added
-
-- CSRF negative-path test: cookie-authenticated mutations without the
-  `x-agent-legion-request` header are rejected with 403 (SECURITY-AUTH-001).
-
 ## [0.3.0-alpha] - 2026-08-25
 
 ### Added
