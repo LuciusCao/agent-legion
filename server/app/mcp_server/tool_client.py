@@ -36,7 +36,10 @@ class ToolClient:
 
     async def call(self, method: str, path: str, body: dict[str, Any] | None = None) -> str:
         try:
-            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as http:
+            # trust_env=False: the loopback target is this backend itself, so
+            # HTTP(S)_PROXY/ALL_PROXY must never apply — a socks ALL_PROXY
+            # without socksio installed otherwise breaks every tool call.
+            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS, trust_env=False) as http:
                 response = await http.request(
                     method,
                     f"{self._api_base}{_TOOLS_PATH}{path}",

@@ -269,6 +269,28 @@ def test_connection_error_returns_text_not_exception(monkeypatch) -> None:
     assert "refused" in text
 
 
+def test_loopback_client_ignores_env_proxies(monkeypatch) -> None:
+    """A socks ALL_PROXY without socksio must not break the loopback client."""
+    captured: dict = {}
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def request(self, method, url, json=None, headers=None):  # noqa: A002
+            return _FakeResponse(200)
+
+    monkeypatch.setattr("server.app.mcp_server.tool_client.httpx.AsyncClient", FakeAsyncClient)
+    asyncio.run(ToolClient(_CONFIG).call("GET", "/workspaces/ws-1/workflow"))
+    assert captured.get("trust_env") is False
+
+
 def test_config_requires_token() -> None:
     with pytest.raises(McpConfigError, match=TOKEN_ENV):
         McpServerConfig.from_env({})
