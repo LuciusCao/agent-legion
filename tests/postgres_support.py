@@ -56,6 +56,22 @@ def ensure_test_database() -> None:
         exists = conn.execute("select 1 from pg_database where datname = %s", (dbname,)).fetchone()
         if exists is None:
             conn.execute(sql.SQL("create database {}").format(sql.Identifier(dbname)))
+        # Role-isolation guard (scripts/drop-worktree-db.sh): align the
+        # derived database owner with agent_legion_dev when the role exists,
+        # so the cleanup path can run as a non-superuser role. Best-effort:
+        # a creator without ownership-transfer rights simply skips.
+        try:
+            role = conn.execute(
+                "select 1 from pg_roles where rolname = 'agent_legion_dev'"
+            ).fetchone()
+            if role is not None:
+                conn.execute(
+                    sql.SQL("alter database {} owner to agent_legion_dev").format(
+                        sql.Identifier(dbname)
+                    )
+                )
+        except Exception:
+            pass
 
 
 # Importing test helpers must remain side-effect free. The root PostgreSQL

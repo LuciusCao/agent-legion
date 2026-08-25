@@ -59,7 +59,7 @@ def test_postgres_support_import_has_no_database_creation_side_effect() -> None:
     assert "ensure_test_database" not in top_level_calls
 
 
-@pytest.mark.parametrize(("database_exists", "expected_execution_count"), [(False, 3), (True, 2)])
+@pytest.mark.parametrize(("database_exists", "expected_execution_count"), [(False, 4), (True, 3)])
 def test_database_creation_is_serialized_before_catalog_check(
     monkeypatch: pytest.MonkeyPatch,
     database_exists: bool,
@@ -82,6 +82,9 @@ def test_database_creation_is_serialized_before_catalog_check(
     assert len(connection.executions) == expected_execution_count
     assert "pg_advisory_lock" in connection.executions[0][0]
     assert "pg_database" in connection.executions[1][0]
+    # Role-isolation guard: the owner-alignment probe runs last (the fake
+    # answers None, so no ALTER follows); the advisory lock still comes first.
+    assert "pg_roles" in connection.executions[-1][0]
 
 
 def test_direct_postgres_consumers_are_in_explicit_inventory() -> None:

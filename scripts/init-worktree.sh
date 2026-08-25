@@ -92,6 +92,15 @@ if [[ -f .env ]]; then
 fi
 if command -v createdb >/dev/null 2>&1; then
     createdb "$DB" 2>/dev/null && echo "已创建数据库 ${DB}" || echo "数据库 ${DB} 已存在或建库失败（如已存在可忽略）"
+    # role 隔离护栏（scripts/drop-worktree-db.sh）：派生库属主对齐
+    # agent_legion_dev（集群存在该 role 时），清理路径走非 superuser
+    # role，对共享/prod 库物理不可 drop；best-effort，失败仅 warning。
+    if command -v psql >/dev/null 2>&1 \
+        && psql -d postgres -tAc "select 1 from pg_roles where rolname='agent_legion_dev'" 2>/dev/null | grep -q 1; then
+        psql -d postgres -qc "ALTER DATABASE \"$DB\" OWNER TO agent_legion_dev" 2>/dev/null \
+            && echo "数据库 ${DB} 属主已对齐 agent_legion_dev" \
+            || echo "提示: ${DB} 属主对齐 agent_legion_dev 失败（可手动 ALTER DATABASE OWNER）" >&2
+    fi
 else
     echo "提示: 未找到 createdb，请手动创建数据库 ${DB}" >&2
 fi
