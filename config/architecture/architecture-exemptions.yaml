@@ -18,9 +18,10 @@ exemptions:
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
 - check: architecture.scheduler_threadpool
   path: server/app/workflow_worker/thread.py:self._pools[executor_id]
-  reason: WorkflowWorkerThread creates one shared ThreadPoolExecutor per executor
-    definition to submit adapter executions; each pool is bounded by the executor's
-    global capacity and keyed by executor_id, not workspace.
+  reason: WorkflowWorkerThread creates one shared ThreadPoolExecutor for the
+    single implicit code pool (constant CODE_EXECUTOR_ID,
+    server/app/workflow_worker/pools.py) to submit adapter executions; the
+    pool is bounded by the instance code_capacity setting, not workspace.
   owner: workspace-executor
   remove_when: issues/open/032-P2-event-driven-worker.md
 - check: architecture.file_budget

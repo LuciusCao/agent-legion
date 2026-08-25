@@ -84,6 +84,10 @@ changes (`docs/**`, `**/*.md`, `LICENSE`) do not trigger the workflow at all
 - **rust** — `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
   and `cargo test` in `velites/`.
 - **e2e-smoke** — the deterministic browser smoke suite.
+- **docker-build** — CI-only image build lane (host + worker targets). It runs
+  only when the `changes` job detects image-relevant path changes
+  (`Dockerfile`, `.dockerignore`, dependency locks, `worker/`, `shared/`,
+  `deploy/`); no other job exercises the Dockerfile.
 - **ci-extended** — `tests/ci -m ci_extended` stress scenarios. Runs only on
   the weekly schedule and manual dispatch; PR and push runs skip it.
 - **nightly-e2e** — multi-browser smoke E2E (the deterministic browser suite
@@ -158,7 +162,8 @@ Configure the repository on GitHub as follows:
 1. Protect `develop` and any release branches (Settings → Branches, or Rules → Rulesets).
 2. Require the `backend-unit`, `backend-postgres-a`, `backend-postgres-b`,
    `backend-postgres-c`, `frontend-logic`, `frontend-component`,
-   `frontend-coverage`, `rust`, and `e2e-smoke` status checks to pass before
+   `frontend-coverage`, `rust`, `e2e-smoke`, and `docker-build` status checks
+   to pass before
    merging; require branches to be up to date.
 3. Disable force-push and branch deletion for protected branches.
 4. Merge changes through a pull request; do not edit protected branches in the web UI.

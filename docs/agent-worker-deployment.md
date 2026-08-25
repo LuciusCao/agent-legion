@@ -14,6 +14,9 @@ LLM gateway 是独立基础设施，不属于 Agent Worker 协议。Worker 容�
 mkdir -p deploy/secrets
 openssl rand -hex 32 > deploy/secrets/postgres_password
 openssl rand -hex 32 > deploy/secrets/agent_worker_register_token
+UV_CACHE_DIR=.uv-cache uv run python -c \
+  "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
+  > deploy/secrets/vault_master_key
 ```
 
 把 PostgreSQL 密码写入 pgpass。以下命令中的 `<postgres-password>` 必须替换成 `deploy/secrets/postgres_password` 文件里的值：
@@ -25,8 +28,10 @@ postgres:5432:agent_legion:agent_legion:<postgres-password>
 将这一行保存为 `deploy/secrets/postgres_pgpass`，然后限制密钥文件权限：
 
 ```bash
-chmod 600 deploy/secrets/postgres_password deploy/secrets/postgres_pgpass deploy/secrets/agent_worker_register_token
+chmod 600 deploy/secrets/postgres_password deploy/secrets/postgres_pgpass deploy/secrets/agent_worker_register_token deploy/secrets/vault_master_key
 ```
+
+`vault_master_key` 是实例 vault 的主密钥：必须是 32 字节密钥的 URL-safe Base64 编码（Fernet 格式），所以用上面的 `Fernet.generate_key()` 生成而不是 `openssl rand`——格式不对会在 vault 写入 / `secret_ref` 解析时报 `Vault master key is not a valid Fernet key`。compose 把它挂为 `AGENT_LEGION_VAULT_MASTER_KEY_FILE` 注入 Host（见 `deploy/compose.host.yaml`），`scripts/stack-prod-up.sh` 启动前对它 fail-fast 检查，缺失会直接拒绝启动并指向本节。
 
 ## 2. 部署机准备挂载目录
 
@@ -292,9 +297,15 @@ docker compose -f deploy/compose.worker.yaml exec worker \
 # LLM gateway（Tailnet 地址 + token；token 未启用时去掉 header）
 docker compose -f deploy/compose.worker.yaml exec worker \
   python3 -c "import urllib.request; req = urllib.request.Request('http://192.0.2.1:8788/v1/chat/completions', data=b'{\"model\":\"<model>\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}', headers={'Content-Type': 'application/json', 'Authorization': 'Bearer $LLM_GATEWAY_TOKEN'}); print(urllib.request.urlopen(req, timeout=30).status)"
+
+# 对象存储 public endpoint（Tailnet 地址，即 AGENT_LEGION_S3_PUBLIC_ENDPOINT；TCP 连通即可）
+docker compose -f deploy/compose.worker.yaml exec worker \
+  python3 -c "import socket; socket.create_connection(('192.0.2.1', 9000), timeout=5); print('ok')"
 ```
 
-两条都成功后才允许承接生产任务。如果容器内无法解析或路由到 Tailnet 地址，不要把它隐式塞进业务容器——先单独设计 Tailscale sidecar，再重新验证。
+第三条不可省略：远程 Worker 的材料与 bundle 成员走 presigned GET（`worker/material_fetch.py`、`worker/bundle_fetch.py`），产物回传走 presigned PUT staging（`worker/artifact_upload.py`），全部指向 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`；compose 内部地址 `rustfs:9000` 从远程不可达。注意内置 RustFS 默认只发布在 `127.0.0.1`（`deploy/compose.host.yaml` 的 `${AGENT_LEGION_S3_BIND:-127.0.0.1}` 端口映射）：远程 Worker 场景必须同时在 `deploy/.env` 设 `AGENT_LEGION_S3_BIND=<部署机 Tailnet IP>` 并把 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向同一地址（presigned URL 按该地址签发），否则本条探测必然失败。若改用 HTTP 探测，根路径返回 4xx 也算可达（S3 匿名 GET `/` 本就会被拒），只有连接拒绝/超时才是失败。
+
+三条都成功后才允许承接生产任务。如果容器内无法解析或路由到 Tailnet 地址，不要把它隐式塞进业务容器——先单独设计 Tailscale sidecar，再重新验证。
 
 ## 8. 停止服务
 

@@ -77,9 +77,19 @@ address via `AGENT_LEGION_HOST_BIND` (see the deployment doc, §2).
 
 **Container caveat.** A Docker Desktop network namespace does not necessarily
 inherit the host's Tailnet routes. Before going live, run the smoke test from
-**inside** the Worker container — Host API and gateway, both by tailnet
+**inside** the Worker container — Host API, gateway, and the object-storage
+public endpoint (`AGENT_LEGION_S3_PUBLIC_ENDPOINT`), all by tailnet
 address — per
 [agent-worker-deployment.md §7](agent-worker-deployment.md#7-tailnet-冒烟验证上线前必须执行).
+The storage endpoint is load-bearing: presigned GETs fetch materials and
+bundle members, presigned PUTs return artifacts; the compose-internal
+`rustfs:9000` is unreachable from remote devices. When the Host uses the
+bundled RustFS, setting `AGENT_LEGION_S3_PUBLIC_ENDPOINT` alone is not
+enough — `deploy/compose.host.yaml` publishes port 9000 on
+`${AGENT_LEGION_S3_BIND:-127.0.0.1}`, so also set
+`AGENT_LEGION_S3_BIND=<laptop-tailnet-ip>` in `deploy/.env` (and
+`AGENT_LEGION_S3_PUBLIC_ENDPOINT=http://<laptop-tailnet-ip>:9000`;
+presigned URLs are signed with that host) before running the smoke test.
 If the container cannot reach the tailnet, design a dedicated Tailscale
 sidecar; do not bake Tailscale into the Worker image.
 
@@ -189,13 +199,17 @@ in:
 - declare the accepted code capabilities in the same `capabilities` list as
   Agent capabilities (no separate field; the Host matches by capability), and
 - set `max_code_concurrency > 0` (0 = never receives code claims, the
-  default). Resizing this field is hot-applied by editing the state-copy YAML
-  `data/agent-worker-service/worker.yaml` directly (`worker/runtime_controls.py`);
-  opening code capacity from 0 to >0 requires a resolvable `velites` binary or
-  the hot update is rejected. Changing it via the console / `PUT /api/config`
-  restarts the execution process, re-running the startup preflight — which
-  refuses to start (exit code 2) when code capacity is declared without a
-  resolvable `velites` binary.
+  default). The field is hot (#123): `PUT /api/config` changes that touch
+  only hot fields (`claim_enabled`, `max_concurrency`,
+  `max_code_concurrency`, `upload_max_concurrency`) do not restart the Worker
+  (`worker/service.py:34-39,133`). Hot-opening code capacity from 0 to >0
+  requires a resolvable `velites` binary: with velites missing, the in-loop
+  hot guard rejects the change and logs it, and the new capacity takes effect
+  on the next loop iteration once velites is installed
+  (`worker/runtime_controls.py:58-67`). Editing the state-copy YAML
+  `data/agent-worker-service/worker.yaml` directly works the same way — that
+  is the bare-metal path; in container deployments the state copy lives in
+  the control volume.
 
 The Worker does **not** require a preinstalled velites: binary resolution is
 shared between the startup preflight and the code runner
@@ -281,7 +295,10 @@ flipping the field:
 ## 8. Security notes
 
 - **Tailnet ACLs:** restrict device-to-device traffic so workers can reach only
-  port 8000 (Host API) and port 8788 (gateway) on the laptop. Nothing else on
+  port 8000 (Host API), port 8788 (gateway), and the object-storage public
+  endpoint (`AGENT_LEGION_S3_PUBLIC_ENDPOINT`, e.g. port 9000) on the laptop —
+  presigned GETs fetch materials/bundle members and presigned PUTs upload
+  artifact staging. Nothing else on
   the laptop should be reachable from worker devices.
 - **Gateway exposure:** binds the tailnet interface only; it is the single
   holder of the provider credential and must not be run with a widened bind
@@ -306,6 +323,7 @@ flipping the field:
   tokens, or other sensitive values into label keys or values.
 - **Bundle/archive safety:** execution bundles and result archives are
   path-validated on both ends (no absolute paths, `..`, or links) before
-  extraction.
+  extraction. With the presigned channel enabled, the result archive no
+  longer embeds artifacts (`worker/upload_queue.py`).
 - **Policy:** precondition 1 (§2) is a hard blocker — encrypted transport is
   not policy approval.

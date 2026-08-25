@@ -553,6 +553,8 @@ server/app/
   - 在 DB 实例设置 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
   - 节点按 capability 分发：DB 中按 workspace 发布的 code 节点（EXEC-CODE-002/003，demo 节点在 workspace 初始化时注入）进入本地 code 池或 Worker code 池；agent 节点（pi / velites runtime）经 broker 派发给 Worker。
 - worker 默认处于**暂停**状态；调用 `POST /api/worker/resume` 开始处理。
+- 后端每次启动会把全部 workspace 重置为暂停（刻意设计，防失控自跑）；恢复调度走
+  `scripts/resume-workspaces.sh`（必须在后端首次启动建表之后执行才生效）或在控制台手动恢复。
 - 内置示例 workflow `education_video_problems_generation` 的节点序列
   （完整 DAG 定义见 `server/app/workflows/builtin_demo.py`）：
 
@@ -566,7 +568,7 @@ server/app/
 
 - 任一 node 失败会把 Job 置为 `failed`，错误写入数据库与日志文件。
 - 支持从任意 node 重跑；重跑会清除该 node 及下游所有 artifacts。
-- `DELETE /api/jobs/{job_id}` 会级联删除 Job 记录、`node_runs`、本地 Job 目录与日志。
+- `DELETE /api/jobs/{job_id}` 会级联删除 Job 记录、`node_runs`、本地 Job 目录与日志；删除服务还会快照 `job_artifacts` 清单行并删除对象存储副本（`server/app/services/job_deletion.py`）。
 
 ### Job Intake 资源解析（resolve phase）
 
@@ -580,12 +582,14 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
   - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`, `node_config_json`, `default_entity`, `intake_config_json`）。`node_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（见下文 Secrets Vault）；旧 `resource_config_json`（resource binding）已在 v24 迁移为节点覆盖并清空
   - `workspace_secrets` — vault 加密存储的 workspace 密钥（Fernet 密文，`(workspace_id, name)` 唯一，v16 新增）
   - `external_connections` / `instance_secrets` / `connection_tokens` — 实例级外部服务连接：连接只存非敏感配置，敏感字段 Fernet 加密入 `instance_secrets`（`conn:<key>:<field>` 引用），鉴权 token 加密缓存在 `connection_tokens`（v34 新增，见下文外部服务连接段）
-  - `job_batches`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表
+  - `runs`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表（`job_batches` 已随 schema v53 drop，由 `runs` 取代）
+  - `materials` — 材料（单文件条目）元数据；`material_bundles` / `material_bundle_members` — bundle 文件夹条目的冻结引用式清单（schema v55）
+  - `job_artifacts` — Job 产物清单（权威副本在实例对象存储，schema v54）
   - `workflow_revisions` — workflow 版本修订历史
   - `workspace_packages` — 已创建 package 路径
 - 初始化器在 PostgreSQL advisory lock 下按版本应用 schema。
 - `JobQueries.connect()` 是上下文管理器（定义在 `JobQueriesBase`），确保 `conn.close()`；workspace 侧查询由 `WorkspaceQueriesMixin` 合并进统一的 `JobQueries`。
-- `JobDeletionService` 级联删除 Job 记录、`node_runs`、本地 Job 目录与日志。
+- `JobDeletionService` 级联删除 Job 记录、`node_runs`、本地 Job 目录与日志；同时快照 `job_artifacts` 清单行并删除对象存储副本（`server/app/services/job_deletion.py`）。
 - 存储路径以**相对 POSIX 路径**保存在 `settings.data_dir` 下（前缀为 `videos/`, `jobs/`, `logs/`, `packages/`），API 返回时投影为绝对路径。
 - SQL 占位符约定：**新 SQL 一律写 psycopg 的 `%s`**，不要再写 SQLite 风格的 `?`。存量 `?` 由 `server/app/db/dialect.py` 盲替换为 `%s`，该层无法区分占位符与 Postgres JSON 的 `?`/`?|`/`?&` 操作符；`scripts/check_architecture.py` 的 SQL 占位符检查（基线 `config/architecture/sql-placeholders-baseline.json`）按 ratchet 方式只降不升，新文件出现任何 SQL `?` 即失败，改写存量后同步下调基线。
 

@@ -137,6 +137,11 @@ EOF
   解析下沉到 jobs）。**存量 jobs 较多时迁移 UPDATE 可能耗时数分钟，
   务必先备份数据库并在低峰执行**；迁移幂等可重入，中断后重启
   会继续。
+- 当前 schema 已到 v56：v54（`job_artifacts` 产物清单表）、v55
+  （`material_bundles`）与 v56（`job_node_status_counts` 触发器维护的
+  状态计数）均为 additive 迁移，随启动自动执行。
+- bundle 条目（文件夹整体一个条目）复用同一 bucket 与材料缓存，无额外
+  存储配置。
 - 上传一个文件验证闭环：`POST /api/workspaces/{id}/materials/presign`
   → PUT → `complete`，材料状态变 `ready`。
 - 恢复 workspace 调度（后端每次启动都会把全部 scope 重置为 paused，
