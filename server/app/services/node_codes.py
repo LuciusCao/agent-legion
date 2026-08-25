@@ -52,6 +52,25 @@ def _split_entity_key(entity_key: str) -> tuple[str, str]:
     return workflow_key, node_key
 
 
+# Process-local publish generation (issue #124): the workflow worker's
+# per-pass dispatch memo tags entries with this counter, so an in-process
+# publish/rollback/archive invalidates memoized code on the very next claim
+# (the #115 "next node execution" contract) instead of the next pass; the
+# per-pass clear remains the backstop for writes from another process.
+# Bumped only AFTER the store mutation commits.
+_publish_generation = 0
+
+
+def node_code_publish_generation() -> int:
+    """Current node-code publish generation (monotonic within this process)."""
+    return _publish_generation
+
+
+def _bump_publish_generation() -> None:
+    global _publish_generation
+    _publish_generation += 1
+
+
 def _to_row(entity: VersionedEntity) -> dict[str, Any]:
     """Rebuild the historical node-code row shape from a versioned entity."""
     workflow_key, node_key = _split_entity_key(entity.entity_key)
@@ -163,7 +182,9 @@ class NodeCodeService:
     def publish(self, workspace_id: str, workflow_key: str, node_key: str) -> dict[str, Any]:
         """Publish the current draft; the previously published version archives."""
         self._require_enabled()
-        return _to_row(self._store.publish(_entity_key(workflow_key, node_key), workspace_id))
+        row = _to_row(self._store.publish(_entity_key(workflow_key, node_key), workspace_id))
+        _bump_publish_generation()
+        return row
 
     def rollback(
         self,
@@ -185,12 +206,16 @@ class NodeCodeService:
                 "change_note": change_note if change_note is not None else f"rollback to v{version}"
             },
         )
+        _bump_publish_generation()
         return _to_row(entity)
 
     def archive_all(self, workspace_id: str | None, workflow_key: str, node_key: str) -> int:
         """Archive every version in one workspace or a legacy global scope."""
         self._require_enabled()
-        return self._store.archive_all(_entity_key(workflow_key, node_key), workspace_id)
+        archived = self._store.archive_all(_entity_key(workflow_key, node_key), workspace_id)
+        if archived:
+            _bump_publish_generation()
+        return archived
 
     def seed_global(self, workflow_key: str, node_key: str, code: str, change_note: str) -> bool:
         """Publish *code* as the global (workspace-NULL) version when absent.
@@ -223,4 +248,5 @@ class NodeCodeService:
             # seeds carry identical factory content and the window exists
             # only on first startup of an un-seeded database.
             return False
+        _bump_publish_generation()
         return True
