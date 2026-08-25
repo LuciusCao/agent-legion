@@ -4564,10 +4564,13 @@ export interface components {
     /**
      * StudioChatContextResponse
      * @description What the get_studio_context MCP tool returns: the session's bound
-     *     workspace, the human's live Studio node selection, and the active
+     *     workspace, the human's live Studio node selection, the canvas' unpublished
+     *     workflow draft (None until the frontend pushes it), and the active
      *     workflow's structure. ``workflow`` is None when nothing is published yet.
      */
     StudioChatContextResponse: {
+      /** Draft Yaml */
+      draft_yaml: string | null
       /** Selected Node Key */
       selected_node_key: string | null
       workflow: components['schemas']['StudioContextWorkflow'] | null
@@ -4576,9 +4579,13 @@ export interface components {
     }
     /**
      * StudioChatContextUpdateRequest
-     * @description Human-side context push: the Studio node currently selected (or null).
+     * @description Human-side context push (partial update): the selected Studio node
+     *     (field presence decides, null clears) and/or the canvas' unpublished
+     *     workflow draft YAML (null = leave the mirror untouched).
      */
     StudioChatContextUpdateRequest: {
+      /** Draft Yaml */
+      draft_yaml?: string | null
       /** Selected Node Key */
       selected_node_key?: string | null
     }
@@ -4671,6 +4678,8 @@ export interface components {
        * Format: date-time
        */
       created_at: string
+      /** Draft Yaml */
+      draft_yaml?: string | null
       /** Error Detail */
       error_detail: string
       /** Id */
@@ -5188,6 +5197,12 @@ export interface components {
       label: string
       /** Node Key */
       node_key: string
+      /**
+       * Node Type
+       * @default node
+       * @enum {string}
+       */
+      node_type: 'start' | 'node'
       /**
        * Risk
        * @enum {string}

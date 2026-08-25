@@ -1,5 +1,6 @@
 import type { WorkflowDefinitionRecord } from '../../types'
 import type { AgentDefinition } from '../../types/executorTypes'
+import type { ChangeSummaryViewModel } from './workflowStudioChanges'
 import { WorkflowNodeDetailView } from './WorkflowNodeDetailView'
 import pageStyles from '../WorkflowStudioPageResponsive.module.css'
 import sidePanelStyles from '../WorkflowStudioPageSidePanel.module.css'
@@ -11,6 +12,7 @@ type Props = {
   agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
+  compareSummary?: ChangeSummaryViewModel | null
   readOnly: boolean
   detailLeft: boolean
   mobileActive: boolean
@@ -43,6 +45,7 @@ export function WorkflowStudioDetailSection(props: Props) {
         agentCatalog={props.agentCatalog}
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}
+        compareSummary={props.compareSummary}
         readOnly={props.readOnly}
         agentOpen={props.agentOpen}
         onToggleAgent={props.onToggleAgent}

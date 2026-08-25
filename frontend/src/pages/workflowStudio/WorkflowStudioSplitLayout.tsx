@@ -56,6 +56,7 @@ export function WorkflowStudioSplitLayout({
           agentCatalog={props.agentCatalog}
           definitionYaml={props.definitionYaml}
           setDefinitionYaml={props.setDefinitionYaml}
+          compareSummary={props.compareSummary}
           readOnly={props.readOnly}
           detailLeft={detailLeft}
           mobileActive={mobilePanel === 'editor'}

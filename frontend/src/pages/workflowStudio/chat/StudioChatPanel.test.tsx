@@ -293,7 +293,7 @@ describe('StudioChatPanel', () => {
       expect(mockApi.updateStudioChatContext).toHaveBeenCalledWith(
         'ws1',
         's1',
-        'node-a'
+        { selectedNodeKey: 'node-a' }
       )
     )
   })

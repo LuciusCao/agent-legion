@@ -359,6 +359,35 @@ def test_context_update_route_roundtrip_and_scope_guard(client, tmp_path) -> Non
         client.delete(url)
 
 
+def test_context_update_partial_fields(client, tmp_path) -> None:
+    """PUT context is a partial update: a draft-only push keeps the pushed
+    selected node, and a selection-only push keeps the pushed draft."""
+    _register_fake_agent(client, tmp_path)
+    workspace_id = _create_workspace(client)
+    session_id = _create_session(client, workspace_id)
+    url = _session_url(workspace_id, session_id)
+    try:
+        response = client.put(
+            f"{url}/context", json={"selected_node_key": "node-a", "draft_yaml": "key: wf\n"}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["session"]["selected_node_key"] == "node-a"
+        assert response.json()["session"]["draft_yaml"] == "key: wf\n"
+
+        draft_only = client.put(f"{url}/context", json={"draft_yaml": "key: wf2\n"})
+        assert draft_only.status_code == 200, draft_only.text
+        assert draft_only.json()["session"]["selected_node_key"] == "node-a"
+        assert draft_only.json()["session"]["draft_yaml"] == "key: wf2\n"
+
+        selection_only = client.put(f"{url}/context", json={"selected_node_key": None})
+        assert selection_only.status_code == 200, selection_only.text
+        assert selection_only.json()["session"]["selected_node_key"] is None
+        assert selection_only.json()["session"]["draft_yaml"] == "key: wf2\n"
+        assert client.get(url).json()["session"]["draft_yaml"] == "key: wf2\n"
+    finally:
+        client.delete(url)
+
+
 def test_create_session_with_unknown_agent_is_400(client, tmp_path) -> None:
     _register_fake_agent(client, tmp_path)
     workspace_id = _create_workspace(client)

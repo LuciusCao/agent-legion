@@ -433,7 +433,7 @@ server/app/
 | StudioContextNode | BaseModel | key: str, capability: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextEdge | BaseModel | source: str, target: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextWorkflow | BaseModel | workflow_key: str, version: int, nodes: list[StudioContextNode], edges: list[... | app/routes/studio_agent_context_contracts.py |
-| StudioChatContextResponse | BaseModel | workspace_id: str, selected_node_key: str | None, workflow: StudioContextWork... | app/routes/studio_agent_context_contracts.py |
+| StudioChatContextResponse | BaseModel | workspace_id: str, selected_node_key: str | None, draft_yaml: str | None, wor... | app/routes/studio_agent_context_contracts.py |
 | StudioAgentTokenMintRequest | BaseModel | ttl_hours: int | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenMintResponse | BaseModel | id: str, token: str, expires_at: str | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenEntry | BaseModel | id: str, created_at: str, expires_at: str, revoked_at: str | None | app/routes/studio_agent_token_contracts.py |
@@ -453,7 +453,7 @@ server/app/
 | StudioChatMessageResponse | BaseModel | message: StudioChatMessageRecord | app/routes/studio_chat_contracts.py |
 | StudioChatMessagesResponse | BaseModel | messages: list[StudioChatMessageRecord] | app/routes/studio_chat_contracts.py |
 | StudioChatAllowAllRequest | BaseModel | enabled: bool | app/routes/studio_chat_contracts.py |
-| StudioChatContextUpdateRequest | BaseModel | selected_node_key: str | None | app/routes/studio_chat_contracts.py |
+| StudioChatContextUpdateRequest | BaseModel | selected_node_key: str | None, draft_yaml: str | None | app/routes/studio_chat_contracts.py |
 | StudioChatPermissionAnswerRequest | BaseModel | option_id: str | None, deny: bool | app/routes/studio_chat_contracts.py |
 | StudioChatPermissionAnswerResponse | BaseModel | resolved: str | app/routes/studio_chat_contracts.py |
 | TokenUsageRunItem | BaseModel | run_id: int, node_key: str, status: str, usage: RunUsage | None, reason: str ... | app/routes/token_usage_contracts.py |
@@ -479,7 +479,7 @@ server/app/
 | WorkflowDraftCompareError | BaseModel | category: str, message: str, line: int | None, column: int | None, node_key: ... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowRevisionSummaryItem | BaseModel | id: str, version: int, workflow_key: str, definition_hash: str | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowDraftSummaryItem | BaseModel | key: str, label: str, version: int | app/routes/workflow_draft_compare_contracts.py |
-| WorkflowNodeChange | BaseModel | type: WorkflowChangeType, node_key: str, label: str, fields: list[str], risk:... | app/routes/workflow_draft_compare_contracts.py |
+| WorkflowNodeChange | BaseModel | type: WorkflowChangeType, node_key: str, label: str, node_type: Literal['star... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowEdgeChange | BaseModel | type: WorkflowEdgeChangeType, source: str, target: str, before_condition: str... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowIntakeChange | BaseModel | type: WorkflowIntakeChangeType, mode_key: str, field_key: str | None, risk: W... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowRiskFlag | BaseModel | code: str, severity: WorkflowRiskLevel, message: str | app/routes/workflow_draft_compare_contracts.py |

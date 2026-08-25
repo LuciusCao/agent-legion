@@ -116,8 +116,8 @@ exemptions:
 - check: architecture.file_budget
   path: server/app/db/migrations/__init__.py
   reason: The module is the flat export point for the idempotent migration
-    chain and grows by two lines per schema version (v56
-    job_node_status_counts).
+    chain and grows by two lines per schema version (v57
+    studio_chat_draft).
   owner: workspace-executor
   remove_when: docs/architecture/studio-phase3-implementation-plan.md
-  ceiling: 52
+  ceiling: 54

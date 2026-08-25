@@ -311,6 +311,13 @@ class StudioChatService:
         self._db.update_studio_chat_session(session_id, selected_node_key=node_key)
         return self.get_session(session_id)
 
+    def set_draft_yaml(self, session_id: str, workspace_id: str, draft_yaml: str) -> dict[str, Any]:
+        self.get_session(session_id, workspace_id)
+        # No SSE publish (same reasoning as set_selected_node): the draft only
+        # feeds get_studio_context; the pushing client already knows the value.
+        self._db.update_studio_chat_session(session_id, draft_yaml=draft_yaml)
+        return self.get_session(session_id)
+
     def respond_permission(
         self,
         session_id: str,

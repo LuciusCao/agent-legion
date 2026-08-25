@@ -44,7 +44,9 @@ describe('useStudioContextSync', () => {
       expect(mockApi.updateStudioChatContext).toHaveBeenCalledWith(
         'ws1',
         's1',
-        null
+        {
+          selectedNodeKey: null,
+        }
       )
     )
     rerender({ key: null })
@@ -55,7 +57,9 @@ describe('useStudioContextSync', () => {
       expect(mockApi.updateStudioChatContext).toHaveBeenCalledWith(
         'ws1',
         's1',
-        'node-a'
+        {
+          selectedNodeKey: 'node-a',
+        }
       )
     )
     expect(mockApi.updateStudioChatContext).toHaveBeenCalledTimes(2)
@@ -85,7 +89,7 @@ describe('useStudioContextSync', () => {
       expect(mockApi.updateStudioChatContext).toHaveBeenLastCalledWith(
         'ws1',
         's1',
-        'node-b'
+        { selectedNodeKey: 'node-b' }
       )
     )
     rerender({ key: 'node-a' })
@@ -93,7 +97,7 @@ describe('useStudioContextSync', () => {
       expect(mockApi.updateStudioChatContext).toHaveBeenLastCalledWith(
         'ws1',
         's1',
-        'node-a'
+        { selectedNodeKey: 'node-a' }
       )
     )
   })

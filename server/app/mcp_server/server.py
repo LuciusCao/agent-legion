@@ -66,10 +66,10 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
     @mcp.tool()
     async def get_studio_context() -> str:
         """Current Studio session context: the bound workspace, its active
-        workflow structure (nodes and capabilities), and the node the human
-        currently has selected in Studio (live value on every call). Takes no
-        workspace_id — the session binding decides which workspace you operate
-        on. Call this first when you need workspace or selection context."""
+        workflow structure (nodes and capabilities), the node the human has
+        selected in Studio, and the canvas' unpublished draft YAML (both live
+        on every call). Takes no workspace_id — the session binding decides
+        which workspace you operate on. Call this first for context."""
         config, client = await _client()
         if config.session_id is None:
             return "get_studio_context is unavailable: no chat session bound"

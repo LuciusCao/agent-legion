@@ -22,6 +22,7 @@ export type NodeChangeGroup = {
   type: NodeChange['type']
   nodeKey: string
   label: string
+  nodeType: NodeChange['node_type']
   fields: string[]
   severity: ChangeSeverity
 }
@@ -113,6 +114,7 @@ function normalizeNodeChange(change: NodeChange): NodeChangeGroup {
     type: change.type,
     nodeKey: change.node_key,
     label: change.label,
+    nodeType: change.node_type,
     fields: change.fields,
     severity: change.risk,
   }

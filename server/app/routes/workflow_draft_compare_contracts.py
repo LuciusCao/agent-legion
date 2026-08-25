@@ -46,6 +46,10 @@ class WorkflowNodeChange(BaseModel):
     type: WorkflowChangeType
     node_key: str
     label: str
+    # 'start' marks the entry node (explicit or loader-injected synthetic) so
+    # the canvas can synthesize its inspector details from a draft that does
+    # not declare it.
+    node_type: Literal["start", "node"] = "node"
     fields: list[str]
     risk: WorkflowRiskLevel
 

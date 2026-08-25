@@ -21,6 +21,7 @@ export function StudioChatAside({
     >
       <StudioChatPanel
         selectedNodeKey={props.selectedNodeKey}
+        definitionYaml={props.definitionYaml}
         onApplyWorkflowDraft={(yaml) => {
           if (
             props.dirty &&

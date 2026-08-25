@@ -106,6 +106,34 @@ def test_bound_token_reads_own_session_context(client, job_db, tmp_path) -> None
         client.delete(f"/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}")
 
 
+def test_context_carries_canvas_draft_mirror(client, job_db, tmp_path) -> None:
+    """The payload's draft_yaml is null until the human's Studio pushes the
+    canvas' unpublished draft through the PUT context route."""
+    script_path = _register_fake_agent(client, tmp_path)
+    workspace_id = _create_workspace(client)
+    session_id = _create_session(client, workspace_id)
+    token = _session_token(script_path)
+    try:
+        response = client.get(
+            _context_url(session_id), headers={"Authorization": f"Bearer {token}"}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["draft_yaml"] is None
+
+        pushed = client.put(
+            f"/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/context",
+            json={"draft_yaml": "key: wf\nnodes: {}\n"},
+        )
+        assert pushed.status_code == 200, pushed.text
+        response = client.get(
+            _context_url(session_id), headers={"Authorization": f"Bearer {token}"}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["draft_yaml"] == "key: wf\nnodes: {}\n"
+    finally:
+        client.delete(f"/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}")
+
+
 def test_bound_token_gets_404_on_foreign_workspace_session(client, job_db, tmp_path) -> None:
     script_path = _register_fake_agent(client, tmp_path)
     workspace_a = _create_workspace(client, "Context WS A")

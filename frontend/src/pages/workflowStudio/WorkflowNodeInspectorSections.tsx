@@ -24,9 +24,9 @@ export function WorkflowNodeInspectorSections(props: InspectorSectionProps) {
   const { node } = props.details
   // Start nodes carry the entry contract (type: start) and never execute:
   // the capability/execution/code editors do not apply (the backend 404s
-  // their node-code endpoints), so show the read-only contract instead.
+  // their node-code endpoints), so only the entry-contract section applies.
   if (node.node_type === 'start') {
-    return <WorkflowNodeStartSection details={props.details} />
+    return <WorkflowNodeStartSection {...props} />
   }
   return (
     <>

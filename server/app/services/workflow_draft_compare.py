@@ -139,6 +139,7 @@ def _diff_nodes(
                     "type": "added",
                     "node_key": key,
                     "label": draft_node.label,
+                    "node_type": draft_node.node_type,
                     "fields": [],
                     "risk": "info",
                 }
@@ -158,6 +159,7 @@ def _diff_nodes(
                     "type": "removed",
                     "node_key": key,
                     "label": base_node.label,
+                    "node_type": base_node.node_type,
                     "fields": [],
                     "risk": "breaking",
                 }
@@ -182,6 +184,7 @@ def _diff_nodes(
                     "type": "modified",
                     "node_key": key,
                     "label": draft_node.label,
+                    "node_type": draft_node.node_type,
                     "fields": fields,
                     "risk": risk,
                 }

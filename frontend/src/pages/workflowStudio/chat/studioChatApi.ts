@@ -1,20 +1,19 @@
 import { api } from '../../../api/core'
 import type { components } from '../../../generated/api'
 
-export type StudioChatAgentOption =
-  components['schemas']['StudioChatAgentOption']
-export type StudioChatSessionRecord =
-  components['schemas']['StudioChatSessionRecord']
-export type StudioChatMessageRecord =
-  components['schemas']['StudioChatMessageRecord']
-export type StudioChatPermissionAnswerRequest =
-  components['schemas']['StudioChatPermissionAnswerRequest']
+type S = components['schemas']
 
-type AgentsResponse = components['schemas']['StudioChatAgentsResponse']
-type SessionsResponse = components['schemas']['StudioChatSessionsResponse']
-type SessionResponse = components['schemas']['StudioChatSessionResponse']
-type MessagesResponse = components['schemas']['StudioChatMessagesResponse']
-type MessageResponse = components['schemas']['StudioChatMessageResponse']
+export type StudioChatAgentOption = S['StudioChatAgentOption']
+export type StudioChatSessionRecord = S['StudioChatSessionRecord']
+export type StudioChatMessageRecord = S['StudioChatMessageRecord']
+export type StudioChatPermissionAnswerRequest =
+  S['StudioChatPermissionAnswerRequest']
+
+type AgentsResponse = S['StudioChatAgentsResponse']
+type SessionsResponse = S['StudioChatSessionsResponse']
+type SessionResponse = S['StudioChatSessionResponse']
+type MessagesResponse = S['StudioChatMessagesResponse']
+type MessageResponse = S['StudioChatMessageResponse']
 
 function base(workspaceId: string, sessionId?: string): string {
   const root = `/api/workspaces/${encodeURIComponent(workspaceId)}/studio-chat`
@@ -107,22 +106,23 @@ export function answerStudioChatPermission(
 ): Promise<void> {
   return api(
     `${base(workspaceId, sessionId)}/permissions/${encodeURIComponent(requestId)}`,
-    {
-      method: 'POST',
-      body: JSON.stringify(answer),
-    }
+    { method: 'POST', body: JSON.stringify(answer) }
   ).then(() => undefined)
 }
 
-/** 把用户在 Studio 当前选中的节点推到会话上下文（agent 经
- * get_studio_context 工具读取实时值）。 */
+/** 把 Studio 侧上下文推到会话（agent 经 get_studio_context 工具读取实时值）。
+ * 部分更新：body 只带出现的字段——selectedNodeKey 出现即使为 null 也发送（清除选中），draftYaml 映射为 draft_yaml。 */
 export function updateStudioChatContext(
   workspaceId: string,
   sessionId: string,
-  selectedNodeKey: string | null
+  updates: { selectedNodeKey?: string | null; draftYaml?: string }
 ): Promise<StudioChatSessionRecord> {
+  const body: Record<string, unknown> = {}
+  if ('selectedNodeKey' in updates)
+    body.selected_node_key = updates.selectedNodeKey
+  if (updates.draftYaml !== undefined) body.draft_yaml = updates.draftYaml
   return api<SessionResponse>(`${base(workspaceId, sessionId)}/context`, {
     method: 'PUT',
-    body: JSON.stringify({ selected_node_key: selectedNodeKey }),
+    body: JSON.stringify(body),
   }).then((response) => response.session)
 }

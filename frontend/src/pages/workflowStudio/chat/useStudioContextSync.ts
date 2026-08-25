@@ -20,7 +20,9 @@ export function useStudioContextSync(
       return
     }
     lastSentRef.current = { sessionId, key: selectedNodeKey }
-    void updateStudioChatContext(workspaceId, sessionId, selectedNodeKey).catch(
+    void updateStudioChatContext(workspaceId, sessionId, {
+      selectedNodeKey,
+    }).catch(
       // 推送失败清除去重标记，下次选中变化/会话切换时重试。
       () => {
         if (lastSentRef.current?.sessionId === sessionId) {

@@ -1,5 +1,6 @@
 import type { WorkflowDefinitionRecord } from '../../types'
 import type { AgentDefinition } from '../../types/executorTypes'
+import type { ChangeSummaryViewModel } from './workflowStudioChanges'
 import { WorkflowNodeInspector } from './WorkflowNodeInspector'
 import { selectedNodeDetails } from './workflowStudioModel'
 import { StudioAgentPanelToggle } from './StudioAgentPanelToggle'
@@ -11,6 +12,7 @@ type Props = {
   agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
+  compareSummary?: ChangeSummaryViewModel | null
   readOnly: boolean
   agentOpen: boolean
   onToggleAgent: () => void
@@ -48,6 +50,7 @@ export function WorkflowNodeDetailView(props: Props) {
           selectedNodeKey={props.nodeKey}
           definitionYaml={props.definitionYaml}
           setDefinitionYaml={props.setDefinitionYaml}
+          compareSummary={props.compareSummary}
           readOnly={props.readOnly}
           onClose={props.onBack}
         />

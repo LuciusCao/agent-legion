@@ -15,7 +15,7 @@ from server.app.jobs.queries.studio_chat_messages import StudioChatMessageQuerie
 _SESSION_COLUMNS = (
     "id, workspace_id, user_id, agent_id, title, status, acp_session_id,"
     " capability_snapshot_json, allow_all_permissions, mcp_status,"
-    " selected_node_key, error_detail, created_at, updated_at, closed_at"
+    " selected_node_key, draft_yaml, error_detail, created_at, updated_at, closed_at"
 )
 
 # Advisory-lock key serializing session creation against the active cap.
@@ -37,6 +37,7 @@ def _build_session_updates(fields: dict[str, Any]) -> dict[str, Any]:
         "allow_all_permissions",
         "mcp_status",
         "selected_node_key",
+        "draft_yaml",
         "error_detail",
         "closed_at",
     }

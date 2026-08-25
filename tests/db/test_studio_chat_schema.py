@@ -20,6 +20,18 @@ def _columns(conn, table: str) -> set[str]:
     }
 
 
+def test_schema_v57_recorded() -> None:
+    """Latest-migration record pin (moved from
+    tests/db/test_job_node_status_counts_migration.py, v56)."""
+    assert SCHEMA_VERSION == 57
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute(
+            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
+        ).fetchone()
+    assert row is not None
+    assert row["name"] == "studio_chat_draft"
+
+
 def test_studio_chat_tables_exist() -> None:
     # The autouse fixture already ran init_db at the current SCHEMA_VERSION.
     with read_connection(TEST_DATABASE_URL) as conn:
@@ -37,6 +49,7 @@ def test_studio_chat_tables_exist() -> None:
         "allow_all_permissions",
         "mcp_status",
         "selected_node_key",
+        "draft_yaml",
         "error_detail",
         "created_at",
         "updated_at",
@@ -45,6 +58,25 @@ def test_studio_chat_tables_exist() -> None:
     assert {"id", "seq", "session_id", "kind", "role", "content_json", "created_at"} == (
         message_columns
     )
+
+
+@pytest.mark.fresh_schema
+def test_v56_database_gains_draft_yaml_via_init_db() -> None:
+    # Pre-v57 databases have the sessions table without the draft column;
+    # init_db replays the schema file whose alter statement adds it.
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
+        conn.execute("alter table studio_chat_sessions drop column draft_yaml")
+
+    init_db(TEST_DATABASE_URL)
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        assert "draft_yaml" in _columns(conn, "studio_chat_sessions")
+        migration = conn.execute(
+            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
+        ).fetchone()
+    assert migration is not None
+    assert migration["name"] == "studio_chat_draft"
 
 
 @pytest.mark.fresh_schema
@@ -72,7 +104,7 @@ def test_v42_database_upgrades_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert migration is not None
-    assert migration["name"] == "job_node_status_counts"
+    assert migration["name"] == "studio_chat_draft"
 
     # Rows written through the new tables survive a replay (init_db runs at
     # every backend startup).

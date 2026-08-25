@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { WorkflowNodeInspectorSections } from './WorkflowNodeInspectorSections'
 import { api } from '../../api'
 import { useSettingStore } from '../../stores/settingStore'
@@ -22,14 +22,31 @@ const startNode: WorkflowNodeRecord = {
   accepted_item_types: ['material', 'ref'],
 }
 
-function renderSections(node: WorkflowNodeRecord) {
+const startYaml = `key: demo
+nodes:
+  _start:
+    type: start
+    accepted_item_types:
+      - material
+      - ref
+`
+
+function renderSections(
+  node: WorkflowNodeRecord,
+  options?: {
+    readOnly?: boolean
+    definitionYaml?: string
+    setDefinitionYaml?: (value: string) => void
+  }
+) {
   return render(
     <WorkflowNodeInspectorSections
       details={{ node, incoming: [], outgoing: [] }}
       agentCatalog={[]}
-      definitionYaml=""
-      setDefinitionYaml={() => {}}
+      definitionYaml={options?.definitionYaml ?? startYaml}
+      setDefinitionYaml={options?.setDefinitionYaml ?? (() => {})}
       workflowKey="demo_workflow"
+      readOnly={options?.readOnly}
     />
   )
 }
@@ -41,7 +58,7 @@ describe('WorkflowNodeInspectorSections for a start node', () => {
   })
 
   it('shows the read-only entry contract instead of code/execution editors', () => {
-    renderSections(startNode)
+    renderSections(startNode, { readOnly: true })
 
     expect(screen.getByLabelText('入口节点')).toBeInTheDocument()
     expect(screen.getByText(/material、ref/)).toBeInTheDocument()
@@ -53,5 +70,50 @@ describe('WorkflowNodeInspectorSections for a start node', () => {
     expect(mockApi).not.toHaveBeenCalled()
     // Structure info stays available.
     expect(screen.getByText('依赖关系')).toBeInTheDocument()
+    // readOnly 下不渲染可编辑的 checkbox。
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+  })
+
+  it('renders the three accepted_item_types checkboxes when editable', () => {
+    renderSections(startNode)
+
+    expect(
+      screen.getByRole('checkbox', { name: '材料文件 material' })
+    ).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: '外部引用 ref' })).toBeChecked()
+    expect(
+      screen.getByRole('checkbox', { name: '文件夹 bundle' })
+    ).not.toBeChecked()
+    // 依赖关系段保留。
+    expect(screen.getByText('依赖关系')).toBeInTheDocument()
+  })
+
+  it('patches the draft YAML when a type is toggled', () => {
+    const setDefinitionYaml = vi.fn()
+    renderSections(startNode, { setDefinitionYaml })
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '文件夹 bundle' }))
+    expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
+    const added = setDefinitionYaml.mock.calls[0][0] as string
+    expect(added).toContain('type: start')
+    expect(added).toContain('- bundle')
+
+    setDefinitionYaml.mockClear()
+    fireEvent.click(screen.getByRole('checkbox', { name: '外部引用 ref' }))
+    const removed = setDefinitionYaml.mock.calls[0][0] as string
+    expect(removed).toContain('- material')
+    expect(removed).not.toContain('- ref')
+  })
+
+  it('disables the only checked type so the contract stays non-empty', () => {
+    renderSections({ ...startNode, accepted_item_types: ['material'] })
+
+    expect(
+      screen.getByRole('checkbox', { name: '材料文件 material' })
+    ).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: '外部引用 ref' })).toBeEnabled()
+    expect(
+      screen.getByRole('checkbox', { name: '文件夹 bundle' })
+    ).toBeEnabled()
   })
 })

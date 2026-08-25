@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   patchWorkflowEdgeCondition,
   patchWorkflowLabel,
+  patchWorkflowNodeAcceptedItemTypes,
   patchWorkflowNodeInputs,
   patchWorkflowNodeLabel,
   patchWorkflowNodeOutputs,
@@ -103,6 +104,42 @@ nodes:
       - _start
 `
     const changed = patchWorkflowNodeLabel(yamlWithStart, 'fetch', 'Fetch v2')
+    expect(changed).toContain('type: start')
+    expect(changed).toContain('accepted_item_types:')
+    expect(changed).toContain('- material')
+  })
+
+  it('patches accepted_item_types on an existing start node', () => {
+    const yamlWithStart = `key: demo
+label: Demo
+nodes:
+  _start:
+    type: start
+    accepted_item_types:
+      - material
+      - ref
+`
+    const changed = patchWorkflowNodeAcceptedItemTypes(
+      yamlWithStart,
+      '_start',
+      ['material', 'ref', 'bundle']
+    )
+    expect(changed).toContain('type: start')
+    expect(changed).toContain('- bundle')
+    const again = patchWorkflowNodeAcceptedItemTypes(changed, '_start', [
+      'material',
+    ])
+    expect(again).not.toContain('- ref')
+    expect(again).not.toContain('- bundle')
+  })
+
+  it('creates a start entry when the node is missing from the draft YAML', () => {
+    // loader 注入的合成 _start 节点不在 draft YAML 文本里：补建而不是抛错。
+    const changed = patchWorkflowNodeAcceptedItemTypes(yaml, '_start', [
+      'material',
+      'ref',
+    ])
+    expect(changed).toContain('_start:')
     expect(changed).toContain('type: start')
     expect(changed).toContain('accepted_item_types:')
     expect(changed).toContain('- material')

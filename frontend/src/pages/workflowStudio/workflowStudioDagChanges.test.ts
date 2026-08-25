@@ -35,6 +35,7 @@ function nodeChange(type: 'added' | 'modified' | 'removed', nodeKey: string) {
     type,
     nodeKey,
     label: nodeKey.toUpperCase(),
+    nodeType: 'node' as const,
     fields: [],
     severity: 'info' as const,
   }

@@ -1007,6 +1007,9 @@ create table if not exists studio_chat_sessions (
   -- The node the human currently has selected in Studio (v45); pushed by the
   -- frontend, read live by the get_studio_context MCP tool.
   selected_node_key text,
+  -- The canvas' unpublished workflow draft YAML (v57); pushed by the frontend
+  -- through the same PUT context route, read by get_studio_context.
+  draft_yaml text,
   error_detail text not null default '',
   created_at timestamptz not null default current_timestamp,
   updated_at timestamptz not null default current_timestamp,
@@ -1016,6 +1019,8 @@ create index if not exists idx_studio_chat_sessions_workspace
   on studio_chat_sessions(workspace_id, created_at desc);
 -- Upgrade path for pre-v45 databases.
 alter table studio_chat_sessions add column if not exists selected_node_key text;
+-- Upgrade path for pre-v57 databases.
+alter table studio_chat_sessions add column if not exists draft_yaml text;
 
 create table if not exists studio_chat_messages (
   id text primary key,

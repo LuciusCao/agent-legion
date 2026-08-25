@@ -23,6 +23,7 @@ from server.app.db.migrations.runs import migrate_runs
 from server.app.db.migrations.scoped_token_origin import migrate_scoped_token_origin
 from server.app.db.migrations.studio_chat import migrate_studio_chat_tables
 from server.app.db.migrations.studio_chat_context import migrate_studio_chat_context
+from server.app.db.migrations.studio_chat_draft import migrate_studio_chat_draft
 from server.app.db.migrations.versioned_entities import migrate_versioned_entities
 from server.app.db.migrations.workflow_catalog_retirement import (
     migrate_workflow_catalog_retirement,
@@ -46,6 +47,7 @@ __all__ = [
     "migrate_runs",
     "migrate_scoped_token_origin",
     "migrate_studio_chat_context",
+    "migrate_studio_chat_draft",
     "migrate_studio_chat_tables",
     "migrate_versioned_entities",
     "migrate_workflow_catalog_retirement",

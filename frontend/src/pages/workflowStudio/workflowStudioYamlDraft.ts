@@ -86,6 +86,18 @@ export function patchWorkflowLabel(rawYaml: string, label: string): string {
   return dumpWorkflowYaml(draft)
 }
 
+// start 节点的入口契约。与 patchNode 不同：loader 注入的合成 _start 节点可能
+// 不在 draft YAML 文本里，节点缺失时补建 start 条目而不是抛错。
+export function patchWorkflowNodeAcceptedItemTypes(
+  rawYaml: string,
+  nodeKey: string,
+  types: string[]
+): string {
+  const d = parseWorkflowYaml(rawYaml)
+  ;((d.nodes ??= {})[nodeKey] ??= { type: 'start' }).accepted_item_types = types
+  return dumpWorkflowYaml(d)
+}
+
 export function patchWorkflowEdgeCondition(
   rawYaml: string,
   index: number,

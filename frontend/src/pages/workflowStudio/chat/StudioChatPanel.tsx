@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSettingStore } from '../../../stores/settingStore'
 import { useStudioChat } from './useStudioChat'
 import { useStudioContextSync } from './useStudioContextSync'
+import { useStudioDraftSync } from './useStudioDraftSync'
 import { StudioChatSessionBar } from './StudioChatSessionBar'
 import { StudioChatMessageList } from './StudioChatMessageList'
 import { StudioChatRunBar } from './StudioChatRunBar'
@@ -12,6 +13,7 @@ type Props = {
   onApplyWorkflowDraft: (yaml: string) => void
   onSelectNode?: (nodeKey: string) => void
   selectedNodeKey?: string | null
+  definitionYaml?: string | null
 }
 
 /** Studio 右半的 Agent 对话面板（一等公民分栏，不再是 tab）。agent 只能产草稿，
@@ -19,11 +21,9 @@ type Props = {
 export function StudioChatPanel(props: Props) {
   const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined
   const chat = useStudioChat(workspaceId)
-  useStudioContextSync(
-    workspaceId,
-    chat.activeSessionId,
-    props.selectedNodeKey ?? null
-  )
+  const sessionId = chat.activeSessionId
+  useStudioContextSync(workspaceId, sessionId, props.selectedNodeKey ?? null)
+  useStudioDraftSync(workspaceId, sessionId, props.definitionYaml ?? null)
   const [chosenAgentId, setChosenAgentId] = useState('')
   // 未手动选择时跟随 agent 列表第一项（picker 只列本机可用 agent）。
   const selectedAgentId = chosenAgentId || (chat.agents[0]?.id ?? '')

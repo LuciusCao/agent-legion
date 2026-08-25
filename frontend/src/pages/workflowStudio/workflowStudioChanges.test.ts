@@ -39,6 +39,7 @@ function makeNodeChange(overrides: Partial<NodeChange> = {}): NodeChange {
     type: 'modified',
     node_key: 'node_a',
     label: '节点 A',
+    node_type: 'node',
     fields: ['label'],
     risk: 'info',
     ...overrides,
@@ -115,6 +116,29 @@ describe('workflowStudioChanges', () => {
     )
   })
 
+  it('carries node_type into normalized node changes', () => {
+    const response = makeResponse({
+      summary: {
+        risk_level: 'info',
+        node_changes: [
+          makeNodeChange({ node_key: '_start', node_type: 'start' }),
+          makeNodeChange({ node_key: 'node_a' }),
+        ],
+        edge_changes: [],
+        intake_changes: [],
+        metadata_changes: [],
+        risk_flags: [],
+      },
+    })
+
+    const summary = buildChangeSummary(response)
+
+    expect(summary.nodeChanges.map((change) => change.nodeType)).toEqual([
+      'start',
+      'node',
+    ])
+  })
+
   it('sorts risk flags with breaking first', () => {
     const response = makeResponse({
       summary: {
@@ -189,6 +213,7 @@ describe('workflowStudioChanges', () => {
       type: 'added',
       node_key: 'new_node',
       label: '新节点',
+      node_type: 'node',
       fields: [],
       risk: 'info',
     }
@@ -196,6 +221,7 @@ describe('workflowStudioChanges', () => {
       type: 'modified',
       node_key: 'changed_node',
       label: '变更节点',
+      node_type: 'node',
       fields: ['capability', 'outputs'],
       risk: 'breaking',
     }

@@ -309,6 +309,18 @@ def test_set_selected_node_roundtrip(chat) -> None:
         service.set_selected_node(session["id"], "other-ws", "node-a")
 
 
+def test_set_draft_yaml_persists_on_session_row(chat) -> None:
+    service, _bus, register, workspace_id, user_id = chat
+    register(TEXT_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+
+    updated = service.set_draft_yaml(session["id"], workspace_id, "key: wf\n")
+    assert updated["draft_yaml"] == "key: wf\n"
+    assert service.get_session(session["id"])["draft_yaml"] == "key: wf\n"
+    with pytest.raises(NotFoundError):
+        service.set_draft_yaml(session["id"], "other-ws", "key: wf\n")
+
+
 def test_session_lifecycle_turn_and_token_revocation(chat, job_db) -> None:
     service, bus, register, workspace_id, user_id = chat
     script_path = register(TEXT_SCRIPT)

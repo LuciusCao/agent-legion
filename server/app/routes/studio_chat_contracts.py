@@ -45,6 +45,7 @@ class StudioChatSessionRecord(BaseModel):
     allow_all_permissions: bool
     mcp_status: McpStatus
     selected_node_key: str | None
+    draft_yaml: str | None = None
     error_detail: str
     created_at: datetime
     updated_at: datetime
@@ -90,11 +91,14 @@ class StudioChatAllowAllRequest(BaseModel):
 
 
 class StudioChatContextUpdateRequest(BaseModel):
-    """Human-side context push: the Studio node currently selected (or null)."""
+    """Human-side context push (partial update): the selected Studio node
+    (field presence decides, null clears) and/or the canvas' unpublished
+    workflow draft YAML (null = leave the mirror untouched)."""
 
     model_config = ConfigDict(extra="forbid")
 
     selected_node_key: str | None = None
+    draft_yaml: str | None = None
 
 
 class StudioChatPermissionAnswerRequest(BaseModel):

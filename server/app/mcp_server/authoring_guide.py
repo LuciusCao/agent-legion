@@ -22,8 +22,10 @@ Studio. Nothing you do takes effect in production by itself.
 
 ## 1. Tool map (in the order you typically need them)
 
-- `get_studio_context()` — which workspace this session is bound to and which
-  node the human has selected. Call first; takes no workspace_id.
+- `get_studio_context()` — which workspace this session is bound to, which
+  node the human has selected, and the canvas' current unpublished workflow
+  draft YAML (null until the human's Studio pushes it). Call first; takes no
+  workspace_id.
 - `get_active_workflow(workspace_id)` — the live revision + full definition
   YAML. Answers `{"state": "empty", ...}` (HTTP 200) when the workspace has no
   published workflow yet: that is your signal to author from scratch, not an
