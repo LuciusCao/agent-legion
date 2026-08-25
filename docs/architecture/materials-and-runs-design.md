@@ -2,7 +2,8 @@
 
 状态：v1 已实施（2026-08-22，worktree `.worktrees/materials-runs`，分支
 `feat/materials-and-runs`，schema v53 + materials/runs API + 物化缓存 +
-添加条目面板 + demo seed 迁移，quick gate 全绿）；v1.1/v2/future 待实施。
+添加条目面板 + demo seed 迁移，quick gate 全绿）；v1.2（bundle 文件夹条目，
+#156/#164）已落地（schema v55）；v1.1/v2/future 待实施。
 日期：2026-08-22
 关联：Issue #141（intake 仅支持 question/video 实体）、
 Issue #120（打包重设计：打包清单 + 批次追踪，本文档 §10 的衔接方）、

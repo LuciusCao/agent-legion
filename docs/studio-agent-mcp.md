@@ -1,6 +1,6 @@
 # Studio Agent MCP Server
 
-把平台的 studio-agent 工具面（`/api/studio-agent/tools/*`）以 MCP stdio server 的形式暴露给任意外部 agent（Kimi Code、Claude Code 等）。外部 agent 拿到 8 个工具：内置创作 playbook（`get_authoring_guide`，本地静态资源，不发 HTTP）、读会话上下文（`get_studio_context`，仅 Studio 对话内绑定会话时可用）、读激活 revision（无已发布 revision 时返回结构化空态 `{"state": "empty"}` 而不是报错）、校验/对比草稿（无基线时 compare 退化为草稿全貌预览）、存节点代码草稿（`expected_capability` 声明支持新节点骨架草稿）、存 Agent 定义草稿。workflow 没有注册概念（schema v50）：它就是 workspace 内部的一份 DAG，首个 publish 会把草稿的 key 记为 workspace 的默认 workflow key。
+把平台的 studio-agent 工具面（`/api/studio-agent/tools/*`）以 MCP stdio server 的形式暴露给任意外部 agent（Kimi Code、Claude Code 等）。外部 agent 拿到 8 个工具：内置创作 playbook（`get_authoring_guide`，本地静态资源，不发 HTTP）、读会话上下文（`get_studio_context`，仅 Studio 对话内绑定会话时可用）、读激活 revision（无已发布 revision 时返回结构化空态 `{"state": "empty"}` 而不是报错）、读节点代码现状（`get_node_code`：builtin 源码、已发布自定义代码与待发布草稿）、校验/对比草稿（无基线时 compare 退化为草稿全貌预览）、存节点代码草稿（`expected_capability` 声明支持新节点骨架草稿）、存 Agent 定义草稿。workflow 没有注册概念（schema v50）：它就是 workspace 内部的一份 DAG，首个 publish 会把草稿的 key 记为 workspace 的默认 workflow key。
 
 **权限边界**：MCP server 只是薄转发，真正的约束在后端——scoped token 只能走工具面（草稿/校验/读取），发布、回滚、归档等生效操作永远由人在 Studio 里完成（STUDIO-AGENT-001）。token 只存 sha256 digest，明文只在铸造时返回一次。Studio 对话内铸造的 run token（origin='run'）还绑定会话所在 workspace（schema v45，绑定与 token 行同一条 INSERT 原子写入）：带 workspace 路径的工具端点对其它 workspace 一律 403；自助 token（origin='user'，本文档流程铸造的）不带绑定，按 workspace 成员关系校验（成员/admin 放行，非成员 404）。注意铸造端点自 P4 起 admin-only——「自助」仅指 admin 用户自助，member 无法铸造新 token（已铸造未过期的 token 在 TTL 内仍可用）。
 

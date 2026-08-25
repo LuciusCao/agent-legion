@@ -36,8 +36,13 @@ scripts/
 开发者启动后端（uvicorn 8001）+ 前端（vite 5174）
     → 前端通过 Vite proxy 访问后端 API
     → 后端通过 PostgreSQL 协调任务，并读写 data/ 目录产物
-    → Job 运行产物存入 data/jobs/<workspace>/<shard>/<job_id>/（详见 ../data-layout.md）
+    → Job 运行产物存入 data/jobs/<workspace>/<shard>/<job_id>/（详见 ../data-layout.md）；
+      权威副本在实例对象存储（`jobs/{workspace_id}/{job_id}/{name}` key + `job_artifacts`
+      清单表），本地 job_dir 只是执行暂存与可淘汰缓存
 ```
+
+产物对象存储依赖 `AGENT_LEGION_S3_*` env 配置（自建可用 RustFS），部署细节见
+[../materials-storage-deployment.md](../materials-storage-deployment.md)。
 
 > 生产环境使用 8000/5173；dev worktree 默认 8001/5174，避免与 prod 端口冲突。
 
@@ -48,7 +53,7 @@ scripts/
 - 使用 `uv` 而非 `pip`/`poetry`，依赖锁定在 `uv.lock`。
 - PostgreSQL 是唯一运行时数据库；`server/` 与 `scripts/` 已无任何 SQLite 使用（曾用 SQLite 记录上传状态的 `tools/content-uploader` 已随业务清理退役删除）。
 - 质量门分三层：本地 pre-push 默认 smoke 级（`scripts/run-local-gate.sh`，由 `.githooks/pre-push` 调用）；本地完整门 `check.sh`（`AGENT_LEGION_GATE_LEVEL=full` 触发）；CI（`.github/workflows/quality-gate.yml`）分阶段调用 `scripts/check-quick-backend.sh` / `check-quick-frontend.sh`，不调用 `check.sh`。
-- 多 worktree 开发时，每个 worktree 使用独立的后端端口和 `data/` 目录。
+- 多 worktree 开发时，每个 worktree 使用独立的后端端口和 `data/` 目录；`scripts/init-worktree.sh` 会按 worktree 名派生并创建专属 Postgres 库与 S3 bucket（`AGENT_LEGION_S3_BUCKET`）。
 
 ## API Surface / Interface
 

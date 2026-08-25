@@ -36,9 +36,13 @@ frontend/src/
 │   ├── WorkspaceMainPage.tsx
 │   ├── JobDetailPage.tsx
 │   ├── SettingsPage.tsx
+│   ├── GlobalSettingsPage.tsx
+│   ├── UsersAdminPage.tsx
+│   ├── QualityPage.tsx
 │   ├── TokenUsagePage.tsx
 │   ├── WorkflowStudioPage.tsx
-│   └── jobDetail/          # Job Detail 子组件
+│   ├── jobDetail/          # Job Detail 子组件
+│   └── workflowStudio/     # Workflow Studio 子组件与 hooks（含 chat/ Studio chat 面板）
 ├── layouts/                # 布局组件
 │   ├── AppShell.tsx
 │   └── WorkspaceLayout.tsx
@@ -50,6 +54,10 @@ frontend/src/
 │   ├── question/           # 审题内容组件（QuestionContentPanel、QuestionAnnotations 等）
 │   ├── JobRerunDialog/     # Job 重跑对话框（已有子目录）
 │   ├── settings/           # Settings 区块组件（已有子目录）
+│   ├── AddItemsDialog.tsx      # runs 添加条目对话框
+│   ├── AddItemsUploadPanel.tsx # 条目类型面板：material 上传
+│   ├── AddItemsRefPanel.tsx    # 条目类型面板：ref 外部引用
+│   ├── AddItemsBundlePanel.tsx # 条目类型面板：bundle 文件夹
 │   ├── AddDialog.tsx
 │   ├── VideoPlayer.tsx
 │   ├── VideoContentPanel.tsx     # Job Detail 视频内容面板

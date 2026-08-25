@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Added
+
+- Workspace materials store: S3-compatible presigned direct upload (RustFS
+  locally), content-addressed local material cache for sandboxed nodes,
+  add-items dialog, demo workspace material seeding, and a storage readiness
+  probe in `/api/health` plus a startup self-check (#141).
+- Item-based run creation API `POST /workspaces/{id}/runs` with typed items
+  (#141).
+- Mandatory `type: start` entry node in every workflow DAG carrying the
+  `accepted_item_types` entry contract; item types `material` and `ref`
+  (#156, #161).
+- `bundle` item type: a folder as a single item (`material_bundles`,
+  manifest-referenced members, two-way delete guard, deterministic
+  hardlink-tree materialization, bundle upload panel in the UI) (#156, #164).
+- Job artifacts unified into instance object storage
+  (`jobs/{workspace_id}/{job_id}/{name}` keys + `job_artifacts` manifest
+  table, schema v54); the local job_dir is now an evictable cache (#160).
+- Worker `max_code_concurrency` hot-reload via the console /
+  `PUT /api/config` without restart (#123).
+- `scripts/resume-workspaces.sh` (on-demand workspace scheduling resume) and
+  `scripts/trim_terminal_code_manifests.py` (drain legacy code manifest
+  rows).
+- Optional bundled RustFS in prod-up (#150).
+
+### Changed
+
+- **Breaking (API consumers):** `job_batches` migrated to first-class `runs`
+  (schema v53) (#141).
+- Studio chat MCP loopback is served over an in-app streamable-HTTP endpoint
+  (`/api/studio-agent/mcp`) with scoped, workspace-bound tokens and sliding
+  TTL (#157, #158, #159).
+- Worker artifact return goes only through claim-injected presigned S3
+  staging; the local `/api/artifacts` CAS is a legacy compatibility path
+  (#160).
+
 ### Fixed
 
 - `agent_execution_requests` TOAST bloat (#142): the queued kind='code'
@@ -16,6 +51,12 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   slimmed back to the stub automatically; `scripts/trim_terminal_code_manifests.py`
   drains legacy pre-fix rows (ops-side `VACUUM FULL`/`pg_repack` still needed
   to reclaim disk).
+- Terminal-bundle reap moved off the startup-critical sweep (#139).
+- init-worktree S3 bucket step silently skipped on bare `load_dotenv` (#163).
+- Studio chat MCP loopback deadlock and message interleaving; fully async
+  httpx (#157).
+- Material delete guards and endpoint precedence (#151, #153).
+- Materials & runs v1 follow-ups (#154, #155).
 
 ## [0.2.0] - 2026-08-20
 
