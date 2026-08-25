@@ -76,7 +76,10 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
 
 [tool.coverage.run]
-source = ["server"]
+# worker/ is the untrusted-code-execution frontier (code_runner, upload
+# queue, fetch paths) — it rides the same 85% floor as server/, not behind
+# the aggregate average.
+source = ["server", "worker"]
 omit = [
   "*/__pycache__/*",
   # These paths are referenced only by tests/test_export_openapi.py via

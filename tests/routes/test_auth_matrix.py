@@ -41,6 +41,32 @@ def test_anonymous_business_routes_return_401(anon_client) -> None:
     assert anon_client.get("/api/auth/bootstrap").status_code == 200
 
 
+def test_cookie_mutation_without_csrf_header_is_403(client) -> None:
+    """Cookie-authenticated mutations must carry the CSRF header (SECURITY-AUTH-001).
+
+    A cross-site request can ride the session cookie but cannot set custom
+    headers; without this rejection every cookie channel mutation would be
+    CSRF-able. Bearer-channel exemption (scoped tokens are not ambient) is
+    covered by the test_studio_agent_scope suite.
+    """
+    # The client fixture authenticates over the cookie channel with the CSRF
+    # header preset; drop it to simulate the cross-site request shape (the
+    # session cookie stays on the client).
+    csrf_value = client.headers.pop("x-agent-legion-request", None)
+    assert csrf_value is not None
+    try:
+        response = client.post("/api/workspaces", json={"name": "csrf-probe"})
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Missing request header"
+        # Safe methods never need the header.
+        assert client.get("/api/workspaces").status_code == 200
+    finally:
+        client.headers["x-agent-legion-request"] = csrf_value
+    # The same mutation with the header restored goes through to the role
+    # checks: the admin client may create (200, the route's default status).
+    assert client.post("/api/workspaces", json={"name": "csrf-probe"}).status_code == 200
+
+
 def test_non_member_gets_404_not_403(client, workspace_id) -> None:
     _create_member(client)
     member = _member_client(client)
