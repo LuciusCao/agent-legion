@@ -36,7 +36,13 @@ def artifact_contents(
             if row["node_key"] not in wanted:
                 continue
             try:
-                raw = object_store.open_stream(row).read()
+                # Bounded read: the object can be orders of magnitude larger
+                # than the inline cap, so never pull it fully into memory.
+                stream = object_store.open_stream(row)
+                try:
+                    raw = stream.read(_ARTIFACT_CONTENT_LIMIT + 1)
+                finally:
+                    stream.close()
             except Exception:
                 continue
             contents.append(

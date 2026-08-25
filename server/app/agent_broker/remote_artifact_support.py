@@ -127,8 +127,15 @@ def upgrade_input_artifacts(
 
 def download_remote_artifact(
     store: JobArtifactObjectStore, staging_dir: Path, name: str, ref: Any
-) -> Path:
-    """Stream one verified staging object into the staging dir (hash-checked)."""
+) -> tuple[Path, str]:
+    """Stream one verified staging object into the staging dir (hash-checked).
+
+    Returns the staged path and the hash to register: a Worker-reported hash
+    must match the computed digest (mismatch fails the whole batch); an empty
+    report registers the computed value — the same semantics as
+    ``verify_remote_digest``, so the registered hash always comes from
+    Host-verified content.
+    """
     relative = PurePosixPath(name)
     if relative.is_absolute() or ".." in relative.parts:
         raise ValueError(f"unsafe expected output name: {name!r}")
@@ -145,7 +152,7 @@ def download_remote_artifact(
     declared = str(ref.get("content_hash") or "")
     if declared and digest.hexdigest() != declared:
         raise ValueError(f"artifact content hash mismatch: {name!r}")
-    return target
+    return target, declared or digest.hexdigest()
 
 
 def verify_remote_digest(store: JobArtifactObjectStore, name: str, ref: Any) -> str:

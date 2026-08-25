@@ -13,7 +13,7 @@ discipline:
   under ``AGENT_LEGION_JOB_CACHE_MAX_BYTES``. Only files with a confirmed
   manifest row (i.e. durably stored, recorded size and content hash still
   matching the local file) are ever unlinked, only for ``completed`` jobs
-  without an active lease (re-checked per job right before unlinking:
+  without an active lease (re-checked per file right before each unlink:
   running/failed jobs may still schedule or re-run nodes against the local
   copies), oldest mtime first.
 """
@@ -264,16 +264,13 @@ def evict_cache_to_capacity(
     if total <= budget:
         return 0
     evicted = 0
-    rechecked: dict[str, bool] = {}
     for _mtime, size, job_id, path in _eviction_candidates(store, job_db, settings):
         if total <= budget:
             break
         # 快照到 unlink 之间 job 可能被 rerun 置回 queued 并重新执行：
-        # 每个 job 首删前重查一次前提（每 job 只查一次，缓存结论），不再
-        # 成立就跳过该 job 的剩余文件。
-        if job_id not in rechecked:
-            rechecked[job_id] = _job_still_evictable(job_db, job_id)
-        if not rechecked[job_id]:
+        # 每个文件 unlink 前都重查前提（不缓存结论），不再成立就跳过——
+        # 同 job 的其余文件可能已被 rerun 写成新产物。
+        if not _job_still_evictable(job_db, job_id):
             continue
         try:
             path.unlink()

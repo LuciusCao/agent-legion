@@ -385,6 +385,113 @@ def test_finish_cancelled_empty_hash_registers_host_computed(tmp_path: Path) -> 
     assert storage.objects == {AUTHORITY_KEY: PAYLOAD}
 
 
+def test_finish_completed_empty_hash_registers_host_computed(tmp_path: Path) -> None:
+    """download 路径与 cancelled 同语义：空 hash 登记 Host 流式计算值。"""
+    storage = FakeStorage()
+    storage.objects[STAGING_KEY] = PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
+
+    _finish(handler, {"out.json": _remote_ref(content_hash="")})
+
+    assert leases.results[0].status == "completed"
+    assert (job_dir / "out.json").read_bytes() == PAYLOAD
+    row = object_store.lookup("job-1", "out.json")
+    assert row is not None
+    assert row["content_hash"] == HASH  # Host 计算值，不是空串
+    assert storage.objects == {AUTHORITY_KEY: PAYLOAD}
+
+
+def test_finish_completed_undeclared_empty_hash_registers_host_computed(
+    tmp_path: Path,
+) -> None:
+    """未声明产物不落 job_dir，但 download 路径同样 digest 核验、登记计算值。"""
+    storage = FakeStorage()
+    extra_key = _staging_key("extra.json")
+    storage.objects[STAGING_KEY] = PAYLOAD
+    storage.objects[extra_key] = PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
+
+    _finish(
+        handler,
+        {"out.json": _remote_ref(), "extra.json": _remote_ref(key=extra_key, content_hash="")},
+    )
+
+    assert leases.results[0].status == "completed"
+    assert not (job_dir / "extra.json").exists()
+    row = object_store.lookup("job-1", "extra.json")
+    assert row is not None
+    assert row["content_hash"] == HASH
+    assert storage.objects == {
+        AUTHORITY_KEY: PAYLOAD,
+        "jobs/ws-1/job-1/extra.json": PAYLOAD,
+    }
+
+
+class _FlakyCopyStorage(FakeStorage):
+    """copy_object 在从指定 source key 拷贝时抛错（模拟中途 copy 失败）。"""
+
+    def __init__(self, fail_source: str) -> None:
+        super().__init__()
+        self._fail_source = fail_source
+
+    def copy_object(self, source_key: str, destination_key: str) -> None:
+        if source_key == self._fail_source:
+            raise RuntimeError("copy boom")
+        super().copy_object(source_key, destination_key)
+
+
+def test_promote_mid_batch_copy_failure_rolls_back_authority_keys(tmp_path: Path) -> None:
+    """rerun 覆盖式 promote 中途 copy 失败：已覆盖的 authority key 从备份
+    恢复（旧清单行仍指向旧字节），备份 key 清理，无半应用状态。"""
+    old_a, old_out = b"old-a-bytes", b"old-out-bytes"
+    first_key = _staging_key("a.json")
+    storage = _FlakyCopyStorage(fail_source=STAGING_KEY)  # out.json 的提升 copy 失败
+    storage.objects[first_key] = PAYLOAD
+    storage.objects[STAGING_KEY] = PAYLOAD
+    storage.objects["jobs/ws-1/job-1/a.json"] = old_a  # rerun 前的旧 authority 对象
+    storage.objects[AUTHORITY_KEY] = old_out
+    handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
+    artifacts = {
+        "a.json": _remote_ref(key=first_key),
+        "out.json": _remote_ref(),
+    }
+
+    handler.finish(
+        lease_id="lease-1",
+        worker_id="worker-1",
+        job_id="job-1",
+        node_key="node_a",
+        manifest={"expected_outputs": ["a.json", "out.json"], "execution_id": "exec-1"},
+        outcome=AgentOutcome(status="completed", exit_code=0, output_artifacts=artifacts),
+        archive_name="",
+    )
+
+    assert leases.results[0].status == "failed"
+    assert storage.objects["jobs/ws-1/job-1/a.json"] == old_a  # 已覆盖的被回滚
+    assert storage.objects[AUTHORITY_KEY] == old_out  # 未轮到覆盖的保持旧字节
+    assert not any("/.rollback/" in key for key in storage.objects)  # 备份清理
+    assert object_store.lookup("job-1", "a.json") is None  # 未登记半应用清单行
+    assert not (job_dir / "a.json").exists()
+    assert not (job_dir / "out.json").exists()
+
+
+def test_promote_rerun_success_cleans_up_backups(tmp_path: Path) -> None:
+    """成功路径：旧 authority 对象被新字节覆盖，备份 key 同样清理。"""
+    storage = FakeStorage()
+    storage.objects[STAGING_KEY] = PAYLOAD
+    storage.objects[AUTHORITY_KEY] = b"stale-authority-bytes"
+    handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
+
+    _finish(handler, {"out.json": _remote_ref()})
+
+    assert leases.results[0].status == "completed"
+    assert (job_dir / "out.json").read_bytes() == PAYLOAD
+    assert storage.objects == {AUTHORITY_KEY: PAYLOAD}  # 无残留备份/staging
+    row = object_store.lookup("job-1", "out.json")
+    assert row is not None
+    assert row["content_hash"] == HASH
+
+
 def test_record_remote_many_rolls_back_on_mid_batch_failure(tmp_path: Path) -> None:
     """批量登记单事务：第二行写入失败（FK）时整批回滚，无部分行。"""
     storage = FakeStorage()

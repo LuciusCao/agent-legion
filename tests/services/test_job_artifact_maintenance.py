@@ -291,3 +291,37 @@ def test_eviction_skips_non_completed_job(tmp_path: Path) -> None:
 
     assert evicted == 0
     assert confirmed.is_file()
+
+
+def test_eviction_rechecks_precondition_before_every_unlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """unlink 间隙前提失效（job 被 rerun 置回 queued）→ 同 job 的后续文件
+    不得再删（逐文件重查，不按 job 缓存结论）。"""
+    job = _complete_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    job_dir = tmp_path / "jobs" / "ws" / "job-1"
+    job_dir.mkdir(parents=True)
+    for name in ("a.json", "b.json"):
+        local = job_dir / name
+        local.write_bytes(OLD_PAYLOAD)
+        store.upload(
+            workspace_id="ws-1", job_id="job-1", node_key="n1", name=name, local_path=local
+        )
+
+    calls = 0
+
+    def _flip(job_db: Any, job_id: str) -> bool:
+        nonlocal calls
+        calls += 1
+        return calls == 1  # 仅第一次重查成立，之后前提失效
+
+    monkeypatch.setattr(job_artifact_maintenance, "_job_still_evictable", _flip)
+
+    evicted = evict_cache_to_capacity(store, _job_db(job), _settings(tmp_path), max_bytes=0)
+
+    assert evicted == 1  # 前提失效后同 job 的第二个文件被跳过
+    assert calls == 2
+    remaining = [path for path in job_dir.iterdir() if path.is_file()]
+    assert len(remaining) == 1
