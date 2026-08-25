@@ -2,7 +2,8 @@
 
 Split out of ``agent_completion.py`` for the file-size budget (mirrors the
 ``result_unpack.py`` split): the completion handler stays the orchestrator,
-this module owns the untrusted-ref mechanics.
+this module owns the untrusted-ref verify-then-apply flow (the apply-phase
+mechanics live in ``remote_artifact_promote.py``).
 
 Workers upload to a per-execution staging key (``jobs-staging/...``); the
 Host verifies EVERY ref first (staging layout bound to this execution, size
@@ -17,16 +18,13 @@ half-applied outputs.
 from __future__ import annotations
 
 import logging
-import os
 import tempfile
 from pathlib import Path
 from typing import Any
 
+from server.app.agent_broker.remote_artifact_promote import promote_all
 from server.app.agent_broker.remote_artifact_support import (
-    build_manifest_rows,
-    discard_staging,
     download_remote_artifact,
-    promote_remote,
     verify_remote_digest,
 )
 from server.app.executors.models import ExecutionResult
@@ -102,18 +100,23 @@ def apply_remote_artifact_refs(
         # Phase 2: download every declared output into a same-filesystem
         # staging dir and hash-check it; the temp dir self-cleans on failure.
         staged: dict[str, Path] = {}
-        # name -> hash to register: verified equal to the streamed bytes.
+        # name -> hash to register: verified equal to the streamed bytes; an
+        # empty Worker report registers the Host-computed digest (the same
+        # semantics as the cancelled path below).
         content_hashes: dict[str, str] = {}
         if download:
             with tempfile.TemporaryDirectory(prefix=".artifact-staging-", dir=job_dir) as stage:
                 for name, ref in remote.items():
                     if name in expected:
-                        staged[name] = download_remote_artifact(
+                        staged[name], content_hashes[name] = download_remote_artifact(
                             object_store, Path(stage), name, ref
                         )
-                    content_hashes[name] = str(ref.get("content_hash") or "")
+                    else:
+                        # Undeclared names never land in the job dir but are
+                        # still digest-verified Host-side for the manifest row.
+                        content_hashes[name] = verify_remote_digest(object_store, name, ref)
                 # Phase 3: all verified — promote copies, files, and rows.
-                _promote_all(
+                promote_all(
                     object_store,
                     workspace_id,
                     job_id,
@@ -122,6 +125,7 @@ def apply_remote_artifact_refs(
                     remote,
                     staged,
                     content_hashes,
+                    execution_id,
                 )
                 return set(remote), None
         # Cancelled path: no download, but the staging bytes are still
@@ -129,7 +133,7 @@ def apply_remote_artifact_refs(
         # hash must match and an empty one registers the computed value.
         for name, ref in remote.items():
             content_hashes[name] = verify_remote_digest(object_store, name, ref)
-        _promote_all(
+        promote_all(
             object_store,
             workspace_id,
             job_id,
@@ -138,46 +142,8 @@ def apply_remote_artifact_refs(
             remote,
             staged,
             content_hashes,
+            execution_id,
         )
     except Exception as exc:
         return set(remote), f"failed to apply Worker artifact uploads: {exc}"
     return set(remote), None
-
-
-def _promote_all(
-    object_store: JobArtifactObjectStore,
-    workspace_id: str,
-    job_id: str,
-    node_key: str,
-    job_dir: Path,
-    remote: dict[str, Any],
-    staged: dict[str, Path],
-    content_hashes: dict[str, str],
-) -> None:
-    """Copy to authority keys, promote staged files, register rows, clean up.
-
-    Undeclared names are promoted/registered but never land in the job dir
-    (the same whitelist as the tar unpack path). Copies precede row writes:
-    a failure between them leaves orphaned authority objects (lifecycle
-    backstop), never dangling manifest rows. All manifest rows upsert in ONE
-    transaction (record_remote_many): a mid-batch failure rolls back instead
-    of leaving a half-registered manifest.
-    """
-    authority_keys: dict[str, str] = {}
-    for name, ref in remote.items():
-        authority_keys[name] = promote_remote(
-            object_store,
-            workspace_id=workspace_id,
-            job_id=job_id,
-            name=name,
-            storage_key=str(ref["storage_key"]),
-        )
-    for name, staged_path in staged.items():
-        target = job_dir / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(staged_path, target)
-    object_store.record_remote_many(
-        build_manifest_rows(workspace_id, job_id, node_key, remote, authority_keys, content_hashes)
-    )
-    for ref in remote.values():
-        discard_staging(object_store, str(ref["storage_key"]))
