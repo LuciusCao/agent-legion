@@ -1,5 +1,6 @@
 import { Button } from '@mui/material'
-import type { JobSummary, WorkflowDefinitionRecord } from '../../types'
+import type { JobSummary } from '../../types'
+import type { NodeCatalog } from '../../lib/nodeCatalog'
 import type { FailureCategory } from '../../types/failureTypes'
 import type { WorkflowNodesByKey } from '../JobRerunDialog'
 import type { FailureCategoryContext } from '../JobRerunDialog/useFailureCategories'
@@ -23,7 +24,7 @@ export type JobActionBarProps = {
   jobs: JobSummary[]
   selectedCount?: number
   workspaceId?: string
-  workflowDefinition?: WorkflowDefinitionRecord | null
+  workflowDefinition?: NodeCatalog | null
   workflowNodesByKey?: WorkflowNodesByKey | null
   mode?: 'batch' | 'single'
   loading?: boolean

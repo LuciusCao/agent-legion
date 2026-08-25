@@ -1,22 +1,16 @@
 import type { JobDetail } from '../../types/jobTypes'
-import type { WorkflowDefinitionRecord } from '../../types'
+import type { NodeCatalog } from '../../lib/nodeCatalog'
 import { toDagEdges, toDagNodes } from './jobNodeHelpers'
-function toWorkflowDefinition(
-  detail: JobDetail | null
-): WorkflowDefinitionRecord | null {
+
+function toNodeCatalog(detail: JobDetail | null): NodeCatalog | null {
   if (!detail) return null
   return {
     key: detail.job.workflow_key,
     label: detail.job.workflow_key,
-    intake: { modes: [] },
-    edges: [],
     nodes: detail.nodes.map((n) => ({
       key: n.node_key,
       label: n.label,
-      after: n.after,
       capability: n.capability,
-      inputs: n.inputs,
-      outputs: n.outputs,
     })),
   }
 }
@@ -24,7 +18,7 @@ function toWorkflowDefinition(
 export function deriveJobDetailPresentation(detail: JobDetail | null) {
   const nodes = detail ? toDagNodes(detail.nodes) : []
   const edges = detail ? toDagEdges(detail.nodes) : []
-  const workflowDefinition = toWorkflowDefinition(detail)
+  const nodeCatalog = toNodeCatalog(detail)
   const keyInfoPreviewable = detail
     ? detail.nodes.some(
         (n) => n.node_key === 'generate_key_info' && n.status === 'completed'
@@ -54,8 +48,8 @@ export function deriveJobDetailPresentation(detail: JobDetail | null) {
   return {
     dagNodes: nodes,
     dagEdges: edges,
-    workflowDefinition,
-    workflowLabel: workflowDefinition?.label ?? detail?.job.workflow_key ?? '',
+    nodeCatalog,
+    workflowLabel: nodeCatalog?.label ?? detail?.job.workflow_key ?? '',
     outcome: detail?.job.outcome ?? '',
     workflowRevisionId: detail?.job.workflow_revision_id ?? '',
     currentWorkflowRevisionVersion:

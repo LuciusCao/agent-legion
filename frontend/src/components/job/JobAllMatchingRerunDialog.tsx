@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Dialog, DialogContent, DialogTitle } from '@mui/material'
-import type { JobSummary, WorkflowDefinitionRecord } from '../../types'
+import type { JobSummary } from '../../types'
+import type { NodeCatalog } from '../../lib/nodeCatalog'
 import {
   computeOrderedNodes,
   type WorkflowNodesByKey,
@@ -17,7 +18,7 @@ export type JobAllMatchingRerunDialogProps = {
   count: number
   jobs: JobSummary[]
   workspaceId?: string
-  workflowDefinition?: WorkflowDefinitionRecord | null
+  workflowDefinition?: NodeCatalog | null
   workflowNodesByKey?: WorkflowNodesByKey | null
   onClose: () => void
   onConfirm: (...args: JobRerunConfirmArgs) => void | Promise<void>

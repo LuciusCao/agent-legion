@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { IconButton } from '@mui/material'
-import type { JobSummary, WorkflowDefinitionRecord } from '../../types'
+import type { JobSummary } from '../../types'
+import type { NodeCatalog } from '../../lib/nodeCatalog'
 import { JobRerunDialog, type WorkflowNodesByKey } from '../JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
 import { JobDeleteDialog } from './JobDeleteDialog'
@@ -11,7 +12,7 @@ import styles from './JobDetailActions.module.css'
 
 export type JobDetailActionsProps = {
   jobs: JobSummary[]
-  workflowDefinition?: WorkflowDefinitionRecord | null
+  workflowDefinition?: NodeCatalog | null
   workflowNodesByKey?: WorkflowNodesByKey | null
   loading?: boolean
   onRerun: (nodeKey: string | null, fromFailedNode?: boolean) => void

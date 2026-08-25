@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Dialog } from '@mui/material'
-import type { JobSummary, WorkflowDefinitionRecord } from '../../types'
+import type { JobSummary } from '../../types'
+import type { NodeCatalog } from '../../lib/nodeCatalog'
 import { type WorkflowNodesByKey } from '../../lib/workflowNodes'
 import { useJobRerunDialog } from './useJobRerunDialog'
 import { useFailureCategories } from './useFailureCategories'
@@ -15,7 +16,7 @@ export type { WorkflowNodesByKey }
 export type JobRerunDialogProps = {
   open: boolean
   jobs: JobSummary[]
-  workflowDefinition?: WorkflowDefinitionRecord | null
+  workflowDefinition?: NodeCatalog | null
   workflowNodesByKey?: WorkflowNodesByKey | null
   itemLabel?: string
   allowFailedNodeMode?: boolean

@@ -54,7 +54,7 @@ export default function JobDetailPage() {
   const {
     dagNodes,
     dagEdges,
-    workflowDefinition,
+    nodeCatalog,
     keyInfoPreviewable,
     possibleErrorsPreviewable,
     keyInfoReviewAttempted,
@@ -91,7 +91,7 @@ export default function JobDetailPage() {
     setDetailPageActions(
       <JobDetailActions
         jobs={[detail.job]}
-        workflowDefinition={workflowDefinition}
+        workflowDefinition={nodeCatalog}
         loading={actionLoading}
         onRerun={handleRerun}
         onRunTo={handleRunTo}
@@ -107,7 +107,7 @@ export default function JobDetailPage() {
   }, [
     detail,
     setDetailPageActions,
-    workflowDefinition,
+    nodeCatalog,
     actionLoading,
     handleRerun,
     handleRunTo,
