@@ -28,6 +28,37 @@ The server creates the current schema under a PostgreSQL advisory migration
 lock. The configured role needs permission to connect and to create/alter
 objects in its application schema.
 
+## Dev-machine role isolation and worktree DB cleanup
+
+`DROP DATABASE` requires the database owner or a superuser. To make the
+routine cleanup path physically unable to drop the shared/prod database,
+dev machines should use two dedicated roles:
+
+```sql
+CREATE ROLE agent_legion_prod NOLOGIN;
+CREATE ROLE agent_legion_dev LOGIN CREATEDB;
+ALTER DATABASE agent_legion OWNER TO agent_legion_prod;
+-- and for every derived worktree database:
+ALTER DATABASE <agent_legion_worktree> OWNER TO agent_legion_dev;
+```
+
+- `agent_legion` (the code-default shared/prod database) is owned by the
+  NOLOGIN `agent_legion_prod` role; derived per-worktree databases
+  (`agent_legion_<worktree>` / `agent_legion_test_<worktree>`) belong to the
+  non-superuser `agent_legion_dev` role. `scripts/init-worktree.sh` and the
+  test bootstrap (`tests/postgres_support.py`) align ownership on creation
+  when the role exists.
+- Always remove a retired worktree's databases through
+  `scripts/drop-worktree-db.sh <worktree-name>`, never a bare `dropdb`. The
+  script derives the two database names from the worktree name (the bare
+  shared/prod name is unreachable by construction), connects as
+  `agent_legion_dev` when the role exists (PostgreSQL then rejects any drop
+  outside the derived set), and prints owner/size before asking for
+  confirmation.
+- Day-to-day superuser connections (such as the OS-user role) can still
+  drop anything — the guarantee covers the scripted routine path, not
+  deliberate superuser operations.
+
 ## Capacity for 200–300 agents
 
 Agent count and database connection count are deliberately decoupled. Each API
