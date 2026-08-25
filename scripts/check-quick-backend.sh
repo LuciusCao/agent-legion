@@ -76,7 +76,7 @@ run_tests() {
   fi
   cov_args=()
   if [[ "${AGENT_LEGION_COV:-0}" == "1" ]]; then
-    cov_args=(--cov=server --cov-report=term-missing)
+    cov_args=(--cov=server --cov=worker --cov-report=term-missing)
     if [[ "${AGENT_LEGION_COV_APPEND:-0}" == "1" ]]; then
       cov_args+=(--cov-append)
     fi

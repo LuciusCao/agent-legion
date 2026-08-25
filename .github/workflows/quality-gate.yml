@@ -449,7 +449,7 @@ jobs:
             --durations=30 \
             --junitxml=test-results/backend-full-junit.xml \
             -p scripts.pytest_telemetry \
-            --cov=server --cov-report= --cov-append \
+            --cov=server --cov=worker --cov-report= --cov-append \
             --cov-fail-under=0
         env:
           AGENT_LEGION_RERUN_REPORT: test-results/backend-full-reruns.json
