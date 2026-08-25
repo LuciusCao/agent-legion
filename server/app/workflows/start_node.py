@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.workflows.schema import (
+    ACCEPTED_ITEM_TYPES,
     DEFAULT_ACCEPTED_ITEM_TYPES,
     WorkflowDefinitionError,
     WorkflowEdge,
@@ -46,11 +47,11 @@ def load_start_fields(raw_node: dict[str, Any], node_key: str) -> tuple[str, tup
     if (
         not isinstance(raw_types, list)
         or not raw_types
-        or any(item not in DEFAULT_ACCEPTED_ITEM_TYPES for item in raw_types)
+        or any(item not in ACCEPTED_ITEM_TYPES for item in raw_types)
     ):
         raise WorkflowDefinitionError(
             f"Start node {node_key}.accepted_item_types must be a non-empty subset"
-            f" of {list(DEFAULT_ACCEPTED_ITEM_TYPES)}"
+            f" of {list(ACCEPTED_ITEM_TYPES)}"
         )
     return node_type, tuple(dict.fromkeys(raw_types))
 

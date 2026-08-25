@@ -165,8 +165,8 @@ created_by / created_at / updated_at
 
 ```
 input_json        {type:"material", material_id} | {type:"ref", connection_key,
-                  external_id, params?}——job 输入的一等字段，替代 batch payload
-                  里的 task_candidates 留痕
+                  external_id, params?} | {type:"bundle", bundle_id}——job 输入的
+                  一等字段，替代 batch payload 里的 task_candidates 留痕
 frozen_config_json 冻结的节点配置（从 batch payload node_config 下沉）
 run_id            由 batch_id 改名，值不变
 ```
@@ -175,7 +175,41 @@ run_id            由 batch_id 改名，值不变
 ref → `connection_key:external_id`，身份按连接限定：同一 external_id 跨
 连接是不同条目，去重键与 job id 同样按此派生），不再承担输入寻址职责。
 
-### 5.4 退役
+### 5.4 `material_bundles` 表（bundle 条目，#156）
+
+文件夹作为**一个整体条目**创建一个 job：成员文件走 §6.4 常规上传协议，
+全部 ready 后一次创建调用冻结 manifest（引用式，不复制字节）。
+
+```
+material_bundles
+  id / workspace_id / name（文件夹根名）
+  total_size_bytes / file_count（创建时汇总快照）
+  created_by / created_at
+material_bundle_members
+  bundle_id → material_bundles.id（级联删）
+  material_id → materials.id
+  path      成员在 bundle 内的相对路径（剥公共前缀）
+  ordinal   按 path 排序的稳定序号
+```
+
+- manifest **不可变**：创建后无更新路径，改成员 = 新建 bundle。
+- 成员仍是普通材料，删除双向守卫：被任一 bundle 引用的 material 拒删；
+  被任一 run 条目引用的 bundle 拒删。TTL collector 适用同一成员守卫：
+  bundle 成员的 expired 行跳过物理回收，先删 bundle 才会放行。
+- 成员相对路径拒绝控制字符（TAB/LF 等）：manifest 哈希按行拼接
+  `member_address<TAB>path`，路径携带分隔符会让编码产生歧义。
+- 条目/契约类型统一为字面量 `bundle`（item type、accepted_item_types、
+  source_type）；start 节点 DEFAULT 契约保持 `("material","ref")`，存量
+  workspace 对 bundle 条目 fail-closed，需显式 opt-in。
+- 物化：dispatch 时成员先进内容寻址缓存，再按 manifest 组装**硬链接
+  目录树**，地址由成员集合确定性派生（`shared/material_bundle.py`，
+  Host/Worker 同一规则）；Worker 经 claim 注入的 presigned 通道逐个拉
+  成员，与单材料同一协议（MATERIAL-BUNDLE-001）。缓存纪律两处为
+  bundle 收紧：逐成员物化全程 pin 住全部成员与树根（成员 i+1 的淘汰
+  回合不得删掉成员 i）；缓存淘汰按 entry 粒度——单文件或整棵目录树
+  原子删除，绝不留下残缺树（「目录存在即完整」不变式因此成立）。
+
+### 5.5 退役
 
 - `RESOLVERS` 注册表（`job_intake_registry.py`）整体删除；
   `phase`（intake/node/direct）三态、source_kind、workflow 定义的
@@ -214,6 +248,10 @@ dispatch → 按 material content_hash 查本地 materials_cache/
 
 同一材料多 job 复用不重复下载；Host 与 Worker 行为一致。缓存本身有
 LRU/容量上限（实例设置可配），淘汰不影响正确性（下次重新下载）。
+
+bundle 条目（§5.4）复用同一缓存：成员按各自 content_hash 物化后，按
+manifest 在缓存内组装硬链接目录树（地址由成员集合确定性派生，
+Host/Worker 一致），节点看到的是一个只读文件夹。
 
 ### 6.3 开发与测试环境（无 filesystem fallback，D13）
 
@@ -398,7 +436,8 @@ Host 沙箱 allow-read 碰巧含 `examples/`（Worker 上根本不存在该目�
 | v1.1 | 场景 A 路径输入（拷贝进材料区） | 本地路径提交 |
 | v2 | workflow 输入契约声明；question/video 导入改造为 connector 形态；场景 C 原地引用 | workflow 声明更直白 |
 | 并行 | 产物上云后的打包重设计（Issue #120） | prod 体积受控、出站回传 |
-| future | connector 实体化；文件夹作为单 job 输入（manifest 条目） | — |
+| v1.2 | 文件夹作为单 job 输入（bundle 条目，manifest 引用式，§5.4，#156） | 「添加条目」支持文件夹整体打包 |
+| future | connector 实体化 | — |
 | future（已立项，方案待讨论） | **异步建 job 的进度与结果可见性**：万级 job 走异步队列创建时，界面只看到数量上涨，看不到创建进度与结果分布（成功 / 因重复被 dedup / 校验失败及原因）。需求：run 维度展示创建进度条与结果明细。具体方案另行讨论后补本节 | — |
 
 ## 12. Quality Impact
@@ -412,6 +451,8 @@ Host 沙箱 allow-read 碰巧含 `examples/`（Worker 上根本不存在该目�
     禁止动态放行任意宿主路径；
   - MATERIAL-SECRET-001：材料存储凭据只走 env-only infra 注入（同
     `database.url`），不落 tracked yaml / API / 日志。
+  - MATERIAL-BUNDLE-001：bundle 是不可变引用式 manifest，删除双向守卫，
+    物化为确定性地址的硬链接目录树，Worker 复用材料 presigned 通道。
   - CONNECT-DIRECTION-001：external_connections 必须声明方向；ref 只许
     引用 source 连接，出站节点只许引用 sink 连接，服务端强校验。
 - **测试**：新测试放 `tests/services/`（RunService、材料 dedup、迁移）、

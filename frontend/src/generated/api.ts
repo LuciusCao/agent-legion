@@ -1552,6 +1552,42 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/material-bundles': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Bundles */
+    get: operations['list_bundles_api_workspaces__workspace_id__material_bundles_get']
+    put?: never
+    /** Create Bundle */
+    post: operations['create_bundle_api_workspaces__workspace_id__material_bundles_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/material-bundles/{bundle_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Bundle */
+    get: operations['get_bundle_api_workspaces__workspace_id__material_bundles__bundle_id__get']
+    put?: never
+    post?: never
+    /** Delete Bundle */
+    delete: operations['delete_bundle_api_workspaces__workspace_id__material_bundles__bundle_id__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/materials': {
     parameters: {
       query?: never
@@ -3466,6 +3502,76 @@ export interface components {
     LoginResponse: {
       user: components['schemas']['UserResponse']
     }
+    /** MaterialBundleCreateRequest */
+    MaterialBundleCreateRequest: {
+      /** Members */
+      members: components['schemas']['MaterialBundleMemberInput'][]
+      /** Name */
+      name: string
+    }
+    /** MaterialBundleDeleteResponse */
+    MaterialBundleDeleteResponse: {
+      /** Deleted */
+      deleted: string
+    }
+    /** MaterialBundleListResponse */
+    MaterialBundleListResponse: {
+      /** Bundles */
+      bundles: components['schemas']['MaterialBundleRecord'][]
+      /** Limit */
+      limit: number
+      /** Offset */
+      offset: number
+      /** Total */
+      total: number
+    }
+    /** MaterialBundleMemberInput */
+    MaterialBundleMemberInput: {
+      /** Material Id */
+      material_id: string
+      /** Path */
+      path: string
+    }
+    /** MaterialBundleMemberRecord */
+    MaterialBundleMemberRecord: {
+      /** Content Hash */
+      content_hash: string
+      /** Filename */
+      filename: string
+      /** Material Id */
+      material_id: string
+      /** Ordinal */
+      ordinal: number
+      /** Path */
+      path: string
+      /** Size Bytes */
+      size_bytes: number
+      /** Status */
+      status: string
+    }
+    /** MaterialBundleRecord */
+    MaterialBundleRecord: {
+      /** Created At */
+      created_at: string | null
+      /** Created By */
+      created_by: string
+      /** File Count */
+      file_count: number
+      /** Id */
+      id: string
+      /** Members */
+      members?: components['schemas']['MaterialBundleMemberRecord'][] | null
+      /** Name */
+      name: string
+      /** Total Size Bytes */
+      total_size_bytes: number
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** MaterialBundleResponse */
+    MaterialBundleResponse: {
+      bundle: components['schemas']['MaterialBundleRecord']
+    }
     /** MaterialDeleteResponse */
     MaterialDeleteResponse: {
       /** Deleted */
@@ -4076,6 +4182,7 @@ export interface components {
       items: (
         | components['schemas']['RunItemMaterial']
         | components['schemas']['RunItemRef']
+        | components['schemas']['RunItemBundle']
       )[]
       /** Workflow Key */
       workflow_key: string
@@ -4094,6 +4201,16 @@ export interface components {
     RunDetailResponse: {
       job_stats: components['schemas']['RunJobStats']
       run: components['schemas']['RunRecord']
+    }
+    /** RunItemBundle */
+    RunItemBundle: {
+      /** Bundle Id */
+      bundle_id: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'bundle'
     }
     /** RunItemMaterial */
     RunItemMaterial: {
@@ -8831,6 +8948,139 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['JobsPageResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_bundles_api_workspaces__workspace_id__material_bundles_get: {
+    parameters: {
+      query?: {
+        limit?: number
+        offset?: number
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['MaterialBundleListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_bundle_api_workspaces__workspace_id__material_bundles_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MaterialBundleCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['MaterialBundleResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_bundle_api_workspaces__workspace_id__material_bundles__bundle_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        bundle_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['MaterialBundleResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  delete_bundle_api_workspaces__workspace_id__material_bundles__bundle_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        bundle_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['MaterialBundleDeleteResponse']
         }
       }
       /** @description Validation Error */

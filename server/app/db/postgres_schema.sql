@@ -942,3 +942,32 @@ create unique index if not exists idx_materials_workspace_content_hash
   on materials(workspace_id, content_hash) where content_hash <> '';
 create index if not exists idx_materials_workspace_created
   on materials(workspace_id, created_at desc);
+
+-- Material bundles (schema v55, materials-and-runs design §5, #156): a
+-- folder uploaded as one run item. A bundle owns no bytes — it is a manifest
+-- of ready materials plus their relative paths; materialization rebuilds the
+-- directory tree from the content-addressed cache. Members reference
+-- materials(id) (no on delete cascade: the materials delete guard rejects
+-- deleting a referenced member instead).
+create table if not exists material_bundles (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  name text not null default '',
+  total_size_bytes bigint not null default 0,
+  file_count integer not null default 0,
+  created_by text not null default '',
+  created_at timestamptz not null default current_timestamp
+);
+create index if not exists idx_material_bundles_workspace_created
+  on material_bundles(workspace_id, created_at desc);
+
+create table if not exists material_bundle_members (
+  bundle_id text not null references material_bundles(id) on delete cascade,
+  material_id text not null references materials(id),
+  path text not null,
+  ordinal integer not null,
+  primary key (bundle_id, ordinal),
+  unique (bundle_id, path)
+);
+create index if not exists idx_material_bundle_members_material
+  on material_bundle_members(material_id);

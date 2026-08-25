@@ -31,7 +31,7 @@ from server.app.db.migrations.job_status_counts import (
 )
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 54
+SCHEMA_VERSION = 55
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 
@@ -86,5 +86,5 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             conn.execute("alter table workspaces drop column if exists cms_config_json")
             conn.execute(
                 "insert into schema_migrations(version, name) values (%s, %s)",
-                (SCHEMA_VERSION, "job_artifacts"),
+                (SCHEMA_VERSION, "material_bundles"),
             )

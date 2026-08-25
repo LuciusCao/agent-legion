@@ -16,9 +16,11 @@ import { useWorkflowDefinitionQuery } from '../hooks/useWorkflowDefinitionQuery'
 import { acceptedItemTypes } from '../lib/acceptedItemTypes'
 import { parseRefIds } from '../lib/addItems'
 import type { RunItem, WorkspaceResponse } from '../types'
+import { AddItemsBundlePanel } from './AddItemsBundlePanel'
 import { AddItemsExistingMaterials } from './AddItemsExistingMaterials'
 import { AddItemsRefPanel } from './AddItemsRefPanel'
 import { AddItemsUploadPanel } from './AddItemsUploadPanel'
+import { useBundleUploads } from './useBundleUploads'
 import { useMaterialUploads } from './useMaterialUploads'
 import styles from './AddItemsDialog.module.css'
 
@@ -28,7 +30,7 @@ type AddItemsDialogProps = {
   workspaceId?: string
 }
 
-type TabKey = 'upload' | 'ref' | 'existing'
+type TabKey = 'upload' | 'ref' | 'existing' | 'bundle'
 
 /**
  * 添加条目对话框：按条目类型各一个面板组件（上传材料 / 粘贴 ID /
@@ -56,6 +58,15 @@ export function AddItemsDialog({
     resetUploads,
     entries,
   } = useMaterialUploads(workspaceId)
+  const {
+    bundles,
+    readyBundles,
+    hasActiveBundles,
+    addFolder,
+    retryBundle,
+    removeBundle,
+    resetBundles,
+  } = useBundleUploads(workspaceId)
 
   const enabled = open && Boolean(workspaceId)
   const workspaceQuery = useQuery({
@@ -75,9 +86,19 @@ export function AddItemsDialog({
   const acceptedTypes = acceptedItemTypes(workflowQuery.data)
   const materialAccepted = acceptedTypes.includes('material')
   const refAccepted = acceptedTypes.includes('ref')
+  const bundleAccepted = acceptedTypes.includes('bundle')
   // 当前 tab 不被契约接受时落到可用 tab（派生值，不触发额外渲染循环）。
-  const fallbackTab: TabKey = materialAccepted ? 'upload' : 'ref'
-  const tabAllowed = tab === 'ref' ? refAccepted : materialAccepted
+  const fallbackTab: TabKey = materialAccepted
+    ? 'upload'
+    : bundleAccepted
+      ? 'bundle'
+      : 'ref'
+  const tabAllowed =
+    tab === 'ref'
+      ? refAccepted
+      : tab === 'bundle'
+        ? bundleAccepted
+        : materialAccepted
   const activeTab = tabAllowed ? tab : fallbackTab
 
   const toggleMaterial = useCallback((materialId: string) => {
@@ -90,16 +111,18 @@ export function AddItemsDialog({
 
   const resetState = useCallback(() => {
     resetUploads()
+    resetBundles()
     setRefText('')
     setConnectionKey('')
     setSelectedMaterialIds([])
     setTab('upload')
-  }, [resetUploads])
+  }, [resetUploads, resetBundles])
 
   const refIds = useMemo(() => parseRefIds(refText), [refText])
   // 契约解析后收窄的窗口期：隐藏面板里残留的条目不计数、不提交。
   const totalItems =
     (materialAccepted ? doneEntries.length + selectedMaterialIds.length : 0) +
+    (bundleAccepted ? readyBundles.length : 0) +
     (refAccepted ? refIds.length : 0)
 
   const handleClose = useCallback(() => {
@@ -117,6 +140,10 @@ export function AddItemsDialog({
       ...(materialAccepted ? selectedMaterialIds : []).map((materialId) => ({
         type: 'material' as const,
         material_id: materialId,
+      })),
+      ...(bundleAccepted ? readyBundles : []).map((bundle) => ({
+        type: 'bundle' as const,
+        bundle_id: bundle.bundleId!,
       })),
       ...(refAccepted ? refIds : []).map((id) => ({
         type: 'ref' as const,
@@ -145,8 +172,10 @@ export function AddItemsDialog({
     totalItems,
     materialAccepted,
     refAccepted,
+    bundleAccepted,
     doneEntries,
     selectedMaterialIds,
+    readyBundles,
     refIds,
     connectionKey,
     showToast,
@@ -157,7 +186,11 @@ export function AddItemsDialog({
   if (!open) return null
 
   const submitDisabled =
-    totalItems === 0 || isSubmitting || hasActiveUploads || !workflowKey
+    totalItems === 0 ||
+    isSubmitting ||
+    hasActiveUploads ||
+    hasActiveBundles ||
+    !workflowKey
 
   return (
     <Dialog
@@ -180,11 +213,18 @@ export function AddItemsDialog({
               value="existing"
               disabled={!materialAccepted}
             />
+            <Tab label="文件夹打包" value="bundle" disabled={!bundleAccepted} />
           </Tabs>
-          {(!materialAccepted || !refAccepted) && (
+          {(!materialAccepted || !refAccepted || !bundleAccepted) && (
             <div className={styles.errorHint} data-testid="item-type-hint">
               当前 workflow 只接受
-              {materialAccepted ? '材料条目' : '外部引用条目'}
+              {[
+                materialAccepted ? '材料条目' : null,
+                bundleAccepted ? '文件夹条目' : null,
+                refAccepted ? '外部引用条目' : null,
+              ]
+                .filter(Boolean)
+                .join('、')}
               （start 节点 accepted_item_types）。
             </div>
           )}
@@ -210,6 +250,14 @@ export function AddItemsDialog({
               enabled={enabled}
               selectedIds={selectedMaterialIds}
               onToggle={toggleMaterial}
+            />
+          )}
+          {activeTab === 'bundle' && (
+            <AddItemsBundlePanel
+              bundles={bundles}
+              onAddFolder={addFolder}
+              onRetry={retryBundle}
+              onRemove={removeBundle}
             />
           )}
           {!workflowKey && !workspaceQuery.isLoading && (

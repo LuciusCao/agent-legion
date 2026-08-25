@@ -147,6 +147,10 @@ server/app/
 | POST | `/workspaces/{workspace_id}/jobs/batch-upgrade-workflow` | `batch_upgrade_jobs_workflow` | routes/job_workflow_upgrade_batch.py |
 | GET | `/workspaces/{workspace_id}/jobs` | `list_workspace_jobs` | routes/jobs.py |
 | GET | `/jobs/{job_id}` | `get_job` | routes/jobs.py |
+| POST | `/workspaces/{workspace_id}/material-bundles` | `create_bundle` | routes/material_bundles.py |
+| GET | `/workspaces/{workspace_id}/material-bundles` | `list_bundles` | routes/material_bundles.py |
+| GET | `/workspaces/{workspace_id}/material-bundles/{bundle_id}` | `get_bundle` | routes/material_bundles.py |
+| DELETE | `/workspaces/{workspace_id}/material-bundles/{bundle_id}` | `delete_bundle` | routes/material_bundles.py |
 | POST | `/workspaces/{workspace_id}/materials/presign` | `presign_material` | routes/materials.py |
 | POST | `/workspaces/{workspace_id}/materials/{material_id}/complete` | `complete_material` | routes/materials.py |
 | GET | `/workspaces/{workspace_id}/materials` | `list_materials` | routes/materials.py |
@@ -362,6 +366,13 @@ server/app/
 | LogEventResponse | BaseModel | type: str, title: str, detail: str, truncated: bool | app/routes/job_view_contracts.py |
 | JobLogResponse | BaseModel | run_id: int, log: str, truncated: bool, structured: list[LogEventResponse] | ... | app/routes/job_view_contracts.py |
 | JobDetailResponse | BaseModel | job: JobSummaryResponse, nodes: list[JobNodeResponse], runs: list[NodeRunResp... | app/routes/job_view_contracts.py |
+| MaterialBundleMemberInput | BaseModel | material_id: str, path: str | app/routes/material_bundles.py |
+| MaterialBundleCreateRequest | BaseModel | name: str, members: list[MaterialBundleMemberInput] | app/routes/material_bundles.py |
+| MaterialBundleMemberRecord | BaseModel | material_id: str, path: str, ordinal: int, filename: str, size_bytes: int, co... | app/routes/material_bundles.py |
+| MaterialBundleRecord | BaseModel | id: str, workspace_id: str, name: str, total_size_bytes: int, file_count: int... | app/routes/material_bundles.py |
+| MaterialBundleResponse | BaseModel | bundle: MaterialBundleRecord | app/routes/material_bundles.py |
+| MaterialBundleListResponse | BaseModel | bundles: list[MaterialBundleRecord], total: int, limit: int, offset: int | app/routes/material_bundles.py |
+| MaterialBundleDeleteResponse | BaseModel | deleted: str | app/routes/material_bundles.py |
 | MaterialPresignRequest | BaseModel | filename: str, size_bytes: int, content_hash: str | None, content_type: str | app/routes/materials.py |
 | MaterialRecord | BaseModel | id: str, workspace_id: str, content_hash: str, filename: str, content_type: s... | app/routes/materials.py |
 | MaterialPresignResponse | BaseModel | material: MaterialRecord, upload_url: str | None, upload_expires_in_seconds: ... | app/routes/materials.py |
@@ -404,6 +415,7 @@ server/app/
 | QualityBatchStatsResponse | BaseModel | batch_id: str, groups: list[QualityStatsGroup] | app/routes/quality_contracts.py |
 | RunItemMaterial | BaseModel | type: Literal['material'], material_id: str | app/routes/run_contracts.py |
 | RunItemRef | BaseModel | type: Literal['ref'], connection_key: str, external_id: str, params: dict[str... | app/routes/run_contracts.py |
+| RunItemBundle | BaseModel | type: Literal['bundle'], bundle_id: str | app/routes/run_contracts.py |
 | RunCreateRequest | BaseModel | workflow_key: str, items: list[RunItem] | app/routes/run_contracts.py |
 | RunRecord | BaseModel | id: str, workspace_id: str, workflow_key: str, source_kind: str, status: str,... | app/routes/run_contracts.py |
 | RunCreateResponse | BaseModel | run: RunRecord, created_count: int, jobs: list[dict[str, Any]] | app/routes/run_contracts.py |

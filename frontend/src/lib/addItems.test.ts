@@ -7,6 +7,7 @@ import {
   formatBytes,
   parseRefIds,
   runWithConcurrency,
+  splitBundleRelativePath,
   uploadMaterialFile,
 } from './addItems'
 import { completeMaterial, presignMaterial } from '../api/materialsApi'
@@ -35,6 +36,36 @@ describe('parseRefIds', () => {
   it('trims lines, drops empties and dedupes in order', () => {
     expect(parseRefIds(' q1 \n\nq2\nq1\n  \nq3')).toEqual(['q1', 'q2', 'q3'])
     expect(parseRefIds('')).toEqual([])
+  })
+})
+
+describe('splitBundleRelativePath', () => {
+  it('splits the root folder from the member path', () => {
+    expect(splitBundleRelativePath('root/sub/a.txt')).toEqual({
+      root: 'root',
+      memberPath: 'sub/a.txt',
+    })
+    expect(splitBundleRelativePath('root/a.txt')).toEqual({
+      root: 'root',
+      memberPath: 'a.txt',
+    })
+  })
+
+  it('returns an empty root when there is no folder segment', () => {
+    expect(splitBundleRelativePath('a.txt')).toEqual({
+      root: '',
+      memberPath: 'a.txt',
+    })
+  })
+
+  it('keeps literal backslashes in POSIX filenames untouched', () => {
+    // webkitRelativePath 恒以 `/` 分隔（Windows 上亦然）；字面反斜杠是
+    // 合法文件名字符，不得被归一化成路径段——含 `\` 的成员路径由后端
+    // 校验 fail-closed 拒绝，而不是静默改写。
+    expect(splitBundleRelativePath('root/a\\b.txt')).toEqual({
+      root: 'root',
+      memberPath: 'a\\b.txt',
+    })
   })
 })
 

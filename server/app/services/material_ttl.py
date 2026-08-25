@@ -11,8 +11,10 @@ mirroring ``JobArtifactMaintenanceThread``'s loop discipline:
   materialization) only accepts ``status='ready'``.
 - ``collect_expired_materials`` — physically delete ``expired`` rows past a
   short grace window whose job-input reference count is zero (same
-  ``input_json`` check as ``delete()``): the S3 object goes first, the row
-  second, so an object-delete failure rolls back and retries next pass.
+  ``input_json`` check as ``delete()``) and which no bundle manifest
+  references (same ``material_bundle_members`` guard as ``delete()``,
+  #156): the S3 object goes first, the row second, so an object-delete
+  failure rolls back and retries next pass.
 
 Each material is its own small transaction; a bucket lifecycle rule stays
 the backstop for orphans (deployment doc).
@@ -123,6 +125,15 @@ def collect_expired_materials(
                     (str(candidate["workspace_id"]), material_id),
                 ).fetchone()
                 if referencing is not None:
+                    continue
+                # Bundle 成员同样算引用（#156）：与 MaterialsService.delete
+                # 同一守卫——必须先删 bundle 清单，否则对象已删而行删除被
+                # 外键回滚，仍存在的 bundle 永远无法物化。
+                member_of = conn.execute(
+                    "select bundle_id from material_bundle_members where material_id=%s limit 1",
+                    (material_id,),
+                ).fetchone()
+                if member_of is not None:
                     continue
                 storage.delete_object(str(row["storage_key"]))
                 conn.execute("delete from materials where id=%s", (material_id,))

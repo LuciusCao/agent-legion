@@ -25,6 +25,7 @@ from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_intake_workspace import get_workspace
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
+from server.app.services.run_bundle_candidate import bundle_candidate
 from server.app.services.run_item_types import validate_run_item_types
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
@@ -224,6 +225,8 @@ class RunService:
             item_type = item.get("type")
             if item_type == "material":
                 candidates.append(self._material_candidate(workspace_id, item))
+            elif item_type == "bundle":
+                candidates.append(bundle_candidate(self.job_db.path, workspace_id, item))
             elif item_type == "ref":
                 candidates.append(self._ref_candidate(item))
             else:

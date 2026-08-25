@@ -34,7 +34,7 @@ def _json(raw) -> dict:
 
 
 # The latest-migration record pin (SCHEMA_VERSION + recorded name) moved to
-# tests/db/test_job_artifacts_schema.py (v54).
+# tests/db/test_material_bundles_schema.py (v55).
 
 
 def test_runs_baseline_shape() -> None:
@@ -238,7 +238,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "job_artifacts"
+    assert migration["name"] == "material_bundles"
 
 
 @pytest.mark.fresh_schema

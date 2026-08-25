@@ -17,6 +17,7 @@ def _job_id(workspace_id: str, workflow_key: str, source_id: str) -> str:
 
 
 _MATERIAL_LOCK_SQL = "select id from materials where id=%s and workspace_id=%s for key share"
+_BUNDLE_LOCK_SQL = "select id from material_bundles where id=%s and workspace_id=%s for key share"
 
 
 class JobBulkQueriesMixin(JobQueriesBase):
@@ -52,6 +53,7 @@ class JobBulkQueriesMixin(JobQueriesBase):
         identities: dict[str, tuple[str, str]] = {}
         storage_dirs: dict[str, Path] = {}
         material_ids: list[str] = []
+        bundle_ids: list[str] = []
         for candidate in candidates:
             source_id = str(candidate["entity_id"])
             job_id = _job_id(workspace_id, workflow_key, source_id)
@@ -69,6 +71,8 @@ class JobBulkQueriesMixin(JobQueriesBase):
             input_doc = candidate_input(candidate)
             if input_doc.get("type") == "material":
                 material_ids.append(str(input_doc.get("material_id") or ""))
+            elif input_doc.get("type") == "bundle":
+                bundle_ids.append(str(input_doc.get("bundle_id") or ""))
             rows.append(
                 (
                     job_id,
@@ -100,6 +104,12 @@ class JobBulkQueriesMixin(JobQueriesBase):
                 locked = conn.execute(_MATERIAL_LOCK_SQL, (material_id, workspace_id)).fetchone()
                 if locked is None:
                     raise ValueError(f"Material not found: {material_id}")
+            # Bundle inputs FOR KEY SHARE their bundle row for the same
+            # serialization against the bundle delete guard (#156).
+            for bundle_id in dict.fromkeys(bundle_ids):
+                locked = conn.execute(_BUNDLE_LOCK_SQL, (bundle_id, workspace_id)).fetchone()
+                if locked is None:
+                    raise ValueError(f"Material bundle not found: {bundle_id}")
             placeholders = ",".join("%s" for _ in job_ids)
             existing = conn.execute(
                 f"select * from jobs where id in ({placeholders})", job_ids

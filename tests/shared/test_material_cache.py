@@ -170,6 +170,74 @@ def test_eviction_never_unlinks_pinned_paths(tmp_path: Path) -> None:
     assert not second.exists()
 
 
+def test_eviction_removes_bundle_tree_atomically(tmp_path: Path) -> None:
+    # 一个 bundle 目录树 entry（shard/address/…）+ 一个更新的单文件。
+    tree = tmp_path / "ab" / ("ab" + "0" * 62)
+    (tree / "sub").mkdir(parents=True)
+    (tree / "a.txt").write_bytes(b"a" * 100)
+    (tree / "sub" / "b.txt").write_bytes(b"b" * 100)
+    old = time.time() - 3600
+    for file in (tree / "a.txt", tree / "sub" / "b.txt"):
+        os.utime(file, (old, old))
+    newer = materialize_stream(tmp_path, HASH, _stream, expected_sha256=HASH)
+
+    # 容量只够留单文件：整棵树被原子删掉，不允许残缺目录残留
+    # （assemble_bundle_tree 把「目录存在」视为完整，#156）。
+    evict_to_capacity(tmp_path, len(PAYLOAD))
+
+    assert not tree.exists()
+    assert not (tmp_path / "ab").exists()  # 空 shard 目录一并清理
+    assert newer.exists()
+
+
+def test_eviction_keeps_pinned_tree(tmp_path: Path) -> None:
+    tree = tmp_path / "cd" / ("cd" + "0" * 62)
+    tree.mkdir(parents=True)
+    (tree / "a.txt").write_bytes(b"a" * 100)
+    old = time.time() - 3600
+    os.utime(tree / "a.txt", (old, old))
+
+    evict_to_capacity(tmp_path, 1, pin={tree})
+
+    assert (tree / "a.txt").read_bytes() == b"a" * 100
+
+
+def test_eviction_uses_newest_file_mtime_as_tree_clock(tmp_path: Path) -> None:
+    # 树内任一文件被命中刷新过（assemble 的 utime 循环），整棵树保持年轻。
+    tree = tmp_path / "ef" / ("ef" + "0" * 62)
+    tree.mkdir(parents=True)
+    (tree / "a.txt").write_bytes(b"a" * 100)
+    (tree / "b.txt").write_bytes(b"b" * 100)
+    os.utime(tree / "a.txt", (time.time() - 3600,) * 2)  # b.txt 保持新 mtime
+    old_payload = b"old" * 100
+    old_digest = hashlib.sha256(old_payload).hexdigest()
+    old_file = materialize_stream(tmp_path, old_digest, lambda: _stream(old_payload))
+    os.utime(old_file, (time.time() - 7200,) * 2)  # 严格老于树内任何文件
+
+    # 容量只够留树：老文件被回收；若树按文件粒度淘汰，a.txt 会先被删成残缺树。
+    evict_to_capacity(tmp_path, 200)
+
+    assert not old_file.exists()
+    assert (tree / "a.txt").exists()
+    assert (tree / "b.txt").exists()
+
+
+def test_materialize_extra_pin_protects_sibling_entry(tmp_path: Path) -> None:
+    first = materialize_stream(tmp_path, HASH, _stream, expected_sha256=HASH)
+    old = time.time() - 3600
+    os.utime(first, (old, old))
+    second_payload = b"second" * 50
+    second_digest = hashlib.sha256(second_payload).hexdigest()
+
+    # 容量装不下两个文件，但 extra pin 保护先物化的成员（bundle 场景）。
+    second = materialize_stream(
+        tmp_path, second_digest, lambda: _stream(second_payload), max_bytes=1, pin={first}
+    )
+
+    assert first.exists()
+    assert second.exists()
+
+
 def test_eviction_failure_only_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = materialize_stream(tmp_path, HASH, _stream)
     warnings: list[str] = []
@@ -182,6 +250,30 @@ def test_eviction_failure_only_warns(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     assert warnings, "eviction failure must surface as a warning"
     assert path.exists()
+
+
+def test_eviction_vacates_final_address_when_tree_delete_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """树先改名再删：rmtree 失败时最终地址不得留下残缺树（#156）。"""
+    tree = tmp_path / "ab" / ("ab" + "0" * 62)
+    tree.mkdir(parents=True)
+    (tree / "a.txt").write_bytes(b"a" * 100)
+    os.utime(tree / "a.txt", (time.time() - 3600,) * 2)
+    warnings: list[str] = []
+
+    def _failing_rmtree(path: Path, ignore_errors: bool = False) -> None:  # noqa: ARG001
+        raise OSError("disk error mid-delete")
+
+    monkeypatch.setattr("shared.material_cache.shutil.rmtree", _failing_rmtree)
+    evict_to_capacity(tmp_path, 1, log=warnings.append)
+
+    assert not tree.exists(), "final address must be vacated even when deletion fails"
+    assert warnings
+    # 残骸整体移到 trash 名下（内容完好），下一轮驱逐可重试。
+    leftovers = [p for p in (tmp_path / "ab").iterdir() if p.name.endswith(".trash")]
+    assert len(leftovers) == 1
+    assert (leftovers[0] / "a.txt").read_bytes() == b"a" * 100
 
 
 def test_cache_max_bytes_env_override(monkeypatch: pytest.MonkeyPatch) -> None:

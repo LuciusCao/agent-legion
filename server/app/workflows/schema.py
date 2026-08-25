@@ -8,7 +8,14 @@ class WorkflowDefinitionError(ValueError):
     """Raised when a workflow YAML file is invalid."""
 
 
-#: Item types a start node may accept; also the default contract (D1).
+#: Every item type a start node may declare (D1). ``bundle`` (#156) is
+#: opt-in: it is never part of the default contract below.
+ACCEPTED_ITEM_TYPES = ("material", "ref", "bundle")
+
+#: Item types a start node accepts when it does not declare a contract;
+#: also the synthetic start's contract for pre-start definitions (D3).
+#: ``bundle`` stays out so legacy workflows keep rejecting directory inputs
+#: (fail-closed) until they opt in explicitly.
 DEFAULT_ACCEPTED_ITEM_TYPES = ("material", "ref")
 
 
