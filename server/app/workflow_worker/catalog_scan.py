@@ -75,7 +75,7 @@ def collect_runnable_workspace_jobs(
     paused: dict[str, bool] = {}
     # Take the snapshot once so the pass is consistent even when a reload
     # swaps the list mid-iteration.
-    entries = worker._scan_entries
+    entries = worker.state.scan_entries
     definitions_by_workspace = {workspace_id: d for workspace_id, _key, d in entries}
     # Refresh marks once per distinct workflow key (legacy databases may share
     # a key across workspaces); each job pairs with its OWN workspace's
@@ -89,7 +89,7 @@ def collect_runnable_workspace_jobs(
         if workflow_key in seen_keys:
             continue
         seen_keys.add(workflow_key)
-        for job in worker._mark_store.refresh(worker.job_db, workflow_key):
+        for job in worker.state.mark_store.refresh(worker.job_db, workflow_key):
             if not (workspace_id := job.get("workspace_id")):
                 continue
             workspace_id = str(workspace_id)

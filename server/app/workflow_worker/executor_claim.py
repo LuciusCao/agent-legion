@@ -47,7 +47,7 @@ def claim_executor_node(
     if not snapshot.has_capacity(workspace_id, workflow_key, node.key):
         return False
 
-    worker._pending_claims.append(
+    worker.state.pending_claims.append(
         PreparedClaim(
             request=LeaseClaimRequest(
                 executor_id=executor_id,

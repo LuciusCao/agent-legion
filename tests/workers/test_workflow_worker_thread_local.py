@@ -32,8 +32,8 @@ def test_worker_creates_the_single_code_pool(tmp_path: Path) -> None:
     worker._poll()
 
     # P-0.5: exactly one implicit code pool, sized from code_capacity.
-    assert set(worker._pools) == {"code"}
-    assert worker._pools["code"]._max_workers == 2
+    assert set(worker.state.pools) == {"code"}
+    assert worker.state.pools["code"]._max_workers == 2
     # No per-workspace pools should exist
     assert not hasattr(worker, "_ws_local_executors") or not worker._ws_local_executors
     assert not hasattr(worker, "_ws_agent_executors") or not worker._ws_agent_executors
@@ -66,7 +66,7 @@ def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
 
     assert processed is True
     assert worker.leases.active_counts("code").get("global", 0) == 1
-    assert len(worker._futures) == 1
+    assert len(worker.state.futures) == 1
 
     executor.block_event.set()
     worker.stop()
@@ -172,7 +172,7 @@ def test_stop_shuts_down_shared_pools(tmp_path: Path) -> None:
     worker = _make_worker(tmp_path, db_path, executor, [_make_definition([_local_node("fetch")])])
 
     worker._poll()
-    pool = worker._pools["code"]
+    pool = worker.state.pools["code"]
     worker.stop()
 
     assert pool._shutdown is True
@@ -203,7 +203,7 @@ def test_poll_skips_paused_job(tmp_path: Path) -> None:
 
     assert processed is False
     assert worker.leases.active_counts("code").get("global", 0) == 0
-    assert len(worker._futures) == 0
+    assert len(worker.state.futures) == 0
 
     worker.stop()
 
@@ -374,8 +374,8 @@ def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkey
     processed = worker._poll()
 
     assert processed is True
-    assert worker._futures
-    for future in worker._futures.values():
+    assert worker.state.futures
+    for future in worker.state.futures.values():
         future.result(timeout=5)
 
     node = queries.get_job_node(job["id"], "intake_knowledge_points")

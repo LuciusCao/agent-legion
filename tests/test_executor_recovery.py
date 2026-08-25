@@ -171,7 +171,7 @@ def _make_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._scan_entries = scan_entries(_make_definition())
+    worker.state.scan_entries = scan_entries(_make_definition())
     return worker
 
 

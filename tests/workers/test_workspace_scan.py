@@ -41,7 +41,7 @@ def test_reload_scan_entries_picks_up_new_workspaces(tmp_path: Path, settings, j
     worker = _make_worker(tmp_path, TEST_DATABASE_URL, RecordingExecutor("local-default"), [])
     try:
         worker.reload_scan_entries()
-        assert worker._scan_entries == []
+        assert worker.state.scan_entries == []
 
         workspace = job_db.create_workspace(
             "scan-hot", default_workflow_key="education_video_problems_generation"
@@ -49,7 +49,7 @@ def test_reload_scan_entries_picks_up_new_workspaces(tmp_path: Path, settings, j
         publish_builtin_revision(job_db, workspace["id"])
 
         worker.reload_scan_entries()
-        by_workspace = {ws: (key, d) for ws, key, d in worker._scan_entries}
+        by_workspace = {ws: (key, d) for ws, key, d in worker.state.scan_entries}
         assert str(workspace["id"]) in by_workspace
         key, definition = by_workspace[str(workspace["id"])]
         assert key == "education_video_problems_generation"
@@ -68,7 +68,7 @@ def test_reload_scan_entries_keeps_previous_snapshot_on_failure(
     worker = _make_worker(tmp_path, TEST_DATABASE_URL, RecordingExecutor("local-default"), [])
     try:
         worker.reload_scan_entries()
-        snapshot = worker._scan_entries
+        snapshot = worker.state.scan_entries
         assert snapshot
 
         import server.app.workflow_worker.thread as thread_module
@@ -79,6 +79,6 @@ def test_reload_scan_entries_keeps_previous_snapshot_on_failure(
         monkeypatch.setattr(thread_module, "load_workflow_scan_entries", _fail)
         with contextlib.suppress(RuntimeError):
             worker.reload_scan_entries()
-        assert worker._scan_entries is snapshot
+        assert worker.state.scan_entries is snapshot
     finally:
         worker.stop()

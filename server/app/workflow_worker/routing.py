@@ -44,11 +44,11 @@ def resolve_node_route(
     """Resolve a node's route, through the worker's short-TTL cache."""
     key = (workspace_id, workflow_key, node_key)
     now = time.monotonic()
-    cached = worker._route_cache.get(key)
+    cached = worker.state.route_cache.get(key)
     if cached is not None and now - cached[0] < ROUTE_CACHE_TTL_SECONDS:
         return cached[1]
     route = _resolve_uncached(worker, workspace_id, workflow_key, node_key, capability)
-    worker._route_cache[key] = (now, route)
+    worker.state.route_cache[key] = (now, route)
     return route
 
 

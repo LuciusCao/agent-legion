@@ -175,5 +175,5 @@ def try_claim_code_worker_node(
         dispatch.discard_in_flight(job_id, node.key)
         return False
     key = f"code:{node.capability}"
-    worker._pass_claim_counts[key] = worker._pass_claim_counts.get(key, 0) + 1
+    worker.state.pass_claim_counts[key] = worker.state.pass_claim_counts.get(key, 0) + 1
     return True

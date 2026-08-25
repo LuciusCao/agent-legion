@@ -155,7 +155,7 @@ def _make_worker(
                         "def run(job, job_dir, runtime):\n    pass\n",
                         "test seed",
                     )
-    worker._scan_entries = scan_entries(*definitions)
+    worker.state.scan_entries = scan_entries(*definitions)
     return worker
 
 
@@ -182,11 +182,11 @@ def test_same_node_submitted_once(tmp_path: Path) -> None:
     worker._poll()
 
     assert worker.leases.active_counts("code").get("global", 0) == 1
-    assert len(worker._futures) == 1
+    assert len(worker.state.futures) == 1
 
     worker._poll()
     assert worker.leases.active_counts("code").get("global", 0) == 1
-    assert len(worker._futures) == 1
+    assert len(worker.state.futures) == 1
 
     block_event.set()
     worker.stop()

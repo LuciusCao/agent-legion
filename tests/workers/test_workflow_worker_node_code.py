@@ -72,7 +72,7 @@ def _make_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._scan_entries = scan_entries(*definitions)
+    worker.state.scan_entries = scan_entries(*definitions)
     return worker
 
 
@@ -107,7 +107,7 @@ def _prepare_job(tmp_path: Path, node: WorkflowNode, batch_payload: dict | None 
 
 def _dispatch(tmp_path: Path, worker: WorkflowWorkerThread) -> None:
     worker._poll()
-    for future in worker._futures.values():
+    for future in worker.state.futures.values():
         future.result(timeout=5)
 
 
@@ -383,8 +383,8 @@ def _claim_via_code_worker(
     worker = MagicMock()
     worker.job_db = job_db
     worker.code_dispatch = dispatch
-    worker._batch_payload_cache = {}
-    worker._pass_claim_counts = {}
+    worker.state.batch_payload_cache = {}
+    worker.state.pass_claim_counts = {}
     worker.settings.root_dir = tmp_path
     worker.settings.config = {}
     worker.settings.executor_runtime.workflows.custom_nodes_enabled = True
