@@ -37,9 +37,10 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 - Studio chat MCP loopback is served over an in-app streamable-HTTP endpoint
   (`/api/studio-agent/mcp`) with scoped, workspace-bound tokens and sliding
   TTL (#157, #158, #159).
-- Worker artifact return goes only through claim-injected presigned S3
-  staging; the local `/api/artifacts` CAS is a legacy compatibility path
-  (#160).
+- Worker artifact return goes through claim-injected presigned S3 staging;
+  the local `/api/artifacts` CAS remains as the legacy fallback (missing
+  upload specs, direct-upload failure, or crash recovery re-enters the old
+  channel) (#160).
 
 ### Fixed
 
