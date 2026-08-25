@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+## [0.3.0-alpha] - 2026-08-25
+
 ### Added
 
 - Workspace materials store: S3-compatible presigned direct upload (RustFS
@@ -61,6 +63,11 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 - Performance: trigger-maintained workspace job node status counts (schema
   v56, #121), forced index for expired node-run sweep page reads (#122),
   and per-pass claim-input memos in the dispatch path (#124).
+- Artifact store durability (#168): rerun promotes now back up pre-existing
+  authority objects and roll back on mid-batch copy failure; cache eviction
+  re-validates the job state before every unlink; empty worker-reported
+  `content_hash` registers the Host-computed digest; quality artifact
+  contents read bounded streams instead of whole objects.
 
 ## [0.2.0] - 2026-08-20
 
@@ -114,6 +121,7 @@ Initial open-source release.
   runnable out of the box against a real LLM.
 - Docker deployment stacks (`deploy/`) and remote worker deployment runbook.
 
-[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.3.0-alpha...HEAD
+[0.3.0-alpha]: https://github.com/LuciusCao/agent-legion/compare/v0.2.0...v0.3.0-alpha
 [0.2.0]: https://github.com/LuciusCao/agent-legion/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LuciusCao/agent-legion/releases/tag/v0.1.0

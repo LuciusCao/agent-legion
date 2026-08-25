@@ -1,6 +1,6 @@
 [package]
 name = "velites"
-version = "0.2.0"
+version = "0.3.0-alpha"
 edition = "2021"
 description = "Agent Legion lightweight agent harness (headless, pi-compatible event stream)"
 license = "MIT"
