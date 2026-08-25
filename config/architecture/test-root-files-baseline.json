@@ -34,6 +34,7 @@
     "tests/test_architecture_route_contracts.py",
     "tests/test_architecture_route_mutations.py",
     "tests/test_architecture_service_boundaries.py",
+    "tests/test_architecture_service_data_boundary.py",
     "tests/test_architecture_sql_placeholders.py",
     "tests/test_architecture_video_legacy.py",
     "tests/test_auth_queries.py",

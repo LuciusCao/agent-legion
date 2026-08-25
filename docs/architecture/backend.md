@@ -593,6 +593,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 - `JobDeletionService` 级联删除 Job 记录、`node_runs`、本地 Job 目录与日志；同时快照 `job_artifacts` 清单行并删除对象存储副本（`server/app/services/job_deletion.py`）。
 - 存储路径以**相对 POSIX 路径**保存在 `settings.data_dir` 下（前缀为 `videos/`, `jobs/`, `logs/`, `packages/`），API 返回时投影为绝对路径。
 - SQL 占位符约定：**新 SQL 一律写 psycopg 的 `%s`**，不要再写 SQLite 风格的 `?`。存量 `?` 由 `server/app/db/dialect.py` 盲替换为 `%s`，该层无法区分占位符与 Postgres JSON 的 `?`/`?|`/`?&` 操作符；`scripts/check_architecture.py` 的 SQL 占位符检查（基线 `config/architecture/sql-placeholders-baseline.json`）按 ratchet 方式只降不升，新文件出现任何 SQL `?` 即失败，改写存量后同步下调基线。
+- 服务层数据边界（BOUNDARY-DATA-001）：`server/app/services/` 下的新服务**必须经 `JobQueries` 门面访问数据库**（范式见 `services/job_pause.py` 等 38+ 个 facade-only 服务）；裸 SQL 字面量与 `server.app.db.transaction`/`connection` 直接 import 由 `scripts/architecture/service_data_boundary.py` 检查冻结（基线 `config/architecture/service-data-boundary-baseline.json`，只降不升）。存量服务迁移到门面后手动（或重跑 ratchet）下调基线；新文件出现任一绕行即失败。
 
 ## New Subsystems
 

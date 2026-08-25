@@ -78,6 +78,10 @@
 ## 6. Boundary Rules（禁止模式摘要）
 
 - Workspace API 扩展顺序：contract → service → focused route。
+- 新 service 的数据库访问必须走 `JobQueries` 门面（`server/app/jobs/queries`），
+  不在 service 里手写 SQL 或 import `server.app.db.transaction`/`connection`
+  （BOUNDARY-DATA-001；基线 ratchet 检查见
+  `config/architecture/service-data-boundary-baseline.json`）。
 - 用户鉴权经 `server/app/auth/dependencies.py` 注入（`require_user` /
   `require_admin` / `require_workspace_access`），不要在路由里手写 cookie /
   token 解析；公开端点仅限 `/api/health` 与 `/api/auth/login|bootstrap`。

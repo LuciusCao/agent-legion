@@ -1086,3 +1086,15 @@ invariants:
       - kind: integration
         target: tests/routes/test_runs_api.py::test_item_type_rejected_by_start_contract
         gate: quick
+
+  - id: BOUNDARY-DATA-001
+    statement: Service-layer database access is ratcheted toward the JobQueries facade — raw SQL literals and server.app.db.transaction/connection imports under server/app/services are frozen by config/architecture/service-data-boundary-baseline.json (only-down ratchet; new service files with either bypass are rejected).
+    owner: architecture
+    risk: medium
+    evidence:
+      - kind: contract
+        target: scripts/architecture/service_data_boundary.py
+        gate: quick
+      - kind: contract
+        target: tests/test_architecture_service_data_boundary.py
+        gate: quick
