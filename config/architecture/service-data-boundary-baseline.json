@@ -224,6 +224,10 @@
       5,
       3
     ],
+    "server/app/services/vault_resources.py": [
+      1,
+      0
+    ],
     "server/app/services/versioned_entities.py": [
       20,
       3
