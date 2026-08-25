@@ -78,10 +78,13 @@ def resolve_dispatch_node_code(
     hash mismatch raises, and a pinned version missing at BOTH scopes is data
     corruption and raises too — never silently substituted.
 
-    One DB read per dispatch, same cadence as the vault secret resolution it
-    runs next to; the 30s route cache in ``routing.py`` only covers executor
-    bindings and is deliberately not consulted here. The gate short-circuits
-    to None instead of raising so a disabled feature never breaks dispatch.
+    One DB read per call. The workflow worker's claim path memoizes this per
+    (pass, node) in ``workflow_worker/code_dispatch.py`` (issue #124), tagged
+    with the publish generation so an in-process publish takes effect on the
+    very next claim; the frozen pin path is never memoized. The 30s route
+    cache in ``routing.py`` only covers executor bindings and is not
+    consulted here. The gate short-circuits to None instead of raising so a
+    disabled feature never breaks dispatch.
     """
     if not custom_nodes_enabled:
         return None

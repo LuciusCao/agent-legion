@@ -24,19 +24,20 @@ class JobStatusQueriesMixin(JobQueriesBase):
     def count_workspace_job_nodes_by_status(
         self, workspace_id: str, workflow_key: str
     ) -> dict[str, dict[str, int]]:
+        # Reads the trigger-maintained counter table
+        # (DB-JOB-NODE-STATUS-COUNTS-001) instead of a join+group-by over the
+        # workspace's whole job_nodes ⋈ jobs slice (48s at 260k jobs / 2.9M
+        # job_nodes, hash join spilling ~1GB to temp — issue #121).
         result: dict[str, dict[str, int]] = {}
         with self._connect_read() as conn:
             rows = conn.execute(
                 """
-                select job_nodes.node_key, job_nodes.status, count(*) as cnt
-                from job_nodes
-                join jobs on jobs.id = job_nodes.job_id
-                where jobs.workspace_id = %s and jobs.workflow_key = %s
-                group by job_nodes.node_key, job_nodes.status
+                select node_key, status, cnt from workspace_job_node_status_counts
+                where workspace_id = %s and workflow_key = %s and cnt <> 0
                 """,
                 (workspace_id, workflow_key),
             )
             for row in rows:
                 node_counts = result.setdefault(row["node_key"], {})
-                node_counts[row["status"]] = row["cnt"]
+                node_counts[row["status"]] = int(row["cnt"])
         return result
