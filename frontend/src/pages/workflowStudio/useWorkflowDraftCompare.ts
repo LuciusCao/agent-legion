@@ -33,7 +33,9 @@ export function useWorkflowDraftCompare(
   const latestRequest = useRef(0)
 
   useEffect(() => {
-    if (!workspaceId || !dirty) {
+    // 空基线（新 workspace 无 active revision）时即使未 dirty 也要跑一次
+    // compare，让空态模板草稿（含 _start）以 ghost 节点呈现在画布上。
+    if (!workspaceId || (!dirty && !allowMissingBaseline)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- reset is intentional when comparison is not applicable
       setCompareState('idle')
       setCompareResponse(null)

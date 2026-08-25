@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   conditionLabel,
+  ghostStartNodeDetails,
   groupValidationErrors,
   isDefinitionDirty,
   selectedNodeDetails,
@@ -127,5 +128,39 @@ describe('workflowStudioModel', () => {
     expect(details?.node.key).toBe('classify')
     expect(details?.incoming).toEqual([])
     expect(details?.outgoing).toHaveLength(1)
+  })
+
+  it('resolves ghost start node details from the draft yaml', () => {
+    const yaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '    accepted_item_types: [material, ref]',
+      '  intake:',
+      '    capability: intake',
+      '    after: [_start]',
+      'edges:',
+      '  - source: _start',
+      '    target: intake',
+      '',
+    ].join('\n')
+
+    const details = ghostStartNodeDetails(yaml, '_start')
+
+    expect(details?.node.node_type).toBe('start')
+    expect(details?.node.accepted_item_types).toEqual(['material', 'ref'])
+    expect(details?.incoming).toEqual([])
+    expect(details?.outgoing).toEqual([
+      { source: '_start', target: 'intake', condition: null },
+    ])
+  })
+
+  it('returns null ghost details for non-start, unknown, or unparsable nodes', () => {
+    const yaml = 'key: demo\nnodes:\n  intake:\n    capability: intake\n'
+    expect(ghostStartNodeDetails(yaml, 'intake')).toBeNull()
+    expect(ghostStartNodeDetails(yaml, 'missing')).toBeNull()
+    expect(ghostStartNodeDetails('nodes: [oops', '_start')).toBeNull()
+    expect(ghostStartNodeDetails(yaml, null)).toBeNull()
   })
 })

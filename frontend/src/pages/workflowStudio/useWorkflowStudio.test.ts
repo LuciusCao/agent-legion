@@ -548,6 +548,66 @@ describe('useWorkflowStudio', () => {
     expect(result.current.canPublish).toBe(true)
   })
 
+  it('previews the template draft as ghost nodes in empty mode before any edit', async () => {
+    mocks.fetchActiveWorkflowRevision.mockRejectedValue(notFoundError())
+    mocks.fetchWorkflowRevisions.mockResolvedValue({ revisions: [] })
+    mocks.compareWorkflowDraft.mockResolvedValue({
+      valid: true,
+      creates_revision: true,
+      base_revision: null,
+      draft_workflow: { key: 'demo', label: 'demo', version: 0 },
+      summary: {
+        risk_level: 'info',
+        node_changes: [
+          {
+            type: 'added',
+            node_key: '_start',
+            label: '_start',
+            fields: [],
+            risk: 'info',
+          },
+          {
+            type: 'added',
+            node_key: 'intake',
+            label: 'intake',
+            fields: [],
+            risk: 'info',
+          },
+        ],
+        edge_changes: [],
+        intake_changes: [],
+        risk_flags: [],
+      },
+      errors: [],
+    })
+
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
+    await waitFor(() => expect(result.current.loadState).toBe('empty'))
+
+    // 未做任何编辑：空基线下 compare 也要自动跑一次，把模板草稿（含
+    // _start）以 ghost 节点呈现在画布上。
+    await act(async () => {
+      vi.advanceTimersByTime(450)
+    })
+
+    await waitFor(() =>
+      expect(mocks.compareWorkflowDraft).toHaveBeenCalledWith('ws1', {
+        definition_yaml:
+          'key: demo\nlabel: demo\nnodes:\n  _start:\n    type: start\n  intake:\n    capability: intake\n    after: [_start]\n',
+        allow_missing_baseline: true,
+      })
+    )
+    await waitFor(() => expect(result.current.compareState).toBe('ready'))
+    const ghostStart = result.current.nodes.find(
+      (node) => node.key === '_start'
+    )
+    expect(ghostStart?.ghost).toBe(true)
+    expect(ghostStart?.changeType).toBe('added')
+    expect(result.current.nodes.map((node) => node.key)).toContain('intake')
+  })
+
   it('stays in error state when the active revision 404s for an unknown workspace', async () => {
     mocks.fetchActiveWorkflowRevision.mockRejectedValue(notFoundError())
     mocks.fetchWorkflowRevisions.mockResolvedValue({ revisions: [] })

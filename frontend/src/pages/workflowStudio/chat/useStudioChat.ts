@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRealtimeChannel } from '../../../lib/realtime'
 import { queryKeys } from '../../../lib/queryKeys'
+import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import {
   answerStudioChatPermission,
   cancelStudioChatTurn,
@@ -172,6 +173,14 @@ export function useStudioChat(workspaceId: string | undefined) {
           // 增量补齐拿不到）；turn 结束时全量回取一次自愈。
           if (statusEvent(incoming as ChatMessage).event === 'turn_end') {
             void refillMessages(0).catch(() => undefined)
+            // agent 一轮结束可能已保存 workflow/Agent 草稿：失效画布基线与
+            // Agent 目录查询，让 MCP 修改无需手动刷新即反映到 DAG。
+            void queryClient.invalidateQueries({
+              queryKey: extraQueryKeys.workflowStudioData(workspaceId),
+            })
+            void queryClient.invalidateQueries({
+              queryKey: extraQueryKeys.studioExecutorCatalog(workspaceId),
+            })
           }
         } else if (payload.type === 'session' && payload.session) {
           applySession(payload.session)
@@ -191,7 +200,7 @@ export function useStudioChat(workspaceId: string | undefined) {
       },
     })
     return () => channel.close()
-  }, [workspaceId, activeSessionId, applySession, refillMessages])
+  }, [workspaceId, activeSessionId, applySession, refillMessages, queryClient])
 
   async function runAction(action: () => Promise<void>) {
     setActionError(null)

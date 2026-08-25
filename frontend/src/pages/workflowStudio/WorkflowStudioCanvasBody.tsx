@@ -31,7 +31,9 @@ export function WorkflowStudioCanvasBody({
       />
     )
   }
-  if (!props.workflow) {
+  // 无已发布 workflow 时，compare 叠加的 ghost 节点（空态模板草稿）仍可
+  // 展示；只有连 ghost 节点都没有时才落到占位文案。
+  if (!props.workflow && props.nodes.length === 0) {
     return <p className={styles.empty}>尚未发布 workflow，暂无 DAG 可展示。</p>
   }
   return (

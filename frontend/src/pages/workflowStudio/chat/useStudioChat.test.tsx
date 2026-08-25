@@ -306,6 +306,34 @@ describe('useStudioChat', () => {
     )
   })
 
+  it('invalidates studio canvas queries on turn_end so agent edits show up', async () => {
+    await renderChat()
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    const invalidateSpy = vi.spyOn(testClient, 'invalidateQueries')
+
+    // agent 一轮结束可能已保存 workflow/Agent 草稿：失效画布基线与 Agent
+    // 目录查询，让 MCP 修改无需手动刷新即反映到 DAG。
+    emit({
+      type: 'message',
+      message: {
+        id: 'st1',
+        session_id: 's1',
+        kind: 'status',
+        role: 'system',
+        content: { event: 'turn_end', stop_reason: 'end_turn' },
+      },
+    })
+
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ['workflowStudioData', 'ws1'],
+      })
+    )
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['studioExecutorCatalog', 'ws1'],
+    })
+  })
+
   it('does not merge an in-flight refill from a previous session', async () => {
     type MessagesResult = Awaited<
       ReturnType<typeof chatApi.fetchStudioChatMessages>
