@@ -34,9 +34,7 @@ def load_service_data_boundary_baseline(path: Path) -> ServiceDataBoundaryBaseli
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ServiceDataBoundaryConfigurationError(
-            f"Malformed JSON in {path}: {exc}"
-        ) from exc
+        raise ServiceDataBoundaryConfigurationError(f"Malformed JSON in {path}: {exc}") from exc
 
     if not isinstance(raw, dict):
         raise ServiceDataBoundaryConfigurationError(
@@ -57,9 +55,7 @@ def load_service_data_boundary_baseline(path: Path) -> ServiceDataBoundaryBaseli
 
     version = raw.get("version")
     if type(version) is not int or version != 1:
-        raise ServiceDataBoundaryConfigurationError(
-            f"Unsupported baseline version: {version!r}"
-        )
+        raise ServiceDataBoundaryConfigurationError(f"Unsupported baseline version: {version!r}")
 
     files = raw.get("files")
     if not isinstance(files, dict):
@@ -68,9 +64,7 @@ def load_service_data_boundary_baseline(path: Path) -> ServiceDataBoundaryBaseli
     normalized: dict[str, tuple[int, int]] = {}
     for key, value in files.items():
         if not isinstance(key, str):
-            raise ServiceDataBoundaryConfigurationError(
-                "baseline path keys must be strings"
-            )
+            raise ServiceDataBoundaryConfigurationError("baseline path keys must be strings")
         if not isinstance(value, list) or len(value) != 2:
             raise ServiceDataBoundaryConfigurationError(
                 f"baseline counts for {key} must be a [sql, primitives] pair"

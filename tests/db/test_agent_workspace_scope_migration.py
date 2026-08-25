@@ -216,8 +216,9 @@ def test_upgrade_from_v45_with_legacy_global_index() -> None:
         _seed_global_agent(conn, "writer", "write_script")
         _seed_revision(conn, "ws-up-a", "flow-a", ["write_script"])
         _seed_revision(conn, "ws-up-b", "flow-b", ["write_script"])
-        # Pretend v46 was never applied so init_db replays the full upgrade.
-        conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
+        # Pretend the database stopped at v45 so init_db runs the v46+
+        # incremental upgrade (v46 migration + all later versions).
+        conn.execute("delete from schema_migrations where version >= 46")
 
     init_db(TEST_DATABASE_URL)
 

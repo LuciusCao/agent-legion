@@ -41,9 +41,7 @@ __test__ = False
 
 BASELINE_RELATIVE_PATH = "config/architecture/service-data-boundary-baseline.json"
 
-_SQL_KEYWORD = re.compile(
-    r"\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b", re.IGNORECASE
-)
+_SQL_KEYWORD = re.compile(r"\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b", re.IGNORECASE)
 
 _DB_PRIMITIVE_NAMES = {"read_connection", "write_transaction"}
 
@@ -109,9 +107,7 @@ def check_service_data_boundary(root: Path) -> list[str]:
         return [f"service data boundary configuration: {exc}"]
 
     errors: list[str] = []
-    for path, (sql_literals, db_primitive_refs) in (
-        collect_service_data_bypasses(root).items()
-    ):
+    for path, (sql_literals, db_primitive_refs) in collect_service_data_bypasses(root).items():
         allowed = baseline.files.get(path)
         if allowed is None:
             errors.append(

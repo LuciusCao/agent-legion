@@ -28,6 +28,12 @@ The server creates the current schema under a PostgreSQL advisory migration
 lock. The configured role needs permission to connect and to create/alter
 objects in its application schema.
 
+Schema upgrades are per-version: `schema_migrations` records one row per
+registered version, and `init_db` only runs data migrations above
+`max(version)` (the DDL file still replays in full on upgrade — it is
+idempotent by construction). A database recorded at the current version is
+a no-op, including legacy single-row installs.
+
 ## Dev-machine role isolation and worktree DB cleanup
 
 `DROP DATABASE` requires the database owner or a superuser. To make the
