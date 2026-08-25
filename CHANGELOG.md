@@ -64,6 +64,14 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   constants live once in `shared/` (imported by both Host and Worker),
   replacing the cross-side "keep in sync" copies; network opt-in is now
   strictly `is True` on the Worker path too (P-0.5 semantics).
+- The workflow worker's mutable state moved from ~18 thread-private
+  attributes (reached into by sibling modules) into an explicit
+  `WorkflowWorkerState` container consumed as `worker.state.X`.
+- Studio layout components consume `useWorkflowStudio()` through
+  `StudioStateContext`/`StudioViewContext` instead of threading the whole
+  ~35-field object as props through six layers; the fabricated
+  `WorkflowDefinitionRecord` in job detail is replaced by a minimal
+  `NodeCatalog` type.
 
 ### Added
 

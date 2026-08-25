@@ -9,6 +9,8 @@ export type NodeCatalogNode = {
   key: string
   label: string
   capability?: string
+  // 依赖边：run-to 起始节点校验的 ancestorClosure 沿它回溯。
+  after?: string[] | null
   node_type?: string
   terminal?: { outcome?: string } | null
 }

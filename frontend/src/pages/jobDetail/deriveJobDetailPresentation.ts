@@ -11,6 +11,7 @@ function toNodeCatalog(detail: JobDetail | null): NodeCatalog | null {
       key: n.node_key,
       label: n.label,
       capability: n.capability,
+      after: n.after,
     })),
   }
 }
