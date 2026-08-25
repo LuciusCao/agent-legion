@@ -17,6 +17,7 @@ from server.app.agent_worker_declarations import (
 from server.app.agent_worker_liveness import WorkerLiveness
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
+from shared.protocol import CODE_PROTOCOL_VERSION, MODEL_RUNTIME_PROTOCOL_VERSION
 
 # Worker-supplied registration fields are scheduling inputs from a
 # management-token holder, not trusted identity: keep them bounded so a
@@ -30,10 +31,9 @@ _MAX_TOKEN_LABEL_LENGTH = 128
 # A Worker is "online" while its last authenticated call (claim poll every few
 # seconds, or an execution heartbeat) is fresher than this threshold.
 ONLINE_THRESHOLD_SECONDS = 30
-# Minimum protocol version that may hold kind='code' executions (batch 2):
-# v1 Workers keep the legacy 204 heartbeat and never receive code claims.
-CODE_PROTOCOL_VERSION = 2
-MODEL_RUNTIME_PROTOCOL_VERSION = 3
+# Protocol constants moved to shared/protocol.py (the worker image ships
+# shared/, so both sides import one copy); re-exported here for the existing
+# server-side consumers.
 
 
 class AgentWorkerRegistry:
