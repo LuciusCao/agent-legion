@@ -1,32 +1,34 @@
 import { WorkflowDagFullscreenDialog } from './components/WorkflowDagFullscreenDialog'
 import { WorkflowPublishReviewDialog } from './components/WorkflowPublishReviewDialog'
-import type { StudioLayoutProps } from './workflowStudioLayoutProps'
+import { useStudioState, useStudioView } from './studioStateContext'
 
-export function WorkflowStudioLayoutDialogs(props: StudioLayoutProps) {
+export function WorkflowStudioLayoutDialogs() {
+  const studio = useStudioState()
+  const view = useStudioView()
   return (
     <>
       <WorkflowPublishReviewDialog
-        open={props.reviewDialogOpen}
-        workflowKey={props.workflow?.key ?? null}
-        activeRevision={props.revision}
-        nextVersion={(props.revision?.version ?? 0) + 1}
-        createsRevision={props.createsRevision}
-        definitionHash={props.revision?.definition_hash ?? null}
-        summary={props.compareSummary}
+        open={studio.reviewDialogOpen}
+        workflowKey={studio.workflow?.key ?? null}
+        activeRevision={studio.revision}
+        nextVersion={(studio.revision?.version ?? 0) + 1}
+        createsRevision={studio.createsRevision}
+        definitionHash={studio.revision?.definition_hash ?? null}
+        summary={studio.compareSummary}
         onConfirm={async () => {
-          props.closeReviewDialog()
-          await props.publishDraft()
-          props.onShowChanges()
+          studio.closeReviewDialog()
+          await studio.publishDraft()
+          view.setCanvasMode('changes')
         }}
-        onCancel={props.closeReviewDialog}
+        onCancel={studio.closeReviewDialog}
       />
       <WorkflowDagFullscreenDialog
-        open={props.dagFullscreenOpen}
-        nodes={props.nodes}
-        edges={props.edges}
-        selectedNode={props.selectedNodeKey}
-        onSelectedNodeChange={props.setSelectedNodeKey}
-        onClose={() => props.setDagFullscreenOpen(false)}
+        open={view.dagFullscreenOpen}
+        nodes={studio.nodes}
+        edges={studio.edges}
+        selectedNode={studio.selectedNodeKey}
+        onSelectedNodeChange={studio.setSelectedNodeKey}
+        onClose={() => view.setDagFullscreenOpen(false)}
       />
     </>
   )

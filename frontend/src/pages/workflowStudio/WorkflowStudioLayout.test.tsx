@@ -3,6 +3,7 @@ import { act } from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { useSettingStore } from '../../stores/settingStore'
 import { WorkflowStudioLayout } from './WorkflowStudioLayout'
+import { makeStudioView, withStudioProviders } from './testStudioProviders'
 
 vi.mock('./chat/StudioChatPanel', () => ({
   StudioChatPanel: (props: Record<string, unknown>) => {
@@ -80,6 +81,46 @@ const baseProps = {
   useViewedRevisionAsDraft: vi.fn(),
 }
 
+// Layout 不再接收整包 props：studio 经 StudioStateContext 注入，view 字段
+// （canvasMode/dagFullscreenOpen 等）经 StudioViewContext 注入。
+// 伪造对象与真实 StudioState 形状存在字段级差异（null vs 具体对象），
+// 走 StudioStateContext 注入，类型上统一放宽为 object。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type LayoutStudio = Record<string, any>
+function studioProvidersFor(studio: LayoutStudio) {
+  // view 专属字段摘出进 StudioViewContext；on* 回调是 AppBar 层的，
+  // Layout 子树不再消费。
+  const {
+    dagFullscreenOpen,
+    setDagFullscreenOpen,
+    canvasMode,
+    setCanvasMode,
+    ...studioState
+  } = studio
+  const view = makeStudioView({
+    ...(dagFullscreenOpen !== undefined ? { dagFullscreenOpen } : {}),
+    ...(setDagFullscreenOpen !== undefined ? { setDagFullscreenOpen } : {}),
+    ...(canvasMode !== undefined ? { canvasMode } : {}),
+    ...(setCanvasMode !== undefined ? { setCanvasMode } : {}),
+  })
+  return { studioState, view }
+}
+
+function renderLayout(studio: LayoutStudio) {
+  const { studioState, view } = studioProvidersFor(studio)
+  return render(
+    withStudioProviders(studioState, view, <WorkflowStudioLayout />)
+  )
+}
+
+function rerenderLayout(
+  rerender: (ui: React.ReactNode) => void,
+  studio: LayoutStudio
+) {
+  const { studioState, view } = studioProvidersFor(studio)
+  rerender(withStudioProviders(studioState, view, <WorkflowStudioLayout />))
+}
+
 describe('WorkflowStudioLayout', () => {
   const localStore = new Map<string, string>()
   vi.stubGlobal('localStorage', {
@@ -96,7 +137,7 @@ describe('WorkflowStudioLayout', () => {
   })
 
   it('renders mobile panel navigation landmarks', () => {
-    render(<WorkflowStudioLayout {...baseProps} />)
+    renderLayout(baseProps)
 
     const mobileNav = screen.getByRole('tablist', {
       name: 'Workflow studio panels',
@@ -112,16 +153,14 @@ describe('WorkflowStudioLayout', () => {
   })
 
   it('renders the empty-state guidance and the workspace editor in empty mode', () => {
-    render(
-      <WorkflowStudioLayout
-        {...baseProps}
-        loadState="empty"
-        workflow={null}
-        revision={null}
-        activeRevision={null}
-        revisions={[]}
-      />
-    )
+    renderLayout({
+      ...baseProps,
+      loadState: 'empty' as const,
+      workflow: null,
+      revision: null,
+      activeRevision: null,
+      revisions: [],
+    })
 
     expect(screen.getByRole('alert')).toHaveTextContent(
       '还没有已发布的 workflow'
@@ -141,7 +180,7 @@ describe('WorkflowStudioLayout', () => {
       activeRevision: null,
       revisions: [],
     }
-    const { rerender } = render(<WorkflowStudioLayout {...emptyProps} />)
+    const { rerender } = renderLayout(emptyProps)
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
 
@@ -150,13 +189,13 @@ describe('WorkflowStudioLayout', () => {
       localStorage.getItem('agent-legion:studio-empty-guide-dismissed:ws1')
     ).toBe('1')
     // 重新渲染（如下次进入页面）也不再出现。
-    rerender(<WorkflowStudioLayout {...emptyProps} />)
+    rerenderLayout(rerender, emptyProps)
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('asks for confirmation before applying a chat draft over a dirty editor', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    render(<WorkflowStudioLayout {...baseProps} dirty />)
+    renderLayout({ ...baseProps, dirty: true })
     const panelProps = chatPanelProps.mock.calls[
       chatPanelProps.mock.calls.length - 1
     ]?.[0] as {
@@ -179,7 +218,7 @@ describe('WorkflowStudioLayout', () => {
 
   it('applies a chat draft without confirmation when the editor is clean', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    render(<WorkflowStudioLayout {...baseProps} />)
+    renderLayout(baseProps)
     const panelProps = chatPanelProps.mock.calls[
       chatPanelProps.mock.calls.length - 1
     ]?.[0] as {
@@ -196,7 +235,7 @@ describe('WorkflowStudioLayout', () => {
   })
 
   it('opens contextual node editing after a graph node is selected', () => {
-    const { rerender } = render(<WorkflowStudioLayout {...baseProps} />)
+    const { rerender } = renderLayout(baseProps)
 
     const mobileNav = screen.getByRole('tablist', {
       name: 'Workflow studio panels',
@@ -205,7 +244,7 @@ describe('WorkflowStudioLayout', () => {
       within(mobileNav).getByRole('tab', { name: '画布' })
     ).toHaveAttribute('aria-selected', 'true')
 
-    rerender(<WorkflowStudioLayout {...baseProps} selectedNodeKey="node-a" />)
+    rerenderLayout(rerender, { ...baseProps, selectedNodeKey: 'node-a' })
 
     expect(
       within(mobileNav).getByRole('tab', { name: '编辑节点' })

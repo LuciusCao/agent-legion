@@ -3,15 +3,13 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioCanvasPanel } from './WorkflowStudioCanvasPanel'
 import type { StudioCanvasMode } from './useWorkflowStudioPageView'
-import type { StudioLayoutProps } from './workflowStudioLayoutProps'
+import { makeStudioView, withStudioProviders } from './testStudioProviders'
 
 vi.mock('../../components/dag/DagGraph', () => ({
   DagGraph: () => <div>DAG 画布 stub</div>,
 }))
 
-const baseProps = {
-  canvasMode: 'dag' as StudioCanvasMode,
-  setCanvasMode: vi.fn(),
+const baseStudio = {
   workflow: {
     key: 'demo',
     label: 'Demo',
@@ -31,15 +29,16 @@ const baseProps = {
   compareErrors: null,
   compareSummary: null,
   compareState: 'idle' as const,
-  setDagFullscreenOpen: vi.fn(),
-} as unknown as StudioLayoutProps
+}
 
 /** 受控 canvasMode 的有状态包装，贴近页面层用法。 */
 function StatefulPanel() {
   const [mode, setMode] = useState<StudioCanvasMode>('dag')
-  return (
+  const view = makeStudioView({ canvasMode: mode, setCanvasMode: setMode })
+  return withStudioProviders(
+    baseStudio,
+    view,
     <WorkflowStudioCanvasPanel
-      props={{ ...baseProps, canvasMode: mode, setCanvasMode: setMode }}
       agentOpen
       onToggleAgent={() => {}}
       mobileActive
