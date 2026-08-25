@@ -15,7 +15,6 @@ from tests.postgres_support import (
 )
 
 os.environ["AGENT_LEGION_DATABASE_URL"] = TEST_DATABASE_URL
-os.environ["AGENT_LEGION_SKIP_MODULE_APP"] = "1"
 
 import psycopg
 from psycopg import sql

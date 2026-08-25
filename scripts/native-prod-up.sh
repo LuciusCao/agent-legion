@@ -69,7 +69,7 @@ else
     echo "启动后端 :$BACKEND_PORT …"
     ulimit -n 65535
     nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m uvicorn \
-        server.app.main:app --host 127.0.0.1 --port "$BACKEND_PORT" \
+        server.app.main:create_prod_app --factory --host 127.0.0.1 --port "$BACKEND_PORT" \
         --timeout-graceful-shutdown 3 \
         > data/logs/prod-backend.log 2>&1 &
 fi

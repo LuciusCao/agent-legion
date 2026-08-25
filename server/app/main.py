@@ -1,5 +1,4 @@
 import asyncio
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -283,7 +282,11 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     return app
 
 
-if os.environ.get("AGENT_LEGION_SKIP_MODULE_APP") == "1":
-    app = FastAPI()
-else:
-    app = create_app(start_worker=True)
+def create_prod_app() -> FastAPI:
+    """Uvicorn entry: ``server.app.main:create_prod_app --factory``.
+
+    Importing this module must stay side-effect free (no DB bootstrap, no
+    seeding, no pause reset) — the former module-level ``app`` needed an env
+    escape hatch; this replaces it.
+    """
+    return create_app(start_worker=True)

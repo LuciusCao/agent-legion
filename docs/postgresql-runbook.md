@@ -21,7 +21,7 @@ volume in place (the on-disk format is not compatible across majors).
 ```bash
 createdb agent_legion
 export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion
-uv run uvicorn server.app.main:app --reload
+uv run uvicorn server.app.main:create_prod_app --factory --reload
 ```
 
 The server creates the current schema under a PostgreSQL advisory migration
