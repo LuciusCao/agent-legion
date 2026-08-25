@@ -86,7 +86,8 @@ describe('AddItemsDialog', () => {
     mockCreateBundle.mockReset()
     mockUpload.mockReset()
     mockFetchRevision.mockReset()
-    // 默认：workspace 未发布 revision（404）→ 入口契约缺省全接受。
+    // 默认：workspace 未发布 revision（404）→ 入口契约按 DEFAULT
+    // ['material','ref'] 处理（刻意不含 bundle，存量 fail-closed）。
     mockFetchRevision.mockRejectedValue(
       Object.assign(new Error('No active workflow revision'), { status: 404 })
     )
@@ -511,6 +512,53 @@ describe('AddItemsDialog', () => {
       name: 'root',
       members: [{ material_id: 'm1', path: 'a.txt' }],
     })
+  })
+
+  it('retries bundle creation when the create call fails', async () => {
+    mockRevisionWithAcceptedTypes(['material', 'ref', 'bundle'])
+    mockUpload.mockResolvedValue({ materialId: 'm1', deduplicated: false })
+    mockCreateBundle
+      .mockRejectedValueOnce(new Error('打包冲突'))
+      .mockResolvedValue({ bundle: { id: 'b1' } } as never)
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+
+    const bundleTab = screen.getByRole('tab', { name: '文件夹打包' })
+    await waitFor(() => expect(bundleTab).toBeEnabled())
+    fireEvent.click(bundleTab)
+    pickFiles('add-items-bundle-input', [folderFile('root/a.txt', 'a')])
+
+    await waitFor(() =>
+      expect(screen.getByText('打包冲突')).toBeInTheDocument()
+    )
+
+    // 文件全部成功、创建失败：重试直接重发 create，不重传文件。
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(screen.getByText('就绪')).toBeInTheDocument())
+    expect(mockCreateBundle).toHaveBeenCalledTimes(2)
+    expect(mockUpload).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects an oversized folder before uploading any member', async () => {
+    mockRevisionWithAcceptedTypes(['material', 'ref', 'bundle'])
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+
+    const bundleTab = screen.getByRole('tab', { name: '文件夹打包' })
+    await waitFor(() => expect(bundleTab).toBeEnabled())
+    fireEvent.click(bundleTab)
+    const files = Array.from({ length: 1001 }, (_, i) =>
+      folderFile(`root/f-${i}.txt`, 'x')
+    )
+    pickFiles('add-items-bundle-input', files)
+
+    await waitFor(() =>
+      expect(screen.getByText(/超过 1000 个成员上限/)).toBeInTheDocument()
+    )
+    expect(mockUpload).not.toHaveBeenCalled()
+    expect(mockCreateBundle).not.toHaveBeenCalled()
   })
 
   it('enables the bundle tab only when the start node accepts bundles', async () => {

@@ -107,6 +107,8 @@ def assemble_bundle_tree(
             # Another assembler won the race; its tree holds identical bytes.
             if not final.is_dir():
                 raise
+            # Discard our duplicate temp copy (the docstring's promise).
+            shutil.rmtree(tmp_path, ignore_errors=True)
     except BaseException:
         shutil.rmtree(tmp_path, ignore_errors=True)
         raise

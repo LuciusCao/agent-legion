@@ -15,6 +15,8 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from psycopg import IntegrityError
+
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.job_errors import (
@@ -124,41 +126,48 @@ class MaterialBundlesService:
             raise InvalidOperationError("bundle member paths must be unique")
 
         bundle_id = uuid.uuid4().hex
-        with write_transaction(self._dsn) as conn:
-            rows = {
-                str(row["id"]): row
-                for row in conn.execute(
-                    "select id, status, size_bytes from materials"
-                    " where workspace_id=%s and id = any(%s)",
-                    (workspace_id, material_ids),
-                ).fetchall()
-            }
-            total_size = 0
-            for material_id in material_ids:
-                row = rows.get(material_id)
-                if row is None:
-                    raise NotFoundError(f"Material not found: {material_id}")
-                if str(row["status"]) != "ready":
-                    raise InvalidOperationError(
-                        f"Material is not ready: {material_id} (status: {row['status']})"
-                    )
-                total_size += int(row["size_bytes"])
-            conn.execute(
-                "insert into material_bundles("
-                " id, workspace_id, name, total_size_bytes, file_count, created_by"
-                ") values (%s, %s, %s, %s, %s, %s)",
-                (bundle_id, workspace_id, name, total_size, len(members), created_by),
-            )
-            conn.executemany(
-                "insert into material_bundle_members(bundle_id, material_id, path, ordinal)"
-                " values (%s, %s, %s, %s)",
-                [
-                    (bundle_id, material_id, path, ordinal)
-                    for ordinal, (material_id, path) in enumerate(
-                        zip(material_ids, paths, strict=True)
-                    )
-                ],
-            )
+        try:
+            with write_transaction(self._dsn) as conn:
+                rows = {
+                    str(row["id"]): row
+                    for row in conn.execute(
+                        "select id, status, size_bytes from materials"
+                        " where workspace_id=%s and id = any(%s)",
+                        (workspace_id, material_ids),
+                    ).fetchall()
+                }
+                for material_id in material_ids:
+                    row = rows.get(material_id)
+                    if row is None:
+                        raise NotFoundError(f"Material not found: {material_id}")
+                    if str(row["status"]) != "ready":
+                        raise InvalidOperationError(
+                            f"Material is not ready: {material_id} (status: {row['status']})"
+                        )
+                # Snapshot total counts each referenced material once, even
+                # when the manifest lists it at several paths.
+                total_size = sum(int(rows[mid]["size_bytes"]) for mid in set(material_ids))
+                conn.execute(
+                    "insert into material_bundles("
+                    " id, workspace_id, name, total_size_bytes, file_count, created_by"
+                    ") values (%s, %s, %s, %s, %s, %s)",
+                    (bundle_id, workspace_id, name, total_size, len(members), created_by),
+                )
+                conn.executemany(
+                    "insert into material_bundle_members(bundle_id, material_id, path, ordinal)"
+                    " values (%s, %s, %s, %s)",
+                    [
+                        (bundle_id, material_id, path, ordinal)
+                        # Stable ordinal by sorted path (design §5.4).
+                        for ordinal, (material_id, path) in enumerate(
+                            sorted(zip(material_ids, paths, strict=True), key=lambda pair: pair[1])
+                        )
+                    ],
+                )
+        except IntegrityError as exc:
+            # A member material was deleted between the readiness check and
+            # the member insert (FK violation); the manifest rolled back.
+            raise ConflictError("a bundle member material was deleted concurrently; retry") from exc
         return self.get(workspace_id, bundle_id)
 
     def _fetch_row(self, workspace_id: str, bundle_id: str) -> dict[str, Any]:

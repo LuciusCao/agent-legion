@@ -1,36 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { createMaterialBundle } from '../api/materialsApi'
-import { splitBundleRelativePath, uploadMaterialFile } from '../lib/addItems'
-
-export type BundleFileStatus = 'pending' | 'uploading' | 'done' | 'failed'
-
-export type BundleFileEntry = {
-  key: string
-  path: string
-  size: number
-  status: BundleFileStatus
-  error: string | null
-  materialId: string | null
-}
-
-export type BundleStatus = 'uploading' | 'creating' | 'ready' | 'failed'
-
-export type BundleEntry = {
-  key: string
-  name: string
-  files: BundleFileEntry[]
-  status: BundleStatus
-  bundleId: string | null
-  error: string | null
-}
-
-export const BUNDLE_STATUS_LABELS: Record<BundleStatus, string> = {
-  uploading: '上传中',
-  creating: '打包中',
-  ready: '就绪',
-  failed: '失败',
-}
+import { uploadMaterialFile } from '../lib/addItems'
+import {
+  MAX_BUNDLE_MEMBERS,
+  parseBundleFolder,
+  type BundleEntry,
+  type BundleFileEntry,
+  type BundleFileStatus,
+} from '../lib/bundleFolder'
 
 const UPLOAD_CONCURRENCY = 4
 
@@ -210,33 +188,43 @@ export function useBundleUploads(workspaceId: string | undefined) {
     (fileList: FileList | null) => {
       if (!fileList || fileList.length === 0) return
       const bundleKey = `b${++keySeqRef.current}`
-      let root = ''
+      const { root, drafts } = parseBundleFolder(fileList)
+      const name = root || drafts[0]?.memberPath || 'bundle'
+      if (drafts.length > MAX_BUNDLE_MEMBERS) {
+        // 超限文件夹直接落成失败条目，不上传任何成员。
+        setBundles((prev) => [
+          ...prev,
+          {
+            key: bundleKey,
+            name,
+            files: [],
+            status: 'failed',
+            bundleId: null,
+            error: `文件夹包含 ${drafts.length} 个文件，超过 ${MAX_BUNDLE_MEMBERS} 个成员上限`,
+          },
+        ])
+        return
+      }
       const fileEntries: BundleFileEntry[] = []
-      for (const file of Array.from(fileList)) {
-        const relativePath =
-          (file as File & { webkitRelativePath?: string }).webkitRelativePath ||
-          file.name
-        const parts = splitBundleRelativePath(relativePath)
-        if (!root && parts.root) root = parts.root
+      for (const draft of drafts) {
         const fileKey = `bf${++keySeqRef.current}`
-        filesRef.current.set(fileKey, { file })
+        filesRef.current.set(fileKey, { file: draft.file })
         fileStateRef.current.set(fileKey, {
           bundleKey,
-          path: parts.memberPath,
+          path: draft.memberPath,
           status: 'pending',
           materialId: null,
         })
         queueRef.current.push({ bundleKey, fileKey })
         fileEntries.push({
           key: fileKey,
-          path: parts.memberPath,
-          size: file.size,
+          path: draft.memberPath,
+          size: draft.size,
           status: 'pending',
           error: null,
           materialId: null,
         })
       }
-      const name = root || fileEntries[0]?.path || 'bundle'
       bundleNameRef.current.set(bundleKey, name)
       setBundles((prev) => [
         ...prev,

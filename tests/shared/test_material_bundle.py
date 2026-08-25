@@ -71,6 +71,30 @@ def test_assemble_returns_existing_tree_without_rebuild(tmp_path: Path) -> None:
     assert (tree / "a.txt").read_bytes() == b"existing"
 
 
+def test_assemble_discards_temp_tree_on_lost_rename_race(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """重命名竞争失败方：返回胜者的树，自己的 .part 临时树必须清理（#156）。"""
+    member = _member(tmp_path, "ma", b"aaa")
+    cache_root = tmp_path / "cache"
+    address = bundle_address([("hash-a", "a.txt")])
+    final = cache_root / address[:2] / address
+
+    def _winner_won(src: Path, dst: Path) -> None:  # noqa: ARG001
+        # 胜者先落位；我们的 os.replace 因目标是非空目录而失败。
+        dst.mkdir(parents=True)
+        (dst / "a.txt").write_bytes(b"winner")
+        raise OSError("Directory not empty")
+
+    monkeypatch.setattr("shared.material_bundle.os.replace", _winner_won)
+
+    tree = assemble_bundle_tree(cache_root, address, [(member, "a.txt")])
+
+    assert tree == final
+    assert (tree / "a.txt").read_bytes() == b"winner"
+    assert list(cache_root.rglob("*.part")) == []
+
+
 def test_assemble_rejects_unsafe_relpath(tmp_path: Path) -> None:
     member = _member(tmp_path, "ma", b"aaa")
     with pytest.raises(MaterializeError, match="relative path"):

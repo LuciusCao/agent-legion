@@ -44,12 +44,15 @@ export function fileTypeGroup(filename: string, contentType: string): string {
 /**
  * webkitdirectory 的相对路径（root/sub/file.txt）拆成 bundle 根名与成员
  * 相对路径；没有目录段时根名为空（调用方自行兜底命名）。
+ * 注意：webkitRelativePath 按规范恒以 `/` 分隔（Windows 上亦然），不做
+ * 反斜杠归一化——POSIX 文件名里的字面 `\` 原样保留，由后端成员路径
+ * 校验 fail-closed 拒绝，而不是静默改路径。
  */
 export function splitBundleRelativePath(relativePath: string): {
   root: string
   memberPath: string
 } {
-  const normalized = relativePath.replace(/\\/g, '/').replace(/^\/+/, '')
+  const normalized = relativePath.replace(/^\/+/, '')
   const slash = normalized.indexOf('/')
   if (slash === -1) return { root: '', memberPath: normalized }
   return {

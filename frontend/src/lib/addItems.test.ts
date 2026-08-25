@@ -57,6 +57,16 @@ describe('splitBundleRelativePath', () => {
       memberPath: 'a.txt',
     })
   })
+
+  it('keeps literal backslashes in POSIX filenames untouched', () => {
+    // webkitRelativePath 恒以 `/` 分隔（Windows 上亦然）；字面反斜杠是
+    // 合法文件名字符，不得被归一化成路径段——含 `\` 的成员路径由后端
+    // 校验 fail-closed 拒绝，而不是静默改写。
+    expect(splitBundleRelativePath('root/a\\b.txt')).toEqual({
+      root: 'root',
+      memberPath: 'a\\b.txt',
+    })
+  })
 })
 
 describe('fileTypeGroup', () => {

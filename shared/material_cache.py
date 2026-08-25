@@ -182,9 +182,10 @@ def evict_to_capacity(
     """Evict oldest-mtime cache entries until the root fits *max_bytes*.
 
     Entries are the direct children of the shard dirs: one single-material
-    file or one bundle tree dir. A tree is evicted atomically (whole dir),
-    so eviction can never leave a crippled tree behind — the "existing dir
-    means complete" invariant of ``assemble_bundle_tree`` holds (#156).
+    file or one bundle tree dir. A tree is evicted atomically: it is
+    renamed to a trash sibling first and deleted there, so the final
+    address never holds a partially-deleted tree — the "existing dir means
+    complete" invariant of ``assemble_bundle_tree`` holds (#156).
 
     Eviction never affects correctness (the next materialization
     re-downloads/reassembles) and never blocks: any filesystem error
@@ -218,7 +219,14 @@ def evict_to_capacity(
                 break
             try:
                 if path.is_dir():
-                    shutil.rmtree(path)
+                    # Atomicity: rename the tree aside first, so the final
+                    # address never holds a partially-deleted tree (the
+                    # "existing dir means complete" invariant, #156). A
+                    # failed rmtree leaves a trash sibling behind, which the
+                    # next eviction pass retries as an ordinary candidate.
+                    trash = path.parent / f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.trash"
+                    os.rename(path, trash)
+                    shutil.rmtree(trash)
                 else:
                     path.unlink()
                 total -= size

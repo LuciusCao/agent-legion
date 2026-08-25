@@ -163,7 +163,7 @@ class NodeContext:
         ``filename`` / ``content_type`` / ``size_bytes`` / ``content_hash``.
         Non-material inputs yield ``None``.
 
-        A ``material_bundle`` input (#156) adds ``kind: "bundle"`` and
+        A ``bundle`` input (#156) adds ``kind: "bundle"`` and
         ``entries`` (per-member ``path`` / ``size_bytes`` / ``content_hash``);
         ``path`` then points at the materialized **directory** whose
         relative layout matches the uploaded folder.

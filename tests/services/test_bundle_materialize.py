@@ -13,6 +13,7 @@ from server.app.services.material_bundle_cache import (
     bundle_claim_block,
     bundle_runtime_block,
     is_bundle_input,
+    prefetch_bundle_block,
 )
 from server.app.services.material_bundles import MaterialBundlesService
 from server.app.services.material_cache import material_runtime_block
@@ -191,3 +192,42 @@ def test_claim_block_presigns_each_member_without_storage_key(job_db, bundle, st
         assert entry["download_url"].startswith("https://s3.test/download/")
         assert entry["material_id"] in ("mat-a", "mat-b")
     assert "storage_key" not in json.dumps(block)
+
+
+class _FakeExecutor:
+    """prefetch_bundle_block 需要的最小 executor 面（dispatch 接线）。"""
+
+    def __init__(self, job_db, cache_root: Path, storage: FakeStorage) -> None:
+        self.job_db = job_db
+        self._materials_cache_root = cache_root
+        self._storage = storage
+
+    def _object_store(self) -> FakeStorage:
+        return self._storage
+
+
+def test_prefetch_bundle_block_wires_executor_dispatch(
+    job_db, bundle, storage, tmp_path: Path
+) -> None:
+    """dispatch 实际调用路径：DSN / cache root / storage 全部取自 executor。"""
+    executor = _FakeExecutor(job_db, tmp_path, storage)
+
+    block = prefetch_bundle_block(executor, _job(bundle["id"]), WORKSPACE_ID)
+
+    assert block is not None
+    assert block["kind"] == "bundle"
+    tree = Path(block["path"])
+    assert (tree / "a.txt").read_bytes() == PAYLOAD_A
+    assert (tree / "sub" / "b.txt").read_bytes() == PAYLOAD_B
+
+
+def test_prefetch_bundle_block_returns_none_for_non_bundle(job_db, storage, tmp_path: Path) -> None:
+    executor = _FakeExecutor(job_db, tmp_path, storage)
+    job = {"input_json": json.dumps({"type": "material", "material_id": "mat-a"})}
+    assert prefetch_bundle_block(executor, job, WORKSPACE_ID) is None
+
+
+def test_prefetch_bundle_block_fails_closed_without_job_db(bundle, storage, tmp_path: Path) -> None:
+    executor = _FakeExecutor(None, tmp_path, storage)
+    with pytest.raises(MaterializeError, match="job database"):
+        prefetch_bundle_block(executor, _job(bundle["id"]), WORKSPACE_ID)

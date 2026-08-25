@@ -154,6 +154,43 @@ def test_create_rejects_duplicate_paths(bundles, materials, storage) -> None:
         )
 
 
+def test_create_assigns_ordinals_by_sorted_path(bundles, materials, storage) -> None:
+    """ordinal 是按 path 排序的稳定序号（设计 §5.4），与请求顺序无关。"""
+    first = _ready_material(materials, storage, b"alpha", "a.txt")
+    second = _ready_material(materials, storage, b"beta-content", "b.txt")
+
+    bundle = bundles.create(
+        WORKSPACE_ID,
+        name="folder",
+        members=[
+            {"material_id": second, "path": "sub/b.txt"},
+            {"material_id": first, "path": "a.txt"},
+        ],
+    )
+
+    assert [(member["path"], member["ordinal"]) for member in bundle["members"]] == [
+        ("a.txt", 0),
+        ("sub/b.txt", 1),
+    ]
+
+
+def test_create_counts_shared_material_once_in_total(bundles, materials, storage) -> None:
+    """同一 material 挂在多个路径下时，total_size_bytes 只计一次。"""
+    material_id = _ready_material(materials, storage, b"shared-payload", "s.txt")
+
+    bundle = bundles.create(
+        WORKSPACE_ID,
+        name="folder",
+        members=[
+            {"material_id": material_id, "path": "a.txt"},
+            {"material_id": material_id, "path": "sub/copy.txt"},
+        ],
+    )
+
+    assert bundle["file_count"] == 2
+    assert bundle["total_size_bytes"] == len(b"shared-payload")
+
+
 @pytest.mark.parametrize(
     "path",
     ["", "/abs.txt", "a/../b.txt", "a//b.txt", "a/./b.txt", "back\\slash.txt"],

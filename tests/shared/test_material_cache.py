@@ -252,6 +252,30 @@ def test_eviction_failure_only_warns(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert path.exists()
 
 
+def test_eviction_vacates_final_address_when_tree_delete_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """树先改名再删：rmtree 失败时最终地址不得留下残缺树（#156）。"""
+    tree = tmp_path / "ab" / ("ab" + "0" * 62)
+    tree.mkdir(parents=True)
+    (tree / "a.txt").write_bytes(b"a" * 100)
+    os.utime(tree / "a.txt", (time.time() - 3600,) * 2)
+    warnings: list[str] = []
+
+    def _failing_rmtree(path: Path, ignore_errors: bool = False) -> None:  # noqa: ARG001
+        raise OSError("disk error mid-delete")
+
+    monkeypatch.setattr("shared.material_cache.shutil.rmtree", _failing_rmtree)
+    evict_to_capacity(tmp_path, 1, log=warnings.append)
+
+    assert not tree.exists(), "final address must be vacated even when deletion fails"
+    assert warnings
+    # 残骸整体移到 trash 名下（内容完好），下一轮驱逐可重试。
+    leftovers = [p for p in (tmp_path / "ab").iterdir() if p.name.endswith(".trash")]
+    assert len(leftovers) == 1
+    assert (leftovers[0] / "a.txt").read_bytes() == b"a" * 100
+
+
 def test_cache_max_bytes_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cache_max_bytes() == DEFAULT_CACHE_MAX_BYTES
     monkeypatch.setenv("AGENT_LEGION_MATERIAL_CACHE_MAX_BYTES", "1024")
