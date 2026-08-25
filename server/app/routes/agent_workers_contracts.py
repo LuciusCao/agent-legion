@@ -25,6 +25,9 @@ class RegisterAgentWorkerRequest(BaseModel):
 class AgentWorkerWorkspace(BaseModel):
     workspace_id: str
     workspace_name: str
+    # Ids of the presented register tokens that opened this workspace, so the
+    # Worker console can associate each token card with its workspace.
+    token_ids: list[str] = Field(default_factory=list)
 
 
 class RegisterAgentWorkerResponse(BaseModel):

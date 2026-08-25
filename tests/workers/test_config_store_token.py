@@ -71,6 +71,26 @@ def test_failed_yaml_write_leaves_no_orphan_token(
 
     monkeypatch.setattr(store, "write", boom)
     with pytest.raises(OSError, match="disk full"):
-        store.update_public({"claim_enabled": True}, registration_token="token-x")
+        store.update_public({"claim_enabled": True}, registration_token="token-x.secret-part")
 
     assert not (store.state_dir / "register_token").exists()
+
+
+def test_upsert_rejects_path_traversal_token_id(tmp_path: Path) -> None:
+    """无空白的 '../../x.secret' 也能过长度/空白校验，必须被 id 白名单拦下。"""
+    store = _store(tmp_path)
+    for bad in ("../../x.secret", "..\\win.secret", "plain-secret-no-id", "id-only."):
+        with pytest.raises(ValueError, match="Token 格式无效"):
+            store.upsert_registration_token(bad)
+    assert store.read_registration_tokens() == []
+    assert not (tmp_path / "x.secret").exists()
+
+
+def test_update_public_invalid_token_leaves_config_untouched(tmp_path: Path) -> None:
+    """token 校验先于配置落盘：422 时配置不得半应用。"""
+    store = _store(tmp_path)
+    before = store.path.read_bytes()
+    with pytest.raises(ValueError, match="Token 格式无效"):
+        store.update_public({"claim_enabled": True}, registration_token="../../x.secret")
+    assert store.path.read_bytes() == before
+    assert store.read_registration_tokens() == []

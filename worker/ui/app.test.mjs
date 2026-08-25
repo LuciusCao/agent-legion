@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { NUMBER_DEFAULTS, bucketLabel, chartSeriesData, executionLabel, fillWindowBuckets, foldLogLines, formatElapsed, formatTokens, groupExecutions, hasChartData, labelsFromText, latestMetric, linesFromText, metricsParams, modelsFromText, numberField, phaseProgress, runOccupancy, tokensLastHour } from "./app.js";
+import { NUMBER_DEFAULTS, bucketLabel, chartSeriesData, executionLabel, fillWindowBuckets, foldLogLines, formatElapsed, formatTokens, groupExecutions, hasChartData, labelsFromText, latestMetric, linesFromText, metricsParams, modelsFromText, numberField, phaseProgress, runOccupancy, tokenCardModel, tokensLastHour } from "./app.js";
 
 test("labelsFromText 解析多行 key=value", () => {
   assert.deepEqual(labelsFromText("host=home\nos=mac"), { host: "home", os: "mac" });
@@ -224,4 +224,24 @@ test("foldLogLines 忽略时间戳折叠连续重复行，展示最新一行并�
   ]);
   assert.deepEqual(foldLogLines([]), []);
   assert.deepEqual(foldLogLines(undefined), []);
+});
+
+test("tokenCardModel 按 token_ids 把每张卡片关联到开通它的 workspace", () => {
+  const workspaces = [
+    { workspace_id: "ws-a", workspace_name: "Alpha", token_ids: ["tok-a1"] },
+    { workspace_id: "ws-b", workspace_name: "Beta", token_ids: ["tok-b1", "tok-b2"] },
+  ];
+  const cardB = tokenCardModel({ token_id: "tok-b2", state: "ok" }, workspaces);
+  assert.equal(cardB.workspaceId, "ws-b");
+  assert.equal(cardB.workspaceName, "Beta");
+  const cardA = tokenCardModel({ token_id: "tok-a1", state: "ok" }, workspaces);
+  assert.equal(cardA.workspaceId, "ws-a");
+});
+
+test("tokenCardModel 对没有 token_ids 关联的旧 Host 响应回退为无 workspace", () => {
+  const legacy = [{ workspace_id: "ws-a", workspace_name: "Alpha" }];
+  const card = tokenCardModel({ token_id: "tok-x", state: "pending" }, legacy);
+  assert.equal(card.workspaceId, undefined);
+  assert.equal(card.workspaceName, undefined);
+  assert.equal(tokenCardModel({ token_id: "tok-x" }, undefined).workspaceId, undefined);
 });

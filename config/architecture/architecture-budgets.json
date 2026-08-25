@@ -1212,7 +1212,7 @@
     "worker/cli_args.py": 90,
     "worker/client.py": 67,
     "worker/code_runner.py": 460,
-    "worker/config_store.py": 231,
+    "worker/config_store.py": 229,
     "worker/event_filter.py": 61,
     "worker/execution_heartbeat.py": 56,
     "worker/execution_lifecycle.py": 53,

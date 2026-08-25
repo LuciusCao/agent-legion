@@ -555,13 +555,13 @@ def test_registration_retries_transient_host_errors_without_traceback(
     client = agent_worker.Client("http://unused")
     calls = 0
 
-    def flaky_register(config: dict, token: str) -> str:
+    def flaky_register(config: dict, token: str) -> dict:
         nonlocal calls
         del config, token
         calls += 1
         if calls < 3:
             raise urllib.error.URLError("host unavailable")
-        return "worker-token"
+        return {"worker_token": "worker-token", "workspaces": []}
 
     client.register = flaky_register  # type: ignore[method-assign]
     assert register_with_retry(client, {}, ["token"], threading.Event(), 0.001)
@@ -633,7 +633,7 @@ def _run_main(
         lambda sig, handler: handlers.setdefault(sig, handler),
     )
     monkeypatch.setattr(agent_worker, "Client", lambda host, **kwargs: fake)
-    fake.register = lambda config, token: "worker-token"  # type: ignore[attr-defined]
+    fake.register = lambda config, token: {"worker_token": "worker-token", "workspaces": []}  # type: ignore[attr-defined]
     # main() 的启动预检会探测 PATH 上的 runtime 二进制；测试与真实机器环境
     # 无关，统一打桩为全部存在（预检自身的用例单独覆盖）。
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/bin/{binary}")

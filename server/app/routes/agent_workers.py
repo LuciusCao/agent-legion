@@ -53,8 +53,8 @@ def create_agent_workers_router(
         in X-Agent-Worker-Register-Tokens); all of them must be live
         workspace-scoped tokens — any revoked or unknown token fails the whole
         registration so a stale token can never silently narrow the scope.
-        Returns [{'workspace_id', 'workspace_name'}] rows so the Worker console
-        can label each token with its workspace name."""
+        Returns [{'workspace_id', 'workspace_name', 'token_ids'}] rows so the
+        Worker console can label each token with its workspace name."""
         supplied = [
             token.strip()
             for token in request.headers.get("x-agent-worker-register-tokens", "").split(",")
@@ -129,6 +129,7 @@ def create_agent_workers_router(
                 AgentWorkerWorkspace(
                     workspace_id=str(row["workspace_id"]),
                     workspace_name=str(row["workspace_name"]),
+                    token_ids=[str(token_id) for token_id in row["token_ids"]],
                 )
                 for row in scope
             ],

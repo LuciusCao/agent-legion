@@ -52,6 +52,8 @@ def _issue_scoped_token(client: TestClient, workspace_id: str = "test-workspace"
 
     Creates the workspace first when it does not exist yet (some tests never
     seed a job and only exercise the registration contract)."""
+    # 签发是 admin-only API；幂等（409 → login 回落），重复调用无副作用。
+    _authenticate_admin(client)
     created = client.post(
         "/api/agent-register-tokens",
         json={"workspace_id": workspace_id, "label": "test"},
@@ -484,11 +486,12 @@ def test_register_with_scoped_token_stores_and_returns_scope(tmp_path: Path) -> 
 
         scoped_registration = _register(client, credential=scoped, worker_id="scoped-worker")
         assert scoped_registration["allowed_workspaces"] == ["test-workspace"]
-        # issue #35: the response carries workspace rows (id + name) so the
-        # Worker console can label each token.
+        # issue #35: the response carries workspace rows (id + name + the token
+        # ids that opened it) so the Worker console can label each token.
         workspaces_row = scoped_registration["workspaces"]
         assert [row["workspace_id"] for row in workspaces_row] == ["test-workspace"]
         assert all(row["workspace_name"] for row in workspaces_row)
+        assert workspaces_row[0]["token_ids"] == [scoped.partition(".")[0]]
 
         listed = client.get("/api/agent-workers")
         assert listed.status_code == 200
@@ -506,6 +509,10 @@ def test_register_with_scoped_token_stores_and_returns_scope(tmp_path: Path) -> 
             "other-workspace",
             "test-workspace",
         ]
+        # 每个 workspace 行记录开通它的 token id，控制台按 token_id 关联卡片。
+        by_workspace = {row["workspace_id"]: row["token_ids"] for row in merged["workspaces"]}
+        assert by_workspace["test-workspace"] == [scoped.partition(".")[0]]
+        assert by_workspace["other-workspace"] == [other.partition(".")[0]]
 
         # The workspace view only sees workers scoped to it; the legacy []
         # scope (a retired global registration) would be invisible there.

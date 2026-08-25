@@ -13,7 +13,7 @@ import yaml
 
 from worker import worker_declarations
 from worker._atomic import atomic_write
-from worker.registration_token import TOKEN_FILE_PATTERN, normalized_registration_token
+from worker.registration_token import TOKEN_FILE_PATTERN, validated_registration_token
 from worker.runtime_controls import MAX_DYNAMIC_CONCURRENCY, validate_claim_controls
 
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
@@ -190,10 +190,7 @@ class WorkerConfigStore:
 
         The token file name is derived from the token's own id prefix so the
         console can correlate a card with its file. Writing is idempotent."""
-        normalized = normalized_registration_token(token)
-        token_id = normalized.partition(".")[0]
-        if not token_id:
-            raise ValueError("Token 格式无效：缺少 id 前缀")
+        token_id, normalized = validated_registration_token(token)
         path = self.token_dir() / f"{token_id}.token"
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write(path, normalized + "\n", mode=0o600)
@@ -223,6 +220,11 @@ class WorkerConfigStore:
             if registration_token is not None:
                 # 兼容路径：老客户端/脚本仍以单 token 字段提交；落成
                 # register_tokens/ 下的一个文件，与 UI 的添加操作同构。
+                # 先校验 token：校验失败时配置不落盘，避免 API 422 但配置
+                # 已生效的半应用状态。写入顺序保持 配置 → token 文件：中途
+                # 崩溃只留孤儿 token 文件（重新提交即可收敛），而配置引用的
+                # 是目录而非单个 token，不会出现配置指向缺失文件的状态。
+                validated_registration_token(registration_token)
                 updated["register_token_dir"] = str(self.state_dir / "register_tokens")
                 self.write(updated)
                 self.upsert_registration_token(registration_token)

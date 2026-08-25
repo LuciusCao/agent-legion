@@ -18,6 +18,18 @@ def normalized_registration_token(token: str) -> str:
     return normalized
 
 
+def validated_registration_token(token: str) -> tuple[str, str]:
+    """校验 "<id>.<secret>" 格式并返回 (token_id, normalized)；id 过 TOKEN_FILE_PATTERN
+    同款白名单——写入路径由它拼出，未校验的 id（如 "../.."）可路径穿越逃逸目录。"""
+    normalized = normalized_registration_token(token)
+    token_id, separator, secret = normalized.partition(".")
+    if not separator or not TOKEN_FILE_PATTERN.fullmatch(f"{token_id}.token"):
+        raise ValueError("Token 格式无效：缺少合法 id 前缀")
+    if not secret or "/" in secret or "\\" in secret:
+        raise ValueError("Token 格式无效：缺少 secret 部分或含路径分隔符")
+    return token_id, normalized
+
+
 def registration_tokens(config: dict[str, Any], state_dir: Path) -> list[dict[str, Any]]:
     """List configured scoped tokens as [{'token_id', 'token'}] rows.
 

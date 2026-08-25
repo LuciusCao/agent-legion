@@ -174,12 +174,13 @@ class AgentWorkerRegistry:
         Takes the worker's full token list; every token must resolve to a live
         (non-revoked) workspace-scoped token — one bad token fails the whole
         registration so a stale token can never silently narrow the scope.
-        Returns the merged scope as [{'workspace_id', 'workspace_name'}] rows
-        (deduplicated), or None when no token was presented or any failed."""
+        Returns the merged scope as [{'workspace_id', 'workspace_name',
+        'token_ids'}] rows (deduplicated; token_ids records which presented
+        tokens opened the workspace), or None when nothing resolved."""
         presented = [token for token in tokens if token]
         if not presented:
             return None
-        scopes: dict[str, str] = {}
+        scopes: dict[str, dict[str, Any]] = {}
         with read_connection(self.database_dsn) as conn:
             for token in presented:
                 token_id, separator, secret = token.partition(".")
@@ -196,10 +197,14 @@ class AgentWorkerRegistry:
                 digest = hashlib.sha256(secret.encode()).hexdigest()
                 if not hmac.compare_digest(digest, row["token_hash"]):
                     return None
-                scopes[str(row["workspace_id"])] = str(row["name"])
+                entry = scopes.setdefault(
+                    str(row["workspace_id"]),
+                    {"workspace_name": str(row["name"]), "token_ids": []},
+                )
+                entry["token_ids"].append(token_id)
         return [
-            {"workspace_id": workspace_id, "workspace_name": name}
-            for workspace_id, name in sorted(scopes.items())
+            {"workspace_id": workspace_id, **entry}
+            for workspace_id, entry in sorted(scopes.items())
         ]
 
     def list_register_tokens(self) -> list[dict[str, Any]]:

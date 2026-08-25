@@ -537,7 +537,9 @@ async function loadConfig() {
 const TOKEN_STATE_LABEL = { ok: "已验证", pending: "验证中…", rejected: "已失效 · 无法注册" };
 
 export function tokenCardModel(row, workspaces) {
-  const detail = (workspaces || []).find((item) => item.workspace_id);
+  // Host 在每个 workspace 行里记录开通它的 token id（token_ids）；按
+  // row.token_id 反查，不能把第一张卡片以外的 token 都标成同一个 workspace。
+  const detail = (workspaces || []).find((item) => (item.token_ids || []).includes(row.token_id));
   return {
     token_id: row.token_id,
     state: row.state || "pending",

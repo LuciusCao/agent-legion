@@ -2720,6 +2720,8 @@ export interface components {
     }
     /** AgentWorkerWorkspace */
     AgentWorkerWorkspace: {
+      /** Token Ids */
+      token_ids?: string[]
       /** Workspace Id */
       workspace_id: string
       /** Workspace Name */
