@@ -72,7 +72,6 @@ def _backend_env(port: int, db_name: str, vault_key: str) -> dict[str, str]:
             "AGENT_LEGION_SKIP_DOTENV": "1",
             "AGENT_LEGION_DATABASE_URL": db_dsn(db_name),
             "AGENT_LEGION_DATA_DIR": str(DATA_DIR),
-            "AGENT_LEGION_WORKER_REGISTER_TOKEN": "ci-only-dummy-register-token",
             "AGENT_LEGION_VAULT_MASTER_KEY": vault_key,
         }
     )

@@ -60,7 +60,7 @@ exemptions:
     package after rollout.
   owner: config
   remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
-  ceiling: 190
+  ceiling: 216
 - check: architecture.file_budget
   path: server/app/routes/__init__.py
   reason: Composition adds the Agent Worker control-plane router, the artifact
@@ -116,8 +116,8 @@ exemptions:
 - check: architecture.file_budget
   path: server/app/db/migrations/__init__.py
   reason: The module is the flat export point for the idempotent migration
-    chain and grows by two lines per schema version (v57
-    studio_chat_draft).
+    chain and grows by two lines per schema version (v57 studio_chat_draft,
+    v58 retire_global_register_tokens).
   owner: workspace-executor
   remove_when: docs/architecture/studio-phase3-implementation-plan.md
-  ceiling: 54
+  ceiling: 58

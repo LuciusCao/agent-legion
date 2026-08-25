@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   createRegisterToken,
+  fetchWorkspaces,
   listAgentWorkers,
   listRegisterTokens,
   revokeAgentWorker,
@@ -12,6 +13,7 @@ import type {
   AgentRegisterTokenSummary,
   AgentWorkerSummary,
 } from '../../api'
+import { queryKeys } from '../../lib/queryKeys'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import { toErrorMessage } from '../../lib/queryError'
 import styles from './WorkerTokensSection.module.css'
@@ -21,15 +23,13 @@ function formatTime(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
 }
 
-function workerScope(worker: AgentWorkerSummary): string {
-  return worker.allowed_workspaces.length === 0
-    ? '全部 workspace'
-    : worker.allowed_workspaces.join(', ')
-}
-
 /**
  * Worker register token management (issue / list / revoke) plus revocation of
  * already-registered workers (endpoints require login).
+ *
+ * issue #35: registration is scoped-token-only — every token is bound to one
+ * workspace (the workspace picker is mandatory) and each registered worker
+ * shows the workspace scope it registered with.
  */
 export function WorkerTokensSection() {
   const [label, setLabel] = useState('')
@@ -45,9 +45,18 @@ export function WorkerTokensSection() {
     queryKey: extraQueryKeys.workerTokens(),
     queryFn: () => Promise.all([listRegisterTokens(), listAgentWorkers()]),
   })
+  const { data: workspaces } = useQuery({
+    queryKey: queryKeys.workspaces(),
+    queryFn: async () => (await fetchWorkspaces()).workspaces,
+  })
   const listError = toErrorMessage(listQueryError)
   const tokens = lists?.[0] ?? []
   const workers = lists?.[1] ?? []
+
+  function workspaceName(workspaceId: string | null): string {
+    if (!workspaceId) return ''
+    return workspaces?.find((w) => w.id === workspaceId)?.name ?? workspaceId
+  }
 
   function refresh() {
     void queryClient.invalidateQueries({
@@ -57,13 +66,13 @@ export function WorkerTokensSection() {
 
   async function handleCreate() {
     const trimmedLabel = label.trim()
-    if (!trimmedLabel) return
+    if (!trimmedLabel || !workspaceId) return
     setError('')
     setLoading(true)
     try {
       const created = await createRegisterToken({
         label: trimmedLabel,
-        workspace_id: workspaceId.trim() || null,
+        workspace_id: workspaceId,
       })
       setCreatedToken(created)
       setCopied(false)
@@ -133,31 +142,38 @@ export function WorkerTokensSection() {
             value={label}
             onChange={(event) => setLabel(event.target.value)}
           />
-          <input
+          <select
             className={styles.input}
-            placeholder="workspace_id（可空，空 = 全部 workspace）"
             aria-label="workspace 范围"
             value={workspaceId}
             onChange={(event) => setWorkspaceId(event.target.value)}
-          />
+          >
+            <option value="">选择 workspace（必选）</option>
+            {(workspaces ?? []).map((workspace) => (
+              <option key={workspace.id} value={workspace.id}>
+                {workspace.name}（{workspace.id}）
+              </option>
+            ))}
+          </select>
           <button
             type="button"
             className={styles.button}
             onClick={() => void handleCreate()}
-            disabled={loading || label.trim() === ''}
+            disabled={loading || label.trim() === '' || !workspaceId}
           >
             签发
           </button>
         </div>
+        <p className={styles.hint}>
+          每个 Token 绑定一个 workspace（全局 token 已退役）；Worker 只承接该
+          workspace 的任务。
+        </p>
 
         {createdToken && (
           <div data-testid="created-token">
             <p className={styles.hint}>
-              已签发「{createdToken.label}」
-              {createdToken.workspace_id
-                ? `（仅 ${createdToken.workspace_id}）`
-                : '（全部 workspace）'}
-              ：
+              已签发「{createdToken.label}」（仅{' '}
+              {workspaceName(createdToken.workspace_id)}）：
             </p>
             <div className={styles.tokenBox}>{createdToken.register_token}</div>
             <div className={styles.row}>
@@ -195,8 +211,10 @@ export function WorkerTokensSection() {
               data-testid={`register-token-${token.token_id}`}
             >
               <span className={styles.itemLabel}>{token.label}</span>
-              <span className={styles.chip}>
-                {token.workspace_id ?? '全部 workspace'}
+              <span className={styles.chipScope}>
+                {token.workspace_id
+                  ? workspaceName(token.workspace_id)
+                  : '全部 workspace（已退役）'}
               </span>
               <span className={styles.chip}>
                 {formatTime(token.created_at)}
@@ -248,7 +266,20 @@ export function WorkerTokensSection() {
               <span className={styles.chip}>
                 并发上限 {worker.max_concurrency}
               </span>
-              <span className={styles.chip}>{workerScope(worker)}</span>
+              {worker.allowed_workspaces.length === 0 ? (
+                <span
+                  className={`${styles.chip} ${styles.chipRevoked}`}
+                  title="旧全局 token 注册的存量 Worker（scope=全部）。仅管理员可见；请为其签发 workspace token 并重新注册"
+                >
+                  待迁移（旧全局注册）
+                </span>
+              ) : (
+                <span className={styles.chipScope}>
+                  {worker.allowed_workspaces
+                    .map((id) => workspaceName(id))
+                    .join(', ')}
+                </span>
+              )}
               {worker.revoked && (
                 <span className={`${styles.chip} ${styles.chipRevoked}`}>
                   已吊销

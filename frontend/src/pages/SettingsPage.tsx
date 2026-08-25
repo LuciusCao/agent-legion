@@ -17,6 +17,7 @@ import { DangerZone } from '../components/settings/DangerZone'
 import { WorkflowSection } from '../components/settings/WorkflowSection'
 import { IntakeConfigSection } from '../components/settings/IntakeConfigSection'
 import { WorkerTokensSection } from '../components/settings/WorkerTokensSection'
+import { WorkspaceWorkersSection } from '../components/settings/WorkspaceWorkersSection'
 import { WorkspaceMembersSection } from '../components/settings/WorkspaceMembersSection'
 import styles from './SettingsPage.module.css'
 
@@ -154,7 +155,11 @@ export function SettingsPage() {
             <h2 className={styles.sectionTitle}>Agent 与 Worker</h2>
             <hr className={styles.sectionDivider} />
             <AgentRoutingSection />
-            <WorkerTokensSection />
+            {isAdmin ? (
+              <WorkerTokensSection />
+            ) : (
+              <WorkspaceWorkersSection workspaceId={workspaceId ?? ''} />
+            )}
           </section>
           <AgentDefaultsSection
             workspaceId={workspaceId}

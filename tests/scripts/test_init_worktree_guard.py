@@ -120,7 +120,8 @@ def test_flat_worktree_passes_guard_and_initializes(tmp_path: Path) -> None:
         "AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_flat"
         in (worktree / ".env").read_text()
     )
-    assert (worktree / "deploy/secrets/agent_worker_register_token").is_file()
+    # issue #35：全局 register token 已退役，init-worktree 不再生成。
+    assert not (worktree / "deploy/secrets/agent_worker_register_token").exists()
     assert (worktree / "deploy/secrets/vault_master_key").read_text().strip() == (
         "stub-vault-master-key"
     )
@@ -161,9 +162,9 @@ def test_worker_config_seeded_from_base_with_rewritten_identity(tmp_path: Path) 
     assert "worker_id: flat" in config
     assert "name: flat (worktree)" in config
     assert "runtimes: [velites]" in config
-    # 容器路径 /run/secrets/... 必须改写为本 worktree 生成的本地密钥文件。
-    assert "/run/secrets" not in config
-    assert f"register_token_file: {worktree}/deploy/secrets/agent_worker_register_token" in config
+    # issue #35：token 不再经配置文件注入（原容器路径行保留原样，注册走
+    # worker 控制台粘贴 scoped token）。
+    assert "register_token_file: /run/secrets/agent_worker_register_token" in config
 
 
 def test_worker_config_host_url_uses_dev_backend_port(tmp_path: Path) -> None:

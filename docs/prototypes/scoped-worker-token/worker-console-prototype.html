@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Worker 控制台 — Scoped Token 原型</title>
+    <link rel="stylesheet" href="../../../worker/ui/styles.css" />
+    <style>
+      /* ===== 以下为 scoped token 新增样式（最终会并入 styles.css） ===== */
+
+      /* Host 注册 Token 单行输入 → Scoped Token 列表管理区块 */
+      .token-list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+      .token-card {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 14px;
+        border: 1px solid #2b5044;
+        border-radius: 10px;
+        background: #081512;
+      }
+      .token-card .token-main { min-width: 0; }
+      .token-card .token-id {
+        display: block;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 11px;
+        color: #b9cdc5;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .token-card .token-ws { margin-top: 4px; display: flex; align-items: center; gap: 7px; font-size: 12px; }
+      .token-card .token-ws .ws-icon { width: 1.1em; height: 1.1em; fill: var(--mint); flex: 0 0 auto; }
+      .token-card .token-ws .ws-name { color: #eef8f3; font-weight: 600; }
+      .token-card .token-ws .ws-id { color: var(--dim); font-size: 10px; }
+      .token-state {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .token-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+      .token-state.ok { color: var(--mint); }
+      .token-state.pending { color: var(--amber); }
+      .token-state.error { color: var(--red); }
+      .token-state.revoked { color: var(--red); }
+      .token-remove {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border: 1px solid #2b5044;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 11px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .token-remove:hover { color: var(--red); border-color: rgba(255, 120, 109, .4); }
+
+      /* 添加 token 输入行 */
+      .token-add-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin-top: 12px; }
+      .token-add-row input { margin-top: 0; }
+      .token-add-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 0 16px;
+        border: 1px solid rgba(102, 232, 173, .3);
+        border-radius: 9px;
+        background: rgba(85, 230, 166, .12);
+        color: var(--mint);
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .token-add-btn:hover { background: rgba(85, 230, 166, .2); }
+
+      /* 校验错误反馈（沿用 .error 视觉） */
+      .token-error { margin-top: 10px; }
+
+      /* 诊断页工作区范围：多个 workspace 展示 */
+      .ws-scope-list { display: flex; flex-wrap: wrap; gap: 6px; }
+      .ws-scope-chip {
+        padding: 4px 10px;
+        border: 1px solid rgba(102, 232, 173, .26);
+        border-radius: 999px;
+        background: rgba(85, 230, 166, .08);
+        color: var(--mint);
+        font-size: 11px;
+      }
+
+      /* 原型演示控制条 */
+      .demo-bar {
+        position: fixed;
+        bottom: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 99;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border: 1px solid #2b5044;
+        border-radius: 12px;
+        background: rgba(4, 13, 11, .96);
+        box-shadow: 0 8px 28px rgba(0, 0, 0, .45);
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .demo-bar .chip { cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <svg class="icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#hub"></use></svg>
+          <span>AGENT LEGION</span>
+        </div>
+        <nav aria-label="Worker 控制台">
+          <button class="nav-button active" data-page="overview" aria-current="page">
+            <svg class="icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#grid"></use></svg><span>概览</span>
+          </button>
+          <button class="nav-button" data-page="config">
+            <svg class="icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#settings"></use></svg><span>配置</span>
+          </button>
+          <button class="nav-button" data-page="diagnostics">
+            <svg class="icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#diagnostics"></use></svg><span>诊断</span>
+          </button>
+        </nav>
+        <div class="sidebar-meta">
+          <span>Worker Service</span>
+          <small>local control plane</small>
+        </div>
+      </aside>
+
+      <div class="app-main">
+        <header class="topbar">
+          <div class="topbar-title">
+            <h1>Worker 控制台</h1>
+            <span id="global-notice" class="global-notice" role="status"></span>
+          </div>
+          <div class="topbar-actions">
+            <div class="worker-identity">
+              <svg class="icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#memory"></use></svg>
+              <span id="worker-name">host-local-1</span>
+              <span class="online-dot ok" title="已连接"></span>
+            </div>
+            <button id="toggle-claiming" class="primary-action" data-enabled="true">
+              <svg class="icon claim-play-icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#play"></use></svg>
+              <span>暂停领取</span>
+            </button>
+          </div>
+        </header>
+
+        <main class="content">
+          <!-- ============ 配置页：核心改动 ============ -->
+          <section class="page-view active" data-view="config">
+            <section class="page-panel">
+              <div class="page-heading">
+                <div><p class="eyebrow">CONFIGURATION</p><h2>连接与能力</h2><p>配置本机执行节点，并控制它向 Host 声明的能力范围。</p></div>
+                <button id="save-config" class="save-button" type="submit" form="config-form">
+                  <svg class="icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#save"></use></svg>保存并应用
+                </button>
+              </div>
+              <form id="config-form">
+                <div class="form-section">
+                  <div class="form-section-heading"><h3>连接与身份</h3><span class="muted"></span></div>
+                  <div class="form-grid">
+                    <label class="wide">Host 地址<input name="host_url" type="url" value="http://host:8000" required /></label>
+                    <label>Worker ID<input name="worker_id" value="host-local-1" required /></label>
+                    <label>显示名称<input name="name" value="Host-local Worker" /></label>
+                    <label>最大并发<input name="max_concurrency" type="number" value="10" required /></label>
+                    <label>代码并发 <span class="hint">code 节点沙箱执行，0 = 不领取</span><input name="max_code_concurrency" type="number" value="0" required /></label>
+                    <label>上传并发<input name="upload_max_concurrency" type="number" value="4" required /></label>
+                    <fieldset>
+                      <legend>运行时</legend>
+                      <label class="check"><input name="runtimes" type="checkbox" value="velites" checked /> Velites</label>
+                    </fieldset>
+                  </div>
+                </div>
+
+                <!-- ★ 新增区块：Scoped Token 管理（替代原「Host 注册 Token」单行输入） -->
+                <div class="form-section" id="token-section">
+                  <div class="form-section-heading">
+                    <div>
+                      <h3>Workspace 访问（Scoped Token）</h3>
+                      <p>由 Host 管理员在「设置 → Worker Token」签发，粘贴到此处。每个 Token 绑定一个 workspace；添加后立即注册验证，状态实时反馈。至少保留一个有效 Token。</p>
+                    </div>
+                  </div>
+                  <div class="token-list" id="token-list">
+                    <!-- 状态 A：正常 —— 已验证有效 -->
+                    <div class="token-card" data-state="ok">
+                      <div class="token-main">
+                        <span class="token-id">a3f8…c21e</span>
+                        <span class="token-ws">
+                          <svg class="ws-icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#grid"></use></svg>
+                          <span class="ws-name">市场研究组</span>
+                          <span class="ws-id">ws_marketing</span>
+                        </span>
+                      </div>
+                      <span class="token-state ok" title="最近一次注册成功">已验证 · 09:12</span>
+                      <button type="button" class="token-remove" title="移除后需保存生效">移除</button>
+                    </div>
+
+                    <!-- 状态 B：Host 端已吊销 -->
+                    <div class="token-card" data-state="revoked">
+                      <div class="token-main">
+                        <span class="token-id">77b0…9f3d</span>
+                        <span class="token-ws">
+                          <svg class="ws-icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#grid"></use></svg>
+                          <span class="ws-name">产品设计</span>
+                          <span class="ws-id">ws_product</span>
+                        </span>
+                      </div>
+                      <span class="token-state revoked" title="Host 已吊销该 Token，注册返回 401">已吊销 · 无法注册</span>
+                      <button type="button" class="token-remove">移除</button>
+                    </div>
+
+                    <!-- 状态 C：等待验证（刚添加） -->
+                    <div class="token-card" data-state="pending" hidden>
+                      <div class="token-main">
+                        <span class="token-id">新粘贴的 Token 尾号 …d4a2</span>
+                        <span class="token-ws">
+                          <svg class="ws-icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#grid"></use></svg>
+                          <span class="ws-name">待 Host 返回 workspace 信息</span>
+                        </span>
+                      </div>
+                      <span class="token-state pending">验证中…</span>
+                      <button type="button" class="token-remove">移除</button>
+                    </div>
+                  </div>
+
+                  <div class="token-add-row">
+                    <input id="token-input" type="password" autocomplete="off" placeholder="粘贴 Scoped Token（token_id.secret）" aria-label="添加 Scoped Token" />
+                    <button type="button" class="token-add-btn" id="token-add">
+                      <svg class="icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#share"></use></svg>添加并验证
+                    </button>
+                  </div>
+                  <p id="token-error" class="error token-error" role="alert" hidden></p>
+                </div>
+
+                <div class="form-section">
+                  <div class="form-section-heading"><div><h3>能力与模型</h3><p>每行一项，保存后由 Worker 重新向 Host 登记。</p></div></div>
+                  <div class="form-grid">
+                    <label class="wide">Worker 能力 <span class="hint">与节点 capability 完全匹配</span><textarea name="capabilities" rows="3">generate_key_info</textarea></label>
+                    <label>标签 <span class="hint">key=value</span><textarea name="labels" rows="3">os=linux</textarea></label>
+                  </div>
+                </div>
+              </form>
+            </section>
+          </section>
+
+          <!-- ============ 诊断页：工作区范围展示 ============ -->
+          <section class="page-view" data-view="diagnostics" hidden>
+            <section class="diagnostic-status-grid">
+              <article><span class="diagnostic-dot"></span><div><strong>本机服务</strong><small>运行中</small></div></article>
+              <article><span class="diagnostic-dot"></span><div><strong>Host API</strong><small>可达</small></div></article>
+              <article><span class="diagnostic-dot"></span><div><strong>Host 登记</strong><small>已注册</small></div></article>
+              <article><span class="diagnostic-dot"></span><div><strong>工作区范围</strong><div class="ws-scope-list"><span class="ws-scope-chip">市场研究组</span><span class="ws-scope-chip">产品设计</span></div></div></article>
+            </section>
+            <section class="page-panel log-panel">
+              <div class="section-heading">
+                <div><p class="eyebrow">EVENTS</p><h2>最近日志 <small class="muted">连续重复行自动折叠</small></h2></div>
+              </div>
+              <pre id="logs">[09:12:03] 使用 Token a3f8…c21e 注册成功（workspace: 市场研究组）
+[09:12:03] 使用 Token 77b0…9f3d 注册失败：401 invalid register token（已吊销）
+[09:12:04] Host 汇报本 Worker 可领取的 workspace：ws_marketing, ws_product
+[14:20:11] Token 77b0…9f3d 注册仍失败，等待管理员处理或移除</pre>
+              <p class="cli-hint">本机命令：<code>workerctl status</code></p>
+            </section>
+          </section>
+
+          <!-- 概览页保持不动，仅占位 -->
+          <section class="page-view" data-view="overview" hidden>
+            <section class="page-panel"><div class="page-heading"><div><p class="eyebrow">OVERVIEW</p><h2>概览</h2><p>本原型聚焦配置页与诊断页，概览页不变。</p></div></div></section>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <!-- 原型演示控制：切换场景状态 -->
+    <div class="demo-bar">
+      <span>演示状态：</span>
+      <button class="chip active" data-demo="normal">正常（1 有效 + 1 吊销）</button>
+      <button class="chip" data-demo="adding">添加新 Token 验证中</button>
+      <button class="chip" data-demo="error">无效 Token 报错</button>
+      <span style="margin-left:6px">诊断页可见工作区范围 →</span>
+    </div>
+
+    <script>
+      // ---- 原型交互：页面切换 + 状态演示 ----
+      document.querySelectorAll(".nav-button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll(".nav-button").forEach((b) => b.classList.toggle("active", b === btn));
+          document.querySelectorAll(".page-view").forEach((v) => (v.hidden = v.dataset.view !== btn.dataset.page));
+        });
+      });
+      const list = document.getElementById("token-list");
+      const errEl = document.getElementById("token-error");
+      const pendingCard = list.querySelector('[data-state="pending"]');
+      document.querySelectorAll(".demo-bar .chip").forEach((chip) => {
+        chip.addEventListener("click", () => {
+          document.querySelectorAll(".demo-bar .chip").forEach((c) => c.classList.toggle("active", c === chip));
+          errEl.hidden = chip.dataset.demo !== "error";
+          pendingCard.hidden = chip.dataset.demo !== "adding";
+          if (chip.dataset.demo === "error") {
+            errEl.textContent = "Token 无效：Host 返回 401 invalid register token。请确认 Token 已签发且未被吊销。";
+          }
+        });
+      });
+      document.getElementById("token-add").addEventListener("click", () => {
+        document.querySelector('[data-demo="adding"]').click();
+      });
+    </script>
+  </body>
+</html>

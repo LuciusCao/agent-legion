@@ -398,3 +398,36 @@ def test_env_override_precedes_yaml(
     for key in config_path[:-1]:
         node = node[key]
     assert node[config_path[-1]] == expected
+
+
+def test_load_settings_rejects_retired_register_token_config(tmp_path, monkeypatch):
+    """issue #35：全局 register token 退役后，遗留 yaml 键与 env 变量都 fail-fast。"""
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
+
+    config_path = tmp_path / "explicit.yaml"
+    config_path.write_text(
+        "database: {url: postgresql://configured/app}\n"
+        "agent_workers:\n"
+        "  register_token: legacy-secret\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match=r"agent_workers\.register_token"):
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    config_path.write_text(
+        "database: {url: postgresql://configured/app}\n"
+        "agent_workers:\n"
+        "  register_token_file: /run/secrets/legacy\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match=r"agent_workers\.register_token_file"):
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
+    monkeypatch.setenv("AGENT_LEGION_WORKER_REGISTER_TOKEN", "legacy-secret")
+    with pytest.raises(ValueError, match="AGENT_LEGION_WORKER_REGISTER_TOKEN"):
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+    monkeypatch.delenv("AGENT_LEGION_WORKER_REGISTER_TOKEN")
+    monkeypatch.setenv("AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE", "/run/secrets/legacy")
+    with pytest.raises(ValueError, match="AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE"):
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)

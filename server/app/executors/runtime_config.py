@@ -84,8 +84,9 @@ class WorkflowsRuntimeConfig(BaseModel):
 class AgentWorkersRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    register_token: str = ""
-    register_token_file: str = ""
+    # The global register token (register_token / register_token_file) was
+    # retired with issue #35: registration is scoped-token-only, so this
+    # section no longer carries any credential.
     max_archive_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
     min_protocol_version: int = Field(default=1, ge=1)
 

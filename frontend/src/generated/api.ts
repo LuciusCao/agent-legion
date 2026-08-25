@@ -427,7 +427,16 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** List Workers */
+    /**
+     * List Workers
+     * @description List registered workers; workspace_id narrows to that workspace.
+     *
+     *     The workspace view only shows workers registered with that
+     *     workspace's scoped tokens (legacy [] scope is excluded); without the
+     *     parameter every logged-in user still sees the full list — the UI is
+     *     responsible for passing the current workspace, and the admin settings
+     *     page intentionally keeps the unfiltered view.
+     */
     get: operations['list_workers_api_agent_workers_get']
     put?: never
     post?: never
@@ -2709,6 +2718,13 @@ export interface components {
       /** Worker Id */
       worker_id: string
     }
+    /** AgentWorkerWorkspace */
+    AgentWorkerWorkspace: {
+      /** Workspace Id */
+      workspace_id: string
+      /** Workspace Name */
+      workspace_name: string
+    }
     /** AgentWorkersResponse */
     AgentWorkersResponse: {
       /** Workers */
@@ -2923,7 +2939,7 @@ export interface components {
        */
       label: string
       /** Workspace Id */
-      workspace_id?: string | null
+      workspace_id: string
     }
     /** DeleteJobResponse */
     DeleteJobResponse: {
@@ -4175,6 +4191,8 @@ export interface components {
       host_protocol_version: number
       /** Worker Token */
       worker_token: string
+      /** Workspaces */
+      workspaces?: components['schemas']['AgentWorkerWorkspace'][]
     }
     /** RunCreateRequest */
     RunCreateRequest: {
@@ -6725,7 +6743,9 @@ export interface operations {
   }
   list_workers_api_agent_workers_get: {
     parameters: {
-      query?: never
+      query?: {
+        workspace_id?: string | null
+      }
       header?: never
       path?: never
       cookie?: never
@@ -6739,6 +6759,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['AgentWorkersResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }

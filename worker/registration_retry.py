@@ -8,28 +8,40 @@ from typing import Any
 
 from worker._retry import run_with_retry
 from worker.host_client import Client, WorkerAuthError
+from worker.registration_token import registration_tokens
+
+_last_registration_workspaces: list[dict[str, Any]] = []
 
 
 def register_from_config(
-    client: Client, config: dict[str, Any], stop: threading.Event
+    client: Client, config: dict[str, Any], stop: threading.Event, state_dir: Path
 ) -> tuple[float, bool | None]:
-    management_token = Path(str(config["register_token_file"])).read_text(encoding="utf-8").strip()
+    """Register with every configured scoped token (issue #35).
+
+    All tokens are presented in one registration; the Host resolves the union
+    scope and rejects the whole call when any token is unknown or revoked —
+    a partial registration can never silently narrow the worker's scope."""
+    tokens = [row["token"] for row in registration_tokens(config, state_dir)]
     poll_interval = float(config.get("poll_interval_seconds", 2))
     return (
         poll_interval,
-        register_with_retry(client, config, management_token, stop, poll_interval),
+        register_with_retry(client, config, tokens, stop, poll_interval),
     )
 
 
 def register_with_retry(
     client: Client,
     config: dict[str, Any],
-    management_token: str,
+    management_tokens: list[str],
     stop: threading.Event,
     initial_backoff: float,
 ) -> bool | None:
     def attempt() -> bool:
-        client.register(config, management_token)
+        document = client.register(config, management_tokens)
+        # 注册成功即记住 Host 汇报的 workspace 明细（id+name），executor 把它
+        # 转发给状态文件供控制台展示每个 token 对应的 workspace 名称。
+        global _last_registration_workspaces
+        _last_registration_workspaces = list(document.get("workspaces", []))
         return True
 
     try:
@@ -48,3 +60,8 @@ def register_with_retry(
     except WorkerAuthError as exc:
         print(f"Agent Worker registration rejected: {exc}", flush=True)
         return False
+
+
+def last_registration_workspaces() -> list[dict[str, Any]]:
+    """Workspaces reported by the most recent successful registration."""
+    return list(_last_registration_workspaces)

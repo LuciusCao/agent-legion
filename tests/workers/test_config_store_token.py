@@ -33,22 +33,32 @@ def _store(tmp_path: Path) -> WorkerConfigStore:
     return store
 
 
-def test_yaml_written_before_token_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_legacy_single_token_lands_in_token_dir(tmp_path: Path) -> None:
+    """兼容通道：单 token 提交写入 register_tokens/ 目录（issue #35）。"""
     store = _store(tmp_path)
-    seen: dict[str, bool] = {}
-    original_write = store.write
+    store.update_public({"claim_enabled": True}, registration_token="abc123.secret-part")
 
-    def spy_write(config: dict[str, Any]) -> None:
-        seen["token_existed_at_yaml_write"] = (store.state_dir / "register_token").exists()
-        original_write(config)
+    tokens = store.read_registration_tokens()
+    assert len(tokens) == 1
+    assert tokens[0]["token_id"] == "abc123"
+    assert tokens[0]["token"] == "abc123.secret-part"
+    assert store.read()["register_token_dir"] == str(store.state_dir / "register_tokens")
 
-    monkeypatch.setattr(store, "write", spy_write)
-    store.update_public({"claim_enabled": True}, registration_token="token-x")
 
-    assert seen["token_existed_at_yaml_write"] is False
-    token_path = store.state_dir / "register_token"
-    assert token_path.read_text(encoding="utf-8").strip() == "token-x"
-    assert store.read()["register_token_file"] == str(token_path)
+def test_upsert_and_remove_scoped_tokens(tmp_path: Path) -> None:
+    """添加/移除 scoped token；文件名来自 token id，移除幂等返回 False。"""
+    store = _store(tmp_path)
+    store.upsert_registration_token("id-aaa.first-secret")
+    store.upsert_registration_token("id-bbb.second-secret")
+
+    tokens = store.read_registration_tokens()
+    assert [row["token_id"] for row in tokens] == ["id-aaa", "id-bbb"]
+
+    assert store.remove_registration_token("id-aaa") is True
+    assert store.remove_registration_token("id-aaa") is False
+    assert [row["token_id"] for row in store.read_registration_tokens()] == ["id-bbb"]
+    # 路径穿越风格的 token_id 被拒绝。
+    assert store.remove_registration_token("../etc") is False
 
 
 def test_failed_yaml_write_leaves_no_orphan_token(

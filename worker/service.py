@@ -14,11 +14,10 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
-from worker.host_client import Client
 from worker.metrics_proxy import create_metrics_proxy_router
 from worker.registration_token import registration_token_configured
 from worker.service_bind import embed_control_token
-from worker.service_models import WorkerConfigPayload
+from worker.service_models import RegisterTokenPayload, WorkerConfigPayload
 from worker.supervisor import WorkerConfigStore, WorkerSupervisor, public_config
 
 logger = logging.getLogger(__name__)
@@ -42,23 +41,22 @@ _HOT_CONFIG_FIELDS = {
 def _public_config_response(store: WorkerConfigStore, config: dict[str, Any]) -> dict[str, Any]:
     return {
         **public_config(config),
-        "register_token_configured": registration_token_configured(config),
+        "register_token_configured": registration_token_configured(config, store.state_dir),
     }
 
 
 def _revoke_previous_worker(config: dict[str, Any]) -> None:
-    """Best-effort：改 worker_id 前在 Host 上吊销旧注册。
+    """改 worker_id 前的 best-effort 提示：Host 侧吊销是 admin-only 操作。
 
-    失败只记 warning 不阻断保存——退化为旧行为（旧 worker_id 无心跳后离线残留）。"""
-    host_url = str(config.get("host_url", ""))
+    旧实现曾以 register token 调 /agent-workers/{id}/revoke，但该端点要求
+    admin 会话，调用必然 401 被吞掉——等价于 no-op。这里只记录一条日志，
+    旧 worker_id 依赖 Host 的离线超时自然消失。"""
     worker_id = str(config.get("worker_id", ""))
-    if not host_url or not worker_id:
-        return
-    try:
-        token = Path(str(config["register_token_file"])).read_text(encoding="utf-8").strip()
-        Client(host_url).revoke(worker_id, token)
-    except Exception as exc:  # noqa: BLE001 — best-effort，任何失败都不阻断保存
-        logger.warning("吊销旧 Worker %s 失败，继续保存新配置：%s", worker_id, exc)
+    if worker_id:
+        logger.info(
+            "worker_id 已从 %s 变更；旧注册需管理员在 Host UI 吊销（离线后自然不再领取）",
+            worker_id,
+        )
 
 
 def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool = True) -> FastAPI:
@@ -143,6 +141,38 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool 
 
     @app.post("/api/restart", dependencies=guarded)
     def restart() -> dict[str, Any]:
+        supervisor.restart()
+        return supervisor.status()
+
+    @app.get("/api/register-tokens", dependencies=guarded)
+    def list_register_tokens() -> dict[str, Any]:
+        """Scoped token 清单（仅 id 与验证状态，永不回显明文）。"""
+        tokens = supervisor.store.read_registration_tokens()
+        token_status = supervisor.token_status()
+        return {
+            "tokens": [
+                {
+                    "token_id": row["token_id"],
+                    "state": token_status.get(row["token_id"], "pending"),
+                }
+                for row in tokens
+            ]
+        }
+
+    @app.post("/api/register-tokens", dependencies=guarded)
+    def add_register_token(payload: RegisterTokenPayload) -> dict[str, Any]:
+        """添加一个 scoped token 并重启（重注册会验证全部 token）。"""
+        try:
+            supervisor.store.upsert_registration_token(payload.register_token)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        supervisor.restart()
+        return supervisor.status()
+
+    @app.delete("/api/register-tokens/{token_id}", status_code=200, dependencies=guarded)
+    def remove_register_token(token_id: str) -> dict[str, Any]:
+        if not supervisor.store.remove_registration_token(token_id):
+            raise HTTPException(status_code=404, detail="token not found")
         supervisor.restart()
         return supervisor.status()
 

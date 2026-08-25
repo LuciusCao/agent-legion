@@ -6,7 +6,7 @@
 #   2. 把 AGENT_LEGION_DATABASE_URL 指向按 worktree 名派生的专属 Postgres 库并尝试建库
 #   2.5 按 worktree 名派生 AGENT_LEGION_S3_BUCKET 写入 .env，endpoint 可达时
 #       建 bucket 并配置浏览器直传所需的前端 dev origin CORS
-#   3. 生成缺失的 deploy/secrets（agent_worker_register_token / vault_master_key）
+#   3. 生成缺失的 deploy/secrets（vault_master_key；worker 全局注册 token 已退役，见 issue #35）
 # 用法: scripts/init-worktree.sh [基准 worktree 路径]（默认取第一个非 bare 且非当前的 worktree）
 set -euo pipefail
 
@@ -192,17 +192,13 @@ fi
 
 # 3. deploy/secrets
 mkdir -p deploy/secrets
-if [[ ! -s deploy/secrets/agent_worker_register_token ]]; then
-    openssl rand -hex 32 > deploy/secrets/agent_worker_register_token
-    echo "已生成 deploy/secrets/agent_worker_register_token"
-fi
 if [[ ! -s deploy/secrets/vault_master_key ]]; then
     UV_CACHE_DIR=.uv-cache uv run python -c \
         "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
         > deploy/secrets/vault_master_key
     echo "已生成 deploy/secrets/vault_master_key"
 fi
-chmod 600 deploy/secrets/agent_worker_register_token deploy/secrets/vault_master_key
+chmod 600 deploy/secrets/vault_master_key
 
 # 4. config/agent-worker.yaml：缺失时从基准 worktree 复制并改写本实例字段
 #    （host_url 指向开发后端、worker_id 按 worktree 派生）。注意生效配置是
@@ -212,14 +208,13 @@ if [[ ! -f config/agent-worker.yaml ]]; then
     if [[ -n "$BASE" && -f "$BASE/config/agent-worker.yaml" ]]; then
         mkdir -p config
         cp "$BASE/config/agent-worker.yaml" config/agent-worker.yaml
-        # host_url 指向本实例的开发后端端口（与 make dev-backend 的 DEV_BACKEND_PORT 一致），
-        # register_token_file 指向本 worktree 生成的本地密钥（基准配置里的
-        # /run/secrets/... 是容器路径，宿主机 make dev-worker 读不到）。
+        # host_url 指向本实例的开发后端端口（与 make dev-backend 的 DEV_BACKEND_PORT 一致）。
+        # 注册 token 不再经配置文件注入（issue #35）：启动 worker 控制台后在
+        # 「Workspace 访问（Scoped Token）」区块粘贴 Host 管理员签发的 scoped token。
         replace_in_place "s|^host_url:.*|host_url: http://127.0.0.1:${DEV_BACKEND_PORT:-8001}|" config/agent-worker.yaml
         replace_in_place "s|^worker_id:.*|worker_id: ${NAME}|" config/agent-worker.yaml
         replace_in_place "s|^name:.*|name: ${NAME} (worktree)|" config/agent-worker.yaml
-        replace_in_place "s|^register_token_file:.*|register_token_file: ${ROOT}/deploy/secrets/agent_worker_register_token|" config/agent-worker.yaml
-        echo "已生成 config/agent-worker.yaml <- ${BASE}（host_url/worker_id/name/register_token_file 已改写）"
+        echo "已生成 config/agent-worker.yaml <- ${BASE}（host_url/worker_id/name 已改写）"
     else
         echo "提示: 基准 worktree 无 config/agent-worker.yaml，跳过 worker 配置种子" >&2
     fi

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hmac
 import re
 from typing import Annotated, Any
 
@@ -24,6 +23,7 @@ from server.app.routes.agent_workers_contracts import (
     AgentWorkerRevokeResponse,
     AgentWorkersResponse,
     AgentWorkerSummary,
+    AgentWorkerWorkspace,
     CreateAgentRegisterTokenRequest,
     RegisterAgentWorkerRequest,
     RegisterAgentWorkerResponse,
@@ -46,17 +46,25 @@ def create_agent_workers_router(
     router = APIRouter(tags=["agent-workers"])
     config = settings.executor_runtime.agent_workers
 
-    def resolve_registration_scope(request: Request) -> list[str]:
-        """Resolve the presented registration credential to a workspace scope.
+    def resolve_registration_scope(request: Request) -> list[dict[str, Any]]:
+        """Resolve the presented registration credentials to a workspace scope.
 
-        The global register token admits Workers to ALL workspaces ([]); a
-        scoped register token (agent_register_tokens) admits only its
-        workspace. Anything else is rejected."""
-        supplied = request.headers.get("x-agent-worker-register-token", "")
+        The Worker presents every scoped register token it holds (comma-joined
+        in X-Agent-Worker-Register-Tokens); all of them must be live
+        workspace-scoped tokens — any revoked or unknown token fails the whole
+        registration so a stale token can never silently narrow the scope.
+        Returns [{'workspace_id', 'workspace_name'}] rows so the Worker console
+        can label each token with its workspace name."""
+        supplied = [
+            token.strip()
+            for token in request.headers.get("x-agent-worker-register-tokens", "").split(",")
+            if token.strip()
+        ]
+        # 单 token 兼容头：旧版 worker 客户端仍以单值头注册（等价于一个元素）。
+        supplied = supplied or [request.headers.get("x-agent-worker-register-token", "")]
+        supplied = [token for token in supplied if token]
         if not supplied:
             raise HTTPException(status_code=401, detail="missing Agent Worker registration token")
-        if config.register_token and hmac.compare_digest(supplied, config.register_token):
-            return []
         scope = registry.resolve_register_scope(supplied)
         if scope is None:
             raise HTTPException(status_code=401, detail="invalid Agent Worker registration token")
@@ -108,10 +116,23 @@ def create_agent_workers_router(
         if payload.protocol_version < config.min_protocol_version:
             raise HTTPException(status_code=400, detail="unsupported Agent Worker protocol")
         try:
-            token = registry.issue_token(**payload.model_dump(), allowed_workspaces=scope)
+            token = registry.issue_token(
+                **payload.model_dump(),
+                allowed_workspaces=[row["workspace_id"] for row in scope],
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return RegisterAgentWorkerResponse(worker_token=token, allowed_workspaces=scope)
+        return RegisterAgentWorkerResponse(
+            worker_token=token,
+            allowed_workspaces=[row["workspace_id"] for row in scope],
+            workspaces=[
+                AgentWorkerWorkspace(
+                    workspace_id=str(row["workspace_id"]),
+                    workspace_name=str(row["workspace_name"]),
+                )
+                for row in scope
+            ],
+        )
 
     @router.post(
         "/agent-register-tokens",
@@ -175,8 +196,16 @@ def create_agent_workers_router(
     @router.get("/agent-workers", response_model=AgentWorkersResponse)
     def list_workers(
         _user: Annotated[dict[str, Any], Depends(require_user)],
+        workspace_id: str | None = None,
     ) -> AgentWorkersResponse:
-        return AgentWorkersResponse.model_validate({"workers": registry.list_workers()})
+        """List registered workers; workspace_id narrows to that workspace.
+
+        The workspace view only shows workers registered with that
+        workspace's scoped tokens (legacy [] scope is excluded); without the
+        parameter every logged-in user still sees the full list — the UI is
+        responsible for passing the current workspace, and the admin settings
+        page intentionally keeps the unfiltered view."""
+        return AgentWorkersResponse.model_validate({"workers": registry.list_workers(workspace_id)})
 
     @router.get("/agent-executions/{execution_id}/bundle")
     def bundle(execution_id: str, request: Request) -> FileResponse:

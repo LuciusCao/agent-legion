@@ -42,8 +42,15 @@ export async function revokeRegisterToken(
   )
 }
 
-export async function listAgentWorkers(): Promise<AgentWorkerSummary[]> {
-  const data = await api<WorkersResponse>('/api/agent-workers')
+export async function listAgentWorkers(
+  workspaceId?: string
+): Promise<AgentWorkerSummary[]> {
+  // workspace_id narrows to workers registered with that workspace's scoped
+  // tokens (issue #35); omitting it keeps the admin full view.
+  const query = workspaceId
+    ? `?workspace_id=${encodeURIComponent(workspaceId)}`
+    : ''
+  const data = await api<WorkersResponse>(`/api/agent-workers${query}`)
   return data.workers ?? []
 }
 

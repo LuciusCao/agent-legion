@@ -19,6 +19,9 @@ from server.app.db.migrations.job_node_status_counts import (
 )
 from server.app.db.migrations.local_executor_removal import migrate_local_executor_removal
 from server.app.db.migrations.node_cms_config import migrate_node_cms_config
+from server.app.db.migrations.retire_global_register_tokens import (
+    migrate_retire_global_register_tokens,
+)
 from server.app.db.migrations.runs import migrate_runs
 from server.app.db.migrations.scoped_token_origin import migrate_scoped_token_origin
 from server.app.db.migrations.studio_chat import migrate_studio_chat_tables
@@ -44,6 +47,7 @@ __all__ = [
     "migrate_job_artifacts",
     "migrate_local_executor_removal",
     "migrate_node_cms_config",
+    "migrate_retire_global_register_tokens",
     "migrate_runs",
     "migrate_scoped_token_origin",
     "migrate_studio_chat_context",

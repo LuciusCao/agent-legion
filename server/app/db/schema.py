@@ -17,6 +17,7 @@ from server.app.db.migrations import (
     migrate_job_artifacts,
     migrate_local_executor_removal,
     migrate_node_cms_config,
+    migrate_retire_global_register_tokens,
     migrate_runs,
     migrate_scoped_token_origin,
     migrate_studio_chat_context,
@@ -33,7 +34,7 @@ from server.app.db.migrations.job_status_counts import (
 )
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 57
+SCHEMA_VERSION = 58
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 
@@ -87,8 +88,12 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             migrate_job_artifacts(conn)
             migrate_workspace_job_node_status_counts(conn)
             migrate_studio_chat_draft(conn)
+            # v58: retire all-workspaces register tokens (#35) runs last so
+            # legacy NULL-workspace rows are revoked before any scoped-token
+            # traffic can observe them.
+            migrate_retire_global_register_tokens(conn)
             conn.execute("alter table workspaces drop column if exists cms_config_json")
             conn.execute(
                 "insert into schema_migrations(version, name) values (%s, %s)",
-                (SCHEMA_VERSION, "studio_chat_draft"),
+                (SCHEMA_VERSION, "retire_global_register_tokens"),
             )

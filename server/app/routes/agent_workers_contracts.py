@@ -22,6 +22,11 @@ class RegisterAgentWorkerRequest(BaseModel):
     image_version: str = Field(default="", max_length=128)
 
 
+class AgentWorkerWorkspace(BaseModel):
+    workspace_id: str
+    workspace_name: str
+
+
 class RegisterAgentWorkerResponse(BaseModel):
     worker_token: str
     # Negotiated Host capability level. A v3 Worker must not continue against
@@ -29,10 +34,15 @@ class RegisterAgentWorkerResponse(BaseModel):
     host_protocol_version: int = 3
     # Server-resolved workspace admission scope; [] means all workspaces.
     allowed_workspaces: list[str]
+    # Same scope enriched with workspace names (one row per presented token's
+    # workspace, deduplicated) so the Worker console can label each token.
+    workspaces: list[AgentWorkerWorkspace] = Field(default_factory=list)
 
 
 class CreateAgentRegisterTokenRequest(BaseModel):
-    workspace_id: str | None = Field(default=None, max_length=128)
+    # Required: the all-workspaces token variant was retired with the global
+    # register token (issue #35).
+    workspace_id: str = Field(min_length=1, max_length=128)
     label: str = Field(default="", max_length=128)
 
 
