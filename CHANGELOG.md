@@ -58,6 +58,9 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   httpx (#157).
 - Material delete guards and endpoint precedence (#151, #153).
 - Materials & runs v1 follow-ups (#154, #155).
+- Performance: trigger-maintained workspace job node status counts (schema
+  v56, #121), forced index for expired node-run sweep page reads (#122),
+  and per-pass claim-input memos in the dispatch path (#124).
 
 ## [0.2.0] - 2026-08-20
 

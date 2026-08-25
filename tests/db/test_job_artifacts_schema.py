@@ -3,7 +3,8 @@
 The manifest table for job artifacts in object storage: the authoritative
 bytes live under ``jobs/{workspace_id}/{job_id}/{name}`` in the instance
 bucket; the local job_dir copy is an evictable cache. The latest-migration
-record pin moved to tests/db/test_material_bundles_schema.py (v55).
+record pin moved to tests/db/test_material_bundles_schema.py (v55), then to
+tests/db/test_job_node_status_counts_migration.py (v56).
 """
 
 from __future__ import annotations

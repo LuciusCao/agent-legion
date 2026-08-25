@@ -943,6 +943,15 @@ invariants:
         target: tests/db/test_job_status_counts_migration.py
         gate: quick
 
+  - id: DB-JOB-NODE-STATUS-COUNTS-001
+    statement: "workspace_job_node_status_counts is the read source for count_workspace_job_nodes_by_status (the workspace DAG endpoint); a join+group-by over job_nodes ⋈ jobs is O(workspace job_nodes) per call and was measured at 48s on 260k jobs / 2.9M job_nodes with the hash join spilling ~1GB to temp (issue #121). Triggers keep the counter table transactionally in sync across every write path: per-row on job_nodes (insert/delete/update of status, node_key, job_id, deriving workspace_id/workflow_key from the parent jobs row), set-based BEFORE DELETE on jobs (the cascaded job_nodes deletes afterwards find no parent and skip), and set-based AFTER UPDATE OF workspace_id, workflow_key on jobs (re-key moves every node count). The v56 backfill rebuilds it from job_nodes ⋈ jobs and is idempotent. The read omits zero-count rows, so results are identical to the group-by it replaced."
+    owner: jobs
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/db/test_job_node_status_counts_migration.py
+        gate: quick
+
   - id: DB-WORKFLOW-CATALOG-001
     statement: "The global workflow catalog (workflow_catalog table, schema v40) is retired at schema v50 (issue #112): a workflow is the DAG inside one workspace, so workspaces.default_workflow_key is a plain text identifier (old job rows keep their workflow_key as text) and the workspace's ACTIVE workflow_revision is the only runtime definition source — node override validation and settings schemas (workspace_node_config / workspace_settings_schemas), snapshot-less job fallbacks (job detail, run-to, rerun, preview), package artifact curation, and the worker scan list all resolve it; the catalog list/register HTTP APIs and the studio-agent register/list tools are gone, and the built-in demo definition stays in the repo (server/app/workflows/builtin.py) as the optional sample-template seed at workspace creation. Creating a workspace no longer selects or validates a workflow: demo mode seeds the sample template (defaulting to it when no key is given), blank mode leaves the key slot empty and the first successful draft publish adopts the draft's key; the v50 migration drops the table after warning about registered keys no workspace references."
     owner: workspace-executor

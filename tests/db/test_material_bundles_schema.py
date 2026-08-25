@@ -2,25 +2,16 @@
 
 The reference-only manifest for bundle intake: a folder uploaded as ONE run
 item — members stay ordinary materials, the bundle freezes material ids +
-relative paths. The latest-migration record pin lives here (moved from
-tests/db/test_job_artifacts_schema.py, v54).
+relative paths.
 """
 
 from __future__ import annotations
 
-from server.app.db.schema import SCHEMA_VERSION
 from server.app.db.transaction import read_connection
 from tests.postgres_support import TEST_DATABASE_URL
 
-
-def test_schema_v55_recorded() -> None:
-    assert SCHEMA_VERSION == 55
-    with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute(
-            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
-        ).fetchone()
-    assert row is not None
-    assert row["name"] == "material_bundles"
+# The latest-migration record pin (SCHEMA_VERSION + recorded name) moved to
+# tests/db/test_job_node_status_counts_migration.py (v56).
 
 
 def test_material_bundles_table_shape() -> None:

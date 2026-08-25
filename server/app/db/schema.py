@@ -24,6 +24,7 @@ from server.app.db.migrations import (
     migrate_versioned_entities,
     migrate_workflow_catalog_retirement,
     migrate_workspace_cms_config,
+    migrate_workspace_job_node_status_counts,
     migrate_workspace_secrets,
 )
 from server.app.db.migrations.job_status_counts import (
@@ -31,7 +32,7 @@ from server.app.db.migrations.job_status_counts import (
 )
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 55
+SCHEMA_VERSION = 56
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 
@@ -83,8 +84,9 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             # rewrite), then every row is harvested and the table dropped.
             migrate_runs(conn)
             migrate_job_artifacts(conn)
+            migrate_workspace_job_node_status_counts(conn)
             conn.execute("alter table workspaces drop column if exists cms_config_json")
             conn.execute(
                 "insert into schema_migrations(version, name) values (%s, %s)",
-                (SCHEMA_VERSION, "material_bundles"),
+                (SCHEMA_VERSION, "job_node_status_counts"),
             )
