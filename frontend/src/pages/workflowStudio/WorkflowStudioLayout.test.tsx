@@ -1,10 +1,17 @@
-import { render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act } from 'react'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { useSettingStore } from '../../stores/settingStore'
 import { WorkflowStudioLayout } from './WorkflowStudioLayout'
 
 vi.mock('./chat/StudioChatPanel', () => ({
-  StudioChatPanel: () => <div>chat panel stub</div>,
+  StudioChatPanel: (props: Record<string, unknown>) => {
+    chatPanelProps(props)
+    return <div>chat panel stub</div>
+  },
 }))
+
+const chatPanelProps = vi.fn()
 
 const workflow = {
   key: 'demo_video_workflow',
@@ -34,6 +41,8 @@ const baseProps = {
   revisions: [revision],
   executorCatalog: [],
   agentCatalog: [],
+  agentCatalogError: false,
+  retryAgentCatalog: vi.fn(),
   definitionYaml: 'key: demo_video_workflow\nlabel: 知识视频 DAG\n',
   setDefinitionYaml: vi.fn(),
   selectedNodeKey: null,
@@ -72,6 +81,20 @@ const baseProps = {
 }
 
 describe('WorkflowStudioLayout', () => {
+  const localStore = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => localStore.get(key) ?? null,
+    setItem: (key: string, value: string) => void localStore.set(key, value),
+    removeItem: (key: string) => void localStore.delete(key),
+    clear: () => localStore.clear(),
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    useSettingStore.setState({ workspaceId: 'ws1' })
+  })
+
   it('renders mobile panel navigation landmarks', () => {
     render(<WorkflowStudioLayout {...baseProps} />)
 
@@ -100,13 +123,76 @@ describe('WorkflowStudioLayout', () => {
       />
     )
 
-    expect(screen.getByRole('status')).toHaveTextContent(
+    expect(screen.getByRole('alert')).toHaveTextContent(
       '还没有已发布的 workflow'
     )
     // 空态下编辑区照常渲染，用户直接改模板草稿。
     expect(
       screen.getByRole('tablist', { name: 'Workflow studio panels' })
     ).toBeInTheDocument()
+  })
+
+  it('dismisses the empty-state guidance persistently per workspace', () => {
+    const emptyProps = {
+      ...baseProps,
+      loadState: 'empty' as const,
+      workflow: null,
+      revision: null,
+      activeRevision: null,
+      revisions: [],
+    }
+    const { rerender } = render(<WorkflowStudioLayout {...emptyProps} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(
+      localStorage.getItem('agent-legion:studio-empty-guide-dismissed:ws1')
+    ).toBe('1')
+    // 重新渲染（如下次进入页面）也不再出现。
+    rerender(<WorkflowStudioLayout {...emptyProps} />)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('asks for confirmation before applying a chat draft over a dirty editor', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<WorkflowStudioLayout {...baseProps} dirty />)
+    const panelProps = chatPanelProps.mock.calls[
+      chatPanelProps.mock.calls.length - 1
+    ]?.[0] as {
+      onApplyWorkflowDraft: (yaml: string) => void
+    }
+
+    act(() => panelProps.onApplyWorkflowDraft('key: demo\nlabel: agent\n'))
+
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(baseProps.setDefinitionYaml).not.toHaveBeenCalled()
+
+    confirmSpy.mockReturnValue(true)
+    act(() => panelProps.onApplyWorkflowDraft('key: demo\nlabel: agent\n'))
+    expect(baseProps.backToDraft).toHaveBeenCalled()
+    expect(baseProps.setDefinitionYaml).toHaveBeenCalledWith(
+      'key: demo\nlabel: agent\n'
+    )
+    confirmSpy.mockRestore()
+  })
+
+  it('applies a chat draft without confirmation when the editor is clean', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<WorkflowStudioLayout {...baseProps} />)
+    const panelProps = chatPanelProps.mock.calls[
+      chatPanelProps.mock.calls.length - 1
+    ]?.[0] as {
+      onApplyWorkflowDraft: (yaml: string) => void
+    }
+
+    act(() => panelProps.onApplyWorkflowDraft('key: demo\nlabel: agent\n'))
+
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(baseProps.setDefinitionYaml).toHaveBeenCalledWith(
+      'key: demo\nlabel: agent\n'
+    )
+    confirmSpy.mockRestore()
   })
 
   it('opens contextual node editing after a graph node is selected', () => {

@@ -111,14 +111,29 @@ def test_invalid_code_is_400(workspace_with_revision, code) -> None:
     assert workspace_with_revision.put(BASE, json={"code": code}).status_code == 400
 
 
-def test_unknown_node_is_404(workspace_with_revision) -> None:
+def test_unknown_node_reads_as_empty_state(workspace_with_revision) -> None:
+    # Draft-only nodes (entering with the next publish) are readable so their
+    # code can be drafted before the revision exists: nothing stored yet.
     url = f"/api/workspaces/default/workflows/{WF}/nodes/no_such_node/code"
-    assert workspace_with_revision.get(url).status_code == 404
+    response = workspace_with_revision.get(url)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["origin"] == "none"
+    assert body["has_draft"] is False
+
+
+def test_unknown_node_accepts_draft(workspace_with_revision) -> None:
+    url = f"/api/workspaces/default/workflows/{WF}/nodes/no_such_node/code"
+    assert workspace_with_revision.put(url, json={"code": CUSTOM_V1}).status_code == 200
+    body = workspace_with_revision.get(url).json()
+    assert body["origin"] == "none"
+    assert body["has_draft"] is True
+    assert body["draft_code"] == CUSTOM_V1
 
 
 def test_start_node_is_404(workspace_with_revision) -> None:
     # The synthetic `_start` entry node never executes: no code to read or
-    # draft (same 404 semantics as an unknown node).
+    # draft (404 even though draft-only unknown nodes are allowed through).
     url = f"/api/workspaces/default/workflows/{WF}/nodes/_start/code"
     assert workspace_with_revision.get(url).status_code == 404
     assert workspace_with_revision.put(url, json={"code": CUSTOM_V1}).status_code == 404

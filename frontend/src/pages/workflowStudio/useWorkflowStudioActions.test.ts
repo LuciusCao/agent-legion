@@ -2,6 +2,7 @@ import { renderHook } from '@testing-library/react'
 import { act } from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { useWorkflowStudioActions } from './useWorkflowStudioActions'
+import { useUiStore } from '../../stores/uiStore'
 import type { UseWorkflowStudioDraftResult } from './useWorkflowStudioDraft'
 import type { UseWorkflowDraftCompareResult } from './useWorkflowDraftCompare'
 
@@ -47,6 +48,7 @@ const reload = vi.fn().mockResolvedValue(undefined)
 
 describe('useWorkflowStudioActions', () => {
   beforeEach(() => {
+    useUiStore.setState({ toast: null })
     mocks.publishWorkflowDraft.mockResolvedValue({ valid: true, errors: [] })
     mocks.validateWorkflowDraft.mockResolvedValue({ valid: true, errors: [] })
   })
@@ -96,5 +98,50 @@ describe('useWorkflowStudioActions', () => {
 
     expect(result.current.validationMessage).toBe('校验失败')
     expect(result.current.validationErrors).toEqual(['missing key'])
+  })
+
+  it('toasts publish/validate outcomes (feedback visible when the changes view is hidden)', async () => {
+    const { result } = renderHook(() =>
+      useWorkflowStudioActions('ws1', draft, reload, compare)
+    )
+
+    await act(async () => {
+      await result.current.validateDraft()
+    })
+    expect(useUiStore.getState().toast).toEqual({
+      message: '校验通过',
+      type: 'success',
+    })
+
+    await act(async () => {
+      await result.current.publishDraft()
+    })
+    expect(useUiStore.getState().toast).toEqual({
+      message: '保存成功',
+      type: 'success',
+    })
+  })
+
+  it('clears stale validation state when the draft is edited again', async () => {
+    const { result, rerender } = renderHook(
+      ({ definitionYaml }) =>
+        useWorkflowStudioActions(
+          'ws1',
+          { ...draft, definitionYaml },
+          reload,
+          compare
+        ),
+      { initialProps: { definitionYaml: 'key: demo\n' } }
+    )
+
+    await act(async () => {
+      await result.current.validateDraft()
+    })
+    expect(result.current.validationMessage).toBe('校验通过')
+
+    rerender({ definitionYaml: 'key: demo\nlabel: changed\n' })
+
+    expect(result.current.validationMessage).toBe('')
+    expect(result.current.validationErrors).toEqual([])
   })
 })

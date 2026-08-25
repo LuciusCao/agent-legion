@@ -246,19 +246,47 @@ def test_get_node_code_state_reads_builtin(client, job_db) -> None:
     assert payload["has_draft"] is False
 
 
-def test_get_node_code_state_404_for_unknown_node(client, job_db) -> None:
+def test_get_node_code_state_reads_skeleton_node(client, job_db) -> None:
+    # Nodes that only exist in a not-yet-published draft are readable: no code
+    # yet -> origin none; a saved skeleton draft reads back (issue #101).
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
-    response = scoped.get(
+    base = (
         f"/api/studio-agent/tools/workspaces/{workspace_id}"
         f"/workflows/{_WORKFLOW_KEY}/nodes/no_such_node/code"
     )
-    assert response.status_code == 404
+
+    empty = scoped.get(base)
+    assert empty.status_code == 200
+    assert empty.json()["origin"] == "none"
+    assert empty.json()["has_draft"] is False
+
+    saved = scoped.put(
+        f"{base}/draft",
+        json={"code": _NODE_CODE, "expected_capability": "new_capability"},
+    )
+    assert saved.status_code == 200, saved.text
+    state = scoped.get(base)
+    assert state.status_code == 200
+    assert state.json()["has_draft"] is True
+    assert state.json()["draft_code"] == _NODE_CODE
+
+
+def test_save_node_code_draft_rejects_empty_expected_capability(client, job_db) -> None:
+    # min_length=1: an empty string must not bypass the presence gate (#101).
+    workspace_id = _create_workspace(client)
+    scoped, _ = _scoped_client(client, job_db)
+    response = scoped.put(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}"
+        f"/workflows/{_WORKFLOW_KEY}/nodes/{_NODE_KEY}/code/draft",
+        json={"code": _NODE_CODE, "expected_capability": ""},
+    )
+    assert response.status_code == 422
 
 
 def test_node_code_tools_404_for_start_node(client, job_db) -> None:
     # The injected `_start` entry node never executes: reading its code or
-    # saving a draft for it gets the same 404 as an unknown node.
+    # saving a draft for it 404s (draft-only unknown nodes are allowed).
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
     base = (

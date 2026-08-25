@@ -24,20 +24,23 @@ export function WorkflowNodeConfigSection(props: {
       aria-label={`节点配置 ${props.node.key}`}
     >
       <div className={inspectorStyles.sectionTitle}>节点配置</div>
-      {props.readOnly && (
+      {props.readOnly ? (
+        // 历史版本查看模式：配置不属于 revision，但保存会直接写 live 设置
+        // ——只读视图锁死（与 code 段的 writable = !readOnly 对齐）。
         <div className={inspectorStyles.empty}>
-          当前为历史版本查看模式；配置不属于 revision，保存将修改当前 workspace
-          设置。
+          历史版本查看模式下节点配置不可编辑；配置不属于
+          revision，请切回草稿视图修改。
         </div>
+      ) : (
+        <NodeConfigCard
+          key={props.node.key}
+          workspaceId={workspaceId}
+          nodeKey={props.node.key}
+          label={props.node.label}
+          schema={schema}
+          initialValues={initialValues ?? {}}
+        />
       )}
-      <NodeConfigCard
-        key={props.node.key}
-        workspaceId={workspaceId}
-        nodeKey={props.node.key}
-        label={props.node.label}
-        schema={schema}
-        initialValues={initialValues ?? {}}
-      />
     </section>
   )
 }

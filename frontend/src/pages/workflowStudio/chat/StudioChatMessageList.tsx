@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react'
 import type { StudioChat } from './useStudioChat'
+import { useChatAutoScroll } from './useChatAutoScroll'
 import {
   permissionResolutionText,
   planEntries,
@@ -56,7 +56,7 @@ function StatusLine({ message }: { message: ChatMessage }) {
 
 export function StudioChatMessageList(props: Props) {
   const { chat } = props
-  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const { bottomRef, listRef, handleScroll } = useChatAutoScroll(chat.messages)
   const toolCallByFirstMessage = new Map<string, ToolCallView>()
   const seen = new Set<string>()
   for (const message of chat.messages) {
@@ -83,13 +83,13 @@ export function StudioChatMessageList(props: Props) {
         .slice(-1)[0]?.toolCallId ?? null)
     : null
 
-  useEffect(() => {
-    // jsdom 没有 scrollIntoView；浏览器里滚动到底。
-    bottomRef.current?.scrollIntoView?.({ block: 'end' })
-  }, [chat.messages])
-
   return (
-    <div className={styles.messages} aria-label="对话消息">
+    <div
+      ref={listRef}
+      className={styles.messages}
+      aria-label="对话消息"
+      onScroll={handleScroll}
+    >
       {chat.messages.map((message) => (
         <MessageItem
           key={message.id}

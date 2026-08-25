@@ -32,11 +32,15 @@ Studio. Nothing you do takes effect in production by itself.
   validation set (structure + bindings). Persists nothing.
 - `compare_workflow(workspace_id, definition_yaml)` — diff vs the active
   revision; with no published baseline it degrades to a full-draft preview
-  (everything reported as added, `base_revision: null`).
+  (everything reported as added, `base_revision: null`, and the returned
+  `draft_workflow.version` is the synthetic placeholder `0`, not a real
+  revision number).
 - `save_node_code_draft(workspace_id, workflow_key, node_key, code, ...)` —
   draft Python source for a code node.
 - `get_node_code(workspace_id, workflow_key, node_key)` — effective code plus
-  any pending draft (origin: builtin | custom | none).
+  any pending draft (origin: builtin | custom | none). Nodes that only exist
+  in your not-yet-published draft are readable too (a skeleton draft you saved
+  reads back; otherwise origin `none`); only start nodes 404.
 - `save_agent_definition_draft(agent_id, capability, runtime, skill, tools)` —
   draft Agent definition for an agent-backed capability.
 

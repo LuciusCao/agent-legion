@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { publishWorkflowDraft, validateWorkflowDraft } from '../../api'
+import { useValidationFeedback } from './useValidationFeedback'
 import type { UseWorkflowStudioDraftResult } from './useWorkflowStudioDraft'
 import type { UseWorkflowDraftCompareResult } from './useWorkflowDraftCompare'
 
@@ -23,9 +24,10 @@ export function useWorkflowStudioActions(
   compare: UseWorkflowDraftCompareResult
 ): UseWorkflowStudioActionsResult {
   const [actionState, setActionState] = useState<ActionState>('idle')
-  const [validationErrors, setValidationErrors] = useState<string[]>([])
-  const [validationMessage, setValidationMessage] = useState('')
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
+  const { validationErrors, validationMessage, report } = useValidationFeedback(
+    draft.definitionYaml
+  )
   const { compareState, compareErrors, compareSummary } = compare
   const hasCompareChanges = Boolean(
     compareSummary?.nodeChanges.length ||
@@ -51,13 +53,11 @@ export function useWorkflowStudioActions(
         workspaceId,
         draft.definitionYaml
       )
-      setValidationErrors(result.errors)
-      setValidationMessage(result.valid ? '校验通过' : '校验失败')
+      const message = result.valid ? '校验通过' : '校验失败'
+      report(result.errors, message, result.valid ? 'success' : 'error')
     } catch (e) {
-      setValidationErrors([])
-      setValidationMessage(
-        `校验失败：${(e instanceof Error && e.message) || '网络错误'}`
-      )
+      const message = `校验失败：${(e instanceof Error && e.message) || '网络错误'}`
+      report([], message, 'error')
     } finally {
       setActionState('idle')
     }
@@ -70,18 +70,15 @@ export function useWorkflowStudioActions(
         workspaceId,
         draft.definitionYaml
       )
-      setValidationErrors(result.errors)
       if (result.valid) {
         await reload()
-        setValidationMessage('保存成功')
+        report(result.errors, '保存成功', 'success')
       } else {
-        setValidationMessage('保存失败')
+        report(result.errors, '保存失败', 'error')
       }
     } catch (e) {
-      setValidationErrors([])
-      setValidationMessage(
-        `保存失败：${(e instanceof Error && e.message) || '网络错误'}`
-      )
+      const message = `保存失败：${(e instanceof Error && e.message) || '网络错误'}`
+      report([], message, 'error')
     } finally {
       setActionState('idle')
     }

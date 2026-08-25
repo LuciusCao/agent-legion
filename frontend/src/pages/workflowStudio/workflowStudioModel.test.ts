@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   conditionLabel,
-  ghostStartNodeDetails,
+  ghostDraftNodeDetails,
   groupValidationErrors,
   isDefinitionDirty,
   selectedNodeDetails,
@@ -146,7 +146,7 @@ describe('workflowStudioModel', () => {
       '',
     ].join('\n')
 
-    const details = ghostStartNodeDetails(yaml, '_start')
+    const details = ghostDraftNodeDetails(yaml, '_start')
 
     expect(details?.node.node_type).toBe('start')
     expect(details?.node.accepted_item_types).toEqual(['material', 'ref'])
@@ -156,11 +156,39 @@ describe('workflowStudioModel', () => {
     ])
   })
 
-  it('returns null ghost details for non-start, unknown, or unparsable nodes', () => {
+  it('resolves ghost executable node details from the draft yaml', () => {
+    const yaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  intake:',
+      '    label: 读取知识点',
+      '    capability: intake',
+      '    after: [_start]',
+      '    inputs: [a.json]',
+      '    outputs: [b.json]',
+      'edges:',
+      '  - source: _start',
+      '    target: intake',
+      '',
+    ].join('\n')
+
+    const details = ghostDraftNodeDetails(yaml, 'intake')
+
+    expect(details?.node.node_type).toBeUndefined()
+    expect(details?.node.label).toBe('读取知识点')
+    expect(details?.node.capability).toBe('intake')
+    expect(details?.node.inputs).toEqual(['a.json'])
+    expect(details?.node.outputs).toEqual(['b.json'])
+    expect(details?.incoming).toHaveLength(1)
+    expect(details?.outgoing).toEqual([])
+  })
+
+  it('returns null ghost details for unknown or unparsable nodes', () => {
     const yaml = 'key: demo\nnodes:\n  intake:\n    capability: intake\n'
-    expect(ghostStartNodeDetails(yaml, 'intake')).toBeNull()
-    expect(ghostStartNodeDetails(yaml, 'missing')).toBeNull()
-    expect(ghostStartNodeDetails('nodes: [oops', '_start')).toBeNull()
-    expect(ghostStartNodeDetails(yaml, null)).toBeNull()
+    expect(ghostDraftNodeDetails(yaml, 'missing')).toBeNull()
+    expect(ghostDraftNodeDetails('nodes: [oops', '_start')).toBeNull()
+    expect(ghostDraftNodeDetails(yaml, null)).toBeNull()
   })
 })

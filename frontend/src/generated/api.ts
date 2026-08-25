@@ -4449,6 +4449,7 @@ export interface components {
      * StudioAgentNodeCodeDraftRequest
      * @description ``expected_capability``: validated for existing nodes (mismatch -> 400);
      *     its presence authorizes a skeleton draft for a not-yet-published node.
+     *     ``min_length=1``: an empty string must not bypass the presence gate.
      */
     StudioAgentNodeCodeDraftRequest: {
       /** Change Note */

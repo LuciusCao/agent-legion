@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type {
   WorkflowDefinitionRecord,
   WorkflowRevisionDetailResponse,
   WorkflowRevisionSummary,
 } from '../../types'
 import { isDefinitionDirty } from './workflowStudioModel'
+import { useDraftBaselineSync } from './useDraftBaselineSync'
 import { useWorkflowStudioRevisionSelection } from './useWorkflowStudioRevisionSelection'
 import {
   createDraftViewState,
@@ -57,12 +58,15 @@ export function useWorkflowStudioDraft(
     fetchRevisionDetail
   )
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset draft to loaded original when it changes
-    setDraftYaml(originalYaml)
-    setViewState(createDraftViewState(activeRevision?.id ?? null))
-    clearRevisionLoadError()
-  }, [originalYaml, activeRevision?.id, clearRevisionLoadError])
+  useDraftBaselineSync(
+    originalYaml,
+    activeRevision?.id,
+    draftYaml,
+    setDraftYaml,
+    setViewState,
+    clearRevisionLoadError,
+    viewState.hasPreservedDraft
+  )
 
   const readOnly = isRevisionReadOnly(viewState)
   const definitionYaml =

@@ -12,6 +12,7 @@ function queryClientWrapper({ children }: { children: ReactNode }) {
 }
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { useWorkflowStudio } from './useWorkflowStudio'
+import { useWorkflowStudioDraft } from './useWorkflowStudioDraft'
 
 const activeRevisionPayload = {
   revision: {
@@ -608,6 +609,75 @@ describe('useWorkflowStudio', () => {
     expect(result.current.nodes.map((node) => node.key)).toContain('intake')
   })
 
+  it('clears the selection when the workspace changes', async () => {
+    const { result, rerender } = renderHook(
+      ({ ws }: { ws: string }) => useWorkflowStudio(ws),
+      { wrapper: queryClientWrapper, initialProps: { ws: 'ws1' } }
+    )
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+    act(() => result.current.setSelectedNodeKey('a'))
+    expect(result.current.selectedNodeKey).toBe('a')
+
+    // async act 冲刷 ws2 的查询解析，避免 act 外交互告警。
+    await act(async () => {
+      rerender({ ws: 'ws2' })
+    })
+
+    await waitFor(() => expect(result.current.selectedNodeKey).toBeNull())
+  })
+
+  it('clears the selection when the selected node disappears from the canvas', async () => {
+    mocks.fetchActiveWorkflowRevision.mockRejectedValue(notFoundError())
+    mocks.fetchWorkflowRevisions.mockResolvedValue({ revisions: [] })
+    const emptyCompare = (keys: string[]) => ({
+      valid: true,
+      creates_revision: true,
+      base_revision: null,
+      draft_workflow: { key: 'demo', label: 'demo', version: 0 },
+      summary: {
+        risk_level: 'info',
+        node_changes: keys.map((key) => ({
+          type: 'added',
+          node_key: key,
+          label: key,
+          fields: [],
+          risk: 'info',
+        })),
+        edge_changes: [],
+        intake_changes: [],
+        risk_flags: [],
+      },
+      errors: [],
+    })
+    mocks.compareWorkflowDraft.mockResolvedValue(
+      emptyCompare(['_start', 'intake'])
+    )
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
+    await waitFor(() => expect(result.current.loadState).toBe('empty'))
+    await act(async () => {
+      vi.advanceTimersByTime(450)
+    })
+    await waitFor(() => expect(result.current.compareState).toBe('ready'))
+
+    act(() => result.current.setSelectedNodeKey('intake'))
+    expect(result.current.selectedNodeKey).toBe('intake')
+
+    // 草稿编辑把 intake 移除：ghost 预览刷新后选择自动清除。
+    mocks.compareWorkflowDraft.mockResolvedValue(emptyCompare(['_start']))
+    act(() => {
+      result.current.setDefinitionYaml(
+        'key: demo\nlabel: demo\nnodes:\n  _start:\n    type: start\n'
+      )
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(450)
+    })
+
+    await waitFor(() => expect(result.current.selectedNodeKey).toBeNull())
+  })
+
   it('stays in error state when the active revision 404s for an unknown workspace', async () => {
     mocks.fetchActiveWorkflowRevision.mockRejectedValue(notFoundError())
     mocks.fetchWorkflowRevisions.mockResolvedValue({ revisions: [] })
@@ -618,6 +688,46 @@ describe('useWorkflowStudio', () => {
     })
 
     await waitFor(() => expect(result.current.loadState).toBe('error'))
+  })
+
+  it('preserves a dirty draft when the baseline changes externally', () => {
+    const fetchDetail = vi.fn()
+    const { result, rerender } = renderHook(
+      ({ originalYaml }: { originalYaml: string }) =>
+        useWorkflowStudioDraft('ws1', originalYaml, null, null, fetchDetail),
+      { initialProps: { originalYaml: 'key: demo\nlabel: v1\n' } }
+    )
+
+    // 初始装载：草稿跟随基线。
+    expect(result.current.draftYaml).toBe('key: demo\nlabel: v1\n')
+    act(() => result.current.setDraftYaml('key: demo\nlabel: my edits\n'))
+    expect(result.current.dirty).toBe(true)
+
+    // 外部（他人/他 tab）发布使基线前进：用户草稿保留，打 preserved 标记。
+    rerender({ originalYaml: 'key: demo\nlabel: v2\n' })
+
+    expect(result.current.draftYaml).toBe('key: demo\nlabel: my edits\n')
+    expect(result.current.hasPreservedDraft).toBe(true)
+  })
+
+  it('resets to the new baseline when the draft is clean or matches it', () => {
+    const fetchDetail = vi.fn()
+    const { result, rerender } = renderHook(
+      ({ originalYaml }: { originalYaml: string }) =>
+        useWorkflowStudioDraft('ws1', originalYaml, null, null, fetchDetail),
+      { initialProps: { originalYaml: 'key: demo\nlabel: v1\n' } }
+    )
+
+    // 干净草稿：跟随新基线。
+    rerender({ originalYaml: 'key: demo\nlabel: v2\n' })
+    expect(result.current.draftYaml).toBe('key: demo\nlabel: v2\n')
+    expect(result.current.hasPreservedDraft).toBe(false)
+
+    // 自己 publish 成功：草稿与新基线一致，常规 reset 不误标 preserved。
+    rerender({ originalYaml: 'key: demo\nlabel: v3\n' })
+    act(() => result.current.setDraftYaml('key: demo\nlabel: v3\n'))
+    rerender({ originalYaml: 'key: demo\nlabel: v3\n' })
+    expect(result.current.hasPreservedDraft).toBe(false)
   })
 
   it('stays in error state for non-404 active revision failures', async () => {

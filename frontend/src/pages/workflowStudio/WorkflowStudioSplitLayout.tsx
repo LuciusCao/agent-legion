@@ -1,4 +1,4 @@
-import { StudioChatPanel } from './chat/StudioChatPanel'
+import { StudioChatAside } from './StudioChatAside'
 import { WorkflowStudioCanvasPanel } from './WorkflowStudioCanvasPanel'
 import { WorkflowStudioDetailSection } from './WorkflowStudioDetailSection'
 import { WorkflowStudioResizeHandle } from './WorkflowStudioResizeHandle'
@@ -64,20 +64,11 @@ export function WorkflowStudioSplitLayout({
           onBack={() => props.setSelectedNodeKey(null)}
         />
       )}
-      <aside
-        data-mobile-panel="agent"
-        data-collapsed={agentOpen ? undefined : 'true'}
-        aria-label="Agent 对话面板"
-        className={asideClass}
-      >
-        <StudioChatPanel
-          onApplyWorkflowDraft={(yaml) => {
-            props.backToDraft()
-            props.setDefinitionYaml(yaml)
-          }}
-          onSelectNode={props.setSelectedNodeKey}
-        />
-      </aside>
+      <StudioChatAside
+        props={props}
+        agentOpen={agentOpen}
+        asideClass={asideClass}
+      />
     </div>
   )
 }

@@ -60,6 +60,14 @@ export function parseWorkflowLabel(rawYaml: string): string | undefined {
   }
 }
 
+export function parseWorkflowKey(rawYaml: string): string | undefined {
+  try {
+    return parseWorkflowYaml(rawYaml).key
+  } catch {
+    return undefined
+  }
+}
+
 export function parseWorkflowNode(
   rawYaml: string,
   nodeKey: string
