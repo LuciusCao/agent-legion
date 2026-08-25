@@ -20,6 +20,18 @@ nodes:
     capability: do_thing
 """
 
+_DRAFT_YAML_WITH_START = """
+key: test_publish_flow
+label: Test Publish Flow
+nodes:
+  _start:
+    type: start
+    accepted_item_types: [material]
+  do_thing:
+    capability: do_thing
+    after: [_start]
+"""
+
 
 def _workspace(queries: JobQueries) -> dict:
     return queries.create_workspace("draft-publish-ws", default_workflow_key="test_publish_flow")
@@ -98,6 +110,20 @@ def test_validate_clean_with_published_node_code(tmp_path: Path) -> None:
     _seed_node_code(workspace["id"])
 
     assert validate_workflow_draft_for_publish(queries, workspace["id"], _DRAFT_YAML, True) == []
+
+
+def test_publish_skips_code_resolution_for_start_node(tmp_path: Path) -> None:
+    """Start nodes never execute (EXEC-WORKFLOW-START-001): publish validation must
+    not demand published node code or a unique Agent for them."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _seed_node_code(workspace["id"])
+
+    ok, errors = publish_workflow_draft(queries, workspace["id"], _DRAFT_YAML_WITH_START)
+
+    assert (ok, errors) == (True, [])
+    active = queries.get_active_workflow_revision(workspace["id"], "test_publish_flow")
+    assert active is not None
 
 
 def test_validate_reports_structural_errors_before_bindings(tmp_path: Path) -> None:

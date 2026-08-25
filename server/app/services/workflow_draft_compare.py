@@ -72,6 +72,8 @@ def _node_change_fields(base: WorkflowNode, draft: WorkflowNode) -> list[str]:
     draft_terminal = draft.terminal.outcome if draft.terminal else None
     if base_terminal != draft_terminal:
         fields.append("terminal")
+    if base.accepted_item_types != draft.accepted_item_types:
+        fields.append("accepted_item_types")
     return fields
 
 
@@ -104,6 +106,8 @@ def _node_field_risks(base: WorkflowNode, draft: WorkflowNode) -> dict[str, str]
     draft_terminal = draft.terminal.outcome if draft.terminal else None
     if base_terminal != draft_terminal:
         risks["terminal"] = "breaking"
+    if base.accepted_item_types != draft.accepted_item_types:
+        risks["accepted_item_types"] = "breaking"
 
     return risks
 
@@ -227,6 +231,15 @@ def _diff_nodes(
                         "message": (
                             f"节点 {key} 的终端结果从 {base_terminal} 改为 {draft_terminal}。"
                         ),
+                    }
+                )
+
+            if base_node.accepted_item_types != draft_node.accepted_item_types:
+                risk_flags.append(
+                    {
+                        "code": "accepted_item_types_changed",
+                        "severity": "breaking",
+                        "message": f"节点 {key} 的入口条目类型契约（accepted_item_types）发生变化。",
                     }
                 )
 

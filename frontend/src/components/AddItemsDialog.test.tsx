@@ -1,22 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, act } from '@testing-library/react'
 import type { ReactElement } from 'react'
 
 import { AddItemsDialog } from './AddItemsDialog'
 import { api, createRun, fetchActiveWorkflowRevision } from '../api'
+import { createMaterialBundle } from '../api/materialsApi'
 import { uploadMaterialFile } from '../lib/addItems'
 import { useUiStore } from '../stores/uiStore'
 import { TestQueryProvider } from '../testing/testQueryClient'
-import type {
-  ActiveWorkflowRevisionResponse,
-  WorkflowDefinitionRecord,
-} from '../types'
+import type { MaterialListResponse } from '../types'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
   createRun: vi.fn(),
   fetchActiveWorkflowRevision: vi.fn(),
 }))
+
+vi.mock('../api/materialsApi', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/materialsApi')>()
+  return { ...actual, createMaterialBundle: vi.fn() }
+})
 
 vi.mock('../lib/addItems', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/addItems')>()
@@ -25,75 +28,82 @@ vi.mock('../lib/addItems', async (importOriginal) => {
 
 const mockApi = vi.mocked(api)
 const mockCreateRun = vi.mocked(createRun)
-const mockFetchWorkflow = vi.mocked(fetchActiveWorkflowRevision)
+const mockCreateBundle = vi.mocked(createMaterialBundle)
 const mockUpload = vi.mocked(uploadMaterialFile)
+const mockFetchRevision = vi.mocked(fetchActiveWorkflowRevision)
 
 function renderWithClient(ui: ReactElement) {
   return render(<TestQueryProvider>{ui}</TestQueryProvider>)
 }
 
-function activeRevisionOf(
-  workflow: WorkflowDefinitionRecord
-): ActiveWorkflowRevisionResponse {
-  return {
-    revision: {
-      id: 'ws1:demo_workflow:v1',
-      workspace_id: 'ws1',
-      workflow_key: 'demo_workflow',
-      version: 1,
-      status: 'active',
-      definition_hash: 'hash',
-      created_at: '2026-01-01T00:00:00Z',
-    },
-    workflow,
-    definition_yaml: '',
-  }
-}
-
-function workflowWithModes(
-  modes: { key: string; label: string; input_field: string }[]
-) {
-  return activeRevisionOf({
-    key: 'demo_workflow',
-    label: 'demo',
-    intake: { modes },
-    edges: [],
-    nodes: [],
-  })
+let materialsResponse: MaterialListResponse = {
+  materials: [],
+  total: 0,
+  limit: 0,
+  offset: 0,
 }
 
 function mockWorkspace() {
-  mockApi.mockResolvedValue({
-    workspace: {
-      id: 'ws1',
-      name: 'demo',
-      default_workflow_key: 'demo_workflow',
-    },
-  } as never)
+  mockApi.mockImplementation(
+    (path: unknown) =>
+      Promise.resolve(
+        String(path).includes('/materials')
+          ? materialsResponse
+          : {
+              workspace: {
+                id: 'ws1',
+                name: 'demo',
+                default_workflow_key: 'demo_workflow',
+              },
+            }
+      ) as never
+  )
+}
+
+function mockMaterials(materials: Record<string, unknown>[]) {
+  materialsResponse = {
+    materials,
+    total: materials.length,
+    limit: materials.length,
+    offset: 0,
+  } as MaterialListResponse
 }
 
 function pickFiles(testId: string, files: File[]) {
   fireEvent.change(screen.getByTestId(testId), { target: { files } })
 }
 
+function folderFile(relativePath: string, content: string) {
+  const file = new File([content], relativePath.split('/').pop()!)
+  Object.defineProperty(file, 'webkitRelativePath', { value: relativePath })
+  return file
+}
+
 describe('AddItemsDialog', () => {
   beforeEach(() => {
     mockApi.mockReset()
     mockCreateRun.mockReset()
-    mockFetchWorkflow.mockReset()
+    mockCreateBundle.mockReset()
     mockUpload.mockReset()
-    useUiStore.setState({ toast: null, addDialogOpen: false })
+    mockFetchRevision.mockReset()
+    // 默认：workspace 未发布 revision（404）→ 入口契约按 DEFAULT
+    // ['material','ref'] 处理（刻意不含 bundle，存量 fail-closed）。
+    mockFetchRevision.mockRejectedValue(
+      Object.assign(new Error('No active workflow revision'), { status: 404 })
+    )
+    useUiStore.setState({ toast: null })
+    mockMaterials([])
     mockWorkspace()
-    mockFetchWorkflow.mockResolvedValue(workflowWithModes([]))
   })
 
-  it('renders both tabs', () => {
+  it('renders all three tabs', () => {
     renderWithClient(
       <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
     )
     expect(screen.getByText('添加条目')).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '上传材料' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '粘贴 ID' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '已有材料' })).toBeInTheDocument()
     expect(screen.getByTestId('total-count')).toHaveTextContent('共 0 个条目')
   })
 
@@ -206,40 +216,370 @@ describe('AddItemsDialog', () => {
     )
   })
 
-  it('offers the legacy intake entry only when modes exist', async () => {
-    mockFetchWorkflow.mockResolvedValue(
-      workflowWithModes([
-        {
-          key: 'batch_by_ids',
-          label: '按题目ID批量',
-          input_field: 'question_ids',
-        },
-      ])
+  it('lists only ready materials on the existing-materials tab', async () => {
+    mockMaterials([
+      {
+        id: 'm-ready',
+        filename: 'ready.md',
+        size_bytes: 10,
+        status: 'ready',
+      },
+      {
+        id: 'm-pending',
+        filename: 'pending.md',
+        size_bytes: 20,
+        status: 'pending_upload',
+      },
+    ])
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
     )
+
+    fireEvent.click(screen.getByRole('tab', { name: '已有材料' }))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('existing-materials-list')).toBeInTheDocument()
+    )
+    expect(screen.getByText('ready.md')).toBeInTheDocument()
+    expect(screen.queryByText('pending.md')).not.toBeInTheDocument()
+    expect(mockApi).toHaveBeenCalledWith(
+      expect.stringContaining('/api/workspaces/ws1/materials')
+    )
+  })
+
+  it('counts checked existing materials in the total', async () => {
+    mockMaterials([
+      { id: 'm1', filename: 'a.md', size_bytes: 10, status: 'ready' },
+      { id: 'm2', filename: 'b.md', size_bytes: 20, status: 'ready' },
+    ])
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: '已有材料' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('existing-materials-list')).toBeInTheDocument()
+    )
+    fireEvent.click(screen.getByRole('checkbox', { name: 'a.md' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'b.md' }))
+
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 2 个条目')
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'a.md' }))
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 1 个条目')
+  })
+
+  it('merges uploaded, existing and ref items in the submit payload', async () => {
     const onClose = vi.fn()
+    mockUpload.mockResolvedValue({ materialId: 'm-up', deduplicated: false })
+    mockMaterials([
+      { id: 'm-old', filename: 'old.md', size_bytes: 10, status: 'ready' },
+    ])
+    mockCreateRun.mockResolvedValue({
+      run: { id: 'r1' },
+      created_count: 3,
+      jobs: [],
+    } as never)
     renderWithClient(
       <AddItemsDialog open={true} onClose={onClose} workspaceId="ws1" />
     )
 
-    const legacyButton = await screen.findByRole('button', {
-      name: '旧版接入模式',
-    })
-    fireEvent.click(legacyButton)
+    pickFiles('add-items-file-input', [new File(['a'], 'a.txt')])
+    await waitFor(() => expect(screen.getByText('完成')).toBeInTheDocument())
 
-    expect(onClose).toHaveBeenCalled()
-    expect(useUiStore.getState().addDialogOpen).toBe(true)
-    expect(useUiStore.getState().addDialogWorkspaceId).toBe('ws1')
+    fireEvent.click(screen.getByRole('tab', { name: '已有材料' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('existing-materials-list')).toBeInTheDocument()
+    )
+    fireEvent.click(screen.getByRole('checkbox', { name: 'old.md' }))
+
+    fireEvent.click(screen.getByRole('tab', { name: '粘贴 ID' }))
+    fireEvent.change(screen.getByLabelText('连接 Key'), {
+      target: { value: 'cms' },
+    })
+    fireEvent.change(screen.getByLabelText('外部 ID'), {
+      target: { value: 'q1' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
+
+    await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
+    expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
+      workflow_key: 'demo_workflow',
+      items: [
+        { type: 'material', material_id: 'm-up' },
+        { type: 'material', material_id: 'm-old' },
+        { type: 'ref', connection_key: 'cms', external_id: 'q1' },
+      ],
+    })
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
 
-  it('hides the legacy entry when the workflow has no intake modes', async () => {
+  function mockRevisionWithAcceptedTypes(accepted: string[]) {
+    mockFetchRevision.mockResolvedValue({
+      definition_yaml: '',
+      revision: { id: 'r1', version: 1 },
+      workflow: {
+        key: 'demo_workflow',
+        label: 'demo',
+        intake: { modes: [] },
+        nodes: [
+          {
+            key: '_start',
+            label: '入口',
+            capability: '',
+            node_type: 'start',
+            accepted_item_types: accepted,
+            after: [],
+            inputs: [],
+            outputs: [],
+          },
+        ],
+        edges: [],
+      },
+    } as never)
+  }
+
+  it('disables the ref tab when the start node accepts materials only', async () => {
+    mockRevisionWithAcceptedTypes(['material'])
     renderWithClient(
       <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
     )
-    await waitFor(() => expect(mockFetchWorkflow).toHaveBeenCalled())
+
     await waitFor(() =>
-      expect(
-        screen.queryByRole('button', { name: '旧版接入模式' })
-      ).not.toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: '粘贴 ID' })).toBeDisabled()
     )
+    expect(screen.getByRole('tab', { name: '上传材料' })).toBeEnabled()
+    expect(screen.getByRole('tab', { name: '已有材料' })).toBeEnabled()
+    expect(screen.getByTestId('item-type-hint')).toHaveTextContent('材料条目')
+  })
+
+  it('disables the material tabs when the start node accepts refs only', async () => {
+    mockRevisionWithAcceptedTypes(['ref'])
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+
+    // 默认选中的 upload tab 被禁用后应落到可用的 ref tab。
+    await waitFor(() =>
+      expect(screen.getByLabelText('外部 ID')).toBeInTheDocument()
+    )
+    expect(screen.getByRole('tab', { name: '上传材料' })).toBeDisabled()
+    expect(screen.getByRole('tab', { name: '已有材料' })).toBeDisabled()
+    expect(screen.getByRole('tab', { name: '粘贴 ID' })).toBeEnabled()
+    expect(screen.getByTestId('item-type-hint')).toHaveTextContent(
+      '外部引用条目'
+    )
+  })
+
+  it('drops hidden-panel items when the resolved contract narrows', async () => {
+    // 竞态：契约查询未 resolve 时缺省全接受，用户已粘贴 ref id 并完成
+    // 上传；契约随后 resolve 为仅 material——隐藏面板残留的 ref 条目
+    // 不计数、不提交。
+    let resolveRevision!: (value: unknown) => void
+    mockFetchRevision.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRevision = resolve
+      }) as never
+    )
+    mockUpload.mockResolvedValue({ materialId: 'm1', deduplicated: false })
+    mockCreateRun.mockResolvedValue({
+      run: { id: 'r1' },
+      created_count: 1,
+      jobs: [],
+    } as never)
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+
+    pickFiles('add-items-file-input', [new File(['a'], 'a.txt')])
+    await waitFor(() => expect(screen.getByText('完成')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('tab', { name: '粘贴 ID' }))
+    fireEvent.change(screen.getByLabelText('连接 Key'), {
+      target: { value: 'cms' },
+    })
+    fireEvent.change(screen.getByLabelText('外部 ID'), {
+      target: { value: 'q1' },
+    })
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 2 个条目')
+
+    await act(async () => {
+      resolveRevision({
+        definition_yaml: '',
+        revision: { id: 'r1', version: 1 },
+        workflow: {
+          key: 'demo_workflow',
+          label: 'demo',
+          intake: { modes: [] },
+          nodes: [
+            {
+              key: '_start',
+              label: '入口',
+              capability: '',
+              node_type: 'start',
+              accepted_item_types: ['material'],
+              after: [],
+              inputs: [],
+              outputs: [],
+            },
+          ],
+          edges: [],
+        },
+      })
+    })
+
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: '粘贴 ID' })).toBeDisabled()
+    )
+    // 残留的 ref 条目不再计数，剩下的上传条目仍可提交。
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 1 个条目')
+    fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
+
+    await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
+    expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
+      workflow_key: 'demo_workflow',
+      items: [{ type: 'material', material_id: 'm1' }],
+    })
+  })
+
+  it('packs a picked folder into one bundle item', async () => {
+    const onClose = vi.fn()
+    mockRevisionWithAcceptedTypes(['material', 'ref', 'bundle'])
+    mockUpload.mockImplementation((_workspaceId, file: File) =>
+      Promise.resolve({ materialId: `m-${file.name}`, deduplicated: false })
+    )
+    mockCreateBundle.mockResolvedValue({ bundle: { id: 'b1' } } as never)
+    mockCreateRun.mockResolvedValue({
+      run: { id: 'r1' },
+      created_count: 1,
+      jobs: [],
+    } as never)
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={onClose} workspaceId="ws1" />
+    )
+
+    const bundleTab = screen.getByRole('tab', { name: '文件夹打包' })
+    await waitFor(() => expect(bundleTab).toBeEnabled())
+    fireEvent.click(bundleTab)
+    pickFiles('add-items-bundle-input', [
+      folderFile('root/sub/a.txt', 'a'),
+      folderFile('root/b.txt', 'b'),
+    ])
+
+    // 成员全部传完后自动创建 manifest：根名剥掉公共前缀，按路径排序。
+    await waitFor(() => expect(screen.getByText('就绪')).toBeInTheDocument())
+    expect(mockCreateBundle).toHaveBeenCalledWith('ws1', {
+      name: 'root',
+      members: [
+        { material_id: 'm-b.txt', path: 'b.txt' },
+        { material_id: 'm-a.txt', path: 'sub/a.txt' },
+      ],
+    })
+    // 一个文件夹只算一个条目。
+    expect(screen.getByTestId('total-count')).toHaveTextContent('共 1 个条目')
+
+    fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
+    await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
+    expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
+      workflow_key: 'demo_workflow',
+      items: [{ type: 'bundle', bundle_id: 'b1' }],
+    })
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+  })
+
+  it('marks a bundle failed when a member upload fails and retries it', async () => {
+    mockRevisionWithAcceptedTypes(['material', 'ref', 'bundle'])
+    mockUpload
+      .mockRejectedValueOnce(new Error('网络错误'))
+      .mockResolvedValue({ materialId: 'm1', deduplicated: false })
+    mockCreateBundle.mockResolvedValue({ bundle: { id: 'b1' } } as never)
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+
+    const bundleTab = screen.getByRole('tab', { name: '文件夹打包' })
+    await waitFor(() => expect(bundleTab).toBeEnabled())
+    fireEvent.click(bundleTab)
+    pickFiles('add-items-bundle-input', [folderFile('root/a.txt', 'a')])
+
+    await waitFor(() =>
+      expect(screen.getByText('1 个文件上传失败')).toBeInTheDocument()
+    )
+    expect(mockCreateBundle).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(screen.getByText('就绪')).toBeInTheDocument())
+    expect(mockCreateBundle).toHaveBeenCalledWith('ws1', {
+      name: 'root',
+      members: [{ material_id: 'm1', path: 'a.txt' }],
+    })
+  })
+
+  it('retries bundle creation when the create call fails', async () => {
+    mockRevisionWithAcceptedTypes(['material', 'ref', 'bundle'])
+    mockUpload.mockResolvedValue({ materialId: 'm1', deduplicated: false })
+    mockCreateBundle
+      .mockRejectedValueOnce(new Error('打包冲突'))
+      .mockResolvedValue({ bundle: { id: 'b1' } } as never)
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+
+    const bundleTab = screen.getByRole('tab', { name: '文件夹打包' })
+    await waitFor(() => expect(bundleTab).toBeEnabled())
+    fireEvent.click(bundleTab)
+    pickFiles('add-items-bundle-input', [folderFile('root/a.txt', 'a')])
+
+    await waitFor(() =>
+      expect(screen.getByText('打包冲突')).toBeInTheDocument()
+    )
+
+    // 文件全部成功、创建失败：重试直接重发 create，不重传文件。
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(screen.getByText('就绪')).toBeInTheDocument())
+    expect(mockCreateBundle).toHaveBeenCalledTimes(2)
+    expect(mockUpload).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects an oversized folder before uploading any member', async () => {
+    mockRevisionWithAcceptedTypes(['material', 'ref', 'bundle'])
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+
+    const bundleTab = screen.getByRole('tab', { name: '文件夹打包' })
+    await waitFor(() => expect(bundleTab).toBeEnabled())
+    fireEvent.click(bundleTab)
+    const files = Array.from({ length: 1001 }, (_, i) =>
+      folderFile(`root/f-${i}.txt`, 'x')
+    )
+    pickFiles('add-items-bundle-input', files)
+
+    await waitFor(() =>
+      expect(screen.getByText(/超过 1000 个成员上限/)).toBeInTheDocument()
+    )
+    expect(mockUpload).not.toHaveBeenCalled()
+    expect(mockCreateBundle).not.toHaveBeenCalled()
+  })
+
+  it('enables the bundle tab only when the start node accepts bundles', async () => {
+    mockRevisionWithAcceptedTypes(['material', 'ref'])
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: '文件夹打包' })).toBeDisabled()
+    )
+  })
+
+  it('enables the bundle tab when the contract lists bundle', async () => {
+    mockRevisionWithAcceptedTypes(['bundle'])
+    renderWithClient(
+      <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: '文件夹打包' })).toBeEnabled()
+    )
+    // 其余 tab 被禁用后落到 bundle tab。
+    expect(screen.getByTestId('add-items-bundle-input')).toBeInTheDocument()
   })
 })

@@ -19,7 +19,9 @@ token and enforces the workspace binding.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
+import anyio
 from mcp.server.fastmcp import FastMCP
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -46,10 +48,13 @@ class _ScopedTokenAuthApp:
             await self._app(scope, receive, send)
             return
         headers = {str(k, "latin-1"): str(v, "latin-1") for k, v in scope["headers"]}
-        scheme, _, token = headers.get("authorization", "").partition(" ")
+        scheme, _, raw_token = headers.get("authorization", "").partition(" ")
+        token = raw_token.strip()
+        # authenticate_scoped_token is a blocking DB query; keep it off the
+        # event loop so it cannot stall every request on this worker.
         user = (
-            authenticate_scoped_token(self._db, token.strip())
-            if scheme.lower() == "bearer" and token.strip()
+            await anyio.to_thread.run_sync(authenticate_scoped_token, self._db, token)
+            if scheme.lower() == "bearer" and token
             else None
         )
         if user is None or user.get("actor_scope") != STUDIO_AGENT_SCOPE:
@@ -66,17 +71,28 @@ class _ScopedTokenAuthApp:
         await self._app(scope, receive, send)
 
 
-def create_studio_mcp_http_app(job_db: JobQueries, api_base: str) -> tuple[FastMCP, ASGIApp]:
+def create_studio_mcp_http_app(
+    job_db: JobQueries, api_base_resolver: Callable[[], str]
+) -> tuple[FastMCP, ASGIApp]:
     """Build the mountable MCP app. The returned FastMCP instance must have
     its session manager run inside the host app's lifespan (mounted sub-app
     lifespans do not propagate). The session manager is single-use, so a
     lifespan re-entry must rebuild the pair — mount a StudioMcpRelay and swap
-    the app in on every entry instead of mounting this app directly."""
+    the app in on every entry instead of mounting this app directly.
 
-    def resolve_config() -> McpServerConfig:
+    ``api_base_resolver`` is consulted per request (#158): freezing the
+    registry's api_base at lifespan while chat sessions read it fresh at
+    create time leaves the loopback and the injected MCP URL pointing at
+    different backends after an admin registry edit. The resolver may do
+    blocking I/O (registry DB read): it is awaited via ``anyio.to_thread``
+    so the uvicorn event loop never stalls on it.
+    """
+
+    async def resolve_config() -> McpServerConfig:
         request = mcp.get_context().request_context.request
         if request is None:
             raise RuntimeError("studio MCP HTTP transport has no active request")
+        api_base = await anyio.to_thread.run_sync(api_base_resolver)
         return McpServerConfig.from_headers(request.headers, api_base=api_base)
 
     mcp = create_mcp_server(resolve_config)

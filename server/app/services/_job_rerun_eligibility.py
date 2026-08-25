@@ -17,6 +17,7 @@ from server.app.services._job_rerun_upstream_guard import (
 from server.app.services.job_operation_error import JobOperationError
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
+from server.app.workflows.start_node import START_NODE_TYPE
 from server.app.workflows.workflow_branching import upstream_nodes
 
 if TYPE_CHECKING:
@@ -56,6 +57,15 @@ def check_rerun_eligibility(
             actual_node_key,
             "node_not_found",
             f"Node {actual_node_key} not found in workflow",
+        )
+    if definition.nodes[actual_node_key].node_type == START_NODE_TYPE:
+        return JobOperationError(
+            job_id,
+            "rerun",
+            "failed",
+            actual_node_key,
+            "node_not_executable",
+            f"Node {actual_node_key} is an entry (type: start) node and never executes",
         )
 
     if service.job_db.get_job_node(job_id, actual_node_key) is None:

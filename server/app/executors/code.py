@@ -30,11 +30,17 @@ from pathlib import Path
 from typing import Any
 
 from server.app.executors._code_sandbox import execute_custom_sandboxed
+from server.app.executors.artifact_mirror import (
+    build_artifact_object_store,
+    upload_produced_artifacts,
+)
+from server.app.executors.artifact_restore import restore_missing_inputs
 from server.app.executors.models import (
     CODE_EXECUTOR_ID,
     ExecutionContext,
     ExecutionResult,
 )
+from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.storage import build_s3_storage
 from shared.material_cache import MATERIALS_CACHE_DIRNAME
 
@@ -83,6 +89,7 @@ class CodeExecutor:
         self._velites_path: str | None = None
         self._storage_probed = False
         self._object_storage: Any | None = None
+        self._artifact_objects: JobArtifactObjectStore | None = None
 
     def supports(self, capability: str) -> bool:
         # Single implicit code pool (P-0.5): the adapter runs any capability;
@@ -96,6 +103,33 @@ class CodeExecutor:
             self._storage_probed = True
             self._object_storage = build_s3_storage()
         return self._object_storage
+
+    def _artifact_object_store(self) -> JobArtifactObjectStore | None:
+        """Artifact upload service (D12); None without storage or a DB handle."""
+        if self._artifact_objects is None:
+            # Settings/storage misconfiguration (e.g. a missing secret file
+            # surfaced by load_s3_settings) must never fail the node
+            # (EXEC-ARTIFACT-STORE-001): disable mirroring instead.
+            try:
+                self._artifact_objects = build_artifact_object_store(
+                    self._object_store(), getattr(self.job_db, "path", None)
+                )
+            except Exception:
+                logger.warning("artifact store unavailable; mirroring disabled", exc_info=True)
+        return self._artifact_objects
+
+    def _upload_artifacts(self, context: ExecutionContext, produced: tuple[str, ...]) -> None:
+        """Best-effort upload of produced artifacts (D12): a storage outage
+        never fails the node — the local copy stays and the maintenance
+        reconciler re-uploads later (EXEC-ARTIFACT-STORE-001)."""
+        upload_produced_artifacts(
+            self._artifact_object_store(),
+            workspace_id=str(context.workspace_id),
+            job_id=str(context.job_id),
+            node_key=str(context.node_key),
+            job_dir=context.job_dir,
+            produced=produced,
+        )
 
     def execute(self, context: ExecutionContext) -> ExecutionResult:
         if context.execution_id in self._cancelled:
@@ -120,6 +154,24 @@ class CodeExecutor:
         timeout = context.node_config.get("timeout_seconds")
         if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout < 1:
             timeout = _DEFAULT_TIMEOUT_SECONDS
+        if context.inputs:
+            # The local job_dir is an evictable cache (EXEC-ARTIFACT-STORE-001):
+            # a targeted rerun may find declared inputs reclaimed, so restore
+            # them from object storage best-effort first. Failures never change
+            # node semantics — the node errors on the missing input itself.
+            try:
+                restore_missing_inputs(
+                    self._artifact_object_store(),
+                    job_id=str(context.job_id),
+                    job_dir=context.job_dir,
+                    inputs=context.inputs,
+                )
+            except Exception:
+                logger.warning(
+                    "input restore failed for job %s; continuing with local files only",
+                    context.job_id,
+                    exc_info=True,
+                )
         return execute_custom_sandboxed(self, context, timeout)
 
     def cancel(self, execution_id: str) -> None:
@@ -155,6 +207,7 @@ class CodeExecutor:
         produced = tuple(
             name for name in context.expected_outputs if (context.job_dir / name).is_file()
         )
+        self._upload_artifacts(context, produced)
         return ExecutionResult(
             status="completed",
             exit_code=0,

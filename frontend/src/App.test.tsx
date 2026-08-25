@@ -1,4 +1,3 @@
-import { act } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import {
@@ -8,20 +7,13 @@ import {
 } from 'react-router-dom'
 import App from './App'
 
-const { closeAddDialog, connectAgentsWs, disconnectAgentsWs } = vi.hoisted(
-  () => ({
-    closeAddDialog: vi.fn(),
-    connectAgentsWs: vi.fn(),
-    disconnectAgentsWs: vi.fn(),
-  })
-)
+const { connectAgentsWs, disconnectAgentsWs } = vi.hoisted(() => ({
+  connectAgentsWs: vi.fn(),
+  disconnectAgentsWs: vi.fn(),
+}))
 
 vi.mock('./stores/agentsStore', () => ({
   useAgentsStore: () => ({ connectAgentsWs }),
-}))
-
-vi.mock('./stores/uiStore', () => ({
-  useUiStore: () => ({ closeAddDialog }),
 }))
 
 vi.mock('./AppRoutes', () => ({
@@ -52,21 +44,5 @@ describe('App startup lifecycle', () => {
     view.unmount()
 
     expect(disconnectAgentsWs).toHaveBeenCalledOnce()
-  })
-
-  it('closes the add dialog whenever the pathname changes', async () => {
-    const routes: RouteObject[] = [{ path: '*', element: <App /> }]
-    const router = createMemoryRouter(routes, { initialEntries: ['/'] })
-    render(
-      <RouterProvider router={router} future={{ v7_startTransition: true }} />
-    )
-
-    expect(closeAddDialog).toHaveBeenCalledOnce()
-
-    await act(async () => {
-      await router.navigate('/next')
-    })
-
-    expect(closeAddDialog).toHaveBeenCalledTimes(2)
   })
 })

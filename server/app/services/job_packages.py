@@ -29,9 +29,10 @@ from server.app.storage_paths import make_data_relative, resolve_job_dir
 
 
 class JobPackageService(WorkspacePackageClearPackedMixin, WorkspacePackageLifecycleMixin):
-    def __init__(self, job_db: JobQueries, settings: Settings) -> None:
+    def __init__(self, job_db: JobQueries, settings: Settings, object_store: Any = None) -> None:
         self.job_db = job_db
         self.settings = settings
+        self.object_store = object_store
 
     def list_workspace_packages(self, workspace_id: str, limit: int = 10) -> list[dict[str, Any]]:
         return self.job_db.list_workspace_packages(workspace_id, limit=limit)
@@ -107,6 +108,7 @@ class JobPackageService(WorkspacePackageClearPackedMixin, WorkspacePackageLifecy
             workspace_packages_dir,
             self.settings.jobs_dir,
             artifact_names=artifact_names,
+            object_store=self.object_store,
         )
         package_filename = package_path.name
         download_url = f"/api/workspaces/{workspace_id}/packages/{package_filename}"

@@ -110,7 +110,6 @@ def material_runtime_block(
         path = materialize_stream(
             cache_root,
             address,
-            filename,
             lambda: storage.open_stream(str(row["storage_key"])),
             expected_sha256=content_hash,
             expected_size=size_bytes,
@@ -138,7 +137,14 @@ def prefetch_material_block(
     The dispatching parent downloads here so the sandboxed node only reads a
     local file (EXEC-CODE-003); failures raise ``MaterializeError`` with a
     node-facing message, which the sandbox path maps to a failed result.
+    Bundle inputs materialize as a directory tree (#156, see
+    ``material_bundle_cache``).
     """
+    from server.app.services.material_bundle_cache import prefetch_bundle_block
+
+    bundle_block = prefetch_bundle_block(executor, job, workspace_id)
+    if bundle_block is not None:
+        return bundle_block
     if not is_material_input(job):
         return None
     job_db = executor.job_db
@@ -167,9 +173,20 @@ def material_claim_block(
     Injected into the claim-time ``runtime_context`` (memory only, like the
     secret injection — the persisted manifest keeps only the audit stub).
     The Worker materializes from the presigned GET URL with no storage
-    credentials of its own; ``storage_key`` never crosses the wire.
+    credentials of its own; ``storage_key`` never crosses the wire. Bundle
+    inputs get one presigned GET per member (#156).
     """
     input_doc = _input_document(job)
+    if input_doc.get("type") == "bundle":
+        from server.app.services.material_bundle_cache import bundle_claim_block
+
+        return bundle_claim_block(
+            database_dsn,
+            workspace_id,
+            job,
+            storage=storage,
+            download_expires_seconds=download_expires_seconds,
+        )
     if input_doc.get("type") != "material":
         return None
     row = _ready_row(database_dsn, workspace_id, input_doc)

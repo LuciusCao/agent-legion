@@ -1,23 +1,24 @@
 """Per-turn streaming chunk coalescing for Studio chat (agent text + thought).
 
-ACP streams one ``agent_message_chunk`` / ``agent_thought_chunk`` notification
-per fragment; each kind folds into a single persisted message row per turn
-(create on first chunk, in-place content updates after). The ACP SDK resolves
-the prompt response before the last session/update handler tasks run, so
-trailing chunks of a finished turn can arrive after turn end — they keep
-folding into that turn's still-open rows. The slots are therefore reset at
-the START of the next turn (``send_message``), never at turn end: a turn-end
-reset would let a trailing chunk start a tail-only orphan row, and a slot
-attached after a reset would make the next turn's first chunk overwrite the
-previous turn's row in place (#98).
+ACP streams one ``agent_message_chunk`` / ``agent_thought_chunk`` per fragment;
+each kind folds into one persisted row per uninterrupted stretch. A non-text
+update (tool call, plan, permission prompt) interrupts the prose: the service
+calls ``reset()`` so the next chunk opens a FRESH row below the interruption
+instead of folding the whole turn's text above every tool card (#98 follow-up).
+Trailing chunks of a finished turn can arrive after turn end (the ACP SDK
+resolves the prompt response before the last update handlers run); they fold
+into still-open rows, or seed one tail row when the turn ended on an
+interruption — matching their actual position. Slots are never reset at turn
+end itself, only at the START of the next turn or mid-turn on interruption:
+a turn-end reset would let a trailing chunk start a tail-only orphan row, and
+a slot attached after a reset would make the next turn's first chunk
+overwrite the previous turn's row in place (#98).
 
-Residual window, stated honestly: chunks carry no turn id, so a trailing chunk
-arriving after the next turn's reset is taken as that turn's first chunk and
-seeds a tail-only orphan row; inherent without ACP turn-tagged chunks.
+Residual window: chunks carry no turn id, so a trailing chunk arriving after
+the next turn's reset seeds a tail-only orphan row (no turn-tagged chunks).
 
-The state lives on SessionRuntime and is guarded by the runtime lock; the
-first-chunk create+attach is a single critical section so a turn-start reset
-can never land between them and leak a stale open id into the next turn.
+The state lives on SessionRuntime under the runtime lock; first-chunk
+create+attach is one critical section so a reset never lands between them.
 """
 
 from __future__ import annotations
@@ -42,7 +43,9 @@ class TurnStreamState:
         self.message_ids[kind] = message_id
 
     def reset(self) -> None:
-        """Start a new turn: drop the previous turn's open slots."""
+        # Drop the open slots: called at the start of a turn, and mid-turn
+        # when a non-text update (tool call / plan / permission prompt)
+        # interrupts the prose so following chunks open fresh rows.
         self.message_ids.clear()
         self.texts.clear()
 

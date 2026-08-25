@@ -21,7 +21,9 @@ repeatable, auditable production process.
 - **Batch in, results out.** Submit a batch of work items through one API
   call; each item becomes a job that flows through the DAG. Rerun a single
   node, run to a target node, or resume from a pause — downstream staleness
-  is tracked for you.
+  is tracked for you. Beyond single-file materials and external references,
+  items can also be **bundles**: an entire folder submitted as one item
+  (manifest-referenced).
 - **A live operations console.** React SPA with a real-time DAG view, SSE
   dashboard events, WebSocket agent status, run logs, artifacts,
   token-usage statistics, and failure-category batch rerun.
@@ -60,6 +62,12 @@ cp .env.example .env                        # then edit: set AGENT_LEGION_DATABA
 cd frontend && npm install && cd ..
 ```
 
+You also need to configure `AGENT_LEGION_S3_*` object storage (locally you
+can run RustFS — see
+[docs/materials-storage-deployment.md](docs/materials-storage-deployment.md)).
+Without it the rest of the instance works, but the materials API degrades to
+503 and demo material seeding is skipped.
+
 ### 2. One-time local setup
 
 ```bash
@@ -94,7 +102,9 @@ enable it in the worker console at http://127.0.0.1:8789.
 
 The repository ships a minimal demo workflow,
 **`education_video_problems_generation`**: ten generic K-12 math knowledge
-points under `examples/` are fanned out one job each — draft a teaching
+points under `examples/` are seeded as example materials into the demo
+workspace (requires `AGENT_LEGION_S3_*` object storage; seeding is skipped
+when it is not configured), each fanned out into one job — draft a teaching
 video script, review it, generate five exercises, review them, then a
 simulated (no-network) publish.
 
@@ -109,10 +119,10 @@ Then in the console:
    LLM endpoint serves.
 3. Enable automatic scheduling for the workspace and claiming in the Worker
    console.
-4. Submit a batch: `POST /api/workspaces/{id}/job-batches` with
-   `{"workflow_key": "education_video_problems_generation",
-   "source_kind": "direct_ids", "knowledge_point_ids": ["triangle-area"]}`
-   — or use the intake UI.
+4. Submit items through the workspace console's **添加条目** (add) panel:
+   upload the knowledge-point markdown as materials or select the seeded
+   example materials (one material becomes one job), or paste external IDs
+   bound to a configured connection.
 5. Watch the DAG light up in real time, and inspect each node's trace and
    artifacts when it finishes.
 

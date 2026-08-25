@@ -581,7 +581,7 @@ def test_rerun_from_intake_resets_not_applicable_downstream(job_db, rerun_servic
         source_id="Q1",
         run_id="batch1",
         title="Question 1",
-        node_keys=list(definition.nodes),
+        node_keys=list(definition.executable_nodes),
         workspace_id=workspace["id"],
     )
     job_db.update_job_node(job["id"], "review_script", status="not_applicable")

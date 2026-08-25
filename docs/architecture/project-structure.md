@@ -19,7 +19,9 @@ agent-legion/
 │       ├── architecture-invariants.yaml
 │       ├── architecture-exemptions.yaml
 │       ├── architecture-budget-policy.yaml
-│       └── architecture-budgets.json
+│       ├── architecture-budgets.json
+│       ├── test-root-files-baseline.json
+│       └── sql-placeholders-baseline.json
 │   # 运行时 split 配置（app.yaml / workflow.yaml / agent_legion.yaml）已退役：
 │   # 代码默认值 + env 覆盖 + DB 实例设置文档，文件存在即启动报错。
 │   # skill 源与锁（skills.yaml / skills.lock）亦已退役：存 DB global_settings
@@ -76,7 +78,9 @@ agent-legion/
 │   └── Cargo.toml
 ├── shared/                     # Host 与 Worker/节点 SDK 共享的轻量契约
 │   ├── pi_events.py
-│   └── pi_model_error.py
+│   ├── pi_model_error.py
+│   ├── material_cache.py       # 材料物化缓存（内容寻址、原子写入、按字节预算淘汰）
+│   └── material_bundle.py      # bundle 文件夹条目的清单与确定性地址硬链接物化
 ├── workspace_libs/             # 节点 SDK 与执行脚手架（code 节点沙箱/Worker 闭包白名单）
 ├── scripts/                    # 质量门、迁移、生成器
 │   ├── check-quick.sh          # 快速质量门
@@ -92,7 +96,10 @@ agent-legion/
 │   └── install-git-hooks.sh    # 预提交钩子安装
 ├── tests/                      # pytest 测试套件
 │   ├── conftest.py
-│   ├── test_*.py               # 单元/集成测试
+│   ├── test_*.py               # 单元/集成测试（存量；新测试禁止放根目录——
+│   │                           # `scripts/architecture/test_placement.py` +
+│   │                           # `config/architecture/test-root-files-baseline.json`
+│   │                           # 强制，须进对应子系统子目录）
 │   ├── test_architecture_*.py  # 架构契约测试
 │   ├── routes/                 # 路由级测试
 │   ├── full/                   # 高保真完整门测试

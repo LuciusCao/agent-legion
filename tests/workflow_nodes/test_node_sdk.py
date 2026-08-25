@@ -264,7 +264,7 @@ def test_root_dir_reads_runtime_key(tmp_path: Path) -> None:
 def test_material_reads_runtime_block(tmp_path: Path) -> None:
     block = {
         "material_id": "mat-1",
-        "path": "/data/materials_cache/ab/abcdef/notes.txt",
+        "path": "/data/materials_cache/ab/abcdef",
         "filename": "notes.txt",
         "content_type": "text/plain",
         "size_bytes": 42,

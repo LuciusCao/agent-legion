@@ -39,6 +39,26 @@ def _insert_connection(job_db, key: str) -> None:
         )
 
 
+def _accept_all_item_types(job_db, workspace_id: str) -> None:
+    """Republish the demo workflow with a widened start-node entry contract.
+
+    The seeded demo revision accepts materials only; tests exercising ref
+    items publish this variant (same DAG, ``accepted_item_types: [material,
+    ref]``) so the entry contract lets them through.
+    """
+    import copy
+
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+    from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION
+    from server.app.workflows.definition import workflow_definition_from_dict
+
+    raw = copy.deepcopy(DEMO_WORKFLOW_DEFINITION)
+    raw["nodes"]["_start"]["accepted_item_types"] = ["material", "ref"]
+    WorkflowRevisionService(job_db).publish_workspace_revision(
+        workspace_id, workflow_definition_from_dict(raw)
+    )
+
+
 def _create_run(client, workspace_id: str, items: list[dict]):
     return client.post(
         f"/api/workspaces/{workspace_id}/runs",
@@ -82,6 +102,7 @@ def test_non_member_gets_404(client, job_db) -> None:
 
 def test_create_list_and_detail(client, job_db) -> None:
     workspace_id = _create_workspace(client)
+    _accept_all_item_types(job_db, workspace_id)
     _insert_material(job_db, workspace_id, "mat-1")
     _insert_connection(job_db, "cms-main")
 
@@ -149,6 +170,7 @@ def test_material_validation_errors(client, job_db) -> None:
 
 def test_ref_validation_errors(client, job_db) -> None:
     workspace_id = _create_workspace(client)
+    _accept_all_item_types(job_db, workspace_id)
 
     response = _create_run(
         client,
@@ -179,3 +201,20 @@ def test_duplicate_items_return_400(client, job_db) -> None:
     second = _create_run(client, workspace_id, [{"type": "material", "material_id": "mat-1"}])
     assert second.status_code == 400
     assert "No tasks were resolved" in second.json()["detail"]
+
+
+def test_item_type_rejected_by_start_contract(client, job_db) -> None:
+    """The seeded demo revision accepts materials only: ref items get a 400
+    before any write (EXEC-WORKFLOW-START-001)."""
+    workspace_id = _create_workspace(client)
+    _insert_connection(job_db, "cms-main")
+
+    response = _create_run(
+        client,
+        workspace_id,
+        [{"type": "ref", "connection_key": "cms-main", "external_id": "Q-1"}],
+    )
+
+    assert response.status_code == 400
+    assert "not accepted by this workflow" in response.json()["detail"]
+    assert client.get(f"/api/workspaces/{workspace_id}/runs").json()["runs"] == []

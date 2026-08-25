@@ -31,7 +31,7 @@ from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.services.node_config_batch import frozen_node_config, run_frozen_payload
-from server.app.services.quality_labels import artifact_contents
+from server.app.services.quality_artifact_contents import artifact_contents
 from server.app.services.versioned_entities import VersionedEntityStore
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.storage_paths import resolve_job_dir
@@ -50,9 +50,15 @@ _REPLAY_COLUMNS = (
 
 
 class QualityReplayService:
-    def __init__(self, job_db: JobQueries, artifact_store: ArtifactStore | None = None) -> None:
+    def __init__(
+        self,
+        job_db: JobQueries,
+        artifact_store: ArtifactStore | None = None,
+        object_store: Any = None,
+    ) -> None:
         self.job_db = job_db
         self.artifact_store = artifact_store
+        self.object_store = object_store
 
     @property
     def db_path(self) -> str:
@@ -164,7 +170,9 @@ class QualityReplayService:
         return {
             "replay": replay,
             "labels": [dict(label) for label in labels],
-            "artifacts": artifact_contents(self.artifact_store, replay["replay_job_id"], node_key),
+            "artifacts": artifact_contents(
+                self.artifact_store, replay["replay_job_id"], node_key, self.object_store
+            ),
             "input_artifacts": self._input_artifacts(replay["replay_job_id"], node_key),
         }
 
@@ -307,26 +315,40 @@ class QualityReplayService:
             "title": f"Quality replay of {job['title'] or job['id']}",
             "stem": str(job["stem"] or ""),
         }
-        copy_job = self.job_db.create_jobs_bulk(
-            candidates=[candidate],
-            workflow_key=workflow_key,
-            run_id=str(batch["id"]),
-            node_keys=list(definition.nodes),
-            workspace_id=workspace_id,
-            revision=revision,
-            frozen_config={node.key: frozen} if frozen is not None else {},
-        )[0]
+        try:
+            copy_job = self.job_db.create_jobs_bulk(
+                candidates=[candidate],
+                workflow_key=workflow_key,
+                run_id=str(batch["id"]),
+                node_keys=list(definition.executable_nodes),
+                workspace_id=workspace_id,
+                revision=revision,
+                frozen_config={node.key: frozen} if frozen is not None else {},
+            )[0]
+        except Exception:
+            # create_run committed before create_jobs_bulk ran; compensate the
+            # orphaned run row like the items/sync-intake paths do.
+            self._discard_empty_run(str(batch["id"]))
+            raise
         copy_job_id = str(copy_job["id"])
         try:
             self._copy_frozen_inputs(job, copy_job, node)
             self._copy_artifact_refs(str(job["id"]), copy_job_id, definition, node.key)
-            ancestors = sorted(ancestor_closure(definition, node.key) - {node.key})
+            # The start node never enters job_nodes (EXEC-WORKFLOW-START-001), so it
+            # must not reach prepare_replay_copy's completed_nodes either.
+            ancestors = sorted(
+                (ancestor_closure(definition, node.key) - {node.key})
+                & definition.executable_nodes.keys()
+            )
             downstream = sorted(downstream_nodes(definition, node.key))
             with write_transaction(self.db_path) as conn:
                 prepare_replay_copy(
                     conn, copy_job_id, completed_nodes=ancestors, skipped_nodes=downstream
                 )
         except Exception:
+            # Best-effort: the not-exists guard keeps the run once the copy
+            # job exists, so this only cleans up if job creation rolled back.
+            self._discard_empty_run(str(batch["id"]))
             # Never leave a fully-pending copy job behind: the scheduler would
             # run the whole workflow. Fail it so it drops out of the scan.
             with write_transaction(self.db_path) as conn:
@@ -339,6 +361,14 @@ class QualityReplayService:
                 )
             raise
         return copy_job_id
+
+    def _discard_empty_run(self, run_id: str) -> None:
+        # Best-effort cleanup of the run row after copy-job creation failed;
+        # never mask the original failure.
+        try:
+            self.job_db.delete_run_without_jobs(run_id)
+        except Exception:
+            logger.warning("run %s left orphaned after replay setup failed", run_id)
 
     def _copy_frozen_inputs(
         self, job: dict[str, Any], copy_job: dict[str, Any], node: WorkflowNode
@@ -428,11 +458,18 @@ class QualityReplayService:
 
     def _input_artifacts(self, replay_job_id: str, node_key: str) -> list[dict[str, Any]]:
         """Frozen upstream inputs shared with the copy job (comparison aid)."""
-        if self.artifact_store is None or not replay_job_id:
+        if not replay_job_id:
             return []
-        upstream = {
-            str(ref["node_key"]) for ref in self.artifact_store.refs_for_job(replay_job_id)
-        } - {node_key}
+        upstream: set[str] = set()
+        if self.artifact_store is not None:
+            upstream = {
+                str(ref["node_key"]) for ref in self.artifact_store.refs_for_job(replay_job_id)
+            }
+        if self.object_store is not None and self.object_store.enabled:
+            upstream |= {
+                str(row["node_key"]) for row in self.object_store.rows_for_job(replay_job_id)
+            }
+        upstream -= {node_key}
         if not upstream:
             return []
-        return artifact_contents(self.artifact_store, replay_job_id, upstream)
+        return artifact_contents(self.artifact_store, replay_job_id, upstream, self.object_store)

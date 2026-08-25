@@ -52,6 +52,11 @@ def materialize_claim_material(
     material = context.get("material") if isinstance(context, Mapping) else None
     if not isinstance(material, Mapping):
         return None
+    if material.get("kind") == "bundle":
+        # Deferred import: bundle_fetch depends on this module (#156).
+        from worker.bundle_fetch import materialize_claim_bundle
+
+        return materialize_claim_bundle(material, execution_dir)
     material_id = str(material.get("material_id") or "").strip()
     url = str(material.get("download_url") or "").strip()
     if not material_id or not url:
@@ -64,7 +69,6 @@ def materialize_claim_material(
     path = materialize_stream(
         cache_root,
         content_hash or material_id,
-        filename,
         lambda: _open_download(url),
         expected_sha256=content_hash,
         expected_size=expected_size,

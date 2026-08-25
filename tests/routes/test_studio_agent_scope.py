@@ -76,6 +76,9 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/workspaces/{workspace_id}/materials/presign", None),
     ("POST", "/api/workspaces/{workspace_id}/materials/{material_id}/complete", None),
     ("DELETE", "/api/workspaces/{workspace_id}/materials/{material_id}", None),
+    # Bundle intake (materials-and-runs design §5, #156).
+    ("POST", "/api/workspaces/{workspace_id}/material-bundles", None),
+    ("DELETE", "/api/workspaces/{workspace_id}/material-bundles/{bundle_id}", None),
     # Workspace, secret, package, member and settings writes.
     ("POST", "/api/workspaces", None),
     ("PATCH", "/api/workspaces/{workspace_id}", None),
@@ -196,6 +199,7 @@ _PATH_PARAM_VALUES = {
     "session_id": "session-x",
     "request_id": "request-x",
     "material_id": "mat-x",
+    "bundle_id": "bundle-x",
 }
 
 

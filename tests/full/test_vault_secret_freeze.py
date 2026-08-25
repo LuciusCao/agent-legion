@@ -21,7 +21,7 @@ from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_node_config import update_workspace_node_config
-from tests.helpers import load_builtin_definition
+from tests.helpers import load_demo_legacy_intake_definition
 
 PLAINTEXT = "full-gate-secret-token"
 CONNECTION_KEY = "cms-full"
@@ -42,7 +42,9 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
     )
     workspace_id = str(workspace["id"])
     seed_demo_workspace_node_codes(settings, workspace_id)
-    definition = load_builtin_definition("education_video_problems_generation")
+    # The demo workflow no longer declares intake modes (#154); this test
+    # exercises the job-batches intake freeze, so seed the legacy variant.
+    definition = load_demo_legacy_intake_definition()
     WorkflowRevisionService(job_db).ensure_active_revision(workspace_id, definition)
 
     # Create the connection; the token is diverted to the instance vault.

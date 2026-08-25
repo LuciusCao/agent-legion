@@ -90,7 +90,7 @@ def test_materialize_downloads_into_cache(tmp_path: Path, monkeypatch: pytest.Mo
     assert urls == ["https://s3.test/download/fake?sig=x"]
     path = Path(block["path"])
     cache_root = tmp_path / "work" / MATERIALS_CACHE_DIRNAME
-    assert path == cache_root / HASH[:2] / HASH / "notes.txt"
+    assert path == cache_root / HASH[:2] / HASH
     assert path.read_bytes() == PAYLOAD
 
     # 命中：同一 execution 再次物化不再下载。
@@ -246,12 +246,12 @@ def test_execute_code_materializes_and_exposes_local_path(
     # 节点读到的是物化缓存里的本地文件。
     output = json.loads((execution_dir / "job" / "output.json").read_text(encoding="utf-8"))
     assert output == {"material_id": "mat-w1", "size": len(PAYLOAD)}
-    assert (cache_root / HASH[:2] / HASH / "notes.txt").read_bytes() == PAYLOAD
+    assert (cache_root / HASH[:2] / HASH).read_bytes() == PAYLOAD
 
 
 def test_clean_work_root_preserves_materials_cache(tmp_path: Path) -> None:
     cache_root = tmp_path / MATERIALS_CACHE_DIRNAME
-    cached = cache_root / HASH[:2] / HASH / "notes.txt"
+    cached = cache_root / HASH[:2] / HASH
     cached.parent.mkdir(parents=True)
     cached.write_bytes(PAYLOAD)
     stale = tmp_path / "exec-stale"
@@ -265,7 +265,7 @@ def test_clean_work_root_preserves_materials_cache(tmp_path: Path) -> None:
 
 def test_stale_sweep_preserves_materials_cache(tmp_path: Path) -> None:
     cache_root = tmp_path / MATERIALS_CACHE_DIRNAME
-    cached = cache_root / HASH[:2] / HASH / "notes.txt"
+    cached = cache_root / HASH[:2] / HASH
     cached.parent.mkdir(parents=True)
     cached.write_bytes(PAYLOAD)
     stale = tmp_path / "exec-stale"

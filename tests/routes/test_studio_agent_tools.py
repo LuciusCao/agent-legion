@@ -256,6 +256,19 @@ def test_get_node_code_state_404_for_unknown_node(client, job_db) -> None:
     assert response.status_code == 404
 
 
+def test_node_code_tools_404_for_start_node(client, job_db) -> None:
+    # The injected `_start` entry node never executes: reading its code or
+    # saving a draft for it gets the same 404 as an unknown node.
+    workspace_id = _create_workspace(client)
+    scoped, _ = _scoped_client(client, job_db)
+    base = (
+        f"/api/studio-agent/tools/workspaces/{workspace_id}"
+        f"/workflows/{_WORKFLOW_KEY}/nodes/_start/code"
+    )
+    assert scoped.get(base).status_code == 404
+    assert scoped.put(f"{base}/draft", json={"code": _NODE_CODE}).status_code == 404
+
+
 def test_save_node_code_draft_attributes_studio_agent(client, job_db) -> None:
     workspace_id = _create_workspace(client)
     scoped, admin_id = _scoped_client(client, job_db)
@@ -387,12 +400,21 @@ def test_compare_workflow_without_baseline_returns_full_draft_preview(client, jo
     assert payload["creates_revision"] is True
     assert payload["summary"]["node_changes"] == [
         {
+            # 草稿未声明 start：loader 注入合成 start（EXEC-WORKFLOW-START-001），
+            # 无基线对比下它也作为新增节点出现。
+            "type": "added",
+            "node_key": "_start",
+            "label": "Start",
+            "fields": [],
+            "risk": "info",
+        },
+        {
             "type": "added",
             "node_key": "publish_content",
             "label": "publish_content",
             "fields": [],
             "risk": "info",
-        }
+        },
     ]
     assert any(flag["code"] == "no_baseline" for flag in payload["summary"]["risk_flags"])
 

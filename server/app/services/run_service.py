@@ -25,6 +25,8 @@ from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_intake_workspace import get_workspace
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
+from server.app.services.run_bundle_candidate import bundle_candidate
+from server.app.services.run_item_types import validate_run_item_types
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import workflow_definition_from_dict
@@ -99,6 +101,7 @@ class RunService:
         definition = workflow_definition_from_dict(json.loads(active_revision["definition_json"]))
         if not items:
             raise InvalidOperationError("At least one item is required")
+        validate_run_item_types(definition, items)
 
         # Validate everything (items, node config, pins) before the first
         # write so a rejected request leaves no half-created run behind.
@@ -116,13 +119,13 @@ class RunService:
             self.settings.executor_runtime.workflows.custom_nodes_enabled,
             workspace_id,
             workflow_key,
-            [node.key for node in definition.nodes.values()],
+            list(definition.executable_nodes),
         )
 
         # Same dedup contract as intake: items whose (source_type, source_id)
-        # already has a job in this workspace drop out; accepted keys grow the
+        # already has a job in this workflow drop out; accepted keys grow the
         # set so intra-request duplicates filter exactly like pre-existing jobs.
-        existing_keys = self.job_db.list_job_dedup_keys(workspace_id)
+        existing_keys = self.job_db.list_job_dedup_keys(workspace_id, workflow_key)
         fresh: list[dict[str, Any]] = []
         for candidate in candidates:
             key = (str(candidate["entity_type"]), str(candidate["entity_id"]))
@@ -151,7 +154,7 @@ class RunService:
                 candidates=fresh,
                 workflow_key=workflow_key,
                 run_id=run["id"],
-                node_keys=list(definition.nodes),
+                node_keys=list(definition.executable_nodes),
                 workspace_id=workspace_id,
                 revision=active_revision,
                 frozen_config=node_config,
@@ -222,6 +225,8 @@ class RunService:
             item_type = item.get("type")
             if item_type == "material":
                 candidates.append(self._material_candidate(workspace_id, item))
+            elif item_type == "bundle":
+                candidates.append(bundle_candidate(self.job_db.path, workspace_id, item))
             elif item_type == "ref":
                 candidates.append(self._ref_candidate(item))
             else:

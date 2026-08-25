@@ -78,6 +78,7 @@ def create_router(
     quality_replays: QualityReplayService | None = None,
     studio_chat_service: StudioChatService | None = None,
     materials_service: MaterialsService | None = None,
+    job_artifact_objects: Any = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
@@ -103,7 +104,7 @@ def create_router(
         and agent_worker_registry is not None
         and agent_completion is not None
     ):
-        workers_router = create_agent_workers_router(agent_broker, agent_worker_registry, agent_completion, settings, ops_metrics)  # fmt: skip
+        workers_router = create_agent_workers_router(agent_broker, agent_worker_registry, agent_completion, settings, ops_metrics, job_artifact_objects)  # fmt: skip
         router.include_router(workers_router)
     if artifact_store is not None:
         router.include_router(
@@ -148,6 +149,7 @@ def create_router(
         job_event_manager,
         job_event_buffer,
         artifact_store=artifact_store,
+        object_store=job_artifact_objects,
     )
     router.include_router(job_group)
 

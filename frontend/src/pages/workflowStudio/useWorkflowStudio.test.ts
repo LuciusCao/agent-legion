@@ -493,7 +493,7 @@ describe('useWorkflowStudio', () => {
 
     await waitFor(() => expect(result.current.loadState).toBe('empty'))
     expect(result.current.definitionYaml).toBe(
-      'key: demo\nlabel: demo\nnodes:\n  start:\n    capability: start\n'
+      'key: demo\nlabel: demo\nnodes:\n  _start:\n    type: start\n  intake:\n    capability: intake\n    after: [_start]\n'
     )
     expect(result.current.workflow).toBeNull()
     expect(result.current.dirty).toBe(false)

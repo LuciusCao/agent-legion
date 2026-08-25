@@ -57,6 +57,9 @@ def default_instance_document() -> dict[str, Any]:
             "max_archive_bytes": runtime.agent_workers.max_archive_bytes,
             "min_protocol_version": runtime.agent_workers.min_protocol_version,
         },
+        # Materials TTL (design §10): 0 = disabled; read fresh from the DB at
+        # material completion/sweep time, never hydrated into Settings.
+        "materials_ttl_days": 0,
     }
     for key in _EXECUTOR_SCALAR_KEYS:
         document[key] = getattr(runtime, key)

@@ -16,9 +16,10 @@ def test_builtin_workflow_keys() -> None:
 
 
 def test_demo_workflow_shape() -> None:
-    """The open-source demo DAG: six nodes, linear chain, simulated publish."""
+    """The open-source demo DAG: start entry contract + six business nodes."""
     definition = load_builtin_workflow("education_video_problems_generation")
     assert [node.key for node in definition.nodes.values()] == [
+        "_start",
         "intake_knowledge_points",
         "write_script",
         "review_script",
@@ -26,7 +27,13 @@ def test_demo_workflow_shape() -> None:
         "review_questions",
         "publish_content",
     ]
-    assert [node.capability for node in definition.nodes.values()] == [
+    start = definition.start_node
+    assert start is not None
+    assert start.key == "_start"
+    assert start.node_type == "start"
+    # Material-only entry contract: ref items are rejected at run creation.
+    assert start.accepted_item_types == ("material",)
+    assert [node.capability for node in definition.executable_nodes.values()] == [
         "intake_knowledge_points",
         "write_script",
         "review_script",
@@ -35,9 +42,8 @@ def test_demo_workflow_shape() -> None:
         "publish_content",
     ]
     assert definition.nodes["publish_content"].terminal is not None
-    assert definition.intake is not None
-    mode = definition.intake.modes["direct_ids"]
-    assert mode.input_field == "knowledge_point_ids"
+    # Legacy intake modes are retired (#154): the demo DAG declares none.
+    assert definition.intake.modes == {}
 
 
 def test_load_builtin_workflow_validates_and_matches_key() -> None:
@@ -45,7 +51,9 @@ def test_load_builtin_workflow_validates_and_matches_key() -> None:
         definition = load_builtin_workflow(key)
         assert definition.key == key
         assert definition.nodes
-        assert all(node.capability for node in definition.nodes.values())
+        # Every executable node declares a capability; the start node is exempt.
+        assert all(node.capability for node in definition.executable_nodes.values())
+        assert definition.start_node is not None
 
 
 def test_load_builtin_workflow_unknown_key_raises_key_error() -> None:

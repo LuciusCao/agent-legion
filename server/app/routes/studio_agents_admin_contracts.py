@@ -4,12 +4,16 @@ The registry is the only way a chat session gets its agent command line:
 admins maintain {id, label, command, args[]} entries here and non-admin users
 pick an agent by id — arbitrary command lines never cross the non-admin API
 boundary (RCE guard). api_base tells the session-scoped MCP server where the
-backend's own API lives.
+backend's own API lives; it also decides where the agent's MCP client sends
+the session's scoped Bearer token, so it is validated as a plain absolute
+http(s) URL at the write side (#158).
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from urllib.parse import urlsplit
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class StudioAgentRegistryEntry(BaseModel):
@@ -26,6 +30,22 @@ class StudioAgentRegistryDocument(BaseModel):
 
     api_base: str = Field(min_length=1)
     agents: list[StudioAgentRegistryEntry] = Field(default_factory=list)
+
+    @field_validator("api_base")
+    @classmethod
+    def _api_base_is_plain_http_url(cls, value: str) -> str:
+        """api_base is the scoped-token egress target (#158): pin it to a
+        plain absolute http(s) URL — no embedded credentials, query, or
+        fragment — so a malformed entry fails the write instead of leaking
+        tokens at session creation time."""
+        parsed = urlsplit(value.strip())
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ValueError("api_base must be an absolute http(s) URL")
+        if parsed.username or parsed.password:
+            raise ValueError("api_base must not embed credentials")
+        if parsed.query or parsed.fragment:
+            raise ValueError("api_base must not carry a query string or fragment")
+        return value.strip().rstrip("/")
 
     @model_validator(mode="after")
     def _unique_agent_ids(self) -> StudioAgentRegistryDocument:

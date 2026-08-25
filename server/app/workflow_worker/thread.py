@@ -90,6 +90,16 @@ class WorkflowWorkerThread:
         self._batch_payload_cache: dict[str, dict[str, Any] | None] = {}
         self._pass_claim_counts: dict[str, int] = {}
         self._pending_claims: list[PreparedClaim] = []
+        # Per-pass claim-input memos (issue #124): every claimed node used to
+        # re-read its published code text and re-resolve each vault secret_ref
+        # against the DB, so a multi-slot pass multiplied those round trips on
+        # an already-congested DB. Memoizing per (pass, key) collapses the
+        # repeats. Code entries are tagged with the publish generation: an
+        # in-process publish/rollback/archive lands on the very next claim
+        # (the #115 "next node execution" contract); a secret write takes
+        # effect on the next pass.
+        self._node_code_cache: dict[tuple[str, str, str], tuple[int, str | None]] = {}
+        self._secret_memo: dict[tuple[str, str], str | None] = {}
         self._agent_pass = AgentPassState()
         # Code stockpile gate (issue #125): TTL-cached, shared across passes.
         self.code_stock = CodeStockGate(settings.database_url, settings.executor_runtime.code_stock)
@@ -135,6 +145,7 @@ class WorkflowWorkerThread:
 
     def _poll(self) -> bool:
         self._batch_payload_cache, self._pass_claim_counts, self._pending_claims = {}, {}, []
+        self._node_code_cache, self._secret_memo = {}, {}
         self._scan_phases = {"marks": 0.0, "ws_query": 0.0, "miss_fetch": 0.0, "eval": 0.0}
         self._agent_pass.reset_pass()
         self._maintenance.maybe_cleanup()

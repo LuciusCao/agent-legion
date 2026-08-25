@@ -41,6 +41,7 @@ def create_agent_workers_router(
     completion: AgentCompletionHandler,
     settings: Settings,
     ops_metrics: OpsMetricsService | None = None,
+    job_artifact_objects: Any = None,
 ) -> APIRouter:
     router = APIRouter(tags=["agent-workers"])
     config = settings.executor_runtime.agent_workers
@@ -90,7 +91,9 @@ def create_agent_workers_router(
     if ops_metrics is not None:
         router.include_router(create_agent_worker_metrics_router(ops_metrics, authorize_worker))
     router.include_router(
-        create_agent_worker_claim_router(broker, settings, authorize_worker, require_lease_id)
+        create_agent_worker_claim_router(
+            broker, settings, authorize_worker, require_lease_id, job_artifact_objects
+        )
     )
 
     @router.post(

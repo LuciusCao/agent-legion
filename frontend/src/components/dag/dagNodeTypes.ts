@@ -13,7 +13,7 @@ export interface DagNodeData extends Record<string, unknown> {
   nodeKey?: string
   capability?: string
   executorUnbound?: boolean
-  topologyBadges?: Array<'entry' | 'branch' | 'terminal'>
+  topologyBadges?: Array<'start' | 'entry' | 'branch' | 'terminal'>
   terminalOutcome?: string
   inputs: string[]
   outputs: string[]

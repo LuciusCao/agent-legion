@@ -94,6 +94,14 @@
   （`server/app/workflows/builtin.py`）只是创建 workspace 时可选的示例模板种子，blank
   workspace 首次成功 publish 认领草稿的 key。
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
+  唯一例外是 `type: start` 的入口节点：恰好一个、豁免 capability、承载入口契约
+  `accepted_item_types`、永不执行（调度视为恒 completed、不进 job_nodes、不 dispatch）、
+  不可删（无 start 的存量定义由 loader 自动注入合成 start），`RunService.create_run`
+  按它校验条目类型（EXEC-WORKFLOW-START-001）。条目类型三种：`material`（单文件）、
+  `ref`（外部引用）、`bundle`（文件夹整体一个条目，manifest 引用式：成员走常规材料
+  上传后一次创建冻结 `material_bundles`，删除双向守卫，物化为确定性地址的硬链接
+  目录树，MATERIAL-BUNDLE-001）；DEFAULT 契约保持 `("material","ref")`，存量
+  workspace 对 bundle 条目 fail-closed。
 - Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.runtime` / `.contracts`。
 - code 节点：capability 不再声明 `path`（#96 已退役该绑定）；所有节点代码以
   DB 发布文本（`versioned_entities` entity_type `node_code`）为准，经发布流生效、版本不可变。
@@ -175,6 +183,17 @@
 - 多步变更必须先全部校验/备妥再统一应用：中间结果放临时变量，全部成功后
   一次性赋值生效，禁止半应用状态；跨进程/跨事务动作（killpg、目录迁移、
   重排队）前必须重新校验目标身份与状态。这是代码评审最高发的缺陷族。
+- Job 产物存储（#160，D12，schema v54）：权威副本在实例对象存储
+  （`jobs/{workspace_id}/{job_id}/{name}` key + `job_artifacts` 清单表，
+  `server/app/services/job_artifact_objects.py`），本地 job_dir 只是执行
+  暂存与可淘汰缓存——淘汰只删清单已确认的文件（行有 content_hash 时复核
+  本地 sha256 一致，unlink 前重查 job 仍 completed 且无 active lease，
+  EXEC-ARTIFACT-STORE-001），读
+  路径本地命中直读、缺失回退对象存储（quality artifact_contents 是刻意的
+  manifest-first 例外，反映持久化记录）。Worker 产物回传只走 claim 注入的
+  presigned S3 通道（Host HEAD 核验后登记落盘），禁止新增独立回传协议
+  （EXEC-ARTIFACT-WORKER-001）；`/api/artifacts` 本地 CAS 是 legacy 兼容路径，
+  不要给它加新功能。
 
 典型反例：
 

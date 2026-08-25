@@ -6,19 +6,23 @@ materializes it into a local cache directory that is statically allow-read
 in the sandbox (MATERIAL-ACCESS-001). Both execution sides share the exact
 same cache rules via this module:
 
-- layout: ``{cache_root}/{address[:2]}/{address}/{filename}`` where
-  ``address`` is the material's content hash (falling back to its id), so
-  repeated jobs over the same content download once;
+- layout: ``{cache_root}/{address[:2]}/{address}`` where ``address`` is
+  the material's content hash (falling back to its id) — the address
+  itself is the file name, so content addressing dedups naturally and
+  the original filename never shapes the cache (it stays available in
+  the runtime material block for display/identity use);
 - a hit is returned as-is (mtime refreshed for the LRU);
 - a miss streams the bytes into a unique sibling temp file and atomically
   renames it into place, so concurrent materializers (processes or threads)
   never observe a partial file;
-- capacity is a simple oldest-mtime-first eviction towards a byte budget
-  (v1); eviction failures only warn, they never block materialization.
-  The file a ``materialize_stream`` call just wrote is pinned for that
-  call's eviction pass, so a single over-budget material survives its own
-  eviction (temporarily exceeding the budget) instead of being unlinked
-  before its path is returned.
+- capacity is an oldest-mtime-first eviction towards a byte budget (v1) at
+  entry granularity: an entry is one single-material file or one bundle
+  tree dir (evicted atomically, never partially unlinked); eviction
+  failures only warn, they never block materialization.
+  The entry a ``materialize_stream`` call just wrote (plus any caller-given
+  pins) is pinned for that call's eviction pass, so a single over-budget
+  material survives its own eviction (temporarily exceeding the budget)
+  instead of being unlinked before its path is returned.
 
 Stdlib only (``shared`` house rule): the byte source is injected as a
 stream factory — the Host wraps its S3 ``ObjectStorage.open_stream``, the
@@ -30,6 +34,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
+import shutil
 import uuid
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -62,29 +67,23 @@ def cache_max_bytes() -> int:
     return DEFAULT_CACHE_MAX_BYTES
 
 
-def _safe_filename(filename: str) -> str:
-    """Basename-only cache member name; never a path segment sequence."""
-    name = Path(str(filename)).name.strip()
-    return name or "blob"
-
-
-def cache_file_path(cache_root: Path, address: str, filename: str) -> Path:
+def cache_file_path(cache_root: Path, address: str) -> Path:
     """The deterministic cache location for one addressed material."""
     address = str(address).strip()
     if not address:
         raise MaterializeError("material cache address is empty")
-    return Path(cache_root) / address[:2] / address / _safe_filename(filename)
+    return Path(cache_root) / address[:2] / address
 
 
 def materialize_stream(
     cache_root: Path,
     address: str,
-    filename: str,
     stream_factory: Callable[[], BinaryIO],
     *,
     expected_sha256: str = "",
     expected_size: int | None = None,
     max_bytes: int | None = None,
+    pin: Iterable[Path] | None = None,
     log: Callable[[str], None] = print,
 ) -> Path:
     """Return the local cache path for *address*, downloading on a miss.
@@ -96,11 +95,14 @@ def materialize_stream(
     addressing). A declared sha256/size is verified before the rename — a
     mismatch raises ``MaterializeError`` and nothing is cached.
 
-    The post-write eviction pass pins the returned path, so the file handed
-    back to the caller always exists — even when it alone exceeds the byte
-    budget (the budget is a target, not a hard ceiling for one material).
+    The post-write eviction pass pins the returned path plus anything in
+    *pin*, so the file handed back to the caller always exists — even when
+    it alone exceeds the byte budget (the budget is a target, not a hard
+    ceiling for one material). A bundle materialization passes every member
+    path (and the tree root) as *pin*, so a later member's eviction pass
+    never deletes an earlier member out from under the assembly (#156).
     """
-    final = cache_file_path(cache_root, address, filename)
+    final = cache_file_path(cache_root, address)
     if final.is_file():
         # Refresh the LRU clock; a vanished file between the check and the
         # touch just skips the refresh.
@@ -140,8 +142,34 @@ def materialize_stream(
         tmp_path.unlink(missing_ok=True)
         raise
     budget = cache_max_bytes() if max_bytes is None else max_bytes
-    evict_to_capacity(Path(cache_root), budget, pin={final}, log=log)
+    pinned = {final, *(Path(p) for p in pin or ())}
+    evict_to_capacity(Path(cache_root), budget, pin=pinned, log=log)
     return final
+
+
+def _entry_stats(path: Path) -> tuple[float, int]:
+    """(mtime, byte size) of one cache entry.
+
+    A bundle tree dir aggregates its files: newest member mtime as the LRU
+    clock (``assemble_bundle_tree`` refreshes every link on a hit), summed
+    size. Hard links shared with the member file count twice — conservative
+    for the budget, never a correctness issue.
+    """
+    if not path.is_dir():
+        stat = path.stat()
+        return stat.st_mtime, stat.st_size
+    latest = 0.0
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(path):
+        for name in filenames:
+            with contextlib.suppress(OSError):
+                stat = (Path(dirpath) / name).stat()
+                latest = max(latest, stat.st_mtime)
+                total += stat.st_size
+    if latest == 0.0:
+        with contextlib.suppress(OSError):
+            latest = path.stat().st_mtime
+    return latest, total
 
 
 def evict_to_capacity(
@@ -151,40 +179,60 @@ def evict_to_capacity(
     pin: Iterable[Path] | None = None,
     log: Callable[[str], None] = print,
 ) -> None:
-    """Evict oldest-mtime cache files until the root fits *max_bytes*.
+    """Evict oldest-mtime cache entries until the root fits *max_bytes*.
+
+    Entries are the direct children of the shard dirs: one single-material
+    file or one bundle tree dir. A tree is evicted atomically: it is
+    renamed to a trash sibling first and deleted there, so the final
+    address never holds a partially-deleted tree — the "existing dir means
+    complete" invariant of ``assemble_bundle_tree`` holds (#156).
 
     Eviction never affects correctness (the next materialization
-    re-downloads) and never blocks: any filesystem error downgrades to a
-    warning. Paths in *pin* are never unlinked, even when they keep the
-    root over budget — a single pinned over-budget material temporarily
-    exceeds the budget rather than being deleted out from under its
-    consumer. Other files currently served to a sandbox may still
+    re-downloads/reassembles) and never blocks: any filesystem error
+    downgrades to a warning. Entries in *pin* are never removed, even when
+    they keep the root over budget — a single pinned over-budget material
+    temporarily exceeds the budget rather than being deleted out from under
+    its consumer. Other files currently served to a sandbox may still
     disappear under it — the mtime refresh on every hit keeps
     recently-used entries young, which is the v1 mitigation.
     """
     root = Path(cache_root)
     pinned = {Path(p) for p in pin or ()}
     try:
+        candidates: list[Path] = []
+        for shard in root.iterdir():
+            if shard.is_dir():
+                candidates.extend(shard.iterdir())
+            else:
+                candidates.append(shard)  # stray root-level file
         entries: list[tuple[float, int, Path]] = []
         total = 0
-        for dirpath, _dirnames, filenames in os.walk(root):
-            for name in filenames:
-                path = Path(dirpath) / name
-                with contextlib.suppress(OSError):
-                    stat = path.stat()
-                    entries.append((stat.st_mtime, stat.st_size, path))
-                    total += stat.st_size
+        for candidate in candidates:
+            with contextlib.suppress(OSError):
+                mtime, size = _entry_stats(candidate)
+                entries.append((mtime, size, candidate))
+                total += size
         if total <= max_bytes:
             return
         for _mtime, size, path in sorted(e for e in entries if e[2] not in pinned):
             if total <= max_bytes:
                 break
             try:
-                path.unlink()
+                if path.is_dir():
+                    # Atomicity: rename the tree aside first, so the final
+                    # address never holds a partially-deleted tree (the
+                    # "existing dir means complete" invariant, #156). A
+                    # failed rmtree leaves a trash sibling behind, which the
+                    # next eviction pass retries as an ordinary candidate.
+                    trash = path.parent / f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.trash"
+                    os.rename(path, trash)
+                    shutil.rmtree(trash)
+                else:
+                    path.unlink()
                 total -= size
             except OSError as exc:
                 log(f"materials cache eviction skipped {path}: {exc}")
-        # Drop the address dirs left empty by eviction (best effort).
+        # Drop the shard dirs left empty by eviction (best effort).
         for dirpath, dirnames, filenames in os.walk(root, topdown=False):
             if not dirnames and not filenames and Path(dirpath) != root:
                 with contextlib.suppress(OSError):

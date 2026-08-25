@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.services.node_code_pins import frozen_dispatch_pin
 from server.app.services.node_code_resolution import resolve_dispatch_node_code
+from server.app.services.node_codes import node_code_publish_generation
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -35,14 +36,26 @@ def resolve_code_node_dispatch(
     corruption and raises too — never silently substituted with the current
     published code (EXEC-CODE-003).
     """
-    node_code = resolve_dispatch_node_code(
-        worker.job_db.path,
-        worker.settings.executor_runtime.workflows.custom_nodes_enabled,
-        workspace_id,
-        workflow_key,
-        node.key,
-        frozen_dispatch_pin(snapshot_pins, batch_payload, node.key),
-    )
+    frozen = frozen_dispatch_pin(snapshot_pins, batch_payload, node.key)
+    cache_key = (workspace_id, workflow_key, node.key)
+    generation = node_code_publish_generation()
+    cached = worker._node_code_cache.get(cache_key)
+    # Per-pass memo (issue #124): same-pass claims of one node share a single
+    # published-code read; an in-process publish bumps the generation, so new
+    # code lands on the very next claim rather than the next pass.
+    if frozen is None and cached is not None and cached[0] == generation:
+        node_code = cached[1]
+    else:
+        node_code = resolve_dispatch_node_code(
+            worker.job_db.path,
+            worker.settings.executor_runtime.workflows.custom_nodes_enabled,
+            workspace_id,
+            workflow_key,
+            node.key,
+            frozen,
+        )
+        if frozen is None:
+            worker._node_code_cache[cache_key] = (generation, node_code)
     if node_code is None:
         raise ValueError(
             f"capability {node.capability!r} has no published node code "

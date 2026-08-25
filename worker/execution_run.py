@@ -213,6 +213,8 @@ def run_execution(
                         str(name) for name in manifest.get("expected_outputs", [])
                     ),
                     command=tuple(command),
+                    # #160 D12：直传 S3 的上传规格（空 = 旧 CAS 通道）。
+                    artifact_uploads=dict(manifest.get("artifact_uploads") or {}),
                 )
             # else: lease lost mid-run — the Host owns the outcome; nothing
             # to deliver, fall through to the local-discard path below.

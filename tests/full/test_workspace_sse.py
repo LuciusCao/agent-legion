@@ -9,11 +9,12 @@ import pytest
 import uvicorn
 
 from server.app.main import create_app
+from tests.helpers import publish_legacy_intake_revision
 
 
 @contextmanager
 def _run_test_server(data_dir):
-    """Start the app on a free localhost port and yield its base URL."""
+    """Start the app on a free localhost port and yield (base URL, app)."""
     app = create_app(data_dir=data_dir, start_worker=False)
     server = uvicorn.Server(
         uvicorn.Config(
@@ -41,7 +42,7 @@ def _run_test_server(data_dir):
             time.sleep(0.05)
         if port is None:
             raise RuntimeError("Uvicorn server did not start")
-        yield f"http://127.0.0.1:{port}"
+        yield f"http://127.0.0.1:{port}", app
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -51,7 +52,7 @@ def _run_test_server(data_dir):
 def test_workspace_sse_receives_jobs_created(tmp_path):
     # Note: TestClient buffers infinite streaming responses and never yields
     # live SSE chunks, so we run a real Uvicorn server for this test.
-    with _run_test_server(tmp_path) as base_url:
+    with _run_test_server(tmp_path) as (base_url, app):
         client = httpx.Client(trust_env=False)
         try:
             # Authenticate first: bootstrap the initial admin; the session
@@ -73,6 +74,9 @@ def test_workspace_sse_receives_jobs_created(tmp_path):
             )
             assert resp.status_code == 200
             workspace_id = resp.json()["workspace"]["id"]
+            # The demo workflow no longer declares intake modes (#154); publish
+            # the legacy-intake variant so the job-batches post resolves.
+            publish_legacy_intake_revision(app.state.job_db, workspace_id)
 
             with client.stream(
                 "GET",

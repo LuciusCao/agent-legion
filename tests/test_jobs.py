@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from server.app.jobs.queries import JobQueries
@@ -183,10 +185,10 @@ def test_mark_node_for_rerun_marks_downstream_stale(tmp_path):
         source_id="Q200",
         run_id="",
         title="Question Q200",
-        node_keys=list(definition.nodes),
+        node_keys=list(definition.executable_nodes),
         workspace_id="default",
     )
-    for node_key in definition.nodes:
+    for node_key in definition.executable_nodes:
         queries.update_job_node(job["id"], node_key, status="completed", error_message="old error")
 
     queries.mark_node_for_rerun(
@@ -284,3 +286,93 @@ def test_start_node_run_persists_run_and_session_directories(tmp_path):
 
     assert run["run_dir"] == str(tmp_path / "run-1")
     assert run["session_dir"] == str(tmp_path / "run-1/session")
+
+
+def test_run_upsert_refreshes_frozen_pins_when_run_has_no_jobs(tmp_path):
+    """Id collision on a jobless run (jobs deleted, code republished, same
+    items resubmitted) must refresh the pins a quality replay would freeze to."""
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "default", default_workflow_key="education_video_problems_generation"
+    )
+    digest_payload = {"question_ids": ["Q001"], "node_config": {}}
+
+    first = queries.create_run(
+        workflow_key="education_video_problems_generation",
+        source_kind="mixed",
+        digest_payload=digest_payload,
+        workspace_id=workspace["id"],
+        frozen_pins={"node_code_versions": {"n1": {"version": 1}}},
+    )
+    second = queries.create_run(
+        workflow_key="education_video_problems_generation",
+        source_kind="mixed",
+        digest_payload=digest_payload,
+        workspace_id=workspace["id"],
+        frozen_pins={"node_code_versions": {"n1": {"version": 2}}},
+    )
+
+    assert second["id"] == first["id"]
+    pins = json.loads(second["frozen_pins_json"])
+    assert pins["node_code_versions"]["n1"]["version"] == 2
+
+
+def test_run_upsert_keeps_frozen_pins_while_run_has_jobs(tmp_path):
+    """A run with live jobs keeps the pins those jobs were created with."""
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "default", default_workflow_key="education_video_problems_generation"
+    )
+    digest_payload = {"question_ids": ["Q001"], "node_config": {}}
+
+    first = queries.create_run(
+        workflow_key="education_video_problems_generation",
+        source_kind="mixed",
+        digest_payload=digest_payload,
+        workspace_id=workspace["id"],
+        frozen_pins={"node_code_versions": {"n1": {"version": 1}}},
+    )
+    queries.create_job(
+        workflow_key="education_video_problems_generation",
+        source_type="question_id",
+        source_id="Q001",
+        run_id=first["id"],
+        title="Question Q001",
+        node_keys=["fetch_question_context"],
+        workspace_id=workspace["id"],
+    )
+
+    second = queries.create_run(
+        workflow_key="education_video_problems_generation",
+        source_kind="mixed",
+        digest_payload=digest_payload,
+        workspace_id=workspace["id"],
+        frozen_pins={"node_code_versions": {"n1": {"version": 2}}},
+    )
+
+    assert second["id"] == first["id"]
+    pins = json.loads(second["frozen_pins_json"])
+    assert pins["node_code_versions"]["n1"]["version"] == 1
+
+
+def test_job_dedup_keys_are_scoped_per_workflow(tmp_path):
+    """The same (source_type, source_id) under another workflow_key of the
+    same workspace is not a duplicate."""
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "default", default_workflow_key="education_video_problems_generation"
+    )
+    for workflow_key in ("workflow_a", "workflow_b"):
+        queries.create_job(
+            workflow_key=workflow_key,
+            source_type="question_id",
+            source_id="Q100",
+            run_id="",
+            title="Question Q100",
+            node_keys=["fetch_question_context"],
+            workspace_id=workspace["id"],
+        )
+
+    assert queries.list_job_dedup_keys(workspace["id"], "workflow_a") == {("question_id", "Q100")}
+    assert queries.list_job_dedup_keys(workspace["id"], "workflow_b") == {("question_id", "Q100")}
+    assert queries.list_job_dedup_keys(workspace["id"], "workflow_c") == set()

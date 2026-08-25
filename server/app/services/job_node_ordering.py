@@ -1,8 +1,16 @@
 from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.start_node import START_NODE_TYPE
 
 
 def effective_after(definition: WorkflowDefinition, node_key: str) -> list[str]:
-    edge_sources = [edge.source for edge in definition.edges if edge.target == node_key]
+    # Start nodes are a definition-level concept and never enter job_nodes;
+    # hide their derived `_start -> root` edges from the job view so the
+    # frontend does not render phantom nodes for them.
+    edge_sources = [
+        edge.source
+        for edge in definition.edges
+        if edge.target == node_key and definition.nodes[edge.source].node_type != START_NODE_TYPE
+    ]
     if edge_sources:
         return edge_sources
     if node_key in definition.nodes:

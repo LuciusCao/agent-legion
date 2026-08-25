@@ -61,6 +61,7 @@ class JobDeletionService:
         job_event_manager: JobEventManager | None = None,
         job_event_buffer: Any | None = None,
         artifact_store: ArtifactStore | None = None,
+        object_store: Any = None,
     ) -> None:
         self.job_db = job_db
         self.lease_repo = lease_repo
@@ -69,6 +70,7 @@ class JobDeletionService:
         self.job_event_manager = job_event_manager
         self.job_event_buffer = job_event_buffer
         self.artifact_store = artifact_store
+        self.object_store = object_store
 
     def _now(self) -> datetime:
         if self.clock is not None:
@@ -110,6 +112,13 @@ class JobDeletionService:
             _fail(job_id, "delete_failed", str(exc))
 
         artifact_candidates = read_artifact_candidates(self.artifact_store, job_id)
+        # D12: snapshot the object-storage manifest rows before the job row
+        # cascades them away; the objects are reclaimed after commit.
+        object_rows = (
+            self.object_store.rows_for_job(job_id)
+            if self.object_store is not None and self.object_store.enabled
+            else []
+        )
         operation_id = f"{self._now().strftime('%Y%m%d%H%M%S%f')}-{uuid.uuid4().hex[:8]}"
         staged_storage: Path | None = None
         staged_logs: list[Path] = []
@@ -156,6 +165,8 @@ class JobDeletionService:
         self._prune_empty_trash(self.settings.jobs_dir / ".trash" / operation_id)
         self._prune_empty_trash(self.settings.logs_dir / "jobs" / ".trash" / operation_id)
         gc_deleted_job_artifacts(self.artifact_store, job_id, artifact_candidates)
+        if object_rows and self.object_store is not None:
+            self.object_store.delete_objects(object_rows)
         if self.job_event_buffer is not None:
             self.job_event_buffer.record_job_deleted(workspace_id, job_id)
         elif self.job_event_manager is not None:

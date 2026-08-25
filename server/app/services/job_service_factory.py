@@ -33,6 +33,7 @@ class JobServices:
         job_event_manager: JobEventManager | None,
         job_event_buffer: Any | None,
         artifact_store: ArtifactStore | None = None,
+        object_store: Any = None,
     ) -> None:
         self.executor_leases = ExecutorLeaseRepository(
             job_db.path,
@@ -53,11 +54,13 @@ class JobServices:
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
         )
-        self.queries = JobQueryService(job_db, settings, workspace_executor_configuration)
+        self.queries = JobQueryService(
+            job_db, settings, workspace_executor_configuration, object_store=object_store
+        )
         self.patch_queries = JobPatchQueryService(
             job_db, settings, job_event_buffer=job_event_buffer
         )
-        self.artifacts = JobArtifactService(job_db)
+        self.artifacts = JobArtifactService(job_db, object_store=object_store)
         self.logs = JobLogService(settings, job_db)
         self.pause = JobPauseService(
             job_db,
@@ -91,4 +94,5 @@ class JobServices:
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
             artifact_store=artifact_store,
+            object_store=object_store,
         )

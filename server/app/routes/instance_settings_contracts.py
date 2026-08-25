@@ -47,6 +47,10 @@ class InstanceSettingsDocument(BaseModel):
     sweeper_interval_seconds: float = Field(gt=0)
     # Implicit single code pool capacity (P-0.5); restart-effective.
     code_capacity: int = Field(gt=0)
+    # Materials TTL in days (design §10); 0 = disabled. Read fresh from the
+    # DB at material completion time, so edits take effect without restart.
+    # Upper bound ~100 years: larger values overflow now() + make_interval.
+    materials_ttl_days: int = Field(ge=0, le=36500)
     workflows: InstanceWorkflowsSettings
     agent_workers: InstanceAgentWorkersSettings
     openclaw: InstanceOpenClawSettings

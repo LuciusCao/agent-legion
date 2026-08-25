@@ -7,7 +7,6 @@ import { useAgentsStore } from '../stores/agentsStore'
 import { useUiStore } from '../stores/uiStore'
 import { AppShell } from './AppShell'
 import { AppBar } from '../components/AppBar'
-import { AddDialog } from '../components/AddDialog'
 import { AddItemsDialog } from '../components/AddItemsDialog'
 import { AgentStatusIndicator } from '../components/AgentStatusIndicator'
 import { MaterialIcon } from '../components/MaterialIcon'
@@ -20,10 +19,6 @@ export default function WorkspaceLayout() {
 
   const { fetchWorkerStatus } = useAgentsStore()
   const {
-    addDialogOpen,
-    closeAddDialog,
-    addDialogContext,
-    addDialogWorkspaceId,
     setWorkspacePackageDialogOpen,
     setTokenUsageDialogOpen,
     pageTitle,
@@ -139,12 +134,6 @@ export default function WorkspaceLayout() {
         open={addItemsOpen}
         onClose={() => setAddItemsOpen(false)}
         workspaceId={workspaceId}
-      />
-      <AddDialog
-        open={addDialogOpen}
-        onClose={closeAddDialog}
-        context={addDialogContext}
-        workspaceId={addDialogWorkspaceId}
       />
     </AppShell>
   )

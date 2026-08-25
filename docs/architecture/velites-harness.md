@@ -397,10 +397,10 @@ pi_config/pi_command_builder/pi_prompt 链）已整体删除（#108）。
 - Phase 1 shadow = 抽样回放（`scripts/velites_replay.py` 离线双跑 pi 与
   velites，diff 事件流与产出）；
 - Phase 2 金丝雀 = 全局 `flavor: velites` + worker capacity 压低起步，逐步
-  恢复至 96 并发（一夜 4.3 万节点、99.6%）；
+  恢复至生产量级并发（整夜跑批验证、成功率高）；
 - 升格落地（2026-08-03，PR #20/#21）：runtime 枚举/dispatch/sweeper/runtime
-  维度 + Worker UI/预检；审题链路迁 `runtime: velites` 并验证一夜
-  （8.4 万节点、97.7%）；
+  维度 + Worker UI/预检；审题链路迁 `runtime: velites` 并整夜跑批验证
+  （生产量级节点量）；
 - 金丝雀关闭（2026-08-04，`14ec130f`）：`flavor: velites` 与审题链路
   `runtime: velites` 落为 tracked 默认值。
 

@@ -1,15 +1,19 @@
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from tests.helpers import load_builtin_definition
+from tests.helpers import load_demo_legacy_intake_definition, publish_legacy_intake_revision
 from tests.helpers.auth import authenticate_client
 
 
 def _create_workspace(
     client, name="default", default_workflow_key="education_video_problems_generation"
 ):
-    return client.post(
+    workspace_id = client.post(
         "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
     ).json()["workspace"]["id"]
+    # The demo workflow no longer declares intake modes (#154); these tests
+    # post job-batches, so publish the legacy-intake variant.
+    publish_legacy_intake_revision(client.app.state.job_db, workspace_id)
+    return workspace_id
 
 
 def _create_job(client, workspace_id, question_id="Q301"):
@@ -25,7 +29,9 @@ def _create_job(client, workspace_id, question_id="Q301"):
 
 
 def _publish_next_revision(app, workspace_id):
-    definition = load_builtin_definition("education_video_problems_generation")
+    # Publish the legacy-intake variant (not the intake-less builtin) so jobs
+    # created after the upgrade keep resolving direct_ids (#154).
+    definition = load_demo_legacy_intake_definition()
     return WorkflowRevisionService(app.state.job_db).publish_workspace_revision(
         workspace_id, definition
     )

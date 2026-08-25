@@ -69,8 +69,12 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
         "output_artifacts": {},
         "run_dir": PurePosixPath(run_dir.relative_to(job_dir)).as_posix(),
     }
+    # #160 D12：与 upload_queue._bulk_transfer 同一直传判定（每个产出都有
+    # 上传规格才走直传）；直传时产物不再内嵌归档（字节走 presigned PUT）。
+    direct = bool(task.artifact_uploads) and all(name in task.artifact_uploads for name in outputs)
     with tarfile.open(archive, "w:gz") as tar:
-        for name in outputs:
-            tar.add(job_dir / PurePosixPath(name), arcname=name)
+        if not direct:
+            for name in outputs:
+                tar.add(job_dir / PurePosixPath(name), arcname=name)
         tar.add(run_dir, arcname=str(run_dir.relative_to(job_dir)))
     return metadata, archive, outputs

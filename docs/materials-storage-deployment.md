@@ -137,6 +137,11 @@ EOF
   解析下沉到 jobs）。**存量 jobs 较多时迁移 UPDATE 可能耗时数分钟，
   务必先备份数据库并在低峰执行**；迁移幂等可重入，中断后重启
   会继续。
+- 当前 schema 已到 v56：v54（`job_artifacts` 产物清单表）、v55
+  （`material_bundles`）与 v56（`job_node_status_counts` 触发器维护的
+  状态计数）均为 additive 迁移，随启动自动执行。
+- bundle 条目（文件夹整体一个条目）复用同一 bucket 与材料缓存，无额外
+  存储配置。
 - 上传一个文件验证闭环：`POST /api/workspaces/{id}/materials/presign`
   → PUT → `complete`，材料状态变 `ready`。
 - 恢复 workspace 调度（后端每次启动都会把全部 scope 重置为 paused，
@@ -146,8 +151,22 @@ EOF
 
 ## 3. 运维
 
-- **TTL**：材料过期由 bucket lifecycle 规则 + `materials.expires_at`
-  治理（治理机制随产物上云切片落地）；手工清理可用 console（`:9001`）。
+- **TTL**：材料过期由实例设置 `materials_ttl_days`（admin 全局设置 →
+  实例设置，或 `PUT /api/admin/instance-settings`）治理，非负整数天，
+  默认 `0` = 关闭。开启后：`complete` 标记 `ready` 时按当前 TTL 写
+  `materials.expires_at`（改设置即时生效，无需重启）；TTL sweeper
+  （`sweeper_enabled` 单副本后台线程）把到期行翻成 `expired`——新引用
+  在 run 创建与 dispatch 物化处都被拒（解析链只接受 `ready`），已在
+  引用中的 job 不强行失效；`expired` 超过短暂 grace（10 分钟）且
+  引用计数为 0 时物理删除（先删 S3 对象再删行，对象删除失败留到下轮
+  重试）。bucket lifecycle 规则是孤儿对象兜底：材料 key 在 bucket 根
+  （`{workspace_id}/{content_hash}/{filename}`），产物在 `jobs/` 前缀
+  下，Worker 直传的暂存对象在 `jobs-staging/` 前缀下（Host 核验后服务端
+  copy 提升到 `jobs/` 权威 key 并 best-effort 删除暂存对象），三条前缀
+  分开配规则——材料侧按你们对上传内容的数据分级策略设保留期（务必
+  显著长于 `materials_ttl_days`，让 DB 侧先完成引用检查），`jobs/`
+  前缀按产物保留策略另设，`jobs-staging/` 配短保留（如 1 天，孤儿
+  暂存对象只是失败残留）。手工清理可用 console（`:9001`）。
 - **缓存**：`data/materials_cache/` 是可淘汰缓存，可随时清空（下次
   dispatch 重新下载）；worker 侧在 `{work_root}/materials_cache`。
 - **迁移后端**（RustFS → AWS S3 或反向）：改 `deploy/.env` 的

@@ -42,9 +42,8 @@ def test_load_demo_workflow_definition():
 
     assert definition.key == "education_video_problems_generation"
     assert definition.label == "教学视频脚本与题目生成（示例）"
-    direct_ids = definition.intake.modes["direct_ids"]
-    assert direct_ids.label == "按知识点批量"
-    assert direct_ids.input_field == "knowledge_point_ids"
+    # Legacy intake modes are retired (#154): the demo DAG declares none.
+    assert definition.intake.modes == {}
     assert definition.nodes["intake_knowledge_points"].label == "读取知识点"
     assert definition.nodes["write_script"].label == "撰写教学视频脚本"
     assert definition.nodes["write_script"].after == ["intake_knowledge_points"]
@@ -191,9 +190,10 @@ def test_load_demo_workflow_capabilities():
 
     assert definition.key == "education_video_problems_generation"
     assert definition.label == "教学视频脚本与题目生成（示例）"
-    assert set(definition.intake.modes) == {"direct_ids"}
+    assert set(definition.intake.modes) == set()
 
     assert list(definition.nodes) == [
+        "_start",
         "intake_knowledge_points",
         "write_script",
         "review_script",
@@ -201,6 +201,10 @@ def test_load_demo_workflow_capabilities():
         "review_questions",
         "publish_content",
     ]
+    start = definition.nodes["_start"]
+    assert start.node_type == "start"
+    assert start.accepted_item_types == ("material",)
+    assert definition.start_node is start
     assert definition.nodes["intake_knowledge_points"].capability == "intake_knowledge_points"
     assert definition.nodes["write_script"].capability == "write_script"
     assert definition.nodes["review_script"].after == ["write_script"]

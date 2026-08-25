@@ -91,7 +91,7 @@ class JobIntakeService:
             self.settings.executor_runtime.workflows.custom_nodes_enabled,
             workspace_id,
             workflow_key,
-            [node.key for node in definition.nodes.values()],
+            list(definition.executable_nodes),
         )
 
         if payload.get("async_processing"):
@@ -107,12 +107,12 @@ class JobIntakeService:
                 node_code_versions,
             )
 
-        # Filter candidates that already exist in the workspace so duplicates are
-        # reported as created_count=0 instead of failing the whole batch. The
-        # dedup key set is a lightweight projection that grows with every
+        # Filter candidates that already exist in this workflow so duplicates
+        # are reported as created_count=0 instead of failing the whole batch.
+        # The dedup key set is a lightweight projection that grows with every
         # accepted candidate, so intra-request duplicates across chunk
         # boundaries are filtered exactly like pre-existing jobs.
-        existing_keys = self.job_db.list_job_dedup_keys(workspace_id)
+        existing_keys = self.job_db.list_job_dedup_keys(workspace_id, workflow_key)
         candidates, resolved_any = resolve_fresh_candidates(
             spec,
             entity,
@@ -161,15 +161,27 @@ class JobIntakeService:
             workspace_id=workspace_id,
             frozen_pins={"node_code_versions": node_code_versions},
         )
-        jobs = self.job_db.create_jobs_bulk(
-            candidates=candidates,
-            workflow_key=workflow_key,
-            run_id=batch["id"],
-            node_keys=list(definition.nodes),
-            workspace_id=workspace_id,
-            revision=active_revision,
-            frozen_config=node_config,
-        )
+        try:
+            jobs = self.job_db.create_jobs_bulk(
+                candidates=candidates,
+                workflow_key=workflow_key,
+                run_id=batch["id"],
+                node_keys=list(definition.executable_nodes),
+                workspace_id=workspace_id,
+                revision=active_revision,
+                frozen_config=node_config,
+            )
+        except Exception:
+            # create_run committed before create_jobs_bulk ran; without
+            # compensation the orphaned run row would make an identical
+            # resubmission hit the deterministic-id upsert and return the
+            # empty run. Best-effort (guarded by not-exists): never mask the
+            # original failure.
+            try:
+                self.job_db.delete_run_without_jobs(str(batch["id"]))
+            except Exception:
+                logger.warning("run %s left orphaned after job creation failed", batch["id"])
+            raise
         if jobs:
             notify_schedulable_work()
 

@@ -21,19 +21,19 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
     "key": DEMO_WORKFLOW_KEY,
     "label": "教学视频脚本与题目生成（示例）",
     "schema_version": 2,
-    "intake": {
-        "modes": {
-            # Legacy intake mode (retired in a later slice): the demo's main
-            # path is material items — the user uploads (or picks the seeded
-            # sample) knowledge-point markdown and each material becomes one
-            # job; the intake node reads it via ctx.material.
-            "direct_ids": {
-                "label": "按知识点批量",
-                "input_field": "knowledge_point_ids",
-            },
-        },
-    },
+    # No legacy intake modes (retired in #154): the demo's only path is
+    # material/ref items — the user uploads (or picks the seeded sample)
+    # knowledge-point markdown and each material becomes one job; the intake
+    # node reads it via ctx.material.
     "nodes": {
+        # Entry contract (EXEC-WORKFLOW-START-001): the demo runs on uploaded
+        # knowledge-point materials only — ref items are rejected at run
+        # creation and the AddItemsDialog "粘贴 ID" tab is disabled.
+        "_start": {
+            "label": "入口",
+            "type": "start",
+            "accepted_item_types": ["material"],
+        },
         "intake_knowledge_points": {
             "label": "读取知识点",
             "capability": "intake_knowledge_points",
@@ -85,6 +85,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         },
     },
     "edges": [
+        {"from": "_start", "to": "intake_knowledge_points"},
         {"from": "intake_knowledge_points", "to": "write_script"},
         {"from": "intake_knowledge_points", "to": "generate_questions"},
         {"from": "write_script", "to": "review_script"},

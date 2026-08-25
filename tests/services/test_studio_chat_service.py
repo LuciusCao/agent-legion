@@ -52,6 +52,33 @@ TEXT_SCRIPT = {
     ],
 }
 
+INTERRUPTED_TEXT_SCRIPT = {
+    "capabilities": {"loadSession": False, "mcpCapabilities": {"http": False, "sse": False}},
+    "on_prompt": [
+        {
+            "notify": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "step one,"},
+            }
+        },
+        {
+            "notify": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tc-mid",
+                "title": "agent-legion-studio__validate_workflow",
+                "kind": "other",
+                "status": "completed",
+            }
+        },
+        {
+            "notify": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "step two."},
+            }
+        },
+    ],
+}
+
 MCP_PERMISSION_SCRIPT = {
     "on_prompt": [
         {
@@ -329,6 +356,40 @@ def test_session_lifecycle_turn_and_token_revocation(chat, job_db) -> None:
     assert authenticate_scoped_token(job_db, token) is None
     with pytest.raises(ConflictError):
         service.send_message(session["id"], workspace_id, "again")
+
+
+def test_tool_call_splits_turn_text_into_interleaved_messages(chat) -> None:
+    """A tool call mid-turn closes the open text row: chunks after it start a
+    fresh message below the tool card, so rendering interleaves by seq instead
+    of stacking all text above every tool call."""
+    service, _bus, register, workspace_id, user_id = chat
+    register(INTERRUPTED_TEXT_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+
+    service.send_message(session["id"], workspace_id, "do two steps")
+    _wait_for(
+        lambda: (
+            len(
+                [
+                    m
+                    for m in service.list_messages(session["id"], workspace_id)
+                    if m["kind"] == "text" and m["role"] == "agent"
+                ]
+            )
+            == 2
+        )
+    )
+
+    messages = service.list_messages(session["id"], workspace_id)
+    visible = [
+        m
+        for m in messages
+        if m["kind"] == "tool_call" or (m["kind"] == "text" and m["role"] == "agent")
+    ]
+    assert [m["kind"] for m in visible] == ["text", "tool_call", "text"]
+    assert visible[0]["content"]["text"] == "step one,"
+    assert visible[1]["content"]["toolCallId"] == "tc-mid"
+    assert visible[2]["content"]["text"] == "step two."
 
 
 def test_thought_chunks_persist_as_coalesced_thought_message(chat) -> None:

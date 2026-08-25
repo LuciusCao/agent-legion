@@ -23,8 +23,10 @@ import json
 import logging
 from typing import Any
 
+from server.app.agent_broker.artifact_object_block import inject_artifact_object_block
 from server.app.config_schema import node_safe_settings_config
 from server.app.db.transaction import read_connection
+from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.material_cache import material_claim_block
 from server.app.services.run_payload import sdk_batch_row
 
@@ -97,6 +99,7 @@ def resolve_code_runtime_context(
     manifest: dict[str, Any],
     database_dsn: Any,
     settings_config: dict[str, Any] | None,
+    object_store: JobArtifactObjectStore | None = None,
 ) -> dict[str, Any]:
     """Rebuild the full runtime_context at claim time (memory only).
 
@@ -135,7 +138,7 @@ def resolve_code_runtime_context(
                 logger.warning(
                     "run %s changed since enqueue (hash mismatch) for job %s", batch_id, job_id
                 )
-    return {
+    resolved = {
         **manifest,
         "runtime_context": {
             "job": _json_safe(dict(job)) if job else {},
@@ -148,9 +151,20 @@ def resolve_code_runtime_context(
             # storage_key it signs never persist. The Worker materializes
             # from the URL into its own cache; failures here fail the claim
             # (500 → sweeper requeue, same loop as secret resolution).
-            "material": material_claim_block(database_dsn, workspace_id, job or {}),
+            "material": material_claim_block(
+                database_dsn,
+                workspace_id,
+                job or {},
+                storage=object_store.storage if object_store is not None else None,
+            ),
         },
     }
+    # D12 (#160): claim-time object-storage artifact channel (presigned PUT
+    # for outputs, presigned GET for staged inputs) — memory-only like the
+    # secret injection above; a storage error degrades to the legacy CAS
+    # channel instead of failing the claim.
+    inject_artifact_object_block(object_store, resolved)
+    return resolved
 
 
 def _fetch_row(database_dsn: Any, query: str, value: Any) -> dict[str, Any] | None:

@@ -115,9 +115,14 @@ echo "AGENT_LEGION_S3_BUCKET -> ${BUCKET}"
 # override=False——调用 shell 已导出的同名变量优先）。任何失败（endpoint
 # 不可达、boto3 缺失、凭据错误）都降级为提示，不阻断初始化。
 if PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run python - <<'PY'
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-load_dotenv(override=False)
+# 显式传路径：无参 load_dotenv() 走 find_dotenv 的调用栈探测，在本脚本的
+# stdin heredoc（python -）模式下必抛 AssertionError，被外层降级吞成
+# 「endpoint 不可达」的误导性提示。
+load_dotenv(Path(".env"), override=False)
 
 import boto3
 from botocore.exceptions import ClientError

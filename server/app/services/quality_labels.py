@@ -16,8 +16,9 @@ from psycopg.types.json import Jsonb
 
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
-from server.app.services.artifact_store import ArtifactNotFoundError, ArtifactStore
+from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.quality_artifact_contents import artifact_contents
 
 QUALITY_REASON_CODES = (
     "fact_error",
@@ -27,37 +28,6 @@ QUALITY_REASON_CODES = (
     "format_violation",
     "other",
 )
-
-# Artifact bodies are inlined into the item detail response; cap each blob so
-# a pathological output cannot blow up the payload.
-_ARTIFACT_CONTENT_LIMIT = 32 * 1024
-
-
-def artifact_contents(
-    artifact_store: ArtifactStore | None, job_id: str, node_keys: str | set[str]
-) -> list[dict[str, Any]]:
-    """Inline the stored artifact bodies of one job's node(s) (shared by
-    quality item details and replay details)."""
-    if artifact_store is None:
-        return []
-    wanted = {node_keys} if isinstance(node_keys, str) else set(node_keys)
-    contents: list[dict[str, Any]] = []
-    for ref in artifact_store.refs_for_job(job_id):
-        if ref["node_key"] not in wanted:
-            continue
-        try:
-            path = artifact_store.open(ref["hash"])
-            raw = path.read_bytes()
-        except (ArtifactNotFoundError, OSError):
-            continue
-        contents.append(
-            {
-                "name": ref["name"],
-                "content": raw[:_ARTIFACT_CONTENT_LIMIT].decode("utf-8", errors="replace"),
-                "truncated": len(raw) > _ARTIFACT_CONTENT_LIMIT,
-            }
-        )
-    return contents
 
 
 _LATEST_RUN_LABEL = """
@@ -78,9 +48,15 @@ _ITEM_COLUMNS = """
 
 
 class QualityLabelService:
-    def __init__(self, db_path: DatabaseDsn, artifact_store: ArtifactStore | None = None) -> None:
+    def __init__(
+        self,
+        db_path: DatabaseDsn,
+        artifact_store: ArtifactStore | None = None,
+        object_store: Any = None,
+    ) -> None:
         self.db_path = db_path
         self.artifact_store = artifact_store
+        self.object_store = object_store
 
     def _get_item(self, conn, workspace_id: str, item_id: str) -> dict[str, Any]:
         row = conn.execute(
@@ -232,4 +208,4 @@ class QualityLabelService:
         }
 
     def _artifact_contents(self, job_id: str, node_key: str) -> list[dict[str, Any]]:
-        return artifact_contents(self.artifact_store, job_id, node_key)
+        return artifact_contents(self.artifact_store, job_id, node_key, self.object_store)

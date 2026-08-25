@@ -17,7 +17,8 @@ Agent Legion 是一个自托管控制台，把 AI agent 变成内容生产线的
   拥有自己的 DAG 与版本历史。
 - **批量进，结果出。** 一次 API 调用提交一批工作项，每项成为一个 job
   流过 DAG。支持单节点重跑、跑到指定节点、从暂停处继续——下游过期
-  状态自动跟踪。
+  状态自动跟踪。条目类型除了单文件材料与外部引用，还有 **bundle 文件夹
+  条目**——整个文件夹作为一个条目提交（manifest 引用式）。
 - **实时运维控制台。** React SPA：实时 DAG 视图、SSE 仪表盘事件、
   WebSocket agent 状态、运行日志、产物、token 用量统计、按失败类别
   批量重跑。
@@ -53,6 +54,10 @@ createdb agent_legion
 cp .env.example .env                        # 然后编辑：设置 AGENT_LEGION_DATABASE_URL
 cd frontend && npm install && cd ..
 ```
+
+同时需要配置 `AGENT_LEGION_S3_*` 对象存储（本地可起 RustFS，见
+[docs/materials-storage-deployment.md](docs/materials-storage-deployment.md)）。
+未配置时实例其余功能正常，但材料 API 降级为 503，示例材料播种跳过。
 
 ### 2. 一次性本地配置
 
@@ -103,8 +108,10 @@ make import-demo      # 安装并锁定 demo skills；不存在时创建并 seed
 2. 在 workspace **设置 → Agent 默认配置** 里填入你的 LLM 端点提供的
    provider/model。
 3. 打开 workspace 的自动调度，并在 Worker 控制台打开 claim。
-4. 提交一批任务：在 workspace 里「添加条目」上传知识点 markdown（或粘贴
-   已播种的示例材料 ID），确认后创建运行——每个材料一个 job。
+4. 提交一批任务：在 workspace 里「添加条目」对话框上传知识点 markdown，
+   或在面板中勾选已播种的示例材料，确认后创建运行——每个材料一个
+   job。（「粘贴 ID」面板是 **ref 条目**：需先在 admin 配置外部服务连接，
+   粘贴该连接下的外部 ID。）
 5. 看 DAG 实时点亮；每个节点完成后可以查看它的完整执行痕迹与产物。
 
 ### 下一步
@@ -123,6 +130,7 @@ make import-demo      # 安装并锁定 demo skills；不存在时创建并 seed
 |-------|--------|
 | 把系统跑起来 / 跑 demo | 本文件 + `examples/README.md` |
 | 运维（部署、worker、远程执行） | [docs/](docs/README.md)——部署、worker 与 runbook 文档 |
+| 材料存储（RustFS/S3） | [docs/materials-storage-deployment.md](docs/materials-storage-deployment.md) |
 | 理解原理（架构、配置参考、runtime） | [docs/architecture/](docs/architecture/README.md) |
 | 贡献代码 | [CONTRIBUTING.md](CONTRIBUTING.md) 与 [AGENTS.md](AGENTS.md) |
 | 跟踪变更 | [CHANGELOG.md](CHANGELOG.md) |

@@ -16,6 +16,7 @@ from server.app.routes.job_view_contracts import (
     JobsResponse,
     JobSummaryResponse,
 )
+from tests.helpers import publish_legacy_intake_revision
 
 EXPECTED_OPERATIONS = {
     ("get", "/api/workspaces"): "WorkspacesResponse",
@@ -130,6 +131,9 @@ def _create_test_job(client):
     )
     assert ws_response.status_code == 200
     workspace_id = ws_response.json()["workspace"]["id"]
+    # The demo workflow no longer declares intake modes (#154); publish the
+    # legacy-intake variant so the job-batches path resolves direct_ids.
+    publish_legacy_intake_revision(client.app.state.job_db, workspace_id)
     response = client.post(
         f"/api/workspaces/{workspace_id}/job-batches",
         json={

@@ -32,8 +32,11 @@ from server.app.services.artifact_store import ArtifactStore
 from server.app.services.demo_node_migration import migrate_demo_node_codes_to_workspaces
 from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.instance_settings import apply_instance_settings
+from server.app.services.job_artifact_maintenance import JobArtifactMaintenanceThread
+from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
+from server.app.services.material_ttl import MaterialTtlSweeperThread
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
 from server.app.services.quality_labels import QualityLabelService
@@ -89,6 +92,14 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # operator explicitly resumes it in this process lifetime.
     workspace_worker_control.reset_all_to_paused()
     artifact_store = ArtifactStore(settings.data_dir / "artifacts", job_db.path)
+    # Instance object storage is env-only infra config (AGENT_LEGION_S3_*):
+    # unconfigured instances keep the API up — materials degrade to 503 and
+    # job-artifact upload/read simply falls back to the local job_dir (D12).
+    # build_s3_storage_checked logs one startup self-check line (OK/DEGRADED/
+    # configured=false); a failed probe never blocks startup. One client is
+    # shared by the materials service and the job-artifact object store.
+    object_storage = build_s3_storage_checked()
+    job_artifact_objects = JobArtifactObjectStore(job_db.path, object_storage)
     job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
         job_db, settings, job_event_manager.bus
     )
@@ -130,10 +141,14 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         settings.jobs_dir,
         settings.data_dir / "agent_bundles",
         skill_manager=skill_manager,
+        object_store=job_artifact_objects,
+        max_archive_bytes=settings.executor_runtime.agent_workers.max_archive_bytes,
     )
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None
     artifact_gc_thread: ArtifactOrphanGcThread | None = None
+    artifact_maintenance_thread: JobArtifactMaintenanceThread | None = None
+    material_ttl_thread: MaterialTtlSweeperThread | None = None
     background_tasks = BackgroundTasks(
         workspace_event_aggregator=workspace_event_aggregator,
         agent_broadcast_controller=agent_manager.broadcast_controller,
@@ -144,6 +159,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         nonlocal workflow_worker_thread, sweeper_thread, artifact_gc_thread
+        nonlocal artifact_maintenance_thread, material_ttl_thread
         job_event_manager.bus.attach_loop(asyncio.get_running_loop())
         if start_worker:
             validate_settings(settings)
@@ -168,9 +184,18 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             if settings.executor_runtime.sweeper_enabled:
                 artifact_gc_thread = ArtifactOrphanGcThread(artifact_store)
                 artifact_gc_thread.start()
+                artifact_maintenance_thread = JobArtifactMaintenanceThread(
+                    job_artifact_objects, job_db, settings
+                )
+                artifact_maintenance_thread.start()
+                # Materials TTL (design §10): same single-replica ownership.
+                material_ttl_thread = MaterialTtlSweeperThread(job_db.path, object_storage)
+                material_ttl_thread.start()
         background_tasks.start(app)
+        studio_chat_service.reap_zombie_sessions()
+        studio_registry = StudioAgentRegistryStore(job_db.path)
         studio_mcp, studio_mcp_app = create_studio_mcp_http_app(
-            job_db, str(StudioAgentRegistryStore(job_db.path).get()["api_base"])
+            job_db, lambda: str(studio_registry.get()["api_base"])
         )
         studio_mcp_relay.set(studio_mcp_app)
         try:
@@ -183,7 +208,12 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             # Reap chat sessions before closing DB pools: teardown revokes
             # scoped tokens and settles permission waiters via the DB.
             studio_chat_service.shutdown()
-            for thread in (sweeper_thread, artifact_gc_thread):
+            for thread in (
+                sweeper_thread,
+                artifact_gc_thread,
+                artifact_maintenance_thread,
+                material_ttl_thread,
+            ):
                 if thread is not None:
                     thread.stop()
             if workflow_worker_thread is not None:
@@ -208,16 +238,13 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.studio_chat_service = studio_chat_service
     app.state.event_bus = job_event_manager.bus
     app.state.job_event_buffer = job_event_buffer
-    # Materials object storage is env-only infra config (AGENT_LEGION_S3_*):
-    # unconfigured instances keep the API up and degrade materials to 503.
-    # build_s3_storage_checked logs one startup self-check line (OK/DEGRADED/
-    # configured=false); a failed probe never blocks startup.
-    app.state.materials_service = MaterialsService(job_db.path, build_s3_storage_checked())
+    app.state.materials_service = MaterialsService(job_db.path, object_storage)
+    app.state.job_artifact_objects = job_artifact_objects
     app.state.workspace_event_aggregator = workspace_event_aggregator
     executor_catalog = ExecutorCatalogService(settings)
     workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db, settings)
     workspace_configuration = WorkspaceConfigurationService(job_db, settings, agent_manager)
-    job_packages = JobPackageService(job_db, settings)
+    job_packages = JobPackageService(job_db, settings, object_store=job_artifact_objects)
     app.include_router(create_auth_router(app.state.auth_service), prefix="/api")
     app.include_router(
         create_router(
@@ -237,11 +264,16 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             agent_completion=agent_completion,
             ops_metrics=ops_metrics,
             quality_sampling=QualitySamplingService(job_db.path),
-            quality_labels=QualityLabelService(job_db.path, artifact_store),
+            quality_labels=QualityLabelService(
+                job_db.path, artifact_store, object_store=job_artifact_objects
+            ),
             quality_stats=QualityStatsService(job_db.path),
-            quality_replays=QualityReplayService(job_db, artifact_store),
+            quality_replays=QualityReplayService(
+                job_db, artifact_store, object_store=job_artifact_objects
+            ),
             studio_chat_service=studio_chat_service,
             materials_service=app.state.materials_service,
+            job_artifact_objects=job_artifact_objects,
         )
     )
     # After the API routers so /api/studio-agent/tools/* routes match first;

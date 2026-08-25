@@ -64,6 +64,10 @@ def handle_permission_request(
     if runtime is None:
         return {"deny": True}
     with runtime.lock:
+        # Teardown flips `closed` under this same lock before its settle
+        # sweep; parking after that point would hang until the timeout (#158).
+        if runtime.closed:
+            return {"deny": True}
         runtime.pending_permissions[request_id] = pending
     service._append_message(
         session_id,
@@ -76,23 +80,45 @@ def handle_permission_request(
             "options": options,
         },
     )
-    service._db.update_studio_chat_session(session_id, status="awaiting_permission")
-    service._publish_session(session_id)
-    try:
-        settled = pending.event.wait(timeout=PERMISSION_TIMEOUT_SECONDS)
-        if not settled:
-            logger.warning("studio chat permission %s timed out; auto-denied", request_id)
-            pending.decision = {"deny": True, "via": "timeout"}
-    finally:
+    # Atomic check-and-set (#158): an unconditional write could overwrite a
+    # concurrent close/error back to a live state. 'awaiting_permission' is an
+    # allowed current state because concurrent prompts of the same turn
+    # re-park. When the guard fails the session is closing or dead: deny at
+    # once instead of parking against a torn-down runtime.
+    parked = service._db.update_studio_chat_session_if(
+        session_id,
+        status_in=("running", "awaiting_permission"),
+        status="awaiting_permission",
+    )
+    if not parked:
         with runtime.lock:
             runtime.pending_permissions.pop(request_id, None)
-        # Only the awaiting_permission → running transition is ours: a close
-        # (or fatal error) that settled this waiter as denied must not be
-        # overwritten back to running (ghost live session).
-        current = service._db.get_studio_chat_session(session_id) or {}
-        if current.get("status") == "awaiting_permission":
-            service._db.update_studio_chat_session(session_id, status="running")
-            service._publish_session(session_id)
+        pending.decision = {"deny": True, "via": "session_closed"}
+    else:
+        service._publish_session(session_id)
+        try:
+            settled = pending.event.wait(timeout=PERMISSION_TIMEOUT_SECONDS)
+            if not settled:
+                logger.warning("studio chat permission %s timed out; auto-denied", request_id)
+                with runtime.lock:
+                    # Dict membership is the not-yet-settled criterion (#158):
+                    # a human answer that raced the timeout already popped the
+                    # request and owns the decision.
+                    orphaned = runtime.pending_permissions.pop(request_id, None)
+                    if orphaned is not None:
+                        orphaned.decision = {"deny": True, "via": "timeout"}
+        finally:
+            with runtime.lock:
+                runtime.pending_permissions.pop(request_id, None)
+                still_parked = bool(runtime.pending_permissions)
+            # Only the awaiting_permission → running transition is ours, and
+            # only once no prompt of this turn is still parked: a close (or
+            # fatal error) that settled this waiter must not be overwritten
+            # back to running (ghost live session, #158).
+            if not still_parked and service._db.update_studio_chat_session_if(
+                session_id, status_in=("awaiting_permission",), status="running"
+            ):
+                service._publish_session(session_id)
     decision = pending.decision
     service._append_message(
         session_id,

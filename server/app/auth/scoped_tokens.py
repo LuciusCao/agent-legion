@@ -20,9 +20,16 @@ from server.app.auth.sessions import hash_token, issue_token
 from server.app.jobs.queries import JobQueries
 
 STUDIO_AGENT_SCOPE = "studio_agent"
-# Run duration plus grace. Deliberately fixed (no sliding renewal) so a leaked
-# token dies on its own.
+# Run duration plus grace. The TTL is fixed at mint time, but a live studio
+# chat session slides it forward at each turn start (renew_scoped_token below,
+# #158): the token the agent holds in its MCP headers cannot be swapped
+# mid-session, so the same token's expiry is extended while a human keeps the
+# session active. A leaked token still dies on its own once the session goes
+# idle or closes (close revokes it outright).
 SCOPED_TOKEN_TTL = timedelta(hours=2)
+# Renew at turn start only when less than this much life remains, so active
+# sessions do not pay an UPDATE per turn.
+SCOPED_TOKEN_RENEW_THRESHOLD = timedelta(minutes=30)
 
 
 def mint_scoped_token(
@@ -61,3 +68,24 @@ def authenticate_scoped_token(queries: JobQueries, token: str) -> dict[str, Any]
 def revoke_scoped_token(queries: JobQueries, token: str) -> None:
     """Revoke a scoped token (run finished or cancelled)."""
     queries.revoke_scoped_token(hash_token(token))
+
+
+def renew_scoped_token(
+    queries: JobQueries,
+    token: str,
+    *,
+    ttl: timedelta = SCOPED_TOKEN_TTL,
+    threshold: timedelta = SCOPED_TOKEN_RENEW_THRESHOLD,
+    now: datetime | None = None,
+) -> None:
+    """Slide a live token's expiry a full TTL forward when close to expiry.
+
+    Called at studio chat turn start (#158): chat sessions outlive the fixed
+    TTL, and the agent's MCP headers cannot be re-pointed mid-session, so the
+    same token is kept alive while the human keeps prompting. No-op for
+    revoked tokens, tokens with more than ``threshold`` life left, and —
+    deliberately — already-expired tokens: an idle session's leaked token
+    must not spring back to life on the next prompt.
+    """
+    current = now or datetime.now(UTC)
+    queries.extend_scoped_token_expiry(hash_token(token), current + ttl, current + threshold)

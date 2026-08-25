@@ -13,7 +13,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from server.app.auth.dependencies import reject_studio_agent_scope
+from server.app.auth.dependencies import enforce_scoped_workspace_binding, reject_studio_agent_scope
 from server.app.auth.workspace_access import require_workspace_access
 from server.app.events import JobEventManager
 from server.app.routes.job_http import raise_job_http_error
@@ -44,8 +44,11 @@ def create_studio_chat_router(
     # Effecting endpoints (session lifecycle, message send, permission
     # answers) refuse studio-agent scoped tokens (STUDIO-AGENT-001): a scoped
     # token must not mint fresh tokens via create_session nor self-approve
-    # its own permission prompts. Reads stay on the plain router.
+    # its own permission prompts. Reads stay on the plain router but enforce
+    # the scoped token's workspace binding (#158): a run token may only read
+    # the chat data of the workspace it was minted for.
     guarded = APIRouter(dependencies=[Depends(reject_studio_agent_scope)])
+    scoped_read = Annotated[dict[str, Any], Depends(enforce_scoped_workspace_binding)]
 
     @router.get(
         "/workspaces/{workspace_id}/studio-chat/agents",
@@ -75,7 +78,7 @@ def create_studio_chat_router(
         "/workspaces/{workspace_id}/studio-chat/sessions",
         response_model=StudioChatSessionsResponse,
     )
-    def list_sessions(workspace_id: str) -> StudioChatSessionsResponse:
+    def list_sessions(workspace_id: str, _user: scoped_read) -> StudioChatSessionsResponse:
         return StudioChatSessionsResponse(
             sessions=[
                 StudioChatSessionRecord.model_validate(row)
@@ -87,7 +90,9 @@ def create_studio_chat_router(
         "/workspaces/{workspace_id}/studio-chat/sessions/{session_id}",
         response_model=StudioChatSessionResponse,
     )
-    def get_session(workspace_id: str, session_id: str) -> StudioChatSessionResponse:
+    def get_session(
+        workspace_id: str, session_id: str, _user: scoped_read
+    ) -> StudioChatSessionResponse:
         try:
             session = service.get_session(session_id, workspace_id)
         except JobServiceError as exc:
@@ -110,7 +115,7 @@ def create_studio_chat_router(
         response_model=StudioChatMessagesResponse,
     )
     def list_messages(
-        workspace_id: str, session_id: str, after_seq: int = 0
+        workspace_id: str, session_id: str, _user: scoped_read, after_seq: int = 0
     ) -> StudioChatMessagesResponse:
         try:
             messages = service.list_messages(session_id, workspace_id, after_seq=after_seq)
@@ -139,7 +144,7 @@ def create_studio_chat_router(
         responses={200: {"content": {"text/event-stream": {}}}},
     )
     async def session_events(
-        request: Request, workspace_id: str, session_id: str
+        request: Request, workspace_id: str, session_id: str, _user: scoped_read
     ) -> StreamingResponse:
         if job_event_manager is None:
             raise HTTPException(status_code=503, detail="Event manager not available")

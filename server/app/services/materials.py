@@ -22,6 +22,7 @@ from server.app.services.job_errors import (
     JobServiceError,
     NotFoundError,
 )
+from server.app.services.material_ttl import mark_ready
 from server.app.storage import ObjectStorage
 
 _PRESIGN_EXPIRY_SECONDS = 3600
@@ -72,6 +73,11 @@ class MaterialsService:
         # Public seam: tests inject a fake ObjectStorage; an unconfigured
         # instance keeps None and the API degrades to 503.
         self.storage = storage
+
+    @property
+    def database_dsn(self) -> DatabaseDsn:
+        """The workspace DSN; adjunct services (bundles) share it."""
+        return self._dsn
 
     def _require_storage(self) -> ObjectStorage:
         if self.storage is None:
@@ -198,10 +204,9 @@ class MaterialsService:
                     (material_id,),
                 )
             else:
-                conn.execute(
-                    "update materials set status='ready' where id=%s",
-                    (material_id,),
-                )
+                # TTL (design §10): expires_at from the instance setting,
+                # read fresh at every completion.
+                mark_ready(conn, self._dsn, material_id)
         if failure is not None:
             raise MaterialVerificationError(failure)
         return _record(self._fetch_row(workspace_id, material_id))
@@ -287,6 +292,14 @@ class MaterialsService:
             ).fetchone()
             if referencing is not None:
                 raise MaterialInUseError(f"Material is referenced by job {referencing['id']}")
+            # A bundle member cannot be deleted either (#156): the bundle
+            # manifest would silently lose a file. Delete the bundle first.
+            member_of = conn.execute(
+                "select bundle_id from material_bundle_members where material_id=%s limit 1",
+                (material_id,),
+            ).fetchone()
+            if member_of is not None:
+                raise MaterialInUseError(f"Material is a member of bundle {member_of['bundle_id']}")
             # 先删对象再删行（保持既有顺序）：对象删除失败则事务回滚、行仍在
             # 可重试；行已删而对象残留才是不可恢复方向。
             storage.delete_object(str(row["storage_key"]))

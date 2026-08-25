@@ -63,6 +63,8 @@ edges:
         ("parse", "classify"),
         ("classify", "uploadable"),
         ("classify", "non_uploadable"),
+        # No start declared: the loader injects one pointing at the implicit root.
+        ("_start", "parse"),
     ]
     assert definition.edges[1].condition is not None
     assert definition.edges[1].condition.artifact == "decision.json"

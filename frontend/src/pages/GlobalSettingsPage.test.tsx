@@ -96,6 +96,7 @@ const instanceSettings: InstanceSettingsResponse = {
   sweeper_enabled: true,
   sweeper_interval_seconds: 60,
   code_capacity: 16,
+  materials_ttl_days: 0,
   workflows: { enabled: true },
   agent_workers: { max_archive_bytes: 104857600, min_protocol_version: 2 },
   openclaw: {
@@ -194,6 +195,12 @@ describe('GlobalSettingsPage', () => {
     // 实例设置表单异步加载，label 需等待（导航按钮会提前匹配标题文本）
     expect(await screen.findByLabelText('日志保留天数')).toHaveValue(30)
     expect(screen.getByText(/需重启服务才能生效/)).toBeInTheDocument()
+    // 材料 TTL 字段级 hint：保存即生效，且 input 带 max 上界。
+    expect(screen.getByText('保存后立即生效，无需重启')).toBeInTheDocument()
+    expect(screen.getByLabelText('材料保留天数（0 关闭）')).toHaveAttribute(
+      'max',
+      '36500'
+    )
   })
 
   it('keeps the save button disabled until the form is dirty', async () => {

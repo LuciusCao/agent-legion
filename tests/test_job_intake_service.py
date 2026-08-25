@@ -6,14 +6,16 @@ from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from tests.helpers import load_builtin_definition
+from tests.helpers import load_demo_legacy_intake_definition
 
 
 def _create_workspace_with_revision(
     job_db, settings, workflow_key="education_video_problems_generation"
 ):
     workspace = job_db.create_workspace("default", default_workflow_key=workflow_key)
-    definition = load_builtin_definition(workflow_key)
+    # The demo workflow no longer declares intake modes (#154); these tests
+    # exercise the job-batches intake service, so seed the legacy variant.
+    definition = load_demo_legacy_intake_definition()
     seed_demo_workspace_node_codes(settings, workspace["id"])
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     return workspace
@@ -161,7 +163,7 @@ def test_list_job_dedup_keys_returns_only_key_columns(job_db, settings):
         },
     )
 
-    keys = job_db.list_job_dedup_keys("default")
+    keys = job_db.list_job_dedup_keys("default", "education_video_problems_generation")
 
     assert keys == {("question", "Q1"), ("question", "Q2")}
 
@@ -284,3 +286,28 @@ def test_job_intake_freezes_workspace_factory_seed_pins(job_db, settings):
     for pin in pins.values():
         assert pin["version"] == 1
         assert len(pin["code_hash"]) == 64
+
+
+def test_job_intake_compensates_orphan_run_when_job_creation_fails(job_db, settings, monkeypatch):
+    """create_run commits before create_jobs_bulk; a bulk failure must not
+    leave an orphaned run row that an identical resubmission would upsert-hit."""
+    _create_workspace_with_revision(job_db, settings)
+    service = JobIntakeService(job_db, settings)
+
+    def fail_bulk(**kwargs):
+        raise RuntimeError("bulk insert boom")
+
+    monkeypatch.setattr(job_db, "create_jobs_bulk", fail_bulk)
+
+    with pytest.raises(RuntimeError, match="bulk insert boom"):
+        service.create_batch(
+            "default",
+            {
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "entity": "question",
+                "knowledge_point_ids": ["Q1"],
+            },
+        )
+
+    assert job_db.list_runs("default") == []

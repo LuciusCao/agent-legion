@@ -105,7 +105,7 @@ def test_list_jobs_exposes_job_workflow_version_and_outdated_status(query_servic
         source_id="Q1",
         run_id=batch["id"],
         title="Question 1",
-        node_keys=list(definition.nodes),
+        node_keys=list(definition.executable_nodes),
         workspace_id=workspace["id"],
         workflow_revision_id=original["id"],
         workflow_version=original["version"],
@@ -284,6 +284,9 @@ def test_job_query_service_detail_orders_nodes_and_uses_edge_dependencies(query_
     ]
     nodes = {node["node_key"]: node for node in detail["nodes"]}
     assert nodes["write_script"]["after"] == ["intake_knowledge_points"]
+    # Root nodes must not inherit the synthetic `_start -> root` edge: start
+    # nodes are a definition-level concept and never appear in job views.
+    assert nodes["intake_knowledge_points"]["after"] == []
 
 
 def test_job_query_service_detail_lists_artifacts_from_relative_storage_dir(

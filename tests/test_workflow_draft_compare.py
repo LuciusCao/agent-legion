@@ -432,3 +432,25 @@ def test_compare_schema_version_changed_returns_breaking_metadata_change(app_wit
     assert change["field"] == "schema_version"
     assert change["risk"] == "breaking"
     assert result["summary"]["risk_level"] == "breaking"
+
+
+def test_compare_start_contract_change_returns_breaking_change(app_with_workspace):
+    """Start 节点的 accepted_item_types 是入口契约：变更进 diff 且触发新 revision。"""
+    app, workspace_id = app_with_workspace
+    definition = load_builtin_definition("education_video_problems_generation")
+    start = definition.nodes["_start"]
+    definition.nodes["_start"] = replace(start, accepted_item_types=("material", "ref"))
+    raw = definition_to_yaml(definition)
+
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, raw)
+
+    assert result["valid"] is True
+    assert result["creates_revision"] is True
+    change = next(c for c in result["summary"]["node_changes"] if c["node_key"] == "_start")
+    assert change["type"] == "modified"
+    assert change["fields"] == ["accepted_item_types"]
+    assert change["risk"] == "breaking"
+    assert any(
+        flag["code"] == "accepted_item_types_changed" for flag in result["summary"]["risk_flags"]
+    )

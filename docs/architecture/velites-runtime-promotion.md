@@ -8,7 +8,7 @@
 
 > 本节与 §2 描述的是**实施前基线**（2026-08-02 核实），作为改动锚点存档保留；落地后的当前状态见 velites-harness.md §9。
 
-velites（`velites/` Rust agent harness）已通过金丝雀验证：一天 4.3 万生产节点、99.6% 成功率、96 并发。当前它以 `workflows.pi.flavor: pi|velites` 全局开关（`config/workflow.yaml:120`）的方式作为 pi runtime 的"实现 flavor"存在——所有 agent 定义仍是 `runtime: pi`（`config/workflow.yaml:1-46`），flavor 决定 Host 为节点生成哪套命令行。
+velites（`velites/` Rust agent harness）已通过金丝雀验证：生产量级节点量、高成功率、数十并发。当前它以 `workflows.pi.flavor: pi|velites` 全局开关（`config/workflow.yaml:120`）的方式作为 pi runtime 的"实现 flavor"存在——所有 agent 定义仍是 `runtime: pi`（`config/workflow.yaml:1-46`），flavor 决定 Host 为节点生成哪套命令行。
 
 架构方向：未来支持多种 agent 类型，**pi、openclaw、velites 是平级 runtime**，flavor 只是灰度过渡层。本计划覆盖把 velites 从 flavor 升格为 `AgentDefinition.runtime` 一等值的全部改动，以及 flavor 的三阶段退役路线。
 

@@ -82,10 +82,20 @@ class VaultService:
     """Fernet encryption plus workspace_secrets persistence in one boundary."""
 
     def __init__(
-        self, database_dsn: DatabaseDsn, settings_config: dict[str, Any] | None = None
+        self,
+        database_dsn: DatabaseDsn,
+        settings_config: dict[str, Any] | None = None,
+        memo: dict[tuple[str, str], str | None] | None = None,
     ) -> None:
         self._dsn = database_dsn
         self._settings_config = settings_config
+        # Optional caller-owned memo keyed (workspace_id, name): the workflow
+        # worker passes a per-pass dict so one scheduling pass re-reads a
+        # secret_ref only once no matter how many nodes claim it (issue #124).
+        # Values stay memory-only, same as any resolved plaintext
+        # (VAULT-SECRET-001); the memo's lifetime bounds staleness, and
+        # set/delete through this instance drop the entry immediately.
+        self._memo = memo
 
     def set(self, workspace_id: str, name: str, plaintext: str) -> dict[str, Any]:
         if not name or len(name) > _MAX_NAME_LENGTH:
@@ -105,6 +115,8 @@ class VaultService:
                 """,
                 (workspace_id, name, ciphertext),
             )
+        if self._memo is not None:
+            self._memo.pop((workspace_id, name), None)
         metadata = self.get_metadata(workspace_id, name)
         if metadata is None:  # pragma: no cover - the upsert above just wrote it
             raise VaultError(f"vault secret {name!r} was not persisted")
@@ -116,15 +128,19 @@ class VaultService:
         Callers must keep the plaintext in memory only: never persist it and
         never include it in an API response.
         """
+        if self._memo is not None and (workspace_id, name) in self._memo:
+            return self._memo[(workspace_id, name)]
         with read_connection(self._dsn) as conn:
             row = conn.execute(
                 "select ciphertext from workspace_secrets where workspace_id=%s and name=%s",
                 (workspace_id, name),
             ).fetchone()
         if row is None:
+            if self._memo is not None:
+                self._memo[(workspace_id, name)] = None
             return None
         try:
-            return (
+            plaintext = (
                 _fernet(self._settings_config)
                 .decrypt(str(row["ciphertext"]).encode("utf-8"))
                 .decode("utf-8")
@@ -133,6 +149,9 @@ class VaultService:
             raise VaultError(
                 f"vault secret {name!r} cannot be decrypted with the configured master key"
             ) from exc
+        if self._memo is not None:
+            self._memo[(workspace_id, name)] = plaintext
+        return plaintext
 
     def delete(self, workspace_id: str, name: str) -> None:
         with write_transaction(self._dsn) as conn:
@@ -140,6 +159,8 @@ class VaultService:
                 "delete from workspace_secrets where workspace_id=%s and name=%s",
                 (workspace_id, name),
             )
+        if self._memo is not None:
+            self._memo.pop((workspace_id, name), None)
 
     def get_metadata(self, workspace_id: str, name: str) -> dict[str, Any] | None:
         with read_connection(self._dsn) as conn:

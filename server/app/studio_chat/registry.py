@@ -15,8 +15,10 @@ take effect without a restart.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
@@ -27,6 +29,24 @@ DEFAULT_API_BASE = "http://127.0.0.1:8000"
 
 def default_registry_document() -> dict[str, Any]:
     return {"api_base": DEFAULT_API_BASE, "agents": []}
+
+
+def api_base_host_is_internal(api_base: str) -> bool:
+    """Whether the api_base host keeps scoped tokens inside the network (#158).
+
+    api_base is the egress target for the per-session scoped Bearer token; a
+    host that is neither loopback nor a private address means the token
+    leaves the machine, which the admin route warns about. Unresolvable
+    hostnames cannot be classified locally and count as external.
+    """
+    host = (urlsplit(api_base).hostname or "").lower()
+    if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_private
 
 
 class StudioAgentRegistryStore:

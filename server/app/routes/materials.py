@@ -13,7 +13,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.auth.workspace_access import require_workspace_access
 from server.app.routes.job_http import raise_job_http_error
+from server.app.routes.material_bundles import create_material_bundles_router
 from server.app.services.job_errors import JobServiceError
+from server.app.services.material_bundles import MaterialBundlesService
 from server.app.services.materials import (
     MaterialInUseError,
     MaterialsService,
@@ -153,4 +155,8 @@ def create_materials_router(service: MaterialsService) -> APIRouter:
             _raise_material_http_error(exc)
         return MaterialDeleteResponse(deleted=material_id)
 
+    # Bundle manifests are a materials adjunct (#156): same secured group,
+    # same DSN — mounting here keeps the exempt routes/__init__.py untouched.
+    bundles = create_material_bundles_router(MaterialBundlesService(service.database_dsn))
+    router.include_router(bundles)
     return router

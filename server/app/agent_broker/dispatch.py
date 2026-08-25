@@ -155,6 +155,10 @@ class AgentDispatchService:
                 runtime={"node_execution": asdict(node.execution)},
             )
             stage_agent_inputs(self.artifact_store, context, manifest)
+            # D12: the object-storage artifact channel (presigned PUT/GET) is
+            # injected at CLAIM time (routes/agent_worker_claims.py), memory
+            # only — no URL ever persists in the queued manifest or bundle,
+            # so a long queue backlog cannot strand expired URLs.
             manifest["command_spec"] = render_command_spec(manifest)
             if self.broker.bundle_dir is None:
                 raise RuntimeError("Agent bundle directory is not configured")
