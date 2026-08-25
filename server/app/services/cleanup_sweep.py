@@ -39,6 +39,16 @@ order by finished_at, id
 limit %s
 """
 
+# Forced-index page read (issue #122): at prod scale one terminal status
+# covers ~98% of node_runs, so the planner judged
+# idx_node_runs_status_finished_at_id unselective and chose seq scan + sort
+# of the whole expired tail PER PAGE (19min/page observed, crushing instance
+# IO and stalling the dispatch loop). SET LOCAL scoped to the page's own
+# transaction pins the index scan back; statement_timeout is the fail-fast
+# net so any future pathological plan cancels instead of running unbounded.
+_PAGE_INDEX_PIN_SQL = "set local enable_seqscan = off"
+_PAGE_TIMEOUT_SQL = "set local statement_timeout = '30s'"
+
 
 def _flush_run_dir_updates(db: JobQueries, pending: list[str]) -> None:
     """Apply buffered run_dir clears in one short transaction."""
@@ -142,10 +152,12 @@ def sweep_expired_node_runs(
 
     Rows are paged per (terminal status, artifact action) with a
     ``(finished_at, id)`` keyset so ``idx_node_runs_status_finished_at_id``
-    serves every chunk read without sorting. Each chunk is fetched on its own
-    short-lived read connection, so no transaction is held while files are
-    deleted. The SQL cutoff is a coarse superset filter; the exact per-row
-    retention check in ``_remove_row_artifacts`` is unchanged.
+    serves every chunk read without sorting; the index choice is enforced
+    (``_PAGE_INDEX_PIN_SQL``), not left to the planner (issue #122). Each
+    chunk is fetched on its own short-lived read connection, so no
+    transaction is held while files are deleted. The SQL cutoff is a coarse
+    superset filter; the exact per-row retention check in
+    ``_remove_row_artifacts`` is unchanged.
 
     Rows are never deleted, so each pass starts from the persisted
     high-water mark (``CleanupSweepStore``) instead of re-paging the whole
@@ -163,6 +175,8 @@ def sweep_expired_node_runs(
             last_finished_at, last_id = sweep_store.load(cursor_key)
             while True:
                 with db._connect_read() as conn:
+                    conn.execute(_PAGE_INDEX_PIN_SQL)
+                    conn.execute(_PAGE_TIMEOUT_SQL)
                     rows = conn.execute(
                         _EXPIRED_NODE_RUNS_SQL,
                         (

@@ -965,7 +965,7 @@
     "server/app/services/agent_version_pins.py": 64,
     "server/app/services/artifact_orphan_gc.py": 95,
     "server/app/services/artifact_store.py": 141,
-    "server/app/services/cleanup_sweep.py": 174,
+    "server/app/services/cleanup_sweep.py": 190,
     "server/app/services/cleanup_sweep_store.py": 71,
     "server/app/services/connection_adapter_hmac.py": 108,
     "server/app/services/connection_adapter_static.py": 43,
