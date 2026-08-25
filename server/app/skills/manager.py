@@ -21,6 +21,62 @@ from server.app.skills.errors import SkillConfigError, SkillPathError, SkillRepo
 logger = logging.getLogger(__name__)
 
 _EXECUTION_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_COMMIT_RE = re.compile(r"^[0-9a-f]{7,64}$")
+_REPO_SCHEMES = ("https://", "http://", "ssh://", "git://", "file://")
+# git "transport-helper" style prefixes execute an arbitrary helper process
+# (ext::<command>, transport-<helper> via <helper>::<address>) — never valid
+# for a skill source, unlike the ordinary host:path scp form.
+_REPO_FORBIDDEN_PREFIXES = ("ext::", "transport-")
+_REF_FORBIDDEN_CHARS = set(" ~^:?*[\\")
+
+
+def _validate_commit(commit: str) -> str:
+    """Lock-sourced commit ids must be plain hex object ids.
+
+    Any other shape (notably a string starting with ``-``) would be parsed by
+    git as an option rather than a rev — the argument-injection class these
+    validators close. rev-parse output is hex by construction; this guards
+    the DB lock document path.
+    """
+    if not _COMMIT_RE.match(commit):
+        raise SkillConfigError(f"skill commit {commit!r} is not a hex object id")
+    return commit
+
+
+def _validate_repo(repo: str) -> str:
+    """Reject option-shaped or exotic-scheme skill repo values.
+
+    Sources come from the admin-managed skill document; the checks keep a
+    malformed entry (or a future lower-privilege write path) from turning
+    into git CLI option injection. Local paths and scp-like host:path forms
+    pass (neither starts with ``-`` after this check).
+    """
+    if repo.startswith("-"):
+        raise SkillConfigError(f"skill repo {repo!r} must not start with '-'")
+    if repo.startswith(_REPO_FORBIDDEN_PREFIXES):
+        raise SkillConfigError(f"skill repo {repo!r} uses a forbidden git transport prefix")
+    if "://" in repo and not repo.startswith(_REPO_SCHEMES):
+        raise SkillConfigError(f"skill repo {repo!r} uses an unsupported URL scheme")
+    return repo
+
+
+def _validate_ref(ref: str) -> str:
+    """Reject refs that git could parse as options or malformed refnames.
+
+    Same injection class as ``_validate_repo``: the ref feeds fetch/rev-parse
+    position arguments, so a leading ``-`` (or a refname git rejects anyway)
+    must fail validation before any git call.
+    """
+    if (
+        not ref
+        or ref.startswith(("-", "/", "."))
+        or ".." in ref
+        or ref.endswith(".lock")
+        or (_REF_FORBIDDEN_CHARS & set(ref))
+        or any(ord(ch) < 0x20 for ch in ref)
+    ):
+        raise SkillConfigError(f"skill ref {ref!r} is not a valid git refname")
+    return ref
 
 
 class SkillStore(Protocol):
@@ -161,13 +217,14 @@ class SkillManager:
         skill_key: str,
         cache_dir: Path,
     ) -> None:
-        repo = self._normalize_repo(source.repo)
+        repo = self._normalize_repo(_validate_repo(source.repo))
+        _validate_ref(source.ref)
         in_place = self._is_in_place_source(repo, cache_dir)
         if not cache_dir.exists():
             if in_place:
                 raise SkillRepoError(f"local skill repo not found: {cache_dir}")
             cache_dir.parent.mkdir(parents=True, exist_ok=True)
-            self._run_git(["clone", repo, str(cache_dir)])
+            self._run_git(["clone", "--", repo, str(cache_dir)])
             # A fresh clone may lack commits the old repo held (e.g. locked
             # commits detached from any ref), so drop the memoized presence
             # checks for this cache dir.
@@ -186,15 +243,15 @@ class SkillManager:
                     f"skill {skill_key!r} config differs from the published skill lock; "
                     "refresh the lock"
                 )
-            commit = locked.commit
+            commit = _validate_commit(locked.commit)
             if not self._has_commit(cache_dir, commit):
                 if in_place:
                     raise SkillRepoError(
                         f"locked commit {commit!r} is missing from local skill repo {cache_dir}"
                     )
-                self._run_git(["-C", str(cache_dir), "fetch", "origin", commit])
+                self._run_git(["-C", str(cache_dir), "fetch", "origin", "--", commit])
                 fetched_commit = self._rev_parse(cache_dir, "FETCH_HEAD")
-                commit = fetched_commit
+                commit = _validate_commit(fetched_commit)
         else:
             commit = self._resolve_source_ref(cache_dir, source.ref, in_place=in_place)
             with self._lock_write_lock:
@@ -221,14 +278,14 @@ class SkillManager:
         now = time.monotonic()
         if verified[0] != commit or now - verified[1] >= self._repo_state_ttl:
             if not cache_at_commit(self._run_git, cache_dir, commit):
-                self._run_git(["-C", str(cache_dir), "checkout", commit, "-f"])
+                self._run_git(["-C", str(cache_dir), "checkout", commit, "-f", "--"])
                 self._run_git(["-C", str(cache_dir), "clean", "-fd"])
             self._verified_clean[str(cache_dir)] = (commit, now)
 
     def _resolve_source_ref(self, cache_dir: Path, ref: str, *, in_place: bool) -> str:
         if in_place:
             return self._rev_parse(cache_dir, ref)
-        self._run_git(["-C", str(cache_dir), "fetch", "origin", ref])
+        self._run_git(["-C", str(cache_dir), "fetch", "origin", "--", ref])
         return self._rev_parse(cache_dir, "FETCH_HEAD")
 
     def _normalize_repo(self, repo: str) -> str:
@@ -242,6 +299,7 @@ class SkillManager:
         return Path(repo).resolve() == cache_dir.resolve()
 
     def _has_commit(self, cache_dir: Path, commit: str) -> bool:
+        _validate_commit(commit)
         key = (str(cache_dir), commit)
         if key in self._known_commits:
             return True
@@ -253,7 +311,8 @@ class SkillManager:
 
     def _rev_parse(self, cache_dir: Path, rev: str) -> str:
         # Use ^{commit} to resolve annotated tags to their underlying commit.
-        result = self._run_git(["-C", str(cache_dir), "rev-parse", f"{rev}^{{commit}}"])
+        _validate_ref(rev)
+        result = self._run_git(["-C", str(cache_dir), "rev-parse", "--verify", f"{rev}^{{commit}}"])
         return result.stdout.strip()
 
     def _run_git(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:

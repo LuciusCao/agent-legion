@@ -1104,7 +1104,7 @@
     "server/app/skills/doc_cache.py": 36,
     "server/app/skills/errors.py": 16,
     "server/app/skills/lock.py": 48,
-    "server/app/skills/manager.py": 234,
+    "server/app/skills/manager.py": 289,
     "server/app/skills/refresh.py": 47,
     "server/app/skills/runtime.py": 50,
     "server/app/skills/seed.py": 58,
