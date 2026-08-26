@@ -175,29 +175,6 @@ const workflowDefinition = {
   ],
 }
 
-// agent 节点（capability 命中已发布 Agent，即 agentRoutes 中的 node_key）
-// 带 execution 覆盖的 active revision：resolve_execution_block 同链判定就绪。
-const workflowDefinitionWithAgentExecution = {
-  ...workflowDefinition,
-  nodes: [
-    ...workflowDefinition.nodes,
-    {
-      key: 'agent_review',
-      label: 'Agent 审核',
-      after: ['review'],
-      capability: 'agent_review',
-      inputs: [],
-      outputs: [],
-      execution: {
-        provider: 'openai',
-        model: 'gpt-5',
-        thinking: '',
-        prompt: '',
-      },
-    },
-  ],
-}
-
 describe('WorkspaceMainPage', () => {
   const originalEventSource = globalThis.EventSource
 
@@ -951,181 +928,20 @@ describe('WorkspaceMainPage', () => {
   })
 
   it('guides through Studio as step 1 for a workspace without a published workflow', async () => {
+    // 引导导航细节见 WorkspaceMainPage.onboarding.test.tsx；这里保留一个
+    // 主文件级冒烟：无 published workflow 时主页面正常渲染引导入口。
     mockFetchWorkspaceStats.mockResolvedValue({
       ...baseStats,
       workflow_key: null,
       workflow_label: null,
     } as unknown as WorkspaceStats)
-    render(
-      <MemoryRouter initialEntries={['/workspaces/ws1']}>
-        <Routes>
-          <Route
-            path="/workspaces/:workspaceId/workflow-studio"
-            element={<div>Studio 页面</div>}
-          />
-          <Route
-            path="/workspaces/:workspaceId/*"
-            element={<WorkspaceMainPage />}
-          />
-        </Routes>
-      </MemoryRouter>
-    )
-
+    renderPage()
     await loadJobsViaSSE()
 
     const studioButton = await screen.findByRole('button', {
       name: '进入 Studio',
     })
     expect(studioButton).toBeEnabled()
-
-    await act(async () => {
-      studioButton.click()
-    })
-
-    expect(await screen.findByText('Studio 页面')).toBeInTheDocument()
-  })
-
-  it('marks the Studio step completed when the workspace has a published workflow', async () => {
-    renderPage()
-    await loadJobsViaSSE()
-
-    expect(
-      await screen.findByRole('button', { name: '进入 Studio' })
-    ).toBeInTheDocument()
-    expect(screen.getByText('已完成')).toBeInTheDocument()
-  })
-
-  it('unlocks step 3 when agent nodes carry execution overrides even without workspace defaults', async () => {
-    // agent 节点 execution.* 已配齐：即使 workspace 默认为空（settings 快照
-    // 返回空 agentDefaults），解析链（节点覆盖优先）也应判定就绪。
-    mockFetchWorkflowDefinition.mockResolvedValue({
-      workflow: workflowDefinitionWithAgentExecution,
-    })
-    mockApi.mockImplementation((path: string) => {
-      if (path === '/api/workspaces/ws1/stats') {
-        return Promise.resolve(baseStats)
-      }
-      if (path === '/api/workspaces/ws1/settings') {
-        return Promise.resolve({
-          entityType: 'question',
-          intakeModes: ['manual'],
-          labelOverrides: {},
-          workflowKey: 'question_content',
-          agentDefaults: { provider: '', model: '', thinking: '' },
-        })
-      }
-      if (path === '/api/workspaces/ws1/agent-routes') {
-        return Promise.resolve({
-          routes: [
-            {
-              workflow_key: 'question_content',
-              node_key: 'agent_review',
-              node_label: 'Agent 审核',
-              capability: 'agent_review',
-              agent_id: 'agent-1',
-              agent_skill: 'review',
-            },
-          ],
-        })
-      }
-      return Promise.resolve({})
-    })
-
-    renderPage()
-    await loadJobsViaSSE()
-
-    expect(
-      await screen.findByRole('button', { name: '添加条目' })
-    ).toBeEnabled()
-    // 解析链就绪 + 接入模式已勾选 → 步骤 1、2 均完成。
-    expect(screen.getAllByText('已完成')).toHaveLength(2)
-  })
-
-  it('keeps step 3 locked when an agent node lacks provider/model resolution', async () => {
-    // agent 节点存在（agentRoutes 命中）但 execution 未覆盖且 workspace
-    // 默认为空：解析链两端都缺，步骤 2/3 保持锁定。
-    mockApi.mockImplementation((path: string) => {
-      if (path === '/api/workspaces/ws1/stats') {
-        return Promise.resolve(baseStats)
-      }
-      if (path === '/api/workspaces/ws1/settings') {
-        return Promise.resolve({
-          entityType: 'question',
-          intakeModes: ['manual'],
-          labelOverrides: {},
-          workflowKey: 'question_content',
-          agentDefaults: { provider: '', model: '', thinking: '' },
-        })
-      }
-      if (path === '/api/workspaces/ws1/agent-routes') {
-        return Promise.resolve({
-          routes: [
-            {
-              workflow_key: 'question_content',
-              node_key: 'review',
-              node_label: '审核',
-              capability: 'review',
-              agent_id: 'agent-1',
-              agent_skill: 'review',
-            },
-          ],
-        })
-      }
-      return Promise.resolve({})
-    })
-
-    renderPage()
-    await loadJobsViaSSE()
-
-    expect(
-      await screen.findByRole('button', { name: '添加条目' })
-    ).toBeDisabled()
-    expect(screen.getByText('已完成')).toBeInTheDocument()
-  })
-
-  it('does not fetch the settings snapshot when jobs exist and the guide is hidden', async () => {
-    // 引导隐藏（有任务）：settings 快照的四个请求（workspace / settings /
-    // executor-configuration / agent-routes）都不应发出。
-    const seededJob = makeJob({
-      id: 'j1',
-      source_id: 'Q1',
-      title: 'Job',
-      status: 'pending',
-    })
-    mockFetchJobsSnapshot.mockImplementation(() =>
-      Promise.resolve({
-        workspace_id: 'ws1',
-        revision: 1,
-        stats: baseStats.job_stats,
-        jobs: [seededJob],
-        total: 1,
-        next_cursor: null,
-      })
-    )
-    const settingsPaths = [
-      '/api/workspaces/ws1',
-      '/api/workspaces/ws1/settings',
-      '/api/workspaces/ws1/agent-routes',
-    ]
-    const settingsCalls: string[] = []
-    mockApi.mockImplementation((path: string) => {
-      if (settingsPaths.includes(path)) {
-        settingsCalls.push(path)
-      }
-      if (path === '/api/workspaces/ws1/stats') {
-        return Promise.resolve(baseStats)
-      }
-      return Promise.resolve({})
-    })
-
-    renderPage()
-    await loadJobsViaSSE()
-
-    expect(
-      screen.queryByRole('heading', { name: '开始使用 Workspace' })
-    ).not.toBeInTheDocument()
-    expect(settingsCalls).toEqual([])
-    expect(mockGetWorkspaceExecutorConfiguration).not.toHaveBeenCalled()
   })
 
   it('renders workspace package history dialog when open', async () => {
