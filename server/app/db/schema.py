@@ -61,3 +61,13 @@ def init_db(database_dsn: DatabaseDsn) -> None:
         # cms_config_json column is superseded by workspace_cms_config's
         # resource rows and must not survive any install path.
         conn.execute("alter table workspaces drop column if exists cms_config_json")
+        # Retired-table parity sweep: postgres_schema.sql still CREATES these
+        # tables so older data migrations can replay against them (v34 reads
+        # job_batches, v47 harvests the executor tables), and their owning
+        # migrations (v53 runs cutover, v47 executor retirement) drop them.
+        # A database recorded at v48-v58 skips those migrations but still
+        # replays the schema file, resurrecting empty copies that a fresh
+        # database never has — upgraded databases must not stay dirtier than
+        # fresh ones (guarded by tests/db/test_schema_upgrade_parity.py).
+        for retired in ("job_batches", "workspace_executor_allocations", "workspace_node_bindings"):
+            conn.execute(f"drop table if exists {retired}")

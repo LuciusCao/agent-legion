@@ -193,6 +193,12 @@ Review 于独立 worktree `.worktrees/perf-review`（分支 `review/perf-quality
 - 5 个 migration pin 测试断言 v58 name → 更新为 v59。
 - `test_registration_retries_transient_host_errors_without_traceback` 原用 `urllib.error.URLError`（真实 Client 走 requests，永不抛它）→ 改用 `requests.ConnectionError`。
 - 新 db 测试文件需登记 `tests/conftest.py::_POSTGRES_TEST_FILES`。
+
+### 结构性防线：schema 升级 parity 测试（`tests/db/test_schema_upgrade_parity.py`）
+
+针对「init_db 先重放全量 DDL、再跑 version>max(applied) 迁移」这条无强制机制的放置规则，新增按**失败类别**设防的测试：构造 SCHEMA_VERSION-1 形状的库（scratch schema，与 worker 主 schema 隔离）走 init_db 升级，与 fresh 库做全 catalog（columns + indexes）比对，二者必须完全一致。已做有效性自证：把索引放回 migrate_runs（第二版错误）时测试精确报出 `only fresh: jobs.idx_jobs_run_id`；放 schema.sql（第一版错误）由既有 `test_v52_...` 覆盖。未来任何版本把 DDL 放错边都会在此变红，`test_newest_migration_undo_inventory_is_current` 会在版本 bump 时提醒扩展 undo 清单。
+
+该测试首跑即抓到一个**现存**偏差：`job_batches` / `workspace_executor_allocations` / `workspace_node_bindings` 三张退役表会被 schema 文件重建（供旧数据迁移重放用）却只在各自的退役迁移里 DROP——v48–v58 的升级库跳过那些迁移，三张空表永久遗留（fresh 库没有）。已在 `init_db` 迁移链末尾加幂等清理 DROP 修复（与既有 cms_config_json 清理同位置）。
 - 架构预算 ratchet：4 个文件行数 ceiling 经 `ratchet_architecture_budgets.py --bump` 合法上调；JsonTree ceiling 随默认 ratchet 回落（63→61）。
 - `App.test.tsx` 的 store mock 需支持 selector 调用形态。
 
