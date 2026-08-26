@@ -696,9 +696,6 @@ invariants:
         target: tests/workers/test_code_runner.py::test_secrets_stay_off_disk
         gate: quick
       - kind: integration
-        target: tests/workers/test_code_runner.py::test_strip_secret_config_drops_secret_keys_and_connection_block
-        gate: quick
-      - kind: integration
         target: tests/full/test_vault_secret_freeze.py
         gate: full
 
