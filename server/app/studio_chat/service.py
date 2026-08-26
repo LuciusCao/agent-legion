@@ -5,10 +5,11 @@ persisted timeline. The service owns the registry of live handles, delegates
 the permission policy to studio_chat.permissions (MCP tool calls auto-approve —
 the scoped token is already the authority boundary; local read-only kinds
 auto-approve; everything else goes to the human, with a per-session allow-all
-switch), tracks the behavioural MCP-visibility smoke signal (a run that never
-showed an agent-legion tool call ends with mcp_status='unverified' instead of
-silently succeeding), and forwards everything to SSE subscribers through the
-shared event bus.
+switch), tracks the behavioural MCP-visibility smoke signal (a session where
+no turn ever showed an agent-legion tool call gets a one-time advisory hint
+after its first completed turn — cancelled turns and no-tool Q&A turns are
+not treated as wiring failures), and forwards everything to SSE subscribers
+through the shared event bus.
 
 All callback entry points (on_ready/on_update/...) run on the session's ACP
 thread; public entry points run on FastAPI worker threads. Mutable runtime
@@ -36,6 +37,7 @@ from server.app.settings import Settings
 from server.app.studio_chat.acp_session import AcpSessionHandle, build_mcp_server_spec
 from server.app.studio_chat.availability import AgentAvailabilityProbe
 from server.app.studio_chat.callbacks import ServiceCallbacks
+from server.app.studio_chat.mcp_hint import maybe_emit_mcp_hint
 from server.app.studio_chat.payloads import (
     serialize_message,
     serialize_session,
@@ -398,23 +400,10 @@ class StudioChatService:
         return handle_permission_request(self, session_id, tool_call, options)
 
     def _on_turn_end(self, session_id: str, stop_reason: str) -> None:
-        session = self._db.get_studio_chat_session(session_id) or {}
-        runtime = self._runtime(session_id)
-        mcp_observed = runtime.mcp_observed if runtime is not None else False
-        if not mcp_observed and session.get("mcp_status") != "verified":
-            self._db.update_studio_chat_session(session_id, mcp_status="unverified")
-            self._append_message(
-                session_id,
-                "status",
-                "system",
-                {
-                    "event": "mcp_unverified",
-                    "detail": (
-                        "This turn never called an agent-legion MCP tool; the agent may "
-                        "not have picked up the platform tools."
-                    ),
-                },
-            )
+        # The MCP-visibility smoke signal is advisory only (mcp_hint.py): a
+        # turn without an agent-legion tool call is not evidence of a wiring
+        # problem, so the hint fires once per session, never on cancels.
+        maybe_emit_mcp_hint(self, session_id, stop_reason)
         self._append_message(
             session_id, "status", "system", {"event": "turn_end", "stop_reason": stop_reason}
         )

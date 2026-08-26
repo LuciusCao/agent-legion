@@ -23,6 +23,12 @@ Script shape::
 Single-threaded message pump: ``pump_until`` re-enters dispatch so a prompt
 turn can await a permission response or a cancel notification while keeps
 reading.
+
+Terminal steps (``{"terminal": {"command": ..., "args": [...]}}``) exercise
+the client-side terminal protocol: the fake agent asks the backend to create
+a terminal, polls output, waits for exit, and releases it — mirroring how
+kimi runs its Bash tool. The received initialize params (clientCapabilities)
+are sunk so tests can assert on the advertised capability flags.
 """
 
 from __future__ import annotations
@@ -78,6 +84,7 @@ class _FakeAgent:
         method = message["method"]
         request_id = message["id"]
         if method == "initialize":
+            self._sink({"initialize_params": message["params"]})
             self._send(
                 {
                     "jsonrpc": "2.0",
@@ -128,6 +135,9 @@ class _FakeAgent:
             elif "permission" in step:
                 outcome = self._request_permission(session_id, step["permission"])
                 self._sink({"permission_outcome": outcome, "record": step.get("record")})
+            elif "terminal" in step:
+                outcome = self._run_terminal(session_id, step["terminal"])
+                self._sink({"terminal_outcome": outcome, "record": step.get("record")})
         if self.script.get("wait_for_cancel"):
             self.pump_until(lambda: self.cancelled)
 
@@ -148,6 +158,52 @@ class _FakeAgent:
         )
         self.pump_until(lambda: request_id in self.pending)
         return self.pending.pop(request_id).get("result", {}).get("outcome", {})
+
+    def _run_terminal(self, session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Drive the client-side terminal protocol like kimi's Bash tool does:
+        create → poll output → wait for exit → release."""
+        request_id = f"fake-{self._next_request_id}"
+        self._next_request_id += 1
+        self._send(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "terminal/create",
+                "params": {
+                    "sessionId": session_id,
+                    "command": payload.get("command"),
+                    "args": payload.get("args", []),
+                },
+            }
+        )
+        self.pump_until(lambda: request_id in self.pending)
+        result = self.pending.pop(request_id).get("result", {})
+        terminal_id = result.get("terminalId")
+        if not terminal_id:
+            return {"error": "no terminalId in create response"}
+
+        def _call(method: str, params: dict[str, Any]) -> dict[str, Any]:
+            call_id = f"fake-{self._next_request_id}"
+            self._next_request_id += 1
+            self._send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": call_id,
+                    "method": method,
+                    "params": {"sessionId": session_id, "terminalId": terminal_id, **params},
+                }
+            )
+            self.pump_until(lambda: call_id in self.pending)
+            return self.pending.pop(call_id).get("result", {})
+
+        exit_result = _call("terminal/wait_for_exit", {})
+        output_result = _call("terminal/output", {})
+        _call("terminal/release", {})
+        return {
+            "terminalId": terminal_id,
+            "exitCode": exit_result.get("exitCode"),
+            "output": output_result.get("output", ""),
+        }
 
     def serve(self) -> None:
         self.pump_until(lambda: False)
