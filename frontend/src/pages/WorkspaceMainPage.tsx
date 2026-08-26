@@ -13,6 +13,7 @@ import { useWorkspacePauseActions } from '../hooks/useWorkspacePauseActions'
 import { useWorkspaceRerunActions } from '../hooks/useWorkspaceRerunActions'
 import { useWorkspaceSelection } from '../hooks/useWorkspaceSelection'
 import { useWorkspaceOnboardingSteps } from '../hooks/useWorkspaceOnboardingSteps'
+import { shouldShowEmptyGuide } from '../lib/onboardingReadiness'
 import { JobFilterBar } from '../components/job/JobFilterBar'
 import { JobList } from '../components/job/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
@@ -104,14 +105,23 @@ export default function WorkspaceMainPage() {
     setDeleteDialogOpen(false)
   }
 
-  const emptyStateSteps = useWorkspaceOnboardingSteps(workspaceId, workflowKey)
+  // 全新 workspace（无 job 且无筛选）只显示分步引导，隐藏筛选栏与空列表；
+  // workspaceStats 与 active revision 须先 settle，避免加载首帧闪现引导。
+  const showEmptyGuide = shouldShowEmptyGuide({
+    filteredJobIds,
+    totalJobs,
+    jobsLoading,
+    filtersActive,
+    workflowKey,
+    workflowDefinitionLoaded: workflowDefinitionData !== undefined,
+  })
 
-  // 全新 workspace（无 job 且无筛选）只显示分步引导，隐藏筛选栏与空列表。
-  const showEmptyGuide =
-    filteredJobIds.length === 0 &&
-    totalJobs === 0 &&
-    !jobsLoading &&
-    !filtersActive
+  const emptyStateSteps = useWorkspaceOnboardingSteps(
+    workspaceId,
+    workflowKey,
+    workflowDefinition,
+    showEmptyGuide
+  )
 
   return (
     <div
