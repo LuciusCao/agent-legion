@@ -57,15 +57,12 @@ invariants:
         gate: quick
 
   - id: EXEC-STATS-001
-    statement: "Workspace runtime stats report the single implicit code pool (P-0.5: instance code_capacity, per-workspace and global active leases) without consulting AgentStatusManager or any executor configuration table."
+    statement: "Workspace runtime stats report the single implicit code pool (P-0.5: instance code_capacity, per-workspace and global active leases) without consulting AgentStatusManager or any executor configuration table. The AgentStatusManager dependency was removed from WorkspaceConfigurationService outright (2026-08, issue #2 phase 1): the coupling is now structurally impossible rather than behaviorally guarded."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: integration
         target: tests/test_workspace_configuration_service.py::test_code_pool_stats_report_capacity_and_leases
-        gate: quick
-      - kind: integration
-        target: tests/test_workspace_configuration_service.py::test_code_pool_stats_does_not_consult_agent_status_manager
         gate: quick
       - kind: integration
         target: tests/routes/jobs/test_workspace_stats.py::test_workspace_stats_code_pool_reflects_leases

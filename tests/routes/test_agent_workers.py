@@ -15,32 +15,27 @@ from server.app.db.transaction import write_transaction
 from server.app.services.vault import VaultService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import workflow_definition_from_mapping
-from tests.routes.test_agent_worker_registration import (
-    _authenticate_admin,
-    _issue_scoped_token,
-    _make_app,
-    _register,
+from tests.helpers.agent_worker_api import (
+    authenticate_admin,
+    claim,
+    empty_archive,
+    issue_scoped_token,
+    make_app,
+    register,
+    seed_request,
 )
-from tests.test_agent_broker import _seed_request
+
+_seed_request = seed_request
 
 _CSRF = {"x-agent-legion-request": "1"}
 
 
-def _claim(client: TestClient, token: str) -> dict:
-    response = client.post(
-        "/api/agent-executions/claim",
-        headers={"X-Agent-Worker-Token": token},
-        json={"worker_id": "home-mini"},
-    )
-    assert response.status_code == 200, response.text
-    return dict(response.json())
-
-
-def _empty_archive() -> bytes:
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:gz"):
-        pass
-    return buffer.getvalue()
+_authenticate_admin = authenticate_admin
+_make_app = make_app
+_issue_scoped_token = issue_scoped_token
+_register = register
+_claim = claim
+_empty_archive = empty_archive
 
 
 def test_agent_worker_register_and_claim_api(tmp_path: Path) -> None:

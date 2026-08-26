@@ -28,9 +28,9 @@ from server.app.services.artifact_store import ArtifactStore
 from server.app.settings import Settings
 from server.app.workflows.schema import WorkflowNode, WorkflowNodeExecution
 from tests.helpers import replace_agent_catalog
+from tests.helpers.agent_worker_api import insert_job_rows as _insert_job_rows
 from tests.helpers.executor_worker import make_pi_skill
 from tests.postgres_support import TEST_DATABASE_URL
-from tests.test_agent_broker import _insert_job_rows
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VELITES_BINARY = REPO_ROOT / "velites" / "target" / "debug" / "velites"

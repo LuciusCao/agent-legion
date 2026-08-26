@@ -1,17 +1,13 @@
 from __future__ import annotations
 
+from tests.helpers.auth_contract import (
+    assert_login_lockout_after_repeated_failures,
+    assert_users_endpoints_require_admin,
+)
+from tests.helpers.auth_contract import bootstrap_admin as _bootstrap_admin
+from tests.helpers.auth_contract import login as _login
+
 CSRF = {"x-agent-legion-request": "1"}
-
-
-def _bootstrap_admin(client, username="admin", password="admin-pw"):
-    return client.post(
-        "/api/auth/bootstrap",
-        json={"username": username, "password": password, "display_name": "Admin"},
-    )
-
-
-def _login(client, username="admin", password="admin-pw"):
-    return client.post("/api/auth/login", json={"username": username, "password": password})
 
 
 def test_bootstrap_only_available_for_first_user(anon_client) -> None:
@@ -68,12 +64,7 @@ def test_cookie_mutation_requires_csrf_header(anon_client) -> None:
 
 
 def test_login_lockout_after_repeated_failures(anon_client) -> None:
-    _bootstrap_admin(anon_client)
-    anon_client.cookies.clear()
-    for _ in range(5):
-        assert _login(anon_client, password="wrong").status_code == 401
-    locked = _login(anon_client)
-    assert locked.status_code == 429
+    assert_login_lockout_after_repeated_failures(anon_client)
 
 
 def test_admin_user_management(anon_client) -> None:
@@ -118,21 +109,7 @@ def test_admin_user_management(anon_client) -> None:
 
 
 def test_users_endpoints_require_admin(anon_client) -> None:
-    _bootstrap_admin(anon_client)
-    anon_client.post(
-        "/api/users",
-        json={"username": "member1", "password": "pw1"},
-        headers=CSRF,
-    )
-    member_client = anon_client.__class__(anon_client.app)
-    member_client.post("/api/auth/login", json={"username": "member1", "password": "pw1"})
-    assert member_client.get("/api/users").status_code == 403
-    assert (
-        member_client.post(
-            "/api/users", json={"username": "x", "password": "y"}, headers=CSRF
-        ).status_code
-        == 403
-    )
+    assert_users_endpoints_require_admin(anon_client)
 
 
 def test_workspace_member_management(anon_client, job_db) -> None:

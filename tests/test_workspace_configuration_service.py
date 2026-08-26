@@ -7,8 +7,8 @@ from server.app.services.workspace_configuration import WorkspaceConfigurationSe
 
 
 @pytest.fixture
-def workspace_service(job_db, settings, agent_manager):
-    return WorkspaceConfigurationService(job_db, settings, agent_manager)
+def workspace_service(job_db, settings):
+    return WorkspaceConfigurationService(job_db, settings)
 
 
 @pytest.fixture
@@ -124,23 +124,6 @@ def test_code_pool_stats_report_capacity_and_leases(workspace_service, workspace
     # available 是全局剩余。
     pool = stats["code_pool"]
     assert pool == {"capacity": 16, "running": 1, "available": 15}
-
-
-def test_code_pool_stats_does_not_consult_agent_status_manager(
-    workspace_service, workspace, job_db, settings, monkeypatch
-):
-    consulted = []
-    original_get_all = workspace_service.agent_manager.get_all
-
-    def tracking_get_all():
-        consulted.append(("get_all",))
-        return original_get_all()
-
-    monkeypatch.setattr(workspace_service.agent_manager, "get_all", tracking_get_all)
-
-    stats = workspace_service.stats(workspace["id"])
-    assert "code_pool" in stats
-    assert not consulted, "stats() should not consult AgentStatusManager"
 
 
 def test_code_pool_stats_available_respects_global_usage_by_other_workspaces(

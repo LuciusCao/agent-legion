@@ -15,91 +15,25 @@ from server.app.services.artifact_store import ArtifactStore
 from server.app.settings import Settings
 from server.app.workflows.schema import WorkflowNode
 from tests.helpers import replace_agent_catalog
+from tests.helpers.agent_worker_api import (
+    assert_capacity_matrix,
+    broker,
+    insert_job_rows,
+    seed_request,
+)
 from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _broker(data_dir, **kwargs) -> AgentExecutionBroker:
-    return AgentExecutionBroker(TEST_DATABASE_URL, data_dir=data_dir, **kwargs)
+    return broker(data_dir, **kwargs)
 
 
-def _insert_job_rows(
-    job_db,
-    *,
-    job_id: str,
-    node_key: str,
-    limit: int,
-    workspace_id: str,
-    agent_id: str,
-) -> None:
-    with job_db.connect() as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
-            (workspace_id,),
-        )
-        conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (%s, %s, 'questions', 'question', %s)",
-            (job_id, workspace_id, job_id),
-        )
-        conn.execute("insert into job_nodes(job_id, node_key) values (%s, %s)", (job_id, node_key))
-        conn.execute(
-            "insert into workspace_node_routes(workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values (%s, 'questions', %s, 'agent', %s)"
-            " on conflict(workspace_id, workflow_key, node_key) do nothing",
-            (workspace_id, node_key, agent_id),
-        )
-        # Capacity is workspace-level now: one row per workspace.
-        conn.execute(
-            "insert into workspace_agent_capacities(workspace_id, max_concurrency)"
-            " values (%s, %s)"
-            " on conflict(workspace_id) do update"
-            " set max_concurrency=excluded.max_concurrency",
-            (workspace_id, limit),
-        )
+def _insert_job_rows(*args, **kwargs):
+    return insert_job_rows(*args, **kwargs)
 
 
-def _seed_request(
-    job_db,
-    *,
-    job_id: str,
-    node_key: str = "generate",
-    limit: int = 20,
-    workspace_id: str = "test-workspace",
-    runtime: str = "pi",
-    agent_id: str = "generator-v1",
-    definitions: dict[str, AgentDefinition] | None = None,
-) -> None:
-    definition = AgentDefinition(
-        capability="generate",
-        runtime=runtime,
-        skill="question/generate",
-        requires_labels={"arch": "arm64"},
-    )
-    catalog = definitions or {agent_id: definition}
-    replace_agent_catalog(workspace_id, catalog)
-    _insert_job_rows(
-        job_db,
-        job_id=job_id,
-        node_key=node_key,
-        limit=limit,
-        workspace_id=workspace_id,
-        agent_id=agent_id,
-    )
-    assert _broker(job_db.jobs_dir.parent).enqueue(
-        AgentExecutionRequest(
-            workspace_id=workspace_id,
-            job_id=job_id,
-            workflow_key="questions",
-            node_key=node_key,
-            agent_id=agent_id,
-            agent_definition_hash=catalog[agent_id].definition_hash(),
-            manifest={
-                "job_id": job_id,
-                "log_path": f"logs/{job_id}.log",
-                "execution": {"provider": "gateway", "model": "test-model"},
-            },
-        )
-    )
+def _seed_request(*args, **kwargs):
+    return seed_request(*args, **kwargs)
 
 
 def test_worker_registration_declares_runtime_and_machine_capacity(job_db) -> None:
@@ -251,33 +185,7 @@ def test_expired_worker_claim_is_requeued_for_another_worker(job_db) -> None:
 
 
 def test_node_twenty_and_three_workers_ten_never_claim_more_than_twenty(job_db) -> None:
-    for index in range(30):
-        _seed_request(job_db, job_id=f"job-{index}", limit=20)
-    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
-    for worker_id in ("worker-1", "worker-2", "worker-3"):
-        registry.issue_token(
-            worker_id=worker_id,
-            name=worker_id,
-            runtimes=["pi"],
-            max_concurrency=10,
-            labels={"arch": "arm64"},
-        )
-    broker = _broker(job_db.jobs_dir.parent)
-
-    claimed = [
-        broker.claim(worker_id)
-        for worker_id in ("worker-1", "worker-2", "worker-3")
-        for _ in range(10)
-    ]
-
-    assert sum(claim is not None for claim in claimed) == 20
-    with job_db._connect_read() as conn:
-        rows = conn.execute(
-            "select worker_id, count(*) as cnt from agent_execution_requests"
-            " where state='claimed' group by worker_id order by worker_id"
-        ).fetchall()
-    assert sum(int(row["cnt"]) for row in rows) == 20
-    assert all(int(row["cnt"]) <= 10 for row in rows)
+    assert_capacity_matrix(job_db)
 
 
 def test_sweep_closes_request_when_lease_already_finished(job_db) -> None:

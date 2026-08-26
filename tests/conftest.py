@@ -126,7 +126,6 @@ _SMOKE_TEST_FILES = frozenset(
         "tests/routes/jobs/test_job_lifecycle.py",
         "tests/services/test_vault.py",
         "tests/executors/test_shard_contract.py",
-        "tests/executors/test_executor_kinds.py",
         "tests/executors/leases/test_claim_basics.py",
         "tests/workflows/test_sharding.py",
         "tests/db/test_retry.py",
@@ -136,7 +135,10 @@ _SMOKE_TEST_FILES = frozenset(
 
 # Files that connect to PostgreSQL directly instead of through a root fixture.
 # Keep this inventory explicit so new direct consumers are visible in review;
-# fixture-based consumers are classified by _POSTGRES_FIXTURES below.
+# fixture-based consumers are classified by _POSTGRES_FIXTURES below. Both
+# directions are enforced by tests/test_pytest_postgres_boundaries.py: a file
+# importing tests.postgres_support (or calling psycopg.connect) must be listed
+# here, and every listed path must still exist.
 _POSTGRES_TEST_FILES = frozenset(
     {
         "tests/ci/test_executor_worker_stress.py",
@@ -191,7 +193,6 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/routes/test_agent_register_tokens.py",
         "tests/routes/test_agent_claim_artifact_channel.py",
         "tests/routes/test_agent_worker_result_spool.py",
-        "tests/routes/test_video_job_projection.py",
         "tests/routes/test_workspace_secrets.py",
         "tests/test_cors.py",
         "tests/test_workflow_draft_compare.py",
@@ -208,8 +209,6 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/routes/test_quality_replay_routes.py",
         "tests/routes/test_skill_sources.py",
         "tests/routes/test_workspace_agent_routes.py",
-        "tests/scripts/test_backfill_comprehension_ids.py",
-        "tests/scripts/test_backfill_comprehension_jobdir_ids.py",
         "tests/services/test_agent_artifacts.py",
         "tests/services/test_agent_artifact_inject.py",
         "tests/services/test_agent_completion_remote.py",
@@ -233,6 +232,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/services/test_ops_metrics.py",
         "tests/services/test_studio_chat_service.py",
         "tests/services/test_studio_chat_issue158.py",
+        "tests/services/test_studio_chat_mcp_hint.py",
         "tests/services/test_studio_chat_availability.py",
         "tests/services/test_quality_labels.py",
         "tests/services/test_quality_replays.py",
@@ -282,7 +282,6 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/workers/test_workflow_worker_ready_queue.py",
         "tests/workers/test_workflow_worker_thread_local.py",
         "tests/workers/test_workflow_worker_thread_paths.py",
-        "tests/workers/test_workflow_worker_thread_pi.py",
         "tests/workflows/test_sharding.py",
     }
 )
@@ -516,7 +515,7 @@ def _session_test_schema():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_postgres_database(request):
+def _isolate_postgres_database(_assert_shared_app_invariants, request):
     if request.node.get_closest_marker("no_db") is not None:
         # Tests marked no_db never touch the database (pure static governance
         # checks, fully mocked script tests); skip TRUNCATE-based isolation.
@@ -553,13 +552,16 @@ def _isolate_postgres_database(request):
 def _assert_shared_app_invariants():
     """Fail a test that left the worker-session shared app dirty.
 
-    Naming is load-bearing: same-scope autouse fixtures are set up in
-    alphabetical order (and torn down in reverse), and monkeypatch is torn
-    down only after every fixture that grabbed it. Sorting before
-    ``_block_real_cms_http`` — the first autouse fixture that requests
-    monkeypatch — puts this teardown after the monkeypatch undo, so it
-    observes the post-undo in-memory state of any shared app the test
-    touched. fresh=True apps are private and never tracked.
+    The guard must run its teardown AFTER the monkeypatch undo: a test may
+    scope an app.state mutation with monkeypatch (auto-restored), and the
+    guard has to observe the post-undo state or it would false-red on
+    exactly those tests. Teardown is reverse setup order, so the guard is
+    the first autouse fixture set up: every other autouse fixture in this
+    conftest declares ``_assert_shared_app_invariants`` as its first
+    parameter. That makes the ordering an explicit dependency chain instead
+    of alphabetical fixture-name sorting; the structure is enforced by
+    tests/test_pytest_postgres_boundaries.py. fresh=True apps are private
+    and never tracked.
     """
     _SHARED_APP_USAGE.clear()
     yield
@@ -573,7 +575,7 @@ def _assert_shared_app_invariants():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_project_dotenv(monkeypatch):
+def _isolate_project_dotenv(_assert_shared_app_invariants, monkeypatch):
     """Keep unit tests from inheriting real local credentials by default.
 
     Production and local app runs still load the project .env normally. Tests
@@ -588,7 +590,7 @@ def _isolate_project_dotenv(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _block_real_cms_http(monkeypatch):
+def _block_real_cms_http(_assert_shared_app_invariants, monkeypatch):
     if os.environ.get("AGENT_LEGION_TEST_REAL_CMS") == "1":
         return
     # The repo yaml no longer carries a global cms: section; tests loading the
@@ -649,7 +651,7 @@ def _fake_cms_question_item(question_id: str) -> dict[str, object]:
 
 
 @pytest.fixture(autouse=True)
-def _fast_password_hashing(monkeypatch):
+def _fast_password_hashing(_assert_shared_app_invariants, monkeypatch):
     """Tests mint a session per client; keep pbkdf2 cheap so the suite stays fast."""
     monkeypatch.setattr("server.app.auth.passwords._ITERATIONS", 1_000)
 

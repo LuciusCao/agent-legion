@@ -2608,28 +2608,6 @@ export interface components {
     AgentStatusResponse: {
       /** Busy */
       busy: boolean
-      /**
-       * Current Content Type
-       * @default
-       */
-      current_content_type: string
-      /**
-       * Current External Id
-       * @default
-       */
-      current_external_id: string
-      /**
-       * Current Phase
-       * @default
-       */
-      current_phase: string
-      /**
-       * Current Title
-       * @default
-       */
-      current_title: string
-      /** Current Video Id */
-      current_video_id?: string | null
       /** Id */
       id: string
       /** Name */

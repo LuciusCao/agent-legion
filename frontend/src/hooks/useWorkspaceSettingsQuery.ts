@@ -80,12 +80,13 @@ async function fetchWorkspaceSettingsSnapshot(
 }
 
 export function useWorkspaceSettingsQuery(
-  workspaceId: string | null | undefined
+  workspaceId: string | null | undefined,
+  enabled = true
 ) {
   return useQuery({
     queryKey: extraQueryKeys.workspaceSettings(workspaceId ?? ''),
     queryFn: () => fetchWorkspaceSettingsSnapshot(workspaceId ?? ''),
-    enabled: !!workspaceId,
+    enabled: !!workspaceId && enabled,
   })
 }
 

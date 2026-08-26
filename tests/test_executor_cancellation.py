@@ -20,6 +20,7 @@ from server.app.executors.cancellation import (
 from server.app.executors.code import CodeExecutor
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.runtime import ExecutionRuntime
+from tests.helpers.velites_sandbox import sandboxed
 
 
 class TestCancellationToken:
@@ -145,9 +146,7 @@ class TestCodeExecutorIsolation:
     def test_code_executor_runs_node_sandboxed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from tests.executors.test_code_executor import _sandboxed
-
-        _sandboxed(monkeypatch)
+        sandboxed(monkeypatch)
         executor = _code_executor(tmp_path, "cooperative")
         ctx = _code_context(tmp_path, "exec-cooperative", "cooperative", ("out.json",))
         ctx = replace(ctx, node_code=textwrap.dedent(_COOPERATIVE_NODE))
@@ -160,9 +159,8 @@ class TestCodeExecutorIsolation:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from server.app.executors.cancellation import CancellationToken
-        from tests.executors.test_code_executor import _sandboxed
 
-        _sandboxed(monkeypatch)
+        sandboxed(monkeypatch)
         executor = _code_executor(tmp_path, "blocked", cancellation_grace_seconds=0.3)
         # In-flight cancellation flows through the runtime token (the parent's
         # ExecutionRuntime cancel path); executor.cancel marks pre-start only.

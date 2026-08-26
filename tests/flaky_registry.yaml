@@ -49,3 +49,18 @@ entries:
     the p95 click-latency assertion stays strict.
   observed: First nightly-e2e stress run after Phase 4C, 2026-08.
   recurring: true
+- id: FLAKY-006
+  scope: backend:sharding-lease-poll-timing
+  owner: test-infra
+  reason: tests/workflows/test_sharding.py::test_every_shard_claim_goes_through_leases
+    failed once in a local pre-push quick gate run (pull request 175,
+    2026-08-26) and passed on rerun before the same push; it also passed
+    twice in isolation and all 17 sharding tests under -n 4 in the same
+    session. The test itself is process-free (FakeShardExecutor, sqlite
+    leases), so the failure mode is machine-load timing in the _poll_until
+    loops' tight timeouts, not the code under test. Retrying the gate is the
+    correct response; if it recurs, widen the poll timeouts before
+    considering a deeper fix.
+  observed: Local pre-push quick gate for 9f479768 (pull request 175),
+    2026-08-26; retry run passed in 47s.
+  recurring: true

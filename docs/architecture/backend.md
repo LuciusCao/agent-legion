@@ -284,7 +284,7 @@ server/app/
 | AgentWorkerDeleteResponse | BaseModel | worker_id: str, deleted: bool | app/routes/agent_workers_contracts.py |
 | AgentClaimResponse | BaseModel | execution_id: str, lease_id: str, workspace_id: str, job_id: str, workflow_ke... | app/routes/agent_workers_contracts.py |
 | AgentHeartbeatResponse | BaseModel | cancelled_execution_ids: list[str] | app/routes/agent_workers_contracts.py |
-| AgentStatusResponse | BaseModel | id: str, name: str, busy: bool, current_video_id: str | None, current_title: ... | app/routes/agents.py |
+| AgentStatusResponse | BaseModel | id: str, name: str, busy: bool | app/routes/agents.py |
 | AgentsResponse | BaseModel | agents: list[AgentStatusResponse] | app/routes/agents.py |
 | ArtifactUploadResponse | BaseModel | hash: str | app/routes/artifacts.py |
 | LoginRequest | BaseModel | username: str, password: str | app/routes/auth_contracts.py |

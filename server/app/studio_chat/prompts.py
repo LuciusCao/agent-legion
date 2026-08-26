@@ -68,7 +68,7 @@ def looks_like_agent_legion_tool_call(text: str) -> bool:
     (e.g. a Bash line mentioning a tool name) impersonate an MCP call.
     Matching is deliberately conservative (server name or an exact tool-name
     token) — a false negative only degrades to the safe path (human-confirmed
-    permission, mcp_status warning).
+    permission, one-time mcp_status advisory).
     """
     lowered = text.lower()
     if AGENT_LEGION_MCP_SERVER_NAME in lowered:

@@ -1,6 +1,5 @@
 from typing import Any
 
-from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.demo_material_seed import seed_demo_workspace_materials
@@ -42,11 +41,9 @@ class WorkspaceConfigurationService:
         self,
         job_db: JobQueries,
         settings: Settings,
-        agent_manager: AgentStatusManager,
     ):
         self.job_db = job_db
         self.settings = settings
-        self.agent_manager = agent_manager
 
     def _workspace(self, workspace_id: str) -> dict[str, Any]:
         workspace = self.job_db.get_workspace(workspace_id)
