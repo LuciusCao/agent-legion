@@ -8,6 +8,7 @@ recorded groups after killing the executor.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import sys
@@ -86,13 +87,17 @@ def test_reap_kills_grandchildren_too(tmp_path: Path) -> None:
     )
     _write_record(tmp_path, "exec-1", proc.pid)
     try:
+        # The pid file must exist BEFORE reaping: the reaper kills the whole
+        # group on sight, and racing it against the grandchild's spawn (as CI
+        # just proved) makes the file never appear. Waiting here also proves
+        # the grandchild actually started, which is what the kill must cover.
+        _wait_for_file(pid_file, timeout=10)
+        grandchild = int(pid_file.read_text().strip())
         reap_orphaned_agents(tmp_path, lambda _msg: None)
         proc.wait(timeout=10)
         # Watch the grandchild's PID exit instead of sleeping past its touch
         # deadline: once the PID is gone, a surviving shell can no longer
         # touch. Race-free under load, and ~2s faster than the old blind wait.
-        _wait_for_file(pid_file, timeout=10)
-        grandchild = int(pid_file.read_text().strip())
         deadline = time.monotonic() + 10.0
         while _pid_alive(grandchild):
             assert time.monotonic() < deadline, (
@@ -100,13 +105,13 @@ def test_reap_kills_grandchildren_too(tmp_path: Path) -> None:
             )
             time.sleep(0.05)
     finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait(timeout=5)
-        if pid_file.exists():
-            grandchild = int(pid_file.read_text().strip())
-            if _pid_alive(grandchild):
-                os.kill(grandchild, 9)
+        # Group-targeted cleanup: killing the grandchild by PID after its own
+        # death could hit a recycled PID; the pgid (== proc.pid, established by
+        # start_new_session and still ours while the group has members) cannot
+        # be misattributed.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, 9)
+        proc.wait(timeout=5)
 
     assert not marker.exists()
 

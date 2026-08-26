@@ -428,22 +428,35 @@ def test_custom_cancel_kills_whole_process_group(
     from server.app.executors.cancellation import CancellationToken
 
     token = CancellationToken(_threading.Event())
-    canceller = _threading.Timer(0.5, token.cancel)
-    canceller.start()
     sandboxed = replace(
         context,
         node_code=custom_source,
         runtime={"cancellation": token},
     )
-    result = _executor().execute(sandboxed)
-    canceller.cancel()
 
-    assert result.status == "cancelled"
-    # Wait for the PID file: the grandchild was started before cancellation.
+    # Cancel deterministically mid-execution: run the executor on a thread and
+    # fire the token only after the pid file proves the grandchild spawned.
+    # A wall-clock timer raced the child's startup under load (the same race
+    # CI just caught in the orphan-reaper twin of this test).
+    result_holder: dict = {}
+
+    def run() -> None:
+        result_holder["result"] = _executor().execute(sandboxed)
+
+    thread = _threading.Thread(target=run)
+    thread.start()
     deadline = time.monotonic() + 10.0
-    while not pid_file.exists():
-        assert time.monotonic() < deadline, "grandchild never started"
-        time.sleep(0.05)
+    try:
+        while not pid_file.exists():
+            assert time.monotonic() < deadline, "grandchild never started"
+            time.sleep(0.05)
+        token.cancel()
+    finally:
+        thread.join(timeout=10.0)
+    assert not thread.is_alive()
+
+    result = result_holder["result"]
+    assert result.status == "cancelled"
     pid = int(pid_file.read_text().strip())
     # The grandchild must be dead well before its 2s sleep ends.
     while _pid_alive(pid):
