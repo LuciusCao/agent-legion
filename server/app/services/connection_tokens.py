@@ -11,10 +11,16 @@ concurrent refreshers of the same connection queue; readers of a valid token
 never touch the lock. ``ConnectionService.update``/``delete`` take the same
 gate (see :mod:`connection_gate`), so an admin credential swap can never
 interleave with an in-flight exchange. Unlike the retired row-lock design,
-the advisory lock blocks no row and pins no connection-pool peer (the pool is
-32; 10-20s HTTP waits under a row lock could starve it on a cold/expired
-connection). Adapters must use bounded network timeouts so a hung upstream
-cannot hold the advisory lock indefinitely.
+the gate blocks no row and does not block readers of ``external_connections``
+— but each queued refresher still holds one pool connection while waiting
+(the transaction checks the connection out before taking the gate), and the
+exchange itself runs with the transaction open, so ~pool-size concurrent
+refreshers of the SAME connection can still exhaust the pool (the old row
+lock had the same arithmetic and additionally blocked every
+``external_connections`` reader). If that burst ever materializes, add an
+in-process per-key single-flight so extra callers wait on an event instead
+of queueing on pool connections. Adapters must use bounded network timeouts
+so a hung upstream cannot hold the gate indefinitely.
 
 Call sites that receive an upstream auth failure (HTTP 401/403 or an in-band
 auth error code) should report it via ``NodeContext.report_auth_failure``

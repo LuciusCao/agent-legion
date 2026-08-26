@@ -1,24 +1,12 @@
-import { memo, useMemo } from 'react'
+import { useMemo } from 'react'
 import type { StudioChat } from './useStudioChat'
 import { useChatAutoScroll } from './useChatAutoScroll'
 import {
-  permissionResolutionText,
-  planEntries,
   streamingTextId,
-  textContent,
   type ChatMessage,
   type ToolCallView,
 } from './studioChatMessages'
-import { StatusLine } from './StudioChatStatusLine'
-import { StudioChatTextBubble } from './StudioChatTextBubble'
-import { StudioChatToolCallCard } from './StudioChatToolCallCard'
-import { StudioChatPermission } from './StudioChatPermission'
-import { StudioChatThought } from './StudioChatThought'
-import {
-  AgentDefinitionDraftCard,
-  NodeCodeDraftCard,
-  WorkflowDraftCard,
-} from './StudioChatDraftCards'
+import { MessageItem } from './StudioChatMessageItem'
 import styles from './StudioChatPanel.module.css'
 
 type Props = {
@@ -52,6 +40,15 @@ export function StudioChatMessageList(props: Props) {
     }
     return map
   }, [chat.messages, toolCallById])
+  // Streaming target + permission lookup hoisted from MessageItem: both feed
+  // per-message props as primitives / stable view objects, so MessageItem's
+  // memo sees unchanged props for untouched messages (a streaming update
+  // touches one message; passing the whole `chat` object would defeat memo).
+  const streamingId = chat.busy ? streamingTextId(chat.messages) : null
+  const permissionById = useMemo(
+    () => new Map(chat.permissions.map((view) => [view.requestId, view])),
+    [chat.permissions]
+  )
 
   // workflow 草稿卡片挂在最后一个携带该 yaml 的工具调用后面。
   const draftAnchorId = useMemo(
@@ -80,9 +77,20 @@ export function StudioChatMessageList(props: Props) {
         <MessageItem
           key={message.id}
           message={message}
-          props={props}
+          streaming={message.id === streamingId}
           toolCall={toolCallByFirstMessage.get(message.id) ?? null}
+          permission={permissionById.get(permissionRequestId(message)) ?? null}
           draftAnchorId={draftAnchorId}
+          workflowDraft={chat.workflowDraft}
+          agentDrafts={chat.agentDrafts}
+          nodeDrafts={chat.nodeDrafts}
+          allowAllPermissions={chat.session?.allow_all_permissions ?? false}
+          permissionDisabled={chat.session?.status !== 'awaiting_permission'}
+          workspaceId={props.workspaceId}
+          onApplyWorkflowDraft={props.onApplyWorkflowDraft}
+          onSelectNode={props.onSelectNode}
+          onAnswerPermission={chat.answerPermission}
+          onToggleAllowAll={chat.setAllowAll}
         />
       ))}
       <div ref={bottomRef} />
@@ -95,99 +103,8 @@ function toolCallIdOf(message: ChatMessage): string {
   return typeof content?.toolCallId === 'string' ? content.toolCallId : ''
 }
 
-// Memoized per message: a streaming update appends/touches one message, and
-// the rest of the (potentially long) list should not re-render for it.
-const MessageItem = memo(function MessageItem({
-  message,
-  props,
-  toolCall,
-  draftAnchorId,
-}: {
-  message: ChatMessage
-  props: Props
-  toolCall: ToolCallView | null
-  draftAnchorId: string | null
-}) {
-  const { chat } = props
-  if (message.kind === 'text') {
-    // 流式中的 agent 文本保持纯文本；空闲时 busy=false 全部视为已完成
-    // （含后端重启丢失 turn_end 的兜底）。
-    const streaming = chat.busy && message.id === streamingTextId(chat.messages)
-    return <StudioChatTextBubble message={message} streaming={streaming} />
-  }
-  if (message.kind === 'thought') {
-    return <StudioChatThought text={textContent(message)} />
-  }
-  if (message.kind === 'tool_call') {
-    if (!toolCall) return null
-    return (
-      <div className={styles.toolCallGroup}>
-        <StudioChatToolCallCard call={toolCall} />
-        {chat.workflowDraft && draftAnchorId === toolCall.toolCallId && (
-          <WorkflowDraftCard
-            draft={chat.workflowDraft}
-            workspaceId={props.workspaceId}
-            onApply={props.onApplyWorkflowDraft}
-          />
-        )}
-        {chat.agentDrafts
-          .filter((draft) => draft.toolCallId === toolCall.toolCallId)
-          .map((draft) => (
-            <AgentDefinitionDraftCard key={draft.toolCallId} draft={draft} />
-          ))}
-        {chat.nodeDrafts
-          .filter((draft) => draft.toolCallId === toolCall.toolCallId)
-          .map((draft) => (
-            <NodeCodeDraftCard
-              key={draft.toolCallId}
-              draft={draft}
-              onSelectNode={props.onSelectNode}
-            />
-          ))}
-      </div>
-    )
-  }
-  if (message.kind === 'plan') {
-    const entries = planEntries(message)
-    if (entries.length === 0) return null
-    return (
-      <div className={styles.plan}>
-        <div className={styles.planTitle}>计划</div>
-        <ul>
-          {entries.map((entry, index) => (
-            <li key={index} data-status={entry.status || undefined}>
-              {entry.content}
-            </li>
-          ))}
-        </ul>
-      </div>
-    )
-  }
-  if (message.kind === 'permission') {
-    const content = message.content as Record<string, unknown>
-    if (content?.status === 'resolved' && !content?.request_id) {
-      const text = permissionResolutionText(message)
-      return text ? <div className={styles.statusLine}>{text}</div> : null
-    }
-    if (content?.status === 'resolved') return null
-    const permission = chat.permissions.find(
-      (view) => view.requestId === content?.request_id
-    )
-    if (!permission) return null
-    return (
-      <StudioChatPermission
-        permission={permission}
-        allowAll={chat.session?.allow_all_permissions ?? false}
-        disabled={chat.session?.status !== 'awaiting_permission'}
-        onAnswer={(requestId, answer) =>
-          void chat.answerPermission(requestId, answer)
-        }
-        onToggleAllowAll={(enabled) => void chat.setAllowAll(enabled)}
-      />
-    )
-  }
-  if (message.kind === 'status') {
-    return <StatusLine message={message} />
-  }
-  return null
-})
+function permissionRequestId(message: ChatMessage): string {
+  if (message.kind !== 'permission') return ''
+  const content = message.content as Record<string, unknown>
+  return typeof content?.request_id === 'string' ? content.request_id : ''
+}

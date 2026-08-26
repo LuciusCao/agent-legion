@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useUiStore } from '../../stores/uiStore'
 import { JobDetailActions } from '../../components/job/JobDetailActions'
 import type { NodeCatalog } from '../../lib/nodeCatalog'
@@ -19,14 +19,22 @@ type Options = {
 }
 
 /**
- * Push the actions panel into uiStore only when its visible inputs change:
- * the 5s running-state poll produces a fresh `detail` object every cycle,
- * and pushing a new JSX element into uiStore each time re-renders the whole
- * layout (WorkspaceLayout subscribes to detailPageActions).
+ * Push the actions panel into uiStore only when its visible inputs change.
+ *
+ * The 5s running-state poll produces a fresh `detail` object every cycle;
+ * pushing a new JSX element into uiStore each time re-renders the whole
+ * layout (WorkspaceLayout subscribes to detailPageActions). The effect's ONLY
+ * trigger is therefore `actionsSignature` — the current values (detail,
+ * nodeCatalog, callbacks) are read through a ref snapshot so a fresh `detail`
+ * reference with an unchanged signature never refires the effect.
  */
 export function useJobDetailActions(options: Options) {
-  const { detail, nodeCatalog, actionLoading } = options
+  const { detail, actionLoading } = options
   const setDetailPageActions = useUiStore((state) => state.setDetailPageActions)
+  const snapshotRef = useRef(options)
+  useEffect(() => {
+    snapshotRef.current = options
+  })
   const actionsSignature = detail
     ? [
         detail.job.status,
@@ -37,43 +45,30 @@ export function useJobDetailActions(options: Options) {
       ].join('|')
     : null
   useEffect(() => {
-    if (!detail) {
+    if (actionsSignature === null) {
+      setDetailPageActions(null)
+      return
+    }
+    const snapshot = snapshotRef.current
+    if (!snapshot.detail) {
       setDetailPageActions(null)
       return
     }
     setDetailPageActions(
       <JobDetailActions
-        jobs={[detail.job]}
-        workflowDefinition={nodeCatalog}
-        loading={actionLoading}
-        onRerun={options.onRerun}
-        onRunTo={options.onRunTo}
-        onContinue={options.onContinue}
-        onUpgradeWorkflow={options.onUpgradeWorkflow}
-        onPackage={options.onPackage}
-        onClearPacked={options.onClearPacked}
-        onDelete={options.onDelete}
-        onOpenArtifacts={options.onOpenArtifacts}
+        jobs={[snapshot.detail.job]}
+        workflowDefinition={snapshot.nodeCatalog}
+        loading={snapshot.actionLoading}
+        onRerun={snapshot.onRerun}
+        onRunTo={snapshot.onRunTo}
+        onContinue={snapshot.onContinue}
+        onUpgradeWorkflow={snapshot.onUpgradeWorkflow}
+        onPackage={snapshot.onPackage}
+        onClearPacked={snapshot.onClearPacked}
+        onDelete={snapshot.onDelete}
+        onOpenArtifacts={snapshot.onOpenArtifacts}
       />
     )
     return () => setDetailPageActions(null)
-    // deps: `actionLoading` reaches this effect only through actionsSignature
-    // above — the 5s running-state poll produces a fresh `detail` object every
-    // cycle, and listing the raw value would refire this effect (and re-push
-    // a visually identical JSX node into uiStore) on every poll.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    actionsSignature,
-    nodeCatalog,
-    setDetailPageActions,
-    detail,
-    options.onRerun,
-    options.onRunTo,
-    options.onContinue,
-    options.onUpgradeWorkflow,
-    options.onPackage,
-    options.onClearPacked,
-    options.onDelete,
-    options.onOpenArtifacts,
-  ])
+  }, [actionsSignature, setDetailPageActions])
 }

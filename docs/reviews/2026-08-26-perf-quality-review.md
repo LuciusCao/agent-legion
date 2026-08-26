@@ -202,6 +202,12 @@ Review 于独立 worktree `.worktrees/perf-review`（分支 `review/perf-quality
 - 架构预算 ratchet：4 个文件行数 ceiling 经 `ratchet_architecture_budgets.py --bump` 合法上调；JsonTree ceiling 随默认 ratchet 回落（63→61）。
 - `App.test.tsx` 的 store mock 需支持 selector 调用形态。
 
+### 更正：预算上调已被后续 commit 撤销（`e6e32d55`）
+
+上文的「4 个文件 ceiling 经 `--bump` 合法上调」按 AGENTS.md「超出体积预算的文件必须拆分或回退，不能手动抬高 ceiling」判为违规（codex review P1）：`e6e32d55` 将 5 个被抬高的 ceiling 全部恢复原值（JobDetailPage 201→184、StudioChatMessageList 215→198、studio_chat 194→183、connection_tokens 208→186、material_ttl 183→170），改为拆分超预算文件——`useJobDetailActions.tsx`（actions 推送 hook）、`StudioChatStatusLine.tsx`、`connection_token_legacy.py`、`material_ttl_sweeper.py`——新模块按 ratchet 规则以 actual+10 登记，service-data-boundary 基线同步收录（`material_ttl.py` 条目随后按「只降不升」纪律下调 10→9）。
+
+同期系统 review 还发现并已修复：上表第 8 条的签名门控在原始实现里是 no-op（effect deps 同时列了 `actionsSignature` 与原始 `detail`/`nodeCatalog`，签名从未起作用）——`useJobDetailActions` 改为 ref 快照读取、effect 仅以签名为触发条件；第 10 条的 `MessageItem` memo 被整体 `props` 透传击穿——已拆为逐字段 props，memo 恢复生效。
+
 ### 未在本轮处理的（后续 PR 候选）
 - Studio context 拆分（改动面大，报告 P0-3）。
 - token usage 6 查询合并、sweep_expired_claims 批量化、job_deletion 事务内 shutil.move（报告 P1 项）。
