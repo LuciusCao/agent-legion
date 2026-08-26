@@ -35,7 +35,12 @@
 
 ## 4. Quality Gates（必须执行）
 
-- 任何代码修改后先跑 `./scripts/check-quick.sh`。
+- 修改-验证内环用 `GATE_TIER=aff ./scripts/check-quick.sh`：backend 按覆盖逆索引
+  只跑受影响测试、前端 `vitest related` 只跑导入改动文件的测试；首次先跑
+  `GATE_TIER=aff-index ./scripts/check-quick-backend.sh` 建索引（依赖/conftest 变更后
+  重建）。aff 档不是 gate 凭证（`run-local-gate.sh` 拒绝该档）——无索引或选择面太宽时
+  自动回落 unit 全量，回落只会更慢、不会漏跑。任何代码修改后至少跑一次完整
+  `./scripts/check-quick.sh`（aff 通过不能替代）。
 - quick gate 的 backend lane 同时跑 `worker/ui/app.test.mjs`（node:test，无 node 时跳过并提示）；
   CI 侧在 backend-postgres-a job 执行同一入口。
 - 提交或交接前确认 GitHub Actions full gate 通过（`.github/workflows/quality-gate.yml`
@@ -60,8 +65,9 @@
 - 后端测试隔离基于 TRUNCATE：每个 xdist worker 每 session 只建一次 schema，每个测试
   清空所有表（`tests/conftest.py`）。改动 DDL 的测试必须加 `@pytest.mark.fresh_schema`
   走完整重建。本地 quick gate 默认不带覆盖率（`AGENT_LEGION_COV=1` 开启；85% floor 由
-  CI 与 `./scripts/check.sh` 强制）。pytest worker 数默认 min(4, 核数)，用
-  `AGENT_LEGION_TEST_WORKERS` 覆盖。
+  CI 与 `./scripts/check.sh` 强制）。pytest worker 数默认 worktree 感知（无兄弟
+  worktree 跑 gate 时 cores-2、上限 8，有竞争时 min(4, 核数)；探测逻辑见
+  `scripts/gate-jobs.sh`），用 `AGENT_LEGION_TEST_WORKERS` 覆盖。
 - 新测试必须放进对应子系统子目录（如 `tests/services/`、`tests/scripts/`），不要新增
   `tests/` 根目录文件（静态检查 `scripts/architecture/test_placement.py` 强制，基线
   `config/architecture/test-root-files-baseline.json`）；确定不碰数据库的纯静态测试可加

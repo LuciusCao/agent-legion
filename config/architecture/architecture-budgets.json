@@ -646,6 +646,7 @@
     "scripts/generate_architecture.py": 253,
     "scripts/generate_architecture_frontend.py": 56,
     "scripts/migrate_job_dirs_to_shards.py": 135,
+    "scripts/pytest_aff_selection.py": 190,
     "scripts/pytest_gate_shard.py": 64,
     "scripts/pytest_telemetry.py": 48,
     "scripts/quality/__init__.py": 10,

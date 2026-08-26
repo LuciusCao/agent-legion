@@ -6,9 +6,11 @@
 
 | 脚本 | 用途 |
 |------|------|
-| `check-quick.sh` | 日常快速质量门：先并行 backend/frontend 静态检查，再并行 pytest/Vitest，避免静态检查与两套测试 runner 同时争抢 CPU。 |
-| `check-quick-backend.sh` | quick gate 后端 lane；支持 `BACKEND_GATE_PHASE=static\|test\|all`。 |
-| `check-quick-frontend.sh` | quick gate 前端 lane；支持 `FRONTEND_GATE_PHASE=static\|test\|all`，并通过 `FRONTEND_TEST_MODE=test\|coverage` 选择 Vitest 模式。 |
+| `check-quick.sh` | 日常快速质量门：先并行 backend/frontend 静态检查，再并行 pytest/Vitest，避免静态检查与两套测试 runner 同时争抢 CPU。`GATE_TIER=aff` 是 agent 内环组合档（backend 受影响测试 + 前端 `vitest related`，非 gate 凭证）。 |
+| `check-quick-backend.sh` | quick gate 后端 lane；支持 `BACKEND_GATE_PHASE=static\|test\|all`。测试档位 `GATE_TIER=smoke\|unit\|postgres\|full`；`aff` 按 `.pytest-aff-index.json` 选择受影响测试（无索引回落 unit），`aff-index` 一次性重建索引（带 `--cov-context=test` 的 unit 全量跑）。 |
+| `check-quick-frontend.sh` | quick gate 前端 lane；支持 `FRONTEND_GATE_PHASE=static\|test\|all`，并通过 `FRONTEND_TEST_MODE=test\|coverage\|related` 选择 Vitest 模式（`related` = 只跑导入改动源文件的测试，`vitest related`）。 |
+| `gate-jobs.sh` | 各 lane 默认并行度策略：无兄弟 worktree 跑 gate 时 `cores-2`（上限 8），有竞争时回落 `min(4, cores)`；经 `git worktree list` 探测兄弟 worktree 的 `.quick-gate.lock`。 |
+| `pytest_aff_selection.py` | backend 受影响测试选择：从 `--cov-context=test` 的 coverage 数据蒸馏「源文件 → 测试 nodeid」逆索引（`build`），并按 git 改动选出受影响测试（`select`）；内环加速用，非 gate 凭证。 |
 | `check-fast.sh` | pre-commit 实际调用的 fast gate：ruff/mypy/前端 lint，不跑测试。 |
 | `check.sh` | 完整质量门（提交前）：coverage 模式 quick gate + 并行的 full backend evidence/前端 bundle，避免重复 Vitest 与 typecheck。 |
 | `check-ci.sh` | CI 质量门：完整 gate 的 CI 扩展版本。 |
