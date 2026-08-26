@@ -75,6 +75,6 @@ def test_throttle_boundary_writes_at_exactly_the_interval(job_db, monkeypatch) -
     assert registry.authenticate(token) is not None
     assert registry._liveness._writes["boundary-worker"] == 1010.0
 
-    # Revoking evicts the memo entry so the dict stays bounded.
-    assert registry.revoke("boundary-worker") is True
+    # Deleting the record evicts the memo entry so the dict stays bounded.
+    assert registry.delete_worker("boundary-worker") == "deleted"
     assert "boundary-worker" not in registry._liveness._writes

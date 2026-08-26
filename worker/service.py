@@ -45,16 +45,14 @@ def _public_config_response(store: WorkerConfigStore, config: dict[str, Any]) ->
     }
 
 
-def _revoke_previous_worker(config: dict[str, Any]) -> None:
-    """改 worker_id 前的 best-effort 提示：Host 侧吊销是 admin-only 操作。
+def _forget_previous_worker(config: dict[str, Any]) -> None:
+    """改 worker_id 前的提示：Host 侧删除注册记录是 admin-only 操作。
 
-    旧实现曾以 register token 调 /agent-workers/{id}/revoke，但该端点要求
-    admin 会话，调用必然 401 被吞掉——等价于 no-op。这里只记录一条日志，
-    旧 worker_id 依赖 Host 的离线超时自然消失。"""
+    这里只记录一条日志，旧 worker_id 依赖 Host 的离线超时自然消失。"""
     worker_id = str(config.get("worker_id", ""))
     if worker_id:
         logger.info(
-            "worker_id 已从 %s 变更；旧注册需管理员在 Host UI 吊销（离线后自然不再领取）",
+            "worker_id 已从 %s 变更；旧注册记录需管理员在 Host UI 删除（离线后自然不再领取）",
             worker_id,
         )
 
@@ -125,7 +123,7 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool 
             previous = supervisor.store.read(require_identity=False)
             new_worker_id = fields.get("worker_id")
             if new_worker_id is not None and new_worker_id != previous["worker_id"]:
-                _revoke_previous_worker(previous)
+                _forget_previous_worker(previous)
             config = supervisor.store.update_public(fields, registration_token=registration_token)
             changed = {field for field in fields if previous.get(field) != config.get(field)}
             restarted = bool(changed - _HOT_CONFIG_FIELDS or registration_token is not None)

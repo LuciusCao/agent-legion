@@ -92,6 +92,9 @@ MIGRATIONS: list[SchemaMigration] = [
     # NULL-workspace rows are revoked before any scoped-token traffic can
     # observe them.
     SchemaMigration(58, "retire_global_register_tokens", migrate_retire_global_register_tokens),
+    # v59 is DDL-only (agent_workers.register_token_ids_json): the idempotent
+    # schema-file replay adds the column, no data migration needed.
+    SchemaMigration(59, "worker_register_token_ids"),
 ]
 
 assert [m.version for m in MIGRATIONS] == sorted(m.version for m in MIGRATIONS), (

@@ -787,6 +787,8 @@ if (hasDom) {
   } else {
     Promise.all([loadConfig(), loadRegisterTokens(), loadStatus(), loadLogs(), loadMetrics()]);
     setInterval(loadStatus, 5000);
+    // token 卡片状态（验证中 → 已验证 + workspace 信息）随重注册完成自动刷新。
+    setInterval(loadRegisterTokens, 5000);
     setInterval(loadMetrics, 30000);
   }
 }

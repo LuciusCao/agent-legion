@@ -53,8 +53,8 @@ vi.mock('../api', () => ({
   listRegisterTokens: vi.fn().mockResolvedValue([]),
   listAgentWorkers: vi.fn().mockResolvedValue([]),
   createRegisterToken: vi.fn(),
-  revokeRegisterToken: vi.fn(),
-  revokeAgentWorker: vi.fn(),
+  deleteRegisterToken: vi.fn(),
+  deleteAgentWorker: vi.fn(),
 }))
 
 const mockApi = vi.mocked(api)

@@ -67,8 +67,12 @@ class AgentRegisterTokensResponse(BaseModel):
     tokens: list[AgentRegisterTokenSummary]
 
 
-class AgentRegisterTokenRevokeResponse(BaseModel):
-    revoked: bool
+class AgentRegisterTokenDeleteResponse(BaseModel):
+    token_id: str
+    deleted: bool
+    # Workers whose registration records were cascade-deleted in the same
+    # transaction (no live key left); their credentials die immediately.
+    cascaded_worker_ids: list[str] = Field(default_factory=list)
 
 
 class ClaimAgentExecutionRequest(BaseModel):
@@ -94,6 +98,10 @@ class AgentWorkerSummary(BaseModel):
     protocol_version: int
     # Server-side workspace admission scope; [] means all workspaces.
     allowed_workspaces: list[str]
+    # Ids of the workspace-scoped register tokens that admitted the latest
+    # (re)registration — the worker↔key binding shown in the admin UI. [] for
+    # workers registered before schema v59.
+    register_token_ids: list[str] = Field(default_factory=list)
     registered_at: str
     last_seen_at: str
     # True while the Worker's last authenticated call is within the online
@@ -106,9 +114,9 @@ class AgentWorkersResponse(BaseModel):
     workers: list[AgentWorkerSummary]
 
 
-class AgentWorkerRevokeResponse(BaseModel):
+class AgentWorkerDeleteResponse(BaseModel):
     worker_id: str
-    revoked: bool
+    deleted: bool
 
 
 class AgentClaimResponse(BaseModel):

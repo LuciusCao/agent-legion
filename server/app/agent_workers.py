@@ -5,11 +5,11 @@ import hmac
 import json
 import re
 import secrets
-import uuid
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from server.app.agent_register_tokens import AgentRegisterTokenStore
 from server.app.agent_worker_declarations import (
     normalize_labels,
     normalize_worker_declarations,
@@ -27,7 +27,6 @@ from shared.protocol import CODE_PROTOCOL_VERSION, MODEL_RUNTIME_PROTOCOL_VERSIO
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _MAX_NAME_LENGTH = 128
 _MAX_CONCURRENCY = 1024
-_MAX_TOKEN_LABEL_LENGTH = 128
 # A Worker is "online" while its last authenticated call (claim poll every few
 # seconds, or an execution heartbeat) is fresher than this threshold.
 ONLINE_THRESHOLD_SECONDS = 30
@@ -36,10 +35,21 @@ ONLINE_THRESHOLD_SECONDS = 30
 # server-side consumers.
 
 
-class AgentWorkerRegistry:
+class AgentWorkerRegistry(AgentRegisterTokenStore):
+    """Worker registration lifecycle; the admin-issued register token store
+    (issue/resolve/list/revoke) is inherited from AgentRegisterTokenStore."""
+
     def __init__(self, database_dsn: DatabaseDsn) -> None:
-        self.database_dsn = database_dsn
+        super().__init__(database_dsn)
         self._liveness = WorkerLiveness()
+
+    def delete_register_token(self, token_id: str) -> list[str] | None:
+        deleted = super().delete_register_token(token_id)
+        # Evict cascade-deleted Workers from the liveness memo so the throttle
+        # dict stays bounded.
+        for worker_id in deleted or []:
+            self._liveness.discard(worker_id)
+        return deleted
 
     def issue_token(
         self,
@@ -55,6 +65,7 @@ class AgentWorkerRegistry:
         protocol_version: int = 1,
         image_version: str = "",
         allowed_workspaces: Sequence[str] | None = None,
+        register_token_ids: Sequence[str] | None = None,
     ) -> str:
         # image_version is accepted for forward compatibility but not stored:
         # the agent_workers table has no column for it yet.
@@ -90,6 +101,10 @@ class AgentWorkerRegistry:
         # token therefore only bites at the next re-registration, it does not
         # narrow an already-registered Worker's stored scope.
         scope = sorted({str(workspace) for workspace in (allowed_workspaces or [])})
+        # The worker↔key binding: ids of the register tokens that admitted
+        # this registration, refreshed on every re-registration together with
+        # the scope. Absent for legacy direct registry callers.
+        token_ids = sorted({str(token_id) for token_id in (register_token_ids or [])})
         secret = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(secret.encode()).hexdigest()
         now = datetime.now(UTC)
@@ -106,8 +121,9 @@ class AgentWorkerRegistry:
                   worker_id, name, runtimes_json, capabilities_json, models_json,
                   max_concurrency, max_code_concurrency, labels_json,
                   protocol_version, token_hash, allowed_workspaces_json,
+                  register_token_ids_json,
                   registered_at, last_seen_at, revoked_at
-                ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, null)
+                ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, null)
                 on conflict(worker_id) do update set
                   name=excluded.name,
                   runtimes_json=excluded.runtimes_json,
@@ -119,6 +135,7 @@ class AgentWorkerRegistry:
                   protocol_version=excluded.protocol_version,
                   token_hash=excluded.token_hash,
                   allowed_workspaces_json=excluded.allowed_workspaces_json,
+                  register_token_ids_json=excluded.register_token_ids_json,
                   last_seen_at=excluded.last_seen_at,
                   revoked_at=null
                 """,
@@ -134,103 +151,12 @@ class AgentWorkerRegistry:
                     protocol_version,
                     token_hash,
                     json.dumps(scope),
+                    json.dumps(token_ids),
                     now,
                     now,
                 ),
             )
         return f"{worker_id}.{secret}"
-
-    def issue_register_token(self, *, workspace_id: str | None, label: str = "") -> tuple[str, str]:
-        """Issue a workspace-scoped registration token; returns (token_id, plaintext).
-
-        workspace_id is required: the all-workspaces token variant was retired
-        with the global register token (issue #35) — every registration must be
-        attributable to exactly one workspace. Only the sha256 hash is stored;
-        the plaintext is returned exactly once.
-        """
-        if workspace_id is None:
-            raise ValueError("workspace_id is required (all-workspaces tokens are retired)")
-        if len(label) > _MAX_TOKEN_LABEL_LENGTH:
-            raise ValueError(f"register token label exceeds {_MAX_TOKEN_LABEL_LENGTH} chars")
-        token_id = uuid.uuid4().hex
-        secret = secrets.token_urlsafe(32)
-        token_hash = hashlib.sha256(secret.encode()).hexdigest()
-        with write_transaction(self.database_dsn) as conn:
-            exists = conn.execute(
-                "select 1 from workspaces where id=%s", (workspace_id,)
-            ).fetchone()
-            if exists is None:
-                raise ValueError(f"workspace {workspace_id!r} does not exist")
-            conn.execute(
-                "insert into agent_register_tokens(id, token_hash, workspace_id, label)"
-                " values (%s, %s, %s, %s)",
-                (token_id, token_hash, workspace_id, label),
-            )
-        return token_id, f"{token_id}.{secret}"
-
-    def resolve_register_scope(self, tokens: Sequence[str]) -> list[dict[str, Any]] | None:
-        """Resolve presented scoped register tokens to their workspace scopes.
-
-        Takes the worker's full token list; every token must resolve to a live
-        (non-revoked) workspace-scoped token — one bad token fails the whole
-        registration so a stale token can never silently narrow the scope.
-        Returns the merged scope as [{'workspace_id', 'workspace_name',
-        'token_ids'}] rows (deduplicated; token_ids records which presented
-        tokens opened the workspace), or None when nothing resolved."""
-        presented = [token for token in tokens if token]
-        if not presented:
-            return None
-        scopes: dict[str, dict[str, Any]] = {}
-        with read_connection(self.database_dsn) as conn:
-            for token in presented:
-                token_id, separator, secret = token.partition(".")
-                if not separator or not token_id or not secret:
-                    return None
-                row = conn.execute(
-                    "select t.token_hash, t.revoked_at, t.workspace_id, w.name"
-                    " from agent_register_tokens t join workspaces w on w.id = t.workspace_id"
-                    " where t.id=%s",
-                    (token_id,),
-                ).fetchone()
-                if row is None or row["revoked_at"] is not None or row["workspace_id"] is None:
-                    return None
-                digest = hashlib.sha256(secret.encode()).hexdigest()
-                if not hmac.compare_digest(digest, row["token_hash"]):
-                    return None
-                entry = scopes.setdefault(
-                    str(row["workspace_id"]),
-                    {"workspace_name": str(row["name"]), "token_ids": []},
-                )
-                entry["token_ids"].append(token_id)
-        return [
-            {"workspace_id": workspace_id, **entry}
-            for workspace_id, entry in sorted(scopes.items())
-        ]
-
-    def list_register_tokens(self) -> list[dict[str, Any]]:
-        """List issued register tokens; never includes hash or plaintext."""
-        with read_connection(self.database_dsn) as conn:
-            rows = conn.execute(
-                "select * from agent_register_tokens order by created_at, id"
-            ).fetchall()
-        return [
-            {
-                "token_id": row["id"],
-                "workspace_id": row["workspace_id"],
-                "label": row["label"],
-                "created_at": row["created_at"],
-                "revoked": row["revoked_at"] is not None,
-            }
-            for row in rows
-        ]
-
-    def revoke_register_token(self, token_id: str) -> bool:
-        with write_transaction(self.database_dsn) as conn:
-            result = conn.execute(
-                "update agent_register_tokens set revoked_at=current_timestamp where id=%s",
-                (token_id,),
-            )
-            return result.rowcount > 0
 
     def authenticate(self, token: str) -> dict[str, Any] | None:
         worker_id, separator, secret = token.partition(".")
@@ -273,15 +199,41 @@ class AgentWorkerRegistry:
                 ).fetchall()
         return [_worker_payload(row) for row in rows]
 
-    def revoke(self, worker_id: str) -> bool:
+    def delete_worker(self, worker_id: str) -> str:
+        """Hard-delete a worker registration; blocked while a bound key lives.
+
+        There is no per-worker revocation by design: a Worker is just a client
+        of its register keys, so access is cut by deleting the key (the Worker
+        then fails its next re-registration). Deleting the record is the
+        follow-up cleanup step and only opens once none of the Worker's bound
+        keys exist anymore (legacy pre-v59 registrations have no recorded
+        binding and are always deletable — they are the migration cleanup
+        target). The check and the delete happen in one transaction so a
+        registration record never vanishes under in-flight claims. Returns
+        'deleted', 'not_found', or 'keys_active'. Historical execution rows
+        reference worker_id as plain text (no FK), so removing the row does
+        not touch them."""
         with write_transaction(self.database_dsn) as conn:
-            result = conn.execute(
-                "update agent_workers set revoked_at=current_timestamp where worker_id=%s",
+            row = conn.execute(
+                "select register_token_ids_json from agent_workers where worker_id=%s",
+                (worker_id,),
+            ).fetchone()
+            if row is None:
+                return "not_found"
+            bound = json.loads(row["register_token_ids_json"] or "[]")
+            if bound:
+                alive = conn.execute(
+                    "select 1 from agent_register_tokens where id = any(%s) limit 1",
+                    (bound,),
+                ).fetchone()
+                if alive is not None:
+                    return "keys_active"
+            conn.execute(
+                "delete from agent_workers where worker_id=%s",
                 (worker_id,),
             )
-        # Evict the liveness memo entry so the throttle dict stays bounded.
         self._liveness.discard(worker_id)
-        return result.rowcount > 0
+        return "deleted"
 
 
 def _worker_payload(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -306,6 +258,9 @@ def _worker_payload(row: Mapping[str, Any]) -> dict[str, Any]:
         "labels": json.loads(row["labels_json"]),
         "protocol_version": int(row["protocol_version"]),
         "allowed_workspaces": json.loads(row["allowed_workspaces_json"] or "[]"),
+        # Absent only for pre-v59 rows in test doubles; real rows always have
+        # the column (default '[]').
+        "register_token_ids": json.loads(row.get("register_token_ids_json") or "[]"),
         "registered_at": (
             registered_at.isoformat() if isinstance(registered_at, datetime) else str(registered_at)
         ),

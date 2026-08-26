@@ -102,45 +102,53 @@ def test_agent_register_token_management_api(tmp_path: Path) -> None:
         )
         assert missing.status_code == 400
 
-        # Revoke kills the credential.
-        revoked = client.post(f"/api/agent-register-tokens/{body['token_id']}/revoke")
-        assert revoked.status_code == 200
-        assert revoked.json() == {"revoked": True}
-        register_after_revoke = client.post(
+        # Delete kills the credential (hard delete is the only lifecycle
+        # action — there is no soft revoke).
+        deleted = client.delete(f"/api/agent-register-tokens/{body['token_id']}")
+        assert deleted.status_code == 200
+        assert deleted.json() == {
+            "token_id": body["token_id"],
+            "deleted": True,
+            "cascaded_worker_ids": [],
+        }
+        register_after_delete = client.post(
             "/api/agent-workers/register",
             headers={"X-Agent-Worker-Register-Token": plaintext},
             json={"worker_id": "w1", "runtimes": ["pi"], "max_concurrency": 1},
         )
-        assert register_after_revoke.status_code == 401
-        unknown = client.post("/api/agent-register-tokens/no-such/revoke")
+        assert register_after_delete.status_code == 401
+        unknown = client.delete("/api/agent-register-tokens/no-such")
         assert unknown.status_code == 404
 
 
-def test_agent_worker_revoke_api(tmp_path: Path) -> None:
+def test_agent_worker_delete_api(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
     _seed_request(app.state.job_db, job_id="job-regtokens-4", limit=2)
 
     # Anonymous calls and the legacy register-token header both get 401
     # (SECURITY-AUTH-001) — asserted on a cookie-less client.
     with TestClient(app) as anonymous:
-        unauthenticated = anonymous.post("/api/agent-workers/no-such/revoke")
+        unauthenticated = anonymous.delete("/api/agent-workers/no-such")
         assert unauthenticated.status_code == 401
-        legacy = anonymous.post(
-            "/api/agent-workers/no-such/revoke",
-            headers={"X-Agent-Worker-Register-Token": "nope"},
-        )
-        assert legacy.status_code == 401
 
     with TestClient(app) as client:
         _authenticate_admin(client)
 
-        token = _register(client)["worker_token"]
-        revoked = client.post("/api/agent-workers/home-mini/revoke")
-        assert revoked.status_code == 200, revoked.text
-        assert revoked.json() == {"worker_id": "home-mini", "revoked": True}
+        credential = _issue_scoped_token(client)
+        token = _register(client, credential=credential)["worker_token"]
+        token_id = credential.partition(".")[0]
 
-        # The revoked Worker's credential is dead: authenticate rejects it, so
-        # the claim poll fails before ever reaching the broker.
+        # While the Worker's bound key is alive, its record cannot be deleted.
+        blocked = client.delete("/api/agent-workers/home-mini")
+        assert blocked.status_code == 409
+
+        # Deleting the only bound key cascade-deletes the Worker record in the
+        # same transaction: its credential dies immediately, not at its next
+        # re-registration.
+        deleted_key = client.delete(f"/api/agent-register-tokens/{token_id}")
+        assert deleted_key.status_code == 200
+        assert deleted_key.json()["cascaded_worker_ids"] == ["home-mini"]
+
         claim = client.post(
             "/api/agent-executions/claim",
             headers={"X-Agent-Worker-Token": token},
@@ -149,10 +157,7 @@ def test_agent_worker_revoke_api(tmp_path: Path) -> None:
         assert claim.status_code in (401, 409)
 
         listed = client.get("/api/agent-workers").json()["workers"]
-        mine = next(w for w in listed if w["worker_id"] == "home-mini")
-        assert mine["revoked"] is True
+        assert all(w["worker_id"] != "home-mini" for w in listed)
 
-        # Re-revoke is idempotent: the row still exists, so it succeeds again.
-        again = client.post("/api/agent-workers/home-mini/revoke")
-        assert again.status_code == 200
-        assert again.json() == {"worker_id": "home-mini", "revoked": True}
+        # The record is already gone — manual deletion reports 404.
+        assert client.delete("/api/agent-workers/home-mini").status_code == 404

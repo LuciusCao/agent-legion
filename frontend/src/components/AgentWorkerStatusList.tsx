@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { listAgentWorkers } from '../api/workerTokens'
+import { listAgentWorkers } from '../api/agentWorkers'
 import { queryKeys } from '../lib/queryKeys'
 import { useAgentsStore } from '../stores/agentsStore'
 import { buildWorkerRows } from './agentWorkerRows'

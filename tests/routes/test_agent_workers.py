@@ -12,94 +12,18 @@ from fastapi.testclient import TestClient
 
 from server.app.agent_broker import AgentExecutionRequest
 from server.app.db.transaction import write_transaction
-from server.app.main import create_app
 from server.app.services.vault import VaultService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import workflow_definition_from_mapping
+from tests.routes.test_agent_worker_registration import (
+    _authenticate_admin,
+    _issue_scoped_token,
+    _make_app,
+    _register,
+)
 from tests.test_agent_broker import _seed_request
 
 _CSRF = {"x-agent-legion-request": "1"}
-
-
-def _authenticate_admin(client: TestClient) -> None:
-    """Bootstrap the first admin and keep its session cookie on the client.
-
-    409 = first user already bootstrapped on this app (a second TestClient
-    block within one test); the cookie is per-client so re-login instead."""
-    response = client.post(
-        "/api/auth/bootstrap",
-        json={"username": "admin", "password": "admin-pw"},
-    )
-    if response.status_code == 409:
-        response = client.post(
-            "/api/auth/login",
-            json={"username": "admin", "password": "admin-pw"},
-        )
-    assert response.status_code == 200, response.text
-    client.headers["x-agent-legion-request"] = "1"
-
-
-def _make_app(tmp_path: Path):
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    # Workspace dispatch defaults to paused (reset at every startup); the
-    # operator resume is part of the environment these tests exercise.
-    app.state.workspace_worker_control.resume("test-workspace")
-    return app
-
-
-def _issue_scoped_token(client: TestClient, workspace_id: str = "test-workspace") -> str:
-    """Issue a real workspace-scoped register token via the admin API.
-
-    Creates the workspace first when it does not exist yet (some tests never
-    seed a job and only exercise the registration contract)."""
-    # 签发是 admin-only API；幂等（409 → login 回落），重复调用无副作用。
-    _authenticate_admin(client)
-    created = client.post(
-        "/api/agent-register-tokens",
-        json={"workspace_id": workspace_id, "label": "test"},
-    )
-    if created.status_code == 400:
-        ensured = client.post(
-            "/api/workspaces",
-            json={"name": workspace_id},
-        )
-        assert ensured.status_code in (200, 201), ensured.text
-        created = client.post(
-            "/api/agent-register-tokens",
-            json={"workspace_id": workspace_id, "label": "test"},
-        )
-    assert created.status_code == 201, created.text
-    return created.json()["register_token"]
-
-
-def _register(client: TestClient, credential: str | None = None, **overrides) -> dict:
-    """Register a worker with a scoped token (auto-issued for test-workspace)."""
-    if credential is None:
-        credential = _issue_scoped_token(client)
-    payload = {
-        "worker_id": "home-mini",
-        "name": "Home Mac mini",
-        "runtimes": ["pi"],
-        "capabilities": ["generate"],
-        "models": [{"provider": "gateway", "model": "test-model"}],
-        "max_concurrency": 10,
-        "labels": {"arch": "arm64"},
-        "protocol_version": 1,
-        "image_version": "agent-legion-worker:test",
-    }
-    payload.update(overrides)
-    headers = {"X-Agent-Worker-Register-Token": credential}
-    tokens = overrides.pop("tokens", None)
-    if tokens:
-        headers = {"X-Agent-Worker-Register-Tokens": ",".join(tokens)}
-    response = client.post(
-        "/api/agent-workers/register",
-        headers=headers,
-        json=payload,
-    )
-    assert response.status_code == 201, response.text
-    assert response.json()["host_protocol_version"] == 3
-    return dict(response.json())
 
 
 def _claim(client: TestClient, token: str) -> dict:
@@ -473,53 +397,6 @@ def test_result_rejects_oversized_archive(tmp_path: Path) -> None:
         # The declared-length gate fires before the body is written anywhere.
         bundle_dir = Path(app.state.agent_broker.bundle_dir)
         assert not bundle_dir.exists() or list(bundle_dir.glob("*.result.tar.gz")) == []
-
-
-def test_register_with_scoped_token_stores_and_returns_scope(tmp_path: Path) -> None:
-    app = _make_app(tmp_path)
-    _seed_request(app.state.job_db, job_id="job-1", limit=2)
-
-    with TestClient(app) as client:
-        _authenticate_admin(client)
-        scoped = _issue_scoped_token(client)
-        other = _issue_scoped_token(client, workspace_id="other-workspace")
-
-        scoped_registration = _register(client, credential=scoped, worker_id="scoped-worker")
-        assert scoped_registration["allowed_workspaces"] == ["test-workspace"]
-        # issue #35: the response carries workspace rows (id + name + the token
-        # ids that opened it) so the Worker console can label each token.
-        workspaces_row = scoped_registration["workspaces"]
-        assert [row["workspace_id"] for row in workspaces_row] == ["test-workspace"]
-        assert all(row["workspace_name"] for row in workspaces_row)
-        assert workspaces_row[0]["token_ids"] == [scoped.partition(".")[0]]
-
-        listed = client.get("/api/agent-workers")
-        assert listed.status_code == 200
-        workers = {w["worker_id"]: w for w in listed.json()["workers"]}
-        assert workers["scoped-worker"]["allowed_workspaces"] == ["test-workspace"]
-
-        # Multiple tokens in one registration merge their scopes (union).
-        merged = _register(
-            client,
-            credential=None,
-            worker_id="scoped-worker",
-            tokens=[scoped, other],
-        )
-        assert sorted(merged["allowed_workspaces"]) == [
-            "other-workspace",
-            "test-workspace",
-        ]
-        # 每个 workspace 行记录开通它的 token id，控制台按 token_id 关联卡片。
-        by_workspace = {row["workspace_id"]: row["token_ids"] for row in merged["workspaces"]}
-        assert by_workspace["test-workspace"] == [scoped.partition(".")[0]]
-        assert by_workspace["other-workspace"] == [other.partition(".")[0]]
-
-        # The workspace view only sees workers scoped to it; the legacy []
-        # scope (a retired global registration) would be invisible there.
-        marketing_view = client.get(
-            "/api/agent-workers", params={"workspace_id": "test-workspace"}
-        ).json()["workers"]
-        assert [w["worker_id"] for w in marketing_view] == ["scoped-worker"]
 
 
 def test_worker_online_flag_tracks_last_seen(tmp_path: Path) -> None:

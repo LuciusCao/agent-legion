@@ -29,14 +29,16 @@ export function WorkspaceWorkersSection({
   } = useQuery({
     queryKey: extraQueryKeys.workspaceWorkers(workspaceId),
     queryFn: () => listAgentWorkers(workspaceId),
+    // Worker 注册/下线应在几秒内自动反映到列表。
+    refetchInterval: 5000,
   })
 
   return (
     <div className={styles.block}>
       <h3 className={styles.heading}>本 Workspace 的 Worker</h3>
       <p className={styles.hint}>
-        仅显示使用本 workspace 签发 Token 注册的 Worker；Token
-        签发与吊销由管理员在 「Agent 与 Worker」区管理。
+        仅显示使用本 workspace 签发 Token 注册的 Worker；Key
+        签发与删除由管理员在 「Agent 与 Worker」区管理。
       </p>
       {error && (
         <p className={styles.error} role="alert">

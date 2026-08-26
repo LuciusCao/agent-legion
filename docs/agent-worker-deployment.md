@@ -101,11 +101,11 @@ mkdir -p deploy/secrets
 
 Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope**，`worker.yaml` 不需要也不允许声明 workspace（issue #35 后全局 token 已退役，只保留 scoped token 一种）：
 
-- **Scoped token（唯一方式）**：在 Host Web UI 的「设置 → Worker Token」页面签发与管理：填写标签并**选择 workspace（必选）**即可创建，明文只显示一次。复制后到 Worker 机器的 Worker 控制台（`http://<worker>:8787` 配置页）「Workspace 访问（Scoped Token）」区块粘贴添加；无显示器的设备可用 `workerctl configure --register-token-file <file>` 导入。一个 Worker 可添加多个不同 workspace 的 token：注册时全部呈现，Host 取并集作为 scope；任何一个 token 失效（吊销/未知）都会让整次注册 401。该页面同时支持查看/吊销已签发 token 与吊销已注册 Worker。
+- **Scoped token（唯一方式）**：在 Host Web UI 的 workspace「设置 → Agent 与 Worker」页面签发与管理：填写 Key 名称即可创建（固定绑定当前 workspace），明文 token 只显示一次。复制后到 Worker 机器的 Worker 控制台（`http://<worker>:8787` 配置页）「Workspace 访问（Scoped Token）」区块粘贴添加；无显示器的设备可用 `workerctl configure --register-token-file <file>` 导入。一个 Worker 可添加多个不同 workspace 的 token：注册时全部呈现，Host 取并集作为 scope；任何一个 token 失效（已删除/未知）都会让整次注册 401。该页面同时支持删除已签发的 key 与清理已注册 Worker 的记录：**删除 key 是切断 Worker 访问的唯一方式**——删除即级联，仅绑定该 key 的 Worker 记录一并删除、凭证立即失效，持有其它 key 的 Worker 同步收窄 scope——没有单独的「吊销 Worker」操作，正如作废 API key 才能作废它的全部客户端。
 
   该 Worker 注册后只能看到并 claim 对应 workspace 的任务；Host 侧每个 workspace 的设置页也只显示用本 workspace token 注册的 Worker（管理员仍可见全量）。
 
-  注意：这些管理端点（UI 与下列 curl 共用的 `/api/agent-register-tokens*`、`/api/agent-workers/*/revoke`）要求 **admin 会话**调用，必须携带登录 cookie 与 CSRF header（见 Host Web UI 登录后的会话）。Worker 注册本身仍必须凭 scoped token，不受影响。
+  注意：这些管理端点（UI 与下列 curl 共用的 `/api/agent-register-tokens*`、`DELETE /api/agent-workers/{id}`）要求 **admin 会话**调用，必须携带登录 cookie 与 CSRF header（见 Host Web UI 登录后的会话）。Worker 注册本身仍必须凭 scoped token，不受影响。
 
   也可以用 curl 在部署机上签发（备选方式）。这些请求需要 admin 会话：先在 Host Web UI 登录（或调用 `/api/auth/login`）取得登录 cookie，并在请求中带上 CSRF header，否则返回 401/403。
 
@@ -117,14 +117,14 @@ curl -sS -X POST http://192.0.2.1:8000/api/agent-register-tokens \
 ```
 
 ```bash
-# 列表（不含明文与 hash，含吊销状态）
+# 列表（不含明文与 hash）
 curl -sS http://192.0.2.1:8000/api/agent-register-tokens
 
-# 吊销
-curl -sS -X POST http://192.0.2.1:8000/api/agent-register-tokens/<token_id>/revoke
+# 删除 key（硬删，立即失效）
+curl -sS -X DELETE http://192.0.2.1:8000/api/agent-register-tokens/<token_id>
 ```
 
-注意：吊销 scoped token 只影响后续注册；已注册 Worker 落库的 scope 在重新注册前不变。需要立即收缩时，吊销后让该 Worker 重新注册（换用新 token）。
+注意：删除 scoped token 会级联生效——同一事务内，不再持有任何存活 key 的 Worker 会被一并删除（其凭证立即失效，不需要等它重启或重注册）；仍持有其它存活 key 的 Worker 保留记录，但失效绑定被剔除、落库 scope 同步收窄到剩余 key 的范围。无绑定记录的 legacy Worker 不受级联影响，可在同一页面手动删除。
 
 Worker 机器上继续挂载它自己的 Pi 配置，并在 gateway 设置了 token 时同样提供 `LLM_GATEWAY_TOKEN`（见 §2）：
 

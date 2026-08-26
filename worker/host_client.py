@@ -124,16 +124,6 @@ class Client(TransferOperations):
         self.token = str(document["worker_token"])
         return dict(document)
 
-    def revoke(self, worker_id: str, management_token: str) -> None:
-        """Revoke a Worker registration on the Host (same credential as register)."""
-        status, body = self.request(
-            "POST",
-            f"/api/agent-workers/{worker_id}/revoke",
-            headers={"X-Agent-Worker-Register-Token": management_token},
-        )
-        if status != 200:
-            raise RuntimeError(f"Agent Worker revoke failed: HTTP {status}: {body[:300]!r}")
-
     def get_self(self) -> dict[str, Any]:
         """Return this Worker's Host-side record using its per-worker token."""
         status, body = self.request("GET", "/api/agent-workers/self")

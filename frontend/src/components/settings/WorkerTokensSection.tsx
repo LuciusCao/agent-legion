@@ -2,11 +2,10 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   createRegisterToken,
+  deleteRegisterToken,
   fetchWorkspaces,
   listAgentWorkers,
   listRegisterTokens,
-  revokeAgentWorker,
-  revokeRegisterToken,
 } from '../../api'
 import type {
   AgentRegisterTokenCreatedResponse,
@@ -16,46 +15,64 @@ import type {
 import { queryKeys } from '../../lib/queryKeys'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import { toErrorMessage } from '../../lib/queryError'
+import { ConfirmDialog } from '../ConfirmDialog'
+import { AgentWorkerList, workerName } from './AgentWorkerList'
 import styles from './WorkerTokensSection.module.css'
 
-function formatTime(iso: string): string {
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
-}
-
 /**
- * Worker register token management (issue / list / revoke) plus revocation of
- * already-registered workers (endpoints require login).
+ * Workspace-scoped worker key management (issue / list / delete) plus the
+ * registered-worker list (AgentWorkerList). Endpoints require login.
  *
- * issue #35: registration is scoped-token-only — every token is bound to one
- * workspace (the workspace picker is mandatory) and each registered worker
- * shows the workspace scope it registered with.
+ * issue #35: registration is scoped-token-only — every key is bound to one
+ * workspace. This section lives on the workspace settings page, so issuance
+ * is pinned to the current workspace (no workspace picker) and the key list
+ * shows only this workspace's keys; the issued secret is the key's token.
+ * Deleting a key cuts access immediately — workers left without any live key
+ * are cascade-deleted in the same transaction, survivors are narrowed to
+ * their remaining keys' scope; there is no per-worker revoke.
  */
-export function WorkerTokensSection() {
+export function WorkerTokensSection({ workspaceId }: { workspaceId: string }) {
   const [label, setLabel] = useState('')
-  const [workspaceId, setWorkspaceId] = useState('')
   const [createdToken, setCreatedToken] =
     useState<AgentRegisterTokenCreatedResponse | null>(null)
   const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [pendingDeleteToken, setPendingDeleteToken] =
+    useState<AgentRegisterTokenSummary | null>(null)
   const queryClient = useQueryClient()
 
   const { data: lists, error: listQueryError } = useQuery({
     queryKey: extraQueryKeys.workerTokens(),
     queryFn: () => Promise.all([listRegisterTokens(), listAgentWorkers()]),
+    // Worker 侧添加 token 并重注册后，这里应在几秒内自动反映出来。
+    refetchInterval: 5000,
   })
   const { data: workspaces } = useQuery({
     queryKey: queryKeys.workspaces(),
     queryFn: async () => (await fetchWorkspaces()).workspaces,
   })
   const listError = toErrorMessage(listQueryError)
-  const tokens = lists?.[0] ?? []
+  const allTokens = lists?.[0] ?? []
+  const tokens = allTokens.filter((token) => token.workspace_id === workspaceId)
   const workers = lists?.[1] ?? []
 
-  function workspaceName(workspaceId: string | null): string {
-    if (!workspaceId) return ''
-    return workspaces?.find((w) => w.id === workspaceId)?.name ?? workspaceId
+  // The worker↔key binding (schema v59): which workers' latest registration
+  // was admitted by this key.
+  function tokenConsumers(tokenId: string): AgentWorkerSummary[] {
+    return workers.filter((worker) =>
+      (worker.register_token_ids ?? []).includes(tokenId)
+    )
+  }
+  const pendingConsumers = tokenConsumers(pendingDeleteToken?.token_id ?? '')
+  const pendingKeyWarning =
+    pendingConsumers.length > 0
+      ? `该 key 当前被 ${pendingConsumers.length} 个 Worker（${pendingConsumers.map(workerName).join('、')}）的最近一次注册使用：仅绑定该 key 的 Worker 会被一并删除并立即失效；同时持有其它 key 的 Worker 保留，但范围收窄到剩余 key。`
+      : ''
+
+  function workspaceName(id: string | null): string {
+    if (!id) return ''
+    return workspaces?.find((w) => w.id === id)?.name ?? id
   }
 
   function refresh() {
@@ -77,7 +94,6 @@ export function WorkerTokensSection() {
       setCreatedToken(created)
       setCopied(false)
       setLabel('')
-      setWorkspaceId('')
       refresh()
     } catch (err) {
       setError(toErrorMessage(err))
@@ -96,31 +112,16 @@ export function WorkerTokensSection() {
     }
   }
 
-  async function handleRevokeToken(token: AgentRegisterTokenSummary) {
-    if (!window.confirm(`确定要吊销 token「${token.label}」吗？`)) return
+  async function handleDeleteToken() {
+    if (!pendingDeleteToken) return
     setError('')
     try {
-      await revokeRegisterToken(token.token_id)
+      await deleteRegisterToken(pendingDeleteToken.token_id)
       refresh()
     } catch (err) {
       setError(toErrorMessage(err))
-    }
-  }
-
-  async function handleRevokeWorker(worker: AgentWorkerSummary) {
-    const name = worker.name || worker.worker_id
-    if (
-      !window.confirm(
-        `确定要吊销 Worker「${name}」吗？吊销后它将无法继续 claim 任务。`
-      )
-    )
-      return
-    setError('')
-    try {
-      await revokeAgentWorker(worker.worker_id)
-      refresh()
-    } catch (err) {
-      setError(toErrorMessage(err))
+    } finally {
+      setPendingDeleteToken(null)
     }
   }
 
@@ -133,28 +134,15 @@ export function WorkerTokensSection() {
       )}
 
       <div className={styles.card}>
-        <h3 className={styles.heading}>签发新 Token</h3>
+        <h3 className={styles.heading}>签发新 Key</h3>
         <div className={styles.row}>
           <input
             className={styles.input}
-            placeholder="标签（必填，如 home-mac-mini）"
-            aria-label="Token 标签"
+            placeholder="Key 名称（必填，如 home-mac-mini）"
+            aria-label="Key 名称"
             value={label}
             onChange={(event) => setLabel(event.target.value)}
           />
-          <select
-            className={styles.input}
-            aria-label="workspace 范围"
-            value={workspaceId}
-            onChange={(event) => setWorkspaceId(event.target.value)}
-          >
-            <option value="">选择 workspace（必选）</option>
-            {(workspaces ?? []).map((workspace) => (
-              <option key={workspace.id} value={workspace.id}>
-                {workspace.name}（{workspace.id}）
-              </option>
-            ))}
-          </select>
           <button
             type="button"
             className={styles.button}
@@ -165,15 +153,15 @@ export function WorkerTokensSection() {
           </button>
         </div>
         <p className={styles.hint}>
-          每个 Token 绑定一个 workspace（全局 token 已退役）；Worker 只承接该
-          workspace 的任务。
+          签发的 Key 固定绑定当前 workspace（全局 token 已退役）；Worker 只承接
+          本 workspace 的任务。
         </p>
 
         {createdToken && (
           <div data-testid="created-token">
             <p className={styles.hint}>
-              已签发「{createdToken.label}」（仅{' '}
-              {workspaceName(createdToken.workspace_id)}）：
+              Key「{createdToken.label}」已签发（仅{' '}
+              {workspaceName(createdToken.workspace_id)}），对应 token：
             </p>
             <div className={styles.tokenBox}>{createdToken.register_token}</div>
             <div className={styles.row}>
@@ -199,105 +187,77 @@ export function WorkerTokensSection() {
         )}
       </div>
 
-      <h3 className={styles.heading}>已签发 Token</h3>
+      <h3 className={styles.heading}>已签发 Key</h3>
       {tokens.length === 0 ? (
-        <p className={styles.empty}>暂无已签发的 scoped token</p>
+        <p className={styles.empty}>本 workspace 暂无已签发的 key</p>
       ) : (
         <ul className={styles.list}>
-          {tokens.map((token) => (
-            <li
-              key={token.token_id}
-              className={styles.listItem}
-              data-testid={`register-token-${token.token_id}`}
-            >
-              <span className={styles.itemLabel}>{token.label}</span>
-              <span className={styles.chipScope}>
-                {token.workspace_id
-                  ? workspaceName(token.workspace_id)
-                  : '全部 workspace（已退役）'}
-              </span>
-              <span className={styles.chip}>
-                {formatTime(token.created_at)}
-              </span>
-              <span
-                className={`${styles.chip} ${
-                  token.revoked ? styles.chipRevoked : styles.chipActive
-                }`}
+          {tokens.map((token) => {
+            const consumers = tokenConsumers(token.token_id)
+            return (
+              <li
+                key={token.token_id}
+                className={styles.listItem}
+                data-testid={`register-token-${token.token_id}`}
               >
-                {token.revoked ? '已吊销' : '有效'}
-              </span>
-              {!token.revoked && (
+                <span className={styles.itemLabel}>{token.label}</span>
+                <span
+                  className={styles.chip}
+                  title={`Key ID：${token.token_id}`}
+                >
+                  {token.token_id.slice(0, 8)}
+                </span>
+                <span
+                  className={styles.chip}
+                  title={
+                    consumers.length > 0
+                      ? `最近注册使用该 key 的 Worker：${consumers
+                          .map(workerName)
+                          .join('、')}`
+                      : '暂无 Worker 的最近注册使用该 key'
+                  }
+                >
+                  {consumers.length > 0
+                    ? `${consumers.length} 个 Worker 使用`
+                    : '未被使用'}
+                </span>
+                {token.revoked && (
+                  <span className={`${styles.chip} ${styles.chipRevoked}`}>
+                    已失效（旧版吊销）
+                  </span>
+                )}
                 <button
                   type="button"
                   className={styles.dangerButton}
-                  onClick={() => void handleRevokeToken(token)}
+                  onClick={() => setPendingDeleteToken(token)}
                 >
-                  吊销
+                  删除
                 </button>
-              )}
-            </li>
-          ))}
+              </li>
+            )
+          })}
         </ul>
       )}
 
-      <h3 className={styles.heading}>已注册 Worker</h3>
-      {workers.length === 0 ? (
-        <p className={styles.empty}>暂无已注册 Worker</p>
-      ) : (
-        <ul className={styles.list}>
-          {workers.map((worker) => (
-            <li
-              key={worker.worker_id}
-              className={styles.listItem}
-              data-testid={`worker-${worker.worker_id}`}
-            >
-              <span className={styles.itemLabel}>
-                {worker.name || worker.worker_id}
-              </span>
-              <span
-                className={`${styles.chip} ${
-                  worker.online ? styles.chipActive : ''
-                }`}
-                title={`最近心跳 ${worker.last_seen_at}`}
-              >
-                {worker.online ? '在线' : '离线'}
-              </span>
-              <span className={styles.chip}>{worker.runtimes.join(', ')}</span>
-              <span className={styles.chip}>
-                并发上限 {worker.max_concurrency}
-              </span>
-              {worker.allowed_workspaces.length === 0 ? (
-                <span
-                  className={`${styles.chip} ${styles.chipRevoked}`}
-                  title="旧全局 token 注册的存量 Worker（scope=全部）。仅管理员可见；请为其签发 workspace token 并重新注册"
-                >
-                  待迁移（旧全局注册）
-                </span>
-              ) : (
-                <span className={styles.chipScope}>
-                  {worker.allowed_workspaces
-                    .map((id) => workspaceName(id))
-                    .join(', ')}
-                </span>
-              )}
-              {worker.revoked && (
-                <span className={`${styles.chip} ${styles.chipRevoked}`}>
-                  已吊销
-                </span>
-              )}
-              {!worker.revoked && (
-                <button
-                  type="button"
-                  className={styles.dangerButton}
-                  onClick={() => void handleRevokeWorker(worker)}
-                >
-                  吊销
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+      <AgentWorkerList
+        workers={workers}
+        tokens={allTokens}
+        workspaceName={workspaceName}
+        onChanged={refresh}
+        onError={setError}
+      />
+
+      <ConfirmDialog
+        open={pendingDeleteToken !== null}
+        title="删除 Key"
+        onClose={() => setPendingDeleteToken(null)}
+        onConfirm={handleDeleteToken}
+      >
+        <p>
+          确定要删除 key「{pendingDeleteToken?.label}」吗？删除后该 key
+          立即失效且不可恢复。{pendingKeyWarning}
+        </p>
+      </ConfirmDialog>
     </div>
   )
 }

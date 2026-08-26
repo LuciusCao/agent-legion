@@ -156,7 +156,7 @@ export function SettingsPage() {
             <hr className={styles.sectionDivider} />
             <AgentRoutingSection />
             {isAdmin ? (
-              <WorkerTokensSection />
+              <WorkerTokensSection workspaceId={workspaceId ?? ''} />
             ) : (
               <WorkspaceWorkersSection workspaceId={workspaceId ?? ''} />
             )}

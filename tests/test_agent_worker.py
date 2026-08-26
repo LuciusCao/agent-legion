@@ -420,33 +420,6 @@ def test_client_claim_raises_auth_error_on_409() -> None:
         client.claim("w1")
 
 
-def test_client_revoke_posts_with_management_token() -> None:
-    client = agent_worker.Client("http://unused")
-    seen: list[tuple[str, str, dict]] = []
-
-    def fake_request(method: str, path: str, **kwargs: object) -> tuple[int, bytes]:
-        seen.append((method, path, kwargs.get("headers") or {}))  # type: ignore[arg-type]
-        return 200, b'{"worker_id": "w1", "revoked": true}'
-
-    client.request = fake_request  # type: ignore[method-assign]
-    client.revoke("w1", "management-token")
-
-    assert seen == [
-        (
-            "POST",
-            "/api/agent-workers/w1/revoke",
-            {"X-Agent-Worker-Register-Token": "management-token"},
-        )
-    ]
-
-
-def test_client_revoke_raises_on_error_status() -> None:
-    client = agent_worker.Client("http://unused")
-    client.request = lambda *a, **k: (401, b"invalid token")  # type: ignore[method-assign]
-    with pytest.raises(RuntimeError, match="revoke"):
-        client.revoke("w1", "management-token")
-
-
 def test_client_heartbeat_returns_status() -> None:
     client = agent_worker.Client("http://unused")
     client.request = lambda *a, **k: (409, b"")  # type: ignore[method-assign]
