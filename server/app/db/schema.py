@@ -44,8 +44,12 @@ def init_db(database_dsn: DatabaseDsn) -> None:
         if applied_versions and max(applied_versions) >= SCHEMA_VERSION:
             return
         conn.execute(_SCHEMA_FILE.read_text(encoding="utf-8"))
+        # Legacy single-row installs recorded only their final version, so a
+        # membership check would replay every retired data migration on
+        # upgrade; anything at or below the high-water mark is already done.
+        max_applied = max(applied_versions) if applied_versions else 0
         for migration in MIGRATIONS:
-            if migration.version in applied_versions:
+            if migration.version <= max_applied:
                 continue
             if migration.apply is not None:
                 migration.apply(conn)

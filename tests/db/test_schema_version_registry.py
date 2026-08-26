@@ -68,3 +68,28 @@ def test_upgrade_from_older_version_runs_only_the_increment() -> None:
     with read_connection(TEST_DATABASE_URL) as conn:
         exists = conn.execute("select to_regclass('runs') as oid").fetchone()
     assert exists is not None and exists["oid"] is not None
+
+
+def test_legacy_single_row_upgrade_runs_only_the_increment() -> None:
+    # Legacy installs recorded a single latest-version row. Upgrading such a
+    # database must run only versions above that watermark — never replay the
+    # retired executor data migrations (v24-v47), which a membership check
+    # would re-run against the current schema.
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("delete from schema_migrations")
+        conn.execute(
+            "insert into schema_migrations(version, name) values (%s, %s)",
+            (SCHEMA_VERSION - 1, "legacy_single_row"),
+        )
+
+    init_db(TEST_DATABASE_URL)
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        rows = {
+            row["version"]: row["name"]
+            for row in conn.execute("select version, name from schema_migrations").fetchall()
+        }
+    assert rows == {
+        SCHEMA_VERSION - 1: "legacy_single_row",
+        SCHEMA_VERSION: MIGRATIONS[-1].name,
+    }
