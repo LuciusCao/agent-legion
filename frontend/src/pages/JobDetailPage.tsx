@@ -2,16 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { JobProgressPanel } from '../components/job/JobProgressPanel'
 import { fetchJobArtifact } from '../api'
-import { useUiStore } from '../stores/uiStore'
 import { deriveJobDetailPresentation } from './jobDetail/deriveJobDetailPresentation'
 import styles from './JobDetailPage.module.css'
 import { ArtifactListDialog } from '../components/artifact/ArtifactListDialog'
 import { ArtifactPreviewDialog } from '../components/artifact/ArtifactPreviewDialog'
 import { DagFullscreenDialog } from '../components/dag/DagFullscreenDialog'
 import { TokenUsageDialog } from '../components/tokenUsage/TokenUsageDialog'
-import { JobDetailActions } from '../components/job/JobDetailActions'
 import { NonUploadableNotice } from '../components/job/NonUploadableNotice'
 import { useJobDetail } from './jobDetail/useJobDetail'
+import { useJobDetailActions } from './jobDetail/useJobDetailActions'
 import { EntityPanel } from './jobDetail/EntityPanel'
 
 export default function JobDetailPage() {
@@ -19,7 +18,6 @@ export default function JobDetailPage() {
     workspaceId: string
     jobId: string
   }>()
-  const { setDetailPageActions } = useUiStore()
   const {
     detail,
     error,
@@ -83,58 +81,21 @@ export default function JobDetailPage() {
     [jobId]
   )
 
-  // Write the actions panel only when its visible inputs actually change:
-  // the 5s running-state poll produces a fresh `detail` object every cycle,
-  // and pushing a new JSX element into uiStore each time re-renders the whole
-  // layout (WorkspaceLayout subscribes to detailPageActions).
-  const actionsSignature = detail
-    ? [
-        detail.job.status,
-        detail.job.updated_at,
-        detail.job.completed_nodes,
-        detail.job.total_nodes,
-        actionLoading,
-      ].join('|')
-    : null
-  useEffect(() => {
-    if (!detail) {
-      setDetailPageActions(null)
-      return
-    }
-    setDetailPageActions(
-      <JobDetailActions
-        jobs={[detail.job]}
-        workflowDefinition={nodeCatalog}
-        loading={actionLoading}
-        onRerun={handleRerun}
-        onRunTo={handleRunTo}
-        onContinue={handleContinue}
-        onUpgradeWorkflow={handleUpgradeWorkflow}
-        onPackage={handlePackage}
-        onClearPacked={handleClearPacked}
-        onDelete={handleDelete}
-        onOpenArtifacts={() => setArtifactListOpen(true)}
-      />
-    )
-    return () => setDetailPageActions(null)
-    // deps: `actionLoading` reaches this effect only through actionsSignature
-    // above — the 5s running-state poll produces a fresh `detail` object every
-    // cycle, and listing the raw value would refire this effect (and re-push
-    // a visually identical JSX node into uiStore) on every poll.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    actionsSignature,
-    nodeCatalog,
-    setDetailPageActions,
+  const openArtifactList = useCallback(() => setArtifactListOpen(true), [])
+
+  useJobDetailActions({
     detail,
-    handleRerun,
-    handleRunTo,
-    handleContinue,
-    handleUpgradeWorkflow,
-    handlePackage,
-    handleClearPacked,
-    handleDelete,
-  ])
+    nodeCatalog,
+    actionLoading,
+    onRerun: handleRerun,
+    onRunTo: handleRunTo,
+    onContinue: handleContinue,
+    onUpgradeWorkflow: handleUpgradeWorkflow,
+    onPackage: handlePackage,
+    onClearPacked: handleClearPacked,
+    onDelete: handleDelete,
+    onOpenArtifacts: openArtifactList,
+  })
 
   if (!jobId) {
     return <p className="error-text">缺少任务 ID</p>

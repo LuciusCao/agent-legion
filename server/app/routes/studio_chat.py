@@ -80,12 +80,11 @@ def create_studio_chat_router(
         response_model=StudioChatSessionsResponse,
     )
     def list_sessions(workspace_id: str, _user: scoped_read) -> StudioChatSessionsResponse:
-        return StudioChatSessionsResponse(
-            sessions=[
-                StudioChatSessionRecord.model_validate(row)
-                for row in service.list_sessions(workspace_id)
-            ]
-        )
+        sessions = [
+            StudioChatSessionRecord.model_validate(row)
+            for row in service.list_sessions(workspace_id)
+        ]
+        return StudioChatSessionsResponse(sessions=sessions)
 
     @router.get(
         "/workspaces/{workspace_id}/studio-chat/sessions/{session_id}",
@@ -150,8 +149,8 @@ def create_studio_chat_router(
         if job_event_manager is None:
             raise HTTPException(status_code=503, detail="Event manager not available")
         try:
-            # Synchronous DB read (pool checkout); off the loop so a busy pool
-            # cannot stall every SSE/WS heartbeat behind this lookup.
+            # Synchronous DB read (pool checkout) run off the loop so a busy
+            # pool cannot stall every SSE/WS heartbeat behind this lookup.
             await concurrency.run_in_threadpool(service.get_session, session_id, workspace_id)
         except JobServiceError as exc:
             raise_job_http_error(exc)

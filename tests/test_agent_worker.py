@@ -575,6 +575,37 @@ def test_registration_retries_transient_host_errors_without_traceback(
     assert "Traceback" not in output
 
 
+def test_registration_retries_transient_http_status_errors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """5xx/429 answers surface as TransientHostError and stay in the retry loop."""
+    client = agent_worker.Client("http://unused")
+    statuses = [503, 429, 201]
+
+    def flaky_request(*args: object, **kwargs: object) -> tuple[int, bytes]:
+        del args, kwargs
+        status = statuses.pop(0)
+        if status == 201:
+            return (status, b'{"worker_token": "tok", "host_protocol_version": 3}')
+        return (status, b"temporarily unavailable")
+
+    client.request = flaky_request  # type: ignore[method-assign]
+    config = {"worker_id": "w1", "runtimes": ["pi"], "max_concurrency": 1}
+    assert register_with_retry(client, config, ["token"], threading.Event(), 0.001)
+    output = capsys.readouterr().out
+    assert "retrying" in output
+    assert "HTTP 503" in output
+
+
+def test_registration_unexpected_client_error_crashes_loudly() -> None:
+    """A non-retriable unexpected status (e.g. 404) must not enter the loop."""
+    client = agent_worker.Client("http://unused")
+    client.request = lambda *a, **k: (404, b"not found")  # type: ignore[method-assign]
+    config = {"worker_id": "w1", "runtimes": ["pi"], "max_concurrency": 1}
+    with pytest.raises(RuntimeError, match="HTTP 404"):
+        register_with_retry(client, config, ["token"], threading.Event(), 0.001)
+
+
 def test_client_heartbeat_and_report_send_lease_header() -> None:
     client = agent_worker.Client("http://unused")
     seen: list[dict] = []

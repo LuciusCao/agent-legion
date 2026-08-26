@@ -23,11 +23,11 @@ from server.app.services.material_bundles import MaterialBundlesService
 from server.app.services.material_cache import material_claim_block
 from server.app.services.material_ttl import (
     DELETE_GRACE_SECONDS,
-    MaterialTtlSweeperThread,
     collect_expired_materials,
     expire_due_materials,
     materials_ttl_days,
 )
+from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from server.app.services.materials import MaterialsService
 from server.app.storage import ObjectHead
 from shared.material_cache import MaterializeError

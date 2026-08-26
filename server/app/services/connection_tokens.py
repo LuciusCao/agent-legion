@@ -2,17 +2,19 @@
 
 Acquired tokens live Fernet-encrypted in ``connection_tokens`` (VAULT-SECRET-001
 extends to instance scope). ``get_token`` is the single read path: a valid
-cached token is returned directly; an expired/missing one is refreshed while
-holding a connection-scoped advisory lock (NOT the external_connections row
-lock): a burst of concurrent callers (e.g. 96 workers) triggers at most one
-credential exchange — for login-based adapters this is what keeps rate
-limits and account lockouts away. Only concurrent refreshers of the same
-connection queue; readers of a valid token never touch the lock. Unlike the
-retired row-lock design, the advisory lock blocks no row and pins no
-connection-pool peer (the pool is 32; 10-20s HTTP waits under a row lock
-could starve it on a cold/expired connection). Adapters must use bounded
-network timeouts so a hung upstream cannot hold the advisory lock
-indefinitely.
+cached token is returned directly (a disabled connection serves nothing); an
+expired/missing one is refreshed while holding a connection-scoped advisory
+gate (NOT the external_connections row lock): a burst of concurrent callers
+(e.g. 96 workers) triggers at most one credential exchange — for login-based
+adapters this is what keeps rate limits and account lockouts away. Only
+concurrent refreshers of the same connection queue; readers of a valid token
+never touch the lock. ``ConnectionService.update``/``delete`` take the same
+gate (see :mod:`connection_gate`), so an admin credential swap can never
+interleave with an in-flight exchange. Unlike the retired row-lock design,
+the advisory lock blocks no row and pins no connection-pool peer (the pool is
+32; 10-20s HTTP waits under a row lock could starve it on a cold/expired
+connection). Adapters must use bounded network timeouts so a hung upstream
+cannot hold the advisory lock indefinitely.
 
 Call sites that receive an upstream auth failure (HTTP 401/403 or an in-band
 auth error code) should report it via ``NodeContext.report_auth_failure``
@@ -21,19 +23,20 @@ auth error code) should report it via ``NodeContext.report_auth_failure``
 persistent failure surfaces as a technical node failure.
 
 Note: DB rows render datetimes as ISO strings (string_dict_row), so expiry
-checks parse ``expires_at`` from text.
+checks parse ``expires_at`` from text. Legacy frozen-node hooks live in
+:mod:`connection_token_legacy`.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.connection_adapters import ConnectionAdapterError
+from server.app.services.connection_gate import lock_connection_gate
 from server.app.services.connections import ConnectionService
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.vault import _fernet
@@ -87,9 +90,10 @@ class ConnectionTokenService:
         with write_transaction(self._dsn) as conn:
             # pg_advisory_xact_lock keys on the connection key text: scope is
             # per connection, unrelated keys never queue on each other.
-            conn.execute(
-                "select pg_advisory_xact_lock(hashtext('agent-legion-conn-token:' || %s))", (key,)
-            )
+            # ConnectionService.update/delete take the same gate, so a
+            # concurrent admin reconfiguration can never interleave with the
+            # resolve→exchange→write sequence (see connection_gate).
+            lock_connection_gate(conn, key)
             locked = conn.execute(
                 "select key, enabled from external_connections where key=%s", (key,)
             ).fetchone()
@@ -154,8 +158,9 @@ class ConnectionTokenService:
     def _read_valid(self, key: str) -> str | None:
         with read_connection(self._dsn) as conn:
             row = conn.execute(
-                "select token_ciphertext, expires_at from connection_tokens"
-                " where connection_key=%s",
+                "select t.token_ciphertext, t.expires_at"
+                " from connection_tokens t join external_connections c on c.key = t.connection_key"
+                " where t.connection_key=%s and c.enabled = 1",
                 (key,),
             ).fetchone()
         return self._decrypt_if_valid(row)
@@ -208,34 +213,3 @@ def inject_connection_config(
     injected = dict(node_config)
     injected["connection_config"] = tokens.runtime_config(key)
     return injected
-
-
-def report_node_auth_failure(runtime: Mapping[str, Any]) -> None:
-    """Legacy in-runtime hook: invalidate the connection's cached token.
-
-    Superseded by the marker channel (``NodeContext.report_auth_failure`` in
-    ``workspace_libs.node_sdk``): current nodes hold no database handle, so
-    the parent executor performs the invalidation after the child exits. This
-    function stays for legacy frozen node code that still calls it; it is a
-    silent no-op when the runtime carries no connection or no DB handle.
-    """
-    node_config = runtime.get("node_config")
-    key = (
-        str(node_config.get("connection") or "").strip() if isinstance(node_config, Mapping) else ""
-    )
-    # The code executors pop ``_job_db_path`` before invoking node code and
-    # hand the node a JobQueries handle instead (``runtime["job_db"]``, see
-    # server/app/executors/code.py and _code_sandbox.py): resolve the DSN from
-    # that handle first and keep ``_job_db_path`` only as a fallback for
-    # runtimes that still carry the raw path.
-    job_db = runtime.get("job_db")
-    job_db_path = getattr(job_db, "path", None)
-    dsn = str(job_db_path).strip() if job_db_path else ""
-    if not dsn:
-        dsn = str(runtime.get("_job_db_path") or "").strip()
-    if not key or not dsn:
-        return
-    try:
-        ConnectionTokenService(dsn).report_auth_failure(key)
-    except Exception:  # reporting must never mask the original failure
-        logger.exception("connection %s: failed to report auth failure", key)
