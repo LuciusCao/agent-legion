@@ -7,6 +7,8 @@ export interface EmptyStateGuideProps {
     title: string
     description: string
     unlocked: boolean
+    /** 已完成的步骤显示对勾图标与「已完成」徽标，动作按钮仍可点击。 */
+    completed?: boolean
     actionLabel: string
     onAction: () => void
   }>
@@ -27,14 +29,21 @@ export function EmptyStateGuide({ steps }: EmptyStateGuideProps) {
             key={idx}
             data-step={idx}
             className={`${styles.stepCard} ${
-              step.unlocked ? styles.unlocked : styles.locked
+              step.unlocked ? '' : styles.locked
             }`}
           >
             <div className={styles.stepIcon}>
-              <MaterialIcon name={step.icon} />
+              <MaterialIcon
+                name={step.completed ? 'check_circle' : step.icon}
+              />
             </div>
             <div className={styles.stepBody}>
-              <h3 className={styles.stepTitle}>{step.title}</h3>
+              <h3 className={styles.stepTitle}>
+                {step.title}
+                {step.completed && (
+                  <span className={styles.doneBadge}>已完成</span>
+                )}
+              </h3>
               <p className={styles.stepDesc}>{step.description}</p>
               <button
                 type="button"

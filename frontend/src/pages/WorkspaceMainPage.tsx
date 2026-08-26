@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import {
   selectFilterCounts,
   selectFilteredJobIds,
@@ -12,10 +12,11 @@ import { useWorkspacePackageActions } from '../hooks/useWorkspacePackageActions'
 import { useWorkspacePauseActions } from '../hooks/useWorkspacePauseActions'
 import { useWorkspaceRerunActions } from '../hooks/useWorkspaceRerunActions'
 import { useWorkspaceSelection } from '../hooks/useWorkspaceSelection'
+import { useWorkspaceOnboardingSteps } from '../hooks/useWorkspaceOnboardingSteps'
+import { shouldShowEmptyGuide } from '../lib/onboardingReadiness'
 import { JobFilterBar } from '../components/job/JobFilterBar'
 import { JobList } from '../components/job/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
-import { StudioEntryCard } from '../components/StudioEntryCard'
 import {
   JobActionBar,
   type JobActionBarFilter,
@@ -28,7 +29,6 @@ import styles from './WorkspaceMainPage.module.css'
 
 export default function WorkspaceMainPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
-  const navigate = useNavigate()
   const { data: workspaceStats } = useWorkspaceStats(workspaceId)
   const jobIds = useJobStore((state) => state.jobIds)
   const filterConfig = useJobStore((state) => state.filterConfig)
@@ -105,19 +105,22 @@ export default function WorkspaceMainPage() {
     setDeleteDialogOpen(false)
   }
 
-  const emptyStateSteps = useMemo(
-    () => [
-      {
-        icon: 'settings',
-        title: '开始使用 Workspace',
-        description:
-          '当前 Workspace 还没有任务，先前往设置页配置资源连接与接入模式。',
-        unlocked: true,
-        actionLabel: '去配置',
-        onAction: () => navigate('settings'),
-      },
-    ],
-    [navigate]
+  // 全新 workspace（无 job 且无筛选）只显示分步引导，隐藏筛选栏与空列表；
+  // workspaceStats 与 active revision 须先 settle，避免加载首帧闪现引导。
+  const showEmptyGuide = shouldShowEmptyGuide({
+    filteredJobIds,
+    totalJobs,
+    jobsLoading,
+    filtersActive,
+    workflowKey,
+    workflowDefinitionLoaded: workflowDefinitionData !== undefined,
+  })
+
+  const emptyStateSteps = useWorkspaceOnboardingSteps(
+    workspaceId,
+    workflowKey,
+    workflowDefinition,
+    showEmptyGuide
   )
 
   return (
@@ -174,31 +177,28 @@ export default function WorkspaceMainPage() {
         <p className={styles.error}>工作流定义加载失败：{workflowError}</p>
       )}
 
-      {workspaceId && workspaceStats && !workflowKey && (
-        <StudioEntryCard workspaceId={workspaceId} />
-      )}
-
-      <section>
-        <JobFilterBar
-          key={workspaceId}
-          filterConfig={filterConfig}
-          counts={filterCounts}
-          workflowDefinition={workflowDefinition}
-          onChange={setFilterConfig}
-        />
-      </section>
-
-      {filteredJobIds.length === 0 &&
-      totalJobs === 0 &&
-      !jobsLoading &&
-      !filtersActive ? (
+      {showEmptyGuide && (
         <section className={styles.section}>
           <EmptyStateGuide steps={emptyStateSteps} />
         </section>
-      ) : (
-        <section className={styles.sectionFill}>
-          {workspaceId ? <JobList workspaceId={workspaceId} /> : null}
-        </section>
+      )}
+
+      {!showEmptyGuide && (
+        <>
+          <section>
+            <JobFilterBar
+              key={workspaceId}
+              filterConfig={filterConfig}
+              counts={filterCounts}
+              workflowDefinition={workflowDefinition}
+              onChange={setFilterConfig}
+            />
+          </section>
+
+          <section className={styles.sectionFill}>
+            {workspaceId ? <JobList workspaceId={workspaceId} /> : null}
+          </section>
+        </>
       )}
 
       {workspaceId && (
