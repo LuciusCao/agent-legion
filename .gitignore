@@ -6,7 +6,7 @@
 __pycache__/
 *.pyc
 data/
-frontend/node_modules/
+node_modules/
 frontend/dist/
 *.log
 .worktrees/
