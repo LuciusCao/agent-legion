@@ -242,7 +242,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.workspace_event_aggregator = workspace_event_aggregator
     executor_catalog = ExecutorCatalogService(settings)
     workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db, settings)
-    workspace_configuration = WorkspaceConfigurationService(job_db, settings, agent_manager)
+    workspace_configuration = WorkspaceConfigurationService(job_db, settings)
     job_packages = JobPackageService(job_db, settings, object_store=job_artifact_objects)
     app.include_router(create_auth_router(app.state.auth_service), prefix="/api")
     app.include_router(

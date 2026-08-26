@@ -21,6 +21,7 @@ from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.service import StudioChatService
+from tests.helpers import wait_for_predicate
 from tests.postgres_support import TEST_DATABASE_URL
 
 FAKE_AGENT = Path(__file__).resolve().parents[1] / "helpers" / "fake_acp_agent.py"
@@ -198,12 +199,7 @@ class RecordingBus:
 
 
 def _wait_for(condition, timeout: float = 20.0, interval: float = 0.05) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if condition():
-            return
-        time.sleep(interval)
-    raise AssertionError("condition not met within timeout")
+    wait_for_predicate(condition, timeout=timeout, interval=interval)
 
 
 @pytest.fixture
@@ -429,23 +425,6 @@ def test_thought_chunks_persist_as_coalesced_thought_message(chat) -> None:
     assert thought_events
 
 
-def test_run_without_mcp_tool_call_is_flagged_unverified(chat) -> None:
-    service, _bus, register, workspace_id, user_id = chat
-    register({"on_prompt": []})
-    session = service.create_session(workspace_id, user_id, "fake-agent")
-    service.send_message(session["id"], workspace_id, "hello")
-
-    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
-    session = service.get_session(session["id"])
-    assert session["mcp_status"] == "unverified"
-    events = [
-        m["content"].get("event")
-        for m in service.list_messages(session["id"], workspace_id)
-        if m["kind"] == "status"
-    ]
-    assert "mcp_unverified" in events
-
-
 def test_agent_legion_tool_permission_auto_approves(chat) -> None:
     service, _bus, register, workspace_id, user_id = chat
     script_path = register(MCP_PERMISSION_SCRIPT)
@@ -524,6 +503,44 @@ def test_permission_timeout_is_bounded() -> None:
     """Guard: the human permission wait must stay short enough that an
     abandoned tab cannot park a turn for long (#91 follow-up: 900s → 120s)."""
     assert permissions_module.PERMISSION_TIMEOUT_SECONDS == 120
+
+
+TERMINAL_SCRIPT = {
+    "on_prompt": [
+        {
+            "terminal": {
+                "command": sys.executable,
+                "args": ["-c", "print('terminal says hi')"],
+            }
+        }
+    ]
+}
+
+
+def test_initialize_advertises_terminal_capability(chat) -> None:
+    """kimi's Bash/Grep tools only run when the client advertises
+    clientCapabilities.terminal=true at initialize."""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(TERMINAL_SCRIPT)
+    service.create_session(workspace_id, user_id, "fake-agent")
+
+    sink = _read_sink(script_path)
+    initialize = next(e["initialize_params"] for e in sink if "initialize_params" in e)
+    assert initialize["clientCapabilities"]["terminal"] is True
+
+
+def test_terminal_roundtrip_runs_command_and_returns_output(chat) -> None:
+    """terminal/create → wait_for_exit → output → release drives a real
+    subprocess through the client-side terminal protocol."""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(TERMINAL_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "run a command")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    outcomes = [e["terminal_outcome"] for e in _read_sink(script_path) if "terminal_outcome" in e]
+    assert outcomes and outcomes[0]["exitCode"] == 0
+    assert "terminal says hi" in outcomes[0]["output"]
 
 
 def test_local_command_mentioning_tool_names_is_not_auto_approved(chat) -> None:

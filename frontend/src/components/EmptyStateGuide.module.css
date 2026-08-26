@@ -49,6 +49,17 @@
   background: #fafafa;
 }
 
+.doneBadge {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e8f5e9;
+  color: #1b5e20;
+  font-size: 12px;
+  font-weight: 400;
+  vertical-align: middle;
+}
+
 .stepIcon {
   display: flex;
   align-items: center;

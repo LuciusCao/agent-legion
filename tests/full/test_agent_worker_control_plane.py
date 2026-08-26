@@ -16,19 +16,21 @@ from server.app.agent_workers import AgentWorkerRegistry
 from server.app.main import create_app
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from tests.db.test_postgres_runtime import (
-    test_schema_initialization_is_idempotent as _assert_schema_idempotent,
-)
 from tests.helpers import (
     load_builtin_definition,
     replace_agent_catalog,
     seed_workspace_agent_definitions,
 )
-from tests.postgres_support import TEST_DATABASE_URL
-from tests.test_agent_broker import _seed_request
-from tests.test_agent_broker import (
-    test_node_twenty_and_three_workers_ten_never_claim_more_than_twenty as _assert_capacity_matrix,
+from tests.helpers.agent_worker_api import (
+    assert_capacity_matrix as _assert_capacity_matrix,
 )
+from tests.helpers.agent_worker_api import (
+    seed_request as _seed_request,
+)
+from tests.helpers.postgres_schema import (
+    assert_schema_initialization_is_idempotent as _assert_schema_idempotent,
+)
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 @pytest.mark.full_gate

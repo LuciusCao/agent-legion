@@ -164,7 +164,7 @@ class AgentExecutionBroker:
         for workspace_id in workspace_ids:
             manager.ensure_workspace_agent(worker_id, workspace_id, max_tasks=max_tasks, name=name)
         if claimed is not None:
-            manager.set_busy(worker_id, "", workspace_id=claimed.workspace_id)
+            manager.set_busy(worker_id, workspace_id=claimed.workspace_id)
 
     def _notify_worker_released(self, worker_id: str, workspace_id: str) -> None:
         if self.agent_status is not None:

@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.ops_metrics import OpsMetricsService
+from tests.helpers.seed import insert_token_usage
 from tests.postgres_support import TEST_DATABASE_URL
 
 _NOW = datetime(2026, 7, 26, 12, 34, 45, tzinfo=UTC)
@@ -51,30 +52,24 @@ def _insert_token_usage(
     output_tokens: int = 5,
     cache_read_tokens: int = 1,
 ) -> None:
-    total = input_tokens + output_tokens + cache_read_tokens
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into node_runs(id, job_id, node_key, status)"
             " values (%s, %s, 'generate', 'completed')",
             (run_id, job_id),
         )
-        conn.execute(
-            """
-            insert into node_run_token_usage(
-              node_run_id, job_id, workspace_id, node_key, provider, model,
-              input_tokens, output_tokens, cache_read_tokens, total_tokens, created_at
-            ) values (%s, %s, %s, 'generate', 'p', 'm', %s, %s, %s, %s, %s)
-            """,
-            (
-                run_id,
-                job_id,
-                workspace_id,
-                input_tokens,
-                output_tokens,
-                cache_read_tokens,
-                total,
-                created_at,
-            ),
+        insert_token_usage(
+            conn,
+            node_run_id=run_id,
+            job_id=job_id,
+            workspace_id=workspace_id,
+            node_key="generate",
+            provider="p",
+            model="m",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            created_at=created_at,
         )
 
 

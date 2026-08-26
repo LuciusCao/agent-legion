@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.helpers.seed import insert_node_run, insert_token_usage
+
 
 @pytest.fixture
 def workspace_and_job(client):
@@ -25,12 +27,7 @@ def workspace_and_job(client):
 
 def _insert_node_run(job_db, *, run_id, job_id, node_key, status="completed"):
     with job_db.connect() as conn:
-        conn.execute(
-            "insert into node_runs(id, job_id, node_key, status) values (%s, %s, %s, %s)"
-            " on conflict (id) do update set job_id=excluded.job_id,"
-            " node_key=excluded.node_key, status=excluded.status",
-            (run_id, job_id, node_key, status),
-        )
+        insert_node_run(conn, run_id=run_id, job_id=job_id, node_key=node_key, status=status)
 
 
 def _insert_token_usage(
@@ -47,41 +44,19 @@ def _insert_token_usage(
     output_tokens,
     cache_read_tokens,
 ):
-    total = input_tokens + output_tokens + cache_read_tokens
     with job_db.connect() as conn:
-        conn.execute(
-            """
-            insert into node_run_token_usage(
-              node_run_id, job_id, workspace_id, node_key, provider, model, skill_version,
-              message_count, input_tokens, output_tokens, cache_read_tokens, total_tokens
-            ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            on conflict (node_run_id) do update set
-              job_id=excluded.job_id,
-              workspace_id=excluded.workspace_id,
-              node_key=excluded.node_key,
-              provider=excluded.provider,
-              model=excluded.model,
-              skill_version=excluded.skill_version,
-              message_count=excluded.message_count,
-              input_tokens=excluded.input_tokens,
-              output_tokens=excluded.output_tokens,
-              cache_read_tokens=excluded.cache_read_tokens,
-              total_tokens=excluded.total_tokens
-            """,
-            (
-                node_run_id,
-                job_id,
-                workspace_id,
-                node_key,
-                provider,
-                model,
-                skill_version,
-                1,
-                input_tokens,
-                output_tokens,
-                cache_read_tokens,
-                total,
-            ),
+        insert_token_usage(
+            conn,
+            node_run_id=node_run_id,
+            job_id=job_id,
+            workspace_id=workspace_id,
+            node_key=node_key,
+            provider=provider,
+            model=model,
+            skill_version=skill_version,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
         )
 
 

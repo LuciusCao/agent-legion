@@ -46,6 +46,7 @@ from acp.schema import (
 from server.app.mcp_server.config import SESSION_ID_HEADER
 from server.app.mcp_server.http_app import MCP_URL_PATH
 from server.app.studio_chat.capabilities import capability_snapshot
+from server.app.studio_chat.terminals import AcpTerminalStore, TerminalClientMixin
 
 logger = logging.getLogger(__name__)
 
@@ -92,11 +93,9 @@ class AcpSessionCallbacks(Protocol):
     def on_exit(self) -> None: ...
 
 
-class _ClientImpl:
-    """ACP client surface the agent calls back into (duck-typed protocol)."""
-
-    def __init__(self, handle: AcpSessionHandle) -> None:
-        self._handle = handle
+class _ClientImpl(TerminalClientMixin):
+    """ACP client surface the agent calls back into (duck-typed protocol);
+    ``_handle``/``terminals`` are bound by the factory in ``_run``."""
 
     async def session_update(self, session_id: str, update: Any, **kwargs: Any) -> None:
         payload = update.model_dump(by_alias=True, exclude_none=True, mode="json")
@@ -227,7 +226,8 @@ class AcpSessionHandle:
             self.callbacks.on_exit()
 
     async def _run(self) -> None:
-        client = _ClientImpl(self)
+        client = _ClientImpl()
+        client._handle, client.terminals = self, AcpTerminalStore()
         try:
             async with spawn_agent_process(
                 cast(Any, client), self.command, *self.args, env=self.env, cwd=self.cwd
@@ -239,7 +239,9 @@ class AcpSessionHandle:
                 self._drain_stderr(process)
                 initialize = await conn.initialize(
                     protocol_version=PROTOCOL_VERSION,
-                    client_capabilities=ClientCapabilities(),
+                    # terminal=True: kimi's Bash/Grep run via the ACP
+                    # terminal protocol; without the flag they fail upfront.
+                    client_capabilities=ClientCapabilities(terminal=True),
                     client_info=Implementation(
                         name="agent-legion-studio", title="Agent Legion", version="1"
                     ),
@@ -258,6 +260,10 @@ class AcpSessionHandle:
             # problems undiagnosable from the logs alone.
             logger.warning("studio chat ACP session failed: %s", exc, exc_info=True)
             self.callbacks.on_error(str(exc))
+        finally:
+            # Reap terminals a crashed/killed agent never released itself.
+            with contextlib.suppress(Exception):
+                await client.terminals.close_all()
 
     async def _prompt_loop(self, conn: Any, acp_session_id: str) -> None:
         while True:

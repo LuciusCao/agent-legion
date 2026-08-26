@@ -1,22 +1,30 @@
 /* 左右分栏的桌面端放置规则（≤900px 走移动面板切换，见
  * WorkflowStudioPageResponsive.module.css）。grid 列必须显式钉死：
- * canvasReplaced/chatCollapsed 的 display:none 会让 auto-placement 错位。 */
+ * canvasReplaced/chatCollapsed 的不可见化会让 auto-placement 错位。 */
 @media (min-width: 901px) {
+  /* 详情替换画布时不能用 display:none：React Flow 的 ResizeObserver 会测到
+   * 0×0，返回 DAG 时 fitView 以失效尺寸重算，画布整体下移。改用
+   * visibility:hidden 保持测量。colLeft 同时钉死 grid-row:1——画布与左列
+   * 详情共享同一格，否则 auto-placement 把同列详情排进第二隐式行（只是
+   * 被今天 0 高的隐藏画布压平才没位移）。 */
   .colLeft {
     grid-column: 1;
+    grid-row: 1;
   }
   .colHandle {
     grid-column: 2;
+    grid-row: 1;
   }
   .colRight {
     grid-column: 3;
+    grid-row: 1;
     /* 右轨道是 minmax(auto, 1fr)（WorkflowStudioPage.module.css）：不钉
      * min-width:0 的话，chat 长工具名/JSON 等不可断内容会把轨道撑过 1fr，
      * 右栏随对话自增宽、左栏被挤没。 */
     min-width: 0;
   }
   .canvasReplaced {
-    display: none;
+    visibility: hidden;
   }
   .chatCollapsed {
     display: none;

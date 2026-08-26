@@ -18,8 +18,13 @@ from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.workflow_worker.code_claim import try_claim_code_worker_node
 from server.app.workflow_worker.code_stock import CodeStockConfig, CodeStockGate
+from tests.helpers.agent_worker_api import (
+    enqueue_code as _enqueue_code,
+)
+from tests.helpers.agent_worker_api import (
+    insert_code_job_rows as _insert_code_job_rows,
+)
 from tests.postgres_support import TEST_DATABASE_URL
-from tests.services.test_code_claim import _enqueue_code, _insert_code_job_rows
 from tests.workers.helpers import _local_node
 
 

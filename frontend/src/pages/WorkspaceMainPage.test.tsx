@@ -80,6 +80,13 @@ vi.mock('../api/jobBatchUpgradeWorkflowApi', () => ({
   ) => mockBatchUpgradeJobsWorkflow(...args),
 }))
 
+const mockGetWorkspaceExecutorConfiguration = vi.fn()
+
+vi.mock('../api/executorApi', () => ({
+  getWorkspaceExecutorConfiguration: (...args: unknown[]) =>
+    mockGetWorkspaceExecutorConfiguration(...args),
+}))
+
 function renderPage(workspaceId = 'ws1') {
   return render(
     <MemoryRouter initialEntries={[`/workspaces/${workspaceId}`]}>
@@ -187,6 +194,12 @@ describe('WorkspaceMainPage', () => {
     mockBatchRunToJobs.mockReset()
     mockUpgradeJobWorkflow.mockReset()
     mockBatchUpgradeJobsWorkflow.mockReset()
+    mockGetWorkspaceExecutorConfiguration.mockReset()
+    mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
+      node_limits: [],
+      migration_warnings: [],
+      agent_capacity: null,
+    })
 
     mockFetchJobsSnapshot.mockImplementation(() =>
       Promise.resolve({
@@ -914,43 +927,21 @@ describe('WorkspaceMainPage', () => {
     })
   })
 
-  it('renders a Studio entry card for a workspace without a published workflow', async () => {
+  it('guides through Studio as step 1 for a workspace without a published workflow', async () => {
+    // 引导导航细节见 WorkspaceMainPage.onboarding.test.tsx；这里保留一个
+    // 主文件级冒烟：无 published workflow 时主页面正常渲染引导入口。
     mockFetchWorkspaceStats.mockResolvedValue({
       ...baseStats,
       workflow_key: null,
       workflow_label: null,
     } as unknown as WorkspaceStats)
-    render(
-      <MemoryRouter initialEntries={['/workspaces/ws1']}>
-        <Routes>
-          <Route
-            path="/workspaces/:workspaceId/workflow-studio"
-            element={<div>Studio 页面</div>}
-          />
-          <Route
-            path="/workspaces/:workspaceId/*"
-            element={<WorkspaceMainPage />}
-          />
-        </Routes>
-      </MemoryRouter>
-    )
-
-    expect(await screen.findByText('进入 Studio')).toBeInTheDocument()
-
-    await act(async () => {
-      screen.getByText('进入 Studio').click()
-    })
-
-    expect(await screen.findByText('Studio 页面')).toBeInTheDocument()
-  })
-
-  it('hides the Studio entry card when the workspace has a published workflow', async () => {
     renderPage()
+    await loadJobsViaSSE()
 
-    await waitFor(() => {
-      expect(mockFetchWorkspaceStats).toHaveBeenCalled()
+    const studioButton = await screen.findByRole('button', {
+      name: '进入 Studio',
     })
-    expect(screen.queryByText('进入 Studio')).not.toBeInTheDocument()
+    expect(studioButton).toBeEnabled()
   })
 
   it('renders workspace package history dialog when open', async () => {
