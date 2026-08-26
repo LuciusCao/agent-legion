@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { deriveJobDetailPresentation } from './deriveJobDetailPresentation'
+import {
+  deriveJobDetailPresentation,
+  toNodeCatalog,
+} from './deriveJobDetailPresentation'
 import { toDagNodes } from './jobNodeHelpers'
 import type { JobDetail } from '../../types/jobTypes'
 
@@ -142,6 +145,55 @@ describe('deriveJobDetailPresentation', () => {
     expect(result.possibleErrorsPreviewable).toBe(false)
     expect(result.keyInfoReviewAttempted).toBe(false)
     expect(result.possibleErrorsReviewAttempted).toBe(false)
+  })
+})
+
+describe('toNodeCatalog', () => {
+  it('carries key, label, capability and the after edges for every node', () => {
+    // Regression pin for fd74c5e1: dropping `after` silently broke run-to
+    // start-node validation (ancestorClosure walks these edges).
+    const detail = makeDetail([
+      makeNode('generate_key_info', 'completed'),
+      makeNode('review_key_info', 'running', {
+        label: 'Review key info',
+        capability: 'review_key_info',
+        after: ['generate_key_info'],
+      }),
+      makeNode('assemble_items', 'pending', {
+        after: ['generate_key_info', 'review_key_info'],
+      }),
+    ])
+
+    const catalog = toNodeCatalog(detail)
+
+    expect(catalog).toEqual({
+      key: 'demo_workflow',
+      label: 'demo_workflow',
+      nodes: [
+        {
+          key: 'generate_key_info',
+          label: 'generate_key_info',
+          capability: 'generate_key_info',
+          after: [],
+        },
+        {
+          key: 'review_key_info',
+          label: 'Review key info',
+          capability: 'review_key_info',
+          after: ['generate_key_info'],
+        },
+        {
+          key: 'assemble_items',
+          label: 'assemble_items',
+          capability: 'assemble_items',
+          after: ['generate_key_info', 'review_key_info'],
+        },
+      ],
+    })
+  })
+
+  it('returns null when detail is null', () => {
+    expect(toNodeCatalog(null)).toBeNull()
   })
 })
 

@@ -2,7 +2,7 @@ import type { JobDetail } from '../../types/jobTypes'
 import type { NodeCatalog } from '../../lib/nodeCatalog'
 import { toDagEdges, toDagNodes } from './jobNodeHelpers'
 
-function toNodeCatalog(detail: JobDetail | null): NodeCatalog | null {
+export function toNodeCatalog(detail: JobDetail | null): NodeCatalog | null {
   if (!detail) return null
   return {
     key: detail.job.workflow_key,
