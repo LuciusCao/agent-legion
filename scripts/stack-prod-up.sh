@@ -2,8 +2,7 @@
 # 一键启动本地生产 stack（PostgreSQL + Host + Worker）：
 #   1. 检查 deploy/secrets 齐全
 #   2. 起 postgres 并等待 healthy
-#   3. ASR 模型（SenseVoiceSmall）缺失时在容器内预热（host 启动自检 fail-closed，必须先预热）
-#   4. 构建并起全 stack，等待 host / worker healthy
+#   3. 构建并起全 stack，等待 host / worker healthy
 # 本机覆盖文件 deploy/compose.local.yaml 存在时自动并入（bind-mount / 安全选项等）。
 set -euo pipefail
 
@@ -25,9 +24,9 @@ if [[ "$(scripts/local-s3-decide.sh --default-endpoint http://rustfs:9000 deploy
     COMPOSE+=(--profile materials-local)
 fi
 
-# 1. secrets
+# 1. secrets（worker 注册走 scoped token（Host UI 签发），不再需要全局 secret）
 missing=0
-for f in postgres_password postgres_pgpass agent_worker_register_token vault_master_key; do
+for f in postgres_password postgres_pgpass vault_master_key; do
     if [[ ! -s "deploy/secrets/$f" ]]; then
         echo "缺少 deploy/secrets/${f}（生成方式见 docs/agent-worker-deployment.md §1）" >&2
         missing=1
@@ -45,17 +44,8 @@ for i in $(seq 1 30); do
 done
 [[ "$status" == *healthy* ]] || { echo "postgres 未在预期时间内 healthy（当前: ${status:-unknown}）" >&2; exit 1; }
 
-# 3. ASR 模型预热（volume 已有所需模型则跳过）
-MODEL_DIR=/root/.cache/modelscope/hub/models/iic/SenseVoiceSmall
-if "${COMPOSE[@]}" run --rm --no-deps host test -d "$MODEL_DIR" 2>/dev/null; then
-    echo "ASR 模型已就绪，跳过预热"
-else
-    echo "预热 ASR 模型（首次约 1-4G 下载）…"
-    "${COMPOSE[@]}" run --rm --no-deps host python -c \
-        "from funasr import AutoModel; AutoModel(model='iic/SenseVoiceSmall', disable_update=True)"
-fi
-
-# 4. 全 stack
+# 3. 全 stack
+# （ASR 模型预热步骤随 funasr/ASR 渠道一并退役：torch/CUDA 依赖链已从镜像移除）
 "${COMPOSE[@]}" up -d --build
 echo "等待 host / worker healthy…"
 for i in $(seq 1 60); do
