@@ -273,10 +273,15 @@ def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -
         argv = [str(binary), *command[1:]]
         for placeholder, value in substitutions.items():
             argv = [part.replace(placeholder, value) for part in argv]
+        # gateway provider 走 config::resolve()（env 凭据）的前提是 models
+        # registry 不存在；开发机上 ~/.velites/models.json 存在时 resolve
+        # 会先撞上 "provider gateway is not configured"。指向不存在的路径
+        # 强制走迁移桥分支，与 test_velites_controllability 的隔离先例一致。
         env = {
             **os.environ,
             "VELITES_BASE_URL": gateway.base_url,
             "VELITES_API_KEY": "stub-key",
+            "VELITES_MODELS_PATH": str(tmp_path / "no-models.json"),
         }
         proc = subprocess.run(
             argv, cwd=job_dir, env=env, capture_output=True, text=True, timeout=300
