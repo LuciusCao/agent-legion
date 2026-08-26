@@ -13,11 +13,6 @@ class AgentStatusResponse(BaseModel):
     id: str
     name: str
     busy: bool
-    current_video_id: str | None = None
-    current_title: str = ""
-    current_content_type: str = ""
-    current_external_id: str = ""
-    current_phase: str = ""
 
 
 class AgentsResponse(BaseModel):
