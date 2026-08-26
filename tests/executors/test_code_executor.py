@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import shutil
-import subprocess
 import sys
 import textwrap
 import time
@@ -17,44 +15,9 @@ from server.app.executors.code import CodeExecutor
 from server.app.executors.contracts import CodeCapabilityConfig
 from server.app.executors.models import ExecutionContext
 from tests.helpers import pid_is_running
+from tests.helpers.velites_sandbox import sandboxed as _sandboxed
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-VELITES_DEBUG_BINARY = REPO_ROOT / "velites" / "target" / "debug" / "velites"
-
-
-def _velites_binary() -> Path:
-    """Prebuilt debug binary, or a cargo build (skipped when cargo is absent)."""
-    if VELITES_DEBUG_BINARY.exists():
-        return VELITES_DEBUG_BINARY
-    cargo = shutil.which("cargo")
-    if cargo is None:
-        pytest.skip("no prebuilt velites binary and cargo is not available")
-    proc = subprocess.run(
-        [cargo, "build", "--manifest-path", str(REPO_ROOT / "velites" / "Cargo.toml")],
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0 or not VELITES_DEBUG_BINARY.exists():
-        pytest.skip(f"velites build failed: {proc.stderr[-400:]}")
-    return VELITES_DEBUG_BINARY
-
-
-def _sandbox_backend_available() -> bool:
-    """Probe the actual OS sandbox backend, not just the platform."""
-    if sys.platform == "darwin":
-        return shutil.which("sandbox-exec") is not None
-    if sys.platform == "linux":
-        return shutil.which("bwrap") is not None
-    return False
-
-
-def _sandboxed(monkeypatch: pytest.MonkeyPatch) -> None:
-    if not _sandbox_backend_available():
-        pytest.skip("no OS sandbox backend (macOS sandbox-exec / Linux bwrap)")
-    binary = _velites_binary()
-    monkeypatch.setattr(
-        "server.app.executors._code_sandbox.shutil.which", lambda _name: str(binary)
-    )
 
 
 # Rejection semantics differ per backend: seatbelt denies with EPERM, while
@@ -438,29 +401,37 @@ def test_custom_cancel_kills_whole_process_group(
     # fire the token only after the pid file proves the grandchild spawned.
     # A wall-clock timer raced the child's startup under load (the same race
     # CI just caught in the orphan-reaper twin of this test).
-    result_holder: dict = {}
+    outcome_holder: dict = {}
 
     def run() -> None:
-        result_holder["result"] = _executor().execute(sandboxed)
+        try:
+            outcome_holder["result"] = _executor().execute(sandboxed)
+        except Exception as exc:
+            # Re-raised below; a bare holder["result"] KeyError would bury it.
+            outcome_holder["error"] = exc
 
     thread = _threading.Thread(target=run)
     thread.start()
-    deadline = time.monotonic() + 10.0
+    spawn_deadline = time.monotonic() + 10.0
     try:
         while not pid_file.exists():
-            assert time.monotonic() < deadline, "grandchild never started"
+            assert time.monotonic() < spawn_deadline, "grandchild never started"
             time.sleep(0.05)
         token.cancel()
     finally:
         thread.join(timeout=10.0)
     assert not thread.is_alive()
+    if "error" in outcome_holder:
+        raise outcome_holder["error"]
 
-    result = result_holder["result"]
+    result = outcome_holder["result"]
     assert result.status == "cancelled"
     pid = int(pid_file.read_text().strip())
-    # The grandchild must be dead well before its 2s sleep ends.
+    # The grandchild must be dead well before its 2s sleep ends. Fresh
+    # deadline: the spawn phase above may have consumed most of its own.
+    death_deadline = time.monotonic() + 10.0
     while pid_is_running(pid):
-        assert time.monotonic() < deadline, (
+        assert time.monotonic() < death_deadline, (
             f"grandchild {pid} survived cancellation; marker={marker}"
         )
         time.sleep(0.05)

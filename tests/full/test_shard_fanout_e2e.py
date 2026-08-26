@@ -6,13 +6,23 @@ from pathlib import Path
 
 import pytest
 
-from tests.workflows.test_sharding import (
+from tests.helpers.sharding import (
     FakeShardExecutor,
-    _make_e2e,
-    _node_shards,
-    _node_status,
-    _over_definition,
-    _poll_until,
+)
+from tests.helpers.sharding import (
+    make_e2e as _make_e2e,
+)
+from tests.helpers.sharding import (
+    node_shards as _node_shards,
+)
+from tests.helpers.sharding import (
+    node_status as _node_status,
+)
+from tests.helpers.sharding import (
+    over_definition as _over_definition,
+)
+from tests.helpers.sharding import (
+    poll_until as _poll_until,
 )
 
 pytestmark = pytest.mark.full_gate

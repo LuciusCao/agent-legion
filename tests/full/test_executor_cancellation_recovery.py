@@ -16,6 +16,7 @@ from tests.helpers.executor_worker import (
     make_definition,
     make_worker,
 )
+from tests.helpers.velites_sandbox import sandbox_backend_available, velites_binary
 from tests.postgres_support import TEST_DATABASE_URL
 
 GRACE = 0.5
@@ -70,11 +71,9 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Cancel Recovery", default_workflow_key="demo_workflow")
 
-    from tests.executors.test_code_executor import _sandbox_backend_available, _velites_binary
-
-    if not _sandbox_backend_available():
+    if not sandbox_backend_available():
         pytest.skip("no OS sandbox backend (macOS sandbox-exec / Linux bwrap)")
-    binary = _velites_binary()
+    binary = velites_binary()
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(
         "server.app.executors._code_sandbox.shutil.which", lambda _name: str(binary)

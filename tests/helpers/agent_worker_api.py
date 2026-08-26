@@ -208,9 +208,11 @@ def register(client: TestClient, credential: str | None = None, **overrides) -> 
         "protocol_version": 1,
         "image_version": "agent-legion-worker:test",
     }
+    # tokens is a header-level option, not a payload field: pop it before the
+    # update so it never leaks into the JSON body.
+    tokens = overrides.pop("tokens", None)
     payload.update(overrides)
     headers = {"X-Agent-Worker-Register-Token": credential}
-    tokens = overrides.pop("tokens", None)
     if tokens:
         headers = {"X-Agent-Worker-Register-Tokens": ",".join(tokens)}
     response = client.post(

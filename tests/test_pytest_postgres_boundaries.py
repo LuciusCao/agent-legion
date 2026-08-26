@@ -107,19 +107,36 @@ def _ast_calls_psycopg_connect(source: str) -> bool:
 
     Importing psycopg just for its exception classes (retry-path fakes) or
     embedding "psycopg.connect" inside a code string executed by a subprocess
-    must NOT count — only a real call node in this module does.
+    must NOT count — only a real call node in this module does. Recognized
+    forms: ``psycopg.connect(...)`` (including ``import psycopg as p``
+    aliases) and ``from psycopg import connect`` followed by a plain
+    ``connect(...)``. Exotic indirection (``getattr(psycopg, "connect")``)
+    still evades the scan — keep new direct connections obvious instead.
     """
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return False
+    module_aliases = {"psycopg"}
+    connect_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "psycopg" and alias.asname:
+                    module_aliases.add(alias.asname)
+        elif isinstance(node, ast.ImportFrom) and node.module == "psycopg":
+            connect_names.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "connect"
+            )
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
+        if isinstance(func, ast.Name) and func.id in connect_names:
+            return True
         if isinstance(func, ast.Attribute) and func.attr == "connect":
             value = func.value
-            if isinstance(value, ast.Name) and value.id == "psycopg":
+            if isinstance(value, ast.Name) and value.id in module_aliases:
                 return True
             if isinstance(value, ast.Attribute) and value.attr == "psycopg":
                 return True
@@ -165,6 +182,36 @@ def test_smoke_tier_entries_reference_existing_files() -> None:
     ]
 
     assert stale == []
+
+
+def test_test_modules_do_not_import_each_other() -> None:
+    # A test module importing another test module's helpers turns a rename or
+    # split of the imported file into an import-error cascade across the
+    # suite. Shared scaffolding belongs in tests/helpers/ instead. Only the
+    # tests.* namespace is checked: importable check scripts like
+    # scripts/architecture/test_placement.py are production modules whose
+    # names merely happen to start with test_.
+    offenders: list[str] = []
+    for path in sorted((ROOT / "tests").rglob("test_*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        modules: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                modules.append(node.module)
+            elif isinstance(node, ast.Import):
+                modules.extend(alias.name for alias in node.names)
+        if any(
+            segment.startswith("test_")
+            for mod in modules
+            if mod == "tests" or mod.startswith("tests.")
+            for segment in mod.split(".")[1:]
+        ):
+            offenders.append(path.relative_to(ROOT).as_posix())
+
+    assert offenders == []
 
 
 GUARD_FIXTURE = "_assert_shared_app_invariants"
