@@ -15,7 +15,6 @@ from tests.postgres_support import (
 )
 
 os.environ["AGENT_LEGION_DATABASE_URL"] = TEST_DATABASE_URL
-os.environ["AGENT_LEGION_SKIP_MODULE_APP"] = "1"
 
 import psycopg
 from psycopg import sql
@@ -163,6 +162,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/db/test_postgres_runtime.py",
         "tests/db/test_quality_loop_schema.py",
         "tests/db/test_runs_migration.py",
+        "tests/db/test_schema_version_registry.py",
         "tests/db/test_versioned_entities_migration.py",
         "tests/db/test_workflow_catalog_retirement.py",
         "tests/db/test_workspace_cms_migration.py",

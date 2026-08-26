@@ -7,10 +7,9 @@ claim-time-resolved secrets, no ``secret_config`` key) and the bundle carries
 ``server/app/agent_broker/code_dispatch.py`` builds both sides).
 
 The node code runs inside the velites OS sandbox exactly like the Host-side
-custom-code path: ``server/app/executors/_code_sandbox.py`` is the reference
-implementation; the argv/env/stdin-payload construction below is copied and
-adapted from it (Worker has no repo checkout, only the bundle snapshot), and
-both sides carry cross-referencing comments — keep them in sync.
+custom-code path; argv/env/read-roots/result parsing live in the shared
+``shared/code_sandbox.py`` module imported by both sides (the worker image
+ships worker/ + shared/, no repo checkout).
 
 Secret boundary (VAULT-SECRET-001 extended to the Worker): the resolved
 manifest lives only in memory and crosses into the child as a stdin pickle;
@@ -21,13 +20,10 @@ persistence must go through ``strip_secret_config`` first.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import pickle
 import shutil
-import site
 import subprocess
-import sys
 import tarfile
 import threading
 from collections.abc import Mapping
@@ -35,6 +31,15 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+from shared.code_sandbox import (
+    AUTH_FAILURE_MARKER_PATH,
+    CODE_BUNDLE_NODE_FILE,
+    CODE_RESULT_LOG_MEMBER,
+    MAX_CONNECTION_KEY_CHARS,
+    build_sandbox_argv,
+    child_env,
+    read_result_error,
+)
 from shared.material_cache import MATERIALS_CACHE_DIRNAME
 from worker._atomic import atomic_write
 from worker.binary_resolution import resolve_binary
@@ -48,17 +53,10 @@ if TYPE_CHECKING:
     from worker.host_client import Client
     from worker.status import ExecutionStatusReporter
 
-# Mirrors server/app/agent_broker/agent_bundle.py (worker image ships only
-# worker/ + shared/, so the constants are duplicated; keep in sync).
-CODE_BUNDLE_NODE_FILE = "node_code.py"
-CODE_BUNDLE_LIBS_DIR = "workspace_libs"
-CODE_RESULT_LOG_MEMBER = "node.log"
-# Mirrors workspace_libs/node_sdk.py NODE_RUNTIME_DIR / AUTH_FAILURE_MARKER.
-AUTH_FAILURE_MARKER_PATH = PurePosixPath(".node_runtime") / "auth_failure"
-# Sibling of server/app/executors/_code_sandbox.py _RESULT_BASENAME.
+# Where the sandboxed child writes its JSON result (sibling of the Host-side
+# .custom_node_result.json; deliberately a different filename so the two
+# paths cannot collide in shared tooling).
 RESULT_BASENAME = ".code_result.json"
-# Mirrors server/app/routes/agent_worker_results.py _MAX_CONNECTION_KEY_CHARS.
-MAX_CONNECTION_KEY_CHARS = 128
 
 _CANCEL_EVENTS: dict[str, threading.Event] = {}
 _CANCEL_LOCK = threading.Lock()
@@ -214,76 +212,6 @@ def build_child_payload(
     }
 
 
-def child_env(libs_root: Path) -> dict[str, str]:
-    """Minimal environment for the sandboxed child.
-
-    Copied/adapted from ``_code_sandbox.py::_child_env`` (keep in sync): the
-    Worker env's database DSNs, tokens and LLM keys stay out of the sandbox;
-    PYTHONPATH points at the bundle snapshot instead of a repo checkout."""
-    env: dict[str, str] = {}
-    # sandbox-exec/bwrap are spawned by name inside the wrapper.
-    if path := os.environ.get("PATH"):
-        env["PATH"] = path
-    for key in ("TMPDIR", "HOME"):
-        if value := os.environ.get(key):
-            env[key] = value
-    for key, value in os.environ.items():
-        if key == "LANG" or key.startswith("LC_"):
-            env[key] = value
-    python_paths = [str(libs_root), *(str(Path(p).resolve()) for p in site.getsitepackages())]
-    if python_path := os.environ.get("PYTHONPATH"):
-        python_paths.append(python_path)
-    env["PYTHONPATH"] = os.pathsep.join(python_paths)
-    return env
-
-
-def _read_roots(libs_root: Path, materials_cache_root: Path | None = None) -> list[str]:
-    """Read-only allowlist: the bundle snapshot plus interpreter prefixes.
-
-    Copied/adapted from ``_code_sandbox.py::_read_roots`` (keep in sync); the
-    Host side allow-lists repo subdirs, the Worker side only the extracted
-    bundle (node_code.py + workspace_libs) — nothing else of the Worker
-    filesystem is needed by node code. The materials cache root (design
-    §6.2) is the only material path node code may read: a static root,
-    never a per-material dynamic grant (MATERIAL-ACCESS-001)."""
-    roots = [str(libs_root)]
-    if materials_cache_root is not None and materials_cache_root.is_dir():
-        roots.append(str(materials_cache_root))
-    for prefix in {sys.prefix, sys.base_prefix}:
-        if prefix:
-            roots.append(str(Path(prefix).resolve()))
-    return roots
-
-
-def build_sandbox_argv(
-    velites: str,
-    job_dir: Path,
-    libs_root: Path,
-    result_path: Path,
-    *,
-    sandbox_network: bool,
-    materials_cache_root: Path | None = None,
-) -> list[str]:
-    """``velites sandbox wrap`` argv for one code node (EXEC-CODE-003).
-
-    Copied/adapted from ``_code_sandbox.py::execute_custom_sandboxed`` (keep
-    in sync): on the Worker every code execution — builtin or custom — goes
-    through the sandbox (batch 2 design §7.2)."""
-    command = [velites, "sandbox", "wrap", "--cwd", str(job_dir)]
-    for root in _read_roots(libs_root, materials_cache_root):
-        command += ["--allow-read", root]
-    if sandbox_network:
-        command.append("--allow-network")
-    command += [
-        "--",
-        str(Path(sys.executable).resolve()),
-        "-m",
-        "workspace_libs.code_child",
-        str(result_path),
-    ]
-    return command
-
-
 def read_auth_failure_key(job_dir: Path, manifest: dict[str, Any]) -> str:
     """Read the connection key a node recorded via ``report_auth_failure``.
 
@@ -304,29 +232,6 @@ def read_auth_failure_key(job_dir: Path, manifest: dict[str, Any]) -> str:
         if isinstance(config, Mapping):
             key = str(config.get("connection") or "").strip()
     return key[:MAX_CONNECTION_KEY_CHARS]
-
-
-def _read_result_error(result_path: Path) -> str | None:
-    """Parse the child's JSON result with a strict schema check.
-
-    Copied/adapted from ``_code_sandbox.py::_read_result`` (keep in sync):
-    None = the child reported success; any non-conforming content is a
-    failure — the file sits in a sandbox-writable directory and must never
-    be trusted blindly."""
-    try:
-        document = json.loads(result_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        document = None
-    if (
-        not isinstance(document, dict)
-        or set(document) != {"status", "message"}
-        or document["status"] not in ("ok", "error")
-        or not (document["message"] is None or isinstance(document["message"], str))
-    ):
-        return "sandboxed code node did not return a result"
-    if document["status"] == "error":
-        return str(document["message"])
-    return None
 
 
 def _outcome(
@@ -354,7 +259,7 @@ def _outcome(
                 f"code child exited before reading its payload ({type(write_error[0]).__name__})"
             ),
         }
-    result_error = _read_result_error(result_path)
+    result_error = read_result_error(result_path)
     if result_error is not None:
         return {"status": "failed", "error_message": result_error}
     missing = [name for name in expected_outputs if not (job_dir / PurePosixPath(name)).is_file()]
@@ -426,9 +331,9 @@ def execute_code(
         command = build_sandbox_argv(
             velites,
             job_dir,
-            prepared.libs_root,
+            [prepared.libs_root],
             result_path,
-            sandbox_network=bool(manifest.get("sandbox_network")),
+            sandbox_network=manifest.get("sandbox_network"),
             materials_cache_root=execution_dir.parent / MATERIALS_CACHE_DIRNAME,
         )
         payload = pickle.dumps(

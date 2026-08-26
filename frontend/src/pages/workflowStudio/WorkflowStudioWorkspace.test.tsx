@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioWorkspace } from './WorkflowStudioWorkspace'
-import type { StudioLayoutProps } from './workflowStudioLayoutProps'
+import { makeStudioView, withStudioProviders } from './testStudioProviders'
 import { api } from '../../api'
 import { TestQueryProvider } from '../../testing/testQueryClient'
 import { useSettingStore } from '../../stores/settingStore'
@@ -61,7 +61,7 @@ const baseSettings: WorkspaceSettings = {
   workflowKey: '',
 }
 
-function renderWorkspace(overrides?: Partial<StudioLayoutProps>) {
+function renderWorkspace(overrides?: Record<string, unknown>) {
   const props = {
     workflow,
     executorCatalog,
@@ -74,12 +74,13 @@ function renderWorkspace(overrides?: Partial<StudioLayoutProps>) {
     backToDraft: vi.fn(),
     setDagFullscreenOpen: vi.fn(),
     ...overrides,
-  } as unknown as StudioLayoutProps
+  } as unknown as Record<string, unknown>
+  const view = makeStudioView()
   return {
     setSelectedNodeKey: props.setSelectedNodeKey,
     ...render(
       <TestQueryProvider>
-        <WorkflowStudioWorkspace {...props} />
+        {withStudioProviders(props, view, <WorkflowStudioWorkspace />)}
       </TestQueryProvider>
     ),
   }

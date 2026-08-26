@@ -1,17 +1,16 @@
 import { StudioChatPanel } from './chat/StudioChatPanel'
-import type { StudioLayoutProps } from './workflowStudioLayoutProps'
+import { useStudioState } from './studioStateContext'
 
 /** 右半 Agent 对话栏：应用 agent 的 workflow 草稿前，若编辑器有未发布
  * 修改需先确认（否则静默覆盖用户草稿）。 */
 export function StudioChatAside({
-  props,
   agentOpen,
   asideClass,
 }: {
-  props: StudioLayoutProps
   agentOpen: boolean
   asideClass: string
 }) {
+  const studio = useStudioState()
   return (
     <aside
       data-mobile-panel="agent"
@@ -20,20 +19,20 @@ export function StudioChatAside({
       className={asideClass}
     >
       <StudioChatPanel
-        selectedNodeKey={props.selectedNodeKey}
-        definitionYaml={props.definitionYaml}
+        selectedNodeKey={studio.selectedNodeKey}
+        definitionYaml={studio.definitionYaml}
         onApplyWorkflowDraft={(yaml) => {
           if (
-            props.dirty &&
+            studio.dirty &&
             !window.confirm(
               '当前编辑器里有未发布的修改，应用此草稿将覆盖它们。确定继续吗？'
             )
           )
             return
-          props.backToDraft()
-          props.setDefinitionYaml(yaml)
+          studio.backToDraft()
+          studio.setDefinitionYaml(yaml)
         }}
-        onSelectNode={props.setSelectedNodeKey}
+        onSelectNode={studio.setSelectedNodeKey}
       />
     </aside>
   )

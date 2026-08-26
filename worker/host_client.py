@@ -13,14 +13,13 @@ from typing import Any, BinaryIO
 
 import requests
 
+from shared.protocol import PROTOCOL_VERSION
 from worker.host_transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
 
-# Protocol v3: runtime-scoped model declarations. Batch-2 fields remain
-# cancel bodies. Mirrors RegisterAgentWorkerResponse.host_protocol_version in
-# server/app/routes/agent_workers_contracts.py — bump both together.
-# Registration negotiates this version with the Host. In particular, a v3
+# Protocol history lives in shared/protocol.py (shipped in the worker image,
+# imported by both sides): v3 = runtime-scoped model declarations. A v3
 # Worker must fail closed against an older Host that erases model runtimes.
-PROTOCOL_VERSION = 3
+# Registration negotiates this version with the Host.
 
 DEFAULT_TIMEOUT = 30
 

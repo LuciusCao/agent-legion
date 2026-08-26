@@ -1,4 +1,4 @@
-"""Data migration applied alongside the idempotent DDL replay (v18)."""
+"""Data migration applied alongside the idempotent DDL replay (v25)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ _LOCAL_EXECUTOR_ID = "local-default"
 
 
 def migrate_local_executor_removal(conn: Any) -> None:
-    """Retire the local executor kind (v18).
+    """Retire the local executor kind (v25).
 
     The remaining seven ``local-default`` capabilities moved to
     ``code-default`` (config/workflow.yaml), so every workspace binding that

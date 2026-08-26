@@ -1,4 +1,4 @@
-"""Data migration applied alongside the idempotent DDL replay (v19)."""
+"""Data migration applied alongside the idempotent DDL replay (v14)."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def _store_plaintext_token(
 
 
 def migrate_node_cms_config(conn: Any) -> None:
-    """Move CMS resource bindings onto first-node config overrides (v19).
+    """Move CMS resource bindings onto first-node config overrides (v14).
 
     Each workspace's ``resource_config.resources[*]`` binding maps onto the
     node config override of the corresponding first node (fetch_questions /

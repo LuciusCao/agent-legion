@@ -139,7 +139,7 @@ def _make_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._scan_entries = scan_entries(definition)
+    worker.state.scan_entries = scan_entries(definition)
     worker._ensure_pools()
     return worker
 
@@ -149,7 +149,7 @@ def _drain(worker: WorkflowWorkerThread, timeout: float = 5.0) -> None:
     while time.monotonic() < deadline:
         worker._poll()
         reap_futures(worker)
-        if not worker._futures and not worker._poll():
+        if not worker.state.futures and not worker._poll():
             # One more pass to claim any newly-ready nodes.
             break
         time.sleep(0.05)

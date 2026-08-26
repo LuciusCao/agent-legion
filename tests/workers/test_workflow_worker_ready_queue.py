@@ -97,7 +97,7 @@ def test_evaluate_once_per_job_per_pass(tmp_path: Path, monkeypatch: pytest.Monk
 
     assert worker._poll() is True
     assert worker.leases.active_counts("code")["global"] == 3
-    assert len(worker._futures) == 3
+    assert len(worker.state.futures) == 3
     assert loader_calls["count"] == 1
     assert snapshot_calls["count"] == 1
 
@@ -162,7 +162,7 @@ def test_multi_ready_node_job_claimed_within_one_pass(tmp_path: Path) -> None:
 
     assert worker._poll() is True
     assert worker.leases.active_counts("code")["global"] == 2
-    assert len(worker._futures) == 2
+    assert len(worker.state.futures) == 2
     job = worker.job_db.list_jobs(workspace_id=ws["id"], workflow_key="test")[0]
     statuses = {
         node["node_key"]: node["status"] for node in worker.job_db.list_job_nodes(job["id"])

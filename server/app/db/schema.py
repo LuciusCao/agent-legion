@@ -3,35 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from server.app.db.connection import DatabaseDsn
-from server.app.db.migrations import (
-    migrate_agent_catalog_cutover,
-    migrate_agent_request_kind_window,
-    migrate_agent_workspace_scope,
-    migrate_code_executor_bindings,
-    migrate_custom_node_codes,
-    migrate_executor_asr_config_schema,
-    migrate_executor_entity_type,
-    migrate_executor_retirement,
-    migrate_external_connections,
-    migrate_hmac_connection_type,
-    migrate_job_artifacts,
-    migrate_local_executor_removal,
-    migrate_node_cms_config,
-    migrate_retire_global_register_tokens,
-    migrate_runs,
-    migrate_scoped_token_origin,
-    migrate_studio_chat_context,
-    migrate_studio_chat_draft,
-    migrate_studio_chat_tables,
-    migrate_versioned_entities,
-    migrate_workflow_catalog_retirement,
-    migrate_workspace_cms_config,
-    migrate_workspace_job_node_status_counts,
-    migrate_workspace_secrets,
-)
-from server.app.db.migrations.job_status_counts import (
-    migrate_workspace_job_status_counts,
-)
+from server.app.db.migration_registry import MIGRATIONS
 from server.app.db.transaction import write_transaction
 
 SCHEMA_VERSION = 58
@@ -39,7 +11,16 @@ _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 
 def init_db(database_dsn: DatabaseDsn) -> None:
-    """Initialize or upgrade the PostgreSQL schema under a migration lock."""
+    """Initialize or upgrade the PostgreSQL schema under a migration lock.
+
+    Fresh databases apply the whole idempotent ``postgres_schema.sql`` and
+    every migration in order, recording one ``schema_migrations`` row per
+    version. Databases at an older version still replay the full DDL file
+    (that remains the DDL upgrade mechanism) but only run data migrations
+    with ``version > max(applied)`` — no more full replay of data
+    migrations on upgrade. Databases recorded at the current version
+    (including legacy single-row installs) are a no-op.
+    """
     with write_transaction(database_dsn) as conn:
         # Serialize migrations per database, not cluster-wide: worktrees run
         # against dedicated databases (tests/postgres_support.py derives one
@@ -56,44 +37,27 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             )
             """
         )
-        applied = conn.execute(
-            "select version from schema_migrations where version = %s", (SCHEMA_VERSION,)
-        ).fetchone()
-        if applied is None:
-            conn.execute(_SCHEMA_FILE.read_text(encoding="utf-8"))
-            migrate_workspace_cms_config(conn)
-            migrate_workspace_secrets(conn)
-            migrate_code_executor_bindings(conn)
-            migrate_local_executor_removal(conn)
-            migrate_node_cms_config(conn)
-            migrate_custom_node_codes(conn)
-            migrate_versioned_entities(conn)
-            migrate_agent_catalog_cutover(conn)
-            migrate_executor_entity_type(conn)
-            migrate_executor_asr_config_schema(conn)
-            migrate_external_connections(conn)
-            migrate_hmac_connection_type(conn)
-            migrate_workspace_job_status_counts(conn)
-            migrate_scoped_token_origin(conn)
-            migrate_studio_chat_tables(conn)
-            migrate_studio_chat_context(conn)
-            migrate_agent_workspace_scope(conn)
-            migrate_executor_retirement(conn)
-            migrate_workflow_catalog_retirement(conn)
-            migrate_agent_request_kind_window(conn)
-            # Runs cutover (v53) goes last: earlier migrations still replay
-            # against job_batches (e.g. the external-connections payload
-            # rewrite), then every row is harvested and the table dropped.
-            migrate_runs(conn)
-            migrate_job_artifacts(conn)
-            migrate_workspace_job_node_status_counts(conn)
-            migrate_studio_chat_draft(conn)
-            # v58: retire all-workspaces register tokens (#35) runs last so
-            # legacy NULL-workspace rows are revoked before any scoped-token
-            # traffic can observe them.
-            migrate_retire_global_register_tokens(conn)
-            conn.execute("alter table workspaces drop column if exists cms_config_json")
+        applied_versions = {
+            row["version"]
+            for row in conn.execute("select version from schema_migrations").fetchall()
+        }
+        if applied_versions and max(applied_versions) >= SCHEMA_VERSION:
+            return
+        conn.execute(_SCHEMA_FILE.read_text(encoding="utf-8"))
+        # Legacy single-row installs recorded only their final version, so a
+        # membership check would replay every retired data migration on
+        # upgrade; anything at or below the high-water mark is already done.
+        max_applied = max(applied_versions) if applied_versions else 0
+        for migration in MIGRATIONS:
+            if migration.version <= max_applied:
+                continue
+            if migration.apply is not None:
+                migration.apply(conn)
             conn.execute(
                 "insert into schema_migrations(version, name) values (%s, %s)",
-                (SCHEMA_VERSION, "retire_global_register_tokens"),
+                (migration.version, migration.name),
             )
+        # Legacy final cleanup (historically trailed the whole replay): the
+        # cms_config_json column is superseded by workspace_cms_config's
+        # resource rows and must not survive any install path.
+        conn.execute("alter table workspaces drop column if exists cms_config_json")

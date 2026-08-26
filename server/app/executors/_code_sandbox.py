@@ -16,13 +16,10 @@ strictly validated **JSON** from a file inside the sandbox-writable
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import pickle
 import shutil
-import site
 import subprocess
-import sys
 import threading
 import time
 from collections.abc import Mapping
@@ -36,6 +33,12 @@ from server.app.executors._code_runtime import (
 )
 from server.app.executors.cancellation import CancellationToken
 from server.app.executors.models import ExecutionContext, ExecutionResult
+from shared.code_sandbox import (
+    build_sandbox_argv,
+    child_env,
+    read_result_error,
+    read_roots,
+)
 from shared.material_cache import MaterializeError
 
 if TYPE_CHECKING:
@@ -70,93 +73,38 @@ def _velites_binary(executor: CodeExecutor) -> str | None:
     return executor._velites_path
 
 
-def _child_env() -> dict[str, str]:
-    """Minimal environment for the sandboxed child.
-
-    Everything else — database DSNs, vault master key, CMS tokens
-    (AGENT_LEGION_* / CMS_* / BASECMS_*) — stays out of the sandbox.
-    """
-    env: dict[str, str] = {}
-    # sandbox-exec/bwrap are spawned by name inside the wrapper.
-    if path := os.environ.get("PATH"):
-        env["PATH"] = path
-    # tempfile and locale basics for the interpreter and node code.
-    for key in ("TMPDIR", "HOME"):
-        if value := os.environ.get(key):
-            env[key] = value
-    for key, value in os.environ.items():
-        if key == "LANG" or key.startswith("LC_"):
-            env[key] = value
-    # server package import root (computed by the caller's interpreter).
-    python_paths = [
-        str(_SERVER_REPO_ROOT),
-        *(str(Path(p).resolve()) for p in site.getsitepackages()),
-    ]
-    if python_path := os.environ.get("PYTHONPATH"):
-        python_paths.append(python_path)
-    env["PYTHONPATH"] = os.pathsep.join(python_paths)
-    return env
-
-
-def _read_roots(executor: CodeExecutor) -> list[str]:
-    """Read-only allowlist: import subdirs plus the interpreter prefixes.
-
-    The venv prefix (``sys.prefix``) keeps site-packages importable and
-    pyvenv.cfg readable; the base prefix (``sys.base_prefix``) covers
-    @rpath-loaded libpython — passed explicitly instead of relying on the
-    wrapper's PATH python3 probe, which may resolve a different interpreter
-    than ``sys.executable``.
-    """
-    roots: list[str] = []
-    repo_roots = {executor._repo_root, _SERVER_REPO_ROOT}
-    for repo_root in repo_roots:
+def _import_roots(executor: CodeExecutor) -> list[Path]:
+    """Read roots for the Host-side sandbox: repo subdirs plus the cache."""
+    roots: list[Path] = []
+    for repo_root in {executor._repo_root, _SERVER_REPO_ROOT}:
         for subdir in _REPO_READ_SUBDIRS:
             candidate = repo_root / subdir
             if candidate.is_dir():
-                roots.append(str(candidate))
-    # Materialization cache (design §6.2): the ONLY material path node code
-    # may read — a static root, never a per-material dynamic grant
-    # (MATERIAL-ACCESS-001).
-    cache_root = executor._materials_cache_root
-    if cache_root.is_dir():
-        roots.append(str(cache_root))
-    for prefix in {sys.prefix, sys.base_prefix}:
-        if prefix:
-            roots.append(str(Path(prefix).resolve()))
+                roots.append(candidate)
     return roots
 
 
-def _read_result(result_path: Path, log_path: Path) -> ExecutionResult | None:
-    """Parse the child's JSON result with a strict schema check.
+def _read_roots(executor: CodeExecutor) -> list[str]:
+    """Host adapter over the shared read-roots allowlist.
 
-    Returns None for a successful run (outputs still need checking); any
-    non-conforming content fails the node — the file sits in a
-    sandbox-writable directory and must never be trusted blindly.
+    Keeps the historical executor-based signature (tests and diagnostics
+    probe the sandbox surface through it); the materials cache root
+    (MATERIAL-ACCESS-001) is appended by the shared implementation.
     """
-    try:
-        document = json.loads(result_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        document = None
-    if (
-        not isinstance(document, dict)
-        or set(document) != {"status", "message"}
-        or document["status"] not in ("ok", "error")
-        or not (document["message"] is None or isinstance(document["message"], str))
-    ):
-        return ExecutionResult(
-            status="failed",
-            exit_code=1,
-            error_message="sandboxed custom code node did not return a result",
-            log_path=str(log_path),
-        )
-    if document["status"] == "error":
-        return ExecutionResult(
-            status="failed",
-            exit_code=1,
-            error_message=str(document["message"]),
-            log_path=str(log_path),
-        )
-    return None
+    return read_roots(_import_roots(executor), executor._materials_cache_root)
+
+
+def _read_result(result_path: Path, log_path: Path) -> ExecutionResult | None:
+    """Wrap the shared strict result check into an ExecutionResult."""
+    error = read_result_error(result_path)
+    if error is None:
+        return None
+    return ExecutionResult(
+        status="failed",
+        exit_code=1,
+        error_message=error,
+        log_path=str(log_path),
+    )
 
 
 def execute_custom_sandboxed(
@@ -210,24 +158,16 @@ def execute_custom_sandboxed(
         }
     )
 
-    command = [velites, "sandbox", "wrap", "--cwd", str(context.job_dir)]
-    for root in _read_roots(executor):
-        command += ["--allow-read", root]
+    command = build_sandbox_argv(
+        velites,
+        context.job_dir,
+        _import_roots(executor),
+        result_path,
+        sandbox_network=context.node_config.get("sandbox_network"),
+        materials_cache_root=executor._materials_cache_root,
+    )
     # Network opt-in travels the node config chain (P-0.5): the resolved
     # node config wins; anything else denies (the sandbox default).
-    sandbox_network = context.node_config.get("sandbox_network")
-    if sandbox_network is True:
-        command.append("--allow-network")
-    command += [
-        "--",
-        str(Path(sys.executable).resolve()),
-        "-m",
-        "workspace_libs.code_child",
-        str(result_path),
-    ]
-    # worker/code_runner.py 的 build_sandbox_argv/child_env/_read_roots 从本
-    # 文件复制适配（Worker 上全部 code 执行统一过沙箱，批次 2）——改 argv/
-    # 环境/payload 契约（含 materials 缓存根的静态 allow-read）时两边同步。
 
     log_fd = os.open(str(context.log_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
     try:
@@ -237,7 +177,7 @@ def execute_custom_sandboxed(
             stdout=log_fd,
             stderr=subprocess.STDOUT,
             cwd=str(context.job_dir),
-            env=_child_env(),
+            env=child_env(_SERVER_REPO_ROOT),
             # velites does not forward signals: terminate the whole group so
             # sandbox-exec grandchildren are not orphaned.
             start_new_session=True,

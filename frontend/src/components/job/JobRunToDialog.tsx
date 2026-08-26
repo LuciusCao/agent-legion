@@ -7,7 +7,8 @@ import {
   DialogContent,
   DialogTitle,
 } from '@mui/material'
-import type { JobSummary, WorkflowDefinitionRecord } from '../../types'
+import type { JobSummary } from '../../types'
+import type { NodeCatalog } from '../../lib/nodeCatalog'
 import { ancestorClosure, validateRunTo } from '../../lib/jobDag'
 import {
   computeOrderedNodes,
@@ -19,7 +20,7 @@ import styles from './JobRunToDialog.module.css'
 export type JobRunToDialogProps = {
   open: boolean
   jobs: JobSummary[]
-  workflowDefinition?: WorkflowDefinitionRecord | null
+  workflowDefinition?: NodeCatalog | null
   workflowNodesByKey?: WorkflowNodesByKey | null
   itemLabel?: string
   onConfirm: (targetKey: string, startKey?: string) => void | Promise<void>

@@ -173,5 +173,30 @@ def test_quality_gate_runs_unit_and_postgres_layers_with_combined_coverage() -> 
 
 
 def test_test_harness_skips_module_level_application_bootstrap() -> None:
-    source = (ROOT / "tests/conftest.py").read_text(encoding="utf-8")
-    assert 'os.environ["AGENT_LEGION_SKIP_MODULE_APP"] = "1"' in source
+    # The module-level `app = create_app(start_worker=True)` was removed in
+    # favor of the create_prod_app factory: importing server.app.main must be
+    # side-effect free by construction, not by a conftest env escape hatch.
+    conftest_source = (ROOT / "tests/conftest.py").read_text(encoding="utf-8")
+    assert "AGENT_LEGION_SKIP_MODULE_APP" not in conftest_source
+    main_source = (ROOT / "server/app/main.py").read_text(encoding="utf-8")
+    assert "AGENT_LEGION_SKIP_MODULE_APP" not in main_source
+    # No module-level app assignment may reappear (import-time startup);
+    # assignments inside function bodies (create_app itself) are fine.
+    for node in ast.parse(main_source).body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "app":
+                    raise AssertionError(
+                        "module-level `app = ...` reintroduced; use create_prod_app factory"
+                    )
+
+
+@pytest.mark.no_db
+def test_importing_main_module_has_no_side_effects() -> None:
+    # The factory refactor made `import server.app.main` inert: no module
+    # attribute `app` may exist, and importing must not construct an app.
+    import server.app.main as main_module
+
+    assert not hasattr(main_module, "app")
+    assert hasattr(main_module, "create_prod_app")
+    assert hasattr(main_module, "create_app")

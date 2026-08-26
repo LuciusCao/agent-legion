@@ -59,7 +59,7 @@ def _find_free_port() -> int:
 
 def _backend_command(port: int) -> list[str]:
     return (
-        f"{sys.executable} -m uvicorn server.app.main:app "
+        f"{sys.executable} -m uvicorn server.app.main:create_prod_app --factory "
         f"--host 127.0.0.1 --port {port} --log-level warning"
     ).split()
 

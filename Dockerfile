@@ -35,7 +35,7 @@ COPY . ./
 COPY --from=frontend /src/frontend/dist /app/frontend/dist
 RUN uv sync --frozen --no-dev
 EXPOSE 8000
-CMD ["uvicorn", "server.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "20"]
+CMD ["uvicorn", "server.app.main:create_prod_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "20"]
 
 FROM python:${PYTHON_VERSION}-slim-bookworm AS worker
 ARG NODE_VERSION=22.17.0

@@ -22,9 +22,9 @@ from typing import Any
 
 import pytest
 
+from shared.code_sandbox import build_sandbox_argv
 from worker import binary_resolution
 from worker.code_runner import (
-    build_sandbox_argv,
     cancel_executions,
     execute_code,
     prepare_code_execution,
@@ -198,7 +198,7 @@ def test_build_sandbox_argv_structure() -> None:
     argv = build_sandbox_argv(
         "/usr/bin/velites",
         Path("/work/e1/job"),
-        Path("/work/e1/bundle"),
+        [Path("/work/e1/bundle")],
         Path("/work/e1/job/.code_result.json"),
         sandbox_network=True,
     )
@@ -215,7 +215,7 @@ def test_build_sandbox_argv_structure() -> None:
     no_network = build_sandbox_argv(
         "/usr/bin/velites",
         Path("/work/e1/job"),
-        Path("/work/e1/bundle"),
+        [Path("/work/e1/bundle")],
         Path("/work/e1/job/.code_result.json"),
         sandbox_network=False,
     )

@@ -107,5 +107,5 @@ def make_worker(
                     "def run(job, job_dir, runtime):\n    pass\n",
                     "test seed",
                 )
-    worker._scan_entries = scan_entries(*definitions)
+    worker.state.scan_entries = scan_entries(*definitions)
     return worker

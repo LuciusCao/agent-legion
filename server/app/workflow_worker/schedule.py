@@ -52,14 +52,14 @@ def claim_ready_queues(
     claims = 0
     while queues:
         round_claimed = False
-        for workspace_id in worker._round_robin.order(list(queues)):
+        for workspace_id in worker.state.round_robin.order(list(queues)):
             queue = queues.get(workspace_id)
             if queue is None or worker._is_paused(workspace_id):
                 continue
             if claim_next_candidate(worker, workspaces[workspace_id], queue, snapshot):
                 round_claimed = True
                 claims += 1
-                worker._round_robin.complete_pass(workspace_id)
+                worker.state.round_robin.complete_pass(workspace_id)
             if not queue:
                 del queues[workspace_id]
         if not round_claimed:
@@ -124,7 +124,7 @@ def try_claim_and_submit(
     if resolved.kind == "agent":
         # Once the enqueue pool filled up this pass, skip remaining agent
         # candidates outright (route came from the TTL cache: zero DB).
-        if worker._agent_pass.pool_full is True:
+        if worker.state.agent_pass.pool_full is True:
             return False
         return claim_agent_node(
             worker,
@@ -201,5 +201,7 @@ def try_claim_and_submit(
         config_snapshot_json,
     )
     if claimed:
-        worker._pass_claim_counts[executor_id] = worker._pass_claim_counts.get(executor_id, 0) + 1
+        worker.state.pass_claim_counts[executor_id] = (
+            worker.state.pass_claim_counts.get(executor_id, 0) + 1
+        )
     return claimed

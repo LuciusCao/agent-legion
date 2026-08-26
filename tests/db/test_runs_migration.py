@@ -87,7 +87,8 @@ def _rebuild_v52_shape(conn) -> None:
         )
         """
     )
-    conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
+    # Pretend the database stopped at v52 so init_db runs the v53+ upgrade.
+    conn.execute("delete from schema_migrations where version >= 53")
 
 
 def _seed_batch(conn, batch_id: str, payload: dict | str, status: str = "completed") -> None:

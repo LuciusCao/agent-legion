@@ -139,7 +139,7 @@ def make_workflow_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._scan_entries = scan_entries(definition)
+    worker.state.scan_entries = scan_entries(definition)
     return worker, definition
 
 

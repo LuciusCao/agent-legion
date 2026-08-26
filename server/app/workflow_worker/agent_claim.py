@@ -31,7 +31,7 @@ def cached_run_payload(worker: WorkflowWorkerThread, job: dict[str, Any]) -> dic
     run_id = job.get("run_id")
     if not run_id:
         return None
-    cache = worker._batch_payload_cache
+    cache = worker.state.batch_payload_cache
     key = str(run_id)
     if key not in cache:
         cache[key] = run_frozen_payload(worker.job_db, job)
@@ -153,21 +153,21 @@ def claim_agent_node(
             # 缺失时发生，受影响的 job 可由用户重跑。
             fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
         finally:
-            worker._agent_pass.in_flight.discard(flight_key)
+            worker.state.agent_pass.in_flight.discard(flight_key)
 
     # Staging + bundling run off the poll thread. Register in-flight before
     # submit so duplicate candidates are skipped until the closure finishes.
-    worker._agent_pass.in_flight.add(flight_key)
+    worker.state.agent_pass.in_flight.add(flight_key)
     if not dispatch.enqueue_pool.submit(_enqueue):
         # Pool backlog full: skip this pass's remaining agent candidates.
-        worker._agent_pass.in_flight.discard(flight_key)
-        worker._agent_pass.pool_full = True
+        worker.state.agent_pass.in_flight.discard(flight_key)
+        worker.state.agent_pass.pool_full = True
         return False
     # Count the submission toward the stock gate: the snapshot stays frozen
     # until refresh (over-counts on enqueue failure — conservative, fine).
-    enqueued = worker._agent_pass.stock_enqueued
+    enqueued = worker.state.agent_pass.stock_enqueued
     stock_key = (str(workspace_id), agent_id)
     enqueued[stock_key] = enqueued.get(stock_key, 0) + 1
     key = f"agent:{agent_id}"
-    worker._pass_claim_counts[key] = worker._pass_claim_counts.get(key, 0) + 1
+    worker.state.pass_claim_counts[key] = worker.state.pass_claim_counts.get(key, 0) + 1
     return True

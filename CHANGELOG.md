@@ -50,6 +50,36 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 - Compose stacks no longer mount `agent_worker_register_token`; workers get
   their scoped token via the console or `workerctl configure
   --register-token-file` (#35).
+### Changed
+
+- **Breaking (deployment):** `server.app.main` no longer exports a
+  module-level `app`; launchers must use the factory form
+  (`uvicorn server.app.main:create_prod_app --factory`). Importing the
+  module is now side-effect free — the `AGENT_LEGION_SKIP_MODULE_APP` env
+  escape hatch is retired.
+- Schema upgrades record one `schema_migrations` row per version and only
+  run data migrations above `max(applied)`; legacy single-row installs are
+  a no-op (DB-SCHEMA-001).
+- Sandbox argv/env/read-roots construction and the registration protocol
+  constants live once in `shared/` (imported by both Host and Worker),
+  replacing the cross-side "keep in sync" copies; network opt-in is now
+  strictly `is True` on the Worker path too (P-0.5 semantics).
+- The workflow worker's mutable state moved from ~18 thread-private
+  attributes (reached into by sibling modules) into an explicit
+  `WorkflowWorkerState` container consumed as `worker.state.X`.
+- Studio layout components consume `useWorkflowStudio()` through
+  `StudioStateContext`/`StudioViewContext` instead of threading the whole
+  ~35-field object as props through six layers; the fabricated
+  `WorkflowDefinitionRecord` in job detail is replaced by a minimal
+  `NodeCatalog` type.
+
+### Added
+
+- Service data-boundary ratchet (BOUNDARY-DATA-001): new services under
+  `server/app/services/` must reach the database through the `JobQueries`
+  facade; existing raw-SQL/DB-primitive counts are frozen in
+  `config/architecture/service-data-boundary-baseline.json` and only
+  ratchet down.
 
 ## [0.3.0-alpha] - 2026-08-25
 

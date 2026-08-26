@@ -57,16 +57,16 @@ def resolve_cached_definition(
     key = str(job.get("workflow_definition_hash") or "")
     if not key:
         return fallback
-    if key not in worker._definition_cache:
+    if key not in worker.state.definition_cache:
         snapshot = str(job.get("workflow_definition_snapshot_json") or "")
         if not snapshot:
             snapshot = worker.job_db.get_workflow_snapshot_for_hash(key)
-        worker._definition_cache[key] = (
+        worker.state.definition_cache[key] = (
             definition_from_job_snapshot({"workflow_definition_snapshot_json": snapshot})
             if snapshot
             else None
         )
-    return worker._definition_cache[key] or fallback
+    return worker.state.definition_cache[key] or fallback
 
 
 def evaluate_job_ready(

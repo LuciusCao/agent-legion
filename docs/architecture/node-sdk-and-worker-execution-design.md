@@ -243,9 +243,11 @@ manifest 拼装、取消检查点）：统一走 `ctx.service_config(...)` /
   `_code_child` 对 `server.app` 仅两个依赖（`CancellationToken`、
   `_load_run_from_source`），随之下沉后零依赖；`workspace_libs/` 已在沙箱
   allowlist，不需要动沙箱策略。
-- velites wrap argv 构建与进程管理留在执行器层，Host/Worker 各一份（Worker
-  侧复制进 `worker/`；批次 3 已取消，Host 侧这份随本地兜底路径长期保留，
-  见 §9）。
+- velites wrap argv/env/read-roots 构建与结果解析收敛到 `shared/code_sandbox.py`
+  单份实现（Host 与 Worker 都 import 它；worker 镜像本就随包携带 `shared/`）；
+  进程管理与超时/取消循环留在各自执行器层。注册协议版本常量同理收敛到
+  `shared/protocol.py`，跨侧一致性由
+  `tests/workers/test_protocol_sync.py` 钉死。
 
 ### 7.5 取消信号
 

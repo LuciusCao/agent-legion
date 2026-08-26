@@ -37,9 +37,9 @@ def submit_claim(
     """
     pool = worker._pool_for(executor_id)
     future = pool.submit(run_claim, worker, claim, context)
-    future.add_done_callback(lambda _f: worker._wake_event.set())
-    worker._futures[claim.execution_id] = future
-    worker._future_claims[claim.execution_id] = (executor_id, claim.lease_id)
+    future.add_done_callback(lambda _f: worker.state.wake_event.set())
+    worker.state.futures[claim.execution_id] = future
+    worker.state.future_claims[claim.execution_id] = (executor_id, claim.lease_id)
 
 
 def run_claim(
@@ -60,12 +60,12 @@ def run_claim(
 
 
 def reap_futures(worker: WorkflowWorkerThread) -> None:
-    for execution_id in list(worker._futures):
-        future = worker._futures[execution_id]
+    for execution_id in list(worker.state.futures):
+        future = worker.state.futures[execution_id]
         if future.done():
             try:
                 future.result()
             except Exception:
                 logger.exception("workflow future %s failed", execution_id)
-            worker._futures.pop(execution_id, None)
-            worker._future_claims.pop(execution_id, None)
+            worker.state.futures.pop(execution_id, None)
+            worker.state.future_claims.pop(execution_id, None)

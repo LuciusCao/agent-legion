@@ -1,4 +1,4 @@
-"""Schema v25: workflow_node_codes custom node code table."""
+"""workflow_node_codes custom node code table (v25 era, registry-retired DDL)."""
 
 from __future__ import annotations
 

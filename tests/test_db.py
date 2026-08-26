@@ -1,3 +1,4 @@
+from server.app.db.migration_registry import MIGRATIONS
 from server.app.db.schema import SCHEMA_VERSION
 from server.app.db.transaction import read_connection
 from tests.postgres_support import TEST_DATABASE_URL
@@ -34,13 +35,14 @@ def test_database_creates_performance_indexes():
 
 
 def test_database_initialization_records_postgres_schema():
-    """Database initialization records the PostgreSQL control-plane schema."""
+    """Database initialization records one row per registered migration."""
     with read_connection(TEST_DATABASE_URL) as conn:
-        versions = {
-            row["version"]
-            for row in conn.execute("select version from schema_migrations").fetchall()
+        rows = {
+            row["version"]: row["name"]
+            for row in conn.execute("select version, name from schema_migrations").fetchall()
         }
-    assert versions == {SCHEMA_VERSION}
+    assert rows == {m.version: m.name for m in MIGRATIONS}
+    assert max(rows) == SCHEMA_VERSION
 
 
 def test_workspaces_table_has_node_config_column():

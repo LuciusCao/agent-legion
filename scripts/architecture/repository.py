@@ -34,6 +34,7 @@ from scripts.architecture.helpers import (
 from scripts.architecture.import_cycles import check_import_cycles
 from scripts.architecture.route_contracts import has_protocol_response_annotation
 from scripts.architecture.service_boundaries import check_service_import_boundaries
+from scripts.architecture.service_data_boundary import check_service_data_boundary
 from scripts.architecture.sql_placeholders import check_sql_placeholders
 from scripts.architecture.test_placement import check_test_placement
 from scripts.architecture.video_legacy import check_video_legacy
@@ -163,6 +164,7 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_import_cycles(root))
     errors.extend(check_configuration_ownership(root))
     errors.extend(check_sql_placeholders(root))
+    errors.extend(check_service_data_boundary(root))
     errors.extend(check_test_placement(root))
 
     try:

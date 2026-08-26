@@ -4,6 +4,7 @@ import type { useWorkflowStudioPageView } from './useWorkflowStudioPageView'
 import { nodeKeyForAgent, StudioNavContext } from './workflowStudioNav'
 import type { StudioNav } from './workflowStudioNav'
 import { WorkflowStudioLayout } from './WorkflowStudioLayout'
+import { StudioStateContext, StudioViewContext } from './studioStateContext'
 
 type Studio = ReturnType<typeof useWorkflowStudio>
 type View = ReturnType<typeof useWorkflowStudioPageView>
@@ -27,18 +28,12 @@ export function WorkflowStudioPageContent(props: {
     [workflow, agentCatalog, studio.setSelectedNodeKey]
   )
   return (
-    <StudioNavContext.Provider value={nav}>
-      <WorkflowStudioLayout
-        {...studio}
-        dagFullscreenOpen={view.dagFullscreenOpen}
-        setDagFullscreenOpen={view.setDagFullscreenOpen}
-        canvasMode={view.canvasMode}
-        setCanvasMode={view.setCanvasMode}
-        onValidate={() => void studio.validateDraft()}
-        onPublish={() => void studio.requestPublish()}
-        onReset={studio.resetDefinition}
-        onShowChanges={() => view.setCanvasMode('changes')}
-      />
-    </StudioNavContext.Provider>
+    <StudioStateContext.Provider value={studio}>
+      <StudioNavContext.Provider value={nav}>
+        <StudioViewContext.Provider value={view}>
+          <WorkflowStudioLayout />
+        </StudioViewContext.Provider>
+      </StudioNavContext.Provider>
+    </StudioStateContext.Provider>
   )
 }

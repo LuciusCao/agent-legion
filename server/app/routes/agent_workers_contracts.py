@@ -1,10 +1,10 @@
 """Pydantic contracts for the Agent Worker control-plane routes."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from server.app.agent_workers import MODEL_RUNTIME_PROTOCOL_VERSION
 
 
 class RegisterAgentWorkerRequest(BaseModel):
@@ -32,9 +32,7 @@ class AgentWorkerWorkspace(BaseModel):
 
 class RegisterAgentWorkerResponse(BaseModel):
     worker_token: str
-    # Negotiated Host capability level. A v3 Worker must not continue against
-    # an older Host that would erase runtime-scoped model declarations.
-    host_protocol_version: int = 3
+    host_protocol_version: int = MODEL_RUNTIME_PROTOCOL_VERSION
     # Server-resolved workspace admission scope; [] means all workspaces.
     allowed_workspaces: list[str]
     # Same scope enriched with workspace names (one row per presented token's

@@ -1086,3 +1086,27 @@ invariants:
       - kind: integration
         target: tests/routes/test_runs_api.py::test_item_type_rejected_by_start_contract
         gate: quick
+
+  - id: BOUNDARY-DATA-001
+    statement: Service-layer database access is ratcheted toward the JobQueries facade — raw SQL literals, server.app.db.transaction/connection imports, and Name.path DSN escape-hatch accesses under server/app/services are frozen by config/architecture/service-data-boundary-baseline.json (only-down ratchet per counter; new service files with any bypass are rejected).
+    owner: architecture
+    risk: high
+    evidence:
+      - kind: contract
+        target: scripts/architecture/service_data_boundary.py
+        gate: quick
+      - kind: contract
+        target: tests/scripts/test_architecture_service_data_boundary.py
+        gate: quick
+
+  - id: DB-SCHEMA-001
+    statement: schema_migrations records one row per registered version (MIGRATIONS in server/app/db/migration_registry.py); init_db upgrades run only migrations with version > max(applied) while fresh installs apply the full idempotent DDL file plus every migration in version order.
+    owner: db
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/db/test_schema_version_registry.py
+        gate: quick
+      - kind: integration
+        target: tests/test_db.py::test_database_initialization_records_postgres_schema
+        gate: quick

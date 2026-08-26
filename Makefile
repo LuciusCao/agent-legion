@@ -30,7 +30,7 @@ DEV_FRONTEND_PORT ?= 5174
 
 .PHONY: dev-backend
 dev-backend: ## 启动后端开发服务器 (127.0.0.1:$(DEV_BACKEND_PORT))
-	ulimit -n $(DEV_NOFILE_LIMIT); $(UV) run uvicorn server.app.main:app --reload --reload-dir server --timeout-graceful-shutdown 3 --host 127.0.0.1 --port $(DEV_BACKEND_PORT)
+	ulimit -n $(DEV_NOFILE_LIMIT); $(UV) run uvicorn server.app.main:create_prod_app --factory --reload --reload-dir server --timeout-graceful-shutdown 3 --host 127.0.0.1 --port $(DEV_BACKEND_PORT)
 
 .PHONY: dev-frontend
 dev-frontend: ## 启动前端开发服务器（代理 /api 到 $(DEV_BACKEND_PORT)）

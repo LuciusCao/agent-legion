@@ -515,7 +515,7 @@ def test_worker_runs_only_target_closure_in_until_node_mode(
         _seed_trivial_node_code(str(queries.path), workspace_id, "branched", node.key)
 
     worker = _make_worker(tmp_path, queries, [definition])
-    worker._scan_entries = scan_entries(definition)
+    worker.state.scan_entries = scan_entries(definition)
 
     # Poll repeatedly until the worker pauses on target completion.
     for _ in range(20):
