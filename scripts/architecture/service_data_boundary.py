@@ -47,21 +47,20 @@ _DB_PRIMITIVE_NAMES = {"read_connection", "write_transaction"}
 
 _SCAN_ROOT = "server/app/services"
 
-# This checker's own fixtures.
-_EXCLUDE = {
-    "tests/test_architecture_service_data_boundary.py",
-}
 
-
-def count_service_data_bypasses(source: str) -> tuple[int, int]:
-    """Count (sql_literals, db_primitive_refs) in one service module."""
+def count_service_data_bypasses(source: str) -> tuple[int, int, int]:
+    """Count (sql_literals, db_primitive_refs, dsn_path_refs) in one module."""
     tree = ast.parse(source)
     sql_literals = 0
     db_primitive_refs = 0
+    dsn_path_refs = 0
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             if _SQL_KEYWORD.search(node.value):
                 sql_literals += 1
+        elif isinstance(node, ast.Attribute):
+            if node.attr == "path" and isinstance(node.value, ast.Name):
+                dsn_path_refs += 1
         elif isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 if alias.name in _DB_PRIMITIVE_NAMES or (
@@ -78,24 +77,19 @@ def count_service_data_bypasses(source: str) -> tuple[int, int]:
                     "server.app.db.connection",
                 ):
                     db_primitive_refs += 1
-    return sql_literals, db_primitive_refs
+    return sql_literals, db_primitive_refs, dsn_path_refs
 
 
-def collect_service_data_bypasses(root: Path) -> dict[str, tuple[int, int]]:
-    """Count raw-SQL and DB-primitive usage per service file."""
-    counts: dict[str, tuple[int, int]] = {}
+def collect_service_data_bypasses(root: Path) -> dict[str, tuple[int, int, int]]:
+    """Count raw-SQL, DB-primitive and DSN-path usage per service file."""
+    counts: dict[str, tuple[int, int, int]] = {}
     base = root / _SCAN_ROOT
     if not base.is_dir():
         return counts
     for path in sorted(base.rglob("*.py")):
-        relative = path.relative_to(root).as_posix()
-        if relative in _EXCLUDE:
-            continue
-        sql_literals, db_primitive_refs = count_service_data_bypasses(
-            path.read_text(encoding="utf-8")
-        )
-        if sql_literals or db_primitive_refs:
-            counts[relative] = (sql_literals, db_primitive_refs)
+        bypasses = count_service_data_bypasses(path.read_text(encoding="utf-8"))
+        if any(bypasses):
+            counts[path.relative_to(root).as_posix()] = bypasses
     return counts
 
 
@@ -107,17 +101,25 @@ def check_service_data_boundary(root: Path) -> list[str]:
         return [f"service data boundary configuration: {exc}"]
 
     errors: list[str] = []
-    for path, (sql_literals, db_primitive_refs) in collect_service_data_bypasses(root).items():
+    for path, (sql_literals, db_primitive_refs, dsn_path_refs) in collect_service_data_bypasses(
+        root
+    ).items():
         allowed = baseline.files.get(path)
         if allowed is None:
             errors.append(
                 f"{path}: {sql_literals} SQL literal(s) / {db_primitive_refs} "
-                "DB-primitive reference(s) with no baseline entry; new services "
-                "must reach the database through JobQueries (jobs/queries)"
+                f"DB-primitive reference(s) / {dsn_path_refs} DSN path reference(s) "
+                "with no baseline entry; new services must reach the database "
+                "through JobQueries (jobs/queries)"
             )
-        elif (sql_literals, db_primitive_refs) > allowed:
+        elif (
+            sql_literals > allowed[0]
+            or db_primitive_refs > allowed[1]
+            or dsn_path_refs > allowed[2]
+        ):
             errors.append(
-                f"{path}: ({sql_literals}, {db_primitive_refs}) exceeds baseline "
-                f"{allowed}; route new DB access through JobQueries instead"
+                f"{path}: ({sql_literals}, {db_primitive_refs}, {dsn_path_refs}) "
+                f"exceeds baseline {allowed}; route new DB access through "
+                "JobQueries instead"
             )
     return sorted(errors)

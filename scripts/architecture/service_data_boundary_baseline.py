@@ -2,8 +2,8 @@
 
 Split out of ``service_data_boundary.py`` for the file-size budget; strict
 parsing of ``config/architecture/service-data-boundary-baseline.json`` lives
-here. Each entry maps a service file to a ``[sql_literals, db_primitive_refs]``
-pair; both only ever ratchet down.
+here. Each entry maps a service file to a ``[sql_literals, db_primitive_refs,
+dsn_path_refs]`` triple; all three only ever ratchet down.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ __test__ = False
 
 @dataclass(frozen=True)
 class ServiceDataBoundaryBaseline:
-    files: dict[str, tuple[int, int]]
+    files: dict[str, tuple[int, int, int]]
 
 
 class ServiceDataBoundaryConfigurationError(ValueError):
@@ -27,7 +27,7 @@ class ServiceDataBoundaryConfigurationError(ValueError):
 
 
 def load_service_data_boundary_baseline(path: Path) -> ServiceDataBoundaryBaseline:
-    """Require exactly version 1 and a normalized (sql, primitives) map."""
+    """Require exactly version 1 and a normalized (sql, primitives, dsn) map."""
     if not path.is_file():
         raise ServiceDataBoundaryConfigurationError(f"Baseline file not found: {path}")
 
@@ -61,24 +61,24 @@ def load_service_data_boundary_baseline(path: Path) -> ServiceDataBoundaryBaseli
     if not isinstance(files, dict):
         raise ServiceDataBoundaryConfigurationError("files must be a mapping")
 
-    normalized: dict[str, tuple[int, int]] = {}
+    normalized: dict[str, tuple[int, int, int]] = {}
     for key, value in files.items():
         if not isinstance(key, str):
             raise ServiceDataBoundaryConfigurationError("baseline path keys must be strings")
-        if not isinstance(value, list) or len(value) != 2:
+        if not isinstance(value, list) or len(value) != 3:
             raise ServiceDataBoundaryConfigurationError(
-                f"baseline counts for {key} must be a [sql, primitives] pair"
+                f"baseline counts for {key} must be a [sql, primitives, dsn] triple"
             )
-        sql_literals, db_primitive_refs = value
-        if type(sql_literals) is not int or type(db_primitive_refs) is not int:
+        sql_literals, db_primitive_refs, dsn_path_refs = value
+        if not all(type(count) is int for count in value):
             raise ServiceDataBoundaryConfigurationError(
                 f"baseline counts for {key} must be integers"
             )
-        if sql_literals < 0 or db_primitive_refs < 0:
+        if any(count < 0 for count in value):
             raise ServiceDataBoundaryConfigurationError(
                 f"baseline counts for {key} must be non-negative"
             )
-        if sql_literals == 0 and db_primitive_refs == 0:
+        if sql_literals == 0 and db_primitive_refs == 0 and dsn_path_refs == 0:
             raise ServiceDataBoundaryConfigurationError(
                 f"baseline entry for {key} must record at least one bypass"
             )
@@ -87,6 +87,6 @@ def load_service_data_boundary_baseline(path: Path) -> ServiceDataBoundaryBaseli
             raise ServiceDataBoundaryConfigurationError(
                 f"duplicate normalized baseline path: {normalized_key}"
             )
-        normalized[normalized_key] = (sql_literals, db_primitive_refs)
+        normalized[normalized_key] = (sql_literals, db_primitive_refs, dsn_path_refs)
 
     return ServiceDataBoundaryBaseline(files=normalized)

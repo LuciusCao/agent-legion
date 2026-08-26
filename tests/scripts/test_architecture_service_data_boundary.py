@@ -35,10 +35,11 @@ def test_counts_sql_literals_by_keyword_family():
         'D = "hello world"\n'
     )
 
-    sql_literals, db_primitive_refs = count_service_data_bypasses(source)
+    sql_literals, db_primitive_refs, dsn_path_refs = count_service_data_bypasses(source)
 
     assert sql_literals == 3
     assert db_primitive_refs == 0
+    assert dsn_path_refs == 0
 
 
 def test_counts_db_primitive_imports_and_calls():
@@ -48,19 +49,38 @@ def test_counts_db_primitive_imports_and_calls():
         "import server.app.db.connection\n"
     )
 
-    sql_literals, db_primitive_refs = count_service_data_bypasses(source)
+    sql_literals, db_primitive_refs, dsn_path_refs = count_service_data_bypasses(source)
 
     assert sql_literals == 0
     assert db_primitive_refs == 3
+    assert dsn_path_refs == 0
 
 
 def test_counts_db_primitives_from_other_import_paths():
     # from server.app.db import transaction-style module access also counts.
     source = "from server.app.db.transaction import read_connection, write_transaction\n"
 
-    _, db_primitive_refs = count_service_data_bypasses(source)
+    _, db_primitive_refs, _ = count_service_data_bypasses(source)
 
     assert db_primitive_refs == 2
+
+
+def test_counts_dsn_path_attribute_access():
+    # The DSN escape hatch: `.path` attribute access on any Name (heuristic —
+    # `os.path` and `condition.path` count too); attribute chains like
+    # `self.job_db.path` do not (value is an Attribute, not a Name).
+    source = (
+        "import psycopg\n"
+        "conn = psycopg.connect(job_db.path)\n"
+        "home = os.path.expanduser('~')\n"
+        "other = self.job_db.path\n"
+    )
+
+    sql_literals, db_primitive_refs, dsn_path_refs = count_service_data_bypasses(source)
+
+    assert sql_literals == 0
+    assert db_primitive_refs == 0
+    assert dsn_path_refs == 2
 
 
 def test_collect_only_scans_services_root(tmp_path):
@@ -88,7 +108,7 @@ def test_rejects_count_above_baseline(tmp_path):
         'A = "SELECT 1"\nB = "INSERT INTO t VALUES (1)"\n',
     )
     write_neutral_budget_governance(tmp_path)
-    write_boundary_baseline(tmp_path, {"server/app/services/legacy.py": [1, 0]})
+    write_boundary_baseline(tmp_path, {"server/app/services/legacy.py": [1, 0, 0]})
 
     errors = check_repository(tmp_path)
 
@@ -102,11 +122,57 @@ def test_rejects_db_primitive_growth_above_baseline(tmp_path):
         "from server.app.db.transaction import write_transaction\n",
     )
     write_neutral_budget_governance(tmp_path)
-    write_boundary_baseline(tmp_path, {"server/app/services/legacy.py": [0, 1]})
+    write_boundary_baseline(tmp_path, {"server/app/services/legacy.py": [0, 1, 0]})
 
     errors = check_repository(tmp_path)
 
     assert any("exceeds baseline" in error for error in errors)
+
+
+def test_compares_each_counter_against_its_own_baseline_entry(tmp_path):
+    # Tuple comparison is lexicographic: (1, 2, 0) > (2, 1, 0) is False, so a
+    # single `>` check would let DB-primitive growth pass as long as the SQL
+    # count dropped. Each counter must be compared against its own entry.
+    write(
+        tmp_path / "server/app/services/legacy.py",
+        'A = "SELECT 1"\n'
+        "from server.app.db.transaction import read_connection\n"
+        "from server.app.db.transaction import write_transaction\n",
+    )
+    write_neutral_budget_governance(tmp_path)
+    write_boundary_baseline(tmp_path, {"server/app/services/legacy.py": [2, 1, 0]})
+
+    errors = check_repository(tmp_path)
+
+    assert any("exceeds baseline" in error and "legacy.py" in error for error in errors)
+
+
+def test_rejects_dsn_path_escape_without_baseline_entry(tmp_path):
+    write(
+        tmp_path / "server/app/services/sneaky.py",
+        "import psycopg\nconn = psycopg.connect(job_db.path)\n",
+    )
+    write_neutral_budget_governance(tmp_path)
+
+    errors = check_repository(tmp_path)
+
+    assert any(
+        "no baseline entry" in error and "sneaky.py" in error and "DSN path" in error
+        for error in errors
+    )
+
+
+def test_rejects_dsn_path_growth_above_baseline(tmp_path):
+    write(
+        tmp_path / "server/app/services/legacy.py",
+        'A = "SELECT 1"\nB = job_db.path\n',
+    )
+    write_neutral_budget_governance(tmp_path)
+    write_boundary_baseline(tmp_path, {"server/app/services/legacy.py": [1, 0, 0]})
+
+    errors = check_repository(tmp_path)
+
+    assert any("exceeds baseline" in error and "legacy.py" in error for error in errors)
 
 
 def test_accepts_counts_within_baseline(tmp_path):
@@ -115,7 +181,7 @@ def test_accepts_counts_within_baseline(tmp_path):
         'A = "SELECT 1"\nB = "INSERT INTO t VALUES (1)"\n',
     )
     write_neutral_budget_governance(tmp_path)
-    write_boundary_baseline(tmp_path, {"server/app/services/legacy.py": [2, 0]})
+    write_boundary_baseline(tmp_path, {"server/app/services/legacy.py": [2, 0, 0]})
 
     errors = check_repository(tmp_path)
 
@@ -155,7 +221,7 @@ def test_baseline_rejects_zero_zero_entries(tmp_path):
     baseline = tmp_path / "config/architecture/service-data-boundary-baseline.json"
     baseline.parent.mkdir(parents=True, exist_ok=True)
     baseline.write_text(
-        json.dumps({"version": 1, "files": {"server/app/services/legacy.py": [0, 0]}}),
+        json.dumps({"version": 1, "files": {"server/app/services/legacy.py": [0, 0, 0]}}),
         encoding="utf-8",
     )
 
@@ -168,7 +234,7 @@ def test_current_repo_passes_its_own_baseline():
     # The committed baseline must satisfy the real tree (the ratchet starts
     # frozen at the current counts, so this only fails if the checker's
     # semantics drift from what generated it).
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
 
     errors = check_service_data_boundary(root)
 

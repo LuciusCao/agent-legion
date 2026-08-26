@@ -1088,7 +1088,7 @@ invariants:
         gate: quick
 
   - id: BOUNDARY-DATA-001
-    statement: Service-layer database access is ratcheted toward the JobQueries facade — raw SQL literals and server.app.db.transaction/connection imports under server/app/services are frozen by config/architecture/service-data-boundary-baseline.json (only-down ratchet; new service files with either bypass are rejected).
+    statement: Service-layer database access is ratcheted toward the JobQueries facade — raw SQL literals, server.app.db.transaction/connection imports, and Name.path DSN escape-hatch accesses under server/app/services are frozen by config/architecture/service-data-boundary-baseline.json (only-down ratchet per counter; new service files with any bypass are rejected).
     owner: architecture
     risk: high
     evidence:
@@ -1096,7 +1096,7 @@ invariants:
         target: scripts/architecture/service_data_boundary.py
         gate: quick
       - kind: contract
-        target: tests/test_architecture_service_data_boundary.py
+        target: tests/scripts/test_architecture_service_data_boundary.py
         gate: quick
 
   - id: DB-SCHEMA-001
