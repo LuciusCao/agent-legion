@@ -1100,7 +1100,7 @@ invariants:
         gate: quick
 
   - id: DB-SCHEMA-001
-    statement: schema_migrations records one row per registered version (MIGRATIONS in server/app/db/schema.py); init_db upgrades run only migrations with version > max(applied) while fresh installs apply the full idempotent DDL file plus every migration in version order.
+    statement: schema_migrations records one row per registered version (MIGRATIONS in server/app/db/migration_registry.py); init_db upgrades run only migrations with version > max(applied) while fresh installs apply the full idempotent DDL file plus every migration in version order.
     owner: db
     risk: high
     evidence:
