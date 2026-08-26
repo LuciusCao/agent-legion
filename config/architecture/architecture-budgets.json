@@ -757,6 +757,7 @@
     "server/app/db/migrations/job_artifacts.py": 28,
     "server/app/db/migrations/job_node_status_counts.py": 24,
     "server/app/db/migrations/job_status_counts.py": 21,
+    "server/app/db/migrations/jobs_run_id_index.py": 28,
     "server/app/db/migrations/local_executor_removal.py": 33,
     "server/app/db/migrations/node_cms_config.py": 129,
     "server/app/db/migrations/retire_global_register_tokens.py": 29,

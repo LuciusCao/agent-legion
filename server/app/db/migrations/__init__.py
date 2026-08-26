@@ -17,6 +17,7 @@ from server.app.db.migrations.job_artifacts import migrate_job_artifacts
 from server.app.db.migrations.job_node_status_counts import (
     migrate_workspace_job_node_status_counts,
 )
+from server.app.db.migrations.jobs_run_id_index import migrate_jobs_run_id_index
 from server.app.db.migrations.local_executor_removal import migrate_local_executor_removal
 from server.app.db.migrations.node_cms_config import migrate_node_cms_config
 from server.app.db.migrations.retire_global_register_tokens import (
@@ -45,6 +46,7 @@ __all__ = [
     "migrate_external_connections",
     "migrate_hmac_connection_type",
     "migrate_job_artifacts",
+    "migrate_jobs_run_id_index",
     "migrate_local_executor_removal",
     "migrate_node_cms_config",
     "migrate_retire_global_register_tokens",

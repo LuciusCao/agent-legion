@@ -78,13 +78,6 @@ def migrate_runs(conn: Any) -> None:
         "create index if not exists idx_runs_intake_queue"
         " on runs(status, updated_at) where status in ('queued', 'processing')"
     )
-    # Run-scoped job lookups (schema v59): the batch-queue intake upsert's
-    # not-exists guard, count_jobs_in_run and the requeue-depleted subqueries
-    # all filter jobs by run_id on every run create/poll. Lives here (not in
-    # postgres_schema.sql) because v52 upgrades replay the full DDL file
-    # BEFORE this migration renames jobs.batch_id back to run_id — a schema
-    # file entry would reference a column that does not exist yet.
-    conn.execute("create index if not exists idx_jobs_run_id on jobs(run_id)")
     if not conn.execute("select to_regclass('job_batches')").fetchone()["to_regclass"]:
         return
     conn.execute(_DECODE_FN_DDL)

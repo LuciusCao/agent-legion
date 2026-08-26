@@ -176,7 +176,7 @@ Review 于独立 worktree `.worktrees/perf-review`（分支 `review/perf-quality
 按「建议落地顺序」完成了 11 项修复，`./scripts/check-quick.sh` 全绿（backend 3621 tests + frontend 1373 tests + rust 全部通过）：
 
 ### 后端
-1. **jobs(run_id) 索引（schema v59）** — DDL 放在 `migrate_runs`（`db/migrations/runs.py`）而非 schema.sql：v52 升级路径会先重放全量 DDL 再由 migration 把 `batch_id` 改名回 `run_id`，schema 文件里的索引会引用尚未存在的列（`test_v52_database_upgrades_via_init_db` 抓住了这一点）。registry 加 v59 条目，pin 测试在 `tests/db/test_jobs_run_id_index.py`。
+1. **jobs(run_id) 索引（schema v59）** — DDL 放在 v59 专属 migration `db/migrations/jobs_run_id_index.py` 而非 schema.sql：init_db 升级旧库时先重放全量 DDL 文件、再跑数据迁移，v52 形状的库此时 `jobs` 上还叫 `batch_id`，schema 文件里的索引会引用尚未存在的列（`test_v52_database_upgrades_via_init_db` 抓住了这一点）。放 v53 `migrate_runs` 也不行：v53–v58 的库会跳过该迁移（`53 <= max_applied`），索引永远建不上（`test_v58_database_upgrades_gain_the_index` 回归测试抓住了这一点，需 `@pytest.mark.fresh_schema` 避免污染共享 schema）。registry 加 v59 条目（带 apply fn），pin 测试在 `tests/db/test_jobs_run_id_index.py`。
 2. **gzip compresslevel=6**（`http_middleware.py`）。
 3. **4 个 async 路由的同步 DB auth 卸载到线程池**（`agents.py` WS、`agent_workers.py` result、`studio_chat.py` SSE、`artifacts.py` 上传）。
 4. **material_ttl**：expire 合并为单条批量 UPDATE；S3 删除移到事务提交后（失败降级为孤儿对象，交给 bucket lifecycle 兜底，不再持有写事务做网络 IO）；对应测试语义同步更新。
