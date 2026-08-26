@@ -81,12 +81,6 @@
   color: var(--status-failed-text);
 }
 
-.statusStale {
-  background: var(--status-failed-bg);
-  border-color: var(--status-failed-border);
-  color: var(--status-failed-text);
-}
-
 .statusPending {
   background: #ffffff;
   border-color: #e5e7eb;
@@ -160,11 +154,6 @@
 }
 
 .badgeFailed {
-  background: var(--status-failed-bg);
-  color: var(--status-failed-text);
-}
-
-.badgeStale {
   background: var(--status-failed-bg);
   color: var(--status-failed-text);
 }

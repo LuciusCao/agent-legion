@@ -1,6 +1,5 @@
 import type { BatchJobTarget } from '../../../api/batchTarget'
 import type { JobListFilterParams } from '../../../types/jobTypes'
-import { matchesFilterPayload } from '../filterLogic/matchesFilterPayload'
 import type { JobState } from '../state'
 
 export const FAILED_SELECTION_FILTER: JobListFilterParams = {
@@ -41,18 +40,6 @@ export function enterAllMatchingState(
     selectedIds: new Set<string>(),
     selectionCount: count,
   }
-}
-
-/** Count loaded jobs matching the selection filter (fallback when the
- * server-side count is unknown). */
-export function countLoadedMatching(state: JobState): number {
-  if (!state.selectionFilter) return 0
-  let count = 0
-  for (const id of state.jobIds) {
-    const job = state.jobsById[id]
-    if (job && matchesFilterPayload(job, state.selectionFilter)) count += 1
-  }
-  return count
 }
 
 /** The only selection fields resolveBatchTarget reads; callers may pass the
