@@ -45,6 +45,8 @@ _SQL_KEYWORD = re.compile(r"\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b"
 
 _DB_PRIMITIVE_NAMES = {"read_connection", "write_transaction"}
 
+_DB_PRIMITIVE_MODULES = ("transaction", "connection")
+
 _SCAN_ROOT = "server/app/services"
 
 
@@ -62,20 +64,22 @@ def count_service_data_bypasses(source: str) -> tuple[int, int, int]:
             if node.attr == "path" and isinstance(node.value, ast.Name):
                 dsn_path_refs += 1
         elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
             for alias in node.names:
+                from_primitive_module = (
+                    module.startswith("server.app.db.")
+                    and module.split(".")[-1] in _DB_PRIMITIVE_MODULES
+                )
+                # Package-level form (`from server.app.db import transaction`)
+                # hands over the same primitives module — count it too.
+                via_package = module == "server.app.db" and alias.name in _DB_PRIMITIVE_MODULES
                 if alias.name in _DB_PRIMITIVE_NAMES or (
-                    node.module is not None
-                    and node.module.startswith("server.app.db.")
-                    and alias.name != "*"
-                    and node.module.split(".")[-1] in {"transaction", "connection"}
+                    alias.name != "*" and (from_primitive_module or via_package)
                 ):
                     db_primitive_refs += 1
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name in (
-                    "server.app.db.transaction",
-                    "server.app.db.connection",
-                ):
+                if alias.name in {f"server.app.db.{m}" for m in _DB_PRIMITIVE_MODULES}:
                     db_primitive_refs += 1
     return sql_literals, db_primitive_refs, dsn_path_refs
 

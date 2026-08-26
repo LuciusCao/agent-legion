@@ -56,9 +56,23 @@ def test_counts_db_primitive_imports_and_calls():
     assert dsn_path_refs == 0
 
 
-def test_counts_db_primitives_from_other_import_paths():
-    # from server.app.db import transaction-style module access also counts.
+def test_counts_db_primitives_from_submodule_import_paths():
+    # from server.app.db.transaction import ... counts each imported name.
     source = "from server.app.db.transaction import read_connection, write_transaction\n"
+
+    _, db_primitive_refs, _ = count_service_data_bypasses(source)
+
+    assert db_primitive_refs == 2
+
+
+def test_counts_db_primitives_from_package_level_imports():
+    # from server.app.db import transaction hands the service the module that
+    # owns read_connection/write_transaction — the same escape hatch.
+    source = (
+        "from server.app.db import transaction\n"
+        "from server.app.db import connection as dbconn\n"
+        "from server.app.db import schema\n"
+    )
 
     _, db_primitive_refs, _ = count_service_data_bypasses(source)
 
@@ -145,6 +159,18 @@ def test_compares_each_counter_against_its_own_baseline_entry(tmp_path):
     errors = check_repository(tmp_path)
 
     assert any("exceeds baseline" in error and "legacy.py" in error for error in errors)
+
+
+def test_rejects_package_level_db_import_without_baseline_entry(tmp_path):
+    write(
+        tmp_path / "server/app/services/sneaky.py",
+        "from server.app.db import transaction\n",
+    )
+    write_neutral_budget_governance(tmp_path)
+
+    errors = check_repository(tmp_path)
+
+    assert any("no baseline entry" in error and "sneaky.py" in error for error in errors)
 
 
 def test_rejects_dsn_path_escape_without_baseline_entry(tmp_path):
