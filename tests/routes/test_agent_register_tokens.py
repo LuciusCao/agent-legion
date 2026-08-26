@@ -11,13 +11,21 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from tests.routes.test_agent_workers import (
-    _authenticate_admin,
-    _issue_scoped_token,
-    _make_app,
-    _register,
+from tests.helpers.agent_worker_api import (
+    authenticate_admin as _authenticate_admin,
 )
-from tests.test_agent_broker import _seed_request
+from tests.helpers.agent_worker_api import (
+    issue_scoped_token as _issue_scoped_token,
+)
+from tests.helpers.agent_worker_api import (
+    make_app as _make_app,
+)
+from tests.helpers.agent_worker_api import (
+    register as _register,
+)
+from tests.helpers.agent_worker_api import (
+    seed_request as _seed_request,
+)
 
 
 def test_register_token_requires_workspace(tmp_path: Path) -> None:

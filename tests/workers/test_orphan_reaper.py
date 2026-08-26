@@ -8,6 +8,7 @@ recorded groups after killing the executor.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import pid_is_running
 from worker.orphan_reaper import reap_orphaned_agents
 from worker.process_lifecycle import AGENT_PGID_FILENAME
 
@@ -72,27 +74,54 @@ def test_reap_skips_group_without_agent_marker(tmp_path: Path) -> None:
 def test_reap_kills_grandchildren_too(tmp_path: Path) -> None:
     """The whole group dies, not just the direct child (no orphaned grandchildren)."""
     marker = tmp_path / "grandchild-survived"
+    pid_file = tmp_path / "grandchild.pid"
     proc = subprocess.Popen(
         [
             sys.executable,
             "-c",
             "import subprocess, time\n"
-            f"subprocess.Popen(['/bin/sh', '-c', 'sleep 2; touch {marker}'])\n"
+            f"g = subprocess.Popen(['/bin/sh', '-c', 'sleep 2; touch {marker}'])\n"
+            f"open({str(pid_file)!r}, 'w').write(str(g.pid))\n"
             "time.sleep(60)  # agent-legion-exec-1\n",
         ],
         start_new_session=True,
     )
     _write_record(tmp_path, "exec-1", proc.pid)
     try:
+        # The pid file must exist BEFORE reaping: the reaper kills the whole
+        # group on sight, and racing it against the grandchild's spawn (as CI
+        # just proved) makes the file never appear. Waiting here also proves
+        # the grandchild actually started, which is what the kill must cover.
+        _wait_for_file(pid_file, timeout=10)
+        grandchild = int(pid_file.read_text().strip())
         reap_orphaned_agents(tmp_path, lambda _msg: None)
         proc.wait(timeout=10)
+        # Watch the grandchild's PID exit instead of sleeping past its touch
+        # deadline: once the PID is gone, a surviving shell can no longer
+        # touch. Race-free under load, and ~2s faster than the old blind wait.
+        deadline = time.monotonic() + 10.0
+        while pid_is_running(grandchild):
+            assert time.monotonic() < deadline, (
+                f"grandchild {grandchild} survived the reaper; marker={marker}"
+            )
+            time.sleep(0.05)
     finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait(timeout=5)
+        # Group-targeted cleanup: killing the grandchild by PID after its own
+        # death could hit a recycled PID; the pgid (== proc.pid, established by
+        # start_new_session and still ours while the group has members) cannot
+        # be misattributed.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, 9)
+        proc.wait(timeout=5)
 
-    time.sleep(2.5)
     assert not marker.exists()
+
+
+def _wait_for_file(path: Path, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while not path.exists():
+        assert time.monotonic() < deadline, f"{path} never appeared"
+        time.sleep(0.05)
 
 
 def test_reap_ignores_garbage_and_esrch_records(tmp_path: Path) -> None:

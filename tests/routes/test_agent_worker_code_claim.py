@@ -17,7 +17,8 @@ from fastapi.testclient import TestClient
 
 from server.app.agent_broker import AgentExecutionRequest
 from server.app.services.vault import VaultService
-from tests.routes.test_agent_workers import _make_app, _register
+from tests.helpers.agent_worker_api import make_app as _make_app
+from tests.helpers.agent_worker_api import register as _register
 
 _CLAIM_URL = "/api/agent-executions/claim"
 

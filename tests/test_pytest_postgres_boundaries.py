@@ -102,6 +102,165 @@ def test_direct_postgres_consumers_are_in_explicit_inventory() -> None:
     assert missing == []
 
 
+def _ast_calls_psycopg_connect(source: str) -> bool:
+    """True when the module really calls psycopg.connect(...).
+
+    Importing psycopg just for its exception classes (retry-path fakes) or
+    embedding "psycopg.connect" inside a code string executed by a subprocess
+    must NOT count — only a real call node in this module does. Recognized
+    forms: ``psycopg.connect(...)`` (including ``import psycopg as p``
+    aliases) and ``from psycopg import connect`` followed by a plain
+    ``connect(...)``. Exotic indirection (``getattr(psycopg, "connect")``)
+    still evades the scan — keep new direct connections obvious instead.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    module_aliases = {"psycopg"}
+    connect_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "psycopg" and alias.asname:
+                    module_aliases.add(alias.asname)
+        elif isinstance(node, ast.ImportFrom) and node.module == "psycopg":
+            connect_names.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "connect"
+            )
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in connect_names:
+            return True
+        if isinstance(func, ast.Attribute) and func.attr == "connect":
+            value = func.value
+            if isinstance(value, ast.Name) and value.id in module_aliases:
+                return True
+            if isinstance(value, ast.Attribute) and value.attr == "psycopg":
+                return True
+    return False
+
+
+def test_raw_psycopg_connect_calls_are_in_explicit_inventory() -> None:
+    # Guards the loophole the import scan cannot see: a test may open a real
+    # connection with a bare `import psycopg` + `psycopg.connect(...)` and
+    # never touch tests.postgres_support. Without the postgres marker the
+    # per-test TRUNCATE isolation never runs for it.
+    missing: list[str] = []
+    for path in sorted((ROOT / "tests").rglob("test_*.py")):
+        if path == Path(__file__):
+            continue
+        source = path.read_text(encoding="utf-8")
+        if "psycopg" not in source:
+            continue
+        if not _ast_calls_psycopg_connect(source):
+            continue
+        relative = path.relative_to(ROOT).as_posix()
+        if relative not in test_config._POSTGRES_TEST_FILES:
+            missing.append(relative)
+
+    assert missing == []
+
+
+def test_postgres_inventory_entries_reference_existing_files() -> None:
+    # The inventory is hand-maintained; a deleted/renamed test file leaves a
+    # dead entry behind that nothing notices (five accumulated before this
+    # guard). Dead entries also hide the missing-direction check above: a
+    # renamed file counts as "missing" while its old path sits in the set.
+    stale = [
+        entry for entry in sorted(test_config._POSTGRES_TEST_FILES) if not (ROOT / entry).exists()
+    ]
+
+    assert stale == []
+
+
+def test_smoke_tier_entries_reference_existing_files() -> None:
+    stale = [
+        entry for entry in sorted(test_config._SMOKE_TEST_FILES) if not (ROOT / entry).exists()
+    ]
+
+    assert stale == []
+
+
+def test_test_modules_do_not_import_each_other() -> None:
+    # A test module importing another test module's helpers turns a rename or
+    # split of the imported file into an import-error cascade across the
+    # suite. Shared scaffolding belongs in tests/helpers/ instead. Only the
+    # tests.* namespace is checked: importable check scripts like
+    # scripts/architecture/test_placement.py are production modules whose
+    # names merely happen to start with test_.
+    offenders: list[str] = []
+    for path in sorted((ROOT / "tests").rglob("test_*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        modules: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                modules.append(node.module)
+            elif isinstance(node, ast.Import):
+                modules.extend(alias.name for alias in node.names)
+        if any(
+            segment.startswith("test_")
+            for mod in modules
+            if mod == "tests" or mod.startswith("tests.")
+            for segment in mod.split(".")[1:]
+        ):
+            offenders.append(path.relative_to(ROOT).as_posix())
+
+    assert offenders == []
+
+
+GUARD_FIXTURE = "_assert_shared_app_invariants"
+
+
+def _autouse_fixtures(tree: ast.Module) -> dict[str, list[str]]:
+    """Map autouse fixture name -> its parameter names, from the conftest AST."""
+    fixtures: dict[str, list[str]] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for decorator in node.decorator_list:
+            if not isinstance(decorator, ast.Call):
+                continue
+            func = decorator.func
+            if not (isinstance(func, ast.Attribute) and func.attr == "fixture"):
+                continue
+            if any(
+                kw.arg == "autouse" and getattr(kw.value, "value", False)
+                for kw in decorator.keywords
+            ):
+                fixtures[node.name] = [arg.arg for arg in node.args.args]
+    return fixtures
+
+
+def test_shared_app_guard_is_first_autouse_fixture() -> None:
+    # The shared-app invariant guard must be torn down after the monkeypatch
+    # undo (it observes post-undo app.state), i.e. it must be the first
+    # autouse fixture set up. This used to hold only through alphabetical
+    # fixture-name sorting — renaming the guard silently broke it. Now every
+    # other autouse fixture in the root conftest declares the guard as its
+    # first parameter, and this check keeps that structure in place.
+    source = (ROOT / "tests/conftest.py").read_text(encoding="utf-8")
+    fixtures = _autouse_fixtures(ast.parse(source))
+
+    assert GUARD_FIXTURE in fixtures, "shared app invariant guard fixture is gone"
+    assert "monkeypatch" not in fixtures[GUARD_FIXTURE], (
+        "the guard must not request monkeypatch: a dependency would tear it "
+        "down BEFORE the monkeypatch undo, inverting the required order"
+    )
+    for name, params in sorted(fixtures.items()):
+        if name == GUARD_FIXTURE:
+            continue
+        assert params[:1] == [GUARD_FIXTURE], (
+            f"autouse fixture {name} must declare {GUARD_FIXTURE} as its first "
+            "parameter so the guard teardown runs after it"
+        )
+
+
 def test_database_backed_root_fixtures_are_classified() -> None:
     assert {
         "anon_client",

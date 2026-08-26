@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import shutil
-import subprocess
 import sys
 import textwrap
 import time
@@ -16,44 +14,10 @@ from server.app.executors.artifact_restore import restore_missing_inputs
 from server.app.executors.code import CodeExecutor
 from server.app.executors.contracts import CodeCapabilityConfig
 from server.app.executors.models import ExecutionContext
+from tests.helpers import pid_is_running
+from tests.helpers.velites_sandbox import sandboxed as _sandboxed
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-VELITES_DEBUG_BINARY = REPO_ROOT / "velites" / "target" / "debug" / "velites"
-
-
-def _velites_binary() -> Path:
-    """Prebuilt debug binary, or a cargo build (skipped when cargo is absent)."""
-    if VELITES_DEBUG_BINARY.exists():
-        return VELITES_DEBUG_BINARY
-    cargo = shutil.which("cargo")
-    if cargo is None:
-        pytest.skip("no prebuilt velites binary and cargo is not available")
-    proc = subprocess.run(
-        [cargo, "build", "--manifest-path", str(REPO_ROOT / "velites" / "Cargo.toml")],
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0 or not VELITES_DEBUG_BINARY.exists():
-        pytest.skip(f"velites build failed: {proc.stderr[-400:]}")
-    return VELITES_DEBUG_BINARY
-
-
-def _sandbox_backend_available() -> bool:
-    """Probe the actual OS sandbox backend, not just the platform."""
-    if sys.platform == "darwin":
-        return shutil.which("sandbox-exec") is not None
-    if sys.platform == "linux":
-        return shutil.which("bwrap") is not None
-    return False
-
-
-def _sandboxed(monkeypatch: pytest.MonkeyPatch) -> None:
-    if not _sandbox_backend_available():
-        pytest.skip("no OS sandbox backend (macOS sandbox-exec / Linux bwrap)")
-    binary = _velites_binary()
-    monkeypatch.setattr(
-        "server.app.executors._code_sandbox.shutil.which", lambda _name: str(binary)
-    )
 
 
 # Rejection semantics differ per backend: seatbelt denies with EPERM, while
@@ -405,12 +369,20 @@ def test_custom_cancel_kills_whole_process_group(
 ) -> None:
     """Cancellation kills the exec'd child's whole group (no orphaned grandchildren)."""
     _sandboxed(monkeypatch)
+    marker = tmp_path / "grandchild-survived"
+    pid_file = tmp_path / "grandchild.pid"
+    # The grandchild outlives the sandboxed child by design: it sleeps, then
+    # touches the marker. The test asserts cancellation killed the whole
+    # group BEFORE that touch. Watching the grandchild's PID exit (instead of
+    # sleeping past its touch deadline) keeps the assertion race-free under
+    # load: once the PID is gone, a surviving shell can no longer touch.
     custom_source = (
         "import subprocess\n"
         "import time\n\n"
         "def run(job, job_dir, runtime):\n"
-        "    marker = job_dir / 'grandchild-survived'\n"
-        "    subprocess.Popen(['/bin/sh', '-c', f'sleep 2; touch {marker}'])\n"
+        f"    marker = job_dir / '{marker.name}'\n"
+        "    proc = subprocess.Popen(['/bin/sh', '-c', f'sleep 2; touch {marker}'])\n"
+        f"    (job_dir / '{pid_file.name}').write_text(str(proc.pid))\n"
         "    time.sleep(30)\n"
     )
 
@@ -419,19 +391,51 @@ def test_custom_cancel_kills_whole_process_group(
     from server.app.executors.cancellation import CancellationToken
 
     token = CancellationToken(_threading.Event())
-    canceller = _threading.Timer(0.5, token.cancel)
-    canceller.start()
     sandboxed = replace(
         context,
         node_code=custom_source,
         runtime={"cancellation": token},
     )
-    result = _executor().execute(sandboxed)
-    canceller.cancel()
 
+    # Cancel deterministically mid-execution: run the executor on a thread and
+    # fire the token only after the pid file proves the grandchild spawned.
+    # A wall-clock timer raced the child's startup under load (the same race
+    # CI just caught in the orphan-reaper twin of this test).
+    outcome_holder: dict = {}
+
+    def run() -> None:
+        try:
+            outcome_holder["result"] = _executor().execute(sandboxed)
+        except Exception as exc:
+            # Re-raised below; a bare holder["result"] KeyError would bury it.
+            outcome_holder["error"] = exc
+
+    thread = _threading.Thread(target=run)
+    thread.start()
+    spawn_deadline = time.monotonic() + 10.0
+    try:
+        while not pid_file.exists():
+            assert time.monotonic() < spawn_deadline, "grandchild never started"
+            time.sleep(0.05)
+        token.cancel()
+    finally:
+        thread.join(timeout=10.0)
+    assert not thread.is_alive()
+    if "error" in outcome_holder:
+        raise outcome_holder["error"]
+
+    result = outcome_holder["result"]
     assert result.status == "cancelled"
-    time.sleep(2.5)
-    assert not (tmp_path / "grandchild-survived").exists()
+    pid = int(pid_file.read_text().strip())
+    # The grandchild must be dead well before its 2s sleep ends. Fresh
+    # deadline: the spawn phase above may have consumed most of its own.
+    death_deadline = time.monotonic() + 10.0
+    while pid_is_running(pid):
+        assert time.monotonic() < death_deadline, (
+            f"grandchild {pid} survived cancellation; marker={marker}"
+        )
+        time.sleep(0.05)
+    assert not marker.exists()
 
 
 # ---------------------------------------------------------------------------
