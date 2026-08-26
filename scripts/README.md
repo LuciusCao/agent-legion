@@ -39,10 +39,9 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 
 ## Spec / Skill 治理
 
-| 脚本 | 用途 |
-|------|------|
-| `verify_specs.py` | 检查 design specs 的引用健康，自动分类到 `specs/`、`completed/`、`archive/`，并生成 `SPEC_HEALTH.md`。 |
-| `check-skills-shared.py` | 校验外部 Pi skill 仓库与项目共享引用文件的一致性。 |
+`verify_specs.py` 与 `check-skills-shared.py` 已退役删除：前者随未发布的
+`docs/superpowers/` 设计 specs（`f4e7e46f`）一同失去操作对象，后者随业务
+workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 
 ## 示例 workflow
 
@@ -72,14 +71,10 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 
 | 脚本 | 用途 | 退役条件 |
 |------|------|----------|
-| `backfill_failure_classification.py` | 为历史 failed `node_runs` 回填 `failure_category`/`failure_detail`（幂等，支持 `--dry-run` / `--include-unknown`）。 | 生产库中无未分类的 failed 行，且分类规则稳定不再需要重评 `unknown`。 |
-| `backfill_worker_output_validation.py` | 补跑 EXEC-VALIDATION-001 之前 Worker 完成节点的输出校验，失败的标记节点/任务 failed（幂等，支持 `--dry-run`）。 | 所有存量 Worker-run 节点完成重校验（无候选行）。 |
 | `view-session.py` | 将 OpenClaw session JSONL 渲染为人类可读的对话日志。 | OpenClaw runner 退役或控制台内置 session 查看能力。 |
-| `velites_diff_events.py` | 结构对比 Node Pi 与 velites 的 `events.jsonl` 事件流（忽略时序字段与 delta 事件差异）。 | velites 完全替代 Node Pi 且回归基线归档后。 |
-| `migrate_job_dirs_to_shards.py` | 一次性迁移：把扁平 `jobs/<workspace>/<job_id>` 目录改名为分片布局并同步 `jobs.storage_dir`（幂等可重入，`--apply` 需停后端/worker）。 | 生产库不再有 3 段 legacy `storage_dir` 行（全部迁移到 4 段分片布局）。 |
-| `velites_replay.py` | velites 灰度 Phase 1 影子回放：抽样生产 run 目录，离线双跑 Node Pi 与 velites 并对比事件流与声明输出（只读生产数据，不碰 DB）。 | velites 灰度完成、影子回放基线归档后。 |
+| `trim_terminal_code_manifests.py` | 收缩已终态节点的膨胀 code manifest 行（issue #142 止血）。 | 生产库存量膨胀行排空（新代码路径不再膨胀）。 |
 
-一次性脚本（`diagnose_cms.py`、`cleanup-agent-pollution.py`、`backfill-node-run-dirs.py`、`archive/backfill_source_uuid.py`）已于 2026-07-22 退役删除；一次性迁移脚本（`import-sqlite-to-postgres.py` + `sqlite_import_support.py`、`migrate-config-layout.py`）已于 2026-07-23 随 SQLite→PostgreSQL 迁移与配置布局拆分完成退役删除；历史用法见 git 历史。
+一次性脚本（`diagnose_cms.py`、`cleanup-agent-pollution.py`、`backfill-node-run-dirs.py`、`archive/backfill_source_uuid.py`）已于 2026-07-22 退役删除；一次性迁移脚本（`import-sqlite-to-postgres.py` + `sqlite_import_support.py`、`migrate-config-layout.py`）已于 2026-07-23 随 SQLite→PostgreSQL 迁移与配置布局拆分完成退役删除；`backfill_failure_classification.py`、`backfill_worker_output_validation.py`、`migrate_job_dirs_to_shards.py`（存量行迁移完毕）、`backfill_workflow_revision_resources.py`（loader 已硬拒绝 `resources` 字段）、`velites_replay.py`（灰度完成、基线归档）、`velites_diff_events.py`（阶段 C 取消、条件不再适用）、`bench_gzip_exemption.py`（一次性基准，决策已落地）已于 2026-08-26 退役删除；历史用法见 git 历史。
 
 ## 子目录
 
@@ -95,7 +90,7 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 
 ## 约定
 
-- 新脚本统一使用下划线命名（`check_xxx.py`）；连字符命名（`check-skills-shared.py` 等）为存量，不强改。
+- 新脚本统一使用下划线命名（`check_xxx.py`）。
 - 包内可导入的脚本通过 `uv run python -m scripts.<name>` 运行，不再复制 `sys.path` bootstrap；
   同包共享逻辑直接 `from scripts._xxx import ...`。
 - 以下存量场景保留 `sys.path` bootstrap：`worker/executor.py`（Docker 已改为整体拷贝 `worker/` 包，bootstrap 仅为兼容直接以脚本方式运行）、
