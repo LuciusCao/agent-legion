@@ -1,7 +1,7 @@
 """Admin routes for workspace-scoped Agent Worker registration tokens.
 
 Split from agent_workers.py for the file-size budget: the /agent-register-tokens
-management surface (issue / list / revoke, all require_admin) lives here;
+management surface (issue / list / delete, all require_admin) lives here;
 worker registration and the execution data plane stay in agent_workers.py.
 """
 

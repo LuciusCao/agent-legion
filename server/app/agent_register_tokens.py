@@ -1,7 +1,7 @@
 """Workspace-scoped Agent Worker registration token store (EXEC-WORKERACL-001).
 
 Split from agent_workers.py for the file-size budget: everything about the
-admin-issued registration credentials (issue / resolve / list / revoke) lives
+admin-issued registration credentials (issue / resolve / list / delete) lives
 here. AgentWorkerRegistry inherits this store and adds the worker
 registration lifecycle on top, so existing callers keep one entry point.
 """
@@ -26,7 +26,7 @@ class AgentRegisterTokenStore:
     def __init__(self, database_dsn: DatabaseDsn) -> None:
         self.database_dsn = database_dsn
 
-    def issue_register_token(self, *, workspace_id: str | None, label: str = "") -> tuple[str, str]:
+    def issue_register_token(self, *, workspace_id: str, label: str = "") -> tuple[str, str]:
         """Issue a workspace-scoped registration token; returns (token_id, plaintext).
 
         workspace_id is required: the all-workspaces token variant was retired
@@ -34,7 +34,7 @@ class AgentRegisterTokenStore:
         attributable to exactly one workspace. Only the sha256 hash is stored;
         the plaintext is returned exactly once.
         """
-        if workspace_id is None:
+        if not workspace_id:
             raise ValueError("workspace_id is required (all-workspaces tokens are retired)")
         if len(label) > _MAX_TOKEN_LABEL_LENGTH:
             raise ValueError(f"register token label exceeds {_MAX_TOKEN_LABEL_LENGTH} chars")

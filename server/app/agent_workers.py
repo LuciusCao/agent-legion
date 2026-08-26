@@ -38,7 +38,7 @@ ONLINE_THRESHOLD_SECONDS = 30
 
 class AgentWorkerRegistry(AgentRegisterTokenStore):
     """Worker registration lifecycle; the admin-issued register token store
-    (issue/resolve/list/revoke) is inherited from AgentRegisterTokenStore."""
+    (issue/resolve/list/delete) is inherited from AgentRegisterTokenStore."""
 
     def __init__(self, database_dsn: DatabaseDsn) -> None:
         super().__init__(database_dsn)
@@ -219,7 +219,11 @@ class AgentWorkerRegistry(AgentRegisterTokenStore):
             bound = json.loads(row["register_token_ids_json"] or "[]")
             if bound:
                 alive = conn.execute(
-                    "select 1 from agent_register_tokens where id = any(%s) limit 1",
+                    # revoked_at rows (legacy v58 revoke leftovers) do not
+                    # block the manual cleanup delete: they can no longer
+                    # admit registrations, so they are not "alive" keys.
+                    "select 1 from agent_register_tokens"
+                    " where id = any(%s) and revoked_at is null limit 1",
                     (bound,),
                 ).fetchone()
                 if alive is not None:

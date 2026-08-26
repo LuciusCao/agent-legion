@@ -274,7 +274,7 @@ server/app/
 | AgentWorkerWorkspace | BaseModel | workspace_id: str, workspace_name: str, token_ids: list[str] | app/routes/agent_workers_contracts.py |
 | RegisterAgentWorkerResponse | BaseModel | worker_token: str, host_protocol_version: int, allowed_workspaces: list[str],... | app/routes/agent_workers_contracts.py |
 | CreateAgentRegisterTokenRequest | BaseModel | workspace_id: str, label: str | app/routes/agent_workers_contracts.py |
-| AgentRegisterTokenCreatedResponse | BaseModel | token_id: str, register_token: str, workspace_id: str | None, label: str | app/routes/agent_workers_contracts.py |
+| AgentRegisterTokenCreatedResponse | BaseModel | token_id: str, register_token: str, workspace_id: str, label: str | app/routes/agent_workers_contracts.py |
 | AgentRegisterTokenSummary | BaseModel | token_id: str, workspace_id: str | None, label: str, created_at: str, revoked... | app/routes/agent_workers_contracts.py |
 | AgentRegisterTokensResponse | BaseModel | tokens: list[AgentRegisterTokenSummary] | app/routes/agent_workers_contracts.py |
 | AgentRegisterTokenDeleteResponse | BaseModel | token_id: str, deleted: bool, cascaded_worker_ids: list[str] | app/routes/agent_workers_contracts.py |

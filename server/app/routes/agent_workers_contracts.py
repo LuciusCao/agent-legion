@@ -51,12 +51,14 @@ class AgentRegisterTokenCreatedResponse(BaseModel):
     token_id: str
     # Plaintext, returned exactly once at issuance.
     register_token: str
-    workspace_id: str | None
+    workspace_id: str
     label: str
 
 
 class AgentRegisterTokenSummary(BaseModel):
     token_id: str
+    # The None case is unreachable via the API (issuance requires a
+    # workspace); it only models pre-v58 rows read straight from the table.
     workspace_id: str | None
     label: str
     created_at: str

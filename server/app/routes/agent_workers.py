@@ -11,6 +11,7 @@ from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.agent_result_commit import commit_agent_result
 from server.app.agent_broker.result_spool import discard_staged_result, spool_result_body
 from server.app.agent_completion import AgentCompletionHandler
+from server.app.agent_register_key_guard import RegisterKeyDeleted
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.auth.dependencies import require_admin, require_user
 from server.app.routes.agent_register_tokens import create_agent_register_tokens_router
@@ -115,16 +116,19 @@ def create_agent_workers_router(
         try:
             token = registry.issue_token(
                 **payload.model_dump(),
-                allowed_workspaces=[row["workspace_id"] for row in scope],
+                # The stored scope is re-derived from the locked key rows
+                # inside issue_token's transaction; allowed_workspaces is
+                # not passed here (that legacy parameter only serves direct
+                # registry callers without a key binding).
                 register_token_ids=[
                     str(token_id) for row in scope for token_id in row["token_ids"]
                 ],
             )
-        except KeyError as exc:
+        except RegisterKeyDeleted as exc:
             # A bound key was deleted after the read-only resolve (guard
             # re-checks under lock): the credential is dead, not malformed.
-            # RegisterKeyDeleted subclasses KeyError but str() of KeyError
-            # wraps the message in quotes — args[0] carries the clean text.
+            # str() of a KeyError subclass wraps the message in quotes —
+            # args[0] carries the clean text.
             detail = exc.args[0] if exc.args else str(exc)
             raise HTTPException(status_code=401, detail=detail) from exc
         except ValueError as exc:

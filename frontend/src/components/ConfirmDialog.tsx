@@ -37,6 +37,10 @@ export function ConfirmDialog({
     setIsSubmitting(true)
     try {
       await onConfirm()
+    } catch (err) {
+      // onConfirm 负责把自己的错误呈现给用户（两个调用方都 setError 后
+      // 关闭弹窗）；这里只兜底记录，避免 unhandled rejection 静默丢失。
+      console.error('ConfirmDialog onConfirm failed:', err)
     } finally {
       setIsSubmitting(false)
     }

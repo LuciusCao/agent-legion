@@ -163,6 +163,45 @@ def test_delete_key_narrows_multi_key_worker_to_surviving_scope(
         assert client.get("/api/agent-workers").json()["workers"] == []
 
 
+def test_delete_workspace_cascades_bound_keys(tmp_path: Path) -> None:
+    """Deleting a workspace runs the per-key cascade, not just the FK: a
+    Worker bound only to that workspace's keys loses its registration, and a
+    multi-key Worker is narrowed to the surviving keys' workspaces. Without
+    this, the FK would drop the keys silently, the Worker row would keep the
+    dead workspace in its scope, and a same-name recreation (which reuses the
+    slug id) would instantly re-admit the stale Worker."""
+    app = _make_app(tmp_path)
+    app.state.settings.executor_runtime.workflows.enabled = True
+
+    with TestClient(app) as client:
+        _authenticate_admin(client)
+        doomed = _issue_scoped_token(client, workspace_id="doomed-workspace")
+        survivor = _issue_scoped_token(client, workspace_id="other-workspace")
+        _register(client, credential=None, worker_id="sole-worker", tokens=[doomed])
+        _register(client, credential=None, worker_id="multi-worker", tokens=[doomed, survivor])
+
+        response = client.delete("/api/workspaces/doomed-workspace")
+        assert response.status_code == 200, response.text
+
+        workers = client.get("/api/agent-workers").json()["workers"]
+        assert [w["worker_id"] for w in workers] == ["multi-worker"]
+        assert workers[0]["register_token_ids"] == [survivor.partition(".")[0]]
+        assert workers[0]["allowed_workspaces"] == ["other-workspace"]
+
+        # A same-name recreation reuses the slug id; the stale Worker must
+        # not resurface in the new workspace's view.
+        recreated = client.post("/api/workspaces", json={"name": "doomed-workspace"})
+        assert recreated.status_code in (200, 201), recreated.text
+        workspace_view = client.get(
+            "/api/agent-workers", params={"workspace_id": "doomed-workspace"}
+        ).json()["workers"]
+        assert workspace_view == []
+        other_view = client.get(
+            "/api/agent-workers", params={"workspace_id": "other-workspace"}
+        ).json()["workers"]
+        assert [w["worker_id"] for w in other_view] == ["multi-worker"]
+
+
 def test_issue_token_aborts_when_bound_key_is_deleted(tmp_path: Path) -> None:
     """SECURITY-WORKER-001: the admission keys are revalidated inside the
     write transaction, so a key deleted between the route's read-only
@@ -191,6 +230,51 @@ def test_issue_token_aborts_when_bound_key_is_deleted(tmp_path: Path) -> None:
             register_token_ids=[token_id],
         )
     # The write transaction rolled back: no worker row survived.
+    assert all(w["worker_id"] != "racy-worker" for w in registry.list_workers())
+
+
+def test_register_returns_401_when_key_dies_mid_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HTTP contract for the P1 race: the route resolves the credential
+    fine, the key is deleted before issue_token's write transaction runs,
+    and the response is a clean 401 (not a 500, not a quoted KeyError str)
+    with no worker row left behind."""
+    app = _make_app(tmp_path)
+
+    with TestClient(app) as client:
+        _authenticate_admin(client)
+        credential = _issue_scoped_token(client)
+        token_id = credential.partition(".")[0]
+        registry = app.state.agent_worker_registry
+
+        original_issue_token = registry.issue_token
+
+        def issue_token_after_deleting_key(**kwargs):
+            registry.delete_register_token(token_id)
+            return original_issue_token(**kwargs)
+
+        monkeypatch.setattr(registry, "issue_token", issue_token_after_deleting_key)
+        response = client.post(
+            "/api/agent-workers/register",
+            headers={"X-Agent-Worker-Register-Token": credential},
+            json={
+                "worker_id": "racy-worker",
+                "name": "Racy",
+                "runtimes": ["pi"],
+                "capabilities": ["generate"],
+                "models": [{"provider": "gateway", "model": "test-model"}],
+                "max_concurrency": 10,
+                "labels": {"arch": "arm64"},
+                "protocol_version": 1,
+            },
+        )
+
+    assert response.status_code == 401, response.text
+    detail = response.json()["detail"]
+    assert "no longer exists" in detail
+    assert detail.startswith("register token"), detail
     assert all(w["worker_id"] != "racy-worker" for w in registry.list_workers())
 
 

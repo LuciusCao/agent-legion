@@ -105,6 +105,8 @@ Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope
 
   该 Worker 注册后只能看到并 claim 对应 workspace 的任务；Host 侧每个 workspace 的设置页也只显示用本 workspace token 注册的 Worker（管理员仍可见全量）。
 
+  从旧模型迁移的运维提示：per-worker revoke 已退役，旧版「已吊销（revoked）」的 Worker 记录不再持久生效——只要该 Worker 还持有存活 key，重新注册即恢复正常（列表中显示「已失效（旧版吊销）」只是遗留标记）。要永久切断一个旧 Worker 的访问，必须删除它持有的全部 key（删除 key 即级联切断），只吊销记录是无效的。
+
   注意：这些管理端点（UI 与下列 curl 共用的 `/api/agent-register-tokens*`、`DELETE /api/agent-workers/{id}`）要求 **admin 会话**调用，必须携带登录 cookie 与 CSRF header（见 Host Web UI 登录后的会话）。Worker 注册本身仍必须凭 scoped token，不受影响。
 
   也可以用 curl 在部署机上签发（备选方式）。这些请求需要 admin 会话：先在 Host Web UI 登录（或调用 `/api/auth/login`）取得登录 cookie，并在请求中带上 CSRF header，否则返回 401/403。
@@ -235,7 +237,7 @@ docker compose -f deploy/compose.worker.yaml exec worker workerctl configure \
 
 ### 崩溃重启与失败状态
 
-Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程内指数退避重试注册，不会打印 traceback，也不会触发 supervisor 重启。执行进程因其他原因崩溃后按指数退避自动重启：5 秒起步、每次 ×2、封顶 300 秒；稳定运行满 60 秒后重置退避。退出码 2（Host 明确拒绝注册、Worker 已被吊销，或启动预检失败——例如声明了某个 runtime 但其二进制在自带副本与 PATH 上都找不到）不自动重启，进入 failed 状态，需修正配置后手动 `workerctl restart`。`status` 中的 `restart_count`、`next_restart_delay`、`failed` 字段反映这些状态；容器 healthcheck 会把 failed 或已配置但进程未运行视为 unhealthy。
+Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程内指数退避重试注册，不会打印 traceback，也不会触发 supervisor 重启。执行进程因其他原因崩溃后按指数退避自动重启：5 秒起步、每次 ×2、封顶 300 秒；稳定运行满 60 秒后重置退避。退出码 2（Host 明确拒绝注册——例如持有的全部 key 已被删除，或启动预检失败——例如声明了某个 runtime 但其二进制在自带副本与 PATH 上都找不到）不自动重启，进入 failed 状态，需修正配置后手动 `workerctl restart`。`status` 中的 `restart_count`、`next_restart_delay`、`failed` 字段反映这些状态；容器 healthcheck 会把 failed 或已配置但进程未运行视为 unhealthy。
 
 ### 挂载配置与状态副本不一致
 

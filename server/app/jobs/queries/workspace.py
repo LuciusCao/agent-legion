@@ -6,6 +6,9 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from server.app.agent_register_token_workspace_removal import (
+    cascade_delete_workspace_register_tokens,
+)
 from server.app.jobs.node_limits import (
     get_workspace_node_limits,
     replace_workspace_node_limits,
@@ -241,6 +244,12 @@ class WorkspaceQueriesMixin(JobQueriesBase):
             ).fetchone()
             if running is not None:
                 raise ValueError("Cannot delete workspace with running jobs")
+            # The FK on agent_register_tokens.workspace_id is on delete
+            # cascade: without this per-key cascade the workspace's keys
+            # would vanish silently while bound Worker rows keep the dead
+            # workspace in their scope — and a same-name recreation reuses
+            # the slug id, instantly re-admitting those stale Workers.
+            cascade_delete_workspace_register_tokens(conn, workspace_id)
             conn.execute(
                 "delete from job_nodes where job_id in (select id from jobs where workspace_id = %s)",
                 (workspace_id,),

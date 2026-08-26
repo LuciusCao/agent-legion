@@ -2570,7 +2570,7 @@ export interface components {
       /** Token Id */
       token_id: string
       /** Workspace Id */
-      workspace_id: string | null
+      workspace_id: string
     }
     /** AgentRegisterTokenDeleteResponse */
     AgentRegisterTokenDeleteResponse: {

@@ -43,15 +43,19 @@ def locked_register_scope(conn: Any, register_token_ids: Sequence[str]) -> list[
     """Revalidate the bound register-token rows under lock, in `conn`'s
     transaction, and return the surviving keys' workspace ids.
 
-    Raises RegisterKeyDeleted when any bound key no longer exists (deleted or
-    never issued): the caller must abort the registration, not persist a
-    worker whose admission keys are already dead."""
+    Raises RegisterKeyDeleted when any bound key no longer exists or is
+    revoked: the caller must abort the registration, not persist a worker
+    whose admission keys are already dead. revoked_at rows are legacy
+    v58 leftovers (the revoke API is gone) — the route-level resolve
+    rejects them too; the check here is defense in depth so a future
+    revive of any revoke write path cannot silently re-admit a revoked
+    key through this direct-registry path."""
     rows = conn.execute(
-        "select id, workspace_id from agent_register_tokens"
+        "select id, workspace_id, revoked_at from agent_register_tokens"
         " where id = any(%s) order by id for update",
         (register_token_ids,),
     ).fetchall()
-    surviving = {str(row["id"]) for row in rows}
+    surviving = {str(row["id"]) for row in rows if row["revoked_at"] is None}
     missing = [token_id for token_id in register_token_ids if token_id not in surviving]
     if missing:
         raise RegisterKeyDeleted(
@@ -59,4 +63,10 @@ def locked_register_scope(conn: Any, register_token_ids: Sequence[str]) -> list[
             + ", ".join(sorted(missing))
             + " — re-register with current keys"
         )
-    return sorted({str(row["workspace_id"]) for row in rows})
+    return sorted(
+        {
+            str(row["workspace_id"])
+            for row in rows
+            if row["revoked_at"] is None and str(row["id"]) in surviving
+        }
+    )
