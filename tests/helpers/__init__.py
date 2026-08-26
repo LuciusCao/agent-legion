@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -192,6 +193,31 @@ def wait_for_predicate(
         if time.monotonic() > deadline:
             raise TimeoutError("Predicate was not satisfied in time")
         time.sleep(interval)
+
+
+def pid_is_running(pid: int) -> bool:
+    """True when *pid* names a live (non-zombie) process.
+
+    os.kill(pid, 0) alone also succeeds for zombies: an unreaped orphan
+    keeps its PID until somebody wait()s it, so a kill-probe liveness loop
+    spins to its deadline in containers without a reaping init. On Linux,
+    consult /proc for the state field; elsewhere fall back to the signal
+    probe (macOS launchd reaps orphans promptly).
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except OSError:
+        return True
+    # comm may contain spaces and parens; the state letter is the first
+    # field after the final ')'.
+    tail = stat.rsplit(")", 1)[1] if ")" in stat else ""
+    return tail.split()[0] != "Z" if tail else True
 
 
 def seed_workspace_agent_definitions(workspace_id: str) -> list[str]:

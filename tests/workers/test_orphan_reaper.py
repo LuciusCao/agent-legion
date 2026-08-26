@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import pid_is_running
 from worker.orphan_reaper import reap_orphaned_agents
 from worker.process_lifecycle import AGENT_PGID_FILENAME
 
@@ -99,7 +100,7 @@ def test_reap_kills_grandchildren_too(tmp_path: Path) -> None:
         # deadline: once the PID is gone, a surviving shell can no longer
         # touch. Race-free under load, and ~2s faster than the old blind wait.
         deadline = time.monotonic() + 10.0
-        while _pid_alive(grandchild):
+        while pid_is_running(grandchild):
             assert time.monotonic() < deadline, (
                 f"grandchild {grandchild} survived the reaper; marker={marker}"
             )
@@ -114,16 +115,6 @@ def test_reap_kills_grandchildren_too(tmp_path: Path) -> None:
         proc.wait(timeout=5)
 
     assert not marker.exists()
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
 
 
 def _wait_for_file(path: Path, timeout: float) -> None:

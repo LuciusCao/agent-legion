@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import os
 import shutil
 import subprocess
 import sys
@@ -17,6 +16,7 @@ from server.app.executors.artifact_restore import restore_missing_inputs
 from server.app.executors.code import CodeExecutor
 from server.app.executors.contracts import CodeCapabilityConfig
 from server.app.executors.models import ExecutionContext
+from tests.helpers import pid_is_running
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VELITES_DEBUG_BINARY = REPO_ROOT / "velites" / "target" / "debug" / "velites"
@@ -459,22 +459,12 @@ def test_custom_cancel_kills_whole_process_group(
     assert result.status == "cancelled"
     pid = int(pid_file.read_text().strip())
     # The grandchild must be dead well before its 2s sleep ends.
-    while _pid_alive(pid):
+    while pid_is_running(pid):
         assert time.monotonic() < deadline, (
             f"grandchild {pid} survived cancellation; marker={marker}"
         )
         time.sleep(0.05)
     assert not marker.exists()
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
 
 
 # ---------------------------------------------------------------------------
