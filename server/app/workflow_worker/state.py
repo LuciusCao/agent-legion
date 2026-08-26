@@ -107,17 +107,3 @@ class WorkflowWorkerState:
         self.secret_memo = {}
         self.scan_phases = {"marks": 0.0, "ws_query": 0.0, "miss_fetch": 0.0, "eval": 0.0}
         self.agent_pass.reset_pass()
-
-    def reset_all(self) -> None:
-        """Full reset used by tests rebuilding a worker's world."""
-        self.reset_pass()
-        self.wake_event = threading.Event()
-        self.pools = {}
-        self.futures = {}
-        self.future_claims = {}
-        self.definition_cache = {}
-        self.job_evals = {}
-        self.mark_store = MarkStore()
-        self.last_ready_stats = {"hit": 0, "miss": 0}
-        self.route_cache = {}
-        self.round_robin = WorkspaceRoundRobin()

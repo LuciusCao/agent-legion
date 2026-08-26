@@ -1174,7 +1174,7 @@
     "server/app/workflow_worker/scan.py": 82,
     "server/app/workflow_worker/schedule.py": 173,
     "server/app/workflow_worker/shards.py": 208,
-    "server/app/workflow_worker/state.py": 99,
+    "server/app/workflow_worker/state.py": 86,
     "server/app/workflow_worker/thread.py": 182,
     "server/app/workflows/__init__.py": 11,
     "server/app/workflows/builtin.py": 34,
