@@ -26,14 +26,17 @@ def maybe_emit_mcp_hint(service: StudioChatService, session_id: str, stop_reason
     Conditions: the runtime never observed an agent-legion tool call, the
     session is not already verified, this turn actually completed (a
     user-cancelled turn is not evidence of anything), and the hint has not
-    been shown before in this session.
+    been shown before in this session. The shown-once memory is the
+    persisted mcp_status='unverified' itself, so the guarantee survives
+    backend restarts and runtime rebuilds; the in-memory flag only
+    deduplicates within one runtime.
     """
     session = service._db.get_studio_chat_session(session_id) or {}
     runtime = service._runtime(session_id)
     mcp_observed = runtime.mcp_observed if runtime is not None else False
     if (
         mcp_observed
-        or session.get("mcp_status") == "verified"
+        or session.get("mcp_status") in ("verified", "unverified")
         or stop_reason == "cancelled"
         or (runtime is not None and runtime.mcp_hint_shown)
     ):

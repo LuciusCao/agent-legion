@@ -65,7 +65,11 @@ class _Terminal:
     output: bytearray = field(default_factory=bytearray)
     byte_limit: int = DEFAULT_OUTPUT_BYTE_LIMIT
     truncated: bool = False
-    released: bool = False
+    # Strong reference to the output-drain task: asyncio only weak-references
+    # tasks, so an unreferenced drain could be GC'd mid-run (pipe never
+    # emptied, child blocks forever). Also awaited after process exit so
+    # wait_for_exit/kill leave the buffer holding the full output tail.
+    drain_task: asyncio.Task[None] | None = None
 
 
 class AcpTerminalStore:
@@ -88,9 +92,13 @@ class AcpTerminalStore:
         limit = output_byte_limit or DEFAULT_OUTPUT_BYTE_LIMIT
         limit = max(limit, MIN_OUTPUT_BYTE_LIMIT)
         # env arrives as EnvVariable models (name/value); None means inherit.
+        # When present, merge over the inherited environment (keeping
+        # PATH/HOME/...) instead of replacing it, matching the ACP reference
+        # client's behaviour — an agent that sends only overrides must not
+        # lose the base environment.
         process_env: dict[str, str] | None = None
         if env:
-            process_env = {str(item.name): str(item.value) for item in env}
+            process_env = {**os.environ, **{str(item.name): str(item.value) for item in env}}
         process = await asyncio.create_subprocess_exec(
             command,
             *(args or []),
@@ -104,7 +112,7 @@ class AcpTerminalStore:
         )
         terminal = _Terminal(process=process, byte_limit=limit)
         self._terminals[terminal_id] = terminal
-        asyncio.get_running_loop().create_task(self._drain(terminal_id, terminal))
+        terminal.drain_task = asyncio.get_running_loop().create_task(self._drain(terminal))
         return CreateTerminalResponse(terminal_id=terminal_id)
 
     async def output(self, terminal_id: str) -> TerminalOutputResponse:
@@ -128,6 +136,9 @@ class AcpTerminalStore:
             await asyncio.wait_for(terminal.process.wait(), timeout=WAIT_TIMEOUT_SECONDS)
         except TimeoutError:
             await self._kill(terminal)
+        # Process exit means pipe EOF, so the drain finishes here; awaiting
+        # it guarantees a following terminal/output sees the full tail.
+        await self._drained(terminal)
         return WaitForTerminalExitResponse(**_exit_payload(terminal.process))
 
     async def release(self, terminal_id: str) -> ReleaseTerminalResponse:
@@ -135,7 +146,6 @@ class AcpTerminalStore:
         if terminal is None:
             # Idempotent per protocol: releasing twice is not an error.
             return ReleaseTerminalResponse()
-        terminal.released = True
         if terminal.process.returncode is None:
             await self._kill(terminal)
         return ReleaseTerminalResponse()
@@ -152,9 +162,8 @@ class AcpTerminalStore:
             with _swallow("terminal close_all"):
                 await self.release(terminal_id)
 
-    async def _drain(self, terminal_id: str, terminal: _Terminal) -> None:
+    async def _drain(self, terminal: _Terminal) -> None:
         """Fold stdout(+stderr) into the capped output buffer; head-truncate."""
-        del terminal_id
         stream = terminal.process.stdout
         if stream is None:
             return
@@ -183,6 +192,13 @@ class AcpTerminalStore:
                 os.killpg(pid, signal_module.SIGKILL)
         with _swallow("terminal kill wait"):
             await terminal.process.wait()
+        await self._drained(terminal)
+
+    async def _drained(self, terminal: _Terminal) -> None:
+        """Await the drain task once the process is gone (pipe EOF ends it)."""
+        if terminal.drain_task is not None:
+            with _swallow("terminal drain"):
+                await terminal.drain_task
 
 
 class _swallow:

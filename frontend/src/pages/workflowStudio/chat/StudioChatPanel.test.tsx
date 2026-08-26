@@ -138,7 +138,7 @@ describe('StudioChatPanel', () => {
       }),
       chatMessage('m5', 5, 'status', 'system', {
         event: 'mcp_unverified',
-        detail: 'no tool call',
+        detail: '本会话还没有任何 agent-legion 平台工具调用的迹象',
       }),
     ])
     renderPanel()
@@ -147,8 +147,9 @@ describe('StudioChatPanel', () => {
     expect(screen.getByText('好的，先看 active 版本')).toBeInTheDocument()
     expect(screen.getByText('get_active_workflow')).toBeInTheDocument()
     expect(screen.getByText('起草新节点')).toBeInTheDocument()
+    // mcp_unverified 的文案以后端 detail 为准渲染。
     expect(
-      screen.getByText(/尚未观察到 agent-legion 平台工具调用/)
+      screen.getByText(/本会话还没有任何 agent-legion 平台工具调用的迹象/)
     ).toBeInTheDocument()
 
     // 工具调用明细默认折叠（rawInput 不可见），点击展开。

@@ -10,6 +10,9 @@ import pytest
 
 from server.app.studio_chat.terminals import AcpTerminalStore
 
+# Pure subprocess unit tests: no database access, skip TRUNCATE isolation.
+pytestmark = pytest.mark.no_db
+
 
 def test_create_output_wait_release_roundtrip() -> None:
     async def _run() -> None:
@@ -152,7 +155,11 @@ def test_env_vars_are_passed_to_the_process() -> None:
 
         created = await store.create(
             command=sys.executable,
-            args=["-c", "import os; print(os.environ.get('STUDIO_TEST_MARKER', 'missing'))"],
+            args=[
+                "-c",
+                "import os; print(os.environ.get('STUDIO_TEST_MARKER', 'missing')); "
+                "print('PATH' in os.environ and 'path-kept' or 'path-lost')",
+            ],
             env=[_Env("STUDIO_TEST_MARKER", "present")],
             cwd=None,
             output_byte_limit=None,
@@ -161,6 +168,8 @@ def test_env_vars_are_passed_to_the_process() -> None:
         await store.wait_for_exit(created.terminalId)
         state = await store.output(created.terminalId)
         assert "present" in state.output
+        # env 是合并而非替换：agent 只传覆盖项时继承环境（PATH 等）不丢。
+        assert "path-kept" in state.output
 
     asyncio.run(_run())
 

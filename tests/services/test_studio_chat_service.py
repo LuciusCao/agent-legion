@@ -429,60 +429,6 @@ def test_thought_chunks_persist_as_coalesced_thought_message(chat) -> None:
     assert thought_events
 
 
-def test_run_without_mcp_tool_call_is_flagged_unverified(chat) -> None:
-    service, _bus, register, workspace_id, user_id = chat
-    register({"on_prompt": []})
-    session = service.create_session(workspace_id, user_id, "fake-agent")
-    service.send_message(session["id"], workspace_id, "hello")
-
-    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
-    session = service.get_session(session["id"])
-    assert session["mcp_status"] == "unverified"
-    events = [
-        m["content"].get("event")
-        for m in service.list_messages(session["id"], workspace_id)
-        if m["kind"] == "status"
-    ]
-    assert "mcp_unverified" in events
-
-
-def test_mcp_unverified_hint_is_shown_once_per_session(chat) -> None:
-    """提示是会话级一次性的：第二个无工具轮次不再重复刷屏。"""
-    service, _bus, register, workspace_id, user_id = chat
-    register({"on_prompt": []})
-    session = service.create_session(workspace_id, user_id, "fake-agent")
-    for _ in range(2):
-        service.send_message(session["id"], workspace_id, "hello")
-        _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
-
-    events = [
-        m["content"].get("event")
-        for m in service.list_messages(session["id"], workspace_id)
-        if m["kind"] == "status"
-    ]
-    assert events.count("mcp_unverified") == 1
-
-
-def test_cancelled_turn_does_not_raise_mcp_unverified(chat) -> None:
-    """用户取消的轮次不是接线问题的证据：不产生 mcp 信号。"""
-    service, _bus, register, workspace_id, user_id = chat
-    register(WAIT_CANCEL_SCRIPT)
-    session = service.create_session(workspace_id, user_id, "fake-agent")
-    service.send_message(session["id"], workspace_id, "accidental submit")
-    _wait_for(lambda: service.get_session(session["id"])["status"] == "running")
-
-    service.cancel(session["id"], workspace_id)
-    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
-    session = service.get_session(session["id"])
-    assert session["mcp_status"] == "unknown"
-    events = [
-        m["content"].get("event")
-        for m in service.list_messages(session["id"], workspace_id)
-        if m["kind"] == "status"
-    ]
-    assert "mcp_unverified" not in events
-
-
 def test_agent_legion_tool_permission_auto_approves(chat) -> None:
     service, _bus, register, workspace_id, user_id = chat
     script_path = register(MCP_PERMISSION_SCRIPT)

@@ -31,10 +31,10 @@ function StatusLine({ message }: { message: ChatMessage }) {
   const { event, detail } = statusEvent(message)
   if (event === 'turn_end') return null
   if (event === 'mcp_unverified') {
+    // 文案以后端 detail 为唯一来源（mcp_hint.MCP_UNVERIFIED_HINT）。
     return (
       <div className={styles.statusLine}>
-        ℹ 本会话尚未观察到 agent-legion
-        平台工具调用；若本轮本不需要读写平台状态可忽略。
+        ℹ {detail || '本会话尚未观察到 agent-legion 平台工具调用'}
       </div>
     )
   }
