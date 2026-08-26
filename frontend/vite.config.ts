@@ -15,7 +15,6 @@ const commonTestExcludes = [
 const browserTestFiles = [
   'src/api/core.test.ts',
   'src/components/useJobListLoadMore.test.ts',
-  'src/hooks/useAsync.test.ts',
   'src/hooks/useDashboardEvents.test.ts',
   'src/hooks/useDebouncedCallback.test.ts',
   'src/hooks/useJobComprehensionInfo.test.ts',
