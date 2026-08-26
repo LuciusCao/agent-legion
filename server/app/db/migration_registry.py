@@ -92,6 +92,8 @@ MIGRATIONS: list[SchemaMigration] = [
     # NULL-workspace rows are revoked before any scoped-token traffic can
     # observe them.
     SchemaMigration(58, "retire_global_register_tokens", migrate_retire_global_register_tokens),
+    # v59: jobs(run_id) index for the batch-queue run-scoped lookups (DDL-only).
+    SchemaMigration(59, "jobs_run_id_index"),
 ]
 
 assert [m.version for m in MIGRATIONS] == sorted(m.version for m in MIGRATIONS), (

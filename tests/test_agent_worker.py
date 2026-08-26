@@ -16,6 +16,7 @@ import urllib.error
 from pathlib import Path
 
 import pytest
+import requests
 
 from server.app.agent_broker.agent_bundle import build_agent_bundle
 from worker import executor as agent_worker
@@ -560,7 +561,10 @@ def test_registration_retries_transient_host_errors_without_traceback(
         del config, token
         calls += 1
         if calls < 3:
-            raise urllib.error.URLError("host unavailable")
+            # The transport-level failure register_with_retry treats as
+            # "Host temporarily unavailable" (requests raises RequestException
+            # subclasses; arbitrary exceptions are NOT retried anymore).
+            raise requests.ConnectionError("host unavailable")
         return {"worker_token": "worker-token", "workspaces": []}
 
     client.register = flaky_register  # type: ignore[method-assign]

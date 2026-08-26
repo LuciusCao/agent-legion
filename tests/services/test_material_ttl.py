@@ -294,16 +294,21 @@ def test_collect_keeps_material_within_grace(
 def test_collect_keeps_row_when_object_delete_fails(
     service: MaterialsService, storage: FakeStorage
 ) -> None:
+    """行先删、对象后删（事务外）：对象删除失败留下孤儿对象交给 bucket
+    lifecycle 兜底，行已删除（不再原地重试同一行）。"""
     material_id = _ready_material(service, storage, "retry.txt")
     _set_expires_at(material_id, f"-{DELETE_GRACE_SECONDS + 60} seconds")
     expire_due_materials(TEST_DATABASE_URL)
+    storage_key = str(_material_row(material_id)["storage_key"])
     storage.fail_deletes = True
 
-    assert collect_expired_materials(TEST_DATABASE_URL, storage) == 0
-    assert _material_row(material_id)["status"] == "expired"  # 留行下轮重试
-
-    storage.fail_deletes = False
+    # collect 仍成功（行删除与对象删除解耦），对象删除异常被逐条吞掉。
     assert collect_expired_materials(TEST_DATABASE_URL, storage) == 1
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute("select 1 from materials where id=%s", (material_id,)).fetchone()
+    assert row is None
+    # 对象删除失败 → 孤儿对象留存（bucket lifecycle rule 兜底，不重试行）。
+    assert storage_key in storage.objects
 
 
 def test_thread_run_once_noop_without_storage(service: MaterialsService) -> None:

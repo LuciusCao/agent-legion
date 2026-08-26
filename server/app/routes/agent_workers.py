@@ -232,7 +232,9 @@ def create_agent_workers_router(
 
     @router.post("/agent-executions/{execution_id}/result", status_code=204)
     async def result(execution_id: str, request: Request) -> Response:
-        worker = authorize_worker(request)
+        # authenticate() hits the DB (read + throttled liveness write) per
+        # report; it must not run on the loop alongside the SSE/WS heartbeats.
+        worker = await concurrency.run_in_threadpool(authorize_worker, request)
         worker_id = str(worker["worker_id"])
         lease_id = require_lease_id(request)
         # Validate metadata fully BEFORE writing the archive: malformed input

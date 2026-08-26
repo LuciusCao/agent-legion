@@ -6,6 +6,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+import requests
+
 from worker._retry import run_with_retry
 from worker.host_client import Client, WorkerAuthError
 from worker.registration_token import registration_tokens
@@ -47,7 +49,11 @@ def register_with_retry(
     try:
         return run_with_retry(
             attempt,
-            retriable=(Exception,),
+            # Only transport-level failures are "Host temporarily unavailable".
+            # A blanket (Exception,) here would also retry TypeError/KeyError
+            # bugs inside the attempt forever, disguising them as network
+            # outages; those must crash loudly instead.
+            retriable=(requests.RequestException,),
             terminal=(WorkerAuthError,),
             base_seconds=max(0.2, initial_backoff),
             cap_seconds=60.0,

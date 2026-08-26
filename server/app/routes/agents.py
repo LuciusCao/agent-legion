@@ -2,6 +2,7 @@ import logging
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
+from starlette import concurrency
 
 from ..auth.dependencies import SESSION_COOKIE, require_user
 from ..events.agents import AgentStatusManager
@@ -37,8 +38,15 @@ def create_agents_router(agent_manager: AgentStatusManager) -> APIRouter:
     async def agents_ws(websocket: WebSocket) -> None:
         # WS handshakes carry the session cookie same-site; router-level
         # dependencies cannot run on websocket scopes, so authenticate here.
+        # authenticate() is a synchronous DB read — off the loop, matching the
+        # MCP mount's anyio.to_thread handling of the same service.
         auth = websocket.app.state.auth_service
-        if auth.authenticate(websocket.cookies.get(SESSION_COOKIE, "")) is None:
+        if (
+            await concurrency.run_in_threadpool(
+                auth.authenticate, websocket.cookies.get(SESSION_COOKIE, "")
+            )
+            is None
+        ):
             await websocket.close(code=4401)
             return
         await agent_manager.connect(websocket)

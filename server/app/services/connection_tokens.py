@@ -3,13 +3,16 @@
 Acquired tokens live Fernet-encrypted in ``connection_tokens`` (VAULT-SECRET-001
 extends to instance scope). ``get_token`` is the single read path: a valid
 cached token is returned directly; an expired/missing one is refreshed while
-holding a row lock on the parent connection row, so a burst of concurrent
-callers (e.g. 96 workers) triggers at most one credential exchange — for
-login-based adapters this is what keeps rate limits and account lockouts away.
-The lock is held across the refresh (network IO included) by design: only
-concurrent refreshers of the same connection queue; readers of a valid token
-never touch the lock. Adapters must use bounded network timeouts so a hung
-upstream cannot hold the row lock indefinitely.
+holding a connection-scoped advisory lock (NOT the external_connections row
+lock): a burst of concurrent callers (e.g. 96 workers) triggers at most one
+credential exchange — for login-based adapters this is what keeps rate
+limits and account lockouts away. Only concurrent refreshers of the same
+connection queue; readers of a valid token never touch the lock. Unlike the
+retired row-lock design, the advisory lock blocks no row and pins no
+connection-pool peer (the pool is 32; 10-20s HTTP waits under a row lock
+could starve it on a cold/expired connection). Adapters must use bounded
+network timeouts so a hung upstream cannot hold the advisory lock
+indefinitely.
 
 Call sites that receive an upstream auth failure (HTTP 401/403 or an in-band
 auth error code) should report it via ``NodeContext.report_auth_failure``
@@ -66,13 +69,29 @@ class ConnectionTokenService:
         self._settings_config = settings_config
 
     def get_token(self, key: str) -> str:
-        """Return a valid token, refreshing under a row lock when needed."""
+        """Return a valid token, refreshing under a connection-scoped lock."""
         cached = self._read_valid(key)
         if cached is not None:
             return cached
+        return self._refresh_token(key)
+
+    def _refresh_token(self, key: str) -> str:
+        """Single-flight refresh: one credential exchange per connection.
+
+        The advisory lock serializes refreshers of the same connection; the
+        exchange itself (network IO) runs with NO transaction and NO row
+        locks held, so a slow upstream never pins pool connections. The
+        cached-token check inside the lock makes queued losers of the race
+        reuse the winner's token instead of exchanging again.
+        """
         with write_transaction(self._dsn) as conn:
+            # pg_advisory_xact_lock keys on the connection key text: scope is
+            # per connection, unrelated keys never queue on each other.
+            conn.execute(
+                "select pg_advisory_xact_lock(hashtext('agent-legion-conn-token:' || %s))", (key,)
+            )
             locked = conn.execute(
-                "select key, enabled from external_connections where key=%s for update", (key,)
+                "select key, enabled from external_connections where key=%s", (key,)
             ).fetchone()
             if locked is None:
                 raise NotFoundError(f"connection {key!r} 不存在")
@@ -86,10 +105,14 @@ class ConnectionTokenService:
             token = self._decrypt_if_valid(row)
             if token is not None:
                 return token
-            # Re-resolve config/secrets *after* taking the row lock: resolving
-            # before it would let a caller that queued behind a concurrent
-            # admin update exchange the already-replaced credentials and cache
-            # a token for them.
+            # Single-flight: hold the advisory lock ACROSS the exchange so
+            # concurrent refreshers queue here instead of each performing
+            # the credential exchange (login adapters are rate-limit and
+            # lockout sensitive). No row locks are held and no other DB
+            # work is blocked: pool peers see a normal open transaction.
+            # Resolve config/secrets after taking the lock: resolving before
+            # it would let a caller that queued behind a concurrent admin
+            # update exchange the already-replaced credentials.
             adapter, config, secrets = self._connections._resolved(key)
             try:
                 acquired = adapter.authenticate(config, secrets)

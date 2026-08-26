@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react'
 import type { StudioChat } from './useStudioChat'
 import { useChatAutoScroll } from './useChatAutoScroll'
 import {
@@ -57,31 +58,43 @@ function StatusLine({ message }: { message: ChatMessage }) {
 export function StudioChatMessageList(props: Props) {
   const { chat } = props
   const { bottomRef, listRef, handleScroll } = useChatAutoScroll(chat.messages)
-  const toolCallByFirstMessage = new Map<string, ToolCallView>()
-  const seen = new Set<string>()
-  for (const message of chat.messages) {
-    if (message.kind !== 'tool_call') continue
-    const call = chat.toolCalls.find(
-      (view) => view.toolCallId === toolCallIdOf(message)
-    )
-    const id = toolCallIdOf(message)
-    if (id && call && !seen.has(id)) {
-      seen.add(id)
-      toolCallByFirstMessage.set(message.id, call)
+  // Memoized: during streaming every SSE message event re-renders this list;
+  // the toolCall lookup is O(messages × toolCalls) if rebuilt naively, and a
+  // Map keyed by toolCallId makes it O(messages + toolCalls).
+  const toolCallById = useMemo(
+    () => new Map(chat.toolCalls.map((view) => [view.toolCallId, view])),
+    [chat.toolCalls]
+  )
+  const toolCallByFirstMessage = useMemo(() => {
+    const map = new Map<string, ToolCallView>()
+    const seen = new Set<string>()
+    for (const message of chat.messages) {
+      if (message.kind !== 'tool_call') continue
+      const id = toolCallIdOf(message)
+      const call = id ? toolCallById.get(id) : undefined
+      if (id && call && !seen.has(id)) {
+        seen.add(id)
+        map.set(message.id, call)
+      }
     }
-  }
+    return map
+  }, [chat.messages, toolCallById])
 
   // workflow 草稿卡片挂在最后一个携带该 yaml 的工具调用后面。
-  const draftAnchorId = chat.workflowDraft
-    ? (chat.toolCalls
-        .filter(
-          (call) =>
-            call.rawInput?.definition_yaml === chat.workflowDraft!.yaml &&
-            (call.title.toLowerCase().includes('validate_workflow') ||
-              call.title.toLowerCase().includes('compare_workflow'))
-        )
-        .slice(-1)[0]?.toolCallId ?? null)
-    : null
+  const draftAnchorId = useMemo(
+    () =>
+      chat.workflowDraft
+        ? (chat.toolCalls
+            .filter(
+              (call) =>
+                call.rawInput?.definition_yaml === chat.workflowDraft!.yaml &&
+                (call.title.toLowerCase().includes('validate_workflow') ||
+                  call.title.toLowerCase().includes('compare_workflow'))
+            )
+            .slice(-1)[0]?.toolCallId ?? null)
+        : null,
+    [chat.toolCalls, chat.workflowDraft]
+  )
 
   return (
     <div
@@ -109,7 +122,9 @@ function toolCallIdOf(message: ChatMessage): string {
   return typeof content?.toolCallId === 'string' ? content.toolCallId : ''
 }
 
-function MessageItem({
+// Memoized per message: a streaming update appends/touches one message, and
+// the rest of the (potentially long) list should not re-render for it.
+const MessageItem = memo(function MessageItem({
   message,
   props,
   toolCall,
@@ -202,4 +217,4 @@ function MessageItem({
     return <StatusLine message={message} />
   }
   return null
-}
+})

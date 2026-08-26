@@ -240,4 +240,4 @@ def test_upgrade_from_v45_with_legacy_global_index() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "retire_global_register_tokens"
+    assert migration["name"] == "jobs_run_id_index"

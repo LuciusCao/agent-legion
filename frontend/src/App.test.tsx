@@ -13,7 +13,11 @@ const { connectAgentsWs, disconnectAgentsWs } = vi.hoisted(() => ({
 }))
 
 vi.mock('./stores/agentsStore', () => ({
-  useAgentsStore: () => ({ connectAgentsWs }),
+  // App subscribes with a field selector ((s) => s.connectAgentsWs); the
+  // mock store keeps both call shapes working.
+  useAgentsStore: (
+    selector?: (state: { connectAgentsWs: unknown }) => unknown
+  ) => (selector ? selector({ connectAgentsWs }) : { connectAgentsWs }),
 }))
 
 vi.mock('./AppRoutes', () => ({

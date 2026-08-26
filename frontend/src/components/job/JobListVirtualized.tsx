@@ -50,9 +50,9 @@ export function JobListVirtualized({
               jobId={jobId}
               selected={selectedIds.has(jobId)}
               selectMode={selectMode}
-              virtualRow={virtualRow}
+              virtualRowStart={virtualRow.start}
               workspaceId={workspaceId}
-              onToggleSelect={() => onToggleSelect(jobId)}
+              onToggleSelect={onToggleSelect}
             />
           )
         })}

@@ -83,6 +83,19 @@ export default function JobDetailPage() {
     [jobId]
   )
 
+  // Write the actions panel only when its visible inputs actually change:
+  // the 5s running-state poll produces a fresh `detail` object every cycle,
+  // and pushing a new JSX element into uiStore each time re-renders the whole
+  // layout (WorkspaceLayout subscribes to detailPageActions).
+  const actionsSignature = detail
+    ? [
+        detail.job.status,
+        detail.job.updated_at,
+        detail.job.completed_nodes,
+        detail.job.total_nodes,
+        actionLoading,
+      ].join('|')
+    : null
   useEffect(() => {
     if (!detail) {
       setDetailPageActions(null)
@@ -104,11 +117,16 @@ export default function JobDetailPage() {
       />
     )
     return () => setDetailPageActions(null)
+    // deps: `actionLoading` reaches this effect only through actionsSignature
+    // above — the 5s running-state poll produces a fresh `detail` object every
+    // cycle, and listing the raw value would refire this effect (and re-push
+    // a visually identical JSX node into uiStore) on every poll.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    detail,
-    setDetailPageActions,
+    actionsSignature,
     nodeCatalog,
-    actionLoading,
+    setDetailPageActions,
+    detail,
     handleRerun,
     handleRunTo,
     handleContinue,
