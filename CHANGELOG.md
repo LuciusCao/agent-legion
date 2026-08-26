@@ -6,6 +6,51 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Security
+
+- Vault plaintext compatibility window closed (VAULT-SECRET-001): schema v57
+  sweeps legacy plaintext node-config secrets from
+  `workspaces.node_config_json` and `jobs.frozen_config_json` into the
+  workspace vault (dropped with a warning when no master key is configured);
+  the node-config save chain vaults inherited legacy plaintext instead of
+  carrying it forward; workflow publish validation rejects secret-marked node
+  config fields holding plaintext (only `{"secret_ref": ...}` markers are
+  accepted).
+- Skill source git argument-injection hardened: option-shaped or
+  transport-helper repo values (`--upload-pack=...`, `ext::...`), invalid
+  refnames, and non-hex locked commits are rejected before any git subprocess
+  is spawned; `clone`/`fetch`/`checkout` positionals are `--`-separated.
+- Removed the dead `vault_resources.py` module (unimportable since the
+  resource-providers retirement).
+- The `worker/` package now rides the 85% coverage floor with `server/`
+  (measured baseline 93%), with a dedicated 90% per-partition floor.
+
+### Added
+
+- CSRF negative-path test: cookie-authenticated mutations without the
+  `x-agent-legion-request` header are rejected with 403 (SECURITY-AUTH-001).
+
+### Changed
+
+- **Breaking (deployments):** the global worker register token is retired —
+  registration uses workspace-scoped tokens only, issued per workspace in the
+  admin UI (设置 → Worker Token, workspace is now mandatory at issuance) and
+  managed in the Worker console's new "Workspace 访问" panel; leftover
+  `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` env vars or yaml
+  `agent_workers.register_token(_file)` keys now fail startup with migration
+  guidance (#35, schema v58).
+- Worker registration presents all configured scoped tokens in one call
+  (`X-Agent-Worker-Register-Tokens`); the Host resolves the union workspace
+  scope, rejects the whole registration when any token is revoked, and returns
+  per-workspace rows (id + name) so the console labels each token (#35).
+- `GET /api/agent-workers?workspace_id=...` narrows to workers registered
+  with that workspace's tokens; each workspace's settings page shows a
+  read-only worker list, while legacy `[]`-scope (global-token) workers are
+  admin-visible only until re-registered (#35).
+- Compose stacks no longer mount `agent_worker_register_token`; workers get
+  their scoped token via the console or `workerctl configure
+  --register-token-file` (#35).
+
 ## [0.3.0-alpha] - 2026-08-25
 
 ### Added

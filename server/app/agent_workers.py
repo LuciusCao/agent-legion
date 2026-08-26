@@ -83,12 +83,12 @@ class AgentWorkerRegistry:
             require_model_runtime=protocol_version >= MODEL_RUNTIME_PROTOCOL_VERSION,
         )
         # The workspace scope is ALWAYS resolved server-side from the presented
-        # registration credential (route layer), never from Worker fields:
-        # global register token -> [] (all workspaces, the pre-v7 behavior);
-        # scoped token -> [workspace_id]. Re-registering rotates the token AND
-        # refreshes the scope from the current credential — revoking a scoped
-        # register token therefore only bites at the next re-registration, it
-        # does not narrow an already-registered Worker's stored scope.
+        # registration credentials (route layer), never from Worker fields:
+        # each scoped register token contributes its workspace id; the merged
+        # list is stored. Re-registering rotates the token AND refreshes the
+        # scope from the current credentials — revoking a scoped register
+        # token therefore only bites at the next re-registration, it does not
+        # narrow an already-registered Worker's stored scope.
         scope = sorted({str(workspace) for workspace in (allowed_workspaces or [])})
         secret = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(secret.encode()).hexdigest()
@@ -141,23 +141,26 @@ class AgentWorkerRegistry:
         return f"{worker_id}.{secret}"
 
     def issue_register_token(self, *, workspace_id: str | None, label: str = "") -> tuple[str, str]:
-        """Issue a scoped registration token; returns (token_id, plaintext).
+        """Issue a workspace-scoped registration token; returns (token_id, plaintext).
 
-        workspace_id=None mints a token that admits Workers to ALL workspaces.
-        Only the sha256 hash is stored; the plaintext is returned exactly once.
+        workspace_id is required: the all-workspaces token variant was retired
+        with the global register token (issue #35) — every registration must be
+        attributable to exactly one workspace. Only the sha256 hash is stored;
+        the plaintext is returned exactly once.
         """
+        if workspace_id is None:
+            raise ValueError("workspace_id is required (all-workspaces tokens are retired)")
         if len(label) > _MAX_TOKEN_LABEL_LENGTH:
             raise ValueError(f"register token label exceeds {_MAX_TOKEN_LABEL_LENGTH} chars")
         token_id = uuid.uuid4().hex
         secret = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(secret.encode()).hexdigest()
         with write_transaction(self.database_dsn) as conn:
-            if workspace_id is not None:
-                exists = conn.execute(
-                    "select 1 from workspaces where id=%s", (workspace_id,)
-                ).fetchone()
-                if exists is None:
-                    raise ValueError(f"workspace {workspace_id!r} does not exist")
+            exists = conn.execute(
+                "select 1 from workspaces where id=%s", (workspace_id,)
+            ).fetchone()
+            if exists is None:
+                raise ValueError(f"workspace {workspace_id!r} does not exist")
             conn.execute(
                 "insert into agent_register_tokens(id, token_hash, workspace_id, label)"
                 " values (%s, %s, %s, %s)",
@@ -165,26 +168,44 @@ class AgentWorkerRegistry:
             )
         return token_id, f"{token_id}.{secret}"
 
-    def resolve_register_scope(self, token: str) -> list[str] | None:
-        """Resolve a presented scoped register token to its workspace scope.
+    def resolve_register_scope(self, tokens: Sequence[str]) -> list[dict[str, Any]] | None:
+        """Resolve presented scoped register tokens to their workspace scopes.
 
-        Returns [] for an all-workspaces token, [workspace_id] for a scoped
-        one, or None when the token is unknown or revoked."""
-        token_id, separator, secret = token.partition(".")
-        if not separator or not token_id or not secret:
+        Takes the worker's full token list; every token must resolve to a live
+        (non-revoked) workspace-scoped token — one bad token fails the whole
+        registration so a stale token can never silently narrow the scope.
+        Returns the merged scope as [{'workspace_id', 'workspace_name',
+        'token_ids'}] rows (deduplicated; token_ids records which presented
+        tokens opened the workspace), or None when nothing resolved."""
+        presented = [token for token in tokens if token]
+        if not presented:
             return None
+        scopes: dict[str, dict[str, Any]] = {}
         with read_connection(self.database_dsn) as conn:
-            row = conn.execute(
-                "select * from agent_register_tokens where id=%s", (token_id,)
-            ).fetchone()
-        if row is None or row["revoked_at"] is not None:
-            return None
-        digest = hashlib.sha256(secret.encode()).hexdigest()
-        if not hmac.compare_digest(digest, row["token_hash"]):
-            return None
-        if row["workspace_id"] is None:
-            return []
-        return [str(row["workspace_id"])]
+            for token in presented:
+                token_id, separator, secret = token.partition(".")
+                if not separator or not token_id or not secret:
+                    return None
+                row = conn.execute(
+                    "select t.token_hash, t.revoked_at, t.workspace_id, w.name"
+                    " from agent_register_tokens t join workspaces w on w.id = t.workspace_id"
+                    " where t.id=%s",
+                    (token_id,),
+                ).fetchone()
+                if row is None or row["revoked_at"] is not None or row["workspace_id"] is None:
+                    return None
+                digest = hashlib.sha256(secret.encode()).hexdigest()
+                if not hmac.compare_digest(digest, row["token_hash"]):
+                    return None
+                entry = scopes.setdefault(
+                    str(row["workspace_id"]),
+                    {"workspace_name": str(row["name"]), "token_ids": []},
+                )
+                entry["token_ids"].append(token_id)
+        return [
+            {"workspace_id": workspace_id, **entry}
+            for workspace_id, entry in sorted(scopes.items())
+        ]
 
     def list_register_tokens(self) -> list[dict[str, Any]]:
         """List issued register tokens; never includes hash or plaintext."""
@@ -233,9 +254,23 @@ class AgentWorkerRegistry:
         # when the throttled write was skipped.
         return _worker_payload({**row, "last_seen_at": datetime.now(UTC)})
 
-    def list_workers(self) -> list[dict[str, Any]]:
+    def list_workers(self, workspace_id: str | None = None) -> list[dict[str, Any]]:
+        """List registered workers, optionally narrowed to one workspace.
+
+        A workspace view only ever sees workers whose stored scope contains
+        that workspace (i.e. registered with one of its scoped tokens); the
+        [] legacy scope (global-token registrations) is excluded on purpose —
+        those workers are visible to admins only until they re-register."""
         with read_connection(self.database_dsn) as conn:
-            rows = conn.execute("select * from agent_workers order by worker_id").fetchall()
+            if workspace_id is None:
+                rows = conn.execute("select * from agent_workers order by worker_id").fetchall()
+            else:
+                rows = conn.execute(
+                    "select * from agent_workers"
+                    " where allowed_workspaces_json::jsonb @> jsonb_build_array(%s::text)"
+                    " order by worker_id",
+                    (workspace_id,),
+                ).fetchall()
         return [_worker_payload(row) for row in rows]
 
     def revoke(self, worker_id: str) -> bool:

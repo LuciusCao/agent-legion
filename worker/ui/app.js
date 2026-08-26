@@ -116,7 +116,7 @@ function renderStatus(status) {
       : "未登记",
   );
   const scope = status.host_worker?.allowed_workspaces;
-  setText("workspace-scope", scope ? (scope.length ? scope.join(", ") : "全部") : "—");
+  renderWorkspaceScope(status, scope);
   setText("worker-name", status.host_worker?.name || status.host_worker?.worker_id || "本机 Worker");
   setText("diagnostic-host", status.host_reachable ? "连接正常" : friendlyConnectionError(status.connection_error));
   // 顶栏圆点是唯一的全局连接指示：title 携带 Host 可达性与最后同步时间
@@ -165,7 +165,6 @@ function fillForm(config) {
       form.elements[key].value = value;
     }
   }
-  setText("register-token-state", config.register_token_configured ? "已配置；留空保持不变" : "尚未配置");
 }
 
 export function formatElapsed(started_at, now = Date.now()) {
@@ -534,6 +533,93 @@ async function loadConfig() {
   } catch (error) { errorBox.textContent = `加载配置失败：${error.message}`; }
 }
 
+// ---- Scoped token 管理（issue #35）：卡片列表渲染与增删 ----
+const TOKEN_STATE_LABEL = { ok: "已验证", pending: "验证中…", rejected: "已失效 · 无法注册" };
+
+export function tokenCardModel(row, workspaces) {
+  // Host 在每个 workspace 行里记录开通它的 token id（token_ids）；按
+  // row.token_id 反查，不能把第一张卡片以外的 token 都标成同一个 workspace。
+  const detail = (workspaces || []).find((item) => (item.token_ids || []).includes(row.token_id));
+  return {
+    token_id: row.token_id,
+    state: row.state || "pending",
+    stateLabel: TOKEN_STATE_LABEL[row.state] || row.state,
+    workspaceName: detail?.workspace_name,
+    workspaceId: detail?.workspace_id,
+  };
+}
+
+async function loadRegisterTokens() {
+  const listEl = document.querySelector("#token-list");
+  const emptyEl = document.querySelector("#token-empty");
+  const errEl = document.querySelector("#token-error");
+  if (!listEl) return;
+  try {
+    const [tokenPayload, status] = await Promise.all([api("/api/register-tokens"), api("/api/status")]);
+    const workspaces = status.workspaces || [];
+    const cards = (tokenPayload.tokens || []).map((row) => tokenCardModel(row, workspaces));
+    listEl.querySelectorAll(".token-card").forEach((el) => el.remove());
+    emptyEl.hidden = cards.length > 0;
+    for (const card of cards) {
+      listEl.insertAdjacentHTML("beforeend", renderTokenCard(card));
+    }
+    bindTokenCardActions();
+  } catch (error) {
+    if (errEl) { errEl.hidden = false; errEl.textContent = `加载 Token 列表失败：${error.message}`; }
+  }
+}
+
+function renderTokenCard(card) {
+  const ws = card.workspaceName
+    ? `<span class="token-ws"><svg class="ws-icon" aria-hidden="true"><use href="/assets/icons.svg#grid"></use></svg><span class="ws-name">${escapeHtml(card.workspaceName)}</span><span class="ws-id">${escapeHtml(card.workspaceId || "")}</span></span>`
+    : `<span class="token-ws"><span class="ws-id">等待 Host 返回 workspace 信息</span></span>`;
+  return `<div class="token-card" data-state="${card.state}">
+    <div class="token-main">
+      <span class="token-id">${escapeHtml(card.token_id)}</span>
+      ${ws}
+    </div>
+    <span class="token-state ${card.state}" title="${escapeHtml(card.stateLabel)}">${escapeHtml(card.stateLabel)}</span>
+    <button type="button" class="token-remove" data-token-id="${escapeHtml(card.token_id)}">移除</button>
+  </div>`;
+}
+
+function bindTokenCardActions() {
+  document.querySelectorAll(".token-remove").forEach((button) => {
+    button.onclick = async () => {
+      const tokenId = button.dataset.tokenId;
+      if (!window.confirm(`确定移除 Token「${tokenId}」吗？移除后将重启并按剩余 Token 重新注册。`)) return;
+      try {
+        renderStatus(await api(`/api/register-tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" }));
+        setNotice("Token 已移除，正在按剩余 Token 重注册");
+        await loadRegisterTokens();
+        await loadLogs();
+      } catch (error) { showTokenError(error.message); }
+    };
+  });
+}
+
+function showTokenError(message) {
+  const errEl = document.querySelector("#token-error");
+  if (errEl) { errEl.hidden = false; errEl.textContent = message; }
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+}
+
+function renderWorkspaceScope(status, scope) {
+  const container = document.querySelector("#workspace-scope");
+  if (!container) return;
+  const workspaces = status.workspaces || [];
+  if (workspaces.length) {
+    container.innerHTML = workspaces
+      .map((item) => `<span class="ws-scope-chip">${escapeHtml(item.workspace_name || item.workspace_id)}</span>`)
+      .join("");
+    return;
+  }
+  container.textContent = scope ? (scope.length ? scope.join(", ") : "全部") : "—";
+}
+
 // ---- Host 监控面板：加载与 DOM 渲染（只看本机 Worker 切片） ----
 let metricsGranularity = "6h";
 
@@ -630,11 +716,9 @@ if (hasDom) {
         heartbeat_interval_seconds: numberField(data, "heartbeat_interval_seconds"),
         shutdown_grace_seconds: numberField(data, "shutdown_grace_seconds"),
       };
-      const registerToken = data.get("register_token").trim();
-      if (registerToken) payload.register_token = registerToken;
       const result = await api("/api/config", { method: "PUT", body: JSON.stringify(payload) });
       renderStatus(result.status);
-      form.elements.register_token.value = "";
+      await loadRegisterTokens();
       fillForm(result.config);
       setText("save-state", result.restarted ? "已保存并重启生效" : "已热更新");
       setNotice(result.restarted ? "配置已保存并重启" : "配置已保存");
@@ -642,6 +726,26 @@ if (hasDom) {
       loadMetrics();
     } catch (error) { errorBox.textContent = error.message; setText("save-state", "保存失败"); }
   });
+
+  const tokenAdd = document.querySelector("#token-add");
+  if (tokenAdd) {
+    tokenAdd.addEventListener("click", async () => {
+      const input = document.querySelector("#token-input");
+      const errEl = document.querySelector("#token-error");
+      const token = (input?.value || "").trim();
+      if (errEl) errEl.hidden = true;
+      if (!token) return;
+      tokenAdd.disabled = true;
+      try {
+        renderStatus(await api("/api/register-tokens", { method: "POST", body: JSON.stringify({ register_token: token }) }));
+        input.value = "";
+        setNotice("Token 已添加，正在重启验证");
+        await loadRegisterTokens();
+        await loadLogs();
+      } catch (error) { showTokenError(error.message); }
+      tokenAdd.disabled = false;
+    });
+  }
 
   document.querySelector("#restart").addEventListener("click", async () => {
     actionMenu.hidden = true;
@@ -681,7 +785,7 @@ if (hasDom) {
     setText("status-detail", "请刷新页面并按提示输入控制令牌；本机默认走 http://127.0.0.1:8787/ 访问时自动注入");
     errorBox.textContent = "控制令牌未注入，页面不可用";
   } else {
-    Promise.all([loadConfig(), loadStatus(), loadLogs(), loadMetrics()]);
+    Promise.all([loadConfig(), loadRegisterTokens(), loadStatus(), loadLogs(), loadMetrics()]);
     setInterval(loadStatus, 5000);
     setInterval(loadMetrics, 30000);
   }

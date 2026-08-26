@@ -13,7 +13,6 @@ LLM gateway 是独立基础设施，不属于 Agent Worker 协议。Worker 容�
 ```bash
 mkdir -p deploy/secrets
 openssl rand -hex 32 > deploy/secrets/postgres_password
-openssl rand -hex 32 > deploy/secrets/agent_worker_register_token
 UV_CACHE_DIR=.uv-cache uv run python -c \
   "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
   > deploy/secrets/vault_master_key
@@ -28,7 +27,7 @@ postgres:5432:agent_legion:agent_legion:<postgres-password>
 将这一行保存为 `deploy/secrets/postgres_pgpass`，然后限制密钥文件权限：
 
 ```bash
-chmod 600 deploy/secrets/postgres_password deploy/secrets/postgres_pgpass deploy/secrets/agent_worker_register_token deploy/secrets/vault_master_key
+chmod 600 deploy/secrets/postgres_password deploy/secrets/postgres_pgpass deploy/secrets/vault_master_key
 ```
 
 `vault_master_key` 是实例 vault 的主密钥：必须是 32 字节密钥的 URL-safe Base64 编码（Fernet 格式），所以用上面的 `Fernet.generate_key()` 生成而不是 `openssl rand`——格式不对会在 vault 写入 / `secret_ref` 解析时报 `Vault master key is not a valid Fernet key`。compose 把它挂为 `AGENT_LEGION_VAULT_MASTER_KEY_FILE` 注入 Host（见 `deploy/compose.host.yaml`），`scripts/stack-prod-up.sh` 启动前对它 fail-fast 检查，缺失会直接拒绝启动并指向本节。
@@ -100,14 +99,13 @@ mkdir -p deploy/secrets
 
 无需先复制或编辑 Worker YAML：首次启动会导入仓库内的引导配置，随后在本机控制台填写 Host 地址、Worker ID 和能力。已有引导 YAML（如复制自 `deploy/worker.remote.example.yaml`）的机器可继续使用；启动前设置 `AGENT_WORKER_CONFIG=./<your-worker>.yaml`，Worker Service 会在首次启动时导入它。
 
-Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope**，`worker.yaml` 不需要也不允许声明 workspace。两种 token：
+Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope**，`worker.yaml` 不需要也不允许声明 workspace（issue #35 后全局 token 已退役，只保留 scoped token 一种）：
 
-- **全局 token**：把部署机的 `deploy/secrets/agent_worker_register_token` 安全复制到 Worker 机器的同一路径；不要把它提交到 Git。Worker 注册后可承接全部 workspace 的任务。
-- **Scoped token（需要把 Worker 隔离到单个 workspace 时使用）**：推荐在 Host Web UI 的「设置 → Worker Token」页面签发与管理：填写标签与可选的 workspace 范围即可创建，明文只显示一次，复制后保存为 Worker 机器上的 `deploy/secrets/agent_worker_register_token`（权限 600）。该页面同时支持查看/吊销已签发 token 与吊销已注册 Worker。
+- **Scoped token（唯一方式）**：在 Host Web UI 的「设置 → Worker Token」页面签发与管理：填写标签并**选择 workspace（必选）**即可创建，明文只显示一次。复制后到 Worker 机器的 Worker 控制台（`http://<worker>:8787` 配置页）「Workspace 访问（Scoped Token）」区块粘贴添加；无显示器的设备可用 `workerctl configure --register-token-file <file>` 导入。一个 Worker 可添加多个不同 workspace 的 token：注册时全部呈现，Host 取并集作为 scope；任何一个 token 失效（吊销/未知）都会让整次注册 401。该页面同时支持查看/吊销已签发 token 与吊销已注册 Worker。
 
-  该 Worker 注册后只能看到并 claim 对应 workspace 的任务。
+  该 Worker 注册后只能看到并 claim 对应 workspace 的任务；Host 侧每个 workspace 的设置页也只显示用本 workspace token 注册的 Worker（管理员仍可见全量）。
 
-  注意：这些管理端点（UI 与下列 curl 共用的 `/api/agent-register-tokens*`、`/api/agent-workers/*/revoke`）要求 **admin 会话**调用，必须携带登录 cookie 与 CSRF header（见 Host Web UI 登录后的会话）。Worker 注册本身仍必须凭 register token（全局或 scoped），不受影响。
+  注意：这些管理端点（UI 与下列 curl 共用的 `/api/agent-register-tokens*`、`/api/agent-workers/*/revoke`）要求 **admin 会话**调用，必须携带登录 cookie 与 CSRF header（见 Host Web UI 登录后的会话）。Worker 注册本身仍必须凭 scoped token，不受影响。
 
   也可以用 curl 在部署机上签发（备选方式）。这些请求需要 admin 会话：先在 Host Web UI 登录（或调用 `/api/auth/login`）取得登录 cookie，并在请求中带上 CSRF header，否则返回 401/403。
 
@@ -227,11 +225,13 @@ docker compose -f deploy/compose.worker.yaml exec worker workerctl configure \
   --max-concurrency 10 \
   --capability subtitle_review \
   --model openai/gpt-5.2 \
-  --register-token-file /run/secrets/agent_worker_register_token \
+  --register-token-file ./marketing.token \
   --label os=linux --label arch=arm64
 ```
 
-`--register-token-file` 在 Worker 本机读取 Host 签发的 token，再通过 loopback 控制 API 写入权限为 0600 的状态文件；不要把 token 明文放进命令参数或 shell 历史。对于树莓派、云服务器等无显示器设备，上述 `workerctl` 命令覆盖初始化、状态检查、能力和模型声明、动态扩容、claim 开关、日志与进程重启，不依赖浏览器。
+`./marketing.token` 是本机保存的 scoped token 文件（从 Host Web UI 复制明文后以 0600 权限保存，文件名自定）；compose 不再挂载全局 token。
+
+`--register-token-file` 在 Worker 本机读取 Host 签发的 scoped token，再通过 loopback 控制 API 写入权限为 0600 的状态文件（与控制台「添加并验证」同构）；不要把 token 明文放进命令参数或 shell 历史。重复执行可添加多个 workspace 的 token。对于树莓派、云服务器等无显示器设备，上述 `workerctl` 命令覆盖初始化、状态检查、能力和模型声明、动态扩容、claim 开关、日志与进程重启，不依赖浏览器。
 
 ### 崩溃重启与失败状态
 
@@ -254,12 +254,12 @@ Quick Start 已含命令）：
 
 1. `cp config/agent-worker.example.yaml config/agent-worker.yaml`，按本机改
    `host_url`（dev 栈后端端口，默认 `http://127.0.0.1:8001`）、
-   `register_token_file: deploy/secrets/agent_worker_register_token`、
    `work_root: data/agent-worker`，并按要跑的 workflow 声明
    `capabilities` / `models`。
-2. 注册 token 文件必须在**后端首次启动之前**创建——后端在启动时读取它；
-   先起后端、后补 token 文件会导致 Worker 注册 401，此时重启一次后端即可
-   对齐。
+2. 起后端并登录 Host Web UI，在「设置 → Worker Token」为目标 workspace 签发
+   scoped token；到 Worker 控制台（默认 `http://127.0.0.1:8789`）的
+   「Workspace 访问（Scoped Token）」区块粘贴添加。Worker 侧 token 随时可以
+   补——注册失败只影响 Worker 自身，不需要重启后端。
 3. 重跑 `make dev-up`（幂等）启动 Worker，然后在 worker 控制台打开
    `claim_enabled`（默认关闭，见下方检查单第 3 条）。
 

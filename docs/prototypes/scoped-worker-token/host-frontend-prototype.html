@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Host 前端 — Scoped Token 原型（管理员设置页 + Workspace Worker 视图）</title>
+    <style>
+      /* 复刻 frontend/src/components/settings/WorkerTokensSection.module.css 视觉体系（浅色） */
+      * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
+      body {
+        margin: 0;
+        font-family: -apple-system, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+        background: #f7f8fa;
+        color: #1f2329;
+      }
+      .page { max-width: 860px; margin: 0 auto; padding: 28px 20px 80px; }
+      .page > h1 { font-size: 20px; margin: 0 0 4px; }
+      .page > .sub { font-size: 13px; color: #74777f; margin: 0 0 24px; }
+
+      .card {
+        border: 1px solid #c3c6cf;
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 16px;
+        background: #fff;
+      }
+      .heading { font-size: 14px; font-weight: 500; margin: 0 0 12px; color: #43474e; }
+      .hint { font-size: 12px; color: #74777f; margin: 8px 0 0; }
+      .error { font-size: 13px; color: #c62828; margin: 8px 0 0; }
+      .row { display: flex; gap: 8px; align-items: center; }
+      .input {
+        flex: 1; min-width: 0; padding: 8px 10px;
+        border: 1px solid #c3c6cf; border-radius: 8px; font-size: 14px;
+      }
+      .button {
+        padding: 8px 14px; border: none; border-radius: 8px;
+        background: #1a73e8; color: #fff; font-size: 14px; cursor: pointer; flex-shrink: 0;
+      }
+      .button:disabled { background: #9bbdf0; cursor: default; }
+      .dangerButton {
+        padding: 6px 12px; border: 1px solid #c62828; border-radius: 8px;
+        background: #fff; color: #c62828; font-size: 13px; cursor: pointer; flex-shrink: 0;
+      }
+      .list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 12px; }
+      .listItem {
+        display: flex; align-items: center; gap: 12px;
+        padding: 12px; border: 1px solid #c3c6cf; border-radius: 12px; background: #fff;
+      }
+      .itemLabel {
+        flex: 1; font-weight: 500; min-width: 0;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .chip {
+        font-size: 12px; padding: 2px 8px; border-radius: 999px;
+        background: #f0f0f0; color: #43474e; flex-shrink: 0;
+      }
+      .chipActive { background: #e6f4ea; color: #1e7e34; }
+      .chipRevoked { background: #ffebee; color: #b71c1c; }
+      .chipScope { background: #e8f0fe; color: #1a56b0; }
+      .tokenBox {
+        font-family: monospace; font-size: 13px; background: #f5f5f5;
+        border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 10px;
+        word-break: break-all; margin: 8px 0;
+      }
+      .warning { font-size: 13px; color: #b71c1c; margin: 8px 0 0; }
+      .empty { font-size: 13px; color: #74777f; margin: 0 0 12px; }
+
+      /* ===== 原型新增样式 ===== */
+      /* workspace 选择改为下拉（admin 端新增：不能再签发“全部 workspace”token） */
+      select.input { appearance: auto; }
+      /* 已注册 Worker 行新增：通过哪个 token 注册（可见性依据） */
+      .viaToken { font-size: 12px; color: #74777f; flex-shrink: 0; }
+      /* workspace 视图卡片里的 worker 列表（复用同一卡片语言） */
+      .sectionGap { margin-top: 32px; }
+      .demoNote {
+        border-left: 3px solid #1a73e8; background: #e8f0fe; border-radius: 0 8px 8px 0;
+        padding: 10px 14px; font-size: 12px; color: #1a56b0; margin-bottom: 20px;
+      }
+      .demo-bar {
+        position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+        z-index: 99; display: flex; align-items: center; gap: 8px;
+        padding: 10px 14px; border: 1px solid #c3c6cf; border-radius: 12px;
+        background: rgba(255, 255, 255, .97); box-shadow: 0 8px 28px rgba(0, 0, 0, .12);
+        font-size: 12px; color: #74777f;
+      }
+      .demo-chip {
+        padding: 5px 12px; border-radius: 999px; border: 1px solid #c3c6cf;
+        background: #fff; font-size: 12px; cursor: pointer; color: #43474e;
+      }
+      .demo-chip.active { background: #e8f0fe; color: #1a56b0; border-color: #1a73e8; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>Host 前端 — Scoped Token 改造原型</h1>
+      <p class="sub">下方上半部分是「管理员 · 设置 → Worker Token」（签发界面调整）；下半部分是普通用户在某 workspace 内看到的 Worker 视图（按 token 签发范围过滤，全新）。</p>
+
+      <div class="demoNote">
+        设计要点：① 签发时 workspace 从「可空文本框」改为<strong>必选下拉</strong>——「全部 workspace」的 token 停止签发；② 已注册 Worker 列表新增「注册来源」chip，标明它通过哪个 workspace 的 token 注册（即各 workspace 视图的可见性依据）；③ workspace 内的 Worker 视图只显示本 workspace 签发 token 注册的 Worker，只读。
+      </div>
+
+      <!-- ============ 场景一：管理员 · 设置 → Worker Token ============ -->
+      <section id="admin-view">
+        <h2 style="font-size:16px;margin:0 0 12px;">① 管理员 · 设置 → Worker Token</h2>
+
+        <div class="card">
+          <h3 class="heading">签发新 Token</h3>
+          <div class="row">
+            <input class="input" placeholder="标签（必填，如 home-mac-mini）" aria-label="Token 标签" value="marketing-mac-mini" />
+            <!-- ★ 改动点：workspace 必选下拉，不再允许空 = 全部 workspace -->
+            <select class="input" aria-label="workspace 范围" style="max-width:220px;">
+              <option value="" disabled>选择 workspace（必选）</option>
+              <option selected>市场研究组（ws_marketing）</option>
+              <option>产品设计（ws_product）</option>
+              <option>运营分析（ws_ops）</option>
+            </select>
+            <button class="button">签发</button>
+          </div>
+          <p class="hint">全局 token 与「全部 workspace」token 已下线：每个 token 必须绑定一个 workspace，Worker 只能承接该 workspace 的任务。</p>
+
+          <div data-testid="created-token">
+            <p class="hint">已签发「marketing-mac-mini」（仅 市场研究组）：</p>
+            <div class="tokenBox">9f2a…c81d.xK9mQpZr3vN7wE2sL8hT4uY6bV1cD5fG0aR9tX3zMnB7kHj5lPq</div>
+            <div class="row">
+              <button class="button">复制 Token</button>
+              <button class="dangerButton">关闭</button>
+            </div>
+            <p class="warning">明文 token 仅显示这一次，关闭后无法再查看，请立即复制保存。</p>
+          </div>
+        </div>
+
+        <h3 class="heading">已签发 Token</h3>
+        <ul class="list">
+          <li class="listItem" data-testid="register-token-1">
+            <span class="itemLabel">marketing-mac-mini</span>
+            <span class="chip chipScope">市场研究组</span>
+            <span class="chip">2026/8/20 14:32</span>
+            <span class="chip chipActive">有效</span>
+            <button class="dangerButton">吊销</button>
+          </li>
+          <li class="listItem" data-testid="register-token-2">
+            <span class="itemLabel">product-build-runner</span>
+            <span class="chip chipScope">产品设计</span>
+            <span class="chip">2026/8/18 09:10</span>
+            <span class="chip chipActive">有效</span>
+            <button class="dangerButton">吊销</button>
+          </li>
+          <li class="listItem" data-testid="register-token-3">
+            <span class="itemLabel">ops-old-worker</span>
+            <span class="chip chipScope">运营分析</span>
+            <span class="chip">2026/8/6 11:02</span>
+            <span class="chip chipRevoked">已吊销</span>
+          </li>
+        </ul>
+
+        <h3 class="heading">已注册 Worker（管理员全量视图）</h3>
+        <ul class="list">
+          <li class="listItem" data-testid="worker-1">
+            <span class="itemLabel">home-mac-mini</span>
+            <span class="chip chipActive" title="最近心跳 2026/8/25 15:40">在线</span>
+            <span class="chip">velites</span>
+            <span class="chip">并发上限 10</span>
+            <!-- ★ 改动点：scope chip 一定是具体 workspace；新增注册来源 -->
+            <span class="chip chipScope">市场研究组</span>
+            <span class="viaToken">via marketing-mac-mini</span>
+            <button class="dangerButton">吊销</button>
+          </li>
+          <li class="listItem" data-testid="worker-2">
+            <span class="itemLabel">product-build-runner</span>
+            <span class="chip chipActive" title="最近心跳 2026/8/25 15:39">在线</span>
+            <span class="chip">velites, pi</span>
+            <span class="chip">并发上限 4</span>
+            <span class="chip chipScope">产品设计</span>
+            <span class="viaToken">via product-build-runner</span>
+            <button class="dangerButton">吊销</button>
+          </li>
+          <li class="listItem" data-testid="worker-3">
+            <span class="itemLabel">legacy-host-worker</span>
+            <span class="chip">离线</span>
+            <span class="chip">velites</span>
+            <span class="chip">并发上限 10</span>
+            <span class="chip chipRevoked" title="旧全局 token 注册的存量 Worker，scope=[]">待迁移（旧全局注册）</span>
+            <span class="viaToken">via 全局 token（已退役）</span>
+            <button class="dangerButton">吊销</button>
+          </li>
+        </ul>
+      </section>
+
+      <!-- ============ 场景二：普通用户 · workspace 内 Worker 视图 ============ -->
+      <section id="workspace-view" class="sectionGap">
+        <h2 style="font-size:16px;margin:0 0 12px;">② Workspace 内 · Worker 视图（普通用户，只读）</h2>
+
+        <div class="demoNote" style="border-left-color:#1e7e34;background:#e6f4ea;color:#1e7e34;">
+          当前 workspace：<strong>市场研究组</strong>。列表只显示用本 workspace token 注册的 Worker；legacy-host-worker（旧全局 token 注册）与 product-build-runner（产品设计 token）均不可见。
+        </div>
+
+        <ul class="list" id="ws-worker-list">
+          <li class="listItem" data-testid="ws-worker-1">
+            <span class="itemLabel">home-mac-mini</span>
+            <span class="chip chipActive" title="最近心跳 2026/8/25 15:40">在线</span>
+            <span class="chip">velites</span>
+            <span class="chip">并发上限 10</span>
+            <span class="chip chipScope">市场研究组</span>
+          </li>
+          <li class="listItem" data-testid="ws-worker-2">
+            <span class="itemLabel">marketing-laptop-2</span>
+            <span class="chip">离线</span>
+            <span class="chip">velites</span>
+            <span class="chip">并发上限 2</span>
+            <span class="chip chipScope">市场研究组</span>
+          </li>
+        </ul>
+        <p class="empty" id="ws-empty" hidden>本 workspace 尚无可用 Worker。请联系管理员在「设置 → Worker Token」签发本 workspace 的 token，并在 Worker 控制台添加。</p>
+      </section>
+    </div>
+
+    <div class="demo-bar">
+      <span>演示：</span>
+      <button class="demo-chip" id="demo-empty">workspace 无 Worker（空态）</button>
+      <span style="margin-left:6px">管理员视角在上面 · workspace 视角在下面</span>
+    </div>
+
+    <script>
+      const list = document.getElementById("ws-worker-list");
+      const empty = document.getElementById("ws-empty");
+      document.getElementById("demo-empty").addEventListener("click", () => {
+        const isEmpty = !list.hidden;
+        list.hidden = isEmpty;
+        empty.hidden = !isEmpty;
+      });
+    </script>
+  </body>
+</html>

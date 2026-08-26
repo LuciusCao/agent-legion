@@ -239,7 +239,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "studio_chat_draft"
+    assert migration["name"] == "retire_global_register_tokens"
 
 
 @pytest.mark.fresh_schema

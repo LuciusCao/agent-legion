@@ -67,7 +67,6 @@ services:
     environment:
       AGENT_LEGION_DATABASE_URL: postgresql://agent_legion@postgres:5432/agent_legion
       PGPASSFILE: /run/secrets/postgres_pgpass
-      AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE: /run/secrets/agent_worker_register_token
       AGENT_LEGION_VAULT_MASTER_KEY_FILE: /run/secrets/vault_master_key
       AGENT_LEGION_DATA_DIR: /var/lib/agent-legion
       # 无冒号的 ${VAR-默认值} 形式：deploy/.env 显式写 AGENT_LEGION_S3_ENDPOINT=
@@ -85,7 +84,7 @@ services:
       # 的凭据齐备性由 scripts/local-s3-decide.sh 在 prod-up 入口 fail-fast。
       AGENT_LEGION_S3_ACCESS_KEY: ${AGENT_LEGION_S3_ACCESS_KEY:-}
       AGENT_LEGION_S3_SECRET_KEY: ${AGENT_LEGION_S3_SECRET_KEY:-}
-    secrets: [agent_worker_register_token, postgres_pgpass, vault_master_key]
+    secrets: [postgres_pgpass, vault_master_key]
     volumes:
       - host-data:/var/lib/agent-legion
       - ${AGENT_SKILLS_DIR:-../skills}:/root/.agents/skills/agent-legion:ro
@@ -107,7 +106,6 @@ services:
     depends_on:
       host:
         condition: service_healthy
-    secrets: [agent_worker_register_token]
     # velites 沙箱（bwrap）在容器内需要：seccomp 放行 unshare（默认 profile
     # 拦截，setuid 绕不过）+ CAP_SYS_ADMIN（创建 mount/pid namespace，
     # 容器默认能力集不含）。缺了则沙箱 fail-closed，agent 全部秒退。
@@ -149,8 +147,6 @@ secrets:
     file: ${POSTGRES_PASSWORD_FILE:-./secrets/postgres_password}
   postgres_pgpass:
     file: ${POSTGRES_PGPASS_FILE:-./secrets/postgres_pgpass}
-  agent_worker_register_token:
-    file: ${AGENT_WORKER_REGISTER_TOKEN_FILE:-./secrets/agent_worker_register_token}
   vault_master_key:
     file: ${VAULT_MASTER_KEY_FILE:-./secrets/vault_master_key}
 

@@ -43,7 +43,7 @@ export function MonitoringPanel({ workspaceId }: { workspaceId?: string }) {
   // Worker 列表拉取失败不阻塞监控数据，仅不提供过滤选项（error 不消费）。
   const { data: workerList } = useQuery({
     queryKey: queryKeys.agentWorkers(),
-    queryFn: listAgentWorkers,
+    queryFn: () => listAgentWorkers(),
   })
   const workers = workerList ?? []
 

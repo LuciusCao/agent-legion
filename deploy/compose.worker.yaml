@@ -7,7 +7,6 @@ services:
       target: worker
     image: agent-legion-worker:local
     restart: unless-stopped
-    secrets: [agent_worker_register_token]
     # velites 沙箱（bwrap）在容器内需要：seccomp 放行 unshare + CAP_SYS_ADMIN
     # （同 compose.host.yaml 注释）。缺失时沙箱 fail-closed，agent 全部秒退。
     security_opt:
@@ -42,10 +41,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-
-secrets:
-  agent_worker_register_token:
-    file: ${AGENT_WORKER_REGISTER_TOKEN_FILE:-./secrets/agent_worker_register_token}
 
 volumes:
   worker-data:

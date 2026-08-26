@@ -160,12 +160,13 @@ def test_registration_token_is_write_only_and_stored_with_private_permissions(
     store = WorkerConfigStore(tmp_path / "state")
     store.write(validate_config(_config()))
 
-    updated = store.update_public({}, registration_token="host-issued-token")
-    token_path = Path(updated["register_token_file"])
+    updated = store.update_public({}, registration_token="tok-1.host-issued-secret")
+    # scoped token 落 register_tokens/ 目录，一个 token 一个 "<id>.token" 文件。
+    token_path = store.state_dir / "register_tokens" / "tok-1.token"
 
-    assert token_path.read_text(encoding="utf-8") == "host-issued-token\n"
+    assert token_path.read_text(encoding="utf-8") == "tok-1.host-issued-secret\n"
     assert token_path.stat().st_mode & 0o777 == 0o600
-    assert registration_token_configured(updated) is True
+    assert registration_token_configured(updated, store.state_dir) is True
     assert "register_token" not in public_config(updated)
     assert "register_token_file" not in public_config(updated)
 
@@ -230,14 +231,14 @@ def test_local_api_stores_registration_token_without_returning_it(tmp_path: Path
     with TestClient(app) as client:
         response = client.put(
             "/api/config",
-            json={"register_token": "host-issued-token"},
+            json={"register_token": "tok-1.host-issued-secret"},
             headers=_auth(store),
         )
 
     assert response.status_code == 200
     assert response.json()["restarted"] is True
     assert response.json()["config"]["register_token_configured"] is True
-    assert "host-issued-token" not in response.text
+    assert "host-issued-secret" not in response.text
     assert supervisor.restarts == 1
 
 
@@ -338,33 +339,19 @@ def test_local_api_partial_update_keeps_unspecified_fields(tmp_path: Path) -> No
     assert config["host_url"] == "http://host.test:8000"
 
 
-def _make_revoke_harness(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> tuple[WorkerConfigStore, FakeSupervisor, Any, list[tuple[str, str, str]]]:
-    token_file = tmp_path / "register-token"
-    token_file.write_text("management-token\n", encoding="utf-8")
+def _make_revoke_harness(tmp_path: Path) -> tuple[WorkerConfigStore, FakeSupervisor, Any]:
     store = WorkerConfigStore(tmp_path / "state")
-    store.write(validate_config({**_config(), "register_token_file": str(token_file)}))
+    store.write(validate_config(_config()))
     supervisor = FakeSupervisor(store)
-    calls: list[tuple[str, str, str]] = []
-
-    class FakeHostClient:
-        def __init__(self, host: str) -> None:
-            self.host = host
-
-        def revoke(self, worker_id: str, management_token: str) -> None:
-            calls.append((self.host, worker_id, management_token))
-
-    monkeypatch.setattr(service_module, "Client", FakeHostClient)
-    return store, supervisor, create_app(supervisor, tmp_path), calls
+    return store, supervisor, create_app(supervisor, tmp_path)
 
 
-def test_put_config_revokes_previous_worker_id_before_restart(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_put_config_worker_id_change_logs_revoke_hint_and_restarts(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    store, supervisor, app, calls = _make_revoke_harness(tmp_path, monkeypatch)
+    store, supervisor, app = _make_revoke_harness(tmp_path)
 
-    with TestClient(app) as client:
+    with caplog.at_level(logging.INFO), TestClient(app) as client:
         response = client.put(
             "/api/config",
             json={**public_config(store.read()), "worker_id": "worker-2"},
@@ -373,17 +360,17 @@ def test_put_config_revokes_previous_worker_id_before_restart(
 
     assert response.status_code == 200, response.text
     assert response.json()["config"]["worker_id"] == "worker-2"
-    # 旧 Host 地址 + 旧 worker_id + register_token_file 里的 management token。
-    assert calls == [("http://host.test:8000", "worker-1", "management-token")]
+    # Host 吊销是 admin-only：改 worker_id 只记提示日志，旧 worker 靠离线超时消失。
+    assert any("worker-1" in record.getMessage() for record in caplog.records)
     assert supervisor.restarts == 1
 
 
-def test_put_config_without_worker_id_change_does_not_revoke(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_put_config_without_worker_id_change_logs_no_revoke_hint(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    store, supervisor, app, calls = _make_revoke_harness(tmp_path, monkeypatch)
+    store, supervisor, app = _make_revoke_harness(tmp_path)
 
-    with TestClient(app) as client:
+    with caplog.at_level(logging.INFO), TestClient(app) as client:
         response = client.put(
             "/api/config",
             json={**public_config(store.read()), "name": "Renamed Worker"},
@@ -392,32 +379,14 @@ def test_put_config_without_worker_id_change_does_not_revoke(
 
     assert response.status_code == 200
     assert response.json()["config"]["name"] == "Renamed Worker"
-    assert calls == []
+    assert not any("吊销" in record.getMessage() for record in caplog.records)
     assert supervisor.restarts == 1
 
 
-def test_put_config_revoke_failure_still_saves_and_restarts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    store, supervisor, app, calls = _make_revoke_harness(tmp_path, monkeypatch)
-
-    def failing_revoke(self: Any, worker_id: str, management_token: str) -> None:
-        calls.append((self.host, worker_id, management_token))
-        raise RuntimeError("connection refused")
-
-    monkeypatch.setattr(service_module.Client, "revoke", failing_revoke)
-
-    with TestClient(app) as client:
-        response = client.put(
-            "/api/config",
-            json={**public_config(store.read()), "worker_id": "worker-2"},
-            headers=_auth(store),
-        )
-
-    assert response.status_code == 200, response.text
-    assert response.json()["config"]["worker_id"] == "worker-2"
-    assert calls == [("http://host.test:8000", "worker-1", "management-token")]
-    assert supervisor.restarts == 1
+def test_worker_id_change_has_no_host_revoke_channel() -> None:
+    """旧实现以 register token 调 /agent-workers/{id}/revoke 必然 401（该端点
+    admin-only），已随 scoped token 退役删除：service 不再持有 Host 管理客户端。"""
+    assert not hasattr(service_module, "Client")
 
 
 def test_api_requires_bearer_token_except_health(tmp_path: Path) -> None:

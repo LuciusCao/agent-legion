@@ -4,6 +4,7 @@ import type { ReactElement } from 'react'
 import { WorkerTokensSection } from './WorkerTokensSection'
 import {
   createRegisterToken,
+  fetchWorkspaces,
   listAgentWorkers,
   listRegisterTokens,
   revokeAgentWorker,
@@ -17,6 +18,7 @@ vi.mock('../../api', () => ({
   listRegisterTokens: vi.fn(),
   revokeAgentWorker: vi.fn(),
   revokeRegisterToken: vi.fn(),
+  fetchWorkspaces: vi.fn(),
 }))
 
 const mockListRegisterTokens = vi.mocked(listRegisterTokens)
@@ -24,6 +26,7 @@ const mockListAgentWorkers = vi.mocked(listAgentWorkers)
 const mockCreateRegisterToken = vi.mocked(createRegisterToken)
 const mockRevokeRegisterToken = vi.mocked(revokeRegisterToken)
 const mockRevokeAgentWorker = vi.mocked(revokeAgentWorker)
+const mockFetchWorkspaces = vi.mocked(fetchWorkspaces)
 
 const sampleToken = {
   token_id: 't1',
@@ -55,6 +58,25 @@ beforeEach(() => {
   window.confirm = vi.fn(() => true)
   mockListRegisterTokens.mockResolvedValue([sampleToken])
   mockListAgentWorkers.mockResolvedValue([sampleWorker])
+  mockFetchWorkspaces.mockResolvedValue({
+    workspaces: [
+      {
+        id: 'demo_video_workflow',
+        name: '演示工作区',
+        description: '',
+        created_at: '2026-07-01T00:00:00Z',
+        updated_at: '2026-07-01T00:00:00Z',
+        default_entity: '',
+        default_workflow_key: '',
+        intake_config: {},
+        intake_config_json: '{}',
+        node_config: {},
+        node_config_json: '{}',
+        resource_config: {},
+        resource_config_json: '{}',
+      },
+    ],
+  })
 })
 
 function renderWithClient(ui: ReactElement) {
@@ -71,7 +93,8 @@ describe('WorkerTokensSection', () => {
     expect(mockListRegisterTokens).toHaveBeenCalledWith()
     expect(mockListAgentWorkers).toHaveBeenCalledWith()
     expect(screen.getByText('mac-mini')).toBeTruthy()
-    expect(screen.getByText('demo_video_workflow')).toBeTruthy()
+    // token 列表以 workspace 名称标注归属（issue #35）。
+    expect(screen.getByText('演示工作区')).toBeTruthy()
   })
 
   it('shows runtime, concurrency and workspace scope chips for workers', async () => {
@@ -94,13 +117,13 @@ describe('WorkerTokensSection', () => {
     expect(globalItem.textContent).toContain('在线')
     expect(globalItem.textContent).toContain('pi')
     expect(globalItem.textContent).toContain('并发上限 2')
-    expect(globalItem.textContent).toContain('全部 workspace')
+    expect(globalItem.textContent).toContain('待迁移（旧全局注册）')
 
     const scopedItem = screen.getByTestId('worker-w2')
     expect(scopedItem.textContent).toContain('离线')
-    expect(scopedItem.textContent).toContain(
-      'demo_video_workflow, demo_workspace'
-    )
+    // workspace 名称优先显示，未知 id 回退为 id 本身。
+    expect(scopedItem.textContent).toContain('演示工作区')
+    expect(scopedItem.textContent).toContain('demo_workspace')
   })
 
   it('shows an error when loading fails', async () => {
@@ -116,7 +139,7 @@ describe('WorkerTokensSection', () => {
     mockCreateRegisterToken.mockResolvedValue({
       token_id: 't2',
       register_token: 'plain-secret',
-      workspace_id: null,
+      workspace_id: 'demo_video_workflow',
       label: 'new-worker',
     })
     const writeText = vi.fn().mockResolvedValue(undefined)
@@ -130,6 +153,9 @@ describe('WorkerTokensSection', () => {
     fireEvent.change(screen.getByLabelText('Token 标签'), {
       target: { value: 'new-worker' },
     })
+    fireEvent.change(screen.getByLabelText('workspace 范围'), {
+      target: { value: 'demo_video_workflow' },
+    })
     fireEvent.click(screen.getByRole('button', { name: '签发' }))
 
     await waitFor(() => {
@@ -137,7 +163,7 @@ describe('WorkerTokensSection', () => {
     })
     expect(mockCreateRegisterToken).toHaveBeenCalledWith({
       label: 'new-worker',
-      workspace_id: null,
+      workspace_id: 'demo_video_workflow',
     })
     expect(screen.getByText('plain-secret')).toBeTruthy()
     expect(screen.getByText(/仅显示这一次/)).toBeTruthy()

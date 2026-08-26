@@ -366,11 +366,18 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
     assert entry["revoked"] is False
     assert "token_hash" not in entry and "register_token" not in entry
 
-    assert registry.resolve_register_scope(plaintext) == ["test-workspace"]
-    assert registry.resolve_register_scope(f"{token_id}.wrong-secret") is None
+    assert registry.resolve_register_scope([plaintext]) == [
+        {
+            "workspace_id": "test-workspace",
+            "workspace_name": "Test",
+            "token_ids": [token_id],
+        }
+    ]
+    assert registry.resolve_register_scope([f"{token_id}.wrong-secret"]) is None
+    assert registry.resolve_register_scope([]) is None
 
     assert registry.revoke_register_token(token_id) is True
-    assert registry.resolve_register_scope(plaintext) is None
+    assert registry.resolve_register_scope([plaintext]) is None
     assert registry.revoke_register_token("no-such-token") is False
 
 

@@ -22,4 +22,11 @@ class WorkerConfigPayload(BaseModel):
     poll_interval_seconds: float | None = None
     heartbeat_interval_seconds: float | None = None
     shutdown_grace_seconds: float | None = None
+    # 兼容通道：等价于向 /api/register-tokens 添加一个 token（老客户端/脚本）。
     register_token: str | None = None
+
+
+class RegisterTokenPayload(BaseModel):
+    """添加一个 Host 签发的 scoped 注册 token（明文仅写入，永不回显）。"""
+
+    register_token: str

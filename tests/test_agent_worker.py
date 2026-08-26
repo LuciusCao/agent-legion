@@ -489,13 +489,17 @@ def test_client_claim_declares_code_capacity() -> None:
 def test_client_registration_declares_protocol_v3_and_code_capacity() -> None:
     client = agent_worker.Client("http://unused")
     seen: list[dict] = []
-    client.request = lambda *a, **k: (  # type: ignore[method-assign]
-        seen.append(json.loads(k["data"])),
-        (
+    headers: dict[str, str] = {}
+
+    def stub(*args, **kwargs):  # type: ignore[no-untyped-def]
+        seen.append(json.loads(kwargs["data"]))
+        headers.update(kwargs["headers"])
+        return (
             201,
             b'{"worker_token": "tok", "host_protocol_version": 3, "allowed_workspaces": []}',
-        ),
-    )[1]
+        )
+
+    client.request = stub  # type: ignore[method-assign]
 
     client.register(
         {
@@ -504,11 +508,19 @@ def test_client_registration_declares_protocol_v3_and_code_capacity() -> None:
             "max_concurrency": 1,
             "max_code_concurrency": 3,
         },
-        "management-token",
+        ["token-a", "token-b"],
     )
 
     assert seen[0]["protocol_version"] == 3
     assert seen[0]["max_code_concurrency"] == 3
+    # issue #35：全部 scoped token 逗号拼进同一个注册请求。
+    assert headers["X-Agent-Worker-Register-Tokens"] == "token-a,token-b"
+
+
+def test_client_registration_rejects_empty_token_list() -> None:
+    client = agent_worker.Client("http://unused")
+    with pytest.raises(agent_worker.WorkerAuthError, match="no register token"):
+        client.register({"worker_id": "w1", "runtimes": ["pi"], "max_concurrency": 1}, [])
 
 
 def test_client_registration_rejects_old_host_before_claiming() -> None:
@@ -521,7 +533,7 @@ def test_client_registration_rejects_old_host_before_claiming() -> None:
     with pytest.raises(agent_worker.WorkerAuthError, match="upgrade Host before Worker"):
         client.register(
             {"worker_id": "w1", "runtimes": ["pi", "velites"], "max_concurrency": 1},
-            "management-token",
+            ["management-token"],
         )
 
     assert client.token == ""
@@ -533,7 +545,7 @@ def test_client_registration_rejects_permanent_http_errors() -> None:
     with pytest.raises(agent_worker.WorkerAuthError, match="registration rejected"):
         client.register(
             {"worker_id": "w1", "runtimes": ["pi"], "max_concurrency": 1},
-            "bad-token",
+            ["bad-token"],
         )
 
 
@@ -543,16 +555,16 @@ def test_registration_retries_transient_host_errors_without_traceback(
     client = agent_worker.Client("http://unused")
     calls = 0
 
-    def flaky_register(config: dict, token: str) -> str:
+    def flaky_register(config: dict, token: str) -> dict:
         nonlocal calls
         del config, token
         calls += 1
         if calls < 3:
             raise urllib.error.URLError("host unavailable")
-        return "worker-token"
+        return {"worker_token": "worker-token", "workspaces": []}
 
     client.register = flaky_register  # type: ignore[method-assign]
-    assert register_with_retry(client, {}, "token", threading.Event(), 0.001)
+    assert register_with_retry(client, {}, ["token"], threading.Event(), 0.001)
     output = capsys.readouterr().out
     assert calls == 3
     assert "retrying" in output
@@ -621,7 +633,7 @@ def _run_main(
         lambda sig, handler: handlers.setdefault(sig, handler),
     )
     monkeypatch.setattr(agent_worker, "Client", lambda host, **kwargs: fake)
-    fake.register = lambda config, token: "worker-token"  # type: ignore[attr-defined]
+    fake.register = lambda config, token: {"worker_token": "worker-token", "workspaces": []}  # type: ignore[attr-defined]
     # main() 的启动预检会探测 PATH 上的 runtime 二进制；测试与真实机器环境
     # 无关，统一打桩为全部存在（预检自身的用例单独覆盖）。
     monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/bin/{binary}")

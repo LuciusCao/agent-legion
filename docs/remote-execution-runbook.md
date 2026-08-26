@@ -150,11 +150,15 @@ essentials, for orientation:
 
 - One Worker **container** per machine; an internal supervisor runs up to
   `max_concurrency` concurrent Agent executions.
-- The Worker registers with the Host using a registration token delivered as a
-  **secret file** (`AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE` on the Host,
-  `/run/secrets/agent_worker_register_token` in the container) — never in the
-  image, Compose YAML or command line — and receives a per-worker token in
-  exchange. Per-worker tokens are stored server-side as sha256 hashes only.
+- The Worker registers with the Host using **scoped registration tokens**
+  issued per workspace in the admin UI (设置 → Worker Token, issue #35). The
+  global register token and the "all workspaces" token variant are retired:
+  tokens are pasted into the Worker console (配置 → Workspace 访问) and every
+  registration presents all configured tokens at once — the Host resolves the
+  union workspace scope and rejects the whole registration if any token is
+  revoked. Registration returns the per-workspace rows (id + name) so the
+  console can label each token. Per-worker tokens are stored server-side as
+  sha256 hashes only.
 - Protocol: `register → claim → heartbeat → result` over
   `/api/agent-workers/register`, `/api/agent-executions/claim`,
   `/api/agent-executions/{id}/heartbeat` and `/api/agent-executions/{id}/result`.
@@ -282,7 +286,7 @@ flipping the field:
 | Worker stays up but reports registration unavailable | Host unreachable or returning 5xx | The Worker retries registration in-process; verify `host_url` and the §3 smoke test, then inspect Host logs if 5xx persists |
 | Worker becomes unhealthy with registration rejected | Registration token mismatch or Worker revoked | `make stack-logs STACK=worker`; verify the token file and registration status |
 | Worker exits with code 2 and logs `启动预检失败` / startup preflight failure | A declared runtime's binary cannot be resolved (e.g. `velites` declared but not installed), or `max_code_concurrency > 0` without `velites` | Install the binary — either on PATH (`cargo build --release` in `velites/`) or as the bundled copy (`./scripts/ensure-velites.sh --dest data/bin`, per-platform) — drop the runtime from the Worker's `runtimes`, or set `max_code_concurrency: 0`, then restart |
-| Registration returns 401 | `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` on the Host does not match the worker's token file | Re-copy `deploy/secrets/agent_worker_register_token` to the worker machine (deployment doc §4) |
+| Registration returns 401 | A scoped token is unknown or revoked on the Host (the Host rejects the whole registration when any token fails) | Re-issue a scoped token in the admin UI (设置 → Worker Token), replace it in the Worker console (配置 → Workspace 访问), and revoke the stale one |
 | Registration returns 400 `unsupported Agent Worker protocol` | Worker's `protocol_version` below `agent_workers.min_protocol_version` | Rebuild the worker image from the current repo; lower the minimum only as a short emergency escape hatch |
 | Claim returns 204 forever | No queued executions compatible with the worker's runtimes/labels | Check the workflow's Agent node routing and the worker's declared `runtimes` / `labels` |
 | Heartbeat/result 409 (`execution is not owned by this Worker`) | Network partition or Host restart — the execution lease expired and was reassigned/failed | Terminal for that execution; rerun the job. Persistent storms mean the tailnet is unstable |

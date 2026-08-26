@@ -37,8 +37,6 @@ def create_artifacts_router(
             if agent_worker_registry.authenticate(agent_token) is not None:
                 return
             raise HTTPException(status_code=401, detail="invalid Agent Worker token")
-        if not agent_config.register_token:
-            raise HTTPException(status_code=503, detail="Agent Worker execution is disabled")
         raise HTTPException(status_code=401, detail="missing Agent Worker token")
 
     @router.post("", status_code=201, response_model=ArtifactUploadResponse)

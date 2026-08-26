@@ -99,14 +99,16 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
     token_id, plaintext = registry.issue_register_token(
         workspace_id="acl-workspace", label="full-gate"
     )
-    assert registry.resolve_register_scope(plaintext) == ["acl-workspace"]
+    scope = registry.resolve_register_scope([plaintext])
+    assert scope is not None
+    assert [row["workspace_id"] for row in scope] == ["acl-workspace"]
 
     worker_token = registry.issue_token(
         worker_id="acl-worker",
         name="ACL Worker",
         runtimes=["pi"],
         max_concurrency=1,
-        allowed_workspaces=registry.resolve_register_scope(plaintext),
+        allowed_workspaces=[row["workspace_id"] for row in scope],
     )
     worker = registry.authenticate(worker_token)
     assert worker is not None
@@ -117,7 +119,7 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
     assert "token_hash" not in entry and "register_token" not in entry
 
     assert registry.revoke_register_token(token_id)
-    assert registry.resolve_register_scope(plaintext) is None
+    assert registry.resolve_register_scope([plaintext]) is None
 
 
 @pytest.mark.full_gate
@@ -170,16 +172,19 @@ def test_http_claim_cycle_releases_capacity_and_updates_panel(tmp_path: Path) ->
     HTTP must close the request, release both capacity domains, complete the
     node, and mirror busy/idle into the workspace Agent panel."""
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.agent_workers.register_token = "management-secret"
     # Dispatch defaults to paused after every startup; resume the seeded
     # workspace the way an operator would.
     app.state.workspace_worker_control.resume("test-workspace")
     _seed_request(app.state.job_db, job_id="job-e2e", limit=2)
+    # 全局 register token 已退役（issue #35）：按 workspace 签发 scoped token。
+    _, management_secret = AgentWorkerRegistry(TEST_DATABASE_URL).issue_register_token(
+        workspace_id="test-workspace", label="e2e"
+    )
 
     with TestClient(app) as client:
         token = client.post(
             "/api/agent-workers/register",
-            headers={"X-Agent-Worker-Register-Token": "management-secret"},
+            headers={"X-Agent-Worker-Register-Token": management_secret},
             json={
                 "worker_id": "e2e-worker",
                 "name": "E2E Worker",

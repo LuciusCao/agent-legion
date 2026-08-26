@@ -7,5 +7,7 @@ max_concurrency: 10
 # code 节点执行池容量（0 = 仅 agent）；> 0 需 velites 在 PATH（启动预检强制）。
 # max_code_concurrency: 0
 labels: {os: linux, arch: arm64, location: host}
-register_token_file: /run/secrets/agent_worker_register_token
+# 注册用 scoped token 在 Worker 控制台（8787）配置页添加，或经 workerctl
+# configure --register-token-file 导入；不再有全局 token（issue #35）。
+# register_token_dir 默认指向 state 目录下的 register_tokens/，通常无需配置。
 work_root: /var/lib/agent-legion-worker

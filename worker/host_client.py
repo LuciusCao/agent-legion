@@ -79,7 +79,14 @@ class Client(TransferOperations):
         temporary.replace(stream_to)
         return response.status_code, b""
 
-    def register(self, config: dict[str, Any], management_token: str) -> str:
+    def register(self, config: dict[str, Any], management_tokens: list[str]) -> dict[str, Any]:
+        """Register with every scoped token; returns the parsed response.
+
+        All tokens travel in one request (X-Agent-Worker-Register-Tokens,
+        comma-joined); the Host resolves the union scope and rejects the whole
+        registration when any token is unknown or revoked. The response
+        carries worker_token plus per-workspace rows (id + name) for the
+        console."""
         payload = {
             "worker_id": config["worker_id"],
             "name": config.get("name", config["worker_id"]),
@@ -92,13 +99,16 @@ class Client(TransferOperations):
             "labels": config.get("labels", {}),
             "protocol_version": PROTOCOL_VERSION,
         }
+        tokens = ",".join(token for token in management_tokens if token)
+        if not tokens:
+            raise WorkerAuthError("Agent Worker registration rejected: no register token")
         status, body = self.request(
             "POST",
             "/api/agent-workers/register",
             data=json.dumps(payload).encode(),
             headers={
                 "Content-Type": "application/json",
-                "X-Agent-Worker-Register-Token": management_token,
+                "X-Agent-Worker-Register-Tokens": tokens,
             },
         )
         if status in (400, 401, 403, 409, 422):
@@ -113,7 +123,7 @@ class Client(TransferOperations):
                 "Host protocol does not support runtime-scoped models; upgrade Host before Worker"
             )
         self.token = str(document["worker_token"])
-        return self.token
+        return dict(document)
 
     def revoke(self, worker_id: str, management_token: str) -> None:
         """Revoke a Worker registration on the Host (same credential as register)."""
