@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import shutil
 import subprocess
 import sys
@@ -405,12 +406,20 @@ def test_custom_cancel_kills_whole_process_group(
 ) -> None:
     """Cancellation kills the exec'd child's whole group (no orphaned grandchildren)."""
     _sandboxed(monkeypatch)
+    marker = tmp_path / "grandchild-survived"
+    pid_file = tmp_path / "grandchild.pid"
+    # The grandchild outlives the sandboxed child by design: it sleeps, then
+    # touches the marker. The test asserts cancellation killed the whole
+    # group BEFORE that touch. Watching the grandchild's PID exit (instead of
+    # sleeping past its touch deadline) keeps the assertion race-free under
+    # load: once the PID is gone, a surviving shell can no longer touch.
     custom_source = (
         "import subprocess\n"
         "import time\n\n"
         "def run(job, job_dir, runtime):\n"
-        "    marker = job_dir / 'grandchild-survived'\n"
-        "    subprocess.Popen(['/bin/sh', '-c', f'sleep 2; touch {marker}'])\n"
+        f"    marker = job_dir / '{marker.name}'\n"
+        "    proc = subprocess.Popen(['/bin/sh', '-c', f'sleep 2; touch {marker}'])\n"
+        f"    (job_dir / '{pid_file.name}').write_text(str(proc.pid))\n"
         "    time.sleep(30)\n"
     )
 
@@ -430,8 +439,29 @@ def test_custom_cancel_kills_whole_process_group(
     canceller.cancel()
 
     assert result.status == "cancelled"
-    time.sleep(2.5)
-    assert not (tmp_path / "grandchild-survived").exists()
+    # Wait for the PID file: the grandchild was started before cancellation.
+    deadline = time.monotonic() + 10.0
+    while not pid_file.exists():
+        assert time.monotonic() < deadline, "grandchild never started"
+        time.sleep(0.05)
+    pid = int(pid_file.read_text().strip())
+    # The grandchild must be dead well before its 2s sleep ends.
+    while _pid_alive(pid):
+        assert time.monotonic() < deadline, (
+            f"grandchild {pid} survived cancellation; marker={marker}"
+        )
+        time.sleep(0.05)
+    assert not marker.exists()
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 # ---------------------------------------------------------------------------

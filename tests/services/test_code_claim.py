@@ -11,54 +11,20 @@ import json
 
 import pytest
 
-from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
+from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_workers import AgentWorkerRegistry
+from tests.helpers.agent_worker_api import (
+    enqueue_code as _enqueue_code,
+)
+from tests.helpers.agent_worker_api import (
+    insert_code_job_rows as _insert_code_job_rows,
+)
+from tests.helpers.agent_worker_api import seed_request as _seed_request
 from tests.postgres_support import TEST_DATABASE_URL
-from tests.test_agent_broker import _seed_request
 
 
 def _broker(data_dir) -> AgentExecutionBroker:
     return AgentExecutionBroker(TEST_DATABASE_URL, data_dir=data_dir)
-
-
-def _insert_code_job_rows(job_db, *, job_id: str, node_key: str = "package") -> None:
-    with job_db.connect() as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'demo_workflow')"
-            " on conflict(id) do nothing"
-        )
-        conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (%s, 'test-workspace', 'questions', 'question', %s)",
-            (job_id, job_id),
-        )
-        conn.execute("insert into job_nodes(job_id, node_key) values (%s, %s)", (job_id, node_key))
-
-
-def _enqueue_code(broker: AgentExecutionBroker, *, job_id: str, node_key: str = "package") -> str:
-    execution_id = broker.enqueue(
-        AgentExecutionRequest(
-            workspace_id="test-workspace",
-            job_id=job_id,
-            workflow_key="questions",
-            node_key=node_key,
-            # No Agent definition exists for this pair: the claim must not
-            # consult versioned_entities for kind='code' rows.
-            agent_id="package",
-            agent_definition_hash="codehash",
-            manifest={
-                "kind": "code",
-                "capability": "package",
-                "code_hash": "abc123",
-                "job_id": job_id,
-                "log_path": f"logs/{job_id}.log",
-                "config": {"mode": "fast"},
-            },
-            kind="code",
-        )
-    )
-    assert execution_id is not None
-    return execution_id
 
 
 def _register_code_worker(

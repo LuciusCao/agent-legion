@@ -24,11 +24,13 @@ from tests.helpers import (
     replace_agent_catalog,
     seed_workspace_agent_definitions,
 )
-from tests.postgres_support import TEST_DATABASE_URL
-from tests.test_agent_broker import _seed_request
-from tests.test_agent_broker import (
-    test_node_twenty_and_three_workers_ten_never_claim_more_than_twenty as _assert_capacity_matrix,
+from tests.helpers.agent_worker_api import (
+    assert_capacity_matrix as _assert_capacity_matrix,
 )
+from tests.helpers.agent_worker_api import (
+    seed_request as _seed_request,
+)
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 @pytest.mark.full_gate

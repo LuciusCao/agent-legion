@@ -5,10 +5,11 @@ from __future__ import annotations
 import contextlib
 import json
 import sys
-import time
 from pathlib import Path
 
 import pytest
+
+from tests.helpers import wait_for_predicate
 
 FAKE_AGENT = Path(__file__).resolve().parents[1] / "helpers" / "fake_acp_agent.py"
 CSRF = {"x-agent-legion-request": "1"}
@@ -58,12 +59,7 @@ HUMAN_PERMISSION_SCRIPT = {
 
 
 def _wait_for(condition, timeout: float = 20.0, interval: float = 0.05) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if condition():
-            return
-        time.sleep(interval)
-    raise AssertionError("condition not met within timeout")
+    wait_for_predicate(condition, timeout=timeout, interval=interval)
 
 
 def _register_fake_agent(

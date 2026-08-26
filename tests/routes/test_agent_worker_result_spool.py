@@ -13,8 +13,21 @@ from pathlib import Path
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from tests.routes.test_agent_workers import _claim, _empty_archive, _make_app, _register
-from tests.test_agent_broker import _seed_request
+from tests.helpers.agent_worker_api import (
+    claim as _claim,
+)
+from tests.helpers.agent_worker_api import (
+    empty_archive as _empty_archive,
+)
+from tests.helpers.agent_worker_api import (
+    make_app as _make_app,
+)
+from tests.helpers.agent_worker_api import (
+    register as _register,
+)
+from tests.helpers.agent_worker_api import (
+    seed_request as _seed_request,
+)
 
 
 def test_result_rejects_oversized_streamed_body_and_cleans_staging(tmp_path: Path) -> None:

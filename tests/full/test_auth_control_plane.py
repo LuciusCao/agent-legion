@@ -6,11 +6,11 @@ import hashlib
 
 import pytest
 
-from tests.routes.test_auth_routes import (
-    test_login_lockout_after_repeated_failures as _assert_login_lockout,
+from tests.helpers.auth_contract import (
+    assert_login_lockout_after_repeated_failures as _assert_login_lockout,
 )
-from tests.routes.test_auth_routes import (
-    test_users_endpoints_require_admin as _assert_users_require_admin,
+from tests.helpers.auth_contract import (
+    assert_users_endpoints_require_admin as _assert_users_require_admin,
 )
 
 
