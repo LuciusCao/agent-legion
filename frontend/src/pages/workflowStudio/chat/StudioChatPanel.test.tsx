@@ -147,7 +147,9 @@ describe('StudioChatPanel', () => {
     expect(screen.getByText('好的，先看 active 版本')).toBeInTheDocument()
     expect(screen.getByText('get_active_workflow')).toBeInTheDocument()
     expect(screen.getByText('起草新节点')).toBeInTheDocument()
-    expect(screen.getByText(/尚未观察到 agent-legion 平台工具调用/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/尚未观察到 agent-legion 平台工具调用/)
+    ).toBeInTheDocument()
 
     // 工具调用明细默认折叠（rawInput 不可见），点击展开。
     expect(screen.queryByText(/"workspace_id"/)).not.toBeInTheDocument()

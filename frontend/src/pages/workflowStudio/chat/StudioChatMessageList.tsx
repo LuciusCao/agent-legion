@@ -33,7 +33,8 @@ function StatusLine({ message }: { message: ChatMessage }) {
   if (event === 'mcp_unverified') {
     return (
       <div className={styles.statusLine}>
-        ℹ 本会话尚未观察到 agent-legion 平台工具调用；若本轮本不需要读写平台状态可忽略。
+        ℹ 本会话尚未观察到 agent-legion
+        平台工具调用；若本轮本不需要读写平台状态可忽略。
       </div>
     )
   }
