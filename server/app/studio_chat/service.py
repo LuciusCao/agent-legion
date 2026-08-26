@@ -5,10 +5,11 @@ persisted timeline. The service owns the registry of live handles, delegates
 the permission policy to studio_chat.permissions (MCP tool calls auto-approve —
 the scoped token is already the authority boundary; local read-only kinds
 auto-approve; everything else goes to the human, with a per-session allow-all
-switch), tracks the behavioural MCP-visibility smoke signal (a run that never
-showed an agent-legion tool call ends with mcp_status='unverified' instead of
-silently succeeding), and forwards everything to SSE subscribers through the
-shared event bus.
+switch), tracks the behavioural MCP-visibility smoke signal (a session where
+no turn ever showed an agent-legion tool call gets a one-time advisory hint
+after its first completed turn — cancelled turns and no-tool Q&A turns are
+not treated as wiring failures), and forwards everything to SSE subscribers
+through the shared event bus.
 
 All callback entry points (on_ready/on_update/...) run on the session's ACP
 thread; public entry points run on FastAPI worker threads. Mutable runtime
@@ -401,7 +402,21 @@ class StudioChatService:
         session = self._db.get_studio_chat_session(session_id) or {}
         runtime = self._runtime(session_id)
         mcp_observed = runtime.mcp_observed if runtime is not None else False
-        if not mcp_observed and session.get("mcp_status") != "verified":
+        # The MCP-visibility smoke signal is advisory only. A turn that never
+        # touched an agent-legion tool is NOT evidence of a wiring problem:
+        # the user may have asked a question that needs no platform state, or
+        # cancelled mid-run. Only when no turn of the whole session has ever
+        # shown an agent-legion tool call AND this turn actually completed do
+        # we surface the one-time hint; cancelled turns are skipped entirely.
+        if (
+            not mcp_observed
+            and session.get("mcp_status") != "verified"
+            and stop_reason != "cancelled"
+            and not (runtime is not None and runtime.mcp_hint_shown)
+        ):
+            if runtime is not None:
+                with runtime.lock:
+                    runtime.mcp_hint_shown = True
             self._db.update_studio_chat_session(session_id, mcp_status="unverified")
             self._append_message(
                 session_id,
@@ -410,8 +425,8 @@ class StudioChatService:
                 {
                     "event": "mcp_unverified",
                     "detail": (
-                        "This turn never called an agent-legion MCP tool; the agent may "
-                        "not have picked up the platform tools."
+                        "本会话还没有任何 agent-legion 平台工具调用的迹象；如果你期望"
+                        " agent 读写平台状态，请检查其 MCP 配置。纯问答类对话可忽略本提示。"
                     ),
                 },
             )

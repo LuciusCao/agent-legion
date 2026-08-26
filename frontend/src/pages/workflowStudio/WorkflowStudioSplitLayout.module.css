@@ -1,6 +1,6 @@
 /* 左右分栏的桌面端放置规则（≤900px 走移动面板切换，见
  * WorkflowStudioPageResponsive.module.css）。grid 列必须显式钉死：
- * canvasReplaced/chatCollapsed 的 display:none 会让 auto-placement 错位。 */
+ * canvasReplaced/chatCollapsed 的不可见化会让 auto-placement 错位。 */
 @media (min-width: 901px) {
   .colLeft {
     grid-column: 1;
@@ -15,8 +15,11 @@
      * 右栏随对话自增宽、左栏被挤没。 */
     min-width: 0;
   }
+  /* 被详情替换时不能用 display:none：React Flow 的 ResizeObserver 会测到
+   * 0×0，返回 DAG 时 fitView 以失效尺寸重新计算，画布内容整体下移。
+   * visibility:hidden 保持布局与测量，视觉上让位给详情面板。 */
   .canvasReplaced {
-    display: none;
+    visibility: hidden;
   }
   .chatCollapsed {
     display: none;

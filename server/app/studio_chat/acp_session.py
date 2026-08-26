@@ -36,6 +36,7 @@ from acp.schema import (
     HttpHeader,
     HttpMcpServer,
     Implementation,
+    KillTerminalResponse,
     RequestPermissionResponse,
     TextContentBlock,
 )
@@ -46,6 +47,7 @@ from acp.schema import (
 from server.app.mcp_server.config import SESSION_ID_HEADER
 from server.app.mcp_server.http_app import MCP_URL_PATH
 from server.app.studio_chat.capabilities import capability_snapshot
+from server.app.studio_chat.terminals import AcpTerminalStore
 
 logger = logging.getLogger(__name__)
 
@@ -97,10 +99,49 @@ class _ClientImpl:
 
     def __init__(self, handle: AcpSessionHandle) -> None:
         self._handle = handle
+        # Terminal registry lives on the handle: one store per session loop.
+        self.terminals = AcpTerminalStore()
 
     async def session_update(self, session_id: str, update: Any, **kwargs: Any) -> None:
         payload = update.model_dump(by_alias=True, exclude_none=True, mode="json")
         self._handle.callbacks.on_update(payload)
+
+    async def create_terminal(
+        self,
+        session_id: str,
+        command: str,
+        args: list[str] | None = None,
+        env: list[Any] | None = None,
+        cwd: str | None = None,
+        output_byte_limit: int | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        del session_id  # one store per handle; the id adds nothing here
+        return await self.terminals.create(
+            command=command,
+            args=args,
+            env=env,
+            cwd=cwd,
+            output_byte_limit=output_byte_limit,
+            default_cwd=self._handle.cwd,
+        )
+
+    async def terminal_output(self, session_id: str, terminal_id: str, **kwargs: Any) -> Any:
+        del session_id
+        return await self.terminals.output(terminal_id)
+
+    async def wait_for_terminal_exit(self, session_id: str, terminal_id: str, **kwargs: Any) -> Any:
+        del session_id
+        return await self.terminals.wait_for_exit(terminal_id)
+
+    async def release_terminal(self, session_id: str, terminal_id: str, **kwargs: Any) -> Any:
+        del session_id
+        return await self.terminals.release(terminal_id)
+
+    async def kill_terminal(self, session_id: str, terminal_id: str, **kwargs: Any) -> Any:
+        del session_id
+        await self.terminals.kill(terminal_id)
+        return KillTerminalResponse()
 
     async def request_permission(
         self, session_id: str, tool_call: Any, options: list[Any], **kwargs: Any
@@ -239,7 +280,11 @@ class AcpSessionHandle:
                 self._drain_stderr(process)
                 initialize = await conn.initialize(
                     protocol_version=PROTOCOL_VERSION,
-                    client_capabilities=ClientCapabilities(),
+                    # terminal=True: kimi runs its Bash/Grep tools through the
+                    # ACP terminal protocol (terminal/create + output polling).
+                    # Without the capability flag those tools fail upfront with
+                    # "ACP terminal capability is unavailable".
+                    client_capabilities=ClientCapabilities(terminal=True),
                     client_info=Implementation(
                         name="agent-legion-studio", title="Agent Legion", version="1"
                     ),
@@ -255,6 +300,11 @@ class AcpSessionHandle:
         except Exception as exc:
             logger.warning("studio chat ACP session failed: %s", exc)
             self.callbacks.on_error(str(exc))
+        finally:
+            # Reap any terminal the agent left running (protocol says release,
+            # but a crashed/killed agent never gets the chance).
+            with contextlib.suppress(Exception):
+                await client.terminals.close_all()
 
     async def _prompt_loop(self, conn: Any, acp_session_id: str) -> None:
         while True:
