@@ -87,3 +87,32 @@ def test_apply_openclaw_env_cwd_outranks_db_document(settings, job_db, store, mo
     apply_instance_settings(settings, job_db.path)
 
     assert settings.executor_runtime.openclaw.cwd == "/tmp/openclaw-env"
+
+
+def test_effective_document_strips_retired_openclaw_keys_from_stored_document() -> None:
+    """Deployments upgraded from before the openclaw-knob retirement still
+    carry command_template/timeout_seconds/isolated_workspace_root/skill_safety
+    in global_settings['instance'].openclaw; the effective document must be
+    normalized to the cwd-only shape so the extra=forbid response model
+    validates (otherwise GET /api/admin/instance-settings would 500)."""
+    from server.app.routes.instance_settings_contracts import InstanceSettingsResponse
+    from server.app.services.instance_settings import effective_instance_document
+
+    stored = {
+        "openclaw": {
+            "cwd": "/tmp/openclaw-db",
+            "command_template": ["openclaw", "agent"],
+            "timeout_seconds": 600,
+            "isolated_workspace_root": "/tmp/isolated",
+            "skill_safety": {"enabled": True, "repos": [{"path": "~/.skills/s1"}]},
+        }
+    }
+
+    document = effective_instance_document(stored)
+
+    assert document["openclaw"] == {"cwd": "/tmp/openclaw-db"}
+    # The full response contract validates against the normalized document.
+    response = InstanceSettingsResponse.model_validate(document)
+    assert response.openclaw.cwd == "/tmp/openclaw-db"
+    # The caller's stored document is not mutated.
+    assert "command_template" in stored["openclaw"]

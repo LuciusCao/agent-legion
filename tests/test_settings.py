@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from server.app.settings import load_env_file, load_settings
 
@@ -303,7 +304,30 @@ def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
 
 
 def test_load_settings_ignores_retired_openclaw_knobs(tmp_path, monkeypatch):
-    """Retired openclaw keys (skill_safety et al.) are ignored, not validated."""
+    """Retired openclaw keys are ignored, not validated."""
+    config_path = tmp_path / "workflow.yaml"
+    config_path.write_text(
+        "data_dir: data\n"
+        "openclaw:\n"
+        "  cwd: .\n"
+        "  timeout_seconds: 600\n"
+        "  command_template: []\n"
+        "  skill_safety:\n"
+        "    enabled: true\n"
+        "    repos:\n"
+        "      - path: ~/.openclaw/workspace/skills/s1\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.executor_runtime.openclaw.cwd == "."
+
+
+def test_load_settings_rejects_skill_safety_ref(tmp_path, monkeypatch):
+    """skill_safety refs stay rejected at startup (config governance G3): the
+    DB skill_lock document is the single source of truth for refs, so the
+    retired-key ignore rule must not swallow a ref silently."""
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
         "data_dir: data\n"
@@ -313,14 +337,12 @@ def test_load_settings_ignores_retired_openclaw_knobs(tmp_path, monkeypatch):
         "    enabled: true\n"
         "    repos:\n"
         "      - path: ~/.openclaw/workspace/skills/s1\n"
-        "        ref: v1.0.0\n"
-        "  command_template: []\n",
+        "        ref: v1.0.0\n",
         encoding="utf-8",
     )
 
-    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
-
-    assert settings.executor_runtime.openclaw.cwd == "."
+    with pytest.raises(ValidationError, match="ref"):
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
 
 @pytest.mark.parametrize(

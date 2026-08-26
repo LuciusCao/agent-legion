@@ -19,8 +19,11 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 - Removed retired/unused config surface: the dead `PiRuntimeConfig` block
   and the unconsumed OpenClaw runtime knobs (`command_template`,
   `timeout_seconds`, `isolated_workspace_root`, `skill_safety`) — the admin
-  instance-settings `openclaw` document is now `cwd`-only (stored documents
-  carrying the retired keys keep working: unknown keys are ignored on load).
+  instance-settings `openclaw` document is now `cwd`-only. Stored documents
+  from older deployments are normalized at read time (retired keys stripped
+  before response validation, no data migration needed), and
+  `openclaw.skill_safety.repos[].ref` stays rejected at startup (config
+  governance G3: refs are pinned by the DB `skill_lock` document only).
 - Worker: removed the test-only `read_current_executions` compatibility
   helper and `strip_secret_config` (never called on the Worker — secret
   stripping happens Host-side in `split_manifest_config` before dispatch;

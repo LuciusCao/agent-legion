@@ -27,6 +27,36 @@ def test_openclaw_runtime_config_ignores_extra_fields():
     assert "runners" not in config.model_dump()
 
 
+def test_openclaw_runtime_config_ignores_retired_knobs():
+    config = OpenClawRuntimeConfig.model_validate(
+        {
+            "cwd": "/tmp/openclaw",
+            "command_template": ["openclaw", "agent"],
+            "timeout_seconds": 300,
+            "isolated_workspace_root": "/tmp/isolated",
+            "skill_safety": {"enabled": True, "repos": [{"path": "~/.skills/s1"}]},
+        }
+    )
+    assert config.cwd == "/tmp/openclaw"
+    assert "command_template" not in config.model_dump()
+    assert "skill_safety" not in config.model_dump()
+
+
+def test_openclaw_runtime_config_rejects_skill_safety_ref():
+    """Refs are pinned by the DB skill_lock document (G3): a ref key must be
+    rejected at startup even though the rest of the retired block is ignored."""
+    with pytest.raises(ValidationError, match="ref"):
+        OpenClawRuntimeConfig.model_validate(
+            {
+                "cwd": ".",
+                "skill_safety": {
+                    "enabled": True,
+                    "repos": [{"path": "~/.skills/s1", "ref": "v1.0.0"}],
+                },
+            }
+        )
+
+
 def test_workflows_runtime_config_defaults():
     config = WorkflowsRuntimeConfig()
     # Default on: matches the retired tracked workflow.yaml value

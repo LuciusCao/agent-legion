@@ -61,6 +61,32 @@ def test_get_returns_code_defaults_when_unset(client) -> None:
     assert response.json() == _payload()
 
 
+def test_get_normalizes_legacy_stored_openclaw_keys(client) -> None:
+    """A stored document saved before the openclaw-knob retirement still
+    carries command_template/timeout_seconds/isolated_workspace_root/
+    skill_safety; GET must normalize to the cwd-only shape instead of
+    failing response validation with a 500 (Codex review, PR #183)."""
+    from server.app.services.instance_settings_store import InstanceSettingsStore
+
+    store = InstanceSettingsStore(client.app.state.job_db.path)
+    store.put(
+        {
+            "openclaw": {
+                "cwd": "/tmp/openclaw-legacy",
+                "command_template": ["openclaw", "agent"],
+                "timeout_seconds": 600,
+                "isolated_workspace_root": "",
+                "skill_safety": {"enabled": True, "repos": [{"path": "~/.skills/s1"}]},
+            }
+        }
+    )
+
+    response = client.get(INSTANCE_SETTINGS_URL)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["openclaw"] == {"cwd": "/tmp/openclaw-legacy"}
+
+
 def test_put_roundtrip(client) -> None:
     payload = _payload()
     payload["lease_ttl_seconds"] = 120

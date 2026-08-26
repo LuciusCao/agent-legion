@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from server.app.agent_broker.dispatch_pool import AgentEnqueueConfig
 from server.app.workflow_worker.agent_stock import AgentStockConfig
@@ -25,6 +25,30 @@ class OpenClawRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     cwd: str = "."
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_skill_safety_refs(cls, data: Any) -> Any:
+        """Fail fast on ``skill_safety.repos[].ref`` (config governance G3).
+
+        The retired ``skill_safety`` block is otherwise ignored like the other
+        retired knobs, but a ``ref`` key must never be silently dropped: refs
+        are pinned by the DB ``skill_lock`` document as the single source of
+        truth, and the repository rule requires the rejection at startup.
+        """
+        if isinstance(data, dict):
+            skill_safety = data.get("skill_safety")
+            if isinstance(skill_safety, dict):
+                repos = skill_safety.get("repos")
+                if isinstance(repos, list) and any(
+                    isinstance(repo, dict) and "ref" in repo for repo in repos
+                ):
+                    raise ValueError(
+                        "openclaw.skill_safety.repos entries must not carry a ref key: "
+                        "refs are pinned by the DB skill_lock document (config "
+                        "governance G3)"
+                    )
+        return data
 
 
 class WorkflowsRuntimeConfig(BaseModel):
