@@ -37,6 +37,7 @@ from server.app.settings import Settings
 from server.app.studio_chat.acp_session import AcpSessionHandle, build_mcp_server_spec
 from server.app.studio_chat.availability import AgentAvailabilityProbe
 from server.app.studio_chat.callbacks import ServiceCallbacks
+from server.app.studio_chat.mcp_hint import maybe_emit_mcp_hint
 from server.app.studio_chat.payloads import (
     serialize_message,
     serialize_session,
@@ -399,37 +400,10 @@ class StudioChatService:
         return handle_permission_request(self, session_id, tool_call, options)
 
     def _on_turn_end(self, session_id: str, stop_reason: str) -> None:
-        session = self._db.get_studio_chat_session(session_id) or {}
-        runtime = self._runtime(session_id)
-        mcp_observed = runtime.mcp_observed if runtime is not None else False
-        # The MCP-visibility smoke signal is advisory only. A turn that never
-        # touched an agent-legion tool is NOT evidence of a wiring problem:
-        # the user may have asked a question that needs no platform state, or
-        # cancelled mid-run. Only when no turn of the whole session has ever
-        # shown an agent-legion tool call AND this turn actually completed do
-        # we surface the one-time hint; cancelled turns are skipped entirely.
-        if (
-            not mcp_observed
-            and session.get("mcp_status") != "verified"
-            and stop_reason != "cancelled"
-            and not (runtime is not None and runtime.mcp_hint_shown)
-        ):
-            if runtime is not None:
-                with runtime.lock:
-                    runtime.mcp_hint_shown = True
-            self._db.update_studio_chat_session(session_id, mcp_status="unverified")
-            self._append_message(
-                session_id,
-                "status",
-                "system",
-                {
-                    "event": "mcp_unverified",
-                    "detail": (
-                        "本会话还没有任何 agent-legion 平台工具调用的迹象；如果你期望"
-                        " agent 读写平台状态，请检查其 MCP 配置。纯问答类对话可忽略本提示。"
-                    ),
-                },
-            )
+        # The MCP-visibility smoke signal is advisory only (mcp_hint.py): a
+        # turn without an agent-legion tool call is not evidence of a wiring
+        # problem, so the hint fires once per session, never on cancels.
+        maybe_emit_mcp_hint(self, session_id, stop_reason)
         self._append_message(
             session_id, "status", "system", {"event": "turn_end", "stop_reason": stop_reason}
         )

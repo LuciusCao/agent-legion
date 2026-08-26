@@ -14,6 +14,13 @@ auto-approved by the platform's read-only policy). Output is capped at
 ``output_byte_limit`` (the agent sets 4 MiB) with head-truncation to keep the
 retained tail, mirroring the protocol's truncation contract.
 
+Each terminal runs in its own process group (``start_new_session=True``);
+kill/release terminate the whole group so pipelines and background children
+of an approved Bash command cannot outlive the terminal. Group identity is
+re-validated right before the signal: the pid is compared against the
+process's own pgid, so a recycled or already-reaped pid can never aim the
+group signal at an unrelated process (AGENTS.md killpg discipline).
+
 Lifecycle: terminals live in a per-handle registry on the session loop's
 event loop; ``release``/``kill`` reap the process, and ``AcpTerminalStore.
 close_all`` (called from the handle teardown path) kills anything the agent
@@ -24,17 +31,23 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import signal as signal_module
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from acp.schema import (
     CreateTerminalResponse,
+    KillTerminalResponse,
     ReleaseTerminalResponse,
     TerminalExitStatus,
     TerminalOutputResponse,
     WaitForTerminalExitResponse,
 )
+
+if TYPE_CHECKING:
+    from server.app.studio_chat.acp_session import AcpSessionHandle
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +98,9 @@ class AcpTerminalStore:
             env=process_env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            # Own process group: kill/release must take down the whole tree
+            # (pipelines, `&` background children), not just the direct child.
+            start_new_session=True,
         )
         terminal = _Terminal(process=process, byte_limit=limit)
         self._terminals[terminal_id] = terminal
@@ -156,7 +172,15 @@ class AcpTerminalStore:
     async def _kill(self, terminal: _Terminal) -> None:
         if terminal.process.returncode is not None:
             return
-        terminal.process.kill()
+        # Group-wide signal, identity-checked: start_new_session made the child
+        # its own group leader (pid == pgid), so this only matches while the
+        # child is still that leader. A recycled pid in another group fails the
+        # pgid comparison and the signal is skipped instead of hitting an
+        # unrelated process (AGENTS.md killpg re-validation discipline).
+        with _swallow("terminal killpg"):
+            pid = terminal.process.pid
+            if pid is not None and os.getpgid(pid) == pid:
+                os.killpg(pid, signal_module.SIGKILL)
         with _swallow("terminal kill wait"):
             await terminal.process.wait()
 
@@ -188,11 +212,68 @@ def _exit_payload(process: asyncio.subprocess.Process) -> dict[str, Any]:
     code = process.returncode
     if code is None or code >= 0:
         return {"exit_code": code}
-    signal_number = -code
     try:
-        import signal as signal_module
-
-        name = signal_module.Signals(signal_number).name
+        name = signal_module.Signals(-code).name
     except ValueError:
-        name = str(signal_number)
+        name = str(-code)
     return {"exit_code": None, "signal": name}
+
+
+class TerminalClientMixin:
+    """``terminal/*`` request handlers for the ACP client object.
+
+    The ACP SDK router resolves ``create_terminal`` / ``terminal_output`` /
+    ``wait_for_terminal_exit`` / ``release_terminal`` / ``kill_terminal`` as
+    attributes on the client object (duck-typed protocol) and calls them with
+    the request models' field names. The host class provides ``terminals``
+    (an AcpTerminalStore) and ``_handle`` (for the default cwd); this mixin
+    lives in terminals.py so acp_session.py stays within its size budget.
+    """
+
+    terminals: AcpTerminalStore
+    _handle: AcpSessionHandle
+
+    async def create_terminal(  # type: ignore[no-untyped-def]
+        self,
+        session_id: str,
+        command: str,
+        args: list[str] | None = None,
+        env: list[Any] | None = None,
+        cwd: str | None = None,
+        output_byte_limit: int | None = None,
+        **kwargs: Any,
+    ) -> CreateTerminalResponse:
+        del session_id  # one store per handle; the id adds nothing here
+        return await self.terminals.create(
+            command=command,
+            args=args,
+            env=env,
+            cwd=cwd,
+            output_byte_limit=output_byte_limit,
+            default_cwd=self._handle.cwd,
+        )
+
+    async def terminal_output(
+        self, session_id: str, terminal_id: str, **kwargs: Any
+    ) -> TerminalOutputResponse:
+        del session_id
+        return await self.terminals.output(terminal_id)
+
+    async def wait_for_terminal_exit(
+        self, session_id: str, terminal_id: str, **kwargs: Any
+    ) -> WaitForTerminalExitResponse:
+        del session_id
+        return await self.terminals.wait_for_exit(terminal_id)
+
+    async def release_terminal(
+        self, session_id: str, terminal_id: str, **kwargs: Any
+    ) -> ReleaseTerminalResponse:
+        del session_id
+        return await self.terminals.release(terminal_id)
+
+    async def kill_terminal(
+        self, session_id: str, terminal_id: str, **kwargs: Any
+    ) -> KillTerminalResponse:
+        del session_id
+        await self.terminals.kill(terminal_id)
+        return KillTerminalResponse()

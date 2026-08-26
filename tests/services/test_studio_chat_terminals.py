@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 
 import pytest
@@ -160,5 +161,48 @@ def test_env_vars_are_passed_to_the_process() -> None:
         await store.wait_for_exit(created.terminalId)
         state = await store.output(created.terminalId)
         assert "present" in state.output
+
+    asyncio.run(_run())
+
+
+def test_kill_takes_down_the_whole_process_group() -> None:
+    """`sh -c 'sleep 60 & sleep 60'` 之类命令的后台子进程必须随 terminal
+    一起终止——只杀直接子进程会让后代进程泄漏成孤儿。"""
+    import shutil
+
+    async def _run() -> None:
+        if shutil.which("sh") is None:
+            return
+        store = AcpTerminalStore()
+        created = await store.create(
+            command="sh",
+            args=["-c", "sleep 987 & sleep 987 & wait"],
+            env=None,
+            cwd=None,
+            output_byte_limit=None,
+            default_cwd=".",
+        )
+        await asyncio.sleep(0.5)
+        terminal = store._terminals[created.terminalId]
+        pgid = os.getpgid(terminal.process.pid)
+        # The group already has the direct child plus two sleeps.
+        # (macOS/Linux `ps` per-group listing; count what our group holds.)
+        await store.kill(created.terminalId)
+        awaited = await store.wait_for_exit(created.terminalId)
+        assert awaited.exit_code is None  # group SIGKILL reads as signal death
+        await asyncio.sleep(0.3)
+        # After the group kill no member of the old pgid may survive.
+        import subprocess
+
+        listing = subprocess.run(
+            ["ps", "-o", "pgid=", "-eo", "pgid,pid"], capture_output=True, text=True
+        )
+        surviving = [
+            line.split()
+            for line in listing.stdout.splitlines()
+            if line.split() and line.split()[0] == str(pgid)
+        ]
+        assert surviving == []
+        await store.release(created.terminalId)
 
     asyncio.run(_run())
