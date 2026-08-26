@@ -175,7 +175,7 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     )
     worker2._poll()
     assert worker2.leases.active_counts("code").get("global", 0) == 1
-    for future in list(worker2._futures.values()):
+    for future in list(worker2.state.futures.values()):
         future.result(timeout=10)
     node2 = job_db.get_job_node(job2["id"], "cooperative")
     assert node2["status"] == "completed"
