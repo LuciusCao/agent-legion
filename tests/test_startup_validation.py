@@ -22,9 +22,6 @@ def _minimal_config() -> str:
 data_dir: data
 openclaw:
   cwd: {cwd}
-  command_template:
-    - openclaw
-    - agent
 """
 
 

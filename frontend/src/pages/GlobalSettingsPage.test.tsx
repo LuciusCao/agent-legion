@@ -101,13 +101,6 @@ const instanceSettings: InstanceSettingsResponse = {
   agent_workers: { max_archive_bytes: 104857600, min_protocol_version: 2 },
   openclaw: {
     cwd: '.',
-    timeout_seconds: 600,
-    isolated_workspace_root: '',
-    command_template: ['openclaw', 'agent', '--json'],
-    skill_safety: {
-      enabled: true,
-      repos: [{ path: '~/.agents/skills/agent-legion/s1' }],
-    },
   },
 }
 

@@ -4,9 +4,9 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from server.app.agent_broker.dispatch_pool import AgentEnqueueConfig
 from server.app.workflow_worker.agent_stock import AgentStockConfig
@@ -15,56 +15,16 @@ from server.app.workflow_worker.code_stock import CodeStockConfig
 logger = logging.getLogger(__name__)
 
 
-class PiRuntimeConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    flavor: Literal["pi", "velites"] = "pi"  # runtime: pi 的遗留实现选择层（§9）；非法值 fail-fast
-    binary: str = Field(default="pi", validate_default=True)
-    provider: str = ""
-    model: str = ""
-    thinking: str = ""
-    timeout_seconds: int = Field(default=600, ge=1)
-    cancellation_grace_seconds: int = Field(default=5, ge=0)
-    environment: dict[str, str] = Field(default_factory=dict)
-    velites_no_sandbox: bool = False  # 逃生门：velites 下传 --no-sandbox（沙箱降级免发版）
-
-    @field_validator("binary")
-    @classmethod
-    def _flavor_binary(cls, value: str, info: ValidationInfo) -> str:
-        return "velites" if info.data.get("flavor") == "velites" and value == "pi" else value
-
-
-class OpenClawSkillSafetyRepo(BaseModel):
-    """One skill checkout the OpenClaw runner may force-restore before a run.
-
-    Only the path is declared here; the restore ref is pinned by the DB
-    ``skill_lock`` document (config governance G3, single source of truth).
-    A ``ref`` key is rejected as an extra field.
+class OpenClawRuntimeConfig(BaseModel):
+    """OpenClaw runtime knobs as consumed today: only ``cwd`` is read (the
+    agents-list discovery working directory and its startup validation).
+    ``command_template`` / ``timeout_seconds`` / ``isolated_workspace_root`` /
+    ``skill_safety`` retired with the legacy business workflow pipeline.
     """
 
-    model_config = ConfigDict(extra="forbid")
-
-    path: str = Field(min_length=1)
-
-
-class OpenClawSkillSafetyRuntimeConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = False
-    repos: list[OpenClawSkillSafetyRepo] = Field(default_factory=list)
-
-
-class OpenClawRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    command_template: tuple[str, ...] = Field(min_length=1)
     cwd: str = "."
-    timeout_seconds: int = Field(default=600, ge=1)
-    cancellation_grace_seconds: int = Field(default=5, ge=0)
-    isolated_workspace_root: str = ""
-    skill_safety: OpenClawSkillSafetyRuntimeConfig = Field(
-        default_factory=OpenClawSkillSafetyRuntimeConfig
-    )
 
 
 class WorkflowsRuntimeConfig(BaseModel):
@@ -78,7 +38,6 @@ class WorkflowsRuntimeConfig(BaseModel):
     # members (design §7 trust assumption). Disable via
     # AGENT_LEGION_CUSTOM_NODES_ENABLED=0.
     custom_nodes_enabled: bool = True
-    pi: PiRuntimeConfig = Field(default_factory=PiRuntimeConfig)
 
 
 class AgentWorkersRuntimeConfig(BaseModel):
@@ -105,9 +64,7 @@ class ExecutorRuntimeConfig(BaseModel):
     sweeper_enabled: bool = True
     sweeper_interval_seconds: float = Field(default=5.0, gt=0)
     workflows: WorkflowsRuntimeConfig = Field(default_factory=WorkflowsRuntimeConfig)
-    openclaw: OpenClawRuntimeConfig = Field(
-        default_factory=lambda: OpenClawRuntimeConfig(command_template=("openclaw",))
-    )
+    openclaw: OpenClawRuntimeConfig = Field(default_factory=OpenClawRuntimeConfig)
     agent_workers: AgentWorkersRuntimeConfig = Field(default_factory=AgentWorkersRuntimeConfig)
     agent_stock: AgentStockConfig = Field(default_factory=AgentStockConfig)
     code_stock: CodeStockConfig = Field(default_factory=CodeStockConfig)

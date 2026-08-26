@@ -37,28 +37,6 @@ def _payload() -> dict:
         "agent_workers": {"max_archive_bytes": 64 * 1024 * 1024, "min_protocol_version": 1},
         "openclaw": {
             "cwd": ".",
-            "timeout_seconds": 600,
-            "isolated_workspace_root": "",
-            "command_template": [
-                "openclaw",
-                "agent",
-                "--local",
-                "--agent",
-                "main",
-                "--session-id",
-                "{video_id}-{timestamp}",
-                "--thinking",
-                "on",
-                "--message",
-                "{prompt_text}",
-                "--json",
-            ],
-            "skill_safety": {
-                "enabled": True,
-                # Code defaults ship no business skills (open-source
-                # extraction plan §1.1 #6): the whitelist starts empty.
-                "repos": [],
-            },
         },
     }
 
@@ -115,10 +93,7 @@ def test_put_rejects_out_of_range_values(client) -> None:
     payload["agent_workers"]["min_protocol_version"] = 0
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
     payload = _payload()
-    payload["openclaw"]["timeout_seconds"] = 0
-    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
-    payload = _payload()
-    payload["openclaw"]["command_template"] = []
+    payload["monitoring"]["sample_interval_seconds"] = 0
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
 
 
@@ -149,18 +124,19 @@ def test_put_materials_ttl_roundtrip(client) -> None:
     assert response.json()["materials_ttl_days"] == 30
 
 
-def test_put_rejects_skill_safety_ref(client) -> None:
-    """skill_safety repos are a path-only allowlist (G3): ref keys 422."""
+def test_put_rejects_retired_openclaw_keys(client) -> None:
+    """Retired openclaw knobs are unknown fields now: they 422 (extra=forbid)."""
     payload = _payload()
-    payload["openclaw"]["skill_safety"]["repos"] = [{"path": "~/skills/s1", "ref": "v1.0.0"}]
+    payload["openclaw"]["skill_safety"] = {"enabled": True, "repos": []}
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+    payload = _payload()
+    payload["openclaw"]["command_template"] = ["openclaw"]
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
 
 
 def test_put_openclaw_roundtrip(client) -> None:
     payload = _payload()
     payload["openclaw"]["cwd"] = "/tmp/openclaw"
-    payload["openclaw"]["command_template"] = ["openclaw", "agent", "--json"]
-    payload["openclaw"]["skill_safety"]["enabled"] = False
     response = client.put(INSTANCE_SETTINGS_URL, json=payload)
     assert response.status_code == 200, response.text
     assert response.json() == payload

@@ -58,34 +58,9 @@ def test_default_document_matches_retired_yaml_values() -> None:
         "max_archive_bytes": 64 * 1024 * 1024,
         "min_protocol_version": 1,
     }
-    # openclaw defaults mirror the retired agent_legion.yaml section, except
-    # skill_safety.repos (emptied: no business skills ship with the platform).
-    assert document["openclaw"] == {
-        "cwd": ".",
-        "timeout_seconds": 600,
-        "isolated_workspace_root": "",
-        "command_template": [
-            "openclaw",
-            "agent",
-            "--local",
-            "--agent",
-            "main",
-            "--session-id",
-            "{video_id}-{timestamp}",
-            "--thinking",
-            "on",
-            "--message",
-            "{prompt_text}",
-            "--json",
-        ],
-        "skill_safety": {
-            "enabled": True,
-            # Diverges from the retired yaml on purpose: the platform ships
-            # no business skills, so the whitelist defaults to empty
-            # (open-source extraction plan §1.1 #6).
-            "repos": [],
-        },
-    }
+    # openclaw defaults are cwd-only now: the retired knobs
+    # (command_template/skill_safety/...) were configurable but never consumed.
+    assert document["openclaw"] == {"cwd": "."}
 
 
 def test_effective_document_merges_partial_stored_over_defaults() -> None:

@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from server.app.settings import load_env_file, load_settings
 
@@ -291,70 +290,37 @@ def test_load_settings_rejects_retired_workflows_pi_yaml(tmp_path, monkeypatch):
 def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
-        "data_dir: data\n"
-        "workflows:\n"
-        "  enabled: true\n"
-        "openclaw:\n"
-        "  cwd: .\n"
-        "  timeout_seconds: 600\n"
-        "  skill_safety:\n"
-        "    enabled: true\n"
-        "    repos:\n"
-        "      - path: ~/.openclaw/workspace/skills/s1\n"
-        "  command_template:\n"
-        "    - openclaw\n"
-        "    - agent\n",
+        "data_dir: data\nworkflows:\n  enabled: true\nopenclaw:\n  cwd: .\n",
         encoding="utf-8",
     )
 
     settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
     assert settings.executor_runtime.workflows.enabled is True
-    # workflows.pi 块已退役：PiRuntimeConfig 只剩硬编码默认（死路径 executors/pi.py 专用）。
-    assert settings.executor_runtime.workflows.pi.flavor == "pi"
-    assert settings.executor_runtime.workflows.pi.binary == "pi"
     assert settings.executor_runtime.openclaw.cwd == "."
-    assert settings.executor_runtime.openclaw.timeout_seconds == 600
-    assert settings.executor_runtime.openclaw.command_template == ("openclaw", "agent")
-    assert settings.executor_runtime.openclaw.skill_safety.enabled is True
-    assert [repo.path for repo in settings.executor_runtime.openclaw.skill_safety.repos] == [
-        "~/.openclaw/workspace/skills/s1"
-    ]
+    # 退役的 openclaw 旋钮（command_template/timeout_seconds/skill_safety）随
+    # 配置面清理移除：extra="ignore" 使 yaml 里的残留键被静默丢弃。
 
 
-def test_load_settings_rejects_skill_safety_ref(tmp_path, monkeypatch):
-    """skill_safety refs were retired (config governance G3); lock is the source."""
+def test_load_settings_ignores_retired_openclaw_knobs(tmp_path, monkeypatch):
+    """Retired openclaw keys (skill_safety et al.) are ignored, not validated."""
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
         "data_dir: data\n"
         "openclaw:\n"
-        "  command_template:\n"
-        "    - openclaw\n"
+        "  cwd: .\n"
         "  skill_safety:\n"
         "    enabled: true\n"
         "    repos:\n"
         "      - path: ~/.openclaw/workspace/skills/s1\n"
-        "        ref: v1.0.0\n",
+        "        ref: v1.0.0\n"
+        "  command_template: []\n",
         encoding="utf-8",
     )
 
-    with pytest.raises(ValidationError) as exc_info:
-        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
-    assert "ref" in str(exc_info.value)
-
-
-def test_load_settings_rejects_empty_openclaw_command_template(tmp_path, monkeypatch):
-    config_path = tmp_path / "workflow.yaml"
-    config_path.write_text(
-        "data_dir: data\nopenclaw:\n  command_template: []\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ValidationError) as exc_info:
-        load_settings(data_dir=tmp_path / "data", config_path=config_path)
-
-    assert "command_template" in str(exc_info.value)
+    assert settings.executor_runtime.openclaw.cwd == "."
 
 
 @pytest.mark.parametrize(
@@ -373,14 +339,7 @@ def test_env_override_precedes_yaml(
     if layout == "legacy":
         config_path_file = tmp_path / "workflow.yaml"
         config_path_file.write_text(
-            "data_dir: data\n"
-            "workflows:\n"
-            "  enabled: false\n"
-            "openclaw:\n"
-            "  cwd: yaml-cwd\n"
-            "  command_template:\n"
-            "    - openclaw\n"
-            "    - agent\n",
+            "data_dir: data\nworkflows:\n  enabled: false\nopenclaw:\n  cwd: yaml-cwd\n",
             encoding="utf-8",
         )
     else:

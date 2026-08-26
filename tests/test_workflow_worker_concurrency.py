@@ -126,7 +126,6 @@ def _make_worker(
         executor_runtime=ExecutorRuntimeConfig.model_validate(
             {
                 "workflows": {"enabled": True},
-                "openclaw": {"command_template": ["openclaw"]},
                 "code_capacity": code_capacity,
             }
         ),
