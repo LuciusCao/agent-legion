@@ -1,99 +1,32 @@
 """Agent Worker registration contract tests: scoped tokens, scope storage,
 the worker↔token binding (schema v59), and registration record deletion.
 
-Shared registration helpers live here; test_agent_workers.py (execution data
-plane) imports them so both files stay under the test size limit.
+Shared registration helpers live in tests/helpers/agent_worker_api.py (PR #181
+extracted them for the whole agent worker / broker test surface); this file
+keeps only the registration-contract scenarios.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
-from server.app.main import create_app
-from tests.test_agent_broker import _seed_request
+from server.app.agent_register_key_guard import RegisterKeyDeleted
+from tests.helpers.agent_worker_api import (
+    authenticate_admin,
+    issue_scoped_token,
+    make_app,
+    register,
+    seed_request,
+)
 
-
-def _authenticate_admin(client: TestClient) -> None:
-    """Bootstrap the first admin and keep its session cookie on the client.
-
-    409 = first user already bootstrapped on this app (a second TestClient
-    block within one test); the cookie is per-client so re-login instead."""
-    response = client.post(
-        "/api/auth/bootstrap",
-        json={"username": "admin", "password": "admin-pw"},
-    )
-    if response.status_code == 409:
-        response = client.post(
-            "/api/auth/login",
-            json={"username": "admin", "password": "admin-pw"},
-        )
-    assert response.status_code == 200, response.text
-    client.headers["x-agent-legion-request"] = "1"
-
-
-def _make_app(tmp_path: Path):
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    # Workspace dispatch defaults to paused (reset at every startup); the
-    # operator resume is part of the environment these tests exercise.
-    app.state.workspace_worker_control.resume("test-workspace")
-    return app
-
-
-def _issue_scoped_token(client: TestClient, workspace_id: str = "test-workspace") -> str:
-    """Issue a real workspace-scoped register token via the admin API.
-
-    Creates the workspace first when it does not exist yet (some tests never
-    seed a job and only exercise the registration contract)."""
-    # 签发是 admin-only API；幂等（409 → login 回落），重复调用无副作用。
-    _authenticate_admin(client)
-    created = client.post(
-        "/api/agent-register-tokens",
-        json={"workspace_id": workspace_id, "label": "test"},
-    )
-    if created.status_code == 400:
-        ensured = client.post(
-            "/api/workspaces",
-            json={"name": workspace_id},
-        )
-        assert ensured.status_code in (200, 201), ensured.text
-        created = client.post(
-            "/api/agent-register-tokens",
-            json={"workspace_id": workspace_id, "label": "test"},
-        )
-    assert created.status_code == 201, created.text
-    return created.json()["register_token"]
-
-
-def _register(client: TestClient, credential: str | None = None, **overrides) -> dict:
-    """Register a worker with a scoped token (auto-issued for test-workspace)."""
-    if credential is None:
-        credential = _issue_scoped_token(client)
-    payload = {
-        "worker_id": "home-mini",
-        "name": "Home Mac mini",
-        "runtimes": ["pi"],
-        "capabilities": ["generate"],
-        "models": [{"provider": "gateway", "model": "test-model"}],
-        "max_concurrency": 10,
-        "labels": {"arch": "arm64"},
-        "protocol_version": 1,
-        "image_version": "agent-legion-worker:test",
-    }
-    payload.update(overrides)
-    headers = {"X-Agent-Worker-Register-Token": credential}
-    tokens = overrides.pop("tokens", None)
-    if tokens:
-        headers = {"X-Agent-Worker-Register-Tokens": ",".join(tokens)}
-    response = client.post(
-        "/api/agent-workers/register",
-        headers=headers,
-        json=payload,
-    )
-    assert response.status_code == 201, response.text
-    assert response.json()["host_protocol_version"] == 3
-    return dict(response.json())
+_authenticate_admin = authenticate_admin
+_issue_scoped_token = issue_scoped_token
+_make_app = make_app
+_register = register
+_seed_request = seed_request
 
 
 def test_register_with_scoped_token_stores_and_returns_scope(tmp_path: Path) -> None:
@@ -228,6 +161,37 @@ def test_delete_key_narrows_multi_key_worker_to_surviving_scope(
         deleted_last = client.delete(f"/api/agent-register-tokens/{second_id}")
         assert deleted_last.json()["cascaded_worker_ids"] == ["home-mini"]
         assert client.get("/api/agent-workers").json()["workers"] == []
+
+
+def test_issue_token_aborts_when_bound_key_is_deleted(tmp_path: Path) -> None:
+    """SECURITY-WORKER-001: the admission keys are revalidated inside the
+    write transaction, so a key deleted between the route's read-only
+    resolve and the worker write aborts the registration — the cascade
+    cannot see an uncommitted row, so without this guard a worker_token
+    bound to a dead key would survive."""
+    app = _make_app(tmp_path)
+    registry = app.state.agent_worker_registry
+
+    with TestClient(app) as client:
+        _authenticate_admin(client)
+        credential = _issue_scoped_token(client)
+        token_id = credential.partition(".")[0]
+
+    # Simulate the race: the credential resolved fine, the key died before
+    # the worker row was written (route-level delete + registry-level retry).
+    cascaded = registry.delete_register_token(token_id)
+    assert cascaded == []
+
+    with pytest.raises(RegisterKeyDeleted, match="no longer exists"):
+        registry.issue_token(
+            worker_id="racy-worker",
+            name="Racy",
+            runtimes=["pi"],
+            max_concurrency=1,
+            register_token_ids=[token_id],
+        )
+    # The write transaction rolled back: no worker row survived.
+    assert all(w["worker_id"] != "racy-worker" for w in registry.list_workers())
 
 
 def test_legacy_worker_without_recorded_binding_is_always_deletable(

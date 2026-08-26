@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from server.app.agent_register_key_guard import resolve_issue_scope
 from server.app.agent_register_tokens import AgentRegisterTokenStore
 from server.app.agent_worker_declarations import (
     normalize_labels,
@@ -97,24 +98,19 @@ class AgentWorkerRegistry(AgentRegisterTokenStore):
         # registration credentials (route layer), never from Worker fields:
         # each scoped register token contributes its workspace id; the merged
         # list is stored. Re-registering rotates the token AND refreshes the
-        # scope from the current credentials — revoking a scoped register
-        # token therefore only bites at the next re-registration, it does not
-        # narrow an already-registered Worker's stored scope.
-        scope = sorted({str(workspace) for workspace in (allowed_workspaces or [])})
-        # The worker↔key binding: ids of the register tokens that admitted
-        # this registration, refreshed on every re-registration together with
-        # the scope. Absent for legacy direct registry callers.
+        # scope from the current credentials. With bound keys the scope is
+        # re-derived from the locked key rows below; allowed_workspaces only
+        # serves legacy direct callers with no key binding.
         token_ids = sorted({str(token_id) for token_id in (register_token_ids or [])})
         secret = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(secret.encode()).hexdigest()
         now = datetime.now(UTC)
         with write_transaction(self.database_dsn) as conn:
-            for workspace in scope:
-                exists = conn.execute(
-                    "select 1 from workspaces where id=%s", (workspace,)
-                ).fetchone()
-                if exists is None:
-                    raise ValueError(f"workspace {workspace!r} does not exist")
+            # Revalidation happens inside THIS transaction: a key deleted
+            # after the route's read-only resolve must abort the registration,
+            # or the delete-key-cuts-access guarantee is lost (the worker row
+            # is invisible to the cascade until commit).
+            scope = resolve_issue_scope(conn, token_ids, allowed_workspaces)
             conn.execute(
                 """
                 insert into agent_workers(
@@ -215,7 +211,7 @@ class AgentWorkerRegistry(AgentRegisterTokenStore):
         not touch them."""
         with write_transaction(self.database_dsn) as conn:
             row = conn.execute(
-                "select register_token_ids_json from agent_workers where worker_id=%s",
+                "select register_token_ids_json from agent_workers where worker_id=%s for update",
                 (worker_id,),
             ).fetchone()
             if row is None:

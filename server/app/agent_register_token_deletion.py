@@ -34,7 +34,8 @@ def delete_register_token_cascading(database_dsn: DatabaseDsn, token_id: str) ->
             return None
         rows = conn.execute(
             "select worker_id, register_token_ids_json from agent_workers"
-            " where register_token_ids_json::jsonb @> jsonb_build_array(%s::text)",
+            " where register_token_ids_json::jsonb @> jsonb_build_array(%s::text)"
+            " order by worker_id for update",
             (token_id,),
         ).fetchall()
         deleted: list[str] = []

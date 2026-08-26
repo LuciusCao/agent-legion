@@ -720,6 +720,7 @@
     "server/app/agent_catalog.py": 52,
     "server/app/agent_catalog_builtin.py": 72,
     "server/app/agent_completion.py": 172,
+    "server/app/agent_register_key_guard.py": 61,
     "server/app/agent_register_token_deletion.py": 83,
     "server/app/agent_register_tokens.py": 115,
     "server/app/agent_worker_declarations.py": 81,

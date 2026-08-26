@@ -120,6 +120,13 @@ def create_agent_workers_router(
                     str(token_id) for row in scope for token_id in row["token_ids"]
                 ],
             )
+        except KeyError as exc:
+            # A bound key was deleted after the read-only resolve (guard
+            # re-checks under lock): the credential is dead, not malformed.
+            # RegisterKeyDeleted subclasses KeyError but str() of KeyError
+            # wraps the message in quotes — args[0] carries the clean text.
+            detail = exc.args[0] if exc.args else str(exc)
+            raise HTTPException(status_code=401, detail=detail) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return RegisterAgentWorkerResponse(
