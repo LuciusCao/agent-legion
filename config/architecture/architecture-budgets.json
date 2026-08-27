@@ -854,7 +854,7 @@
     "server/app/routes/agent_workers.py": 228,
     "server/app/routes/agent_workers_contracts.py": 91,
     "server/app/routes/agents.py": 46,
-    "server/app/routes/artifacts.py": 65,
+    "server/app/routes/artifacts.py": 46,
     "server/app/routes/auth.py": 134,
     "server/app/routes/auth_contracts.py": 58,
     "server/app/routes/common.py": 22,

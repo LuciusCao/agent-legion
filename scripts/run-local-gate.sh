@@ -99,9 +99,42 @@ done
 
 # Machine identity is part of the fingerprint (#206): the evidence cache is
 # shared across worktrees via the common git dir, so without it machine A's
-# pass would be replayed on machine B for the same SHA + toolchain.
-machine_id="$(uname -srm)"
-fingerprint_input+="machine=${machine_id%%$'\n'*}"$'\n'
+# pass would be replayed on machine B for the same SHA + toolchain. uname -srm
+# alone is NOT a host identity (identical OS/arch machines share it — codex
+# review), so resolve a per-host unique id: AGENT_LEGION_MACHINE_ID_FILE
+# override (also the test seam), /etc/machine-id (or its dbus mirror) on
+# Linux, IOPlatformUUID on macOS, hostname as the last resort.
+resolve_machine_identity() {
+  local candidate override
+  override="${AGENT_LEGION_MACHINE_ID_FILE:-}"
+  if [[ -n "$override" && -r "$override" ]]; then
+    candidate="$(tr -d '[:space:]' <"$override")"
+    if [[ -n "$candidate" ]]; then
+      printf 'machine-id:%s' "$candidate"
+      return 0
+    fi
+  fi
+  for candidate in /etc/machine-id /var/lib/dbus/machine-id; do
+    if [[ -r "$candidate" ]]; then
+      candidate="$(tr -d '[:space:]' <"$candidate")"
+      if [[ -n "$candidate" ]]; then
+        printf 'machine-id:%s' "$candidate"
+        return 0
+      fi
+    fi
+  done
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    candidate="$(ioreg -rd1 -c IOPlatformExpertDevice 2>/dev/null | sed -n 's/.*IOPlatformUUID" = "\([^"]*\)".*/\1/p' | head -n 1)"
+    if [[ -n "$candidate" ]]; then
+      printf 'platform-uuid:%s' "$candidate"
+      return 0
+    fi
+  fi
+  candidate="$(hostname 2>/dev/null || true)"
+  printf 'hostname:%s' "${candidate:-unknown}"
+}
+machine_identity="$(resolve_machine_identity)"
+fingerprint_input+="machine=${machine_identity%%$'\n'*}"$'\n'
 
 fingerprint="$(printf '%s' "$fingerprint_input" | git hash-object --stdin)"
 cache_dir="$common_dir/local-gates/$head_sha"
