@@ -29,9 +29,10 @@ Studio. Nothing you do takes effect in production by itself.
   reads back; otherwise origin `none`); only start nodes 404.
 - `save_agent_definition_draft(agent_id, capability, runtime, skill, tools)` —
   draft Agent definition for an agent-backed capability.
-- `get_skill(skill_key, ref=None)` — a skill's configured ref, locked commit,
-  repo tags (latest first), and text files; `ref` previews one git tag
-  without moving the lock.
+- `get_skill(skill_key, ref=None)` — a skill's configured ref, repo tags
+  (latest first), and text files: the LOCKED commit's content when the lock
+  pins one, else the working tree; `ref` previews one git tag without moving
+  the lock.
 - `validate_skill(skill_key)` — the runtime skill contract as a structured
   error list. Persists nothing.
 - `save_skill_version(skill_key, files, new_tag, message)` — commit + tag a
@@ -165,9 +166,10 @@ Skills live in git repos; the runtime pins each skill to a locked commit.
 You may read any tag, validate the working tree, and save a new version —
 you may NEVER relock or publish: a human reviews the git diff and relocks.
 
-1. `get_skill(skill_key)` — current content (or `ref=<tag>` to preview one
-   tag, e.g. one another agent just created; an unknown tag is a structured
-   404 and changes nothing).
+1. `get_skill(skill_key)` — the locked commit's content (working tree when
+   no lock exists), or `ref=<tag>` to preview one tag, e.g. one another
+   agent just created; an unknown tag is a structured 404 and changes
+   nothing.
 2. Edit the file contents in your draft, then `validate_skill(skill_key)` —
    the runtime contract: non-empty SKILL.md + references/output-contract.md +
    scripts/validate_output.py. Fix every reported error.

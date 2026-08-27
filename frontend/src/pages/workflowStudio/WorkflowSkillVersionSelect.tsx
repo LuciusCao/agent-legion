@@ -25,6 +25,8 @@ export function WorkflowSkillVersionSelect(props: {
   const locked = queryClient.getQueryData<SkillDetail>(
     extraQueryKeys.studioSkillDetail(props.skillKey, null)
   )
+  // getQueryData 非响应式：锁定条目 gcTime 过期后标签退化为「当前锁定版本」
+  // 纯文本（不带 ref 名），评审确认可接受——选中状态与内容不受缓存存活影响。
   const lockedLabel = locked?.ref
     ? `当前锁定版本（${locked.ref}）`
     : '当前锁定版本'

@@ -13,12 +13,14 @@ from server.app.services.job_errors import (
     InvalidOperationError,
     NotFoundError,
 )
+from server.app.services.skill_detail import detail_at_ref
 from server.app.services.skill_editing import (
     SkillEditingService,
     SkillEditValidationError,
     SkillFileWrite,
 )
-from server.app.services.skill_repo import detail_at_ref
+from server.app.services.skill_repo import SkillGitError, run_git
+from server.app.services.skill_repo_edit import SkillRollbackError, edit_lock_for
 from server.app.services.skill_source_store import InMemorySkillSourceStore
 from server.app.skills.config import SkillsConfig, SkillsLock, SkillSourceConfig
 
@@ -74,8 +76,8 @@ def store(repo: Path) -> InMemorySkillSourceStore:
 
 
 @pytest.fixture
-def service(store: InMemorySkillSourceStore, repo: Path) -> SkillEditingService:
-    return SkillEditingService(store, base_dir=repo.parents[1])
+def service(store: InMemorySkillSourceStore, repo: Path, tmp_path: Path) -> SkillEditingService:
+    return SkillEditingService(store, base_dir=repo.parents[1], runs_dir=tmp_path / "runs")
 
 
 def test_validate_happy_path(service: SkillEditingService) -> None:
@@ -175,7 +177,18 @@ def test_save_version_rejects_dirty_tree(service: SkillEditingService, repo: Pat
 
 @pytest.mark.parametrize(
     "bad_path",
-    ["../escape.md", "/abs/file.md", ".git/config", "sub/../../escape.md", "a/.gitx/../../b.md"],
+    [
+        "../escape.md",
+        "/abs/file.md",
+        ".git/config",
+        "sub/../../escape.md",
+        "a/.gitx/../../b.md",
+        # Case-insensitive filesystems (macOS): any-case .git at any level must
+        # be rejected, or a hook lands in the metadata dir (PR #224 review P0).
+        ".GIT/hooks/pre-commit",
+        "sub/.Git/hooks/post-checkout",
+        ".Git/config",
+    ],
 )
 def test_save_version_rejects_escaping_paths(
     service: SkillEditingService, repo: Path, bad_path: str
@@ -187,6 +200,109 @@ def test_save_version_rejects_escaping_paths(
     # Nothing was written or committed.
     assert _git(repo, "rev-parse", "HEAD") == before
     assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_save_version_never_runs_repo_hooks(service: SkillEditingService, repo: Path) -> None:
+    # --no-verify: an automated authoring flow must not execute hook code.
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    hook.chmod(0o755)
+    result = service.save_version(
+        _KEY, [SkillFileWrite(path="SKILL.md", content="# V2\n")], "v2.0.0", "m"
+    )
+    assert result["tag"] == "v2.0.0"
+
+
+def test_save_version_rejects_dash_leading_tag(service: SkillEditingService) -> None:
+    # `git check-ref-format refs/tags/-l` passes but `git tag -l` would list,
+    # not create — the 201 would lie about the tag existing (PR #224 review).
+    for bad_tag in ("-l", "-v2"):
+        with pytest.raises(SkillEditValidationError, match="Invalid tag"):
+            service.save_version(
+                _KEY, [SkillFileWrite(path="SKILL.md", content="# V2\n")], bad_tag, "m"
+            )
+
+
+def test_save_version_rolls_back_when_tag_step_fails(
+    service: SkillEditingService, repo: Path, monkeypatch
+) -> None:
+    before = _git(repo, "rev-parse", "HEAD")
+    real_git = SkillEditingService._git
+
+    def fake_git(repo_dir, args, *, check=True):
+        if args and args[0] == "tag":
+            raise SkillGitError("simulated tag race")
+        return real_git(repo_dir, args, check=check)
+
+    monkeypatch.setattr(SkillEditingService, "_git", staticmethod(fake_git))
+    with pytest.raises(SkillGitError, match="simulated tag race"):
+        service.save_version(
+            _KEY, [SkillFileWrite(path="SKILL.md", content="# V2\n")], "v2.0.0", "m"
+        )
+    # Commit happened, tag failed: rollback still restores the original HEAD.
+    assert _git(repo, "rev-parse", "HEAD") == before
+    assert _git(repo, "status", "--porcelain") == ""
+    assert _git(repo, "tag", "--list") == "v1.0.0"
+
+
+def test_rollback_failure_raises_explicit_error(
+    service: SkillEditingService, repo: Path, monkeypatch
+) -> None:
+    real_git = SkillEditingService._git
+
+    def fake_git(repo_dir, args, *, check=True):
+        if args and args[0] == "tag":
+            raise SkillGitError("simulated tag race")
+        if args[:2] == ["reset", "--hard"]:
+            return subprocess.CompletedProcess(args=args, returncode=1, stdout="", stderr="boom")
+        return real_git(repo_dir, args, check=check)
+
+    monkeypatch.setattr(SkillEditingService, "_git", staticmethod(fake_git))
+    with pytest.raises(SkillRollbackError, match="manual intervention"):
+        service.save_version(
+            _KEY, [SkillFileWrite(path="SKILL.md", content="# V2\n")], "v2.0.0", "m"
+        )
+
+
+def test_error_messages_do_not_leak_host_paths(service: SkillEditingService, repo: Path) -> None:
+    (repo / "SKILL.md").write_text("# dirty\n", encoding="utf-8")
+    with pytest.raises(ConflictError) as excinfo:
+        service.save_version(
+            _KEY, [SkillFileWrite(path="SKILL.md", content="# V2\n")], "v2.0.0", "m"
+        )
+    assert str(repo) not in str(excinfo.value)
+    assert _KEY in str(excinfo.value)
+
+
+def test_run_git_operational_failure_is_not_a_404(repo: Path) -> None:
+    with pytest.raises(SkillGitError):
+        run_git(repo, ["show", "deadbeefdeadbeef:SKILL.md"])
+
+
+def test_save_version_serializes_on_the_repo_lock(
+    service: SkillEditingService, repo: Path, tmp_path: Path
+) -> None:
+    import threading
+
+    lock = edit_lock_for(repo, service.base_dir, tmp_path / "runs")
+    completed: list[dict] = []
+
+    def run_save() -> None:
+        completed.append(
+            service.save_version(
+                _KEY, [SkillFileWrite(path="SKILL.md", content="# V2\n")], "v2.0.0", "m"
+            )
+        )
+
+    with lock:
+        worker = threading.Thread(target=run_save)
+        worker.start()
+        worker.join(timeout=2)
+        assert completed == []  # blocked on the held lock, no partial write
+        assert _git(repo, "tag", "--list") == "v1.0.0"
+    worker.join(timeout=10)
+    assert not worker.is_alive()
+    assert completed and completed[0]["tag"] == "v2.0.0"
 
 
 def test_save_version_rejects_overwriting_untracked_file(

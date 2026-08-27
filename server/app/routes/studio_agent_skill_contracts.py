@@ -21,14 +21,15 @@ class SkillValidateToolResponse(BaseModel):
 
 
 class SkillVersionFileWrite(BaseModel):
-    path: str = Field(min_length=1)
-    content: str
+    path: str = Field(min_length=1, max_length=512)
+    # Aligned with the 128 KB read cap (skill_repo.MAX_FILE_BYTES).
+    content: str = Field(max_length=128 * 1024)
 
 
 class SkillSaveVersionRequest(BaseModel):
-    files: list[SkillVersionFileWrite] = Field(min_length=1)
-    new_tag: str = Field(min_length=1)
-    message: str = Field(min_length=1)
+    files: list[SkillVersionFileWrite] = Field(min_length=1, max_length=100)
+    new_tag: str = Field(min_length=1, max_length=128)
+    message: str = Field(min_length=1, max_length=4096)
 
 
 class SkillSaveVersionResponse(BaseModel):

@@ -16,7 +16,12 @@ import pytest
 
 from server.app.auth import scoped_tokens
 from server.app.services.skill_source_store import SkillSourceStore
-from server.app.skills.config import SkillsConfig, SkillSourceConfig
+from server.app.skills.config import (
+    LockedSkillSource,
+    SkillsConfig,
+    SkillsLock,
+    SkillSourceConfig,
+)
 
 _KEY = "education-video-problems-generation/write-script"
 _URL_KEY = "education-video-problems-generation/review-script"
@@ -208,3 +213,76 @@ def test_save_skill_version_contract_failure_rolls_back(client_factory, job_db, 
         assert _git(skill_home, "rev-parse", "HEAD") == before
         assert _git(skill_home, "tag", "--list") == "v1.0.0"
         assert _git(skill_home, "status", "--porcelain") == ""
+
+
+def test_save_skill_version_git_metadata_path_is_422(client_factory, job_db, skill_home) -> None:
+    # Any-case .git at any level is rejected (PR #224 review P0): on
+    # case-insensitive filesystems `.GIT/hooks/` lands in the metadata dir.
+    with client_factory(fresh=True) as client:
+        scoped = _scoped(client, job_db)
+        response = scoped.post(
+            f"{_TOOLS}/{_KEY}/versions",
+            json={
+                "files": [{"path": ".GIT/hooks/pre-commit", "content": "#!/bin/sh\nexit 1\n"}],
+                "new_tag": "v2.0.0",
+                "message": "m",
+            },
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"]["errors"]
+
+
+def test_save_skill_version_payload_bounds(client_factory, job_db, skill_home) -> None:
+    with client_factory(fresh=True) as client:
+        scoped = _scoped(client, job_db)
+        oversized = scoped.post(
+            f"{_TOOLS}/{_KEY}/versions",
+            json={
+                "files": [{"path": "SKILL.md", "content": "x" * (128 * 1024 + 1)}],
+                "new_tag": "v2.0.0",
+                "message": "m",
+            },
+        )
+        assert oversized.status_code == 422
+        too_many = scoped.post(
+            f"{_TOOLS}/{_KEY}/versions",
+            json={
+                "files": [{"path": f"f{i}.md", "content": "x"} for i in range(101)],
+                "new_tag": "v2.0.0",
+                "message": "m",
+            },
+        )
+        assert too_many.status_code == 422
+
+
+def test_default_detail_reads_locked_commit_after_save(client_factory, job_db, skill_home) -> None:
+    # Lock pins the current HEAD; after save_skill_version the default detail
+    # keeps serving the LOCKED commit's content ("current locked version"),
+    # while the new tag is readable through ?ref= (PR #224 review).
+    head = _git(skill_home, "rev-parse", "HEAD")
+    store = SkillSourceStore(job_db.path)
+    sources = store.get_sources() or SkillsConfig()
+    lock = store.get_lock() or SkillsLock()
+    lock.skills[_KEY] = LockedSkillSource(repo=sources.skills[_KEY].repo, ref="v1.0.0", commit=head)
+    store.put_lock(lock)
+    with client_factory(fresh=True) as client:
+        scoped = _scoped(client, job_db)
+        saved = scoped.post(
+            f"{_TOOLS}/{_KEY}/versions",
+            json={
+                "files": [{"path": "SKILL.md", "content": "# Write Script v2\n"}],
+                "new_tag": "v1.1.0",
+                "message": "revise",
+            },
+        )
+        assert saved.status_code == 201, saved.text
+
+        default = scoped.get(f"{_TOOLS}/{_KEY}")
+        assert default.status_code == 200, default.text
+        assert default.json()["commit"] == head
+        locked_md = next(f for f in default.json()["files"] if f["path"] == "SKILL.md")
+        assert locked_md["content"] == "# Write Script\n"
+
+        tagged = scoped.get(f"{_TOOLS}/{_KEY}", params={"ref": "v1.1.0"})
+        tagged_md = next(f for f in tagged.json()["files"] if f["path"] == "SKILL.md")
+        assert tagged_md["content"] == "# Write Script v2\n"

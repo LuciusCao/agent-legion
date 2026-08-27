@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.db.connection import DatabaseDsn
-from server.app.services import skill_repo
+from server.app.services import skill_detail, skill_repo
 from server.app.services.job_errors import NotFoundError
 from server.app.services.skill_source_store import SkillSourceStore
 from server.app.skills.config import SkillsConfig, SkillsLock
@@ -32,19 +32,14 @@ class SkillCatalogService:
         source = self._config().skills.get(skill_key)
         if source is None:
             raise NotFoundError(f"Skill {skill_key!r} is not configured")
-        skill_dir = self._skill_dir(skill_key)
-        if ref is not None:
-            # Preview a git tag without touching the lock or the checkout.
-            return skill_repo.detail_at_ref(skill_key, ref, skill_dir)
+        # Tag/ref/locked reads resolve to the declared source repo for local
+        # path sources (a non-in-place save lands there, not in the cache);
+        # URL sources read the cache clone. _skill_dir always runs first: it
+        # doubles as the skill-key format/escape guard.
+        cache_dir = self._skill_dir(skill_key)
+        repo_dir = skill_repo.local_repo_path(source.repo) or cache_dir
         locked = self._lock().skills.get(skill_key)
-        return {
-            "key": skill_key,
-            "ref": source.ref,
-            "commit": locked.commit if locked is not None else "",
-            "available": skill_dir.is_dir(),
-            "tags": list(skill_repo.list_tags(skill_dir)) if skill_dir.is_dir() else [],
-            "files": self._files(skill_dir) if skill_dir.is_dir() else [],
-        }
+        return skill_detail.skill_detail(skill_key, source.ref, repo_dir, locked, ref, self._files)
 
     def _skill_dir(self, skill_key: str) -> Path:
         parts = skill_key.split("/")

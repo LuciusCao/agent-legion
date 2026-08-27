@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from urllib.parse import unquote
 
 import pytest
 
@@ -87,7 +88,9 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
     }
 
     recorded = {
-        (call["method"], call["url"].removeprefix(_CONFIG.api_base).removeprefix("/api"))
+        # unquote：skill 工具对 skill_key 段做 URL 编码，占位符 `{param}` 在
+        # 记录里以 %7Bparam%7D 出现，解码后与路由模板逐字对齐。
+        (call["method"], unquote(call["url"].removeprefix(_CONFIG.api_base).removeprefix("/api")))
         for call in calls
     }
     assert recorded == table

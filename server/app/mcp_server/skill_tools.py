@@ -21,17 +21,24 @@ from server.app.mcp_server.tool_client import ToolClient
 ClientFactory = Callable[[], Awaitable[tuple[McpServerConfig, ToolClient]]]
 
 
+def _skill_path(skill_key: str) -> str:
+    """URL-encode each skill-key segment (keys are <group>/<name>)."""
+    return "/".join(quote(segment, safe="") for segment in skill_key.split("/"))
+
+
 def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
     @mcp.tool()
     async def get_skill(skill_key: str, ref: str | None = None) -> str:
-        """Read a skill's content: key, configured ref, locked commit, the
-        repo's git tags (latest version first), and its text files (SKILL.md +
-        references/ + scripts/). Pass ref (a git tag of the skill repo) to
-        preview that tag's content — e.g. a tag another agent just created —
-        without changing the lock; an unknown tag comes back as a structured
-        HTTP 404 error, nothing changes."""
+        """Read a skill: key, configured ref, the repo's git tags (latest
+        version first), and text files (SKILL.md + references/ + scripts/).
+        Without ref the content is the LOCKED commit when the skill lock pins
+        one (the "current locked version"), else the working tree. Pass ref
+        (a git tag of the skill repo) to preview that tag's content — e.g. a
+        tag another agent just created — without changing the lock; an
+        unknown tag comes back as a structured HTTP 404 error, nothing
+        changes."""
         _, client = await client_factory()
-        path = f"/skills/{skill_key}"
+        path = f"/skills/{_skill_path(skill_key)}"
         if ref is not None:
             path += f"?ref={quote(ref, safe='')}"
         return await client.call("GET", path)
@@ -44,7 +51,7 @@ def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         ({"valid": bool, "errors": [{"path", "error"}]}). Persists nothing —
         always run this before save_skill_version."""
         _, client = await client_factory()
-        return await client.call("POST", f"/skills/{skill_key}/validate")
+        return await client.call("POST", f"/skills/{_skill_path(skill_key)}/validate")
 
     @mcp.tool()
     async def save_skill_version(
@@ -63,4 +70,4 @@ def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         human reviews the diff, changes the ref, and relocks."""
         _, client = await client_factory()
         body: dict[str, Any] = {"files": files, "new_tag": new_tag, "message": message}
-        return await client.call("POST", f"/skills/{skill_key}/versions", body)
+        return await client.call("POST", f"/skills/{_skill_path(skill_key)}/versions", body)

@@ -27,7 +27,9 @@ from server.app.settings import Settings
 def create_studio_agent_skill_tools_router(settings: Settings) -> APIRouter:
     router = APIRouter()
     catalog = SkillCatalogService(settings.database_url)
-    editing = SkillEditingService(SkillSourceStore(settings.database_url))
+    editing = SkillEditingService(
+        SkillSourceStore(settings.database_url), runs_dir=settings.skills_runs_dir
+    )
 
     @router.get("/studio-agent/tools/skills/{skill_key:path}", response_model=SkillDetailResponse)
     def get_skill(skill_key: str, ref: str | None = None) -> SkillDetailResponse:

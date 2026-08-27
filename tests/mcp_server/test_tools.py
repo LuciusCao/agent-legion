@@ -238,6 +238,25 @@ def test_get_skill_with_ref_appends_query(recorded) -> None:
     assert calls[0]["url"].endswith("/skills/wf/review?ref=v1.2.0%2Bexp")
 
 
+def test_skill_tools_url_encode_skill_key_segments(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_skill", {"skill_key": "wf/re view"})
+    assert "/skills/wf/re%20view" in calls[0]["url"]
+    _run_tool(server, "validate_skill", {"skill_key": "wf/re view"})
+    assert "/skills/wf/re%20view/validate" in calls[1]["url"]
+    _run_tool(
+        server,
+        "save_skill_version",
+        {
+            "skill_key": "wf/re view",
+            "files": [{"path": "SKILL.md", "content": "x"}],
+            "new_tag": "v2",
+            "message": "m",
+        },
+    )
+    assert "/skills/wf/re%20view/versions" in calls[2]["url"]
+
+
 def test_validate_skill_posts(recorded) -> None:
     server, calls = recorded
     _run_tool(server, "validate_skill", {"skill_key": "wf/review"})
