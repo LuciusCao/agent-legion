@@ -574,7 +574,7 @@ async function loadRegisterTokens() {
 function renderTokenCard(card) {
   const ws = card.workspaceName
     ? `<span class="token-ws"><svg class="ws-icon" aria-hidden="true"><use href="/assets/icons.svg#grid"></use></svg><span class="ws-name">${escapeHtml(card.workspaceName)}</span><span class="ws-id">${escapeHtml(card.workspaceId || "")}</span></span>`
-    : `<span class="token-ws"><span class="ws-id">等待 Host 返回 workspace 信息</span></span>`;
+    : `<span class="token-ws"><span class="ws-id">注册成功后显示 workspace 名称</span></span>`;
   return `<div class="token-card" data-state="${card.state}">
     <div class="token-main">
       <span class="token-id">${escapeHtml(card.token_id)}</span>
