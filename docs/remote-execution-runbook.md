@@ -311,17 +311,23 @@ flipping the field:
   `deploy/.env`/environment passthrough and is referenced from the worker pi
   provider config as `"$LLM_GATEWAY_TOKEN"` — never as a literal in
   `models.json`, Compose YAML, or on a command line.
-- **Registration token handling:** `AGENT_LEGION_WORKER_REGISTER_TOKEN` (or the
-  `_FILE` variant) lives in the Host's environment/secret mount and in
-  `deploy/secrets/` on each worker machine — never in `config/*.yaml`, worker
-  YAML, images (`.dockerignore` excludes `**/secrets` and `**/.env`), or logs.
+- **Registration token handling:** registration uses workspace-scoped tokens
+  (issue #35): issue them per workspace in the Host Web UI
+  （设置 → Worker Token） and add them on each worker machine via the Worker
+  console or `workerctl configure --register-token-file` — never in
+  `config/*.yaml`, worker YAML, images (`.dockerignore` excludes `**/secrets`
+  and `**/.env`), or logs. The former global
+  `AGENT_LEGION_WORKER_REGISTER_TOKEN`（or `_FILE`）env vars are retired and
+  **fail startup** when set.
 - **Worker hygiene:** no credentials, secret-bearing prompts, or API keys in
   worker logs; the Worker workdir volume holds only transient execution data
   and may be cleaned per retention policy. Code executions receive
   vault-resolved node secrets over the claim response; they are held in memory
-  only, fed to the child via stdin, and scrubbed before any persistence — a
-  secret value must never appear in the workdir volume or logs (enforced by
-  `strip_secret_config`, tested by `test_secrets_stay_off_disk`).
+  only and fed to the child via stdin — the Host-side
+  `split_manifest_config` keeps secret-marked keys out of the dispatch
+  manifest before it ever reaches the Worker, and nothing config-derived is
+  persisted on the Worker side, so a secret value must never appear in the
+  workdir volume or logs (tested by `test_secrets_stay_off_disk`).
 - **Worker labels:** labels travel in the register payload and are listed by
   `GET /api/agent-workers`. They are routing metadata — never put secrets,
   tokens, or other sensitive values into label keys or values.

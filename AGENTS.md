@@ -233,8 +233,7 @@ CodeExecutor(...).execute(context)
   或 admin API（`PUT /api/admin/skill-sources/{skill_key}`）更新 ref → relock
   （`POST /api/admin/skill-sources/relock`，或 CLI `make skills-lock` /
   `uv run python -m server.app.skills.lock`）解析并冻结 commit。
-- 修改后同步 shared assets，跑 `UV_CACHE_DIR=.uv-cache uv run python scripts/check-skills-shared.py`
-  验证共享引用文件一致（skill 清单来自 `server/app/skills/builtin_sources.py` 常量）。
+  （skill 共享资源一致性检查 `check-skills-shared.py` 已随业务 skill 源退役删除。）
 - 完整流程见 [README.md](README.md) 的 Agent Runtimes 章节。
 
 ## 8. Security & Data

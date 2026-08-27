@@ -235,10 +235,3 @@ export function groupCompareErrors(errors: CompareError[]): ErrorGroup[] {
     errors: items,
   }))
 }
-
-export function hasBlockingError(errors: CompareError[] | null): boolean {
-  if (!errors || errors.length === 0) return false
-  return errors.some(
-    (error) => error.category === 'yaml' || error.category === 'schema'
-  )
-}

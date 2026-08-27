@@ -48,9 +48,6 @@ class JobEventBuffer:
     def record_job_updated(self, workspace_id: str, job_id: str) -> int:
         return self.record(workspace_id, job_id, "updated")
 
-    def record_job_created(self, workspace_id: str, job_id: str) -> int:
-        return self.record(workspace_id, job_id, "created")
-
     def record_jobs_created(self, workspace_id: str, job_ids: list[str]) -> int:
         if not job_ids:
             return self.current_revision()

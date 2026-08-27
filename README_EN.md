@@ -71,20 +71,19 @@ Without it the rest of the instance works, but the materials API degrades to
 ### 2. One-time local setup
 
 ```bash
-# Registration token shared by the backend and local workers.
-# Create it BEFORE the first backend start (the backend reads it at startup).
-mkdir -p deploy/secrets
-openssl rand -hex 24 > deploy/secrets/agent_worker_register_token
-chmod 600 deploy/secrets/agent_worker_register_token
-
 # Build the velites binary used to sandbox node code
 ./scripts/ensure-velites.sh --dest data/bin
 
-# Local worker config (edit host_url to http://127.0.0.1:8001 and set
-# register_token_file: deploy/secrets/agent_worker_register_token,
-# work_root: data/agent-worker — see the comments in the example file)
+# Local worker config (edit host_url to http://127.0.0.1:8001 and
+# work_root to data/agent-worker — see the comments in the example file)
 cp config/agent-worker.example.yaml config/agent-worker.yaml
 ```
+
+Worker registration no longer uses a global token: after startup, issue a
+scoped token per workspace in the Host Web UI (Settings → Worker Token) and
+paste it into the "Workspace access" section of the Worker console
+(`http://127.0.0.1:8789`) — tokens can be added at any time, no backend
+restart needed (see [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md)).
 
 ### 3. Start everything
 

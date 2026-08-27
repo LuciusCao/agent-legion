@@ -26,8 +26,7 @@ data/                       # 文件产物（gitignored）
 
 scripts/
 ├── check-quick.sh          # 快速质量门
-├── check.sh                # 完整质量门
-└── verify_specs.py         # Spec 健康检查
+└── check.sh                # 完整质量门
 ```
 
 ## Data Flow

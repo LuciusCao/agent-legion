@@ -252,11 +252,8 @@ server/app/
 | AgentEnqueueConfig | BaseModel | workers: int, max_pending: int | app/agent_broker/dispatch_pool.py |
 | AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/agent_catalog.py |
 | CodeCapabilityConfig | BaseModel | timeout_seconds: int, sandbox_network: bool, config_schema: dict[str, Any] | app/executors/contracts.py |
-| PiRuntimeConfig | BaseModel | flavor: Literal['pi', 'velites'], binary: str, provider: str, model: str, thi... | app/executors/runtime_config.py |
-| OpenClawSkillSafetyRepo | BaseModel | path: str | app/executors/runtime_config.py |
-| OpenClawSkillSafetyRuntimeConfig | BaseModel | enabled: bool, repos: list[OpenClawSkillSafetyRepo] | app/executors/runtime_config.py |
-| OpenClawRuntimeConfig | BaseModel | command_template: tuple[str, ...], cwd: str, timeout_seconds: int, cancellati... | app/executors/runtime_config.py |
-| WorkflowsRuntimeConfig | BaseModel | enabled: bool, custom_nodes_enabled: bool, pi: PiRuntimeConfig | app/executors/runtime_config.py |
+| OpenClawRuntimeConfig | BaseModel | cwd: str | app/executors/runtime_config.py |
+| WorkflowsRuntimeConfig | BaseModel | enabled: bool, custom_nodes_enabled: bool | app/executors/runtime_config.py |
 | AgentWorkersRuntimeConfig | BaseModel | max_archive_bytes: int, min_protocol_version: int | app/executors/runtime_config.py |
 | ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/executors/runtime_config.py |
 | AgentDefinitionResponse | BaseModel | id: str, runtime: Literal['pi', 'openclaw', 'velites'], capability: str, skil... | app/routes/agent_catalog_contracts.py |
@@ -320,9 +317,7 @@ server/app/
 | WorkspaceConfigurationResponse | BaseModel | workspace: WorkspaceRecord, settings: WorkspaceSettingsPayload, executor_conf... | app/routes/executor_contracts.py |
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
-| InstanceOpenClawSkillSafetyRepo | BaseModel | path: str | app/routes/instance_openclaw_contracts.py |
-| InstanceOpenClawSkillSafetySettings | BaseModel | enabled: bool, repos: list[InstanceOpenClawSkillSafetyRepo] | app/routes/instance_openclaw_contracts.py |
-| InstanceOpenClawSettings | BaseModel | cwd: str, timeout_seconds: int, isolated_workspace_root: str, command_templat... | app/routes/instance_openclaw_contracts.py |
+| InstanceOpenClawSettings | BaseModel | cwd: str | app/routes/instance_openclaw_contracts.py |
 | InstanceCleanupSettings | BaseModel | log_retention_days: int, run_dir_retention_days: int, interval_seconds: int | app/routes/instance_settings_contracts.py |
 | InstanceMonitoringSettings | BaseModel | sample_interval_seconds: float, retention_days: int | app/routes/instance_settings_contracts.py |
 | InstanceWorkflowsSettings | BaseModel | enabled: bool | app/routes/instance_settings_contracts.py |
@@ -647,7 +642,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 `config/app.yaml` 已整体退役：bootstrap/安全类键转 env-only，实例级可调配置迁入 DB：
 
 - env-only：`database.url` → `AGENT_LEGION_DATABASE_URL`（唯一权威变量，G4；缺省 `postgresql://127.0.0.1:5432/agent_legion`）；`data_dir` → `AGENT_LEGION_DATA_DIR`（缺省 `data`）；`server.cors` → `AGENT_LEGION_CORS_ALLOW_ORIGINS`（逗号分隔）/ `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`；`agent_workers` 的全局 register token 已随 issue #35 退役（遗留的 `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]` 或 yaml `register_token[_file]` 会让启动直接报错）。
-- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`workflows.enabled`（是否启用 Agent Legion DAG workflow worker）、`agent_workers.max_archive_bytes` / `min_protocol_version`、`openclaw.cwd` / `timeout_seconds` / `isolated_workspace_root` / `command_template`（含 `{prompt_text}`、`{video_id}`、`{timestamp}` 占位符的命令参数列表）/ `skill_safety`（OpenClaw skill 安全校验；`repos` 只声明允许强制恢复的 path 白名单，恢复 ref 统一从 DB `skill_lock` 文档（`global_settings`）解析——config 治理 G3 单源化，实例设置 API 写 `ref` 返回 422，explicit 单文件配置写 `ref` 启动即报错）。代码默认值 = 退役前 tracked yaml 的生效值；`AGENT_LEGION_OPENCLAW_CWD` 作为 env 覆盖优先级高于 DB 文档。
+- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`workflows.enabled`（是否启用 Agent Legion DAG workflow worker）、`agent_workers.max_archive_bytes` / `min_protocol_version`、`openclaw.cwd`（唯一保留键；退役键 `command_template` / `timeout_seconds` / `isolated_workspace_root` / `skill_safety` 随业务工作流管线一并退役——存量 DB 文档读取时剥离、写入返回 422，explicit 单文件配置里的残留键被忽略，但 `skill_safety.repos[].ref` 仍按 config 治理 G3 启动即报错：ref 以 DB `skill_lock` 文档为唯一权威）。代码默认值 `cwd="."`；`AGENT_LEGION_OPENCLAW_CWD` 作为 env 覆盖优先级高于 DB 文档。
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 

@@ -1,7 +1,3 @@
-.bindingList {
-  display: grid;
-  gap: 10px;
-}
 .binding {
   display: grid;
   gap: 6px;

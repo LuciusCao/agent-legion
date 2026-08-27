@@ -31,9 +31,6 @@ env:
   # job (which hosts the api:check contract step) needs a live database.
   AGENT_LEGION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/agent_legion_ci
   AGENT_LEGION_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/agent_legion_test_ci
-  # check-skills-shared.py compares skill repos at machine-local paths
-  # (~/.agents/skills/...) that only exist on maintainer machines.
-  AGENT_LEGION_SKIP_SKILLS_SHARED_CHECK: "1"
   # The global worker register token was retired (issue #35): registration
   # uses scoped tokens and settings fails fast on this variable, so CI must
   # not inject it anymore.

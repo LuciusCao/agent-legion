@@ -15,7 +15,6 @@ const commonTestExcludes = [
 const browserTestFiles = [
   'src/api/core.test.ts',
   'src/components/useJobListLoadMore.test.ts',
-  'src/hooks/useAsync.test.ts',
   'src/hooks/useDashboardEvents.test.ts',
   'src/hooks/useDebouncedCallback.test.ts',
   'src/hooks/useJobComprehensionInfo.test.ts',
@@ -24,7 +23,6 @@ const browserTestFiles = [
   'src/lib/download.test.ts',
   'src/lib/htmlText.test.ts',
   'src/lib/latex.test.ts',
-  'src/lib/materialWeb.test.ts',
   'src/lib/sanitizeHtml.test.ts',
   'src/hooks/useJobFilterRefetch.test.ts',
   'src/pages/jobDetail/useUpgradeWorkflowAction.test.ts',

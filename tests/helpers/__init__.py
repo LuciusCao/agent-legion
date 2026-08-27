@@ -96,8 +96,6 @@ def make_workflow_worker(
     queries: JobQueries,
     *,
     workflow_key: str = "education_video_problems_generation",
-    pi_binary: str | None = "echo",
-    pi_timeout: int = 1,
 ) -> tuple[WorkflowWorkerThread, WorkflowDefinition]:
     """Build a configured WorkflowWorkerThread for *workflow_key*."""
     from server.app import main as app_main
@@ -108,13 +106,7 @@ def make_workflow_worker(
     settings = app_main.load_settings(data_dir=tmp_path)
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
-            "workflows": {
-                "enabled": True,
-                "pi": {"binary": pi_binary, "timeout_seconds": pi_timeout}
-                if pi_binary is not None
-                else {},
-            },
-            "openclaw": {"command_template": ["openclaw", "agent"]},
+            "workflows": {"enabled": True},
         }
     )
 

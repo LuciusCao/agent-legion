@@ -266,11 +266,6 @@
       1,
       0
     ],
-    "server/app/services/token_usage_capture.py": [
-      0,
-      1,
-      0
-    ],
     "server/app/services/token_usage_lease.py": [
       2,
       2,
@@ -289,11 +284,6 @@
     "server/app/services/vault.py": [
       5,
       3,
-      0
-    ],
-    "server/app/services/vault_resources.py": [
-      1,
-      0,
       0
     ],
     "server/app/services/versioned_entities.py": [
