@@ -1212,7 +1212,7 @@
     "velites/src/provider/retry.rs": 199,
     "velites/src/provider/stub.rs": 84,
     "velites/src/sandbox/macos.rs": 116,
-    "velites/src/sandbox/mod.rs": 415,
+    "velites/src/sandbox/mod.rs": 412,
     "velites/src/sandbox/tests.rs": 355,
     "velites/src/session.rs": 34,
     "velites/src/skill.rs": 83,

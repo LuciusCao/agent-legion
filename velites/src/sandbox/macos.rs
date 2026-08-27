@@ -4,7 +4,11 @@
 //! backend probe. Split from ``sandbox.rs`` for the file size budget
 //! (#202); the cross-platform types and the Linux bwrap backend stay there.
 
-use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "macos", test))]
+use std::path::Path;
+
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
 
 #[cfg(target_os = "macos")]
 use anyhow::{anyhow, Context};
@@ -31,7 +35,7 @@ pub(crate) fn macos_system_read_paths() -> Vec<PathBuf> {
 }
 
 /// Escape a path for embedding in a seatbelt profile string literal.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 pub(crate) fn seatbelt_escape(path: &Path) -> String {
     path.display()
         .to_string()
