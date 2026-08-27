@@ -4,8 +4,9 @@ import { api } from '../../api'
 import { getSkillDetail } from '../../api/executorApi'
 import { TestQueryProvider } from '../../testing/testQueryClient'
 import type { WorkflowDefinitionRecord } from '../../types'
-import type { AgentDefinition } from '../../types/executorTypes'
+import type { AgentDefinition, SkillDetail } from '../../types/executorTypes'
 import { WorkflowNodeDetailBody } from './WorkflowNodeDetailBody'
+import { WorkflowSkillPreviewPanel } from './WorkflowSkillPreviewPanel'
 
 // inspector 各 section（code/config/agentDefaults）统一走 '../../api' 的 api。
 vi.mock('../../api', () => ({ api: vi.fn() }))
@@ -22,6 +23,21 @@ vi.mock('./AgentEditor', () => ({
 
 const mockApi = vi.mocked(api)
 const mockGetSkillDetail = vi.mocked(getSkillDetail)
+
+// 默认响应不带 tags 字段：版本下拉降级为纯文本。带 tags 的场景各用例自行覆盖。
+function skillDetail(overrides?: Partial<SkillDetail>): SkillDetail {
+  return {
+    key: 'demo/review',
+    ref: 'v1.2.0',
+    commit: 'abc1234567890',
+    available: true,
+    tags: ['v1.3.0', 'v1.2.0'],
+    files: [
+      { path: 'SKILL.md', size: 8, content: '# Skill', truncated: false },
+    ],
+    ...overrides,
+  }
+}
 
 const workflow: WorkflowDefinitionRecord = {
   key: 'demo_workflow',
@@ -200,5 +216,88 @@ describe('WorkflowNodeDetailBody', () => {
     expect(
       screen.getByRole('button', { name: '查看 Prompt' })
     ).toBeInTheDocument()
+  })
+
+  it('lists skill tags in the version select and refetches with ?ref=', async () => {
+    mockGetSkillDetail.mockImplementation((_key, ref) =>
+      Promise.resolve(
+        ref === 'v1.3.0'
+          ? skillDetail({
+              ref: 'v1.3.0',
+              commit: 'def4567890123',
+              files: [
+                {
+                  path: 'SKILL.md',
+                  size: 11,
+                  content: '# Skill v1.3',
+                  truncated: false,
+                },
+              ],
+            })
+          : skillDetail()
+      )
+    )
+    renderBody('generate_key_info')
+    fireEvent.click(screen.getByRole('button', { name: '浏览技能文件' }))
+
+    // 锁定版本为首项（标签带锁定 ref），tags 按响应倒序列出。
+    fireEvent.mouseDown(await screen.findByLabelText('版本'))
+    expect(
+      await screen.findByRole('option', { name: '当前锁定版本（v1.2.0）' })
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('option', { name: 'v1.3.0' }))
+
+    expect(mockGetSkillDetail).toHaveBeenCalledWith('demo/review', 'v1.3.0')
+    expect(await screen.findByText('# Skill v1.3')).toBeInTheDocument()
+    // 查看中的 tag 与锁定版本标识清楚：下拉显示当前选中的 tag。
+    expect(screen.getByRole('combobox')).toHaveTextContent('v1.3.0')
+  })
+
+  it('degrades the version select to plain text when the skill has no tags', async () => {
+    mockGetSkillDetail.mockResolvedValue(skillDetail({ tags: [] }))
+    renderBody('generate_key_info')
+    fireEvent.click(screen.getByRole('button', { name: '浏览技能文件' }))
+
+    expect(await screen.findByText('# Skill')).toBeInTheDocument()
+    expect(screen.queryByLabelText('版本')).not.toBeInTheDocument()
+    expect(screen.getByText('v1.2.0 · abc1234')).toBeInTheDocument()
+  })
+
+  it('resets the selected tag when the skill key changes', async () => {
+    mockGetSkillDetail.mockImplementation((key, ref) =>
+      Promise.resolve(
+        ref === 'v1.3.0'
+          ? skillDetail({
+              key,
+              ref: 'v1.3.0',
+              files: [
+                {
+                  path: 'SKILL.md',
+                  size: 11,
+                  content: '# Skill v1.3',
+                  truncated: false,
+                },
+              ],
+            })
+          : skillDetail({ key })
+      )
+    )
+    const { rerender } = render(
+      <TestQueryProvider>
+        <WorkflowSkillPreviewPanel skillKey="demo/review" onBack={() => {}} />
+      </TestQueryProvider>
+    )
+    fireEvent.mouseDown(await screen.findByLabelText('版本'))
+    fireEvent.click(await screen.findByRole('option', { name: 'v1.3.0' }))
+    expect(await screen.findByText('# Skill v1.3')).toBeInTheDocument()
+
+    rerender(
+      <TestQueryProvider>
+        <WorkflowSkillPreviewPanel skillKey="demo/other" onBack={() => {}} />
+      </TestQueryProvider>
+    )
+
+    // ref 选择带 skillKey 印记：切换技能即回落锁定版本（不带 ref 拉取）。
+    expect(mockGetSkillDetail).toHaveBeenLastCalledWith('demo/other', undefined)
   })
 })
