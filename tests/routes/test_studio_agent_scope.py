@@ -184,6 +184,17 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
         "PUT",
         "/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
     ): "scoped-only tool surface",
+    # Skill read/validate/save-version tools (issue #217): draft-only — the
+    # save endpoint commits+tags a local skill repo but never touches the
+    # skill lock (release stays a human admin relock).
+    (
+        "POST",
+        "/api/studio-agent/tools/skills/{skill_key:path}/validate",
+    ): "scoped-only tool surface",
+    (
+        "POST",
+        "/api/studio-agent/tools/skills/{skill_key:path}/versions",
+    ): "scoped-only tool surface",
     # SPA mount's API 404 catch-all (server/app/spa.py).
     ("POST", "/api/{path:path}"): "API 404 catch-all",
     ("PUT", "/api/{path:path}"): "API 404 catch-all",

@@ -67,6 +67,7 @@ def test_get_configured_skill_detail(client_factory, tmp_path, monkeypatch):
     data = response.json()
     assert data["ref"] == "v1.0.0"
     assert data["available"] is True
+    assert data["tags"] == ["v1.0.0"]
     assert any(item["path"] == "SKILL.md" for item in data["files"])
 
 

@@ -9,6 +9,8 @@ studio_agent_context 两个 router）做双向比对：工具参数一律填 "{�
 from __future__ import annotations
 
 import asyncio
+import re
+from urllib.parse import unquote
 
 import pytest
 
@@ -55,14 +57,16 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
     # 工具面清单变化时同步这里与工具文档（server/app/mcp_server/server.py）。
     # get_authoring_guide 是本地静态工具（不发 HTTP），不影响下方
     # recorded == table 的路由比对。
-    assert len(tools) == 8
+    assert len(tools) == 11
     for tool in tools:
         schema = tool.inputSchema
-        args = {
-            name: f"{{{name}}}"
-            for name in (schema.get("properties") or {})
-            if name in (schema.get("required") or [])
-        }
+        args = {}
+        for name, prop in (schema.get("properties") or {}).items():
+            if name not in (schema.get("required") or []):
+                continue
+            # "{参数名}" 占位只用于字符串参数（让记录的 path 即路由模板）；
+            # 非字符串参数给类型合法的空值（不影响 method+path 比对）。
+            args[name] = f"{{{name}}}" if prop.get("type") in (None, "string") else []
         asyncio.run(server.call_tool(tool.name, args))
 
     settings = Settings(
@@ -76,14 +80,17 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
     )
     router = create_studio_agent_tools_router(None, settings)  # 枚举路由不触 DB
     table = {
-        (method, route.path)
+        # `{param:path}` 转换器归一化为 `{param}`：工具侧占位不含转换器后缀。
+        (method, re.sub(r"\{(\w+):\w+\}", r"{\1}", route.path))
         for router_ in (router, create_studio_agent_context_router(None))
         for route in router_.routes
         for method in (route.methods or set()) & _ROUTE_METHODS
     }
 
     recorded = {
-        (call["method"], call["url"].removeprefix(_CONFIG.api_base).removeprefix("/api"))
+        # unquote：skill 工具对 skill_key 段做 URL 编码，占位符 `{param}` 在
+        # 记录里以 %7Bparam%7D 出现，解码后与路由模板逐字对齐。
+        (call["method"], unquote(call["url"].removeprefix(_CONFIG.api_base).removeprefix("/api")))
         for call in calls
     }
     assert recorded == table

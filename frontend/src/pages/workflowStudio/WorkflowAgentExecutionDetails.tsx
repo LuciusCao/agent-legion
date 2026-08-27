@@ -1,45 +1,35 @@
 import ArticleOutlinedIcon from '@mui/icons-material/ArticleOutlined'
 import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined'
 import { Button } from '@mui/material'
-import { useState } from 'react'
 import type { WorkflowNodeRecord } from '../../types'
-import type { AgentDefinition } from '../../types/executorTypes'
+import { useShowNodeDetailPreview } from './nodeDetailPreviewContext'
 import { useWorkspaceAgentDefaults } from './useWorkspaceAgentDefaults'
 import { WorkflowNodeRuntimeSettings } from './WorkflowNodeRuntimeSettings'
-import { WorkflowPromptPreviewDialog } from './WorkflowPromptPreviewDialog'
-import { WorkflowSkillPreviewDialog } from './WorkflowSkillPreviewDialog'
-import { buildWorkflowNodePromptPreview } from './workflowNodePromptPreview'
-import { parseWorkflowNode } from './workflowStudioYamlDraft.parse'
 import styles from './WorkflowAgentExecutionDetails.module.css'
 
 export function WorkflowAgentExecutionDetails(props: {
-  definition: AgentDefinition
   node: WorkflowNodeRecord
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
 }) {
-  const [dialog, setDialog] = useState<'prompt' | 'skill' | null>(null)
+  // 预览在详情 panel 内原位展开（不开 dialog），右侧 Agent 对话保持可见。
+  const showPreview = useShowNodeDetailPreview()
   const agentDefaults = useWorkspaceAgentDefaults()
-  const draft = parseWorkflowNode(props.definitionYaml, props.node.key)
-  const additionalPrompt = draft
-    ? (draft.execution?.prompt ?? '')
-    : (props.node.execution?.prompt ?? '')
-  const skillKey = props.definition.skill
   return (
     <>
       <div className={styles.actions}>
         <Button
           size="small"
           startIcon={<ArticleOutlinedIcon />}
-          onClick={() => setDialog('prompt')}
+          onClick={() => showPreview('prompt')}
         >
           查看 Prompt
         </Button>
         <Button
           size="small"
           startIcon={<FolderOpenOutlinedIcon />}
-          onClick={() => setDialog('skill')}
+          onClick={() => showPreview('skill')}
         >
           浏览技能文件
         </Button>
@@ -50,21 +40,6 @@ export function WorkflowAgentExecutionDetails(props: {
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}
         readOnly={props.readOnly}
-      />
-      <WorkflowPromptPreviewDialog
-        open={dialog === 'prompt'}
-        nodeLabel={props.node.label}
-        prompt={buildWorkflowNodePromptPreview(
-          props.node,
-          skillKey,
-          additionalPrompt
-        )}
-        onClose={() => setDialog(null)}
-      />
-      <WorkflowSkillPreviewDialog
-        open={dialog === 'skill'}
-        skillKey={skillKey}
-        onClose={() => setDialog(null)}
       />
     </>
   )

@@ -1,8 +1,39 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #e0e0e0;
+  flex: none;
+}
+.title {
+  font-size: 13px;
+  color: #43474e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.version {
+  flex: none;
+  font-size: 12px;
+  color: #616161;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.versionSelect {
+  flex: none;
+  min-width: 180px;
+}
 .content {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  height: min(72vh, 760px);
-  padding: 0 !important;
+  grid-template-columns: 200px minmax(0, 1fr);
 }
 .fileList {
   overflow: auto;
@@ -27,9 +58,8 @@
   overflow: auto;
 }
 .code {
-  min-height: 100%;
   margin: 0;
-  padding: 18px 20px;
+  padding: 16px 20px;
   color: #1a1c1e;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
@@ -44,7 +74,7 @@
 @media (max-width: 700px) {
   .content {
     grid-template-columns: 1fr;
-    grid-template-rows: 180px minmax(0, 1fr);
+    grid-template-rows: minmax(120px, 32%) minmax(0, 1fr);
   }
   .fileList {
     border-right: 0;
