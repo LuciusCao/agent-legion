@@ -993,6 +993,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent/tools/skills/{skill_key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Skill */
+    get: operations['get_skill_api_studio_agent_tools_skills__skill_key__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/skills/{skill_key}/validate': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Validate Skill */
+    post: operations['validate_skill_api_studio_agent_tools_skills__skill_key__validate_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/skills/{skill_key}/versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Save Skill Version */
+    post: operations['save_skill_version_api_studio_agent_tools_skills__skill_key__versions_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft': {
     parameters: {
       query?: never
@@ -4350,7 +4401,13 @@ export interface components {
       /** Total */
       total: number | null
     }
-    /** SkillDetailResponse */
+    /**
+     * SkillDetailResponse
+     * @description Skill detail; with the ``ref`` query param the content comes from that
+     *     git tag instead of the working tree (lock and checkout untouched). An
+     *     unknown or non-tag ``ref`` is a 404, not a 422: the tag is the addressed
+     *     resource and it does not exist in the repo.
+     */
     SkillDetailResponse: {
       /** Available */
       available: boolean
@@ -4376,6 +4433,26 @@ export interface components {
        * @default false
        */
       truncated: boolean
+    }
+    /** SkillSaveVersionRequest */
+    SkillSaveVersionRequest: {
+      /** Files */
+      files: components['schemas']['SkillVersionFileWrite'][]
+      /** Message */
+      message: string
+      /** New Tag */
+      new_tag: string
+    }
+    /** SkillSaveVersionResponse */
+    SkillSaveVersionResponse: {
+      /** Commit */
+      commit: string
+      /** Files */
+      files?: string[]
+      /** Key */
+      key: string
+      /** Tag */
+      tag: string
     }
     /**
      * SkillSourceEntry
@@ -4437,6 +4514,29 @@ export interface components {
       tags?: string[]
       /** Valid */
       valid: boolean
+    }
+    /** SkillValidateToolResponse */
+    SkillValidateToolResponse: {
+      /** Errors */
+      errors?: components['schemas']['SkillValidationIssue'][]
+      /** Key */
+      key: string
+      /** Valid */
+      valid: boolean
+    }
+    /** SkillValidationIssue */
+    SkillValidationIssue: {
+      /** Error */
+      error: string
+      /** Path */
+      path: string
+    }
+    /** SkillVersionFileWrite */
+    SkillVersionFileWrite: {
+      /** Content */
+      content: string
+      /** Path */
+      path: string
     }
     /** StorageStatus */
     StorageStatus: {
@@ -7148,7 +7248,9 @@ export interface operations {
   }
   get_skill_api_executors_skills__skill_key__get: {
     parameters: {
-      query?: never
+      query?: {
+        ref?: string | null
+      }
       header?: never
       path: {
         skill_key: string
@@ -7752,6 +7854,105 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['StudioChatContextResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_skill_api_studio_agent_tools_skills__skill_key__get: {
+    parameters: {
+      query?: {
+        ref?: string | null
+      }
+      header?: never
+      path: {
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  validate_skill_api_studio_agent_tools_skills__skill_key__validate_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillValidateToolResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_skill_version_api_studio_agent_tools_skills__skill_key__versions_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SkillSaveVersionRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillSaveVersionResponse']
         }
       }
       /** @description Validation Error */

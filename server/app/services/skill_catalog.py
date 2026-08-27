@@ -4,12 +4,13 @@ from pathlib import Path
 from typing import Any
 
 from server.app.db.connection import DatabaseDsn
+from server.app.services import skill_repo
 from server.app.services.job_errors import NotFoundError
 from server.app.services.skill_source_store import SkillSourceStore
 from server.app.skills.config import SkillsConfig, SkillsLock
 
-_TEXT_EXTENSIONS = {".json", ".md", ".py", ".sh", ".toml", ".txt", ".yaml", ".yml"}
-_MAX_FILE_BYTES = 128 * 1024
+_TEXT_EXTENSIONS = skill_repo.TEXT_EXTENSIONS
+_MAX_FILE_BYTES = skill_repo.MAX_FILE_BYTES
 
 
 class SkillCatalogService:
@@ -27,11 +28,14 @@ class SkillCatalogService:
             "skill_commit": locked.commit if locked is not None else "",
         }
 
-    def detail(self, skill_key: str) -> dict[str, Any]:
+    def detail(self, skill_key: str, ref: str | None = None) -> dict[str, Any]:
         source = self._config().skills.get(skill_key)
         if source is None:
             raise NotFoundError(f"Skill {skill_key!r} is not configured")
         skill_dir = self._skill_dir(skill_key)
+        if ref is not None:
+            # Preview a git tag without touching the lock or the checkout.
+            return skill_repo.detail_at_ref(skill_key, ref, skill_dir)
         locked = self._lock().skills.get(skill_key)
         return {
             "key": skill_key,

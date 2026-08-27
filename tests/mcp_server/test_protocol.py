@@ -2,7 +2,7 @@
 
 Spawns ``python -m server.app.mcp_server`` over stdio like a real MCP host
 would, pointed at a local stub HTTP backend (no platform database involved):
-handshake, tools/list discovers the 8 tools, and a tools/call round-trip
+handshake, tools/list discovers the 11 tools, and a tools/call round-trip
 proves the scoped token reaches the backend and the response comes back as
 text.
 """
@@ -98,9 +98,12 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
                 "get_active_workflow",
                 "get_authoring_guide",
                 "get_node_code",
+                "get_skill",
                 "get_studio_context",
                 "save_agent_definition_draft",
                 "save_node_code_draft",
+                "save_skill_version",
+                "validate_skill",
                 "validate_workflow",
             ]
 

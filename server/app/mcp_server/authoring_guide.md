@@ -29,12 +29,18 @@ Studio. Nothing you do takes effect in production by itself.
   reads back; otherwise origin `none`); only start nodes 404.
 - `save_agent_definition_draft(agent_id, capability, runtime, skill, tools)` —
   draft Agent definition for an agent-backed capability.
+- `get_skill(skill_key, ref=None)` — a skill's configured ref, locked commit,
+  and text files; `ref` previews one git tag without moving the lock.
+- `validate_skill(skill_key)` — the runtime skill contract as a structured
+  error list. Persists nothing.
+- `save_skill_version(skill_key, files, new_tag, message)` — commit + tag a
+  new version in the skill's LOCAL source repo (section 6). Lock untouched.
 
 There is NO tool to create workspaces or to publish anything, and no workflow
 registry anymore (schema v50): a workflow is simply the DAG inside one
 workspace. The human creates the workspace in Studio (blank canvas, or
 initialized from the sample template) and publishes workflow revisions, node
-code, and agent definitions.
+code, agent definitions, and skill releases.
 
 ## 2. From-scratch flow (empty workspace)
 
@@ -152,7 +158,32 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
 - Agent execution (`provider`/`model`/`thinking`) resolves node
   `execution.*` overrides → workspace defaults → validation error if unset.
 
-## 6. Common errors and what to do
+## 6. Skill editing (read → edit → validate → tag)
+
+Skills live in git repos; the runtime pins each skill to a locked commit.
+You may read any tag, validate the working tree, and save a new version —
+you may NEVER relock or publish: a human reviews the git diff and relocks.
+
+1. `get_skill(skill_key)` — current content (or `ref=<tag>` to preview one
+   tag, e.g. one another agent just created; an unknown tag is a structured
+   404 and changes nothing).
+2. Edit the file contents in your draft, then `validate_skill(skill_key)` —
+   the runtime contract: non-empty SKILL.md + references/output-contract.md +
+   scripts/validate_output.py. Fix every reported error.
+3. `save_skill_version(skill_key, files, new_tag, message)` — local-path
+   sources only (URL sources refused). Every path is validated before any
+   write (inside the skill dir, no `..`/absolute paths, no `.git`, no
+   overwriting untracked files); after writing, the contract check re-runs
+   and a failure rolls the repo back to its original commit. On success it
+   commits (author agent-legion-studio) and tags `new_tag` (an existing tag
+   is a conflict). The skill lock is untouched: running jobs keep the
+   locked commit.
+4. Show the human the git diff of the new tag and ask them to release it:
+   change the skill source ref + relock in the admin skill-sources UI (or
+   `make skills-lock`). NEVER ask for a relock before the human has seen
+   the diff.
+
+## 7. Common errors and what to do
 
 - `Draft workflow key '...' does not match workspace default workflow key
   '...'` — the workspace already has a key; re-emit the YAML with that key.
@@ -164,6 +195,8 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
   — fix the code before re-saving.
 - 404 `Unknown workflow node` / `No active workflow revision` on
   save_node_code_draft — you forgot `expected_capability` for a new node.
+- save_skill_version: 409 `already has tag` — pick a fresh tag; 422 with an
+  `errors` list — fix the reported paths or missing contract files.
 - `HTTP 401` — token expired/revoked; ask the human to mint a new one.
 
 Golden rule: validate first, compare second, present third — and let the
