@@ -172,12 +172,21 @@ def test_zero_max_parallel_gates_disables_queue(repo: Path) -> None:
     assert not _slots_dir(repo).exists() or not list(_slots_dir(repo).glob("gate-*"))
 
 
-def test_worker_budget_divides_across_live_gates(repo: Path) -> None:
-    cores = int(
-        subprocess.run(
+def _cpu_count() -> int:
+    """Portable core count, mirroring the scripts' sysctl/nproc fallback."""
+    try:
+        out = subprocess.run(
             ["sysctl", "-n", "hw.ncpu"], capture_output=True, text=True, check=True
         ).stdout.strip()
-    )
+        return int(out)
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+        return int(
+            subprocess.run(["nproc"], capture_output=True, text=True, check=True).stdout.strip()
+        )
+
+
+def test_worker_budget_divides_across_live_gates(repo: Path) -> None:
+    cores = _cpu_count()
     holder = subprocess.Popen(["sleep", "60"])
     try:
         # One live slot (the holder's).
@@ -197,10 +206,6 @@ def test_worker_budget_divides_across_live_gates(repo: Path) -> None:
 
 
 def test_worker_budget_lone_gate_clamped(repo: Path) -> None:
-    cores = int(
-        subprocess.run(
-            ["sysctl", "-n", "hw.ncpu"], capture_output=True, text=True, check=True
-        ).stdout.strip()
-    )
+    cores = _cpu_count()
     out = _bash(JOBS_SCRIPT, repo, "detect_gate_default_jobs_worktree_aware").strip()
     assert out == str(max(2, min(8, cores - 2)))

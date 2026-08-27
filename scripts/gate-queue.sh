@@ -43,8 +43,13 @@ count_live_gate_slots() {
   for slot in "$dir"/gate-*; do
     [[ -f "$slot" ]] || continue
     pid="$(head -n1 "$slot" 2>/dev/null)"
-    [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && count=$((count + 1))
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      count=$((count + 1))
+    fi
   done
+  # echo ends the function with status 0 even when the last loop iteration
+  # took the false branch (a bare [[ ]] && chain would surface as status 1
+  # under the caller's set -e).
   echo "$count"
 }
 
@@ -58,6 +63,7 @@ _reclaim_stale_gate_slots() {
       rm -rf "$slot"
     fi
   done
+  return 0
 }
 
 # A pid whose process exited stays kill-0-alive as a zombie until its parent
@@ -74,10 +80,29 @@ _reclaim_aged_gate_slots() {
   now="$(date +%s)"
   for slot in "$dir"/gate-*; do
     [[ -f "$slot" ]] || continue
-    mtime="$(stat -f %m "$slot" 2>/dev/null || stat -c %Y "$slot" 2>/dev/null || echo "$now")"
+    mtime="$(_slot_mtime "$slot" "$now")"
     age=$((now - mtime))
-    [[ "$age" -gt "$max_age" ]] && rm -rf "$slot"
+    if [[ "$age" -gt "$max_age" ]]; then
+      rm -rf "$slot"
+    fi
   done
+  return 0
+}
+
+# File mtime as epoch seconds, platform-portable. BSD/macOS stat needs
+# `-f %m`; GNU/Linux `stat -f` is the filesystem-status switch that would
+# swallow the file argument as part of the format string, so probe once
+# which syntax works instead of chaining fallbacks (a failed chain leaks
+# multi-line output into arithmetic).
+_slot_mtime() {
+  local file="$1" fallback="$2"
+  if stat -f %m "$file" >/dev/null 2>&1; then
+    stat -f %m "$file"
+  elif stat -c %Y "$file" >/dev/null 2>&1; then
+    stat -c %Y "$file"
+  else
+    echo "$fallback"
+  fi
 }
 
 release_gate_slot() {
@@ -110,16 +135,10 @@ acquire_gate_slot() {
     return 0
   }
   mkdir -p "$dir"
-  _reclaim_stale_gate_slots
-  _reclaim_aged_gate_slots
   local poll="${AGENT_LEGION_GATE_POLL_SECONDS:-5}"
   local waited=0 announced=0 slot_file holders
   while true; do
-    if [[ "$(count_live_gate_slots)" -lt "$max" ]]; then
-      slot_file="$dir/gate-$$-$(date +%s%N 2>/dev/null || date +%s)"
-      printf '%s\n%s\n%s\n' "$$" "$(pwd)" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >"$slot_file"
-      export AGENT_LEGION_GATE_SLOT_FILE="$slot_file"
-      export AGENT_LEGION_GATE_SLOT_HELD=1
+    if _try_acquire_gate_slot "$dir" "$max"; then
       return 0
     fi
     if [[ "$announced" -eq 0 ]]; then
@@ -135,6 +154,32 @@ acquire_gate_slot() {
     _reclaim_stale_gate_slots
     _reclaim_aged_gate_slots
   done
+}
+
+# Atomic admission without a mutex: every contender first creates its own
+# slot file (creation is atomic; the pid lands in the same write), then
+# counts live slots INCLUDING its own and yields (deletes its file) when the
+# cap is exceeded. A start burst can briefly overshoot by the number of
+# racers and converges to the cap within one poll interval — no coordination
+# primitive to wedge, a crashed contender's file reclaims as a stale slot
+# like any other, and the overshoot window (milliseconds) is irrelevant
+# next to multi-minute gates. Yielding contenders back off a random sub-second
+# delay so a synchronized retry burst does not re-collide.
+_try_acquire_gate_slot() {
+  local dir="$1" max="$2" slot_file
+  _reclaim_stale_gate_slots
+  _reclaim_aged_gate_slots
+  slot_file="$dir/gate-$$-$(date +%s%N 2>/dev/null || date +%s)"
+  printf '%s\n%s\n%s\n' "$$" "$(pwd)" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >"$slot_file"
+  if [[ "$(count_live_gate_slots)" -le "$max" ]]; then
+    export AGENT_LEGION_GATE_SLOT_FILE="$slot_file"
+    export AGENT_LEGION_GATE_SLOT_HELD=1
+    return 0
+  fi
+  rm -rf "$slot_file"
+  # Jittered backoff: 0-0.5s, seeded from the nanosecond clock.
+  sleep "0.$(printf '%03d' $(( $(date +%s%N 2>/dev/null | tail -c 4) % 500 )))" 2>/dev/null || true
+  return 1
 }
 
 _describe_gate_slot_holders() {

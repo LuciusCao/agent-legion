@@ -133,12 +133,13 @@ echo "=== Parallel Quick Gate ==="
 echo "Parallel static/test rounds; the API contract check runs once between them."
 lanes_started_at=$SECONDS
 
-# Shared per-lane job cap: worktree-aware (scripts/gate-jobs.sh) — min(4,
-# cores) while a sibling worktree runs its own gate, cores-2 when this
-# machine's gates are all ours (per-lane envs override; CI 4-vCPU runners are
-# unaffected).
+# Shared per-lane job cap: worktree-aware (scripts/gate-jobs.sh) — the
+# machine budget divides across live gates ((cores-2)/N, clamped to [2,8]);
+# the sibling-lock probe applies when the queue is not visible (per-lane envs
+# override; CI 4-vCPU runners are unaffected). Recomputed per round, not
+# snapshotted once: a second gate may take its slot between rounds, and each
+# round should run against the concurrency that round actually sees.
 source "$ROOT_DIR/scripts/gate-jobs.sh"
-default_gate_jobs="$(detect_gate_default_jobs_worktree_aware)"
 
 lane_enabled() {
   [[ "$GATE_LANES" == "static" || " $GATE_LANES " == *" $1 "* ]]
@@ -159,7 +160,7 @@ run_rust_round() {
   # Cargo defaults to one rustc job per core; keep the gate polite on machines
   # running several worktrees (AGENT_LEGION_RUST_WORKERS overrides; CI 4-vCPU
   # runners are unaffected).
-  rust_jobs="${AGENT_LEGION_RUST_WORKERS:-$default_gate_jobs}"
+  rust_jobs="${AGENT_LEGION_RUST_WORKERS:-$(detect_gate_default_jobs_worktree_aware)}"
   if [[ "$round" == "static-check" ]]; then
     cargo fmt --all -- --check
     cargo clippy --all-targets --locked -j "$rust_jobs" -- -D warnings
