@@ -1112,7 +1112,7 @@
     "server/app/skills/doc_cache.py": 36,
     "server/app/skills/errors.py": 16,
     "server/app/skills/lock.py": 63,
-    "server/app/skills/manager.py": 248,
+    "server/app/skills/manager.py": 259,
     "server/app/skills/paths.py": 75,
     "server/app/skills/refresh.py": 47,
     "server/app/skills/runs_gc.py": 47,

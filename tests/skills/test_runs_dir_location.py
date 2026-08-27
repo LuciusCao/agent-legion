@@ -22,6 +22,7 @@ from tests.helpers.skill_store import memory_skill_store
 _KEY = "demo_workflow/generate_key_info"
 
 
+@pytest.mark.no_db
 def test_default_runs_dir_is_in_temp_dir() -> None:
     """The default lands under the OS temp dir with the deterministic
     prefixed name (same value on every call — the FileLock domain depends
@@ -30,18 +31,22 @@ def test_default_runs_dir_is_in_temp_dir() -> None:
 
     first = default_skills_runs_dir()
     assert first == default_skills_runs_dir()
-    assert first.parent == Path(tempfile.gettempdir()).resolve() or first.parent == Path(
-        tempfile.gettempdir()
-    )
+    assert first.is_absolute()
+    # Under the real OS temp dir (not a repo-relative or home-relative path).
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    assert temp_root == first.parent.resolve() or temp_root == first.parent
     assert first.name.startswith("agent-legion-skills.runs")
+    assert first != Path.home() / ".agents" / "skills" / "agent-legion.runs"
 
 
+@pytest.mark.no_db
 def test_default_runs_dir_has_uid_suffix_on_posix() -> None:
     if not hasattr(os, "getuid"):
         pytest.skip("posix-only assertion")
     assert default_skills_runs_dir().name.endswith(f"-{os.getuid()}")
 
 
+@pytest.mark.no_db
 def test_manager_default_runs_dir_uses_temp_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -59,6 +64,7 @@ def test_manager_default_runs_dir_uses_temp_default(
     assert manager.runs_dir != manager.base_dir.parent / f"{manager.base_dir.name}.runs"
 
 
+@pytest.mark.no_db
 def test_sweep_removes_stale_execution_dirs_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -92,6 +98,7 @@ def test_sweep_removes_stale_execution_dirs_only(
     assert (locks / "demo_workflow--generate_key_info.lock").exists()
 
 
+@pytest.mark.no_db
 def test_sweep_missing_runs_dir_is_a_no_op(tmp_path: Path) -> None:
     manager = SkillManager(
         store=memory_skill_store({_KEY: {"repo": "https://example.com/s.git", "ref": "main"}}),
@@ -101,6 +108,7 @@ def test_sweep_missing_runs_dir_is_a_no_op(tmp_path: Path) -> None:
     assert manager.sweep_stale_executions() == 0
 
 
+@pytest.mark.no_db
 def test_sweep_never_follows_symlinked_execution_dirs(tmp_path: Path) -> None:
     """A symlinked execution dir is skipped, never rmtree'd through — the
     same escape protection _resolve_execution_dir enforces per id."""
@@ -121,6 +129,7 @@ def test_sweep_never_follows_symlinked_execution_dirs(tmp_path: Path) -> None:
     assert (runs / "symlinked-execution").is_symlink()
 
 
+@pytest.mark.no_db
 def test_sweep_ignores_stray_files(tmp_path: Path) -> None:
     manager = SkillManager(
         store=memory_skill_store({_KEY: {"repo": "https://example.com/s.git", "ref": "main"}}),
@@ -135,6 +144,7 @@ def test_sweep_ignores_stray_files(tmp_path: Path) -> None:
     assert (runs / "stray.txt").exists()
 
 
+@pytest.mark.no_db
 def test_swept_execution_id_is_recreatable(tmp_path: Path) -> None:
     """A sweep racing a live dispatch is loud, not silent: after removal the
     run dir is simply rebuilt on the next get_skill_dir call."""
@@ -176,6 +186,7 @@ def test_swept_execution_id_is_recreatable(tmp_path: Path) -> None:
     assert second.exists()
 
 
+@pytest.mark.no_db
 def test_ensure_secure_runs_dir_creates_private_root(tmp_path: Path) -> None:
     """First use creates the root with 0700, no parents=True: atomic, and a
     race with a pre-existing entry surfaces as an error instead of reuse."""
@@ -190,6 +201,7 @@ def test_ensure_secure_runs_dir_creates_private_root(tmp_path: Path) -> None:
     assert mode == 0o700
 
 
+@pytest.mark.no_db
 def test_ensure_secure_runs_dir_reuses_validated_root(tmp_path: Path) -> None:
     from server.app.skills.paths import ensure_secure_runs_dir
 
@@ -198,6 +210,7 @@ def test_ensure_secure_runs_dir_reuses_validated_root(tmp_path: Path) -> None:
     assert again == root
 
 
+@pytest.mark.no_db
 def test_ensure_secure_runs_dir_rejects_symlink(tmp_path: Path) -> None:
     """A symlink at the predictable path must fail closed, never rmtree or
     copytree through it (shared /tmp pre-creation attack)."""
@@ -214,6 +227,7 @@ def test_ensure_secure_runs_dir_rejects_symlink(tmp_path: Path) -> None:
     assert (outside / "sentinel.txt").exists()
 
 
+@pytest.mark.no_db
 def test_ensure_secure_runs_dir_rejects_wrong_owner(tmp_path: Path) -> None:
     """A root owned by another uid (pre-created by an attacker on a shared
     temp dir) is refused, not reused."""
@@ -236,6 +250,7 @@ def test_ensure_secure_runs_dir_rejects_wrong_owner(tmp_path: Path) -> None:
         ensure_secure_runs_dir(root)
 
 
+@pytest.mark.no_db
 def test_ensure_secure_runs_dir_tightens_wide_mode_when_owned(tmp_path: Path) -> None:
     """A 0777 root owned by the current user (older-version upgrade path or a
     permissive umask) is tightened to 0700 once, not refused."""
@@ -252,6 +267,7 @@ def test_ensure_secure_runs_dir_tightens_wide_mode_when_owned(tmp_path: Path) ->
     assert stat_module.S_IMODE(root.stat().st_mode) == 0o700
 
 
+@pytest.mark.no_db
 def test_get_skill_dir_fails_closed_on_pre_created_runs_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -297,3 +313,40 @@ def test_get_skill_dir_fails_closed_on_pre_created_runs_dir(
         manager.get_skill_dir(_KEY, str(uuid.uuid4()))
     assert (outside / "evil").exists()
     assert not (outside / "demo_workflow").exists()
+
+
+@pytest.mark.no_db
+def test_sweep_refuses_symlinked_runs_root(tmp_path: Path) -> None:
+    """P0 regression: a symlink AT the runs root must not be resolved through —
+    the sweep is a deletion primitive, and resolve() on a symlinked root
+    would rmtree victim subtrees. It must refuse (0 swept) and leave the
+    victim untouched."""
+    from server.app.skills.runs_gc import sweep_stale_execution_dirs
+
+    victim = tmp_path / "victim"
+    (victim / "important").mkdir(parents=True)
+    long_ago = time.time() - 7200
+    os.utime(victim / "important", (long_ago, long_ago))
+
+    runs = tmp_path / "runs"
+    runs.symlink_to(victim, target_is_directory=True)
+
+    swept = sweep_stale_execution_dirs(runs, max_age_seconds=3600.0)
+
+    assert swept == 0
+    assert (victim / "important").exists()
+    assert runs.is_symlink()
+
+
+@pytest.mark.no_db
+def test_sweep_creates_and_uses_secure_root_on_fresh_install(tmp_path: Path) -> None:
+    """First sweep on a missing root creates the 0700 root and sweeps it
+    (empty), instead of silently skipping GC until the first dispatch."""
+    import stat as stat_module
+
+    from server.app.skills.runs_gc import sweep_stale_execution_dirs
+
+    runs = tmp_path / "runs"
+    assert sweep_stale_execution_dirs(runs, max_age_seconds=3600.0) == 0
+    assert runs.is_dir()
+    assert stat_module.S_IMODE(runs.stat().st_mode) == 0o700

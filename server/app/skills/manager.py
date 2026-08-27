@@ -303,7 +303,20 @@ class SkillManager:
             # Skills base dir is a read-only input (issue #42): locks live under runs_dir.
             ensure_secure_runs_dir(self.runs_dir)
             lock_dir = self.runs_dir / ".locks"
-            lock_dir.mkdir(mode=0o700, exist_ok=True)
+            # Defense in depth: exist_ok would let a symlinked .locks (inside
+            # a root an operator pinned to an already-polluted path) redirect
+            # the FileLocks; reject anything not owned-by-us real dir, and
+            # normalize a stale mode (older-version creation).
+            try:
+                lock_dir.mkdir(mode=0o700)
+            except FileExistsError:
+                if os.path.islink(lock_dir) or not os.path.isdir(lock_dir):
+                    raise OSError(
+                        f"refusing to use skills lock dir {lock_dir}: it exists "
+                        "but is not a directory (possible redirected lock "
+                        "path). Remove it or pin AGENT_LEGION_SKILLS_RUNS_DIR."
+                    ) from None
+                os.chmod(lock_dir, 0o700)
             name = f"{cache_dir.parent.name}--{cache_dir.name}.lock"
             self._cache_locks[key] = FileLock(str(lock_dir / name))
         return self._cache_locks[key]

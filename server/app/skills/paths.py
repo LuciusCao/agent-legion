@@ -22,6 +22,12 @@ logger = logging.getLogger(__name__)
 RUNS_DIR_PREFIX = "agent-legion-skills.runs"
 
 
+def _euid() -> int:
+    """Effective uid; -1 on platforms without one (Windows) so the
+    ownership check fails closed instead of AttributeError."""
+    return getattr(os, "geteuid", lambda: -1)()
+
+
 def default_skills_runs_dir() -> Path:
     """Deterministic per-user temp dir for execution snapshots and cache locks.
 
@@ -49,9 +55,10 @@ def ensure_secure_runs_dir(runs_dir: Path) -> Path:
     - ``mkdir(0o700)`` without ``parents=True`` and without ``exist_ok``:
       creation is atomic, so racing a pre-existing entry fails loudly.
     - On ``EEXIST`` the existing entry must be a real directory (lstat — no
-      symlink) owned by the current user; mode looser than ``0700`` is
-      tightened once via chmod (upgrade path from the earlier permissive
-      creation), anything else is a hard error naming the remediation.
+      symlink) owned by the current user; any mode deviation from ``0700``
+      is normalized once via chmod (upgrade path from the earlier permissive
+      creation — this also restores the write bit for over-restrictive
+      entries), anything else is a hard error naming the remediation.
     - The parent must already exist (the OS temp dir always does); a pinned
       custom root via ``AGENT_LEGION_SKILLS_RUNS_DIR`` is created by the
       operator with matching guarantees.
@@ -66,7 +73,7 @@ def ensure_secure_runs_dir(runs_dir: Path) -> Path:
     # Path exists: validate ownership and that it is not a symlink. lstat is
     # the authority; a dangling or redirected symlink must fail.
     st = os.lstat(path)
-    if os.path.islink(path) or not os.path.isdir(path) or st.st_uid != os.geteuid():
+    if os.path.islink(path) or not os.path.isdir(path) or st.st_uid != _euid():
         raise OSError(
             f"refusing to use skills runs dir {path}: it exists but is not a "
             "directory owned by the current user (possible pre-created entry "
@@ -74,8 +81,9 @@ def ensure_secure_runs_dir(runs_dir: Path) -> Path:
             "AGENT_LEGION_SKILLS_RUNS_DIR to a private path."
         )
     if st.st_mode & 0o777 != 0o700:
-        # One-time tighten: an entry created by an older version (or a
-        # different umask) that we own. chmod -S keeps us on lstat facts.
-        os.chmod(path, 0o700, follow_symlinks=False)
-        logger.info("tightened skills runs dir %s to 0700", path)
+        # One-time normalization: an entry created by an older version (or a
+        # different umask) that we own. Safe because lstat above already
+        # proved the path itself is not a symlink.
+        os.chmod(path, 0o700)
+        logger.info("normalized skills runs dir %s to 0700", path)
     return path

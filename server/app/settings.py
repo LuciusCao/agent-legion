@@ -16,7 +16,7 @@ from server.app.executors.runtime_config import (
     WorkflowsRuntimeConfig,
     validate_runtime,
 )
-from server.app.skills.paths import default_skills_runs_dir  # noqa: F401 — Settings default
+from server.app.skills.paths import default_skills_runs_dir
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -243,8 +243,9 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir, jobs_dir]:
         path.mkdir(parents=True, exist_ok=True)
     executor_runtime = ExecutorRuntimeConfig.model_validate(config)
-    # skills.runs_dir comes only from the env override (skills yaml section
-    # does not exist); absent that, the deterministic temp default.
+    # skills.runs_dir is env-only by contract (AGENT_LEGION_SKILLS_RUNS_DIR);
+    # a hand-written yaml skills section would also land here (the loader
+    # does not own a skills key), which is tolerated but unsupported.
     skills_override = config.get("skills", {}).get("runs_dir")
     return Settings(
         root_dir=root_dir,

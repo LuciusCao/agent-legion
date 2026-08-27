@@ -7,6 +7,8 @@ import shutil
 import time
 from pathlib import Path
 
+from server.app.skills.paths import ensure_secure_runs_dir
+
 logger = logging.getLogger(__name__)
 
 # Execution snapshots live for seconds (copytree -> bundle -> finally-rmtree).
@@ -30,9 +32,17 @@ def sweep_stale_execution_dirs(runs_dir: Path, *, max_age_seconds: float) -> int
     the run dir, so a swept-but-in-use dir fails the copy loudly instead of
     silently corrupting results.
     """
-    root = runs_dir.resolve()
-    if not root.is_dir():
+    # The sweep is a deletion primitive: it must never run through a root
+    # that fails the shared-temp trust rules (a symlinked or foreign-owned
+    # runs dir would turn resolve() into an escape hatch for rmtree).
+    # ensure_secure_runs_dir also creates the root on first sweep, so a
+    # fresh install sweeps an empty 0700 dir instead of skipping.
+    try:
+        ensure_secure_runs_dir(runs_dir)
+    except OSError:
+        logger.exception("refusing to sweep skills runs dir %s", runs_dir)
         return 0
+    root = runs_dir
     cutoff = time.time() - max_age_seconds
     swept = 0
     for entry in root.iterdir():
