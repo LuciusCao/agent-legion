@@ -7,8 +7,6 @@ export type JobRerunByFailureRequest =
   components['schemas']['JobRerunByFailureRequest']
 export type JobRerunByFailureResponse =
   components['schemas']['JobRerunByFailureResponse']
-export type JobRerunByFailureResult =
-  components['schemas']['JobRerunByFailureResultResponse']
 export type FailureCategory = JobRerunByFailureRequest['category']
 
 export type RerunByFailureInput = {

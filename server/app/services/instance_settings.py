@@ -77,11 +77,38 @@ def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+# OpenClaw keys retired with the legacy business workflow pipeline. Stored
+# documents from older deployments still carry them; they are stripped at read
+# time (before response validation — InstanceOpenClawSettings is extra=forbid)
+# so the effective document matches the cwd-only shape without a data migration.
+_RETIRED_OPENCLAW_KEYS = (
+    "command_template",
+    "timeout_seconds",
+    "isolated_workspace_root",
+    "skill_safety",
+)
+
+
+def _strip_retired_openclaw_keys(stored: dict[str, Any]) -> dict[str, Any]:
+    """Remove retired ``openclaw`` keys from a stored document copy."""
+    openclaw = stored.get("openclaw")
+    if not isinstance(openclaw, dict):
+        return stored
+    retired = [key for key in _RETIRED_OPENCLAW_KEYS if key in openclaw]
+    if not retired:
+        return stored
+    stripped = dict(stored)
+    stripped["openclaw"] = {
+        key: value for key, value in openclaw.items() if key not in _RETIRED_OPENCLAW_KEYS
+    }
+    return stripped
+
+
 def effective_instance_document(stored: dict[str, Any] | None) -> dict[str, Any]:
     """Return the effective document: stored values over code defaults."""
     if stored is None:
         return default_instance_document()
-    return _merge(default_instance_document(), stored)
+    return _merge(default_instance_document(), _strip_retired_openclaw_keys(stored))
 
 
 def apply_instance_settings(settings: Settings, database_dsn: DatabaseDsn) -> None:

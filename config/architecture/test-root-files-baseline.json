@@ -109,8 +109,6 @@
     "tests/test_stress_report.py",
     "tests/test_stress_simulator.py",
     "tests/test_test_telemetry.py",
-    "tests/test_velites_replay.py",
-    "tests/test_verify_specs.py",
     "tests/test_worker_cli.py",
     "tests/test_worker_control_db.py",
     "tests/test_worker_event_filter.py",

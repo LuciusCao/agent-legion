@@ -28,7 +28,3 @@ export type CatalogSource =
   | WorkflowDefinitionRecord
   | null
   | undefined
-
-export function catalogNodes(source: CatalogSource): NodeCatalogNode[] {
-  return source?.nodes ?? []
-}

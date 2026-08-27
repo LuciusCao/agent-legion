@@ -36,7 +36,7 @@ class Settings:
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
             workflows=WorkflowsRuntimeConfig(),
-            openclaw=OpenClawRuntimeConfig(command_template=("openclaw",)),
+            openclaw=OpenClawRuntimeConfig(),
         )
     )
 

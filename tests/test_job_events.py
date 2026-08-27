@@ -634,15 +634,10 @@ def fake_job_db():
 class FakeJobEventBuffer:
     def __init__(self):
         self.updated = []
-        self.created = []
         self.deleted = []
 
     def record_job_updated(self, workspace_id, job_id):
         self.updated.append((workspace_id, job_id))
-        return 1
-
-    def record_job_created(self, workspace_id, job_id):
-        self.created.append((workspace_id, job_id))
         return 1
 
     def record_job_deleted(self, workspace_id, job_id):

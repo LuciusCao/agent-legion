@@ -62,20 +62,19 @@ cd frontend && npm install && cd ..
 ### 2. 一次性本地配置
 
 ```bash
-# 后端与本地 worker 共享的注册 token。
-# 必须在后端【首次启动之前】创建（后端在启动时读取它）。
-mkdir -p deploy/secrets
-openssl rand -hex 24 > deploy/secrets/agent_worker_register_token
-chmod 600 deploy/secrets/agent_worker_register_token
-
 # 构建用于沙箱执行节点代码的 velites 二进制
 ./scripts/ensure-velites.sh --dest data/bin
 
-# 本地 worker 配置（把 host_url 改为 http://127.0.0.1:8001，并设置
-# register_token_file: deploy/secrets/agent_worker_register_token、
-# work_root: data/agent-worker——详见示例文件里的注释）
+# 本地 worker 配置（把 host_url 改为 http://127.0.0.1:8001、
+# work_root 改为 data/agent-worker——详见示例文件里的注释）
 cp config/agent-worker.example.yaml config/agent-worker.yaml
 ```
+
+worker 注册不再使用全局 token：启动后在 Host Web UI 的
+「设置 → Worker Token」为 workspace 签发 scoped token，到 Worker 控制台
+（`http://127.0.0.1:8789`）的「Workspace 访问」区块粘贴添加即可——token
+随时可以补，无需重启后端（详见
+[docs/agent-worker-deployment.md](docs/agent-worker-deployment.md)）。
 
 ### 3. 启动
 

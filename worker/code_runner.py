@@ -13,8 +13,10 @@ ships worker/ + shared/, no repo checkout).
 
 Secret boundary (VAULT-SECRET-001 extended to the Worker): the resolved
 manifest lives only in memory and crosses into the child as a stdin pickle;
-nothing derived from ``config`` may touch disk or logs. Any future
-persistence must go through ``strip_secret_config`` first.
+nothing derived from ``config`` may touch disk or logs. The Host-side
+``split_manifest_config`` (server/app/agent_broker/code_dispatch.py) keeps
+secret-marked keys out of the dispatch manifest before it ever reaches the
+Worker.
 """
 
 from __future__ import annotations
@@ -91,28 +93,6 @@ def cancel_executions(execution_ids: list[str]) -> int:
     if matched:
         print(f"Host cancelled code execution(s): {', '.join(matched)}", flush=True)
     return len(matched)
-
-
-def strip_secret_config(config: Mapping[str, Any], schema: Mapping[str, Any]) -> dict[str, Any]:
-    """Drop schema-secret keys and the injected connection block.
-
-    Mandatory filter before ANY disk/log persistence of config-derived data
-    (VAULT-SECRET-001 on the Worker). Counterpart of the Host-side
-    ``split_manifest_config`` in server/app/agent_broker/code_dispatch.py —
-    keep the key-selection rules in sync. The full resolved config may only
-    exist in memory and in the stdin payload to the child."""
-    raw_properties = schema.get("properties") if isinstance(schema, Mapping) else None
-    properties = raw_properties if isinstance(raw_properties, Mapping) else {}
-    secret_keys = {
-        key
-        for key, prop in properties.items()
-        if isinstance(prop, Mapping) and prop.get("secret", False)
-    }
-    return {
-        str(key): value
-        for key, value in config.items()
-        if key not in secret_keys and key != "connection_config"
-    }
 
 
 @dataclass(frozen=True)

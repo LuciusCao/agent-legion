@@ -377,7 +377,7 @@ workspace `default_agent_*` → 报错，无全局兜底。manifest 的执行块
 **flavor 的退役（2026-08-05）**：`workflows.pi.flavor` 实现选择层已随 yaml
 块一并删除。此前保持 `runtime: pi` 的 4 个业务视频 agent 已由
 schema v27 migration 翻转为 `runtime: velites`（新发 published 版本、归档
-旧版）。`PiRuntimeConfig` 只剩硬编码默认（flavor="pi"）；此前专供的本地
+旧版）。`PiRuntimeConfig` 当时只剩硬编码默认（flavor="pi"，该配置类亦已于 2026-08-26 死代码清理中删除）；此前专供的本地
 pi executor 死路径（`executors/pi.py` + `PiRunner` 及
 pi_config/pi_command_builder/pi_prompt 链）已整体删除（#108）。
 

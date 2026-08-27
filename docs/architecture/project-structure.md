@@ -88,8 +88,6 @@ agent-legion/
 │   ├── check-ci.sh             # CI 质量门
 │   ├── check_architecture.py   # 架构契约检查
 │   ├── check_invariants.py     # 不变量/豁免校验
-│   ├── check-skills-shared.py  # Skill 共享资源一致性检查
-│   ├── verify_specs.py         # Spec 健康检查
 │   ├── ratchet_architecture_budgets.py # 架构预算基线更新
 │   ├── generate_architecture.py # 自动生成架构文档表格
 │   ├── generate-api-types.sh   # 生成前端 API 类型

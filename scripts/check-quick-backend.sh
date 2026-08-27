@@ -27,8 +27,9 @@ run_static_checks() {
   echo "=== Architecture Docs Freshness ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.generate_architecture --check
 
-  echo "=== Spec Health Check ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/verify_specs.py --check
+  # The spec health check (scripts/verify_specs.py) retired with the
+  # unpublished docs/superpowers specs (f4e7e46f): the directory is
+  # gitignored and absent, so the step had been passing vacuously.
 }
 
 run_tests() {

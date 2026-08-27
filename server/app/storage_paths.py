@@ -227,10 +227,3 @@ def resolve_job_dir(job: Any, jobs_dir: Path) -> Path:
     # Job records may be partial dicts constructed in tests/services without an
     # ``id`` key, so fall back to "" rather than requiring the key.
     return _resolve_record_dir(job, "", jobs_dir, "job")
-
-
-def derive_session_dir_from_run_dir(run_dir: Path | None) -> Path | None:
-    if run_dir is None:
-        return None
-    session_dir = run_dir / "session"
-    return session_dir if session_dir.is_dir() else None
