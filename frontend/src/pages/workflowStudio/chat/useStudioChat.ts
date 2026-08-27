@@ -42,7 +42,6 @@ export function useStudioChat(workspaceId: string | undefined) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [session, setSession] = useState<StudioChatSessionRecord | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [sending, setSending] = useState(false)
   const [starting, setStarting] = useState(false)
   const [runTiming, setRunTiming] = useState<{
     startedAt: number | null
@@ -206,8 +205,10 @@ export function useStudioChat(workspaceId: string | undefined) {
     setActionError(null)
     try {
       await action()
+      return true
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '操作失败')
+      return false
     }
   }
 
@@ -229,10 +230,11 @@ export function useStudioChat(workspaceId: string | undefined) {
     setStarting(false)
   }
 
+  // 返回是否发送成功：busy 排队（useStudioChatQueue）flush 失败时要保留
+  // 队首，失败原因已置 actionError。
   async function send(text: string) {
-    if (!workspaceId || !activeSessionId || !text.trim()) return
-    setSending(true)
-    await runAction(async () => {
+    if (!workspaceId || !activeSessionId || !text.trim()) return false
+    const sent = await runAction(async () => {
       const message: StudioChatMessageRecord = await sendStudioChatMessage(
         workspaceId,
         activeSessionId,
@@ -240,7 +242,7 @@ export function useStudioChat(workspaceId: string | undefined) {
       )
       setMessages((current) => upsertMessage(current, message) ?? current)
     })
-    setSending(false)
+    return sent
   }
 
   async function cancel() {
@@ -300,7 +302,6 @@ export function useStudioChat(workspaceId: string | undefined) {
     permissions,
     busy,
     closed,
-    sending,
     starting,
     actionError,
     lastRunMs: runTiming.lastMs,

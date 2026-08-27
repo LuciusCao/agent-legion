@@ -1,6 +1,8 @@
 import { WorkflowDagFullscreenDialog } from './components/WorkflowDagFullscreenDialog'
 import { WorkflowPublishReviewDialog } from './components/WorkflowPublishReviewDialog'
 import { useStudioState, useStudioView } from './studioStateContext'
+import { WorkflowStudioChangesDrawer } from './WorkflowStudioChangesDrawer'
+import { WorkflowStudioYamlEditorDialog } from './WorkflowStudioYamlEditorDialog'
 
 export function WorkflowStudioLayoutDialogs() {
   const studio = useStudioState()
@@ -18,7 +20,7 @@ export function WorkflowStudioLayoutDialogs() {
         onConfirm={async () => {
           studio.closeReviewDialog()
           await studio.publishDraft()
-          view.setCanvasMode('changes')
+          view.setChangesPanelOpen(true)
         }}
         onCancel={studio.closeReviewDialog}
       />
@@ -30,6 +32,8 @@ export function WorkflowStudioLayoutDialogs() {
         onSelectedNodeChange={studio.setSelectedNodeKey}
         onClose={() => view.setDagFullscreenOpen(false)}
       />
+      <WorkflowStudioChangesDrawer />
+      <WorkflowStudioYamlEditorDialog />
     </>
   )
 }

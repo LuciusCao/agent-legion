@@ -1,34 +1,9 @@
-import { Chip } from '@mui/material'
-import type { WorkflowRevisionSummary } from '../../types'
-import type { ChangeSummaryViewModel } from './workflowStudioChanges'
+import { draftSaveText } from './useWorkflowDraftPersistence'
 import { WorkflowRevisionSelect } from './WorkflowRevisionSelect'
-import { WorkflowStudioChangeCountChip } from './WorkflowStudioChangeCountChip'
 import { WorkflowStudioCommandBarActions } from './WorkflowStudioCommandBarActions'
+import type { WorkflowStudioCommandBarProps as Props } from './WorkflowStudioCommandBar.types'
+import { WorkflowStudioStatusChip } from './WorkflowStudioStatusChip'
 import styles from './WorkflowStudioCommandBar.module.css'
-
-type Props = {
-  revision: WorkflowRevisionSummary | null
-  revisions: WorkflowRevisionSummary[]
-  activeRevision: WorkflowRevisionSummary | null
-  viewMode: 'draft' | 'revision'
-  dirty: boolean
-  readOnly: boolean
-  hasPreservedDraft: boolean
-  compareSummary: ChangeSummaryViewModel | null
-  compareState: 'idle' | 'loading' | 'ready' | 'error'
-  actionState: 'idle' | 'validating' | 'publishing'
-  canSubmit: boolean
-  canPublish: boolean
-  selectedRevisionId?: string | null
-  isLoadingRevision?: boolean
-  revisionLoadError?: string | null
-  onSelectRevision: (revisionId: string) => void
-  onValidate: () => void
-  onPublish: () => void
-  onReset: () => void
-  backToDraft: () => void
-  useViewedRevisionAsDraft: () => void
-}
 
 export function WorkflowStudioCommandBar({
   revision,
@@ -40,6 +15,7 @@ export function WorkflowStudioCommandBar({
   hasPreservedDraft,
   compareSummary,
   compareState,
+  draftSave,
   actionState,
   canSubmit,
   canPublish,
@@ -50,6 +26,7 @@ export function WorkflowStudioCommandBar({
   onValidate,
   onPublish,
   onReset,
+  onShowChanges,
   backToDraft,
   useViewedRevisionAsDraft,
 }: Props) {
@@ -58,25 +35,25 @@ export function WorkflowStudioCommandBar({
     viewMode === 'revision'
       ? `查看 v${revision?.version ?? '-'} · ${hash} · 只读`
       : `基于 v${activeRevision?.version ?? '-'} 的草稿`
-  const syncText = readOnly ? '只读' : dirty ? '有未发布变更' : '已同步'
-  const risk =
-    compareSummary?.riskLevel === 'breaking'
-      ? '风险：高'
-      : compareSummary?.riskLevel === 'warning'
-        ? '风险：中'
-        : compareSummary?.riskLevel === 'info'
-          ? '风险：低'
-          : null
+  // 草稿自动保存状态低噪暴露：不进 chip（StatusChip 体积预算已满），只挂
+  // 顶栏 meta 文本的 tooltip。
+  const saveText = draftSaveText(draftSave)
 
   return (
     <div className={styles.commandBar} aria-label="Workflow command bar">
-      <span className={styles.meta}>{modeText}</span>
+      <span className={styles.meta} title={saveText ?? undefined}>
+        {modeText}
+      </span>
       <div className={styles.status}>
-        <Chip size="small" label={syncText} />
-        <WorkflowStudioChangeCountChip summary={compareSummary} />
-        {compareState === 'loading' && <Chip size="small" label="计算变更" />}
-        {risk && <Chip size="small" color="warning" label={risk} />}
-        {hasPreservedDraft && <Chip size="small" label="已保留当前草稿" />}
+        <WorkflowStudioStatusChip
+          readOnly={readOnly}
+          version={revision?.version ?? null}
+          dirty={dirty}
+          hasPreservedDraft={hasPreservedDraft}
+          summary={compareSummary}
+          compareState={compareState}
+          onShowChanges={onShowChanges}
+        />
       </div>
       <WorkflowRevisionSelect
         revisions={revisions}

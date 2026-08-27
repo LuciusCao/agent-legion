@@ -1,13 +1,10 @@
-import type { useWorkflowStudio } from './useWorkflowStudio'
 import { WorkflowStudioCommandBar } from './WorkflowStudioCommandBar'
+import { useStudioState, useStudioView } from './studioStateContext'
 
-type Props = {
-  studio: ReturnType<typeof useWorkflowStudio>
-  onValidate: () => void
-}
-
-export function WorkflowStudioCommandBarContainer(props: Props) {
-  const { studio } = props
+/** 顶栏容器：从 Studio context 取状态与视图动作，组装 CommandBar。 */
+export function WorkflowStudioCommandBarContainer() {
+  const studio = useStudioState()
+  const view = useStudioView()
   return (
     <WorkflowStudioCommandBar
       revision={studio.revision}
@@ -19,6 +16,7 @@ export function WorkflowStudioCommandBarContainer(props: Props) {
       hasPreservedDraft={studio.hasPreservedDraft}
       compareSummary={studio.compareSummary}
       compareState={studio.compareState}
+      draftSave={studio.draftSave}
       actionState={studio.actionState}
       canSubmit={studio.canSubmit}
       canPublish={studio.canPublish}
@@ -26,9 +24,10 @@ export function WorkflowStudioCommandBarContainer(props: Props) {
       isLoadingRevision={studio.isLoadingRevision}
       revisionLoadError={studio.revisionLoadError}
       onSelectRevision={studio.selectRevision}
-      onValidate={props.onValidate}
+      onValidate={() => void view.validateAndShowResult()}
       onPublish={() => void studio.requestPublish()}
       onReset={studio.resetDefinition}
+      onShowChanges={() => view.setChangesPanelOpen(true)}
       backToDraft={studio.backToDraft}
       useViewedRevisionAsDraft={studio.useViewedRevisionAsDraft}
     />

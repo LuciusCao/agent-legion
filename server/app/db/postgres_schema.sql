@@ -1099,3 +1099,15 @@ create table if not exists material_bundle_members (
 );
 create index if not exists idx_material_bundle_members_material
   on material_bundle_members(material_id);
+
+-- Workflow Studio draft (schema v61): the workspace's single unpublished
+-- workflow YAML draft, autosaved by the Studio editor so a refresh no longer
+-- loses it. One row per workspace (the Studio draft model is single-draft);
+-- publish does not clear it — the published YAML becomes the new draft
+-- content and the dirty flag fades against the new baseline.
+create table if not exists workspace_workflow_drafts (
+  workspace_id text primary key references workspaces(id) on delete cascade,
+  definition_yaml text not null,
+  created_at timestamptz not null default current_timestamp,
+  updated_at timestamptz not null default current_timestamp
+);

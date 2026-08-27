@@ -301,7 +301,7 @@ describe('StudioChatPanel', () => {
     )
   })
 
-  it('shows cancel while running and disables the input', async () => {
+  it('shows cancel while running and keeps the input enabled', async () => {
     mockApi.fetchStudioChatSessions.mockResolvedValue([
       sessionRecord({ status: 'running' }),
     ])
@@ -309,11 +309,74 @@ describe('StudioChatPanel', () => {
     renderPanel()
 
     const cancel = await screen.findByRole('button', { name: '取消' })
-    expect(screen.getByLabelText('消息输入')).toBeDisabled()
+    // busy 不再禁用输入：发送会进入前端队列。
+    expect(screen.getByLabelText('消息输入')).toBeEnabled()
+    expect(screen.getByRole('button', { name: '排队' })).toBeInTheDocument()
     await act(async () => {
       fireEvent.click(cancel)
     })
     expect(mockApi.cancelStudioChatTurn).toHaveBeenCalledWith('ws1', 's1')
+  })
+
+  it('queues messages while busy and flushes when the run ends', async () => {
+    mockApi.fetchStudioChatSessions.mockResolvedValue([
+      sessionRecord({ status: 'running' }),
+    ])
+    mockApi.sendStudioChatMessage.mockResolvedValue(
+      chatMessage('u1', 1, 'text', 'user', { text: '排队消息' })
+    )
+    renderPanel()
+
+    const input = await screen.findByLabelText('消息输入')
+    await waitFor(() => expect(input).toBeEnabled())
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    fireEvent.change(input, { target: { value: '排队消息' } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+    // busy：不直接发送，进入队列并显示队列条。
+    expect(mockApi.sendStudioChatMessage).not.toHaveBeenCalled()
+    expect(screen.getByText('排队中 1')).toBeInTheDocument()
+    expect(screen.getByText('排队消息')).toBeInTheDocument()
+
+    // agent 一轮结束（会话快照翻转为 idle）→ 自动按 FIFO 发出队首。
+    act(() => {
+      EventSourceMock.instances[0].emitMessage({
+        type: 'session',
+        session: sessionRecord({ status: 'idle' }),
+      })
+    })
+    await waitFor(() =>
+      expect(mockApi.sendStudioChatMessage).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        '排队消息'
+      )
+    )
+    await waitFor(() =>
+      expect(screen.queryByText('排队中 1')).not.toBeInTheDocument()
+    )
+  })
+
+  it('removes a queued message from the queue bar', async () => {
+    mockApi.fetchStudioChatSessions.mockResolvedValue([
+      sessionRecord({ status: 'running' }),
+    ])
+    renderPanel()
+
+    const input = await screen.findByLabelText('消息输入')
+    await waitFor(() => expect(input).toBeEnabled())
+    fireEvent.change(input, { target: { value: '不想发了' } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+    expect(screen.getByText('排队中 1')).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '移除' }))
+    })
+    expect(screen.queryByText('排队中 1')).not.toBeInTheDocument()
+    expect(mockApi.sendStudioChatMessage).not.toHaveBeenCalled()
   })
 
   it('sends on Enter and starts a new chat from the picker', async () => {

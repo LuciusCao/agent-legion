@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useSettingStore } from '../../../stores/settingStore'
 import { useStudioChat } from './useStudioChat'
+import { useStudioChatQueue } from './useStudioChatQueue'
 import { useStudioContextSync } from './useStudioContextSync'
 import { useStudioDraftSync } from './useStudioDraftSync'
 import { StudioChatSessionBar } from './StudioChatSessionBar'
 import { StudioChatMessageList } from './StudioChatMessageList'
+import { StudioChatQueueBar } from './StudioChatQueueBar'
 import { StudioChatRunBar } from './StudioChatRunBar'
 import { StudioChatInput } from './StudioChatInput'
 import styles from './StudioChatPanel.module.css'
@@ -21,6 +23,7 @@ type Props = {
 export function StudioChatPanel(props: Props) {
   const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined
   const chat = useStudioChat(workspaceId)
+  const queue = useStudioChatQueue(chat.busy, chat.activeSessionId, chat.send)
   const sessionId = chat.activeSessionId
   useStudioContextSync(workspaceId, sessionId, props.selectedNodeKey ?? null)
   useStudioDraftSync(workspaceId, sessionId, props.definitionYaml ?? null)
@@ -52,15 +55,13 @@ export function StudioChatPanel(props: Props) {
     )
   }
 
-  const inputDisabled =
-    !chat.session || chat.busy || chat.closed || chat.sending
+  // busy（运行中）不再禁用输入：发送会进入前端队列（见 useStudioChatQueue）。
+  const inputDisabled = !chat.session || chat.closed
   const disabledReason = !chat.session
     ? '先选择会话或新建对话'
     : chat.closed
       ? '会话已关闭，请新建对话'
-      : chat.busy
-        ? 'agent 运行中…'
-        : null
+      : null
 
   return (
     <div className={styles.chatPanel}>
@@ -101,10 +102,12 @@ export function StudioChatPanel(props: Props) {
         lastRunMs={chat.lastRunMs}
         onCancel={() => void chat.cancel()}
       />
+      <StudioChatQueueBar queue={queue} />
       <StudioChatInput
+        busy={chat.busy}
         disabled={inputDisabled}
         disabledReason={disabledReason}
-        onSend={(text) => void chat.send(text)}
+        onSend={queue.submit}
       />
     </div>
   )

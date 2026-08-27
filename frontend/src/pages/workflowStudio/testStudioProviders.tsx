@@ -25,8 +25,10 @@ export function makeStudioView(overrides: Record<string, unknown> = {}) {
   return {
     dagFullscreenOpen: false,
     setDagFullscreenOpen: vi.fn(),
-    canvasMode: 'dag' as const,
-    setCanvasMode: vi.fn(),
+    changesPanelOpen: false,
+    setChangesPanelOpen: vi.fn(),
+    yamlEditorOpen: false,
+    setYamlEditorOpen: vi.fn(),
     validateAndShowResult: vi.fn(),
     ...overrides,
   }

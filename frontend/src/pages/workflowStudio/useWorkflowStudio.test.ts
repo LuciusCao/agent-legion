@@ -52,6 +52,8 @@ const mocks = {
   compareWorkflowDraft: vi.fn(),
   publishWorkflowDraft: vi.fn(),
   validateWorkflowDraft: vi.fn(),
+  fetchWorkflowDraft: vi.fn(),
+  putWorkflowDraft: vi.fn(),
   getExecutorCatalog: vi.fn(),
 }
 
@@ -69,6 +71,8 @@ vi.mock('../../api', () => ({
     mocks.publishWorkflowDraft(...args),
   validateWorkflowDraft: (...args: unknown[]) =>
     mocks.validateWorkflowDraft(...args),
+  fetchWorkflowDraft: (...args: unknown[]) => mocks.fetchWorkflowDraft(...args),
+  putWorkflowDraft: (...args: unknown[]) => mocks.putWorkflowDraft(...args),
 }))
 
 vi.mock('../../api/executorApi', () => ({
@@ -88,6 +92,14 @@ describe('useWorkflowStudio', () => {
     mocks.getExecutorCatalog.mockResolvedValue({ executors: [] })
     mocks.publishWorkflowDraft.mockResolvedValue({ valid: true, errors: [] })
     mocks.validateWorkflowDraft.mockResolvedValue({ valid: true, errors: [] })
+    mocks.fetchWorkflowDraft.mockResolvedValue({
+      definition_yaml: null,
+      updated_at: null,
+    })
+    mocks.putWorkflowDraft.mockResolvedValue({
+      definition_yaml: 'key: demo\n',
+      updated_at: '2026-08-27T00:00:00+00:00',
+    })
   })
 
   it('does not call compare for unchanged draft', async () => {
@@ -396,6 +408,62 @@ describe('useWorkflowStudio', () => {
     expect(result.current.dirty).toBe(true)
   })
 
+  it('keeps an adopted historical revision when the server draft arrives late', async () => {
+    // 服务端草稿 GET 在途时采用历史版本：采用算「用户碰过」，迟到的服务端
+    // 草稿不得覆盖刚采用的内容。
+    mocks.fetchWorkflowRevisionDetail.mockResolvedValue({
+      revision: {
+        id: 'rev-old',
+        workspace_id: 'ws1',
+        workflow_key: 'wf',
+        version: 1,
+        status: 'archived',
+        definition_hash: 'oldhash',
+        created_at: '2026-07-05T10:00:00Z',
+        published_at: '2026-07-05T10:05:00Z',
+      },
+      workflow: activeRevisionPayload.workflow,
+      definition_yaml:
+        'key: wf\nlabel: Restored\nschema_version: 2\nnodes: {}\nedges: []\n',
+    })
+    let resolveDraftQuery: (value: {
+      definition_yaml: string | null
+      updated_at: string | null
+    }) => void = () => {}
+    mocks.fetchWorkflowDraft.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveDraftQuery = resolve
+        })
+    )
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+
+    await act(async () => {
+      await result.current.selectRevision('rev-old')
+    })
+    act(() => result.current.useViewedRevisionAsDraft())
+    expect(result.current.definitionYaml).toContain('Restored')
+
+    await act(async () => {
+      resolveDraftQuery({
+        definition_yaml: 'key: demo\nlabel: Late Server Draft\n',
+        updated_at: '2026-08-27T01:02:03+00:00',
+      })
+      await Promise.resolve()
+    })
+
+    // 先确认迟到的服务端草稿真的送达（hydration 记录其 savedAt），再断言
+    // 已采用的历史版本未被它覆盖。
+    await waitFor(() =>
+      expect(result.current.draftSave.savedAt).toBe('2026-08-27T01:02:03+00:00')
+    )
+    expect(result.current.definitionYaml).toContain('Restored')
+    expect(result.current.dirty).toBe(true)
+  })
+
   it('ignores stale revision detail when a newer revision is requested', async () => {
     const slowPayload = {
       revision: {
@@ -688,6 +756,59 @@ describe('useWorkflowStudio', () => {
     })
 
     await waitFor(() => expect(result.current.loadState).toBe('error'))
+  })
+
+  it('applies the server-persisted draft over the baseline on first load', async () => {
+    mocks.fetchWorkflowDraft.mockResolvedValue({
+      definition_yaml: 'key: demo\nlabel: Server Draft\n',
+      updated_at: '2026-08-27T01:02:03+00:00',
+    })
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
+
+    await waitFor(() =>
+      expect(result.current.definitionYaml).toBe(
+        'key: demo\nlabel: Server Draft\n'
+      )
+    )
+
+    // 服务端草稿 ≠ 基线即 dirty；且装载本身不触发任何 PUT。
+    expect(result.current.dirty).toBe(true)
+    expect(result.current.draftSave).toEqual({
+      status: 'idle',
+      savedAt: '2026-08-27T01:02:03+00:00',
+    })
+    // async act 冲刷 react-query 的异步通知，避免 act 外交互告警。
+    await act(async () => {
+      vi.advanceTimersByTime(2000)
+    })
+    expect(mocks.putWorkflowDraft).not.toHaveBeenCalled()
+  })
+
+  it('autosaves draft edits to the server after the debounce', async () => {
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+    await waitFor(() =>
+      expect(result.current.definitionYaml).toBe(
+        activeRevisionPayload.definition_yaml
+      )
+    )
+
+    act(() => {
+      result.current.setDefinitionYaml('key: demo\nlabel: Autosaved\n')
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
+      'ws1',
+      'key: demo\nlabel: Autosaved\n'
+    )
+    await waitFor(() => expect(result.current.draftSave.status).toBe('saved'))
   })
 
   it('preserves a dirty draft when the baseline changes externally', () => {

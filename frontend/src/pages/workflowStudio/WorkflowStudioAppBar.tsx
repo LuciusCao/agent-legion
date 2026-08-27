@@ -1,34 +1,20 @@
 import { AppBar } from '../../components/AppBar'
 import { WorkflowStudioCommandBarContainer } from './WorkflowStudioCommandBarContainer'
-import type { useWorkflowStudio } from './useWorkflowStudio'
 import { useWorkflowStudioAppTitle } from './useWorkflowStudioAppTitle'
-type Studio = ReturnType<typeof useWorkflowStudio>
 
 type Props = {
   workspaceId: string | undefined
-  studio: Studio
   scrolled?: boolean
-  onValidate: () => void
 }
 
-export function WorkflowStudioAppBar({
-  workspaceId,
-  studio,
-  scrolled,
-  onValidate,
-}: Props) {
+export function WorkflowStudioAppBar({ workspaceId, scrolled }: Props) {
   const title = useWorkflowStudioAppTitle(workspaceId)
   return (
     <AppBar
       title={title}
       backTo={workspaceId ? `/workspaces/${workspaceId}` : '/'}
       scrolled={scrolled}
-      rightActions={
-        <WorkflowStudioCommandBarContainer
-          studio={studio}
-          onValidate={onValidate}
-        />
-      }
+      rightActions={<WorkflowStudioCommandBarContainer />}
     />
   )
 }

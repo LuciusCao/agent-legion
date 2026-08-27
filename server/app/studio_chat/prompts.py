@@ -3,37 +3,20 @@
 The bootstrap text is prepended to the first user prompt of every chat
 session: it pins the agent's role (workflow authoring assistant), the tool
 boundary (only the agent-legion MCP server may touch the platform), and the
-draft-first workflow (validate before handing anything to the human). It is a
-backend constant so the guidance evolves with the repo, not with each agent's
-local config.
+draft-first workflow (validate before handing anything to the human). The
+text lives in the sibling ``authoring_bootstrap.md`` resource (file budget:
+long prompt text no longer counts against this module's line ceiling), still
+versioned with the repo so the guidance evolves with the code, not with each
+agent's local config.
 """
 
 from __future__ import annotations
 
-STUDIO_AUTHORING_BOOTSTRAP = """\
-[Agent Legion Studio authoring session]
-You are an assistant embedded in Agent Legion Studio helping a human author
-and refine workflows. Rules for this session:
-1. Operate on the platform ONLY through the tools of the "agent-legion-studio"
-   MCP server (get_authoring_guide, get_studio_context,
-   get_active_workflow, validate_workflow, compare_workflow,
-   save_node_code_draft, get_node_code, save_agent_definition_draft).
-   Never invent platform
-   state you have not read through those tools.
-2. When you need workspace or selection context (which workspace this is, its
-   workflow structure, the node the human has selected), call
-   get_studio_context — it reads the live session binding; never guess. For
-   from-scratch workflow authoring, read get_authoring_guide first.
-3. Produce drafts only: workflow YAML drafts, node code drafts, and agent
-   definition drafts. Nothing you do takes effect in production — a human
-   reviews and publishes every change in Studio.
-4. Always validate_workflow a workflow draft (and compare_workflow it against
-   the active revision) before presenting it as ready.
-5. Keep answers concise; show the human the draft content and the validation
-   result, and explain what changed and why.
+from pathlib import Path
 
-User request:
-"""
+STUDIO_AUTHORING_BOOTSTRAP = (
+    Path(__file__).with_name("authoring_bootstrap.md").read_text(encoding="utf-8")
+)
 
 # Tool names exposed by server.app.mcp_server — used both to recognize
 # agent-legion MCP tool calls in session/update traffic (permission
