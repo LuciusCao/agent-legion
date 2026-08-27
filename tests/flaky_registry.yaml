@@ -15,7 +15,7 @@ entries:
     historical single offender (InteractionOverlay.test.tsx, 12 options x 12
     clicks, failed in CI runs 30805689114 and 30814709192) was mitigated with
     a per-test 20s timeout and has since been deleted with the video-hive
-    player cluster (PR #183 dead-code sweep). Root cause fixed 2026-08-27:
+    player cluster (PR 183 dead-code sweep). Root cause fixed 2026-08-27 —
     the component project now carries a project-level 20s testTimeout
     (frontend/vite.config.ts), so every heavy jsdom render gets the slack
     without per-test overrides. Keeping the entry registered until the next
@@ -30,12 +30,11 @@ entries:
     while two sibling worktrees ran their own vitest suites in parallel; the
     assertion saw the turn's agent message but not yet its tool_call content
     (async event coalescing), and an isolated rerun passed in 44.7s. Same
-    machine-load timing family as FLAKY-006: the correct response is
+    machine-load timing family as FLAKY-006 — the correct response is
     retrying the gate; if it recurs, add a bounded wait for the tool_call
     event instead of relying on immediate visibility.
   observed: Local quick gate on review/architecture (c8913a71 + audit fixes),
     2026-08-27; isolated rerun passed.
-  deadline: 2026-10-27
   recurring: true
 - id: FLAKY-003
   scope: backend:xdist-coverage-combine

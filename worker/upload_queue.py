@@ -39,7 +39,17 @@ from worker._retry import run_with_retry
 from worker.artifact_upload import DirectUploadError, upload_artifact_direct
 from worker.host_transfer import HostRequestError
 from worker.runtime_controls import MAX_DYNAMIC_CONCURRENCY
-from worker.upload_prepare import failed_metadata, prepare_or_failed
+
+# MAX_ERROR_MESSAGE_CHARS 的定义在 upload_prepare（failed_metadata 的截断
+# 上限）；execution_run 沿本模块导入，`as` 惯用法重导出而非再定义一份
+# 副本（#200/#201 同族的 sync-by-comment 反模式）。
+from worker.upload_prepare import (
+    MAX_ERROR_MESSAGE_CHARS as MAX_ERROR_MESSAGE_CHARS,
+)
+from worker.upload_prepare import (
+    failed_metadata,
+    prepare_or_failed,
+)
 from worker.upload_scheduler import LaneScheduler
 
 PENDING_FILENAME = "upload_pending.json"
@@ -47,8 +57,6 @@ _PENDING_VERSION = 1
 
 _RETRY_BASE_SECONDS = 2.0
 _RETRY_CAP_SECONDS = 60.0
-# re-export：failed_metadata 在 upload_prepare，execution_run 沿本模块导入。
-MAX_ERROR_MESSAGE_CHARS = 4000
 _HEARTBEAT_JOIN_SECONDS = 5.0
 
 
