@@ -74,6 +74,10 @@ def start_worker_threads(
             agent_broker,
             interval_seconds=settings.executor_runtime.sweeper_interval_seconds,
             lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
+            # Leak GC: skill execution snapshots orphaned by a hard crash
+            # between copytree and the finally-cleanup (no other reaper
+            # covers the runs dir).
+            skill_sweeper=agent_dispatch.skill_manager.sweep_stale_executions,
         )
         try:
             sweeper_thread.start()

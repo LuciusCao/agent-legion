@@ -113,7 +113,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         job_event_buffer=job_event_buffer,
     )
     agent_dispatch = AgentDispatchService(settings, agent_broker, artifact_store)
-    skill_manager = build_skill_manager(settings.database_url)
+    skill_manager = build_skill_manager(settings.database_url, settings.skills_runs_dir)
 
     executor_leases = ExecutorLeaseRepository(
         job_db.path,

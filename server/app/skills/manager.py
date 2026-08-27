@@ -17,6 +17,11 @@ from server.app.skills.cache_state import cache_at_commit
 from server.app.skills.config import LockedSkillSource, SkillsConfig, SkillsLock, SkillSourceConfig
 from server.app.skills.doc_cache import SkillDocCache
 from server.app.skills.errors import SkillConfigError, SkillPathError, SkillRepoError
+from server.app.skills.paths import default_skills_runs_dir
+from server.app.skills.runs_gc import (
+    DEFAULT_MAX_AGE_SECONDS,
+    sweep_stale_execution_dirs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +53,7 @@ class SkillManager:
     ) -> None:
         self._store = store
         self.base_dir = Path(base_dir)
-        self.runs_dir = (
-            Path(runs_dir) if runs_dir else self.base_dir.parent / f"{self.base_dir.name}.runs"
-        )
+        self.runs_dir = Path(runs_dir) if runs_dir else default_skills_runs_dir()
         self.git_command = git_command or ["git"]
         self._cache_locks: dict[str, FileLock] = {}
         # Serializes the read-modify-write of the DB lock document within this
@@ -93,6 +96,10 @@ class SkillManager:
         execution_dir = self._resolve_execution_dir(execution_id)
         if execution_dir.exists():
             shutil.rmtree(execution_dir)
+
+    def sweep_stale_executions(self, *, max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS) -> int:
+        """Leak GC over the runs dir; see ``runs_gc.sweep_stale_execution_dirs``."""
+        return sweep_stale_execution_dirs(self.runs_dir, max_age_seconds=max_age_seconds)
 
     def _validate_execution_id(self, execution_id: str) -> None:
         if not execution_id:
