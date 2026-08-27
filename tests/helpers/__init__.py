@@ -118,7 +118,7 @@ def make_workflow_worker(
         settings_config=settings.config,
         job_db=queries,
     )
-    leases = ExecutorLeaseRepository(queries.path, data_dir=tmp_path)
+    leases = ExecutorLeaseRepository(queries, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
         executor=executor,

@@ -16,7 +16,6 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from server.app.db.transaction import read_connection
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
@@ -237,7 +236,7 @@ class RunService:
         material_id = str(item.get("material_id") or "").strip()
         if not material_id:
             raise InvalidOperationError("material item requires material_id")
-        with read_connection(self.job_db.path) as conn:
+        with self.job_db.read() as conn:
             row = conn.execute(
                 "select id, status, filename from materials where id=%s and workspace_id=%s",
                 (material_id, workspace_id),
@@ -265,7 +264,7 @@ class RunService:
         # (SECURITY-EXTERNAL-CONNECTION-001); direction validation
         # (CONNECT-DIRECTION-001) is a later slice, so existence is the whole
         # check here.
-        with read_connection(self.job_db.path) as conn:
+        with self.job_db.read() as conn:
             row = conn.execute(
                 "select key from external_connections where key=%s",
                 (connection_key,),

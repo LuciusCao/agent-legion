@@ -26,7 +26,7 @@ def execution_service(job_db: JobQueries, settings):
     return JobExecutionService(
         job_db,
         JobArtifactMutationService(settings.jobs_dir),
-        ExecutorLeaseRepository(job_db.path, data_dir=settings.data_dir),
+        ExecutorLeaseRepository(job_db, data_dir=settings.data_dir),
     )
 
 

@@ -18,7 +18,7 @@ from tests.helpers import load_builtin_definition, publish_builtin_revision
 def rerun_service(job_db, settings):
     return JobRerunService(
         job_db,
-        ExecutorLeaseRepository(job_db.path, data_dir=settings.data_dir),
+        ExecutorLeaseRepository(job_db, data_dir=settings.data_dir),
         settings,
         JobArtifactMutationService(settings.jobs_dir),
     )

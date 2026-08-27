@@ -77,7 +77,7 @@ def test_job_delete_rejects_outside_sibling_storage(tmp_path: Path) -> None:
     job_db_path = TEST_DATABASE_URL
     job_db = JobQueries(job_db_path, settings.jobs_dir)
     ensure_legacy_workspace_tables(job_db)
-    lease_repo = ExecutorLeaseRepository(job_db.path, data_dir=settings.data_dir)
+    lease_repo = ExecutorLeaseRepository(job_db, data_dir=settings.data_dir)
     service = JobDeletionService(job_db, lease_repo, settings)
 
     outside = tmp_path / "outside"
@@ -105,7 +105,7 @@ def test_job_delete_rejects_symlink_escape_storage(tmp_path: Path) -> None:
     job_db_path = TEST_DATABASE_URL
     job_db = JobQueries(job_db_path, settings.jobs_dir)
     ensure_legacy_workspace_tables(job_db)
-    lease_repo = ExecutorLeaseRepository(job_db.path, data_dir=settings.data_dir)
+    lease_repo = ExecutorLeaseRepository(job_db, data_dir=settings.data_dir)
     service = JobDeletionService(job_db, lease_repo, settings)
 
     outside = tmp_path / "outside_target"

@@ -108,7 +108,7 @@ def _insert_active_lease(
 
 def test_delete_rejects_active_lease_despite_stale_ui(job_db: JobQueries, tmp_path: Path) -> None:
     settings = _create_settings(tmp_path)
-    lease_repo = ExecutorLeaseRepository(job_db.path, data_dir=tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     service = JobDeletionService(job_db, lease_repo, settings)
 
     job = _create_job(job_db, "ws1", "Q001", status="queued")
@@ -132,7 +132,7 @@ def test_delete_atomic_guard_catches_lease_created_after_precheck(
     job_db: JobQueries, tmp_path: Path, monkeypatch
 ) -> None:
     settings = _create_settings(tmp_path)
-    lease_repo = ExecutorLeaseRepository(job_db.path, data_dir=tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     service = JobDeletionService(job_db, lease_repo, settings)
     job = _create_job(job_db, "ws-race", "Q001", status="queued")
     storage_dir = resolve_job_dir(job, settings.jobs_dir)
@@ -164,7 +164,7 @@ def test_delete_atomic_guard_catches_lease_created_after_precheck(
 
 def test_delete_succeeds_for_inactive_job(job_db: JobQueries, tmp_path: Path) -> None:
     settings = _create_settings(tmp_path)
-    lease_repo = ExecutorLeaseRepository(job_db.path, data_dir=tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     service = JobDeletionService(job_db, lease_repo, settings)
 
     job = _create_job(job_db, "ws2", "Q002", status="completed")
@@ -189,7 +189,7 @@ def test_delete_cleans_artifact_refs_and_unreferenced_files(
     job_db: JobQueries, tmp_path: Path
 ) -> None:
     settings = _create_settings(tmp_path)
-    lease_repo = ExecutorLeaseRepository(job_db.path, data_dir=tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     # Grace-free store so the test exercises physical GC of just-created blobs.
     store = ArtifactStore(tmp_path / "artifacts", job_db.path, gc_grace_seconds=0)
     service = JobDeletionService(job_db, lease_repo, settings, artifact_store=store)
@@ -217,7 +217,7 @@ def test_delete_with_artifact_store_and_no_refs_keeps_existing_behavior(
     job_db: JobQueries, tmp_path: Path
 ) -> None:
     settings = _create_settings(tmp_path)
-    lease_repo = ExecutorLeaseRepository(job_db.path, data_dir=tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     store = _create_artifact_store(job_db, tmp_path)
     service = JobDeletionService(job_db, lease_repo, settings, artifact_store=store)
 
@@ -235,7 +235,7 @@ def test_delete_with_artifact_store_and_no_refs_keeps_existing_behavior(
 
 def test_delete_without_artifact_store_skips_cleanup(job_db: JobQueries, tmp_path: Path) -> None:
     settings = _create_settings(tmp_path)
-    lease_repo = ExecutorLeaseRepository(job_db.path, data_dir=tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     store = _create_artifact_store(job_db, tmp_path)
     service = JobDeletionService(job_db, lease_repo, settings)
 
@@ -253,7 +253,7 @@ def test_delete_without_artifact_store_skips_cleanup(job_db: JobQueries, tmp_pat
 
 def test_delete_rejects_wrong_workspace(job_db: JobQueries, tmp_path: Path) -> None:
     settings = _create_settings(tmp_path)
-    lease_repo = ExecutorLeaseRepository(job_db.path, data_dir=tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     service = JobDeletionService(job_db, lease_repo, settings)
 
     job = _create_job(job_db, "ws3", "Q003", status="completed")
@@ -270,7 +270,7 @@ def test_delete_rejects_wrong_workspace(job_db: JobQueries, tmp_path: Path) -> N
 
 def test_delete_rejects_missing_job(job_db: JobQueries, tmp_path: Path) -> None:
     settings = _create_settings(tmp_path)
-    lease_repo = ExecutorLeaseRepository(job_db.path, data_dir=tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     service = JobDeletionService(job_db, lease_repo, settings)
 
     with pytest.raises(JobOperationError) as exc_info:
@@ -285,7 +285,7 @@ def test_delete_rejects_missing_job(job_db: JobQueries, tmp_path: Path) -> None:
 
 def test_batch_delete_returns_ordered_results(job_db: JobQueries, tmp_path: Path) -> None:
     settings = _create_settings(tmp_path)
-    lease_repo = ExecutorLeaseRepository(job_db.path, data_dir=tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     service = JobDeletionService(job_db, lease_repo, settings)
 
     job_a = _create_job(job_db, "ws4", "Q004", status="completed")
@@ -312,7 +312,7 @@ def test_delete_rollback_preserves_recreated_destination(
 ) -> None:
     """Rollback must not overwrite a destination recreated after staging."""
     settings = _create_settings(tmp_path)
-    lease_repo = ExecutorLeaseRepository(job_db.path, data_dir=tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     service = JobDeletionService(job_db, lease_repo, settings)
     job = _create_job(job_db, "ws-rollback", "Q007", status="completed")
     storage_dir = resolve_job_dir(job, settings.jobs_dir)
@@ -359,7 +359,7 @@ def test_delete_rollback_preserves_recreated_destination(
 
 def test_delete_raises_for_escaping_storage_dir(job_db: JobQueries, tmp_path: Path) -> None:
     settings = _create_settings(tmp_path)
-    lease_repo = ExecutorLeaseRepository(job_db.path, data_dir=tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     service = JobDeletionService(job_db, lease_repo, settings)
 
     job = _create_job(job_db, "ws-escape", "Q008", status="completed")
