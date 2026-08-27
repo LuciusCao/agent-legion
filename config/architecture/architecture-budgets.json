@@ -817,7 +817,7 @@
     "server/app/jobs/execution_control.py": 122,
     "server/app/jobs/execution_pause.py": 63,
     "server/app/jobs/node_limits.py": 36,
-    "server/app/jobs/queries/__init__.py": 54,
+    "server/app/jobs/queries/__init__.py": 44,
     "server/app/jobs/queries/auth.py": 202,
     "server/app/jobs/queries/base.py": 19,
     "server/app/jobs/queries/batch.py": 81,

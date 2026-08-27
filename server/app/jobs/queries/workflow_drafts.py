@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
-class WorkflowDraftQueriesMixin(JobQueriesBase):
+class WorkflowDraftQueriesMixin(ConnectionQueriesMixin):
     """CRUD for workspace_workflow_drafts (get / upsert)."""
 
     def get_workspace_workflow_draft(self, workspace_id: str) -> dict[str, Any] | None:
