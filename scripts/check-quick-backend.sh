@@ -48,7 +48,10 @@ run_tests() {
   fi
 
   # GATE_TIER=smoke runs the curated fast subset (membership lives in
-  # tests/conftest.py) without coverage — the 85% coverage floor only makes
+  # config/architecture/smoke-test-files.json, loaded by tests/conftest.py —
+  # the same loader also reads postgres-test-files.json, which backs the
+  # marker-based postgres classification) without coverage — the 85% coverage
+  # floor only makes
   # sense for the full suite, which remains the CI boundary. GATE_TIER=unit
   # runs every non-PostgreSQL test against an intentionally unreachable
   # database URL; this is marker-based membership rather than a file

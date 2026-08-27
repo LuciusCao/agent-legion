@@ -10,12 +10,23 @@ exemptions:
   path: server/app/routes/agent_workers.py:result
   reason: Agent Worker result acknowledgement returns an empty 204 response by protocol.
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  remove_when: docs/architecture/backend.md#agent-worker-protocol-responses
 - check: architecture.route_response_model
   path: server/app/routes/agent_workers.py:release_slot
   reason: Agent Worker release-slot acknowledgement returns an empty 204 response by protocol.
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  remove_when: docs/architecture/backend.md#agent-worker-protocol-responses
+- check: architecture.file_budget
+  path: server/app/routes/artifacts.py
+  reason: Artifact routes authenticate the per-Worker token used by Agent
+    execution transport, and the per-file upload path grew past the plain
+    baseline with the scoped-token work (#35). The routes serve the retired
+    CAS transfer channel that only pre-D12 Workers still call; the durable
+    resolution is deleting this router when that Worker generation is gone
+    (#160), not splitting deprecated code.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/160
+  ceiling: 61
 - check: architecture.file_budget
   path: server/app/worker_control.py
   reason: Task 8 of the phase2 state-externalization plan persists pause state
@@ -25,7 +36,7 @@ exemptions:
     in-memory-era baseline and the budget will be re-ratcheted if the module
     shrinks.
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase2-state-externalization.md#task-8
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/190
   ceiling: 70
 - check: architecture.file_budget
   path: server/app/jobs/queries/workflow_revisions.py
@@ -35,7 +46,7 @@ exemptions:
     pruning rows absent from the new projection. Extract the projection write helper
     after rollout.
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-02-workflow-studio-change-review.md#task-1
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/195
   ceiling: 209
 - check: architecture.file_budget
   path: server/app/settings.py
@@ -51,7 +62,7 @@ exemptions:
     governance G4). Extract database settings into the configuration
     package after rollout.
   owner: config
-  remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/188
   ceiling: 216
 - check: architecture.file_budget
   path: server/app/routes/__init__.py
@@ -65,14 +76,8 @@ exemptions:
     chat conversation + ACP agent registry routers (phase 3 chunk 4, schema
     v43).
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/189
   ceiling: 146
-- check: architecture.file_budget
-  path: server/app/routes/artifacts.py
-  reason: Artifact routes authenticate the per-Worker token used by Agent execution transport.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-  ceiling: 61
 - check: architecture.file_budget
   path: server/app/services/workflow_revisions.py
   reason: Active revisions reconcile Agent routes at Host startup (capacity is
@@ -82,7 +87,7 @@ exemptions:
     an empty-catalog regression. Publish also snapshots node_code_pins (the
     published custom code versions, EXEC-CODE-002) alongside the definition.
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/195
   ceiling: 131
 - check: architecture.file_budget
   path: server/app/agent_broker/dispatch.py

@@ -71,6 +71,26 @@ def test_reap_skips_group_without_agent_marker(tmp_path: Path) -> None:
         proc.wait(timeout=5)
 
 
+def test_reap_kills_code_path_group_with_trailing_marker(tmp_path: Path) -> None:
+    """#186：code 路径的标记是 argv 尾部元素（build_sandbox_argv 注入，
+    不是 agent 路径的 --name 形态）——reaper 同样识别并回收。"""
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)", "agent-legion-exec-code-1"],
+        start_new_session=True,
+    )
+    record = _write_record(tmp_path, "exec-code-1", proc.pid)
+    try:
+        reap_orphaned_agents(tmp_path, lambda _msg: None)
+        proc.wait(timeout=10)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+
+    assert proc.poll() is not None
+    assert not record.exists()
+
+
 def test_reap_kills_grandchildren_too(tmp_path: Path) -> None:
     """The whole group dies, not just the direct child (no orphaned grandchildren)."""
     marker = tmp_path / "grandchild-survived"

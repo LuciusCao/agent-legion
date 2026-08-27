@@ -99,11 +99,17 @@ def build_sandbox_argv(
     *,
     sandbox_network: object,
     materials_cache_root: Path | None = None,
+    marker: str | None = None,
 ) -> list[str]:
     """``velites sandbox wrap`` argv for one code node (EXEC-CODE-003).
 
     Network is strictly opt-in (P-0.5): only ``sandbox_network is True``
     appends ``--allow-network``; the sandbox default denies everything else.
+    ``marker`` (optional, Worker-only) rides the child argv after the result
+    path so a ps-based orphan reaper can attribute the process group to its
+    execution — the same identity convention as the agent path's
+    ``--name agent-legion-<execution_id>``; ``code_child`` reads only argv[1]
+    and never consumes it (#186).
     """
     command = [velites, "sandbox", "wrap", "--cwd", str(job_dir)]
     for root in read_roots(import_roots, materials_cache_root):
@@ -117,6 +123,8 @@ def build_sandbox_argv(
         "workspace_libs.code_child",
         str(result_path),
     ]
+    if marker is not None:
+        command.append(marker)
     return command
 
 

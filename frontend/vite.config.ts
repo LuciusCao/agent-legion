@@ -144,6 +144,13 @@ export default defineConfig(({ mode }) => {
             include: ['src/**/*.test.tsx', ...browserTestFiles],
             exclude: commonTestExcludes,
             setupFiles: ['./src/test-setup.ts'],
+            // Project-level timeout policy (FLAKY-002 root cause): jsdom
+            // rendering is CPU-bound, and under parallel runner load the
+            // default 5s per-test timeout fires in batches on tests that pass
+            // in isolation. 20s matches the per-test override the historical
+            // offender carried; heavy renders get the slack they need while
+            // genuine hangs still fail bounded.
+            testTimeout: 20_000,
           },
         },
       ],

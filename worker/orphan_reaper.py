@@ -1,4 +1,11 @@
-"""Orphaned agent process-group reaping (supervisor crash-recovery path)."""
+"""Orphaned execution process-group reaping (supervisor crash-recovery path).
+
+Both execution kinds record their child pgid (``AGENT_PGID_FILENAME``): agent
+runs from ``execution_run`` and kind='code' runs from ``code_runner``. Identity
+is verified through the ``agent-legion-<execution_id>`` argv marker, injected
+by the agent command builders as ``--name`` and by
+``shared/code_sandbox.build_sandbox_argv`` as a trailing argv element (#186).
+"""
 
 from __future__ import annotations
 
@@ -38,9 +45,10 @@ def reap_orphaned_agents(work_root: Path, log=print) -> None:
             if pgid <= 1:  # 半截/恶意记录：0/-1 会把信号发给本进程组，按垃圾跳过
                 continue
             # pgid 在宿主重启/崩溃后可能被 OS 回收复用：裸 pgid 发信号会误杀
-            # 无关进程组。仅当组内仍有携带本 execution 标记（两个 runtime 的
-            # 命令构建器都注入 --name agent-legion-<execution_id>）的进程时才
-            # 发信号；无法确认身份的陈旧记录只清理记录本身。
+            # 无关进程组。仅当组内仍有携带本 execution 标记（agent 路径经
+            # 命令构建器注入 --name agent-legion-<execution_id>；code 路径经
+            # shared/code_sandbox.build_sandbox_argv 注入 argv 尾部标记）的
+            # 进程时才发信号；无法确认身份的陈旧记录只清理记录本身。
             marker = f"agent-legion-{record.parent.name}"
             if not _group_has_agent_marker(pgid, marker):
                 record.unlink(missing_ok=True)

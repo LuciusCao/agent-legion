@@ -1,6 +1,7 @@
 import json
 import os
 from contextlib import contextmanager
+from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
@@ -117,19 +118,9 @@ def pytest_configure() -> None:
 # high-value tests that keeps the local push feedback loop around a minute
 # while the full quick suite stays the CI boundary. Membership is path-based:
 # every architecture governance test is smoke by default, plus one core
-# behavioral file per subsystem. Add new entries here when a new subsystem
-# gains tests; keep the tier under ~90s.
-_SMOKE_TEST_FILES = frozenset(
-    {
-        "tests/routes/test_auth_routes.py",
-        "tests/routes/jobs/test_job_lifecycle.py",
-        "tests/services/test_vault.py",
-        "tests/executors/test_shard_contract.py",
-        "tests/executors/leases/test_claim_basics.py",
-        "tests/workflows/test_sharding.py",
-        "tests/db/test_retry.py",
-    }
-)
+# behavioral file per subsystem. The manifest lives in
+# config/architecture/smoke-test-files.json (#192); add new entries there
+# when a new subsystem gains tests; keep the tier under ~90s.
 
 
 # Files that connect to PostgreSQL directly instead of through a root fixture.
@@ -137,155 +128,19 @@ _SMOKE_TEST_FILES = frozenset(
 # fixture-based consumers are classified by _POSTGRES_FIXTURES below. Both
 # directions are enforced by tests/test_pytest_postgres_boundaries.py: a file
 # importing tests.postgres_support (or calling psycopg.connect) must be listed
-# here, and every listed path must still exist.
-_POSTGRES_TEST_FILES = frozenset(
-    {
-        "tests/ci/test_executor_worker_stress.py",
-        "tests/db/test_agent_catalog_cutover_migration.py",
-        "tests/db/test_agent_request_kind_window.py",
-        "tests/db/test_agent_workspace_scope_migration.py",
-        "tests/db/test_retire_global_register_tokens_migration.py",
-        "tests/db/test_agent_request_kind_schema.py",
-        "tests/db/test_auth_scoped_tokens_migration.py",
-        "tests/db/test_studio_chat_schema.py",
-        "tests/db/test_custom_node_codes_migration.py",
-        "tests/db/test_executor_retirement_migration.py",
-        "tests/db/test_external_connections_migration.py",
-        "tests/db/test_hmac_connection_type_migration.py",
-        "tests/db/test_job_nodes_unclaimable_index.py",
-        "tests/db/test_job_artifacts_schema.py",
-        "tests/db/test_job_node_status_counts_migration.py",
-        "tests/db/test_job_status_counts_migration.py",
-        "tests/db/test_jobs_run_id_index.py",
-        "tests/db/test_schema_upgrade_parity.py",
-        "tests/db/test_materials_schema.py",
-        "tests/db/test_material_bundles_schema.py",
-        "tests/db/test_monitoring_hotpath_indexes.py",
-        "tests/db/test_node_cms_config_migration.py",
-        "tests/db/test_postgres_runtime.py",
-        "tests/db/test_quality_loop_schema.py",
-        "tests/db/test_runs_migration.py",
-        "tests/db/test_schema_version_registry.py",
-        "tests/db/test_versioned_entities_migration.py",
-        "tests/db/test_workflow_catalog_retirement.py",
-        "tests/db/test_workspace_cms_migration.py",
-        "tests/db/test_workspace_secrets_migration.py",
-        "tests/executors/leases/test_expire_race.py",
-        "tests/executors/leases/test_shard_expiry.py",
-        "tests/executors/test_leases.py",
-        "tests/full/test_agent_worker_control_plane.py",
-        "tests/full/test_executor_cancellation_recovery.py",
-        "tests/full/test_executor_worker_fairness.py",
-        "tests/full/test_storage_path_corruption.py",
-        "tests/full/test_velites_harness_e2e.py",
-        "tests/full/test_split_config_startup.py",
-        "tests/full/test_workspace_sse.py",
-        "tests/routes/jobs/test_failed_node_runs.py",
-        "tests/routes/jobs/test_intake_modes.py",
-        "tests/routes/jobs/test_job_batches.py",
-        "tests/routes/jobs/test_job_batch_pause.py",
-        "tests/routes/jobs/test_job_lifecycle.py",
-        "tests/routes/jobs/test_job_rerun.py",
-        "tests/routes/jobs/test_job_run_to.py",
-        "tests/routes/jobs/test_openapi_contracts.py",
-        "tests/routes/jobs/test_workflow_upgrade.py",
-        "tests/routes/test_agent_workers.py",
-        "tests/routes/test_agent_worker_registration.py",
-        "tests/routes/test_agent_register_tokens.py",
-        "tests/routes/test_agent_claim_artifact_channel.py",
-        "tests/routes/test_agent_worker_result_spool.py",
-        "tests/routes/test_workspace_secrets.py",
-        "tests/test_cors.py",
-        "tests/test_workflow_draft_compare.py",
-        "tests/routes/test_workflow_draft_publish_routes.py",
-        "tests/routes/test_workflow_draft_validate.py",
-        "tests/test_workspace_executor_configuration_flow.py",
-        "tests/test_workspace_job_control_flow.py",
-        "tests/test_workspace_settings_api.py",
-        "tests/routes/jobs/test_workspace_configuration.py",
-        "tests/routes/jobs/test_workspace_crud.py",
-        "tests/routes/test_artifacts_route.py",
-        "tests/routes/test_metrics.py",
-        "tests/routes/test_quality.py",
-        "tests/routes/test_quality_replay_routes.py",
-        "tests/routes/test_skill_sources.py",
-        "tests/routes/test_workspace_agent_routes.py",
-        "tests/services/test_agent_artifacts.py",
-        "tests/services/test_agent_artifact_inject.py",
-        "tests/services/test_agent_completion_remote.py",
-        "tests/services/test_agent_broker_claim_scan.py",
-        "tests/services/test_agent_broker_claim_windows.py",
-        "tests/services/test_agent_version_pin.py",
-        "tests/services/test_agent_worker_liveness.py",
-        "tests/services/test_artifact_orphan_gc.py",
-        "tests/services/test_builtin_agent_seed.py",
-        "tests/services/test_cleanup_sweep_planner.py",
-        "tests/services/test_code_claim.py",
-        "tests/services/test_code_claim_sweeper.py",
-        "tests/services/test_code_dispatch.py",
-        "tests/services/test_code_manifest_trim.py",
-        "tests/services/test_artifact_store.py",
-        "tests/services/test_dispatch_claim_caches.py",
-        "tests/services/test_job_rerun_batch.py",
-        "tests/services/test_job_artifact_maintenance.py",
-        "tests/services/test_material_ttl.py",
-        "tests/services/test_job_rerun_preview.py",
-        "tests/services/test_ops_metrics.py",
-        "tests/services/test_studio_chat_service.py",
-        "tests/services/test_studio_chat_issue158.py",
-        "tests/services/test_studio_chat_mcp_hint.py",
-        "tests/services/test_studio_chat_availability.py",
-        "tests/services/test_quality_labels.py",
-        "tests/services/test_quality_replays.py",
-        "tests/services/test_quality_sampling.py",
-        "tests/services/test_quality_stats.py",
-        "tests/services/test_scoped_tokens.py",
-        "tests/services/test_skill_source_store.py",
-        "tests/services/test_token_usage.py",
-        "tests/test_export_openapi.py",
-        "tests/test_jobs_route_contracts.py",
-        "tests/test_legacy_worker_disabled.py",
-        "tests/test_main.py",
-        "tests/routes/test_misc.py",
-        "tests/services/test_workflow_draft_publish.py",
-        "tests/test_agent_broker.py",
-        "tests/test_agent_broker_batch.py",
-        "tests/test_agent_broker_concurrency.py",
-        "tests/test_agent_broker_empty.py",
-        "tests/services/test_agent_broker_reaper.py",
-        "tests/test_agent_catalog.py",
-        "tests/test_agent_stock.py",
-        "tests/test_auth_queries.py",
-        "tests/test_db.py",
-        "tests/test_executor_recovery.py",
-        "tests/test_job_event_buffer_db.py",
-        "tests/test_job_events.py",
-        "tests/test_job_log_service.py",
-        "tests/test_job_workflow_upgrade.py",
-        "tests/test_jobs.py",
-        "tests/test_jobs_queries.py",
-        "tests/test_log_cleanup.py",
-        "tests/test_relative_path_portability.py",
-        "tests/test_run_dir_cleanup.py",
-        "tests/test_skill_catalog_service.py",
-        "tests/test_worker_control_db.py",
-        "tests/test_workflow_execution_control.py",
-        "tests/test_workflow_revisions.py",
-        "tests/test_workflow_worker_concurrency.py",
-        "tests/test_workspace_executor_queries.py",
-        "tests/workers/test_code_stock_gate.py",
-        "tests/workers/test_scheduler_wakeup.py",
-        "tests/workers/test_workspace_scan.py",
-        "tests/workers/test_workflow_worker_capacity.py",
-        "tests/workers/test_workflow_worker_mark_scan.py",
-        "tests/workers/test_workflow_worker_node_code.py",
-        "tests/workers/test_workflow_worker_node_config.py",
-        "tests/workers/test_workflow_worker_ready_queue.py",
-        "tests/workers/test_workflow_worker_thread_local.py",
-        "tests/workers/test_workflow_worker_thread_paths.py",
-        "tests/workflows/test_sharding.py",
-    }
-)
+# in the manifest, and every listed path must still exist. The manifest lives
+# in config/architecture/postgres-test-files.json (#192).
+def _load_manifest(name: str) -> frozenset[str]:
+    path = Path(__file__).resolve().parents[1] / "config" / "architecture" / name
+    document = json.loads(path.read_text(encoding="utf-8"))
+    files = document.get("files")
+    if not isinstance(files, list) or not all(isinstance(entry, str) for entry in files):
+        raise RuntimeError(f"malformed manifest {path}: files must be a list of strings")
+    return frozenset(files)
+
+
+_SMOKE_TEST_FILES = _load_manifest("smoke-test-files.json")
+_POSTGRES_TEST_FILES = _load_manifest("postgres-test-files.json")
 
 _POSTGRES_FIXTURES = frozenset(
     {

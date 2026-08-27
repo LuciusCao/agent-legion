@@ -39,7 +39,17 @@ from worker._retry import run_with_retry
 from worker.artifact_upload import DirectUploadError, upload_artifact_direct
 from worker.host_transfer import HostRequestError
 from worker.runtime_controls import MAX_DYNAMIC_CONCURRENCY
-from worker.upload_prepare import prepare_result, write_empty_archive
+
+# MAX_ERROR_MESSAGE_CHARS 的定义在 upload_prepare（failed_metadata 的截断
+# 上限）；execution_run 沿本模块导入，`as` 惯用法重导出而非再定义一份
+# 副本（#200/#201 同族的 sync-by-comment 反模式）。
+from worker.upload_prepare import (
+    MAX_ERROR_MESSAGE_CHARS as MAX_ERROR_MESSAGE_CHARS,
+)
+from worker.upload_prepare import (
+    failed_metadata,
+    prepare_or_failed,
+)
 from worker.upload_scheduler import LaneScheduler
 
 PENDING_FILENAME = "upload_pending.json"
@@ -47,30 +57,7 @@ _PENDING_VERSION = 1
 
 _RETRY_BASE_SECONDS = 2.0
 _RETRY_CAP_SECONDS = 60.0
-MAX_ERROR_MESSAGE_CHARS = 4000
 _HEARTBEAT_JOIN_SECONDS = 5.0
-
-
-def _failed_metadata(task: UploadTask, error_message: str) -> dict[str, Any]:
-    # failed 上报的统一载荷（prepare 失败 / CAS 4xx 终态共用）。
-    return {
-        "status": "failed",
-        "exit_code": 1,
-        "error_message": error_message[:MAX_ERROR_MESSAGE_CHARS],
-        "command": list(task.command),
-        "output_artifacts": {},
-    }
-
-
-def _prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
-    # prepare_result + 失败降级为 failed 上报；直传回落后按清空的
-    # artifact_uploads 重跑，tar 随之内嵌产物。
-    try:
-        return prepare_result(task)
-    except Exception as exc:
-        archive = task.execution_dir / "result.tar.gz"
-        write_empty_archive(archive)
-        return _failed_metadata(task, f"result preparation failed: {exc}"), archive, []
 
 
 @dataclass
@@ -106,6 +93,17 @@ class UploadTask:
     # 一律从 bulk 车道重进，prepare 与 artifact 上传会原样重做。
     prepared_metadata: dict[str, Any] | None = None
     prepared_archive: Path | None = None
+
+    def is_direct_upload(self, outputs: list[str]) -> bool:
+        """#160 D12 直传判定（#201 单点收敛）：manifest 带 artifact_uploads 且
+        每个产出都有上传规格才走直传 S3 通道；否则整体回落旧通道（CAS POST +
+        tar 内嵌）。归档是否内嵌产物（upload_prepare / code_runner 的
+        prepare_result）与上传通道（_bulk_transfer）必须用同一判定，否则产物
+        既不在 tar 里也没直传。注意 DirectUploadError 的回落路径会把
+        artifact_uploads 清空再重取判定，本方法天然随之变 False。"""
+        return bool(self.artifact_uploads) and all(
+            name in self.artifact_uploads for name in outputs
+        )
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -266,13 +264,11 @@ class UploadQueue:
             return False  # never started; marker intact for the next startup
         self._status.set_phase(task.execution_id, "uploading")
         job_dir = task.execution_dir / "job"
-        metadata, archive, outputs = _prepare_or_failed(task)
-        # #160 D12：manifest 带 artifact_uploads 且每个产出都有上传规格时走
-        # 直传 S3 通道；否则整体回落旧通道（CAS POST + tar 内嵌，tar 已在
-        # prepare_result 按同一条件决定是否内嵌）。
-        direct = bool(task.artifact_uploads) and all(
-            name in task.artifact_uploads for name in outputs
-        )
+        metadata, archive, outputs = prepare_or_failed(task)
+        # #160 D12：直传判定经 UploadTask.is_direct_upload（#201 单点收敛）；
+        # 直传走 presigned PUT，否则整体回落旧通道（CAS POST + tar 内嵌，tar
+        # 已在 prepare_result 按同一方法决定是否内嵌）。
+        direct = task.is_direct_upload(outputs)
         while True:
             uploaded: dict[str, Any] = {}
             restart = False
@@ -292,14 +288,14 @@ class UploadQueue:
                     # 重试的 CAS 通道，与无规格任务同一语义。
                     print(f"direct upload failed for {task.execution_id}: {exc}", flush=True)
                     task.artifact_uploads = {}
-                    metadata, archive, outputs = _prepare_or_failed(task)
+                    metadata, archive, outputs = prepare_or_failed(task)
                     direct = False
                     restart = True
                     break
                 except HostRequestError as exc:
                     # Terminal 4xx on the artifact itself: report the run failed
                     # instead of looping forever on a verdict that cannot change.
-                    metadata = _failed_metadata(task, str(exc))
+                    metadata = failed_metadata(task, str(exc))
                     uploaded = {}
                     break
                 if ref is None:

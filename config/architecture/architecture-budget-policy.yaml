@@ -13,6 +13,10 @@ production:
       extensions: [.py]
     - path: workspace_libs
       extensions: [.py]
+    # #202：velites 主 crate 纳入预算治理（tests/ 集成测试不纳入——Rust 内联
+    # #[cfg(test)] 单测与实现同居是其惯例，不套 Python 的测试目录模型）。
+    - path: velites/src
+      extensions: [.rs]
   exclude:
     - frontend/src/generated/**
   buffer_lines: 10

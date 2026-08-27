@@ -9,6 +9,7 @@
 
 pub mod bash;
 pub mod command_guard;
+pub(super) mod command_paths;
 pub mod read;
 pub mod truncate;
 pub mod write;
