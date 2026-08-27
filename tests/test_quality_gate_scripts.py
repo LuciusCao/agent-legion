@@ -738,7 +738,10 @@ def test_backend_pytest_distributes_work_with_worksteal(tmp_path: Path) -> None:
     came from. worksteal keeps idle workers stealing pending tests."""
     calls = _run_backend_gate_with_fake_uv(tmp_path, {})
 
-    assert calls.count("pytest") == 1
+    # Count the uv invocation ("run pytest "), not the "pytest" substring —
+    # telemetry mode (AGENT_LEGION_TEST_RESULTS_DIR, as in CI) also passes
+    # "-p scripts.pytest_telemetry", which contains it.
+    assert calls.count("run pytest ") == 1
     assert "--dist worksteal" in calls
 
 
