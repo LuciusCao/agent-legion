@@ -60,6 +60,7 @@ def test_quick_gate_starts_backend_and_frontend_lanes_concurrently(tmp_path: Pat
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
     # The quick gate sources the shared job-count helper.
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
     marker = tmp_path / "frontend.started"
 
     _write_executable(
@@ -92,6 +93,7 @@ def test_quick_gate_reports_each_lane_status(tmp_path: Path) -> None:
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
     # The quick gate sources the shared job-count helper.
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
     _write_executable(scripts / "check-quick-backend.sh", "#!/usr/bin/env bash\nexit 7\n")
     _write_executable(scripts / "check-quick-frontend.sh", "#!/usr/bin/env bash\nexit 0\n")
 
@@ -108,6 +110,7 @@ def test_quick_gate_hoists_api_contract_out_of_parallel_static_round(tmp_path: P
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
     # The quick gate sources the shared job-count helper.
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
     gate_log = tmp_path / "gate.log"
 
     _write_executable(scripts / "check-quick-backend.sh", "#!/usr/bin/env bash\nexit 0\n")
@@ -133,6 +136,7 @@ def _quick_gate_fixture(scripts: Path) -> Path:
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
     # The quick gate sources the shared job-count helper.
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
     _write_executable(scripts / "check-quick-backend.sh", "#!/usr/bin/env bash\nexit 0\n")
     _write_executable(scripts / "check-quick-frontend.sh", "#!/usr/bin/env bash\nexit 0\n")
     return quick_gate
@@ -181,6 +185,7 @@ def test_quick_gate_heartbeat_prints_running_lane_progress(tmp_path: Path) -> No
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
     # The quick gate sources the shared job-count helper.
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
     _write_executable(
         scripts / "check-quick-backend.sh",
         '#!/usr/bin/env bash\necho "backend lane working"\nsleep 6\n',
@@ -308,6 +313,7 @@ def test_backend_gate_emits_junit_durations_and_rerun_report(tmp_path: Path) -> 
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
     # The backend lane sources the shared job-count helper.
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
     gate_log = tmp_path / "gate.log"
     _write_executable(
         fake_bin / "uv",
@@ -348,6 +354,7 @@ def test_backend_smoke_tier_runs_the_curated_subset(tmp_path: Path) -> None:
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
     # The backend lane sources the shared job-count helper.
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
     gate_log = tmp_path / "gate.log"
     _write_executable(
         fake_bin / "uv",
@@ -386,6 +393,7 @@ def test_backend_full_coverage_defers_floor_to_combined_report(tmp_path: Path) -
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
     # The backend lane sources the shared job-count helper.
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
     gate_log = tmp_path / "gate.log"
     _write_executable(
         fake_bin / "uv",
@@ -507,6 +515,7 @@ def _run_backend_gate_with_fake_uv(
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
     # The backend lane sources the shared job-count helper.
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
     gate_log = tmp_path / "gate.log"
     _write_executable(
         fake_bin / "uv",
@@ -554,6 +563,7 @@ def test_backend_aff_tier_selects_tests_with_index(tmp_path: Path) -> None:
     backend_gate = scripts / "check-quick-backend.sh"
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
     gate_log = tmp_path / "gate.log"
     # The fake uv logs its arguments; the selection subcommand prints one
     # selected nodeid the gate must forward to pytest.
@@ -602,6 +612,7 @@ def test_backend_aff_tier_falls_back_when_selection_is_broad(tmp_path: Path) -> 
     backend_gate = scripts / "check-quick-backend.sh"
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
     gate_log = tmp_path / "gate.log"
     _write_executable(
         fake_bin / "uv",
@@ -646,6 +657,7 @@ def test_backend_aff_tier_falls_back_on_unmapped_source_files(tmp_path: Path) ->
     backend_gate = scripts / "check-quick-backend.sh"
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
     gate_log = tmp_path / "gate.log"
     _write_executable(
         fake_bin / "uv",
@@ -763,6 +775,7 @@ def _rust_gate_fixture(tmp_path: Path) -> tuple[Path, Path]:
     quick_gate = scripts / "check-quick.sh"
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
     # The rust lane requires the crate directory to exist.
     (tmp_path / "velites").mkdir()
     _write_executable(

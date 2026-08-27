@@ -96,6 +96,18 @@ cleanup_lock() {
   rm -rf "$lock_dir"
 }
 
+# Machine-wide gate queue (scripts/gate-queue.sh): with several agent
+# worktrees on one host, unlimited parallel gates thrash the CPU (observed
+# ~1h for the last of 4 concurrent quick gates). A slot in the shared git
+# common directory caps concurrent gates at AGENT_LEGION_MAX_PARALLEL_GATES
+# (default 2); later gates queue with holder announcements. Acquired after
+# the worktree lock so same-worktree serialization stays first.
+source "$ROOT_DIR/scripts/gate-queue.sh"
+acquire_gate_slot
+cleanup_gate_slot() {
+  release_gate_slot
+}
+
 COVERAGE_FILE="${COVERAGE_FILE:-$ROOT_DIR/.coverage.check-quick.$$}"
 export COVERAGE_FILE
 if [[ -z "${KEEP_COVERAGE:-}" ]]; then
@@ -112,21 +124,22 @@ cleanup_logs() {
   rm -rf "$log_dir"
 }
 if [[ -z "${KEEP_COVERAGE:-}" ]]; then
-  trap 'cleanup_lock; cleanup_logs; cleanup_coverage' EXIT
+  trap 'cleanup_lock; cleanup_gate_slot; cleanup_logs; cleanup_coverage' EXIT
 else
-  trap 'cleanup_lock; cleanup_logs' EXIT
+  trap 'cleanup_lock; cleanup_gate_slot; cleanup_logs' EXIT
 fi
 
 echo "=== Parallel Quick Gate ==="
 echo "Parallel static/test rounds; the API contract check runs once between them."
 lanes_started_at=$SECONDS
 
-# Shared per-lane job cap: worktree-aware (scripts/gate-jobs.sh) — min(4,
-# cores) while a sibling worktree runs its own gate, cores-2 when this
-# machine's gates are all ours (per-lane envs override; CI 4-vCPU runners are
-# unaffected).
+# Shared per-lane job cap: worktree-aware (scripts/gate-jobs.sh) — the
+# machine budget divides across live gates ((cores-2)/N, clamped to [2,8]);
+# the sibling-lock probe applies when the queue is not visible (per-lane envs
+# override; CI 4-vCPU runners are unaffected). Recomputed per round, not
+# snapshotted once: a second gate may take its slot between rounds, and each
+# round should run against the concurrency that round actually sees.
 source "$ROOT_DIR/scripts/gate-jobs.sh"
-default_gate_jobs="$(detect_gate_default_jobs_worktree_aware)"
 
 lane_enabled() {
   [[ "$GATE_LANES" == "static" || " $GATE_LANES " == *" $1 "* ]]
@@ -147,7 +160,7 @@ run_rust_round() {
   # Cargo defaults to one rustc job per core; keep the gate polite on machines
   # running several worktrees (AGENT_LEGION_RUST_WORKERS overrides; CI 4-vCPU
   # runners are unaffected).
-  rust_jobs="${AGENT_LEGION_RUST_WORKERS:-$default_gate_jobs}"
+  rust_jobs="${AGENT_LEGION_RUST_WORKERS:-$(detect_gate_default_jobs_worktree_aware)}"
   if [[ "$round" == "static-check" ]]; then
     cargo fmt --all -- --check
     cargo clippy --all-targets --locked -j "$rust_jobs" -- -D warnings

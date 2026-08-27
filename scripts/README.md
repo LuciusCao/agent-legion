@@ -9,7 +9,8 @@
 | `check-quick.sh` | 日常快速质量门：先并行 backend/frontend 静态检查，再并行 pytest/Vitest，避免静态检查与两套测试 runner 同时争抢 CPU。`GATE_TIER=aff` 是 agent 内环组合档（backend 受影响测试 + 前端 `vitest related`，非 gate 凭证）。 |
 | `check-quick-backend.sh` | quick gate 后端 lane；支持 `BACKEND_GATE_PHASE=static\|test\|all`。测试档位 `GATE_TIER=smoke\|unit\|postgres\|full`；`aff` 按 `.pytest-aff-index.json` 选择受影响测试（无索引回落 unit），`aff-index` 一次性重建索引（带 `--cov-context=test` 的 unit 全量跑）。 |
 | `check-quick-frontend.sh` | quick gate 前端 lane；支持 `FRONTEND_GATE_PHASE=static\|test\|all`，并通过 `FRONTEND_TEST_MODE=test\|coverage\|related` 选择 Vitest 模式（`related` = 只跑导入改动源文件的测试，`vitest related`）。 |
-| `gate-jobs.sh` | 各 lane 默认并行度策略：无兄弟 worktree 跑 gate 时 `cores-2`（上限 8），有竞争时回落 `min(4, cores)`；经 `git worktree list` 探测兄弟 worktree 的 `.quick-gate.lock`。 |
+| `gate-jobs.sh` | 各 lane 默认并行度策略：机器预算按并发 gate 数均分（`(cores-2)/N` 夹在 2..8，N 为机器级 slot 数）；队列不可见时回落兄弟 worktree 探测（`min(4, cores)` / `cores-2`）。 |
+| `gate-queue.sh` | 机器级 gate 排队：quick gate 在 git common dir 的共享 slot 目录（默认 `AGENT_LEGION_MAX_PARALLEL_GATES=2` 并发）取位，满位则打印持有者并等待；陈旧 slot（pid 已死或超龄）自动回收。防多 agent worktree 并行跑门时互相拖垮（曾观察到 4 并发把最后一个 quick gate 拖到 ~1 小时）。 |
 | `pytest_aff_selection.py` | backend 受影响测试选择：从 `--cov-context=test` 的 coverage 数据蒸馏「源文件 → 测试 nodeid」逆索引（`build`），并按 git 改动选出受影响测试（`select`）；内环加速用，非 gate 凭证。 |
 | `check-fast.sh` | pre-commit 实际调用的 fast gate：ruff/mypy/前端 lint，不跑测试。 |
 | `check.sh` | 完整质量门（提交前）：coverage 模式 quick gate + 并行的 full backend evidence/前端 bundle，避免重复 Vitest 与 typecheck。 |

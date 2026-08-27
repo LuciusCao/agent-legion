@@ -55,17 +55,18 @@ run_tests() {
   # allowlist, and proves the pure layer remains independently runnable.
   #
   # AGENT_LEGION_TEST_WORKERS caps pytest-xdist parallelism. Default is
-  # worktree-aware (scripts/gate-jobs.sh): min(4, cores) while a sibling
-  # worktree runs its own gate, cores-2 when this machine's gates are all
-  # ours — without oversubscribing machines that run several worktrees or a
-  # frontend lane at the same time (raise it on a dedicated box; CI 4-vCPU
-  # runners are unaffected).
+  # worktree-aware (scripts/gate-jobs.sh): the machine budget divides across
+  # live gates ((cores-2)/N, clamped to [2,8]); the sibling-lock probe applies
+  # when the queue is not visible — without oversubscribing machines that run
+  # several worktrees or a frontend lane at the same time (raise it on a
+  # dedicated box; CI 4-vCPU runners are unaffected). Computed at tier start
+  # (per round from check-quick.sh's perspective), so a sibling gate taking
+  # its slot between rounds is reflected by the next invocation.
   #
   # --reruns absorbs timing-sensitive flakes under parallel-gate load; a real
   # regression still fails after the single retry (visible as RERUN in output).
   source "$ROOT_DIR/scripts/gate-jobs.sh"
-  default_workers="$(detect_gate_default_jobs_worktree_aware)"
-  workers="${AGENT_LEGION_TEST_WORKERS:-$default_workers}"
+  workers="${AGENT_LEGION_TEST_WORKERS:-$(detect_gate_default_jobs_worktree_aware)}"
   telemetry_args=()
   if [[ -n "${AGENT_LEGION_TEST_RESULTS_DIR:-}" ]]; then
     result_name="${AGENT_LEGION_TEST_RESULT_NAME:-backend}"
