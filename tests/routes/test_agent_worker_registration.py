@@ -190,7 +190,9 @@ def test_delete_workspace_cascades_bound_keys(tmp_path: Path) -> None:
 
         # A same-name recreation reuses the slug id; the stale Worker must
         # not resurface in the new workspace's view.
-        recreated = client.post("/api/workspaces", json={"name": "doomed-workspace"})
+        recreated = client.post(
+            "/api/workspaces", json={"id": "doomed_workspace", "name": "doomed-workspace"}
+        )
         assert recreated.status_code in (200, 201), recreated.text
         workspace_view = client.get(
             "/api/agent-workers", params={"workspace_id": "doomed-workspace"}

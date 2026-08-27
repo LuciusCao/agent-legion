@@ -85,13 +85,32 @@ def _register_fake_agent(
     return script_path
 
 
+_CREATE_COUNT = 0
+
+
 def _create_workspace(client, name="Chat WS") -> str:
+    # v61: id==key and unique per call within a test (TRUNCATE isolation
+    # resets the counter each test).
+    global _CREATE_COUNT
+    _CREATE_COUNT += 1
+    ws_id = (
+        "education_video_problems_generation"
+        if _CREATE_COUNT == 1
+        else f"education_video_problems_generation_{_CREATE_COUNT}"
+    )
     response = client.post(
         "/api/workspaces",
-        json={"name": name, "default_workflow_key": "education_video_problems_generation"},
+        json={"id": ws_id, "name": name},
     )
     assert response.status_code == 200, response.text
     return response.json()["workspace"]["id"]
+
+
+@pytest.fixture(autouse=True)
+def _reset_create_count():
+    global _CREATE_COUNT
+    _CREATE_COUNT = 0
+    yield
 
 
 def _create_session(client, workspace_id: str) -> str:

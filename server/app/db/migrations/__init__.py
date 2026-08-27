@@ -32,6 +32,9 @@ from server.app.db.migrations.versioned_entities import migrate_versioned_entiti
 from server.app.db.migrations.workflow_catalog_retirement import (
     migrate_workflow_catalog_retirement,
 )
+from server.app.db.migrations.workspace_id_key_binding import (
+    migrate_workspace_id_key_binding,
+)
 from server.app.db.migrations.workspace_secrets import migrate_workspace_secrets
 
 __all__ = [
@@ -58,6 +61,7 @@ __all__ = [
     "migrate_versioned_entities",
     "migrate_workflow_catalog_retirement",
     "migrate_workspace_cms_config",
+    "migrate_workspace_id_key_binding",
     "migrate_workspace_job_node_status_counts",
     "migrate_workspace_secrets",
 ]

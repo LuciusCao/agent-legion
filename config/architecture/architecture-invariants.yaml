@@ -947,7 +947,7 @@ invariants:
         gate: quick
 
   - id: DB-WORKFLOW-CATALOG-001
-    statement: "The global workflow catalog (workflow_catalog table, schema v40) is retired at schema v50 (issue #112): a workflow is the DAG inside one workspace, so workspaces.default_workflow_key is a plain text identifier (old job rows keep their workflow_key as text) and the workspace's ACTIVE workflow_revision is the only runtime definition source — node override validation and settings schemas (workspace_node_config / workspace_settings_schemas), snapshot-less job fallbacks (job detail, run-to, rerun, preview), package artifact curation, and the worker scan list all resolve it; the catalog list/register HTTP APIs and the studio-agent register/list tools are gone, and the built-in demo definition stays in the repo (server/app/workflows/builtin.py) as the optional sample-template seed at workspace creation. Creating a workspace no longer selects or validates a workflow: demo mode seeds the sample template (defaulting to it when no key is given), blank mode leaves the key slot empty and the first successful draft publish adopts the draft's key; the v50 migration drops the table after warning about registered keys no workspace references."
+    statement: "The global workflow catalog (workflow_catalog table, schema v40) is retired at schema v50 (issue #112): a workflow is the DAG inside one workspace, so workspaces.default_workflow_key is a plain text identifier (old job rows keep their workflow_key as text) and the workspace's ACTIVE workflow_revision is the only runtime definition source — node override validation and settings schemas (workspace_node_config / workspace_settings_schemas), snapshot-less job fallbacks (job detail, run-to, rerun, preview), package artifact curation, and the worker scan list all resolve it; the catalog list/register HTTP APIs and the studio-agent register/list tools are gone, and the built-in demo definition stays in the repo (server/app/workflows/builtin.py). Schema v61 supersedes the creation semantics: workspace creation takes an explicit caller-provided id which IS the workflow key (bound and immutable, no demo/blank modes and no create-path seeding — demo workspaces are provisioned by `make import-demo` / scripts/seed_demo.py), the first-publish key adoption path is removed, and the v61 migration renames legacy workspace ids to their bound keys; see DB-WORKSPACE-KEY-BINDING-001. The v50 migration drops the catalog table after warning about registered keys no workspace references."
     owner: workspace-executor
     risk: high
     evidence:
@@ -959,6 +959,21 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/routes/test_studio_agent_tools.py
+        gate: quick
+
+  - id: DB-WORKSPACE-KEY-BINDING-001
+    statement: "Workspace id and workflow key are one identifier (schema v61, issue #211): POST /api/workspaces requires an explicit id (pattern ^[a-z0-9][a-z0-9_-]{0,63}$) that is written to default_workflow_key at creation and never changes afterwards — PATCH /api/workspaces and PUT /configuration reject any key change with 400, the publish guard (require_draft_workflow_key_match) rejects drafts whose key differs with 422, and the create path seeds nothing (demo provisioning lives in `make import-demo` / scripts/seed_demo.py, which pins the demo workspace id to its key). The v61 migration renames legacy workspaces to id == key (cascading workspace_id through every child table plus the FK-less auth_scoped_tokens and ops_metric_samples, fail-fast on id conflicts) and backfills never-published workspaces with key = id; default_workflow_key is deprecated as a separate concept pending full retirement (issue #211)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/db/test_workspace_id_key_binding.py
+        gate: quick
+      - kind: contract
+        target: tests/routes/jobs/test_workspace_crud.py
+        gate: quick
+      - kind: contract
+        target: tests/test_workspace_settings_api.py
         gate: quick
 
   - id: MATERIAL-ACCESS-001

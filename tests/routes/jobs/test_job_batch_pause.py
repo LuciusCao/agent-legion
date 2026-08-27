@@ -7,10 +7,7 @@ from tests.helpers.auth import authenticate_client
 def _create_workspace(client, name="default"):
     workspace_id = client.post(
         "/api/workspaces",
-        json={
-            "name": name,
-            "default_workflow_key": "education_video_problems_generation",
-        },
+        json={"id": "education_video_problems_generation", "name": name},
     ).json()["workspace"]["id"]
     # The demo workflow no longer declares intake modes (#154); these tests
     # post job-batches, so publish the legacy-intake variant.

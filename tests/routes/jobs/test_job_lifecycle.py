@@ -6,14 +6,17 @@ from tests.helpers import publish_legacy_intake_revision
 from tests.helpers.auth import authenticate_client
 
 
-def _create_workspace(
-    client, name="default", default_workflow_key="education_video_problems_generation"
-):
+def _create_workspace(client, name="default", default_workflow_key="test"):
     workspace_id = client.post(
-        "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
+        "/api/workspaces", json={"id": default_workflow_key, "name": name}
     ).json()["workspace"]["id"]
     # The demo workflow no longer declares intake modes (#154); these tests
-    # post job-batches, so publish the legacy-intake variant.
+    # post job-batches, so publish the legacy-intake variant. Creation no
+    # longer seeds the factory Agents (v61), so seed them here — agent route
+    # materialization at publish time needs them.
+    from tests.helpers import seed_workspace_agent_definitions
+
+    seed_workspace_agent_definitions(workspace_id)
     publish_legacy_intake_revision(client.app.state.job_db, workspace_id)
     return workspace_id
 
@@ -30,7 +33,7 @@ def test_get_job_detail_and_artifact_when_enabled(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q003"],
             },
@@ -62,7 +65,7 @@ def test_job_detail_includes_pi_run_trace(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q100"],
             },
@@ -101,7 +104,7 @@ def test_job_detail_includes_node_dependencies(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q202"],
             },
@@ -130,7 +133,7 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q203"],
             },
@@ -172,12 +175,12 @@ def test_delete_job_rejects_running_job(tmp_path):
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q601"],
             },
         )
-        job_id = f"{ws_id}_education_video_problems_generation_Q601"
+        job_id = f"{ws_id}_test_Q601"
         job = app.state.job_db.get_job(job_id)
         storage_dir = resolve_job_dir(job, app.state.settings.jobs_dir)
         storage_dir.mkdir(parents=True, exist_ok=True)
@@ -213,12 +216,12 @@ def test_delete_job_cascades_and_returns_deleted_id(tmp_path):
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q602"],
             },
         )
-        job_id = f"{ws_id}_education_video_problems_generation_Q602"
+        job_id = f"{ws_id}_test_Q602"
         job = app.state.job_db.get_job(job_id)
         storage_dir = resolve_job_dir(job, app.state.settings.jobs_dir)
         storage_dir.mkdir(parents=True, exist_ok=True)
@@ -245,7 +248,7 @@ def test_list_workspace_runs_returns_joined_job_metadata(tmp_path):
         batch = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q001"],
             },
@@ -285,7 +288,7 @@ def test_list_workspace_runs_filters_by_status_and_node(tmp_path):
         batch = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q001"],
             },
@@ -320,16 +323,13 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         ws_id = c.post(
             "/api/workspaces",
-            json={
-                "name": "Reading DAG",
-                "default_workflow_key": "education_video_problems_generation",
-            },
+            json={"id": "reading_dag", "name": "Reading DAG"},
         ).json()["workspace"]["id"]
         publish_legacy_intake_revision(c.app.state.job_db, ws_id)
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": ws_id,
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q001", "Q002"],
             },
@@ -338,7 +338,7 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["workflow"]["key"] == "education_video_problems_generation"
+    assert body["workflow"]["key"] == ws_id
     assert all("label" in node for node in body["nodes"])
     fetch_node = next(
         (node for node in body["nodes"] if node["key"] == "intake_knowledge_points"), None
@@ -374,18 +374,18 @@ def test_get_job_run_log_returns_redacted_tail(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q1"],
             },
         )
-        job_id = "test_education_video_problems_generation_Q1"
+        job_id = "test_test_Q1"
         log_path = log_dir / f"{job_id}-intake_knowledge_points.log"
         log_path.write_text("start\nleaked-token\nend\n", encoding="utf-8")
         run = app.state.job_db.start_node_run(
@@ -416,18 +416,18 @@ def test_get_job_run_log_returns_404_for_missing_run(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q1"],
             },
         )
-        job_id = "test_education_video_problems_generation_Q1"
+        job_id = "test_test_Q1"
         resp = c.get(f"/api/jobs/{job_id}/runs/999999/log")
     assert resp.status_code == 404
 
@@ -442,18 +442,18 @@ def test_get_job_run_log_rejects_escape(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q1"],
             },
         )
-        job_id = "test_education_video_problems_generation_Q1"
+        job_id = "test_test_Q1"
         run = app.state.job_db.start_node_run(
             job_id, "intake_knowledge_points", ["cmd"], "../escape.log"
         )
@@ -486,13 +486,13 @@ def test_job_detail_includes_node_inputs_outputs(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "WS", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "ws", "name": "WS"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "ws")
         batch = c.post(
             "/api/workspaces/ws/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "ws",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q1"],
             },

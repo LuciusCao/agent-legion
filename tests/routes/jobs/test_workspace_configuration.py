@@ -6,7 +6,7 @@ def _create_workspace(
 ):
     return client.post(
         "/api/workspaces",
-        json={"name": name, "default_workflow_key": default_workflow_key},
+        json={"id": default_workflow_key, "name": name},
     ).json()["workspace"]["id"]
 
 

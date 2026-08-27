@@ -13,9 +13,7 @@ def workspace_service(job_db, settings):
 
 @pytest.fixture
 def workspace(workspace_service):
-    return workspace_service.create(
-        {"name": "Test", "default_workflow_key": "education_video_problems_generation"}
-    )
+    return workspace_service.create({"id": "education_video_problems_generation", "name": "Test"})
 
 
 def test_workspace_configuration_missing_workspace_raises_domain_error(workspace_service):
@@ -129,9 +127,7 @@ def test_code_pool_stats_report_capacity_and_leases(workspace_service, workspace
 def test_code_pool_stats_available_respects_global_usage_by_other_workspaces(
     workspace_service, workspace, job_db, settings
 ):
-    other = workspace_service.create(
-        {"name": "Other", "default_workflow_key": "education_video_problems_generation"}
-    )
+    other = workspace_service.create({"id": "other_ws", "name": "Other"})
     for i in range(16):
         job = _code_job(job_db, other["id"], f"global-{i}")
         _claim_code_lease(job_db, other["id"], job["id"], settings)
@@ -142,15 +138,13 @@ def test_code_pool_stats_available_respects_global_usage_by_other_workspaces(
     assert pool["available"] == 0
 
 
-def test_create_workspace_seeds_active_workflow_revision(workspace_service, job_db):
-    workspace = workspace_service.create(
-        {"name": "WS", "default_workflow_key": "education_video_problems_generation"}
-    )
-    active = job_db.get_active_workflow_revision(
-        workspace["id"], "education_video_problems_generation"
-    )
-    assert active is not None
-    assert active["version"] == 1
+def test_create_workspace_binds_key_and_seeds_nothing(workspace_service, job_db):
+    """Schema v61: the id is bound as the workflow key; creation seeds no
+    revision (demo provisioning is `make import-demo` / scripts/seed_demo.py)."""
+    workspace = workspace_service.create({"id": "fresh_ws", "name": "WS"})
+    assert workspace["id"] == "fresh_ws"
+    assert workspace["default_workflow_key"] == "fresh_ws"
+    assert job_db.get_active_workflow_revision(workspace["id"], "fresh_ws") is None
 
 
 def _save(workspace_service, workspace_id: str, agent_capacity: int | None = None):
@@ -186,14 +180,15 @@ def test_replace_configuration_rejects_non_positive_agent_capacity(workspace_ser
     assert workspace_service.job_db.get_workspace_agent_capacity(workspace["id"]) is None
 
 
-def test_update_workflow_seeds_revision_for_new_workflow(workspace_service, job_db):
+def test_update_workflow_rejects_key_change(workspace_service, job_db):
+    """Schema v61: the workflow key is bound to the workspace id; changing it
+    (even before any revision exists) is rejected."""
     workspace = workspace_service.create(
-        {"name": "WS", "default_workflow_key": "education_video_problems_generation"}
+        {"id": "education_video_problems_generation", "name": "WS"}
     )
-    workspace_service.update_section(
-        workspace["id"], "workflow", {"workflowKey": "education_video_problems_generation"}
-    )
+    with pytest.raises(InvalidOperationError, match="immutable"):
+        workspace_service.update_section(workspace["id"], "workflow", {"workflowKey": "other_flow"})
     assert (
         job_db.get_active_workflow_revision(workspace["id"], "education_video_problems_generation")
-        is not None
+        is None
     )

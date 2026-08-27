@@ -49,7 +49,7 @@ function makeRoute(nodeKey: string): WorkspaceAgentRouteEntry {
 
 function buildSteps(overrides: {
   workflowKey?: string | null
-  definition?: ReturnType<typeof makeDefinition>
+  definition?: ReturnType<typeof makeDefinition> | null
   routes?: WorkspaceAgentRouteEntry[]
   agentDefaults?: { provider: string; model: string }
   intakeModes?: string[]
@@ -59,7 +59,10 @@ function buildSteps(overrides: {
       overrides.workflowKey === undefined
         ? 'wf'
         : (overrides.workflowKey ?? undefined),
-    workflowDefinition: overrides.definition ?? makeDefinition([]),
+    workflowDefinition:
+      overrides.definition === undefined
+        ? makeDefinition([])
+        : overrides.definition,
     agentRoutes: overrides.routes ?? [],
     agentDefaults: overrides.agentDefaults,
     intakeModes: overrides.intakeModes,
@@ -112,8 +115,9 @@ describe('shouldShowEmptyGuide', () => {
 })
 
 describe('buildOnboardingSteps readiness', () => {
-  it('locks everything without a published workflow', () => {
-    const steps = buildSteps({ workflowKey: null })
+  it('locks everything without a published revision (key exists since v61)', () => {
+    // v61：key 创建即绑定(恒非空)，未发布的信号是 active revision 缺失。
+    const steps = buildSteps({ definition: null })
     expect(steps[0].completed).toBe(false)
     expect(steps[1].unlocked).toBe(false)
     expect(steps[2].unlocked).toBe(false)

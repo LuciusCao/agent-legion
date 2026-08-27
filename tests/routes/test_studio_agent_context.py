@@ -14,6 +14,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from server.app.auth import scoped_tokens
 
 FAKE_AGENT = Path(__file__).resolve().parents[1] / "helpers" / "fake_acp_agent.py"
@@ -40,13 +42,37 @@ def _register_fake_agent(client, tmp_path) -> Path:
     return script_path
 
 
+_CREATE_COUNT = 0
+
+
 def _create_workspace(client, name: str = "Context WS") -> str:
+    # v61: id==key, unique per call within a test (TRUNCATE isolation resets
+    # the counter each test).
+    global _CREATE_COUNT
+    _CREATE_COUNT += 1
+    ws_id = (
+        "education_video_problems_generation"
+        if _CREATE_COUNT == 1
+        else f"education_video_problems_generation_{_CREATE_COUNT}"
+    )
     response = client.post(
         "/api/workspaces",
-        json={"name": name, "default_workflow_key": "education_video_problems_generation"},
+        json={"id": ws_id, "name": name},
     )
     assert response.status_code == 200, response.text
+    # v61: creation seeds nothing; publish the demo revision so chat context
+    # resolution (active revision) sees the DAG.
+    from tests.helpers import publish_builtin_revision
+
+    publish_builtin_revision(client.app.state.job_db, ws_id)
     return str(response.json()["workspace"]["id"])
+
+
+@pytest.fixture(autouse=True)
+def _reset_create_count():
+    global _CREATE_COUNT
+    _CREATE_COUNT = 0
+    yield
 
 
 def _create_session(client, workspace_id: str) -> str:

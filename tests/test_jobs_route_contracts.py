@@ -127,7 +127,7 @@ def test_catch_all_router_does_not_shadow_job_log_endpoint(client):
 def _create_test_job(client):
     ws_response = client.post(
         "/api/workspaces",
-        json={"name": "test_ws", "default_workflow_key": "education_video_problems_generation"},
+        json={"id": "education_video_problems_generation", "name": "test_ws"},
     )
     assert ws_response.status_code == 200
     workspace_id = ws_response.json()["workspace"]["id"]

@@ -40,10 +40,7 @@ class FakeStorage:
 def _create_workspace(client) -> str:
     response = client.post(
         "/api/workspaces",
-        json={
-            "name": "materials-ws",
-            "default_workflow_key": "education_video_problems_generation",
-        },
+        json={"id": "materials-ws", "name": "materials-ws"},
     )
     assert response.status_code == 200, response.text
     return response.json()["workspace"]["id"]

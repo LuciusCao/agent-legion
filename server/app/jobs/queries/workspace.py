@@ -54,7 +54,15 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         default_entity: str = "question",
         intake_config: dict[str, Any] | None = None,
         description: str = "",
+        workspace_id: str | None = None,
     ) -> dict[str, Any]:
+        """Create a workspace row.
+
+        ``workspace_id`` (schema v61) is the caller-provided id the service
+        layer binds to ``default_workflow_key``; when omitted the id is
+        derived from the name (legacy behavior tests rely on — the id==key
+        invariant is enforced at the HTTP service layer, not here).
+        """
         clean_name = name.strip()
         if not clean_name:
             raise ValueError("Workspace name is required")
@@ -70,13 +78,23 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         intake_config_json = json.dumps(intake_config or {}, ensure_ascii=False, sort_keys=True)
         clean_description = (description or "").strip()
 
-        base_id = _workspace_id(clean_name)
         with self.connect() as conn:
-            workspace_id = base_id
-            suffix = 2
-            while conn.execute("select 1 from workspaces where id=%s", (workspace_id,)).fetchone():
-                workspace_id = f"{base_id}_{suffix}"
-                suffix += 1
+            if workspace_id is not None:
+                if _safe_identifier(workspace_id, "") != workspace_id:
+                    raise ValueError("Workspace id must match [a-zA-Z0-9_-], no edge _")
+                if (
+                    conn.execute("select 1 from workspaces where id=%s", (workspace_id,)).fetchone()
+                    is not None
+                ):
+                    raise ValueError(f"Workspace id already exists: {workspace_id}")
+            else:
+                workspace_id = _workspace_id(clean_name)
+                suffix = 2
+                while conn.execute(
+                    "select 1 from workspaces where id=%s", (workspace_id,)
+                ).fetchone():
+                    workspace_id = f"{workspace_id}_{suffix}"
+                    suffix += 1
 
             conn.execute(
                 """

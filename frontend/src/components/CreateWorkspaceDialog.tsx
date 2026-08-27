@@ -9,37 +9,39 @@ import {
 } from '@mui/material'
 import { WORKSPACE_LABELS } from '../labels'
 import { useCreateWorkspace } from '../hooks/useWorkspaceMutations'
-import { SampleTemplateCheckbox } from './settings/SampleTemplateCheckbox'
 
 type Props = {
   open: boolean
   onClose: () => void
 }
 
+// schema v61：id 即 workflow key，创建后不可变，与后端
+// WorkspaceCreateRequest 的 pattern 保持一致。
+const WORKSPACE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/
+
 export default function CreateWorkspaceDialog({ open, onClose }: Props) {
   const createWorkspace = useCreateWorkspace()
+  const [id, setId] = useState('')
   const [name, setName] = useState('')
-  const [fromSample, setFromSample] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const idValid = WORKSPACE_ID_PATTERN.test(id)
+
   function handleClose() {
+    setId('')
     setName('')
-    setFromSample(false)
     setError(null)
     onClose()
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!name.trim()) return
+    if (!idValid || !name.trim()) return
     setError(null)
     setCreating(true)
     try {
-      await createWorkspace.mutateAsync({
-        name: name.trim(),
-        workflowMode: fromSample ? 'demo' : 'blank',
-      })
+      await createWorkspace.mutateAsync({ id, name: name.trim() })
       handleClose()
     } catch (err) {
       setError(String(err))
@@ -58,14 +60,19 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
         >
           <TextField
             variant="outlined"
+            label="Workspace ID"
+            value={id}
+            onChange={(e) => setId(e.target.value)}
+            helperText="仅小写字母、数字、-、_，创建后不可修改（同时作为 Workflow Key）"
+            error={id.length > 0 && !idValid}
+            required
+          />
+          <TextField
+            variant="outlined"
             label={WORKSPACE_LABELS.workspaceName}
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
-          />
-          <SampleTemplateCheckbox
-            checked={fromSample}
-            onChange={setFromSample}
           />
           {error && (
             <div style={{ color: '#ba1a1a', fontSize: 12 }}>{error}</div>
@@ -79,7 +86,7 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
         <Button
           variant="contained"
           onClick={handleSubmit}
-          disabled={creating || !name.trim()}
+          disabled={creating || !idValid || !name.trim()}
         >
           {creating ? '创建中…' : WORKSPACE_LABELS.create}
         </Button>

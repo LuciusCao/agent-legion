@@ -48,15 +48,19 @@ def load_demo_legacy_intake_definition() -> WorkflowDefinition:
 def publish_legacy_intake_revision(job_db: JobQueries, workspace_id: str) -> dict[str, Any]:
     """Publish the legacy-intake demo variant as the workspace's active revision.
 
-    API workspace creation seeds the intake-less demo revision; tests that
-    post job-batches call this right after creation so the legacy intake
+    Schema v61 binds the workflow key to the workspace id, so the variant's
+    definition key is rewritten to the workspace id before publishing; tests
+    that post job-batches call this right after creation so the legacy intake
     service path keeps resolving ``direct_ids``.
     """
+    from dataclasses import replace
+
     from server.app.services.workflow_revisions import WorkflowRevisionService
 
-    return WorkflowRevisionService(job_db).publish_workspace_revision(
-        workspace_id, load_demo_legacy_intake_definition()
-    )
+    definition = load_demo_legacy_intake_definition()
+    if definition.key != workspace_id:
+        definition = replace(definition, key=workspace_id)
+    return WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, definition)
 
 
 def publish_builtin_revision(
@@ -71,13 +75,18 @@ def publish_builtin_revision(
     directly use this so definition resolution (workspace active revision,
     schema v50) sees the DAG.
     """
+    from dataclasses import replace
+
     from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
     from server.app.services.workflow_revisions import WorkflowRevisionService
 
     seed_demo_workspace_node_codes(load_settings(), workspace_id)
-    return WorkflowRevisionService(job_db).ensure_active_revision(
-        workspace_id, load_builtin_workflow(workflow_key)
-    )
+    definition = load_builtin_workflow(workflow_key)
+    # Schema v61 binds the workflow key to the workspace id: rewrite the
+    # definition key so the revision lands under the workspace's bound key.
+    if definition.key != workspace_id:
+        definition = replace(definition, key=workspace_id)
+    return WorkflowRevisionService(job_db).ensure_active_revision(workspace_id, definition)
 
 
 def scan_entries(*definitions: WorkflowDefinition) -> list[tuple[str, str, WorkflowDefinition]]:

@@ -41,6 +41,7 @@ from server.app.db.migrations import (
     migrate_versioned_entities,
     migrate_workflow_catalog_retirement,
     migrate_workspace_cms_config,
+    migrate_workspace_id_key_binding,
     migrate_workspace_job_node_status_counts,
     migrate_workspace_secrets,
 )
@@ -100,6 +101,11 @@ MIGRATIONS: list[SchemaMigration] = [
     # v60 is DDL-only (agent_workers.register_token_ids_json): the idempotent
     # schema-file replay adds the column, no data migration needed.
     SchemaMigration(60, "worker_register_token_ids"),
+    # v61: bind workspace id and workflow key (rename ids to their bound
+    # keys, backfill empty keys from the id). Runs last: it must see the
+    # post-v50 world where default_workflow_key is a plain per-workspace
+    # identifier, and it rewrites workspace_id rows in every child table.
+    SchemaMigration(61, "workspace_id_key_binding", migrate_workspace_id_key_binding),
 ]
 
 assert [m.version for m in MIGRATIONS] == sorted(m.version for m in MIGRATIONS), (

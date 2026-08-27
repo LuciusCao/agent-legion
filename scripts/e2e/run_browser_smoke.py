@@ -62,6 +62,37 @@ def _find_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def _seed_demo_workspace(dsn: str, vault_key: str) -> None:
+    """Provision the demo workspace (id=education_video_problems_generation).
+
+    Schema v61 removed the create-path sample-template seed, so the demo DAG,
+    factory Agents, node codes and materials the smoke specs drive are seeded
+    up front via the same seeder `make import-demo` uses (skill sources fall
+    back to the factory templates — no imported skill repos in the e2e env).
+    load_settings reads AGENT_LEGION_* from os.environ, so the e2e overrides
+    are applied and restored around the seed call.
+    """
+    from scripts.seed_demo import seed_demo
+    from server.app.settings import load_settings
+
+    overrides = {
+        "AGENT_LEGION_SKIP_DOTENV": "1",
+        "AGENT_LEGION_DATABASE_URL": dsn,
+        "AGENT_LEGION_DATA_DIR": str(DATA_DIR),
+        "AGENT_LEGION_VAULT_MASTER_KEY": vault_key,
+    }
+    previous = {key: os.environ.get(key) for key in overrides}
+    os.environ.update(overrides)
+    try:
+        seed_demo(load_settings())
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 def _backend_env(port: int, db_name: str, vault_key: str) -> dict[str, str]:
     env = dict(os.environ)
     for key in _CMS_ENV_KEYS:
@@ -199,6 +230,7 @@ def main() -> int:
             logger.error("Backend failed to start; log tail:\n%s", _log_tail(backend_log))
             return 1
         seed_cms_connection(db_dsn(db_name), cms_base_url, vault_key)
+        _seed_demo_workspace(db_dsn(db_name), vault_key)
 
         if not _frontend_bundle_fresh():
             _build_frontend()

@@ -6,7 +6,7 @@ from server.app.db.connection import DatabaseDsn
 from server.app.db.migration_registry import MIGRATIONS
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 60
+SCHEMA_VERSION = 61
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 

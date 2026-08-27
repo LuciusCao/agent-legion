@@ -47,10 +47,12 @@ from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SC
 # agent_workers.register_token_ids_json via the schema file) must leave behind
 # so the undo step rewinds a current-shape database to exactly
 # SCHEMA_VERSION-1. The previous newest (v59 jobs_run_id_index) is part of the
-# v60-1 baseline shape and stays.
-_NEWEST_MIGRATION_COLUMNS = (("agent_workers", "register_token_ids_json", "text"),)
+# v61 (workspace_id_key_binding) is a pure data migration — no DDL, no
+# indexes, no columns — so the undo inventory is empty; the previous newest
+# (v60 worker_register_token_ids) is part of the v61-1 baseline shape.
+_NEWEST_MIGRATION_COLUMNS = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "worker_register_token_ids"
+_NEWEST_MIGRATION_NAME = "workspace_id_key_binding"
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]

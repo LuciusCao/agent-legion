@@ -150,7 +150,7 @@ describe('workspace api', () => {
     )
   })
 
-  it('creates workspace with the sample template mode', async () => {
+  it('creates workspace with an explicit id', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -167,7 +167,7 @@ describe('workspace api', () => {
     } as Response)
     global.fetch = fetchMock
 
-    const workspace = await createWorkspace('Physics', 'demo')
+    const workspace = await createWorkspace('physics', 'Physics')
 
     expect(workspace.default_entity).toBe('knowledge')
     expect(workspace.intake_config).toEqual({
@@ -178,14 +178,14 @@ describe('workspace api', () => {
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
+          id: 'physics',
           name: 'Physics',
-          workflow_mode: 'demo',
         }),
       })
     )
   })
 
-  it('forwards blank workflow mode on workspace creation', async () => {
+  it('rejects retired workflow_mode field at the type level (smoke)', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -195,15 +195,16 @@ describe('workspace api', () => {
     } as Response)
     global.fetch = fetchMock
 
-    await createWorkspace('Blank', 'blank')
+    // v61: createWorkspace(id, name); the workflow_mode contract is gone.
+    await createWorkspace('blank_ws', 'Blank')
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/workspaces',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
+          id: 'blank_ws',
           name: 'Blank',
-          workflow_mode: 'blank',
         }),
       })
     )

@@ -31,7 +31,7 @@ def test_schema_v57_recorded() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "worker_register_token_ids"
+    assert row["name"] == "workspace_id_key_binding"
 
 
 def test_studio_chat_tables_exist() -> None:
@@ -78,7 +78,7 @@ def test_v56_database_gains_draft_yaml_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert migration is not None
-    assert migration["name"] == "worker_register_token_ids"
+    assert migration["name"] == "workspace_id_key_binding"
 
 
 @pytest.mark.fresh_schema
@@ -94,7 +94,9 @@ def test_v42_database_upgrades_via_init_db() -> None:
         conn.execute("drop table if exists studio_chat_sessions")
         conn.execute("insert into users(id, username) values ('u-legacy', 'legacy-user')")
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('w-legacy', 'legacy-ws', 'demo_workflow')"
+            # v61 invariant: id == key (the migration renames mismatched ids,
+            # so seed rows that already satisfy it keep their ids stable).
+            "insert into workspaces(id, name, default_workflow_key) values ('demo_workflow', 'legacy-ws', 'demo_workflow')"
         )
 
     init_db(TEST_DATABASE_URL)
@@ -106,14 +108,14 @@ def test_v42_database_upgrades_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert migration is not None
-    assert migration["name"] == "worker_register_token_ids"
+    assert migration["name"] == "workspace_id_key_binding"
 
     # Rows written through the new tables survive a replay (init_db runs at
     # every backend startup).
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into studio_chat_sessions(id, workspace_id, user_id, agent_id)"
-            " values ('s-1', 'w-legacy', 'u-legacy', 'fake-agent')"
+            " values ('s-1', 'demo_workflow', 'u-legacy', 'fake-agent')"
         )
         conn.execute(
             "insert into studio_chat_messages(id, session_id, kind, role)"

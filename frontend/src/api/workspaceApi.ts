@@ -13,15 +13,14 @@ export async function fetchWorkspaces(): Promise<WorkspacesResponse> {
 }
 
 export async function createWorkspace(
-  name: string,
-  workflowMode: 'demo' | 'blank' = 'blank'
+  id: string,
+  name: string
 ): Promise<WorkspaceRecord> {
+  // Schema v61: the caller-provided id IS the workflow key (bound and
+  // immutable at creation).
   const result = await api<WorkspaceResponse>('/api/workspaces', {
     method: 'POST',
-    body: JSON.stringify({
-      name,
-      workflow_mode: workflowMode,
-    }),
+    body: JSON.stringify({ id, name }),
   })
   return result.workspace
 }
@@ -31,7 +30,6 @@ export async function updateWorkspace(
   fields: {
     name?: string
     description?: string
-    default_workflow_key?: string
     default_entity?: string
     resource_config?: Record<string, unknown>
     intake_config?: Record<string, unknown>

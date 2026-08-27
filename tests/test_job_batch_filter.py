@@ -7,9 +7,7 @@ WORKFLOW_KEY = "education_video_problems_generation"
 
 
 def _create_workspace(client, name: str) -> str:
-    response = client.post(
-        "/api/workspaces", json={"name": name, "default_workflow_key": WORKFLOW_KEY}
-    )
+    response = client.post("/api/workspaces", json={"id": WORKFLOW_KEY, "name": name})
     assert response.status_code == 200
     workspace_id = response.json()["workspace"]["id"]
     # The demo workflow no longer declares intake modes (#154); these tests

@@ -15,36 +15,38 @@ describe('CreateWorkspaceDialog', () => {
     mutateAsync.mockResolvedValue({ id: 'my_ws' })
   })
 
-  it('creates a blank-canvas workspace by default (no workflow picker)', async () => {
+  it('creates a workspace with the explicit id and name (v61 binding)', async () => {
     const user = userEvent.setup()
     render(<CreateWorkspaceDialog open onClose={() => {}} />)
-    await user.type(screen.getByRole('textbox'), 'My WS')
+    await user.type(
+      screen.getByRole('textbox', { name: /Workspace ID/ }),
+      'my_ws'
+    )
+    await user.type(
+      screen.getByRole('textbox', { name: /Workspace 名称/ }),
+      'My WS'
+    )
 
     await user.click(screen.getByRole('button', { name: '创建' }))
 
     await waitFor(() =>
-      expect(mutateAsync).toHaveBeenCalledWith({
-        name: 'My WS',
-        workflowMode: 'blank',
-      })
+      expect(mutateAsync).toHaveBeenCalledWith({ id: 'my_ws', name: 'My WS' })
     )
   })
 
-  it('creates a demo-mode workspace when the sample template checkbox is checked', async () => {
+  it('blocks submission while the id does not match the v61 pattern', async () => {
     const user = userEvent.setup()
     render(<CreateWorkspaceDialog open onClose={() => {}} />)
-    await user.type(screen.getByRole('textbox'), 'My WS')
-
-    await user.click(
-      screen.getByLabelText('从示例模板初始化（教学视频脚本与题目生成）')
+    await user.type(
+      screen.getByRole('textbox', { name: /Workspace ID/ }),
+      'Bad ID'
     )
-    await user.click(screen.getByRole('button', { name: '创建' }))
-
-    await waitFor(() =>
-      expect(mutateAsync).toHaveBeenCalledWith({
-        name: 'My WS',
-        workflowMode: 'demo',
-      })
+    await user.type(
+      screen.getByRole('textbox', { name: /Workspace 名称/ }),
+      'My WS'
     )
+
+    expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
+    expect(mutateAsync).not.toHaveBeenCalled()
   })
 })
