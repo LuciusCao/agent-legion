@@ -14,7 +14,7 @@ from pathlib import Path
 
 __test__ = False
 
-_C_LIKE_SUFFIXES = (".ts", ".tsx", ".css")
+_C_LIKE_SUFFIXES = (".ts", ".tsx", ".css", ".rs")
 
 
 def count_effective_lines(path: Path) -> int:
@@ -23,6 +23,12 @@ def count_effective_lines(path: Path) -> int:
     if path.suffix == ".py":
         return _python_effective_lines(text)
     if path.suffix in _C_LIKE_SUFFIXES:
+        # Rust is a subset of this grammar: same // and /* */ comments, and
+        # raw strings r"…" never span lines without the line itself carrying
+        # code, so the C-like scanner is exact enough for budget counting
+        # (#202; overcounting only happens for a line that is nothing but a
+        # multi-line raw string continuation, which counts as code — the
+        # stricter metric).
         return _c_like_effective_lines(text)
     return len(text.splitlines())
 
