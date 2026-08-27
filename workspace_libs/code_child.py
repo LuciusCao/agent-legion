@@ -40,6 +40,9 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> int:
+    # argv[2]（存在时）是 build_sandbox_argv 注入的 reaper 身份标记
+    # （agent-legion-<execution_id>）：挂在命令行上是为了 ps 能看到它、
+    # 孤儿回收能归属进程组；子进程自身从不消费（#186）。
     result_path = sys.argv[1]
     payload = pickle.load(sys.stdin.buffer)  # noqa: S301 - parent-produced payload
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout, force=True)

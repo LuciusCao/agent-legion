@@ -315,6 +315,7 @@ def execute_code(
             result_path,
             sandbox_network=manifest.get("sandbox_network"),
             materials_cache_root=execution_dir.parent / MATERIALS_CACHE_DIRNAME,
+            marker=f"agent-legion-{execution_id}",
         )
         payload = pickle.dumps(
             build_child_payload(manifest, prepared.code_text, job_dir, materials=materials)
@@ -335,7 +336,9 @@ def execute_code(
             )
         finally:
             os.close(log_fd)
-        # executor 被 SIGKILL 时 supervisor 按此 killpg 兜底（同 agent 路径）。
+        # executor 被 SIGKILL 时 supervisor 经 orphan_reaper 兜底回收：argv 尾部
+        # 的 agent-legion-<execution_id> 标记让 reaper 能把进程组归属到本执行
+        # （同 agent 路径的 --name 注入，#186）。
         atomic_write(execution_dir / AGENT_PGID_FILENAME, str(proc.pid))
         heartbeat.proc_ref["proc"] = proc
         write_error: list[BaseException] = []
@@ -401,9 +404,10 @@ def prepare_code_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[st
     auth_failure = str(outcome.get("auth_failure_connection") or "").strip()
     if auth_failure:
         metadata["auth_failure_connection"] = auth_failure
-    # #160 D12：直传判定与 upload_queue._bulk_transfer 一致；直传时产物不
-    # 内嵌归档（字节走 presigned PUT），node.log 照常携带。
-    direct = bool(task.artifact_uploads) and all(name in task.artifact_uploads for name in outputs)
+    # #160 D12：直传判定与 upload_queue._bulk_transfer 一致（#201 收敛进
+    # UploadTask.is_direct_upload）；直传时产物不内嵌归档（字节走 presigned
+    # PUT），node.log 照常携带。
+    direct = task.is_direct_upload(outputs)
     with tarfile.open(archive, "w:gz") as tar:
         if not direct:
             for name in outputs:
