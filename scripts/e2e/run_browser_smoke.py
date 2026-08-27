@@ -67,24 +67,21 @@ def _seed_demo_workspace(dsn: str, vault_key: str) -> None:
 
     Schema v61 removed the create-path sample-template seed, so the demo DAG,
     factory Agents, node codes and materials the smoke specs drive are seeded
-    up front via the same seeder `make import-demo` uses. The skill sources
-    must resolve to git repos (the lock step runs git rev-parse), so the
-    runner first imports the repo-shipped demo skills into DATA_DIR (the same
-    copy + git init + tag flow as scripts/import-demo.sh, driven through its
-    AGENT_LEGION_DEMO_SKILLS_DIR override) and passes the root as skill_root.
-    load_settings reads AGENT_LEGION_* from os.environ, so the e2e overrides
-    are applied and restored around the seed call.
+    up front via the same seeder `make import-demo` uses. The skill lock step
+    resolves refs via git, so the repo-shipped demo skills are first imported
+    into DATA_DIR (scripts/import-demo.sh via AGENT_LEGION_DEMO_SKILLS_DIR)
+    and passed as skill_root. load_settings reads AGENT_LEGION_* from
+    os.environ, so the e2e overrides wrap the seed call.
     """
     from scripts.seed_demo import seed_demo
     from server.app.settings import load_settings
 
     skills_root = DATA_DIR / "demo-skills"
     skills_root.mkdir(parents=True, exist_ok=True)
-    import_env = {**os.environ, "AGENT_LEGION_DEMO_SKILLS_DIR": str(skills_root)}
     imported = subprocess.run(
         [str(PROJECT_ROOT / "scripts" / "import-demo.sh")],
         cwd=PROJECT_ROOT,
-        env=import_env,
+        env={**os.environ, "AGENT_LEGION_DEMO_SKILLS_DIR": str(skills_root)},
         capture_output=True,
         text=True,
     )

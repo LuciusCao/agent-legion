@@ -619,7 +619,7 @@
     "scripts/check_reruns.py": 182,
     "scripts/e2e/_cms_stub.py": 75,
     "scripts/e2e/_database.py": 64,
-    "scripts/e2e/run_browser_smoke.py": 246,
+    "scripts/e2e/run_browser_smoke.py": 258,
     "scripts/export_openapi.py": 112,
     "scripts/gc_artifacts.py": 48,
     "scripts/generate_architecture.py": 253,
