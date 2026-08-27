@@ -66,7 +66,8 @@ exemptions:
   ceiling: 216
 - check: architecture.file_budget
   path: server/app/routes/__init__.py
-  reason: Composition adds the Agent Worker control-plane router, the artifact
+  reason: >-
+    Composition adds the Agent Worker control-plane router, the artifact
     authentication dependency, the workspace-scoped custom node code
     router (EXEC-CODE-002), the DB-backed Agent definition catalog +
     skill validation routers (agent config governance, schema v26), the
@@ -74,10 +75,12 @@ exemptions:
     studio-agent tool surface router (STUDIO-AGENT-001, phase 3 chunk 3),
     the studio-agent self-service token router (schema v42), and the Studio
     chat conversation + ACP agent registry routers (phase 3 chunk 4, schema
-    v43).
+    v43). Issue #189 reworked the factory into an explicit RouterDeps
+    bundle with fail-fast wiring checks; the remaining size is the flat
+    include_router composition itself.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/189
-  ceiling: 146
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/190
+  ceiling: 179
 - check: architecture.file_budget
   path: server/app/services/workflow_revisions.py
   reason: Active revisions reconcile Agent routes at Host startup (capacity is

@@ -2,8 +2,8 @@ import json
 import subprocess
 import threading
 
+from server.app.agent_control.openclaw_discovery import list_openclaw_agents
 from server.app.events.agents import AgentStatus, AgentStatusManager
-from server.app.openclaw_agents import list_openclaw_agents
 
 
 def _agent_dict(**kwargs):

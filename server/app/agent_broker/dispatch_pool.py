@@ -12,19 +12,11 @@ import queue
 import threading
 from collections.abc import Callable
 
-from pydantic import BaseModel, ConfigDict, Field
+# Tuning model lives in the neutral configuration module (issue #188);
+# re-exported here for the existing broker-side consumers.
+from server.app.configuration.executor_knobs import AgentEnqueueConfig as AgentEnqueueConfig
 
 logger = logging.getLogger(__name__)
-
-
-class AgentEnqueueConfig(BaseModel):
-    """Enqueue-pool tuning (``executor_runtime.agent_enqueue``); each closure
-    is ~1s of mostly-IO work, so throughput scales with ``workers``."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    workers: int = Field(default=16, ge=1)
-    max_pending: int = Field(default=1024, ge=1)
 
 
 class AgentEnqueuePool:

@@ -127,7 +127,7 @@ def test_mcp_unverified_hint_is_not_repeated_after_runtime_rebuild(chat) -> None
     _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
 
     # 模拟 runtime 重建：内存标志丢失，只剩 DB 里的 mcp_status。
-    runtime = service._runtime(session["id"])
+    runtime = service.runtime(session["id"])
     assert runtime is not None
     with runtime.lock:
         runtime.mcp_hint_shown = False

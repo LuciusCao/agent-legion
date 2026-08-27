@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.run_freeze import candidate_input
 from server.app.jobs.storage_layout import job_storage_dir
-from server.app.services.run_payload import candidate_input
 from server.app.storage_paths import make_data_relative
 
 

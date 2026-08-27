@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.app.agent_catalog import AgentDefinition
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.main import create_app
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.workflow_revisions import WorkflowRevisionService

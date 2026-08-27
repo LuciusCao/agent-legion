@@ -28,27 +28,9 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from pydantic import BaseModel, ConfigDict, Field
-
-
-class AgentStockConfig(BaseModel):
-    """Tuning for the stockpile gate (``executor_runtime.agent_stock``)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = True
-    window_seconds: int = Field(default=1800, ge=1)
-    # Rate amplifier horizon: the done rate projected this far ahead deepens
-    # stock for fast tasks / sudden bursts; the capacity floor covers the
-    # baseline, so a few minutes of headroom is enough.
-    horizon_seconds: int = Field(default=180, ge=1)
-    min_stock: int = Field(default=4, ge=0)
-    max_stock: int = Field(default=500, ge=1)
-    refresh_seconds: float = Field(default=30.0, gt=0)
-    # A Worker counts toward the capacity floor only when its last claim
-    # poll is this recent (every poll touches last_seen_at, idle or not).
-    worker_fresh_seconds: int = Field(default=120, ge=1)
-
+# Tuning model lives in the neutral configuration module (issue #188);
+# re-exported here for the existing worker-side consumers.
+from server.app.configuration.executor_knobs import AgentStockConfig as AgentStockConfig
 
 # Buckets missing from the priority map (never seen on a workflow revision)
 # draw from the pool after every known bucket: they are treated as one tier

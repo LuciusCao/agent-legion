@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_catalog import AgentDefinition
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.main import create_app
 from tests.helpers import replace_agent_catalog
 from tests.postgres_support import TEST_DATABASE_URL

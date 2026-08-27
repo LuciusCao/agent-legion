@@ -16,7 +16,7 @@ from cryptography.fernet import Fernet
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.code_dispatch import resolve_code_manifest_config
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.services.vault import VaultService
 from tests.postgres_support import TEST_DATABASE_URL
 

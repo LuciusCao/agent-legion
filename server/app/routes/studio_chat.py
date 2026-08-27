@@ -34,7 +34,8 @@ from server.app.routes.studio_chat_contracts import (
     StudioChatSessionsResponse,
 )
 from server.app.services.job_errors import JobServiceError
-from server.app.studio_chat.service import StudioChatService, studio_chat_channel
+from server.app.studio_chat.channels import studio_chat_channel
+from server.app.studio_chat.service import StudioChatService
 
 
 def create_studio_chat_router(

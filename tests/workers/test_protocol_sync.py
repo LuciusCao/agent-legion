@@ -38,10 +38,10 @@ def test_host_contract_default_matches_shared() -> None:
 
 
 def test_server_registry_constants_match_shared() -> None:
-    from server.app.agent_workers import (
+    from server.app.agent_control.registry import (
         CODE_PROTOCOL_VERSION as server_code,
     )
-    from server.app.agent_workers import (
+    from server.app.agent_control.registry import (
         MODEL_RUNTIME_PROTOCOL_VERSION as server_model_runtime,
     )
 

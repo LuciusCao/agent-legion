@@ -6,7 +6,7 @@ import json
 from pathlib import PurePosixPath
 from typing import Any
 
-from server.app.agent_completion import AgentOutcome
+from server.app.agent_control.completion import AgentOutcome
 from server.app.routes.agent_worker_result_refs import parse_artifact_ref
 from shared.code_sandbox import MAX_CONNECTION_KEY_CHARS
 

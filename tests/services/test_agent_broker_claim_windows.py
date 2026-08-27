@@ -10,7 +10,7 @@ window ladder with its own attempt budget (``claim_windows``).
 from __future__ import annotations
 
 from server.app.agent_broker import AgentExecutionBroker, claim_windows
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from tests.helpers.agent_worker_api import (
     enqueue_code as _enqueue_code,
 )

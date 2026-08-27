@@ -5,7 +5,7 @@ URL), produced artifacts stream straight to object storage instead of the
 legacy per-file ``POST /api/artifacts`` + result.tar.gz embed. The result
 metadata then reports the object-storage ref form
 ``{"storage_key", "size_bytes", "content_hash"}``; the Host HEAD-verifies
-every ref before applying it (server/app/agent_completion.py).
+every ref before applying it (server/app/agent_control/completion.py).
 
 The URL arrives over the authenticated claim channel, so no SSRF guard
 applies (same rule as the material download in ``worker.material_fetch``).

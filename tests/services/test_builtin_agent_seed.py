@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from server.app.agent_catalog import AgentDefinition
-from server.app.agent_catalog_builtin import (
+from server.app.agent_catalog.builtin import (
     BUILTIN_AGENT_DEFINITIONS,
     seed_demo_workspace_agent_definitions,
 )

@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from server.app.studio_chat.service import StudioChatService
+    from server.app.studio_chat.events import ServiceBackend
 
 MCP_UNVERIFIED_HINT = (
     "本会话还没有任何 agent-legion 平台工具调用的迹象；如果你期望"
@@ -20,7 +20,7 @@ MCP_UNVERIFIED_HINT = (
 )
 
 
-def maybe_emit_mcp_hint(service: StudioChatService, session_id: str, stop_reason: str) -> None:
+def maybe_emit_mcp_hint(backend: ServiceBackend, session_id: str, stop_reason: str) -> None:
     """Emit the one-time mcp_unverified hint when applicable.
 
     Conditions: the runtime never observed an agent-legion tool call, the
@@ -31,8 +31,8 @@ def maybe_emit_mcp_hint(service: StudioChatService, session_id: str, stop_reason
     backend restarts and runtime rebuilds; the in-memory flag only
     deduplicates within one runtime.
     """
-    session = service._db.get_studio_chat_session(session_id) or {}
-    runtime = service._runtime(session_id)
+    session = backend.db.get_studio_chat_session(session_id) or {}
+    runtime = backend.runtime(session_id)
     mcp_observed = runtime.mcp_observed if runtime is not None else False
     if (
         mcp_observed
@@ -44,8 +44,8 @@ def maybe_emit_mcp_hint(service: StudioChatService, session_id: str, stop_reason
     if runtime is not None:
         with runtime.lock:
             runtime.mcp_hint_shown = True
-    service._db.update_studio_chat_session(session_id, mcp_status="unverified")
-    service._append_message(
+    backend.db.update_studio_chat_session(session_id, mcp_status="unverified")
+    backend.store.append_message(
         session_id,
         "status",
         "system",

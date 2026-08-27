@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from server.app.agent_broker import AgentExecutionBroker
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.workflow_worker.code_claim import try_claim_code_worker_node
 from server.app.workflow_worker.code_stock import CodeStockConfig, CodeStockGate
 from tests.helpers.agent_worker_api import (

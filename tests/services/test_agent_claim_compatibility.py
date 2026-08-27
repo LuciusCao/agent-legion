@@ -11,7 +11,7 @@ import json
 import pytest
 
 from server.app.agent_broker.agent_claim_compatibility import live_claim_manifest, worker_can_run
-from server.app.agent_worker_declarations import normalize_models
+from server.app.agent_control.declarations import normalize_models
 
 
 def _row(

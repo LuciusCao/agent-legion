@@ -18,7 +18,7 @@ from typing import Any, BinaryIO
 import pytest
 from psycopg import IntegrityError
 
-from server.app.agent_completion import AgentCompletionHandler, AgentOutcome
+from server.app.agent_control.completion import AgentCompletionHandler, AgentOutcome
 from server.app.db.schema import init_db
 from server.app.db.transaction import write_transaction
 from server.app.services.job_artifact_objects import JobArtifactObjectStore

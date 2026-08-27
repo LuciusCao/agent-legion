@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from server.app.agent_register_key_guard import RegisterKeyDeleted
+from server.app.agent_control.register_key_guard import RegisterKeyDeleted
 from tests.helpers.agent_worker_api import (
     authenticate_admin,
     issue_scoped_token,

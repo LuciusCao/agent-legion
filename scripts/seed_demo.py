@@ -10,7 +10,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from server.app import agent_catalog_builtin
+from server.app.agent_catalog import builtin as agent_catalog_builtin
 from server.app.jobs import JobQueries
 from server.app.services.demo_material_seed import seed_demo_workspace_materials
 from server.app.services.demo_node_migration import migrate_demo_node_codes_to_workspaces

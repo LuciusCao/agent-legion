@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.agent_register_token_deletion import cascade_delete_register_token
+from server.app.agent_control.register_token_deletion import cascade_delete_register_token
 
 
 def cascade_delete_workspace_register_tokens(conn: Any, workspace_id: str) -> list[str]:

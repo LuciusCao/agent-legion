@@ -35,8 +35,8 @@ from server.app.agent_broker.broker import AgentExecutionBroker, AgentExecutionR
 from server.app.agent_broker.claim_paths import claim_log_path
 from server.app.agent_broker.code_manifest import runtime_context_stub
 from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
-from server.app.agent_workers import CODE_PROTOCOL_VERSION as _CODE_PROTOCOL_VERSION
-from server.app.agent_workers import ONLINE_THRESHOLD_SECONDS as _ONLINE_THRESHOLD_SECONDS
+from server.app.agent_control.registry import CODE_PROTOCOL_VERSION as _CODE_PROTOCOL_VERSION
+from server.app.agent_control.registry import ONLINE_THRESHOLD_SECONDS as _ONLINE_THRESHOLD_SECONDS
 from server.app.db.transaction import read_connection
 from server.app.executors.contracts import CodeCapabilityConfig
 from server.app.executors.models import ExecutionContext

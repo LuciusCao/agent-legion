@@ -4,16 +4,14 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from server.app.agent_broker import AgentDispatchService, AgentExecutionBroker
-from server.app.agent_completion import AgentCompletionHandler
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.openclaw_discovery import list_openclaw_agents
 from server.app.auth.service import build_auth_service
+from server.app.bootstrap import build_agent_plane
 from server.app.db.connection import close_database_pools
 from server.app.events import JobEventManager
 from server.app.events.agents import AgentStatusManager
 from server.app.events.aggregator import build_workspace_event_aggregator
 from server.app.events.bus import InProcessEventBus
-from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.sweeper import SweeperThread
 from server.app.http_middleware import add_http_middleware
 from server.app.jobs import JobQueries
@@ -22,9 +20,9 @@ from server.app.mcp_server.http_app import (
     StudioMcpRelay,
     create_studio_mcp_http_app,
 )
-from server.app.openclaw_agents import list_openclaw_agents
-from server.app.routes import create_router
+from server.app.routes import RouterDeps, create_router
 from server.app.routes.auth import create_auth_router
+from server.app.routes.quality_deps import build_quality_loop
 from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
 from server.app.services.artifact_store import ArtifactStore
@@ -38,17 +36,12 @@ from server.app.services.job_packages import JobPackageService
 from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
-from server.app.services.quality_labels import QualityLabelService
-from server.app.services.quality_replays import QualityReplayService
-from server.app.services.quality_sampling import QualitySamplingService
-from server.app.services.quality_stats import QualityStatsService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
 from server.app.settings import load_settings, validate_settings
-from server.app.skills.runtime import build_skill_manager
 from server.app.skills.seed import seed_skill_sources
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
@@ -102,26 +95,16 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
         job_db, settings, job_event_manager.bus
     )
-    agent_broker = AgentExecutionBroker(
-        job_db.path,
-        lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
-        bundle_dir=settings.data_dir / "agent_bundles",
-        data_dir=settings.data_dir,
-        agent_status=agent_manager,
-        is_workspace_paused=workspace_worker_control.is_paused,
-        job_db=job_db,
-        job_event_buffer=job_event_buffer,
-    )
-    agent_dispatch = AgentDispatchService(settings, agent_broker, artifact_store)
-    skill_manager = build_skill_manager(settings.database_url, settings.skills_runs_dir)
-
-    executor_leases = ExecutorLeaseRepository(
+    agent_plane = build_agent_plane(
         job_db,
-        data_dir=settings.data_dir,
-        job_event_manager=job_event_manager,
-        job_event_buffer=job_event_buffer,
+        settings,
+        agent_manager,
+        workspace_worker_control,
+        artifact_store,
+        job_event_manager,
+        job_event_buffer,
+        object_store=job_artifact_objects,
     )
-    agent_worker_registry = AgentWorkerRegistry(job_db.path)
     ops_metrics = OpsMetricsService(job_db.path, settings.config)
     # Studio chat (phase 3 chunk 4): ACP conversation sessions, one agent
     # subprocess per session; in-process only, reaped in the lifespan finally.
@@ -133,15 +116,11 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # PATH-level availability of every registered chat agent: warms the probe
     # cache and logs the entries the picker will hide on this host.
     studio_chat_service.warm_availability_probe()
-    agent_completion = AgentCompletionHandler(
-        executor_leases,
-        artifact_store,
-        settings.jobs_dir,
-        settings.data_dir / "agent_bundles",
-        skill_manager=skill_manager,
-        object_store=job_artifact_objects,
-        max_archive_bytes=settings.executor_runtime.agent_workers.max_archive_bytes,
-    )
+    agent_broker = agent_plane.broker
+    agent_dispatch = agent_plane.dispatch
+    agent_completion = agent_plane.completion
+    executor_leases = agent_plane.executor_leases
+    agent_worker_registry = agent_plane.worker_registry
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None
     artifact_gc_thread: ArtifactOrphanGcThread | None = None
@@ -244,34 +223,33 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     workspace_configuration = WorkspaceConfigurationService(job_db, settings)
     job_packages = JobPackageService(job_db, settings, object_store=job_artifact_objects)
     app.include_router(create_auth_router(app.state.auth_service), prefix="/api")
+    quality = build_quality_loop(job_db, artifact_store, object_store=job_artifact_objects)
     app.include_router(
         create_router(
-            job_db,
-            settings,
-            agent_manager,
-            workspace_worker_control,
-            executor_catalog=executor_catalog,
-            workspace_executor_configuration=workspace_executor_configuration,
-            workspace_configuration=workspace_configuration,
-            job_packages=job_packages,
-            job_event_manager=job_event_manager,
-            job_event_buffer=job_event_buffer,
-            artifact_store=artifact_store,
-            agent_broker=agent_broker,
-            agent_worker_registry=agent_worker_registry,
-            agent_completion=agent_completion,
-            ops_metrics=ops_metrics,
-            quality_sampling=QualitySamplingService(job_db.path),
-            quality_labels=QualityLabelService(
-                job_db.path, artifact_store, object_store=job_artifact_objects
-            ),
-            quality_stats=QualityStatsService(job_db.path),
-            quality_replays=QualityReplayService(
-                job_db, artifact_store, object_store=job_artifact_objects
-            ),
-            studio_chat_service=studio_chat_service,
-            materials_service=app.state.materials_service,
-            job_artifact_objects=job_artifact_objects,
+            RouterDeps(
+                job_db=job_db,
+                settings=settings,
+                agent_manager=agent_manager,
+                workspace_worker_control=workspace_worker_control,
+                executor_catalog=executor_catalog,
+                workspace_executor_configuration=workspace_executor_configuration,
+                workspace_configuration=workspace_configuration,
+                job_packages=job_packages,
+                job_event_manager=job_event_manager,
+                job_event_buffer=job_event_buffer,
+                artifact_store=artifact_store,
+                agent_broker=agent_broker,
+                agent_worker_registry=agent_worker_registry,
+                agent_completion=agent_completion,
+                ops_metrics=ops_metrics,
+                quality_sampling=quality.quality_sampling,
+                quality_labels=quality.quality_labels,
+                quality_stats=quality.quality_stats,
+                quality_replays=quality.quality_replays,
+                studio_chat_service=studio_chat_service,
+                materials_service=app.state.materials_service,
+                job_artifact_objects=job_artifact_objects,
+            )
         )
     )
     # After the API routers so /api/studio-agent/tools/* routes match first;

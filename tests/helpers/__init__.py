@@ -219,7 +219,7 @@ def seed_workspace_agent_definitions(workspace_id: str) -> list[str]:
     longer seeds a global catalog, so tests that run the demo workflow end to
     end instantiate the factory templates into their own workspace here.
     """
-    from server.app.agent_catalog_builtin import seed_demo_workspace_agent_definitions
+    from server.app.agent_catalog.builtin import seed_demo_workspace_agent_definitions
     from tests.postgres_support import TEST_DATABASE_URL
 
     return seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id)

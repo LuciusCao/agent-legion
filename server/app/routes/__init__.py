@@ -1,10 +1,12 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, Depends
 
 from ..agent_broker import AgentExecutionBroker
-from ..agent_completion import AgentCompletionHandler
-from ..agent_workers import AgentWorkerRegistry
+from ..agent_control import AgentCompletionHandler, AgentWorkerRegistry
 from ..auth.studio_authoring import require_studio_authoring
 from ..auth.workspace_access import require_workspace_access
 from ..events import JobEventManager
@@ -55,101 +57,140 @@ from .workspace_settings import create_workspace_settings_router
 from .workspaces import create_workspaces_router
 
 
-def create_router(
-    job_db: JobQueries,
-    settings: Settings,
-    agent_manager: AgentStatusManager,
-    workspace_worker_control: WorkspaceWorkerControl | None = None,
-    *,
-    executor_catalog: ExecutorCatalogService,
-    workspace_executor_configuration: WorkspaceExecutorConfigurationService,
-    workspace_configuration: WorkspaceConfigurationService,
-    job_packages: JobPackageService,
-    job_event_manager: JobEventManager | None = None,
-    job_event_buffer: Any | None = None,
-    artifact_store: ArtifactStore | None = None,
-    agent_broker: AgentExecutionBroker | None = None,
-    agent_worker_registry: AgentWorkerRegistry | None = None,
-    agent_completion: AgentCompletionHandler | None = None,
-    ops_metrics: OpsMetricsService | None = None,
-    quality_sampling: QualitySamplingService | None = None,
-    quality_labels: QualityLabelService | None = None,
-    quality_stats: QualityStatsService | None = None,
-    quality_replays: QualityReplayService | None = None,
-    studio_chat_service: StudioChatService | None = None,
-    materials_service: MaterialsService | None = None,
-    job_artifact_objects: Any = None,
-) -> APIRouter:
+@dataclass
+class RouterDeps:
+    """Explicit, complete dependency bundle for the API router tree.
+
+    A missing service must fail loudly at composition time (issue #189):
+    the previous keyword-with-None-default signature silently dropped the
+    whole route group when a caller forgot one argument. Every field here
+    is required — optional integration seams stay ``None``-able but are
+    named and grouped, and the conditional mounts below only cover
+    genuinely optional infrastructure (e.g. object storage) rather than
+    wiring mistakes.
+    """
+
+    job_db: JobQueries
+    settings: Settings
+    agent_manager: AgentStatusManager
+    executor_catalog: ExecutorCatalogService
+    workspace_executor_configuration: WorkspaceExecutorConfigurationService
+    workspace_configuration: WorkspaceConfigurationService
+    job_packages: JobPackageService
+    # Optional integration seams: genuinely absent infrastructure (reduced
+    # embeds, object storage off) — not wiring mistakes.
+    workspace_worker_control: WorkspaceWorkerControl | None = None
+    job_event_manager: JobEventManager | None = None
+    job_event_buffer: Any | None = None
+    artifact_store: ArtifactStore | None = None
+    agent_broker: AgentExecutionBroker | None = None
+    agent_worker_registry: AgentWorkerRegistry | None = None
+    agent_completion: AgentCompletionHandler | None = None
+    ops_metrics: OpsMetricsService | None = None
+    quality_sampling: QualitySamplingService | None = None
+    quality_labels: QualityLabelService | None = None
+    quality_stats: QualityStatsService | None = None
+    quality_replays: QualityReplayService | None = None
+    studio_chat_service: StudioChatService | None = None
+    materials_service: MaterialsService | None = None
+    job_artifact_objects: Any | None = None
+
+
+def create_router(deps: RouterDeps) -> APIRouter:
     router = APIRouter(prefix="/api")
 
     def secured(sub_router: APIRouter) -> None:
         router.include_router(sub_router, dependencies=[Depends(require_workspace_access)])
 
     def studio_secured(sub_router: APIRouter) -> None:
-        deps = [Depends(require_workspace_access), Depends(require_studio_authoring)]
-        router.include_router(sub_router, dependencies=deps)
+        deps_list = [Depends(require_workspace_access), Depends(require_studio_authoring)]
+        router.include_router(sub_router, dependencies=deps_list)
 
     router.include_router(create_common_router())
-    router.include_router(create_agents_router(agent_manager))
-    router.include_router(create_token_usage_pricing_router(job_db, settings))
+    router.include_router(create_agents_router(deps.agent_manager))
+    router.include_router(create_token_usage_pricing_router(deps.job_db, deps.settings))
     # Global admin endpoints (not workspace-scoped): the sub-routers enforce
     # require_admin themselves, so they must not go through secured().
-    router.include_router(create_instance_settings_router(job_db, settings))
-    router.include_router(create_skill_sources_router(settings))
-    router.include_router(create_connections_router(settings))
-    secured(create_packages_router(job_db, settings, job_packages))
-    secured(create_worker_router(workspace_worker_control))
-    if (
-        agent_broker is not None
-        and agent_worker_registry is not None
-        and agent_completion is not None
-    ):
-        workers_router = create_agent_workers_router(agent_broker, agent_worker_registry, agent_completion, settings, ops_metrics, job_artifact_objects)  # fmt: skip
-        router.include_router(workers_router)
-    if artifact_store is not None:
-        router.include_router(
-            create_artifacts_router(artifact_store, settings, agent_worker_registry)
+    router.include_router(create_instance_settings_router(deps.job_db, deps.settings))
+    router.include_router(create_skill_sources_router(deps.settings))
+    router.include_router(create_connections_router(deps.settings))
+    secured(create_packages_router(deps.job_db, deps.settings, deps.job_packages))
+    secured(create_worker_router(deps.workspace_worker_control))
+    # The worker control plane is one surface: broker + registry + completion
+    # mount together or not at all (integration seams absent in reduced
+    # embeds); a partially-wired trio is a composition bug — fail loudly.
+    worker_plane = (deps.agent_broker, deps.agent_worker_registry, deps.agent_completion)
+    if any(part is None for part in worker_plane) != all(part is None for part in worker_plane):
+        raise ValueError(
+            "agent worker control plane is partially wired: agent_broker, "
+            "agent_worker_registry and agent_completion must be provided together"
         )
-    if ops_metrics is not None:
-        secured(create_metrics_router(ops_metrics))
-    if quality_sampling is not None and quality_labels is not None and quality_stats is not None:
-        secured(create_quality_router(quality_sampling, quality_labels, quality_stats))
-    if quality_replays is not None:
-        secured(create_quality_replays_router(quality_replays))
+    if all(part is not None for part in worker_plane):
+        broker, registry, completion = worker_plane
+        assert broker is not None and registry is not None and completion is not None
+        workers_router = create_agent_workers_router(  # fmt: skip
+            broker,
+            registry,
+            completion,
+            deps.settings,
+            deps.ops_metrics,
+            deps.job_artifact_objects,
+        )
+        router.include_router(workers_router)
+    if deps.artifact_store is not None:
+        router.include_router(
+            create_artifacts_router(deps.artifact_store, deps.settings, deps.agent_worker_registry)
+        )
+    if deps.ops_metrics is not None:
+        secured(create_metrics_router(deps.ops_metrics))
+    if (
+        deps.quality_sampling is not None
+        and deps.quality_labels is not None
+        and deps.quality_stats is not None
+    ):
+        secured(
+            create_quality_router(deps.quality_sampling, deps.quality_labels, deps.quality_stats)
+        )
+    if deps.quality_replays is not None:
+        secured(create_quality_replays_router(deps.quality_replays))
     workspaces_router = create_workspaces_router(
-        workspace_configuration, settings, job_event_manager=job_event_manager
+        deps.workspace_configuration,
+        deps.settings,
+        job_event_manager=deps.job_event_manager,
     )
     secured(workspaces_router)
-    secured(create_workspace_settings_router(workspace_configuration, settings))
-    if materials_service is not None:
-        secured(create_materials_router(materials_service))
-    studio_secured(create_workflow_revisions_router(job_db, settings))
-    studio_secured(create_workflow_node_codes_router(job_db, settings))
-    studio_secured(create_agent_definitions_router(job_db, settings))
-    secured(create_skills_router(settings))
-    secured(create_workspace_configuration_router(workspace_configuration, settings))
+    secured(create_workspace_settings_router(deps.workspace_configuration, deps.settings))
+    if deps.materials_service is not None:
+        secured(create_materials_router(deps.materials_service))
+    studio_secured(create_workflow_revisions_router(deps.job_db, deps.settings))
+    studio_secured(create_workflow_node_codes_router(deps.job_db, deps.settings))
+    studio_secured(create_agent_definitions_router(deps.job_db, deps.settings))
+    secured(create_skills_router(deps.settings))
+    secured(create_workspace_configuration_router(deps.workspace_configuration, deps.settings))
     executors_router = create_workspace_executors_router(
-        executor_catalog, workspace_executor_configuration, settings
+        deps.executor_catalog, deps.workspace_executor_configuration, deps.settings
     )
     secured(executors_router)
-    secured(create_workspace_agent_routes_router(job_db, settings))
-    secured(create_studio_agent_tools_router(job_db, settings))
-    secured(create_studio_agent_context_router(job_db))
-    secured(create_studio_agent_tokens_router(job_db))
-    if studio_chat_service is not None:
-        router.include_router(create_studio_agents_admin_router(job_db))
-        chat = create_studio_chat_router(studio_chat_service, job_event_manager=job_event_manager)
+    secured(create_workspace_agent_routes_router(deps.job_db, deps.settings))
+    secured(create_studio_agent_tools_router(deps.job_db, deps.settings))
+    secured(create_studio_agent_context_router(deps.job_db))
+    secured(create_studio_agent_tokens_router(deps.job_db))
+    if deps.studio_chat_service is not None:
+        router.include_router(create_studio_agents_admin_router(deps.job_db))
+        chat = create_studio_chat_router(
+            deps.studio_chat_service, job_event_manager=deps.job_event_manager
+        )
         studio_secured(chat)
     job_group = APIRouter(dependencies=[Depends(require_workspace_access)])
     include_job_routes(
         job_group,
-        job_db,
-        settings,
-        workspace_executor_configuration,
-        job_event_manager,
-        job_event_buffer,
-        artifact_store=artifact_store,
-        object_store=job_artifact_objects,
+        deps.job_db,
+        deps.settings,
+        deps.workspace_executor_configuration,
+        deps.job_event_manager,
+        deps.job_event_buffer,
+        artifact_store=deps.artifact_store,
+        object_store=deps.job_artifact_objects,
     )
     router.include_router(job_group)
 

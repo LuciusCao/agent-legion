@@ -4,7 +4,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from server.app import agent_catalog_builtin
+from server.app.agent_catalog import builtin as agent_catalog_builtin
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.workflow_revision_format import (

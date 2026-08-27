@@ -240,10 +240,10 @@ def test_agent_exit_tears_down_runtime_and_revokes_token(chat, job_db) -> None:
     script_path = register(TEXT_SCRIPT)
     session = service.create_session(workspace_id, user_id, "fake-agent")
     token = _session_token(script_path)
-    runtime = service._runtime(session["id"])
+    runtime = service.runtime(session["id"])
     assert runtime is not None
     service._on_exit(session["id"])
-    assert service._runtime(session["id"]) is None
+    assert service.runtime(session["id"]) is None
     assert authenticate_scoped_token(job_db, token) is None
     assert service.get_session(session["id"])["status"] == "error"
     # _on_exit skips the handle by design (it runs on the ACP thread); reap
@@ -301,7 +301,7 @@ def test_permission_park_after_teardown_denies_immediately(chat) -> None:
     service, _bus, register, workspace_id, user_id = chat
     register(TEXT_SCRIPT)
     session = service.create_session(workspace_id, user_id, "fake-agent")
-    runtime = service._runtime(session["id"])
+    runtime = service.runtime(session["id"])
     assert runtime is not None
     with runtime.lock:
         runtime.closed = True

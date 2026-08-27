@@ -8,7 +8,7 @@ import pytest
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.sweepers import fail_stale_definition_requests
 from server.app.agent_catalog import AgentDefinition
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.db.transaction import read_connection
 from server.app.services.agent_service import AgentService
 from server.app.services.agent_version_pins import resolve_dispatch_agent_definition

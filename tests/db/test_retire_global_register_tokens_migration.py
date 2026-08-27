@@ -89,7 +89,7 @@ def test_migration_revokes_only_live_all_workspaces_tokens() -> None:
     assert rows["scoped-live"] is None, "workspace-scoped token must survive"
 
     # The revoked all-workspaces token no longer authenticates a registration.
-    from server.app.agent_workers import AgentWorkerRegistry
+    from server.app.agent_control.registry import AgentWorkerRegistry
 
     scope = AgentWorkerRegistry(TEST_DATABASE_URL).resolve_register_scope(
         [f"legacy-live.{secrets.token_urlsafe(8)}"]
