@@ -100,6 +100,9 @@ MIGRATIONS: list[SchemaMigration] = [
     # v60 is DDL-only (agent_workers.register_token_ids_json): the idempotent
     # schema-file replay adds the column, no data migration needed.
     SchemaMigration(60, "worker_register_token_ids"),
+    # v61 is DDL-only (workspace_workflow_drafts): the Studio workflow YAML
+    # draft table comes from the schema-file replay, no data migration.
+    SchemaMigration(61, "workspace_workflow_drafts"),
 ]
 
 assert [m.version for m in MIGRATIONS] == sorted(m.version for m in MIGRATIONS), (

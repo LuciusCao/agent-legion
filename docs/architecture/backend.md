@@ -215,6 +215,8 @@ server/app/
 | POST | `/workspaces/{workspace_id}/workflow-drafts/compare` | `compare_workflow_draft_route` | routes/workflow_draft_compare.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/validate` | `validate_workflow_draft` | routes/workflow_draft_publish.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/publish` | `publish_draft` | routes/workflow_draft_publish.py |
+| GET | `/workspaces/{workspace_id}/workflow-draft` | `get_draft` | routes/workflow_draft_store.py |
+| PUT | `/workspaces/{workspace_id}/workflow-draft` | `put_draft` | routes/workflow_draft_store.py |
 | GET | `/workflow-node-code-template` | `get_node_code_template` | routes/workflow_node_codes.py |
 | GET | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `get_node_code` | routes/workflow_node_codes.py |
 | PUT | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `save_node_code_draft` | routes/workflow_node_codes.py |
@@ -482,6 +484,8 @@ server/app/
 | WorkflowCompareSummary | BaseModel | risk_level: WorkflowRiskLevel, node_changes: list[WorkflowNodeChange], edge_c... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowDraftCompareResponse | BaseModel | valid: bool, creates_revision: bool, base_revision: WorkflowRevisionSummaryIt... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowMetadataChange | BaseModel | type: Literal['modified'], field: str, before_value: str | None, after_value:... | app/routes/workflow_draft_compare_metadata_contracts.py |
+| WorkflowDraftStoreRequest | BaseModel | definition_yaml: str | app/routes/workflow_draft_store_contracts.py |
+| WorkflowDraftStoreResponse | BaseModel | definition_yaml: str | None, updated_at: str | None | app/routes/workflow_draft_store_contracts.py |
 | WorkflowNodeCodeResponse | BaseModel | origin: Literal['builtin', 'custom', 'none'], code: str, version: int | None,... | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeTemplateResponse | BaseModel | code: str | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeDraftRequest | BaseModel | code: str, change_note: str | None | app/routes/workflow_node_code_contracts.py |
