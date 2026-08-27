@@ -79,6 +79,16 @@ worker. worksteal lets idle workers steal pending tests, shrinking that
 tail (with `--reruns 1` kept as insurance for genuinely timing-sensitive
 tests).
 
+Within a gate, the test round is staggered: the backend lane runs alone
+first, then frontend and rust run in parallel. Starting all three test
+lanes together oversubscribed the machine from the inside (~20 jobs on a
+10-core box) — the same CPU contention the machine-wide queue removed
+between gates. Measured on an idle machine: the backend unit tier alone
+takes ~44s, yet stretched past 10 minutes inside a fully parallel gate.
+The static round stays fully parallel (lint/typecheck are light), and the
+`test` round inside `check-quick-frontend.sh`/`run_rust_round` lanes is
+unaffected when invoked standalone.
+
 The smoke tier (`GATE_TIER=smoke`) replaces the backend pytest lane with a
 curated subset — every architecture governance test plus one core behavioral
 file per subsystem, assigned by path in `tests/conftest.py`
@@ -93,6 +103,17 @@ unreachable loopback database URL, so an accidental database dependency fails
 the gate instead of silently using a developer database. CI runs it as the
 `backend-unit` job; the PostgreSQL integration layer (`GATE_TIER=postgres`)
 runs in the `backend-postgres-a/b/c` jobs described below.
+
+The full tier (`GATE_TIER=full`, the default for `check-quick.sh` without a
+tier override) selects the same unit layer as `GATE_TIER=unit`: the
+PostgreSQL integration layer (~47% of the quick suite's tests and ~2.5x the
+unit tier's wall time) moved out of the local default because CI re-runs all
+of it on every PR — paying it on every local gate bought little. Before
+handing off database-touching work, run `GATE_TIER=postgres
+./scripts/check-quick-backend.sh` explicitly (or rely on CI).
+`scripts/check.sh` — the local full-gate substitute — still pins both tiers
+itself (unit segment, then postgres appended onto the same coverage file),
+so its combined coverage report keeps seeing the whole suite.
 
 The affected tier (`GATE_TIER=aff`) is the edit-test iteration loop for
 agents and humans alike: the backend lane selects tests whose recorded

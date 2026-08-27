@@ -37,8 +37,15 @@ echo "=== Quick Gate (segmented) ==="
 # invocation, so segment 2's frontend static lane runs api:check inline
 # (FRONTEND_API_CHECK defaults to 1 when the backend lane is absent).
 # Standalone ./scripts/check-quick.sh usage is unaffected.
-echo "--- Segment 1: backend lane with coverage (exclusive machine) ---"
-GATE_LANES="backend" AGENT_LEGION_COV=1 "$ROOT_DIR/scripts/check-quick.sh"
+#
+# The local full gate keeps BOTH backend tiers even though the quick gate's
+# full tier shrank to the unit layer: segment 1a runs the unit tier, segment
+# 1b appends the postgres tier onto the same COVERAGE_FILE (AGENT_LEGION_
+# COV_APPEND=1), so the combined report below still sees the whole suite.
+echo "--- Segment 1a: backend unit tier with coverage (exclusive machine) ---"
+GATE_LANES="backend" GATE_TIER=unit AGENT_LEGION_COV=1 "$ROOT_DIR/scripts/check-quick.sh"
+echo "--- Segment 1b: backend postgres tier with coverage (exclusive machine) ---"
+GATE_LANES="backend" GATE_TIER=postgres AGENT_LEGION_COV=1 AGENT_LEGION_COV_APPEND=1 "$ROOT_DIR/scripts/check-quick.sh"
 echo "--- Segment 2: frontend + rust lanes (no backend coverage) ---"
 GATE_LANES="frontend rust" FRONTEND_TEST_MODE=coverage "$ROOT_DIR/scripts/check-quick.sh"
 

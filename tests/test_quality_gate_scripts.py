@@ -250,9 +250,9 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
     _write_executable(
         scripts / "check-quick.sh",
         "#!/usr/bin/env bash\n"
-        'printf "quick:lanes=%s,cov=%s,mode=%s\\n" '
+        'printf "quick:lanes=%s,cov=%s,mode=%s,tier=%s\\n" '
         '"${GATE_LANES:-unset}" "${AGENT_LEGION_COV:-unset}" '
-        '"${FRONTEND_TEST_MODE:-unset}" >>"$GATE_LOG"\n',
+        '"${FRONTEND_TEST_MODE:-unset}" "${GATE_TIER:-unset}" >>"$GATE_LOG"\n',
     )
     _write_executable(scripts / "check-deps-audit.sh", "#!/usr/bin/env bash\nexit 0\n")
     for command in ("uv", "npm"):
@@ -274,9 +274,13 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
     # racing the frontend/rust lanes makes pytest-cov/xdist silently lose a
     # whole worker's coverage data. Frontend/rust follow without backend
     # coverage (frontend still runs in coverage mode for the partition report).
+    # The backend segments run the unit and postgres tiers separately (the
+    # quick gate's full tier is unit-only) and append coverage onto the same
+    # COVERAGE_FILE, so the combined report below still sees the whole suite.
     assert quick_calls == [
-        "quick:lanes=backend,cov=1,mode=unset",
-        "quick:lanes=frontend rust,cov=unset,mode=coverage",
+        "quick:lanes=backend,cov=1,mode=unset,tier=unit",
+        "quick:lanes=backend,cov=1,mode=unset,tier=postgres",
+        "quick:lanes=frontend rust,cov=unset,mode=coverage,tier=unset",
     ]
     assert calls.count("npm:run build:bundle") == 1
     assert not any("test:coverage" in call for call in calls)

@@ -40,6 +40,16 @@
   凭证（`run-local-gate.sh` 拒绝该档）——无索引、索引盲区（改动的源文件不在索引里）
   或选择面太宽时自动回落 unit 全量，回落只会更慢、不会漏跑。任何代码修改后至少跑
   一次完整 `./scripts/check-quick.sh`（aff 通过不能替代）。
+- **quick gate 的完整档默认只跑 unit 层**（PostgreSQL 离线，`-m "not postgres and
+  not repository_gate"`）：postgres 集成层（约占 quick 套件 47% 的测试、约 2.5 倍
+  unit 层耗时）交给 CI（每个 PR 的 backend-postgres-a/b/c 必跑）。**碰数据库的改动
+  （schema、migration、queries、routes 的 DB 行为）交接前必须显式跑
+  `GATE_TIER=postgres ./scripts/check-quick-backend.sh`**；本地全量替代品
+  `./scripts/check.sh` 自身仍包含两层（unit 段 + postgres 追加段）。
+- **gate 内部 test 轮错峰**：backend lane 先单独跑完，frontend/rust 随后并行——
+  三条测试 lane 同时起会从 gate 内部超订机器（backend 8 worker + vitest + cargo
+  ≈ 20 个任务挤 10 核，实测空闲机器上 unit 层单独 44 秒、全并行 gate 里拖到 10
+  分钟以上）。静态轮保持全并行（lint/typecheck 很轻）。
 - **aff 索引纪律**：`.pytest-aff-index.json` 是 gitignore 的本地工件，每个 worktree
   首次用 aff 前必须先跑 `GATE_TIER=aff-index ./scripts/check-quick-backend.sh` 建
   索引（约 2.5 分钟）；依赖或 `tests/conftest.py` 变更后重建。索引缺失时 aff 自动
