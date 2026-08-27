@@ -24,14 +24,13 @@ use std::path::{Path, PathBuf};
 #[cfg_attr(target_os = "macos", allow(unused_imports))]
 use anyhow::{anyhow, Context};
 
-#[cfg(any(target_os = "macos", test))]
 mod macos;
 
 #[cfg(any(target_os = "macos", test))]
-use macos::{ancestor_list_only, macos_system_read_paths, seatbelt_profile_opts};
+use macos::ancestor_list_only;
 
 #[cfg(target_os = "macos")]
-use macos::probe_macos;
+use macos::{macos_system_read_paths, probe_macos, seatbelt_profile_opts};
 
 /// OS-level filesystem sandbox wrapping the bash tool's child process.
 pub struct Sandbox {
