@@ -2,6 +2,7 @@ import { useState } from 'react'
 import styles from './StudioChatPanel.module.css'
 
 type Props = {
+  busy: boolean
   disabled: boolean
   disabledReason: string | null
   onSend: (text: string) => void
@@ -30,7 +31,12 @@ export function StudioChatInput(props: Props) {
           rows={2}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
+            // 中文输入法组合中的回车是确认候选，不能当成发送。
+            if (
+              event.key === 'Enter' &&
+              !event.shiftKey &&
+              !event.nativeEvent.isComposing
+            ) {
               event.preventDefault()
               submit()
             }
@@ -42,11 +48,11 @@ export function StudioChatInput(props: Props) {
           disabled={props.disabled || !text.trim()}
           onClick={submit}
         >
-          发送
+          {props.busy ? '排队' : '发送'}
         </button>
       </div>
       <div className={styles.inputHint}>
-        Enter 发送 · Shift+Enter 换行 · 运行中不可发送，可取消
+        Enter 发送 · Shift+Enter 换行 · 运行中发送将进入队列
       </div>
     </div>
   )
