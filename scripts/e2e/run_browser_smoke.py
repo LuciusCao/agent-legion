@@ -67,13 +67,29 @@ def _seed_demo_workspace(dsn: str, vault_key: str) -> None:
 
     Schema v61 removed the create-path sample-template seed, so the demo DAG,
     factory Agents, node codes and materials the smoke specs drive are seeded
-    up front via the same seeder `make import-demo` uses (skill sources fall
-    back to the factory templates — no imported skill repos in the e2e env).
+    up front via the same seeder `make import-demo` uses. The skill sources
+    must resolve to git repos (the lock step runs git rev-parse), so the
+    runner first imports the repo-shipped demo skills into DATA_DIR (the same
+    copy + git init + tag flow as scripts/import-demo.sh, driven through its
+    AGENT_LEGION_DEMO_SKILLS_DIR override) and passes the root as skill_root.
     load_settings reads AGENT_LEGION_* from os.environ, so the e2e overrides
     are applied and restored around the seed call.
     """
     from scripts.seed_demo import seed_demo
     from server.app.settings import load_settings
+
+    skills_root = DATA_DIR / "demo-skills"
+    skills_root.mkdir(parents=True, exist_ok=True)
+    import_env = {**os.environ, "AGENT_LEGION_DEMO_SKILLS_DIR": str(skills_root)}
+    imported = subprocess.run(
+        [str(PROJECT_ROOT / "scripts" / "import-demo.sh")],
+        cwd=PROJECT_ROOT,
+        env=import_env,
+        capture_output=True,
+        text=True,
+    )
+    if imported.returncode != 0:
+        raise RuntimeError(f"demo skill import failed:\n{imported.stdout}\n{imported.stderr}")
 
     overrides = {
         "AGENT_LEGION_SKIP_DOTENV": "1",
@@ -84,7 +100,7 @@ def _seed_demo_workspace(dsn: str, vault_key: str) -> None:
     previous = {key: os.environ.get(key) for key in overrides}
     os.environ.update(overrides)
     try:
-        seed_demo(load_settings())
+        seed_demo(load_settings(), skill_root=skills_root)
     finally:
         for key, value in previous.items():
             if value is None:

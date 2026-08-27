@@ -52,7 +52,9 @@ test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }, t
   const addItemsDialog = page.getByRole('dialog', { name: '添加条目' })
   await addItemsDialog.getByRole('tab', { name: '粘贴 ID' }).click()
   await addItemsDialog.getByLabel('连接 Key').fill('cms-internal')
-  await addItemsDialog.getByLabel('外部 ID').fill('Q1')
+  // smoke-job-rerun.spec.ts runs first and consumes Q1 in the shared demo
+  // workspace; use a distinct id to avoid the (connection, id) dedup.
+  await addItemsDialog.getByLabel('外部 ID').fill('Q2')
   await addItemsDialog.getByRole('button', { name: '创建运行' }).click()
   // A successful submit closes the dialog; wait for it (the modal overlay
   // intercepts pointer events while it is in the DOM, so clicking the job
