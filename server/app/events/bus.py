@@ -59,9 +59,16 @@ class InProcessEventBus:
         if loop is None:
             self._send(channel, payload)
             return
-        if loop.is_running():
-            loop.call_soon_threadsafe(self._send, channel, payload)
-        else:
+        try:
+            # Race window: the loop can stop between the is_running check and
+            # call_soon_threadsafe (the latter then raises RuntimeError). A
+            # publish racing shutdown must degrade to a direct send (same as
+            # no loop attached), never propagate into the publishing thread.
+            if loop.is_running():
+                loop.call_soon_threadsafe(self._send, channel, payload)
+            else:
+                self._send(channel, payload)
+        except RuntimeError:
             self._send(channel, payload)
 
     def _send(self, channel: str, payload: str) -> None:

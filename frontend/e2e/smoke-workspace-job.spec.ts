@@ -1,27 +1,41 @@
 import { expect, test } from '@playwright/test'
 
-import {
-  createWorkspaceViaApi,
-  ensureAdminSession,
-  widenDemoWorkflowItemTypes,
-} from './helpers'
+import { ensureAdminSession, widenDemoWorkflowItemTypes } from './helpers'
 
-const WORKSPACE_NAME = 'E2E 冒烟工作区'
 
-test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }) => {
+test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }, testInfo) => {
+  // Unique per engine+attempt: the smoke suite shares one database across
+  // browser engines (chromium runs first, then firefox/webkit), and the
+  // workspace list renders oldest-first — a reused name would send the
+  // run-creation step into the previous engine's workspace, where the
+  // (source_type, source_id) dedup rejects the same Q1 item with
+  // "No tasks were resolved from input".
+  const WORKSPACE_NAME = `E2E 冒烟工作区 ${testInfo.project.name}-${testInfo.retry}`
   await ensureAdminSession(page)
 
-  // Multi-browser runs share one database: the CJK name transliterates to
-  // the same `e2e` slug, so engines after Chromium get suffixed ids and a
-  // name-text click would enter the FIRST same-name workspace (an earlier
-  // engine's, whose `cms-internal:Q1` job makes create_run's dedup drop the
-  // item and 400). Create via API and enter by the exact returned id.
-  const workspaceId = await createWorkspaceViaApi(page, WORKSPACE_NAME)
-  await page.goto(`/workspaces/${workspaceId}`)
-  await expect(page).toHaveURL(new RegExp(`/workspaces/${workspaceId}$`))
+  await page.goto('/')
+  const createButton = page.getByRole('button', { name: '新建 Workspace' })
+  await expect(createButton).toBeVisible()
+  await createButton.click()
+
+  const createDialog = page.getByRole('dialog')
+  await createDialog.getByLabel('Workspace 名称').fill(WORKSPACE_NAME)
+  await createDialog
+    .getByRole('checkbox', {
+      name: '从示例模板初始化（教学视频脚本与题目生成）',
+    })
+    .check()
+  await createDialog.getByRole('button', { name: '创建' }).click()
+  // Demo-template workspaces seed node code server-side; the POST can take
+  // seconds (4-5s observed locally), so give the close a generous timeout.
+  await expect(createDialog).toBeHidden({ timeout: 30_000 })
+
+  await page.getByText(WORKSPACE_NAME).first().click()
+  await expect(page).toHaveURL(/\/workspaces\/[^/]+$/)
 
   // The demo workflow is material-only (start node accepted_item_types); the
   // ref path below needs the contract widened first (EXEC-WORKFLOW-START-001).
+  const workspaceId = page.url().split('/workspaces/')[1]
   await widenDemoWorkflowItemTypes(page, workspaceId)
   await page.reload()
 
@@ -34,6 +48,10 @@ test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }) =
   await addItemsDialog.getByLabel('连接 Key').fill('cms-internal')
   await addItemsDialog.getByLabel('外部 ID').fill('Q1')
   await addItemsDialog.getByRole('button', { name: '创建运行' }).click()
+  // A successful submit closes the dialog; wait for it (the modal overlay
+  // intercepts pointer events while it is in the DOM, so clicking the job
+  // row before the close lands — a real risk on slow CI runners — fails).
+  await expect(addItemsDialog).toBeHidden({ timeout: 15_000 })
 
   // The runs API creates jobs synchronously; no workflow worker is started,
   // so the job appears with all nodes still pending.

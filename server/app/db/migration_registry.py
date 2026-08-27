@@ -29,6 +29,7 @@ from server.app.db.migrations import (
     migrate_external_connections,
     migrate_hmac_connection_type,
     migrate_job_artifacts,
+    migrate_jobs_run_id_index,
     migrate_local_executor_removal,
     migrate_node_cms_config,
     migrate_retire_global_register_tokens,
@@ -92,9 +93,13 @@ MIGRATIONS: list[SchemaMigration] = [
     # NULL-workspace rows are revoked before any scoped-token traffic can
     # observe them.
     SchemaMigration(58, "retire_global_register_tokens", migrate_retire_global_register_tokens),
-    # v59 is DDL-only (agent_workers.register_token_ids_json): the idempotent
+    # v59: jobs(run_id) index for the batch-queue run-scoped lookups. DDL-only
+    # but carries an apply fn (not just a schema-file entry): the schema file
+    # replays before v53's batch_id→run_id rename on v52 upgrades.
+    SchemaMigration(59, "jobs_run_id_index", migrate_jobs_run_id_index),
+    # v60 is DDL-only (agent_workers.register_token_ids_json): the idempotent
     # schema-file replay adds the column, no data migration needed.
-    SchemaMigration(59, "worker_register_token_ids"),
+    SchemaMigration(60, "worker_register_token_ids"),
 ]
 
 assert [m.version for m in MIGRATIONS] == sorted(m.version for m in MIGRATIONS), (

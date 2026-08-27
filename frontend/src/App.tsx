@@ -4,7 +4,9 @@ import Toast from './components/Toast'
 import AppRoutes from './AppRoutes'
 
 export default function App() {
-  const { connectAgentsWs } = useAgentsStore()
+  // Field selector only: subscribing to the whole store would re-render the
+  // entire route tree on every WS agent message (upsertAgent → new array).
+  const connectAgentsWs = useAgentsStore((s) => s.connectAgentsWs)
 
   useEffect(() => {
     const cleanup = connectAgentsWs()

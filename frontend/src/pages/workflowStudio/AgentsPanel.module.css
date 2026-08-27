@@ -11,12 +11,6 @@
   padding-right: 16px;
 }
 
-.listToolbar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
 .listItems {
   list-style: none;
   margin: 0;
@@ -45,17 +39,6 @@
 
 .listItem:hover {
   background-color: #f0f0f0;
-}
-
-.listItemActive {
-  background-color: #f0f0f0;
-}
-
-.listItemTitle {
-  font-size: 14px;
-  font-weight: 500;
-  color: #1a1c1e;
-  word-break: break-all;
 }
 
 .listItemMeta {

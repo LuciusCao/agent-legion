@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { IconButton } from '@mui/material'
 import { DagStepper } from '../dag/DagStepper'
 import { MaterialIcon } from '../MaterialIcon'
@@ -70,14 +70,23 @@ export function JobProgressPanel({
     })
   }, [])
 
-  const relevantRuns = filterRelevantRuns(runs, nodes)
-  const runByNodeKey = new Map<string, NodeRun>()
-  for (const run of relevantRuns) {
-    const existing = runByNodeKey.get(run.node_key)
-    if (!existing || run.id > existing.id) {
-      runByNodeKey.set(run.node_key, run)
+  // Memoized: the 5s running-state poll re-renders this panel with fresh
+  // runs/nodes arrays; the relevance filter and latest-run Map should not
+  // rebuild on unrelated state (error expansion, dialogs).
+  const relevantRuns = useMemo(
+    () => filterRelevantRuns(runs, nodes),
+    [runs, nodes]
+  )
+  const runByNodeKey = useMemo(() => {
+    const map = new Map<string, NodeRun>()
+    for (const run of relevantRuns) {
+      const existing = map.get(run.node_key)
+      if (!existing || run.id > existing.id) {
+        map.set(run.node_key, run)
+      }
     }
-  }
+    return map
+  }, [relevantRuns])
 
   return (
     <div className={styles.panel}>

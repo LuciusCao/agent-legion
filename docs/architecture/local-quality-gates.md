@@ -13,6 +13,7 @@ provide.
 | Event | Gate | Command / CI job |
 | --- | --- | --- |
 | Commit | Fast | `scripts/check-fast.sh` |
+| Edit-test iteration (agent inner loop) | Affected: backend affected-test selection over the unit tier + frontend `vitest related` | `GATE_TIER=aff ./scripts/check-quick.sh` |
 | Push (any branch) | Smoke (default): static checks + smoke test tier, lanes trimmed by pushed paths | `scripts/check-quick.sh` with `GATE_TIER=smoke` |
 | Push with `AGENT_LEGION_GATE_LEVEL=quick` | Quick: full quick suite, lanes trimmed | `scripts/check-quick.sh` |
 | Push with `AGENT_LEGION_GATE_LEVEL=full` | Full, locally | `scripts/check.sh` |
@@ -29,6 +30,17 @@ of the full quick suite, so trimming never weakens the server-side boundary.
 The lane set and the test tier are part of the local evidence fingerprint, so
 evidence from a trimmed run is never reused for a different lane set or tier.
 
+Per-lane parallelism defaults are worktree-aware
+(`detect_gate_default_jobs_worktree_aware` in `scripts/gate-jobs.sh`):
+`min(4, cores)` while a sibling worktree holds its quick-gate lock, and
+`cores-2` (capped at 8) when this machine's gates are all ours — the gate
+scripts detect sibling `.quick-gate.lock` directories through
+`git worktree list`, so several agents working in parallel worktrees keep
+today's polite baseline while a lone agent gets the spare CPU. Per-lane env
+overrides (`AGENT_LEGION_TEST_WORKERS`,
+`AGENT_LEGION_FRONTEND_TEST_WORKERS`, `AGENT_LEGION_RUST_WORKERS`) still
+win.
+
 The smoke tier (`GATE_TIER=smoke`) replaces the backend pytest lane with a
 curated subset — every architecture governance test plus one core behavioral
 file per subsystem, assigned by path in `tests/conftest.py`
@@ -43,6 +55,23 @@ unreachable loopback database URL, so an accidental database dependency fails
 the gate instead of silently using a developer database. CI runs it as the
 `backend-unit` job; the PostgreSQL integration layer (`GATE_TIER=postgres`)
 runs in the `backend-postgres-a/b/c` jobs described below.
+
+The affected tier (`GATE_TIER=aff`) is the edit-test iteration loop for
+agents and humans alike: the backend lane selects tests whose recorded
+coverage intersects the changed source files (index in
+`.pytest-aff-index.json`, distilled from a one-off `GATE_TIER=aff-index`
+run with `--cov-context=test`), and the frontend lane runs `vitest related`
+over the changed frontend files. It falls back to the plain unit tier when
+no index exists, when a changed source file is missing from the index (an
+index blind spot — the affected tests are unknown), when the selection
+would run most of the suite anyway, or when the changed set includes shared
+files — the fallback never widens what runs. Deleted test files are dropped
+from the selection (a stale path would fail pytest collection). An aff pass
+is **not** gate evidence: `scripts/run-local-gate.sh` rejects the tier, and
+the full suite remains the pre-push/CI boundary. Rebuild the index after
+dependency or conftest changes (a stale index only slows the loop —
+unmapped sources force the fallback, and unmapped test files still run
+wholesale via the tests/ rule in `scripts/pytest_aff_selection.py`).
 
 Install the repository-managed hooks once from a worktree that contains `.githooks/`:
 
@@ -111,10 +140,6 @@ CI environment notes:
 - The api:check contract step regenerates frontend API types through
   `create_app` + node_modules, so it lives in the backend-postgres-a job; the
   frontend jobs need neither Python nor Postgres.
-- `AGENT_LEGION_SKIP_SKILLS_SHARED_CHECK=1` skips `check-skills-shared.py` in CI:
-  the built-in skill sources (`server/app/skills/builtin_sources.py`) point at
-  machine-local skill repos (`~/.agents/skills/...`) that do not exist on
-  runners. Local gates still run the check.
 - uv and npm caches are enabled; the first cold run is dominated by dependency
   downloads and takes substantially longer than cached runs.
 

@@ -2,8 +2,8 @@
 
 Registration is scoped-token-only now; the migration revokes any legacy
 ``agent_register_tokens`` row with ``workspace_id IS NULL`` still marked
-live. The registry test also pins SCHEMA_VERSION and its recorded name,
-replacing the pin previously held by tests/db/test_studio_chat_schema.py.
+live. The registry test also pinned SCHEMA_VERSION and its recorded name;
+that pin now lives in tests/db/test_jobs_run_id_index.py (v59).
 """
 
 from __future__ import annotations
@@ -44,11 +44,11 @@ def _insert_register_token(
 
 
 def test_schema_version_pin() -> None:
-    # The latest-migration record pin moved here from test_studio_chat_schema.py
-    # (v57 studio_chat_draft → v58 retire_global_register_tokens). v59
-    # (worker_register_token_ids) is DDL-only with no migration module of its
-    # own, so the pin stays in this file.
-    assert SCHEMA_VERSION == 59
+    # The latest-migration record pin moved to tests/db/test_jobs_run_id_index.py
+    # (v58 retire_global_register_tokens → v59 jobs_run_id_index) and now to
+    # the v60 DDL-only entry (worker_register_token_ids, this PR): with no
+    # migration module of its own the pin stays in this file.
+    assert SCHEMA_VERSION == 60
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)

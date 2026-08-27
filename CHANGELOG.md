@@ -6,26 +6,58 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Removed (dead code and stale artifacts)
+
+- Removed the dead `server/app/services/vault_resources.py` module: zero
+  importers and unimportable since the resource-providers retirement (a prior
+  removal in PR #172 was reverted wholesale by `b9a35ff1`, which restored the
+  file; the CHANGELOG had kept claiming it was gone).
+- Removed the dead `server/app/services/token_usage_capture.py` wrapper (its
+  only caller, `pi_runner.py`, was deleted earlier; the lease-scoped
+  replacements in `token_usage_lease.py` remain) and the orphaned
+  `server/app/executors/agent_workspace.py`.
+- Removed retired/unused config surface: the dead `PiRuntimeConfig` block
+  and the unconsumed OpenClaw runtime knobs (`command_template`,
+  `timeout_seconds`, `isolated_workspace_root`, `skill_safety`) — the admin
+  instance-settings `openclaw` document is now `cwd`-only. Stored documents
+  from older deployments are normalized at read time (retired keys stripped
+  before response validation, no data migration needed), and
+  `openclaw.skill_safety.repos[].ref` stays rejected at startup (config
+  governance G3: refs are pinned by the DB `skill_lock` document only).
+- Worker: removed the test-only `read_current_executions` compatibility
+  helper and `strip_secret_config` (never called on the Worker — secret
+  stripping happens Host-side in `split_manifest_config` before dispatch;
+  verified no caller in repository history).
+- Frontend: removed the orphaned video-hive player cluster
+  (`VideoPlayer`, `InteractionOverlay`, `SubtitlePanel`, `NodePanel`,
+  `videoNodeStore` and friends, ~1,030 LOC) plus `CollapsiblePanel`,
+  `TimelineStrip`, `materialWeb.ts`, and the superseded
+  `getFilterCounts`/`filterCountsCore` pair — all unreferenced since the
+  react-query migration; pruned dead exports in `labels.ts`/`theme.ts`/
+  `nodeCatalog.ts`/types, dead rules in `styles.css` (634 → 118 lines) and
+  seven CSS modules; moved `@tanstack/react-query-devtools` to
+  `dependencies` (it is imported by the production entry), moved
+  `@types/dagre` to devDependencies, and dropped the redundant
+  `@types/katex` shim (katex bundles its own types). The filter-count
+  exclusion semantics (each dimension counts jobs matching the other
+  filters while excluding its own) and the worker status-reader edge
+  cases (dead writer, corrupt/missing file, started_at ordering) were
+  re-homed onto the surviving `computeFilterCounts` / `read_runtime_status`
+  implementations with ported tests.
+- Removed one-off scripts whose retirement conditions are met:
+  `backfill_workflow_revision_resources.py` (schema has moved v26 → v58 and
+  the loader hard-rejects the `resources` field), `bench_gzip_exemption.py`,
+  `velites_replay.py`, `velites_diff_events.py` (rollout archived),
+  `backfill_failure_classification.py`, `backfill_worker_output_validation.py`,
+  `migrate_job_dirs_to_shards.py` — each with its unit tests.
+- Docs/deploy hygiene: `.env.example` and the READMEs no longer instruct the
+  retired global worker-register-token setup (which now fails startup);
+  `scripts/stack-prod-up.sh` drops the `agent_worker_register_token` prereq
+  and the broken `funasr` warm-up block (the dependency left the image);
+  references to the deleted `check-skills-shared.py` and the no-op
+  `verify_specs.py` gate step are cleaned up.
+
 ### Security
-
-- Vault plaintext compatibility window closed (VAULT-SECRET-001): schema v57
-  sweeps legacy plaintext node-config secrets from
-  `workspaces.node_config_json` and `jobs.frozen_config_json` into the
-  workspace vault (dropped with a warning when no master key is configured);
-  the node-config save chain vaults inherited legacy plaintext instead of
-  carrying it forward; workflow publish validation rejects secret-marked node
-  config fields holding plaintext (only `{"secret_ref": ...}` markers are
-  accepted).
-- Skill source git argument-injection hardened: option-shaped or
-  transport-helper repo values (`--upload-pack=...`, `ext::...`), invalid
-  refnames, and non-hex locked commits are rejected before any git subprocess
-  is spawned; `clone`/`fetch`/`checkout` positionals are `--`-separated.
-- Removed the dead `vault_resources.py` module (unimportable since the
-  resource-providers retirement).
-- The `worker/` package now rides the 85% coverage floor with `server/`
-  (measured baseline 93%), with a dedicated 90% per-partition floor.
-
-### Added
 
 - CSRF negative-path test: cookie-authenticated mutations without the
   `x-agent-legion-request` header are rejected with 403 (SECURITY-AUTH-001).
@@ -50,8 +82,6 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 - Compose stacks no longer mount `agent_worker_register_token`; workers get
   their scoped token via the console or `workerctl configure
   --register-token-file` (#35).
-### Changed
-
 - **Breaking (deployment):** `server.app.main` no longer exports a
   module-level `app`; launchers must use the factory form
   (`uvicorn server.app.main:create_prod_app --factory`). Importing the

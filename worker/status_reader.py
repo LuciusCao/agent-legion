@@ -26,8 +26,3 @@ def read_runtime_status(path: Path) -> dict[str, Any]:
         ),
         "remote": remote if isinstance(remote, dict) else {},
     }
-
-
-def read_current_executions(path: Path) -> list[dict[str, Any]]:
-    """Reader compatibility helper for callers that only need executions."""
-    return list(read_runtime_status(path)["executions"])

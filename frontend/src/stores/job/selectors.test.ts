@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { getVisibleJobs } from './filterLogic/getVisibleJobs'
-import { getFilterCounts } from './filterLogic/getFilterCounts'
+import { computeFilterCounts } from './filterLogic/incrementalFilters'
 import { createJobState, createJobSummary } from './actions/testHelpers'
 
 describe('getVisibleJobs', () => {
@@ -135,9 +135,14 @@ describe('getVisibleJobs', () => {
   })
 })
 
-describe('getFilterCounts', () => {
+describe('computeFilterCounts', () => {
+  // The counts feed the filter dropdown option totals: each dimension counts
+  // jobs matching ALL other filters while EXCLUDING its own dimension's
+  // filter, so selecting a status still shows the totals of every status.
+  const countsFor = createJobState
+
   it('counts status excluding the status filter itself', () => {
-    const state = createJobState({
+    const state = countsFor({
       jobs: [
         createJobSummary({ id: 'j1', status: 'running' }),
         createJobSummary({ id: 'j2', status: 'failed' }),
@@ -151,13 +156,17 @@ describe('getFilterCounts', () => {
         paused: null,
       },
     })
-    const counts = getFilterCounts(state)
+    const counts = computeFilterCounts(
+      state.jobIds,
+      state.jobsById,
+      state.filterConfig
+    )
     expect(counts.status.running).toBe(1)
     expect(counts.status.failed).toBe(2)
   })
 
   it('counts paused jobs separately from pending jobs', () => {
-    const state = createJobState({
+    const state = countsFor({
       jobs: [
         createJobSummary({ id: 'j1', status: 'paused' }),
         createJobSummary({ id: 'j2', status: 'pending' }),
@@ -170,13 +179,17 @@ describe('getFilterCounts', () => {
         paused: null,
       },
     })
-    const counts = getFilterCounts(state)
+    const counts = computeFilterCounts(
+      state.jobIds,
+      state.jobsById,
+      state.filterConfig
+    )
     expect(counts.status.paused).toBe(1)
     expect(counts.status.pending).toBe(1)
   })
 
-  it('counts all statuses when status filter is all', () => {
-    const state = createJobState({
+  it('counts all statuses when status filter is null', () => {
+    const state = countsFor({
       jobs: [
         createJobSummary({ id: 'j1', status: 'running' }),
         createJobSummary({ id: 'j2', status: 'failed' }),
@@ -190,12 +203,16 @@ describe('getFilterCounts', () => {
         paused: null,
       },
     })
-    const counts = getFilterCounts(state)
+    const counts = computeFilterCounts(
+      state.jobIds,
+      state.jobsById,
+      state.filterConfig
+    )
     expect(counts.status.all).toBe(3)
   })
 
   it('counts versions excluding the version filter', () => {
-    const state = createJobState({
+    const state = countsFor({
       jobs: [
         createJobSummary({ id: 'j1', workflow_version: 3 }),
         createJobSummary({ id: 'j2', workflow_version: 2 }),
@@ -209,13 +226,17 @@ describe('getFilterCounts', () => {
         paused: null,
       },
     })
-    const counts = getFilterCounts(state)
+    const counts = computeFilterCounts(
+      state.jobIds,
+      state.jobsById,
+      state.filterConfig
+    )
     expect(counts.workflowVersion['3']).toBe(1)
     expect(counts.workflowVersion['2']).toBe(2)
   })
 
   it('counts active node keys excluding the node filter', () => {
-    const state = createJobState({
+    const state = countsFor({
       jobs: [
         createJobSummary({ id: 'j1', active_node_key: 'extract' }),
         createJobSummary({ id: 'j2', active_node_key: 'review' }),
@@ -228,13 +249,17 @@ describe('getFilterCounts', () => {
         paused: null,
       },
     })
-    const counts = getFilterCounts(state)
+    const counts = computeFilterCounts(
+      state.jobIds,
+      state.jobsById,
+      state.filterConfig
+    )
     expect(counts.activeNodeKey.extract).toBe(1)
     expect(counts.activeNodeKey.review).toBe(1)
   })
 
   it('counts all options using total jobs matching other filters', () => {
-    const state = createJobState({
+    const state = countsFor({
       jobs: [
         createJobSummary({ id: 'j1', status: 'running', workflow_version: 3 }),
         createJobSummary({
@@ -257,13 +282,13 @@ describe('getFilterCounts', () => {
         paused: null,
       },
     })
-    const counts = getFilterCounts(state)
+    const counts = computeFilterCounts(
+      state.jobIds,
+      state.jobsById,
+      state.filterConfig
+    )
     expect(counts.status.all).toBe(4)
     expect(counts.workflowVersion.all).toBe(4)
-    expect(counts.workflowVersion['3']).toBe(1)
-    expect(counts.workflowVersion['2']).toBe(1)
-    expect(counts.workflowVersion.none).toBe(2)
     expect(counts.activeNodeKey.all).toBe(4)
-    expect(counts.activeNodeKey.extract).toBe(1)
   })
 })

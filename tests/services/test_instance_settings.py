@@ -50,12 +50,9 @@ def test_apply_overrides_executor_runtime_and_writes_back_config(settings, job_d
     # Keys absent from the stored document keep the loaded/default values.
     assert runtime.heartbeat_failure_threshold == 3
     assert runtime.agent_workers.min_protocol_version == 1
-    # Sub-blocks the DB does not manage keep their loaded values.
-    assert runtime.workflows.pi.binary == "pi"
     # openclaw is DB-managed now: absent from the stored document it falls
-    # back to the code defaults (= the retired yaml values).
-    assert runtime.openclaw.command_template[0] == "openclaw"
-    assert runtime.openclaw.skill_safety.enabled is True
+    # back to the cwd-only code defaults.
+    assert runtime.openclaw.cwd == "."
     # cleanup/monitoring are written back into the config dict, merged over
     # defaults (run_dir_retention_days was not in the stored document).
     assert settings.config["cleanup"] == {
@@ -74,27 +71,12 @@ def test_apply_revalidates_executor_runtime_constraints(settings, job_db, store)
 
 
 def test_apply_overrides_openclaw_block(settings, job_db, store) -> None:
-    store.put(
-        {
-            "openclaw": {
-                "cwd": "/tmp/openclaw-db",
-                "timeout_seconds": 300,
-                "command_template": ["openclaw", "agent", "--json"],
-                "skill_safety": {"enabled": False, "repos": [{"path": "~/skills/s1"}]},
-            }
-        }
-    )
+    store.put({"openclaw": {"cwd": "/tmp/openclaw-db"}})
 
     apply_instance_settings(settings, job_db.path)
 
     openclaw = settings.executor_runtime.openclaw
     assert openclaw.cwd == "/tmp/openclaw-db"
-    assert openclaw.timeout_seconds == 300
-    assert openclaw.command_template == ("openclaw", "agent", "--json")
-    assert openclaw.skill_safety.enabled is False
-    assert [repo.path for repo in openclaw.skill_safety.repos] == ["~/skills/s1"]
-    # Keys absent from the stored block fall back to the code defaults.
-    assert openclaw.isolated_workspace_root == ""
 
 
 def test_apply_openclaw_env_cwd_outranks_db_document(settings, job_db, store, monkeypatch) -> None:
@@ -105,3 +87,32 @@ def test_apply_openclaw_env_cwd_outranks_db_document(settings, job_db, store, mo
     apply_instance_settings(settings, job_db.path)
 
     assert settings.executor_runtime.openclaw.cwd == "/tmp/openclaw-env"
+
+
+def test_effective_document_strips_retired_openclaw_keys_from_stored_document() -> None:
+    """Deployments upgraded from before the openclaw-knob retirement still
+    carry command_template/timeout_seconds/isolated_workspace_root/skill_safety
+    in global_settings['instance'].openclaw; the effective document must be
+    normalized to the cwd-only shape so the extra=forbid response model
+    validates (otherwise GET /api/admin/instance-settings would 500)."""
+    from server.app.routes.instance_settings_contracts import InstanceSettingsResponse
+    from server.app.services.instance_settings import effective_instance_document
+
+    stored = {
+        "openclaw": {
+            "cwd": "/tmp/openclaw-db",
+            "command_template": ["openclaw", "agent"],
+            "timeout_seconds": 600,
+            "isolated_workspace_root": "/tmp/isolated",
+            "skill_safety": {"enabled": True, "repos": [{"path": "~/.skills/s1"}]},
+        }
+    }
+
+    document = effective_instance_document(stored)
+
+    assert document["openclaw"] == {"cwd": "/tmp/openclaw-db"}
+    # The full response contract validates against the normalized document.
+    response = InstanceSettingsResponse.model_validate(document)
+    assert response.openclaw.cwd == "/tmp/openclaw-db"
+    # The caller's stored document is not mutated.
+    assert "command_template" in stored["openclaw"]

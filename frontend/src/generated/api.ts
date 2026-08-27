@@ -3048,27 +3048,8 @@ export interface components {
     }
     /** InstanceOpenClawSettings */
     InstanceOpenClawSettings: {
-      /** Command Template */
-      command_template: string[]
       /** Cwd */
       cwd: string
-      /** Isolated Workspace Root */
-      isolated_workspace_root: string
-      skill_safety: components['schemas']['InstanceOpenClawSkillSafetySettings']
-      /** Timeout Seconds */
-      timeout_seconds: number
-    }
-    /** InstanceOpenClawSkillSafetyRepo */
-    InstanceOpenClawSkillSafetyRepo: {
-      /** Path */
-      path: string
-    }
-    /** InstanceOpenClawSkillSafetySettings */
-    InstanceOpenClawSkillSafetySettings: {
-      /** Enabled */
-      enabled: boolean
-      /** Repos */
-      repos: components['schemas']['InstanceOpenClawSkillSafetyRepo'][]
     }
     /** InstanceSettingsResponse */
     InstanceSettingsResponse: {

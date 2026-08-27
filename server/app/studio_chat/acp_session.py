@@ -255,7 +255,10 @@ class AcpSessionHandle:
                 self.ready_event.set()
                 await self._prompt_loop(conn, session.session_id)
         except Exception as exc:
-            logger.warning("studio chat ACP session failed: %s", exc)
+            # exc_info: this is the primary failure signal for the whole ACP
+            # session lifecycle — losing the traceback makes spawn/transport
+            # problems undiagnosable from the logs alone.
+            logger.warning("studio chat ACP session failed: %s", exc, exc_info=True)
             self.callbacks.on_error(str(exc))
         finally:
             # Reap terminals a crashed/killed agent never released itself.

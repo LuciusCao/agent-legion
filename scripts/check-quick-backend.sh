@@ -27,8 +27,9 @@ run_static_checks() {
   echo "=== Architecture Docs Freshness ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.generate_architecture --check
 
-  echo "=== Spec Health Check ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/verify_specs.py --check
+  # The spec health check (scripts/verify_specs.py) retired with the
+  # unpublished docs/superpowers specs (f4e7e46f): the directory is
+  # gitignored and absent, so the step had been passing vacuously.
 }
 
 run_tests() {
@@ -53,15 +54,17 @@ run_tests() {
   # database URL; this is marker-based membership rather than a file
   # allowlist, and proves the pure layer remains independently runnable.
   #
-  # AGENT_LEGION_TEST_WORKERS caps pytest-xdist parallelism. Default:
-  # min(4, core count) — enough for a fast gate without oversubscribing
-  # machines that run several worktrees or a frontend lane at the same time
-  # (raise it on a dedicated box; CI 4-vCPU runners are unaffected).
+  # AGENT_LEGION_TEST_WORKERS caps pytest-xdist parallelism. Default is
+  # worktree-aware (scripts/gate-jobs.sh): min(4, cores) while a sibling
+  # worktree runs its own gate, cores-2 when this machine's gates are all
+  # ours — without oversubscribing machines that run several worktrees or a
+  # frontend lane at the same time (raise it on a dedicated box; CI 4-vCPU
+  # runners are unaffected).
   #
   # --reruns absorbs timing-sensitive flakes under parallel-gate load; a real
   # regression still fails after the single retry (visible as RERUN in output).
   source "$ROOT_DIR/scripts/gate-jobs.sh"
-  default_workers="$(detect_gate_default_jobs)"
+  default_workers="$(detect_gate_default_jobs_worktree_aware)"
   workers="${AGENT_LEGION_TEST_WORKERS:-$default_workers}"
   telemetry_args=()
   if [[ -n "${AGENT_LEGION_TEST_RESULTS_DIR:-}" ]]; then
@@ -109,6 +112,89 @@ run_tests() {
         "${telemetry_args[@]}" \
         "${cov_args[@]}" \
         "${split_cov_floor_args[@]}"
+      ;;
+    aff)
+      # Agent inner-loop tier: affected-test selection over the unit layer.
+      # The selection needs a coverage-derived index (.pytest-aff-index.json,
+      # built by GATE_TIER=aff-index or scripts/pytest_aff_selection.py);
+      # without one — or when the selection would not save time — it falls
+      # back to the plain unit tier. Never a gate pass: full suite stays the
+      # pre-push/CI boundary.
+      aff_args=()
+      if command -v git >/dev/null 2>&1 && [[ -f "$ROOT_DIR/.pytest-aff-index.json" ]]; then
+        base_ref="$(git merge-base HEAD develop 2>/dev/null || git merge-base HEAD origin/develop 2>/dev/null || true)"
+        selected=""
+        selection_status=0
+        selected="$(UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.pytest_aff_selection select \
+          ${base_ref:+--base "$base_ref"} 2>/dev/null)" || selection_status=$?
+        # Exit 4 = a changed source file is missing from the index (stale
+        # index or a --cov blind spot): the affected tests are unknown, so
+        # run the full unit tier rather than a silently incomplete subset.
+        if [[ "$selection_status" -eq 4 ]]; then
+          echo "=== Python Unit Tests (aff fallback: changed source files missing from the index) ==="
+        elif [[ -n "$selected" ]] && [[ "$(printf '%s\n' "$selected" | wc -l)" -lt 400 ]]; then
+          echo "=== Python Affected Tests (selected $(printf '%s' "$selected" | wc -l | tr -d ' ') of unit tier) ==="
+          while IFS= read -r nodeid; do
+            aff_args+=("$nodeid")
+          done <<<"$selected"
+        else
+          echo "=== Python Unit Tests (aff fallback: no index or selection too broad) ==="
+        fi
+      else
+        echo "=== Python Unit Tests (aff fallback: no .pytest-aff-index.json; prime it with GATE_TIER=aff-index) ==="
+      fi
+      if [[ ${#aff_args[@]} -gt 0 ]]; then
+        AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
+          UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+          --ignore=tests/full \
+          --ignore=tests/ci \
+          -m "not postgres and not repository_gate" \
+          -n "$workers" \
+          --reruns 1 \
+          --reruns-delay 2 \
+          "${aff_args[@]}"
+      else
+        AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
+          UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+          --ignore=tests/full \
+          --ignore=tests/ci \
+          -m "not postgres and not repository_gate" \
+          -n "$workers" \
+          --reruns 1 \
+          --reruns-delay 2 \
+          "${telemetry_args[@]}" \
+          "${cov_args[@]}" \
+          "${split_cov_floor_args[@]}"
+      fi
+      ;;
+    aff-index)
+      # One-off index primer: full unit-tier run with per-test coverage
+      # contexts, then distilled into .pytest-aff-index.json. Keep coverage
+      # off elsewhere; this tier exists to pay the 15-40% tracing cost once.
+      echo "=== Python Unit Tests + Coverage Contexts (aff index build) ==="
+      aff_index_cov_file="$ROOT_DIR/.pytest-aff-coverage"
+      rm -f "$aff_index_cov_file" "$aff_index_cov_file".*.*.*
+      # COVERAGE_FILE must stay exported across the pytest run: pytest-cov
+      # merges its xdist worker shards into that path itself, so a separate
+      # `coverage combine` step is unnecessary (and would fail with "No data
+      # to combine" once the shards are already merged).
+      export COVERAGE_FILE="$aff_index_cov_file"
+      AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
+        UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+        --ignore=tests/full \
+        --ignore=tests/ci \
+        -m "not postgres and not repository_gate" \
+        -n "$workers" \
+        --reruns 1 \
+        --reruns-delay 2 \
+        --cov=server --cov=worker --cov=shared --cov=workflow_nodes --cov=scripts --cov=workspace_libs \
+        --cov-context=test \
+        --cov-fail-under=0 \
+        --cov-report= \
+        "$@"
+      UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.pytest_aff_selection build "$aff_index_cov_file"
+      rm -f "$aff_index_cov_file" "$aff_index_cov_file".*.*.*
+      unset COVERAGE_FILE
       ;;
     postgres)
       echo "=== Python PostgreSQL Tests ==="

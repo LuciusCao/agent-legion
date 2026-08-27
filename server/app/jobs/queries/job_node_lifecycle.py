@@ -8,9 +8,6 @@ from server.app.workflows.definition import WorkflowDefinition
 
 
 class JobNodeLifecycleQueriesMixin(JobQueriesBase):
-    def mark_nodes_not_applicable(self, job_id: str, node_keys: list[str], reason: str) -> None:
-        self.mark_nodes_not_applicable_many([(job_id, node_keys, reason)])
-
     def mark_nodes_not_applicable_many(self, entries: list[tuple[str, list[str], str]]) -> None:
         """Batch mark nodes not applicable across many jobs in one connection."""
         if not entries:

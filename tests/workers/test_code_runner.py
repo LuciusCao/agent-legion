@@ -30,7 +30,6 @@ from worker.code_runner import (
     prepare_code_execution,
     prepare_code_result,
     register_cancellation,
-    strip_secret_config,
     unregister_cancellation,
 )
 from worker.status import ExecutionStatusReporter
@@ -181,17 +180,6 @@ def test_prepare_rejects_unsafe_bundle_member(tmp_path: Path) -> None:
         tar.addfile(info, io.BytesIO(data))
     with pytest.raises(ValueError, match="unsafe Agent bundle member"):
         _prepare(tmp_path, _code_claim(), FakeClient(bundle))
-
-
-def test_strip_secret_config_drops_secret_keys_and_connection_block() -> None:
-    schema = {
-        "properties": {
-            "token": {"type": "string", "secret": True},
-            "threshold": {"type": "number"},
-        }
-    }
-    config = {"token": "s3cr3t", "threshold": 0.5, "connection_config": {"token": "abc"}}
-    assert strip_secret_config(config, schema) == {"threshold": 0.5}
 
 
 def test_build_sandbox_argv_structure() -> None:

@@ -41,7 +41,9 @@ def create_artifacts_router(
 
     @router.post("", status_code=201, response_model=ArtifactUploadResponse)
     async def upload_artifact(request: Request) -> ArtifactUploadResponse:
-        authorize_artifact(request)
+        # authenticate() is a synchronous DB read; keep it off the loop like
+        # the store.put below (deprecated route, but same-loop discipline).
+        await concurrency.run_in_threadpool(authorize_artifact, request)
         declared = request.headers.get("content-length")
         if (
             declared is not None

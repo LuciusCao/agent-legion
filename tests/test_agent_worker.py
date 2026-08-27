@@ -16,12 +16,13 @@ import urllib.error
 from pathlib import Path
 
 import pytest
+import requests
 
 from server.app.agent_broker.agent_bundle import build_agent_bundle
 from worker import executor as agent_worker
 from worker.process_lifecycle import terminate
 from worker.registration_retry import register_with_retry
-from worker.status import ExecutionStatusReporter, read_current_executions, read_runtime_status
+from worker.status import ExecutionStatusReporter, read_runtime_status
 from worker.upload_queue import UploadQueue
 
 
@@ -533,7 +534,10 @@ def test_registration_retries_transient_host_errors_without_traceback(
         del config, token
         calls += 1
         if calls < 3:
-            raise urllib.error.URLError("host unavailable")
+            # The transport-level failure register_with_retry treats as
+            # "Host temporarily unavailable" (requests raises RequestException
+            # subclasses; arbitrary exceptions are NOT retried anymore).
+            raise requests.ConnectionError("host unavailable")
         return {"worker_token": "worker-token", "workspaces": []}
 
     client.register = flaky_register  # type: ignore[method-assign]
@@ -542,6 +546,37 @@ def test_registration_retries_transient_host_errors_without_traceback(
     assert calls == 3
     assert "retrying" in output
     assert "Traceback" not in output
+
+
+def test_registration_retries_transient_http_status_errors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """5xx/429 answers surface as TransientHostError and stay in the retry loop."""
+    client = agent_worker.Client("http://unused")
+    statuses = [503, 429, 201]
+
+    def flaky_request(*args: object, **kwargs: object) -> tuple[int, bytes]:
+        del args, kwargs
+        status = statuses.pop(0)
+        if status == 201:
+            return (status, b'{"worker_token": "tok", "host_protocol_version": 3}')
+        return (status, b"temporarily unavailable")
+
+    client.request = flaky_request  # type: ignore[method-assign]
+    config = {"worker_id": "w1", "runtimes": ["pi"], "max_concurrency": 1}
+    assert register_with_retry(client, config, ["token"], threading.Event(), 0.001)
+    output = capsys.readouterr().out
+    assert "retrying" in output
+    assert "HTTP 503" in output
+
+
+def test_registration_unexpected_client_error_crashes_loudly() -> None:
+    """A non-retriable unexpected status (e.g. 404) must not enter the loop."""
+    client = agent_worker.Client("http://unused")
+    client.request = lambda *a, **k: (404, b"not found")  # type: ignore[method-assign]
+    config = {"worker_id": "w1", "runtimes": ["pi"], "max_concurrency": 1}
+    with pytest.raises(RuntimeError, match="HTTP 404"):
+        register_with_retry(client, config, ["token"], threading.Event(), 0.001)
 
 
 def test_client_heartbeat_and_report_send_lease_header() -> None:
@@ -813,41 +848,6 @@ def test_status_reporter_without_env_path_is_noop(
     assert not (tmp_path / "current_executions.json").exists()
 
 
-def test_read_current_executions_returns_empty_for_dead_writer(tmp_path: Path) -> None:
-    path = tmp_path / "current_executions.json"
-    path.write_text(
-        json.dumps({"pid": 99999999, "executions": {"exec-1": {"execution_id": "exec-1"}}}),
-        encoding="utf-8",
-    )
-    assert read_current_executions(path) == []
-
-
-def test_read_current_executions_returns_empty_for_corrupt_or_missing_file(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "current_executions.json"
-    path.write_text("not json", encoding="utf-8")
-    assert read_current_executions(path) == []
-    assert read_current_executions(tmp_path / "missing.json") == []
-
-
-def test_read_current_executions_sorts_by_started_at(tmp_path: Path) -> None:
-    path = tmp_path / "current_executions.json"
-    path.write_text(
-        json.dumps(
-            {
-                "pid": os.getpid(),
-                "executions": {
-                    "b": {"execution_id": "b", "started_at": "2026-07-23T02:00:00+00:00"},
-                    "a": {"execution_id": "a", "started_at": "2026-07-23T01:00:00+00:00"},
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    assert [item["execution_id"] for item in read_current_executions(path)] == ["a", "b"]
-
-
 def test_runtime_status_includes_worker_authenticated_remote_state(tmp_path: Path) -> None:
     path = tmp_path / "status.json"
     reporter = ExecutionStatusReporter(path)
@@ -865,6 +865,44 @@ def test_runtime_status_includes_worker_authenticated_remote_state(tmp_path: Pat
 
     assert runtime["remote"]["host_reachable"] is True
     assert runtime["remote"]["host_worker"]["worker_id"] == "w1"
+
+
+def test_read_runtime_status_returns_empty_for_dead_writer(tmp_path: Path) -> None:
+    path = tmp_path / "current_executions.json"
+    path.write_text(
+        json.dumps({"pid": 99999999, "executions": {"exec-1": {"execution_id": "exec-1"}}}),
+        encoding="utf-8",
+    )
+    assert read_runtime_status(path) == {"executions": [], "remote": {}}
+
+
+def test_read_runtime_status_returns_empty_for_corrupt_or_missing_file(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "current_executions.json"
+    path.write_text("not json", encoding="utf-8")
+    assert read_runtime_status(path) == {"executions": [], "remote": {}}
+    assert read_runtime_status(tmp_path / "missing.json") == {"executions": [], "remote": {}}
+
+
+def test_read_runtime_status_sorts_executions_by_started_at(tmp_path: Path) -> None:
+    path = tmp_path / "current_executions.json"
+    path.write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "executions": {
+                    "b": {"execution_id": "b", "started_at": "2026-07-23T02:00:00+00:00"},
+                    "a": {"execution_id": "a", "started_at": "2026-07-23T01:00:00+00:00"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert [item["execution_id"] for item in read_runtime_status(path)["executions"]] == [
+        "a",
+        "b",
+    ]
 
 
 def test_run_execution_publishes_status_and_clears_it(
@@ -910,4 +948,4 @@ def test_run_execution_publishes_status_and_clears_it(
     assert snapshot["executions"]["exec-1"]["phase"] == "running"
     assert snapshot["executions"]["exec-1"]["node_key"] == "node_a"
     assert snapshot["executions"]["exec-1"]["started_at"]
-    assert read_current_executions(status_path) == []
+    assert read_runtime_status(status_path)["executions"] == []

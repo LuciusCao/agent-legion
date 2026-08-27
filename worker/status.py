@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from worker._atomic import atomic_write
-from worker.status_reader import read_current_executions, read_runtime_status
+from worker.status_reader import read_runtime_status
 
 ENV_VAR = "AGENT_WORKER_STATUS_FILE"
 STATUS_FILENAME = "current_executions.json"
@@ -24,7 +24,6 @@ __all__ = [
     "ENV_VAR",
     "STATUS_FILENAME",
     "ExecutionStatusReporter",
-    "read_current_executions",
     "read_runtime_status",
 ]
 

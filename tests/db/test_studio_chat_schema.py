@@ -25,7 +25,7 @@ def test_schema_v57_recorded() -> None:
     tests/db/test_job_node_status_counts_migration.py, v56)."""
     # The pin now lives in tests/db/test_retire_global_register_tokens_migration.py
     # (v58+): schema_migrations only ever records the latest version, so the
-    # current SCHEMA_VERSION row must exist with the latest migration's name.
+    # current SCHEMA_VERSION row must exist with the v60 migration's name.
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)

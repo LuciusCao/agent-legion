@@ -59,16 +59,13 @@ frontend/src/
 │   ├── AddItemsRefPanel.tsx    # 条目类型面板：ref 外部引用
 │   ├── AddItemsBundlePanel.tsx # 条目类型面板：bundle 文件夹
 │   ├── AddDialog.tsx
-│   ├── VideoPlayer.tsx
 │   ├── VideoContentPanel.tsx     # Job Detail 视频内容面板
-│   ├── TimelineStrip.tsx         # 视频章节时间轴
 │   ├── RichText.tsx              # CMS 富文本（HTML + LaTeX）统一渲染
 │   └── ...
 ├── stores/                 # Zustand 客户端状态管理
 │   ├── jobStore.ts         # job/ 家族唯一对外入口（shim re-export）
 │   ├── job/                # Job 领域子状态
 │   ├── setting/
-│   ├── videoNodeStore.ts   # 视频节点面板（互动触发 + 产物持有）
 │   └── ...
 ├── hooks/                  # React 自定义 Hooks
 │   ├── useWorkspaceEvents.ts

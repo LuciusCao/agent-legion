@@ -2,14 +2,25 @@
 
 Acquired tokens live Fernet-encrypted in ``connection_tokens`` (VAULT-SECRET-001
 extends to instance scope). ``get_token`` is the single read path: a valid
-cached token is returned directly; an expired/missing one is refreshed while
-holding a row lock on the parent connection row, so a burst of concurrent
-callers (e.g. 96 workers) triggers at most one credential exchange — for
-login-based adapters this is what keeps rate limits and account lockouts away.
-The lock is held across the refresh (network IO included) by design: only
+cached token is returned directly (a disabled connection serves nothing); an
+expired/missing one is refreshed while holding a connection-scoped advisory
+gate (NOT the external_connections row lock): a burst of concurrent callers
+(e.g. 96 workers) triggers at most one credential exchange — for login-based
+adapters this is what keeps rate limits and account lockouts away. Only
 concurrent refreshers of the same connection queue; readers of a valid token
-never touch the lock. Adapters must use bounded network timeouts so a hung
-upstream cannot hold the row lock indefinitely.
+never touch the lock. ``ConnectionService.update``/``delete`` take the same
+gate (see :mod:`connection_gate`), so an admin credential swap can never
+interleave with an in-flight exchange. Unlike the retired row-lock design,
+the gate blocks no row and does not block readers of ``external_connections``
+— but each queued refresher still holds one pool connection while waiting
+(the transaction checks the connection out before taking the gate), and the
+exchange itself runs with the transaction open, so ~pool-size concurrent
+refreshers of the SAME connection can still exhaust the pool (the old row
+lock had the same arithmetic and additionally blocked every
+``external_connections`` reader). If that burst ever materializes, add an
+in-process per-key single-flight so extra callers wait on an event instead
+of queueing on pool connections. Adapters must use bounded network timeouts
+so a hung upstream cannot hold the gate indefinitely.
 
 Call sites that receive an upstream auth failure (HTTP 401/403 or an in-band
 auth error code) should report it via ``NodeContext.report_auth_failure``
@@ -18,19 +29,20 @@ auth error code) should report it via ``NodeContext.report_auth_failure``
 persistent failure surfaces as a technical node failure.
 
 Note: DB rows render datetimes as ISO strings (string_dict_row), so expiry
-checks parse ``expires_at`` from text.
+checks parse ``expires_at`` from text. Legacy frozen-node hooks live in
+:mod:`connection_token_legacy`.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.connection_adapters import ConnectionAdapterError
+from server.app.services.connection_gate import lock_connection_gate
 from server.app.services.connections import ConnectionService
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.vault import _fernet
@@ -66,13 +78,30 @@ class ConnectionTokenService:
         self._settings_config = settings_config
 
     def get_token(self, key: str) -> str:
-        """Return a valid token, refreshing under a row lock when needed."""
+        """Return a valid token, refreshing under a connection-scoped lock."""
         cached = self._read_valid(key)
         if cached is not None:
             return cached
+        return self._refresh_token(key)
+
+    def _refresh_token(self, key: str) -> str:
+        """Single-flight refresh: one credential exchange per connection.
+
+        The advisory lock serializes refreshers of the same connection; the
+        exchange itself (network IO) runs with NO transaction and NO row
+        locks held, so a slow upstream never pins pool connections. The
+        cached-token check inside the lock makes queued losers of the race
+        reuse the winner's token instead of exchanging again.
+        """
         with write_transaction(self._dsn) as conn:
+            # pg_advisory_xact_lock keys on the connection key text: scope is
+            # per connection, unrelated keys never queue on each other.
+            # ConnectionService.update/delete take the same gate, so a
+            # concurrent admin reconfiguration can never interleave with the
+            # resolve→exchange→write sequence (see connection_gate).
+            lock_connection_gate(conn, key)
             locked = conn.execute(
-                "select key, enabled from external_connections where key=%s for update", (key,)
+                "select key, enabled from external_connections where key=%s", (key,)
             ).fetchone()
             if locked is None:
                 raise NotFoundError(f"connection {key!r} 不存在")
@@ -86,10 +115,14 @@ class ConnectionTokenService:
             token = self._decrypt_if_valid(row)
             if token is not None:
                 return token
-            # Re-resolve config/secrets *after* taking the row lock: resolving
-            # before it would let a caller that queued behind a concurrent
-            # admin update exchange the already-replaced credentials and cache
-            # a token for them.
+            # Single-flight: hold the advisory lock ACROSS the exchange so
+            # concurrent refreshers queue here instead of each performing
+            # the credential exchange (login adapters are rate-limit and
+            # lockout sensitive). No row locks are held and no other DB
+            # work is blocked: pool peers see a normal open transaction.
+            # Resolve config/secrets after taking the lock: resolving before
+            # it would let a caller that queued behind a concurrent admin
+            # update exchange the already-replaced credentials.
             adapter, config, secrets = self._connections._resolved(key)
             try:
                 acquired = adapter.authenticate(config, secrets)
@@ -131,8 +164,9 @@ class ConnectionTokenService:
     def _read_valid(self, key: str) -> str | None:
         with read_connection(self._dsn) as conn:
             row = conn.execute(
-                "select token_ciphertext, expires_at from connection_tokens"
-                " where connection_key=%s",
+                "select t.token_ciphertext, t.expires_at"
+                " from connection_tokens t join external_connections c on c.key = t.connection_key"
+                " where t.connection_key=%s and c.enabled = 1",
                 (key,),
             ).fetchone()
         return self._decrypt_if_valid(row)
@@ -185,34 +219,3 @@ def inject_connection_config(
     injected = dict(node_config)
     injected["connection_config"] = tokens.runtime_config(key)
     return injected
-
-
-def report_node_auth_failure(runtime: Mapping[str, Any]) -> None:
-    """Legacy in-runtime hook: invalidate the connection's cached token.
-
-    Superseded by the marker channel (``NodeContext.report_auth_failure`` in
-    ``workspace_libs.node_sdk``): current nodes hold no database handle, so
-    the parent executor performs the invalidation after the child exits. This
-    function stays for legacy frozen node code that still calls it; it is a
-    silent no-op when the runtime carries no connection or no DB handle.
-    """
-    node_config = runtime.get("node_config")
-    key = (
-        str(node_config.get("connection") or "").strip() if isinstance(node_config, Mapping) else ""
-    )
-    # The code executors pop ``_job_db_path`` before invoking node code and
-    # hand the node a JobQueries handle instead (``runtime["job_db"]``, see
-    # server/app/executors/code.py and _code_sandbox.py): resolve the DSN from
-    # that handle first and keep ``_job_db_path`` only as a fallback for
-    # runtimes that still carry the raw path.
-    job_db = runtime.get("job_db")
-    job_db_path = getattr(job_db, "path", None)
-    dsn = str(job_db_path).strip() if job_db_path else ""
-    if not dsn:
-        dsn = str(runtime.get("_job_db_path") or "").strip()
-    if not key or not dsn:
-        return
-    try:
-        ConnectionTokenService(dsn).report_auth_failure(key)
-    except Exception:  # reporting must never mask the original failure
-        logger.exception("connection %s: failed to report auth failure", key)

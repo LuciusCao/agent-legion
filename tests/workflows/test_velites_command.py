@@ -5,10 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from server.app.agent_broker.dispatch import resolve_execution_block
-from server.app.executors.runtime_config import PiRuntimeConfig
 from server.app.workflows.pi_protocol import (
     PROMPT_INSTRUCTION,
     build_command,
@@ -63,23 +61,6 @@ def _dispatch(manifest: dict) -> list[str]:
 
 def _execution(manifest: dict, **patch: object) -> dict:
     return {**manifest, "execution": {**MANIFEST["execution"], **patch}}
-
-
-def test_runtime_config_flavor_defaults_to_pi() -> None:
-    config = PiRuntimeConfig()
-    assert config.flavor == "pi"
-    assert config.binary == "pi"
-
-
-def test_runtime_config_velites_defaults_binary() -> None:
-    config = PiRuntimeConfig.model_validate({"flavor": "velites"})
-    assert config.flavor == "velites"
-    assert config.binary == "velites"
-
-
-def test_runtime_config_rejects_unknown_flavor() -> None:
-    with pytest.raises(ValidationError):
-        PiRuntimeConfig.model_validate({"flavor": "rust"})
 
 
 def test_velites_command_exact_argv() -> None:

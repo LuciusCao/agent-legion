@@ -490,7 +490,15 @@ def test_frontend_gate_shards_project_and_defers_coverage_enforcement(tmp_path: 
     assert "run test:coverage-inventory" not in calls
 
 
-def _run_backend_gate_with_fake_uv(tmp_path: Path, env: dict[str, str]) -> str:
+def _run_backend_gate_with_fake_uv(
+    tmp_path: Path, env: dict[str, str], *, capture: str = "log"
+) -> tuple[str, str] | str:
+    """Run the backend gate with a fake uv.
+
+    ``capture="log"`` returns the fake-uv argument log (the historical
+    behavior); ``capture="both"`` returns ``(log, stdout)`` for tiers whose
+    routing messages only appear on stdout.
+    """
     scripts = tmp_path / "scripts"
     fake_bin = tmp_path / "bin"
     scripts.mkdir()
@@ -504,7 +512,8 @@ def _run_backend_gate_with_fake_uv(tmp_path: Path, env: dict[str, str]) -> str:
         fake_bin / "uv",
         "#!/usr/bin/env bash\n"
         'printf "%s\\n" "$*" >>"$GATE_LOG"\n'
-        'printf "shard:%s\\n" "${GATE_SHARD:-unset}" >>"$GATE_LOG"\n',
+        'printf "shard:%s\\n" "${GATE_SHARD:-unset}" >>"$GATE_LOG"\n'
+        'printf "db:%s\\n" "${AGENT_LEGION_TEST_DATABASE_URL:-unset}" >>"$GATE_LOG"\n',
     )
 
     result = _run(
@@ -520,7 +529,165 @@ def _run_backend_gate_with_fake_uv(tmp_path: Path, env: dict[str, str]) -> str:
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+    if capture == "both":
+        return gate_log.read_text(encoding="utf-8"), result.stdout
     return gate_log.read_text(encoding="utf-8")
+
+
+def test_backend_aff_tier_falls_back_to_unit_without_index(tmp_path: Path) -> None:
+    """GATE_TIER=aff without .pytest-aff-index.json must run the whole unit
+    tier against the offline database URL (fallback only widens what runs)."""
+    calls, stdout = _run_backend_gate_with_fake_uv(tmp_path, {"GATE_TIER": "aff"}, capture="both")
+
+    assert "aff fallback: no .pytest-aff-index.json" in stdout
+    assert "not postgres and not repository_gate" in calls
+    assert "agent_legion_unit_offline" in calls
+
+
+def test_backend_aff_tier_selects_tests_with_index(tmp_path: Path) -> None:
+    """With an index present, the aff tier passes the selected nodeids to
+    pytest instead of the whole-tier marker filter."""
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    backend_gate = scripts / "check-quick-backend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    gate_log = tmp_path / "gate.log"
+    # The fake uv logs its arguments; the selection subcommand prints one
+    # selected nodeid the gate must forward to pytest.
+    _write_executable(
+        fake_bin / "uv",
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" >>"$GATE_LOG"\n'
+        'for arg in "$@"; do\n'
+        '  if [[ "$arg" == "scripts.pytest_aff_selection" ]]; then\n'
+        '    if [[ "${prev:-}" == "-m" ]]; then\n'
+        '      printf "tests/test_fake.py::test_thing\\n"\n'
+        "    fi\n"
+        "  fi\n"
+        '  prev="$arg"\n'
+        "done\n",
+    )
+    # The aff tier requires the index file to exist before it even asks for a
+    # selection.
+    (tmp_path / ".pytest-aff-index.json").write_text("{}", encoding="utf-8")
+
+    result = _run(
+        backend_gate,
+        cwd=tmp_path,
+        env={
+            "BACKEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "GATE_TIER": "aff",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = gate_log.read_text(encoding="utf-8")
+    assert "Python Affected Tests (selected" in result.stdout
+    # The selected nodeid is forwarded as a pytest path argument.
+    assert "tests/test_fake.py::test_thing" in calls
+
+
+def test_backend_aff_tier_falls_back_when_selection_is_broad(tmp_path: Path) -> None:
+    """A selection covering hundreds of nodeids saves nothing over the unit
+    tier; the gate must fall back to the plain unit invocation."""
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    backend_gate = scripts / "check-quick-backend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "uv",
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$@" >>"$GATE_LOG"\n'
+        'for arg in "$@"; do\n'
+        '  if [[ "$arg" == "scripts.pytest_aff_selection" ]]; then\n'
+        '    if [[ "${prev:-}" == "-m" ]]; then\n'
+        '      for i in $(seq 1 500); do printf "tests/test_broad.py::test_%s\\n" "$i"; done\n'
+        "    fi\n"
+        "  fi\n"
+        '  prev="$arg"\n'
+        "done\n",
+    )
+    (tmp_path / ".pytest-aff-index.json").write_text("{}", encoding="utf-8")
+
+    result = _run(
+        backend_gate,
+        cwd=tmp_path,
+        env={
+            "BACKEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "GATE_TIER": "aff",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "aff fallback: no index or selection too broad" in result.stdout
+    calls = gate_log.read_text(encoding="utf-8")
+    assert "not postgres and not repository_gate" in calls
+
+
+def test_backend_aff_tier_falls_back_on_unmapped_source_files(tmp_path: Path) -> None:
+    """Selection exit 4 (changed source file missing from the index) must
+    run the full unit tier: the affected tests are unknown, and a selected
+    subset would silently skip them (PR #184 Codex review)."""
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    backend_gate = scripts / "check-quick-backend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "uv",
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$@" >>"$GATE_LOG"\n'
+        'for arg in "$@"; do\n'
+        '  if [[ "$arg" == "scripts.pytest_aff_selection" ]]; then\n'
+        '    if [[ "${prev:-}" == "-m" ]]; then\n'
+        '      echo "unmapped-source-files" >&2; exit 4\n'
+        "    fi\n"
+        "  fi\n"
+        '  prev="$arg"\n'
+        "done\n",
+    )
+    (tmp_path / ".pytest-aff-index.json").write_text("{}", encoding="utf-8")
+
+    result = _run(
+        backend_gate,
+        cwd=tmp_path,
+        env={
+            "BACKEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "GATE_TIER": "aff",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "aff fallback: changed source files missing from the index" in result.stdout
+    calls = gate_log.read_text(encoding="utf-8")
+    assert "not postgres and not repository_gate" in calls
+    assert "not postgres and not repository_gate" in calls
+
+
+def test_backend_aff_index_tier_uses_coverage_contexts(tmp_path: Path) -> None:
+    """The aff-index primer must trace per-test coverage contexts and build
+    the index from the dedicated coverage file (not the default .coverage)."""
+    calls = _run_backend_gate_with_fake_uv(tmp_path, {"GATE_TIER": "aff-index"})
+
+    assert "--cov-context=test" in calls
+    assert "--cov-report=" in calls
+    assert "pytest_aff_selection build" in calls
 
 
 def test_backend_postgres_tier_loads_shard_plugin_when_gate_shard_set(tmp_path: Path) -> None:
@@ -539,14 +706,17 @@ def test_backend_postgres_tier_has_no_shard_plugin_without_gate_shard(tmp_path: 
     assert "postgres and not repository_gate" in calls
 
 
-def test_backend_test_workers_default_is_capped_at_four(tmp_path: Path) -> None:
-    """The pytest -n default is min(4, core count): present on every test
-    tier invocation, never above 4 (issue #91)."""
+def test_backend_test_workers_default_is_capped(tmp_path: Path) -> None:
+    """The pytest -n default is worktree-aware (scripts/gate-jobs.sh): capped
+    at min(4, cores) while a sibling worktree runs a gate, cores-2 (capped at
+    8) otherwise. In the fake-repo fixture no sibling gate lock exists, so the
+    idle branch must hold; the busy branch is covered by the gate-jobs.sh
+    unit tests (issue #91 keeps the busy-branch cap at 4)."""
     calls = _run_backend_gate_with_fake_uv(tmp_path, {})
 
     match = re.search(r"(?:^|\s)-n (\d+)(?:\s|$)", calls)
     assert match is not None, calls
-    assert 1 <= int(match.group(1)) <= 4
+    assert 1 <= int(match.group(1)) <= 8
 
 
 def test_backend_test_workers_env_override_wins(tmp_path: Path) -> None:
@@ -619,12 +789,12 @@ def _run_rust_gate(tmp_path: Path, env: dict[str, str]) -> str:
     return gate_log.read_text(encoding="utf-8")
 
 
-def test_rust_lane_workers_default_is_capped_at_four(tmp_path: Path) -> None:
+def test_rust_lane_workers_default_is_capped(tmp_path: Path) -> None:
     calls = _run_rust_gate(tmp_path, {})
 
     clippy = re.search(r"cargo:clippy .* -j (\d+)", calls)
     assert clippy is not None, calls
-    assert 1 <= int(clippy.group(1)) <= 4
+    assert 1 <= int(clippy.group(1)) <= 8
     assert re.search(r"cargo:test --locked -j \d+", calls)
 
 

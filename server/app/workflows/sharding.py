@@ -164,21 +164,6 @@ def try_start_shard(
     return True
 
 
-def has_pending_shards(conn: DatabaseConnection, job_id: str, node_key: str) -> bool:
-    """Return True when the node still has pending shards to dispatch.
-
-    The ready layer uses this to keep offering a shard node whose aggregate
-    ``job_nodes`` row sits in ``running``: intermediate aggregates never
-    rewrite the node row, so pending shards of a running node must remain
-    schedulable.
-    """
-    row = conn.execute(
-        "select 1 from node_shards where job_id=%s and node_key=%s and status='pending' limit 1",
-        (job_id, node_key),
-    ).fetchone()
-    return row is not None
-
-
 def shard_index_for_execution(
     conn: DatabaseConnection, job_id: str, node_key: str, execution_id: str
 ) -> int | None:

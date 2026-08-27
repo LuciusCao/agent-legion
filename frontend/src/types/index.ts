@@ -138,7 +138,6 @@ export type SkillValidateResponse = ApiSchemas['SkillValidateResponse']
 export type SkillTagsResponse = ApiSchemas['SkillTagsResponse']
 
 export type WorkflowNodeRecord = ApiSchemas['WorkflowNodeResponse']
-export type WorkflowIntakeModeRecord = ApiSchemas['WorkflowIntakeModeResponse']
 export type WorkflowDefinitionRecord = ApiSchemas['WorkflowDefinitionResponse']
 export type WorkflowRevisionSummary = ApiSchemas['WorkflowRevisionSummary']
 export type ActiveWorkflowRevisionResponse =

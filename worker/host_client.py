@@ -28,6 +28,15 @@ class WorkerAuthError(RuntimeError):
     """Server rejected this Worker as unknown or revoked; re-registration is required."""
 
 
+class TransientHostError(requests.RequestException):
+    """Host answered with a transient failure (5xx/429); retrying is correct.
+
+    A RequestException subclass on purpose: the retry loop treats transport
+    failures and these answers alike as "Host temporarily unavailable", while
+    WorkerAuthError (a verdict) and programming errors still fail fast.
+    """
+
+
 class Client(TransferOperations):
     def __init__(
         self,
@@ -115,7 +124,13 @@ class Client(TransferOperations):
                 f"Agent Worker registration rejected: HTTP {status}: {body[:300]!r}"
             )
         if status != 201:
-            raise RuntimeError(f"Agent Worker registration failed: HTTP {status}: {body[:300]!r}")
+            # 5xx/429 mean the Host is temporarily unhealthy (retry); any
+            # other unexpected status is a routing/contract bug that must
+            # crash loudly instead of disguising itself as an outage.
+            message = f"Agent Worker registration failed: HTTP {status}: {body[:300]!r}"
+            if status >= 500 or status == 429:
+                raise TransientHostError(message)
+            raise RuntimeError(message)
         document = json.loads(body)
         if int(document.get("host_protocol_version", 0)) < PROTOCOL_VERSION:
             raise WorkerAuthError(

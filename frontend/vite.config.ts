@@ -15,7 +15,6 @@ const commonTestExcludes = [
 const browserTestFiles = [
   'src/api/core.test.ts',
   'src/components/useJobListLoadMore.test.ts',
-  'src/hooks/useAsync.test.ts',
   'src/hooks/useDashboardEvents.test.ts',
   'src/hooks/useDebouncedCallback.test.ts',
   'src/hooks/useJobComprehensionInfo.test.ts',
@@ -24,7 +23,6 @@ const browserTestFiles = [
   'src/lib/download.test.ts',
   'src/lib/htmlText.test.ts',
   'src/lib/latex.test.ts',
-  'src/lib/materialWeb.test.ts',
   'src/lib/sanitizeHtml.test.ts',
   'src/hooks/useJobFilterRefetch.test.ts',
   'src/pages/jobDetail/useUpgradeWorkflowAction.test.ts',
@@ -103,6 +101,21 @@ export default defineConfig(({ mode }) => {
               )
             ) {
               return 'vendor-react'
+            }
+            // Markdown rendering (studio chat) and the JSON artifact viewer
+            // are heavy and used by few routes — keep them out of the catch-all
+            // vendor bucket, which the entry loads on first paint.
+            if (id.includes('marked')) {
+              return 'vendor-marked'
+            }
+            if (id.includes('react18-json-view')) {
+              return 'vendor-json-view'
+            }
+            if (id.includes('uplot')) {
+              return 'vendor-uplot'
+            }
+            if (id.includes('dompurify')) {
+              return 'vendor-dompurify'
             }
             return 'vendor'
           },

@@ -31,13 +31,6 @@ const settings: InstanceSettingsResponse = {
   agent_workers: { max_archive_bytes: 104857600, min_protocol_version: 2 },
   openclaw: {
     cwd: '.',
-    timeout_seconds: 600,
-    isolated_workspace_root: '',
-    command_template: ['openclaw', 'agent', '--json'],
-    skill_safety: {
-      enabled: true,
-      repos: [{ path: '~/.agents/skills/agent-legion/s1' }],
-    },
   },
 }
 
@@ -159,67 +152,19 @@ describe('InstanceSettingsSection', () => {
     renderSection()
 
     expect(await screen.findByLabelText('OpenClaw 工作目录')).toHaveValue('.')
-    expect(screen.getByLabelText('OpenClaw 超时（秒）')).toHaveValue(600)
-    expect(screen.getByLabelText('隔离工作区根目录')).toHaveValue('')
-    expect(screen.getByLabelText('启用 skill 安全检查')).toBeChecked()
-    expect(screen.getByLabelText('命令模板（JSON 字符串数组）')).toHaveValue(
-      JSON.stringify(settings.openclaw.command_template, null, 2)
-    )
 
     fireEvent.change(screen.getByLabelText('OpenClaw 工作目录'), {
       target: { value: '/tmp/openclaw' },
     })
-    fireEvent.change(screen.getByLabelText('命令模板（JSON 字符串数组）'), {
-      target: { value: '["openclaw", "agent"]' },
-    })
-    fireEvent.change(
-      screen.getByLabelText('skill_safety repos（JSON，仅 path 键）'),
-      { target: { value: '[{"path": "~/skills/s2"}]' } }
-    )
-    fireEvent.click(screen.getByLabelText('启用 skill 安全检查'))
     fireEvent.click(screen.getByText('保存实例设置'))
 
     await waitFor(() => {
       expect(updateInstanceSettings).toHaveBeenCalledWith({
         ...settings,
         openclaw: {
-          ...settings.openclaw,
           cwd: '/tmp/openclaw',
-          command_template: ['openclaw', 'agent'],
-          skill_safety: { enabled: false, repos: [{ path: '~/skills/s2' }] },
         },
       })
     })
-  })
-
-  it('rejects invalid command_template JSON before saving', async () => {
-    renderSection()
-    await screen.findByLabelText('OpenClaw 工作目录')
-
-    fireEvent.change(screen.getByLabelText('命令模板（JSON 字符串数组）'), {
-      target: { value: 'not-json' },
-    })
-    fireEvent.click(screen.getByText('保存实例设置'))
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      '命令模板 不是合法 JSON'
-    )
-    expect(updateInstanceSettings).not.toHaveBeenCalled()
-  })
-
-  it('rejects skill_safety repos with a ref key before saving', async () => {
-    renderSection()
-    await screen.findByLabelText('OpenClaw 工作目录')
-
-    fireEvent.change(
-      screen.getByLabelText('skill_safety repos（JSON，仅 path 键）'),
-      { target: { value: '[{"path": "~/skills/s2", "ref": "v1.0.0"}]' } }
-    )
-    fireEvent.click(screen.getByText('保存实例设置'))
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'skill_safety repos 元素只允许 path 键'
-    )
-    expect(updateInstanceSettings).not.toHaveBeenCalled()
   })
 })
