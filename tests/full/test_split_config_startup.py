@@ -23,7 +23,6 @@ def test_repository_split_configuration_builds_application(tmp_path: Path, monke
         "BASECMS_SECRET",
         "BASECMS_TOKEN_URL",
         "AGENT_LEGION_CMS_TOKEN",
-        "AGENT_LEGION_CMS_TOKEN_GEN_SECRET",
     ):
         monkeypatch.setenv(key, "")
     settings = load_settings(data_dir=tmp_path / "settings-data")

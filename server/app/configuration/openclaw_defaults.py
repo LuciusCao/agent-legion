@@ -14,7 +14,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-# Only ``cwd`` remains consumed (agent discovery working directory). The
+# Only ``cwd`` remains (existence-checked at startup validation). The
 # command_template / timeout_seconds / isolated_workspace_root / skill_safety
 # knobs retired with the legacy business workflow pipeline.
 DEFAULT_OPENCLAW_CONFIG: dict[str, Any] = {"cwd": "."}

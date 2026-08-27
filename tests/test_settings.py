@@ -23,7 +23,6 @@ def _clear_agent_legion_env(monkeypatch):
         "BASECMS_SECRET",
         "BASECMS_TOKEN_URL",
         "AGENT_LEGION_CMS_TOKEN",
-        "AGENT_LEGION_CMS_TOKEN_GEN_SECRET",
         "AGENT_LEGION_OPENCLAW_CWD",
         "AGENT_LEGION_SKIP_DOTENV",
     ):

@@ -16,15 +16,6 @@ export const STATUS_LABELS: Record<string, string> = {
   stale: '已过期',
 }
 
-export const STATUS_ICONS: Record<string, string> = {
-  completed: 'check_circle',
-  running: 'sync',
-  failed: 'error',
-  queued: 'schedule',
-  pending: 'radio_button_unchecked',
-  paused: 'pause_circle',
-}
-
 export const INTERACTION_TYPE_LABELS: Record<string, string> = {
   example_practice: '例题试做',
   interaction_summary: '互动小结',

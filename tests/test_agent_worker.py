@@ -859,6 +859,44 @@ def test_runtime_status_includes_worker_authenticated_remote_state(tmp_path: Pat
     assert runtime["remote"]["host_worker"]["worker_id"] == "w1"
 
 
+def test_read_runtime_status_returns_empty_for_dead_writer(tmp_path: Path) -> None:
+    path = tmp_path / "current_executions.json"
+    path.write_text(
+        json.dumps({"pid": 99999999, "executions": {"exec-1": {"execution_id": "exec-1"}}}),
+        encoding="utf-8",
+    )
+    assert read_runtime_status(path) == {"executions": [], "remote": {}}
+
+
+def test_read_runtime_status_returns_empty_for_corrupt_or_missing_file(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "current_executions.json"
+    path.write_text("not json", encoding="utf-8")
+    assert read_runtime_status(path) == {"executions": [], "remote": {}}
+    assert read_runtime_status(tmp_path / "missing.json") == {"executions": [], "remote": {}}
+
+
+def test_read_runtime_status_sorts_executions_by_started_at(tmp_path: Path) -> None:
+    path = tmp_path / "current_executions.json"
+    path.write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "executions": {
+                    "b": {"execution_id": "b", "started_at": "2026-07-23T02:00:00+00:00"},
+                    "a": {"execution_id": "a", "started_at": "2026-07-23T01:00:00+00:00"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert [item["execution_id"] for item in read_runtime_status(path)["executions"]] == [
+        "a",
+        "b",
+    ]
+
+
 def test_run_execution_publishes_status_and_clears_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

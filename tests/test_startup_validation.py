@@ -49,8 +49,8 @@ def test_agent_workflows_do_not_require_pi_binary_on_host(tmp_path, monkeypatch)
 def test_enabled_workflows_accept_pi_command_from_path(tmp_path, monkeypatch):
     """kind:pi 本地 executor（死路径保留）要求 pi 二进制在 PATH 上。
 
-    workflows.pi yaml 块已退役（agent 配置治理 phase 3），PiRuntimeConfig
-    只剩硬编码默认 binary="pi"。
+    workflows.pi yaml 块已退役（agent 配置治理 phase 3；PiRuntimeConfig
+    已随死代码清理删除，pi 二进制由 dispatch 的 _RUNTIME_BINARIES 钉死）。
     """
     _make_executable(tmp_path / "pi")
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
@@ -81,7 +81,6 @@ def test_openclaw_cwd_must_exist(tmp_path, monkeypatch):
 
 def test_validation_diagnostics_do_not_leak_secret_values(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_LEGION_CMS_TOKEN", "super-secret-token")
-    monkeypatch.setenv("AGENT_LEGION_CMS_TOKEN_GEN_SECRET", "super-secret-gen")
 
     monkeypatch.setenv("AGENT_LEGION_OPENCLAW_CWD", "/no/such/cwd")
     config = _minimal_config().format(cwd=tmp_path)

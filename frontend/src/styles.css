@@ -46,25 +46,12 @@ input {
   font: inherit;
 }
 
-.hidden {
-  display: none !important;
+.active-icon {
+  color: #000000;
 }
 
 .app-shell {
   min-height: 100vh;
-}
-
-.view {
-  min-height: 100vh;
-  padding: 20px;
-}
-
-.topbar,
-.topbar-actions,
-.detail-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
 }
 
 h1,
@@ -75,150 +62,6 @@ p {
 
 h1 {
   font-size: 22px;
-}
-
-/* Material card replacements */
-.card-outlined {
-  background: #ffffff;
-  border: 1px solid #e0e0e0;
-  border-radius: 12px;
-}
-
-/* Filters */
-.list-fixed-header {
-  flex: 0 0 auto;
-  background: #ffffff;
-}
-
-.stats-actions .MuiIconButton-root.active-icon {
-  color: #000000;
-}
-
-/* Video list */
-.video-list {
-  margin-top: 12px;
-}
-
-/* Resource rows */
-.resource-main {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.form-panel,
-.inline-form,
-.field {
-  display: flex;
-  gap: 12px;
-}
-
-.field {
-  flex-direction: column;
-  min-width: 220px;
-}
-
-.field span {
-  font-size: 12px;
-  color: #43474e;
-}
-
-.field select,
-.field input {
-  min-height: 40px;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  padding: 0 12px;
-  background: #ffffff;
-  color: #1a1c1e;
-}
-
-/* Detail view */
-.detail-view {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  gap: 0;
-  height: 100vh;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.detail-title-block::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  left: 0;
-  top: calc(100% + 8px);
-  z-index: 30;
-  max-width: min(640px, calc(100vw - 40px));
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: #1a1c1e;
-  color: #ffffff;
-  box-shadow: 0 2px 8px rgb(0 0 0 / 0.24);
-  font-size: 13px;
-  line-height: 1.4;
-  opacity: 0;
-  overflow-wrap: anywhere;
-  pointer-events: none;
-  visibility: hidden;
-  white-space: normal;
-  transition:
-    opacity 120ms ease,
-    visibility 0s linear 120ms;
-}
-
-.detail-title-block:hover::after {
-  opacity: 1;
-  visibility: visible;
-  transition-delay: 1s, 1s;
-}
-
-/* Detail content */
-.timeline-detail-content {
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  line-height: 1.5;
-  margin-top: 0;
-}
-
-.timeline-detail-content.error {
-  background: #fee2e2;
-  color: #b91c1c;
-  border: 1px solid #ba1a1a;
-}
-
-.timeline-detail-content.transcription {
-  background: #fafafa;
-  border: 1px solid #e0e0e0;
-  color: #1a1c1e;
-}
-
-/* Tabs */
-.tabs {
-  display: flex;
-  gap: 8px;
-  border-bottom: 1px solid #e0e0e0;
-  margin: -4px -4px 12px;
-  padding: 0 4px;
-}
-
-/* Tab panel */
-.tab-panel {
-  display: grid;
-  gap: 8px;
-  max-height: 360px;
-  overflow: auto;
-}
-
-/* Node cards */
-.node-card {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0;
-  width: 100%;
-  padding: 12px;
 }
 
 /* Subtitle rows */
@@ -234,57 +77,6 @@ pre {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* Empty state */
-.empty-state {
-  padding: 16px;
-  color: #43474e;
-}
-
-.review-badge.partial {
-  background: var(--status-partial-bg);
-  color: var(--status-partial-text);
-}
-
-.review-badge.all-failed {
-  background: var(--status-failed-bg);
-  color: var(--status-failed-text);
-}
-
-/* Responsive */
-@media (max-width: 900px) {
-  .filters-row,
-  .topbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .detail-topbar {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-
-  .detail-actions {
-    justify-self: end;
-  }
-
-  .detail-upper {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto;
-    grid-template-areas:
-      'topbar'
-      'primary'
-      'sidebar';
-    height: auto;
-    max-height: none;
-    min-height: 0;
-  }
-
-  .phase-runs-sidebar {
-    align-self: start;
-    max-height: none;
-    overflow: visible;
-  }
 }
 
 /* Page transitions */
@@ -315,11 +107,6 @@ pre {
 
 .pulse-blue {
   animation: pulse-blue 1.4s ease-in-out infinite;
-}
-
-.workspace-job-create .error-text,
-.workspace-job-detail .error-text {
-  white-space: pre-wrap;
 }
 
 .workspace-main {

@@ -266,11 +266,6 @@
       1,
       0
     ],
-    "server/app/services/token_usage_capture.py": [
-      0,
-      1,
-      0
-    ],
     "server/app/services/token_usage_lease.py": [
       2,
       2,

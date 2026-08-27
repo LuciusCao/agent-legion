@@ -44,7 +44,7 @@ from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_
 # Test skill sources: the built-in constants (retired config/skills.yaml +
 # skills.lock transcription) re-seeded into global_settings after every
 # TRUNCATE, mirroring the app startup seed so DB-driven skill resolution
-# (SkillManager, skill catalog, openclaw skill_safety) sees the pinned skills.
+# (SkillManager, skill catalog) sees the pinned skills.
 def _seed_skill_sources() -> None:
     store = SkillSourceStore(TEST_DATABASE_URL)
     store.put_sources(BUILTIN_SKILL_SOURCES.model_copy(deep=True))

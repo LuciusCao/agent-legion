@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 class OpenClawRuntimeConfig(BaseModel):
-    """OpenClaw runtime knobs as consumed today: only ``cwd`` is read (the
-    agents-list discovery working directory and its startup validation).
+    """OpenClaw runtime knobs as consumed today: only ``cwd`` remains, checked
+    for existence at startup validation (validate_runtime).
     ``command_template`` / ``timeout_seconds`` / ``isolated_workspace_root`` /
     ``skill_safety`` retired with the legacy business workflow pipeline.
     """

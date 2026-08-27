@@ -23,7 +23,6 @@ const browserTestFiles = [
   'src/lib/download.test.ts',
   'src/lib/htmlText.test.ts',
   'src/lib/latex.test.ts',
-  'src/lib/materialWeb.test.ts',
   'src/lib/sanitizeHtml.test.ts',
   'src/hooks/useJobFilterRefetch.test.ts',
   'src/pages/jobDetail/useUpgradeWorkflowAction.test.ts',

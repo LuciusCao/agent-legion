@@ -34,11 +34,16 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   `TimelineStrip`, `materialWeb.ts`, and the superseded
   `getFilterCounts`/`filterCountsCore` pair — all unreferenced since the
   react-query migration; pruned dead exports in `labels.ts`/`theme.ts`/
-  `nodeCatalog.ts`/types, dead rules in `styles.css` (634 → ~330 lines) and
+  `nodeCatalog.ts`/types, dead rules in `styles.css` (634 → 118 lines) and
   seven CSS modules; moved `@tanstack/react-query-devtools` to
   `dependencies` (it is imported by the production entry), moved
   `@types/dagre` to devDependencies, and dropped the redundant
-  `@types/katex` shim (katex bundles its own types).
+  `@types/katex` shim (katex bundles its own types). The filter-count
+  exclusion semantics (each dimension counts jobs matching the other
+  filters while excluding its own) and the worker status-reader edge
+  cases (dead writer, corrupt/missing file, started_at ordering) were
+  re-homed onto the surviving `computeFilterCounts` / `read_runtime_status`
+  implementations with ported tests.
 - Removed one-off scripts whose retirement conditions are met:
   `backfill_workflow_revision_resources.py` (schema has moved v26 → v58 and
   the loader hard-rejects the `resources` field), `bench_gzip_exemption.py`,
