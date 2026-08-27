@@ -5,7 +5,7 @@ import styles from './WorkflowStudioChangesView.module.css'
 
 type Studio = ReturnType<typeof useWorkflowStudio>
 
-/** 变更视图实际消费的 studio 子集（画布模式与历史全局弹窗共用）。 */
+/** 变更视图实际消费的 studio 子集（右侧变更 Drawer 与发布前 review 共用）。 */
 export type ChangesViewStudio = Pick<
   Studio,
   | 'validationMessage'
@@ -15,7 +15,7 @@ export type ChangesViewStudio = Pick<
   | 'compareState'
 >
 
-// 画布「变更」模式的内容：校验结果 + 草稿对比摘要。
+// 变更 Drawer 的内容：校验结果 + 草稿对比摘要。
 export function WorkflowStudioChangesView(props: {
   studio: ChangesViewStudio
   onSelectNode: (nodeKey: string) => void

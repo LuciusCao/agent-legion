@@ -13,7 +13,8 @@ type Props = {
   replacedByDetail: boolean
 }
 
-/** 左半画布（含三模式工具栏）。Agent 面板展开且选中节点时被详情替换
+/** 左半画布（DAG 常驻，工具栏含 Agent 面板开关 / 编辑 YAML / DAG 全屏）。
+ * Agent 面板展开且选中节点时被详情替换
  * （桌面端 display:none，移动端仍由面板切换控制）。 */
 export function WorkflowStudioCanvasPanel({
   agentOpen,
@@ -34,10 +35,9 @@ export function WorkflowStudioCanvasPanel({
     <main className={className} data-mobile-panel="graph">
       <div data-canvas-toolbar className={canvasToolbarStyles.canvasToolbar}>
         <WorkflowStudioCanvasToolbar
-          mode={view.canvasMode}
-          onModeChange={view.setCanvasMode}
           agentOpen={agentOpen}
           onToggleAgent={onToggleAgent}
+          onEditYaml={() => view.setYamlEditorOpen(true)}
           onDagFullscreen={() => view.setDagFullscreenOpen(true)}
         />
       </div>

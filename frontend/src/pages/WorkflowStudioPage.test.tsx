@@ -1,5 +1,11 @@
 import React from 'react'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import {
+  render,
+  screen,
+  waitFor,
+  waitForElementToBeRemoved,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioPage } from './WorkflowStudioPage'
@@ -99,6 +105,13 @@ vi.mock('../api', () => {
     publishWorkflowDraft: vi
       .fn()
       .mockResolvedValue({ valid: true, errors: [] }),
+    fetchWorkflowDraft: vi
+      .fn()
+      .mockResolvedValue({ definition_yaml: null, updated_at: null }),
+    putWorkflowDraft: vi.fn().mockResolvedValue({
+      definition_yaml: 'key: demo_video_workflow\n',
+      updated_at: '2026-08-27T00:00:00+00:00',
+    }),
     validateWorkflowDraft: vi
       .fn()
       .mockResolvedValue({ valid: true, errors: [] }),
@@ -140,6 +153,13 @@ describe('WorkflowStudioPage', () => {
     authState.user = { role: 'admin' }
   })
 
+  // 关闭 YAML 全屏 Dialog 并等退出过渡结束：过渡期间 modal 仍挂着，
+  // 顶栏被 aria-hidden，role 查询会失败。
+  async function closeYamlEditor(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: 'close YAML editor' }))
+    await waitForElementToBeRemoved(() => screen.queryByRole('dialog'))
+  }
+
   it('redirects non-admin users away from the studio (P4)', () => {
     authState.user = { role: 'member' }
     renderPage()
@@ -168,7 +188,7 @@ describe('WorkflowStudioPage', () => {
     expect(appBar).toHaveTextContent('发布')
     expect(appBar).toHaveTextContent('重置')
     // P3：查看变更 / YAML 高级编辑 / Agent 管理 / Executor 管理已从顶栏移除，
-    // 前两者下沉为画布区模式，后两者随管理弹窗删除。
+    // 前两者下沉为变更 Drawer 与 YAML 全屏 Dialog，后两者随管理弹窗删除。
     expect(appBar).not.toHaveTextContent('查看变更')
     expect(appBar).not.toHaveTextContent('YAML 高级编辑')
     expect(appBar).not.toHaveTextContent('Agent 管理')
@@ -187,23 +207,43 @@ describe('WorkflowStudioPage', () => {
     expect(screen.getAllByText(/v1/)[0]).toBeInTheDocument()
     expect(screen.getByText(/abcdef12/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'YAML' }))
+    await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
     expect(
       await screen.findByDisplayValue(/key: demo_video_workflow/)
     ).toBeInTheDocument()
   })
 
-  it('shows workflow-wide changes in the canvas changes mode', async () => {
+  it('shows workflow-wide changes in the changes drawer after validation', async () => {
     const user = userEvent.setup()
     renderPage()
 
     await screen.findByText('题目审题 / 编辑工作流')
-    await user.click(screen.getByRole('button', { name: '变更' }))
+    await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
+    const editor = await screen.findByLabelText('工作流 YAML')
+    await user.type(editor, '\n# edited')
+    await closeYamlEditor(user)
 
+    await screen.findByText(/未发布变更/)
+    // 校验完成打开右侧变更面板（Drawer），不再切换画布模式。
+    await user.click(screen.getByRole('button', { name: '校验' }))
+    expect(await screen.findByText('变更与校验')).toBeInTheDocument()
     expect(screen.getByText('变更摘要')).toBeInTheDocument()
-    expect(
-      screen.queryByRole('dialog', { name: '变更与校验' })
-    ).not.toBeInTheDocument()
+  })
+
+  it('opens the changes drawer from the status chip', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByText('题目审题 / 编辑工作流')
+    await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
+    const editor = await screen.findByLabelText('工作流 YAML')
+    await user.type(editor, '\n# edited')
+    await closeYamlEditor(user)
+
+    await user.click(await screen.findByText(/未发布变更/))
+
+    expect(await screen.findByText('变更与校验')).toBeInTheDocument()
+    expect(screen.getByText('变更摘要')).toBeInTheDocument()
   })
 
   it('marks the editor dirty and resets to active definition', async () => {
@@ -211,19 +251,21 @@ describe('WorkflowStudioPage', () => {
     renderPage()
 
     await screen.findByText('题目审题 / 编辑工作流')
-    await user.click(screen.getByRole('button', { name: 'YAML' }))
+    await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
     const editor = await screen.findByLabelText('工作流 YAML')
     await user.clear(editor)
     await user.type(editor, 'key: changed')
+    await closeYamlEditor(user)
 
     const commandBar = screen.getByLabelText('Workflow command bar')
-    expect(within(commandBar).getByText(/有未发布变更/)).toBeInTheDocument()
+    expect(within(commandBar).getByText(/未发布变更/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '重置' }))
 
     expect(within(commandBar).getByText(/已同步/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
     expect(
-      screen.getByDisplayValue(/key: demo_video_workflow/)
+      await screen.findByDisplayValue(/key: demo_video_workflow/)
     ).toBeInTheDocument()
   })
 
@@ -232,11 +274,12 @@ describe('WorkflowStudioPage', () => {
     renderPage()
 
     await screen.findByText('题目审题 / 编辑工作流')
-    await user.click(screen.getByRole('button', { name: 'YAML' }))
+    await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
     const editor = screen.getByLabelText('工作流 YAML')
     await user.type(editor, '\n# edited')
+    await closeYamlEditor(user)
 
-    await screen.findByText(/有未发布变更/)
+    await screen.findByText(/未发布变更/)
     const publishButton = screen.getByRole('button', { name: '发布新版本' })
     await waitFor(() => expect(publishButton).not.toBeDisabled())
     await user.click(publishButton)
@@ -252,11 +295,12 @@ describe('WorkflowStudioPage', () => {
     renderPage()
 
     await screen.findByText('题目审题 / 编辑工作流')
-    await user.click(screen.getByRole('button', { name: 'YAML' }))
+    await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
     const editor = screen.getByLabelText('工作流 YAML')
     await user.type(editor, '\n# edited')
+    await closeYamlEditor(user)
 
-    await screen.findByText(/有未发布变更/)
+    await screen.findByText(/未发布变更/)
     const publishButton = screen.getByRole('button', { name: '发布新版本' })
     await waitFor(() => expect(publishButton).not.toBeDisabled())
     await user.click(publishButton)

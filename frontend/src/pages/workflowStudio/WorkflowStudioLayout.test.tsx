@@ -63,12 +63,13 @@ const baseProps = {
   closeReviewDialog: vi.fn(),
   dagFullscreenOpen: false,
   setDagFullscreenOpen: vi.fn(),
-  canvasMode: 'dag' as const,
-  setCanvasMode: vi.fn(),
+  changesPanelOpen: false,
+  setChangesPanelOpen: vi.fn(),
+  yamlEditorOpen: false,
+  setYamlEditorOpen: vi.fn(),
   onValidate: vi.fn(),
   onPublish: vi.fn(),
   onReset: vi.fn(),
-  onShowChanges: vi.fn(),
   publishDraft: vi.fn(),
   viewMode: 'draft' as const,
   selectedRevisionId: revision.id,
@@ -82,7 +83,7 @@ const baseProps = {
 }
 
 // Layout 不再接收整包 props：studio 经 StudioStateContext 注入，view 字段
-// （canvasMode/dagFullscreenOpen 等）经 StudioViewContext 注入。
+// （changesPanelOpen/yamlEditorOpen/dagFullscreenOpen 等）经 StudioViewContext 注入。
 // 伪造对象与真实 StudioState 形状存在字段级差异（null vs 具体对象），
 // 走 StudioStateContext 注入，类型上统一放宽为 object。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -93,15 +94,19 @@ function studioProvidersFor(studio: LayoutStudio) {
   const {
     dagFullscreenOpen,
     setDagFullscreenOpen,
-    canvasMode,
-    setCanvasMode,
+    changesPanelOpen,
+    setChangesPanelOpen,
+    yamlEditorOpen,
+    setYamlEditorOpen,
     ...studioState
   } = studio
   const view = makeStudioView({
     ...(dagFullscreenOpen !== undefined ? { dagFullscreenOpen } : {}),
     ...(setDagFullscreenOpen !== undefined ? { setDagFullscreenOpen } : {}),
-    ...(canvasMode !== undefined ? { canvasMode } : {}),
-    ...(setCanvasMode !== undefined ? { setCanvasMode } : {}),
+    ...(changesPanelOpen !== undefined ? { changesPanelOpen } : {}),
+    ...(setChangesPanelOpen !== undefined ? { setChangesPanelOpen } : {}),
+    ...(yamlEditorOpen !== undefined ? { yamlEditorOpen } : {}),
+    ...(setYamlEditorOpen !== undefined ? { setYamlEditorOpen } : {}),
   })
   return { studioState, view }
 }
@@ -249,5 +254,25 @@ describe('WorkflowStudioLayout', () => {
     expect(
       within(mobileNav).getByRole('tab', { name: '编辑节点' })
     ).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('opens the changes drawer when changesPanelOpen is set', () => {
+    renderLayout({ ...baseProps, changesPanelOpen: true })
+
+    expect(screen.getByText('变更与校验')).toBeInTheDocument()
+    expect(screen.getByText('尚未运行校验。')).toBeInTheDocument()
+    expect(screen.getByText('变更摘要')).toBeInTheDocument()
+  })
+
+  it('opens the full-screen YAML editor dialog when yamlEditorOpen is set', () => {
+    renderLayout({ ...baseProps, yamlEditorOpen: true })
+
+    // 工具栏按钮同名，用 dialog 角色定位（aria-labelledby 指向标题）。
+    expect(
+      screen.getByRole('dialog', { name: '编辑 YAML' })
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('工作流 YAML')).toHaveValue(
+      baseProps.definitionYaml
+    )
   })
 })
