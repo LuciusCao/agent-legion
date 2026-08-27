@@ -514,10 +514,17 @@ def test_get_workflow_revision_detail_rejects_other_workspace_revision(
         assert second.status_code == 200
         first_id = first.json()["workspace"]["id"]
         second_id = second.json()["workspace"]["id"]
-        # v62: creation seeds nothing; publish into the first workspace.
-        from tests.helpers import publish_builtin_revision
+        # v62: creation seeds nothing; publish into the first workspace. The
+        # /active lookup resolves default_workflow_key, which equals the
+        # workspace id here — so the built-in definition is published with
+        # its key rewritten to the id (the JobQueries-level key rewrite the
+        # publish guard would demand of an HTTP draft anyway).
+        from dataclasses import replace
 
-        publish_builtin_revision(app.state.job_db, first_id)
+        definition = load_builtin_definition("education_video_problems_generation")
+        if definition.key != first_id:
+            definition = replace(definition, key=first_id)
+        WorkflowRevisionService(app.state.job_db).publish_workspace_revision(first_id, definition)
         active = client.get(f"/api/workspaces/{first_id}/workflow-revisions/active")
         assert active.status_code == 200
         first_revision_id = active.json()["revision"]["id"]
