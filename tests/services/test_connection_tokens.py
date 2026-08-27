@@ -19,10 +19,10 @@ from server.app.services.connection_adapters import (
     ConnectionAdapter,
     jwt_expires_at,
 )
+from server.app.services.connection_token_legacy import report_node_auth_failure
 from server.app.services.connection_tokens import (
     ConnectionTokenService,
     inject_connection_config,
-    report_node_auth_failure,
 )
 from server.app.services.connections import ConnectionService
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
@@ -313,3 +313,92 @@ def test_get_token_single_flight_under_concurrency(services, monkeypatch) -> Non
     assert not errors
     assert results == ["tok-shared"] * 4
     assert calls == ["exchange"]
+
+
+def test_get_token_stops_serving_when_disabled(services, monkeypatch) -> None:
+    """A disabled connection must not serve the cached token on the fast path."""
+    connections, tokens = services
+    connections.create("c1", "static_bearer", "", {"token": "tok-abc"})
+    assert tokens.get_token("c1") == "tok-abc"
+
+    connections.update("c1", enabled=False)
+
+    with pytest.raises(InvalidOperationError, match="已停用"):
+        tokens.get_token("c1")
+
+
+def test_update_waits_for_inflight_refresh_and_invalidates(services, monkeypatch) -> None:
+    """Admin update must serialize with an in-flight token refresh.
+
+    The refresh resolves the old config, then blocks inside authenticate
+    while holding the connection gate; the admin update (new credentials)
+    runs concurrently and must queue on the same gate. After both commit,
+    the token the refresh cached must be gone — the next get_token exchanges
+    with the NEW credentials instead of resurrecting the old-config token.
+    """
+    seen_secrets: list[str] = []
+
+    def _authenticate(config: dict, secrets: dict) -> AcquiredToken:
+        seen_secrets.append(str(secrets.get("token")))
+        return AcquiredToken(token=f"tok-{len(seen_secrets)}", expires_at=None)
+
+    refresh_started = threading.Event()
+    release_exchange = threading.Event()
+
+    def _slow_authenticate(config: dict, secrets: dict) -> AcquiredToken:
+        refresh_started.set()
+        release_exchange.wait(timeout=10)
+        return _authenticate(config, secrets)
+
+    monkeypatch.setitem(
+        connection_adapters._REGISTRY,
+        "gate_refresh",
+        ConnectionAdapter(
+            type="gate_refresh",
+            description="test adapter exposing the secret used per exchange",
+            required_config_keys=(),
+            secret_keys=("token",),
+            authenticate=_slow_authenticate,
+            probe=lambda config, secrets: "ok",
+        ),
+    )
+    connections, tokens = services
+    connections.create("c1", "gate_refresh", "", {"token": "old-secret"})
+
+    refreshed: list[str] = []
+    errors: list[BaseException] = []
+
+    def _refresh() -> None:
+        try:
+            refreshed.append(tokens.get_token("c1"))
+        except BaseException as exc:  # noqa: BLE001 - surfaced by the assertion
+            errors.append(exc)
+
+    thread = threading.Thread(target=_refresh)
+    thread.start()
+    assert refresh_started.wait(timeout=10)
+    # The refresh has resolved the OLD config and is mid-exchange, holding
+    # the gate; the admin swap must block on that gate until it commits.
+    update_done = threading.Event()
+
+    def _update() -> None:
+        try:
+            connections.update("c1", config={"token": "new-secret"})
+        except BaseException as exc:  # noqa: BLE001 - surfaced by the assertion
+            errors.append(exc)
+        update_done.set()
+
+    updater = threading.Thread(target=_update)
+    updater.start()
+    time.sleep(0.3)
+    assert not update_done.is_set(), "update committed while the refresh still held the gate"
+    release_exchange.set()
+    updater.join(timeout=10)
+    thread.join(timeout=10)
+
+    assert not errors
+    assert refreshed == ["tok-1"]
+    # The update committed after the refresh: its cached token was deleted
+    # under the same gate, so the next read exchanges with the new secret.
+    assert tokens.get_token("c1") == "tok-2"
+    assert seen_secrets == ["old-secret", "new-secret"]

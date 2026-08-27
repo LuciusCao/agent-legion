@@ -156,6 +156,8 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/db/test_job_artifacts_schema.py",
         "tests/db/test_job_node_status_counts_migration.py",
         "tests/db/test_job_status_counts_migration.py",
+        "tests/db/test_jobs_run_id_index.py",
+        "tests/db/test_schema_upgrade_parity.py",
         "tests/db/test_materials_schema.py",
         "tests/db/test_material_bundles_schema.py",
         "tests/db/test_monitoring_hotpath_indexes.py",

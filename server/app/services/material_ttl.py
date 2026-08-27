@@ -13,8 +13,10 @@ mirroring ``JobArtifactMaintenanceThread``'s loop discipline:
   short grace window whose job-input reference count is zero (same
   ``input_json`` check as ``delete()``) and which no bundle manifest
   references (same ``material_bundle_members`` guard as ``delete()``,
-  #156): the S3 object goes first, the row second, so an object-delete
-  failure rolls back and retries next pass.
+  #156): the row deletes first, the S3 object after the commit, so a
+  network hang during object deletion never pins a write transaction (the
+  FS/DB ordering discipline of ``cleanup_sweep.py``); an object-delete
+  failure leaves an orphan for the bucket lifecycle rule.
 
 Each material is its own small transaction; a bucket lifecycle rule stays
 the backstop for orphans (deployment doc).
@@ -23,7 +25,6 @@ the backstop for orphans (deployment doc).
 from __future__ import annotations
 
 import logging
-import threading
 from typing import Any
 
 from server.app.db.connection import DatabaseDsn
@@ -71,20 +72,12 @@ def mark_ready(conn: Any, database_dsn: DatabaseDsn, material_id: str) -> None:
 
 def expire_due_materials(database_dsn: DatabaseDsn) -> int:
     """Flip ready rows past ``expires_at`` to expired; returns the count."""
-    with read_connection(database_dsn) as conn:
-        rows = conn.execute(
-            "select id from materials where status='ready'"
-            " and expires_at is not null and expires_at <= now()"
-        ).fetchall()
-    expired = 0
-    for row in rows:
-        with write_transaction(database_dsn) as conn:
-            updated = conn.execute(
-                "update materials set status='expired' where id=%s and status='ready'",
-                (str(row["id"]),),
-            ).rowcount
-        expired += int(updated)
-    return expired
+    with write_transaction(database_dsn) as conn:
+        updated = conn.execute(
+            "update materials set status='expired'"
+            " where status='ready' and expires_at is not null and expires_at <= now()"
+        ).rowcount
+    return int(updated)
 
 
 def collect_expired_materials(
@@ -95,10 +88,13 @@ def collect_expired_materials(
 ) -> int:
     """Delete expired materials past grace with zero referencing jobs.
 
-    Returns the number of rows removed. Per material the re-check (row still
-    expired, still unreferenced) and the delete happen in one transaction;
-    object deletion failures keep the row for the next pass (same ordering
-    discipline as ``MaterialsService.delete``).
+    Returns the number of rows removed. Per material the reference re-check
+    (row still expired, still unreferenced, still unbundled) and the row
+    delete happen in one short transaction; the S3 object delete runs AFTER
+    that transaction commits — an object-delete failure leaves an orphaned
+    object for the bucket lifecycle rule, never a write transaction held
+    across a network call (the FS/DB ordering discipline of
+    ``cleanup_sweep.py``).
     """
     with read_connection(database_dsn) as conn:
         candidates = conn.execute(
@@ -113,7 +109,7 @@ def collect_expired_materials(
         try:
             with write_transaction(database_dsn) as conn:
                 row = conn.execute(
-                    "select * from materials where id=%s and status='expired' for update",
+                    "select storage_key from materials where id=%s and status='expired' for update",
                     (material_id,),
                 ).fetchone()
                 if row is None:
@@ -127,16 +123,27 @@ def collect_expired_materials(
                 if referencing is not None:
                     continue
                 # Bundle 成员同样算引用（#156）：与 MaterialsService.delete
-                # 同一守卫——必须先删 bundle 清单，否则对象已删而行删除被
-                # 外键回滚，仍存在的 bundle 永远无法物化。
+                # 同一守卫——必须先删 bundle 清单，否则行删除会被外键拒绝，
+                # 仍存在的 bundle 永远无法物化。
                 member_of = conn.execute(
                     "select bundle_id from material_bundle_members where material_id=%s limit 1",
                     (material_id,),
                 ).fetchone()
                 if member_of is not None:
                     continue
-                storage.delete_object(str(row["storage_key"]))
+                storage_key = str(row["storage_key"])
                 conn.execute("delete from materials where id=%s", (material_id,))
+            # Committed: remove the object outside any transaction. Failure
+            # here is an orphan the bucket lifecycle rule reaps (deployment
+            # doc); the row is already gone so the next pass won't retry.
+            try:
+                storage.delete_object(storage_key)
+            except Exception:
+                logger.warning(
+                    "materials TTL sweep: orphaned object %s (bucket lifecycle will reap it)",
+                    storage_key,
+                    exc_info=True,
+                )
             deleted += 1
         except Exception:
             logger.warning(
@@ -145,56 +152,3 @@ def collect_expired_materials(
                 exc_info=True,
             )
     return deleted
-
-
-class MaterialTtlSweeperThread:
-    """Slow-cadence driver; mirrors JobArtifactMaintenanceThread's discipline.
-
-    The first run happens after one full interval: the sweep is low-urgency
-    and a boot-time scan only competes with startup work.
-    """
-
-    def __init__(
-        self,
-        database_dsn: DatabaseDsn,
-        storage: ObjectStorage | None,
-        *,
-        interval_seconds: float = DEFAULT_SWEEP_INTERVAL_SECONDS,
-    ) -> None:
-        self._dsn = database_dsn
-        self._storage = storage
-        self._interval_seconds = interval_seconds
-        self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
-
-    def start(self) -> None:
-        if self._thread is not None:
-            return
-        self._thread = threading.Thread(target=self._loop, name="material-ttl-sweeper", daemon=True)
-        self._thread.start()
-
-    def run_once(self) -> None:
-        # No object storage means no materials feature: rows can only reach
-        # ready/expired through the storage-backed upload flow.
-        if self._storage is None:
-            return
-        expired = expire_due_materials(self._dsn)
-        if expired:
-            logger.info("materials TTL sweep expired %d material(s)", expired)
-        deleted = collect_expired_materials(self._dsn, self._storage)
-        if deleted:
-            logger.info("materials TTL sweep collected %d material(s)", deleted)
-
-    def _loop(self) -> None:
-        while not self._stop_event.wait(self._interval_seconds):
-            try:
-                self.run_once()
-            except Exception:
-                logger.exception("materials TTL sweep failed")
-
-    def stop(self, timeout: float = 3.0) -> None:
-        self._stop_event.set()
-        thread = self._thread
-        if thread is not None:
-            thread.join(timeout=timeout)
-            self._thread = None

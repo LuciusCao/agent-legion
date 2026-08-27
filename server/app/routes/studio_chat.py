@@ -12,6 +12,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from starlette import concurrency
 
 from server.app.auth.dependencies import enforce_scoped_workspace_binding, reject_studio_agent_scope
 from server.app.auth.workspace_access import require_workspace_access
@@ -79,12 +80,11 @@ def create_studio_chat_router(
         response_model=StudioChatSessionsResponse,
     )
     def list_sessions(workspace_id: str, _user: scoped_read) -> StudioChatSessionsResponse:
-        return StudioChatSessionsResponse(
-            sessions=[
-                StudioChatSessionRecord.model_validate(row)
-                for row in service.list_sessions(workspace_id)
-            ]
-        )
+        sessions = [
+            StudioChatSessionRecord.model_validate(row)
+            for row in service.list_sessions(workspace_id)
+        ]
+        return StudioChatSessionsResponse(sessions=sessions)
 
     @router.get(
         "/workspaces/{workspace_id}/studio-chat/sessions/{session_id}",
@@ -149,7 +149,9 @@ def create_studio_chat_router(
         if job_event_manager is None:
             raise HTTPException(status_code=503, detail="Event manager not available")
         try:
-            service.get_session(session_id, workspace_id)
+            # Synchronous DB read (pool checkout) run off the loop so a busy
+            # pool cannot stall every SSE/WS heartbeat behind this lookup.
+            await concurrency.run_in_threadpool(service.get_session, session_id, workspace_id)
         except JobServiceError as exc:
             raise_job_http_error(exc)
         return await job_event_manager.connect(request, studio_chat_channel(session_id))

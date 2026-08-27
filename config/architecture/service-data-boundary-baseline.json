@@ -76,8 +76,13 @@
       0,
       1
     ],
+    "server/app/services/connection_gate.py": [
+      2,
+      0,
+      0
+    ],
     "server/app/services/connection_tokens.py": [
-      5,
+      6,
       3,
       0
     ],
@@ -182,8 +187,13 @@
       0
     ],
     "server/app/services/material_ttl.py": [
-      10,
+      9,
       3,
+      0
+    ],
+    "server/app/services/material_ttl_sweeper.py": [
+      0,
+      1,
       0
     ],
     "server/app/services/materials.py": [

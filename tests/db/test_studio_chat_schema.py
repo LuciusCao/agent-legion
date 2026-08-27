@@ -23,15 +23,15 @@ def _columns(conn, table: str) -> set[str]:
 def test_schema_v57_recorded() -> None:
     """Latest-migration record pin (moved from
     tests/db/test_job_node_status_counts_migration.py, v56)."""
-    # The pin now lives in tests/db/test_retire_global_register_tokens_migration.py
-    # (v58): schema_migrations only ever records the latest version, so the
-    # current SCHEMA_VERSION row must exist with the v58 migration's name.
+    # The pin now lives in tests/db/test_jobs_run_id_index.py
+    # (v59): schema_migrations only ever records the latest version, so the
+    # current SCHEMA_VERSION row must exist with the v59 migration's name.
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "retire_global_register_tokens"
+    assert row["name"] == "jobs_run_id_index"
 
 
 def test_studio_chat_tables_exist() -> None:
@@ -78,7 +78,7 @@ def test_v56_database_gains_draft_yaml_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert migration is not None
-    assert migration["name"] == "retire_global_register_tokens"
+    assert migration["name"] == "jobs_run_id_index"
 
 
 @pytest.mark.fresh_schema
@@ -106,7 +106,7 @@ def test_v42_database_upgrades_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert migration is not None
-    assert migration["name"] == "retire_global_register_tokens"
+    assert migration["name"] == "jobs_run_id_index"
 
     # Rows written through the new tables survive a replay (init_db runs at
     # every backend startup).

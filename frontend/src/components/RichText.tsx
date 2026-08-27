@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import {
   extractLatexParts,
   renderLatexInHtml,
@@ -12,7 +13,13 @@ export interface RichTextProps {
   mode?: 'inline' | 'block'
 }
 
-export function RichText({ children, mode = 'inline' }: RichTextProps) {
+// Memoized: sanitize + LaTeX extraction walks the whole text on every render,
+// and this component sits inside per-item list rows (question panels, node
+// options) that re-render on every parent poll/patch.
+export const RichText = memo(function RichText({
+  children,
+  mode = 'inline',
+}: RichTextProps) {
   if (mode === 'block') {
     const html = renderLatexInHtml(sanitizeHtml(children))
     return <span dangerouslySetInnerHTML={{ __html: html }} />
@@ -32,4 +39,4 @@ export function RichText({ children, mode = 'inline' }: RichTextProps) {
       )}
     </span>
   )
-}
+})

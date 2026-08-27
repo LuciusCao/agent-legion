@@ -2,9 +2,15 @@ import { expect, test } from '@playwright/test'
 
 import { ensureAdminSession, widenDemoWorkflowItemTypes } from './helpers'
 
-const WORKSPACE_NAME = 'E2E 冒烟工作区'
 
-test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }) => {
+test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }, testInfo) => {
+  // Unique per engine+attempt: the smoke suite shares one database across
+  // browser engines (chromium runs first, then firefox/webkit), and the
+  // workspace list renders oldest-first — a reused name would send the
+  // run-creation step into the previous engine's workspace, where the
+  // (source_type, source_id) dedup rejects the same Q1 item with
+  // "No tasks were resolved from input".
+  const WORKSPACE_NAME = `E2E 冒烟工作区 ${testInfo.project.name}-${testInfo.retry}`
   await ensureAdminSession(page)
 
   await page.goto('/')
@@ -20,7 +26,9 @@ test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }) =
     })
     .check()
   await createDialog.getByRole('button', { name: '创建' }).click()
-  await expect(createDialog).toBeHidden()
+  // Demo-template workspaces seed node code server-side; the POST can take
+  // seconds (4-5s observed locally), so give the close a generous timeout.
+  await expect(createDialog).toBeHidden({ timeout: 30_000 })
 
   await page.getByText(WORKSPACE_NAME).first().click()
   await expect(page).toHaveURL(/\/workspaces\/[^/]+$/)
@@ -40,6 +48,10 @@ test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }) =
   await addItemsDialog.getByLabel('连接 Key').fill('cms-internal')
   await addItemsDialog.getByLabel('外部 ID').fill('Q1')
   await addItemsDialog.getByRole('button', { name: '创建运行' }).click()
+  // A successful submit closes the dialog; wait for it (the modal overlay
+  // intercepts pointer events while it is in the DOM, so clicking the job
+  // row before the close lands — a real risk on slow CI runners — fails).
+  await expect(addItemsDialog).toBeHidden({ timeout: 15_000 })
 
   // The runs API creates jobs synchronously; no workflow worker is started,
   // so the job appears with all nodes still pending.

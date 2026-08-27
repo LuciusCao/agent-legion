@@ -102,6 +102,21 @@ export default defineConfig(({ mode }) => {
             ) {
               return 'vendor-react'
             }
+            // Markdown rendering (studio chat) and the JSON artifact viewer
+            // are heavy and used by few routes — keep them out of the catch-all
+            // vendor bucket, which the entry loads on first paint.
+            if (id.includes('marked')) {
+              return 'vendor-marked'
+            }
+            if (id.includes('react18-json-view')) {
+              return 'vendor-json-view'
+            }
+            if (id.includes('uplot')) {
+              return 'vendor-uplot'
+            }
+            if (id.includes('dompurify')) {
+              return 'vendor-dompurify'
+            }
             return 'vendor'
           },
         },

@@ -35,7 +35,7 @@ from server.app.services.job_artifact_maintenance import JobArtifactMaintenanceT
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
-from server.app.services.material_ttl import MaterialTtlSweeperThread
+from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
 from server.app.services.quality_labels import QualityLabelService
