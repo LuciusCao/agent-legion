@@ -7,6 +7,13 @@
 # instead of thrashing it (observed: 4 parallel quick gates stretched the
 # last one to ~1h; each gate alone takes ~6min).
 #
+# The cap defaults to 1 (serialized). An earlier default of 2 still
+# oversubscribed the box — each gate fans out into parallel backend/frontend/
+# rust lanes, so 2 gates meant ~2x the machine in jobs, and the losers were
+# the timing-sensitive tests that then flaked on timeouts (reruns and manual
+# re-runs cost more than the queue wait they avoided). Serialized, every gate
+# runs at the full machine budget and finishes at lone-gate speed.
+#
 # Why slots and not a load-average probe: load is ambiguous (an unrelated
 # build looks identical to a sibling gate) and non-actionable (how long to
 # wait?). A slot count is exact, cheap, and gives a stable answer to "how
@@ -15,8 +22,9 @@
 #
 # Slot file: <git-common-dir>/gate-slots/gate-<pid>-<nanos>, holding pid /
 # worktree / start time. A slot whose pid is dead is reclaimed on sight
-# (crashed or SIGKILLed gate); AGENT_LEGION_MAX_PARALLEL_GATES (default 2)
-# caps concurrent gates, 0 disables the queue entirely.
+# (crashed or SIGKILLed gate); AGENT_LEGION_MAX_PARALLEL_GATES (default 1,
+# serialized — see above) caps concurrent gates, 0 disables the queue
+# entirely.
 #
 # Re-entrancy: check-quick.sh exports AGENT_LEGION_GATE_SLOT_HELD=1 while it
 # holds a slot; a nested invocation (none today, insurance for check.sh-style
@@ -116,8 +124,8 @@ release_gate_slot() {
 # on entry and every AGENT_LEGION_GATE_POLL_SECONDS (default 5) while waiting.
 # Exports AGENT_LEGION_GATE_SLOT_FILE / _HELD on success.
 acquire_gate_slot() {
-  local max="${AGENT_LEGION_MAX_PARALLEL_GATES:-2}"
-  [[ "$max" =~ ^[0-9]+$ ]] || max=2
+  local max="${AGENT_LEGION_MAX_PARALLEL_GATES:-1}"
+  [[ "$max" =~ ^[0-9]+$ ]] || max=1
   if [[ "$max" -eq 0 ]]; then
     # Queue disabled by explicit override: behave as an always-free machine.
     export AGENT_LEGION_GATE_SLOT_HELD=1
