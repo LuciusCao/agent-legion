@@ -17,7 +17,7 @@ from server.app.skills.cache_state import cache_at_commit
 from server.app.skills.config import LockedSkillSource, SkillsConfig, SkillsLock, SkillSourceConfig
 from server.app.skills.doc_cache import SkillDocCache
 from server.app.skills.errors import SkillConfigError, SkillPathError, SkillRepoError
-from server.app.skills.paths import default_skills_runs_dir
+from server.app.skills.paths import default_skills_runs_dir, ensure_secure_runs_dir
 from server.app.skills.runs_gc import (
     DEFAULT_MAX_AGE_SECONDS,
     sweep_stale_execution_dirs,
@@ -88,6 +88,9 @@ class SkillManager:
 
             if run_dir.exists():
                 shutil.rmtree(run_dir)
+            # Secure-root first use: never mkdir into a pre-created or
+            # symlinked runs dir on a shared temp filesystem.
+            ensure_secure_runs_dir(self.runs_dir)
             shutil.copytree(cache_dir, run_dir, ignore=shutil.ignore_patterns(".git"))
         return run_dir
 
@@ -298,8 +301,9 @@ class SkillManager:
         key = str(cache_dir.resolve())
         if key not in self._cache_locks:
             # Skills base dir is a read-only input (issue #42): locks live under runs_dir.
+            ensure_secure_runs_dir(self.runs_dir)
             lock_dir = self.runs_dir / ".locks"
-            lock_dir.mkdir(parents=True, exist_ok=True)
+            lock_dir.mkdir(mode=0o700, exist_ok=True)
             name = f"{cache_dir.parent.name}--{cache_dir.name}.lock"
             self._cache_locks[key] = FileLock(str(lock_dir / name))
         return self._cache_locks[key]

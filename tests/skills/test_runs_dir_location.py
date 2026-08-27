@@ -174,3 +174,126 @@ def test_swept_execution_id_is_recreatable(tmp_path: Path) -> None:
     assert manager.sweep_stale_executions(max_age_seconds=0.0) == 1
     second = manager.get_skill_dir(_KEY, execution_id)
     assert second.exists()
+
+
+def test_ensure_secure_runs_dir_creates_private_root(tmp_path: Path) -> None:
+    """First use creates the root with 0700, no parents=True: atomic, and a
+    race with a pre-existing entry surfaces as an error instead of reuse."""
+    import stat
+
+    from server.app.skills.paths import ensure_secure_runs_dir
+
+    root = tmp_path / "scratch"
+    created = ensure_secure_runs_dir(root)
+    assert created == root
+    mode = stat.S_IMODE(root.stat().st_mode)
+    assert mode == 0o700
+
+
+def test_ensure_secure_runs_dir_reuses_validated_root(tmp_path: Path) -> None:
+    from server.app.skills.paths import ensure_secure_runs_dir
+
+    root = ensure_secure_runs_dir(tmp_path / "scratch")
+    again = ensure_secure_runs_dir(root)
+    assert again == root
+
+
+def test_ensure_secure_runs_dir_rejects_symlink(tmp_path: Path) -> None:
+    """A symlink at the predictable path must fail closed, never rmtree or
+    copytree through it (shared /tmp pre-creation attack)."""
+    from server.app.skills.paths import ensure_secure_runs_dir
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "sentinel.txt").write_text("keep", encoding="utf-8")
+    target = tmp_path / "scratch"
+    target.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(OSError, match="refusing to use skills runs dir"):
+        ensure_secure_runs_dir(target)
+    assert (outside / "sentinel.txt").exists()
+
+
+def test_ensure_secure_runs_dir_rejects_wrong_owner(tmp_path: Path) -> None:
+    """A root owned by another uid (pre-created by an attacker on a shared
+    temp dir) is refused, not reused."""
+    from unittest.mock import patch
+
+    from server.app.skills.paths import ensure_secure_runs_dir
+
+    root = tmp_path / "scratch"
+    root.mkdir(mode=0o700)
+    real_lstat = os.lstat
+
+    class _Foreign:
+        st_mode = real_lstat(root).st_mode
+        st_uid = real_lstat(root).st_uid + 1  # a different user
+
+    with (
+        patch("server.app.skills.paths.os.lstat", return_value=_Foreign()),
+        pytest.raises(OSError, match="refusing to use skills runs dir"),
+    ):
+        ensure_secure_runs_dir(root)
+
+
+def test_ensure_secure_runs_dir_tightens_wide_mode_when_owned(tmp_path: Path) -> None:
+    """A 0777 root owned by the current user (older-version upgrade path or a
+    permissive umask) is tightened to 0700 once, not refused."""
+    import stat as stat_module
+
+    from server.app.skills.paths import ensure_secure_runs_dir
+
+    root = tmp_path / "scratch"
+    root.mkdir(mode=0o700)
+    os.chmod(root, 0o777)
+
+    ensured = ensure_secure_runs_dir(root)
+    assert ensured == root
+    assert stat_module.S_IMODE(root.stat().st_mode) == 0o700
+
+
+def test_get_skill_dir_fails_closed_on_pre_created_runs_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end: dispatch into a symlinked runs dir fails loudly before
+    any copytree, and the attack target stays untouched."""
+    import subprocess
+
+    env = {**dict(os.environ)}
+    env.update(
+        GIT_AUTHOR_NAME="t",
+        GIT_AUTHOR_EMAIL="t@t",
+        GIT_COMMITTER_NAME="t",
+        GIT_COMMITTER_EMAIL="t@t",
+    )
+    repo = tmp_path / "remote.git"
+    repo.mkdir()
+    subprocess.run(["git", "init", "--bare", "-b", "main", str(repo)], check=True, env=env)
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "clone", str(repo), str(work / "clone")], check=True, env=env)
+    clone = work / "clone"
+    (clone / "SKILL.md").write_text("# skill\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(clone), "add", "."], check=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(clone), "commit", "-m", "init", "--no-gpg-sign", "--no-verify"],
+        check=True,
+        env=env,
+    )
+    subprocess.run(["git", "-C", str(clone), "push", "origin", "HEAD"], check=True, env=env)
+
+    outside = tmp_path / "attacker-drop"
+    outside.mkdir()
+    (outside / "evil").write_text("payload", encoding="utf-8")
+    runs = tmp_path / "runs"
+    runs.symlink_to(outside, target_is_directory=True)
+
+    manager = SkillManager(
+        store=memory_skill_store({_KEY: {"repo": f"file://{repo.resolve()}", "ref": "main"}}),
+        base_dir=tmp_path / "skills",
+        runs_dir=runs,
+    )
+    with pytest.raises(OSError, match="refusing to use skills runs dir"):
+        manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+    assert (outside / "evil").exists()
+    assert not (outside / "demo_workflow").exists()
