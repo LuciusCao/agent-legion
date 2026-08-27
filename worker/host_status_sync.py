@@ -17,7 +17,9 @@ def _remote_status(
     connection_error: str | None = None,
 ) -> dict[str, Any]:
     registered = worker is not None and not bool(worker.get("revoked", False))
-    remote = {
+    # 显式 Any：字面量推断会把值类型窄化成 bool/dict/str，与下方追加
+    # list 值的 workspaces 键不兼容（mypy）。
+    remote: dict[str, Any] = {
         "host_reachable": host_reachable,
         "registered": registered,
         "connected": registered,
@@ -29,8 +31,9 @@ def _remote_status(
         # token→workspace 名称的唯一来源）必须随每次同步重新携带，否则一次
         # 心跳就把启动时写入的字段抹掉。Host 删除某个 scoped token 后会收窄
         # 存活 Worker 的 allowed_workspaces，因此按当前 scope 过滤，避免控制台
-        # 一直显示已删除的 workspace；Host 不可达（worker=None，无 scope 可
-        # 言）时保留最后已知明细，恢复后的下一次同步重新对齐。
+        # 一直显示已删除的 workspace。executor 的不可达路径传入上一次成功的
+        # worker dict，此时按最后已知 scope 过滤；仅当没有可用 worker 视图
+        # （鉴权拒绝 / 首次同步失败）时不过滤，恢复后的下一次同步重新对齐。
         scope = worker.get("allowed_workspaces") if worker else None
         current = [row for row in workspaces if not scope or row["workspace_id"] in scope]
         if current:

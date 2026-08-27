@@ -1235,7 +1235,7 @@
     "worker/service_bind.py": 27,
     "worker/service_models.py": 29,
     "worker/stale_sweep.py": 68,
-    "worker/status.py": 90,
+    "worker/status.py": 89,
     "worker/status_aggregates.py": 29,
     "worker/status_reader.py": 34,
     "worker/supervisor.py": 254,

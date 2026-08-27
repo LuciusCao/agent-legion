@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+import worker.registration_retry as registration_retry
 from worker.host_status_sync import sync_host_status
 from worker.metrics_cache import WorkerMetricsCache
 from worker.status import ExecutionStatusReporter, read_runtime_status
@@ -31,20 +32,24 @@ class _FakeClient:
 
 
 def _publish_once(
-    tmp_path: Path, workspaces: list[dict[str, Any]], client: _FakeClient | None = None
+    tmp_path: Path,
+    workspaces: list[dict[str, Any]],
+    client: _FakeClient | None = None,
+    previous: dict[str, Any] | None = None,
+    monkeypatch: pytest.MonkeyPatch | None = None,
 ) -> dict[str, Any]:
-    import worker.registration_retry as registration_retry
-
-    registration_retry._last_registration_workspaces = workspaces
+    patch = monkeypatch or pytest.MonkeyPatch()
+    patch.setattr(registration_retry, "_last_registration_workspaces", workspaces)
     try:
         sync_host_status(
             client or _FakeClient(),  # type: ignore[arg-type]
             ExecutionStatusReporter(tmp_path / "status.json"),
             WorkerMetricsCache(tmp_path / "metrics.json", refresh_seconds=60),
-            None,
+            previous,
         )
     finally:
-        registration_retry._last_registration_workspaces = []
+        if monkeypatch is None:
+            patch.undo()
     return read_runtime_status(tmp_path / "status.json")["remote"]
 
 
@@ -53,19 +58,6 @@ def test_sync_publishes_registration_workspaces(tmp_path: Path) -> None:
 
     remote = _publish_once(tmp_path, workspaces)
 
-    assert remote["workspaces"] == workspaces
-
-
-def test_sync_keeps_workspaces_when_host_unreachable(tmp_path: Path) -> None:
-    class UnreachableClient(_FakeClient):
-        def get_self(self) -> dict[str, Any]:
-            raise RuntimeError("connection refused")
-
-    workspaces = [{"workspace_id": "ws-1", "workspace_name": "内容生产", "token_ids": ["tok-1"]}]
-
-    remote = _publish_once(tmp_path, workspaces, UnreachableClient())
-
-    assert remote["host_reachable"] is False
     assert remote["workspaces"] == workspaces
 
 
@@ -86,6 +78,29 @@ def test_sync_filters_workspaces_to_current_host_scope(tmp_path: Path) -> None:
     assert [row["workspace_id"] for row in remote["workspaces"]] == ["ws-1"]
 
 
+def test_sync_host_unreachable_filters_by_last_known_scope(tmp_path: Path) -> None:
+    """executor 的不可达路径把上一次成功的 get_self 结果作为 previous 传入；
+    明细按该最后已知 scope 过滤，而非无差别保留。"""
+    workspaces = [
+        {"workspace_id": "ws-1", "workspace_name": "内容生产", "token_ids": ["tok-1"]},
+        {"workspace_id": "ws-2", "workspace_name": "已删除", "token_ids": ["tok-2"]},
+    ]
+
+    class UnreachableClient(_FakeClient):
+        def get_self(self) -> dict[str, Any]:
+            raise RuntimeError("connection refused")
+
+    remote = _publish_once(
+        tmp_path,
+        workspaces,
+        UnreachableClient(),
+        previous={"worker_id": "worker-1", "revoked": False, "allowed_workspaces": ["ws-1"]},
+    )
+
+    assert remote["host_reachable"] is False
+    assert [row["workspace_id"] for row in remote["workspaces"]] == ["ws-1"]
+
+
 def test_sync_without_workspaces_omits_the_field(tmp_path: Path) -> None:
     """尚未注册成功（明细为空）时字段缺省，不写空列表占位。"""
 
@@ -94,15 +109,16 @@ def test_sync_without_workspaces_omits_the_field(tmp_path: Path) -> None:
     assert "workspaces" not in remote
 
 
-def test_sync_host_unreachable_keeps_last_known_scope(tmp_path: Path) -> None:
-    """Host 不可达时 get_self 失败，无法获知当前 scope：保留最后一次已知
-    明细（未过滤），Host 恢复后的下一次同步会重新对齐。"""
+def test_sync_without_worker_view_keeps_unfiltered_workspaces(tmp_path: Path) -> None:
+    """没有可用 worker 视图（鉴权拒绝后重同步失败、或首次同步即失败）时
+    无 scope 可言，明细原样保留，恢复后的下一次同步重新对齐。"""
     workspaces = [{"workspace_id": "ws-1", "workspace_name": "内容生产", "token_ids": ["tok-1"]}]
 
     class UnreachableClient(_FakeClient):
         def get_self(self) -> dict[str, Any]:
             raise RuntimeError("connection refused")
 
-    remote = _publish_once(tmp_path, workspaces, UnreachableClient())
+    remote = _publish_once(tmp_path, workspaces, UnreachableClient(), previous=None)
 
+    assert remote["host_reachable"] is False
     assert remote["workspaces"] == workspaces
