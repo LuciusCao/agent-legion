@@ -44,7 +44,9 @@ if [[ ! "$WT" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
 fi
 
 # 脚本运行在某个 worktree 内（bare 主根上 git 操作会报 "must be run in a
-# work tree"），用脚本所在仓库的当前 work tree 执行 git 命令。
+# work tree"），用脚本所在仓库的当前 work tree 执行 git 命令。先记下调用方
+# 的原始 cwd——下面的 cd 会离开它，而 cwd 护栏要检查的正是调用方的位置。
+CALLER_CWD="$(pwd)"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
@@ -62,6 +64,19 @@ fi
 # .worktrees/<name>（AGENTS.md §1 的嵌套防护约定）。
 MAIN="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
 TARGET="$MAIN/.worktrees/$WT"
+
+# 护栏：拒绝清理调用方 shell 的 cwd 所在的 worktree。agent 常在目标 worktree
+# 里执行本脚本做收尾——脚本自身无碍（bash 已把脚本文件读进内存），但调用
+# shell 的 cwd 会随目录删除一起失效，后续任何命令都失败（cwd 报错）。要求
+# 调用方先 cd 到仓库其他位置（如主仓库根）再收尾。CALLER_CWD 在上方 cd 进
+# 脚本所在 worktree 之前捕获。
+if [[ "$CALLER_CWD" == "$TARGET" || "$CALLER_CWD" == "$TARGET"/* ]]; then
+    echo "错误: 当前 shell 的工作目录在待清理的 worktree 内（${CALLER_CWD}）。" >&2
+    echo "      清理后该目录会被删除，本 shell 的后续命令将全部失效。" >&2
+    echo "      请先 cd 到其他位置再执行收尾，例如:" >&2
+    echo "        cd ${MAIN} && ${MAIN}/.worktrees/develop/scripts/clean-worktree.sh ${WT}" >&2
+    exit 1
+fi
 
 # 1. git worktree remove（remove 前先解析该 worktree checkout 的分支，
 #    供第 2 步删本地分支用）。

@@ -623,6 +623,7 @@
     "scripts/gc_artifacts.py": 48,
     "scripts/generate_architecture.py": 253,
     "scripts/generate_architecture_frontend.py": 56,
+    "scripts/pytest_aff_selection.py": 234,
     "scripts/pytest_gate_shard.py": 64,
     "scripts/pytest_telemetry.py": 48,
     "scripts/quality/__init__.py": 10,

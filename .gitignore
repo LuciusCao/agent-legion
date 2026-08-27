@@ -39,3 +39,5 @@ htmlcov_backend/
 
 # Quick-gate same-worktree serialization lock (scripts/check-quick.sh)
 .quick-gate.lock/
+.pytest-aff-index.json
+.pytest-aff-coverage*

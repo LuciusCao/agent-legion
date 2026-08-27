@@ -121,11 +121,12 @@ echo "=== Parallel Quick Gate ==="
 echo "Parallel static/test rounds; the API contract check runs once between them."
 lanes_started_at=$SECONDS
 
-# Shared per-lane job cap: min(4, core count) keeps parallel lanes polite on
-# machines running several worktrees (per-lane envs override; CI 4-vCPU
-# runners are unaffected).
+# Shared per-lane job cap: worktree-aware (scripts/gate-jobs.sh) — min(4,
+# cores) while a sibling worktree runs its own gate, cores-2 when this
+# machine's gates are all ours (per-lane envs override; CI 4-vCPU runners are
+# unaffected).
 source "$ROOT_DIR/scripts/gate-jobs.sh"
-default_gate_jobs="$(detect_gate_default_jobs)"
+default_gate_jobs="$(detect_gate_default_jobs_worktree_aware)"
 
 lane_enabled() {
   [[ "$GATE_LANES" == "static" || " $GATE_LANES " == *" $1 "* ]]
@@ -262,8 +263,19 @@ if lane_enabled backend && lane_enabled frontend; then
     "$ROOT_DIR/scripts/check-quick-frontend.sh"
 fi
 if [[ "$GATE_LANES" != "static" ]]; then
-  echo "Backend test tier: ${GATE_TIER:-full}"
-  run_round "test" "test" "test"
+  # GATE_TIER=aff is the agent inner-loop combination: backend affected-test
+  # selection over the unit tier (PostgreSQL offline, index-backed; falls
+  # back to the plain unit tier without an index) + frontend affected-test
+  # selection (`vitest related`). A pass is NOT a full-gate pass — the full
+  # suite stays the pre-push/CI boundary; aff only trims the edit-test
+  # iteration cost. Prime the backend index with GATE_TIER=aff-index.
+  if [[ "${GATE_TIER:-full}" == "aff" ]]; then
+    echo "Backend test tier: aff (inner loop)"
+    GATE_TIER=aff FRONTEND_TEST_MODE=related run_round "test" "test" "test"
+  else
+    echo "Backend test tier: ${GATE_TIER:-full}"
+    FRONTEND_TEST_MODE="${FRONTEND_TEST_MODE:-test}" run_round "test" "test" "test"
+  fi
 fi
 
 echo "Parallel quick gate passed in $((SECONDS - lanes_started_at))s."
