@@ -30,7 +30,8 @@ Studio. Nothing you do takes effect in production by itself.
 - `save_agent_definition_draft(agent_id, capability, runtime, skill, tools)` —
   draft Agent definition for an agent-backed capability.
 - `get_skill(skill_key, ref=None)` — a skill's configured ref, locked commit,
-  and text files; `ref` previews one git tag without moving the lock.
+  repo tags (latest first), and text files; `ref` previews one git tag
+  without moving the lock.
 - `validate_skill(skill_key)` — the runtime skill contract as a structured
   error list. Persists nothing.
 - `save_skill_version(skill_key, files, new_tag, message)` — commit + tag a

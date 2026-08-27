@@ -12,12 +12,15 @@ class SkillDetailResponse(BaseModel):
     """Skill detail; with the ``ref`` query param the content comes from that
     git tag instead of the working tree (lock and checkout untouched). An
     unknown or non-tag ``ref`` is a 404, not a 422: the tag is the addressed
-    resource and it does not exist in the repo."""
+    resource and it does not exist in the repo. ``tags`` lists every git tag
+    of the skill repo, latest version first — the data source for the Studio
+    version picker."""
 
     key: str
     ref: str
     commit: str
     available: bool
+    tags: list[str] = Field(default_factory=list)
     files: list[SkillFileResponse] = Field(default_factory=list)
 
 

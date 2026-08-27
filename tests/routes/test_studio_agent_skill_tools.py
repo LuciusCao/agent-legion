@@ -72,11 +72,13 @@ def test_get_skill_and_ref_preview(client_factory, job_db, skill_home) -> None:
         assert locked.status_code == 200, locked.text
         assert locked.json()["ref"] == "v1.0.0"
         assert locked.json()["available"] is True
+        assert locked.json()["tags"] == ["v1.0.0"]
         assert any(f["path"] == "SKILL.md" for f in locked.json()["files"])
 
         tagged = scoped.get(f"{_TOOLS}/{_KEY}", params={"ref": "v1.0.0"})
         assert tagged.status_code == 200, tagged.text
         assert tagged.json()["ref"] == "v1.0.0"
+        assert tagged.json()["tags"] == ["v1.0.0"]
         assert tagged.json()["commit"] == _git(skill_home, "rev-parse", "v1.0.0^{commit}")
 
         missing = scoped.get(f"{_TOOLS}/{_KEY}", params={"ref": "v9.9.9"})

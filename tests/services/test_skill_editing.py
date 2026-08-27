@@ -121,6 +121,15 @@ def test_save_version_commits_and_tags(service: SkillEditingService, repo: Path)
     preview = detail_at_ref(_KEY, "v1.0.0", repo)
     skill_md = next(f for f in preview["files"] if f["path"] == "SKILL.md")
     assert skill_md["content"] == "# Review\n"
+    assert preview["tags"] == ["v1.1.0", "v1.0.0"]
+
+
+def test_detail_at_ref_lists_tags_latest_version_first(repo: Path) -> None:
+    _git(repo, "tag", "v1.2.0")
+    _git(repo, "tag", "v1.10.0")
+    _git(repo, "tag", "v0.9")
+    preview = detail_at_ref(_KEY, "v1.0.0", repo)
+    assert preview["tags"] == ["v1.10.0", "v1.2.0", "v1.0.0", "v0.9"]
 
 
 def test_save_version_never_touches_the_lock(

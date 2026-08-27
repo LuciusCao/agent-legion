@@ -33,6 +33,7 @@ def test_skill_detail_lists_safe_text_files_and_locked_version(tmp_path: Path) -
 
     assert detail["ref"] == "v1.2.0"
     assert detail["commit"] == "abc123"
+    assert detail["tags"] == []  # not a git repo: no tags to list
     assert [item["path"] for item in detail["files"]] == [
         "SKILL.md",
         "references/rules.md",

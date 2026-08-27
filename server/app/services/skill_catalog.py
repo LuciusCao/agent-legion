@@ -42,6 +42,7 @@ class SkillCatalogService:
             "ref": source.ref,
             "commit": locked.commit if locked is not None else "",
             "available": skill_dir.is_dir(),
+            "tags": list(skill_repo.list_tags(skill_dir)) if skill_dir.is_dir() else [],
             "files": self._files(skill_dir) if skill_dir.is_dir() else [],
         }
 

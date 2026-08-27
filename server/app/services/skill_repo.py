@@ -48,7 +48,8 @@ def is_git_repo(repo_dir: Path) -> bool:
 
 
 def list_tags(repo_dir: Path) -> tuple[str, ...]:
-    result = run_git(repo_dir, ["tag", "--list"], check=False)
+    """Git tags of the repo, latest version first (``-version:refname``)."""
+    result = run_git(repo_dir, ["tag", "--list", "--sort=-version:refname"], check=False)
     if result.returncode != 0:
         return ()
     return tuple(
@@ -120,5 +121,6 @@ def detail_at_ref(skill_key: str, ref: str, repo_dir: Path) -> dict[str, Any]:
         "ref": ref,
         "commit": commit,
         "available": True,
+        "tags": list(list_tags(repo_dir)),
         "files": read_files_at_commit(repo_dir, commit),
     }

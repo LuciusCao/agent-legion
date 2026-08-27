@@ -24,11 +24,12 @@ ClientFactory = Callable[[], Awaitable[tuple[McpServerConfig, ToolClient]]]
 def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
     @mcp.tool()
     async def get_skill(skill_key: str, ref: str | None = None) -> str:
-        """Read a skill's content: key, configured ref, locked commit, and its
-        text files (SKILL.md + references/ + scripts/). Pass ref (a git tag of
-        the skill repo) to preview that tag's content — e.g. a tag another
-        agent just created — without changing the lock; an unknown tag comes
-        back as a structured HTTP 404 error, nothing changes."""
+        """Read a skill's content: key, configured ref, locked commit, the
+        repo's git tags (latest version first), and its text files (SKILL.md +
+        references/ + scripts/). Pass ref (a git tag of the skill repo) to
+        preview that tag's content — e.g. a tag another agent just created —
+        without changing the lock; an unknown tag comes back as a structured
+        HTTP 404 error, nothing changes."""
         _, client = await client_factory()
         path = f"/skills/{skill_key}"
         if ref is not None:
