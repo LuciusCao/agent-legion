@@ -550,10 +550,9 @@ server/app/
 是 `architecture.route_response_model` 检查的长期豁免（锚定本节）：
 
 - `POST /api/agent-executions/{execution_id}/result`（routes/agent_workers.py）：结果上报
-  的确认是一个 Server-Sent Events 流（StreamingResponse, text/event-stream），与 workspace
-  job 事件路由同形——流式响应没有 JSON schema 可言。
+  的确认按协议返回空 body 的 204 响应（`Response(status_code=204)`），无 JSON 可建模。
 - `POST /api/agent-executions/{execution_id}/release-slot`（routes/agent_workers.py）：
-  释放槽位的确认按协议返回空 204 响应，无 body。
+  释放槽位的确认同样按协议返回空 204 响应，无 body。
 
 ## Runtime Architecture
 
