@@ -82,7 +82,7 @@ def test_workspace_configuration_settings_payload(workspace_service, workspace):
 
 
 def _claim_code_lease(job_db, workspace_id: str, job_id: str, settings, capacity: int = 16):
-    repo = ExecutorLeaseRepository(job_db.path, data_dir=job_db.jobs_dir.parent)
+    repo = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
     claim = repo.try_claim(
         LeaseClaimRequest(
             executor_id="code",

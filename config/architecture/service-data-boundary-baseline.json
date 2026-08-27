@@ -118,8 +118,8 @@
     ],
     "server/app/services/job_artifact_maintenance.py": [
       3,
-      1,
-      3
+      0,
+      0
     ],
     "server/app/services/job_artifact_mutation.py": [
       1,
@@ -160,11 +160,6 @@
       1,
       0,
       0
-    ],
-    "server/app/services/job_service_factory.py": [
-      0,
-      0,
-      1
     ],
     "server/app/services/log_cleanup.py": [
       2,
@@ -258,7 +253,7 @@
     ],
     "server/app/services/run_service.py": [
       3,
-      1,
+      0,
       0
     ],
     "server/app/services/skill_catalog.py": [

@@ -52,7 +52,7 @@ def _lease_status(job_db: JobQueries, lease_id: str) -> str:
 
 def test_expire_skips_lease_finished_concurrently(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    repo = ExecutorLeaseRepository(job_db.path, job_db=job_db, data_dir=tmp_path)
+    repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     _, job_id, claim = _claimed_stale_lease(job_db, repo, "ws-expire-finish")
     now_str = database_timestamp(datetime.now(UTC))
 
@@ -72,7 +72,7 @@ def test_expire_skips_lease_finished_concurrently(tmp_path: Path) -> None:
 
 def test_expire_skips_lease_renewed_concurrently(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    repo = ExecutorLeaseRepository(job_db.path, job_db=job_db, data_dir=tmp_path)
+    repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     _, job_id, claim = _claimed_stale_lease(job_db, repo, "ws-expire-renew")
     now_str = database_timestamp(datetime.now(UTC))
 
@@ -90,7 +90,7 @@ def test_expire_skips_lease_renewed_concurrently(tmp_path: Path) -> None:
 
 def test_expire_still_expires_genuinely_stale_lease(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    repo = ExecutorLeaseRepository(job_db.path, job_db=job_db, data_dir=tmp_path)
+    repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     _, job_id, claim = _claimed_stale_lease(job_db, repo, "ws-expire-real")
 
     assert repo.expire_stale(datetime.now(UTC)) == [claim.lease_id]

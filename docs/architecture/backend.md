@@ -540,6 +540,17 @@ server/app/
   800 行绝对上限（`production.max_lines`，按原始行数计），豁免也不能突破；挂账超过 30 天的豁免由
   `scripts/check_exemption_age.py` 在 full gate 中告警（不阻断）。
 
+### Agent Worker 协议响应形态（response model 豁免的依据）
+
+两条 Agent Worker 协议端点按协议设计没有 JSON response model 可命名，
+是 `architecture.route_response_model` 检查的长期豁免（锚定本节）：
+
+- `POST /api/agent-executions/{execution_id}/result`（routes/agent_workers.py）：结果上报
+  的确认是一个 Server-Sent Events 流（StreamingResponse, text/event-stream），与 workspace
+  job 事件路由同形——流式响应没有 JSON schema 可言。
+- `POST /api/agent-executions/{execution_id}/release-slot`（routes/agent_workers.py）：
+  释放槽位的确认按协议返回空 204 响应，无 body。
+
 ## Runtime Architecture
 
 ### 后端
@@ -583,7 +594,10 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
   - `job_artifacts` — Job 产物清单（权威副本在实例对象存储，schema v54）
   - `workflow_revisions` — workflow 版本修订历史
   - `workspace_packages` — 已创建 package 路径
-- 初始化器在 PostgreSQL advisory lock 下按版本应用 schema。
+- 初始化器在 PostgreSQL advisory lock 下按版本应用 schema。数据迁移经
+  `server/app/db/migration_registry.py` 的 `MIGRATIONS` 注册表按版本有序应用
+  （DB-SCHEMA-001）；`db/migrations/__init__.py` 的平铺 re-export 随版本每次
+  +2 行，长期收敛方向是从注册表派生该导出。
 - `JobQueries.connect()` 是上下文管理器（定义在 `JobQueriesBase`），确保 `conn.close()`；workspace 侧查询由 `WorkspaceQueriesMixin` 合并进统一的 `JobQueries`。
 - `JobDeletionService` 级联删除 Job 记录、`node_runs`、本地 Job 目录与日志；同时快照 `job_artifacts` 清单行并删除对象存储副本（`server/app/services/job_deletion.py`）。
 - 存储路径以**相对 POSIX 路径**保存在 `settings.data_dir` 下（前缀为 `videos/`, `jobs/`, `logs/`, `packages/`），API 返回时投影为绝对路径。

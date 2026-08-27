@@ -97,24 +97,30 @@ exemptions:
     resolver share the runtime binary constants, so splitting now would just
     scatter one cohesive rule. The per-run Agent version pin (schema v29,
     EXEC-QUALITY-REPLAY-001) added the pinned_agent_version passthrough. Extract
-    the resolver with the phase 4 pi cleanup.
+    the resolver when the agent-broker structure-debt batch (#198) reworks the
+    dispatch boundary.
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/198
   ceiling: 174
 - check: architecture.file_budget
   path: server/app/services/agent_service.py
   reason: Schema v27 made this service the only Agent catalog source of truth;
     the short-TTL published-definition cache (hot claim-path reads) lives next
     to the lifecycle methods so publish/archive can invalidate it in one
-    place. Split the cache into its own module if it gains more policy.
+    place. Split the cache into its own module when it gains more policy —
+    tracked with the wide-service structure batch (#196).
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/196
   ceiling: 135
 - check: architecture.file_budget
   path: server/app/db/migrations/__init__.py
   reason: The module is the flat export point for the idempotent migration
     chain and grows by two lines per schema version (v58 retire_global_register_tokens,
-    v59 jobs_run_id_index, v61 workspace_id_key_binding).
+    v59 jobs_run_id_index). The referenced studio-phase3 plan is complete and
+    was never a real removal condition; the durable resolution is deriving
+    this re-export from the migration registry itself (each migration module
+    is already enumerated by migration_registry.py), which removes the
+    per-version growth entirely.
   owner: workspace-executor
-  remove_when: docs/architecture/studio-phase3-implementation-plan.md
-  ceiling: 70
+  remove_when: docs/architecture/backend.md#database
+  ceiling: 60

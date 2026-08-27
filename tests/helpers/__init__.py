@@ -73,19 +73,15 @@ def publish_builtin_revision(
     Mirrors the workspace-create demo seed (ensure_active_revision is
     seed-if-absent): tests that bypass the API and create the workspace row
     directly use this so definition resolution (workspace active revision,
-    schema v50) sees the DAG.
+    schema v50) sees the DAG. JobQueries-level workspaces keep id and key
+    independent (the id==key invariant is HTTP-layer only, schema v61), so
+    the revision is published under *workflow_key* as given.
     """
-    from dataclasses import replace
-
     from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
     from server.app.services.workflow_revisions import WorkflowRevisionService
 
     seed_demo_workspace_node_codes(load_settings(), workspace_id)
     definition = load_builtin_workflow(workflow_key)
-    # Schema v61 binds the workflow key to the workspace id: rewrite the
-    # definition key so the revision lands under the workspace's bound key.
-    if definition.key != workspace_id:
-        definition = replace(definition, key=workspace_id)
     return WorkflowRevisionService(job_db).ensure_active_revision(workspace_id, definition)
 
 
@@ -127,7 +123,7 @@ def make_workflow_worker(
         settings_config=settings.config,
         job_db=queries,
     )
-    leases = ExecutorLeaseRepository(queries.path, data_dir=tmp_path)
+    leases = ExecutorLeaseRepository(queries, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
         executor=executor,

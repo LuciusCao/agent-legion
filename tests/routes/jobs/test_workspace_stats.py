@@ -69,7 +69,7 @@ def test_workspace_stats_code_pool_reflects_leases(client_factory):
         from server.app.executors.models import LeaseClaimRequest
 
         job_id = job_db.list_jobs(workspace_id=ws_id)[0]["id"]
-        repo = ExecutorLeaseRepository(job_db.path, data_dir=job_db.jobs_dir.parent)
+        repo = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
         claim = repo.try_claim(
             LeaseClaimRequest(
                 executor_id="code",
