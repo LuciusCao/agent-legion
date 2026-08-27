@@ -90,7 +90,7 @@ const mockListAgentWorkers = vi.fn(() =>
   ])
 )
 
-vi.mock('../api/workerTokens', () => ({
+vi.mock('../api/agentWorkers', () => ({
   listAgentWorkers: () => mockListAgentWorkers(),
 }))
 

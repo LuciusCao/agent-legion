@@ -139,8 +139,8 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/admin/connections/{key}/test"): "require_admin",
     ("PUT", "/api/admin/studio-agents"): "require_admin",
     ("POST", "/api/agent-register-tokens"): "require_admin",
-    ("POST", "/api/agent-register-tokens/{token_id}/revoke"): "require_admin",
-    ("POST", "/api/agent-workers/{worker_id}/revoke"): "require_admin",
+    ("DELETE", "/api/agent-register-tokens/{token_id}"): "require_admin",
+    ("DELETE", "/api/agent-workers/{worker_id}"): "require_admin",
     # Worker credential channel (x-agent-worker-token / register token, not a
     # user session; scoped Bearer tokens never authenticate here).
     ("POST", "/api/agent-workers/register"): "worker register-token channel",

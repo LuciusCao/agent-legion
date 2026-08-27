@@ -97,6 +97,9 @@ MIGRATIONS: list[SchemaMigration] = [
     # but carries an apply fn (not just a schema-file entry): the schema file
     # replays before v53's batch_id→run_id rename on v52 upgrades.
     SchemaMigration(59, "jobs_run_id_index", migrate_jobs_run_id_index),
+    # v60 is DDL-only (agent_workers.register_token_ids_json): the idempotent
+    # schema-file replay adds the column, no data migration needed.
+    SchemaMigration(60, "worker_register_token_ids"),
 ]
 
 assert [m.version for m in MIGRATIONS] == sorted(m.version for m in MIGRATIONS), (

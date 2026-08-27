@@ -394,53 +394,6 @@ def test_result_rejects_oversized_archive(tmp_path: Path) -> None:
         assert not bundle_dir.exists() or list(bundle_dir.glob("*.result.tar.gz")) == []
 
 
-def test_register_with_scoped_token_stores_and_returns_scope(tmp_path: Path) -> None:
-    app = _make_app(tmp_path)
-    _seed_request(app.state.job_db, job_id="job-1", limit=2)
-
-    with TestClient(app) as client:
-        _authenticate_admin(client)
-        scoped = _issue_scoped_token(client)
-        other = _issue_scoped_token(client, workspace_id="other-workspace")
-
-        scoped_registration = _register(client, credential=scoped, worker_id="scoped-worker")
-        assert scoped_registration["allowed_workspaces"] == ["test-workspace"]
-        # issue #35: the response carries workspace rows (id + name + the token
-        # ids that opened it) so the Worker console can label each token.
-        workspaces_row = scoped_registration["workspaces"]
-        assert [row["workspace_id"] for row in workspaces_row] == ["test-workspace"]
-        assert all(row["workspace_name"] for row in workspaces_row)
-        assert workspaces_row[0]["token_ids"] == [scoped.partition(".")[0]]
-
-        listed = client.get("/api/agent-workers")
-        assert listed.status_code == 200
-        workers = {w["worker_id"]: w for w in listed.json()["workers"]}
-        assert workers["scoped-worker"]["allowed_workspaces"] == ["test-workspace"]
-
-        # Multiple tokens in one registration merge their scopes (union).
-        merged = _register(
-            client,
-            credential=None,
-            worker_id="scoped-worker",
-            tokens=[scoped, other],
-        )
-        assert sorted(merged["allowed_workspaces"]) == [
-            "other-workspace",
-            "test-workspace",
-        ]
-        # 每个 workspace 行记录开通它的 token id，控制台按 token_id 关联卡片。
-        by_workspace = {row["workspace_id"]: row["token_ids"] for row in merged["workspaces"]}
-        assert by_workspace["test-workspace"] == [scoped.partition(".")[0]]
-        assert by_workspace["other-workspace"] == [other.partition(".")[0]]
-
-        # The workspace view only sees workers scoped to it; the legacy []
-        # scope (a retired global registration) would be invisible there.
-        marketing_view = client.get(
-            "/api/agent-workers", params={"workspace_id": "test-workspace"}
-        ).json()["workers"]
-        assert [w["worker_id"] for w in marketing_view] == ["scoped-worker"]
-
-
 def test_worker_online_flag_tracks_last_seen(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
 

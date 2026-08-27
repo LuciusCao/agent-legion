@@ -190,6 +190,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/routes/jobs/test_openapi_contracts.py",
         "tests/routes/jobs/test_workflow_upgrade.py",
         "tests/routes/test_agent_workers.py",
+        "tests/routes/test_agent_worker_registration.py",
         "tests/routes/test_agent_register_tokens.py",
         "tests/routes/test_agent_claim_artifact_channel.py",
         "tests/routes/test_agent_worker_result_spool.py",

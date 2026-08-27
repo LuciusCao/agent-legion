@@ -403,7 +403,7 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/agent-register-tokens/{token_id}/revoke': {
+  '/api/agent-register-tokens/{token_id}': {
     parameters: {
       query?: never
       header?: never
@@ -412,9 +412,15 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** Revoke Register Token */
-    post: operations['revoke_register_token_api_agent_register_tokens__token_id__revoke_post']
-    delete?: never
+    post?: never
+    /**
+     * Delete Register Token
+     * @description Hard-delete a key and cascade-cut dependent workers: workers left
+     *     without any live key lose their registration record in the same
+     *     transaction (their credential dies immediately); workers with other
+     *     live keys are narrowed to the surviving keys' scope.
+     */
+    delete: operations['delete_register_token_api_agent_register_tokens__token_id__delete']
     options?: never
     head?: never
     patch?: never
@@ -500,7 +506,7 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/agent-workers/{worker_id}/revoke': {
+  '/api/agent-workers/{worker_id}': {
     parameters: {
       query?: never
       header?: never
@@ -509,9 +515,17 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** Revoke Worker */
-    post: operations['revoke_worker_api_agent_workers__worker_id__revoke_post']
-    delete?: never
+    post?: never
+    /**
+     * Delete Worker
+     * @description Hard-delete a worker registration (record cleanup step).
+     *
+     *     There is no per-worker revocation: access is cut by deleting the
+     *     Worker's register keys. Deleting the record only opens once none of
+     *     its bound keys exist anymore, so a reachable Worker can never vanish
+     *     from under in-flight claims.
+     */
+    delete: operations['delete_worker_api_agent_workers__worker_id__delete']
     options?: never
     head?: never
     patch?: never
@@ -2556,12 +2570,16 @@ export interface components {
       /** Token Id */
       token_id: string
       /** Workspace Id */
-      workspace_id: string | null
+      workspace_id: string
     }
-    /** AgentRegisterTokenRevokeResponse */
-    AgentRegisterTokenRevokeResponse: {
-      /** Revoked */
-      revoked: boolean
+    /** AgentRegisterTokenDeleteResponse */
+    AgentRegisterTokenDeleteResponse: {
+      /** Cascaded Worker Ids */
+      cascaded_worker_ids?: string[]
+      /** Deleted */
+      deleted: boolean
+      /** Token Id */
+      token_id: string
     }
     /** AgentRegisterTokenSummary */
     AgentRegisterTokenSummary: {
@@ -2654,10 +2672,10 @@ export interface components {
       /** Versions */
       versions: components['schemas']['AgentVersionSummary'][]
     }
-    /** AgentWorkerRevokeResponse */
-    AgentWorkerRevokeResponse: {
-      /** Revoked */
-      revoked: boolean
+    /** AgentWorkerDeleteResponse */
+    AgentWorkerDeleteResponse: {
+      /** Deleted */
+      deleted: boolean
       /** Worker Id */
       worker_id: string
     }
@@ -2687,6 +2705,8 @@ export interface components {
       online: boolean
       /** Protocol Version */
       protocol_version: number
+      /** Register Token Ids */
+      register_token_ids?: string[]
       /** Registered At */
       registered_at: string
       /** Revoked */
@@ -6671,7 +6691,7 @@ export interface operations {
       }
     }
   }
-  revoke_register_token_api_agent_register_tokens__token_id__revoke_post: {
+  delete_register_token_api_agent_register_tokens__token_id__delete: {
     parameters: {
       query?: never
       header?: never
@@ -6688,7 +6708,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['AgentRegisterTokenRevokeResponse']
+          'application/json': components['schemas']['AgentRegisterTokenDeleteResponse']
         }
       }
       /** @description Validation Error */
@@ -6817,7 +6837,7 @@ export interface operations {
       }
     }
   }
-  revoke_worker_api_agent_workers__worker_id__revoke_post: {
+  delete_worker_api_agent_workers__worker_id__delete: {
     parameters: {
       query?: never
       header?: never
@@ -6834,7 +6854,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['AgentWorkerRevokeResponse']
+          'application/json': components['schemas']['AgentWorkerDeleteResponse']
         }
       }
       /** @description Validation Error */

@@ -284,9 +284,9 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
     assert registry.resolve_register_scope([f"{token_id}.wrong-secret"]) is None
     assert registry.resolve_register_scope([]) is None
 
-    assert registry.revoke_register_token(token_id) is True
+    assert registry.delete_register_token(token_id) == []
     assert registry.resolve_register_scope([plaintext]) is None
-    assert registry.revoke_register_token("no-such-token") is False
+    assert registry.delete_register_token("no-such-token") is None
 
 
 def test_register_token_for_missing_workspace_rejected(job_db) -> None:

@@ -17,6 +17,7 @@ from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.unclaimable import fail_unclaimable_model_requests
 from server.app.agent_catalog import AgentDefinition
 from server.app.agent_workers import AgentWorkerRegistry
+from server.app.db.transaction import write_transaction
 from tests.helpers import replace_agent_catalog
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -475,7 +476,12 @@ def test_unclaimable_sweeper_revoked_worker_does_not_count(job_db) -> None:
         capabilities=["generate"],
         models=[{"provider": "gateway", "model": "test-model"}],
     )
-    registry.revoke("worker-1")
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        # Legacy revoked rows keep their claim-side exclusion semantics; the
+        # per-worker revoke API was removed (access is cut by deleting keys).
+        conn.execute(
+            "update agent_workers set revoked_at=current_timestamp where worker_id='worker-1'"
+        )
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     # Revoked Workers carry no declarations; with none left the deployment-gap

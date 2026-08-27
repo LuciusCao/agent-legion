@@ -263,11 +263,16 @@ create table if not exists agent_workers (
   -- the registration credential (global register token or scoped token),
   -- never from Worker-supplied fields.
   allowed_workspaces_json text not null default '[]',
+  -- Ids of the workspace-scoped register tokens presented at the latest
+  -- (re)registration (schema v59): the worker↔key binding, refreshed on every
+  -- re-registration. [] for workers registered before v59.
+  register_token_ids_json text not null default '[]',
   registered_at timestamptz not null,
   last_seen_at timestamptz not null,
   revoked_at timestamptz
 );
 alter table agent_workers add column if not exists allowed_workspaces_json text not null default '[]';
+alter table agent_workers add column if not exists register_token_ids_json text not null default '[]';
 alter table agent_workers add column if not exists capabilities_json text not null default '[]';
 alter table agent_workers add column if not exists models_json text not null default '[]';
 alter table agent_workers add column if not exists max_code_concurrency integer not null default 0;
@@ -276,9 +281,10 @@ alter table agent_workers add constraint agent_workers_max_code_concurrency_chec
   check(max_code_concurrency >= 0);
 
 -- Workspace-scoped Agent Worker registration tokens (EXEC-WORKERACL-001).
--- workspace_id NULL means the token admits Workers to ALL workspaces; a
--- scoped row admits only its workspace. Only token_hash is stored; the
--- plaintext is returned exactly once at issuance.
+-- Every live token admits Workers to exactly one workspace; the
+-- workspace_id IS NULL all-workspaces variant was retired at schema v58
+-- (issue #35) and any remaining NULL rows stay revoked. Only token_hash is
+-- stored; the plaintext is returned exactly once at issuance.
 create table if not exists agent_register_tokens (
   id text primary key,
   token_hash text not null,

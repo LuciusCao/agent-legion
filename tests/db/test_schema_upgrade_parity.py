@@ -43,10 +43,14 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v59, jobs_run_id_index) must leave behind so
-# the undo step rewinds a current-shape database to exactly SCHEMA_VERSION-1.
-_NEWEST_MIGRATION_INDEXES = ("idx_jobs_run_id",)
-_NEWEST_MIGRATION_NAME = "jobs_run_id_index"
+# Effects the newest migration (v60, worker_register_token_ids — DDL-only,
+# agent_workers.register_token_ids_json via the schema file) must leave behind
+# so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. The previous newest (v59 jobs_run_id_index) is part of the
+# v60-1 baseline shape and stays.
+_NEWEST_MIGRATION_COLUMNS = (("agent_workers", "register_token_ids_json", "text"),)
+_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
+_NEWEST_MIGRATION_NAME = "worker_register_token_ids"
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]
@@ -56,6 +60,8 @@ _CatalogIndexes = set[tuple[str, str, str]]
 def _undo_newest_migration(database_dsn: str) -> None:
     """Rewind a current-shape database to SCHEMA_VERSION - 1."""
     with write_transaction(database_dsn) as conn:
+        for table, column, _data_type in _NEWEST_MIGRATION_COLUMNS:
+            conn.execute(f"alter table {table} drop column if exists {column}")
         for index_name in _NEWEST_MIGRATION_INDEXES:
             conn.execute(f"drop index if exists {index_name}")
         conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))

@@ -59,7 +59,7 @@ def test_agent_definition_catalog_snapshot_lifecycle(job_db) -> None:
 
 
 @pytest.mark.full_gate
-def test_worker_token_is_hashed_and_revocable(job_db) -> None:
+def test_worker_token_is_hashed_and_deleted_worker_loses_access(job_db) -> None:
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     token = registry.issue_token(
         worker_id="secure-worker",
@@ -77,7 +77,9 @@ def test_worker_token_is_hashed_and_revocable(job_db) -> None:
     assert row["token_hash"] == hashlib.sha256(secret.encode()).hexdigest()
     assert secret not in row["token_hash"]
     assert registry.authenticate(token) is not None
-    assert registry.revoke(worker_id)
+    # Direct registry registration has no recorded key binding, so the record
+    # is deletable; deleting it kills the credential.
+    assert registry.delete_worker(worker_id) == "deleted"
     assert registry.authenticate(token) is None
 
 
@@ -90,7 +92,7 @@ def test_postgres_agent_schema_initialization_is_idempotent() -> None:
 def test_scoped_register_token_lifecycle(job_db) -> None:
     """EXEC-WORKERACL-001 evidence: scoped tokens are hashed at rest, resolve
     to their workspace scope, stamp it onto registered Workers, and stop
-    resolving after revoke."""
+    resolving after the key is deleted."""
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     with job_db.connect() as conn:
         conn.execute(
@@ -120,7 +122,7 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
     entry = next(item for item in listed if item["token_id"] == token_id)
     assert "token_hash" not in entry and "register_token" not in entry
 
-    assert registry.revoke_register_token(token_id)
+    assert registry.delete_register_token(token_id) == []
     assert registry.resolve_register_scope([plaintext]) is None
 
 

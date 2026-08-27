@@ -27,6 +27,7 @@ from server.app.agent_broker.code_dispatch import (
 from server.app.agent_broker.code_eligibility import is_worker_eligible
 from server.app.agent_broker.code_manifest import resolve_code_runtime_context
 from server.app.agent_workers import AgentWorkerRegistry
+from server.app.db.transaction import write_transaction
 from server.app.executors.contracts import CodeCapabilityConfig
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.vault import VaultService
@@ -43,6 +44,17 @@ _SCHEMA = {
         "token": {"type": "string", "secret": True},
     }
 }
+
+
+def _revoke(worker_id: str) -> None:
+    """Mark a worker revoked via SQL: the per-worker revoke API was removed
+    (access is cut by deleting register keys), but legacy revoked_at rows keep
+    their claim-side exclusion semantics, which these tests cover."""
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "update agent_workers set revoked_at=current_timestamp where worker_id=%s",
+            (worker_id,),
+        )
 
 
 @pytest.mark.no_db
@@ -395,7 +407,7 @@ def test_online_code_worker_probe_matches_capability(job_db) -> None:
 def test_online_code_worker_probe_wildcard_zero_capacity_and_revoked(job_db) -> None:
     _register_probe_worker("worker-wild", capabilities=None)  # legacy "*" mode
     assert has_online_code_worker(TEST_DATABASE_URL, "anything", "test-workspace") is True
-    AgentWorkerRegistry(TEST_DATABASE_URL).revoke("worker-wild")
+    _revoke("worker-wild")
     assert has_online_code_worker(TEST_DATABASE_URL, "anything", "test-workspace") is False
     # An agent-only Worker (no code pool) never counts even on a match.
     _register_probe_worker("worker-agent", capabilities=["anything"], max_code_concurrency=0)
@@ -423,8 +435,8 @@ def test_online_code_worker_probe_matches_claim_side_filters(job_db) -> None:
     assert has_online_code_worker(TEST_DATABASE_URL, "package", "test-workspace") is True
 
     # A v1 row predating the register-time gate never counts either.
-    AgentWorkerRegistry(TEST_DATABASE_URL).revoke("worker-scoped")
-    AgentWorkerRegistry(TEST_DATABASE_URL).revoke("worker-open")
+    _revoke("worker-scoped")
+    _revoke("worker-open")
     with job_db.connect() as conn:
         conn.execute(
             "insert into agent_workers(worker_id, runtimes_json, max_concurrency,"
@@ -443,7 +455,7 @@ def test_online_probe_caches_per_capability_within_ttl(job_db, tmp_path) -> None
     assert service.online_code_worker_available("package", "test-workspace") is True
     assert service.online_code_worker_available("transcribe", "test-workspace") is False
     # Within the TTL the cached answer is served even after the Worker leaves.
-    AgentWorkerRegistry(TEST_DATABASE_URL).revoke("worker-a")
+    _revoke("worker-a")
     assert service.online_code_worker_available("package", "test-workspace") is True
     service._online_probe.clear()
     assert service.online_code_worker_available("package", "test-workspace") is False

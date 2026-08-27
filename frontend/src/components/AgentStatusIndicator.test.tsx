@@ -3,7 +3,7 @@ import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { AgentStatusIndicator } from './AgentStatusIndicator'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { useConnectionStatusStore } from '../stores/connectionStatusStore'
-import type { AgentWorkerSummary as WorkerSummary } from '../api/workerTokens'
+import type { AgentWorkerSummary as WorkerSummary } from '../api/agentWorkers'
 import { createMockAgentsState, createMockUiState } from '../testing/fixtures'
 import { makeAgentStatus } from '../testing/workspaceFixtures'
 import type { AgentStatus } from '../types'
@@ -21,7 +21,7 @@ const setWorkerPausedMock = vi.fn()
 const showToastMock = vi.fn()
 const listAgentWorkersMock = vi.fn()
 
-vi.mock('../api/workerTokens', () => ({
+vi.mock('../api/agentWorkers', () => ({
   listAgentWorkers: () => listAgentWorkersMock(),
 }))
 

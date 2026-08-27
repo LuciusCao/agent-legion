@@ -33,6 +33,10 @@ export { presignMaterial, completeMaterial, createRun } from './materialsApi'
 // prettier-ignore
 export type { MetricBucket, OpsGranularity, OpsMetricsParams, OpsMetricsResponse } from './metrics'
 // prettier-ignore
-export { createRegisterToken, listAgentWorkers, listRegisterTokens, revokeAgentWorker, revokeRegisterToken } from './workerTokens'
+export { createRegisterToken, deleteRegisterToken, listRegisterTokens } from './workerTokens'
 // prettier-ignore
-export type { AgentRegisterTokenCreatedResponse, AgentRegisterTokenSummary, AgentWorkerSummary } from './workerTokens'
+export { deleteAgentWorker, listAgentWorkers } from './agentWorkers'
+// prettier-ignore
+export type { AgentRegisterTokenCreatedResponse, AgentRegisterTokenSummary } from './workerTokens'
+// prettier-ignore
+export type { AgentWorkerSummary } from './agentWorkers'

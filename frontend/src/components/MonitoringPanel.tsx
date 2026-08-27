@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { OpsGranularity } from '../api/metrics'
-import { listAgentWorkers } from '../api/workerTokens'
+import { listAgentWorkers } from '../api/agentWorkers'
 import { queryKeys } from '../lib/queryKeys'
 import { useOpsMetrics } from '../hooks/useOpsMetrics'
 import { fillWindowBuckets } from '../lib/opsMetricsWindow'

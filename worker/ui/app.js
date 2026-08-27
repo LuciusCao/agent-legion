@@ -564,6 +564,8 @@ async function loadRegisterTokens() {
       listEl.insertAdjacentHTML("beforeend", renderTokenCard(card));
     }
     bindTokenCardActions();
+    // 轮询成功即自愈：不让上一轮的失败横幅与新鲜列表并存。
+    if (errEl) { errEl.hidden = true; errEl.textContent = ""; }
   } catch (error) {
     if (errEl) { errEl.hidden = false; errEl.textContent = `加载 Token 列表失败：${error.message}`; }
   }
@@ -787,6 +789,8 @@ if (hasDom) {
   } else {
     Promise.all([loadConfig(), loadRegisterTokens(), loadStatus(), loadLogs(), loadMetrics()]);
     setInterval(loadStatus, 5000);
+    // token 卡片状态（验证中 → 已验证 + workspace 信息）随重注册完成自动刷新。
+    setInterval(loadRegisterTokens, 5000);
     setInterval(loadMetrics, 30000);
   }
 }

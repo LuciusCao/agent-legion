@@ -13,19 +13,18 @@ from __future__ import annotations
 
 import pytest
 
-from server.app.db.schema import SCHEMA_VERSION, init_db
+from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
 
 
 def test_schema_version_pin() -> None:
-    # The latest-migration record pin moved here from
-    # test_retire_global_register_tokens_migration.py (v58 → v59).
-    assert SCHEMA_VERSION == 59
+    # This file pins the v59 migration record by explicit version: the
+    # latest-version pin (SCHEMA_VERSION itself) lives in
+    # test_retire_global_register_tokens_migration.py, which currently holds
+    # the v60 DDL-only entry (worker_register_token_ids).
     with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute(
-            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
-        ).fetchone()
+        row = conn.execute("select name from schema_migrations where version=%s", (59,)).fetchone()
     assert row is not None
     assert row["name"] == "jobs_run_id_index"
 
@@ -50,7 +49,10 @@ def test_v58_database_upgrades_gain_the_index() -> None:
     """
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("drop index if exists idx_jobs_run_id")
-        conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
+        # Rewind to a v58 shape: both the v59 index record and the v60
+        # DDL-only record must go, or init_db's high-water-mark check
+        # (max(applied) >= SCHEMA_VERSION) short-circuits the upgrade.
+        conn.execute("delete from schema_migrations where version >= 59")
 
     init_db(TEST_DATABASE_URL)
 

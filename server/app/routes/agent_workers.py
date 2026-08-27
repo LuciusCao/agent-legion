@@ -11,20 +11,18 @@ from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.agent_result_commit import commit_agent_result
 from server.app.agent_broker.result_spool import discard_staged_result, spool_result_body
 from server.app.agent_completion import AgentCompletionHandler
+from server.app.agent_register_key_guard import RegisterKeyDeleted
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.auth.dependencies import require_admin, require_user
+from server.app.routes.agent_register_tokens import create_agent_register_tokens_router
 from server.app.routes.agent_worker_claims import create_agent_worker_claim_router
 from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router
 from server.app.routes.agent_worker_results import parse_result_metadata
 from server.app.routes.agent_workers_contracts import (
-    AgentRegisterTokenCreatedResponse,
-    AgentRegisterTokenRevokeResponse,
-    AgentRegisterTokensResponse,
-    AgentWorkerRevokeResponse,
+    AgentWorkerDeleteResponse,
     AgentWorkersResponse,
     AgentWorkerSummary,
     AgentWorkerWorkspace,
-    CreateAgentRegisterTokenRequest,
     RegisterAgentWorkerRequest,
     RegisterAgentWorkerResponse,
 )
@@ -118,8 +116,21 @@ def create_agent_workers_router(
         try:
             token = registry.issue_token(
                 **payload.model_dump(),
-                allowed_workspaces=[row["workspace_id"] for row in scope],
+                # The stored scope is re-derived from the locked key rows
+                # inside issue_token's transaction; allowed_workspaces is
+                # not passed here (that legacy parameter only serves direct
+                # registry callers without a key binding).
+                register_token_ids=[
+                    str(token_id) for row in scope for token_id in row["token_ids"]
+                ],
             )
+        except RegisterKeyDeleted as exc:
+            # A bound key was deleted after the read-only resolve (guard
+            # re-checks under lock): the credential is dead, not malformed.
+            # str() of a KeyError subclass wraps the message in quotes —
+            # args[0] carries the clean text.
+            detail = exc.args[0] if exc.args else str(exc)
+            raise HTTPException(status_code=401, detail=detail) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return RegisterAgentWorkerResponse(
@@ -135,64 +146,34 @@ def create_agent_workers_router(
             ],
         )
 
-    @router.post(
-        "/agent-register-tokens",
-        status_code=201,
-        response_model=AgentRegisterTokenCreatedResponse,
-    )
-    def create_register_token(
-        payload: CreateAgentRegisterTokenRequest,
-        _admin: Annotated[dict[str, Any], Depends(require_admin)],
-    ) -> AgentRegisterTokenCreatedResponse:
-        try:
-            token_id, plaintext = registry.issue_register_token(
-                workspace_id=payload.workspace_id, label=payload.label
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return AgentRegisterTokenCreatedResponse(
-            token_id=token_id,
-            register_token=plaintext,
-            workspace_id=payload.workspace_id,
-            label=payload.label,
-        )
-
-    @router.get("/agent-register-tokens", response_model=AgentRegisterTokensResponse)
-    def list_register_tokens(
-        _admin: Annotated[dict[str, Any], Depends(require_admin)],
-    ) -> AgentRegisterTokensResponse:
-        return AgentRegisterTokensResponse.model_validate(
-            {"tokens": registry.list_register_tokens()}
-        )
-
-    @router.post(
-        "/agent-register-tokens/{token_id}/revoke",
-        response_model=AgentRegisterTokenRevokeResponse,
-    )
-    def revoke_register_token(
-        token_id: str,
-        _admin: Annotated[dict[str, Any], Depends(require_admin)],
-    ) -> AgentRegisterTokenRevokeResponse:
-        if not registry.revoke_register_token(token_id):
-            raise HTTPException(status_code=404, detail="Agent register token not found")
-        return AgentRegisterTokenRevokeResponse(revoked=True)
-
     @router.get("/agent-workers/self", response_model=AgentWorkerSummary)
     def get_worker_self(request: Request) -> AgentWorkerSummary:
         """Let a Worker inspect only its own registration with its issued token."""
         return AgentWorkerSummary.model_validate(authorize_worker(request))
 
-    @router.post(
-        "/agent-workers/{worker_id}/revoke",
-        response_model=AgentWorkerRevokeResponse,
+    @router.delete(
+        "/agent-workers/{worker_id}",
+        response_model=AgentWorkerDeleteResponse,
     )
-    def revoke_worker(
+    def delete_worker(
         worker_id: str,
         _admin: Annotated[dict[str, Any], Depends(require_admin)],
-    ) -> AgentWorkerRevokeResponse:
-        if not registry.revoke(worker_id):
+    ) -> AgentWorkerDeleteResponse:
+        """Hard-delete a worker registration (record cleanup step).
+
+        There is no per-worker revocation: access is cut by deleting the
+        Worker's register keys. Deleting the record only opens once none of
+        its bound keys exist anymore, so a reachable Worker can never vanish
+        from under in-flight claims."""
+        outcome = registry.delete_worker(worker_id)
+        if outcome == "not_found":
             raise HTTPException(status_code=404, detail="Agent Worker not found")
-        return AgentWorkerRevokeResponse(worker_id=worker_id, revoked=True)
+        if outcome == "keys_active":
+            raise HTTPException(
+                status_code=409,
+                detail="Agent Worker still has live register keys; delete them first",
+            )
+        return AgentWorkerDeleteResponse(worker_id=worker_id, deleted=True)
 
     @router.get("/agent-workers", response_model=AgentWorkersResponse)
     def list_workers(
@@ -278,5 +259,9 @@ def create_agent_workers_router(
             # place; on any failure it is reclaimed here.
             discard_staged_result(staged)
         return Response(status_code=204)
+
+    # The /agent-register-tokens management surface lives in its own module
+    # (file-size budget) but ships as part of this router.
+    router.include_router(create_agent_register_tokens_router(registry))
 
     return router

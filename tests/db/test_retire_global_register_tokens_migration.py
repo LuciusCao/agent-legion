@@ -45,14 +45,16 @@ def _insert_register_token(
 
 def test_schema_version_pin() -> None:
     # The latest-migration record pin moved to tests/db/test_jobs_run_id_index.py
-    # (v58 retire_global_register_tokens → v59 jobs_run_id_index).
-    assert SCHEMA_VERSION == 59
+    # (v58 retire_global_register_tokens → v59 jobs_run_id_index) and now to
+    # the v60 DDL-only entry (worker_register_token_ids, this PR): with no
+    # migration module of its own the pin stays in this file.
+    assert SCHEMA_VERSION == 60
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "jobs_run_id_index"
+    assert row["name"] == "worker_register_token_ids"
 
 
 def test_migration_revokes_only_live_all_workspaces_tokens() -> None:

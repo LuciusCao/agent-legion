@@ -360,7 +360,7 @@ def test_put_config_worker_id_change_logs_revoke_hint_and_restarts(
 
     assert response.status_code == 200, response.text
     assert response.json()["config"]["worker_id"] == "worker-2"
-    # Host 吊销是 admin-only：改 worker_id 只记提示日志，旧 worker 靠离线超时消失。
+    # Host 删除注册记录是 admin-only：改 worker_id 只记提示日志，旧 worker 靠离线超时消失。
     assert any("worker-1" in record.getMessage() for record in caplog.records)
     assert supervisor.restarts == 1
 
@@ -379,7 +379,7 @@ def test_put_config_without_worker_id_change_logs_no_revoke_hint(
 
     assert response.status_code == 200
     assert response.json()["config"]["name"] == "Renamed Worker"
-    assert not any("吊销" in record.getMessage() for record in caplog.records)
+    assert not any("旧注册记录" in record.getMessage() for record in caplog.records)
     assert supervisor.restarts == 1
 
 

@@ -2,10 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   createRegisterToken,
-  listAgentWorkers,
+  deleteRegisterToken,
   listRegisterTokens,
-  revokeAgentWorker,
-  revokeRegisterToken,
 } from './workerTokens'
 
 const originalFetch = global.fetch
@@ -67,36 +65,15 @@ describe('worker tokens api', () => {
     )
   })
 
-  it('revokes a register token', async () => {
-    const fetchMock = mockFetchJson({ revoked: true })
+  it('deletes a register token', async () => {
+    const fetchMock = mockFetchJson({ token_id: 't1', deleted: true })
     global.fetch = fetchMock
 
-    await revokeRegisterToken('token/1')
+    await deleteRegisterToken('token/1')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/agent-register-tokens/token%2F1/revoke',
-      expect.objectContaining({ method: 'POST' })
-    )
-  })
-
-  it('lists agent workers', async () => {
-    const fetchMock = mockFetchJson({ workers: [{ worker_id: 'w1' }] })
-    global.fetch = fetchMock
-
-    const workers = await listAgentWorkers()
-
-    expect(workers).toEqual([{ worker_id: 'w1' }])
-  })
-
-  it('revokes an agent worker', async () => {
-    const fetchMock = mockFetchJson({ worker_id: 'w1', revoked: true })
-    global.fetch = fetchMock
-
-    await revokeAgentWorker('w1')
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/agent-workers/w1/revoke',
-      expect.objectContaining({ method: 'POST' })
+      '/api/agent-register-tokens/token%2F1',
+      expect.objectContaining({ method: 'DELETE' })
     )
   })
 })

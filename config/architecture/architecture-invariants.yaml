@@ -514,7 +514,7 @@ invariants:
         gate: quick
 
   - id: SECURITY-WORKER-001
-    statement: "Agent Worker credentials are per-worker and revocable, persisted only as sha256 hashes; registration alone accepts the management token and execution endpoints require the per-worker token."
+    statement: "Agent Worker credentials are per-worker and cut by deleting the worker's register keys (no per-worker revoke), persisted only as sha256 hashes; registration alone accepts the management token and execution endpoints require the per-worker token."
     owner: security
     risk: critical
     evidence:
@@ -525,7 +525,7 @@ invariants:
         target: tests/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity
         gate: quick
       - kind: integration
-        target: tests/full/test_agent_worker_control_plane.py::test_worker_token_is_hashed_and_revocable
+        target: tests/full/test_agent_worker_control_plane.py::test_worker_token_is_hashed_and_deleted_worker_loses_access
         gate: full
 
   - id: DB-FAILURE-001
