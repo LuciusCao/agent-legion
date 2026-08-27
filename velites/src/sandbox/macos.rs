@@ -16,7 +16,7 @@ use anyhow::{anyhow, Context};
 /// System locations a process must be able to READ to execute at all
 /// (binaries, dyld cache, linker config, device nodes, Homebrew prefix).
 #[cfg(target_os = "macos")]
-pub(crate) fn macos_system_read_paths() -> Vec<PathBuf> {
+pub(super) fn macos_system_read_paths() -> Vec<PathBuf> {
     [
         "/usr",
         "/bin",
@@ -36,7 +36,7 @@ pub(crate) fn macos_system_read_paths() -> Vec<PathBuf> {
 
 /// Escape a path for embedding in a seatbelt profile string literal.
 #[cfg(target_os = "macos")]
-pub(crate) fn seatbelt_escape(path: &Path) -> String {
+pub(super) fn seatbelt_escape(path: &Path) -> String {
     path.display()
         .to_string()
         .replace('\\', "\\\\")
@@ -50,7 +50,7 @@ pub(crate) fn seatbelt_escape(path: &Path) -> String {
 /// file inside unreadable — a sandboxed `ls` along the chain sees the next
 /// level exist instead of a misleading EPERM/empty listing.
 #[cfg(any(target_os = "macos", test))]
-pub(crate) fn ancestor_list_only(
+pub(super) fn ancestor_list_only(
     root: &Path,
     read_only: &[PathBuf],
     read_write: &[PathBuf],
@@ -92,7 +92,7 @@ pub(crate) fn ancestor_list_only(
 /// - `signal_self_only` (`sandbox wrap` mode) narrows the global signal
 ///   allow to `(target self)`; the bash tool keeps the global allow.
 #[cfg(target_os = "macos")]
-pub(crate) fn seatbelt_profile_opts(
+pub(super) fn seatbelt_profile_opts(
     read_only: &[PathBuf],
     read_write: &[PathBuf],
     list_only: &[PathBuf],
@@ -142,7 +142,7 @@ pub(crate) fn seatbelt_profile_opts(
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn probe_macos() -> anyhow::Result<()> {
+pub(super) fn probe_macos() -> anyhow::Result<()> {
     let status = std::process::Command::new("sandbox-exec")
         .args(["-p", "(version 1) (allow default)", "/usr/bin/true"])
         .stdin(std::process::Stdio::null())
