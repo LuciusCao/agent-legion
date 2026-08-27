@@ -5,11 +5,17 @@
 # runners are unaffected).
 #
 # detect_gate_default_jobs is the legacy conservative baseline. The gate
-# scripts call detect_gate_default_jobs_worktree_aware instead: the polite
-# min(4, cores) cap exists because several worktrees may run gates
-# concurrently on one machine, and when no sibling worktree holds a quick
-# gate there is spare CPU, so the default climbs to cores-2 (the headroom
-# keeps the parallel backend/frontend lanes from starving each other).
+# scripts call detect_gate_default_jobs_worktree_aware instead, which divides
+# the machine budget across the gates actually running: N concurrent gates
+# (machine-wide slot count, scripts/gate-queue.sh) each get (cores-2)/N
+# workers, clamped to [2, 8]. With no queue visibility (stubbed git, no
+# common dir) it falls back to the sibling-lock probe: min(4, cores) while a
+# sibling worktree runs a gate, cores-2 otherwise.
+
+# count_live_gate_slots lives in gate-queue.sh; source it by this file's own
+# location so any caller (check-quick.sh, check-quick-backend.sh, standalone
+# sourcing) sees the machine-wide slot count.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/gate-queue.sh"
 
 detect_gate_default_jobs() {
   local jobs
@@ -46,20 +52,35 @@ other_worktree_gate_running() {
   return 1
 }
 
-# Default job count with worktree awareness: min(4, cores) while a sibling
-# worktree runs a gate, cores-2 (capped at 8, floored at 1) otherwise.
-# Per-lane env overrides keep precedence.
-detect_gate_default_jobs_worktree_aware() {
-  local jobs cores
-  if other_worktree_gate_running; then
-    cores="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
-    jobs="$cores"
-    [[ "$jobs" -gt 4 ]] && jobs=4
-  else
-    cores="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
-    jobs=$((cores > 3 ? cores - 2 : cores))
-    [[ "$jobs" -lt 1 ]] && jobs=1
-    [[ "$jobs" -gt 8 ]] && jobs=8
-  fi
+# Machine budget split across concurrent gates. N = live machine-wide gate
+# slots (includes this gate's own slot when queued through check-quick.sh),
+# so 1 gate on 10 cores -> 8 workers, 2 gates -> 4 each, 4 gates -> 2 each.
+# The floor of 2 keeps xdist functional on small machines; the cap of 8 keeps
+# one lone gate from oversubscribing a big box.
+_detect_gate_jobs_for_slots() {
+  local slots="$1"
+  local cores jobs
+  cores="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
+  [[ "$slots" -lt 1 ]] && slots=1
+  jobs=$(( (cores - 2) / slots ))
+  [[ "$jobs" -lt 2 ]] && jobs=2
+  [[ "$jobs" -gt 8 ]] && jobs=8
   echo "$jobs"
+}
+
+# Default job count with worktree awareness. Prefer the machine-wide slot
+# count (exact, includes this gate); when the queue is invisible fall back to
+# the sibling-lock probe. Per-lane env overrides keep precedence.
+detect_gate_default_jobs_worktree_aware() {
+  local slots
+  slots="$(count_live_gate_slots 2>/dev/null || echo 0)"
+  if [[ "$slots" =~ ^[0-9]+$ && "$slots" -ge 1 ]]; then
+    _detect_gate_jobs_for_slots "$slots"
+    return
+  fi
+  if other_worktree_gate_running; then
+    detect_gate_default_jobs
+  else
+    _detect_gate_jobs_for_slots 1
+  fi
 }

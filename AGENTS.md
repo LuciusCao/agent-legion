@@ -36,12 +36,21 @@
 ## 4. Quality Gates（必须执行）
 
 - 修改-验证内环用 `GATE_TIER=aff ./scripts/check-quick.sh`：backend 按覆盖逆索引
-  只跑受影响测试、前端 `vitest related` 只跑导入改动文件的测试；首次先跑
-  `GATE_TIER=aff-index ./scripts/check-quick-backend.sh` 建索引（依赖/conftest 变更后
-  重建）。aff 档不是 gate 凭证（`run-local-gate.sh` 拒绝该档）——无索引、索引盲区
-  （改动的源文件不在索引里）或选择面太宽时自动回落 unit 全量，回落只会更慢、
-  不会漏跑。任何代码修改后至少跑一次完整 `./scripts/check-quick.sh`（aff 通过不能
-  替代）。
+  只跑受影响测试、前端 `vitest related` 只跑导入改动文件的测试。aff 档不是 gate
+  凭证（`run-local-gate.sh` 拒绝该档）——无索引、索引盲区（改动的源文件不在索引里）
+  或选择面太宽时自动回落 unit 全量，回落只会更慢、不会漏跑。任何代码修改后至少跑
+  一次完整 `./scripts/check-quick.sh`（aff 通过不能替代）。
+- **aff 索引纪律**：`.pytest-aff-index.json` 是 gitignore 的本地工件，每个 worktree
+  首次用 aff 前必须先跑 `GATE_TIER=aff-index ./scripts/check-quick-backend.sh` 建
+  索引（约 2.5 分钟）；依赖或 `tests/conftest.py` 变更后重建。索引缺失时 aff 自动
+  回落 unit 全量——如果你发现 aff 跑了全量（输出含「aff fallback」），先建索引
+  再继续内环。
+- **机器级 gate 排队**：多个 agent worktree 并行跑质量门会互相拖垮（曾观察到 4 个
+  并行 quick gate 把最后一个拖到 ~1 小时）。quick gate 经 git common dir 的 slot
+  排队（`scripts/gate-queue.sh`）：默认同机最多 `AGENT_LEGION_MAX_PARALLEL_GATES=2`
+  个 gate 并行，后来者打印持有者并等待；每 lane worker 数按并发 gate 数均分
+  （`(cores-2)/N`，夹在 2..8）。agent 不需要也不应该用 `--no-verify` 之外的方式绕过
+  排队——排队本身就是正确行为，等待期可以做读代码/写代码等不占 CPU 的事。
 - quick gate 的 backend lane 同时跑 `worker/ui/app.test.mjs`（node:test，无 node 时跳过并提示）；
   CI 侧在 backend-postgres-a job 执行同一入口。
 - 提交或交接前确认 GitHub Actions full gate 通过（`.github/workflows/quality-gate.yml`

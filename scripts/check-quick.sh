@@ -96,6 +96,18 @@ cleanup_lock() {
   rm -rf "$lock_dir"
 }
 
+# Machine-wide gate queue (scripts/gate-queue.sh): with several agent
+# worktrees on one host, unlimited parallel gates thrash the CPU (observed
+# ~1h for the last of 4 concurrent quick gates). A slot in the shared git
+# common directory caps concurrent gates at AGENT_LEGION_MAX_PARALLEL_GATES
+# (default 2); later gates queue with holder announcements. Acquired after
+# the worktree lock so same-worktree serialization stays first.
+source "$ROOT_DIR/scripts/gate-queue.sh"
+acquire_gate_slot
+cleanup_gate_slot() {
+  release_gate_slot
+}
+
 COVERAGE_FILE="${COVERAGE_FILE:-$ROOT_DIR/.coverage.check-quick.$$}"
 export COVERAGE_FILE
 if [[ -z "${KEEP_COVERAGE:-}" ]]; then
@@ -112,9 +124,9 @@ cleanup_logs() {
   rm -rf "$log_dir"
 }
 if [[ -z "${KEEP_COVERAGE:-}" ]]; then
-  trap 'cleanup_lock; cleanup_logs; cleanup_coverage' EXIT
+  trap 'cleanup_lock; cleanup_gate_slot; cleanup_logs; cleanup_coverage' EXIT
 else
-  trap 'cleanup_lock; cleanup_logs' EXIT
+  trap 'cleanup_lock; cleanup_gate_slot; cleanup_logs' EXIT
 fi
 
 echo "=== Parallel Quick Gate ==="
