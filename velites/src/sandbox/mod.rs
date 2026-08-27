@@ -21,10 +21,8 @@
 
 use std::path::{Path, PathBuf};
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-use anyhow::anyhow;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-use anyhow::Context;
+#[cfg_attr(target_os = "macos", allow(unused_imports))]
+use anyhow::{anyhow, Context};
 
 #[cfg(any(target_os = "macos", test))]
 mod macos;
