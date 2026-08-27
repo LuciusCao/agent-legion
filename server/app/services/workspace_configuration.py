@@ -85,9 +85,12 @@ class WorkspaceConfigurationService:
         workspace_id = str(payload.get("id") or "").strip()
         if not workspace_id:
             raise InvalidOperationError("Workspace id is required")
+        clean_name = str(payload.get("name") or "").strip()
+        if not clean_name:
+            raise InvalidOperationError("Workspace name is required")
         try:
             workspace = self.job_db.create_workspace(
-                payload["name"],
+                clean_name,
                 default_workflow_key=workspace_id,
                 default_entity=payload.get("default_entity", "question"),
                 resource_config=payload.get("resource_config", {}),
@@ -95,7 +98,11 @@ class WorkspaceConfigurationService:
                 workspace_id=workspace_id,
             )
         except ValueError as exc:
-            raise ConflictError(str(exc)) from exc
+            # 409 is reserved for real conflicts (id already exists); every
+            # other validation error stays a 400.
+            if "already exists" in str(exc):
+                raise ConflictError(str(exc)) from exc
+            raise InvalidOperationError(str(exc)) from exc
         return workspace
 
     def get(self, workspace_id: str) -> dict[str, Any]:

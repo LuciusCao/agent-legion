@@ -55,6 +55,16 @@ def test_renames_ids_to_keys_and_cascades_children() -> None:
             " values (current_timestamp, 'bind-rename-ws'),"
             " (current_timestamp, 'bind-empty-ws')"
         )
+        # A registered worker scoped to the old id: the JSON scope list has no
+        # FK, so the migration must rewrite it or the worker stops claiming.
+        conn.execute(
+            "insert into agent_workers(worker_id, name, runtimes_json, capabilities_json,"
+            " models_json, max_concurrency, token_hash, allowed_workspaces_json,"
+            " protocol_version, registered_at, last_seen_at)"
+            " values ('bind-worker-1', 'Bind Worker', '[]', '[]', '[]', 4, 'x',"
+            " '[\"bind-rename-ws\"]', 1, current_timestamp, current_timestamp)"
+            " on conflict do nothing"
+        )
 
     from server.app.db.migrations.workspace_id_key_binding import (
         migrate_workspace_id_key_binding,
@@ -78,6 +88,9 @@ def test_renames_ids_to_keys_and_cascades_children() -> None:
                 " where workspace_id in ('bind_renamed_flow', 'bind-empty-ws')"
             ).fetchall()
         }
+        worker_scope = conn.execute(
+            "select allowed_workspaces_json from agent_workers where worker_id='bind-worker-1'"
+        ).fetchone()["allowed_workspaces_json"]
     # Renamed workspace: id now equals its key.
     assert "bind-rename-ws" not in ws
     assert ws["bind_renamed_flow"] == "bind_renamed_flow"
@@ -85,6 +98,7 @@ def test_renames_ids_to_keys_and_cascades_children() -> None:
     assert ws["bind-empty-ws"] == "bind-empty-ws"
     assert job_ws == "bind_renamed_flow"
     assert metric_ws == {"bind_renamed_flow", "bind-empty-ws"}
+    assert worker_scope == '["bind_renamed_flow"]'
 
 
 def test_conflicting_target_fails_fast() -> None:
@@ -113,6 +127,30 @@ def test_conflicting_target_fails_fast() -> None:
             ).fetchall()
         }
     assert ids == {"bind-conflict-a", "shared_flow"}
+
+
+def test_illegal_legacy_key_fails_fast() -> None:
+    """A legacy key that violates the v61 id contract (e.g. 'team/flow') is
+    rejected up front — renaming to it would strand the workspace behind
+    URL-addressed routes that can never match."""
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        _seed_workspace(conn, "bind-illegal-ws", "team/flow")
+
+    from server.app.db.migrations.workspace_id_key_binding import (
+        migrate_workspace_id_key_binding,
+    )
+
+    with (
+        pytest.raises(RuntimeError, match="team/flow"),
+        write_transaction(TEST_DATABASE_URL) as conn,
+    ):
+        migrate_workspace_id_key_binding(conn)
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute(
+            "select id, default_workflow_key from workspaces where id='bind-illegal-ws'"
+        ).fetchone()
+    assert row is not None and row["default_workflow_key"] == "team/flow"
 
 
 def test_replay_is_idempotent() -> None:

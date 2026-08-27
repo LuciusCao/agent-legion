@@ -13,11 +13,26 @@ invariant holds for legacy rows too. Workspaces with an empty key (never
 published, e.g. blank-canvas ones like course_builder) keep their id and get
 the key backfilled from it.
 
-FK cascades: every ``workspace_id references workspaces(id)`` clause is ``on
-delete cascade`` without ``on update cascade``, so the rename rewrites the
-parent id and each child row explicitly. ``auth_scoped_tokens`` and
-``ops_metric_samples`` carry ``workspace_id`` with no FK at all and are
-included by hand (a missed rename would orphan live security credentials).
+Rename mechanics: FKs are ``on delete cascade`` without ``on update
+cascade``, and ``session_replication_role`` is a privileged setting
+(superuser / explicit grant; the runbook's minimum privilege contract is
+plain CREATE/USAGE), so the swap is privilege-free instead: insert a row
+with the new id (copying every column), point every referencing row at the
+new id, then delete the old row. The jobs/job_nodes status-count triggers
+are USER triggers and disabled around the rewrite (table ownership only —
+system/FK triggers stay active) so they don't double-count into the new
+key. ``auth_scoped_tokens`` and ``ops_metric_samples`` carry
+``workspace_id`` with no FK at all and are rewritten by hand (a missed
+rename would orphan live security credentials);
+``agent_workers.allowed_workspaces_json`` is a JSON scope list (also
+FK-less) and is rewritten so registered workers keep claiming in the
+renamed workspace.
+
+Pre-checks fail fast (the transaction aborts, nothing is renamed): a target
+id already used by another workspace, and a legacy key that violates the
+v61 id contract (``^[a-z0-9][a-z0-9_-]{0,63}$`` — legacy keys were free-form
+text, e.g. ``team/flow`` would produce an id the URL-addressed API could
+never resolve). The operator renames the offending workspace, then re-runs.
 
 Deliberately NOT rewritten: ``jobs.storage_dir`` paths on disk
 (``data/jobs/<workspace_id>/``), material S3 ``storage_key`` prefixes, and
@@ -31,13 +46,18 @@ key to backfill, so every step becomes a no-op.
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# v61 id contract (mirrors WorkspaceCreateRequest.id's pattern).
+_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
 # workspace_id columns WITHOUT a foreign key to workspaces(id). The FK'd
-# children are derived from information_schema at run time; these two are
+# children are derived from information_schema at run time; these are
 # maintained by hand because nothing in the catalog ties them to workspaces.
 _UNCONSTRAINED_WORKSPACE_ID_TABLES = ("auth_scoped_tokens", "ops_metric_samples")
 
@@ -57,25 +77,42 @@ def _child_tables(conn: Any) -> list[str]:
     return [str(row["table_name"]) for row in rows]
 
 
-def _raise_on_id_conflicts(conn: Any, renames: dict[str, str]) -> None:
-    """Fail fast when a target id is already taken by a different workspace.
-
-    A conflict means two workspaces claim the same key (or a key collides
-    with another workspace's id) — no automatic resolution is safe. The
-    operator renames or deletes one side, then re-runs the migration.
-    """
+def _preflight(conn: Any, renames: dict[str, str]) -> None:
+    """Fail fast on id collisions and legacy keys violating the v61 contract."""
     all_ids = {str(row["id"]) for row in conn.execute("select id from workspaces").fetchall()}
-    conflicts = []
-    for old_id, target in renames.items():
-        if target in all_ids and target != old_id:
-            conflicts.append(f"{old_id} -> {target}")
+    conflicts = [
+        f"{old} -> {target}"
+        for old, target in renames.items()
+        if target in all_ids and target != old
+    ]
     if conflicts:
-        # The transaction aborts; the message lists every conflict so the
-        # operator can resolve them in one pass instead of one per retry.
         raise RuntimeError(
             "schema v61 workspace rename conflicts (target id already in use): "
             + "; ".join(conflicts)
             + ". Rename or delete the colliding workspace, then re-run."
+        )
+    invalid = [target for target in renames.values() if not _ID_PATTERN.match(target)]
+    if invalid:
+        raise RuntimeError(
+            "schema v61: legacy workflow keys that violate the new id contract "
+            f"({'[a-z0-9][a-z0-9_-]{{0,63}}'}): {sorted(invalid)}. Set the workspace's "
+            "default_workflow_key to a valid id (e.g. via SQL), then re-run."
+        )
+
+
+def _rewrite_worker_scopes(conn: Any, old_id: str, target: str) -> None:
+    """Rewrite agent_workers.allowed_workspaces_json entries old_id -> target."""
+    rows = conn.execute(
+        "select worker_id, allowed_workspaces_json from agent_workers"
+        " where allowed_workspaces_json::jsonb @> jsonb_build_array(%s::text)",
+        (old_id,),
+    ).fetchall()
+    for row in rows:
+        scopes = json.loads(row["allowed_workspaces_json"] or "[]")
+        rewritten = [target if entry == old_id else entry for entry in scopes]
+        conn.execute(
+            "update agent_workers set allowed_workspaces_json=%s where worker_id=%s",
+            (json.dumps(rewritten), row["worker_id"]),
         )
 
 
@@ -91,28 +128,45 @@ def migrate_workspace_id_key_binding(conn: Any) -> None:
     if not renames and not any(not str(row["default_workflow_key"] or "") for row in rows):
         return
 
-    _raise_on_id_conflicts(conn, renames)
+    _preflight(conn, renames)
 
     tables = _child_tables(conn) + list(_UNCONSTRAINED_WORKSPACE_ID_TABLES)
-    # FKs are on-delete-cascade only (no on-update), so each rename updates
-    # the parent row and every child's workspace_id explicitly. Switching the
-    # session to replica role suspends trigger-based FK enforcement for the
-    # duration of the swap (the test user owns its tables but is not
-    # superuser, so per-table DISABLE TRIGGER would not apply); the enclosing
-    # migration transaction keeps the swap atomic and the final verify query
-    # catches any row a hand-maintained table list missed.
-    conn.execute("set local session_replication_role = replica")
+    # The jobs/job_nodes status-count triggers maintain the count rows per
+    # workspace_id; rewriting jobs.workspace_id under those triggers would
+    # double-count into the new key (PK collisions with the manually
+    # rewritten count rows). Disabling USER triggers needs only table
+    # ownership (system/FK triggers stay active); count rows are rewritten
+    # by the migration itself and resync on the next jobs mutation.
+    _TRIGGER_MAINTAINED_COUNT_TABLES = ("jobs", "job_nodes")
+    for table in _TRIGGER_MAINTAINED_COUNT_TABLES:
+        conn.execute(f"alter table {table} disable trigger user")
     try:
         for old_id, target in renames.items():
-            conn.execute("update workspaces set id=%s where id=%s", (target, old_id))
+            # Privilege-free rename: the new-id parent row exists before any
+            # child points at it (FK stays satisfied throughout), the old row
+            # goes away only after nothing references it.
+            conn.execute(
+                "insert into workspaces (id, name, description, default_workflow_key,"
+                " resource_config_json, node_config_json, default_entity,"
+                " intake_config_json, created_at, updated_at, default_agent_provider,"
+                " default_agent_model, default_agent_thinking)"
+                " select %s, name, description, default_workflow_key,"
+                " resource_config_json, node_config_json, default_entity, intake_config_json,"
+                " created_at, updated_at, default_agent_provider, default_agent_model,"
+                " default_agent_thinking from workspaces where id = %s",
+                (target, old_id),
+            )
             for table in tables:
                 conn.execute(
                     f"update {table} set workspace_id=%s where workspace_id=%s",
                     (target, old_id),
                 )
+            _rewrite_worker_scopes(conn, old_id, target)
+            conn.execute("delete from workspaces where id=%s", (old_id,))
             logger.info("schema v61: workspace %r renamed to %r", old_id, target)
     finally:
-        conn.execute("set local session_replication_role = default")
+        for table in _TRIGGER_MAINTAINED_COUNT_TABLES:
+            conn.execute(f"alter table {table} enable trigger user")
 
     # Never-published workspaces (empty key): backfill the key from the id so
     # the id==key invariant holds uniformly.

@@ -34,7 +34,8 @@ def test_stress_metrics_summary_computes_percentiles():
 def test_parse_args_uses_defaults():
     args = _parse_args([])
 
-    assert args.workspace == "ws-stress"
+    # v61: the workspace id IS the workflow key (default stress_concurrency).
+    assert args.workspace == "stress_concurrency"
     assert args.agents == 100
     assert args.jobs == 5000
     assert args.event_rate == 500
@@ -43,7 +44,7 @@ def test_parse_args_uses_defaults():
 
 
 def test_stress_workflow_definition_has_nodes():
-    definition = _stress_workflow_definition()
+    definition = _stress_workflow_definition("stress_concurrency")
 
     assert definition.key == "stress_concurrency"
     assert set(definition.nodes.keys()) == {"step_1", "step_2", "step_3"}

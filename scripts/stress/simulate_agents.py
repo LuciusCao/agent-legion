@@ -54,9 +54,9 @@ _STRESS_WORKFLOW_KEY = "stress_concurrency"
 _STRESS_NODE_KEYS = ["step_1", "step_2", "step_3"]
 
 
-def _stress_workflow_definition() -> WorkflowDefinition:
+def _stress_workflow_definition(key: str) -> WorkflowDefinition:
     return WorkflowDefinition(
-        key=_STRESS_WORKFLOW_KEY,
+        key=key,
         label="Stress Concurrency Workflow",
         intake=WorkflowIntake(),
         nodes={
@@ -110,28 +110,28 @@ class StressSimulator:
         if workspace is None:
             job_db.create_workspace(
                 name=self.workspace_id,
-                default_workflow_key=_STRESS_WORKFLOW_KEY,
+                default_workflow_key=self.workspace_id,
                 default_entity="question",
             )
             logger.info("Created workspace %s", self.workspace_id)
 
-        existing = job_db.get_active_workflow_revision(self.workspace_id, _STRESS_WORKFLOW_KEY)
+        existing = job_db.get_active_workflow_revision(self.workspace_id, self.workspace_id)
         if existing is not None:
             return
 
-        definition = _stress_workflow_definition()
-        version = job_db.next_workflow_revision_version(self.workspace_id, _STRESS_WORKFLOW_KEY)
+        definition = _stress_workflow_definition(self.workspace_id)
+        version = job_db.next_workflow_revision_version(self.workspace_id, self.workspace_id)
         definition_json = serialize_definition(definition)
         job_db.create_workflow_revision(
             revision_id=f"{self.workspace_id}-stress-rev-1",
             workspace_id=self.workspace_id,
-            workflow_key=_STRESS_WORKFLOW_KEY,
+            workflow_key=self.workspace_id,
             version=version,
             status="active",
             definition_json=definition_json,
             definition_hash=definition_hash(definition_json),
         )
-        logger.info("Created active workflow revision for %s", _STRESS_WORKFLOW_KEY)
+        logger.info("Created active workflow revision for %s", self.workspace_id)
 
     def _seed_jobs(self, job_db: JobQueries) -> None:
         existing = job_db.list_jobs(workspace_id=self.workspace_id)
@@ -143,7 +143,7 @@ class StressSimulator:
             logger.info("Reusing %d existing jobs", len(existing_ids))
             return
 
-        revision = job_db.get_active_workflow_revision(self.workspace_id, _STRESS_WORKFLOW_KEY)
+        revision = job_db.get_active_workflow_revision(self.workspace_id, self.workspace_id)
         if revision is None:
             raise RuntimeError("No active workflow revision for stress workflow")
 
@@ -158,7 +158,7 @@ class StressSimulator:
         for i in range(needed):
             source_id = f"stress-{uuid.uuid4().hex[:12]}"
             job = job_db.create_job(
-                workflow_key=_STRESS_WORKFLOW_KEY,
+                workflow_key=self.workspace_id,
                 source_type="question",
                 source_id=source_id,
                 run_id=f"{self.workspace_id}-batch",
@@ -355,7 +355,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Synthetic backend load generator for agent concurrency stress tests."
     )
-    parser.add_argument("--workspace", default="ws-stress", help="Workspace id/name")
+    parser.add_argument(
+        "--workspace",
+        default=_STRESS_WORKFLOW_KEY,
+        help="Workspace id (= workflow key, schema v61)",
+    )
     parser.add_argument("--agents", type=int, default=100, help="Concurrent synthetic agents")
     parser.add_argument("--jobs", type=int, default=5000, help="Target number of jobs")
     parser.add_argument(

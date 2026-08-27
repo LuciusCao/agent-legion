@@ -243,6 +243,22 @@ def test_create_workspace_binds_key_and_seeds_nothing(tmp_path):
     assert agents.json()["agents"] == []
 
 
+def test_create_workspace_blank_name_returns_400_not_409(tmp_path):
+    """A valid id with a blank name is a validation error (400), not a
+    conflict (409) — 409 is reserved for real id collisions."""
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        response = c.post("/api/workspaces", json={"id": "blank_name_ws", "name": "   "})
+
+    assert response.status_code == 400
+    assert "name" in response.json()["detail"].lower()
+
+
 def test_create_workspace_rejects_bad_and_duplicate_ids(tmp_path):
     from fastapi.testclient import TestClient
 
