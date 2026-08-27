@@ -427,7 +427,7 @@ def _make_worker(
     queries: JobQueries,
     definitions: list[WorkflowDefinition],
 ) -> WorkflowWorkerThread:
-    leases = ExecutorLeaseRepository(queries.path, data_dir=tmp_path)
+    leases = ExecutorLeaseRepository(queries, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
         executor=_FakeExecutor("code"),

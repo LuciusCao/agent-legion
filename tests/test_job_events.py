@@ -30,6 +30,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 class FakeJobDB:
     def __init__(self):
+        self.path = TEST_DATABASE_URL
         self._jobs = {
             "j1": {
                 "id": "j1",
@@ -166,8 +167,7 @@ def test_broadcast_isolated_by_workspace(manager):
 
 def test_finish_broadcasts_job_updated(manager, tmp_path):
     lease_repo = ExecutorLeaseRepository(
-        TEST_DATABASE_URL,
-        job_db=FakeJobDB(),
+        FakeJobDB(),
         job_event_manager=manager,
         data_dir=tmp_path,
     )
@@ -191,8 +191,7 @@ def test_finish_broadcasts_job_updated(manager, tmp_path):
 
 def test_fail_without_lease_broadcasts_job_updated(manager, tmp_path):
     lease_repo = ExecutorLeaseRepository(
-        TEST_DATABASE_URL,
-        job_db=FakeJobDB(),
+        FakeJobDB(),
         job_event_manager=manager,
         data_dir=tmp_path,
     )
@@ -226,8 +225,7 @@ def test_fail_without_lease_broadcasts_job_updated(manager, tmp_path):
 
 def test_expire_stale_broadcasts_job_updated(manager, tmp_path):
     lease_repo = ExecutorLeaseRepository(
-        TEST_DATABASE_URL,
-        job_db=FakeJobDB(),
+        FakeJobDB(),
         job_event_manager=manager,
         data_dir=tmp_path,
     )
@@ -251,8 +249,7 @@ def test_expire_stale_broadcasts_job_updated(manager, tmp_path):
 
 def test_recover_orphaned_running_jobs_broadcasts_job_updated(manager, tmp_path):
     lease_repo = ExecutorLeaseRepository(
-        TEST_DATABASE_URL,
-        job_db=FakeJobDB(),
+        FakeJobDB(),
         job_event_manager=manager,
         data_dir=tmp_path,
     )
@@ -278,8 +275,7 @@ def test_finish_rollback_does_not_broadcast(manager, tmp_path, monkeypatch):
     from server.app.executors import _lease_write_paths
 
     lease_repo = ExecutorLeaseRepository(
-        TEST_DATABASE_URL,
-        job_db=FakeJobDB(),
+        FakeJobDB(),
         job_event_manager=manager,
         data_dir=tmp_path,
     )

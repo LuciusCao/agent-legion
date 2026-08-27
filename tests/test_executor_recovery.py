@@ -195,7 +195,7 @@ def test_fresh_repo_expire_stale_marks_recovery_state(
 
     _set_expired(repo, lease_id)
 
-    fresh_repo = ExecutorLeaseRepository(queries.path, data_dir=queries.jobs_dir.parent)
+    fresh_repo = ExecutorLeaseRepository(queries, data_dir=queries.jobs_dir.parent)
     expired = fresh_repo.expire_stale(datetime.now(UTC))
 
     assert expired == [lease_id]
@@ -267,7 +267,7 @@ def test_recovery_frees_global_and_workspace_capacity(
     lease_id = lease_row["id"]
     _set_expired(repo, lease_id)
 
-    fresh_repo = ExecutorLeaseRepository(queries.path, data_dir=queries.jobs_dir.parent)
+    fresh_repo = ExecutorLeaseRepository(queries, data_dir=queries.jobs_dir.parent)
     expired = fresh_repo.expire_stale(datetime.now(UTC))
     assert expired == [lease_id]
 
@@ -342,7 +342,7 @@ def test_recovery_is_idempotent(
     node_run_id = run_row["id"]
     _set_expired(repo, lease_id)
 
-    fresh_repo = ExecutorLeaseRepository(queries.path, data_dir=queries.jobs_dir.parent)
+    fresh_repo = ExecutorLeaseRepository(queries, data_dir=queries.jobs_dir.parent)
     first = fresh_repo.expire_stale(datetime.now(UTC))
     second = fresh_repo.expire_stale(datetime.now(UTC))
 

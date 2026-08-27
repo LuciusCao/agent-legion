@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, BinaryIO
@@ -16,7 +17,7 @@ from typing import Any, BinaryIO
 import pytest
 
 from server.app.db.schema import init_db
-from server.app.db.transaction import write_transaction
+from server.app.db.transaction import read_connection, write_transaction
 from server.app.services import job_artifact_maintenance
 from server.app.services.job_artifact_maintenance import (
     evict_cache_to_capacity,
@@ -92,7 +93,15 @@ def _seed_job(status: str = "completed") -> dict[str, Any]:
 
 
 def _job_db(job: dict[str, Any]) -> Any:
-    return SimpleNamespace(path=TEST_DATABASE_URL, get_job=lambda job_id: dict(job))
+    # The service reads job/manifest rows through the JobQueries read facade
+    # (#187); the stub exposes a real read connection to the test database
+    # alongside the canned get_job.
+    @contextmanager
+    def _read():
+        with read_connection(TEST_DATABASE_URL) as conn:
+            yield conn
+
+    return SimpleNamespace(path=TEST_DATABASE_URL, get_job=lambda job_id: dict(job), read=_read)
 
 
 def _settings(tmp_path: Path) -> Any:
