@@ -6,10 +6,10 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
-class FailedNodeRunQueriesMixin(JobQueriesBase):
+class FailedNodeRunQueriesMixin(ConnectionQueriesMixin):
     def list_failed_node_runs(
         self,
         workspace_id: str,

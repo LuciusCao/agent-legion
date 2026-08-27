@@ -4,12 +4,11 @@ import hashlib
 import json
 from typing import Any
 
-from server.app.jobs.queries.base import JobQueriesBase
 from server.app.jobs.queries.batch_queue import RunQueueQueriesMixin
 from server.app.jobs.queries.batch_queue_sql import RUN_UPSERT_CONFLICT
 
 
-class RunQueriesMixin(RunQueueQueriesMixin, JobQueriesBase):
+class RunQueriesMixin(RunQueueQueriesMixin):
     def create_run(
         self,
         workflow_key: str,

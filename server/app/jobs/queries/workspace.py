@@ -13,7 +13,7 @@ from server.app.jobs.node_limits import (
     get_workspace_node_limits,
     replace_workspace_node_limits,
 )
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
 def _safe_identifier(value: str, fallback: str) -> str:
@@ -43,7 +43,7 @@ def _workspace_record(row: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
-class WorkspaceQueriesMixin(JobQueriesBase):
+class WorkspaceQueriesMixin(ConnectionQueriesMixin):
     jobs_dir: Path
 
     def create_workspace(

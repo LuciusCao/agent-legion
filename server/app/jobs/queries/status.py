@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
-class JobStatusQueriesMixin(JobQueriesBase):
+class JobStatusQueriesMixin(ConnectionQueriesMixin):
     def count_jobs_by_status(self, workspace_id: str) -> dict[str, int]:
         # Reads the trigger-maintained counter table (DB-JOB-STATUS-COUNTS-001)
         # instead of a group-by over the workspace's whole jobs slice.

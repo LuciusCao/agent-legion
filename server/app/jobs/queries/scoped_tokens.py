@@ -4,10 +4,10 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
-class ScopedTokenQueriesMixin(JobQueriesBase):
+class ScopedTokenQueriesMixin(ConnectionQueriesMixin):
     """Persistence for auth_scoped_tokens (schema v41/v42, STUDIO-AGENT-001)."""
 
     def create_scoped_token(
