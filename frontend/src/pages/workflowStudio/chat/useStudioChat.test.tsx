@@ -345,6 +345,10 @@ describe('useStudioChat', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['studioExecutorCatalog', 'ws1'],
     })
+    // agent 可能已提交新的 skill 版本：技能预览查询按前缀整体失效。
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['studioSkillDetail'],
+    })
   })
 
   it('does not merge an in-flight refill from a previous session', async () => {

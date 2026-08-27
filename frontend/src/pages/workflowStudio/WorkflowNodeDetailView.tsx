@@ -1,7 +1,7 @@
 import type { WorkflowDefinitionRecord } from '../../types'
 import type { AgentDefinition } from '../../types/executorTypes'
 import type { ChangeSummaryViewModel } from './workflowStudioChanges'
-import { WorkflowNodeInspector } from './WorkflowNodeInspector'
+import { WorkflowNodeDetailBody } from './WorkflowNodeDetailBody'
 import { selectedNodeDetails } from './workflowStudioModel'
 import { StudioAgentPanelToggle } from './StudioAgentPanelToggle'
 import styles from './WorkflowNodeDetailView.module.css'
@@ -44,10 +44,10 @@ export function WorkflowNodeDetailView(props: Props) {
         />
       </div>
       <div className={styles.body}>
-        <WorkflowNodeInspector
+        <WorkflowNodeDetailBody
           workflow={props.workflow}
+          nodeKey={props.nodeKey}
           agentCatalog={props.agentCatalog}
-          selectedNodeKey={props.nodeKey}
           definitionYaml={props.definitionYaml}
           setDefinitionYaml={props.setDefinitionYaml}
           compareSummary={props.compareSummary}
