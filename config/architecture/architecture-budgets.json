@@ -727,7 +727,7 @@
     "server/app/auth/studio_authoring.py": 31,
     "server/app/auth/workspace_access.py": 46,
     "server/app/bootstrap/__init__.py": 18,
-    "server/app/bootstrap/agent_plane.py": 86,
+    "server/app/bootstrap/agent_plane.py": 85,
     "server/app/config_schema.py": 150,
     "server/app/configuration/__init__.py": 22,
     "server/app/configuration/cors.py": 42,
