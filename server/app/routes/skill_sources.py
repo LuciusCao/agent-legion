@@ -76,8 +76,12 @@ def create_skill_sources_router(settings: Settings) -> APIRouter:
         _admin: Annotated[dict[str, Any], Depends(require_admin)],
     ) -> SkillSourcesResponse:
         # Local git resolution over a handful of repos; runs synchronously.
-        manager = build_skill_manager(settings.database_url)
-        refresh_lock(SkillSourceStore(settings.database_url), manager.base_dir)
+        manager = build_skill_manager(settings.database_url, settings.skills_runs_dir)
+        refresh_lock(
+            SkillSourceStore(settings.database_url),
+            manager.base_dir,
+            runs_dir=settings.skills_runs_dir,
+        )
         return _merged_view(store)
 
     return router

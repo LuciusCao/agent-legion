@@ -43,3 +43,38 @@ def test_periodic_sweep_reaps_terminal_bundles() -> None:
         sweeper._sweep_once()
 
     broker.reap_terminal_bundles.assert_called_once()
+
+
+@pytest.mark.no_db
+def test_periodic_sweep_runs_skill_execution_gc() -> None:
+    """The optional skill sweeper runs in the periodic pass: leaked
+    execution snapshots in the runs dir are GC'd alongside bundles."""
+    swept = []
+
+    def _skill_sweeper() -> int:
+        swept.append(1)
+        return 2
+
+    sweeper, _, broker = _make_sweeper(skill_sweeper=_skill_sweeper)
+
+    with patch.object(sweeper_module, "fail_unclaimable_model_requests", return_value=[]):
+        sweeper._sweep_once()
+
+    broker.reap_terminal_bundles.assert_called_once()
+    assert len(swept) == 1
+
+
+@pytest.mark.no_db
+def test_skill_execution_gc_failure_does_not_break_sweeper() -> None:
+    """A GC exception is logged and swallowed — one scratch-dir failure must
+    not stop lease expiry or the rest of the sweep."""
+
+    def _boom() -> int:
+        raise RuntimeError("scratch dir vanished")
+
+    sweeper, leases, _ = _make_sweeper(skill_sweeper=_boom)
+
+    with patch.object(sweeper_module, "fail_unclaimable_model_requests", return_value=[]):
+        sweeper._sweep_once()  # must not raise
+
+    leases.expire_stale.assert_called_once()

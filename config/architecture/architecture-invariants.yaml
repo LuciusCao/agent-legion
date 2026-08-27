@@ -780,6 +780,27 @@ invariants:
         target: tests/test_skill_manager.py::test_cache_lock_files_live_under_runs_dir
         gate: quick
 
+  - id: EXEC-SKILL-RUNS-SCRATCH-001
+    statement: "The skills runs dir is OS-managed scratch, never a sibling of the shared skills base dir: the default is a deterministic per-user temp dir (tempfile.gettempdir() + 'agent-legion-skills.runs[-uid]'), overridable via AGENT_LEGION_SKILLS_RUNS_DIR, and every process sharing the skill cache (server, lock-refresh CLI) resolves the identical path so the FileLock domain stays whole. Leaked execution snapshots (hard crash between copytree and the finally-cleanup) are reclaimed by the sweeper-thread GC (runs_gc.sweep_stale_execution_dirs: mtime older than 1h, .locks and non-directories/symlinks untouched), with the OS temp-dir TTL as backstop — leaked snapshots can no longer accumulate permanently under ~/.agents/skills."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/skills/test_runs_dir_location.py::test_default_runs_dir_is_in_temp_dir
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_runs_dir_location.py::test_manager_default_runs_dir_uses_temp_default
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_runs_dir_location.py::test_sweep_removes_stale_execution_dirs_only
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_runs_dir_location.py::test_sweep_never_follows_symlinked_execution_dirs
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_sweeper_startup.py::test_periodic_sweep_runs_skill_execution_gc
+        gate: quick
+
   - id: EXEC-SKILL-CLEAN-TTL-001
     statement: "Skill cache cleanliness verification (rev-parse + status probes) is memoized per cache dir for the doc-cache TTL (SkillManager._verified_clean, deriving from doc_cache_ttl_seconds): within the TTL a dirtied or externally switched cache is served as-is, and the first probe after expiry repairs it via checkout -f + clean -fd — dirty detection is TTL-bounded, never lost. A commit change always misses the memo and re-probes, so relocks never serve a stale commit beyond the doc-cache TTL they already tolerate; doc_cache_ttl_seconds=0 restores per-call probing."
     owner: workspace-executor

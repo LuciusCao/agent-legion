@@ -16,6 +16,7 @@ from server.app.executors.runtime_config import (
     WorkflowsRuntimeConfig,
     validate_runtime,
 )
+from server.app.skills.paths import default_skills_runs_dir
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -32,6 +33,10 @@ class Settings:
     jobs_dir: Path
     config: dict[str, Any]
     database_url: str = "postgresql://127.0.0.1:5432/agent_legion"
+    # Host-side scratch for skill snapshots/cache locks; must resolve
+    # identically in every process sharing the skill cache (FileLock
+    # domain) — per-process temp dirs pin it via AGENT_LEGION_SKILLS_RUNS_DIR.
+    skills_runs_dir: Path = field(default_factory=default_skills_runs_dir)
     cors: CorsSettings = field(default_factory=CorsSettings)
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
@@ -90,6 +95,7 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     "AGENT_LEGION_CORS_ALLOW_CREDENTIALS": (("server", "cors", "allow_credentials"), _bool_parser),
     "AGENT_LEGION_VAULT_MASTER_KEY": (("vault", "master_key"), _str_parser),
     "AGENT_LEGION_VAULT_MASTER_KEY_FILE": (("vault", "master_key_file"), _path_parser),
+    "AGENT_LEGION_SKILLS_RUNS_DIR": (("skills", "runs_dir"), _path_parser),
 }
 
 _DATABASE_URL_ENV = "AGENT_LEGION_DATABASE_URL"
@@ -237,6 +243,10 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir, jobs_dir]:
         path.mkdir(parents=True, exist_ok=True)
     executor_runtime = ExecutorRuntimeConfig.model_validate(config)
+    # skills.runs_dir is env-only by contract (AGENT_LEGION_SKILLS_RUNS_DIR);
+    # a hand-written yaml skills section would also land here (the loader
+    # does not own a skills key), which is tolerated but unsupported.
+    skills_override = config.get("skills", {}).get("runs_dir")
     return Settings(
         root_dir=root_dir,
         database_url=database_url,
@@ -246,6 +256,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         packages_dir=packages_dir,
         jobs_dir=jobs_dir,
         config=config,
+        skills_runs_dir=Path(skills_override) if skills_override else default_skills_runs_dir(),
         cors=load_cors_settings(config),
         executor_runtime=executor_runtime,
     )

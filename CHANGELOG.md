@@ -62,6 +62,19 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 - CSRF negative-path test: cookie-authenticated mutations without the
   `x-agent-legion-request` header are rejected with 403 (SECURITY-AUTH-001).
 
+### Security
+
+- Skills runs dir (per-execution skill snapshots + cache locks) moved from
+  `~/.agents/skills/agent-legion.runs` to a deterministic per-user OS temp
+  dir (`agent-legion-skills.runs[-<uid>]`), overridable via
+  `AGENT_LEGION_SKILLS_RUNS_DIR`: leaked snapshots no longer pollute the
+  agent skills namespace, and the OS temp TTL backstops them. The temp root
+  is created/validated with CPython tempfile trust rules (atomic `mkdir
+  0700`; on reuse it must be a non-symlink directory owned by the current
+  user, mode normalized to 0700) — closing pre-creation/symlink attacks on
+  shared `/tmp`. The leak GC (see Changed) reuses the same validation, and
+  the `.locks` dir is 0700 with symlink rejection (EXEC-SKILL-RUNS-SCRATCH-001).
+
 ### Changed
 
 - **Breaking (deployments):** the global worker register token is retired —
@@ -103,6 +116,13 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   `WorkflowDefinitionRecord` in job detail is replaced by a minimal
   `NodeCatalog` type.
 
+- Skills runs dir leak GC: the sweeper thread now removes execution
+  snapshot dirs older than 1h (mtime-based; `.locks`, non-directories and
+  symlinks untouched) — a hard crash between snapshot copy and the
+  finally-cleanup previously leaked the snapshot permanently. Deployments
+  with per-process temp dirs (systemd `PrivateTmp`, or a host CLI sharing
+  the skill cache with a containerized server) must pin
+  `AGENT_LEGION_SKILLS_RUNS_DIR` to keep the FileLock domain whole.
 ### Added
 
 - Service data-boundary ratchet (BOUNDARY-DATA-001): new services under

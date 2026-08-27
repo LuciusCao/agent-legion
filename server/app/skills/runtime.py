@@ -47,9 +47,15 @@ def resolve_skill_dir(
         raise
 
 
-def build_skill_manager(database_dsn: DatabaseDsn) -> SkillManager:
-    """Project-standard SkillManager: DB-backed sources, shared user-level base dir."""
+def build_skill_manager(database_dsn: DatabaseDsn, runs_dir: Path | None = None) -> SkillManager:
+    """Project-standard SkillManager: DB-backed sources, shared user-level base dir.
+
+    ``runs_dir`` must come from ``settings.skills_runs_dir`` so every process
+    sharing the skill cache (server, lock-refresh CLI) resolves the same
+    lock domain; None falls back to the deterministic temp default.
+    """
     return SkillManager(
         store=SkillSourceStore(database_dsn),
         base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
+        runs_dir=runs_dir,
     )
