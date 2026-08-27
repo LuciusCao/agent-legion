@@ -46,11 +46,14 @@
   回落 unit 全量——如果你发现 aff 跑了全量（输出含「aff fallback」），先建索引
   再继续内环。
 - **机器级 gate 排队**：多个 agent worktree 并行跑质量门会互相拖垮（曾观察到 4 个
-  并行 quick gate 把最后一个拖到 ~1 小时）。quick gate 经 git common dir 的 slot
-  排队（`scripts/gate-queue.sh`）：默认同机最多 `AGENT_LEGION_MAX_PARALLEL_GATES=2`
-  个 gate 并行，后来者打印持有者并等待；每 lane worker 数按并发 gate 数均分
-  （`(cores-2)/N`，夹在 2..8）。agent 不需要也不应该用 `--no-verify` 之外的方式绕过
-  排队——排队本身就是正确行为，等待期可以做读代码/写代码等不占 CPU 的事。
+  并行 quick gate 把最后一个拖到 ~1 小时；并发 2 也会让各 lane 抢 CPU，超时类 flaky
+  就是这么来的）。quick gate 经 git common dir 的 slot 排队（`scripts/gate-queue.sh`）：
+  默认 `AGENT_LEGION_MAX_PARALLEL_GATES=1`——同机串行，一次一个 gate 独占整机预算，
+  排队等价于按序各跑各的全速（大机器想恢复并发可显式设 2）；后来者打印持有者并等待。
+  每 lane worker 数按并发 gate 数均分（`(cores-2)/N`，夹在 2..8；串行时 N=1 即全额），
+  backend pytest 统一 `--dist worksteal` 消尾部延迟。agent 不需要也不应该用
+  `--no-verify` 之外的方式绕过排队——排队本身就是正确行为，等待期可以做读代码/写代码
+  等不占 CPU 的事。
 - quick gate 的 backend lane 同时跑 `worker/ui/app.test.mjs`（node:test，无 node 时跳过并提示）；
   CI 侧在 backend-postgres-a job 执行同一入口。
 - 提交或交接前确认 GitHub Actions full gate 通过（`.github/workflows/quality-gate.yml`

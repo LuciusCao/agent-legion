@@ -97,11 +97,13 @@ cleanup_lock() {
 }
 
 # Machine-wide gate queue (scripts/gate-queue.sh): with several agent
-# worktrees on one host, unlimited parallel gates thrash the CPU (observed
-# ~1h for the last of 4 concurrent quick gates). A slot in the shared git
-# common directory caps concurrent gates at AGENT_LEGION_MAX_PARALLEL_GATES
-# (default 2); later gates queue with holder announcements. Acquired after
-# the worktree lock so same-worktree serialization stays first.
+# worktrees on one host, parallel gates thrash the CPU (observed ~1h for the
+# last of 4 concurrent quick gates; even 2 concurrent gates made
+# timing-sensitive tests flake on timeouts). A slot in the shared git common
+# directory therefore serializes gates at AGENT_LEGION_MAX_PARALLEL_GATES
+# (default 1); later gates queue with holder announcements and then run at
+# the full machine budget. Acquired after the worktree lock so same-worktree
+# serialization stays first.
 source "$ROOT_DIR/scripts/gate-queue.sh"
 acquire_gate_slot
 cleanup_gate_slot() {

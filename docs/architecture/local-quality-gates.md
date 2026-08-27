@@ -33,8 +33,9 @@ evidence from a trimmed run is never reused for a different lane set or tier.
 Per-lane parallelism defaults are worktree-aware
 (`detect_gate_default_jobs_worktree_aware` in `scripts/gate-jobs.sh`): the
 machine budget is divided across the gates actually running — N concurrent
-gates each get `(cores-2)/N` workers, clamped to `[2, 8]`. When the
-machine-wide queue is not visible (stubbed git in fixture repos), the
+gates each get `(cores-2)/N` workers, clamped to `[2, 8]` (with the default
+serialized queue, N is 1 and a gate gets the full `cores-2` budget). When
+the machine-wide queue is not visible (stubbed git in fixture repos), the
 fallback probes sibling `.quick-gate.lock` directories through
 `git worktree list`: `min(4, cores)` while a sibling worktree runs a gate,
 `cores-2` otherwise. Per-lane env overrides
@@ -45,16 +46,19 @@ fallback probes sibling `.quick-gate.lock` directories through
 
 Several agent worktrees on one host can fire quality gates simultaneously;
 uncoordinated, they oversubscribe the CPU (observed: the last of four
-concurrent quick gates stretched to ~1h while a lone gate takes ~6min).
-`scripts/check-quick.sh` therefore acquires a machine-wide gate slot
-(`scripts/gate-queue.sh`) before running lanes:
+concurrent quick gates stretched to ~1h while a lone gate takes ~6min, and
+even two concurrent gates made timing-sensitive tests flake on timeouts —
+each gate fans out into parallel lanes, so the machine saw ~2x its core
+count in jobs). `scripts/check-quick.sh` therefore acquires a machine-wide
+gate slot (`scripts/gate-queue.sh`) before running lanes:
 
 - Slots live in `<git-common-dir>/gate-slots/` — the one path every worktree
   of the repository shares on a host — each recording pid, worktree, and
   start time.
 - At most `AGENT_LEGION_MAX_PARALLEL_GATES` gates run concurrently (default
-  2; `0` disables the queue). A gate finding all slots taken waits, printing
-  the current holders on entry and every 30s.
+  **1** — gates serialize and each runs at the full machine budget; `2` is
+  opt-in for big boxes, `0` disables the queue). A gate finding all slots
+  taken waits, printing the current holders on entry and every 30s.
 - Stale slots are reclaimed on sight: a slot whose pid is dead, or older than
   `AGENT_LEGION_GATE_SLOT_MAX_AGE_SECONDS` (default 7200 — bounds the
   zombie-pid hole where a wrapper forgets to reap its exited child), is
@@ -63,7 +67,17 @@ concurrent quick gates stretched to ~1h while a lone gate takes ~6min).
   same-worktree serialization stays first; `check.sh` calls `check-quick.sh`
   sequentially and each invocation takes and releases its own slot.
 - Waiting is correct behavior, not a failure: agents should do non-CPU work
-  (reading, writing code) while queued, and never bypass the queue.
+  (reading, writing code) while queued, and never bypass the queue. A queued
+  gate costs its full runtime, not more — serialization removed the
+  contention that stretched concurrent gates and flaked their tests, so the
+  queue now moves at lone-gate speed end to end.
+
+Backend pytest lanes distribute xdist work with `--dist worksteal`: the
+default `load` scheduler hands each worker a batch of tests up front, so one
+slow test strands its whole batch and the suite waits on a single busy
+worker. worksteal lets idle workers steal pending tests, shrinking that
+tail (with `--reruns 1` kept as insurance for genuinely timing-sensitive
+tests).
 
 The smoke tier (`GATE_TIER=smoke`) replaces the backend pytest lane with a
 curated subset — every architecture governance test plus one core behavioral

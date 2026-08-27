@@ -68,6 +68,15 @@ run_tests() {
   #
   # --reruns absorbs timing-sensitive flakes under parallel-gate load; a real
   # regression still fails after the single retry (visible as RERUN in output).
+  #
+  # --dist worksteal: the default `load` distribution hands each worker a
+  # batch of ~60 tests up front, so one slow test (or a worker stuck behind
+  # collection/import) strands its whole batch — the suite then waits on a
+  # single busy worker while the others sit idle. worksteal lets an idle
+  # worker steal pending tests, shrinking the tail latency that previously
+  # stretched quick-gate wall time (and that tail is exactly where
+  # timeout-sensitive tests flaked under CPU contention). Collection stays
+  # deterministic; only assignment order changes.
   source "$ROOT_DIR/scripts/gate-jobs.sh"
   workers="${AGENT_LEGION_TEST_WORKERS:-$(detect_gate_default_jobs_worktree_aware)}"
   telemetry_args=()
@@ -99,7 +108,7 @@ run_tests() {
         --ignore=tests/full \
         --ignore=tests/ci \
         -m "smoke" \
-        -n "$workers" \
+        -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2
       ;;
@@ -110,7 +119,7 @@ run_tests() {
         --ignore=tests/full \
         --ignore=tests/ci \
         -m "not postgres and not repository_gate" \
-        -n "$workers" \
+        -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \
         "${telemetry_args[@]}" \
@@ -153,7 +162,7 @@ run_tests() {
           --ignore=tests/full \
           --ignore=tests/ci \
           -m "not postgres and not repository_gate" \
-          -n "$workers" \
+          -n "$workers" --dist worksteal \
           --reruns 1 \
           --reruns-delay 2 \
           "${aff_args[@]}"
@@ -163,7 +172,7 @@ run_tests() {
           --ignore=tests/full \
           --ignore=tests/ci \
           -m "not postgres and not repository_gate" \
-          -n "$workers" \
+          -n "$workers" --dist worksteal \
           --reruns 1 \
           --reruns-delay 2 \
           "${telemetry_args[@]}" \
@@ -188,7 +197,7 @@ run_tests() {
         --ignore=tests/full \
         --ignore=tests/ci \
         -m "not postgres and not repository_gate" \
-        -n "$workers" \
+        -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \
         --cov=server --cov=worker --cov=shared --cov=workflow_nodes --cov=scripts --cov=workspace_libs \
@@ -213,7 +222,7 @@ run_tests() {
         --ignore=tests/full \
         --ignore=tests/ci \
         -m "postgres and not repository_gate" \
-        -n "$workers" \
+        -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \
         "${shard_args[@]}" \
@@ -233,7 +242,7 @@ run_tests() {
       UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
-        -n "$workers" \
+        -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \
         "${telemetry_args[@]}" \

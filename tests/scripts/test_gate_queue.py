@@ -4,8 +4,8 @@ The queue lives in the git common directory so every worktree on a host
 shares it; tests run inside a real (fixture) git repository to exercise the
 real path. Covered: acquire/release lifecycle, capacity waiting with holder
 announcements, stale-slot reclamation (dead pid), re-entrant reuse,
-disabled-queue override, and the worker division across live gate counts in
-scripts/gate-jobs.sh.
+disabled-queue override, the serialized default (one concurrent gate), and
+the worker division across live gate counts in scripts/gate-jobs.sh.
 """
 
 from __future__ import annotations
@@ -147,6 +147,67 @@ def test_live_slots_count_and_capacity_wait(repo: Path) -> None:
         assert waiter.returncode == 0, stderr
         assert "Machine gate queue full" in stderr
         assert "holder-wt" in stderr
+    finally:
+        holder.terminate()
+        holder.wait()
+
+
+def test_default_max_parallel_gates_is_one(repo: Path) -> None:
+    """The default cap is 1 (serialized gates): two concurrent gates still
+    oversubscribed the machine — each gate fans out into parallel lanes, and
+    the timing-sensitive tests that flaked on timeouts cost more than the
+    queue wait ever saved. Raise AGENT_LEGION_MAX_PARALLEL_GATES explicitly
+    on a big box to opt back into concurrency."""
+    holder = subprocess.Popen(["sleep", "60"])
+    try:
+        _write_slot(repo, "gate-holder", pid=holder.pid)
+        # No env override: the default cap must already refuse a second gate.
+        # The backgrounded acquire's output is discarded so the snippet's own
+        # verdict line is the only stdout.
+        out = _bash(
+            QUEUE_SCRIPT,
+            repo,
+            "acquire_gate_slot >/dev/null 2>&1 & waiter=$!; sleep 1; "
+            "if kill -0 $waiter 2>/dev/null; then echo waiting; kill $waiter; "
+            "else echo admitted; fi; wait $waiter 2>/dev/null; exit 0",
+            env={"AGENT_LEGION_GATE_POLL_SECONDS": "10"},
+        )
+        assert out.strip() == "waiting"
+    finally:
+        holder.terminate()
+        holder.wait()
+
+
+def test_serialized_queue_gives_gate_full_machine_budget(repo: Path) -> None:
+    """With the default cap of 1, a queued gate that acquires the slot after
+    the holder exits runs with the full worker budget (N=1 slot), not the
+    divided one — serialization trades queue wait for lone-gate speed."""
+    holder = subprocess.Popen(["sleep", "60"])
+    try:
+        _write_slot(repo, "gate-holder", pid=holder.pid)
+        waiter = subprocess.Popen(
+            [
+                "bash",
+                "-c",
+                f'source "{QUEUE_SCRIPT}"\nsource "{JOBS_SCRIPT}"\n'
+                "AGENT_LEGION_GATE_POLL_SECONDS=1 "
+                "AGENT_LEGION_GATE_SLOT_MAX_AGE_SECONDS=2 "
+                "acquire_gate_slot && "
+                "detect_gate_default_jobs_worktree_aware",
+            ],
+            cwd=repo,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        time.sleep(2)
+        holder.terminate()
+        holder.wait()
+        stdout, stderr = waiter.communicate(timeout=30)
+        assert waiter.returncode == 0, stderr
+        cores = _cpu_count()
+        # Full budget: (cores-2)/1, clamped to [2, 8] — same as a lone gate.
+        assert stdout.strip().splitlines()[-1] == str(max(2, min(8, cores - 2)))
     finally:
         holder.terminate()
         holder.wait()

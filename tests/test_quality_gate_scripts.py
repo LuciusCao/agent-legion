@@ -731,6 +731,20 @@ def test_backend_test_workers_default_is_capped(tmp_path: Path) -> None:
     assert 1 <= int(match.group(1)) <= 8
 
 
+def test_backend_pytest_distributes_work_with_worksteal(tmp_path: Path) -> None:
+    """Every xdist invocation uses --dist worksteal: the default `load`
+    scheduler strands a slow test's whole batch on one worker while the rest
+    idle, and that tail is where quick-gate wall time (and timeout flakes)
+    came from. worksteal keeps idle workers stealing pending tests."""
+    calls = _run_backend_gate_with_fake_uv(tmp_path, {})
+
+    # Count the uv invocation ("run pytest "), not the "pytest" substring —
+    # telemetry mode (AGENT_LEGION_TEST_RESULTS_DIR, as in CI) also passes
+    # "-p scripts.pytest_telemetry", which contains it.
+    assert calls.count("run pytest ") == 1
+    assert "--dist worksteal" in calls
+
+
 def test_backend_test_workers_env_override_wins(tmp_path: Path) -> None:
     calls = _run_backend_gate_with_fake_uv(tmp_path, {"AGENT_LEGION_TEST_WORKERS": "7"})
 
