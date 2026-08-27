@@ -27,8 +27,14 @@ def _remote_status(
     if workspaces := last_registration_workspaces():
         # set_remote 是整体替换：注册时 Host 汇报的 workspace 明细（控制台
         # token→workspace 名称的唯一来源）必须随每次同步重新携带，否则一次
-        # 心跳就把启动时写入的字段抹掉。
-        remote["workspaces"] = workspaces
+        # 心跳就把启动时写入的字段抹掉。Host 删除某个 scoped token 后会收窄
+        # 存活 Worker 的 allowed_workspaces，因此按当前 scope 过滤，避免控制台
+        # 一直显示已删除的 workspace；Host 不可达（worker=None，无 scope 可
+        # 言）时保留最后已知明细，恢复后的下一次同步重新对齐。
+        scope = worker.get("allowed_workspaces") if worker else None
+        current = [row for row in workspaces if not scope or row["workspace_id"] in scope]
+        if current:
+            remote["workspaces"] = current
     return remote
 
 
