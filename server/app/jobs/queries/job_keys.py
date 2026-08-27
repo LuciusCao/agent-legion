@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
-class JobKeyQueriesMixin(JobQueriesBase):
+class JobKeyQueriesMixin(ConnectionQueriesMixin):
     def list_job_dedup_keys(self, workspace_id: str, workflow_key: str) -> set[tuple[str, str]]:
         """Return the ``(source_type, source_id)`` dedup keys of one workflow's jobs.
 

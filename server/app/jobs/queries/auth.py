@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from server.app.auth.sessions import session_expiry
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 USER_ROLES = ("admin", "member")
 WORKSPACE_MEMBER_ROLES = ("editor", "viewer")
@@ -17,7 +17,7 @@ def _public_user(row: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
-class AuthQueriesMixin(JobQueriesBase):
+class AuthQueriesMixin(ConnectionQueriesMixin):
     """Persistence for users, sessions, and workspace membership."""
 
     # --- users -----------------------------------------------------------

@@ -3,8 +3,8 @@ from __future__ import annotations
 from server.app.jobs.atomic_mutations import AtomicJobMutationsMixin
 from server.app.jobs.execution_control import JobExecutionControlMixin
 from server.app.jobs.queries.auth import AuthQueriesMixin
-from server.app.jobs.queries.base import JobQueriesBase
 from server.app.jobs.queries.batch import RunQueriesMixin
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 from server.app.jobs.queries.failed_node_runs import FailedNodeRunQueriesMixin
 from server.app.jobs.queries.job_bulk import JobBulkQueriesMixin
 from server.app.jobs.queries.job_keys import JobKeyQueriesMixin
@@ -42,6 +42,6 @@ class JobQueries(
     JobKeyQueriesMixin,
     AtomicJobMutationsMixin,
     JobExecutionControlMixin,
-    JobQueriesBase,
+    ConnectionQueriesMixin,
 ):
     """Backward-compatible facade for all workspace/job query operations."""

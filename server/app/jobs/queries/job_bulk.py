@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 from server.app.jobs.storage_layout import job_storage_dir
 from server.app.services.run_payload import candidate_input
 from server.app.storage_paths import make_data_relative
@@ -20,7 +20,7 @@ _MATERIAL_LOCK_SQL = "select id from materials where id=%s and workspace_id=%s f
 _BUNDLE_LOCK_SQL = "select id from material_bundles where id=%s and workspace_id=%s for key share"
 
 
-class JobBulkQueriesMixin(JobQueriesBase):
+class JobBulkQueriesMixin(ConnectionQueriesMixin):
     jobs_dir: Path
 
     def create_jobs_bulk(

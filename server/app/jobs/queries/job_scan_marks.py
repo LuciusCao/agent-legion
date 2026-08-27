@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 _ACTIVE_MARK_COLUMNS = (
     "id, workspace_id, source_id, status, execution_paused, execution_mode,"
@@ -28,7 +28,7 @@ ACTIVE_MARKS_SQL = (
 )
 
 
-class JobScanMarksMixin(JobQueriesBase):
+class JobScanMarksMixin(ConnectionQueriesMixin):
     def list_active_job_marks(self, workflow_key: str) -> list[dict[str, Any]]:
         """Lightweight rows for every non-terminal job of a workflow."""
         with self._connect_read() as conn:

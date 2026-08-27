@@ -3,11 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.db.connection import DatabaseConnection
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 from server.app.workflows.definition import WorkflowDefinition
 
 
-class JobNodeLifecycleQueriesMixin(JobQueriesBase):
+class JobNodeLifecycleQueriesMixin(ConnectionQueriesMixin):
     def mark_nodes_not_applicable_many(self, entries: list[tuple[str, list[str], str]]) -> None:
         """Batch mark nodes not applicable across many jobs in one connection."""
         if not entries:

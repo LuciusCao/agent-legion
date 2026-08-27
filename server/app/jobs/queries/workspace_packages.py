@@ -3,10 +3,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
-class WorkspacePackageQueriesMixin(JobQueriesBase):
+class WorkspacePackageQueriesMixin(ConnectionQueriesMixin):
     def insert_workspace_package(
         self,
         workspace_id: str,

@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 from server.app.jobs.queries.job_scan_marks import _ACTIVE_MARK_COLUMNS
 
 
-class JobScanDeltaMixin(JobQueriesBase):
+class JobScanDeltaMixin(ConnectionQueriesMixin):
     def list_changed_job_marks(self, workflow_key: str, since: Any) -> list[dict[str, Any]]:
         """Lightweight rows touched after ``since`` (watermark delta scan).
 

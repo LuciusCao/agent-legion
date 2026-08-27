@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
 def _delete_stale_projection_rows(
@@ -49,7 +49,7 @@ def _delete_stale_projection_rows(
         )
 
 
-class WorkflowRevisionQueriesMixin(JobQueriesBase):
+class WorkflowRevisionQueriesMixin(ConnectionQueriesMixin):
     def materialize_agent_routes(
         self,
         *,
