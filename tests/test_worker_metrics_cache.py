@@ -110,3 +110,75 @@ def test_sync_host_status_propagates_worker_authentication_rejection(tmp_path: P
     assert remote["host_reachable"] is True
     assert remote["registered"] is False
     assert remote["connection_error"] == "invalid token"
+
+
+def test_sync_host_status_keeps_registration_workspaces_across_heartbeats(tmp_path: Path) -> None:
+    """回归：set_remote 是整体替换，周期性心跳若不带 workspaces 会把启动时
+    写入的 workspace 明细抹掉，控制台 token 卡片随之退化为兜底文案。"""
+    client = FakeMetricsClient()
+    client.get_self = lambda: {"worker_id": "worker-1", "revoked": False}  # type: ignore[attr-defined]
+    status_path = tmp_path / "status.json"
+    reporter = ExecutionStatusReporter(status_path)
+    metrics = WorkerMetricsCache(tmp_path / "metrics.json", refresh_seconds=60)
+    workspaces = [
+        {
+            "workspace_id": "ws-1",
+            "workspace_name": "内容生产",
+            "token_ids": ["tok-1"],
+        }
+    ]
+
+    import worker.registration_retry as registration_retry
+
+    registration_retry._last_registration_workspaces = workspaces
+    try:
+        sync_host_status(client, reporter, metrics, None)  # type: ignore[arg-type]
+        # 第二次同步模拟 15s 心跳后的再次调用——字段必须原样保留。
+        sync_host_status(client, reporter, metrics, None)  # type: ignore[arg-type]
+
+        remote = read_runtime_status(status_path)["remote"]
+        assert remote["workspaces"] == workspaces
+    finally:
+        registration_retry._last_registration_workspaces = []
+
+
+def test_sync_host_status_keeps_workspaces_when_host_unreachable(tmp_path: Path) -> None:
+    class UnreachableClient(FakeMetricsClient):
+        def get_self(self) -> dict[str, Any]:
+            raise RuntimeError("connection refused")
+
+    status_path = tmp_path / "status.json"
+    workspaces = [{"workspace_id": "ws-1", "workspace_name": "内容生产", "token_ids": ["tok-1"]}]
+
+    import worker.registration_retry as registration_retry
+
+    registration_retry._last_registration_workspaces = workspaces
+    try:
+        sync_host_status(
+            UnreachableClient(),  # type: ignore[arg-type]
+            ExecutionStatusReporter(status_path),
+            WorkerMetricsCache(tmp_path / "metrics.json"),
+            {"worker_id": "worker-1"},
+        )
+
+        remote = read_runtime_status(status_path)["remote"]
+        assert remote["host_reachable"] is False
+        assert remote["workspaces"] == workspaces
+    finally:
+        registration_retry._last_registration_workspaces = []
+
+
+def test_sync_host_status_without_workspaces_omits_the_field(tmp_path: Path) -> None:
+    """尚未注册成功（明细为空）时行为不变：字段缺省而非空列表占位。"""
+    client = FakeMetricsClient()
+    client.get_self = lambda: {"worker_id": "worker-1", "revoked": False}  # type: ignore[attr-defined]
+    status_path = tmp_path / "status.json"
+
+    sync_host_status(
+        client,  # type: ignore[arg-type]
+        ExecutionStatusReporter(status_path),
+        WorkerMetricsCache(tmp_path / "metrics.json"),
+        None,
+    )
+
+    assert "workspaces" not in read_runtime_status(status_path)["remote"]
