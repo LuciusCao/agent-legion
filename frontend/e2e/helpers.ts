@@ -43,6 +43,26 @@ export async function ensureAdminSession(page: Page): Promise<void> {
 }
 
 /**
+ * Create a workspace seeded from the demo template via the API and return
+ * its id. Multi-browser smoke runs share one database: CJK names collapse
+ * to the same transliterated slug, so later engines get `_2`/`_3` suffixed
+ * ids — entering by the exact returned id (instead of clicking the first
+ * same-name card) keeps each engine working on the workspace it created.
+ */
+export async function createWorkspaceViaApi(
+  page: Page,
+  name: string
+): Promise<string> {
+  const response = await page.request.post('/api/workspaces', {
+    headers: CSRF_HEADERS,
+    data: { name, workflow_mode: 'demo' },
+  })
+  expect(response.ok()).toBeTruthy()
+  const { workspace } = (await response.json()) as { workspace: { id: string } }
+  return workspace.id
+}
+
+/**
  * The demo workflow's start node accepts material items only
  * (EXEC-WORKFLOW-START-001). Smoke specs exercise the ref (粘贴 ID) path, so
  * they widen the entry contract by publishing a revision accepting both item

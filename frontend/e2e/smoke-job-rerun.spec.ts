@@ -1,33 +1,27 @@
 import { expect, test } from '@playwright/test'
 
-import { ensureAdminSession, widenDemoWorkflowItemTypes } from './helpers'
+import {
+  createWorkspaceViaApi,
+  ensureAdminSession,
+  widenDemoWorkflowItemTypes,
+} from './helpers'
 
 const WORKSPACE_NAME = 'E2E 重跑工作区'
 
 test('在 job 详情页通过重跑对话框重跑节点', async ({ page }) => {
   await ensureAdminSession(page)
 
-  await page.goto('/')
-  const createButton = page.getByRole('button', { name: '新建 Workspace' })
-  await expect(createButton).toBeVisible()
-  await createButton.click()
-
-  const createDialog = page.getByRole('dialog')
-  await createDialog.getByLabel('Workspace 名称').fill(WORKSPACE_NAME)
-  await createDialog
-    .getByRole('checkbox', {
-      name: '从示例模板初始化（教学视频脚本与题目生成）',
-    })
-    .check()
-  await createDialog.getByRole('button', { name: '创建' }).click()
-  await expect(createDialog).toBeHidden()
-
-  await page.getByText(WORKSPACE_NAME).first().click()
-  await expect(page).toHaveURL(/\/workspaces\/[^/]+$/)
+  // Multi-browser runs share one database: the CJK name transliterates to
+  // the same `e2e` slug, so engines after Chromium get suffixed ids and a
+  // name-text click would enter the FIRST same-name workspace (an earlier
+  // engine's, whose `cms-internal:Q1` job makes create_run's dedup drop the
+  // item and 400). Create via API and enter by the exact returned id.
+  const workspaceId = await createWorkspaceViaApi(page, WORKSPACE_NAME)
+  await page.goto(`/workspaces/${workspaceId}`)
+  await expect(page).toHaveURL(new RegExp(`/workspaces/${workspaceId}$`))
 
   // The demo workflow is material-only (start node accepted_item_types); the
   // ref path below needs the contract widened first (EXEC-WORKFLOW-START-001).
-  const workspaceId = page.url().split('/workspaces/')[1]
   await widenDemoWorkflowItemTypes(page, workspaceId)
   await page.reload()
 
