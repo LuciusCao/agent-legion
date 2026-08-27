@@ -38,9 +38,10 @@
 - 修改-验证内环用 `GATE_TIER=aff ./scripts/check-quick.sh`：backend 按覆盖逆索引
   只跑受影响测试、前端 `vitest related` 只跑导入改动文件的测试；首次先跑
   `GATE_TIER=aff-index ./scripts/check-quick-backend.sh` 建索引（依赖/conftest 变更后
-  重建）。aff 档不是 gate 凭证（`run-local-gate.sh` 拒绝该档）——无索引或选择面太宽时
-  自动回落 unit 全量，回落只会更慢、不会漏跑。任何代码修改后至少跑一次完整
-  `./scripts/check-quick.sh`（aff 通过不能替代）。
+  重建）。aff 档不是 gate 凭证（`run-local-gate.sh` 拒绝该档）——无索引、索引盲区
+  （改动的源文件不在索引里）或选择面太宽时自动回落 unit 全量，回落只会更慢、
+  不会漏跑。任何代码修改后至少跑一次完整 `./scripts/check-quick.sh`（aff 通过不能
+  替代）。
 - quick gate 的 backend lane 同时跑 `worker/ui/app.test.mjs`（node:test，无 node 时跳过并提示）；
   CI 侧在 backend-postgres-a job 执行同一入口。
 - 提交或交接前确认 GitHub Actions full gate 通过（`.github/workflows/quality-gate.yml`

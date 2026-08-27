@@ -122,9 +122,16 @@ run_tests() {
       aff_args=()
       if command -v git >/dev/null 2>&1 && [[ -f "$ROOT_DIR/.pytest-aff-index.json" ]]; then
         base_ref="$(git merge-base HEAD develop 2>/dev/null || git merge-base HEAD origin/develop 2>/dev/null || true)"
+        selected=""
+        selection_status=0
         selected="$(UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.pytest_aff_selection select \
-          ${base_ref:+--base "$base_ref"} 2>/dev/null || true)"
-        if [[ -n "$selected" ]] && [[ "$(printf '%s\n' "$selected" | wc -l)" -lt 400 ]]; then
+          ${base_ref:+--base "$base_ref"} 2>/dev/null)" || selection_status=$?
+        # Exit 4 = a changed source file is missing from the index (stale
+        # index or a --cov blind spot): the affected tests are unknown, so
+        # run the full unit tier rather than a silently incomplete subset.
+        if [[ "$selection_status" -eq 4 ]]; then
+          echo "=== Python Unit Tests (aff fallback: changed source files missing from the index) ==="
+        elif [[ -n "$selected" ]] && [[ "$(printf '%s\n' "$selected" | wc -l)" -lt 400 ]]; then
           echo "=== Python Affected Tests (selected $(printf '%s' "$selected" | wc -l | tr -d ' ') of unit tier) ==="
           while IFS= read -r nodeid; do
             aff_args+=("$nodeid")
@@ -179,7 +186,7 @@ run_tests() {
         -n "$workers" \
         --reruns 1 \
         --reruns-delay 2 \
-        --cov=server --cov=worker --cov=shared --cov=workflow_nodes --cov=scripts \
+        --cov=server --cov=worker --cov=shared --cov=workflow_nodes --cov=scripts --cov=workspace_libs \
         --cov-context=test \
         --cov-fail-under=0 \
         --cov-report= \

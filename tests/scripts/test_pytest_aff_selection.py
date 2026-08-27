@@ -116,14 +116,42 @@ def test_select_affected_tests_unions_covering_tests():
     assert selected == ["tests/test_settings.py::test_a"]
 
 
-def test_select_affected_tests_runs_new_test_files_wholesale():
+def test_select_affected_tests_runs_new_test_files_wholesale(tmp_path):
     mapping = {"server/app/settings.py": ["tests/test_settings.py::test_a"]}
+    new_test = tmp_path / "tests" / "test_new.py"
+    new_test.parent.mkdir(parents=True)
+    new_test.write_text("def test_new():\n    pass\n", encoding="utf-8")
 
     # A test file absent from the index (new, or never covered) must run all
     # of its tests — selection is a conservative superset.
-    selected = select_affected_tests(["tests/test_new.py"], mapping)
+    selected = select_affected_tests(["tests/test_new.py"], mapping, repo_root=tmp_path)
 
     assert selected == ["tests/test_new.py"]
+
+
+def test_select_affected_tests_drops_nodeids_of_deleted_test_files(tmp_path):
+    mapping = {
+        "tests/test_deleted.py": [
+            "tests/test_deleted.py::test_a",
+            "tests/test_deleted.py::test_b",
+        ],
+        "server/app/settings.py": ["tests/test_alive.py::test_c"],
+    }
+    alive = tmp_path / "tests" / "test_alive.py"
+    alive.parent.mkdir(parents=True)
+    alive.write_text("def test_c():\n    pass\n", encoding="utf-8")
+
+    # The deleted test file still has index records (the indexer ran it
+    # before the deletion), but every recorded nodeid now points at a file
+    # that no longer exists; passing any of them to pytest would fail
+    # collection for as long as the deletion sits in the diff.
+    selected = select_affected_tests(
+        ["tests/test_deleted.py", "server/app/settings.py"],
+        mapping,
+        repo_root=tmp_path,
+    )
+
+    assert selected == ["tests/test_alive.py::test_c"]
 
 
 def test_select_affected_tests_unknown_source_maps_to_nothing():
@@ -136,12 +164,17 @@ def test_select_affected_tests_unknown_source_maps_to_nothing():
     assert select_affected_tests(["server/app/new_module.py"], mapping) == []
 
 
-def test_select_affected_tests_sorted_and_deduplicated():
+def test_select_affected_tests_sorted_and_deduplicated(tmp_path):
     mapping = {
         "server/app/a.py": ["tests/test_x.py::test_2", "tests/test_x.py::test_1"],
         "server/app/b.py": ["tests/test_x.py::test_1"],
     }
+    test_file = tmp_path / "tests" / "test_x.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("def test_1():\n    pass\n\n\ndef test_2():\n    pass\n", encoding="utf-8")
 
-    selected = select_affected_tests(["server/app/b.py", "server/app/a.py"], mapping)
+    selected = select_affected_tests(
+        ["server/app/b.py", "server/app/a.py"], mapping, repo_root=tmp_path
+    )
 
     assert selected == ["tests/test_x.py::test_1", "tests/test_x.py::test_2"]

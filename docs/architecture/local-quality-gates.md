@@ -62,13 +62,16 @@ coverage intersects the changed source files (index in
 `.pytest-aff-index.json`, distilled from a one-off `GATE_TIER=aff-index`
 run with `--cov-context=test`), and the frontend lane runs `vitest related`
 over the changed frontend files. It falls back to the plain unit tier when
-no index exists, when the selection would run most of the suite anyway, or
-when the changed set includes shared files — the fallback never widens what
-runs. An aff pass is **not** gate evidence: `scripts/run-local-gate.sh`
-rejects the tier, and the full suite remains the pre-push/CI boundary.
-Rebuild the index after dependency or conftest changes (a stale index only
-slows the loop — unmapped tests still run wholesale via the tests/ rule in
-`scripts/pytest_aff_selection.py`).
+no index exists, when a changed source file is missing from the index (an
+index blind spot — the affected tests are unknown), when the selection
+would run most of the suite anyway, or when the changed set includes shared
+files — the fallback never widens what runs. Deleted test files are dropped
+from the selection (a stale path would fail pytest collection). An aff pass
+is **not** gate evidence: `scripts/run-local-gate.sh` rejects the tier, and
+the full suite remains the pre-push/CI boundary. Rebuild the index after
+dependency or conftest changes (a stale index only slows the loop —
+unmapped sources force the fallback, and unmapped test files still run
+wholesale via the tests/ rule in `scripts/pytest_aff_selection.py`).
 
 Install the repository-managed hooks once from a worktree that contains `.githooks/`:
 

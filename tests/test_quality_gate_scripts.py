@@ -635,6 +635,51 @@ def test_backend_aff_tier_falls_back_when_selection_is_broad(tmp_path: Path) -> 
     assert "not postgres and not repository_gate" in calls
 
 
+def test_backend_aff_tier_falls_back_on_unmapped_source_files(tmp_path: Path) -> None:
+    """Selection exit 4 (changed source file missing from the index) must
+    run the full unit tier: the affected tests are unknown, and a selected
+    subset would silently skip them (PR #184 Codex review)."""
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    backend_gate = scripts / "check-quick-backend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "uv",
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$@" >>"$GATE_LOG"\n'
+        'for arg in "$@"; do\n'
+        '  if [[ "$arg" == "scripts.pytest_aff_selection" ]]; then\n'
+        '    if [[ "${prev:-}" == "-m" ]]; then\n'
+        '      echo "unmapped-source-files" >&2; exit 4\n'
+        "    fi\n"
+        "  fi\n"
+        '  prev="$arg"\n'
+        "done\n",
+    )
+    (tmp_path / ".pytest-aff-index.json").write_text("{}", encoding="utf-8")
+
+    result = _run(
+        backend_gate,
+        cwd=tmp_path,
+        env={
+            "BACKEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "GATE_TIER": "aff",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "aff fallback: changed source files missing from the index" in result.stdout
+    calls = gate_log.read_text(encoding="utf-8")
+    assert "not postgres and not repository_gate" in calls
+    assert "not postgres and not repository_gate" in calls
+
+
 def test_backend_aff_index_tier_uses_coverage_contexts(tmp_path: Path) -> None:
     """The aff-index primer must trace per-test coverage contexts and build
     the index from the dedicated coverage file (not the default .coverage)."""

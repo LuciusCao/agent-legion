@@ -153,19 +153,64 @@ def save_index(mapping: dict[str, list[str]], base_commit: str) -> None:
     os.replace(tmp, INDEX_PATH)
 
 
-def select_affected_tests(changed: list[str], mapping: dict[str, list[str]]) -> list[str]:
+def select_affected_tests(
+    changed: list[str], mapping: dict[str, list[str]], repo_root: Path | None = None
+) -> list[str]:
     """Union of tests covering any changed file; unknown/new test files run
-    wholesale (conservative superset)."""
+    wholesale (conservative superset).
+
+    Deleted paths are dropped at the nodeid level: a test file removed
+    relative to the merge base has no tests to run — its recorded nodeids are
+    stale, and passing the stale path to pytest would fail collection for as
+    long as the deletion sits in the diff (rebuilding the index would not
+    recover either, because the diff against the merge base keeps listing the
+    deleted file).
+    """
+    root = repo_root if repo_root is not None else REPO_ROOT
     selected: set[str] = set()
     for path in changed:
         nodeids = mapping.get(path)
         if nodeids is not None:
-            selected.update(nodeids)
-        elif path.startswith("tests/"):
+            for nodeid in nodeids:
+                if _nodeid_file_exists(nodeid, root):
+                    selected.add(nodeid)
+        elif path.startswith("tests/") and (root / path).is_file():
             # A changed test file with no coverage record (new file, or the
             # indexer never ran it): every test in that file must run.
             selected.add(path)
     return sorted(selected)
+
+
+def _nodeid_file_exists(nodeid: str, root: Path) -> bool:
+    """True when the collection file part of a nodeid still exists.
+
+    A nodeid looks like ``tests/path/test_x.py::TestClass::test_case``; only
+    the file part is checked — class/function targets are validated by
+    pytest collection itself, and an unknown name there deselects cleanly.
+    """
+    file_part = nodeid.split("::", 1)[0]
+    return (root / file_part).is_file()
+
+
+def unmapped_source_files(
+    changed: list[str], mapping: dict[str, list[str]], repo_root: Path | None = None
+) -> list[str]:
+    """Changed non-test source files the index has no record of.
+
+    The aff tier refuses to select when this is non-empty (the gate falls
+    back to the full unit tier): a source file outside the index means the
+    index was built without coverage for that tree (e.g. a --cov root was
+    missed, or a brand-new module), so the tests it affects are unknown.
+    Falling back only widens what runs — the documented aff semantics.
+    """
+    root = repo_root if repo_root is not None else REPO_ROOT
+    unmapped: list[str] = []
+    for path in changed:
+        if path.startswith("tests/"):
+            continue
+        if mapping.get(path) is None and (root / path).is_file():
+            unmapped.append(path)
+    return sorted(unmapped)
 
 
 def _cmd_build(args: argparse.Namespace) -> int:
@@ -185,6 +230,15 @@ def _cmd_select(args: argparse.Namespace) -> int:
         print("no-index", file=sys.stderr)
         return 3
     changed = changed_source_files(args.base)
+    unmapped = unmapped_source_files(changed, mapping)
+    if unmapped:
+        # A changed source file the index cannot see: the affected tests are
+        # unknown, so refuse to select (exit 4) and let the gate run the full
+        # unit tier instead of silently skipping those tests.
+        print("unmapped-source-files", file=sys.stderr)
+        for path in unmapped:
+            print(f"# unmapped {path}", file=sys.stderr)
+        return 4
     selected = select_affected_tests(changed, mapping)
     for nodeid in selected:
         print(nodeid)
