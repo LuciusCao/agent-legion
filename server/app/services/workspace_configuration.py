@@ -4,7 +4,11 @@ from server.app.jobs import JobQueries
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.demo_material_seed import seed_demo_workspace_materials
 from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
-from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.job_errors import (
+    ConflictError,
+    InvalidOperationError,
+    NotFoundError,
+)
 from server.app.services.vault import VaultService
 from server.app.services.workflow_definitions import (
     builtin_definition_or_none,
@@ -75,29 +79,30 @@ class WorkspaceConfigurationService:
         return self.job_db.list_workspaces()
 
     def create(self, payload: dict[str, Any]) -> dict[str, Any]:
-        workflow_key = str(payload.get("default_workflow_key") or "").strip()
-        # demo (default): seed the repo-shipped sample template as the active
-        # revision (including its factory Agent templates). With no explicit
-        # key the sample workflow itself is the default. blank: the workspace
-        # starts as an empty canvas; Studio starts from an empty draft and the
-        # first publish creates revision v1 and adopts the workflow key.
-        definition = None
-        if payload.get("workflow_mode", "demo") != "blank":
-            if not workflow_key:
-                workflow_key = DEMO_WORKFLOW_KEY
-            definition = builtin_definition_or_none(workflow_key)
+        # Schema v62: the caller-provided id is the workflow key — bound at
+        # creation and immutable. No sample-template seeding on this path;
+        # demo workspaces come from `make import-demo` (scripts/seed_demo.py).
+        workspace_id = str(payload.get("id") or "").strip()
+        if not workspace_id:
+            raise InvalidOperationError("Workspace id is required")
+        clean_name = str(payload.get("name") or "").strip()
+        if not clean_name:
+            raise InvalidOperationError("Workspace name is required")
         try:
             workspace = self.job_db.create_workspace(
-                payload["name"],
-                default_workflow_key=workflow_key,
+                clean_name,
+                default_workflow_key=workspace_id,
                 default_entity=payload.get("default_entity", "question"),
                 resource_config=payload.get("resource_config", {}),
                 intake_config=payload.get("intake_config", {}),
+                workspace_id=workspace_id,
             )
         except ValueError as exc:
+            # 409 is reserved for real conflicts (id already exists); every
+            # other validation error stays a 400.
+            if "already exists" in str(exc):
+                raise ConflictError(str(exc)) from exc
             raise InvalidOperationError(str(exc)) from exc
-        if definition is not None:
-            self._ensure_active_revision(str(workspace["id"]), definition)
         return workspace
 
     def get(self, workspace_id: str) -> dict[str, Any]:
@@ -105,12 +110,14 @@ class WorkspaceConfigurationService:
 
     def update(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._workspace(workspace_id)
+        # Schema v62: the workflow key (= workspace id) is immutable.
+        if payload.get("default_workflow_key") is not None:
+            raise InvalidOperationError("Workflow key is bound to the workspace id and immutable")
         try:
             return self.job_db.update_workspace(
                 workspace_id,
                 name=payload.get("name"),
                 description=payload.get("description"),
-                default_workflow_key=payload.get("default_workflow_key"),
                 default_entity=payload.get("default_entity"),
                 resource_config=payload.get("resource_config"),
                 intake_config=payload.get("intake_config"),
@@ -152,9 +159,14 @@ class WorkspaceConfigurationService:
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
         current = workspace_settings_payload(workspace)
+        # Schema v62: the workflow key is bound to the workspace id and
+        # immutable. The settings payload still carries workflowKey for
+        # compatibility; a matching value is a no-op round-trip.
         workflow_key = settings_patch.get("workflowKey") or str(current["workflowKey"])
         if not workflow_key:
             raise InvalidOperationError("Workspace workflow is not set")
+        if workflow_key != str(workspace["default_workflow_key"]):
+            raise InvalidOperationError("Workflow key is bound to the workspace id and immutable")
         workflow = self._definition_for_seed(workspace_id, workflow_key)
         # workflow is None before the first publish; the validator then runs
         # only the definition-independent checks, and publish-time validation
@@ -232,15 +244,16 @@ class WorkspaceConfigurationService:
                 intake_config=next_intake_config,
             )
         elif section == "workflow":
+            # Schema v62: the workflow key is immutable (bound to the id).
+            # The section stays so legacy clients sending an unchanged key
+            # keep working; any change is rejected.
             workflow_key = patch.get("workflowKey")
-            workspace = self.job_db.update_workspace(
-                workspace_id,
-                default_workflow_key=workflow_key,
-            )
-            if workflow_key:
-                definition = self._definition_for_seed(workspace_id, str(workflow_key))
-                if definition is not None:
-                    self._ensure_active_revision(workspace_id, definition)
+            if workflow_key is not None and str(workflow_key) != str(
+                workspace["default_workflow_key"]
+            ):
+                raise InvalidOperationError(
+                    "Workflow key is bound to the workspace id and immutable"
+                )
         elif section == "nodes":
             workspace = update_workspace_node_config(
                 self.job_db,

@@ -240,7 +240,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "workspace_workflow_drafts"
+    assert migration["name"] == "workspace_id_key_binding"
 
 
 @pytest.mark.fresh_schema

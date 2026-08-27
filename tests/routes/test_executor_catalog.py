@@ -1,9 +1,13 @@
 def _create_workspace(client) -> str:
     response = client.post(
         "/api/workspaces",
-        json={"name": "catalog-ws", "default_workflow_key": "education_video_problems_generation"},
+        json={"id": "education_video_problems_generation", "name": "catalog-ws"},
     )
     assert response.status_code == 200, response.text
+    # v62: creation no longer seeds the factory Agents.
+    from tests.helpers import seed_workspace_agent_definitions
+
+    seed_workspace_agent_definitions(response.json()["workspace"]["id"])
     return str(response.json()["workspace"]["id"])
 
 

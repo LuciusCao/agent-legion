@@ -30,6 +30,7 @@
     "tests/db/test_versioned_entities_migration.py",
     "tests/db/test_workflow_catalog_retirement.py",
     "tests/db/test_workspace_cms_migration.py",
+    "tests/db/test_workspace_id_key_binding.py",
     "tests/db/test_workspace_secrets_migration.py",
     "tests/executors/leases/test_expire_race.py",
     "tests/executors/leases/test_shard_expiry.py",

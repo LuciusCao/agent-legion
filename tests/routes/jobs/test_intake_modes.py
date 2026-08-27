@@ -4,11 +4,9 @@ from tests.helpers import publish_legacy_intake_revision
 from tests.helpers.auth import authenticate_client
 
 
-def _create_workspace(
-    client, name="default", default_workflow_key="education_video_problems_generation"
-):
+def _create_workspace(client, name="default", default_workflow_key="test"):
     workspace_id = client.post(
-        "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
+        "/api/workspaces", json={"id": default_workflow_key, "name": name}
     ).json()["workspace"]["id"]
     # The demo workflow no longer declares intake modes (#154); these tests
     # post job-batches, so publish the legacy-intake variant.
@@ -28,7 +26,7 @@ def test_workspace_batch_delete_removes_jobs(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q604"],
             },
@@ -61,8 +59,8 @@ def test_workspace_intake_config_rejects_disabled_mode(tmp_path):
         workspace_response = c.post(
             "/api/workspaces",
             json={
+                "id": "education_video_problems_generation",
                 "name": "intake-filtered",
-                "default_workflow_key": "education_video_problems_generation",
                 "intake_config": {"enabled_modes": []},
             },
         )
@@ -72,7 +70,7 @@ def test_workspace_intake_config_rejects_disabled_mode(tmp_path):
         response = c.post(
             f"/api/workspaces/{workspace_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": workspace_id,
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["K001"],
             },
@@ -95,8 +93,8 @@ def test_workspace_default_entity_is_used_when_batch_omits_entity(tmp_path):
         workspace_response = c.post(
             "/api/workspaces",
             json={
+                "id": "education_video_problems_generation",
                 "name": "question-default",
-                "default_workflow_key": "education_video_problems_generation",
                 "default_entity": "question",
                 "intake_config": {"enabled_modes": ["direct_ids"]},
             },
@@ -107,7 +105,7 @@ def test_workspace_default_entity_is_used_when_batch_omits_entity(tmp_path):
         response = c.post(
             f"/api/workspaces/{workspace_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": workspace_id,
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q001"],
             },
@@ -133,7 +131,7 @@ def test_batch_with_entity_question(tmp_path):
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "entity": "question",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q001", "Q002"],
@@ -162,7 +160,7 @@ def test_batch_unsupported_entity_mode(tmp_path):
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "entity": "knowledge",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["K001"],
@@ -187,7 +185,7 @@ def test_batch_video_entity_direct_ids_is_resolver_driven(tmp_path):
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "entity": "video",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["K001"],
@@ -211,7 +209,7 @@ def test_batch_unregistered_entity_mode_combination_rejected(tmp_path):
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "entity": "audio",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["K001"],
@@ -234,7 +232,7 @@ def test_batch_with_entity_question_direct_ids(tmp_path):
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "entity": "question",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q1", "Q2"],
@@ -260,7 +258,7 @@ def test_workflow_response_no_task_entity(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
-        created = c.post("/api/workspaces", json={"name": "Intake Shape"})
+        created = c.post("/api/workspaces", json={"id": "test", "name": "Intake Shape"})
         assert created.status_code == 200, created.text
         workspace_id = created.json()["workspace"]["id"]
         publish_legacy_intake_revision(c.app.state.job_db, workspace_id)
@@ -287,13 +285,13 @@ def test_batch_delete_skips_not_found_and_running_jobs(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q1"],
             },
@@ -321,18 +319,18 @@ def test_batch_delete_skips_running_job(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q1"],
             },
         )
-        job_id = "test_education_video_problems_generation_Q1"
+        job_id = "test_test_Q1"
         log_dir = app.state.settings.logs_dir / "jobs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{job_id}-intake_knowledge_points.log"
@@ -365,7 +363,7 @@ def test_batch_run_to_returns_results_in_order(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q805"],
             },

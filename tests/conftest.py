@@ -32,9 +32,11 @@ from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_
 # Test Agent catalog: Agent definitions are workspace-scoped (schema v46), so
 # there is no global seed here — workspaces do not exist at schema-reset time.
 # Tests seed the built-in demo agents into their own workspace via
-# tests/helpers.seed_workspace_agent_definitions (API-created workspaces
-# binding the demo workflow get the demo seed automatically through
-# ensure_active_revision).
+# tests/helpers.seed_workspace_agent_definitions, and revisions via
+# tests/helpers.publish_builtin_revision / publish_legacy_intake_revision
+# (schema v62: workspace creation no longer seeds the demo template —
+# ensure_active_revision runs only through `make import-demo` /
+# scripts/seed_demo.py).
 
 
 # Test executor catalog: none. Executor definitions are retired (schema v47,

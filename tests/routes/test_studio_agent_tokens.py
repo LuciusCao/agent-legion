@@ -97,7 +97,7 @@ def test_non_admin_member_gets_403(client) -> None:
 def test_minted_token_calls_tool_surface(client) -> None:
     minted = _mint(client)
     bearer = _bearer_client(client, minted["token"])
-    created = client.post("/api/workspaces", json={"name": "Token Surface"})
+    created = client.post("/api/workspaces", json={"id": "token_surface", "name": "Token Surface"})
     assert created.status_code == 200, created.text
     workspace_id = created.json()["workspace"]["id"]
 

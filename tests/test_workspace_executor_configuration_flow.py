@@ -40,7 +40,7 @@ def test_workspace_execution_configuration_lifecycle(flow_client: TestClient) ->
     # Create a workspace to configure.
     workspace_response = client.post(
         "/api/workspaces",
-        json={"name": "Flow Workspace", "default_workflow_key": WORKFLOW_KEY},
+        json={"id": WORKFLOW_KEY, "name": "Flow Workspace"},
     )
     assert workspace_response.status_code == 200
     workspace_id = workspace_response.json()["workspace"]["id"]

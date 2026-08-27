@@ -6,7 +6,7 @@ def _create_workspace(
     client, name="default", default_workflow_key="education_video_problems_generation"
 ):
     workspace_id = client.post(
-        "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
+        "/api/workspaces", json={"id": default_workflow_key, "name": name}
     ).json()["workspace"]["id"]
     # The demo workflow no longer declares intake modes (#154); these tests
     # post job-batches, so publish the legacy-intake variant.

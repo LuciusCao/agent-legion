@@ -5598,8 +5598,8 @@ export interface components {
        * @default question
        */
       default_entity: string
-      /** Default Workflow Key */
-      default_workflow_key?: string | null
+      /** Id */
+      id: string
       /** Intake Config */
       intake_config?: {
         [key: string]: unknown
@@ -5610,12 +5610,6 @@ export interface components {
       resource_config?: {
         [key: string]: unknown
       }
-      /**
-       * Workflow Mode
-       * @default demo
-       * @enum {string}
-       */
-      workflow_mode: 'demo' | 'blank'
     }
     /** WorkspaceDagResponse */
     WorkspaceDagResponse: {
@@ -5877,8 +5871,6 @@ export interface components {
     WorkspaceUpdateRequest: {
       /** Default Entity */
       default_entity?: string | null
-      /** Default Workflow Key */
-      default_workflow_key?: string | null
       /** Description */
       description?: string | null
       /** Intake Config */

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import tempfile
+
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
@@ -29,10 +31,17 @@ def _publish_secret_node_schema(workspace_id: str) -> None:
     The demo nodes declare no secret fields, so the generic node-config vault
     diversion mechanism is exercised through a republished write_script agent
     declaring a ``secret: true`` field. Agent definitions are workspace-scoped
-    (schema v46): the workspace already holds the demo-seeded v1 (workspaces
-    binding the demo workflow get the factory templates at binding time), so
-    this publishes v2 inside it.
+    (schema v46); creation seeds nothing since schema v62, so this helper
+    first publishes the demo revision + factory agents, then publishes the
+    secret-carrying write_script v2 inside that workspace.
     """
+    from pathlib import Path
+
+    from server.app.jobs import JobQueries
+    from tests.helpers import publish_builtin_revision, seed_workspace_agent_definitions
+
+    publish_builtin_revision(JobQueries(TEST_DATABASE_URL, Path(tempfile.mkdtemp())), workspace_id)
+    seed_workspace_agent_definitions(workspace_id)
     service = AgentService(TEST_DATABASE_URL, workspace_id)
     service.save_draft(
         "example-write-script-v1",
@@ -69,7 +78,7 @@ def admin_client(app):
 def _create_workspace(client: TestClient) -> str:
     response = client.post(
         "/api/workspaces",
-        json={"name": "secrets-ws", "default_workflow_key": "education_video_problems_generation"},
+        json={"id": "education_video_problems_generation", "name": "secrets-ws"},
     )
     assert response.status_code == 200, response.text
     return response.json()["workspace"]["id"]

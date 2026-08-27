@@ -9,7 +9,7 @@ def _create_workspace(
     client, name="default", default_workflow_key="education_video_problems_generation"
 ):
     workspace_id = client.post(
-        "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
+        "/api/workspaces", json={"id": default_workflow_key, "name": name}
     ).json()["workspace"]["id"]
     # The demo workflow no longer declares intake modes (#154); these tests
     # post job-batches, so publish the legacy-intake variant.
@@ -164,8 +164,8 @@ def test_create_workspace_job_batch_from_direct_ids_uses_opaque_title(tmp_path):
         workspace = c.post(
             "/api/workspaces",
             json={
+                "id": "direct_id_batch",
                 "name": "Direct Id Batch",
-                "default_workflow_key": "education_video_problems_generation",
                 "intake_config": {"enabled_modes": ["direct_ids"]},
             },
         ).json()["workspace"]
@@ -173,7 +173,7 @@ def test_create_workspace_job_batch_from_direct_ids_uses_opaque_title(tmp_path):
         response = c.post(
             f"/api/workspaces/{workspace['id']}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "direct_id_batch",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q001", "Q002"],
             },
