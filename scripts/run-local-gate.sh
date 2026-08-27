@@ -97,6 +97,12 @@ for command_name in uv python3 node npm cargo rustc; do
   fi
 done
 
+# Machine identity is part of the fingerprint (#206): the evidence cache is
+# shared across worktrees via the common git dir, so without it machine A's
+# pass would be replayed on machine B for the same SHA + toolchain.
+machine_id="$(uname -srm)"
+fingerprint_input+="machine=${machine_id%%$'\n'*}"$'\n'
+
 fingerprint="$(printf '%s' "$fingerprint_input" | git hash-object --stdin)"
 cache_dir="$common_dir/local-gates/$head_sha"
 cache_file="$cache_dir/$gate-$fingerprint.pass"

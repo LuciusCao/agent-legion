@@ -175,6 +175,40 @@ def test_gate_level_upgrade_reruns_gate_on_same_sha(
     ]
 
 
+def test_gate_evidence_is_not_shared_across_machines(
+    hook_repo: tuple[Path, Path], tmp_path: Path
+) -> None:
+    # #206: the evidence cache lives in the shared common git dir, so the
+    # fingerprint must include the machine identity — otherwise machine A's
+    # pass replays on machine B for the same SHA + toolchain. A fake `uname`
+    # on PATH simulates the second machine.
+    repo, gate_log = hook_repo
+    push_input = _push_input(repo, "refs/heads/feature/test")
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+
+    first = _run(
+        [repo / ".githooks" / "pre-push"],
+        cwd=repo,
+        input_text=push_input,
+        env=_hook_env(gate_log),
+    )
+
+    _write_executable(
+        fake_bin / "uname",
+        '#!/usr/bin/env bash\nprintf "Linux x86_64 6.1.0-fake\\n"\n',
+    )
+    second = _run(
+        [repo / ".githooks" / "pre-push"],
+        cwd=repo,
+        input_text=push_input,
+        env={**_hook_env(gate_log), "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+    )
+
+    assert "Local quick gate passed" in first.stdout
+    assert "Running local quick gate" in second.stdout  # same SHA, different machine: no reuse
+
+
 @pytest.mark.parametrize("remote_ref", ["refs/heads/develop", "refs/tags/v1.0.0"])
 def test_protected_ref_push_runs_quick_gate(hook_repo: tuple[Path, Path], remote_ref: str) -> None:
     # The full gate for protected refs runs in GitHub Actions CI; the local
