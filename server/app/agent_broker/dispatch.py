@@ -77,7 +77,7 @@ class AgentDispatchService:
         self.settings = settings
         self.broker = broker
         self.artifact_store = artifact_store
-        self.skill_manager = build_skill_manager(settings.database_url)
+        self.skill_manager = build_skill_manager(settings.database_url, settings.skills_runs_dir)
         enqueue_config = settings.executor_runtime.agent_enqueue
         self.enqueue_pool = AgentEnqueuePool(
             workers=enqueue_config.workers, max_pending=enqueue_config.max_pending

@@ -223,6 +223,9 @@ fi
 cat <<EOF
 完成。剩余手工步骤（如未做过）：
   - frontend: cd frontend && npm ci
+  - 质量门内环索引: GATE_TIER=aff-index ./scripts/check-quick-backend.sh
+    （一次性 ~2.5 分钟，建 .pytest-aff-index.json；此后改动后用
+    GATE_TIER=aff ./scripts/check-quick.sh 快速内环，依赖/conftest 变更后重建）
   - 质量门: ./scripts/check-quick.sh
   - 材料存储: 若上方提示跳过了建 bucket，先启动共享 RustFS
     （deploy/compose.host.yaml 的 rustfs 服务）再重跑本脚本；未配置 S3 时

@@ -81,11 +81,6 @@ class ExecutionStatusReporter:
                 self._remote = remote
                 self._flush()
 
-    def remote_view(self) -> dict[str, Any]:
-        """Copy of the current remote view (for merge-then-set flows)."""
-        with self._lock:
-            return dict(self._remote)
-
     def _flush(self) -> None:
         if self._path is None:
             return

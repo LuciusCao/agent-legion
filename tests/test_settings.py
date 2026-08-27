@@ -411,3 +411,35 @@ def test_load_settings_rejects_retired_register_token_config(tmp_path, monkeypat
     monkeypatch.setenv("AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE", "/run/secrets/legacy")
     with pytest.raises(ValueError, match="AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE"):
         load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+
+def test_load_settings_skills_runs_dir_defaults_to_temp(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
+    monkeypatch.delenv("AGENT_LEGION_SKILLS_RUNS_DIR", raising=False)
+    config_path = tmp_path / "explicit.yaml"
+    config_path.write_text("{}\n", encoding="utf-8")
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    from server.app.skills.paths import default_skills_runs_dir
+
+    assert settings.skills_runs_dir == default_skills_runs_dir()
+    assert "agent-legion-skills.runs" in settings.skills_runs_dir.name
+
+
+def test_load_settings_skills_runs_dir_env_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
+    override = tmp_path / "pinned-scratch"
+    monkeypatch.setenv("AGENT_LEGION_SKILLS_RUNS_DIR", str(override))
+    config_path = tmp_path / "explicit.yaml"
+    config_path.write_text("{}\n", encoding="utf-8")
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.skills_runs_dir == override
+
+
+def test_env_example_documents_skills_runs_dir():
+    example_path = Path(__file__).resolve().parents[1] / ".env.example"
+    example = example_path.read_text(encoding="utf-8")
+    assert "AGENT_LEGION_SKILLS_RUNS_DIR=" in example

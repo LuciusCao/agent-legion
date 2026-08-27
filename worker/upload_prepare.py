@@ -19,10 +19,34 @@ from shared.pi_events import (
 if TYPE_CHECKING:
     from worker.upload_queue import UploadTask
 
+MAX_ERROR_MESSAGE_CHARS = 4000
+
 
 def write_empty_archive(archive: Path) -> None:
     with tarfile.open(archive, "w:gz"):
         pass
+
+
+def failed_metadata(task: UploadTask, error_message: str) -> dict[str, Any]:
+    # failed 上报的统一载荷（prepare 失败 / CAS 4xx 终态共用）。
+    return {
+        "status": "failed",
+        "exit_code": 1,
+        "error_message": error_message[:MAX_ERROR_MESSAGE_CHARS],
+        "command": list(task.command),
+        "output_artifacts": {},
+    }
+
+
+def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
+    # prepare_result + 失败降级为 failed 上报；直传回落后按清空的
+    # artifact_uploads 重跑，tar 随之内嵌产物。
+    try:
+        return prepare_result(task)
+    except Exception as exc:
+        archive = task.execution_dir / "result.tar.gz"
+        write_empty_archive(archive)
+        return failed_metadata(task, f"result preparation failed: {exc}"), archive, []
 
 
 def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
@@ -69,9 +93,9 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
         "output_artifacts": {},
         "run_dir": PurePosixPath(run_dir.relative_to(job_dir)).as_posix(),
     }
-    # #160 D12：与 upload_queue._bulk_transfer 同一直传判定（每个产出都有
-    # 上传规格才走直传）；直传时产物不再内嵌归档（字节走 presigned PUT）。
-    direct = bool(task.artifact_uploads) and all(name in task.artifact_uploads for name in outputs)
+    # #160 D12：与 upload_queue._bulk_transfer 同一直传判定（#201 收敛进
+    # UploadTask.is_direct_upload）；直传时产物不再内嵌归档（字节走 presigned PUT）。
+    direct = task.is_direct_upload(outputs)
     with tarfile.open(archive, "w:gz") as tar:
         if not direct:
             for name in outputs:

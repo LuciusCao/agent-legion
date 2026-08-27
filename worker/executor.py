@@ -29,7 +29,7 @@ from worker.fd_limits import raise_fd_limit
 from worker.host_client import Client, WorkerAuthError
 from worker.host_status_sync import sync_host_status
 from worker.metrics_cache import WorkerMetricsCache
-from worker.registration_retry import last_registration_workspaces, register_from_config
+from worker.registration_retry import register_from_config
 from worker.runtime_setup import prepare_runtime_models
 from worker.stale_sweep import SWEEP_INTERVAL_SECONDS, sweep_stale_executions
 from worker.status import ExecutionStatusReporter
@@ -76,11 +76,6 @@ def main() -> int:
     except WorkerAuthError as exc:
         print(f"Agent Worker status authentication rejected: {exc}", flush=True)
         return 2
-    # 注册响应中的 workspace 明细（id+name）交给控制台展示；set_remote 的
-    # 字典在值变化时才落盘，这里在 sync_host_status 之后再合并一次。
-    if workspaces := last_registration_workspaces():
-        merged = {**status.remote_view(), "workspaces": workspaces}
-        status.set_remote(merged)
     work_root = Path(str(config.get("work_root", "/var/lib/agent-legion-worker"))).resolve()
     environment = {str(key): str(value) for key, value in config.get("environment", {}).items()}
     interval = float(config.get("heartbeat_interval_seconds", 15))

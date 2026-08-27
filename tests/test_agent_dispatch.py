@@ -75,7 +75,9 @@ def harness(settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simple
         pool_kwargs.update(kwargs)
         return pool
 
-    monkeypatch.setattr(agent_dispatch, "build_skill_manager", lambda _root: manager)
+    monkeypatch.setattr(
+        agent_dispatch, "build_skill_manager", lambda _root, _runs_dir=None: manager
+    )
     monkeypatch.setattr(agent_dispatch, "AgentEnqueuePool", _pool)
     monkeypatch.setattr(agent_dispatch, "resolve_skill_dir", resolve_skill_dir)
     monkeypatch.setattr(agent_dispatch, "get_skill_version", get_skill_version)

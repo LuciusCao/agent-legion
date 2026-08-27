@@ -40,8 +40,9 @@ def register_with_retry(
 ) -> bool | None:
     def attempt() -> bool:
         document = client.register(config, management_tokens)
-        # 注册成功即记住 Host 汇报的 workspace 明细（id+name），executor 把它
-        # 转发给状态文件供控制台展示每个 token 对应的 workspace 名称。
+        # 注册成功即记住 Host 汇报的 workspace 明细（id+name）；host_status_sync
+        # 把它随每次 remote 状态发布到状态文件，控制台据此给每张 token 卡片
+        # 标注对应的 workspace 名称。
         global _last_registration_workspaces
         _last_registration_workspaces = list(document.get("workspaces", []))
         return True

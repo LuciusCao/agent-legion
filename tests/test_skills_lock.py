@@ -37,15 +37,25 @@ def test_refresh_lock_passes_resolved_sources_to_write(tmp_path: Path) -> None:
 
 def test_main_invokes_refresh_lock(tmp_path: Path, monkeypatch) -> None:
     base_dir = tmp_path / "skills"
+    runs_dir = tmp_path / "runs"
 
     called = {}
 
-    def fake_refresh(store, base: Path) -> None:
+    def fake_refresh(store, base: Path, runs_dir: Path | None = None) -> None:
         called["store"] = store
         called["base"] = base
+        called["runs_dir"] = runs_dir
 
     monkeypatch.setattr("server.app.skills.lock.refresh_lock", fake_refresh)
-    monkeypatch.setattr("server.app.skills.lock._default_dsn", lambda: "postgresql://t/t")
+
+    class _FakeSettings:
+        database_url = "postgresql://t/t"
+        skills_runs_dir = runs_dir
+
+    monkeypatch.setattr(
+        "server.app.skills.lock.load_settings",
+        lambda: _FakeSettings(),
+    )
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -59,15 +69,25 @@ def test_main_invokes_refresh_lock(tmp_path: Path, monkeypatch) -> None:
 
     assert called["store"]._dsn == "postgresql://t/t"
     assert called["base"] == base_dir
+    assert called["runs_dir"] == runs_dir
 
 
 def test_main_honors_database_url_override(tmp_path: Path, monkeypatch) -> None:
     called = {}
 
-    def fake_refresh(store, base: Path) -> None:
+    def fake_refresh(store, base: Path, runs_dir: Path | None = None) -> None:
         called["store"] = store
 
     monkeypatch.setattr("server.app.skills.lock.refresh_lock", fake_refresh)
+
+    class _FakeSettings:
+        database_url = "postgresql://settings/db"
+        skills_runs_dir = tmp_path / "runs"
+
+    monkeypatch.setattr(
+        "server.app.skills.lock.load_settings",
+        lambda: _FakeSettings(),
+    )
     monkeypatch.setattr(
         "sys.argv",
         ["refresh-lock", "--database-url", "postgresql://example/db"],

@@ -81,6 +81,26 @@ def test_css_block_comments_excluded(tmp_path: Path) -> None:
     assert count_effective_lines(path) == 3
 
 
+def test_rust_excludes_comments_counts_attribute_macros(tmp_path: Path) -> None:
+    """#202：.rs 走 C-like 解析——// 与 /* */ 注释排除，#[derive] 等属性行算代码。"""
+    path = _write(
+        tmp_path / "example.rs",
+        "// header\n"
+        "//! doc comment\n"
+        "\n"
+        "/// doc\n"
+        "#[derive(Default)]\n"
+        "pub struct S {\n"
+        "    a: u32,\n"
+        "}\n"
+        "/* multi\n"
+        "   line */\n"
+        "fn f() -> u32 { 1 } // trailing\n",
+    )
+    # code lines: derive, struct, a, }, fn = 5（doc 与块注释排除）
+    assert count_effective_lines(path) == 5
+
+
 def test_unknown_extension_falls_back_to_raw_count(tmp_path: Path) -> None:
     path = _write(tmp_path / "example.md", "# title\n\ntext\n")
     assert count_effective_lines(path) == 3

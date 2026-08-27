@@ -209,6 +209,20 @@ def test_build_sandbox_argv_structure() -> None:
     )
     assert "--allow-network" not in no_network
 
+    # marker 挂在子命令 argv 尾部（result_path 之后）：ps 系孤儿回收靠它把
+    # 进程组归属到 execution（#186）；不传则 argv 不多任何元素。
+    marked = build_sandbox_argv(
+        "/usr/bin/velites",
+        Path("/work/e1/job"),
+        [Path("/work/e1/bundle")],
+        Path("/work/e1/job/.code_result.json"),
+        sandbox_network=False,
+        marker="agent-legion-exec-1",
+    )
+    assert marked[-1] == "agent-legion-exec-1"
+    assert marked[-2] == "/work/e1/job/.code_result.json"
+    assert no_network[-1] == "/work/e1/job/.code_result.json"
+
 
 def _fake_velites(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """velites 桩：跳过 wrap 参数直接 exec -- 之后的命令（不真实沙箱）。"""
@@ -274,6 +288,20 @@ def test_execute_code_completed_and_result_pack(
     # 归档契约：expected_outputs 按 job-dir 相对名 + 根部 node.log。
     assert "output.json" in names
     assert "node.log" in names
+
+
+def test_execute_code_marks_group_for_orphan_reaper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#186：code argv 尾部携带 agent-legion-<execution_id>，否则 supervisor 崩溃后
+    orphan_reaper 无法识别 code 进程组身份，孤儿子进程树无人回收（双执行）。"""
+    client = FakeClient(_code_bundle(tmp_path))
+    task = _execute(tmp_path, monkeypatch, _code_claim(), client)
+
+    assert task is not None
+    assert task.command[-1] == "agent-legion-exec-code-1"
+    metadata, _, _ = prepare_code_result(task)
+    assert metadata["command"][-1] == "agent-legion-exec-code-1"
 
 
 def test_execute_code_reports_auth_failure_connection(

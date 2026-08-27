@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "files": [
+    "tests/db/test_retry.py",
+    "tests/executors/leases/test_claim_basics.py",
+    "tests/executors/test_shard_contract.py",
+    "tests/routes/jobs/test_job_lifecycle.py",
+    "tests/routes/test_auth_routes.py",
+    "tests/services/test_vault.py",
+    "tests/workflows/test_sharding.py"
+  ]
+}

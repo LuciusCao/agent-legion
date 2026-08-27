@@ -43,7 +43,9 @@ test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }, t
   await widenDemoWorkflowItemTypes(page, DEMO_WORKSPACE_ID)
   await page.reload()
 
-  await page.getByRole('button', { name: '添加' }).click()
+  // exact：name 默认子串匹配，会同时命中空 workspace 引导卡片里的
+  // disabled「添加条目」按钮（strict mode violation，视挂载时序 flaky）。
+  await page.getByRole('button', { name: '添加', exact: true }).click()
   // 添加 opens AddItemsDialog; the legacy intake entry is retired (#154), so
   // the smoke path uses the 粘贴 ID tab with the seeded `cms-internal`
   // external connection (ref items only require the connection to exist).
