@@ -240,7 +240,10 @@ describe('WorkflowStudioPage', () => {
     await user.type(editor, '\n# edited')
     await closeYamlEditor(user)
 
-    await user.click(await screen.findByText(/未发布变更/))
+    // 等 compare 落定、chip 稳定为计数形态再点击：编辑后 chip 先显示瞬态的
+    // 「有未发布变更」，compare debounce 一到就被「计算中…」替换——点在被
+    // 替换下来的旧节点上点击会静默丢失（慢机器/CI 上必现的竞态）。
+    await user.click(await screen.findByText(/未发布变更 \d+/))
 
     expect(await screen.findByText('变更与校验')).toBeInTheDocument()
     expect(screen.getByText('变更摘要')).toBeInTheDocument()

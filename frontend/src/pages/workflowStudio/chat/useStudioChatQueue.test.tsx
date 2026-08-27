@@ -77,6 +77,74 @@ describe('useStudioChatQueue', () => {
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual(['第一条'])
   })
 
+  it('serializes rapid submits while the first send is in flight', async () => {
+    // 首个 send 在途、busy 尚未随 SSE 快照翻转时，第二条必须入队而不是
+    // 直发（否则两条都撞后端单 turn 原子认领，第二条 409 且输入已清空）。
+    let resolveSend: (sent: boolean) => void = () => {}
+    const send = vi.fn().mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    const { result, rerender } = renderQueue(send, {
+      busy: false,
+      sessionKey: 's1',
+    })
+    act(() => result.current.submit('第一条'))
+    expect(send).toHaveBeenCalledWith('第一条')
+
+    act(() => result.current.submit('第二条'))
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(result.current.queuedMessages.map((m) => m.text)).toEqual(['第二条'])
+
+    // 在途发送落定 + busy 翻转沿 → 队首发出。
+    await act(async () => {
+      resolveSend(true)
+    })
+    rerender({ busy: true, sessionKey: 's1' })
+    rerender({ busy: false, sessionKey: 's1' })
+    await waitFor(() => expect(send).toHaveBeenCalledWith('第二条'))
+    await act(async () => {
+      resolveSend(true)
+    })
+    await waitFor(() => expect(result.current.queuedMessages).toEqual([]))
+  })
+
+  it('queues a submit that arrives while the queue-head flush is in flight', async () => {
+    // flush 发出队首的 promise 未落定时新提交的消息：入队而不是直发。
+    let resolveSend: (sent: boolean) => void = () => {}
+    const send = vi.fn().mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    const { result, rerender } = renderQueue(send, {
+      busy: true,
+      sessionKey: 's1',
+    })
+    act(() => result.current.submit('第一条'))
+    rerender({ busy: false, sessionKey: 's1' })
+    await waitFor(() => expect(send).toHaveBeenCalledWith('第一条'))
+
+    act(() => result.current.submit('第二条'))
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
+      '第一条',
+      '第二条',
+    ])
+
+    await act(async () => {
+      resolveSend(true)
+    })
+    await waitFor(() =>
+      expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
+        '第二条',
+      ])
+    )
+  })
+
   it('removes a queued message manually', () => {
     const send = vi.fn().mockResolvedValue(true)
     const { result } = renderQueue(send, { busy: true, sessionKey: 's1' })

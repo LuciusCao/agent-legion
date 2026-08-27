@@ -73,11 +73,21 @@ export function useWorkflowStudioDraftStore(
     draftQuery.data === undefined ? undefined : draftQuery.data.definition_yaml,
     draft.setDraftYaml
   )
+  // 采用历史版本也算「用户碰过」：useViewedRevisionAsDraft 内部闭包的是
+  // 原始 setter，先经 touched-aware setter 写入同一值标记 touched，否则
+  // 迟到的服务端草稿会把刚采用的内容覆盖掉（revision 模式下
+  // definitionYaml 即被查看版本的 YAML）。
+  const useViewedRevisionAsDraft = () => {
+    if (draft.viewMode === 'revision' && draft.definitionYaml) {
+      setDraftYaml(draft.definitionYaml)
+    }
+    draft.useViewedRevisionAsDraft()
+  }
   const draftSave = useWorkflowDraftPersistence(
     workspaceId,
     draft.draftYaml,
     originalYaml,
     draftQuery.data
   )
-  return { ...draft, setDraftYaml, draftSave }
+  return { ...draft, setDraftYaml, useViewedRevisionAsDraft, draftSave }
 }

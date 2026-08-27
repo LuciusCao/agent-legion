@@ -202,6 +202,128 @@ describe('useWorkflowDraftPersistence', () => {
     await waitFor(() => expect(result.current.status).toBe('error'))
   })
 
+  it('saves edits made while the draft query was in flight once hydration lands', async () => {
+    // GET 在途时用户已编辑：保存 effect 因未 hydrated 提前退出，draftYaml
+    // 之后不再变化；hydration 翻转必须重新评估当前草稿并补这次保存。
+    const { rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Edited\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: undefined,
+    })
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+    expect(mocks.putWorkflowDraft).not.toHaveBeenCalled()
+
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Edited\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
+      'ws1',
+      'key: demo\nlabel: Edited\n'
+    )
+  })
+
+  it('does not PUT the baseline over an existing server draft on hydration', async () => {
+    // hydration 触发的重新评估以服务端草稿为已持久化基线：draftYaml 等于
+    // 服务端草稿（组合层刚应用完）时不得发起任何 PUT。
+    const { rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Base\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: undefined,
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: SERVER_DRAFT.definition_yaml,
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: SERVER_DRAFT,
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(2000)
+    })
+
+    expect(mocks.putWorkflowDraft).not.toHaveBeenCalled()
+  })
+
+  it('invalidates an in-flight PUT and re-saves when the draft reverts to the persisted value', async () => {
+    // B 的 PUT 在途时用户回退到已持久化值 A：在途响应必须作废（不得把
+    // lastPersisted 更新为 B），并补存 A 把服务端可能已收到的 B 改回来。
+    let resolvePut: (value: typeof SERVER_DRAFT) => void = () => {}
+    mocks.putWorkflowDraft.mockImplementation(
+      () =>
+        new Promise<typeof SERVER_DRAFT>((resolve) => {
+          resolvePut = resolve
+        })
+    )
+    const { rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: A\n',
+      originalYaml: 'key: demo\nlabel: A\n',
+      serverDraft: NO_DRAFT,
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: B\n',
+      originalYaml: 'key: demo\nlabel: A\n',
+      serverDraft: NO_DRAFT,
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
+      'ws1',
+      'key: demo\nlabel: B\n'
+    )
+
+    // PUT(B) 响应前回退到 A。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: A\n',
+      originalYaml: 'key: demo\nlabel: A\n',
+      serverDraft: NO_DRAFT,
+    })
+    // B 的响应迟到：应被作废，lastPersisted 仍是 A。
+    await act(async () => {
+      resolvePut({
+        definition_yaml: 'key: demo\nlabel: B\n',
+        updated_at: '2026-08-27T02:00:00+00:00',
+      })
+    })
+    // 回退后补存 A（last-write-wins 把服务端的 B 改回来）。
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
+      'ws1',
+      'key: demo\nlabel: A\n'
+    )
+
+    // lastPersisted 未被 B 污染：再编辑为 C 照常保存。
+    mocks.putWorkflowDraft.mockResolvedValue(SERVER_DRAFT)
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: C\n',
+      originalYaml: 'key: demo\nlabel: A\n',
+      serverDraft: NO_DRAFT,
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
+      'ws1',
+      'key: demo\nlabel: C\n'
+    )
+  })
+
   it('debounces rapid edits into a single PUT of the latest value', async () => {
     const { rerender } = renderPersistence({
       workspaceId: 'ws1',

@@ -452,6 +452,7 @@
     "frontend/src/pages/workflowStudio/chat/studioChatMessages.ts": 320,
     "frontend/src/pages/workflowStudio/chat/studioChatRefill.ts": 22,
     "frontend/src/pages/workflowStudio/chat/useChatAutoScroll.ts": 28,
+    "frontend/src/pages/workflowStudio/chat/useInFlightSend.ts": 29,
     "frontend/src/pages/workflowStudio/chat/useStudioChat.ts": 273,
     "frontend/src/pages/workflowStudio/chat/useStudioChatQueue.ts": 49,
     "frontend/src/pages/workflowStudio/chat/useStudioContextSync.ts": 36,
