@@ -20,10 +20,14 @@ _DEMO_WORKFLOW = "education_video_problems_generation"
 
 
 def _seed_workspace(conn, workspace_id: str) -> None:
+    # key = id: the v45 upgrade test replays every migration up to the
+    # current version, including the v62 id/key binding rename — shared
+    # per-file keys would collide there (two workspaces renaming onto one
+    # id). The v46 migration below reads revisions, not this column.
     conn.execute(
         "insert into workspaces(id, name, default_workflow_key)"
-        " values (%s, %s, 'demo_workflow') on conflict(id) do nothing",
-        (workspace_id, workspace_id),
+        " values (%s, %s, %s) on conflict(id) do nothing",
+        (workspace_id, workspace_id, workspace_id),
     )
 
 

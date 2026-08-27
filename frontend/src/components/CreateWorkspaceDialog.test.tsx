@@ -15,7 +15,7 @@ describe('CreateWorkspaceDialog', () => {
     mutateAsync.mockResolvedValue({ id: 'my_ws' })
   })
 
-  it('creates a workspace with the explicit id and name (v61 binding)', async () => {
+  it('creates a workspace with the explicit id and name (v62 binding)', async () => {
     const user = userEvent.setup()
     render(<CreateWorkspaceDialog open onClose={() => {}} />)
     await user.type(
@@ -34,7 +34,7 @@ describe('CreateWorkspaceDialog', () => {
     )
   })
 
-  it('blocks submission while the id does not match the v61 pattern', async () => {
+  it('blocks submission while the id does not match the v62 pattern', async () => {
     const user = userEvent.setup()
     render(<CreateWorkspaceDialog open onClose={() => {}} />)
     await user.type(

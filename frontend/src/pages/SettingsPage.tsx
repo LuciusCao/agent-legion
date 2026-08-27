@@ -144,7 +144,7 @@ export function SettingsPage() {
             setSettings={setSettings}
           />
 
-          {/* schema v61：workflow key 与 workspace id 绑定且不可变，
+          {/* schema v62：workflow key 与 workspace id 绑定且不可变，
               原 WorkflowSection 编辑器已移除（后端 PATCH /configuration
               对 key 变更一律 400）。settings.workflowKey 仅作为快照字段
               在保存时原样回传。 */}

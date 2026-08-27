@@ -20,7 +20,7 @@ def test_workspace_settings_round_trip(tmp_path):
         )
         assert ws.status_code == 200
         workspace_id = ws.json()["workspace"]["id"]
-        # Schema v61: creation seeds nothing; publish the demo DAG so the
+        # Schema v62: creation seeds nothing; publish the demo DAG so the
         # node-level settings below have a workflow to resolve against.
         publish_builtin_revision(c.app.state.job_db, workspace_id)
         connection = c.patch(
@@ -401,7 +401,7 @@ def test_node_override_validation_uses_workspace_active_revision(tmp_path):
 
 
 def test_blank_workspace_first_publish_adopts_key_and_runs_job(tmp_path):
-    """Full catalog-free flow (#112 acceptance, v61 semantics): create a
+    """Full catalog-free flow (#112 acceptance, v62 semantics): create a
     workspace with an explicit id (which IS the workflow key), publish a
     draft whose key matches, then intake a job. A mismatched draft key is
     rejected with 422 — the key is immutable."""
@@ -417,7 +417,7 @@ def test_blank_workspace_first_publish_adopts_key_and_runs_job(tmp_path):
         assert ws.status_code == 200, ws.text
         workspace = ws.json()["workspace"]
         workspace_id = workspace["id"]
-        # Schema v61: the key is bound at creation (id == key), not adopted.
+        # Schema v62: the key is bound at creation (id == key), not adopted.
         assert workspace["default_workflow_key"] == "acme_flow"
 
         # The code node needs published code before the first revision (the

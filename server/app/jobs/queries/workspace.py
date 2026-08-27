@@ -13,7 +13,7 @@ from server.app.jobs.node_limits import (
     get_workspace_node_limits,
     replace_workspace_node_limits,
 )
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 _ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
@@ -45,7 +45,7 @@ def _workspace_record(row: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
-class WorkspaceQueriesMixin(JobQueriesBase):
+class WorkspaceQueriesMixin(ConnectionQueriesMixin):
     jobs_dir: Path
 
     def create_workspace(
@@ -60,10 +60,10 @@ class WorkspaceQueriesMixin(JobQueriesBase):
     ) -> dict[str, Any]:
         """Create a workspace row.
 
-        ``workspace_id`` (schema v61) is the explicit caller-provided id; the
+        ``workspace_id`` (schema v62) is the explicit caller-provided id; the
         HTTP service layer always passes it equal to ``default_workflow_key``
         (the id==key invariant lives there — this raw layer also serves test
-        fixtures and low-level seeders that build pre-v61 shapes). When
+        fixtures and low-level seeders that build pre-v62 shapes). When
         omitted the id is derived from the name with a dedup suffix.
         """
         clean_name = name.strip()
@@ -73,9 +73,9 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         if workspace_id is not None:
             workspace_id = workspace_id.strip()
             if workspace_id != clean_workflow_key:
-                raise ValueError("Workspace id must equal default_workflow_key (schema v61)")
+                raise ValueError("Workspace id must equal default_workflow_key (schema v62)")
             if not _ID_PATTERN.match(workspace_id):
-                raise ValueError("Workspace id must match ^[a-z0-9][a-z0-9_-]{0,63}$ (schema v61)")
+                raise ValueError("Workspace id must match ^[a-z0-9][a-z0-9_-]{0,63}$ (schema v62)")
         resource_config_json = json.dumps(
             resource_config or {},
             ensure_ascii=False,

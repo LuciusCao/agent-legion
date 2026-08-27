@@ -46,6 +46,6 @@ def publish_workflow_draft(
     WorkflowRevisionService(job_db, custom_nodes_enabled).save_workspace_revision(
         workspace_id, definition
     )
-    # Schema v61: the workflow key is bound to the workspace id at creation
+    # Schema v62: the workflow key is bound to the workspace id at creation
     # and immutable — no first-publish adoption path anymore.
     return True, []

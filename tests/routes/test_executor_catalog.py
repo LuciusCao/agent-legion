@@ -4,7 +4,7 @@ def _create_workspace(client) -> str:
         json={"id": "education_video_problems_generation", "name": "catalog-ws"},
     )
     assert response.status_code == 200, response.text
-    # v61: creation no longer seeds the factory Agents.
+    # v62: creation no longer seeds the factory Agents.
     from tests.helpers import seed_workspace_agent_definitions
 
     seed_workspace_agent_definitions(response.json()["workspace"]["id"])

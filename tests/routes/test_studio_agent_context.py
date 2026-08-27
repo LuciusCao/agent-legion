@@ -46,7 +46,7 @@ _CREATE_COUNT = 0
 
 
 def _create_workspace(client, name: str = "Context WS") -> str:
-    # v61: id==key, unique per call within a test (TRUNCATE isolation resets
+    # v62: id==key, unique per call within a test (TRUNCATE isolation resets
     # the counter each test).
     global _CREATE_COUNT
     _CREATE_COUNT += 1
@@ -60,7 +60,7 @@ def _create_workspace(client, name: str = "Context WS") -> str:
         json={"id": ws_id, "name": name},
     )
     assert response.status_code == 200, response.text
-    # v61: creation seeds nothing; publish the demo revision so chat context
+    # v62: creation seeds nothing; publish the demo revision so chat context
     # resolution (active revision) sees the DAG.
     from tests.helpers import publish_builtin_revision
 

@@ -195,7 +195,7 @@ describe('workspace api', () => {
     } as Response)
     global.fetch = fetchMock
 
-    // v61: createWorkspace(id, name); the workflow_mode contract is gone.
+    // v62: createWorkspace(id, name); the workflow_mode contract is gone.
     await createWorkspace('blank_ws', 'Blank')
 
     expect(fetchMock).toHaveBeenCalledWith(

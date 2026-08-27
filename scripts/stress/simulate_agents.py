@@ -358,7 +358,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--workspace",
         default=_STRESS_WORKFLOW_KEY,
-        help="Workspace id (= workflow key, schema v61)",
+        help="Workspace id (= workflow key, schema v62)",
     )
     parser.add_argument("--agents", type=int, default=100, help="Concurrent synthetic agents")
     parser.add_argument("--jobs", type=int, default=5000, help="Target number of jobs")

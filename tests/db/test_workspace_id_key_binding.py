@@ -1,10 +1,10 @@
-"""Schema v61: bind workspace id and workflow key (issue #211).
+"""Schema v62: bind workspace id and workflow key (issue #211).
 
 Workspaces are renamed so ``id == default_workflow_key`` (the key is bound at
-creation from v61 on and immutable); never-published workspaces keep their id
+creation from v62 on and immutable); never-published workspaces keep their id
 and get the key backfilled from it. These tests pin the version record and
 cover rename cascades (FK children plus the two unconstrained tables), empty
-key backfill, conflict fail-fast, and idempotent replay.
+key backfill, conflict and shared-key fail-fast, and idempotent replay.
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ def test_schema_version_pin() -> None:
     # The latest-migration record pin moved through
     # test_retire_global_register_tokens_migration.py (v58) →
     # test_jobs_run_id_index.py (v59) → back to the v58 file for the DDL-only
-    # v60; v61 owns its own module, so the pin lives here now.
-    assert SCHEMA_VERSION == 61
+    # v60; v62 owns its own module, so the pin lives here now.
+    assert SCHEMA_VERSION == 62
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
@@ -129,8 +129,55 @@ def test_conflicting_target_fails_fast() -> None:
     assert ids == {"bind-conflict-a", "shared_flow"}
 
 
+def test_shared_key_fails_fast() -> None:
+    """Two workspaces claiming the same key (legal under v50's free-form
+    per-workspace keys) would both rename onto one id — the second parent
+    insert hits workspaces_pkey mid-migration. Fail fast instead, naming
+    both workspaces so the operator can point them at distinct keys."""
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        _seed_workspace(conn, "bind-shared-a", "duplicate_flow")
+        _seed_workspace(conn, "bind-shared-b", "duplicate_flow")
+        # Count rows keyed on (workspace_id, ...): both workspaces renaming
+        # onto one id would collide on these composite PKs too, not just on
+        # workspaces_pkey.
+        for workspace_id in ("bind-shared-a", "bind-shared-b"):
+            conn.execute(
+                "insert into workspace_job_status_counts(workspace_id, status, cnt)"
+                " values (%s, 'done', 1) on conflict do nothing",
+                (workspace_id,),
+            )
+
+    from server.app.db.migrations.workspace_id_key_binding import (
+        migrate_workspace_id_key_binding,
+    )
+
+    with (
+        pytest.raises(RuntimeError, match="duplicate_flow <- bind-shared-a, bind-shared-b"),
+        write_transaction(TEST_DATABASE_URL) as conn,
+    ):
+        migrate_workspace_id_key_binding(conn)
+
+    # The failed transaction rolled back: neither workspace moved.
+    with read_connection(TEST_DATABASE_URL) as conn:
+        ids = {
+            str(row["id"])
+            for row in conn.execute(
+                "select id from workspaces where id in ('bind-shared-a', 'bind-shared-b')"
+            ).fetchall()
+        }
+        count_ws = {
+            str(row["workspace_id"])
+            for row in conn.execute(
+                "select distinct workspace_id from workspace_job_status_counts"
+                " where workspace_id in ('bind-shared-a', 'bind-shared-b')"
+            ).fetchall()
+        }
+    assert ids == {"bind-shared-a", "bind-shared-b"}
+    assert count_ws == {"bind-shared-a", "bind-shared-b"}
+
+
 def test_illegal_legacy_key_fails_fast() -> None:
-    """A legacy key that violates the v61 id contract (e.g. 'team/flow') is
+    """A legacy key that violates the v62 id contract (e.g. 'team/flow') is
     rejected up front — renaming to it would strand the workspace behind
     URL-addressed routes that can never match."""
     with write_transaction(TEST_DATABASE_URL) as conn:
@@ -167,4 +214,4 @@ def test_replay_is_idempotent() -> None:
             "select id from workspaces where id <> default_workflow_key"
             " or default_workflow_key = ''"
         ).fetchall()
-    assert bad == [], "post-v61 invariant violated: every workspace has id == key"
+    assert bad == [], "post-v62 invariant violated: every workspace has id == key"

@@ -44,10 +44,11 @@ def _insert_register_token(
 
 
 def test_schema_version_pin() -> None:
-    # The latest-migration record pin moved through
-    # test_jobs_run_id_index.py (v59) and the v60 DDL-only entry, and now
-    # lives in tests/db/test_workspace_id_key_binding.py (v61).
-    assert SCHEMA_VERSION == 61
+    # The latest-migration record pin moved through test_jobs_run_id_index.py
+    # (v59), the v60 DDL-only entry, and the v61 DDL-only entry
+    # (workspace_workflow_drafts), and now lives in
+    # tests/db/test_workspace_id_key_binding.py (v62).
+    assert SCHEMA_VERSION == 62
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)

@@ -46,7 +46,7 @@ def _create_workspace(client) -> str:
         json={"id": WORKFLOW_KEY, "name": "runs-bundle-ws"},
     )
     assert response.status_code == 200, response.text
-    # v61: creation seeds nothing; the bundle tests republish their own
+    # v62: creation seeds nothing; the bundle tests republish their own
     # contract variants, which requires a base active revision.
     from tests.helpers import publish_builtin_revision
 

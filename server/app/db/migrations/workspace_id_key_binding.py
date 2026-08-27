@@ -1,4 +1,4 @@
-"""Workspace id / workflow key binding (schema v61, issue #211).
+"""Workspace id / workflow key binding (schema v62, issue #211).
 
 Schema v50 let blank-canvas workspaces start with an empty
 ``default_workflow_key``; the first publish then adopted the draft key. That
@@ -6,7 +6,7 @@ window is where a typo'd hand-typed key got permanently claimed, and it is
 also why workspace stats 400'd for unpublished workspaces (build_workspace_stats
 raises on an empty key).
 
-v61 binds the two identifiers for good: a workspace's id IS its workflow key
+v62 binds the two identifiers for good: a workspace's id IS its workflow key
 (created together, immutable from then on). This migration renames existing
 workspaces to their bound key — ``id = default_workflow_key`` — so the
 invariant holds for legacy rows too. Workspaces with an empty key (never
@@ -29,10 +29,12 @@ FK-less) and is rewritten so registered workers keep claiming in the
 renamed workspace.
 
 Pre-checks fail fast (the transaction aborts, nothing is renamed): a target
-id already used by another workspace, and a legacy key that violates the
-v61 id contract (``^[a-z0-9][a-z0-9_-]{0,63}$`` — legacy keys were free-form
-text, e.g. ``team/flow`` would produce an id the URL-addressed API could
-never resolve). The operator renames the offending workspace, then re-runs.
+id already used by another workspace, two workspaces sharing one workflow
+key (both would rename onto the same id), and a legacy key that violates
+the v62 id contract (``^[a-z0-9][a-z0-9_-]{0,63}$`` — legacy keys were
+free-form text, e.g. ``team/flow`` would produce an id the URL-addressed
+API could never resolve). The operator renames the offending workspace,
+then re-runs.
 
 Deliberately NOT rewritten: ``jobs.storage_dir`` paths on disk
 (``data/jobs/<workspace_id>/``), material S3 ``storage_key`` prefixes, and
@@ -53,7 +55,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# v61 id contract (mirrors WorkspaceCreateRequest.id's pattern).
+# v62 id contract (mirrors WorkspaceCreateRequest.id's pattern).
 _ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 # workspace_id columns WITHOUT a foreign key to workspaces(id). The FK'd
@@ -78,7 +80,7 @@ def _child_tables(conn: Any) -> list[str]:
 
 
 def _preflight(conn: Any, renames: dict[str, str]) -> None:
-    """Fail fast on id collisions and legacy keys violating the v61 contract."""
+    """Fail fast on id collisions, shared keys, and legacy keys violating the v62 contract."""
     all_ids = {str(row["id"]) for row in conn.execute("select id from workspaces").fetchall()}
     conflicts = [
         f"{old} -> {target}"
@@ -87,14 +89,30 @@ def _preflight(conn: Any, renames: dict[str, str]) -> None:
     ]
     if conflicts:
         raise RuntimeError(
-            "schema v61 workspace rename conflicts (target id already in use): "
+            "schema v62 workspace rename conflicts (target id already in use): "
             + "; ".join(conflicts)
             + ". Rename or delete the colliding workspace, then re-run."
+        )
+    # v50 keys were free-form per-workspace text, so nothing stopped two
+    # workspaces from claiming the same key; both would rename onto one id
+    # (the second parent insert hits workspaces_pkey, and the child rewrite
+    # would collide on the workspace_id-keyed composite PKs).
+    claims: dict[str, list[str]] = {}
+    for old, target in renames.items():
+        claims.setdefault(target, []).append(old)
+    shared = {target: olds for target, olds in claims.items() if len(olds) > 1}
+    if shared:
+        raise RuntimeError(
+            "schema v62: multiple workspaces are bound to the same workflow key: "
+            + "; ".join(
+                f"{target} <- {', '.join(sorted(olds))}" for target, olds in sorted(shared.items())
+            )
+            + ". Point each workspace at a distinct default_workflow_key, then re-run."
         )
     invalid = [target for target in renames.values() if not _ID_PATTERN.match(target)]
     if invalid:
         raise RuntimeError(
-            "schema v61: legacy workflow keys that violate the new id contract "
+            "schema v62: legacy workflow keys that violate the new id contract "
             f"({'[a-z0-9][a-z0-9_-]{{0,63}}'}): {sorted(invalid)}. Set the workspace's "
             "default_workflow_key to a valid id (e.g. via SQL), then re-run."
         )
@@ -117,7 +135,7 @@ def _rewrite_worker_scopes(conn: Any, old_id: str, target: str) -> None:
 
 
 def migrate_workspace_id_key_binding(conn: Any) -> None:
-    """Bind workspace id and workflow key: rename ids to their keys (v61)."""
+    """Bind workspace id and workflow key: rename ids to their keys (v62)."""
     rows = conn.execute("select id, default_workflow_key from workspaces").fetchall()
     renames: dict[str, str] = {}
     for row in rows:
@@ -136,7 +154,11 @@ def migrate_workspace_id_key_binding(conn: Any) -> None:
     # double-count into the new key (PK collisions with the manually
     # rewritten count rows). Disabling USER triggers needs only table
     # ownership (system/FK triggers stay active); count rows are rewritten
-    # by the migration itself and resync on the next jobs mutation.
+    # by the migration itself and resync on the next jobs mutation. The
+    # workspace_job_status_counts PK is (workspace_id, ...) and
+    # workspace_job_node_status_counts adds workflow_key/node_key — one
+    # rename target per workspace (the shared-key preflight) is what keeps
+    # the plain UPDATE on those PKs collision-free.
     _TRIGGER_MAINTAINED_COUNT_TABLES = ("jobs", "job_nodes")
     for table in _TRIGGER_MAINTAINED_COUNT_TABLES:
         conn.execute(f"alter table {table} disable trigger user")
@@ -163,7 +185,7 @@ def migrate_workspace_id_key_binding(conn: Any) -> None:
                 )
             _rewrite_worker_scopes(conn, old_id, target)
             conn.execute("delete from workspaces where id=%s", (old_id,))
-            logger.info("schema v61: workspace %r renamed to %r", old_id, target)
+            logger.info("schema v62: workspace %r renamed to %r", old_id, target)
     finally:
         for table in _TRIGGER_MAINTAINED_COUNT_TABLES:
             conn.execute(f"alter table {table} enable trigger user")
@@ -181,4 +203,4 @@ def migrate_workspace_id_key_binding(conn: Any) -> None:
             " (select 1 from workspaces w where w.id = t.workspace_id)"
         ).fetchone()["n"]
         if orphans:
-            raise RuntimeError(f"schema v61 rename left {orphans} orphaned rows in {table}")
+            raise RuntimeError(f"schema v62 rename left {orphans} orphaned rows in {table}")

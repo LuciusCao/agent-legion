@@ -7,7 +7,7 @@ def test_list_executors_endpoint(client):
     )
     assert created.status_code == 200, created.text
     workspace_id = created.json()["workspace"]["id"]
-    # v61: creation no longer seeds the factory Agents.
+    # v62: creation no longer seeds the factory Agents.
     from tests.helpers import seed_workspace_agent_definitions
 
     seed_workspace_agent_definitions(workspace_id)

@@ -12,7 +12,7 @@ def _create_workspace(client, name="default", default_workflow_key="test"):
     ).json()["workspace"]["id"]
     # The demo workflow no longer declares intake modes (#154); these tests
     # post job-batches, so publish the legacy-intake variant. Creation no
-    # longer seeds the factory Agents (v61), so seed them here — agent route
+    # longer seeds the factory Agents (v62), so seed them here — agent route
     # materialization at publish time needs them.
     from tests.helpers import seed_workspace_agent_definitions
 

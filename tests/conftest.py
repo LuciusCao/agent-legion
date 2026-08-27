@@ -34,7 +34,7 @@ from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_
 # Tests seed the built-in demo agents into their own workspace via
 # tests/helpers.seed_workspace_agent_definitions, and revisions via
 # tests/helpers.publish_builtin_revision / publish_legacy_intake_revision
-# (schema v61: workspace creation no longer seeds the demo template —
+# (schema v62: workspace creation no longer seeds the demo template —
 # ensure_active_revision runs only through `make import-demo` /
 # scripts/seed_demo.py).
 

@@ -16,7 +16,7 @@ export async function createWorkspace(
   id: string,
   name: string
 ): Promise<WorkspaceRecord> {
-  // Schema v61: the caller-provided id IS the workflow key (bound and
+  // Schema v62: the caller-provided id IS the workflow key (bound and
   // immutable at creation).
   const result = await api<WorkspaceResponse>('/api/workspaces', {
     method: 'POST',

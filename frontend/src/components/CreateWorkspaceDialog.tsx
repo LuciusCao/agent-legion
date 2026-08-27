@@ -15,7 +15,7 @@ type Props = {
   onClose: () => void
 }
 
-// schema v61：id 即 workflow key，创建后不可变，与后端
+// schema v62：id 即 workflow key，创建后不可变，与后端
 // WorkspaceCreateRequest 的 pattern 保持一致。
 const WORKSPACE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/
 

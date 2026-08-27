@@ -11,7 +11,7 @@ _CREATE_COUNT = 0
 
 
 def _create_workspace(client, name: str = "runs-ws") -> str:
-    # v61: id==key, unique per call within a test (TRUNCATE isolation resets
+    # v62: id==key, unique per call within a test (TRUNCATE isolation resets
     # the counter); creation seeds nothing, so publish the legacy-intake
     # revision run creation needs.
     global _CREATE_COUNT

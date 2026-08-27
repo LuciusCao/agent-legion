@@ -43,14 +43,14 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v60, worker_register_token_ids — DDL-only,
-# agent_workers.register_token_ids_json via the schema file) must leave behind
-# so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. The previous newest (v59 jobs_run_id_index) is part of the
-# v61 (workspace_id_key_binding) is a pure data migration — no DDL, no
-# indexes, no columns — so the undo inventory is empty; the previous newest
-# (v60 worker_register_token_ids) is part of the v61-1 baseline shape.
-_NEWEST_MIGRATION_COLUMNS = ()
+# Effects the newest migration (v62, workspace_id_key_binding) must leave
+# behind so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. v62 is a pure data migration — no DDL, no indexes, no
+# columns — so the undo inventory is empty; the previous newest (v61
+# workspace_workflow_drafts, DDL-only via the schema file) is part of the
+# v62-1 baseline shape.
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_NAME = "workspace_id_key_binding"
 
@@ -62,6 +62,8 @@ _CatalogIndexes = set[tuple[str, str, str]]
 def _undo_newest_migration(database_dsn: str) -> None:
     """Rewind a current-shape database to SCHEMA_VERSION - 1."""
     with write_transaction(database_dsn) as conn:
+        for table in _NEWEST_MIGRATION_TABLES:
+            conn.execute(f"drop table if exists {table}")
         for table, column, _data_type in _NEWEST_MIGRATION_COLUMNS:
             conn.execute(f"alter table {table} drop column if exists {column}")
         for index_name in _NEWEST_MIGRATION_INDEXES:

@@ -112,12 +112,12 @@
 - Workflow 是 workspace 内部的一份 DAG：全局 workflow_catalog 已随 schema v50 退役
   （#112，DB-WORKFLOW-CATALOG-001），权威定义是该 workspace 的 active revision——
   节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部读它，
-  不再有列表/注册 API。schema v61（#211，DB-WORKSPACE-KEY-BINDING-001）起
+  不再有列表/注册 API。schema v62（#211，DB-WORKSPACE-KEY-BINDING-001）起
   workspace id 与 workflow key 是同一个标识：创建时显式填写 id（即
   `default_workflow_key`，`^[a-z0-9][a-z0-9_-]{0,63}$`）且终身不可变——PATCH /
   configuration 改 key 一律 400，发布草稿 key 不匹配 422，创建路径不做任何种子
   （示例 DAG `server/app/workflows/builtin.py` 仅经 `make import-demo` /
-  `scripts/seed_demo.py` 提供 demo workspace）；v61 迁移把存量 workspace 的 id 改成
+  `scripts/seed_demo.py` 提供 demo workspace）；v62 迁移把存量 workspace 的 id 改成
   已绑定的 key（key 为空的按 id 回填）。`default_workflow_key` 作为独立概念已标
   deprecated（退役评估 #211）。
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。

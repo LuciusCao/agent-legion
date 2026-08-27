@@ -115,8 +115,8 @@ describe('shouldShowEmptyGuide', () => {
 })
 
 describe('buildOnboardingSteps readiness', () => {
-  it('locks everything without a published revision (key exists since v61)', () => {
-    // v61：key 创建即绑定(恒非空)，未发布的信号是 active revision 缺失。
+  it('locks everything without a published revision (key exists since v62)', () => {
+    // v62：key 创建即绑定(恒非空)，未发布的信号是 active revision 缺失。
     const steps = buildSteps({ definition: null })
     expect(steps[0].completed).toBe(false)
     expect(steps[1].unlocked).toBe(false)

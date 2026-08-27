@@ -48,10 +48,12 @@ def load_demo_legacy_intake_definition() -> WorkflowDefinition:
 def publish_legacy_intake_revision(job_db: JobQueries, workspace_id: str) -> dict[str, Any]:
     """Publish the legacy-intake demo variant as the workspace's active revision.
 
-    Schema v61 binds the workflow key to the workspace id, so the variant's
-    definition key is rewritten to the workspace id before publishing; tests
-    that post job-batches call this right after creation so the legacy intake
-    service path keeps resolving ``direct_ids``.
+    This helper's callers create workspaces through the HTTP API, where
+    schema v62 binds the workflow key to the workspace id — so the variant's
+    definition key is rewritten to the workspace id first, or the publish
+    guard (require_draft_workflow_key_match) rejects the mismatched draft
+    with 422. Tests that post job-batches call this right after creation so
+    the legacy intake service path keeps resolving ``direct_ids``.
     """
     from dataclasses import replace
 
@@ -73,9 +75,12 @@ def publish_builtin_revision(
     Mirrors the workspace-create demo seed (ensure_active_revision is
     seed-if-absent): tests that bypass the API and create the workspace row
     directly use this so definition resolution (workspace active revision,
-    schema v50) sees the DAG. JobQueries-level workspaces keep id and key
-    independent (the id==key invariant is HTTP-layer only, schema v61), so
-    the revision is published under *workflow_key* as given.
+    schema v50) sees the DAG. Unlike publish_legacy_intake_revision, no key
+    rewrite happens here: these callers build workspaces at the JobQueries
+    level, which keeps id and key independent (the id==key invariant is
+    enforced at the HTTP service layer and by the migration, not at this raw
+    layer), and ensure_active_revision has no draft-key guard — so the
+    revision is published under *workflow_key* as given.
     """
     from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
     from server.app.services.workflow_revisions import WorkflowRevisionService

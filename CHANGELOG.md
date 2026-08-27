@@ -78,7 +78,7 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 ### Changed
 
 - **Breaking (API consumers):** workspace id and workflow key are one
-  identifier (schema v61, DB-WORKSPACE-KEY-BINDING-001): `POST
+  identifier (schema v62, DB-WORKSPACE-KEY-BINDING-001): `POST
   /api/workspaces` now requires an explicit `id`
   (`^[a-z0-9][a-z0-9_-]{0,63}$`) that is bound to `default_workflow_key` at
   creation and immutable afterwards — `workflow_mode` and the
@@ -86,7 +86,7 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   fields, 400 on any later key change), workspace creation no longer seeds
   the sample template (demo workspaces are provisioned by `make import-demo`
   / `scripts/seed_demo.py`), and the first-publish key adoption path is gone
-  (mismatched draft keys are rejected with 422). The v61 migration renames
+  (mismatched draft keys are rejected with 422). The v62 migration renames
   existing workspaces to id == key (cascading `workspace_id` through every
   child table plus the FK-less `auth_scoped_tokens` and
   `ops_metric_samples`, fail-fast on id conflicts) and backfills

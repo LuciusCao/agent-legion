@@ -46,6 +46,13 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
         "/api/workspaces/{workspace_id}/workflow-drafts/publish",
         {"definition_yaml": _DRAFT_YAML},
     ),
+    # Studio workflow draft store (schema v61): overwrites the human editor's
+    # autosaved draft; the scoped tool surface has no draft-store tool.
+    (
+        "PUT",
+        "/api/workspaces/{workspace_id}/workflow-draft",
+        {"definition_yaml": _DRAFT_YAML},
+    ),
     ("POST", f"{_NODE_CODE}/publish", None),
     ("POST", f"{_NODE_CODE}/rollback", {"version": 1}),
     ("DELETE", _NODE_CODE, None),

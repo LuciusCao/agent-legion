@@ -28,7 +28,7 @@ class JobBatchResponse(BaseModel):
 class WorkspaceCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # Schema v61: the caller-provided id IS the workflow key — bound at
+    # Schema v62: the caller-provided id IS the workflow key — bound at
     # creation and immutable afterwards. No sample-template seed runs on the
     # create path anymore; demo workspaces are provisioned by
     # `make import-demo` (scripts/seed_demo.py).

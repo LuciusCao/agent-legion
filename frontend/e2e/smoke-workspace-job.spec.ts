@@ -15,6 +15,11 @@ test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }, t
     .toLowerCase()
     .replace(/[^a-z0-9_-]/g, '_')
   const WORKSPACE_NAME = `E2E 冒烟工作区 ${testInfo.project.name}-${testInfo.retry}`
+  // smoke-job-rerun.spec.ts runs first, and retries rerun the whole spec:
+  // a distinct per-attempt id avoids the (connection, external_id) dedup.
+  const externalId = `Q2-${testInfo.project.name}-${testInfo.retry}`
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_')
   await ensureAdminSession(page)
 
   await page.goto('/')
@@ -52,9 +57,7 @@ test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }, t
   const addItemsDialog = page.getByRole('dialog', { name: '添加条目' })
   await addItemsDialog.getByRole('tab', { name: '粘贴 ID' }).click()
   await addItemsDialog.getByLabel('连接 Key').fill('cms-internal')
-  // smoke-job-rerun.spec.ts runs first and consumes Q1 in the shared demo
-  // workspace; use a distinct id to avoid the (connection, id) dedup.
-  await addItemsDialog.getByLabel('外部 ID').fill('Q2')
+  await addItemsDialog.getByLabel('外部 ID').fill(externalId)
   await addItemsDialog.getByRole('button', { name: '创建运行' }).click()
   // A successful submit closes the dialog; wait for it (the modal overlay
   // intercepts pointer events while it is in the DOM, so clicking the job

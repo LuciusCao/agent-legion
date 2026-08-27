@@ -209,6 +209,19 @@ describe('useStudioChat', () => {
     expect(result.current.messages[0]?.id).toBe('u1')
   })
 
+  it('returns false and surfaces actionError when send fails', async () => {
+    mockApi.sendStudioChatMessage.mockRejectedValue(new Error('会话忙'))
+    const { result } = await renderChat()
+    emit({ type: 'session', session: sessionRecord() })
+    let sent: boolean | undefined
+    await act(async () => {
+      sent = await result.current.send('你好')
+    })
+    // 排队 flush 依赖这个布尔决定队首去留。
+    expect(sent).toBe(false)
+    expect(result.current.actionError).toBe('会话忙')
+  })
+
   it('answers permission requests and toggles allow-all', async () => {
     mockApi.answerStudioChatPermission.mockResolvedValue(undefined)
     mockApi.setStudioChatAllowAll.mockResolvedValue(

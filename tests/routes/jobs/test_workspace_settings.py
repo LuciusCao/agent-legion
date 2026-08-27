@@ -4,7 +4,7 @@ def _create_workspace(
     ws_id = client.post("/api/workspaces", json={"id": default_workflow_key, "name": name}).json()[
         "workspace"
     ]["id"]
-    # v61: creation seeds nothing; node settings need an active revision.
+    # v62: creation seeds nothing; node settings need an active revision.
     from tests.helpers import publish_builtin_revision
 
     publish_builtin_revision(client.app.state.job_db, ws_id)

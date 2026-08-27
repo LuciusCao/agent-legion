@@ -28,9 +28,9 @@ def require_draft_workflow_key_match(
     except WorkflowDefinitionError:
         return
     default_key = str(workspace.get("default_workflow_key") or "")
-    # Schema v61: the key is bound at creation (id == key), so the match
+    # Schema v62: the key is bound at creation (id == key), so the match
     # guard is unconditional; the empty-key branch only exists for databases
-    # still mid-upgrade to v61.
+    # still mid-upgrade to v62.
     if not default_key:
         return
     if draft_key != default_key:

@@ -89,7 +89,7 @@ _CREATE_COUNT = 0
 
 
 def _create_workspace(client, name="Chat WS") -> str:
-    # v61: id==key and unique per call within a test (TRUNCATE isolation
+    # v62: id==key and unique per call within a test (TRUNCATE isolation
     # resets the counter each test).
     global _CREATE_COUNT
     _CREATE_COUNT += 1

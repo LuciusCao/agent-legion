@@ -101,11 +101,14 @@ MIGRATIONS: list[SchemaMigration] = [
     # v60 is DDL-only (agent_workers.register_token_ids_json): the idempotent
     # schema-file replay adds the column, no data migration needed.
     SchemaMigration(60, "worker_register_token_ids"),
-    # v61: bind workspace id and workflow key (rename ids to their bound
-    # keys, backfill empty keys from the id). Runs last: it must see the
-    # post-v50 world where default_workflow_key is a plain per-workspace
-    # identifier, and it rewrites workspace_id rows in every child table.
-    SchemaMigration(61, "workspace_id_key_binding", migrate_workspace_id_key_binding),
+    # v61 is DDL-only (workspace_workflow_drafts): the Studio workflow YAML
+    # draft table comes from the schema-file replay, no data migration.
+    SchemaMigration(61, "workspace_workflow_drafts"),
+    # v62: bind workspace id and workflow key (rename ids to their bound
+    # keys, backfill empty keys from the id). Runs last: it rewrites
+    # workspace_id rows in every child table and the agent_workers scope
+    # JSON, so it must see every other workspace-shape change settled.
+    SchemaMigration(62, "workspace_id_key_binding", migrate_workspace_id_key_binding),
 ]
 
 assert [m.version for m in MIGRATIONS] == sorted(m.version for m in MIGRATIONS), (

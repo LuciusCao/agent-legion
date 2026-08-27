@@ -45,6 +45,9 @@ export const extraQueryKeys = {
     ['runTokenUsage', jobId, runId, runStatus] as const,
   workflowStudioData: (workspaceId: string) =>
     ['workflowStudioData', workspaceId] as const,
+  // Studio 编辑器的服务端持久化草稿（GET/PUT workflow-draft）。
+  workflowStudioDraft: (workspaceId: string) =>
+    ['workflowStudioDraft', workspaceId] as const,
   agentDefinitions: (workspaceId: string) => k('agentDefinitions', workspaceId),
   // Studio DAG/Inspector 共享的 Agent 目录（P-0.5：executors 半区已退役）；
   // 面板发布/归档后失效重取。

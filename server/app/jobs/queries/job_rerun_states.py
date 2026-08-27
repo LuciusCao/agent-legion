@@ -11,10 +11,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
-class JobRerunStateQueriesMixin(JobQueriesBase):
+class JobRerunStateQueriesMixin(ConnectionQueriesMixin):
     def list_job_rerun_states_for_jobs(
         self, workspace_id: str, job_ids: Sequence[str]
     ) -> dict[str, dict[str, Any]]:

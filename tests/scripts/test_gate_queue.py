@@ -117,6 +117,14 @@ def test_live_slots_count_and_capacity_wait(repo: Path) -> None:
         # counted before the waiter starts, or the waiter may acquire
         # immediately without ever waiting.
         assert _bash(QUEUE_SCRIPT, repo, "count_live_gate_slots").strip() == "1"
+        # Scrub the parent gate's slot env (same as _bash): under check-quick.sh
+        # the test process inherits AGENT_LEGION_GATE_SLOT_HELD=1, and an
+        # unscrubbed waiter would take the re-entrant path — acquiring
+        # immediately without ever printing the queue-full announcement.
+        waiter_env = os.environ.copy()
+        waiter_env.pop("AGENT_LEGION_GATE_SLOT_FILE", None)
+        waiter_env.pop("AGENT_LEGION_GATE_SLOT_HELD", None)
+        waiter_env.pop("AGENT_LEGION_MAX_PARALLEL_GATES", None)
         waiter = subprocess.Popen(
             [
                 "bash",
@@ -128,6 +136,7 @@ def test_live_slots_count_and_capacity_wait(repo: Path) -> None:
                 "acquire_gate_slot",
             ],
             cwd=repo,
+            env=waiter_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

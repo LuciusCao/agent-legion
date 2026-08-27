@@ -429,7 +429,7 @@ def test_get_active_workflow_revision_returns_definition_and_yaml(tmp_path: Path
         )
         assert response.status_code == 200
         workspace_id = response.json()["workspace"]["id"]
-        # v61: creation seeds nothing; publish the demo revision explicitly.
+        # v62: creation seeds nothing; publish the demo revision explicitly.
         from tests.helpers import publish_builtin_revision
 
         publish_builtin_revision(app.state.job_db, workspace_id)
@@ -460,7 +460,7 @@ def test_get_workflow_revision_detail_returns_definition_and_yaml(tmp_path: Path
         )
         assert response.status_code == 200
         workspace_id = response.json()["workspace"]["id"]
-        # v61: creation seeds nothing; publish the demo revision explicitly.
+        # v62: creation seeds nothing; publish the demo revision explicitly.
         from tests.helpers import publish_builtin_revision
 
         publish_builtin_revision(app.state.job_db, workspace_id)
@@ -514,7 +514,7 @@ def test_get_workflow_revision_detail_rejects_other_workspace_revision(
         assert second.status_code == 200
         first_id = first.json()["workspace"]["id"]
         second_id = second.json()["workspace"]["id"]
-        # v61: creation seeds nothing; publish into the first workspace.
+        # v62: creation seeds nothing; publish into the first workspace.
         from tests.helpers import publish_builtin_revision
 
         publish_builtin_revision(app.state.job_db, first_id)

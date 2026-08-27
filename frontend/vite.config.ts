@@ -27,8 +27,10 @@ const browserTestFiles = [
   'src/hooks/useJobFilterRefetch.test.ts',
   'src/pages/jobDetail/useUpgradeWorkflowAction.test.ts',
   'src/pages/workflowStudio/useWorkflowStudio.test.ts',
+  'src/pages/workflowStudio/useWorkflowDraftPersistence.test.ts',
   'src/pages/workflowStudio/useWorkflowStudioActions.test.ts',
   'src/pages/workflowStudio/useWorkflowStudioMobilePanel.test.ts',
+  'src/pages/workflowStudio/useWorkflowStudioPageView.test.ts',
   'src/stores/agentsStore.test.ts',
   'src/stores/uiStore.test.ts',
 ]

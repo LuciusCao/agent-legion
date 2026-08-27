@@ -31,7 +31,7 @@ def _publish_secret_node_schema(workspace_id: str) -> None:
     The demo nodes declare no secret fields, so the generic node-config vault
     diversion mechanism is exercised through a republished write_script agent
     declaring a ``secret: true`` field. Agent definitions are workspace-scoped
-    (schema v46); creation seeds nothing since schema v61, so this helper
+    (schema v46); creation seeds nothing since schema v62, so this helper
     first publishes the demo revision + factory agents, then publishes the
     secret-carrying write_script v2 inside that workspace.
     """

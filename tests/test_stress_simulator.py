@@ -34,7 +34,7 @@ def test_stress_metrics_summary_computes_percentiles():
 def test_parse_args_uses_defaults():
     args = _parse_args([])
 
-    # v61: the workspace id IS the workflow key (default stress_concurrency).
+    # v62: the workspace id IS the workflow key (default stress_concurrency).
     assert args.workspace == "stress_concurrency"
     assert args.agents == 100
     assert args.jobs == 5000

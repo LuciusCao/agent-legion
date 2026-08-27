@@ -25,7 +25,7 @@ def test_schema_v57_recorded() -> None:
     tests/db/test_job_node_status_counts_migration.py, v56)."""
     # The pin now lives in tests/db/test_retire_global_register_tokens_migration.py
     # (v58+): schema_migrations only ever records the latest version, so the
-    # current SCHEMA_VERSION row must exist with the v60 migration's name.
+    # current SCHEMA_VERSION row must exist with the latest migration's name.
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
@@ -77,8 +77,8 @@ def test_v56_database_gains_draft_yaml_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration is not None
-    assert migration["name"] == "workspace_id_key_binding"
+        assert migration is not None
+        assert migration["name"] == "workspace_id_key_binding"
 
 
 @pytest.mark.fresh_schema
@@ -94,7 +94,7 @@ def test_v42_database_upgrades_via_init_db() -> None:
         conn.execute("drop table if exists studio_chat_sessions")
         conn.execute("insert into users(id, username) values ('u-legacy', 'legacy-user')")
         conn.execute(
-            # v61 invariant: id == key (the migration renames mismatched ids,
+            # v62 invariant: id == key (the migration renames mismatched ids,
             # so seed rows that already satisfy it keep their ids stable).
             "insert into workspaces(id, name, default_workflow_key) values ('demo_workflow', 'legacy-ws', 'demo_workflow')"
         )
@@ -107,8 +107,8 @@ def test_v42_database_upgrades_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration is not None
-    assert migration["name"] == "workspace_id_key_binding"
+        assert migration is not None
+        assert migration["name"] == "workspace_id_key_binding"
 
     # Rows written through the new tables survive a replay (init_db runs at
     # every backend startup).

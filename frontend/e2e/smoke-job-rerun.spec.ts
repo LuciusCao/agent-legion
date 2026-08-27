@@ -7,8 +7,14 @@ import { ensureAdminSession, widenDemoWorkflowItemTypes } from './helpers'
 const DEMO_WORKSPACE_ID = 'education_video_problems_generation'
 
 
-test('在 job 详情页通过重跑对话框重跑节点', async ({ page }) => {
+test('在 job 详情页通过重跑对话框重跑节点', async ({ page }, testInfo) => {
   await ensureAdminSession(page)
+
+  // Unique per engine+attempt: retries rerun the whole spec, and the
+  // (connection, external_id) dedup would reject a replayed create-run.
+  const externalId = `Q1-${testInfo.project.name}-${testInfo.retry}`
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_')
 
   // The whole flow drives the pre-seeded demo workspace; each engine reruns
   // the spec against the same workspace, and the (source_type, source_id)
@@ -31,7 +37,7 @@ test('在 job 详情页通过重跑对话框重跑节点', async ({ page }) => {
   const addItemsDialog = page.getByRole('dialog', { name: '添加条目' })
   await addItemsDialog.getByRole('tab', { name: '粘贴 ID' }).click()
   await addItemsDialog.getByLabel('连接 Key').fill('cms-internal')
-  await addItemsDialog.getByLabel('外部 ID').fill('Q1')
+  await addItemsDialog.getByLabel('外部 ID').fill(externalId)
   await addItemsDialog.getByRole('button', { name: '创建运行' }).click()
   // A successful submit closes the dialog; wait for it (the modal overlay
   // intercepts pointer events while it is in the DOM, so clicking the job

@@ -79,7 +79,7 @@ class WorkspaceConfigurationService:
         return self.job_db.list_workspaces()
 
     def create(self, payload: dict[str, Any]) -> dict[str, Any]:
-        # Schema v61: the caller-provided id is the workflow key — bound at
+        # Schema v62: the caller-provided id is the workflow key — bound at
         # creation and immutable. No sample-template seeding on this path;
         # demo workspaces come from `make import-demo` (scripts/seed_demo.py).
         workspace_id = str(payload.get("id") or "").strip()
@@ -110,7 +110,7 @@ class WorkspaceConfigurationService:
 
     def update(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._workspace(workspace_id)
-        # Schema v61: the workflow key (= workspace id) is immutable.
+        # Schema v62: the workflow key (= workspace id) is immutable.
         if payload.get("default_workflow_key") is not None:
             raise InvalidOperationError("Workflow key is bound to the workspace id and immutable")
         try:
@@ -159,7 +159,7 @@ class WorkspaceConfigurationService:
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
         current = workspace_settings_payload(workspace)
-        # Schema v61: the workflow key is bound to the workspace id and
+        # Schema v62: the workflow key is bound to the workspace id and
         # immutable. The settings payload still carries workflowKey for
         # compatibility; a matching value is a no-op round-trip.
         workflow_key = settings_patch.get("workflowKey") or str(current["workflowKey"])
@@ -244,7 +244,7 @@ class WorkspaceConfigurationService:
                 intake_config=next_intake_config,
             )
         elif section == "workflow":
-            # Schema v61: the workflow key is immutable (bound to the id).
+            # Schema v62: the workflow key is immutable (bound to the id).
             # The section stays so legacy clients sending an unchanged key
             # keep working; any change is rejected.
             workflow_key = patch.get("workflowKey")

@@ -220,7 +220,7 @@ def test_delete_workspace_returns_404_for_unknown_workspace(tmp_path):
 
 
 def test_create_workspace_binds_key_and_seeds_nothing(tmp_path):
-    """Schema v61: id==key binding. Creation seeds no revision and no factory
+    """Schema v62: id==key binding. Creation seeds no revision and no factory
     Agents — the workspace is an empty canvas until the first publish."""
     from fastapi.testclient import TestClient
 

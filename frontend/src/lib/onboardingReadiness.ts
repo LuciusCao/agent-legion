@@ -49,7 +49,7 @@ export interface OnboardingStepsInput {
 /**
  * 新 workspace 引导的步骤构造与就绪判定（纯函数，便于独立测试）。
  * 「已发布」判定用 active revision 存在性而非 workflow_key 非空——
- * schema v61 起 key 在创建时就与 workspace id 绑定（恒非空），真正的
+ * schema v62 起 key 在创建时就与 workspace id 绑定（恒非空），真正的
  * 发布信号是 active revision（workflowDefinition 非空）。
  * provider/model 的解析链与后端 resolve_execution_block 一致：agent 节点
  * execution.* 覆盖优先，缺失落回 workspace agentDefaults——节点侧已配齐时

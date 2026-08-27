@@ -65,7 +65,7 @@ def _find_free_port() -> int:
 def _seed_demo_workspace(dsn: str, vault_key: str) -> None:
     """Provision the demo workspace (id=education_video_problems_generation).
 
-    Schema v61 removed the create-path sample-template seed, so the demo DAG,
+    Schema v62 removed the create-path sample-template seed, so the demo DAG,
     factory Agents, node codes and materials the smoke specs drive are seeded
     up front via the same seeder `make import-demo` uses. The skill lock step
     resolves refs via git, so the repo-shipped demo skills are first imported

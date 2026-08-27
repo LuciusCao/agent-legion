@@ -40,7 +40,7 @@ _CREATE_COUNT = 0
 
 
 def _create_workspace(client, name: str = "Studio Tools") -> str:
-    # v61: id==key and unique per call within a test (the second workspace in
+    # v62: id==key and unique per call within a test (the second workspace in
     # a test gets a suffix; TRUNCATE isolation resets the counter each test).
     # Creation no longer seeds, so publish the demo revision (which also
     # seeds the demo node codes) for the node-code/revision tools.

@@ -8,7 +8,7 @@ import {
 import { useWorkflowDraftCompare } from './useWorkflowDraftCompare'
 import { useWorkflowStudioActions } from './useWorkflowStudioActions'
 import { useWorkflowStudioData } from './useWorkflowStudioData'
-import { useWorkflowStudioDraft } from './useWorkflowStudioDraft'
+import { useWorkflowStudioDraftStore } from './useWorkflowStudioDraftStore'
 import { applyCompareChanges } from './workflowStudioDagChanges'
 
 export function useWorkflowStudio(workspaceId: string | undefined) {
@@ -22,7 +22,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     fetchRevisionDetail,
   } = useWorkflowStudioData(workspaceId)
   const catalog = useExecutorCatalog(workspaceId)
-  const draft = useWorkflowStudioDraft(
+  const draft = useWorkflowStudioDraftStore(
     workspaceId,
     originalYaml,
     workflow,
@@ -66,6 +66,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     validationMessage: actions.validationMessage,
     dirty: draft.dirty,
     canSubmit: draft.canSubmit,
+    draftSave: draft.draftSave,
     canPublish: actions.canPublish,
     createsRevision: compare.compareSummary?.createsRevision ?? true,
     validateDraft: actions.validateDraft,

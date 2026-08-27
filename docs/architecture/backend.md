@@ -72,7 +72,7 @@ server/app/
 ## Key Decisions
 
 - PostgreSQL 是唯一运行时数据库，通过连接池支撑多进程、多设备并发协调。
-- Agent Legion DAG 是唯一的执行模型；workflow 是 workspace 内部的一份 DAG（schema v50 退役全局 catalog）。schema v61 起 workspace id 即 workflow key（创建时显式提供、终身不可变），创建路径不再种子示例模板——示例 workflow（`education_video_problems_generation`）仅经 `make import-demo` 提供 demo workspace，业务 workflow 经 workspace revision 发布 + 自定义节点发布承载。
+- Agent Legion DAG 是唯一的执行模型；workflow 是 workspace 内部的一份 DAG（schema v50 退役全局 catalog）。schema v62 起 workspace id 即 workflow key（创建时显式提供、终身不可变），创建路径不再种子示例模板——示例 workflow（`education_video_problems_generation`）仅经 `make import-demo` 提供 demo workspace，业务 workflow 经 workspace revision 发布 + 自定义节点发布承载。
 - 所有文件 I/O 限制在 `data/` 目录内，由 `security.py` 做路径校验。
 - 路由、服务、执行器之间有明确的边界：Route 只做 HTTP 适配，Service 处理业务逻辑，Executor 通过租赁（lease）申请容量。详见 [AGENTS.md](../../AGENTS.md)。
 - 外部服务凭据与端点配置走实例级外部服务连接（admin 全局设置「外部服务连接」），见下文 Configuration Reference。
@@ -215,6 +215,8 @@ server/app/
 | POST | `/workspaces/{workspace_id}/workflow-drafts/compare` | `compare_workflow_draft_route` | routes/workflow_draft_compare.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/validate` | `validate_workflow_draft` | routes/workflow_draft_publish.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/publish` | `publish_draft` | routes/workflow_draft_publish.py |
+| GET | `/workspaces/{workspace_id}/workflow-draft` | `get_draft` | routes/workflow_draft_store.py |
+| PUT | `/workspaces/{workspace_id}/workflow-draft` | `put_draft` | routes/workflow_draft_store.py |
 | GET | `/workflow-node-code-template` | `get_node_code_template` | routes/workflow_node_codes.py |
 | GET | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `get_node_code` | routes/workflow_node_codes.py |
 | PUT | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `save_node_code_draft` | routes/workflow_node_codes.py |
@@ -482,6 +484,8 @@ server/app/
 | WorkflowCompareSummary | BaseModel | risk_level: WorkflowRiskLevel, node_changes: list[WorkflowNodeChange], edge_c... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowDraftCompareResponse | BaseModel | valid: bool, creates_revision: bool, base_revision: WorkflowRevisionSummaryIt... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowMetadataChange | BaseModel | type: Literal['modified'], field: str, before_value: str | None, after_value:... | app/routes/workflow_draft_compare_metadata_contracts.py |
+| WorkflowDraftStoreRequest | BaseModel | definition_yaml: str | app/routes/workflow_draft_store_contracts.py |
+| WorkflowDraftStoreResponse | BaseModel | definition_yaml: str | None, updated_at: str | None | app/routes/workflow_draft_store_contracts.py |
 | WorkflowNodeCodeResponse | BaseModel | origin: Literal['builtin', 'custom', 'none'], code: str, version: int | None,... | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeTemplateResponse | BaseModel | code: str | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeDraftRequest | BaseModel | code: str, change_note: str | None | app/routes/workflow_node_code_contracts.py |
@@ -546,10 +550,9 @@ server/app/
 是 `architecture.route_response_model` 检查的长期豁免（锚定本节）：
 
 - `POST /api/agent-executions/{execution_id}/result`（routes/agent_workers.py）：结果上报
-  的确认是一个 Server-Sent Events 流（StreamingResponse, text/event-stream），与 workspace
-  job 事件路由同形——流式响应没有 JSON schema 可言。
+  的确认按协议返回空 body 的 204 响应（`Response(status_code=204)`），无 JSON 可建模。
 - `POST /api/agent-executions/{execution_id}/release-slot`（routes/agent_workers.py）：
-  释放槽位的确认按协议返回空 204 响应，无 body。
+  释放槽位的确认同样按协议返回空 204 响应，无 body。
 
 ## Runtime Architecture
 
@@ -586,7 +589,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 ## Database
 
 - PostgreSQL 服务 Agent Legion workflow 与平台状态（当前版本见 `server/app/db/schema.py` 的 `SCHEMA_VERSION`）：
-  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`（schema v61 起 = workspace id，deprecated，见 DB-WORKSPACE-KEY-BINDING-001）, `node_config_json`, `default_entity`, `intake_config_json`）。`node_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（见下文 Secrets Vault）；旧 `resource_config_json`（resource binding）已在 v24 迁移为节点覆盖并清空
+  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`（schema v62 起 = workspace id，deprecated，见 DB-WORKSPACE-KEY-BINDING-001）, `node_config_json`, `default_entity`, `intake_config_json`）。`node_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（见下文 Secrets Vault）；旧 `resource_config_json`（resource binding）已在 v24 迁移为节点覆盖并清空
   - `workspace_secrets` — vault 加密存储的 workspace 密钥（Fernet 密文，`(workspace_id, name)` 唯一，v16 新增）
   - `external_connections` / `instance_secrets` / `connection_tokens` — 实例级外部服务连接：连接只存非敏感配置，敏感字段 Fernet 加密入 `instance_secrets`（`conn:<key>:<field>` 引用），鉴权 token 加密缓存在 `connection_tokens`（v34 新增，见下文外部服务连接段）
   - `runs`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表（`job_batches` 已随 schema v53 drop，由 `runs` 取代）
@@ -673,7 +676,7 @@ Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 sc
 其他配置文件：
 
 - 外部 Pi skill 仓库源与固定 commit 已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB `global_settings`（`skill_sources` / `skill_lock` 文档），lock 是 skill ref 的唯一权威（G3）；经 admin API（`GET/PUT /api/admin/skill-sources`、`POST /api/admin/skill-sources/relock`）与 /admin/settings「Skill 源管理」维护，CLI `make skills-lock`（`uv run python -m server.app.skills.lock`）刷新锁。tracked `config/skills.yaml` / `config/skills.lock` 已退役：DB 无记录且文件存在时启动一次性导入并 warning，否则用内置常量（`server/app/skills/builtin_sources.py`）seed，此后文件不再读取。
-- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；schema v61 起创建 workspace 不再种子模板，demo workspace 由 `make import-demo`（`scripts/seed_demo.py`）提供，其 id 与 key 同为 `education_video_problems_generation`。workflow 没有全局注册表（schema v40 的 `workflow_catalog` 表已于 schema v50 退役，DB-WORKFLOW-CATALOG-001）：workflow 就是 workspace 内部的一份 DAG，权威定义是该 workspace 的 active revision（schema v50 起节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部改读它）。schema v61（DB-WORKSPACE-KEY-BINDING-001）起 workspace id 与 `workspaces.default_workflow_key` 是同一个标识：创建时显式填写、终身不可变（PATCH / PUT configuration 改 key 一律 400，发布草稿 key 不匹配 422）；v61 迁移把存量 workspace 的 id 改成已绑定的 key（key 为空的按 id 回填），`default_workflow_key` 作为独立概念已标 deprecated（退役评估 issue 待开）。
+- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；schema v62 起创建 workspace 不再种子模板，demo workspace 由 `make import-demo`（`scripts/seed_demo.py`）提供，其 id 与 key 同为 `education_video_problems_generation`。workflow 没有全局注册表（schema v40 的 `workflow_catalog` 表已于 schema v50 退役，DB-WORKFLOW-CATALOG-001）：workflow 就是 workspace 内部的一份 DAG，权威定义是该 workspace 的 active revision（schema v50 起节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部改读它）。schema v62（DB-WORKSPACE-KEY-BINDING-001）起 workspace id 与 `workspaces.default_workflow_key` 是同一个标识：创建时显式填写、终身不可变（PATCH / PUT configuration 改 key 一律 400，发布草稿 key 不匹配 422）；v62 迁移把存量 workspace 的 id 改成已绑定的 key（key 为空的按 id 回填），`default_workflow_key` 作为独立概念已标 deprecated（退役评估 issue 待开）。
 - `config/agent-worker.example.yaml`：Worker Service 引导配置样例（`host_url` / `worker_id` / `runtimes` / `capabilities` / `max_concurrency` 等），Worker 侧独立加载，不经 server 的 owned-key 校验。
 - `config/architecture/*`：架构不变量、豁免、源文件体积预算。
 

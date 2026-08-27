@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from server.app.jobs.queries.base import JobQueriesBase
 from server.app.jobs.queries.batch_queue_sql import RUN_REQUEUE_DEPLETED
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
-class RunQueueQueriesMixin(JobQueriesBase):
+class RunQueueQueriesMixin(ConnectionQueriesMixin):
     def count_jobs_in_run(self, run_id: str) -> int:
         with self._connect_read() as conn:
             row = conn.execute(

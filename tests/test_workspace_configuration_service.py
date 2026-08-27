@@ -139,7 +139,7 @@ def test_code_pool_stats_available_respects_global_usage_by_other_workspaces(
 
 
 def test_create_workspace_binds_key_and_seeds_nothing(workspace_service, job_db):
-    """Schema v61: the id is bound as the workflow key; creation seeds no
+    """Schema v62: the id is bound as the workflow key; creation seeds no
     revision (demo provisioning is `make import-demo` / scripts/seed_demo.py)."""
     workspace = workspace_service.create({"id": "fresh_ws", "name": "WS"})
     assert workspace["id"] == "fresh_ws"
@@ -181,7 +181,7 @@ def test_replace_configuration_rejects_non_positive_agent_capacity(workspace_ser
 
 
 def test_update_workflow_rejects_key_change(workspace_service, job_db):
-    """Schema v61: the workflow key is bound to the workspace id; changing it
+    """Schema v62: the workflow key is bound to the workspace id; changing it
     (even before any revision exists) is rejected."""
     workspace = workspace_service.create(
         {"id": "education_video_problems_generation", "name": "WS"}
@@ -192,3 +192,18 @@ def test_update_workflow_rejects_key_change(workspace_service, job_db):
         job_db.get_active_workflow_revision(workspace["id"], "education_video_problems_generation")
         is None
     )
+
+
+def test_update_workflow_accepts_unchanged_key(workspace_service, job_db):
+    """Legacy clients that resend the bound key (no-op) keep working: the
+    section answers 200 with the unchanged workspace instead of 400."""
+    workspace = workspace_service.create(
+        {"id": "education_video_problems_generation", "name": "WS"}
+    )
+    result = workspace_service.update_section(
+        workspace["id"], "workflow", {"workflowKey": "education_video_problems_generation"}
+    )
+    assert result["workflowKey"] == "education_video_problems_generation"
+    stored = job_db.get_workspace(workspace["id"])
+    assert stored is not None
+    assert stored["default_workflow_key"] == "education_video_problems_generation"
