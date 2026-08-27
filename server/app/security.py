@@ -1,33 +1,9 @@
-import ipaddress
-from urllib.parse import urlparse
+# SSRF 守卫的唯一实现在 workspace_libs/url_guard.py（#200：原先与节点 SDK 侧
+# 各持一份 "keep in sync" 副本、无 parity 测试）。冗余别名的显式再导出，
+# 保持 `from server.app.security import validate_download_url` 不变。
+from workspace_libs.url_guard import validate_download_url as validate_download_url
 
-_ALLOWED_SCHEMES = {"http", "https"}
-
-
-def validate_download_url(url: str) -> None:
-    # Keep in sync with workspace_libs/download.py::validate_download_url
-    # (the SDK side cannot import server.app, so the guard is duplicated).
-    if not url:
-        raise ValueError("Invalid URL: empty")
-    parsed = urlparse(url)
-    if parsed.scheme not in _ALLOWED_SCHEMES:
-        raise ValueError(f"Invalid URL scheme: {parsed.scheme}")
-    hostname = parsed.hostname
-    if hostname is None:
-        raise ValueError("Invalid URL: missing hostname")
-    hostname_lower = hostname.lower()
-    if hostname_lower in {"localhost", "0.0.0.0"}:
-        raise ValueError(f"Invalid URL: blocked host {hostname}")
-    try:
-        addr = ipaddress.ip_address(hostname)
-    except ValueError:
-        # Reject non-standard IP notations (octal/hex) that ipaddress doesn't parse
-        # but underlying getaddrinfo may resolve to internal addresses.
-        if all(c in "0123456789abcdefABCDEF.xX" for c in hostname):
-            raise ValueError(f"Invalid URL: blocked IP-like host {hostname}") from None
-        return
-    if addr.is_loopback or addr.is_private or addr.is_link_local or addr.is_reserved:
-        raise ValueError(f"Invalid URL: blocked IP {hostname}")
+__all__ = ["validate_download_url", "validate_package_filename"]
 
 
 def validate_package_filename(filename: str) -> str:

@@ -3,6 +3,17 @@ import pytest
 from server.app.security import validate_download_url, validate_package_filename
 
 
+class TestDownloadUrlSingleImplementation:
+    def test_all_entry_points_share_one_implementation(self):
+        """#200：server / 节点 SDK 两个入口必须解析到同一个实现对象——
+        防止有人把某一侧改回本地副本（sync-by-comment 时代的回归）。"""
+        from workspace_libs.download import validate_download_url as sdk_side
+        from workspace_libs.url_guard import validate_download_url as canonical
+
+        assert validate_download_url is canonical
+        assert sdk_side is canonical
+
+
 class TestValidateDownloadUrl:
     def test_allows_https_public_url(self):
         validate_download_url("https://example.com/video.mp4")
