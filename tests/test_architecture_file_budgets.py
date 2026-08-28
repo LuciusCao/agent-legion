@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.architecture.budget_policy import BudgetPolicy, ProductionRoot, TestRoot
 from scripts.architecture.file_budgets import (
@@ -64,6 +66,80 @@ def write_baseline(root: Path, files_dict: dict[str, int]) -> None:
         json.dumps({"version": 3, "files": files_dict}, indent=2, sort_keys=True),
         encoding="utf-8",
     )
+
+
+def git_repo(
+    tmp_path: Path,
+    files: dict[str, int] | None = None,
+    exemption_ceiling: int | None = None,
+) -> tuple[Path, BudgetPolicy]:
+    """Build a governed repo inside a real git repository.
+
+    The monotonic ceiling check compares against committed revisions, so its
+    tests need an actual git history; ``init`` + ``commit`` of the initial
+    state provides the HEAD anchor, and a second commit (or an uncommitted
+    working-tree edit) plays the role of the raise attempt. The leading
+    empty commit keeps HEAD^ resolvable in every fixture — an unresolvable
+    anchor is itself an error since the codex review on PR #231 (shallow
+    clones must not silently gut the check), and only the dedicated
+    unresolvable-anchor tests build that shape deliberately.
+    """
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
+    write_baseline(root, files if files is not None else {"server/app/example.py": 110})
+    if exemption_ceiling is not None:
+        _rewrite_exemption_ceiling(root, ceiling=exemption_ceiling)
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+        # Empty seed commit: HEAD^ must resolve in the fixture repos.
+        ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
+        ["git", "add", "-A"],
+        ["git", "commit", "-q", "-m", "init"],
+    ):
+        subprocess.run(argv, cwd=root, check=True)
+    return root, policy
+
+
+def commit_all(root: Path, message: str) -> None:
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", message], cwd=root, check=True)
+
+
+def write_exempted_repo(
+    tmp_path: Path, ceiling: int, baseline_ceiling: int
+) -> tuple[Path, BudgetPolicy, ArchitectureExemption]:
+    """Governed git repo with a committed file_budget exemption at ``ceiling``."""
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": baseline_ceiling})
+    registry = root / "config" / "architecture" / "architecture-exemptions.yaml"
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "exemptions": [
+                    {
+                        "check": "architecture.file_budget",
+                        "path": "server/app/example.py",
+                        "ceiling": ceiling,
+                        "reason": "Oversized module needs staged split.",
+                        "owner": "agent-legion",
+                        "remove_when": "issues/open/001.md",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    commit_all(root, "file exemption")
+    exemption = ArchitectureExemption(
+        check="architecture.file_budget",
+        path="server/app/example.py",
+        reason="Oversized module needs staged split.",
+        owner="agent-legion",
+        remove_when="issues/open/001.md",
+        ceiling=ceiling,
+    )
+    return root, policy, exemption
 
 
 def test_buffer_slack_allows_growth(tmp_path: Path) -> None:
@@ -419,3 +495,199 @@ def test_file_at_absolute_production_limit_passes(tmp_path: Path) -> None:
     policy = replace(policy, production_max_lines=50)
     write_baseline(root, {"server/app/example.py": 55})
     assert check_file_budgets(root, policy, ()) == []
+
+
+def test_rejects_uncommitted_raise_of_committed_ceiling(tmp_path: Path) -> None:
+    # A hand-edited budgets.json raising a committed ceiling is caught by
+    # comparing the working tree against HEAD.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    write_baseline(root, {"server/app/example.py": 120})
+    errors = check_file_budgets(root, policy, ())
+    assert any("ceiling 120 rose above committed ceiling 110" in error for error in errors)
+
+
+def test_rejects_committed_raise_over_parent_commit(tmp_path: Path) -> None:
+    # Smuggling the raise into a commit is caught against HEAD^ (HEAD's
+    # first parent), so a committed raise fails the gate on the working tree.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    write_baseline(root, {"server/app/example.py": 120})
+    commit_all(root, "raise ceiling by hand")
+    errors = check_file_budgets(root, policy, ())
+    assert any("rose above committed ceiling 110" in error for error in errors)
+
+
+def test_accepts_committed_lowered_ceiling(tmp_path: Path) -> None:
+    # Lowering is the sanctioned direction; both the working tree and a
+    # committed lowering must stay green.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    write_baseline(root, {"server/app/example.py": 105})
+    assert check_file_budgets(root, policy, ()) == []
+    commit_all(root, "lower ceiling after split")
+    assert check_file_budgets(root, policy, ()) == []
+
+
+def test_accepts_new_entry_absent_from_committed_baseline(tmp_path: Path) -> None:
+    # Registering a new file's ceiling (actual + buffer) is how ceilings
+    # legitimately appear; only growth of an existing entry is a violation.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    (root / "server" / "app" / "new.py").write_text("\n".join(["line"] * 20), encoding="utf-8")
+    write_baseline(root, {"server/app/example.py": 110, "server/app/new.py": 30})
+    assert check_file_budgets(root, policy, ()) == []
+
+
+def _rewrite_exemption_ceiling(root: Path, ceiling: int) -> None:
+    registry = root / "config" / "architecture" / "architecture-exemptions.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "exemptions": [
+                    {
+                        "check": "architecture.file_budget",
+                        "path": "server/app/example.py",
+                        "ceiling": ceiling,
+                        "reason": "Oversized module needs staged split.",
+                        "owner": "agent-legion",
+                        "remove_when": "issues/open/001.md",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_rejects_exempt_ceiling_raise_over_committed_registry(tmp_path: Path) -> None:
+    # The exemption channel may set a higher ceiling than the baseline entry,
+    # but an exemption ceiling itself may not grow across revisions.
+    root, policy, _exemption = write_exempted_repo(tmp_path, ceiling=120, baseline_ceiling=110)
+    _rewrite_exemption_ceiling(root, ceiling=125)
+    from scripts.architecture.exemptions import load_exemptions
+
+    errors = check_file_budgets(root, policy, load_exemptions(root))
+    assert any(
+        "exemption ceiling 125 rose above committed ceiling 120" in error for error in errors
+    )
+
+
+def test_accepts_exempt_ceiling_lowered_over_committed_registry(tmp_path: Path) -> None:
+    # 100 effective lines, buffer 10: the lowered exemption ceiling (105) is
+    # within actual + buffer, and with baseline 95 the stale-exemption rule
+    # (file must not fit the normal ceiling) no longer fires.
+    root, policy, _exemption = write_exempted_repo(tmp_path, ceiling=130, baseline_ceiling=95)
+    _rewrite_exemption_ceiling(root, ceiling=105)
+    from scripts.architecture.exemptions import load_exemptions
+
+    assert check_file_budgets(root, policy, load_exemptions(root)) == []
+
+
+def test_accepts_first_time_exemption_without_prior_entry(tmp_path: Path) -> None:
+    # Filing a dated file_budget exemption is the sanctioned raise channel
+    # (#209): a first-time exemption must not trip the monotonic guard even
+    # though its ceiling exceeds the committed baseline entry — the raise is
+    # recorded in the registry with remove_when + age tracking instead.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 95})
+    _rewrite_exemption_ceiling(root, ceiling=100)
+    from scripts.architecture.exemptions import load_exemptions
+
+    assert check_file_budgets(root, policy, load_exemptions(root)) == []
+
+
+def test_accepts_exemption_retired_onto_lower_baseline(tmp_path: Path) -> None:
+    # Retiring an exemption onto a baseline entry at or below the frozen
+    # ceiling is a tightening (PR #226 pattern for routes/__init__.py): the
+    # committed state carries the 105 exemption, the working tree replaces
+    # it with a plain 103 baseline entry.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 95}, exemption_ceiling=105)
+    (root / "config" / "architecture" / "architecture-exemptions.yaml").write_text(
+        "exemptions: []\n", encoding="utf-8"
+    )
+    write_baseline(root, {"server/app/example.py": 103})
+    assert check_file_budgets(root, policy, ()) == []
+
+
+def test_rejects_exemption_retired_onto_higher_baseline(tmp_path: Path) -> None:
+    # ...but retiring the exemption while simultaneously raising the baseline
+    # entry above the frozen ceiling is a raise wearing a retirement costume.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 95}, exemption_ceiling=105)
+    (root / "config" / "architecture" / "architecture-exemptions.yaml").write_text(
+        "exemptions: []\n", encoding="utf-8"
+    )
+    write_baseline(root, {"server/app/example.py": 110})
+    errors = check_file_budgets(root, policy, ())
+    assert any("ceiling 110 rose above committed ceiling 105" in error for error in errors)
+
+
+def test_monotonic_check_silent_without_git_history(tmp_path: Path) -> None:
+    # Non-git checkouts (plain tmp_path) have no committed anchor; the check
+    # must stay silent rather than fail. The ceiling stays within actual +
+    # buffer so only the monotonic rule could complain.
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
+    write_baseline(root, {"server/app/example.py": 105})
+    assert check_file_budgets(root, policy, ()) == []
+
+
+def test_monotonic_check_fails_when_git_anchor_unresolvable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A git checkout whose HEAD^ does not resolve (shallow clone, depth 1)
+    # silently guts the committed-raise check exactly where CI gates PRs —
+    # codex review on PR #231. An unresolvable anchor is a hard error unless
+    # explicitly opted out. Built by hand: git_repo's fixture always carries
+    # a resolvable HEAD^, so this test deliberately commits only once.
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
+    write_baseline(root, {"server/app/example.py": 105})
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+        ["git", "add", "-A"],
+        ["git", "commit", "-q", "-m", "init"],
+    ):
+        subprocess.run(argv, cwd=root, check=True)
+    monkeypatch.delenv("AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW", raising=False)
+    errors = check_file_budgets(root, policy, ())
+    assert any("HEAD^" in error and "does not resolve" in error for error in errors)
+
+
+def test_monotonic_check_shallow_opt_in_skips_anchor_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The explicit opt-out exists for depth-1 checkouts that genuinely
+    # cannot fetch history; it skips the anchor errors but keeps the
+    # against-HEAD comparison alive (uncommitted raises are still caught).
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 105})
+    monkeypatch.setenv("AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW", "1")
+    assert check_file_budgets(root, policy, ()) == []
+    # ...and an uncommitted raise over the resolved HEAD anchor still fails.
+    write_baseline(root, {"server/app/example.py": 130})
+    errors = check_file_budgets(root, policy, ())
+    assert any("rose above committed ceiling" in error for error in errors)
+
+
+def test_working_tree_revert_of_committed_raise_passes(tmp_path: Path) -> None:
+    # Documented semantics (review on PR #231): a working-tree fix reverting
+    # an already-committed raise to the older, lower value must pass — the
+    # floor is the minimum across anchors, so the pre-raise value wins.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    write_baseline(root, {"server/app/example.py": 120})
+    commit_all(root, "raise ceiling by hand")
+    write_baseline(root, {"server/app/example.py": 110})  # revert in working tree
+    assert check_file_budgets(root, policy, ()) == []
+
+
+def test_monotonic_check_fails_when_head_itself_unresolvable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A git repo with zero commits (unborn HEAD) hits the same hard failure
+    # for HEAD itself, not just HEAD^ — the opt-out covers both anchors.
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
+    write_baseline(root, {"server/app/example.py": 105})
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+    ):
+        subprocess.run(argv, cwd=root, check=True)
+    monkeypatch.delenv("AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW", raising=False)
+    errors = check_file_budgets(root, policy, ())
+    assert any("HEAD" in error and "does not resolve" in error for error in errors)

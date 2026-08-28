@@ -1,8 +1,11 @@
 """Safe ratchet for source-file architecture budgets.
 
-Default mode adds new, lowers stale, and removes obsolete entries without
-raising existing ceilings. The optional --rebase flag raises non-exempt
-ceilings to actual + buffer_lines when the file is within its current ceiling.
+Adds new, lowers stale, and removes obsolete entries. Ceilings are a one-way
+ratchet (#209): an existing entry is never raised, here or by hand —
+``check_architecture`` rejects raises against the committed floor. The only
+sanctioned way to raise a ceiling is a dated ``architecture.file_budget``
+exemption in ``config/architecture/architecture-exemptions.yaml``, which
+freezes a higher ceiling with removal tracking.
 """
 
 from __future__ import annotations
@@ -31,13 +34,8 @@ class RatchetResult:
     errors: tuple[str, ...]
 
 
-def ratchet_budgets(
-    root: Path,
-    *,
-    rebase: bool = False,
-    bump: str | None = None,
-) -> RatchetResult:
-    """Ratchet budgets, with an explicit single-file ceiling bump channel."""
+def ratchet_budgets(root: Path) -> RatchetResult:
+    """Ratchet budgets down; never raise an existing ceiling."""
     errors: list[str] = []
 
     policy_path = root / "config/architecture/architecture-budget-policy.yaml"
@@ -68,23 +66,10 @@ def ratchet_budgets(
         desired = actual + policy.buffer_lines
         existing = old_map.get(path)
         frozen = frozen_ceilings.get(path)
-        # Rebase is not a free pass to exceed the current ceiling.
-        # Non-exempt files are still checked against their existing baseline.
-        # Exempt files are still checked against their frozen ceiling.
-        # Only when the file is not currently over its ceiling may rebase
-        # raise that ceiling up to actual + buffer_lines.
+        # Exempt files answer to their frozen exemption ceiling instead of the
+        # baseline entry, which stays untouched for when the exemption is
+        # removed.
         effective_ceiling = frozen if frozen is not None else existing
-
-        if bump is not None and path == bump:
-            if frozen is not None:
-                errors.append(
-                    f"{path}: --bump does not apply to exempt files; remove the exemption first"
-                )
-                if existing is not None:
-                    new_map[path] = existing
-                continue
-            new_map[path] = desired
-            continue
 
         if effective_ceiling is not None and actual > effective_ceiling:
             errors.append(f"{path}: {actual} effective lines exceeds ceiling {effective_ceiling}; split the file or revert growth")  # fmt: skip
@@ -94,15 +79,10 @@ def ratchet_budgets(
 
         if existing is None:
             new_map[path] = desired
-        elif rebase and frozen is None:
-            new_map[path] = desired if existing != desired else existing
         else:
             new_map[path] = min(existing, desired)
 
-    if bump is not None and bump not in inventory.production:
-        errors.append(f"{bump}: --bump target is not a production file")
-
-    if errors and (bump is None or new_map == old_map):
+    if errors:
         return RatchetResult(changed=False, errors=tuple(errors))
 
     if new_map == old_map:
@@ -121,21 +101,14 @@ def ratchet_budgets(
         tmp_path = f.name
 
     os.replace(tmp_path, baseline_path)
-    return RatchetResult(changed=True, errors=tuple(errors))
+    return RatchetResult(changed=True, errors=())
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument("--rebase", action="store_true", help="Raise existing baseline ceilings to actual + buffer_lines (one-time use).")  # fmt: skip
-    parser.add_argument(
-        "--bump",
-        metavar="PATH",
-        default=None,
-        help="Raise one repo-relative production file ceiling to actual + buffer_lines.",
-    )
     args = parser.parse_args(argv)
-    result = ratchet_budgets(args.root.resolve(), rebase=args.rebase, bump=args.bump)
+    result = ratchet_budgets(args.root.resolve())
     for error in result.errors:
         print(f"ERROR: {error}")
     return 1 if result.errors else 0

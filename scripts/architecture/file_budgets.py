@@ -10,6 +10,7 @@ from typing import Any
 from scripts.quality.exemptions import ArchitectureExemption
 
 from .budget_inventory import build_budget_inventory
+from .budget_monotonicity import ceiling_regression_errors
 from .budget_policy import BudgetPolicy
 from .effective_lines import count_effective_lines
 
@@ -128,6 +129,7 @@ def check_file_budgets(
     errors: list[str] = []
 
     frozen_ceilings = _build_frozen_ceilings(inventory.production, exemptions)
+    errors.extend(ceiling_regression_errors(root, baseline_files, frozen_ceilings))
 
     for path, ceiling in frozen_ceilings.items():
         file_path = root / path
