@@ -15,7 +15,7 @@ from acp.schema import HttpMcpServer
 from server.app.auth.scoped_tokens import authenticate_scoped_token
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.studio_chat import permissions as permissions_module
-from server.app.studio_chat import service as service_module
+from server.app.studio_chat import spawn as spawn_module
 from server.app.studio_chat.acp_session import AcpSessionHandle
 from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 from server.app.studio_chat.registry import StudioAgentRegistryStore
@@ -668,7 +668,7 @@ def test_create_session_failure_cleans_up_row_token_and_runtime(chat, job_db, mo
     service, _bus, register, workspace_id, user_id = chat
     register(TEXT_SCRIPT)
     minted: list[str] = []
-    real_mint = service_module.mint_scoped_token
+    real_mint = spawn_module.mint_scoped_token
 
     def capturing_mint(*args, **kwargs):
         token = real_mint(*args, **kwargs)
@@ -678,8 +678,8 @@ def test_create_session_failure_cleans_up_row_token_and_runtime(chat, job_db, mo
     def exploding_handle(**kwargs):
         raise RuntimeError("spawn blew up")
 
-    monkeypatch.setattr(service_module, "mint_scoped_token", capturing_mint)
-    monkeypatch.setattr(service_module, "AcpSessionHandle", exploding_handle)
+    monkeypatch.setattr(spawn_module, "mint_scoped_token", capturing_mint)
+    monkeypatch.setattr(spawn_module, "AcpSessionHandle", exploding_handle)
 
     with pytest.raises(RuntimeError, match="spawn blew up"):
         service.create_session(workspace_id, user_id, "fake-agent")
@@ -700,7 +700,7 @@ def test_create_session_mint_failure_still_clears_starting_row(chat, monkeypatch
     def exploding_mint(*args, **kwargs):
         raise RuntimeError("mint blew up")
 
-    monkeypatch.setattr(service_module, "mint_scoped_token", exploding_mint)
+    monkeypatch.setattr(spawn_module, "mint_scoped_token", exploding_mint)
 
     with pytest.raises(RuntimeError, match="mint blew up"):
         service.create_session(workspace_id, user_id, "fake-agent")

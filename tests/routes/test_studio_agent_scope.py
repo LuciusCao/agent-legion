@@ -111,10 +111,12 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/studio-agent-tokens", None),
     ("DELETE", "/api/studio-agent-tokens/{token_id}", None),
     # Studio chat effecting endpoints: session lifecycle (create mints a
-    # fresh scoped token), message send/cancel, and permission answers
+    # fresh scoped token; resume respawns the runtime and mints another),
+    # message send/cancel, and permission answers
     # (self-approval would void the human-confirmation boundary).
     ("POST", f"{_CHAT}/sessions", {"agent_id": "agent-x"}),
     ("DELETE", f"{_CHAT}/sessions/{{session_id}}", None),
+    ("POST", f"{_CHAT}/sessions/{{session_id}}/resume", None),
     ("POST", f"{_CHAT}/sessions/{{session_id}}/messages", {"text": "hi"}),
     ("POST", f"{_CHAT}/sessions/{{session_id}}/cancel", None),
     ("POST", f"{_CHAT}/sessions/{{session_id}}/permissions/allow-all", {"enabled": True}),
