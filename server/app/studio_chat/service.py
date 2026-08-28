@@ -357,10 +357,7 @@ class StudioChatService:
     def _on_permission_request(
         self, session_id: str, tool_call: dict[str, Any], options: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        result: dict[str, Any] = self._events().on_permission_request(
-            session_id, tool_call, options
-        )
-        return result
+        return self._events().on_permission_request(session_id, tool_call, options)
 
     def _on_turn_end(self, session_id: str, stop_reason: str) -> None:
         self._events().on_turn_end(session_id, stop_reason)

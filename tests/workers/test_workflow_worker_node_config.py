@@ -7,9 +7,9 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet
 
+from server.app.configuration.executor_runtime import ExecutorRuntimeConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.runtime import ExecutionRuntime
-from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.services.node_codes import NodeCodeService
 from server.app.services.vault import VaultService

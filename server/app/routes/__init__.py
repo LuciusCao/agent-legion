@@ -1,37 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
-
 from fastapi import APIRouter, Depends
 
-from ..agent_broker import AgentExecutionBroker
-from ..agent_control import AgentCompletionHandler, AgentWorkerRegistry
 from ..auth.studio_authoring import require_studio_authoring
 from ..auth.workspace_access import require_workspace_access
-from ..events import JobEventManager
-from ..events.agents import AgentStatusManager
-from ..jobs import JobQueries
-from ..services.artifact_store import ArtifactStore
-from ..services.executor_catalog import ExecutorCatalogService
-from ..services.job_packages import JobPackageService
-from ..services.materials import MaterialsService
-from ..services.ops_metrics import OpsMetricsService
-from ..services.quality_labels import QualityLabelService
-from ..services.quality_replays import QualityReplayService
-from ..services.quality_sampling import QualitySamplingService
-from ..services.quality_stats import QualityStatsService
-from ..services.workspace_configuration import WorkspaceConfigurationService
-from ..services.workspace_executor_configuration import WorkspaceExecutorConfigurationService
-from ..settings import Settings
-from ..studio_chat.service import StudioChatService
-from ..worker_control import WorkspaceWorkerControl
 from .agent_definitions import create_agent_definitions_router
 from .agent_workers import create_agent_workers_router
 from .agents import create_agents_router
 from .artifacts import create_artifacts_router
 from .common import create_common_router
 from .connections import create_connections_router
+from .deps import RouterDeps
 from .instance_settings import create_instance_settings_router
 from .job_route_group import include_job_routes
 from .materials import create_materials_router
@@ -57,43 +36,12 @@ from .workspace_settings import create_workspace_settings_router
 from .workspaces import create_workspaces_router
 
 
-@dataclass
-class RouterDeps:
-    """Explicit, complete dependency bundle for the API router tree.
-
-    A missing service must fail loudly at composition time (issue #189):
-    the previous keyword-with-None-default signature silently dropped the
-    whole route group when a caller forgot one argument. Every field here
-    is required — optional integration seams stay ``None``-able but are
-    named and grouped, and the conditional mounts below only cover
-    genuinely optional infrastructure (e.g. object storage) rather than
-    wiring mistakes.
-    """
-
-    job_db: JobQueries
-    settings: Settings
-    agent_manager: AgentStatusManager
-    executor_catalog: ExecutorCatalogService
-    workspace_executor_configuration: WorkspaceExecutorConfigurationService
-    workspace_configuration: WorkspaceConfigurationService
-    job_packages: JobPackageService
-    # Optional integration seams: genuinely absent infrastructure (reduced
-    # embeds, object storage off) — not wiring mistakes.
-    workspace_worker_control: WorkspaceWorkerControl | None = None
-    job_event_manager: JobEventManager | None = None
-    job_event_buffer: Any | None = None
-    artifact_store: ArtifactStore | None = None
-    agent_broker: AgentExecutionBroker | None = None
-    agent_worker_registry: AgentWorkerRegistry | None = None
-    agent_completion: AgentCompletionHandler | None = None
-    ops_metrics: OpsMetricsService | None = None
-    quality_sampling: QualitySamplingService | None = None
-    quality_labels: QualityLabelService | None = None
-    quality_stats: QualityStatsService | None = None
-    quality_replays: QualityReplayService | None = None
-    studio_chat_service: StudioChatService | None = None
-    materials_service: MaterialsService | None = None
-    job_artifact_objects: Any | None = None
+def _require_all_or_none(parts: tuple, names: tuple[str, ...]) -> tuple:
+    """Fail loudly on a partially-wired plane (issue #189): mounting must be
+    all-or-nothing, otherwise the routes vanish silently."""
+    if any(part is None for part in parts) != all(part is None for part in parts):
+        raise ValueError(f"partially wired: {', '.join(names)} must be provided together")
+    return parts
 
 
 def create_router(deps: RouterDeps) -> APIRouter:
@@ -116,18 +64,14 @@ def create_router(deps: RouterDeps) -> APIRouter:
     router.include_router(create_connections_router(deps.settings))
     secured(create_packages_router(deps.job_db, deps.settings, deps.job_packages))
     secured(create_worker_router(deps.workspace_worker_control))
-    # The worker control plane is one surface: broker + registry + completion
-    # mount together or not at all (integration seams absent in reduced
-    # embeds); a partially-wired trio is a composition bug — fail loudly.
-    worker_plane = (deps.agent_broker, deps.agent_worker_registry, deps.agent_completion)
-    if any(part is None for part in worker_plane) != all(part is None for part in worker_plane):
-        raise ValueError(
-            "agent worker control plane is partially wired: agent_broker, "
-            "agent_worker_registry and agent_completion must be provided together"
-        )
+    # The worker control plane is one surface (broker + registry + completion)
+    # and so is the quality loop: each mounts together or not at all.
+    worker_plane = _require_all_or_none(
+        (deps.agent_broker, deps.agent_worker_registry, deps.agent_completion),
+        ("agent_broker", "agent_worker_registry", "agent_completion"),
+    )
     if all(part is not None for part in worker_plane):
         broker, registry, completion = worker_plane
-        assert broker is not None and registry is not None and completion is not None
         workers_router = create_agent_workers_router(  # fmt: skip
             broker,
             registry,
@@ -143,16 +87,19 @@ def create_router(deps: RouterDeps) -> APIRouter:
         )
     if deps.ops_metrics is not None:
         secured(create_metrics_router(deps.ops_metrics))
-    if (
-        deps.quality_sampling is not None
-        and deps.quality_labels is not None
-        and deps.quality_stats is not None
-    ):
-        secured(
-            create_quality_router(deps.quality_sampling, deps.quality_labels, deps.quality_stats)
-        )
-    if deps.quality_replays is not None:
-        secured(create_quality_replays_router(deps.quality_replays))
+    quality_plane = _require_all_or_none(
+        (
+            deps.quality_sampling,
+            deps.quality_labels,
+            deps.quality_stats,
+            deps.quality_replays,
+        ),
+        ("quality_sampling", "quality_labels", "quality_stats", "quality_replays"),
+    )
+    if all(part is not None for part in quality_plane):
+        sampling, labels, stats, replays = quality_plane
+        secured(create_quality_router(sampling, labels, stats))
+        secured(create_quality_replays_router(replays))
     workspaces_router = create_workspaces_router(
         deps.workspace_configuration,
         deps.settings,

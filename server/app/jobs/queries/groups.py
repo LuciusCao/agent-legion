@@ -1,10 +1,11 @@
 """Domain-grouped mixins composing the JobQueries facade (issue #195).
 
 JobQueries previously declared 18 flat mixins; this module groups them into
-five domain facades so the composition reads by domain. Each group mixin
-only re-composes mixins that already exist — method resolution is unchanged
-(the group is a single inheritance chain, preserving the flat linearization
-order used before).
+five domain facades so the composition reads by domain. The linearization
+order is adjusted by the grouping, but method resolution is unaffected in
+practice: the mixins have zero attribute-name collisions and never use
+``super()`` (non-cooperative inheritance), so every public method resolves
+to the same function object as before the regrouping.
 """
 
 from __future__ import annotations

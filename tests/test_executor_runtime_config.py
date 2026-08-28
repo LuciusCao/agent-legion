@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from server.app.executors.runtime_config import (
+from server.app.configuration.executor_runtime import (
     ExecutorRuntimeConfig,
     OpenClawRuntimeConfig,
     WorkflowsRuntimeConfig,
