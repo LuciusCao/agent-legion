@@ -17,8 +17,8 @@ provide.
 | Push (any branch) | Smoke (default): static checks + smoke test tier, lanes trimmed by pushed paths | `scripts/check-quick.sh` with `GATE_TIER=smoke` |
 | Push with `AGENT_LEGION_GATE_LEVEL=quick` | Quick: unit-tier quick suite, lanes trimmed | `scripts/check-quick.sh` |
 | Push with `AGENT_LEGION_GATE_LEVEL=full` | Full, locally | `scripts/check.sh` |
-| PR to `develop`/`main`/`master`, push to `main`/`master` | Full | CI jobs `backend-unit` + `backend-postgres-a/b/c` + `frontend-*` + `rust` + `e2e-smoke` |
-| Weekly schedule, manual dispatch | Extended | CI jobs `ci-extended` + `nightly-e2e` |
+| PR to `develop`/`main`/`master`, push to `main`/`master` | Full | CI jobs `backend-unit` + `api-check` + `backend-postgres-a/b/c` + `backend-coverage` + `frontend-*` + `rust` + `e2e-smoke` |
+| Weekly schedule, manual dispatch | Extended | CI jobs `ci-extended` + `nightly-e2e` (`nightly-gate.yml`) |
 
 The pre-push hook diffs the pushed commits against their remote base and runs
 only the affected quick-gate lanes locally: frontend-only changes skip the
@@ -102,7 +102,8 @@ layer, selected with `-m "not postgres and not repository_gate"` against an
 unreachable loopback database URL, so an accidental database dependency fails
 the gate instead of silently using a developer database. CI runs it as the
 `backend-unit` job; the PostgreSQL integration layer (`GATE_TIER=postgres`)
-runs in the `backend-postgres-a/b/c` jobs described below.
+runs in the `backend-postgres` matrix job (checks `backend-postgres-a/b/c`)
+described below.
 
 The full tier (`GATE_TIER=full`, the default for `check-quick.sh` without a
 tier override) selects the same unit layer as `GATE_TIER=unit`: the
@@ -154,23 +155,34 @@ unaffected. Passing evidence is shared through the same Git common directory.
 `.github/workflows/quality-gate.yml` runs on pull requests to
 `develop` / `main` / `master`, pushes to `main` / `master` (a `develop`
 merge is already covered by its PR gate, so push runs there were dropped to
-save Actions minutes), a weekly schedule, plus manual dispatch. Docs-only
-changes (`docs/**`, `**/*.md`, `LICENSE`) do not trigger the workflow at all
-(`paths-ignore`). Schedule runs skip every regular lane in the `changes` job
-— the full gate already ran on the push/PR that produced the code — so only
-`ci-extended` and `nightly-e2e` run weekly:
+save Actions minutes), plus manual dispatch. Docs-only changes (`docs/**`,
+`**/*.md`, `LICENSE`) do not trigger the workflow at all (`paths-ignore`).
+The weekly schedule lives in `.github/workflows/nightly-gate.yml` (issue
+#193), which runs only `ci-extended` and `nightly-e2e` — the stress jobs
+never run on PR/push, and a scheduled trunk run in the quality-gate file
+shared its concurrency group, so it could cancel an in-flight push gate for
+the same ref:
 
 - **backend-unit** — static checks (ruff, format, mypy, architecture contracts,
   invariant registry, spec health) plus the PostgreSQL-offline unit tier
   (`GATE_TIER=unit`), uploading its coverage data file as a 1-day artifact.
-- **backend-postgres-a** — the api:check OpenAPI contract step (Python +
-  Postgres + node_modules) and postgres tier shard 1/3, then downloads every
-  shard's coverage artifact, merges them with `coverage combine`, and
-  enforces the 85% floor once on the combined report.
-- **backend-postgres-b** — postgres tier shard 2/3 plus the
-  `tests/full -m full_gate` evidence, uploading its coverage data file.
-- **backend-postgres-c** — postgres tier shard 3/3, uploading its coverage
-  data file.
+- **api-check** — the api:check OpenAPI contract step (Python + Postgres +
+  node_modules) and the worker UI node:test suite. Its own lightweight job
+  (issue #193): it runs on the frontend lane too, so frontend-only PRs no
+  longer drag a postgres-test job along just for the contract check.
+- **backend-postgres-a/b/c** — the postgres tier's three hash shards as one
+  matrix job (`backend-postgres`, issue #193): each leg runs its
+  `GATE_SHARD=i/n` tier slice and uploads coverage data + telemetry as 1-day
+  artifacts. Shard b additionally runs the velites sandbox integration check
+  and the `tests/full -m full_gate` evidence layer. `fail-fast` is off, so a
+  failing shard does not cancel its peers' evidence.
+- **backend-coverage** — downloads every shard's coverage artifact, merges
+  them with `coverage combine`, and enforces the 85% floor once on the
+  combined report. The needs-DAG (`backend-unit` + `backend-postgres`)
+  guarantees every producer finished before the merge starts — the
+  event-driven replacement for the old `gh api` artifact polling in
+  backend-postgres-a (issue #193). It also renders the aggregate backend
+  test summary.
 - **frontend-logic / frontend-component / frontend-coverage** — frontend
   static checks and the two Vitest projects (node / jsdom) as parallel jobs;
   the coverage job merges the shard blob reports and enforces the frontend
@@ -182,8 +194,12 @@ changes (`docs/**`, `**/*.md`, `LICENSE`) do not trigger the workflow at all
   only when the `changes` job detects image-relevant path changes
   (`Dockerfile`, `.dockerignore`, dependency locks, `worker/`, `shared/`,
   `deploy/`); no other job exercises the Dockerfile.
-- **ci-extended** — `tests/ci -m ci_extended` stress scenarios. Runs only on
-  the weekly schedule and manual dispatch; PR and push runs skip it.
+
+In `nightly-gate.yml`:
+
+- **ci-extended** — `tests/ci -m ci_extended` stress scenarios, with the
+  unregistered-rerun (flaky governance) check. Runs only on the weekly
+  schedule and manual dispatch.
 - **nightly-e2e** — multi-browser smoke E2E (the deterministic browser suite
   re-run on Chromium, Firefox, and WebKit via `scripts/e2e/run_browser_smoke.py`;
   PR/push stays Chromium-only) plus a workspace stress run
@@ -194,7 +210,7 @@ changes (`docs/**`, `**/*.md`, `LICENSE`) do not trigger the workflow at all
 The postgres tier shards are a deterministic `md5(nodeid) % 3` collection
 filter (`scripts/pytest_gate_shard.py`, `GATE_SHARD=i/n`). Every pytest shard
 writes its own `COVERAGE_FILE` with `--cov-fail-under=0`, so only the
-combined report in backend-postgres-a enforces the 85% floor.
+combined report in backend-coverage enforces the 85% floor.
 
 CI environment notes:
 
@@ -203,8 +219,8 @@ CI environment notes:
   schemas are created lazily when the PostgreSQL layer starts; importing the
   test support module and running the unit layer never connects to PostgreSQL.
 - The api:check contract step regenerates frontend API types through
-  `create_app` + node_modules, so it lives in the backend-postgres-a job; the
-  frontend jobs need neither Python nor Postgres.
+  `create_app` + node_modules, so it lives in the api-check job; the
+  frontend test jobs need neither Python nor Postgres.
 - uv and npm caches are enabled; the first cold run is dominated by dependency
   downloads and takes substantially longer than cached runs.
 
@@ -250,8 +266,9 @@ verification comes from the CI workflow, not from these files.
 Configure the repository on GitHub as follows:
 
 1. Protect `develop` and any release branches (Settings → Branches, or Rules → Rulesets).
-2. Require the `backend-unit`, `backend-postgres-a`, `backend-postgres-b`,
-   `backend-postgres-c`, `frontend-logic`, `frontend-component`,
+2. Require the `backend-unit`, `api-check`, `backend-postgres-a`,
+   `backend-postgres-b`, `backend-postgres-c`, `backend-coverage`,
+   `frontend-logic`, `frontend-component`,
    `frontend-coverage`, `rust`, `e2e-smoke`, and `docker-build` status checks
    to pass before
    merging; require branches to be up to date.
