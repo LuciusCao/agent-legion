@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from server.app.db.transaction import read_connection
 from server.app.settings import Settings
 from server.app.workflows.definition import WorkflowDefinition, workflow_definition_from_dict
+from server.app.workflows.schema import WorkflowDefinitionError
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -51,12 +52,24 @@ def load_workflow_scan_entries(settings: Settings) -> list[ScanEntry]:
         if raw:
             try:
                 definition = workflow_definition_from_dict(json.loads(str(raw)))
-            except Exception:
+            except (WorkflowDefinitionError, json.JSONDecodeError) as exc:
+                # Expected business failure: an active revision that fails
+                # schema validation (WorkflowDefinitionError) or whose raw
+                # definition_json is malformed JSON (JSONDecodeError — a
+                # sibling ValueError subclass, NOT caught by
+                # WorkflowDefinitionError; catching only the latter let one
+                # bad row kill the whole worker scan and startup — codex P1
+                # on PR #243). The workspace keeps scanning with no fallback
+                # definition — snapshot-less jobs then fail node resolution
+                # downstream with an explicit error instead of the whole
+                # worker scan dying. WARNING with the parse error: the
+                # revision needs an operator republish.
                 logger.warning(
-                    "workflow scan: workspace %s active revision for %r failed to parse;"
-                    " scanning with no fallback definition",
+                    "workflow scan: workspace %s active revision for %r failed to parse"
+                    " (%s); scanning with no fallback definition",
                     workspace_id,
                     workflow_key,
+                    exc,
                 )
         entries.append((workspace_id, workflow_key, definition))
     return entries

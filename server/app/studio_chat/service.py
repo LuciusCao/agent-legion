@@ -376,5 +376,13 @@ class StudioChatService:
                     session_id, status="closed", closed_at=datetime.now(UTC)
                 )
             except Exception:
-                logger.warning("failed to mark studio chat session %s closed", session_id)
+                # #204 broad-except audit: shutdown safety net. The shutdown
+                # loop must reach every live session — one failing status
+                # write (e.g. DB already closing) must not skip the teardown
+                # of the remaining subprocesses and tokens. The row stays
+                # non-closed but is marked by the next startup's
+                # reap_zombie_sessions, so the state self-heals.
+                logger.warning(
+                    "failed to mark studio chat session %s closed", session_id, exc_info=True
+                )
             self.teardown_runtime(session_id, runtime)

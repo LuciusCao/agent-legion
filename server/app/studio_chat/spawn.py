@@ -15,7 +15,7 @@ from typing import Any
 
 from acp.schema import HttpHeader, HttpMcpServer
 
-from server.app.auth.scoped_tokens import mint_scoped_token, revoke_scoped_token
+from server.app.auth.scoped_tokens import mint_scoped_token
 from server.app.jobs import JobQueries
 from server.app.mcp_server.config import SESSION_ID_HEADER
 from server.app.mcp_server.http_app import MCP_URL_PATH
@@ -24,7 +24,7 @@ from server.app.settings import Settings
 from server.app.studio_chat.acp_session import AcpSessionCallbacks, AcpSessionHandle
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.runtime import SessionRuntime
-from server.app.studio_chat.teardown import teardown_runtime
+from server.app.studio_chat.teardown import revoke_minted_token_quietly, teardown_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,14 @@ def spawn_session_runtime(
         # 'starting' row, no leaked token, no orphaned runtime. The status
         # write is guarded (#158): a close that raced the startup window
         # already owns the final 'closed' state.
+        # #204 broad-except audit: the catch stays broad because the outcome
+        # space is genuinely mixed — expected startup refusals
+        # (InvalidOperationError for agent-not-available / start timeout) AND
+        # programming errors must both run this compensation, and both keep
+        # propagating via the bare re-raise (the original type is never
+        # converted, so the two stay distinguishable to the caller and the
+        # route layer). This mirrors the #233 pattern: compensate broad,
+        # classify never.
         detail = str(exc) or exc.__class__.__name__
         db.update_studio_chat_session_if(
             session_id, status_not_in=("closed",), status="error", error_detail=detail[:500]
@@ -122,10 +130,7 @@ def spawn_session_runtime(
             # minted token must not leak (token is None when the mint
             # itself failed).
             if token is not None:
-                try:
-                    revoke_scoped_token(db, token)
-                except Exception:
-                    logger.warning("failed to revoke studio chat token for %s", session_id)
+                revoke_minted_token_quietly(db, token, session_id)
         else:
             teardown_runtime(db, runtimes, runtimes_lock, session_id, runtime)
         raise

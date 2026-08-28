@@ -178,6 +178,43 @@ def test_stop_shuts_down_shared_pools(tmp_path: Path) -> None:
     assert pool._shutdown is True
 
 
+def test_poll_loop_thread_survives_repeated_poll_failures(tmp_path: Path, caplog) -> None:
+    """#204: the poll loop's broad catch is the thread's life support — a
+    failing _poll (programming error or infrastructure outage) is logged
+    with its traceback and the loop keeps running; the next pass is the
+    built-in retry."""
+    import logging
+    import time
+
+    db_path = TEST_DATABASE_URL
+    executor = RecordingExecutor("code")
+    worker = _make_worker(tmp_path, db_path, executor, [_make_definition([_local_node("fetch")])])
+
+    calls = {"count": 0}
+
+    def failing_poll():
+        calls["count"] += 1
+        raise RuntimeError("infra outage")
+
+    real_poll = worker._poll
+    worker._poll = failing_poll
+
+    with caplog.at_level(logging.ERROR, logger="server.app.workflow_worker.thread"):
+        worker.start()
+        try:
+            deadline = time.monotonic() + 5
+            while calls["count"] < 2 and time.monotonic() < deadline:
+                time.sleep(0.05)
+        finally:
+            worker._poll = real_poll
+            worker.stop()
+
+    assert calls["count"] >= 2, "the poll loop died instead of retrying after a failure"
+    failures = [rec for rec in caplog.records if "workflow worker poll failed" in rec.message]
+    assert len(failures) >= 2
+    assert all(rec.exc_info for rec in failures), "poll failures must log the traceback"
+
+
 def test_poll_skips_paused_job(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")

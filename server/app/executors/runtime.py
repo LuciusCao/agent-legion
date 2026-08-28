@@ -64,6 +64,14 @@ class ExecutionRuntime:
         try:
             result = executor.execute(context)
         except Exception as exc:
+            # #204 broad-except audit: this is the deliberate boundary between
+            # the executor adapter layer and the lease finish path. Adapters
+            # (subprocess harnesses, sandbox runners) are third-party surface:
+            # their exception space is unbounded and NOT a business-exception
+            # family we could enumerate. A stray exception must never skip
+            # leases.finish below — the lease would dangle until the sweeper
+            # expires it — so it is normalized into a failed result (with the
+            # full traceback logged) instead of propagating.
             logger.exception(
                 "Executor adapter %s failed for execution %s",
                 claim.executor_id,
@@ -106,6 +114,13 @@ class ExecutionRuntime:
             try:
                 active = self.leases.heartbeat(claim.lease_id, self.lease_ttl_seconds)
             except Exception:
+                # #204 broad-except audit: the heartbeat loop is a daemon
+                # thread whose death would silently stop lease renewal — the
+                # execution would then be re-claimed elsewhere while still
+                # running. Whatever the store raises (DB restart, driver
+                # quirk) is treated as one missed heartbeat and counted by
+                # the existing miss/threshold logic below; the full traceback
+                # is logged so the root cause stays diagnosable.
                 logger.exception("Heartbeat failed for lease %s", claim.lease_id)
                 active = False
 
@@ -131,6 +146,11 @@ class ExecutionRuntime:
                 self.cancel(claim.execution_id)
                 executor.cancel(claim.execution_id)
             except Exception:
+                # #204 broad-except audit: best-effort escalation of a lost
+                # lease. Failing to cancel must not mask the lease-lost signal
+                # — lease_lost_event.set() below is what terminates the
+                # execution, and this thread must survive to set it. The
+                # sweeper's lease expiry is the backstop if both cancels miss.
                 logger.exception("Cancel request failed for execution %s", claim.execution_id)
             lease_lost_event.set()
             break

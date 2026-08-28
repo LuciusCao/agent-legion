@@ -59,8 +59,7 @@ def _log_cancel_result(task: asyncio.Task[Any]) -> None:
     unretrieved-exception warning on an otherwise healthy loop."""
     if task.cancelled():
         return
-    exc = task.exception()
-    if exc is not None:
+    if (exc := task.exception()) is not None:
         logger.warning("studio chat ACP cancel failed: %s", exc)
 
 
@@ -300,7 +299,14 @@ class AcpSessionHandle:
                 )
                 self.callbacks.on_turn_end(str(response.stop_reason))
             except Exception as exc:
-                self.callbacks.on_turn_error(str(exc))
+                # #204 broad-except audit: deliberate per-turn containment —
+                # the prompt loop is the session's life support, so one failed
+                # turn must not kill the loop and the session with it; the
+                # service records the turn error and the user can send the
+                # next prompt, and the traceback is logged for the agent-side
+                # failures that dominate here.
+                self.callbacks.on_turn_error(f"{type(exc).__name__}: {exc}")
+                logger.warning("studio chat prompt turn failed: %s", exc, exc_info=True)
 
     def _drain_stderr(self, process: Any) -> None:
         """Discard agent stderr on a reader task so a chatty agent never

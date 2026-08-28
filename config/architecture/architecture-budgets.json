@@ -1,4 +1,5 @@
 {
+  "version": 3,
   "files": {
     "frontend/src/App.tsx": 29,
     "frontend/src/AppRoutes.tsx": 48,
@@ -1259,6 +1260,7 @@
     "server/app/workflows/sharding_batch.py": 32,
     "server/app/workflows/skill_version.py": 43,
     "server/app/workflows/skills.py": 32,
+    "server/app/workflows/snapshot_shape.py": 40,
     "server/app/workflows/start_node.py": 90,
     "server/app/workflows/validator.py": 30,
     "server/app/workflows/velites_command.py": 105,
@@ -1371,5 +1373,4 @@
     "workspace_libs/node_sdk.py": 197,
     "workspace_libs/url_guard.py": 52
   },
-  "version": 3
-}
+  "version": 3}

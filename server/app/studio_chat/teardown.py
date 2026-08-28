@@ -71,5 +71,23 @@ def teardown_runtime(
     try:
         revoke_scoped_token(db, runtime.token)
     except Exception:
+        # #204 broad-except audit: teardown safety net. The session is being
+        # discarded either way — the registry entry is already popped and the
+        # subprocess is already being closed above — so the revoke failing
+        # must not mask whatever the caller is propagating (startup failure,
+        # shutdown loop). Scoped tokens carry their own TTL, and expired
+        # tokens are purged by the workflow maintenance sweep, so a leaked
+        # revoke self-heals eventually; the warning is the operator signal.
         logger.warning("failed to revoke studio chat token for %s", session_id)
     return owned
+
+
+def revoke_minted_token_quietly(db: JobQueries, token: str, session_id: str) -> None:
+    """Best-effort revoke for a minted token whose handle never materialized
+    (#204: must not mask the propagating startup failure; the token TTL plus
+    the maintenance purge are the backstop, exc_info keeps root cause visible).
+    """
+    try:
+        revoke_scoped_token(db, token)
+    except Exception:
+        logger.warning("failed to revoke studio chat token for %s", session_id, exc_info=True)
