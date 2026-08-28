@@ -43,7 +43,8 @@ function readBrowserTestFiles(): string[] {
 //    to catch.
 // 2. Direct member access on browser-only globals (document.*, window.*,
 //    location.*, navigator.*) — after comment stripping, so a mention in a
-//    comment never counts.
+//    comment never counts. Optional chaining (window?.open) counts too: an
+//    undeclared global still throws ReferenceError in node even under `?.`.
 // 3. DOM-only constructors / packages (DOMParser, ResizeObserver,
 //    IntersectionObserver, MutationObserver, dompurify, katex).
 // 4. Known DOM-infrastructure modules — modules whose DOM need hides behind
@@ -61,7 +62,7 @@ function readBrowserTestFiles(): string[] {
 const TESTING_LIBRARY_IMPORT_RE =
   /['"]@testing-library\/(react|user-event|dom|jest-dom)/
 const DOM_MEMBER_ACCESS_RE =
-  /\b(document|window|location|navigator)\s*\.\s*[A-Za-z_$]/
+  /\b(document|window|location|navigator)\s*\?\.\s*[A-Za-z_$]|\b(document|window|location|navigator)\s*\.\s*[A-Za-z_$]/
 const DOM_CONSTRUCTOR_RE =
   /\bnew\s+(DOMParser|ResizeObserver|IntersectionObserver|MutationObserver)\s*\(/
 const DOM_PACKAGE_IMPORT_RE = /['"](dompurify|katex)['"]/
@@ -114,8 +115,13 @@ function stripComments(source: string): string {
 
 function parseImportSpecifiers(source: string): string[] {
   const specifiers: string[] = []
+  // Static imports/exports are statement-form (line-anchored); dynamic
+  // `import('...')` can appear mid-expression (`const m = await import('...')`,
+  // `Promise.all([import('...')])`, ...), so it must not be line-anchored —
+  // codex review on PR #229: a line-anchored dynamic-import branch silently
+  // skips exactly the tests whose DOM need hides behind a lazy import.
   const importRe =
-    /(?:^|\n)\s*import\s+(?:type\s+)?(?:[^;'"]*?from\s*)?['"]([^'"]+)['"]|(?:^|\n)\s*export\s+(?:type\s+)?[^;'"]*?from\s+['"]([^'"]+)['"]|(?:^|\n)\s*import\s*\(\s*['"]([^'"]+)['"]/g
+    /(?:^|\n)\s*import\s+(?:type\s+)?(?:[^;'"]*?from\s*)?['"]([^'"]+)['"]|(?:^|\n)\s*export\s+(?:type\s+)?[^;'"]*?from\s+['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]/g
   let match: RegExpExecArray | null
   while ((match = importRe.exec(source))) {
     const specifier = match[1] ?? match[2] ?? match[3]
