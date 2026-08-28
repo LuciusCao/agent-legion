@@ -11,7 +11,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.auth.dependencies import require_admin
 from server.app.routes.agent_workers_contracts import (
     AgentRegisterTokenCreatedResponse,

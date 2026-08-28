@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from server.app.executors.runtime_config import StartupValidationError, validate_runtime
+from server.app.configuration.executor_runtime import StartupValidationError, validate_runtime
 from server.app.settings import load_settings, validate_settings
 
 

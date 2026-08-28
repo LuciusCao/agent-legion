@@ -1,3 +1,12 @@
+"""Typed ``executor_runtime`` settings model and startup validation.
+
+Lives in the neutral configuration package so the settings layer never
+imports the runtime packages (issue #188). The per-plane tuning knobs
+(``AgentEnqueueConfig`` / ``AgentStockConfig`` / ``CodeStockConfig``) live
+in ``executor_knobs``; this module aggregates them into the
+``ExecutorRuntimeConfig`` document that ``server/app/settings.py`` embeds.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -8,9 +17,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from server.app.agent_broker.dispatch_pool import AgentEnqueueConfig
-from server.app.workflow_worker.agent_stock import AgentStockConfig
-from server.app.workflow_worker.code_stock import CodeStockConfig
+from server.app.configuration.executor_knobs import (
+    AgentEnqueueConfig,
+    AgentStockConfig,
+    CodeStockConfig,
+)
 
 logger = logging.getLogger(__name__)
 

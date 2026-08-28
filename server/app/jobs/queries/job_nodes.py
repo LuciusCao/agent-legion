@@ -7,8 +7,8 @@ from typing import Any
 
 from server.app.jobs.queries.job_node_lifecycle import JobNodeLifecycleQueriesMixin
 from server.app.jobs.storage_layout import job_storage_dir
-from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.storage_paths import make_data_relative
+from server.app.workflows.revision_format import definition_from_job_snapshot
 
 
 def _job_id(workspace_id: str, workflow_key: str, source_id: str) -> str:

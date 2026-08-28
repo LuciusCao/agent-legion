@@ -12,9 +12,9 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from server.app.configuration.executor_runtime import ExecutorRuntimeConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.runtime import ExecutionRuntime
-from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.services.node_code_pins import node_code_pins_from_job_snapshot
 from server.app.services.node_codes import NodeCodeService, code_hash

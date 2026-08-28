@@ -44,7 +44,14 @@ server/app/
 │   └── schema.py           # 表结构定义
 ├── jobs/                   # Job 领域查询与类型
 │   └── queries/            # JobQueries（含 WorkspaceQueriesMixin）等
-├── configuration/          # 配置加载与 owned-keys 校验
+├── agent_control/          # Agent Worker 控制面（issue #191 归包）：registry.py
+│                         # 注册/鉴权/liveness、register_tokens*.py scoped token
+│                         # 生命周期、completion.py 执行结果提交、
+│                         # declarations.py 声明归一化
+├── agent_catalog/          # Agent 定义目录：definition.py AgentDefinition 模型、
+│                         # builtin.py demo workflow 内置模板
+├── configuration/          # 配置加载与 owned-keys 校验；executor_runtime.py
+│                         # executor_runtime 配置模型（issue #188 中立化）
 ├── executors/              # Code executor、租赁调度与 capacity 控制
 ├── events/                 # 事件总线、Agent 发现与状态跟踪（agents.py）、WS 广播
 ├── workflow_worker/      # DAG workflow worker：thread.py 线程、ready.py 每 pass
@@ -254,13 +261,15 @@ server/app/
 
 | 模型 | 类型 | 字段 | 文件 |
 |------|------|------|------|
-| AgentEnqueueConfig | BaseModel | workers: int, max_pending: int | app/agent_broker/dispatch_pool.py |
-| AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/agent_catalog.py |
+| AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/agent_catalog/definition.py |
+| AgentEnqueueConfig | BaseModel | workers: int, max_pending: int | app/configuration/executor_knobs.py |
+| AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/configuration/executor_knobs.py |
+| CodeStockConfig | BaseModel | enabled: bool, factor: float, min_stock: int, max_stock: int, refresh_seconds... | app/configuration/executor_knobs.py |
+| OpenClawRuntimeConfig | BaseModel | cwd: str | app/configuration/executor_runtime.py |
+| WorkflowsRuntimeConfig | BaseModel | enabled: bool, custom_nodes_enabled: bool | app/configuration/executor_runtime.py |
+| AgentWorkersRuntimeConfig | BaseModel | max_archive_bytes: int, min_protocol_version: int | app/configuration/executor_runtime.py |
+| ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/configuration/executor_runtime.py |
 | CodeCapabilityConfig | BaseModel | timeout_seconds: int, sandbox_network: bool, config_schema: dict[str, Any] | app/executors/contracts.py |
-| OpenClawRuntimeConfig | BaseModel | cwd: str | app/executors/runtime_config.py |
-| WorkflowsRuntimeConfig | BaseModel | enabled: bool, custom_nodes_enabled: bool | app/executors/runtime_config.py |
-| AgentWorkersRuntimeConfig | BaseModel | max_archive_bytes: int, min_protocol_version: int | app/executors/runtime_config.py |
-| ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/executors/runtime_config.py |
 | AgentDefinitionResponse | BaseModel | id: str, runtime: Literal['pi', 'openclaw', 'velites'], capability: str, skil... | app/routes/agent_catalog_contracts.py |
 | AgentDefinitionPayload | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/routes/agent_definition_contracts.py |
 | AgentCopyRequest | BaseModel | new_agent_id: str | app/routes/agent_definition_contracts.py |
@@ -527,8 +536,6 @@ server/app/
 | SkillsConfig | BaseModel | skills: dict[str, SkillSourceConfig] | app/skills/config.py |
 | LockedSkillSource | BaseModel | repo: str, ref: str, commit: str | app/skills/config.py |
 | SkillsLock | BaseModel | version: str, resolved_at: str | None, skills: dict[str, LockedSkillSource] | app/skills/config.py |
-| AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/workflow_worker/agent_stock.py |
-| CodeStockConfig | BaseModel | enabled: bool, factor: float, min_stock: int, max_stock: int, refresh_seconds... | app/workflow_worker/code_stock.py |
 
 <!-- END AUTO-GENERATED -->
 

@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette import concurrency
 
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.services.artifact_store import ArtifactNotFoundError, ArtifactStore
 from server.app.settings import Settings
 

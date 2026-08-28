@@ -7,7 +7,7 @@ playbook outgrew this module's line ceiling). Every claim there mirrors real
 behavior: workflow schema (server/app/workflows/loader.py),
 publish validation (server/app/services/workflow_drafts.py), node-code
 contract (server/app/services/node_codes.py), agent definitions
-(server/app/agent_catalog.py), config schema subset
+(server/app/agent_catalog/definition.py), config schema subset
 (server/app/config_schema.py), workspace-first publishing
 (server/app/services/workflow_draft_publish.py), skill tools
 (server/app/services/skill_editing.py). Update this text whenever

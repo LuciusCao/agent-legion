@@ -15,7 +15,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from server.app.agent_register_token_deletion import delete_register_token_cascading
+from server.app.agent_control.register_token_deletion import delete_register_token_cascading
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 

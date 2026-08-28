@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from server.app.agent_workers import MODEL_RUNTIME_PROTOCOL_VERSION
+from server.app.agent_control.registry import MODEL_RUNTIME_PROTOCOL_VERSION
 
 
 class RegisterAgentWorkerRequest(BaseModel):

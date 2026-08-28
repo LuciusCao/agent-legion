@@ -21,13 +21,13 @@ import copy
 import os
 from typing import Any
 
+from server.app.configuration.executor_runtime import ExecutorRuntimeConfig
 from server.app.configuration.instance_defaults import (
     DEFAULT_CLEANUP_CONFIG,
     DEFAULT_MONITORING_CONFIG,
 )
 from server.app.configuration.openclaw_defaults import DEFAULT_OPENCLAW_CONFIG
 from server.app.db.connection import DatabaseDsn
-from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.services.instance_settings_store import InstanceSettingsStore
 from server.app.settings import Settings
 

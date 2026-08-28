@@ -9,13 +9,13 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from server.app.agent_register_key_guard import resolve_issue_scope
-from server.app.agent_register_tokens import AgentRegisterTokenStore
-from server.app.agent_worker_declarations import (
+from server.app.agent_control.declarations import (
     normalize_labels,
     normalize_worker_declarations,
 )
-from server.app.agent_worker_liveness import WorkerLiveness
+from server.app.agent_control.liveness import WorkerLiveness
+from server.app.agent_control.register_key_guard import resolve_issue_scope
+from server.app.agent_control.register_tokens import AgentRegisterTokenStore
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 from shared.protocol import CODE_PROTOCOL_VERSION, MODEL_RUNTIME_PROTOCOL_VERSION

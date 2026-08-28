@@ -10,9 +10,9 @@ from starlette import concurrency
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.agent_result_commit import commit_agent_result
 from server.app.agent_broker.result_spool import discard_staged_result, spool_result_body
-from server.app.agent_completion import AgentCompletionHandler
-from server.app.agent_register_key_guard import RegisterKeyDeleted
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.completion import AgentCompletionHandler
+from server.app.agent_control.register_key_guard import RegisterKeyDeleted
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.auth.dependencies import require_admin, require_user
 from server.app.routes.agent_register_tokens import create_agent_register_tokens_router
 from server.app.routes.agent_worker_claims import create_agent_worker_claim_router

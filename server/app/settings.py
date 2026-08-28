@@ -9,13 +9,13 @@ from dotenv import load_dotenv
 
 from server.app.configuration import load_application_config
 from server.app.configuration.cors import CorsSettings, load_cors_settings
-from server.app.configuration.instance_defaults import apply_instance_config_defaults
-from server.app.executors.runtime_config import (
+from server.app.configuration.executor_runtime import (
     ExecutorRuntimeConfig,
     OpenClawRuntimeConfig,
     WorkflowsRuntimeConfig,
     validate_runtime,
 )
+from server.app.configuration.instance_defaults import apply_instance_config_defaults
 from server.app.skills.paths import default_skills_runs_dir
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]

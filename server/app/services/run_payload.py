@@ -16,6 +16,10 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+# candidate_input moved to the jobs domain (issue #195); re-exported for the
+# historical import path.
+from server.app.jobs.run_freeze import candidate_input as candidate_input
+
 _PIN_KEYS = ("node_code_versions", "agent_versions", "quality_replay")
 
 
@@ -25,31 +29,6 @@ def _parse_object(raw: Any) -> dict[str, Any]:
     except (TypeError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
-
-
-def candidate_input(candidate: Mapping[str, Any]) -> dict[str, Any]:
-    """The job input document for a task candidate.
-
-    Runs created from items (RunService) carry the terminal input document on
-    the candidate verbatim. Every legacy (pre-materials) intake candidate gets
-    the ``ref`` shape with the legacy marker; ``external_id`` mirrors the
-    job's ``source_id`` and ``connection_key`` stays empty until a workflow
-    binds a source connection (design §7).
-    """
-    explicit = candidate.get("input")
-    if isinstance(explicit, Mapping):
-        return dict(explicit)
-    input_doc: dict[str, Any] = {
-        "type": "ref",
-        "connection_key": "",
-        "external_id": str(candidate["entity_id"]),
-        "legacy": True,
-    }
-    for key in ("entity_type", "title", "stem"):
-        value = candidate.get(key)
-        if value not in (None, ""):
-            input_doc[key] = str(value)
-    return input_doc
 
 
 def reconstruct_batch_payload(

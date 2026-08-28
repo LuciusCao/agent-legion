@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from server.app.configuration.executor_runtime import ExecutorRuntimeConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.runtime import ExecutionRuntime
-from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.settings import Settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread

@@ -574,7 +574,7 @@ def test_close_during_pending_permission_stays_closed(chat) -> None:
     session = service.create_session(workspace_id, user_id, "fake-agent")
     service.send_message(session["id"], workspace_id, "run ls")
     _wait_for(lambda: service.get_session(session["id"])["status"] == "awaiting_permission")
-    runtime = service._runtime(session["id"])
+    runtime = service.runtime(session["id"])
     assert runtime is not None
 
     service.close_session(session["id"], workspace_id)
@@ -687,7 +687,7 @@ def test_create_session_failure_cleans_up_row_token_and_runtime(chat, job_db, mo
     sessions = service.list_sessions(workspace_id)
     assert sessions and sessions[0]["status"] == "error"
     assert minted and authenticate_scoped_token(job_db, minted[0]) is None
-    assert service._runtime(sessions[0]["id"]) is None
+    assert service.runtime(sessions[0]["id"]) is None
 
 
 def test_create_session_mint_failure_still_clears_starting_row(chat, monkeypatch) -> None:
@@ -707,7 +707,7 @@ def test_create_session_mint_failure_still_clears_starting_row(chat, monkeypatch
 
     sessions = service.list_sessions(workspace_id)
     assert sessions and sessions[0]["status"] == "error"
-    assert service._runtime(sessions[0]["id"]) is None
+    assert service.runtime(sessions[0]["id"]) is None
 
 
 def test_busy_claim_rejects_second_sender_without_duplicate_user_message(chat) -> None:

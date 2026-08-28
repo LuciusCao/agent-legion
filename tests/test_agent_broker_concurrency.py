@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.unclaimable import fail_unclaimable_model_requests
 from server.app.agent_catalog import AgentDefinition
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.db.transaction import write_transaction
 from tests.helpers import replace_agent_catalog
 from tests.postgres_support import TEST_DATABASE_URL

@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from server.app.agent_register_token_workspace_removal import (
+from server.app.agent_control.register_token_workspace_removal import (
     cascade_delete_workspace_register_tokens,
 )
 from server.app.jobs.node_limits import (

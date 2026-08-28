@@ -17,7 +17,7 @@ from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.artifact_object_block import inject_artifact_object_block
 from server.app.agent_broker.code_dispatch import resolve_code_manifest_config
 from server.app.agent_broker.code_manifest import resolve_code_runtime_context
-from server.app.agent_workers import CODE_PROTOCOL_VERSION
+from server.app.agent_control.registry import CODE_PROTOCOL_VERSION
 from server.app.routes.agent_workers_contracts import (
     AgentClaimResponse,
     AgentHeartbeatResponse,
