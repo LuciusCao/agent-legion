@@ -558,9 +558,12 @@ server/app/
   （HEAD / HEAD^）对照近期提交的基线与豁免冻结值，拒绝**已跟踪条目**的任何
   ceiling 上抬——手工改 `architecture-budgets.json` 抬高数值、或抬高豁免 ceiling
   同样会被拒绝。ceiling 上抬的唯一合法通道是带 `remove_when` 的
-  `architecture.file_budget` 豁免。已知边界：地板按路径 key，改名/新路径的首次
-  登记（actual + buffer）不受约束（#209 review：改名即重置，内容指纹 key 的加固
-  见 follow-up）；深克隆缺锚点时硬失败，逃生口 env
+  `architecture.file_budget` 豁免。改名绕过已随 #236 加固：检测交给 git 自身的
+  rename 相似度引擎（`git diff --find-renames`，含未提交改动），命中的新路径沿用
+  旧路径地板——改名不再重置 ceiling，真正的全新文件首次登记
+  （actual + buffer）不受约束（删旧建新的正常重构不会误判，因为只有 git 判定
+  内容相似才配对）；深克隆缺锚点时硬失败，git 超时/仓库损坏会在错误中携带真实
+  原因（不再是纯浅克隆猜测），逃生口 env
   `AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW=1`。超出预算的文件必须拆分或回退。
   ceiling 按有效行数计
   （排除注释行与空行，实现见 `scripts/architecture/effective_lines.py`），压缩注释

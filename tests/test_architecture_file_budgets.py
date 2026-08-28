@@ -691,3 +691,212 @@ def test_monotonic_check_fails_when_head_itself_unresolvable(
     monkeypatch.delenv("AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW", raising=False)
     errors = check_file_budgets(root, policy, ())
     assert any("HEAD" in error and "does not resolve" in error for error in errors)
+
+
+def test_rejects_ceiling_raise_via_rename_in_single_commit(tmp_path: Path) -> None:
+    # The path-keyed floor treats a renamed file as a brand-new entry, so
+    # "rename + grow + re-register" resets the ceiling — issue #236. The
+    # renamed file carries its old floor forward: 140 lines re-registered at
+    # 150 sits above the carried floor of 110 and must be rejected, both as
+    # an uncommitted edit and smuggled into a commit.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    (root / "server" / "app" / "example.py").rename(root / "server" / "app" / "example2.py")
+    (root / "server" / "app" / "example2.py").write_text(
+        "\n".join(["line"] * 140), encoding="utf-8"
+    )
+    write_baseline(root, {"server/app/example2.py": 150})
+    errors = check_file_budgets(root, policy, ())
+    assert any("example2.py" in error and "rename" in error for error in errors)
+    # Same shape committed (the CI-visible smuggling path) is still rejected.
+    commit_all(root, "rename + grow + re-register")
+    errors = check_file_budgets(root, policy, ())
+    assert any("example2.py" in error and "rename" in error for error in errors)
+
+
+def test_rejects_rename_even_without_growth_after_ratchet_rebound(tmp_path: Path) -> None:
+    # The friendly trigger path from issue #236: a file at actual ==
+    # ceiling has no slack, so after a rename the plain budget check only
+    # asks for a baseline entry. Registering at actual + buffer (the
+    # ratchet-recommended value) re-inflates the buffer by rename — the old
+    # floor (actual itself) must be carried forward and reject the +10.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 100})
+    (root / "server" / "app" / "example.py").rename(root / "server" / "app" / "example2.py")
+    write_baseline(root, {"server/app/example2.py": 110})
+    errors = check_file_budgets(root, policy, ())
+    assert any("example2.py" in error and "rename" in error for error in errors)
+
+
+def test_rename_to_equivalent_ceiling_passes(tmp_path: Path) -> None:
+    # Renaming while keeping the ceiling at the old floor is a legitimate
+    # move (pure rename, no growth): the carried floor equals the new
+    # entry, nothing rose.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    (root / "server" / "app" / "example.py").rename(root / "server" / "app" / "example2.py")
+    write_baseline(root, {"server/app/example2.py": 110})
+    assert check_file_budgets(root, policy, ()) == []
+
+
+def test_rename_with_lowered_ceiling_passes(tmp_path: Path) -> None:
+    # Rename plus a deliberate tightening (the sanctioned direction) stays
+    # green — carrying the floor must not turn renames into a forced
+    # ceiling freeze at exactly the old value.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    (root / "server" / "app" / "example.py").rename(root / "server" / "app" / "example2.py")
+    write_baseline(root, {"server/app/example2.py": 100})
+    assert check_file_budgets(root, policy, ()) == []
+
+
+def test_rename_with_shrunk_content_and_tighter_ceiling_passes(tmp_path: Path) -> None:
+    # The sanctioned split-then-rename shape: content shrinks, ceiling drops
+    # accordingly — a rename detection that fires here must still pass.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    (root / "server" / "app" / "example.py").rename(root / "server" / "app" / "example2.py")
+    (root / "server" / "app" / "example2.py").write_text("\n".join(["line"] * 50), encoding="utf-8")
+    write_baseline(root, {"server/app/example2.py": 60})
+    assert check_file_budgets(root, policy, ()) == []
+
+
+def test_delete_old_file_and_create_unrelated_new_file_passes(tmp_path: Path) -> None:
+    # Legitimate refactor: remove one file, add a different one. The new
+    # file's content shares nothing with the deleted one, so no rename is
+    # detected and the new entry registers at actual + buffer unrestricted.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    (root / "server" / "app" / "example.py").unlink()
+    (root / "server" / "app" / "unrelated.py").write_text(
+        "\n".join(["def completely_different_content() -> None:\n    pass"] * 40),
+        encoding="utf-8",
+    )
+    write_baseline(root, {"server/app/unrelated.py": 90})
+    assert check_file_budgets(root, policy, ()) == []
+
+
+def test_rename_detection_requires_content_similarity_not_just_deletion(
+    tmp_path: Path,
+) -> None:
+    # A deleted 100-line file and a new 100-line file of disjoint content
+    # must not be paired by name or size heuristics — only git's own
+    # similarity-based rename detection may carry a floor (#236 review
+    # concern: normal delete+add refactors must not be misjudged).
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    (root / "server" / "app" / "example.py").unlink()
+    (root / "server" / "app" / "other.py").write_text(
+        "\n".join(f"alpha_{index} = {index}" for index in range(100)),
+        encoding="utf-8",
+    )
+    write_baseline(root, {"server/app/other.py": 110})
+    assert check_file_budgets(root, policy, ()) == []
+
+
+def test_rejects_rename_floor_carry_when_detection_runs_committed(
+    tmp_path: Path,
+) -> None:
+    # CI shape (issue #236 evidence): the rename lives inside HEAD — the
+    # commit under review renamed the file — while HEAD^ still knows the old
+    # path. The floor must be carried from HEAD^'s old-path entry even when
+    # HEAD itself no longer contains it.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    (root / "server" / "app" / "example.py").rename(root / "server" / "app" / "example2.py")
+    (root / "server" / "app" / "example2.py").write_text(
+        "\n".join(["line"] * 140), encoding="utf-8"
+    )
+    write_baseline(root, {"server/app/example2.py": 150})
+    commit_all(root, "rename + grow + re-register")
+    errors = check_file_budgets(root, policy, ())
+    assert any("example2.py" in error and "rename" in error for error in errors)
+
+
+def test_rejects_exemption_refiled_on_renamed_path_above_carried_floor(
+    tmp_path: Path,
+) -> None:
+    # Exemption-channel variant of the rename bypass: file the dated
+    # exemption on the renamed path above the old path's floor. The carried
+    # floor bounds the exemption ceiling too — a rename is not a fresh
+    # exemption filing.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    (root / "server/app/example.py").rename(root / "server/app/example2.py")
+    write_baseline(root, {"server/app/example2.py": 95})
+    _rewrite_exemption_ceiling(root, ceiling=125)
+    (root / "config" / "architecture" / "architecture-exemptions.yaml").write_text(
+        (root / "config" / "architecture" / "architecture-exemptions.yaml")
+        .read_text(encoding="utf-8")
+        .replace("server/app/example.py", "server/app/example2.py"),
+        encoding="utf-8",
+    )
+    from scripts.architecture.exemptions import load_exemptions
+
+    errors = check_file_budgets(root, policy, load_exemptions(root))
+    assert any(
+        "exemption ceiling 125 rose above committed ceiling 110" in error for error in errors
+    )
+
+
+def test_accepts_exemption_on_renamed_path_within_carried_floor(
+    tmp_path: Path,
+) -> None:
+    # The sanctioned use: rename and file an exemption at or below the old
+    # floor — the carried floor constrains, it does not forbid.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    (root / "server" / "app" / "example.py").rename(root / "server" / "app" / "example2.py")
+    write_baseline(root, {"server/app/example2.py": 95})
+    _rewrite_exemption_ceiling(root, ceiling=105)
+    (root / "config" / "architecture" / "architecture-exemptions.yaml").write_text(
+        (root / "config" / "architecture" / "architecture-exemptions.yaml")
+        .read_text(encoding="utf-8")
+        .replace("server/app/example.py", "server/app/example2.py"),
+        encoding="utf-8",
+    )
+    from scripts.architecture.exemptions import load_exemptions
+
+    assert check_file_budgets(root, policy, load_exemptions(root)) == []
+
+
+def test_snapshot_failure_fails_closed_instead_of_missing_unstaged_rename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Codex review on PR #238: when untracked files exist (an unstaged
+    # rename's new path is untracked) but the worktree snapshot index cannot
+    # be built, falling back to a plain diff is fail-open — the plain diff
+    # never sees the untracked target, the rename goes undetected, and the
+    # new path passes as a first-time registration. The check must hard-fail
+    # instead.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    (root / "server" / "app" / "example.py").rename(root / "server" / "app" / "example2.py")
+    (root / "server" / "app" / "example2.py").write_text(
+        "\n".join(["line"] * 140), encoding="utf-8"
+    )
+    write_baseline(root, {"server/app/example2.py": 150})
+
+    def broken_snapshot(self: object) -> None:
+        return None
+
+    from scripts.architecture.budget_git import GitHelper
+
+    monkeypatch.setattr(GitHelper, "_worktree_snapshot_index", broken_snapshot)
+    monkeypatch.delenv("AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW", raising=False)
+    errors = check_file_budgets(root, policy, ())
+    assert any(
+        "rename detection could not run" in error and "failing closed" in error for error in errors
+    )
+
+
+def test_monotonic_diagnostics_include_real_git_failure_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # #236 follow-up: OSError/TimeoutExpired from the git helper used to be
+    # swallowed into a synthesized stderr nobody read, so a missing git
+    # binary or a timeout was reported as a plain shallow-clone suspicion.
+    # The unresolvable-anchor error must carry the underlying reason.
+    from scripts.architecture import budget_git
+
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
+    write_baseline(root, {"server/app/example.py": 105})
+
+    def failing_run(*args: object, **kwargs: object) -> object:
+        raise OSError("cannot spawn git binary")
+
+    monkeypatch.delenv("AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW", raising=False)
+    monkeypatch.setattr(budget_git.subprocess, "run", failing_run)
+    errors = check_file_budgets(root, policy, ())
+    assert any(
+        "git failed to run" in error and "cannot spawn git binary" in error for error in errors
+    )

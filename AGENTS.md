@@ -107,8 +107,9 @@
   ceiling 单调只降不升（#209）：ratchet 的 `--rebase` / `--bump` 上抬通道已移除，
   `check_architecture` 会按 git 锚点拒绝**已跟踪条目**的任何上抬（含手改 budgets
   JSON 与抬高豁免 ceiling）；唯一合法上抬通道是带 `remove_when` 的
-  `architecture.file_budget` 豁免。已知边界：地板按路径 key，改名/新路径的首次
-  登记（actual + buffer）不在约束内——改名即重置，评审时留意。
+  `architecture.file_budget` 豁免。改名绕过已随 #236 加固：git rename 检测命中的
+  新路径沿用旧路径地板，改名不再重置 ceiling；真正的全新文件首次登记
+  （actual + buffer）不受约束。
 
 ## 6. Boundary Rules（禁止模式摘要）
 
