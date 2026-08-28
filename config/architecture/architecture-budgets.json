@@ -847,7 +847,7 @@
     "server/app/executors/sweeper.py": 95,
     "server/app/http_gzip.py": 31,
     "server/app/http_middleware.py": 44,
-    "server/app/http_range.py": 31,
+    "server/app/http_range.py": 29,
     "server/app/job_intake_background.py": 28,
     "server/app/jobs/__init__.py": 19,
     "server/app/jobs/atomic_mutations.py": 284,
