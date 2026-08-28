@@ -1,6 +1,7 @@
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
@@ -8,6 +9,25 @@ from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.storage_paths import resolve_job_dir
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RawArtifact:
+    """A binary artifact handle: local file path or an object-store stream.
+
+    Local files are served by FileResponse (native Range support for media
+    seeking); stream-backed artifacts come from object storage and stream
+    whole-body on first response.
+    """
+
+    name: str
+    path: Path | None = None
+    stream: BinaryIO | None = None
+    size_bytes: int | None = None
+
+    @property
+    def is_stream(self) -> bool:
+        return self.stream is not None
 
 
 class JobArtifactService:
@@ -37,14 +57,21 @@ class JobArtifactService:
             raise InvalidOperationError("Invalid artifact path")
         return path
 
-    def _read_object(self, job_id: str, artifact_name: str) -> dict[str, Any] | None:
-        if self.object_store is None or not self.object_store.enabled:
+    def _lookup_object_row(self, job_id: str, artifact_name: str) -> dict[str, Any] | None:
+        store = self.object_store
+        if store is None or not store.enabled:
             return None
-        row = self.object_store.lookup(job_id, artifact_name)
+        return store.lookup(job_id, artifact_name)
+
+    def _read_object(self, job_id: str, artifact_name: str) -> dict[str, Any] | None:
+        store = self.object_store
+        if store is None or not store.enabled:
+            return None
+        row = store.lookup(job_id, artifact_name)
         if row is None:
             return None
         try:
-            stream = self.object_store.open_stream(row)
+            stream = store.open_stream(row)
             content = stream.read().decode("utf-8")
         except Exception:
             # 对象可能被 bucket lifecycle 删除（NoSuchKey）或存储暂时不可用：
@@ -64,13 +91,48 @@ class JobArtifactService:
         if path.exists() and path.is_file():
             try:
                 return {"name": artifact_name, "content": path.read_text(encoding="utf-8")}
-            except OSError:
+            except (OSError, UnicodeDecodeError):
                 # TOCTOU：淘汰线程可能在 exists() 与 read_text() 之间 unlink，
-                # 落到对象存储副本而不是冒泡 500。
+                # 落到对象存储副本而不是冒泡 500。UnicodeDecodeError 是二进制
+                # 产物走了文本端点：同样落到 raw 端点该管的路径，这里按未找到
+                # 处理（raw 端点会正常输出字节）。
                 pass
         stored = self._read_object(job_id, artifact_name)
         if stored is not None:
             return stored
+        raise NotFoundError("Artifact not found")
+
+    def open_raw(self, job_id: str, artifact_name: str) -> RawArtifact:
+        """Locate a binary-servable artifact: local job_dir file first, then
+        the object-store stream (mirrors read()'s ordering).
+
+        The returned handle must be consumed (FileResponse / streaming body);
+        stream-backed artifacts raise NotFoundError when object storage is
+        unreachable, matching read()'s degrade-to-404 semantics.
+        """
+        job = self._job_or_404(job_id)
+        path = self._artifact_path(job, artifact_name)
+        if path.exists() and path.is_file():
+            return RawArtifact(name=artifact_name, path=path)
+        store = self.object_store
+        row = self._lookup_object_row(job_id, artifact_name)
+        if row is not None and store is not None:
+            try:
+                stream = store.open_stream(row)
+            except Exception:
+                logger.warning(
+                    "failed to open raw artifact %s of job %s from object storage",
+                    artifact_name,
+                    job_id,
+                    exc_info=True,
+                )
+                raise NotFoundError("Artifact not found") from None
+            size = row.get("size_bytes")
+            return RawArtifact(
+                name=artifact_name,
+                stream=stream,
+                size_bytes=int(size) if isinstance(size, int) else None,
+            )
         raise NotFoundError("Artifact not found")
 
     def reject_subpath(self, job_id: str) -> None:

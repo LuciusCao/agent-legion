@@ -112,3 +112,61 @@ def test_job_artifact_service_falls_back_to_object_store_on_local_read_error(
     result = service.read(job["id"], "result.json")
 
     assert result == {"name": "result.json", "content": '{"from": "store"}'}
+
+
+def test_job_artifact_service_binary_local_file_does_not_500(job_db, job):
+    """本地二进制产物走文本端点：UnicodeDecodeError（ValueError，非 OSError）
+    以前未被捕获直接 500；现在按未找到处理（字节由 raw 端点负责）。"""
+    storage = resolve_job_dir(job, job_db.jobs_dir)
+    storage.mkdir(parents=True, exist_ok=True)
+    (storage / "frame.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
+    service = JobArtifactService(job_db, None)
+
+    with pytest.raises(NotFoundError, match="Artifact not found"):
+        service.read(job["id"], "frame.png")
+
+
+def test_job_artifact_service_open_raw_local_path(job_db, job):
+    storage = resolve_job_dir(job, job_db.jobs_dir)
+    storage.mkdir(parents=True, exist_ok=True)
+    (storage / "frame.png").write_bytes(b"\x89PNG-bytes")
+    service = JobArtifactService(job_db, None)
+
+    raw = service.open_raw(job["id"], "frame.png")
+
+    assert raw.name == "frame.png"
+    assert raw.path is not None
+    assert raw.path.read_bytes() == b"\x89PNG-bytes"
+    assert not raw.is_stream
+
+
+def test_job_artifact_service_open_raw_object_stream(job_db, job):
+    """本地缓存已淘汰 → 对象存储流式输出。"""
+    service = JobArtifactService(job_db, _FakeObjectStore(payload=b"\x00\x01binary"))
+
+    raw = service.open_raw(job["id"], "result.json")
+
+    assert raw.is_stream
+    assert raw.stream is not None
+    assert raw.stream.read() == b"\x00\x01binary"
+    assert raw.path is None
+
+
+def test_job_artifact_service_open_raw_missing(job_db, job):
+    service = JobArtifactService(job_db, None)
+
+    with pytest.raises(NotFoundError, match="Artifact not found"):
+        service.open_raw(job["id"], "missing.png")
+
+
+def test_job_artifact_service_open_raw_object_error_is_404(job_db, job):
+    """对象存储故障 → 404 而非 500（对齐 read() 的降级语义）。"""
+    service = JobArtifactService(job_db, _FakeObjectStore(error=RuntimeError("NoSuchKey")))
+
+    with pytest.raises(NotFoundError, match="Artifact not found"):
+        service.open_raw(job["id"], "result.json")
+
+
+def test_job_artifact_service_open_raw_rejects_traversal(artifact_service, job):
+    with pytest.raises(InvalidOperationError, match="Invalid artifact name"):
+        artifact_service.open_raw(job["id"], "../agent_legion.sqlite")
