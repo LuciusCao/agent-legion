@@ -61,7 +61,7 @@ describe('WorkflowNodeInspectorSections for a start node', () => {
     renderSections(startNode, { readOnly: true })
 
     expect(screen.getByLabelText('入口节点')).toBeInTheDocument()
-    expect(screen.getByText(/material、ref/)).toBeInTheDocument()
+    expect(screen.getByText(/上传文件、外部平台内容/)).toBeInTheDocument()
     // The capability/execution/code editors do not apply to a node that
     // never executes (the backend 404s its node-code endpoints).
     expect(screen.queryByLabelText('节点代码')).not.toBeInTheDocument()
@@ -77,12 +77,10 @@ describe('WorkflowNodeInspectorSections for a start node', () => {
   it('renders the three accepted_item_types checkboxes when editable', () => {
     renderSections(startNode)
 
+    expect(screen.getByRole('checkbox', { name: /上传文件/ })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /外部平台内容/ })).toBeChecked()
     expect(
-      screen.getByRole('checkbox', { name: '材料文件 material' })
-    ).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: '外部引用 ref' })).toBeChecked()
-    expect(
-      screen.getByRole('checkbox', { name: '文件夹 bundle' })
+      screen.getByRole('checkbox', { name: /整个文件夹/ })
     ).not.toBeChecked()
     // 依赖关系段保留。
     expect(screen.getByText('依赖关系')).toBeInTheDocument()
@@ -92,14 +90,14 @@ describe('WorkflowNodeInspectorSections for a start node', () => {
     const setDefinitionYaml = vi.fn()
     renderSections(startNode, { setDefinitionYaml })
 
-    fireEvent.click(screen.getByRole('checkbox', { name: '文件夹 bundle' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /整个文件夹/ }))
     expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
     const added = setDefinitionYaml.mock.calls[0][0] as string
     expect(added).toContain('type: start')
     expect(added).toContain('- bundle')
 
     setDefinitionYaml.mockClear()
-    fireEvent.click(screen.getByRole('checkbox', { name: '外部引用 ref' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /外部平台内容/ }))
     const removed = setDefinitionYaml.mock.calls[0][0] as string
     expect(removed).toContain('- material')
     expect(removed).not.toContain('- ref')
@@ -108,12 +106,8 @@ describe('WorkflowNodeInspectorSections for a start node', () => {
   it('disables the only checked type so the contract stays non-empty', () => {
     renderSections({ ...startNode, accepted_item_types: ['material'] })
 
-    expect(
-      screen.getByRole('checkbox', { name: '材料文件 material' })
-    ).toBeDisabled()
-    expect(screen.getByRole('checkbox', { name: '外部引用 ref' })).toBeEnabled()
-    expect(
-      screen.getByRole('checkbox', { name: '文件夹 bundle' })
-    ).toBeEnabled()
+    expect(screen.getByRole('checkbox', { name: /上传文件/ })).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: /外部平台内容/ })).toBeEnabled()
+    expect(screen.getByRole('checkbox', { name: /整个文件夹/ })).toBeEnabled()
   })
 })

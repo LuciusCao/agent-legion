@@ -1,4 +1,5 @@
 import type { SelectedWorkflowNodeDetails } from './workflowStudioModel'
+import { itemTypeLabels } from '../../lib/acceptedItemTypes'
 import { WorkflowNodeDependencySection } from './WorkflowNodeDependencySection'
 import { WorkflowNodeStartContractEditor } from './components/WorkflowNodeStartContractEditor'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
@@ -15,7 +16,9 @@ export function WorkflowNodeStartSection(props: {
   readOnly?: boolean
 }) {
   const { node } = props.details
-  const types = (node.accepted_item_types ?? []).join('、') || '（未声明）'
+  // readOnly 视图展示用户视角 label（与编辑器、AddItemsDialog 同源），
+  // 不拼内部枚举值；未知类型回退原始值，空契约显示占位符。
+  const types = itemTypeLabels(node.accepted_item_types ?? [])
   return (
     <>
       <section className={inspectorStyles.section} aria-label="入口节点">

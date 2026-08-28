@@ -167,12 +167,10 @@ describe('WorkflowNodeInspector compare fallback for a synthetic start ghost', (
     expect(await screen.findByLabelText('入口节点')).toBeInTheDocument()
     expect(screen.queryByText('未加载 workflow')).not.toBeInTheDocument()
     // 默认契约 material/ref（与 acceptedItemTypes fallback 语义一致）。
+    expect(screen.getByRole('checkbox', { name: /上传文件/ })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /外部平台内容/ })).toBeChecked()
     expect(
-      screen.getByRole('checkbox', { name: '材料文件 material' })
-    ).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: '外部引用 ref' })).toBeChecked()
-    expect(
-      screen.getByRole('checkbox', { name: '文件夹 bundle' })
+      screen.getByRole('checkbox', { name: /整个文件夹/ })
     ).not.toBeChecked()
     // added 边从 edgeChanges 还原进依赖关系段。
     expect(screen.getByText('0 入 / 1 出')).toBeInTheDocument()
@@ -196,8 +194,6 @@ describe('WorkflowNodeInspector compare fallback for a synthetic start ghost', (
     })
 
     expect(await screen.findByLabelText('入口节点')).toBeInTheDocument()
-    expect(
-      screen.getByRole('checkbox', { name: '材料文件 material' })
-    ).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /上传文件/ })).not.toBeChecked()
   })
 })

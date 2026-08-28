@@ -13,7 +13,7 @@ import { api, createRun } from '../api'
 import { useUiStore } from '../stores/uiStore'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { useWorkflowDefinitionQuery } from '../hooks/useWorkflowDefinitionQuery'
-import { acceptedItemTypes } from '../lib/acceptedItemTypes'
+import { acceptedItemTypes, itemTypeLabel } from '../lib/acceptedItemTypes'
 import { parseRefIds } from '../lib/addItems'
 import type { RunItem, WorkspaceResponse } from '../types'
 import { AddItemsBundlePanel } from './AddItemsBundlePanel'
@@ -217,15 +217,20 @@ export function AddItemsDialog({
           </Tabs>
           {(!materialAccepted || !refAccepted || !bundleAccepted) && (
             <div className={styles.errorHint} data-testid="item-type-hint">
-              当前 workflow 只接受
-              {[
-                materialAccepted ? '材料条目' : null,
-                bundleAccepted ? '文件夹条目' : null,
-                refAccepted ? '外部引用条目' : null,
-              ]
-                .filter(Boolean)
-                .join('、')}
-              （start 节点 accepted_item_types）。
+              当前工作流只接受：
+              {
+                // 规范顺序 material/ref/bundle；逐布尔展开而不是把整个
+                // acceptedTypes 数组传给 helper——React Compiler 会把「memo 之后
+                // 数组可能被 opaque 函数 mutate」当成依赖污染。
+                [
+                  materialAccepted && itemTypeLabel('material'),
+                  refAccepted && itemTypeLabel('ref'),
+                  bundleAccepted && itemTypeLabel('bundle'),
+                ]
+                  .filter(Boolean)
+                  .join('、')
+              }
+              。其他提交方式已隐藏，可在 Studio 的入口节点调整。
             </div>
           )}
           {activeTab === 'upload' && (
