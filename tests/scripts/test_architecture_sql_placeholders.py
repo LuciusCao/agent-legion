@@ -68,7 +68,7 @@ def test_collect_counts_scans_tests_and_scripts_roots(tmp_path):
 
 def test_collect_counts_excludes_fixture_files(tmp_path):
     write(
-        tmp_path / "tests/test_architecture_sql_placeholders.py",
+        tmp_path / "tests/scripts/test_architecture_sql_placeholders.py",
         'SQL = "SELECT 1 WHERE a = ?"\n',
     )
     write(tmp_path / "tests/db/test_dialect_guard.py", 'SQL = "SELECT 1 WHERE b = ?"\n')

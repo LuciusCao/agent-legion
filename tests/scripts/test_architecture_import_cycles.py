@@ -205,7 +205,7 @@ def test_class_body_import_is_eager(tmp_path: Path) -> None:
 
 def test_jobs_lazy_getattr_import_is_absent_from_graph() -> None:
     module = importlib.import_module("scripts.architecture.import_cycles")
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     path = root / "server/app/jobs/__init__.py"
     known = {
         module._module_name(candidate.relative_to(root))
@@ -241,7 +241,7 @@ def test_legacy_job_queries_export_remains_compatible() -> None:
 
 
 def test_current_repository_has_no_import_cycles() -> None:
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     assert _check_import_cycles(root) == []
 
 

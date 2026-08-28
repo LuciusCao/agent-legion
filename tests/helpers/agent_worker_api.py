@@ -1,6 +1,6 @@
 """Shared helpers for the agent worker / broker API test surface.
 
-These grew inside test files (``tests/test_agent_broker.py``,
+These grew inside test files (``tests/services/test_agent_broker.py``,
 ``tests/routes/test_agent_workers.py``) and were then imported cross-file by
 other tests, turning test modules into each other's dependencies. They live
 here so a test file can be renamed or split without a cascade of import
@@ -30,7 +30,7 @@ def broker(data_dir, **kwargs) -> AgentExecutionBroker:
 def assert_capacity_matrix(job_db) -> None:
     """30 queued nodes, 3 workers capped at 10: exactly 20 claims get through.
 
-    Shared by the unit tier (tests/test_agent_broker.py) and the full-gate
+    Shared by the unit tier (tests/services/test_agent_broker.py) and the full-gate
     evidence (tests/full/test_agent_worker_control_plane.py).
     """
     for index in range(30):

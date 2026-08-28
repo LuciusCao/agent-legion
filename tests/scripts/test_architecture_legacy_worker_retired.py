@@ -4,7 +4,7 @@ import pytest
 
 pytestmark = pytest.mark.no_db
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 RETIRED_FILES = [
     "server/app/worker.py",

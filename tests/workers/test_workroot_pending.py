@@ -3,7 +3,7 @@
 #203 P1：仅凭 marker 存在就跳过 claim 会让旧 lease 的孤儿 marker 耗尽当前
 重试次数（claim 每次 attempt+1，sweeper 超过 requeue_limit 不再重排）。
 ownership 核对的全部边界在这里钉住；两条 prepare 路径的集成行为分别在
-tests/test_worker_execution_prepare.py 与 tests/workers/test_code_runner.py。
+tests/workers/test_worker_execution_prepare.py 与 tests/workers/test_code_runner.py。
 """
 
 from __future__ import annotations

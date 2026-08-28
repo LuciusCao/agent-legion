@@ -1,7 +1,7 @@
 """Concurrency contract tests for the Agent broker claim path (spec §Testing).
 
 Covers the review-required scenarios the sequential tests in
-``tests/test_agent_broker.py`` cannot reach: the 19/20 two-worker claim race,
+``tests/services/test_agent_broker.py`` cannot reach: the 19/20 two-worker claim race,
 late-result/zombie-heartbeat rejection after requeue, bounded cross-workspace
 fairness, the requeue guard against just-completed nodes, job-control
 re-checks, and stale-definition reaping.

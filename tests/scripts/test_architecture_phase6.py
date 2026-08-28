@@ -7,7 +7,7 @@ from tests.architecture_budget_helpers import write_neutral_budget_governance
 
 pytestmark = pytest.mark.no_db
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def write(path: Path, content: str) -> None:

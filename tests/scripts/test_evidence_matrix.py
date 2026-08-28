@@ -8,7 +8,7 @@ import pytest
 
 from scripts.quality.invariants import load_registry
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MATRIX_PATH = PROJECT_ROOT / "docs" / "architecture" / "workspace-executor-evidence-matrix.md"
 REGISTRY_PATH = PROJECT_ROOT / "config" / "architecture" / "architecture-invariants.yaml"
 

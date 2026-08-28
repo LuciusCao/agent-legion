@@ -17,7 +17,7 @@ invariants:
         target: scripts/check_architecture.py
         gate: quick
       - kind: contract
-        target: tests/test_architecture_configuration.py
+        target: tests/scripts/test_architecture_configuration.py
         gate: quick
 
   - id: SECURITY-PATH-001
@@ -38,7 +38,7 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_job_deletion_service.py
+        target: tests/services/test_job_deletion_service.py
         gate: quick
       - kind: integration
         target: tests/full/test_job_deletion_races.py
@@ -131,7 +131,7 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_executor_cancellation.py
+        target: tests/executors/test_executor_cancellation.py
         gate: quick
       - kind: integration
         target: tests/full/test_executor_cancellation_recovery.py
@@ -177,7 +177,7 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_job_events.py
+        target: tests/events/test_job_events.py
         gate: quick
       - kind: integration
         target: tests/full/test_workspace_sse.py
@@ -201,16 +201,16 @@ invariants:
         target: scripts/check_architecture.py
         gate: quick
       - kind: contract
-        target: tests/test_check_architecture.py
+        target: tests/scripts/test_check_architecture.py
         gate: quick
       - kind: contract
-        target: tests/test_architecture_file_budgets.py
+        target: tests/scripts/test_architecture_file_budgets.py
         gate: quick
       - kind: contract
-        target: tests/test_ratchet_architecture_budgets.py
+        target: tests/scripts/test_ratchet_architecture_budgets.py
         gate: quick
       - kind: contract
-        target: tests/test_architecture_exemption_age.py
+        target: tests/scripts/test_architecture_exemption_age.py
         gate: quick
 
   - id: BOUNDARY-VIDEO-001
@@ -222,7 +222,7 @@ invariants:
         target: scripts/check_architecture.py
         gate: quick
       - kind: contract
-        target: tests/test_architecture_video_legacy.py
+        target: tests/scripts/test_architecture_video_legacy.py
         gate: quick
 
   - id: BOUNDARY-VIDEO-002
@@ -234,7 +234,7 @@ invariants:
         target: scripts/check_architecture.py
         gate: quick
       - kind: contract
-        target: tests/test_architecture_video_legacy.py
+        target: tests/scripts/test_architecture_video_legacy.py
         gate: quick
 
   - id: BOUNDARY-VIDEO-003
@@ -246,10 +246,10 @@ invariants:
         target: scripts/check_architecture.py
         gate: quick
       - kind: contract
-        target: tests/test_architecture_phase6.py
+        target: tests/scripts/test_architecture_phase6.py
         gate: quick
       - kind: contract
-        target: tests/test_architecture_video_legacy.py
+        target: tests/scripts/test_architecture_video_legacy.py
         gate: quick
 
   - id: DB-STATE-001
@@ -258,11 +258,11 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_agent_broker.py
+        target: tests/services/test_agent_broker.py
         gate: quick
 
       - kind: integration
-        target: tests/test_job_event_buffer_db.py
+        target: tests/events/test_job_event_buffer_db.py
         gate: quick
       - kind: integration
         target: tests/routes/jobs/test_job_batches.py::test_async_batch_claim_is_atomic_across_consumers
@@ -277,13 +277,13 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_agent_worker_service.py
+        target: tests/workers/test_agent_worker_service.py
         gate: quick
       - kind: integration
-        target: tests/test_agent_worker.py::test_registration_retries_transient_host_errors_without_traceback
+        target: tests/workers/test_agent_worker.py::test_registration_retries_transient_host_errors_without_traceback
         gate: quick
       - kind: integration
-        target: tests/test_worker_cli.py
+        target: tests/workers/test_worker_cli.py
         gate: quick
 
   - id: EXEC-AGENTCLAIM-001
@@ -292,7 +292,7 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_agent_broker.py
+        target: tests/services/test_agent_broker.py
         gate: quick
       - kind: integration
         target: tests/routes/test_agent_workers.py
@@ -307,10 +307,10 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_agent_catalog.py
+        target: tests/services/test_agent_catalog.py
         gate: quick
       - kind: integration
-        target: tests/test_executor_catalog_service.py::test_catalog_exposes_published_agent_definitions
+        target: tests/services/test_executor_catalog_service.py::test_catalog_exposes_published_agent_definitions
         gate: quick
       - kind: integration
         target: tests/services/test_agent_service.py
@@ -319,7 +319,7 @@ invariants:
         target: tests/db/test_agent_workspace_scope_migration.py
         gate: quick
       - kind: integration
-        target: tests/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity
+        target: tests/services/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity
         gate: quick
       - kind: integration
         target: tests/full/test_agent_worker_control_plane.py::test_agent_definition_catalog_snapshot_lifecycle
@@ -331,7 +331,7 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_agent_broker.py
+        target: tests/services/test_agent_broker.py
         gate: quick
       - kind: integration
         target: tests/routes/test_agent_workers.py
@@ -346,16 +346,16 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_agent_broker.py
+        target: tests/services/test_agent_broker.py
         gate: quick
       - kind: integration
         target: tests/routes/test_agent_workers.py::test_release_slot_requires_and_validates_lease_id
         gate: quick
       - kind: integration
-        target: tests/test_agent_worker.py
+        target: tests/workers/test_agent_worker.py
         gate: quick
       - kind: integration
-        target: tests/test_worker_upload_queue.py
+        target: tests/workers/test_worker_upload_queue.py
         gate: quick
 
   - id: EXEC-VALIDATION-001
@@ -364,7 +364,7 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_agent_completion_validation.py
+        target: tests/services/test_agent_completion_validation.py
         gate: quick
 
   - id: EXEC-CODE-001
@@ -522,7 +522,7 @@ invariants:
         target: tests/routes/test_agent_workers.py
         gate: quick
       - kind: integration
-        target: tests/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity
+        target: tests/services/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity
         gate: quick
       - kind: integration
         target: tests/full/test_agent_worker_control_plane.py::test_worker_token_is_hashed_and_deleted_worker_loses_access
@@ -540,7 +540,7 @@ invariants:
         target: tests/executors/leases/test_failure_classification_persistence.py
         gate: quick
       - kind: integration
-        target: tests/test_agent_broker_concurrency.py::test_stale_definition_requests_are_failed_by_sweeper
+        target: tests/services/test_agent_broker_concurrency.py::test_stale_definition_requests_are_failed_by_sweeper
         gate: quick
 
   - id: DB-FAILURE-002
@@ -579,7 +579,7 @@ invariants:
         target: tests/routes/test_auth_matrix.py
         gate: quick
       - kind: integration
-        target: tests/test_auth_queries.py
+        target: tests/db/test_auth_queries.py
         gate: quick
       - kind: integration
         target: tests/full/test_auth_control_plane.py
@@ -852,7 +852,7 @@ invariants:
         target: tests/workflows/test_velites_command.py
         gate: quick
       - kind: integration
-        target: tests/test_agent_broker.py::test_dispatch_fails_fast_on_unsupported_runtime
+        target: tests/services/test_agent_broker.py::test_dispatch_fails_fast_on_unsupported_runtime
         gate: quick
       - kind: integration
         target: tests/full/test_velites_harness_e2e.py::test_velites_runtime_agent_worker_chain_end_to_end
@@ -902,13 +902,13 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_agent_broker_concurrency.py::test_unclaimable_sweeper_fails_on_runtime_mismatch
+        target: tests/services/test_agent_broker_concurrency.py::test_unclaimable_sweeper_fails_on_runtime_mismatch
         gate: quick
       - kind: integration
-        target: tests/test_agent_broker_concurrency.py::test_unclaimable_sweeper_fails_on_cross_worker_combination
+        target: tests/services/test_agent_broker_concurrency.py::test_unclaimable_sweeper_fails_on_cross_worker_combination
         gate: quick
       - kind: integration
-        target: tests/test_agent_broker.py::test_pi_only_worker_cannot_claim_velites_request
+        target: tests/services/test_agent_broker.py::test_pi_only_worker_cannot_claim_velites_request
         gate: quick
 
   - id: EXEC-QUALITY-REPLAY-001
@@ -1138,5 +1138,5 @@ invariants:
         target: tests/db/test_schema_version_registry.py
         gate: quick
       - kind: integration
-        target: tests/test_db.py::test_database_initialization_records_postgres_schema
+        target: tests/db/test_db.py::test_database_initialization_records_postgres_schema
         gate: quick
