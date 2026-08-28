@@ -105,7 +105,7 @@ def test_scan_entries_contain_unparsable_active_revision(settings, job_db, caplo
     )
 
     with caplog.at_level("WARNING", logger="server.app.workflow_worker.catalog_scan"):
-        entries = load_workflow_scan_entries(settings)
+        entries = load_workflow_scan_entries(job_db)
 
     by_workspace = {ws: (key, definition) for ws, key, definition in entries}
     assert str(workspace["id"]) in by_workspace
@@ -136,7 +136,7 @@ def test_scan_entries_contain_malformed_json_revision(settings, job_db, caplog) 
     )
 
     with caplog.at_level("WARNING", logger="server.app.workflow_worker.catalog_scan"):
-        entries = load_workflow_scan_entries(settings)
+        entries = load_workflow_scan_entries(job_db)
 
     by_workspace = {ws: (key, definition) for ws, key, definition in entries}
     assert str(workspace["id"]) in by_workspace
@@ -172,7 +172,7 @@ def test_scan_entries_propagate_programming_errors(settings, job_db, monkeypatch
     monkeypatch.setattr(catalog_scan, "workflow_definition_from_dict", _boom)
 
     try:
-        load_workflow_scan_entries(settings)
+        load_workflow_scan_entries(job_db)
     except TypeError:
         pass  # the programming error escaped the scan entry loader, as intended
     else:
