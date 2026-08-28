@@ -157,6 +157,6 @@ def create_materials_router(service: MaterialsService) -> APIRouter:
 
     # Bundle manifests are a materials adjunct (#156): same secured group,
     # same DSN — mounting here keeps the exempt routes/__init__.py untouched.
-    bundles = create_material_bundles_router(MaterialBundlesService(service._dsn))
+    bundles = create_material_bundles_router(MaterialBundlesService(service.connect_source))
     router.include_router(bundles)
     return router
