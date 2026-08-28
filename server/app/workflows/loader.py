@@ -18,7 +18,7 @@ from server.app.workflows.schema import (
     WorkflowShardSpec,
     WorkflowTerminal,
 )
-from server.app.workflows.snapshot_shape import snapshot_field
+from server.app.workflows.snapshot_shape import ensure_mapping, snapshot_field
 from server.app.workflows.start_node import ensure_start_node, load_start_fields
 from server.app.workflows.validator import _validate_acyclic
 from server.app.workflows.workflow_node_execution import load_node_execution
@@ -337,17 +337,15 @@ def workflow_definition_from_dict(
                 raw_node.pop(placeholder, None)
         else:
             raw_node.pop("accepted_item_types", None)
-        terminal = raw_node.get("terminal")
-        if terminal is not None:
-            raw_node["terminal"] = dict(terminal)
+        ensure_mapping(raw_node.get("terminal"), f"node {node_key} 'terminal'")
         raw["nodes"][node_key] = raw_node
     for edge in edges_payload:
         raw_edge = {
             "from": edge.get("source") or edge.get("from"),
             "to": edge.get("target") or edge.get("to"),
         }
-        condition = edge.get("condition") or edge.get("when")
-        if condition is not None:
+        condition = ensure_mapping(edge.get("condition") or edge.get("when"), "edge 'condition'")
+        if condition:
             raw_edge["when"] = {
                 "artifact": condition.get("artifact"),
                 "path": condition.get("path"),

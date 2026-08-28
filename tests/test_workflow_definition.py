@@ -435,6 +435,13 @@ def test_workflow_definition_from_dict_converts_corrupt_shapes_to_definition_err
         {"key": "k", "edges": {"a": 1}},  # edges is a mapping
         {"key": "k", "edges": [None]},  # null edge entry
         {"key": "k", "edges": ["string"]},  # non-mapping edge entry
+        # subagent review on PR #243: nested terminal/condition corruption
+        # used to escape as TypeError/ValueError/AttributeError — same
+        # worker-killing path as the shapes above.
+        {"key": "k", "nodes": {"a": {"terminal": "x"}}},  # terminal as str
+        {"key": "k", "nodes": {"a": {"terminal": 5}}},  # terminal as int
+        {"key": "k", "edges": [{"condition": "y"}]},  # condition as str
+        {"key": "k", "edges": [{"when": ["y"]}]},  # when as list
     ]
     for payload in corrupt_payloads:
         with pytest.raises(WorkflowDefinitionError):

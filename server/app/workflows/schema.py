@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+#: Every item type a start node may declare (D1). ``bundle`` (#156) is
+#: opt-in: it is never part of the default contract below.
 class WorkflowDefinitionError(ValueError):
     """Raised when a workflow YAML file is invalid."""
 
