@@ -10,6 +10,7 @@ import pytest
 
 from server.app.agent_broker.agent_bundle import build_agent_bundle
 from worker.execution_prepare import prepare_execution
+from worker.upload_queue import PENDING_FILENAME, PendingUploadExists
 
 
 def _make_bundle(tmp_path: Path, manifest: dict) -> Path:
@@ -135,3 +136,45 @@ def test_prepare_execution_rejects_digest_mismatch(tmp_path: Path) -> None:
             tmp_path / "exec-1",
             threading.Semaphore(1),
         )
+
+
+def test_prepare_refuses_dir_with_pending_upload_marker(tmp_path: Path) -> None:
+    """#203：带未投递 marker 的目录归 UploadQueue 所有，prepare 不得删除或覆盖。"""
+    execution_dir = tmp_path / "exec-1"
+    job_dir = execution_dir / "job"
+    job_dir.mkdir(parents=True)
+    (job_dir / "output.json").write_text("old result", encoding="utf-8")
+    marker = execution_dir / PENDING_FILENAME
+    marker.write_text('{"version": 1, "execution_id": "exec-1"}', encoding="utf-8")
+
+    with pytest.raises(PendingUploadExists, match=PENDING_FILENAME):
+        prepare_execution(
+            FakeClient(_make_bundle(tmp_path, _manifest({}))),
+            _claim(),
+            execution_dir,
+            threading.Semaphore(1),
+        )
+
+    # 目录与内容原样保留：marker、已准备的产物都不许动。
+    assert marker.is_file()
+    assert marker.read_text(encoding="utf-8") == '{"version": 1, "execution_id": "exec-1"}'
+    assert (job_dir / "output.json").read_text(encoding="utf-8") == "old result"
+    # prepare 未写入任何新文件（bundle 下载也未发生）。
+    assert [p.name for p in execution_dir.iterdir()] == ["job", PENDING_FILENAME]
+
+
+def test_prepare_replaces_stale_dir_without_marker(tmp_path: Path) -> None:
+    """无 marker 的崩溃残留目录仍被清理（既有行为回归，issue #203 语义不动摇）。"""
+    stale = tmp_path / "exec-1"
+    stale.mkdir(parents=True)
+    (stale / "junk").write_text("leftover", encoding="utf-8")
+
+    prepare_execution(
+        FakeClient(_make_bundle(tmp_path, _manifest({}))),
+        _claim(),
+        stale,
+        threading.Semaphore(1),
+    )
+
+    assert not (stale / "junk").exists()
+    assert (stale / "bundle.tar.gz").is_file()

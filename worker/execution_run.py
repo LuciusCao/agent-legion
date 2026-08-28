@@ -26,7 +26,13 @@ from worker.execution_prepare import prepare_execution
 from worker.host_client import Client
 from worker.process_lifecycle import AGENT_PGID_FILENAME, terminate, wait_for_exit
 from worker.status import ExecutionStatusReporter
-from worker.upload_queue import MAX_ERROR_MESSAGE_CHARS, UploadQueue, UploadTask
+from worker.upload_queue import (
+    MAX_ERROR_MESSAGE_CHARS,
+    PENDING_FILENAME,
+    PendingUploadExists,
+    UploadQueue,
+    UploadTask,
+)
 
 
 def agent_subprocess_env(environment: dict[str, str]) -> dict[str, str]:
@@ -85,10 +91,12 @@ def deliver_result(
             return
     # Local discard: lease lost or release rejected — stop heartbeating and
     # drop the execution dir; the Host requeues after the lease expires.
+    # #203：带未投递 marker 的目录归 UploadQueue 所有，保留待其投递后自清。
     heartbeat.stop.set()
     heartbeat.thread.join(timeout=2)
     status.finish(execution_id)
-    shutil.rmtree(execution_dir, ignore_errors=True)
+    if not (execution_dir / PENDING_FILENAME).is_file():
+        shutil.rmtree(execution_dir, ignore_errors=True)
 
 
 def run_execution(
@@ -218,6 +226,12 @@ def run_execution(
                 )
             # else: lease lost mid-run — the Host owns the outcome; nothing
             # to deliver, fall through to the local-discard path below.
+    except PendingUploadExists:
+        # #203：execution_dir 属于一个排队中的 pending 上传（restore() 恢复的旧
+        # 结果）。上报假 failed 会经 submit() 覆盖 marker 丢掉旧结果，所以本次
+        # claim 直接放弃：task 保持 None 走本地丢弃分支（marker 目录被豁免），
+        # 停心跳让租约到期，由 Host 重新调度。
+        print(f"skipping claim of {execution_id}: dir holds a pending upload", flush=True)
     except Exception as exc:
         traceback.print_exc()
         task = UploadTask(

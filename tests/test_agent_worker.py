@@ -257,6 +257,36 @@ def test_run_execution_replaces_stale_execution_dir(tmp_path: Path) -> None:
     assert client.reports[0]["status"] == "completed"
 
 
+def test_run_execution_skips_claim_when_pending_upload_marker_exists(
+    tmp_path: Path,
+) -> None:
+    """#203：restore() 恢复的 pending 结果排队中，Host requeue 后又被本 worker
+    claim——run_execution 必须放弃本次 claim（不 prepare、不 release、不 report 假
+    failed），目录与 marker 留给 UploadQueue 投递。"""
+    from worker.upload_queue import PENDING_FILENAME
+
+    execution_dir = tmp_path / "work" / "exec-1"
+    job_dir = execution_dir / "job"
+    job_dir.mkdir(parents=True)
+    (job_dir / "output.json").write_text("old result", encoding="utf-8")
+    marker = execution_dir / PENDING_FILENAME
+    marker.write_text('{"version": 1, "execution_id": "exec-1"}', encoding="utf-8")
+    script = _write_executable(
+        tmp_path / "fake_pi",
+        '#!/usr/bin/env python3\nfrom pathlib import Path\nPath("output.json").write_text("new", encoding="utf-8")\n',
+    )
+    client = FakeClient(_make_bundle(tmp_path, _manifest([script])))
+
+    _run(client, tmp_path / "work")
+
+    # 不上报（也没有假 failed）、不 release：租约到期由 Host 重新调度。
+    assert client.reports == []
+    assert client.release_calls == 0
+    # 目录、marker 与已准备的产物原样保留。
+    assert marker.is_file()
+    assert (job_dir / "output.json").read_text(encoding="utf-8") == "old result"
+
+
 def test_run_execution_releases_slot_after_process_exit(tmp_path: Path) -> None:
     script = _write_executable(
         tmp_path / "fake_pi",
