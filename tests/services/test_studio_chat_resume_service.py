@@ -26,6 +26,7 @@ from server.app.studio_chat.resume_context import (
     RESUME_TRANSCRIPT_OMITTED,
     build_resume_transcript,
 )
+from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.service import StudioChatService
 from tests.helpers import wait_for_predicate
 from tests.postgres_support import TEST_DATABASE_URL
@@ -507,3 +508,81 @@ def test_resume_skips_session_resumed_row_when_close_races(chat, monkeypatch) ->
     ]
     assert "session_resumed" not in events
     assert events == ["session_closed", "session_closed"]
+
+
+class _StubHandle:
+    """ACP handle stand-in: registered runtimes without a subprocess."""
+
+    def send_prompt(self, text: str) -> bool:
+        del text
+        return True
+
+    def cancel(self) -> None: ...
+
+    def close(self) -> None: ...
+
+
+def _resume_aba_setup(chat, job_db):
+    """Old-generation runtime already replaced in the registry by resume's.
+
+    Mirrors the close-mid-turn window: close popped the old runtime, resume
+    claimed the row back to idle and registered the NEW runtime; the old
+    thread's exit echo is still in flight.
+    """
+    service, _bus, _register, workspace_id, user_id = chat
+    session_id = job_db.create_studio_chat_session(workspace_id, user_id, "direct-agent")
+    job_db.update_studio_chat_session(session_id, status="idle")
+    old_runtime = SessionRuntime(_StubHandle(), token="old-token")
+    new_runtime = SessionRuntime(_StubHandle(), token="new-token")
+    with service._runtimes_lock:
+        service._runtimes[session_id] = new_runtime
+    return service, session_id, old_runtime, new_runtime, workspace_id
+
+
+def test_stale_exit_echo_after_resume_spares_new_runtime(chat, job_db) -> None:
+    """Resume ABA regression: the old thread's close-initiated exit echo
+    firing AFTER resume registered the new runtime must not pop/closed-flag
+    the new runtime — it tears down only its own (pinned identity)."""
+    service, session_id, old_runtime, new_runtime, _workspace_id = _resume_aba_setup(chat, job_db)
+
+    service._events().on_exit(session_id, close_initiated=True, expected=old_runtime)
+
+    assert service.runtime(session_id) is new_runtime
+    assert not new_runtime.closed
+    assert old_runtime.closed
+
+
+def test_stale_death_echo_after_resume_does_not_stamp_row(chat, job_db) -> None:
+    """Same ABA on the DB dimension: a stale agent-death echo (registry owned
+    by the new generation) must not stamp the resumed row error nor append a
+    bogus error message."""
+    service, session_id, old_runtime, new_runtime, workspace_id = _resume_aba_setup(chat, job_db)
+
+    service._events().on_exit(session_id, close_initiated=False, expected=old_runtime)
+
+    assert service.runtime(session_id) is new_runtime
+    assert not new_runtime.closed
+    assert job_db.get_studio_chat_session(session_id)["status"] == "idle"
+    assert not any(
+        m["kind"] == "status" and m["content"].get("event") == "error"
+        for m in service.list_messages(session_id, workspace_id)
+    )
+
+
+def test_own_death_echo_still_pops_and_stamps_error(chat, job_db) -> None:
+    """Positive control: the exit echo whose runtime still IS the registry's
+    current entry owns the teardown and the row transition (#158 behavior,
+    now with the identity pinned)."""
+    service, session_id, runtime, _new, workspace_id = _resume_aba_setup(chat, job_db)
+    with service._runtimes_lock:
+        service._runtimes[session_id] = runtime
+
+    service._events().on_exit(session_id, close_initiated=False, expected=runtime)
+
+    assert service.runtime(session_id) is None
+    assert runtime.closed
+    assert job_db.get_studio_chat_session(session_id)["status"] == "error"
+    assert any(
+        m["kind"] == "status" and m["content"].get("event") == "error"
+        for m in service.list_messages(session_id, workspace_id)
+    )

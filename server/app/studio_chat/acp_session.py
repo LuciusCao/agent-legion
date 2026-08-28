@@ -25,7 +25,7 @@ import logging
 import queue
 import threading
 from collections.abc import Mapping
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from acp import PROTOCOL_VERSION, spawn_agent_process
 from acp.schema import (
@@ -45,6 +45,9 @@ from acp.schema import (
 from server.app.studio_chat.capabilities import capability_snapshot
 from server.app.studio_chat.session_load import open_acp_session
 from server.app.studio_chat.terminals import AcpTerminalStore, TerminalClientMixin
+
+if TYPE_CHECKING:
+    from server.app.studio_chat.runtime import SessionRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +73,11 @@ CLOSE_GRACE_SECONDS = 5
 
 class AcpSessionCallbacks(Protocol):
     """Service-side hooks invoked from the session thread; must be thread-safe."""
+
+    # Bound by spawn_session_runtime right after the runtime is created
+    # (before handle.start()): the death-echo on_exit pins this identity so a
+    # stale exit cannot tear down a newer runtime registered by resume (ABA).
+    runtime: SessionRuntime | None
 
     def on_ready(self, capabilities: dict[str, Any], acp_session_id: str) -> None: ...
 

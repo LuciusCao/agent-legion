@@ -3,9 +3,8 @@
 Split from service.py (file budget): create_session and resume_session both
 mint the per-session run token, spawn the ACP subprocess handle, wait for
 readiness, and funnel every startup failure through one cleanup path (guarded
-error write, runtime teardown, token revoke). build_mcp_server_spec lives
-here too — service.py was its only consumer (moved out of acp_session.py for
-the same budget reason).
+error write, runtime teardown, token revoke). build_mcp_server_spec lives here
+too — service.py was its only consumer (moved out of acp_session.py for budget).
 """
 
 from __future__ import annotations
@@ -24,7 +23,8 @@ from server.app.services.job_errors import InvalidOperationError
 from server.app.settings import Settings
 from server.app.studio_chat.acp_session import AcpSessionCallbacks, AcpSessionHandle
 from server.app.studio_chat.registry import StudioAgentRegistryStore
-from server.app.studio_chat.runtime import SessionRuntime, teardown_runtime
+from server.app.studio_chat.runtime import SessionRuntime
+from server.app.studio_chat.teardown import teardown_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +69,11 @@ def spawn_session_runtime(
 ) -> AcpSessionHandle:
     """Mint the run token, spawn the agent subprocess, wait for readiness.
 
-    The caller owns the session-row transition into 'starting' (creation
-    INSERT or resume claim); this path raises after one shared cleanup so a
-    failed start never leaves a 'starting' row, a leaked token, or an
-    orphaned runtime. Returns the live handle (its ``loaded_existing`` flag
-    tells the resume path whether session/load restored the prior context).
+    The caller owns the session-row transition into 'starting' (creation INSERT
+    or resume claim); this path raises after one shared cleanup so a failed
+    start never leaves a 'starting' row, a leaked token, or an orphaned runtime.
+    Returns the live handle (its ``loaded_existing`` flag tells the resume path
+    whether session/load restored the prior context).
     """
     token: str | None = None
     runtime: SessionRuntime | None = None
@@ -95,8 +95,11 @@ def spawn_session_runtime(
             resume_acp_session_id=resume_acp_session_id,
         )
         runtime = SessionRuntime(handle, token)
+        # Pin the runtime identity on the callbacks BEFORE start: the ACP
+        # thread's death-echo on_exit may only tear down this runtime, never
+        # a newer one resume registered for the same session_id (ABA).
         with runtimes_lock:
-            runtimes[session_id] = runtime
+            runtimes[session_id] = callbacks.runtime = runtime
         handle.start()
         if not handle.ready_event.wait(timeout=SESSION_START_TIMEOUT_SECONDS):
             raise InvalidOperationError("Studio agent failed to start (timeout)")

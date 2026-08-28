@@ -1,4 +1,5 @@
 {
+  "version": 3,
   "files": {
     "frontend/src/App.tsx": 29,
     "frontend/src/AppRoutes.tsx": 48,
@@ -1205,12 +1206,13 @@
     "server/app/studio_chat/registry.py": 84,
     "server/app/studio_chat/resume.py": 85,
     "server/app/studio_chat/resume_context.py": 80,
-    "server/app/studio_chat/runtime.py": 71,
-    "server/app/studio_chat/service.py": 301,
+    "server/app/studio_chat/runtime.py": 37,
+    "server/app/studio_chat/service.py": 298,
     "server/app/studio_chat/session_load.py": 40,
     "server/app/studio_chat/spawn.py": 105,
     "server/app/studio_chat/store.py": 79,
     "server/app/studio_chat/streaming.py": 47,
+    "server/app/studio_chat/teardown.py": 72,
     "server/app/studio_chat/terminals.py": 235,
     "server/app/worker_control.py": 31,
     "server/app/worker_startup.py": 100,
@@ -1369,6 +1371,5 @@
     "workspace_libs/node_artifacts.py": 54,
     "workspace_libs/node_sdk.py": 197,
     "workspace_libs/url_guard.py": 52
-  },
-  "version": 3
+  }
 }

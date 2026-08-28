@@ -35,12 +35,10 @@ from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.resume import resume_session
 from server.app.studio_chat.resume_context import prepare_resume_prompt, rearm_resume_transcript
-from server.app.studio_chat.runtime import (
-    SessionRuntime,
-    teardown_runtime,
-)
+from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.spawn import spawn_session_runtime
 from server.app.studio_chat.store import StudioChatStore
+from server.app.studio_chat.teardown import teardown_runtime
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import AcpEventHandlers
@@ -83,16 +81,15 @@ class StudioChatService:
             return self._runtimes.get(session_id)
 
     def teardown_runtime(
-        self, session_id: str, runtime: SessionRuntime | None, *, close_handle: bool = True
-    ) -> None:
-        teardown_runtime(
-            self._db,
-            self._runtimes,
-            self._runtimes_lock,
-            session_id,
-            runtime,
-            close_handle=close_handle,
-        )
+        self,
+        session_id: str,
+        runtime: SessionRuntime | None,
+        *,
+        close_handle: bool = True,
+        expected: SessionRuntime | None = None,
+    ) -> bool:
+        args = (self._db, self._runtimes, self._runtimes_lock, session_id, runtime)
+        return teardown_runtime(*args, close_handle=close_handle, expected=expected)
 
     # -- registry (agent catalog) ----------------------------------------
 
@@ -349,7 +346,7 @@ class StudioChatService:
         self._events().on_error(session_id, detail, fatal=fatal)
 
     def _on_exit(self, session_id: str, *, close_initiated: bool = False) -> None:
-        self._events().on_exit(session_id, close_initiated=close_initiated)
+        self._events().on_exit(session_id, close_initiated=close_initiated, expected=None)
 
     def _events(self) -> AcpEventHandlers:
         from server.app.studio_chat.events import AcpEventHandlers
