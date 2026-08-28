@@ -19,7 +19,7 @@ def app_with_workspace(tmp_path):
     app.state.settings.executor_runtime.workflows.enabled = True
     response = authenticate_client(TestClient(app)).post(
         "/api/workspaces",
-        json={"name": "Studio", "default_workflow_key": "education_video_problems_generation"},
+        json={"id": "education_video_problems_generation", "name": "Studio"},
     )
     workspace_id = response.json()["workspace"]["id"]
     definition = load_builtin_definition("education_video_problems_generation")

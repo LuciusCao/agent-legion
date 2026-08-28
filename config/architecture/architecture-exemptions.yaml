@@ -112,15 +112,3 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/196
   ceiling: 135
-- check: architecture.file_budget
-  path: server/app/db/migrations/__init__.py
-  reason: The module is the flat export point for the idempotent migration
-    chain and grows by two lines per schema version (v58 retire_global_register_tokens,
-    v59 jobs_run_id_index). The referenced studio-phase3 plan is complete and
-    was never a real removal condition; the durable resolution is deriving
-    this re-export from the migration registry itself (each migration module
-    is already enumerated by migration_registry.py), which removes the
-    per-version growth entirely.
-  owner: workspace-executor
-  remove_when: docs/architecture/backend.md#database
-  ceiling: 60

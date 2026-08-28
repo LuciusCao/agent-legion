@@ -2,15 +2,24 @@ import { expect, test } from '@playwright/test'
 
 import { ensureAdminSession, widenDemoWorkflowItemTypes } from './helpers'
 
+// The demo workspace is pre-seeded by scripts/e2e/run_browser_smoke.py
+// (schema v61: creation no longer seeds the sample template).
+const DEMO_WORKSPACE_ID = 'education_video_problems_generation'
+
 
 test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }, testInfo) => {
   // Unique per engine+attempt: the smoke suite shares one database across
-  // browser engines (chromium runs first, then firefox/webkit), and the
-  // workspace list renders oldest-first — a reused name would send the
-  // run-creation step into the previous engine's workspace, where the
-  // (source_type, source_id) dedup rejects the same Q1 item with
-  // "No tasks were resolved from input".
+  // browser engines, and the creation flow asserts the fresh workspace's
+  // onboarding guide — a reused id would 409.
+  const WORKSPACE_ID = `e2e_ws_${testInfo.project.name}_${testInfo.retry}`
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_')
   const WORKSPACE_NAME = `E2E 冒烟工作区 ${testInfo.project.name}-${testInfo.retry}`
+  // smoke-job-rerun.spec.ts runs first, and retries rerun the whole spec:
+  // a distinct per-attempt id avoids the (connection, external_id) dedup.
+  const externalId = `Q2-${testInfo.project.name}-${testInfo.retry}`
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_')
   await ensureAdminSession(page)
 
   await page.goto('/')
@@ -18,25 +27,25 @@ test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }, t
   await expect(createButton).toBeVisible()
   await createButton.click()
 
+  // Schema v61: explicit id (bound to the workflow key at creation) + name.
   const createDialog = page.getByRole('dialog')
+  await createDialog.getByLabel('Workspace ID').fill(WORKSPACE_ID)
   await createDialog.getByLabel('Workspace 名称').fill(WORKSPACE_NAME)
-  await createDialog
-    .getByRole('checkbox', {
-      name: '从示例模板初始化（教学视频脚本与题目生成）',
-    })
-    .check()
   await createDialog.getByRole('button', { name: '创建' }).click()
-  // Demo-template workspaces seed node code server-side; the POST can take
-  // seconds (4-5s observed locally), so give the close a generous timeout.
   await expect(createDialog).toBeHidden({ timeout: 30_000 })
 
-  await page.getByText(WORKSPACE_NAME).first().click()
-  await expect(page).toHaveURL(/\/workspaces\/[^/]+$/)
+  // The fresh workspace shows the 3-step onboarding guide (the original bug:
+  // blank-canvas workspaces used to get a 400 from /stats and never showed it).
+  await page.goto(`/workspaces/${WORKSPACE_ID}`)
+  await expect(page.getByText('创建并发布 Workflow')).toBeVisible()
+
+  // The job flow drives the pre-seeded demo workspace instead.
+  await page.goto(`/workspaces/${DEMO_WORKSPACE_ID}`)
+  await expect(page).toHaveURL(new RegExp(`/workspaces/${DEMO_WORKSPACE_ID}$`))
 
   // The demo workflow is material-only (start node accepted_item_types); the
   // ref path below needs the contract widened first (EXEC-WORKFLOW-START-001).
-  const workspaceId = page.url().split('/workspaces/')[1]
-  await widenDemoWorkflowItemTypes(page, workspaceId)
+  await widenDemoWorkflowItemTypes(page, DEMO_WORKSPACE_ID)
   await page.reload()
 
   // exact：name 默认子串匹配，会同时命中空 workspace 引导卡片里的
@@ -48,7 +57,7 @@ test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }, t
   const addItemsDialog = page.getByRole('dialog', { name: '添加条目' })
   await addItemsDialog.getByRole('tab', { name: '粘贴 ID' }).click()
   await addItemsDialog.getByLabel('连接 Key').fill('cms-internal')
-  await addItemsDialog.getByLabel('外部 ID').fill('Q1')
+  await addItemsDialog.getByLabel('外部 ID').fill(externalId)
   await addItemsDialog.getByRole('button', { name: '创建运行' }).click()
   // A successful submit closes the dialog; wait for it (the modal overlay
   // intercepts pointer events while it is in the DOM, so clicking the job

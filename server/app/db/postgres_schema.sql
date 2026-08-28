@@ -23,6 +23,11 @@ alter table workspaces add column if not exists node_config_json text not null d
 -- stored values, only the column default is dropped.
 alter table workspaces alter column default_workflow_key drop default;
 
+-- Schema v62: default_workflow_key is DEPRECATED — it mirrors the workspace
+-- id (bound at creation, immutable; the v62 migration renamed legacy ids to
+-- their keys). Full retirement is tracked in issue #211; until then the
+-- column stays the runtime authority for revision/DAG resolution.
+
 -- Executor allocations/bindings (retired at schema v47): the tables are
 -- still created here so the historical v17/v18 data migrations can replay
 -- on fresh databases; migrate_executor_retirement harvests their contents

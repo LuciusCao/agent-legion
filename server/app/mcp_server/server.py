@@ -1,23 +1,21 @@
 """Thin MCP wrapper over the studio-agent tool surface.
 
-Agent Legion backend via ``tool_client.ToolClient``, authenticated with a
-studio-agent scoped token (STUDIO-AGENT-001). Tools return the response body
-as text; non-2xx responses come back as ``HTTP <code>: <body>`` text instead
-of raising. The only exception is ``get_authoring_guide``, which serves the
-built-in authoring playbook (``authoring_guide.AUTHORING_GUIDE``) locally
-without an HTTP call.
+Tools forward to the Agent Legion backend via ``tool_client.ToolClient``
+(studio-agent scoped token, STUDIO-AGENT-001) and return the response body
+as text; non-2xx comes back as ``HTTP <code>: <body>`` text instead of
+raising. Only ``get_authoring_guide`` is served locally (no HTTP call).
 
 Two transports share this registration: the stdio entry point
 (``python -m server.app.mcp_server``, external self-service agents, static
 env config) and the in-app streamable-HTTP endpoint (``http_app.py``, Studio
 chat sessions, per-request header config). Both pass a config resolver; the
 HTTP one re-resolves on every tool call so each request runs under its own
-scoped token and session binding. Loopback tools are ``async def`` and go
-through the fully-async ``ToolClient.call`` (httpx): the HTTP transport
-executes tools on the uvicorn event loop, so the loopback must be true async
-I/O — a sync tool deadlocks the single-worker backend against its own
-request, and a thread-pool offload can starve the loopback's sync handlers
-sharing that pool (``get_authoring_guide`` stays sync: it never blocks).
+scoped token and session binding. Loopback tools are ``async def`` over the
+fully-async ``ToolClient.call`` (httpx): the HTTP transport executes tools
+on the uvicorn event loop, so a sync tool deadlocks the single-worker
+backend against its own request, and a thread-pool offload can starve the
+loopback's sync handlers sharing that pool (``get_authoring_guide`` stays
+sync: it never blocks).
 """
 
 from __future__ import annotations
@@ -30,6 +28,7 @@ from mcp.server.fastmcp import FastMCP
 
 from server.app.mcp_server.authoring_guide import AUTHORING_GUIDE
 from server.app.mcp_server.config import McpConfigError, McpServerConfig
+from server.app.mcp_server.skill_tools import register_skill_tools
 from server.app.mcp_server.tool_client import ToolClient
 
 ConfigResolver = Callable[[], Awaitable[McpServerConfig]]
@@ -168,6 +167,9 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
                 "tools": tools or ["read", "write", "bash"],
             },
         )
+
+    # Skill read/validate/save-version tools (issue #217), split for budget.
+    register_skill_tools(mcp, _client)
 
     return mcp
 

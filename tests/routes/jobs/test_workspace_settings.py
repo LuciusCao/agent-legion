@@ -1,9 +1,14 @@
 def _create_workspace(
     client, name="default", default_workflow_key="education_video_problems_generation"
 ):
-    return client.post(
-        "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
-    ).json()["workspace"]["id"]
+    ws_id = client.post("/api/workspaces", json={"id": default_workflow_key, "name": name}).json()[
+        "workspace"
+    ]["id"]
+    # v62: creation seeds nothing; node settings need an active revision.
+    from tests.helpers import publish_builtin_revision
+
+    publish_builtin_revision(client.app.state.job_db, ws_id)
+    return ws_id
 
 
 def test_create_workspace_stores_resource_config_override(client_factory):
@@ -11,8 +16,8 @@ def test_create_workspace_stores_resource_config_override(client_factory):
         response = c.post(
             "/api/workspaces",
             json={
+                "id": "math_v5",
                 "name": "Math V5",
-                "default_workflow_key": "education_video_problems_generation",
                 "resource_config": {
                     "resources": {
                         "question_detail": {

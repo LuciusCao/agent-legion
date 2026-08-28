@@ -182,7 +182,7 @@ def issue_scoped_token(client: TestClient, workspace_id: str = "test-workspace")
     if created.status_code == 400:
         ensured = client.post(
             "/api/workspaces",
-            json={"name": workspace_id},
+            json={"id": workspace_id, "name": workspace_id},
         )
         assert ensured.status_code in (200, 201), ensured.text
         created = client.post(

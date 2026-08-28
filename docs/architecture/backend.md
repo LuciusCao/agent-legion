@@ -72,7 +72,7 @@ server/app/
 ## Key Decisions
 
 - PostgreSQL 是唯一运行时数据库，通过连接池支撑多进程、多设备并发协调。
-- Agent Legion DAG 是唯一的执行模型；workflow 是 workspace 内部的一份 DAG（schema v50 退役全局 catalog），示例 workflow（`education_video_problems_generation`）随仓库内置为可选示例模板，业务 workflow 经 workspace revision 发布 + 自定义节点发布承载。
+- Agent Legion DAG 是唯一的执行模型；workflow 是 workspace 内部的一份 DAG（schema v50 退役全局 catalog）。schema v62 起 workspace id 即 workflow key（创建时显式提供、终身不可变），创建路径不再种子示例模板——示例 workflow（`education_video_problems_generation`）仅经 `make import-demo` 提供 demo workspace，业务 workflow 经 workspace revision 发布 + 自定义节点发布承载。
 - 所有文件 I/O 限制在 `data/` 目录内，由 `security.py` 做路径校验。
 - 路由、服务、执行器之间有明确的边界：Route 只做 HTTP 适配，Service 处理业务逻辑，Executor 通过租赁（lease）申请容量。详见 [AGENTS.md](../../AGENTS.md)。
 - 外部服务凭据与端点配置走实例级外部服务连接（admin 全局设置「外部服务连接」），见下文 Configuration Reference。
@@ -181,6 +181,9 @@ server/app/
 | POST | `/skills/validate` | `validate_skill` | routes/skills.py |
 | GET | `/skills/tags` | `list_skill_tags` | routes/skills.py |
 | GET | `/studio-agent/tools/chat-sessions/{session_id}/context` | `get_chat_session_context` | routes/studio_agent_context.py |
+| GET | `/studio-agent/tools/skills/{skill_key:path}` | `get_skill` | routes/studio_agent_skill_tools.py |
+| POST | `/studio-agent/tools/skills/{skill_key:path}/validate` | `validate_skill` | routes/studio_agent_skill_tools.py |
+| POST | `/studio-agent/tools/skills/{skill_key:path}/versions` | `save_skill_version` | routes/studio_agent_skill_tools.py |
 | POST | `/studio-agent-tokens` | `mint_token` | routes/studio_agent_tokens.py |
 | GET | `/studio-agent-tokens` | `list_tokens` | routes/studio_agent_tokens.py |
 | DELETE | `/studio-agent-tokens/{token_id}` | `revoke_token` | routes/studio_agent_tokens.py |
@@ -329,8 +332,8 @@ server/app/
 | JobSelectionMixin | BaseModel | job_ids: list[str] | None, filter: JobFilterPayload | None, exclude_ids: list... | app/routes/job_batch_filter_contracts.py |
 | JobBatchRequest | BaseModel | workflow_key: str, entity: str | None, source_kind: str, question_ids: list[s... | app/routes/job_contracts.py |
 | JobBatchResponse | BaseModel | batch: dict[str, Any], created_count: int, jobs: list[dict[str, Any]] | app/routes/job_contracts.py |
-| WorkspaceCreateRequest | BaseModel | name: str, default_workflow_key: str | None, workflow_mode: Literal['demo', '... | app/routes/job_contracts.py |
-| WorkspaceUpdateRequest | BaseModel | name: str | None, description: str | None, default_workflow_key: str | None, ... | app/routes/job_contracts.py |
+| WorkspaceCreateRequest | BaseModel | id: str, name: str, default_entity: str, resource_config: dict[str, Any], int... | app/routes/job_contracts.py |
+| WorkspaceUpdateRequest | BaseModel | name: str | None, description: str | None, default_entity: str | None, resour... | app/routes/job_contracts.py |
 | WorkspaceSettingsResponse | BaseModel | settings: dict[str, Any] | app/routes/job_contracts.py |
 | WorkspaceSettingsSectionRequest | BaseModel | entityType: str | None, intakeModes: list[str] | None, labelOverrides: dict[s... | app/routes/job_contracts.py |
 | WorkspaceResponse | BaseModel | workspace: WorkspaceRecord | app/routes/job_contracts.py |
@@ -421,7 +424,7 @@ server/app/
 | RunJobStats | BaseModel | total: int, by_status: dict[str, int] | app/routes/run_contracts.py |
 | RunDetailResponse | BaseModel | run: RunRecord, job_stats: RunJobStats | app/routes/run_contracts.py |
 | SkillFileResponse | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/skill_contracts.py |
-| SkillDetailResponse | BaseModel | key: str, ref: str, commit: str, available: bool, files: list[SkillFileRespon... | app/routes/skill_contracts.py |
+| SkillDetailResponse | BaseModel | key: str, ref: str, commit: str, available: bool, tags: list[str], files: lis... | app/routes/skill_contracts.py |
 | SkillValidateRequest | BaseModel | path: str | app/routes/skill_contracts.py |
 | SkillValidateResponse | BaseModel | valid: bool, path: str, skill_key: str | None, error: str | None, tags: list[... | app/routes/skill_contracts.py |
 | SkillTagsResponse | BaseModel | path: str, tags: list[str], latest_tag: str | None | app/routes/skill_contracts.py |
@@ -432,6 +435,11 @@ server/app/
 | StudioContextEdge | BaseModel | source: str, target: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextWorkflow | BaseModel | workflow_key: str, version: int, nodes: list[StudioContextNode], edges: list[... | app/routes/studio_agent_context_contracts.py |
 | StudioChatContextResponse | BaseModel | workspace_id: str, selected_node_key: str | None, draft_yaml: str | None, wor... | app/routes/studio_agent_context_contracts.py |
+| SkillValidationIssue | BaseModel | path: str, error: str | app/routes/studio_agent_skill_contracts.py |
+| SkillValidateToolResponse | BaseModel | key: str, valid: bool, errors: list[SkillValidationIssue] | app/routes/studio_agent_skill_contracts.py |
+| SkillVersionFileWrite | BaseModel | path: str, content: str | app/routes/studio_agent_skill_contracts.py |
+| SkillSaveVersionRequest | BaseModel | files: list[SkillVersionFileWrite], new_tag: str, message: str | app/routes/studio_agent_skill_contracts.py |
+| SkillSaveVersionResponse | BaseModel | key: str, tag: str, commit: str, files: list[str] | app/routes/studio_agent_skill_contracts.py |
 | StudioAgentTokenMintRequest | BaseModel | ttl_hours: int | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenMintResponse | BaseModel | id: str, token: str, expires_at: str | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenEntry | BaseModel | id: str, created_at: str, expires_at: str, revoked_at: str | None | app/routes/studio_agent_token_contracts.py |
@@ -589,7 +597,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 ## Database
 
 - PostgreSQL 服务 Agent Legion workflow 与平台状态（当前版本见 `server/app/db/schema.py` 的 `SCHEMA_VERSION`）：
-  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`, `node_config_json`, `default_entity`, `intake_config_json`）。`node_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（见下文 Secrets Vault）；旧 `resource_config_json`（resource binding）已在 v24 迁移为节点覆盖并清空
+  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`（schema v62 起 = workspace id，deprecated，见 DB-WORKSPACE-KEY-BINDING-001）, `node_config_json`, `default_entity`, `intake_config_json`）。`node_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（见下文 Secrets Vault）；旧 `resource_config_json`（resource binding）已在 v24 迁移为节点覆盖并清空
   - `workspace_secrets` — vault 加密存储的 workspace 密钥（Fernet 密文，`(workspace_id, name)` 唯一，v16 新增）
   - `external_connections` / `instance_secrets` / `connection_tokens` — 实例级外部服务连接：连接只存非敏感配置，敏感字段 Fernet 加密入 `instance_secrets`（`conn:<key>:<field>` 引用），鉴权 token 加密缓存在 `connection_tokens`（v34 新增，见下文外部服务连接段）
   - `runs`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表（`job_batches` 已随 schema v53 drop，由 `runs` 取代）
@@ -676,7 +684,7 @@ Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 sc
 其他配置文件：
 
 - 外部 Pi skill 仓库源与固定 commit 已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB `global_settings`（`skill_sources` / `skill_lock` 文档），lock 是 skill ref 的唯一权威（G3）；经 admin API（`GET/PUT /api/admin/skill-sources`、`POST /api/admin/skill-sources/relock`）与 /admin/settings「Skill 源管理」维护，CLI `make skills-lock`（`uv run python -m server.app.skills.lock`）刷新锁。tracked `config/skills.yaml` / `config/skills.lock` 已退役：DB 无记录且文件存在时启动一次性导入并 warning，否则用内置常量（`server/app/skills/builtin_sources.py`）seed，此后文件不再读取。
-- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；它是创建 workspace 时可选的示例模板种子。workflow 没有全局注册表（schema v40 的 `workflow_catalog` 表已于 schema v50 退役，DB-WORKFLOW-CATALOG-001）：workflow 就是 workspace 内部的一份 DAG，`workspaces.default_workflow_key` 是普通文本标识，权威定义是该 workspace 的 active revision（schema v50 起节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部改读它）；blank workspace 的 key 槽为空，首次成功 publish 会认领草稿的 key。
+- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；schema v62 起创建 workspace 不再种子模板，demo workspace 由 `make import-demo`（`scripts/seed_demo.py`）提供，其 id 与 key 同为 `education_video_problems_generation`。workflow 没有全局注册表（schema v40 的 `workflow_catalog` 表已于 schema v50 退役，DB-WORKFLOW-CATALOG-001）：workflow 就是 workspace 内部的一份 DAG，权威定义是该 workspace 的 active revision（schema v50 起节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部改读它）。schema v62（DB-WORKSPACE-KEY-BINDING-001）起 workspace id 与 `workspaces.default_workflow_key` 是同一个标识：创建时显式填写、终身不可变（PATCH / PUT configuration 改 key 一律 400，发布草稿 key 不匹配 422）；v62 迁移把存量 workspace 的 id 改成已绑定的 key（key 为空的按 id 回填），`default_workflow_key` 作为独立概念已标 deprecated（退役评估 issue 待开）。
 - `config/agent-worker.example.yaml`：Worker Service 引导配置样例（`host_url` / `worker_id` / `runtimes` / `capabilities` / `max_concurrency` 等），Worker 侧独立加载，不经 server 的 owned-key 校验。
 - `config/architecture/*`：架构不变量、豁免、源文件体积预算。
 

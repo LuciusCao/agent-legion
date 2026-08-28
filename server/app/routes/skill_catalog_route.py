@@ -12,10 +12,12 @@ def create_skill_catalog_router(settings: Settings) -> APIRouter:
     skills = SkillCatalogService(settings.database_url)
 
     @router.get("/executors/skills/{skill_key:path}", response_model=SkillDetailResponse)
-    def get_skill(skill_key: str) -> SkillDetailResponse:
+    def get_skill(skill_key: str, ref: str | None = None) -> SkillDetailResponse:
         require_workflows_enabled(settings)
         try:
-            return SkillDetailResponse(**skills.detail(skill_key))
+            # ref (a git tag of the skill repo) previews that tag's content;
+            # an unknown tag is a 404 (see SkillDetailResponse).
+            return SkillDetailResponse(**skills.detail(skill_key, ref=ref))
         except JobServiceError as exc:
             raise_job_http_error(exc)
 

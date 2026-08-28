@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -28,15 +28,12 @@ class JobBatchResponse(BaseModel):
 class WorkspaceCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    # Schema v62: the caller-provided id IS the workflow key — bound at
+    # creation and immutable afterwards. No sample-template seed runs on the
+    # create path anymore; demo workspaces are provisioned by
+    # `make import-demo` (scripts/seed_demo.py).
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
     name: str
-    # The workflow key slot is optional (schema v50): a blank workspace starts
-    # with no key and the first publish adopts the draft key. demo (default):
-    # seed the repo-shipped sample template as the active revision (including
-    # its factory Agent templates); with no explicit key the sample workflow
-    # itself is the default. blank: empty canvas, Studio starts from an empty
-    # draft and the first publish creates revision v1.
-    default_workflow_key: str | None = None
-    workflow_mode: Literal["demo", "blank"] = "demo"
     default_entity: str = "question"
     resource_config: dict[str, Any] = Field(default_factory=dict)
     intake_config: dict[str, Any] = Field(default_factory=dict)
@@ -47,7 +44,6 @@ class WorkspaceUpdateRequest(BaseModel):
 
     name: str | None = None
     description: str | None = None
-    default_workflow_key: str | None = None
     default_entity: str | None = None
     resource_config: dict[str, Any] | None = None
     intake_config: dict[str, Any] | None = None

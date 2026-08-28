@@ -43,9 +43,14 @@ def storage(client, monkeypatch) -> FakeStorage:
 def _create_workspace(client) -> str:
     response = client.post(
         "/api/workspaces",
-        json={"name": "runs-bundle-ws", "default_workflow_key": WORKFLOW_KEY},
+        json={"id": WORKFLOW_KEY, "name": "runs-bundle-ws"},
     )
     assert response.status_code == 200, response.text
+    # v62: creation seeds nothing; the bundle tests republish their own
+    # contract variants, which requires a base active revision.
+    from tests.helpers import publish_builtin_revision
+
+    publish_builtin_revision(client.app.state.job_db, WORKFLOW_KEY)
     return response.json()["workspace"]["id"]
 
 

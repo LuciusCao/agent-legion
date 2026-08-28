@@ -10,9 +10,20 @@ endpoints must be added here.
 
 from __future__ import annotations
 
+import pytest
+
 from server.app.auth import scoped_tokens
 
 _NODE_CODE = "def run(job, job_dir, runtime):\n    return {}\n"
+
+
+@pytest.fixture(autouse=True)
+def _reset_create_count():
+    global _CREATE_COUNT
+    _CREATE_COUNT = 0
+    yield
+
+
 _WORKFLOW_KEY = "education_video_problems_generation"
 _NODE_KEY = "intake_knowledge_points"
 
@@ -25,12 +36,25 @@ def _scoped_client(client, job_db):
     return scoped, admin_id
 
 
+_CREATE_COUNT = 0
+
+
 def _create_workspace(client, name: str = "Studio Tools") -> str:
+    # v62: id==key and unique per call within a test (the second workspace in
+    # a test gets a suffix; TRUNCATE isolation resets the counter each test).
+    # Creation no longer seeds, so publish the demo revision (which also
+    # seeds the demo node codes) for the node-code/revision tools.
+    global _CREATE_COUNT
+    _CREATE_COUNT += 1
+    ws_id = _WORKFLOW_KEY if _CREATE_COUNT == 1 else f"{_WORKFLOW_KEY}_{_CREATE_COUNT}"
     response = client.post(
         "/api/workspaces",
-        json={"name": name, "default_workflow_key": _WORKFLOW_KEY},
+        json={"id": ws_id, "name": name},
     )
     assert response.status_code == 200, response.text
+    from tests.helpers import publish_builtin_revision
+
+    publish_builtin_revision(client.app.state.job_db, ws_id)
     return str(response.json()["workspace"]["id"])
 
 
@@ -54,6 +78,15 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
         ("GET", f"{base}/workflow/active", None),
         ("GET", f"{base}/workflows/wf/nodes/node/code", None),
         ("GET", "/api/studio-agent/tools/chat-sessions/session-x/context", None),
+        # Skill tools (issue #217): unknown skill keys 404, which still proves
+        # the scope guard let the token through.
+        ("GET", "/api/studio-agent/tools/skills/wf/review", None),
+        ("POST", "/api/studio-agent/tools/skills/wf/review/validate", None),
+        (
+            "POST",
+            "/api/studio-agent/tools/skills/wf/review/versions",
+            {"files": [{"path": "SKILL.md", "content": "x"}], "new_tag": "v2", "message": "m"},
+        ),
     ]
 
 

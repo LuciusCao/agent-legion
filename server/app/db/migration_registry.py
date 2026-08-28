@@ -41,6 +41,7 @@ from server.app.db.migrations import (
     migrate_versioned_entities,
     migrate_workflow_catalog_retirement,
     migrate_workspace_cms_config,
+    migrate_workspace_id_key_binding,
     migrate_workspace_job_node_status_counts,
     migrate_workspace_secrets,
 )
@@ -103,6 +104,11 @@ MIGRATIONS: list[SchemaMigration] = [
     # v61 is DDL-only (workspace_workflow_drafts): the Studio workflow YAML
     # draft table comes from the schema-file replay, no data migration.
     SchemaMigration(61, "workspace_workflow_drafts"),
+    # v62: bind workspace id and workflow key (rename ids to their bound
+    # keys, backfill empty keys from the id). Runs last: it rewrites
+    # workspace_id rows in every child table and the agent_workers scope
+    # JSON, so it must see every other workspace-shape change settled.
+    SchemaMigration(62, "workspace_id_key_binding", migrate_workspace_id_key_binding),
 ]
 
 assert [m.version for m in MIGRATIONS] == sorted(m.version for m in MIGRATIONS), (

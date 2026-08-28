@@ -15,6 +15,8 @@ from server.app.jobs.node_limits import (
 )
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
+_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
 
 def _safe_identifier(value: str, fallback: str) -> str:
     safe_value = re.sub(r"[^a-zA-Z0-9_-]+", "_", value.strip()).strip("_")
@@ -54,13 +56,26 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
         default_entity: str = "question",
         intake_config: dict[str, Any] | None = None,
         description: str = "",
+        workspace_id: str | None = None,
     ) -> dict[str, Any]:
+        """Create a workspace row.
+
+        ``workspace_id`` (schema v62) is the explicit caller-provided id; the
+        HTTP service layer always passes it equal to ``default_workflow_key``
+        (the id==key invariant lives there — this raw layer also serves test
+        fixtures and low-level seeders that build pre-v62 shapes). When
+        omitted the id is derived from the name with a dedup suffix.
+        """
         clean_name = name.strip()
         if not clean_name:
             raise ValueError("Workspace name is required")
-        # The workflow key slot may stay empty (schema v50): a blank-canvas
-        # workspace has no workflow until the first publish adopts one.
         clean_workflow_key = (default_workflow_key or "").strip()
+        if workspace_id is not None:
+            workspace_id = workspace_id.strip()
+            if workspace_id != clean_workflow_key:
+                raise ValueError("Workspace id must equal default_workflow_key (schema v62)")
+            if not _ID_PATTERN.match(workspace_id):
+                raise ValueError("Workspace id must match ^[a-z0-9][a-z0-9_-]{0,63}$ (schema v62)")
         resource_config_json = json.dumps(
             resource_config or {},
             ensure_ascii=False,
@@ -70,13 +85,20 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
         intake_config_json = json.dumps(intake_config or {}, ensure_ascii=False, sort_keys=True)
         clean_description = (description or "").strip()
 
-        base_id = _workspace_id(clean_name)
         with self.connect() as conn:
-            workspace_id = base_id
-            suffix = 2
-            while conn.execute("select 1 from workspaces where id=%s", (workspace_id,)).fetchone():
-                workspace_id = f"{base_id}_{suffix}"
-                suffix += 1
+            if workspace_id is None:
+                workspace_id = _workspace_id(clean_name)
+                suffix = 2
+                while conn.execute(
+                    "select 1 from workspaces where id=%s", (workspace_id,)
+                ).fetchone():
+                    workspace_id = f"{workspace_id}_{suffix}"
+                    suffix += 1
+            elif (
+                conn.execute("select 1 from workspaces where id=%s", (workspace_id,)).fetchone()
+                is not None
+            ):
+                raise ValueError(f"Workspace id already exists: {workspace_id}")
 
             conn.execute(
                 """

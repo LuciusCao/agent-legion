@@ -107,9 +107,12 @@ def test_initialize_and_tool_listing(client, job_db) -> None:
         "get_active_workflow",
         "get_authoring_guide",
         "get_node_code",
+        "get_skill",
         "get_studio_context",
         "save_agent_definition_draft",
         "save_node_code_draft",
+        "save_skill_version",
+        "validate_skill",
         "validate_workflow",
     ]
 

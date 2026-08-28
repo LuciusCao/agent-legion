@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { IntakeConfigSection } from './IntakeConfigSection'
-import { WorkflowSection } from './WorkflowSection'
 import type { WorkspaceSettings, WorkflowDefinitionRecord } from '../../types'
 
 const baseSettings: WorkspaceSettings = {
@@ -143,21 +142,5 @@ describe('IntakeConfigSection', () => {
     )
 
     expect(screen.queryByText('Manual')).not.toBeInTheDocument()
-  })
-})
-
-describe('WorkflowSection', () => {
-  it('renders the current key as free text and reports edits', () => {
-    const onChange = vi.fn()
-    render(
-      <WorkflowSection workflowKey="question_content" onChange={onChange} />
-    )
-
-    const input = screen.getByRole('textbox', { name: '工作流 Key' })
-    expect(input).toHaveValue('question_content')
-
-    fireEvent.change(input, { target: { value: 'my_pipeline' } })
-
-    expect(onChange).toHaveBeenCalledWith('my_pipeline')
   })
 })

@@ -2,16 +2,37 @@
 
 from __future__ import annotations
 
+import pytest
+
 WORKFLOW_KEY = "education_video_problems_generation"
 
 
+_CREATE_COUNT = 0
+
+
 def _create_workspace(client, name: str = "runs-ws") -> str:
+    # v62: id==key, unique per call within a test (TRUNCATE isolation resets
+    # the counter); creation seeds nothing, so publish the legacy-intake
+    # revision run creation needs.
+    global _CREATE_COUNT
+    _CREATE_COUNT += 1
+    ws_id = WORKFLOW_KEY if _CREATE_COUNT == 1 else f"{WORKFLOW_KEY}_{_CREATE_COUNT}"
     response = client.post(
         "/api/workspaces",
-        json={"name": name, "default_workflow_key": WORKFLOW_KEY},
+        json={"id": ws_id, "name": name},
     )
     assert response.status_code == 200, response.text
+    from tests.helpers import publish_legacy_intake_revision
+
+    publish_legacy_intake_revision(client.app.state.job_db, ws_id)
     return response.json()["workspace"]["id"]
+
+
+@pytest.fixture(autouse=True)
+def _reset_create_count():
+    global _CREATE_COUNT
+    _CREATE_COUNT = 0
+    yield
 
 
 def _insert_material(job_db, workspace_id: str, material_id: str, *, status: str = "ready") -> None:

@@ -3,10 +3,14 @@ def test_list_executors_endpoint(client):
     # workspace（绑定时自动 seed demo agent 模板）后按其 scope 读取目录。
     created = client.post(
         "/api/workspaces",
-        json={"name": "catalog-ws", "default_workflow_key": "education_video_problems_generation"},
+        json={"id": "education_video_problems_generation", "name": "catalog-ws"},
     )
     assert created.status_code == 200, created.text
     workspace_id = created.json()["workspace"]["id"]
+    # v62: creation no longer seeds the factory Agents.
+    from tests.helpers import seed_workspace_agent_definitions
+
+    seed_workspace_agent_definitions(workspace_id)
     response = client.get("/api/executors", params={"workspace_id": workspace_id})
     assert response.status_code == 200
     data = response.json()
@@ -67,13 +71,14 @@ def test_get_configured_skill_detail(client_factory, tmp_path, monkeypatch):
     data = response.json()
     assert data["ref"] == "v1.0.0"
     assert data["available"] is True
+    assert data["tags"] == ["v1.0.0"]
     assert any(item["path"] == "SKILL.md" for item in data["files"])
 
 
 def test_get_workspace_executor_configuration_reports_no_warnings_after_v005(client):
     workspace_response = client.post(
         "/api/workspaces",
-        json={"name": "Legacy", "default_workflow_key": "education_video_problems_generation"},
+        json={"id": "education_video_problems_generation", "name": "Legacy"},
     )
     assert workspace_response.status_code == 200
     workspace_id = workspace_response.json()["workspace"]["id"]

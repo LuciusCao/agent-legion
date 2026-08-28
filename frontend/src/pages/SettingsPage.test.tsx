@@ -196,7 +196,6 @@ describe('SettingsPage', () => {
     expect(headings.map((h) => h.textContent)).toEqual([
       '基本信息',
       '接入与资源',
-      '工作流',
       'Agent 与 Worker',
       'Agent 默认配置',
       '代码节点并发',
@@ -213,7 +212,6 @@ describe('SettingsPage', () => {
     expect(navButtons.map((b) => b.textContent)).toEqual([
       '基础信息',
       '接入与资源',
-      '工作流',
       'Agent 与 Worker',
       'Agent 默认配置',
       '危险操作',

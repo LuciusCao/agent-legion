@@ -3,11 +3,9 @@ from tests.helpers import publish_legacy_intake_revision
 from tests.helpers.auth import authenticate_client
 
 
-def _create_workspace(
-    client, name="default", default_workflow_key="education_video_problems_generation"
-):
+def _create_workspace(client, name="default", default_workflow_key="test"):
     workspace_id = client.post(
-        "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
+        "/api/workspaces", json={"id": default_workflow_key, "name": name}
     ).json()["workspace"]["id"]
     # The demo workflow no longer declares intake modes (#154); these tests
     # post job-batches, so publish the legacy-intake variant.
@@ -27,7 +25,7 @@ def test_rerun_node_marks_downstream_stale(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q201"],
             },
@@ -63,7 +61,7 @@ def test_workspace_batch_rerun_marks_jobs_queued(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q603"],
             },
@@ -103,13 +101,13 @@ def test_batch_rerun_skips_not_found_and_running_jobs(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q1"],
             },
@@ -137,7 +135,7 @@ def test_batch_rerun_from_failed_node(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q701"],
             },
@@ -181,7 +179,7 @@ def test_batch_rerun_from_failed_node_skips_non_failed(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q702"],
             },
@@ -226,18 +224,18 @@ def test_rerun_node_errors(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q1"],
             },
         )
-        job_id = "test_education_video_problems_generation_Q1"
+        job_id = "test_test_Q1"
 
         # Job not found
         resp = c.post("/api/jobs/nonexistent/nodes/intake_knowledge_points/rerun")
@@ -259,18 +257,18 @@ def test_rerun_node_rejects_running_job(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q1"],
             },
         )
-        job_id = "test_education_video_problems_generation_Q1"
+        job_id = "test_test_Q1"
         log_dir = app.state.settings.logs_dir / "jobs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{job_id}-fetch_items.log"
@@ -296,18 +294,18 @@ def test_rerun_node_cleanup_failed(tmp_path, monkeypatch):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q1"],
             },
         )
-        job_id = "test_education_video_problems_generation_Q1"
+        job_id = "test_test_Q1"
 
         def _fail_cleanup(*args, **kwargs):
             raise ValueError("cannot remove artifact")
@@ -331,18 +329,18 @@ def test_rerun_node_mark_for_rerun_value_error(tmp_path, monkeypatch):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q1"],
             },
         )
-        job_id = "test_education_video_problems_generation_Q1"
+        job_id = "test_test_Q1"
 
         def _fail_mark(*args, **kwargs):
             raise ValueError("invalid node state")
@@ -370,7 +368,7 @@ def test_rerun_node_preserves_ancestors(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q700"],
             },
@@ -395,18 +393,18 @@ def test_batch_rerun_node_not_found_for_one_job(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q701"],
             },
         )
-        job_id = "test_education_video_problems_generation_Q701"
+        job_id = "test_test_Q701"
         # Remove downstream nodes so the selected node is absent from this job.
         job_db = app.state.job_db
         with job_db.connect() as conn:
@@ -436,13 +434,13 @@ def test_batch_rerun_mixed_node_availability(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q702A"],
             },
@@ -450,13 +448,13 @@ def test_batch_rerun_mixed_node_availability(tmp_path):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q702B"],
             },
         )
-        q_job_id = "test_education_video_problems_generation_Q702A"
-        r_job_id = "test_education_video_problems_generation_Q702B"
+        q_job_id = "test_test_Q702A"
+        r_job_id = "test_test_Q702B"
         # Remove the target node from the second job so it fails with node_not_found.
         job_db = app.state.job_db
         with job_db.connect() as conn:
@@ -488,19 +486,19 @@ def test_batch_rerun_request_order_preserved(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q703", "Q704"],
             },
         )
-        first = "test_education_video_problems_generation_Q703"
-        second = "test_education_video_problems_generation_Q704"
+        first = "test_test_Q703"
+        second = "test_test_Q704"
         resp = c.post(
             "/api/workspaces/test/jobs/batch-rerun",
             json={
@@ -528,18 +526,18 @@ def test_rerun_node_rejects_active_lease(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q705"],
             },
         )
-        job_id = "test_education_video_problems_generation_Q705"
+        job_id = "test_test_Q705"
         job_db = app.state.job_db
         run = job_db.start_node_run(job_id, "publish_content", ["cmd"], "logs/jobs/run.log")
         now = datetime.now(UTC)
@@ -585,18 +583,18 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q706"],
             },
         )
-        job_id = "test_education_video_problems_generation_Q706"
+        job_id = "test_test_Q706"
         job_db = app.state.job_db
         run = job_db.start_node_run(job_id, "publish_content", ["cmd"], "logs/jobs/run.log")
         job_db.finish_node_run(run["id"], "failed", 1, "expired")
@@ -643,18 +641,18 @@ def test_rerun_node_rollback_on_db_failure(tmp_path, monkeypatch):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "test", "name": "Test"},
         )
         publish_legacy_intake_revision(c.app.state.job_db, "test")
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q707"],
             },
         )
-        job_id = "test_education_video_problems_generation_Q707"
+        job_id = "test_test_Q707"
         storage = resolve_job_dir(app.state.job_db.get_job(job_id), app.state.settings.jobs_dir)
         storage.mkdir(parents=True, exist_ok=True)
         (storage / "publish_payload.json").write_text("understanding")
@@ -677,7 +675,7 @@ def _create_failed_job(client, app, ws_id: str, question_id: str) -> str:
     created = client.post(
         f"/api/workspaces/{ws_id}/job-batches",
         json={
-            "workflow_key": "education_video_problems_generation",
+            "workflow_key": "test",
             "source_kind": "direct_ids",
             "knowledge_point_ids": [question_id],
         },
@@ -751,7 +749,7 @@ def test_batch_rerun_preview_from_failed_node_skips_non_failed(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "test",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q804"],
             },

@@ -44,7 +44,7 @@ def storage(client, monkeypatch) -> FakeStorage:
 def _create_workspace(client) -> str:
     response = client.post(
         "/api/workspaces",
-        json={"name": "bundles-ws", "default_workflow_key": "education_video_problems_generation"},
+        json={"id": "education_video_problems_generation", "name": "bundles-ws"},
     )
     assert response.status_code == 200, response.text
     return response.json()["workspace"]["id"]

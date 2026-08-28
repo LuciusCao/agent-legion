@@ -53,6 +53,10 @@ export const extraQueryKeys = {
   // 面板发布/归档后失效重取。
   studioExecutorCatalog: (workspaceId: string) =>
     ['studioExecutorCatalog', workspaceId] as const,
+  // Studio 节点详情的技能文件预览；ref 进 key（版本切换重取），Studio 对话
+  // turn_end 按首段 'studioSkillDetail' 前缀整体失效（useStudioChat）。
+  studioSkillDetail: (skillKey: string, ref: string | null) =>
+    ['studioSkillDetail', skillKey, ref] as const,
   agentVersions: (workspaceId: string, agentId: string) =>
     ['agentVersions', workspaceId, agentId] as const,
   qualityBatches: (workspaceId: string) =>
