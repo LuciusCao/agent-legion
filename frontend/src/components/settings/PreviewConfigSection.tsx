@@ -33,7 +33,11 @@ export function PreviewConfigSection({
 
   // 按节点分组列出全部声明产物；workflow 定义未加载时提示。
   const nodeGroups = (workflowDefinition?.nodes ?? [])
-    .map((node) => ({ label: node.label || node.key, outputs: node.outputs ?? [] }))
+    .map((node) => ({
+      key: node.key,
+      label: node.label || node.key,
+      outputs: node.outputs ?? [],
+    }))
     .filter((group) => group.outputs.length > 0)
 
   return (
@@ -51,14 +55,14 @@ export function PreviewConfigSection({
       ) : (
         <div style={{ marginTop: 12 }}>
           {nodeGroups.map((group) => (
-            <div key={group.label} style={{ marginBottom: 12 }}>
+            <div key={group.key} style={{ marginBottom: 12 }}>
               <span style={{ fontSize: 13, color: '#43474e' }}>{group.label}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
                 {group.outputs.map((name) => {
                   const isChecked = !hiddenSet.has(name)
                   return (
                     <div
-                      key={name}
+                      key={`${group.key}:${name}`}
                       style={{ display: 'flex', alignItems: 'center', gap: 4 }}
                     >
                       <Checkbox

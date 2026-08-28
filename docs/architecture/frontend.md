@@ -172,7 +172,7 @@ frontend/src/
 
 - 前端界面语言为中文。
 - Workspace 列表展示 job 统计、最近活动和快速操作。
-- Job Detail 包含 DAG 图、Stepper、产物（Artifact）面板、日志、视频播放器（针对视频 Job）。
+- Job Detail 包含 DAG 图、Stepper、产物（Artifact）面板、日志。左栏实体面板（`pages/jobDetail/EntityPanel`）三层结构（issue #11）：question 任务 = 结构化 `QuestionContentPanel`（gating 由 `questionPreviewManifest` 声明求值）+ 通用产物预览；其余 source_type 一律通用产物预览兜底（不再白屏）。通用预览 = 扩展名分类（`lib/previewKind`，.svg 强制 text 源码视图）→ 渲染器注册表（`components/preview/previewRegistry`，未命中兜底 text）→ 每产物一张卡片（文本类走 `queryKeys.jobArtifactText` 版本失效 + 512KB 截断；媒体类同源 raw URL 直连）；面板头勾选菜单与设置页 `PreviewConfigSection` 写同一份 workspace 级 `previewHidden` 配置（`useWorkspacePreviewConfig` 乐观更新）。
 - Workflow Studio 支持可视化编辑 workflow 节点、边与 intake modes，并与修订历史集成；Agent 节点按 capability 读取 Agent Catalog，显示 skill/tools 和全局运行默认值，并可编辑 provider/model/thinking/prompt 覆盖。画布区 DAG 是唯一常驻主视图：变更与校验结果在右侧 Drawer（顶栏状态 chip 点击、校验完成、发布前 review 打开），YAML 编辑降级为画布工具栏「编辑 YAML」按钮打开的全屏 Dialog（结构性编辑唯一入口）。顶栏状态收敛为单个 chip：无变更显示「已同步」、查看历史 revision 显示「只读 vN」、有变更显示「未发布变更 N」（颜色编码风险等级，明细在 tooltip，点击打开变更面板），compare 计算中与「已保留当前草稿」并入同一 chip。
 - Token Usage 页面展示 workspace / job / run 级别的 token 用量与成本。
 - 全局 `Toast` 组件用于操作反馈。

@@ -91,6 +91,34 @@ def test_put_configuration_without_preview_keeps_saved_hidden(client_factory):
     assert fetched.json()["settings"]["previewHidden"] == ["questions.json"]
 
 
+def test_settings_get_put_round_trip_accepted(client_factory):
+    """GET /settings 返回的 settings 键 ⊆ PUT /configuration 契约白名单。
+
+    契约是 extra=forbid：GET 返回的服务端附加键（nodeConfig/agentDefaults/
+    nodeConfigSchemas）由前端在发送前白名单过滤。若后端给 GET 加了新键而
+    PUT 契约没跟上（或前端忘了过滤），此测试会以 422 暴露。
+    """
+    put_whitelist = {
+        "entityType",
+        "intakeModes",
+        "labelOverrides",
+        "workflowKey",
+        "previewHidden",
+    }
+    with client_factory(workflows_enabled=True) as c:
+        ws_id = _create_workspace(c)
+        settings = c.get(f"/api/workspaces/{ws_id}/settings").json()["settings"]
+
+        # 模拟前端的白名单 pick。
+        picked = {key: settings[key] for key in put_whitelist if key in settings}
+        put = c.put(
+            f"/api/workspaces/{ws_id}/configuration",
+            json={"name": "Round Trip", "settings": picked},
+        )
+
+    assert put.status_code == 200, put.text
+
+
 def test_put_configuration_with_preview_overwrites_hidden(client_factory):
     with client_factory(workflows_enabled=True) as c:
         ws_id = _create_workspace(c)

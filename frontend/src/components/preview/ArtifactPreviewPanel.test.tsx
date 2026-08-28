@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { ArtifactPreviewPanel } from './ArtifactPreviewPanel'
@@ -41,6 +41,11 @@ function makeDetail(artifacts: string[]): JobDetail {
 }
 
 describe('ArtifactPreviewPanel', () => {
+  beforeEach(() => {
+    mockPreviewHidden.value = []
+    mockToggleArtifact.mockClear()
+  })
+
   it('渲染每个 artifact 一张卡片，含类型徽标', async () => {
     mockFetchJobArtifact.mockResolvedValue({
       content: JSON.stringify({ ok: true }),
@@ -78,11 +83,9 @@ describe('ArtifactPreviewPanel', () => {
     expect(screen.queryByText('questions.json')).not.toBeInTheDocument()
     expect(screen.getByText('frame.png')).toBeInTheDocument()
     expect(screen.getByText('1 个文件')).toBeInTheDocument()
-    mockPreviewHidden.value = []
   })
 
   it('勾选菜单切换产物可见性（写 workspace 配置）', async () => {
-    mockPreviewHidden.value = []
     renderPanel(
       <ArtifactPreviewPanel
         jobId="j1"
