@@ -8,9 +8,13 @@ needs a real LLM for four Agent nodes):
 Everything is seeded through the same production services the demo seed
 uses — workspace-scoped node_code (DB published text), a workspace-scoped
 Agent definition (runtime=velites, skill locked to a local git repo created
-under the e2e data dir), an active workflow revision (which materializes the
-Agent route), and a resume of the workspace's dispatch control (every app
-startup resets all workspaces to paused by design).
+under the e2e data dir) and an active workflow revision (which materializes
+the Agent route). Seeding runs BEFORE the backend boots (seed-before-serve):
+the backend's WorkflowWorkerThread builds its scan_entries snapshot at
+startup and direct-DB seeding triggers no reload, so the workspace must
+already exist by then (PR #240). The dispatch resume is a separate step
+(``resume_main_flow_workspace``) because every app startup resets all
+workspaces to paused.
 
 The demo seed is untouched; this module only ADDS one workspace.
 """
@@ -193,21 +197,18 @@ def _lock_skill(dsn: str, repo: Path, commit: str) -> None:
     locked = LockedSkillSource(repo=str(repo), ref=SKILL_REF, commit=commit)
     if lock.skills.get(SKILL_KEY) != locked:
         lock.skills[SKILL_KEY] = locked
-        lock.resolved_at = (
-            datetime.datetime.now(datetime.UTC)
-            .replace(microsecond=0)
-            .isoformat()
-            .replace("+00:00", "Z")
-        )
+        now = datetime.datetime.now(datetime.UTC)
+        lock.resolved_at = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
         store.put_lock(lock)
 
 
 def seed_main_flow_workspace(dsn: str, data_dir: Path) -> str:
     """Seed the hybrid-DAG workspace; returns its workspace id.
 
-    Runs after the backend's first startup (schema exists, the startup
-    pause-reset already happened) against a freshly reset e2e database, so
-    the guards below are plain seed-if-absent, mirroring scripts/seed_demo.py.
+    Runs BEFORE the backend boots (seed-before-serve, see module docstring);
+    ``JobQueries`` initializes the schema itself on the freshly reset e2e
+    database, so the guards below are plain seed-if-absent, mirroring
+    scripts/seed_demo.py.
     """
     job_db = JobQueries(dsn, jobs_dir=data_dir / "jobs")
 
@@ -244,9 +245,15 @@ def seed_main_flow_workspace(dsn: str, data_dir: Path) -> str:
     WorkflowRevisionService(job_db).ensure_active_revision(
         WORKSPACE_ID, workflow_definition_from_dict(WORKFLOW_DEFINITION)
     )
-
-    # App startup resets every workspace to paused by design; the smoke needs
-    # this workspace dispatching (the demo workspace stays paused).
-    WorkspaceWorkerControl(dsn).resume(WORKSPACE_ID)
     logger.info("e2e main-flow workspace seeded: %s", WORKSPACE_ID)
     return WORKSPACE_ID
+
+
+def resume_main_flow_workspace(dsn: str) -> None:
+    """Resume dispatch for the e2e workspace (the demo workspace stays paused).
+
+    Timing matters: every app startup resets ALL workspaces to paused
+    (``reset_all_to_paused``), so this must run AFTER the backend is healthy,
+    not inside the pre-serve seed above.
+    """
+    WorkspaceWorkerControl(dsn).resume(WORKSPACE_ID)

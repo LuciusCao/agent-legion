@@ -108,14 +108,15 @@ def write_worker_config(
     return yaml_path
 
 
-def start_main_flow_runtime(
-    *, dsn: str, data_dir: Path, backend_base_url: str, log_path: Path
-) -> tuple[StubGateway, subprocess.Popen]:
-    """Assemble the main-flow runtime: stub LLM + workspace seed + Worker.
+def prepare_main_flow_runtime(
+    *, dsn: str, data_dir: Path, backend_base_url: str
+) -> tuple[StubGateway, Path]:
+    """Seed-stage half of the main-flow runtime: no backend HTTP needed.
 
-    Returns the stub gateway (caller closes it) and the Worker subprocess
-    (caller terminates it). Runs after the backend is healthy: the schema
-    exists and the startup pause-reset has already happened.
+    Runs BEFORE the backend boots (seed-before-serve, see _main_flow_seed):
+    stub LLM gateway + models.json + workspace seed + register token +
+    worker.yaml. Returns the stub gateway (caller closes it) and the worker
+    config path for :func:`start_worker`.
     """
     stub = StubGateway(DRAFT_OUTPUT, DRAFT_CONTENT)
     try:
@@ -130,21 +131,25 @@ def start_main_flow_runtime(
             register_token=register_token,
             capability=AGENT_CAPABILITY,
         )
-        env = dict(os.environ)
-        env["PATH"] = f"{_PROJECT_ROOT / 'data' / 'bin'}:{env.get('PATH', '')}"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        logger.info("Starting: %s worker/executor.py --config %s", sys.executable, worker_yaml)
-        with log_path.open("wb") as log:
-            proc = subprocess.Popen(
-                [sys.executable, "worker/executor.py", "--config", str(worker_yaml)],
-                cwd=_PROJECT_ROOT,
-                env=env,
-                stdout=log,
-                stderr=log,
-            )
     except Exception:
         # Ownership only transfers to the caller on success; never leak the
-        # stub's server thread on a seed/token/launch failure.
+        # stub's server thread on a seed/token failure.
         stub.close()
         raise
-    return stub, proc
+    return stub, worker_yaml
+
+
+def start_worker(worker_yaml: Path, log_path: Path) -> subprocess.Popen:
+    """Launch the standalone Worker subprocess (needs a reachable backend)."""
+    env = dict(os.environ)
+    env["PATH"] = f"{_PROJECT_ROOT / 'data' / 'bin'}:{env.get('PATH', '')}"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("Starting: %s worker/executor.py --config %s", sys.executable, worker_yaml)
+    with log_path.open("wb") as log:
+        return subprocess.Popen(
+            [sys.executable, "worker/executor.py", "--config", str(worker_yaml)],
+            cwd=_PROJECT_ROOT,
+            env=env,
+            stdout=log,
+            stderr=log,
+        )
