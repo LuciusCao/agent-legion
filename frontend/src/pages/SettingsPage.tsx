@@ -15,6 +15,7 @@ import { BasicInfoSection } from '../components/settings/BasicInfoSection'
 import { AgentDefaultsSection } from '../components/settings/AgentDefaultsSection'
 import { DangerZone } from '../components/settings/DangerZone'
 import { IntakeConfigSection } from '../components/settings/IntakeConfigSection'
+import { PreviewConfigSection } from '../components/settings/PreviewConfigSection'
 import { WorkerTokensSection } from '../components/settings/WorkerTokensSection'
 import { WorkspaceWorkersSection } from '../components/settings/WorkspaceWorkersSection'
 import { WorkspaceMembersSection } from '../components/settings/WorkspaceMembersSection'
@@ -141,6 +142,12 @@ export function SettingsPage() {
             settings={settings}
             workflowDefinition={workflowDefinition}
             saveError={saveError}
+            setSettings={setSettings}
+          />
+
+          <PreviewConfigSection
+            settings={settings}
+            workflowDefinition={workflowDefinition}
             setSettings={setSettings}
           />
 

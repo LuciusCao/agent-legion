@@ -14,8 +14,11 @@ export const queryKeys = {
   // 替代旧的 refreshKey props 管道。
   jobArtifact: (jobId: string, name: string, version: string) =>
     ['jobArtifact', jobId, name, version] as const,
-  jobVideoDetail: (jobId: string, version: string) =>
-    ['jobVideoDetail', jobId, version] as const,
+  // 通用预览面板的原始文本读取。与 jobArtifact 分开命名空间：结构化
+  // hook（如 useJobQuestion）对同名 artifact 返回归一化对象，queryFn
+  // 形状不同，共 key 会让后挂载方读到错误形状（#11）。
+  jobArtifactText: (jobId: string, name: string, version: string) =>
+    ['jobArtifactText', jobId, name, version] as const,
   studioChatAgents: (workspaceId: string) =>
     ['studio-chat-agents', workspaceId] as const,
   studioChatSessions: (workspaceId: string) =>

@@ -157,8 +157,16 @@ const realComprehension = {
 
 vi.mock('../../api', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../../api')>()
+  const { makeJobDetail } = await import('../../testing/jobDetailFixtures')
   return {
     ...mod,
+    fetchJobDetail: () =>
+      Promise.resolve(
+        makeJobDetail([
+          { node_key: 'generate_key_info', status: 'completed' },
+          { node_key: 'generate_possible_errors', status: 'completed' },
+        ])
+      ),
     fetchJobArtifact: (...args: unknown[]) => {
       const artifactName = args[1] as string
       if (artifactName === 'comprehension_info.json') {
@@ -179,13 +187,7 @@ describe('QuestionContentPanel regression', () => {
 
   it('does not white screen when switching between possible errors', async () => {
     mockFetchJobArtifact.mockResolvedValue(realQuestions)
-    renderPanel(
-      <QuestionContentPanel
-        jobId="job1"
-        keyInfoPreviewable
-        possibleErrorsPreviewable
-      />
-    )
+    renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() =>
       expect(screen.getByText('常见审题错误')).toBeInTheDocument()
     )
@@ -204,13 +206,7 @@ describe('QuestionContentPanel regression', () => {
 
   it('keeps only one of key info or possible error active at a time', async () => {
     mockFetchJobArtifact.mockResolvedValue(realQuestions)
-    renderPanel(
-      <QuestionContentPanel
-        jobId="job1"
-        keyInfoPreviewable
-        possibleErrorsPreviewable
-      />
-    )
+    renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() =>
       expect(screen.getByText('审题信息')).toBeInTheDocument()
     )

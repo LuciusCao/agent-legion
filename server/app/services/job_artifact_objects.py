@@ -280,6 +280,11 @@ class JobArtifactObjectStore:
         assert self.storage is not None
         return self.storage.open_stream(str(row["storage_key"]))
 
+    def open_range_stream(self, row: dict[str, Any], start: int, end: int) -> BinaryIO:
+        """Ranged read for media seek: [start, end] inclusive."""
+        assert self.storage is not None
+        return self.storage.open_range(str(row["storage_key"]), start, end)
+
     def delete_objects(self, rows: list[dict[str, Any]]) -> None:
         """Best-effort object deletion for manifest rows snapshot before a
         job deletion (the rows themselves cascade away with the job row, so

@@ -53,6 +53,7 @@ export const defaultSettings: WorkspaceSettings = {
   intakeModes: [],
   labelOverrides: {},
   workflowKey: '',
+  previewHidden: [],
 }
 
 export const defaultExecutionConfiguration: WorkspaceExecutionConfiguration = {

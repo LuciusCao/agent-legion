@@ -39,40 +39,6 @@ export type AgentStatus = ApiSchemas['AgentStatusResponse'] & {
   max_tasks: number
 }
 
-export type Chapter = {
-  id?: string
-  start: number
-  end?: number
-  title: string
-}
-
-export type InteractionOption = {
-  id: string
-  text: string
-  is_distractor: boolean
-}
-
-export type InteractionNode = {
-  id?: string
-  type?: string
-  trigger_time?: number | string
-  instruction?: string
-  hint?: string
-  reference_sentence?: string
-  options?: InteractionOption[]
-  answer?: string[]
-  grading_mode?: string
-}
-
-export type VideoArtifacts = {
-  subtitles: Array<{ index: number; start: number; end: number; text: string }>
-  chapters: Chapter[]
-  interactions: InteractionNode[]
-  metadata: Record<string, unknown> | null
-  review: Record<string, unknown> | null
-  checklist: Record<string, unknown> | null
-}
-
 export type WorkspaceRecord = ApiSchemas['WorkspaceRecord']
 export type WorkspaceResponse = ApiSchemas['WorkspaceResponse']
 export type WorkspaceConfigurationResponse =

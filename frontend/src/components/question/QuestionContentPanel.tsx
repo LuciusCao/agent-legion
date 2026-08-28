@@ -2,6 +2,11 @@ import { useMemo, useRef, useState } from 'react'
 import { useJobQuestion } from '../../hooks/useJobQuestion'
 import { useJobComprehensionInfo } from '../../hooks/useJobComprehensionInfo'
 import { useJobReviewReports } from '../../hooks/useJobReviewReports'
+import { useJobDetailQuery } from '../../hooks/useJobDetailQuery'
+import {
+  evaluateQuestionGates,
+  evaluateReviewAttempted,
+} from '../../pages/jobDetail/questionPreviewManifest'
 import { buildHighlightedStemParts } from '../../lib/questionHighlight'
 import { escapeHtml } from '../../lib/htmlText'
 import { ErrorAnswerBadges } from '../ErrorAnswerBadges'
@@ -46,25 +51,22 @@ function extractAnswerItems(answer: unknown): string[] | null {
 
 export interface QuestionContentPanelProps {
   jobId: string
-  keyInfoPreviewable?: boolean
-  possibleErrorsPreviewable?: boolean
-  keyInfoReviewAttempted?: boolean
-  possibleErrorsReviewAttempted?: boolean
 }
 
-export function QuestionContentPanel({
-  jobId,
-  keyInfoPreviewable = false,
-  possibleErrorsPreviewable = false,
-  keyInfoReviewAttempted = false,
-  possibleErrorsReviewAttempted = false,
-}: QuestionContentPanelProps) {
+export function QuestionContentPanel({ jobId }: QuestionContentPanelProps) {
   const { question, loading, error } = useJobQuestion(jobId)
   const { info: comprehensionInfo } = useJobComprehensionInfo(jobId)
+  // gating 由 questionPreviewManifest 声明并求值（issue #11 第 2 层），
+  // 替代原先从页面层透传的四个 boolean props。
+  const { data: gateDetail } = useJobDetailQuery(jobId)
+  const [keyInfoPreviewable, possibleErrorsPreviewable] = useMemo(() => {
+    const gates = evaluateQuestionGates(gateDetail ?? null)
+    return [gates.keyInfo, gates.possibleErrors]
+  }, [gateDetail])
   const { reports: reviewReports } = useJobReviewReports(
     jobId,
-    keyInfoReviewAttempted,
-    possibleErrorsReviewAttempted
+    evaluateReviewAttempted(gateDetail ?? null, 'keyInfo'),
+    evaluateReviewAttempted(gateDetail ?? null, 'possibleErrors')
   )
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [selectedErrorId, setSelectedErrorId] = useState<string | null>(null)

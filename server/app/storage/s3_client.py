@@ -52,6 +52,10 @@ class ObjectStorage(Protocol):
         """Return a streaming reader for the object bytes."""
         ...
 
+    def open_range(self, storage_key: str, start: int, end: int) -> BinaryIO:
+        """Return a streaming reader for the byte range [start, end] (inclusive)."""
+        ...
+
     def put_object(self, storage_key: str, data: bytes, content_type: str = "") -> None:
         """Store bytes directly (server-side writes: demo material seed)."""
         ...
@@ -140,6 +144,14 @@ class S3StorageClient:
 
     def open_stream(self, storage_key: str) -> BinaryIO:
         response = self._client.get_object(Bucket=self._settings.bucket, Key=storage_key)
+        return cast(BinaryIO, response["Body"])
+
+    def open_range(self, storage_key: str, start: int, end: int) -> BinaryIO:
+        # S3 语义：Range "bytes=start-end"（闭区间）；越界由存储层按
+        # 200 全量或 416 拒绝，调用方已按对象 size 裁剪。
+        response = self._client.get_object(
+            Bucket=self._settings.bucket, Key=storage_key, Range=f"bytes={start}-{end}"
+        )
         return cast(BinaryIO, response["Body"])
 
     def put_object(self, storage_key: str, data: bytes, content_type: str = "") -> None:

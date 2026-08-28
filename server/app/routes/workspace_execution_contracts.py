@@ -40,6 +40,7 @@ class WorkspaceSettingsPayload(BaseModel):
     intakeModes: list[str]
     labelOverrides: dict[str, str]
     workflowKey: str
+    previewHidden: list[str] = Field(default_factory=list)
 
 
 class WorkspaceConfigurationSettingsRequest(BaseModel):
@@ -49,6 +50,9 @@ class WorkspaceConfigurationSettingsRequest(BaseModel):
     intakeModes: list[str] | None = None
     labelOverrides: dict[str, str] | None = None
     workflowKey: str | None = None
+    # Workspace 级产物预览隐藏列表（job 详情左栏）。PUT 全量保存时缺省
+    # 表示「未改」——沿用已存配置，避免旧客户端 PUT 抹掉勾选。
+    previewHidden: list[str] | None = None
 
 
 class WorkspaceConfigurationRequest(BaseModel):

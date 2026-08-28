@@ -19,6 +19,16 @@ from server.app.services.workspace_node_config import update_workspace_node_conf
 from server.app.services.workspace_node_limit_validation import (
     validate_workspace_node_limits,
 )
+from server.app.services.workspace_preview_settings import (
+    build_intake_config as _build_intake_config,
+)
+from server.app.services.workspace_preview_settings import (
+    clean_preview_hidden as _clean_preview_hidden,
+)
+from server.app.services.workspace_preview_settings import (
+    update_agent_defaults,
+    write_preview_hidden,
+)
 from server.app.services.workspace_settings_payload import workspace_settings_payload
 from server.app.services.workspace_settings_schemas import (
     workspace_settings_payload_with_schemas,
@@ -27,17 +37,6 @@ from server.app.services.workspace_stats import build_workspace_stats
 from server.app.settings import Settings
 from server.app.workflows.builtin_demo import DEMO_WORKFLOW_KEY
 from server.app.workflows.definition import WorkflowDefinition
-
-
-def _build_intake_config(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "enabled_modes": patch["intakeModes"]
-        if patch.get("intakeModes") is not None
-        else current["intakeModes"],
-        "label_overrides": patch["labelOverrides"]
-        if patch.get("labelOverrides") is not None
-        else current["labelOverrides"],
-    }
 
 
 class WorkspaceConfigurationService:
@@ -194,6 +193,7 @@ class WorkspaceConfigurationService:
         raw_resource_config = workspace.get("resource_config")
         resource_config = dict(raw_resource_config) if isinstance(raw_resource_config, dict) else {}
         intake_config = _build_intake_config(current, settings_patch)
+        preview_hidden = _clean_preview_hidden(settings_patch)
         if agent_capacity is not None and agent_capacity <= 0:
             raise InvalidOperationError("Agent capacity must be a positive integer")
         try:
@@ -211,6 +211,8 @@ class WorkspaceConfigurationService:
             # previously saved (or schema-seeded) Agent capacity.
             if agent_capacity is not None:
                 self.job_db.set_workspace_agent_capacity(workspace_id, agent_capacity)
+            if preview_hidden is not None:
+                saved_workspace = write_preview_hidden(self.job_db, workspace_id, preview_hidden)
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
         if workflow is not None:
@@ -261,22 +263,12 @@ class WorkspaceConfigurationService:
                 patch,
             )
         elif section == "agent-defaults":
-            defaults = patch.get("agentDefaults")
-            if not isinstance(defaults, dict):
-                raise InvalidOperationError("agentDefaults payload is required")
-            values: dict[str, Any] = {}
-            for key in ("provider", "model", "thinking"):
-                value = defaults.get(key)
-                if value is not None and not isinstance(value, str):
-                    raise InvalidOperationError(f"agentDefaults.{key} must be a string")
-                values[key] = value
-            workspace = self.job_db.update_workspace(
-                workspace_id,
-                default_agent_provider=values["provider"],
-                default_agent_model=values["model"],
-                default_agent_thinking=values["thinking"],
-            )
-
+            workspace = update_agent_defaults(self.job_db, workspace_id, patch)
+        elif section == "preview":
+            hidden = _clean_preview_hidden(patch)
+            if hidden is None:
+                raise InvalidOperationError("previewHidden payload is required")
+            workspace = write_preview_hidden(self.job_db, workspace_id, hidden)
         else:
             raise NotFoundError("Unknown settings section")
         return self._payload(workspace)

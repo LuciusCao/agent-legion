@@ -109,6 +109,10 @@ MIGRATIONS: list[SchemaMigration] = [
     # workspace_id rows in every child table and the agent_workers scope
     # JSON, so it must see every other workspace-shape change settled.
     SchemaMigration(62, "workspace_id_key_binding", migrate_workspace_id_key_binding),
+    # v63 is DDL-only (workspaces.preview_config_json): workspace-level
+    # artifact preview config comes from the schema-file replay, no data
+    # migration.
+    SchemaMigration(63, "workspace_preview_config"),
 ]
 
 assert [m.version for m in MIGRATIONS] == sorted(m.version for m in MIGRATIONS), (

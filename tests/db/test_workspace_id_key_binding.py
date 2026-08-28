@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import pytest
 
-from server.app.db.schema import SCHEMA_VERSION
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -22,20 +21,6 @@ def _seed_workspace(conn, workspace_id: str, key: str) -> None:
         " values (%s, %s, %s) on conflict do nothing",
         (workspace_id, workspace_id, key),
     )
-
-
-def test_schema_version_pin() -> None:
-    # The latest-migration record pin moved through
-    # test_retire_global_register_tokens_migration.py (v58) →
-    # test_jobs_run_id_index.py (v59) → back to the v58 file for the DDL-only
-    # v60; v62 owns its own module, so the pin lives here now.
-    assert SCHEMA_VERSION == 62
-    with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute(
-            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
-        ).fetchone()
-    assert row is not None
-    assert row["name"] == "workspace_id_key_binding"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:

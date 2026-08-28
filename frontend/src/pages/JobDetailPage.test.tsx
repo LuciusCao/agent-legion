@@ -114,6 +114,13 @@ function renderPage(initialEntry = '/workspaces/ws1/jobs/j1') {
   )
 }
 
+/** 只数 /api/jobs/j1 的 detail GET（产物 fetch 等其他请求不计入轮询断言）。 */
+function detailGetCalls(fetchMock: ReturnType<typeof createFetchMock>): number {
+  return fetchMock.mock.calls.filter(
+    ([url, init]) => url === '/api/jobs/j1' && (init?.method ?? 'GET') === 'GET'
+  ).length
+}
+
 function createFetchMock(
   overrides: {
     detailStatus?: string
@@ -235,6 +242,12 @@ function createFetchMock(
         }),
       })
     }
+    if (url === '/api/jobs/j1/artifacts/question.json' && method === 'GET') {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ name: 'question.json', content: '{}' }),
+      })
+    }
     return Promise.resolve({ ok: true, json: async () => ({}) })
   })
 }
@@ -290,13 +303,14 @@ describe('JobDetailPage', () => {
       expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(detailGetCalls(fetchMock)).toBe(1)
 
     await act(async () => {
       vi.advanceTimersByTime(5000)
     })
     // +1 detail poll；mount 时的 workers invalidate 在无活跃观察者时不产生请求。
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    // 通用产物预览的 artifact fetch 不计入（issue #11 后属正常行为）。
+    expect(detailGetCalls(fetchMock)).toBe(2)
   })
 
   it.each([['running'], ['queued']] as const)(
@@ -310,20 +324,22 @@ describe('JobDetailPage', () => {
         expect(screen.getByText('提取')).toBeInTheDocument()
       })
 
-      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(detailGetCalls(fetchMock)).toBe(1)
 
       await act(async () => {
         vi.advanceTimersByTime(5000)
       })
       // +1 detail poll；mount 时的 workers invalidate 在无活跃观察者时不产生请求。
-      expect(fetchMock).toHaveBeenCalledTimes(3)
+      // 通用产物预览的 artifact fetch 不计入（issue #11 后属正常行为）。
+      expect(detailGetCalls(fetchMock)).toBe(2)
 
       unmount()
 
       await act(async () => {
         vi.advanceTimersByTime(5000)
       })
-      expect(fetchMock).toHaveBeenCalledTimes(3)
+      // unmount 后轮询停止：detail GET 不再增加。
+      expect(detailGetCalls(fetchMock)).toBe(2)
     }
   )
 
@@ -403,14 +419,14 @@ describe('JobDetailPage', () => {
       expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(detailGetCalls(fetchMock)).toBe(1)
 
     await act(async () => {
       vi.advanceTimersByTime(5000)
     })
     // No detail poll for a completed job；mount 时的 workers invalidate
     // 在无活跃观察者（本页未挂 Worker 状态列表）时不产生请求。
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(detailGetCalls(fetchMock)).toBe(1)
   })
 
   it('disables rerun and package for a running job', async () => {
@@ -662,7 +678,9 @@ describe('JobDetailPage', () => {
     expect(
       screen.getByRole('heading', { name: '产物文件' })
     ).toBeInTheDocument()
-    expect(screen.getByText('question.json')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'question.json' })
+    ).toBeInTheDocument()
   })
 
   it('renders QuestionContentPanel for question jobs', async () => {
@@ -704,10 +722,12 @@ describe('JobDetailPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Question stem')).toBeInTheDocument()
     })
-    expect(screen.queryByTestId('video-content-panel')).not.toBeInTheDocument()
+    // issue #11：question 任务的结构化面板在上，通用产物预览在下。
+    expect(screen.getByTestId('artifact-preview-panel')).toBeInTheDocument()
+    expect(screen.getByText('question.json')).toBeInTheDocument()
   })
 
-  it('renders VideoContentPanel for video jobs', async () => {
+  it('renders generic artifact preview for video jobs (issue #11)', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string) => {
@@ -725,12 +745,11 @@ describe('JobDetailPage', () => {
     )
 
     renderPage()
+    // 未知 source_type 不再白屏：通用产物预览兜底（video 空态 stub 已删）。
     await waitFor(() => {
-      expect(screen.getByTestId('video-content-panel')).toBeInTheDocument()
+      expect(screen.getByTestId('artifact-preview-panel')).toBeInTheDocument()
     })
-    // Transitional shell (#11): the dedicated video detail endpoint retired
-    // with the business extraction; the panel renders its empty state.
-    expect(screen.getByText('视频内容尚未生成')).toBeInTheDocument()
+    expect(screen.getByText('question.json')).toBeInTheDocument()
   })
 
   it('renders job token usage dialog when open', async () => {
@@ -801,16 +820,23 @@ describe('JobDetailPage', () => {
       screen.getByLabelText('产物文件').click()
     })
     await act(async () => {
-      screen.getByText('question.json').click()
+      screen.getByRole('button', { name: 'question.json' }).click()
     })
-    expect(await screen.findByText('artifact-body')).toBeInTheDocument()
+    // issue #11 后 artifact 内容同时出现在左栏通用卡片与弹窗，按存在性断言。
+    expect(
+      (await screen.findAllByText('artifact-body')).length
+    ).toBeGreaterThan(0)
 
     await act(async () => {
       screen.getByRole('button', { name: '关闭' }).click()
     })
+    // 弹窗关闭；左栏通用卡片的同内容预览保留（issue #11 新行为）。
     await waitFor(() => {
-      expect(screen.queryByText('artifact-body')).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('heading', { name: '产物文件' })
+      ).not.toBeInTheDocument()
     })
+    expect(screen.getAllByText('artifact-body').length).toBeGreaterThan(0)
   })
 
   it('shows the fetch error inside the artifact preview', async () => {
@@ -836,9 +862,12 @@ describe('JobDetailPage', () => {
       screen.getByLabelText('产物文件').click()
     })
     await act(async () => {
-      screen.getByText('question.json').click()
+      screen.getByRole('button', { name: 'question.json' }).click()
     })
 
-    expect(await screen.findByText(/HTTP 500: server boom/)).toBeInTheDocument()
+    // issue #11 后错误同时呈现在左栏卡片与弹窗，按存在性断言。
+    expect(
+      (await screen.findAllByText(/HTTP 500: server boom/)).length
+    ).toBeGreaterThan(0)
   })
 })
