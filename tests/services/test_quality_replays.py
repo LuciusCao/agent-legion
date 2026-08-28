@@ -13,6 +13,7 @@ from server.app.services.agent_service import AgentService
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.services.quality_labels import QualityLabelService
+from server.app.services.quality_replay_setup import QualityReplaySetup
 from server.app.services.quality_replays import QualityReplayService
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
 from server.app.storage_paths import resolve_job_dir
@@ -399,12 +400,12 @@ def test_programming_error_is_not_recorded_as_replay_failure(env, monkeypatch) -
     logged, and a retry after the bug is fixed is not blocked."""
 
     service = env.service()
-    real_build = service._build_copy_job
+    real_build = QualityReplaySetup.build_copy_job
 
     def broken_build(*args, **kwargs):
         raise TypeError("cannot unpack non-iterable None (injected bug)")
 
-    monkeypatch.setattr(service, "_build_copy_job", broken_build)
+    monkeypatch.setattr(QualityReplaySetup, "build_copy_job", broken_build)
 
     with pytest.raises(InvalidOperationError, match="replay setup failed"):
         service.create_replay(env.workspace_id, "item-1")
@@ -413,7 +414,7 @@ def test_programming_error_is_not_recorded_as_replay_failure(env, monkeypatch) -
     assert env.job_db.list_runs(env.workspace_id) == []
 
     # Once the bug is fixed the same item replays without residue.
-    monkeypatch.setattr(service, "_build_copy_job", real_build)
+    monkeypatch.setattr(QualityReplaySetup, "build_copy_job", real_build)
     replay = service.create_replay(env.workspace_id, "item-1")
     assert replay["status"] == "pending"
 
@@ -431,7 +432,7 @@ def test_programming_error_in_copy_setup_keeps_runtime_error_visible(
     monkeypatch.setattr(env.job_db, "create_jobs_bulk", fail_bulk)
 
     with (
-        caplog.at_level("ERROR", logger="server.app.services.quality_replays"),
+        caplog.at_level("ERROR", logger="server.app.services.quality_replay_setup"),
         pytest.raises(InvalidOperationError, match="replay setup failed") as caught,
     ):
         env.service().create_replay(env.workspace_id, "item-1")

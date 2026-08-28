@@ -22,6 +22,7 @@ from server.app.jobs.queries.job_nodes import JobNodeQueriesMixin
 from server.app.jobs.queries.job_rerun_states import JobRerunStateQueriesMixin
 from server.app.jobs.queries.job_scan_delta import JobScanDeltaMixin
 from server.app.jobs.queries.job_scan_marks import JobScanMarksMixin
+from server.app.jobs.queries.quality_replays import QualityReplayQueriesMixin
 from server.app.jobs.queries.scoped_token_management import (
     ScopedTokenManagementQueriesMixin,
 )
@@ -61,10 +62,11 @@ class RunDomainQueriesMixin(
     JobScanMarksMixin,
     JobStatusQueriesMixin,
     JobKeyQueriesMixin,
+    QualityReplayQueriesMixin,
     AtomicJobMutationsMixin,
     JobExecutionControlMixin,
 ):
-    """Runs, jobs, nodes, scans, reruns, and execution control."""
+    """Runs, jobs, nodes, scans, reruns, quality replays, and execution control."""
 
 
 class StudioChatDomainQueriesMixin(StudioChatQueriesMixin):
