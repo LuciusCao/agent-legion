@@ -340,7 +340,11 @@ describe('QuestionContentPanel', () => {
     )
 
     // 原 gate 关闭场景：审题区块不渲染，避免 chips 标签与 blank label 撞文本。
-    setPanelGates({ keyInfoCompleted: false, possibleErrorsCompleted: false, reviewAttempted: false })
+    setPanelGates({
+      keyInfoCompleted: false,
+      possibleErrorsCompleted: false,
+      reviewAttempted: false,
+    })
     renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
     expect(screen.getByText(/第1空/)).toBeInTheDocument()
@@ -359,7 +363,11 @@ describe('QuestionContentPanel', () => {
       })
     )
 
-    setPanelGates({ keyInfoCompleted: false, possibleErrorsCompleted: false, reviewAttempted: false })
+    setPanelGates({
+      keyInfoCompleted: false,
+      possibleErrorsCompleted: false,
+      reviewAttempted: false,
+    })
     renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
     expect(screen.getByText(/第1空/)).toBeInTheDocument()

@@ -3,7 +3,10 @@
  * 卡片自身不做分类判断——kind 由面板计算后传入。
  */
 import { createElement } from 'react'
-import { classifyArtifactPreview, PREVIEW_KIND_LABELS } from '../../lib/previewKind'
+import {
+  classifyArtifactPreview,
+  PREVIEW_KIND_LABELS,
+} from '../../lib/previewKind'
 import { jobArtifactRawUrl } from '../../api/jobsApi'
 import { resolvePreviewRenderer } from './previewRegistry'
 import type { JobDetail } from '../../types/jobTypes'
@@ -15,7 +18,11 @@ export interface ArtifactPreviewCardProps {
   detail: JobDetail | null
 }
 
-export function ArtifactPreviewCard({ jobId, name, detail }: ArtifactPreviewCardProps) {
+export function ArtifactPreviewCard({
+  jobId,
+  name,
+  detail,
+}: ArtifactPreviewCardProps) {
   const kind = classifyArtifactPreview(name)
   const Renderer = resolvePreviewRenderer(kind)
   return (

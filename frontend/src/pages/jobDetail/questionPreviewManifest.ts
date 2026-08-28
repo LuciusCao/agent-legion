@@ -40,7 +40,10 @@ const TERMINAL_NODE_STATUSES = new Set(['completed', 'failed'])
 /** question 面板的 section 顺序与 gating 声明（渲染顺序即数组顺序）。 */
 export const QUESTION_PREVIEW_SECTIONS: readonly QuestionSectionSpec[] = [
   { id: 'stem' },
-  { id: 'keyInfo', gate: { nodeKey: 'generate_key_info', status: 'completed' } },
+  {
+    id: 'keyInfo',
+    gate: { nodeKey: 'generate_key_info', status: 'completed' },
+  },
   { id: 'options' },
   { id: 'answer' },
   {
@@ -53,7 +56,8 @@ export const QUESTION_PREVIEW_SECTIONS: readonly QuestionSectionSpec[] = [
 function gateVisible(gate: QuestionSectionGate, nodes: JobNode[]): boolean {
   return nodes.some((node) => {
     if (node.node_key !== gate.nodeKey) return false
-    if (gate.status === 'terminal') return TERMINAL_NODE_STATUSES.has(node.status)
+    if (gate.status === 'terminal')
+      return TERMINAL_NODE_STATUSES.has(node.status)
     return node.status === 'completed'
   })
 }
@@ -81,7 +85,9 @@ export function evaluateReviewAttempted(
 export type QuestionGateMap = Record<QuestionSectionId, boolean>
 
 /** 求 section gating：无 gate 恒可见，有 gate 按节点状态判定。 */
-export function evaluateQuestionGates(detail: JobDetail | null): QuestionGateMap {
+export function evaluateQuestionGates(
+  detail: JobDetail | null
+): QuestionGateMap {
   const nodes = detail?.nodes ?? []
   const gates = {} as QuestionGateMap
   for (const section of QUESTION_PREVIEW_SECTIONS) {

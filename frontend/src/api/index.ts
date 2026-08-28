@@ -11,7 +11,6 @@ export {
   fetchWorkspaces,
   fetchWorkspaceStats,
   updateAgentDefaults,
-
   updateWorkspace,
 } from './workspaceApi'
 // prettier-ignore

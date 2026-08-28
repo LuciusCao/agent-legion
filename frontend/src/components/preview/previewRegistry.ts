@@ -17,7 +17,10 @@ import {
   VideoPreview,
 } from './previewRenderers'
 
-export const PREVIEW_RENDERERS: Record<PreviewKind, ComponentType<PreviewRendererProps>> = {
+export const PREVIEW_RENDERERS: Record<
+  PreviewKind,
+  ComponentType<PreviewRendererProps>
+> = {
   json: JsonPreview,
   markdown: MarkdownPreview,
   richtext: RichTextPreview,

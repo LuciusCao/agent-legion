@@ -36,13 +36,21 @@ export function ArtifactPreviewPanel({
       <header className={styles.header}>
         <h2 className={styles.title}>产物预览</h2>
         <span className={styles.count}>{visible.length} 个文件</span>
-        <ArtifactPreviewConfigMenu workspaceId={workspaceId} artifacts={artifacts} />
+        <ArtifactPreviewConfigMenu
+          workspaceId={workspaceId}
+          artifacts={artifacts}
+        />
       </header>
       {visible.length === 0 ? (
         <p className={styles.empty}>暂无产物文件</p>
       ) : (
         visible.map((name) => (
-          <ArtifactPreviewCard key={name} jobId={jobId} name={name} detail={detail} />
+          <ArtifactPreviewCard
+            key={name}
+            jobId={jobId}
+            name={name}
+            detail={detail}
+          />
         ))
       )}
     </div>

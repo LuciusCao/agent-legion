@@ -56,8 +56,17 @@ export function PreviewConfigSection({
         <div style={{ marginTop: 12 }}>
           {nodeGroups.map((group) => (
             <div key={group.key} style={{ marginBottom: 12 }}>
-              <span style={{ fontSize: 13, color: '#43474e' }}>{group.label}</span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
+              <span style={{ fontSize: 13, color: '#43474e' }}>
+                {group.label}
+              </span>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  marginTop: 4,
+                }}
+              >
                 {group.outputs.map((name) => {
                   const isChecked = !hiddenSet.has(name)
                   return (

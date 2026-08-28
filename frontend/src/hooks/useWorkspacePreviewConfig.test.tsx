@@ -11,7 +11,8 @@ const mockUpdate = vi.fn()
 
 // 组件直连 ../api/workspacePreviewApi（API 拆分后不经 barrel），mock 打同模块。
 vi.mock('../api/workspacePreviewApi', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../api/workspacePreviewApi')>()
+  const mod =
+    await importOriginal<typeof import('../api/workspacePreviewApi')>()
   return {
     ...mod,
     updateWorkspacePreviewHidden: (...args: unknown[]) => mockUpdate(...args),
@@ -76,11 +77,17 @@ describe('useWorkspacePreviewConfig', () => {
       await result.current.toggleArtifact('frame.png', false)
     })
 
-    expect(mockUpdate).toHaveBeenCalledWith('ws1', ['frame.png', 'questions.json'])
+    expect(mockUpdate).toHaveBeenCalledWith('ws1', [
+      'frame.png',
+      'questions.json',
+    ])
     const cached = client.getQueryData<WorkspaceSettingsSnapshot>(
       extraQueryKeys.workspaceSettings('ws1')
     )
-    expect(cached?.settings.previewHidden).toEqual(['frame.png', 'questions.json'])
+    expect(cached?.settings.previewHidden).toEqual([
+      'frame.png',
+      'questions.json',
+    ])
   })
 
   it('勾选（显示）从隐藏列表移除', async () => {

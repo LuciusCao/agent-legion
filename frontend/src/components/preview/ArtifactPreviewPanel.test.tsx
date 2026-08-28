@@ -51,7 +51,10 @@ describe('ArtifactPreviewPanel', () => {
       content: JSON.stringify({ ok: true }),
     })
     renderPanel(
-      <ArtifactPreviewPanel jobId="j1" detail={makeDetail(['questions.json', 'frame.png'])} />
+      <ArtifactPreviewPanel
+        jobId="j1"
+        detail={makeDetail(['questions.json', 'frame.png'])}
+      />
     )
 
     expect(await screen.findByText('questions.json')).toBeInTheDocument()
@@ -95,7 +98,9 @@ describe('ArtifactPreviewPanel', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '配置预览产物' }))
-    const item = await screen.findByRole('menuitem', { name: /questions\.json/ })
+    const item = await screen.findByRole('menuitem', {
+      name: /questions\.json/,
+    })
     fireEvent.click(item)
     expect(mockToggleArtifact).toHaveBeenCalledWith('questions.json', false)
   })
@@ -104,7 +109,9 @@ describe('ArtifactPreviewPanel', () => {
     renderPanel(<ArtifactPreviewPanel jobId="j1" detail={null} />)
 
     expect(screen.getByText('暂无产物文件')).toBeInTheDocument()
-    expect(screen.queryByTestId('artifact-preview-card')).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('artifact-preview-card')
+    ).not.toBeInTheDocument()
   })
 
   it('json 解析失败时按原文展示', async () => {
@@ -126,9 +133,10 @@ describe('ArtifactPreviewPanel', () => {
     const img = await screen.findByRole('img', { name: 'frame.png' })
     fireEvent.error(img)
     expect(screen.getByText('媒体加载失败')).toBeInTheDocument()
-    expect(
-      screen.getByRole('link', { name: '新窗口打开' })
-    ).toHaveAttribute('href', '/api/jobs/j1/artifacts/frame.png/raw')
+    expect(screen.getByRole('link', { name: '新窗口打开' })).toHaveAttribute(
+      'href',
+      '/api/jobs/j1/artifacts/frame.png/raw'
+    )
 
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     // 重试后重新挂载 <img>（失败占位消失）。

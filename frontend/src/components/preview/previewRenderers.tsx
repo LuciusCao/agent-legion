@@ -39,7 +39,11 @@ interface TextQueryResult {
   error: string
 }
 
-function useArtifactText(jobId: string, name: string, detail: JobDetail | null): TextQueryResult {
+function useArtifactText(
+  jobId: string,
+  name: string,
+  detail: JobDetail | null
+): TextQueryResult {
   const version = artifactVersion(detail, name)
   const query = useQuery({
     queryKey: queryKeys.jobArtifactText(jobId, name, version),
@@ -105,7 +109,10 @@ export function MarkdownPreview({ jobId, name, detail }: PreviewRendererProps) {
           sx={{ mb: 1 }}
         />
       )}
-      <div className={styles.markdownBody} dangerouslySetInnerHTML={{ __html: html }} />
+      <div
+        className={styles.markdownBody}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
     </div>
   )
 }
@@ -139,11 +146,23 @@ export function TextPreview({ jobId, name, detail }: PreviewRendererProps) {
 }
 
 /** 媒体加载失败（404/格式不支持）的占位 + raw 新窗口兜底。 */
-function MediaError({ jobId, name, onRetry }: { jobId: string; name: string; onRetry: () => void }) {
+function MediaError({
+  jobId,
+  name,
+  onRetry,
+}: {
+  jobId: string
+  name: string
+  onRetry: () => void
+}) {
   return (
     <div className={styles.mediaError}>
       <span className={styles.mediaErrorText}>媒体加载失败</span>
-      <button type="button" className={styles.mediaErrorAction} onClick={onRetry}>
+      <button
+        type="button"
+        className={styles.mediaErrorAction}
+        onClick={onRetry}
+      >
         重试
       </button>
       <a

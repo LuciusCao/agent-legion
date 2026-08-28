@@ -99,11 +99,8 @@ def extract_fastapi_routes(root: Path) -> str:
         # Find create_*_router / register_*_route functions and their nested
         # routes (register_* is the split-file pattern, e.g. raw artifact route)
         for node in ast.walk(tree):
-            if (
-                not isinstance(node, ast.FunctionDef)
-                or not (
-                    node.name.startswith("create_") or node.name.startswith("register_")
-                )
+            if not isinstance(node, ast.FunctionDef) or not (
+                node.name.startswith("create_") or node.name.startswith("register_")
             ):
                 continue
             prefix = _find_router_prefix(node.body, "router")

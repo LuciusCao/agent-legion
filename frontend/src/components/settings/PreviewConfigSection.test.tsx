@@ -47,7 +47,11 @@ describe('PreviewConfigSection', () => {
       defaultSettings,
       makeWorkflow([
         { key: 'parse', label: '解析', outputs: ['questions.json'] },
-        { key: 'assemble', label: '组装', outputs: ['comprehension_info.json'] },
+        {
+          key: 'assemble',
+          label: '组装',
+          outputs: ['comprehension_info.json'],
+        },
       ])
     )
 
@@ -60,17 +64,23 @@ describe('PreviewConfigSection', () => {
   it('默认全部勾选（previewHidden 空）', () => {
     renderSection(
       defaultSettings,
-      makeWorkflow([{ key: 'parse', label: '解析', outputs: ['questions.json'] }])
+      makeWorkflow([
+        { key: 'parse', label: '解析', outputs: ['questions.json'] },
+      ])
     )
 
-    const checkbox = screen.getByRole('checkbox', { name: '' }) as HTMLInputElement
+    const checkbox = screen.getByRole('checkbox', {
+      name: '',
+    }) as HTMLInputElement
     expect(checkbox.checked).toBe(true)
   })
 
   it('隐藏列表中的产物不勾选；点击勾选从隐藏列表移除', () => {
     const { setSettings } = renderSection(
       { ...defaultSettings, previewHidden: ['questions.json'] },
-      makeWorkflow([{ key: 'parse', label: '解析', outputs: ['questions.json'] }])
+      makeWorkflow([
+        { key: 'parse', label: '解析', outputs: ['questions.json'] },
+      ])
     )
 
     const checkbox = screen.getByRole('checkbox') as HTMLInputElement
@@ -83,7 +93,9 @@ describe('PreviewConfigSection', () => {
   it('取消勾选加入隐藏列表（去重排序）', () => {
     const { setSettings } = renderSection(
       { ...defaultSettings, previewHidden: ['b.json'] },
-      makeWorkflow([{ key: 'parse', label: '解析', outputs: ['a.json', 'b.json'] }])
+      makeWorkflow([
+        { key: 'parse', label: '解析', outputs: ['a.json', 'b.json'] },
+      ])
     )
 
     const checkboxes = screen.getAllByRole('checkbox')

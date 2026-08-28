@@ -15,7 +15,9 @@ import { useUiStore } from '../stores/uiStore'
 import { useWorkspaceSettingsQuery } from './useWorkspaceSettingsQuery'
 import type { WorkspaceSettingsSnapshot } from './useWorkspaceSettingsQuery'
 
-export function useWorkspacePreviewConfig(workspaceId: string | null | undefined) {
+export function useWorkspacePreviewConfig(
+  workspaceId: string | null | undefined
+) {
   const queryClient = useQueryClient()
   const { data: snapshot } = useWorkspaceSettingsQuery(workspaceId)
   const showToast = useUiStore((s) => s.showToast)
@@ -30,9 +32,9 @@ export function useWorkspacePreviewConfig(workspaceId: string | null | undefined
     async (artifactName: string, visible: boolean) => {
       if (!workspaceId) return
       const queryKey = extraQueryKeys.workspaceSettings(workspaceId)
-      const snapshotBefore = queryClient.getQueryData<WorkspaceSettingsSnapshot>(queryKey)
-      const hiddenBefore =
-        snapshotBefore?.settings?.previewHidden ?? []
+      const snapshotBefore =
+        queryClient.getQueryData<WorkspaceSettingsSnapshot>(queryKey)
+      const hiddenBefore = snapshotBefore?.settings?.previewHidden ?? []
       const nextHidden = visible
         ? hiddenBefore.filter((name) => name !== artifactName)
         : Array.from(new Set([...hiddenBefore, artifactName])).sort()
@@ -48,7 +50,10 @@ export function useWorkspacePreviewConfig(workspaceId: string | null | undefined
         await updateWorkspacePreviewHidden(workspaceId, nextHidden)
       } catch (err) {
         if (snapshotBefore) {
-          queryClient.setQueryData<WorkspaceSettingsSnapshot>(queryKey, snapshotBefore)
+          queryClient.setQueryData<WorkspaceSettingsSnapshot>(
+            queryKey,
+            snapshotBefore
+          )
         }
         showToast(
           `预览配置保存失败：${err instanceof Error ? err.message : String(err)}`,

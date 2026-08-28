@@ -823,7 +823,9 @@ describe('JobDetailPage', () => {
       screen.getByRole('button', { name: 'question.json' }).click()
     })
     // issue #11 后 artifact 内容同时出现在左栏通用卡片与弹窗，按存在性断言。
-    expect((await screen.findAllByText('artifact-body')).length).toBeGreaterThan(0)
+    expect(
+      (await screen.findAllByText('artifact-body')).length
+    ).toBeGreaterThan(0)
 
     await act(async () => {
       screen.getByRole('button', { name: '关闭' }).click()
@@ -864,6 +866,8 @@ describe('JobDetailPage', () => {
     })
 
     // issue #11 后错误同时呈现在左栏卡片与弹窗，按存在性断言。
-    expect((await screen.findAllByText(/HTTP 500: server boom/)).length).toBeGreaterThan(0)
+    expect(
+      (await screen.findAllByText(/HTTP 500: server boom/)).length
+    ).toBeGreaterThan(0)
   })
 })

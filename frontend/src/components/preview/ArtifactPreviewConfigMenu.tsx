@@ -17,7 +17,8 @@ export function ArtifactPreviewConfigMenu({
   workspaceId,
   artifacts,
 }: ArtifactPreviewConfigMenuProps) {
-  const { previewHidden, toggleArtifact } = useWorkspacePreviewConfig(workspaceId)
+  const { previewHidden, toggleArtifact } =
+    useWorkspacePreviewConfig(workspaceId)
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
   const menuOpen = Boolean(menuAnchor)
   const hiddenSet = new Set(previewHidden)
@@ -48,7 +49,12 @@ export function ArtifactPreviewConfigMenu({
               dense
               onClick={() => void toggleArtifact(name, !isChecked)}
             >
-              <Checkbox checked={isChecked} tabIndex={-1} disableRipple size="small" />
+              <Checkbox
+                checked={isChecked}
+                tabIndex={-1}
+                disableRipple
+                size="small"
+              />
               <ListItemText primary={name} />
             </MenuItem>
           )

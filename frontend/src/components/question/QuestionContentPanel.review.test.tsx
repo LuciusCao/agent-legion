@@ -29,7 +29,8 @@ const { GATE_NODES, GATE_NODES_NO_REVIEW } = vi.hoisted(() => ({
   ],
 }))
 
-let detailNodesOverride: Array<{ node_key: string; status: string }> | null = null
+let detailNodesOverride: Array<{ node_key: string; status: string }> | null =
+  null
 
 const mockComprehensionInfo = {
   question_id: 'Q1',
@@ -145,11 +146,7 @@ describe('QuestionContentPanel review integration', () => {
   })
 
   it('shows review status icons on key-info and possible-error chips', async () => {
-    renderPanel(
-      <QuestionContentPanel
-        jobId="job1"
-      />
-    )
+    renderPanel(<QuestionContentPanel jobId="job1" />)
 
     await waitFor(() =>
       expect(screen.getByText('审题信息')).toBeInTheDocument()
@@ -161,11 +158,7 @@ describe('QuestionContentPanel review integration', () => {
   })
 
   it('renders key-info review decision and reason in detail card', async () => {
-    renderPanel(
-      <QuestionContentPanel
-        jobId="job1"
-      />
-    )
+    renderPanel(<QuestionContentPanel jobId="job1" />)
 
     await waitFor(() =>
       expect(screen.getByText('审题信息')).toBeInTheDocument()
@@ -180,11 +173,7 @@ describe('QuestionContentPanel review integration', () => {
   })
 
   it('renders possible-error review decision and reason in detail card', async () => {
-    renderPanel(
-      <QuestionContentPanel
-        jobId="job1"
-      />
-    )
+    renderPanel(<QuestionContentPanel jobId="job1" />)
 
     await waitFor(() =>
       expect(screen.getByText('常见审题错误')).toBeInTheDocument()
