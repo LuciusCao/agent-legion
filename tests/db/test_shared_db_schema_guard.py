@@ -102,3 +102,59 @@ def test_init_db_routes_through_the_guard(monkeypatch: pytest.MonkeyPatch) -> No
     with pytest.raises(_Boom):
         schema_module.init_db("postgresql://127.0.0.1:5432/agent_legion_dev")
     assert called == ["postgresql://127.0.0.1:5432/agent_legion_dev"]
+
+
+@pytest.mark.no_db
+def test_dsn_database_name_falls_back_to_pgdatabase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """conninfo_to_dict ignores the libpq environment; libpq itself applies
+    PGDATABASE at connect time. A dbname-less DSN must therefore resolve
+    through PGDATABASE or the guard would wave it through while the real
+    connection lands on the shared database (subagent review P1)."""
+    monkeypatch.setenv("PGDATABASE", SHARED_DB_NAME)
+    assert dsn_database_name("postgresql://127.0.0.1:5432") == SHARED_DB_NAME
+    monkeypatch.setenv("PGDATABASE", "agent_legion_dev")
+    assert dsn_database_name("postgresql://127.0.0.1:5432") == "agent_legion_dev"
+    monkeypatch.delenv("PGDATABASE", raising=False)
+    assert dsn_database_name("postgresql://127.0.0.1:5432") == ""
+
+
+@pytest.mark.no_db
+def test_guard_rejects_pgdatabase_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA", raising=False)
+    monkeypatch.setenv("PGDATABASE", SHARED_DB_NAME)
+    with pytest.raises(SharedDatabaseSchemaError, match="refusing to initialize"):
+        guard_shared_db("postgresql://127.0.0.1:5432")
+
+
+@pytest.mark.no_db
+def test_dsn_database_name_covers_legal_dsn_forms() -> None:
+    """Keyword form, unix socket, empty-host URL and trailing whitespace all
+    resolve the way libpq would (regression fixtures for the guard)."""
+    assert dsn_database_name("host=x dbname=" + SHARED_DB_NAME) == SHARED_DB_NAME
+    assert dsn_database_name("postgresql:///") == ""
+    assert dsn_database_name("postgresql:///agent_legion") == SHARED_DB_NAME
+    assert dsn_database_name("postgresql://127.0.0.1:5432/" + SHARED_DB_NAME + " ") == (
+        SHARED_DB_NAME
+    )
+    # A query override to a derived name stays correctly allowed even when
+    # the URL path itself is the shared name.
+    assert (
+        dsn_database_name("postgresql://host/agent_legion?dbname=agent_legion_dev")
+        == "agent_legion_dev"
+    )
+
+
+@pytest.mark.no_db
+def test_seed_from_prod_guard_rejects_encoded_shared_name() -> None:
+    """seed_from_prod shares the libpq-semantics DSN check: the URL-encoded
+    shared name must not pass its prod-target guard."""
+    from scripts.seed_from_prod import SeedError, guard_target_dsn
+
+    with pytest.raises(SeedError, match="生产库同名"):
+        guard_target_dsn("postgresql://127.0.0.1:5432/agent%5Flegion")
+    with pytest.raises(SeedError, match="生产库同名"):
+        guard_target_dsn("postgresql://127.0.0.1:5432/?dbname=agent_legion")
+    # Derived names on loopback stay allowed.
+    guard_target_dsn("postgresql://127.0.0.1:5432/agent_legion_dev")

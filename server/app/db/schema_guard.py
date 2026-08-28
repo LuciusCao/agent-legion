@@ -32,9 +32,12 @@ def dsn_database_name(database_dsn: DatabaseDsn) -> str:
     Parsed with psycopg's conninfo (libpq semantics), not a plain URL path:
     ``agent%5Flegion`` URL-decodes to the shared name and
     ``?dbname=agent_legion`` is a legal DSN form that must not slip past
-    the guard.
+    the guard. conninfo_to_dict does not read the libpq environment, so a
+    dbname-less DSN falls back to PGDATABASE — the env libpq itself would
+    apply at connect time.
     """
-    return str(psycopg.conninfo.conninfo_to_dict(str(database_dsn)).get("dbname") or "")
+    parsed = psycopg.conninfo.conninfo_to_dict(str(database_dsn))
+    return str(parsed.get("dbname") or os.environ.get("PGDATABASE") or "")
 
 
 def guard_shared_db(database_dsn: DatabaseDsn) -> None:
