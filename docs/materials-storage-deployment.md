@@ -27,9 +27,32 @@ tracked yaml、DB、API 或日志（MATERIAL-SECRET-001）。
 ——RustFS 留空凭据会回落镜像默认的公开凭据，必须拦住；部署前先配好
 `deploy/.env`。
 
-## 2. 首次部署 / 升级启用步骤
+## 2. 开发形态（make install / make dev-up）
 
-### 2.1 准备凭据与配置
+开发路径与生产部署分开：全新 clone 后 `make install`（`scripts/install-deps.sh`，
+幂等）一键装齐前置依赖并初始化项目——uv sync、建 `agent_legion` 库、从
+`.env.example` 生成 `.env` 并填入随机 `AGENT_LEGION_S3_ACCESS_KEY/SECRET_KEY`
+（同时作为 rustfs 容器的 root 凭据）、生成 `deploy/secrets/vault_master_key`、
+构建 velites 二进制、装前端依赖、种子 `config/agent-worker.yaml`。
+
+`make dev-up`（`scripts/dev_stack.sh`）启动开发进程前先经
+`scripts/local-s3-decide.sh .env` 决策本地 RustFS（与 prod 入口同一套
+`AGENT_LEGION_LOCAL_S3` 三态逻辑）：决策为 start 时从根 `.env` 显式 export
+S3 凭据后 `docker compose -f deploy/compose.host.yaml up -d rustfs`——
+**dev 形态只有根 `.env` 一份配置**（不读 `deploy/.env`），凭据经环境变量
+注入 compose 插值，因此不存在「两处凭据不一致」的坑。起完后调用
+`scripts/ensure-s3-bucket.py` 确保 bucket 与浏览器直传 CORS 就绪
+（与 `init-worktree.sh` 共用同一脚本）。docker 缺失、启动失败或建 bucket
+失败都只告警不阻断：材料 API 降级为 503，其余功能不受影响，就绪后重跑
+`make dev-up` 即可补齐。`make dev-status` 会顺带显示 rustfs 容器状态。
+
+开发环境切外部对象存储：改根 `.env` 的 `AGENT_LEGION_S3_ENDPOINT` /
+凭据 / `AGENT_LEGION_S3_BUCKET` 三样即可（AWS 默认端点写法是显式留空
+endpoint），`auto` 决策会自动跳过本地 rustfs；细节同 §3.1.1。
+
+## 3. 首次部署 / 升级启用步骤
+
+### 3.1 准备凭据与配置
 
 compose 对 host 与 rustfs 都是 `${AGENT_LEGION_S3_ACCESS_KEY}` 字面插值，
 **不支持 `_FILE` 变体**（写了会把路径字符串当 access key 注入）。凭据
@@ -64,7 +87,7 @@ compose 插值只读 `deploy/.env`，rustfs 容器的 root 凭据以 `deploy/.en
 原生形态的 `AGENT_LEGION_S3_ENDPOINT` 指向 `http://127.0.0.1:9000`，
 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向浏览器 / remote worker 可达的地址。）
 
-### 2.1.1 使用外部对象存储（AWS S3 / MinIO / Garage）
+### 3.1.1 使用外部对象存储（AWS S3 / MinIO / Garage）
 
 代码只对 S3 API 编程，外部存储只需改配置，不需要改代码：
 
@@ -83,7 +106,7 @@ compose 插值只读 `deploy/.env`，rustfs 容器的 root 凭据以 `deploy/.en
 3. auto 误判不会静默失败：后端启动自检（probe 的 DEGRADED 日志）与
    `/api/health` 的 `storage.reachable` 会暴露。
 
-### 2.2 启动与建 bucket
+### 3.2 启动与建 bucket
 
 ```bash
 git pull
@@ -131,7 +154,7 @@ EOF
 
 （等价地也可用 `aws s3 mb s3://<bucket> --endpoint-url <rustfs地址>`。）
 
-### 2.3 启动后检查
+### 3.3 启动后检查
 
 - 后端启动时自动执行 schema 迁移（`job_batches` → `runs`，旧 payload
   解析下沉到 jobs）。**存量 jobs 较多时迁移 UPDATE 可能耗时数分钟，
@@ -150,7 +173,7 @@ EOF
 - worker 的 `claim_enabled` 默认关闭，经 worker 控制台或
   `PUT /api/config` 打开。
 
-## 3. 运维
+## 4. 运维
 
 - **TTL**：材料过期由实例设置 `materials_ttl_days`（admin 全局设置 →
   实例设置，或 `PUT /api/admin/instance-settings`）治理，非负整数天，
@@ -177,7 +200,7 @@ EOF
 - **demo 材料播种**：S3 配好后，新建/绑定 demo workspace 时自动播种
   `examples/` 演示材料；`make import-demo` 同样触发。
 
-## 4. 故障排查
+## 5. 故障排查
 
 | 症状 | 排查 |
 |---|---|

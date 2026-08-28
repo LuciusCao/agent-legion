@@ -120,70 +120,11 @@ else
     echo "AGENT_LEGION_S3_BUCKET=${BUCKET}" >> .env
 fi
 echo "AGENT_LEGION_S3_BUCKET -> ${BUCKET}"
-# 建 bucket：复用 server/app/storage 的 env 加载（.env 经 load_dotenv 生效，
+# 建 bucket：逻辑抽在 scripts/ensure-s3-bucket.py（与 dev_stack.sh 共用），
+# 复用 server/app/storage 的 env 加载（.env 经 load_dotenv 生效，
 # override=False——调用 shell 已导出的同名变量优先）。任何失败（endpoint
 # 不可达、boto3 缺失、凭据错误）都降级为提示，不阻断初始化。
-if PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run python - <<'PY'
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-# 显式传路径：无参 load_dotenv() 走 find_dotenv 的调用栈探测，在本脚本的
-# stdin heredoc（python -）模式下必抛 AssertionError，被外层降级吞成
-# 「endpoint 不可达」的误导性提示。
-load_dotenv(Path(".env"), override=False)
-
-import boto3
-from botocore.exceptions import ClientError
-
-from server.app.storage import load_s3_settings
-
-settings = load_s3_settings()
-if settings is None:
-    print("提示: AGENT_LEGION_S3_BUCKET 未配置，跳过建 bucket")
-    raise SystemExit(0)
-kwargs = {"region_name": settings.region}
-if settings.endpoint_url:
-    kwargs["endpoint_url"] = settings.endpoint_url
-if settings.access_key:
-    kwargs["aws_access_key_id"] = settings.access_key
-    kwargs["aws_secret_access_key"] = settings.secret_key
-client = boto3.client("s3", **kwargs)
-try:
-    client.head_bucket(Bucket=settings.bucket)
-except ClientError as exc:
-    code = str(exc.response.get("Error", {}).get("Code", ""))
-    if code not in ("404", "NoSuchBucket", "NotFound"):
-        raise
-    client.create_bucket(Bucket=settings.bucket)
-    print(f"已创建 S3 bucket: {settings.bucket}")
-else:
-    print(f"S3 bucket 已存在: {settings.bucket}")
-# 浏览器直传要求 bucket CORS 放行前端 dev server origin 的 PUT/GET，并暴露
-# ETag（前端 complete 校验用）。端口约定见 Makefile：prod 前端 5173，dev
-# worktree 默认 5174（DEV_FRONTEND_PORT）。幂等覆写，已存在的 bucket 也补齐。
-client.put_bucket_cors(
-    Bucket=settings.bucket,
-    CORSConfiguration={
-        "CORSRules": [
-            {
-                "AllowedOrigins": [
-                    "http://127.0.0.1:5173",
-                    "http://localhost:5173",
-                    "http://127.0.0.1:5174",
-                    "http://localhost:5174",
-                ],
-                "AllowedMethods": ["PUT", "GET", "HEAD"],
-                "AllowedHeaders": ["*"],
-                "ExposeHeaders": ["ETag"],
-                "MaxAgeSeconds": 3600,
-            }
-        ]
-    },
-)
-print(f"已配置 bucket CORS（前端 dev origin 直传）: {settings.bucket}")
-PY
-then
+if PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run python scripts/ensure-s3-bucket.py .env; then
     :
 else
     echo "提示: S3 endpoint 不可达或未配置，跳过建 bucket（材料 API 将降级为 503；" >&2
