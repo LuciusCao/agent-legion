@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from scripts.ratchet_architecture_budgets import main, ratchet_budgets
@@ -277,34 +278,6 @@ def test_cli_returns_zero_on_success(tmp_path):
     assert read_baseline(root) == {"server/app/example.py": 20}
 
 
-def test_bump_raises_only_target_ceiling(tmp_path):
-    root = configured_repo(
-        tmp_path,
-        {"server/app/grows.py": 30, "server/app/other.py": 40},
-        baseline={"server/app/grows.py": 20, "server/app/other.py": 25},
-    )
-    result = ratchet_budgets(root, bump="server/app/grows.py")
-    assert any("other.py" in error for error in result.errors)
-    assert result.changed is True
-    assert read_baseline(root) == {
-        "server/app/grows.py": 40,
-        "server/app/other.py": 25,
-    }
-
-
-def test_bump_rejects_exempt_file(tmp_path):
-    root = configured_repo(
-        tmp_path,
-        {"server/app/exempt.py": 30},
-        baseline={"server/app/exempt.py": 20},
-    )
-    _write_file_budget_exemption(root, "server/app/exempt.py", 35)
-    result = ratchet_budgets(root, bump="server/app/exempt.py")
-    assert result.changed is False
-    assert "exempt" in result.errors[0]
-    assert read_baseline(root) == {"server/app/exempt.py": 20}
-
-
 def test_cli_returns_one_on_error(tmp_path):
     root = configured_repo(
         tmp_path,
@@ -314,93 +287,28 @@ def test_cli_returns_one_on_error(tmp_path):
     assert main(["--root", str(root)]) == 1
 
 
-def test_rebase_raises_existing_ceiling_to_desired(tmp_path):
+def test_never_raises_ceiling_when_file_grew_within_it(tmp_path):
+    # The file grew from 20 to 25 effective lines but stays under its 30
+    # ceiling; the ratchet must keep the tighter ceiling instead of
+    # re-registering at actual + buffer (which would legalize the growth).
     root = configured_repo(
         tmp_path,
-        {"server/app/example.py": 20},
-        baseline={"server/app/example.py": 25},
+        {"server/app/example.py": 25},
+        baseline={"server/app/example.py": 30},
     )
-    result = ratchet_budgets(root, rebase=True)
+    result = ratchet_budgets(root)
     assert result.errors == ()
-    assert result.changed is True
-    assert read_baseline(root) == {"server/app/example.py": 30}
-
-
-def test_rebase_is_idempotent(tmp_path):
-    root = configured_repo(
-        tmp_path,
-        {"server/app/example.py": 20},
-        baseline={"server/app/example.py": 25},
-    )
-    first = ratchet_budgets(root, rebase=True)
-    assert first.errors == ()
-    assert first.changed is True
-    assert read_baseline(root) == {"server/app/example.py": 30}
-
-    second = ratchet_budgets(root, rebase=True)
-    assert second.errors == ()
-    assert second.changed is False
-    assert read_baseline(root) == {"server/app/example.py": 30}
-
-
-def test_rebase_still_fails_when_actual_exceeds_ceiling(tmp_path):
-    root = configured_repo(
-        tmp_path,
-        {"server/app/example.py": 100},
-        baseline={"server/app/example.py": 90},
-    )
-    result = ratchet_budgets(root, rebase=True)
-    assert "exceeds ceiling 90" in result.errors[0]
     assert result.changed is False
-
-
-def test_rebase_still_respects_frozen_ceiling_when_actual_exceeds_it(tmp_path):
-    root = configured_repo(
-        tmp_path,
-        {"server/app/exempt.py": 100},
-        baseline={"server/app/exempt.py": 90},
-    )
-    _write_file_budget_exemption(root, "server/app/exempt.py", 90)
-    result = ratchet_budgets(root, rebase=True)
-    assert "exceeds ceiling 90" in result.errors[0]
-    assert result.changed is False
-
-
-def test_rebase_does_not_affect_frozen_exemption(tmp_path):
-    root = configured_repo(
-        tmp_path,
-        {"server/app/exempt.py": 100, "server/app/new.py": 5},
-        baseline={"server/app/exempt.py": 50},
-    )
-    _write_file_budget_exemption(root, "server/app/exempt.py", 100)
-
-    result = ratchet_budgets(root, rebase=True)
-
-    assert result.errors == ()
-    assert result.changed is True
-    assert read_baseline(root) == {
-        "server/app/exempt.py": 50,
-        "server/app/new.py": 15,
-    }
-
-
-def test_cli_rebase_flag_passes_through(tmp_path):
-    root = configured_repo(
-        tmp_path,
-        {"server/app/example.py": 20},
-        baseline={"server/app/example.py": 25},
-    )
-    assert main(["--root", str(root), "--rebase"]) == 0
     assert read_baseline(root) == {"server/app/example.py": 30}
 
 
-def test_rebase_still_lowers_stale_ceiling(tmp_path):
-    root = configured_repo(
-        tmp_path,
-        {"server/app/example.py": 10},
-        baseline={"server/app/example.py": 50},
-    )
-    result = ratchet_budgets(root, rebase=True)
-    assert result.errors == ()
-    assert result.changed is True
-    assert read_baseline(root) == {"server/app/example.py": 20}
+def test_cli_rebase_flag_removed(tmp_path):
+    root = configured_repo(tmp_path, {"server/app/example.py": 10}, baseline={})
+    with pytest.raises(SystemExit):
+        main(["--root", str(root), "--rebase"])
+
+
+def test_cli_bump_flag_removed(tmp_path):
+    root = configured_repo(tmp_path, {"server/app/example.py": 10}, baseline={})
+    with pytest.raises(SystemExit):
+        main(["--root", str(root), "--bump", "server/app/example.py"])

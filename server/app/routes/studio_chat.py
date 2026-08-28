@@ -5,8 +5,7 @@ Thin HTTP shell over StudioChatService — no business logic here. Mounted via
 read, editors write, non-members 404). Effecting endpoints additionally mount
 ``reject_studio_agent_scope`` (STUDIO-AGENT-001) via the ``guarded``
 sub-router. The SSE stream reuses the shared JobEventManager machinery on a
-per-session channel.
-"""
+per-session channel."""
 
 from typing import Annotated, Any
 

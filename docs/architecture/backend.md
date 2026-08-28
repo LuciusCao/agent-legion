@@ -553,7 +553,12 @@ server/app/
   UV_CACHE_DIR=.uv-cache uv run python -m scripts.check_architecture
   ```
 
-  ratchet 脚本不会提高 ceiling；超出预算的文件必须拆分或回退。ceiling 按有效行数计
+  ratchet 脚本不会提高 ceiling（`--rebase` / `--bump` 上抬通道已随 #209 移除）；
+  `scripts/architecture/budget_monotonicity.py` 在 `check_architecture` 中按 git 锚点
+  （HEAD / HEAD^）对照近期提交的基线与豁免冻结值，拒绝任何 ceiling 上抬——手工改
+  `architecture-budgets.json` 抬高数值、或抬高豁免 ceiling 同样会被拒绝。ceiling
+  上抬的唯一合法通道是带 `remove_when` 的 `architecture.file_budget` 豁免。超出预算的
+  文件必须拆分或回退。ceiling 按有效行数计
   （排除注释行与空行，实现见 `scripts/architecture/effective_lines.py`），压缩注释
   对预算没有帮助。此外 production 文件有
   800 行绝对上限（`production.max_lines`，按原始行数计），豁免也不能突破；挂账超过 30 天的豁免由

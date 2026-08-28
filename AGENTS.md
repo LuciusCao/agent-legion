@@ -104,6 +104,9 @@
 - 不要手写 frontend transport types，必须从 `frontend/src/generated/api.ts` 派生。
 - 超出体积预算的文件必须拆分或回退，不能手动抬高 ceiling。ceiling 按有效行数计
   （排除注释行与空行），不要为凑预算压缩注释；`max_lines` 绝对上限按原始行数计。
+  ceiling 单调只降不升（#209）：ratchet 的 `--rebase` / `--bump` 上抬通道已移除，
+  `check_architecture` 会按 git 锚点拒绝任何上抬（含手改 budgets JSON 与抬高豁免
+  ceiling）；唯一合法上抬通道是带 `remove_when` 的 `architecture.file_budget` 豁免。
 
 ## 6. Boundary Rules（禁止模式摘要）
 
