@@ -65,9 +65,10 @@
   `--no-verify` 之外的方式绕过排队——排队本身就是正确行为，等待期可以做读代码/写代码
   等不占 CPU 的事。
 - quick gate 的 backend lane 同时跑 `worker/ui/app.test.mjs`（node:test，无 node 时跳过并提示）；
-  CI 侧在 backend-postgres-a job 执行同一入口。
+  CI 侧在 api-check job 执行同一入口。
 - 提交或交接前确认 GitHub Actions full gate 通过（`.github/workflows/quality-gate.yml`
-  的 backend-unit、backend-postgres-a/b/c、frontend-logic、frontend-component、
+  的 backend-unit、api-check、backend-postgres-a/b/c（matrix job `backend-postgres`
+  的三个 shard）、backend-coverage、frontend-logic、frontend-component、
   frontend-coverage、e2e-smoke、rust、docker-build 等 job）；CI 不可用时本地跑
   `./scripts/check.sh` 代替。
 - 运行 `make install-hooks` 启用版本化本地门禁：pre-commit 跑 fast gate，pre-push
@@ -81,8 +82,8 @@
   `shared/`/`deploy/` 改动加跑 docker-build 镜像构建 lane（CI-only）、
   docs-only 全跳过、共享文件全量，检测逻辑见 workflow 的 `changes` job）；push 触发只留
   main/master（develop 合并已由 PR gate 覆盖）；ci-extended 压力门与
-  nightly-e2e 改为每周 schedule + 手动 dispatch，schedule 不重复跑
-  普通 lane。
+  nightly-e2e 在 `.github/workflows/nightly-gate.yml` 每周 schedule + 手动
+  dispatch 执行，不占用 quality-gate 的 concurrency group。
 - 不要使用 `git commit --no-verify` 或 `git push --no-verify` 绕过本地质量门。
 - 禁止在质量门未通过时声明完成。
 - 后端测试隔离基于 TRUNCATE：每个 xdist worker 每 session 只建一次 schema，每个测试

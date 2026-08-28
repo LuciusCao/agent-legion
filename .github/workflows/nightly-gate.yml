@@ -1,0 +1,200 @@
+name: Nightly Gate
+
+# Weekly stress lane, split out of quality-gate.yml (issue #193): these jobs
+# never run on PR/push, so a dedicated file removes the schedule special
+# case from the quality-gate `changes` job and keeps the weekly run out of
+# the quality-gate concurrency group (a scheduled run on a trunk ref could
+# cancel an in-flight push gate for the same ref). Weekly, not nightly, to
+# fit the Actions minutes budget; manual dispatch runs the same two jobs.
+
+on:
+  schedule:
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-gate-${{ github.ref }}
+  # Never cancel a running stress scenario midway; a dispatch run waits.
+  cancel-in-progress: false
+
+env:
+  # Same trio as quality-gate.yml — workflow-level env does not cross files.
+  UV_CACHE_DIR: /home/runner/.cache/uv
+  AGENT_LEGION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/agent_legion_ci
+  AGENT_LEGION_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/agent_legion_test_ci
+
+jobs:
+  # Weekly workspace stress + multi-browser smoke (test architecture plan,
+  # Phase 4C). The stress step runs the existing five-minute scenario against
+  # a real backend and uploads report.md + frontend-metrics.json for
+  # diagnostics; the smoke step re-runs the deterministic browser suite on
+  # Firefox/WebKit as well (PR/push stays Chromium-only via E2E_BROWSERS).
+  # Stress profile rationale: 50 agents / 2000 jobs / 300s at 200 events/s
+  # keeps the page under live SSE traffic long enough for stable click
+  # latency / long task / memory samples while the whole job stays well
+  # under the 45-minute timeout (local 5-agent/60s validation: ~95s total).
+  # The multi-browser suite includes the main-flow spec (#240), so like
+  # quality-gate's e2e-smoke this job needs the velites binary (Host code
+  # sandbox + Worker agent runtime) and its sandbox backend.
+  nightly-e2e:
+    name: nightly-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agent_legion_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: uv sync
+
+      - run: npm ci
+        working-directory: frontend
+
+      # velites binary + sandbox backend: the main-flow spec's Host code
+      # sandbox and the standalone Worker's agent runtime are both fail-closed
+      # without it (the runner builds it via scripts/ensure-velites.sh --dest
+      # data/bin), same as quality-gate's e2e-smoke job.
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: velites
+          # One shared cache across the rust lane and both e2e jobs: the e2e
+          # jobs build the same velites release binary, so they warm-start
+          # from the rust lane's cache instead of a ~14min cold build.
+          shared-key: velites
+
+      # velites sandbox backend; Ubuntu 24.04 restricts unprivileged userns
+      # via AppArmor (current bubblewrap has no setuid mode), so the
+      # disposable CI VM must explicitly enable userns.
+      - name: Install bubblewrap (velites sandbox backend)
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # Browser binaries cache: a cold download stalled for 41 minutes once
+      # (run 30816362118, FLAKY-004) and ate the whole nightly budget.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+        working-directory: frontend
+
+      - name: Multi-browser smoke E2E
+        run: uv run python scripts/e2e/run_browser_smoke.py
+        env:
+          AGENT_LEGION_E2E_ADMIN_DSN: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          E2E_BROWSERS: chromium,firefox,webkit
+
+      - name: Workspace stress run
+        run: >-
+          uv run python scripts/stress/run_e2e_stress.py
+          --agents 50 --jobs 2000 --duration 300 --event-rate 200
+        env:
+          # Shared runners hiccup under load: allow occasional probe timeouts
+          # while the p95 click-latency assertion still guards regressions.
+          STRESS_PROBE_TIMEOUT_MS: "5000"
+          STRESS_MAX_PROBE_ERRORS: "3"
+
+      - name: Upload stress report and metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-stress-${{ github.run_id }}
+          path: stress-results/
+          retention-days: 14
+
+  ci-extended:
+    name: ci-extended
+    # Repeated stress scenarios; too slow for the PR/push loop. Runs weekly
+    # (schedule) and on manual dispatch, replacing the old per-push policy.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          # Tests create their own databases via the *_TEST_DATABASE_URL.
+          POSTGRES_DB: agent_legion_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
+      # --reruns 1 matches the tier gates and is what makes the flaky
+      # governance below meaningful: registered flakes get one retry and
+      # land in the rerun report; without it a flake fails outright and the
+      # report is always empty (codex review on PR #25).
+      - name: CI extended architecture evidence
+        run: |
+          mkdir -p test-results
+          uv run pytest -q tests/ci -m ci_extended \
+            --durations=30 \
+            --junitxml=test-results/ci-extended-junit.xml \
+            --reruns 1 \
+            --reruns-delay 2 \
+            -p scripts.pytest_telemetry
+        env:
+          AGENT_LEGION_RERUN_REPORT: test-results/ci-extended-reruns.json
+
+      - name: CI extended test summary
+        if: always()
+        env:
+          AGENT_LEGION_COV: "0"
+        run: |
+          uv run python scripts/summarize_test_results.py \
+            --title "CI extended test evidence" \
+            --junit test-results/ci-extended-junit.xml \
+            --rerun-report test-results/ci-extended-reruns.json \
+            --output test-results/ci-extended-summary.md
+          cat test-results/ci-extended-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Flaky governance (test architecture plan, Phase 5D): reruns are fine
+      # only for nodeids registered in tests/flaky_registry.yaml with a live
+      # deadline.
+      - name: Fail on unregistered reruns
+        if: always()
+        run: >-
+          uv run python scripts/check_reruns.py
+          --rerun-report test-results/ci-extended-reruns.json

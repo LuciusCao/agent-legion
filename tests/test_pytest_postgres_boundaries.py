@@ -282,44 +282,44 @@ def test_quality_gate_runs_unit_and_postgres_layers_with_combined_coverage() -> 
     assert "AGENT_LEGION_TEST_RESULT_NAME: backend-unit" in workflow
     assert "GATE_TIER: unit" in workflow
     assert "backend-unit-junit.xml" in workflow
-    # Phase 5C-2/5C-3: the postgres tier is hash-sharded into three parallel
-    # jobs (aggregator A hosts api:check + the combined floor; B also runs the
-    # tests/full gate; C runs only its shard), each on its own COVERAGE_FILE
-    # and result name.
-    assert "backend-postgres-a:" in workflow
-    assert "backend-postgres-b:" in workflow
-    assert "backend-postgres-c:" in workflow
-    assert "Backend PostgreSQL tests (shard 1/3)" in workflow
-    assert "Backend PostgreSQL tests (shard 2/3)" in workflow
-    assert "Backend PostgreSQL tests (shard 3/3)" in workflow
+    # Phase 5C-2/5C-3 (issue #193 topology): the postgres tier is hash-sharded
+    # into three matrix legs of one backend-postgres job — the templated name
+    # keeps the legacy backend-postgres-a/b/c check names, so branch
+    # protection and docs references stay valid — each on its own COVERAGE_FILE
+    # and result name. Shard b also runs the tests/full gate; api:check lives
+    # in its own api-check job so frontend-only PRs skip the test shards.
+    assert "name: backend-postgres-${{ matrix.shard }}" in workflow
+    assert "- shard: a" in workflow
+    assert "- shard: b" in workflow
+    assert "- shard: c" in workflow
+    assert "gate_shard: 1/3" in workflow
+    assert "gate_shard: 2/3" in workflow
+    assert "gate_shard: 3/3" in workflow
     assert "GATE_TIER: postgres" in workflow
-    assert "GATE_SHARD: 1/3" in workflow
-    assert "GATE_SHARD: 2/3" in workflow
-    assert "GATE_SHARD: 3/3" in workflow
-    assert "AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-a" in workflow
-    assert "AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-b" in workflow
-    assert "AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-c" in workflow
-    assert "backend-postgres-a-junit.xml" in workflow
-    assert "backend-postgres-b-junit.xml" in workflow
-    assert "backend-postgres-c-junit.xml" in workflow
-    # 5C-3: the aggregator can reach the merge before its peers upload under
-    # load (run 30811145691), so it polls `gh api` for the peer coverage
-    # artifacts first (actions: read) and only then downloads them; a missing
-    # shard still fails the explicit download step.
-    assert "Wait for peer shard coverage artifacts" in workflow
-    assert "actions: read" in workflow
+    assert "GATE_SHARD: ${{ matrix.gate_shard }}" in workflow
+    assert "AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-${{ matrix.shard }}" in workflow
+    assert "backend-postgres-${{ matrix.shard }}-junit.xml" in workflow
+    assert "api-check:" in workflow
+    assert "FRONTEND_GATE_PHASE=api-contract" in workflow
+    assert "Worker UI tests" in workflow
+    # Issue #193: the merge is event-driven. backend-coverage sits behind the
+    # needs-DAG (backend-unit + backend-postgres), so it starts only after
+    # every shard finished — the old 40x15s artifact poll (and its
+    # actions: read permission) is gone.
+    assert "backend-coverage:" in workflow
+    assert "needs: [changes, backend-unit, backend-postgres]" in workflow
+    assert "Wait for peer shard coverage artifacts" not in workflow
+    assert "seq 1 40" not in workflow
+    assert "permissions:" not in workflow
     # Phase 5C: the tiers run as parallel jobs, each writing an independent
     # coverage data file (no cross-tier AGENT_LEGION_COV_APPEND). The
-    # backend-postgres-a job downloads every shard's artifact and merges all
+    # backend-coverage job downloads every shard's artifact and merges all
     # shards via `coverage combine` before the single 85% floor check.
     assert "COVERAGE_FILE: coverage-data/backend-unit.coverage" in workflow
-    assert "COVERAGE_FILE: coverage-data/backend-postgres-a.coverage" in workflow
-    assert "COVERAGE_FILE: coverage-data/backend-postgres-b.coverage" in workflow
-    assert "COVERAGE_FILE: coverage-data/backend-postgres-c.coverage" in workflow
+    assert "COVERAGE_FILE: coverage-data/backend-postgres-${{ matrix.shard }}.coverage" in workflow
     assert "COVERAGE_FILE: coverage-data/backend-full.coverage" in workflow
     assert "name: backend-unit-coverage" in workflow
-    assert "name: backend-postgres-b-coverage" in workflow
-    assert "name: backend-postgres-c-coverage" in workflow
+    assert "name: backend-postgres-${{ matrix.shard }}-coverage" in workflow
     assert "coverage combine" in workflow
     # Every pytest shard (tiers and the tests/full gate) runs on its own
     # COVERAGE_FILE, so each must defer the 85% floor to the combined report;
@@ -329,6 +329,22 @@ def test_quality_gate_runs_unit_and_postgres_layers_with_combined_coverage() -> 
     full_gate_step = workflow.split("Full gate evidence (tests/full)", 1)[1]
     full_gate_step = full_gate_step.split("- name:", 1)[0]
     assert "--cov-fail-under=0" in full_gate_step
+
+
+def test_weekly_stress_lane_lives_in_nightly_gate() -> None:
+    # Issue #193: nightly-e2e and ci-extended never run on PR/push, so the
+    # weekly schedule moved to a dedicated nightly-gate.yml — this also keeps
+    # a scheduled trunk run out of the quality-gate concurrency group, which
+    # could otherwise cancel an in-flight push gate for the same ref.
+    quality_gate = (ROOT / ".github/workflows/quality-gate.yml").read_text(encoding="utf-8")
+    nightly = (ROOT / ".github/workflows/nightly-gate.yml").read_text(encoding="utf-8")
+
+    assert "schedule:" not in quality_gate
+    assert "nightly-e2e" not in quality_gate
+    assert "ci-extended" not in quality_gate
+    assert "schedule:" in nightly
+    assert "nightly-e2e:" in nightly
+    assert "ci-extended:" in nightly
 
 
 def test_test_harness_skips_module_level_application_bootstrap() -> None:
