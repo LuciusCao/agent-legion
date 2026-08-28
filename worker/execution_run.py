@@ -91,7 +91,9 @@ def deliver_result(
             return
     # Local discard: lease lost or release rejected — stop heartbeating and
     # drop the execution dir; the Host requeues after the lease expires.
-    # #203：带未投递 marker 的目录归 UploadQueue 所有，保留待其投递后自清。
+    # #203：带未投递 marker 的目录归 UploadQueue 所有，保留待其投递后自清
+    # （skip 分支的 marker 必属当前 lease；孤儿 marker 在 prepare 已随 stale
+    # 目录清掉，走不到这里）。
     heartbeat.stop.set()
     heartbeat.thread.join(timeout=2)
     status.finish(execution_id)
@@ -227,10 +229,11 @@ def run_execution(
             # else: lease lost mid-run — the Host owns the outcome; nothing
             # to deliver, fall through to the local-discard path below.
     except PendingUploadExists:
-        # #203：execution_dir 属于一个排队中的 pending 上传（restore() 恢复的旧
-        # 结果）。上报假 failed 会经 submit() 覆盖 marker 丢掉旧结果，所以本次
-        # claim 直接放弃：task 保持 None 走本地丢弃分支（marker 目录被豁免），
-        # 停心跳让租约到期，由 Host 重新调度。
+        # #203：execution_dir 属于本 claim 租约的排队中 pending 上传。上报假
+        # failed 会经 submit() 覆盖 marker 丢掉旧结果，所以本次 claim 直接放
+        # 弃：task 保持 None 走本地丢弃分支（marker 目录被豁免），停心跳让租
+        # 约到期，由 Host 重新调度。孤儿 marker（旧 lease）在 prepare 已被清
+        # 掉，不会进这里——最后一次 attempt 不为过期结果殉葬（P1）。
         print(f"skipping claim of {execution_id}: dir holds a pending upload", flush=True)
     except Exception as exc:
         traceback.print_exc()

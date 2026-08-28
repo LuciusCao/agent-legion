@@ -139,13 +139,16 @@ def test_prepare_execution_rejects_digest_mismatch(tmp_path: Path) -> None:
 
 
 def test_prepare_refuses_dir_with_pending_upload_marker(tmp_path: Path) -> None:
-    """#203：带未投递 marker 的目录归 UploadQueue 所有，prepare 不得删除或覆盖。"""
+    """#203：marker 属于当前 claim 的 lease 时目录归 UploadQueue 所有，prepare
+    不得删除或覆盖（restore() 恢复的 pending 结果可能正排队中）。"""
     execution_dir = tmp_path / "exec-1"
     job_dir = execution_dir / "job"
     job_dir.mkdir(parents=True)
     (job_dir / "output.json").write_text("old result", encoding="utf-8")
     marker = execution_dir / PENDING_FILENAME
-    marker.write_text('{"version": 1, "execution_id": "exec-1"}', encoding="utf-8")
+    marker.write_text(
+        '{"version": 1, "execution_id": "exec-1", "lease_id": "lease-1"}', encoding="utf-8"
+    )
 
     with pytest.raises(PendingUploadExists, match=PENDING_FILENAME):
         prepare_execution(
@@ -157,11 +160,57 @@ def test_prepare_refuses_dir_with_pending_upload_marker(tmp_path: Path) -> None:
 
     # 目录与内容原样保留：marker、已准备的产物都不许动。
     assert marker.is_file()
-    assert marker.read_text(encoding="utf-8") == '{"version": 1, "execution_id": "exec-1"}'
     assert (job_dir / "output.json").read_text(encoding="utf-8") == "old result"
     # prepare 未写入任何新文件（bundle 下载也未发生）。iterdir 顺序随文件
     # 系统实现而异（CI 的 Linux 与本地 macOS 不同），按集合断言。
     assert {p.name for p in execution_dir.iterdir()} == {"job", PENDING_FILENAME}
+
+
+def test_prepare_clears_orphan_marker_from_stale_lease(tmp_path: Path) -> None:
+    """#203 P1：旧 lease 的孤儿 marker（report 必 409、结果注定投递不进去）
+    不得牺牲当前 claim——目录随 stale 一起清掉，本次执行照常准备。claim 每
+    次消耗 attempt+1 且 sweeper 超过 requeue_limit 就不再重排，最后一次
+    允许的 attempt 不能为过期结果殉葬。"""
+    execution_dir = tmp_path / "exec-1"
+    job_dir = execution_dir / "job"
+    job_dir.mkdir(parents=True)
+    (job_dir / "output.json").write_text("dead result", encoding="utf-8")
+    marker = execution_dir / PENDING_FILENAME
+    marker.write_text(
+        '{"version": 1, "execution_id": "exec-1", "lease_id": "lease-old"}', encoding="utf-8"
+    )
+
+    prepare_execution(
+        FakeClient(_make_bundle(tmp_path, _manifest({}))),
+        _claim(),  # lease_id="lease-1" ≠ "lease-old"
+        execution_dir,
+        threading.Semaphore(1),
+    )
+
+    # 孤儿目录被清掉、本次 claim 的 bundle 正常落位。
+    assert not marker.exists()
+    assert not (job_dir / "output.json").exists()
+    assert (execution_dir / "bundle.tar.gz").is_file()
+
+
+def test_prepare_clears_marker_without_lease_field(tmp_path: Path) -> None:
+    """无 lease_id 字段的旧版 marker 一律按孤儿处理（保守方向：宁可清掉重跑，
+    也不让无法核对所有权的 marker 无限跳过 claim——attempt 预算会被耗尽）。"""
+    execution_dir = tmp_path / "exec-1"
+    execution_dir.mkdir(parents=True)
+    (execution_dir / PENDING_FILENAME).write_text(
+        '{"version": 1, "execution_id": "exec-1"}', encoding="utf-8"
+    )
+
+    prepare_execution(
+        FakeClient(_make_bundle(tmp_path, _manifest({}))),
+        _claim(),
+        execution_dir,
+        threading.Semaphore(1),
+    )
+
+    assert not (execution_dir / PENDING_FILENAME).exists()
+    assert (execution_dir / "bundle.tar.gz").is_file()
 
 
 def test_prepare_replaces_stale_dir_without_marker(tmp_path: Path) -> None:

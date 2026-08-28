@@ -172,23 +172,50 @@ def test_prepare_rejects_bundle_without_node_code(tmp_path: Path) -> None:
 
 
 def test_prepare_refuses_dir_with_pending_upload_marker(tmp_path: Path) -> None:
-    """#203：带未投递 marker 的目录归 UploadQueue 所有，prepare 不得删除或覆盖
-    （restore() 恢复的 pending 结果可能正排队中）。"""
+    """#203：marker 属于当前 claim 的 lease 时目录归 UploadQueue 所有，prepare
+    不得删除或覆盖（restore() 恢复的 pending 结果可能正排队中）。"""
     execution_dir = tmp_path / "work" / "exec-code-1"
     job_dir = execution_dir / "job"
     job_dir.mkdir(parents=True)
     (job_dir / "output.json").write_text("old result", encoding="utf-8")
     marker = execution_dir / PENDING_FILENAME
-    marker.write_text('{"version": 1, "execution_id": "exec-code-1"}', encoding="utf-8")
+    marker.write_text(
+        '{"version": 1, "execution_id": "exec-code-1", "lease_id": "lease-1"}',
+        encoding="utf-8",
+    )
 
     with pytest.raises(PendingUploadExists, match=PENDING_FILENAME):
         _prepare(tmp_path, _code_claim(), FakeClient(_code_bundle(tmp_path)))
 
-    assert marker.read_text(encoding="utf-8") == '{"version": 1, "execution_id": "exec-code-1"}'
+    assert (
+        marker.read_text(encoding="utf-8")
+        == '{"version": 1, "execution_id": "exec-code-1", "lease_id": "lease-1"}'
+    )
     assert (job_dir / "output.json").read_text(encoding="utf-8") == "old result"
     # bundle 下载未发生：目录内容原样。iterdir 顺序随文件系统实现而异
     # （CI 的 Linux 与本地 macOS 不同），按集合断言。
     assert {p.name for p in execution_dir.iterdir()} == {"job", PENDING_FILENAME}
+
+
+def test_prepare_clears_orphan_marker_from_stale_lease(tmp_path: Path) -> None:
+    """#203 P1：旧 lease 的孤儿 marker（report 必 409）不得牺牲当前 claim
+    （attempt 预算有限，最后一次重试不能为过期结果殉葬）——目录随 stale
+    一起清掉，本次执行照常准备。"""
+    execution_dir = tmp_path / "work" / "exec-code-1"
+    job_dir = execution_dir / "job"
+    job_dir.mkdir(parents=True)
+    (job_dir / "output.json").write_text("dead result", encoding="utf-8")
+    marker = execution_dir / PENDING_FILENAME
+    marker.write_text(
+        '{"version": 1, "execution_id": "exec-code-1", "lease_id": "lease-old"}',
+        encoding="utf-8",
+    )
+
+    _prepare(tmp_path, _code_claim(), FakeClient(_code_bundle(tmp_path)))
+
+    assert not marker.exists()
+    assert not (job_dir / "output.json").exists()
+    assert (execution_dir / "bundle" / "node_code.py").is_file()
 
 
 def test_prepare_replaces_stale_dir_without_marker(tmp_path: Path) -> None:
