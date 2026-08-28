@@ -13,12 +13,18 @@ from server.app.db.transaction import read_connection
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 
 
-def bundle_candidate(database_dsn: Any, workspace_id: str, item: dict[str, Any]) -> dict[str, Any]:
-    """The run candidate for a bundle item (entity dedups on the bundle id)."""
+def bundle_candidate(
+    connect_source: Any, workspace_id: str, item: dict[str, Any]
+) -> dict[str, Any]:
+    """The run candidate for a bundle item (entity dedups on the bundle id).
+
+    ``connect_source`` is the JobQueries facade (or a bare DSN, tests)
+    — BOUNDARY-DATA-001, #187.
+    """
     bundle_id = str(item.get("bundle_id") or "").strip()
     if not bundle_id:
         raise InvalidOperationError("bundle item requires bundle_id")
-    with read_connection(database_dsn) as conn:
+    with read_connection(connect_source) as conn:
         row = conn.execute(
             "select b.id, b.name, b.file_count,"
             " (select count(*) from material_bundle_members m"

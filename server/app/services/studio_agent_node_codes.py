@@ -31,7 +31,7 @@ class StudioAgentNodeCodeTools:
 
     def _service(self) -> NodeCodeService:
         return NodeCodeService(
-            self._job_db.path, self._settings.executor_runtime.workflows.custom_nodes_enabled
+            self._job_db, self._settings.executor_runtime.workflows.custom_nodes_enabled
         )
 
     def _revision_node_capability(

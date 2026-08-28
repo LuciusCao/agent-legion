@@ -11,7 +11,7 @@ from server.app.agent_broker.result_unpack import (
     safe_relative_dir,
     unpack_agent_result,
 )
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.executors.artifact_mirror import upload_produced_artifacts
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, ExecutionStatus
@@ -45,7 +45,7 @@ class AgentOutcome:
     auth_failure_connection: str = ""
 
 
-def report_auth_failure_safe(database_dsn: DatabaseDsn, connection_key: str) -> None:
+def report_auth_failure_safe(database_dsn: ConnectSource, connection_key: str) -> None:
     """Worker-reported auth failure (batch 2): invalidate the cached token.
 
     Reporting must never mask a committed result, so failures are logged and

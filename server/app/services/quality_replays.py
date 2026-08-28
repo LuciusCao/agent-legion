@@ -23,7 +23,6 @@ import uuid
 from typing import Any
 
 from server.app.db.connection import DatabaseConnection
-from server.app.db.transaction import write_transaction
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.artifact_store import ArtifactStore
@@ -60,10 +59,6 @@ class QualityReplayService:
         self.artifact_store = artifact_store
         self.object_store = object_store
 
-    @property
-    def db_path(self) -> str:
-        return self.job_db.path
-
     def create_replay(
         self,
         workspace_id: str,
@@ -73,7 +68,7 @@ class QualityReplayService:
         created_by: str = "",
     ) -> dict[str, Any]:
         """Create a replay copy job for one sample item; returns the row."""
-        with write_transaction(self.db_path) as conn:
+        with self.job_db.write() as conn:
             item = self._get_item(conn, workspace_id, item_id)
             node_key = str(item["node_key"])
             job = self._get_original_job(conn, workspace_id, str(item["job_id"]))
@@ -111,7 +106,7 @@ class QualityReplayService:
                 f"select {_REPLAY_COLUMNS} from quality_replays where id = %s", (replay_id,)
             ).fetchone()
         replay = dict(row) if row is not None else {"id": replay_id}
-        setup = QualityReplaySetup(self.job_db, self.artifact_store, self.db_path)
+        setup = QualityReplaySetup(self.job_db, self.artifact_store)
         try:
             copy_job_id = setup.build_copy_job(
                 workspace_id, item, job, definition, node, replay_id, pin
@@ -124,7 +119,7 @@ class QualityReplayService:
             if isinstance(exc, JobServiceError):
                 raise
             raise InvalidOperationError(f"replay setup failed: {exc}") from exc
-        with write_transaction(self.db_path) as conn:
+        with self.job_db.write() as conn:
             conn.execute(
                 "update quality_replays set replay_job_id = %s where id = %s",
                 (copy_job_id, replay_id),
@@ -134,7 +129,7 @@ class QualityReplayService:
         return replay
 
     def list_replays(self, workspace_id: str, item_id: str) -> list[dict[str, Any]]:
-        with write_transaction(self.db_path) as conn:
+        with self.job_db.write() as conn:
             item = self._get_item(conn, workspace_id, item_id)
             self._reconcile_item_rows(conn, item_id, str(item["node_key"]))
             rows = conn.execute(
@@ -146,7 +141,7 @@ class QualityReplayService:
 
     def get_replay_detail(self, workspace_id: str, replay_id: str) -> dict[str, Any]:
         """Replay row (reconciled) plus its labels and copy-job artifacts."""
-        with write_transaction(self.db_path) as conn:
+        with self.job_db.write() as conn:
             row = conn.execute(
                 """
                 select r.*, i.node_key as item_node_key
@@ -234,7 +229,7 @@ class QualityReplayService:
                 raise InvalidOperationError("agent_version pins apply to Agent-routed nodes only")
             return "", None
         agent_id = str(route["target_id"])
-        store = VersionedEntityStore(self.db_path, "agent")
+        store = VersionedEntityStore(self.job_db, "agent")
         entity = (
             store.get_published(agent_id, workspace_id)
             if agent_version is None

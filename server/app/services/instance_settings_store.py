@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from typing import Any, cast
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 
 GLOBAL_SETTINGS_KEY = "instance"
@@ -23,7 +23,8 @@ GLOBAL_SETTINGS_KEY = "instance"
 class InstanceSettingsStore:
     """Read/write the ``instance`` settings document in ``global_settings``."""
 
-    def __init__(self, database_dsn: DatabaseDsn) -> None:
+    def __init__(self, database_dsn: ConnectSource) -> None:
+        # database_dsn: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187).
         self._dsn = database_dsn
 
     def get(self) -> dict[str, Any] | None:

@@ -12,7 +12,6 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from server.app.db.transaction import read_connection
-from server.app.settings import Settings
 from server.app.workflows.definition import WorkflowDefinition, workflow_definition_from_dict
 from server.app.workflows.schema import WorkflowDefinitionError
 
@@ -35,9 +34,13 @@ _ACTIVE_REVISIONS = (
 )
 
 
-def load_workflow_scan_entries(settings: Settings) -> list[ScanEntry]:
-    """One scan entry per workspace, carrying its active revision definition."""
-    with read_connection(settings.database_url) as conn:
+def load_workflow_scan_entries(connect_source: Any) -> list[ScanEntry]:
+    """One scan entry per workspace, carrying its active revision definition.
+
+    ``connect_source`` is the JobQueries facade (or a bare DSN, tests)
+    — BOUNDARY-DATA-001, #187.
+    """
+    with read_connection(connect_source) as conn:
         workspaces = conn.execute(_SCANNABLE_WORKSPACES).fetchall()
         revisions = {
             (str(row["workspace_id"]), str(row["workflow_key"])): row["definition_json"]

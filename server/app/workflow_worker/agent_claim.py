@@ -89,7 +89,7 @@ def claim_agent_node(
     pin = agent_version_pin(run_payload, node.key)
     try:
         definition_config = resolve_dispatch_agent_definition(
-            worker.settings.database_url, str(workspace_id), agent_id, pin
+            worker.job_db, str(workspace_id), agent_id, pin
         )
     except ValueError as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))

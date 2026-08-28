@@ -25,6 +25,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING
 
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.storage import ObjectStorage, build_s3_storage
 
@@ -37,8 +38,8 @@ DEMO_MATERIALS_DIR = "examples/education-video-problems-generation"
 _CONTENT_TYPE = "text/markdown; charset=utf-8"
 
 
-def _existing_hashes(settings: Settings, workspace_id: str) -> set[str]:
-    with read_connection(settings.database_url) as conn:
+def _existing_hashes(connect_source: ConnectSource, workspace_id: str) -> set[str]:
+    with read_connection(connect_source) as conn:
         rows = conn.execute(
             "select content_hash from materials where workspace_id=%s",
             (workspace_id,),
@@ -51,11 +52,14 @@ def seed_demo_workspace_materials(
     workspace_id: str,
     *,
     storage: ObjectStorage | None = None,
+    connect_source: ConnectSource | None = None,
 ) -> list[str]:
     """Seed the examples/ knowledge markdown as ready materials; returns filenames seeded.
 
     ``storage`` is the test seam (a fake ObjectStorage); when omitted the
     instance env resolves it and an unconfigured instance skips seeding.
+    ``connect_source`` is the JobQueries facade (BOUNDARY-DATA-001, #187);
+    None falls back to the settings DSN (tests, scripts).
     """
     if storage is None:
         storage = build_s3_storage()
@@ -76,7 +80,8 @@ def seed_demo_workspace_materials(
         return []
 
     seeded: list[str] = []
-    known_hashes = _existing_hashes(settings, workspace_id)
+    source = connect_source if connect_source is not None else settings.database_url
+    known_hashes = _existing_hashes(source, workspace_id)
     for path in sorted(source_dir.glob("*.md")):
         payload = path.read_bytes()
         digest = hashlib.sha256(payload).hexdigest()
@@ -88,7 +93,7 @@ def seed_demo_workspace_materials(
             # (a crashed seed between the two simply re-puts on the next run —
             # the content-addressed key makes the put idempotent).
             storage.put_object(storage_key, payload, content_type=_CONTENT_TYPE)
-            with write_transaction(settings.database_url) as conn:
+            with write_transaction(source) as conn:
                 conn.execute(
                     """
                     insert into materials(

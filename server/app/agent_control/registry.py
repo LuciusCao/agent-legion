@@ -16,7 +16,7 @@ from server.app.agent_control.declarations import (
 from server.app.agent_control.liveness import WorkerLiveness
 from server.app.agent_control.register_key_guard import resolve_issue_scope
 from server.app.agent_control.register_tokens import AgentRegisterTokenStore
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from shared.protocol import CODE_PROTOCOL_VERSION, MODEL_RUNTIME_PROTOCOL_VERSION
 
@@ -40,7 +40,7 @@ class AgentWorkerRegistry(AgentRegisterTokenStore):
     """Worker registration lifecycle; the admin-issued register token store
     (issue/resolve/list/delete) is inherited from AgentRegisterTokenStore."""
 
-    def __init__(self, database_dsn: DatabaseDsn) -> None:
+    def __init__(self, database_dsn: ConnectSource) -> None:
         super().__init__(database_dsn)
         self._liveness = WorkerLiveness()
 

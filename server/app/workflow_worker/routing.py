@@ -71,9 +71,9 @@ def _resolve_uncached(
         # projection, not by any node-level declaration.
         if route is not None and route["target_kind"] == "agent":
             agent_id = str(route["target_id"])
-            definition_config = published_agent_definitions(
-                worker.settings.database_url, workspace_id
-            ).get(agent_id)
+            definition_config = published_agent_definitions(worker.job_db, workspace_id).get(
+                agent_id
+            )
             if definition_config is None:
                 return NodeRoute(
                     "error",

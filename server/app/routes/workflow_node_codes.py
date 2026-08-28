@@ -33,9 +33,7 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
     router = APIRouter()
 
     def _service() -> NodeCodeService:
-        return NodeCodeService(
-            job_db.path, settings.executor_runtime.workflows.custom_nodes_enabled
-        )
+        return NodeCodeService(job_db, settings.executor_runtime.workflows.custom_nodes_enabled)
 
     def _reject_start_node(workspace_id: str, workflow_key: str, node_key: str) -> None:
         """Start nodes never execute: there is no code to edit (404).

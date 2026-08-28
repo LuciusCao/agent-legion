@@ -56,21 +56,21 @@ class WorkspaceConfigurationService:
         return workspace
 
     def _vault(self) -> VaultService:
-        return VaultService(self.job_db.path, self.settings.config)
+        return VaultService(self.job_db, self.settings.config)
 
     def _payload(self, workspace: dict[str, Any]) -> dict[str, Any]:
         return workspace_settings_payload_with_schemas(
             self.job_db,
-            published_agent_definitions(self.settings.database_url, str(workspace["id"])),
+            published_agent_definitions(self.job_db, str(workspace["id"])),
             workspace,
         )
 
     def _ensure_active_revision(self, workspace_id: str, definition: WorkflowDefinition) -> None:
         if definition.key == DEMO_WORKFLOW_KEY:
-            seed_demo_workspace_node_codes(self.settings, workspace_id)
+            seed_demo_workspace_node_codes(self.settings, workspace_id, connect_source=self.job_db)
             # Demo materials (design §9): seed-if-absent, skipped with a
             # warning when object storage is not configured.
-            seed_demo_workspace_materials(self.settings, workspace_id)
+            seed_demo_workspace_materials(self.settings, workspace_id, connect_source=self.job_db)
         WorkflowRevisionService(
             self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
         ).ensure_active_revision(workspace_id, definition)
@@ -177,9 +177,7 @@ class WorkspaceConfigurationService:
             node_limits=node_limits,
             agent_capabilities={
                 definition.capability
-                for definition in published_agent_definitions(
-                    self.settings.database_url, workspace_id
-                ).values()
+                for definition in published_agent_definitions(self.job_db, workspace_id).values()
             },
             code_capacity=self.settings.executor_runtime.code_capacity,
         )
@@ -258,7 +256,7 @@ class WorkspaceConfigurationService:
             workspace = update_workspace_node_config(
                 self.job_db,
                 self.settings,
-                published_agent_definitions(self.settings.database_url, workspace_id),
+                published_agent_definitions(self.job_db, workspace_id),
                 workspace,
                 patch,
             )

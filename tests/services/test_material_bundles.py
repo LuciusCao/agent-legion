@@ -67,7 +67,7 @@ def materials(job_db, storage) -> MaterialsService:
 
 @pytest.fixture
 def bundles(materials) -> MaterialBundlesService:
-    return MaterialBundlesService(materials.database_dsn)
+    return MaterialBundlesService(materials.connect_source)
 
 
 def _ready_material(

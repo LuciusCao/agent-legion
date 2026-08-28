@@ -60,8 +60,8 @@ def create_router(deps: RouterDeps) -> APIRouter:
     # Global admin endpoints (not workspace-scoped): the sub-routers enforce
     # require_admin themselves, so they must not go through secured().
     router.include_router(create_instance_settings_router(deps.job_db, deps.settings))
-    router.include_router(create_skill_sources_router(deps.settings))
-    router.include_router(create_connections_router(deps.settings))
+    router.include_router(create_skill_sources_router(deps.job_db, deps.settings))
+    router.include_router(create_connections_router(deps.job_db, deps.settings))
     secured(create_packages_router(deps.job_db, deps.settings, deps.job_packages))
     secured(create_worker_router(deps.workspace_worker_control))
     # The worker control plane is one surface (broker + registry + completion)
@@ -112,10 +112,10 @@ def create_router(deps: RouterDeps) -> APIRouter:
     studio_secured(create_workflow_revisions_router(deps.job_db, deps.settings))
     studio_secured(create_workflow_node_codes_router(deps.job_db, deps.settings))
     studio_secured(create_agent_definitions_router(deps.job_db, deps.settings))
-    secured(create_skills_router(deps.settings))
+    secured(create_skills_router(deps.job_db, deps.settings))
     secured(create_workspace_configuration_router(deps.workspace_configuration, deps.settings))
     agent_catalog_router = create_workspace_agent_catalog_router(
-        deps.agent_catalog, deps.workspace_execution_configuration, deps.settings
+        deps.agent_catalog, deps.workspace_execution_configuration, deps.settings, deps.job_db
     )
     secured(agent_catalog_router)
     secured(create_workspace_agent_routes_router(deps.job_db, deps.settings))

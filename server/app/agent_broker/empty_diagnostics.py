@@ -11,7 +11,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import write_transaction
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _QUEUE_HEAD_LIMIT = 5
 
 
-def log_blocked_queue(dsn: DatabaseDsn, conn: Any, skip_reasons: Mapping[str, int]) -> None:
+def log_blocked_queue(dsn: ConnectSource, conn: Any, skip_reasons: Mapping[str, int]) -> None:
     """Log the blocked-queue signal and persist it for the ops summary."""
     head = conn.execute(
         "select execution_id, workspace_id, job_id, node_key, queued_at"

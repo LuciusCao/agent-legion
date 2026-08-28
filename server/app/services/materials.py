@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.job_errors import (
     ConflictError,
@@ -68,16 +68,18 @@ def _record(row: dict[str, Any]) -> dict[str, Any]:
 
 
 class MaterialsService:
-    def __init__(self, database_dsn: DatabaseDsn, storage: ObjectStorage | None = None) -> None:
-        self._dsn = database_dsn
+    @property
+    def connect_source(self) -> ConnectSource:
+        """The bundles adjunct's connection source (#187 facade passthrough)."""
+        return self._connect_source
+
+    def __init__(self, database_dsn: ConnectSource, storage: ObjectStorage | None = None) -> None:
+        # ``connect_source`` exposes the adjunct's connection source without
+        # leaking the raw DSN (facade in production, #187).
+        self._connect_source = database_dsn
         # Public seam: tests inject a fake ObjectStorage; an unconfigured
         # instance keeps None and the API degrades to 503.
         self.storage = storage
-
-    @property
-    def database_dsn(self) -> DatabaseDsn:
-        """The workspace DSN; adjunct services (bundles) share it."""
-        return self._dsn
 
     def _require_storage(self) -> ObjectStorage:
         if self.storage is None:
@@ -88,7 +90,7 @@ class MaterialsService:
         return self.storage
 
     def _fetch_row(self, workspace_id: str, material_id: str) -> dict[str, Any]:
-        with read_connection(self._dsn) as conn:
+        with read_connection(self._connect_source) as conn:
             row = conn.execute(
                 "select * from materials where id=%s and workspace_id=%s",
                 (material_id, workspace_id),
@@ -116,7 +118,7 @@ class MaterialsService:
         storage = self._require_storage()
         content_hash = content_hash.strip()
         deduplicated = False
-        with write_transaction(self._dsn) as conn:
+        with write_transaction(self._connect_source) as conn:
             row = None
             if content_hash:
                 row = conn.execute(
@@ -197,7 +199,7 @@ class MaterialsService:
         if row["status"] == "expired":
             raise ConflictError(f"Material is expired: {material_id}")
         failure = self._verify_object(storage, row)
-        with write_transaction(self._dsn) as conn:
+        with write_transaction(self._connect_source) as conn:
             if failure is not None:
                 conn.execute(
                     "update materials set status='failed' where id=%s",
@@ -206,7 +208,7 @@ class MaterialsService:
             else:
                 # TTL (design §10): expires_at from the instance setting,
                 # read fresh at every completion.
-                mark_ready(conn, self._dsn, material_id)
+                mark_ready(conn, self._connect_source, material_id)
         if failure is not None:
             raise MaterialVerificationError(failure)
         return _record(self._fetch_row(workspace_id, material_id))
@@ -243,7 +245,7 @@ class MaterialsService:
     def list(self, workspace_id: str, *, limit: int, offset: int) -> dict[str, Any]:
         limit = max(1, min(limit or _DEFAULT_LIST_LIMIT, _MAX_LIST_LIMIT))
         offset = max(0, offset)
-        with read_connection(self._dsn) as conn:
+        with read_connection(self._connect_source) as conn:
             total_row = conn.execute(
                 "select count(*) as total from materials where workspace_id=%s",
                 (workspace_id,),
@@ -277,7 +279,7 @@ class MaterialsService:
         # failure re-runs and quality replays re-resolve the row at dispatch
         # time and would fail with "material not found". Design §10 reference
         # counting replaces this guard in a later slice.
-        with write_transaction(self._dsn) as conn:
+        with write_transaction(self._connect_source) as conn:
             row = conn.execute(
                 "select * from materials where id=%s and workspace_id=%s for update",
                 (material_id, workspace_id),

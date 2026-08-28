@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from server.app.agent_catalog import AgentDefinition
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.versioned_entities import VersionedEntityStore
 
@@ -35,13 +35,15 @@ def agent_version_pin(
 
 
 def resolve_dispatch_agent_definition(
-    database_dsn: DatabaseDsn,
+    database_dsn: ConnectSource,
     workspace_id: str,
     agent_id: str,
     pin: Mapping[str, Any] | None,
 ) -> AgentDefinition | None:
     """Resolve the definition for dispatch; a frozen per-run version pin wins.
 
+    ``database_dsn`` accepts the JobQueries facade or a bare DSN string
+    (BOUNDARY-DATA-001, #187); production callers pass the facade.
     Resolution is strictly workspace-scoped (schema v46) with no global
     fallback. Returns None when the unpinned published definition is gone from
     the workspace (the caller reports the invalid route); a pin whose agent,

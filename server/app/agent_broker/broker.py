@@ -26,7 +26,7 @@ from server.app.agent_broker.code_manifest import CODE_MANIFEST_TRIM
 from server.app.agent_broker.empty import EmptyClaimTrigger
 from server.app.agent_broker.enqueue import enqueue_request
 from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.events.aggregator import record_job_update
 from server.app.executors._lease_lifecycle import heartbeat_lease
@@ -61,7 +61,7 @@ class AgentExecutionBroker:
 
     def __init__(
         self,
-        database_dsn: DatabaseDsn,
+        database_dsn: ConnectSource,
         *,
         lease_ttl_seconds: int = 90,
         bundle_dir: Path | None = None,
@@ -72,6 +72,8 @@ class AgentExecutionBroker:
         job_db: JobQueries | None = None,
         job_event_buffer: Any | None = None,
     ) -> None:
+        # database_dsn: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187);
+        # submodules reach it through the public ``database_dsn`` attribute.
         self.database_dsn = database_dsn
         self.lease_ttl_seconds = lease_ttl_seconds
         self.bundle_dir = bundle_dir

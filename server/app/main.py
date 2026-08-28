@@ -63,7 +63,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
     # Hydrate instance-level settings from the DB before any service reads
     # them (executor runtime, cleanup/monitoring config).
-    apply_instance_settings(settings, job_db.path)
+    apply_instance_settings(settings, job_db)
     # Executor definitions are retired (schema v47, P-0.5). Demo node code is
     # workspace-scoped; upgrade legacy global factory rows into every bound
     # demo workspace, then archive the global rows.
@@ -77,13 +77,13 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # Skill sources/lock retired from tracked yaml into global_settings:
     # import-once the legacy files when present, else seed the built-in
     # constants; with rows present this is a no-op (DB is authoritative).
-    seed_skill_sources(settings.database_url, settings.root_dir)
+    seed_skill_sources(job_db, settings.root_dir)
     WorkflowRevisionService(job_db).reconcile_active_agent_routes()
-    workspace_worker_control = WorkspaceWorkerControl(db_path=job_db.path)
+    workspace_worker_control = WorkspaceWorkerControl(db_path=job_db)
     # Resume state must not survive a restart: dispatch stays off until an
     # operator explicitly resumes it in this process lifetime.
     workspace_worker_control.reset_all_to_paused()
-    artifact_store = ArtifactStore(settings.data_dir / "artifacts", job_db.path)
+    artifact_store = ArtifactStore(settings.data_dir / "artifacts", job_db)
     # Instance object storage is env-only infra config (AGENT_LEGION_S3_*):
     # unconfigured instances keep the API up — materials degrade to 503 and
     # job-artifact upload/read simply falls back to the local job_dir (D12).
@@ -91,7 +91,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # configured=false); a failed probe never blocks startup. One client is
     # shared by the materials service and the job-artifact object store.
     object_storage = build_s3_storage_checked()
-    job_artifact_objects = JobArtifactObjectStore(job_db.path, object_storage)
+    job_artifact_objects = JobArtifactObjectStore(job_db, object_storage)
     job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
         job_db, settings, job_event_manager.bus
     )
@@ -105,7 +105,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         job_event_buffer,
         object_store=job_artifact_objects,
     )
-    ops_metrics = OpsMetricsService(job_db.path, settings.config)
+    ops_metrics = OpsMetricsService(job_db, settings.config)
     # Studio chat (phase 3 chunk 4): ACP conversation sessions, one agent
     # subprocess per session; in-process only, reaped in the lifespan finally.
     studio_chat_service = StudioChatService(job_db, settings, job_event_manager.bus)
@@ -166,11 +166,11 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 )
                 artifact_maintenance_thread.start()
                 # Materials TTL (design §10): same single-replica ownership.
-                material_ttl_thread = MaterialTtlSweeperThread(job_db.path, object_storage)
+                material_ttl_thread = MaterialTtlSweeperThread(job_db, object_storage)
                 material_ttl_thread.start()
         background_tasks.start(app)
         studio_chat_service.reap_zombie_sessions()
-        studio_registry = StudioAgentRegistryStore(job_db.path)
+        studio_registry = StudioAgentRegistryStore(job_db)
         studio_mcp, studio_mcp_app = create_studio_mcp_http_app(
             job_db, lambda: str(studio_registry.get()["api_base"])
         )
@@ -215,10 +215,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.studio_chat_service = studio_chat_service
     app.state.event_bus = job_event_manager.bus
     app.state.job_event_buffer = job_event_buffer
-    app.state.materials_service = MaterialsService(job_db.path, object_storage)
+    app.state.materials_service = MaterialsService(job_db, object_storage)
     app.state.job_artifact_objects = job_artifact_objects
     app.state.workspace_event_aggregator = workspace_event_aggregator
-    agent_catalog = AgentCatalogService(settings)
+    agent_catalog = AgentCatalogService(settings, job_db)
     workspace_execution_configuration = WorkspaceExecutionConfigurationService(job_db, settings)
     workspace_configuration = WorkspaceConfigurationService(job_db, settings)
     job_packages = JobPackageService(job_db, settings, object_store=job_artifact_objects)

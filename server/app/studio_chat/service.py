@@ -70,7 +70,7 @@ class StudioChatService:
         self._db = job_db
         self._settings = settings
         self._bus = bus
-        self._registry = StudioAgentRegistryStore(job_db.path)
+        self._registry = StudioAgentRegistryStore(job_db)
         self._probe = probe if probe is not None else AgentAvailabilityProbe()
         self._runtimes: dict[str, SessionRuntime] = {}
         self._runtimes_lock = threading.Lock()
