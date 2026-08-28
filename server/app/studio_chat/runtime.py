@@ -84,4 +84,11 @@ def teardown_runtime(
     try:
         revoke_scoped_token(db, runtime.token)
     except Exception:
+        # #204 broad-except audit: teardown safety net. The session is being
+        # discarded either way — the registry entry is already popped and the
+        # subprocess is already being closed above — so the revoke failing
+        # must not mask whatever the caller is propagating (startup failure,
+        # shutdown loop). Scoped tokens carry their own TTL, and expired
+        # tokens are purged by the workflow maintenance sweep, so a leaked
+        # revoke self-heals eventually; the warning is the operator signal.
         logger.warning("failed to revoke studio chat token for %s", session_id)

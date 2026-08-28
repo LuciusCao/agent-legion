@@ -54,6 +54,16 @@ class SweeperThread:
         self._thread.start()
 
     def _sweep_once(self, *, reap_bundles: bool = True) -> None:
+        # #204 broad-except audit: every catch below is the deliberate safety
+        # net of a periodic background sweep. The thread must survive ANY
+        # failure of ANY sub-sweep — otherwise one flaky sub-sweep (e.g. a
+        # transient DB error during claim expiry) would permanently stop lease
+        # expiry, orphan recovery, and bundle GC for the whole process. Each
+        # block logs the full traceback (logger.exception) so the failure is
+        # diagnosable, and each is scoped to exactly one sub-sweep so an early
+        # failure never skips the remaining ones. Converting these to narrow
+        # business-exception catches would reintroduce the lost-thread
+        # failure mode this loop exists to prevent.
         now = datetime.now(UTC)
         try:
             self._broker.sweep_expired_claims()

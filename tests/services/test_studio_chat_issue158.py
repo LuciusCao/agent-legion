@@ -378,3 +378,87 @@ def test_kill_process_signals_directly_without_the_loop() -> None:
     handle._process = reaped
     handle._kill_process()
     assert not reaped.killed.is_set()
+
+
+# -- #204 broad-except layering ----------------------------------------------
+
+
+TURN_FAILURE_SCRIPT = {
+    "capabilities": {"loadSession": False, "mcpCapabilities": {"http": False, "sse": False}},
+    "on_prompt": [{"fail": "agent exploded mid-turn"}],
+}
+
+
+def test_failed_turn_is_recorded_with_type_and_keeps_session_alive(chat, caplog) -> None:
+    """#204: a turn-level failure is contained per turn (the prompt loop
+    survives), and the recorded error detail carries the exception TYPE —
+    making the failure class identifiable instead of a bare message."""
+    service, _bus, register, workspace_id, user_id = chat
+    register(TURN_FAILURE_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    session_id = session["id"]
+
+    with caplog.at_level("WARNING", logger="server.app.studio_chat.acp_session"):
+        service.send_message(session_id, workspace_id, "first")
+
+    _wait_for(lambda: service.get_session(session_id)["status"] == "idle")
+    errors = [
+        m
+        for m in service.list_messages(session_id, workspace_id)
+        if m["kind"] == "status" and m["content"].get("event") == "error"
+    ]
+    assert errors, "the failed turn was not recorded as an error message"
+    # The detail is prefixed with the exception class so agent transport
+    # failures are distinguishable from bare strings.
+    assert ":" in errors[-1]["content"]["detail"]
+    assert any("studio chat prompt turn failed" in rec.message for rec in caplog.records)
+    # Traceback is logged with the warning (exc_info), keeping the failure
+    # diagnosable without killing the session.
+    assert any(
+        rec.exc_info for rec in caplog.records if "studio chat prompt turn failed" in rec.message
+    )
+    # The session is still alive: a second turn is accepted by the same loop.
+    service.send_message(session_id, workspace_id, "second")
+    _wait_for(
+        lambda: (
+            len(
+                [
+                    m
+                    for m in service.list_messages(session_id, workspace_id)
+                    if m["kind"] == "text" and m["role"] == "user"
+                ]
+            )
+            == 2
+        )
+    )
+
+
+def test_shutdown_tolerates_failing_status_write_per_session(chat, monkeypatch, caplog) -> None:
+    """#204: the shutdown loop must reach every live session — one failing
+    closed-status write (e.g. DB already going away) must not skip the
+    teardown of the remaining runtimes."""
+    service, _bus, register, workspace_id, user_id = chat
+    register(TEXT_SCRIPT)
+    first = service.create_session(workspace_id, user_id, "fake-agent")
+    # A second registration under a different agent id so a second session
+    # can exist concurrently (both fake agents run the same script).
+    register(TEXT_SCRIPT, agent_id="fake-agent-2")
+    second = service.create_session(workspace_id, user_id, "fake-agent-2")
+
+    real_update = service._db.update_studio_chat_session
+    failing_ids = {first["id"]}
+
+    def failing_update(session_id, **kwargs):
+        if session_id in failing_ids:
+            raise RuntimeError("db is shutting down")
+        return real_update(session_id, **kwargs)
+
+    monkeypatch.setattr(service._db, "update_studio_chat_session", failing_update)
+
+    with caplog.at_level("WARNING", logger="server.app.studio_chat.service"):
+        service.shutdown()
+
+    # The second session's teardown still ran despite the first failing.
+    assert service.runtime(second["id"]) is None
+    assert service.runtime(first["id"]) is None
+    assert any("failed to mark studio chat session" in rec.message for rec in caplog.records)

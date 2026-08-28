@@ -78,3 +78,32 @@ def test_skill_execution_gc_failure_does_not_break_sweeper() -> None:
         sweeper._sweep_once()  # must not raise
 
     leases.expire_stale.assert_called_once()
+
+
+@pytest.mark.no_db
+def test_sweep_blocks_are_isolated_per_sub_sweep(caplog) -> None:
+    """#204: each sub-sweep's broad catch is scoped to exactly that block —
+    a failure in the FIRST block (claim sweep) must not skip lease expiry,
+    orphan recovery, or the skill sweeper later in the same pass."""
+    leases = MagicMock()
+    broker = MagicMock()
+    broker.sweep_expired_claims.side_effect = RuntimeError("db went away")
+    broker.fail_stale_definition_requests.return_value = []
+
+    def _skill_sweeper() -> int:
+        return 3
+
+    sweeper = SweeperThread(leases, broker, skill_sweeper=_skill_sweeper)
+
+    with (
+        patch.object(sweeper_module, "fail_unclaimable_model_requests", return_value=[]),
+        caplog.at_level("ERROR", logger="server.app.executors.sweeper"),
+    ):
+        sweeper._sweep_once()  # must not raise
+
+    leases.expire_stale.assert_called_once()
+    leases.recover_orphaned_running_jobs.assert_called_once()
+    # The failure is surfaced with its traceback (logger.exception), not
+    # silently downgraded to a business-level note.
+    assert any("Agent claim sweep failed" in rec.message for rec in caplog.records)
+    assert any(rec.exc_info for rec in caplog.records if "Agent claim sweep failed" in rec.message)

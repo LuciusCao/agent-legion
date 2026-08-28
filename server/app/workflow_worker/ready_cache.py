@@ -18,7 +18,7 @@ from server.app.services.node_code_pins import node_code_pins_from_job_snapshot
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
-from server.app.workflows.execution_control import allowed_nodes
+from server.app.workflows.execution_control import ExecutionControlError, allowed_nodes
 from server.app.workflows.scheduler import find_ready_nodes
 from server.app.workflows.workflow_branching import RUNNABLE_STATUSES
 
@@ -57,15 +57,16 @@ def resolve_cached_definition(
     key = str(job.get("workflow_definition_hash") or "")
     if not key:
         return fallback
-    if key not in worker.state.definition_cache:
-        snapshot = str(job.get("workflow_definition_snapshot_json") or "")
-        if not snapshot:
-            snapshot = worker.job_db.get_workflow_snapshot_for_hash(key)
-        worker.state.definition_cache[key] = (
-            definition_from_job_snapshot({"workflow_definition_snapshot_json": snapshot})
-            if snapshot
-            else None
-        )
+    if key in worker.state.definition_cache:
+        return worker.state.definition_cache[key] or fallback
+    snapshot = str(job.get("workflow_definition_snapshot_json") or "")
+    if not snapshot:
+        snapshot = worker.job_db.get_workflow_snapshot_for_hash(key)
+    worker.state.definition_cache[key] = (
+        definition_from_job_snapshot({"workflow_definition_snapshot_json": snapshot})
+        if snapshot
+        else None
+    )
     return worker.state.definition_cache[key] or fallback
 
 
@@ -95,8 +96,20 @@ def evaluate_job_ready(
             statuses[key] = "not_applicable"
     try:
         allowed = allowed_nodes(definition, control_snapshot)
-    except Exception:
-        logger.exception("failed to compute allowed nodes for job %s", job["id"])
+    except ExecutionControlError:
+        # Expected business failure (not a programming error): the job's
+        # execution-control state disagrees with the definition — until_node
+        # target missing from this snapshot, or an invalid mode. The node
+        # set is genuinely uncomputable, so the job yields no candidates
+        # this pass (the same job-level failure the run_to service reports
+        # as a node_not_found job error). The job is stuck until an operator
+        # acts; the snapshot names the mismatch.
+        logger.warning(
+            "job %s has invalid execution control %r — no ready nodes",
+            job["id"],
+            control_snapshot,
+            exc_info=True,
+        )
         return []
     for node in definition.nodes.values():
         if (
@@ -114,17 +127,15 @@ def evaluate_job_ready(
         "workflow_definition_snapshot_json": "",
         "node_code_pins": node_code_pins_from_job_snapshot(job),
     }
-    candidates: list[ReadyCandidate] = []
-    for node in find_ready_nodes(definition, statuses, job_dir):
-        if node.key in allowed:
-            candidates.append(
-                ReadyCandidate(
-                    definition=definition,
-                    job=lean_job,
-                    node=node,
-                    job_dir=job_dir,
-                    control_snapshot=control_snapshot,
-                    allowed=allowed,
-                )
-            )
-    return candidates
+    return [
+        ReadyCandidate(
+            definition=definition,
+            job=lean_job,
+            node=node,
+            job_dir=job_dir,
+            control_snapshot=control_snapshot,
+            allowed=allowed,
+        )
+        for node in find_ready_nodes(definition, statuses, job_dir)
+        if node.key in allowed
+    ]
