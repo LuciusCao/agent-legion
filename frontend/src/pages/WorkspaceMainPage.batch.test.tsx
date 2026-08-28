@@ -283,12 +283,12 @@ describe('WorkspaceMainPage batch operations', () => {
       isDirty: false,
       isSaving: false,
       saveError: null,
-      executorConfiguration: {
+      executionConfiguration: {
         node_limits: [],
         migration_warnings: [],
         agent_capacity: null,
       },
-      originalExecutorConfiguration: null,
+      originalExecutionConfiguration: null,
     })
   })
 
