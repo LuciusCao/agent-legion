@@ -38,19 +38,18 @@ DEFAULT_SWEEP_INTERVAL_SECONDS = 3600.0
 DELETE_GRACE_SECONDS = 600
 
 
-def materials_ttl_days(database_dsn: ConnectSource) -> int:
+def materials_ttl_days(connect_source: ConnectSource) -> int:
     """Effective materials TTL in days (0 = disabled); read fresh per call.
 
-    ``database_dsn`` accepts the JobQueries facade or a bare DSN string
-    (BOUNDARY-DATA-001, #187). Unlike the restart-hydrated instance scalars,
-    the TTL is consumed at material completion/sweep time, so it is read from
-    the DB document on every use — edits take effect without a restart.
-    Defensive against out-of-band writes: anything but a positive int
-    degrades to 0.
+    ``connect_source`` is the JobQueries facade (or a bare DSN string in
+    tests) passed straight through to the settings store — never unwrapped
+    to a DSN here (BOUNDARY-DATA-001, #187). Unlike the restart-hydrated
+    instance scalars, the TTL is consumed at material completion/sweep
+    time, so it is read from the DB document on every use — edits take
+    effect without a restart. Defensive against out-of-band writes:
+    anything but a positive int degrades to 0.
     """
-    if not isinstance(database_dsn, str):
-        database_dsn = str(getattr(database_dsn, "dsn_identity", None) or "")
-    stored = InstanceSettingsStore(database_dsn).get()
+    stored = InstanceSettingsStore(connect_source).get()
     if stored is None:
         return 0
     value = stored.get("materials_ttl_days", 0)

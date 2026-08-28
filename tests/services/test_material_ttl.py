@@ -166,6 +166,32 @@ def test_materials_ttl_days_defensive_reads(service: MaterialsService) -> None:
         assert materials_ttl_days(TEST_DATABASE_URL) == 0
 
 
+def test_materials_ttl_days_passes_facade_through_untouched(
+    service: MaterialsService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#247: a JobQueries facade must reach InstanceSettingsStore as the
+    facade itself, never unwrapped to a bare DSN — the original bug (drawing
+    the DSN back out via dsn_identity) was invisible to every existing test
+    because they all pass DSN strings."""
+
+    class FakeFacade:
+        """Stands in for JobQueries: any non-str ConnectSource shape."""
+
+        dsn_identity = TEST_DATABASE_URL
+
+    facade = FakeFacade()
+    received: list[object] = []
+    real_init = InstanceSettingsStore.__init__
+
+    def spy_init(self: InstanceSettingsStore, database_dsn: object) -> None:
+        received.append(database_dsn)
+        real_init(self, database_dsn)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(InstanceSettingsStore, "__init__", spy_init)
+    materials_ttl_days(facade)  # type: ignore[arg-type]
+    assert received and received[0] is facade
+
+
 def test_expire_due_materials_flips_only_past_due(
     service: MaterialsService, storage: FakeStorage
 ) -> None:
