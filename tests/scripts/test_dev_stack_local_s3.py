@@ -12,6 +12,7 @@ docker/uv/lsof/curl 全部走 PATH 桩，用 STUB_* env 驱动行为并记录调
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import stat
@@ -176,12 +177,35 @@ def test_missing_credentials_rc3_warns_and_skips(tmp_path: Path) -> None:
     assert not stub_log.exists() or "docker" not in stub_log.read_text()
 
 
+def _sysbin_without_docker(tmp_path: Path) -> Path:
+    """拼一份剔除 docker* 的系统 bin 目录。
+
+    CI runner 的 /usr/bin 自带真 docker，with_docker=False 只靠不在
+    bin_dir 放桩无法模拟「无 docker」（本地 macOS /usr/bin 无 docker
+    所以不会暴露）。把 /usr/bin + /bin 逐条 symlink 过来、跳过 docker*，
+    让 PATH 在 CI 上也真的没有 docker 可寻。
+    """
+    sysbin = tmp_path / "sysbin"
+    sysbin.mkdir()
+    for system_dir in ("/usr/bin", "/bin"):
+        for name in os.listdir(system_dir):
+            if name.startswith("docker"):
+                continue
+            link = sysbin / name
+            if link.exists():
+                continue
+            with contextlib.suppress(OSError):
+                link.symlink_to(Path(system_dir) / name)
+    return sysbin
+
+
 def test_no_docker_degrades_gracefully(tmp_path: Path) -> None:
     """无 docker：提示降级 503，不阻断 dev-up。"""
     main, bin_dir = _setup(tmp_path, with_docker=False)
     stub_log = tmp_path / "stub.log"
+    sysbin = _sysbin_without_docker(tmp_path)
 
-    result = _run_up(main, bin_dir, stub_log)
+    result = _run_up(main, bin_dir, stub_log, {"PATH": f"{bin_dir}:{sysbin}"})
 
     assert result.returncode == 0, result.stderr
     assert "未检测到 docker" in result.stderr
