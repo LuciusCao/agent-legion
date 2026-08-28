@@ -226,6 +226,11 @@
       3,
       0
     ],
+    "server/app/services/quality_replay_setup.py": [
+      4,
+      1,
+      0
+    ],
     "server/app/services/quality_replays.py": [
       20,
       2,
