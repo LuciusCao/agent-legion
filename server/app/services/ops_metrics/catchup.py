@@ -1,8 +1,7 @@
 """Catch-up sampling for the Host operations metrics service.
 
-Split out of ``ops_metrics.py`` to respect that module's size budget. The
-sampling loop's cycle is sample work + sleep, so under load it drifts past
-minute boundaries; writing only "the previous minute" permanently skips
+The sampling loop's cycle is sample work + sleep, so under load it drifts
+past minute boundaries; writing only "the previous minute" permanently skips
 buckets (visible as gaps on the monitoring panel). ``sample_catch_up``
 backfills every missing bucket since the last written sample, capped at
 ``_MAX_BACKFILL_MINUTES``: after a longer outage the gap stays (no samples

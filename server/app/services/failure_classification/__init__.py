@@ -1,15 +1,16 @@
 """Failure classification write-path helpers.
 
-Rules live in ``_failure_classification_rules``; both executor links (Agent
-Worker, local Pi runner) converge on the lease finish path, which classifies
-once via ``resolve_failure_fields``. Orphan recovery assigns
-``worker_orphaned`` directly at its write path.
+Rules live in ``failure_classification.rules`` (message markers in
+``failure_classification.markers``); both executor links (Agent Worker, local
+Pi runner) converge on the lease finish path, which classifies once via
+``resolve_failure_fields``. Orphan recovery assigns ``worker_orphaned``
+directly at its write path.
 """
 
 from __future__ import annotations
 
 from server.app.executors.models import ExecutionResult
-from server.app.services._failure_classification_rules import (
+from server.app.services.failure_classification.rules import (
     FAILURE_CATEGORIES,
     TIMEOUT_EXIT_CODE,
     TRANSIENT_RETRY_DETAILS,

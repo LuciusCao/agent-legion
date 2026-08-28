@@ -1,4 +1,4 @@
-"""批量执行路径（_job_rerun_batch）与逐条 rerun() 的等价性 + 读查询上界。"""
+"""批量执行路径（job_rerun.batch）与逐条 rerun() 的等价性 + 读查询上界。"""
 
 from __future__ import annotations
 

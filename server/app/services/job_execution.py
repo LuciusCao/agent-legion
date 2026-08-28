@@ -10,10 +10,10 @@ from server.app.events.aggregator import broadcast_job_update, record_job_update
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
-from server.app.services._job_batch_ops import batch_run_to as _batch_run_to
-from server.app.services._job_rerun_upstream_guard import raise_if_failed_upstream
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
+from server.app.services.job_rerun.batch_ops import batch_run_to as _batch_run_to
+from server.app.services.job_rerun.upstream_guard import raise_if_failed_upstream
 from server.app.services.job_staged_cleanup import commit_staged_outputs
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot

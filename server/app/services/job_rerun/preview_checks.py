@@ -11,11 +11,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from server.app.services._job_rerun_upstream_guard import (
+from server.app.services.job_operation_error import JobOperationError
+from server.app.services.job_rerun.upstream_guard import (
     failed_upstream_node_keys,
     upstream_failed_error,
 )
-from server.app.services.job_operation_error import JobOperationError
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 

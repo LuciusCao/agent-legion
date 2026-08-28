@@ -1,6 +1,6 @@
 """Rule table mapping a failed run's exit code and message to (category, detail).
 
-Message markers live in ``_failure_classification_markers``. Unrecognized
+Message markers live in ``failure_classification.markers``. Unrecognized
 failures classify as ``unknown`` — never default to ``technical``.
 
 Category semantics agreed with operators:
@@ -16,7 +16,7 @@ Category semantics agreed with operators:
 
 from __future__ import annotations
 
-from server.app.services._failure_classification_markers import (
+from server.app.services.failure_classification.markers import (
     _CMS_TRANSPORT_PREFIX,
     _CONNECTION_CONFIG_RE,
     _DB_POOL_MARKERS,

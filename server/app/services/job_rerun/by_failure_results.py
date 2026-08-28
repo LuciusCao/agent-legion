@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from server.app.services._job_rerun_single import execute_rerun_result
 from server.app.services.job_operation_error import JobOperationResult
+from server.app.services.job_rerun.single import execute_rerun_result
 
 if TYPE_CHECKING:
     from server.app.services.job_rerun import JobRerunService

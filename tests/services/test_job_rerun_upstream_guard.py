@@ -13,10 +13,10 @@ from typing import Any
 import pytest
 
 from server.app.executors.leases import ExecutorLeaseRepository
-from server.app.services._job_rerun_preview import batch_rerun_preview
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_operation_error import JobOperationError
 from server.app.services.job_rerun import JobRerunService
+from server.app.services.job_rerun.preview import batch_rerun_preview
 from tests.helpers import publish_builtin_revision
 
 _NODE_KEYS = ["intake_knowledge_points", "write_script", "review_script", "publish_content"]
