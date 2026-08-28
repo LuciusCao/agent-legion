@@ -71,6 +71,16 @@ test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }, t
   await jobRow.click()
 
   await expect(page).toHaveURL(/\/workspaces\/[^/]+\/jobs\/[^/]+$/)
-  await expect(page.getByText('读取知识点')).toBeVisible()
-  await expect(page.getByText('生成练习题')).toBeVisible()
+  // Scope to the detail page's progress panel: the workspace job list also
+  // renders each job's current node label (its activeLabel), and
+  // smoke-job-rerun.spec.ts has already created a Q1 job in the same shared
+  // demo workspace — a page-wide getByText would hit both job rows'
+  // activeLabels and fail with a strict mode violation (two jobs, both
+  // showing 读取知识点 while pending). The panel root carries the 查看 DAG
+  // button, so its ancestor chain anchors the timeline below it.
+  const progressPanel = page
+    .getByRole('button', { name: '查看 DAG' })
+    .locator('xpath=ancestor::div[contains(@class, "panel")][1]')
+  await expect(progressPanel.getByText('读取知识点')).toBeVisible()
+  await expect(progressPanel.getByText('生成练习题')).toBeVisible()
 })

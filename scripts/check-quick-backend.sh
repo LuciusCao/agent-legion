@@ -38,7 +38,13 @@ run_tests() {
   # built-in runner. Skip with a notice when node is absent — or when the
   # test file is missing (gate-script tests run this script inside fixture
   # repos that only contain a copy of the script itself).
-  if ! command -v node >/dev/null 2>&1; then
+  # BACKEND_SKIP_WORKER_UI_TESTS=1 (set only by scripts/check.sh's postgres
+  # segment) skips the suite there: the unit segment already ran the
+  # identical invocation, and the tier selection below cannot affect these
+  # tier-independent tests.
+  if [[ "${BACKEND_SKIP_WORKER_UI_TESTS:-0}" == "1" ]]; then
+    echo "=== Worker UI Tests (skipped: BACKEND_SKIP_WORKER_UI_TESTS=1) ==="
+  elif ! command -v node >/dev/null 2>&1; then
     echo "node not found; skipping worker/ui tests (install Node.js to enable them)."
   elif [[ ! -f "$ROOT_DIR/worker/ui/app.test.mjs" ]]; then
     echo "worker/ui/app.test.mjs not present; skipping worker/ui tests."
@@ -231,17 +237,26 @@ run_tests() {
         "${split_cov_floor_args[@]}"
       ;;
     full)
+      # The local full tier is the unit layer — same selection as GATE_TIER=unit.
+      # The PostgreSQL layer (1711 of 3644 quick-suite tests, ~2.5x the unit
+      # tier's cost) moved out of the local default: CI re-runs all of it on
+      # every PR (backend-postgres-a/b/c), so paying it on every local gate
+      # bought little. Run GATE_TIER=postgres explicitly before handing off
+      # database-touching work, or rely on CI; scripts/check.sh (the local
+      # full-gate substitute) pins unit + postgres itself and stays whole.
       # Coverage tracing costs 15-40% CPU on the Python side; the 85% floor is
       # enforced by CI and scripts/check.sh, so the local quick gate skips it
       # unless AGENT_LEGION_COV=1.
       if [[ "${AGENT_LEGION_COV:-0}" == "1" ]]; then
-        echo "=== Python Tests + Coverage ==="
+        echo "=== Python Tests + Coverage (unit tier) ==="
       else
-        echo "=== Python Tests (coverage off; set AGENT_LEGION_COV=1 to enable) ==="
+        echo "=== Python Tests (unit tier, coverage off; set AGENT_LEGION_COV=1 to enable) ==="
       fi
-      UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+      AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
+        UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
+        -m "not postgres and not repository_gate" \
         -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \

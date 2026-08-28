@@ -28,7 +28,10 @@ if [[ "$gate" == "full" && "$lanes" != "backend frontend rust" ]]; then
   exit 2
 fi
 # Test tier for the quick gate's backend lane: smoke/unit (all pure tests with
-# PostgreSQL offline) or full (whole quick suite); aff is the agent inner-loop
+# PostgreSQL offline) or full (the unit layer since PR #225 — the postgres
+# integration layer runs on CI or via an explicit GATE_TIER=postgres run, and
+# scripts/check.sh still covers both tiers for the local full gate); aff is
+# the agent inner-loop
 # combination (unit backend + vitest related frontend) and never produces
 # reusable push evidence — run-local-gate requires the quick/full gates, so aff
 # is only reachable through scripts/check-quick.sh directly. The full gate
