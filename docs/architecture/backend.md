@@ -646,7 +646,7 @@ Workflow Studio 提供可视化 workflow 编辑能力，与版本修订历史集
 - **Routes**: `routes/workflow_revisions.py`, `routes/workflow_draft_compare.py`
 - **Services**: `services/workflow_drafts.py`, `services/workflow_draft_publish.py`, `services/workflow_revision_format.py`, `services/job_workflow_versions.py`, `services/job_workflow_upgrade.py`; `/api/executors` 同时返回已发布 Agent Catalog 投影（versioned_entities），供编辑器按 capability 获取 runtime、skill、tools；provider/model/thinking 的「继承默认」提示读 Studio 草稿 YAML 的顶层 `execution` 块（workspace 级 Agent 默认已随 schema v63 退役），可 claim 的选项来自 `GET /api/workspaces/{id}/runtime-models`（在线 Worker 声明聚合）
 - **DB**: PostgreSQL `workflow_revisions` 表与版本化 schema 初始化
-- **Frontend**: `pages/WorkflowStudioPage.tsx`, `pages/workflowStudio/`
+- **Frontend**: `pages/WorkflowStudioPage.tsx`, `features/workflowStudio/`
 
 ### Token Usage
 
