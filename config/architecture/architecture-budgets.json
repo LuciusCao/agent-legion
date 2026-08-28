@@ -1248,7 +1248,7 @@
     "server/app/workflows/conditions.py": 43,
     "server/app/workflows/definition.py": 40,
     "server/app/workflows/execution_control.py": 52,
-    "server/app/workflows/loader.py": 304,
+    "server/app/workflows/loader.py": 303,
     "server/app/workflows/node_config_schema.py": 43,
     "server/app/workflows/output_validation.py": 75,
     "server/app/workflows/pi_protocol.py": 123,
@@ -1372,5 +1372,5 @@
     "workspace_libs/node_artifacts.py": 54,
     "workspace_libs/node_sdk.py": 197,
     "workspace_libs/url_guard.py": 52
-  },
-  "version": 3}
+  }
+}
