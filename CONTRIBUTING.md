@@ -49,6 +49,11 @@ See [README.md](README.md) for the full quick start and the demo workflow.
   (`make api-generate`) — never hand-write them.
 - New tests go into the subsystem subdirectory under `tests/` (e.g.
   `tests/services/`, `tests/routes/`), not the `tests/` root.
+- Split test files proactively once they pass 800 lines (the gate's 1000-line
+  cap is a hard floor to stay clear of): moving cases untouched into sibling
+  files by theme beats being blocked at the gate right before handoff.
+  Existing files over the line are not expected to be paid down at once —
+  split them the next time you touch the file.
 - Secrets never enter tracked config files, the database, API responses, or
   logs — use the vault / env channels described in AGENTS.md §8.
 - Architecture boundary changes must be reflected in

@@ -5,7 +5,7 @@ renewal at turn start, agent-death teardown (runtime + token), the permission
 park/settle protocol against close and double-respond races, the guarded
 session status UPDATE, and the synchronous kill fallback for a wedged ACP
 loop. The session-lifecycle happy paths live in
-tests/services/test_studio_chat_service.py.
+tests/services/test_studio_chat_service_sessions.py.
 """
 
 from __future__ import annotations
