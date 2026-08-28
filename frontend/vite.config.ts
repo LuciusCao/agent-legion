@@ -32,7 +32,6 @@ const browserTestFiles = [
   'src/pages/workflowStudio/useWorkflowStudioMobilePanel.test.ts',
   'src/pages/workflowStudio/useWorkflowStudioPageView.test.ts',
   'src/stores/agentsStore.test.ts',
-  'src/stores/uiStore.test.ts',
 ]
 
 // Dev-server proxy noise filter: when the browser reloads / HMR restarts, the

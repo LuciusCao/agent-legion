@@ -70,8 +70,11 @@ const DOM_PACKAGE_IMPORT_RE = /['"](dompurify|katex)['"]/
 // Modules whose DOM accesses are all behind a node fallback
 // (`typeof window === 'undefined'` / `typeof document === 'undefined'`),
 // so importing them in a node test is safe. When such a module is hit the
-// scan does not flag it and does not traverse deeper: its own imports were
-// already vetted when the module grew the guard.
+// member-access signal does not flag it and the scan does not traverse
+// deeper: its own imports were already vetted when the module grew the
+// guard. Note this bypass applies to the member-access signal only — the
+// constructor/package signals (DOMParser, dompurify, ...) fire before it
+// and are not bypassed by this list.
 const NODE_SAFE_GUARDED_MODULES = [
   'src/api/requestAuth.ts',
   'src/lib/questionHighlight.ts',
@@ -121,7 +124,7 @@ function parseImportSpecifiers(source: string): string[] {
   // codex review on PR #229: a line-anchored dynamic-import branch silently
   // skips exactly the tests whose DOM need hides behind a lazy import.
   const importRe =
-    /(?:^|\n)\s*import\s+(?:type\s+)?(?:[^;'"]*?from\s*)?['"]([^'"]+)['"]|(?:^|\n)\s*export\s+(?:type\s+)?[^;'"]*?from\s+['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]/g
+    /(?:^|\n)\s*import\s+(?:type\s+)?(?:[^;'"]*?from\s*)?['"]([^'"]+)['"]|(?:^|\n)\s*export\s+(?:type\s+)?[^;'"]*?from\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]/g
   let match: RegExpExecArray | null
   while ((match = importRe.exec(source))) {
     const specifier = match[1] ?? match[2] ?? match[3]
@@ -285,6 +288,34 @@ describe('browserTestFiles guard (vite.config.ts)', () => {
         `in frontend/vite.config.ts, or — if the file genuinely runs in node — add it to\n` +
         `NODE_SAFE_TEST_EXEMPTIONS in src/lib/browserTestFilesGuard.test.ts with a reason.\n\n` +
         unregistered.join('\n\n') +
+        '\n'
+    ).toEqual([])
+  })
+
+  it('registers only files the detector still flags (no inert entries)', () => {
+    // Third rot form: a registered entry that no longer needs DOM (refactor
+    // removed the last DOM usage, or the registration was never needed).
+    // It silently keeps paying the slower jsdom lane forever — the exact
+    // "junk drawer" this guard refuses for the exemption list, mirrored
+    // onto the registration list. Review on PR #229: uiStore.test.ts was
+    // live proof this rot happens.
+    const registered = readBrowserTestFiles()
+    const stale: string[] = []
+    for (const entry of registered) {
+      const absolute = join(FRONTEND_ROOT, entry)
+      if (!existsSync(absolute)) continue // dead-entry test owns that failure
+      if (detectDomNeed(absolute)) continue
+      stale.push(
+        `  ${entry}\n    detector signals: none — the file (and its import closure) has no static DOM usage`
+      )
+    }
+    expect(
+      stale,
+      `browserTestFiles entries the detector no longer flags as needing DOM.\n` +
+        `These tests run in the slower jsdom 'component' project for no reason. Remove them\n` +
+        `from browserTestFiles in frontend/vite.config.ts, or — if the detector is blind to\n` +
+        `a real DOM need — improve the detector rather than keeping a stale entry.\n\n` +
+        stale.join('\n\n') +
         '\n'
     ).toEqual([])
   })
