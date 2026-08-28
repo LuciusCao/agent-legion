@@ -96,6 +96,9 @@
   `tests/` 根目录文件（静态检查 `scripts/architecture/test_placement.py` 强制，基线
   `config/architecture/test-root-files-baseline.json`）；确定不碰数据库的纯静态测试可加
   `@pytest.mark.no_db` 跳过 TRUNCATE 隔离。
+- 测试文件超过 800 行就应拆分（gate 的 1000 行上限是硬底线）：主动按被测主题拆到
+  同目录姊妹文件（用例零改动迁移），比逼近上限被 gate 拦下再被动拆要好——被动拆分
+  总是卡在收尾关口，还得在同一 PR 里补做（#207）。
 
 ## 5. Architecture Governance
 

@@ -456,13 +456,13 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/executors/test_code_executor.py::test_build_runtime_prefetches_inputs_and_hides_db
+        target: tests/executors/test_code_executor_runtime.py::test_build_runtime_prefetches_inputs_and_hides_db
         gate: quick
       - kind: integration
-        target: tests/executors/test_code_executor.py::test_sandboxed_child_auth_failure_marker_reaches_parent
+        target: tests/executors/test_code_executor_runtime.py::test_sandboxed_child_auth_failure_marker_reaches_parent
         gate: quick
       - kind: integration
-        target: tests/executors/test_code_executor.py::test_sandboxed_custom_node_can_use_node_sdk
+        target: tests/executors/test_code_executor_runtime.py::test_sandboxed_custom_node_can_use_node_sdk
         gate: quick
       - kind: contract
         target: tests/workflow_nodes/test_node_sdk.py
@@ -618,7 +618,13 @@ invariants:
         target: tests/routes/test_studio_agents_admin.py
         gate: quick
       - kind: integration
-        target: tests/services/test_studio_chat_service.py
+        target: tests/services/test_studio_chat_service_sessions.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_service_permissions.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_service_lifecycle.py
         gate: quick
       - kind: integration
         target: tests/db/test_studio_chat_schema.py
@@ -687,7 +693,7 @@ invariants:
         target: tests/services/test_code_dispatch.py::test_enqueue_strips_instance_settings_from_manifest_and_child_payload
         gate: quick
       - kind: integration
-        target: tests/executors/test_code_executor.py::test_build_runtime_whitelists_settings_config_sections
+        target: tests/executors/test_code_executor_runtime.py::test_build_runtime_whitelists_settings_config_sections
         gate: quick
       - kind: integration
         target: tests/services/test_code_dispatch.py::test_resolve_code_manifest_config_injects_and_strips_secrets
