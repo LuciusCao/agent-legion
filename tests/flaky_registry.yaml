@@ -25,7 +25,7 @@ entries:
 - id: FLAKY-007
   scope: backend:studio-chat-turn-tool-call-timing
   owner: test-infra
-  reason: tests/services/test_studio_chat_service_sessions.py::test_session_lifecycle_turn_and_token_revocation
+  reason: "tests/services/test_studio_chat_service_sessions.py::test_session_lifecycle_turn_and_token_revocation
     failed once in a local full quick gate (2026-08-27, worktree arch-review;
     the file was since split out of test_studio_chat_service.py, #207)
     while two sibling worktrees ran their own vitest suites in parallel; the
@@ -33,7 +33,7 @@ entries:
     (async event coalescing), and an isolated rerun passed in 44.7s. Same
     machine-load timing family as FLAKY-006 — the correct response is
     retrying the gate; if it recurs, add a bounded wait for the tool_call
-    event instead of relying on immediate visibility.
+    event instead of relying on immediate visibility."
   observed: Local quick gate on review/architecture (c8913a71 + audit fixes),
     2026-08-27; isolated rerun passed.
   recurring: true
@@ -79,11 +79,11 @@ entries:
     loops' tight timeouts, not the code under test. Retrying the gate is the
     correct response; if it recurs, widen the poll timeouts before
     considering a deeper fix.
-  observed: Local pre-push quick gate for 9f479768 (pull request 175),
-    2026-08-26; retry run passed in 47s. Same family hit
+  observed: >-
+    Local pre-push quick gate for 9f479768 (pull request 175), 2026-08-26;
+    retry run passed in 47s. Same family hit
     tests/full/test_shard_fanout_e2e.py::test_shard_fanout_aggregates_to_completed
-    — CI workflow_dispatch run for PR #246 (2026-08-28) and a local
-    6-run stress where it failed once; the develop baseline reproduces the
-    same 1-in-6 rate, confirming pre-existing machine-load timing rather
-    than a PR regression.
+    (CI workflow_dispatch run for PR #246, 2026-08-28, plus a local 6-run
+    stress with one failure; the develop baseline reproduces the same
+    1-in-6 rate — pre-existing machine-load timing, not a PR regression).
   recurring: true
