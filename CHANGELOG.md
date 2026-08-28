@@ -57,13 +57,21 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   references to the deleted `check-skills-shared.py` and the no-op
   `verify_specs.py` gate step are cleaned up.
 
-### Security
 
 - CSRF negative-path test: cookie-authenticated mutations without the
   `x-agent-legion-request` header are rejected with 403 (SECURITY-AUTH-001).
 
 ### Security
 
+- Shared-database schema guard: `init_db` refuses to initialize/migrate the
+  bare shared `agent_legion` database (the code-default DSN) unless
+  `AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1` is set — prod launchers
+  (native-prod-up.sh, deploy/compose.host.yaml) set it, while a misdirected
+  process (worktree script without .env resolving the default DSN) fails
+  with remediation instead of pushing unreleased migrations onto prod
+  (2026-08-27: an export_openapi run applied v59-61 to the shared database
+  this way). `scripts/export_openapi.py` additionally refuses to run at all
+  against the shared database before the app is built.
 - Skills runs dir (per-execution skill snapshots + cache locks) moved from
   `~/.agents/skills/agent-legion.runs` to a deterministic per-user OS temp
   dir (`agent-legion-skills.runs[-<uid>]`), overridable via

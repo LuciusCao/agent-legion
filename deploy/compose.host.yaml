@@ -66,6 +66,9 @@ services:
       # 启动自检 probe 会持续暴露，见 server/app/storage/probe.py）。
     environment:
       AGENT_LEGION_DATABASE_URL: postgresql://agent_legion@postgres:5432/agent_legion
+      # 共享库 schema 门（server/app/db/schema.py）：容器后端是这台
+      # postgres 的有意迁移者，显式授予 opt-in。
+      AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA: "1"
       PGPASSFILE: /run/secrets/postgres_pgpass
       AGENT_LEGION_VAULT_MASTER_KEY_FILE: /run/secrets/vault_master_key
       AGENT_LEGION_DATA_DIR: /var/lib/agent-legion

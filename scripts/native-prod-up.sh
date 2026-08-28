@@ -68,6 +68,10 @@ if port_listening "$BACKEND_PORT"; then
 else
     echo "启动后端 :$BACKEND_PORT …"
     ulimit -n 65535
+    # 共享库 schema 门（server/app/db/schema.py）：prod 是有意迁移裸
+    # agent_legion 库的操作者，显式授予 opt-in；误连该库的工具脚本
+    # （缺 .env 的 worktree export_openapi 等）则被硬拦。
+    AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1 \
     nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m uvicorn \
         server.app.main:create_prod_app --factory --host 127.0.0.1 --port "$BACKEND_PORT" \
         --timeout-graceful-shutdown 3 \

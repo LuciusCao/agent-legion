@@ -4,6 +4,7 @@ from pathlib import Path
 
 from server.app.db.connection import DatabaseDsn
 from server.app.db.migration_registry import MIGRATIONS
+from server.app.db.schema_guard import guard_shared_db
 from server.app.db.transaction import write_transaction
 
 SCHEMA_VERSION = 62
@@ -20,7 +21,15 @@ def init_db(database_dsn: DatabaseDsn) -> None:
     with ``version > max(applied)`` — no more full replay of data
     migrations on upgrade. Databases recorded at the current version
     (including legacy single-row installs) are a no-op.
+
+    Migrating the bare shared database additionally requires
+    AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1 (schema_guard): a process that
+    resolved the code default DSN (env unset, no .env) is far more likely a
+    misdirected tool (worktree script, CI export) than the intended prod
+    operator — those get a hard error with remediation instead of a silent
+    migration push.
     """
+    guard_shared_db(database_dsn)
     with write_transaction(database_dsn) as conn:
         # Serialize migrations per database, not cluster-wide: worktrees run
         # against dedicated databases (tests/postgres_support.py derives one
