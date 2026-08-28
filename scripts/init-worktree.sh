@@ -77,6 +77,8 @@ if [[ ! -f .env ]]; then
     echo "缺少 .env 时后端会回落共享默认库（prod）——请手工从其他 worktree 复制 .env 后重跑本脚本。" >&2
     exit 1
 fi
+# .env 含真实凭据（S3 key 等），权限收紧（幂等，与 install-deps.sh 一致）。
+chmod 600 .env
 
 # 2. 专属 Postgres 库
 NAME="$(printf '%s' "$(basename "$ROOT")" | tr -c 'a-zA-Z0-9_' '_')"

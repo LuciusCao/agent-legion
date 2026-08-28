@@ -30,17 +30,22 @@ tracked yaml、DB、API 或日志（MATERIAL-SECRET-001）。
 ## 2. 开发形态（make install / make dev-up）
 
 开发路径与生产部署分开：全新 clone 后 `make install`（`scripts/install-deps.sh`，
-幂等）一键装齐前置依赖并初始化项目——uv sync、建 `agent_legion` 库、从
+幂等）一键装齐前置依赖并初始化项目——uv sync、建 `agent_legion_dev` 库、从
 `.env.example` 生成 `.env` 并填入随机 `AGENT_LEGION_S3_ACCESS_KEY/SECRET_KEY`
-（同时作为 rustfs 容器的 root 凭据）、生成 `deploy/secrets/vault_master_key`、
-构建 velites 二进制、装前端依赖、种子 `config/agent-worker.yaml`。
+（同时作为 rustfs 容器的 root 凭据；`.env` 已存在但凭据为空时会幂等补填）、
+生成 `deploy/secrets/vault_master_key`、构建 velites 二进制、装前端依赖、
+种子 `config/agent-worker.yaml`。
 
 `make dev-up`（`scripts/dev_stack.sh`）启动开发进程前先经
 `scripts/local-s3-decide.sh .env` 决策本地 RustFS（与 prod 入口同一套
 `AGENT_LEGION_LOCAL_S3` 三态逻辑）：决策为 start 时从根 `.env` 显式 export
 S3 凭据后 `docker compose -f deploy/compose.host.yaml up -d rustfs`——
 **dev 形态只有根 `.env` 一份配置**（不读 `deploy/.env`），凭据经环境变量
-注入 compose 插值，因此不存在「两处凭据不一致」的坑。起完后调用
+注入 compose 插值，因此不存在「两处凭据不一致」的坑。**rustfs 容器已在
+运行时 dev-up 跳过 recreate 直接确认 bucket**：compose 项目名固定
+`agent-legion`，全机（prod 与所有 worktree）共享同一个容器，凭据不同的
+`up -d` 会 recreate 容器并打断持旧凭据的一方；容器在但凭据不匹配会在建
+bucket 处告警暴露。起完后调用
 `scripts/ensure-s3-bucket.py` 确保 bucket 与浏览器直传 CORS 就绪
 （与 `init-worktree.sh` 共用同一脚本）。docker 缺失、启动失败或建 bucket
 失败都只告警不阻断：材料 API 降级为 503，其余功能不受影响，就绪后重跑

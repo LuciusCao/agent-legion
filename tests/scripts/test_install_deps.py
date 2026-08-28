@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "install-deps.sh"
 
 _ENV_EXAMPLE = """\
-AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion
+AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_dev
 AGENT_LEGION_S3_ACCESS_KEY=
 AGENT_LEGION_S3_SECRET_KEY=
 """
@@ -151,11 +151,22 @@ def test_macos_all_tools_present_initializes(tmp_path: Path) -> None:
     log = stub_log.read_text()
     assert "brew install" not in log
     assert "uv sync" in log
-    assert "createdb agent_legion" in log
+    # 精确行匹配：子串 "createdb agent_legion" 对裸名共享库也会成立，钉不住
+    # 派生名约定（裸名是 #227 要避开的共享/prod 库）。
+    assert "createdb agent_legion_dev" in log.splitlines()
     assert "ensure-velites --dest data/bin" in log
     env_text = (main / ".env").read_text()
     assert "AGENT_LEGION_S3_ACCESS_KEY=stub-access-key" in env_text
     assert "AGENT_LEGION_S3_SECRET_KEY=stub-secret-key" in env_text
+    # 一致性：.env DSN 的库名与 createdb 的库名必须是同一个（派生名）。
+    dsn_line = next(
+        line for line in env_text.splitlines() if line.startswith("AGENT_LEGION_DATABASE_URL=")
+    )
+    db_name = dsn_line.rsplit("/", 1)[1]
+    assert db_name == "agent_legion_dev"
+    assert f"createdb {db_name}" in log.splitlines()
+    # .env 从此含真实凭据，权限必须是 600。
+    assert stat.S_IMODE((main / ".env").stat().st_mode) == 0o600
     assert (main / "deploy/secrets/vault_master_key").read_text().strip() == (
         "stub-vault-master-key"
     )
@@ -195,3 +206,55 @@ def test_rerun_is_idempotent_and_keeps_existing_env(tmp_path: Path) -> None:
     assert "config/agent-worker.yaml 已存在" in second.stdout
     assert (main / ".env").read_text() == env_before
     assert (main / "deploy/secrets/vault_master_key").read_text() == key_before
+
+
+def test_existing_env_with_empty_credentials_is_healed(tmp_path: Path) -> None:
+    """.env 已存在但凭据为空（手工 cp 的空模板 / 上次写入中断 / openssl 曾
+    缺失）：重跑必须幂等补填，不留「.env 存在但凭据为空」的半失败态。"""
+    main, bin_dir = _setup(tmp_path)
+    _write_stub(bin_dir / "cargo", _EXIT_OK_STUB)
+    stub_log = tmp_path / "stub.log"
+    shutil.copy(main / ".env.example", main / ".env")
+
+    result = _run(main, bin_dir, stub_log)
+
+    assert result.returncode == 0, result.stderr
+    assert "已补填随机值" in result.stdout
+    env_text = (main / ".env").read_text()
+    assert "AGENT_LEGION_S3_ACCESS_KEY=stub-access-key" in env_text
+    assert "AGENT_LEGION_S3_SECRET_KEY=stub-secret-key" in env_text
+    assert stat.S_IMODE((main / ".env").stat().st_mode) == 0o600
+
+
+def test_existing_env_nonempty_credentials_are_never_overwritten(tmp_path: Path) -> None:
+    """补填只填空键：已配的非空凭据绝不覆盖（缺的另一个键照常补）。"""
+    main, bin_dir = _setup(tmp_path)
+    _write_stub(bin_dir / "cargo", _EXIT_OK_STUB)
+    stub_log = tmp_path / "stub.log"
+    (main / ".env").write_text(
+        "AGENT_LEGION_S3_ACCESS_KEY=my-own-key\nAGENT_LEGION_S3_SECRET_KEY=\n"
+    )
+
+    result = _run(main, bin_dir, stub_log)
+
+    assert result.returncode == 0, result.stderr
+    env_text = (main / ".env").read_text()
+    assert "AGENT_LEGION_S3_ACCESS_KEY=my-own-key" in env_text
+    assert "AGENT_LEGION_S3_SECRET_KEY=stub-secret-key" in env_text
+
+
+def test_createdb_failure_surfaces_real_error_and_degrades(tmp_path: Path) -> None:
+    """createdb 失败不吞 stderr：原样输出真实错误再降级提示，且不终止脚本。"""
+    main, bin_dir = _setup(tmp_path)
+    _write_stub(bin_dir / "cargo", _EXIT_OK_STUB)
+    _write_stub(
+        bin_dir / "createdb",
+        '#!/usr/bin/env bash\necho "createdb: error: connection refused" >&2\nexit 1\n',
+    )
+    stub_log = tmp_path / "stub.log"
+
+    result = _run(main, bin_dir, stub_log)
+
+    assert result.returncode == 0, result.stderr
+    assert "createdb agent_legion_dev 未成功" in result.stdout
+    assert "connection refused" in result.stdout

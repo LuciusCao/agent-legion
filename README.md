@@ -64,6 +64,10 @@ make install    # 装依赖、uv sync、建开发库 agent_legion_dev、生成 .
 `AGENT_LEGION_S3_BUCKET` 三样，本地 RustFS 会被自动跳过（详见
 [docs/materials-storage-deployment.md](docs/materials-storage-deployment.md)）。
 
+docker 不可用（未安装或未启动）时 `make dev-up` 会跳过本地 RustFS：
+示例材料播种同步跳过、材料相关 API 降级返回 503，其余功能不受影响；
+docker 就绪后重跑 `make dev-up` 即可补齐。
+
 ### 2. 启动
 
 ```bash

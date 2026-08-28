@@ -51,6 +51,10 @@ start_component() {
 # 配对引号，与 dotenv 语义对齐）。compose 插值只读 deploy/.env，dev 形态
 # 只有根 .env 一份，起 rustfs 容器前靠它显式 export 凭据，避免 rustfs
 # root 凭据与后端读取的 .env 不一致。
+# 注意：这是仓库里第二份 shell dotenv 解析（另一份在
+# scripts/local-s3-decide.sh 的 lookup/_dotenv_value，语义更完整）；本函数
+# 语义刻意更窄——只取第一个匹配键、空值返回 1，仅够读扁平 KEY=VALUE
+# （S3 十六进制凭据/绑定地址）。需要更完整语义时不要各自扩展，应合并实现。
 read_env_value() {
     local key="$1" line value
     value="$(printenv "$key" 2>/dev/null || true)"
@@ -97,14 +101,35 @@ ensure_local_rustfs() {
     fi
     local compose_files=(-f deploy/compose.host.yaml)
     [[ -f deploy/compose.local.yaml ]] && compose_files+=(-f deploy/compose.local.yaml)
-    # 显式指定服务名时 materials-local profile 自动启用；幂等，已运行则 no-op。
-    if ! AGENT_LEGION_S3_ACCESS_KEY="$(read_env_value AGENT_LEGION_S3_ACCESS_KEY)" \
-        AGENT_LEGION_S3_SECRET_KEY="$(read_env_value AGENT_LEGION_S3_SECRET_KEY)" \
-        docker compose "${compose_files[@]}" up -d rustfs >/dev/null 2>&1; then
-        echo "警告: rustfs 启动失败，材料相关功能将不可用（详见 docs/materials-storage-deployment.md）" >&2
-        return 0
+    # 防 recreate（PR #232）：compose.host.yaml 固定 `name: agent-legion`，
+    # 全机（prod + 所有 worktree）共用同一个 rustfs 容器；凭据与本机不同时
+    # up -d 会因 config hash 变化 recreate 容器，持旧凭据的 prod 立刻材料
+    # 503。已在运行就跳过 up -d 直接确认 bucket——容器在但凭据不匹配会在
+    # 建 bucket 处自然告警暴露。
+    if docker compose "${compose_files[@]}" ps --status running --services 2>/dev/null \
+        | grep -qx rustfs; then
+        echo "RustFS 容器已在运行（可能与 prod/其他 worktree 共享），跳过 recreate，直接确认 bucket"
+    else
+        local access_key secret_key
+        access_key="$(read_env_value AGENT_LEGION_S3_ACCESS_KEY || true)"
+        secret_key="$(read_env_value AGENT_LEGION_S3_SECRET_KEY || true)"
+        if [[ -z "$access_key" || -z "$secret_key" ]]; then
+            # 走到这里说明是「完全未配置 S3 → start」的零配置路径（已表达本地
+            # 存储意图的缺凭据场景已被 local-s3-decide.sh rc 3 拦在上方）。
+            echo "提示: 未配 AGENT_LEGION_S3_ACCESS_KEY/SECRET_KEY，rustfs 使用镜像默认凭据（仅 loopback 绑定）" >&2
+        fi
+        echo "启动 RustFS 容器（首次运行需拉取 rustfs 镜像，可能耗时数分钟）…"
+        # 显式指定服务名时 materials-local profile 自动启用；幂等，已运行则 no-op。
+        if ! AGENT_LEGION_S3_ACCESS_KEY="$access_key" \
+            AGENT_LEGION_S3_SECRET_KEY="$secret_key" \
+            docker compose "${compose_files[@]}" up -d rustfs; then
+            echo "警告: rustfs 启动失败，材料相关功能将不可用；" >&2
+            echo "      可手工重跑: docker compose ${compose_files[*]} up -d rustfs" >&2
+            echo "      （详见 docs/materials-storage-deployment.md）" >&2
+            return 0
+        fi
+        echo "RustFS（材料对象存储）已就绪"
     fi
-    echo "RustFS（材料对象存储）已就绪"
     # 等 RustFS S3 API 就绪后确保 bucket+CORS（ensure-s3-bucket.py 与
     # init-worktree.sh 共用）；超时/失败仅告警，就绪后重跑 make dev-up 补齐。
     for _ in $(seq 1 15); do
@@ -204,15 +229,20 @@ cmd_status() {
     status_line "前端控制台    " "$FRONTEND_PORT" "http://127.0.0.1:$FRONTEND_PORT"
     status_line "Worker 控制台 " "$WORKER_PORT" "http://127.0.0.1:$WORKER_PORT"
     # RustFS 由 docker compose 托管（dev-up 按 local-s3-decide.sh 决策带起）；
-    # docker 缺失时跳过该行。
+    # docker 缺失时跳过该行。compose 文件与 up 保持一致（含 compose.local.yaml
+    # 覆盖），URL 尊重端口映射的绑定地址 AGENT_LEGION_S3_BIND（默认 127.0.0.1）。
     if command -v docker >/dev/null 2>&1; then
-        local running
-        running="$(docker compose -f deploy/compose.host.yaml ps --status running --services 2>/dev/null \
+        local compose_files=(-f deploy/compose.host.yaml)
+        [[ -f deploy/compose.local.yaml ]] && compose_files+=(-f deploy/compose.local.yaml)
+        local bind running
+        bind="$(read_env_value AGENT_LEGION_S3_BIND || true)"
+        bind="${bind:-127.0.0.1}"
+        running="$(docker compose "${compose_files[@]}" ps --status running --services 2>/dev/null \
             | grep -x rustfs || true)"
         if [[ -n "$running" ]]; then
-            echo "  [运行中] RustFS        http://127.0.0.1:9000（console :9001）"
+            echo "  [运行中] RustFS        http://${bind}:9000（console :9001）"
         else
-            echo "  [未运行] RustFS        http://127.0.0.1:9000（console :9001）"
+            echo "  [未运行] RustFS        http://${bind}:9000（console :9001）"
         fi
     fi
     echo "  日志：$LOG_DIR/dev-{backend,frontend,worker}.log"

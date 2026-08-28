@@ -5,12 +5,14 @@
 # 复制 .env、按 worktree 名派生专属库/bucket），两者分工不同：本脚本不
 # 依赖任何既有 worktree，也不会派生隔离库。
 #   1. 检测前置工具：uv、Python 3.11+、Node 18+、PostgreSQL（psql/createdb）、
-#      cargo、docker——macOS 缺失项用 brew 补装（先检测后装），其他平台
-#      打印安装指引后 fail-fast
+#      cargo、docker、openssl（随机凭据生成）——macOS 缺失项用 brew 补装
+#      （先检测后装），其他平台打印安装指引后 fail-fast
 #   2. uv sync（Python 依赖）
-#   3. createdb agent_legion（已存在跳过；PG 未运行时先尝试 brew services 拉起）
-#   4. .env 缺失时从 .env.example 复制，并生成随机 S3 凭据写入（本地 RustFS
-#      用；已有 .env 不动）
+#   3. createdb agent_legion_dev（已存在跳过；PG 未运行时先尝试 brew services 拉起。
+#      派生名而非裸名 agent_legion：裸名是共享/prod 库，init_db 的共享库 schema
+#      守卫会拒绝迁移它）
+#   4. .env 缺失时从 .env.example 复制并生成随机 S3 凭据写入（本地 RustFS
+#      用）；.env 已存在但凭据为空时幂等补填（非空值不覆盖）
 #   5. deploy/secrets/vault_master_key 缺失时生成（同 init-worktree.sh）
 #   6. scripts/ensure-velites.sh --dest data/bin（指纹一致自动跳过）
 #   7. frontend/node_modules 缺失时 npm ci
@@ -63,6 +65,7 @@ if ! $IS_MACOS; then
     { have psql && have createdb; } || MISSING+=("PostgreSQL 17: https://www.postgresql.org/download/")
     have cargo || MISSING+=("Rust 工具链: https://rustup.rs/")
     have docker || MISSING+=("Docker: https://docs.docker.com/get-docker/")
+    have openssl || MISSING+=("OpenSSL: 系统包管理器安装（如 apt install openssl）")
     if [[ ${#MISSING[@]} -gt 0 ]]; then
         echo "错误: 缺少前置依赖（非 macOS 平台请按下述指引手工安装后重跑本脚本）:" >&2
         for item in "${MISSING[@]}"; do
@@ -87,6 +90,7 @@ else
         echo "提示: postgresql@17 为 keg-only，已临时加入 PATH；建议写入 shell 配置: export PATH=\"$PG_BIN:\$PATH\""
     fi
     have cargo || brew_install "Rust 工具链（cargo）" "rust"
+    have openssl || brew_install "OpenSSL" "openssl"
     if ! have docker; then
         brew_install "Docker Desktop" "--cask docker"
         echo "提示: Docker Desktop 需手动启动一次完成授权；未启动时 make dev-up 会跳过本地 RustFS（材料 API 降级 503）"
@@ -103,27 +107,72 @@ if have createdb; then
         if $IS_MACOS && have brew && brew list --formula postgresql@17 >/dev/null 2>&1; then
             echo "PostgreSQL 未在运行，尝试 brew services start postgresql@17 …"
             brew services start postgresql@17 >/dev/null 2>&1 || true
+            # brew services 拉起是异步的：有限轮询等待就绪，避免立即 createdb
+            # 撞 "the database system is starting up"。
+            for _ in $(seq 1 15); do
+                pg_isready -q 2>/dev/null && break
+                sleep 1
+            done
         fi
     fi
-    if createdb agent_legion 2>/dev/null; then
-        echo "已创建数据库 agent_legion"
+    # 不吞 stderr：失败（含「库已存在」）原样输出真实错误再给降级提示。
+    if createdb_output="$(createdb agent_legion_dev 2>&1)"; then
+        echo "已创建数据库 agent_legion_dev"
     else
-        echo "数据库 agent_legion 已存在或建库失败（如已存在可忽略；PG 未运行请先启动后重跑本脚本）"
+        echo "createdb agent_legion_dev 未成功：${createdb_output}"
+        echo "（如库已存在可忽略；PG 未运行请先启动后重跑本脚本）"
     fi
 else
     echo "提示: createdb 不可用（可能刚装完 PostgreSQL），新开 shell 后重跑本脚本即可补齐建库" >&2
 fi
 
-# 4. .env（缺失时从 example 复制并生成随机 S3 凭据；已有 .env 不动）
+# 4. .env（缺失时从 example 复制并写入随机 S3 凭据；已存在但凭据为空时幂等
+#    补填——openssl 曾缺失/手工 cp 的空模板/上次写入中断都会留下「.env
+#    存在但凭据为空」，重跑必须能自愈；非空值绝不覆盖）
+
+# 读 .env 里一个键的值（窄解析：仅匹配行首 KEY=，只够本脚本写的扁平键值）
+env_file_value() {
+    local line
+    line="$(grep -E "^$1=" .env 2>/dev/null | head -n 1 || true)"
+    printf '%s' "${line#*=}"
+}
+
+# 写入/替换 .env 里的一个键（键不存在则追加）
+fill_env_key() {
+    local key="$1" value="$2"
+    if grep -qE "^${key}=" .env; then
+        replace_in_place "s|^${key}=.*|${key}=${value}|" .env
+    else
+        echo "${key}=${value}" >> .env
+    fi
+}
+
 if [[ ! -f .env ]]; then
-    cp .env.example .env
+    # 先生成凭据再 cp：凭据生成失败（set -e 终止）不会留下半成品的 .env。
     ACCESS_KEY="$(openssl rand -hex 20)"
     SECRET_KEY="$(openssl rand -hex 40)"
-    replace_in_place "s|^AGENT_LEGION_S3_ACCESS_KEY=.*|AGENT_LEGION_S3_ACCESS_KEY=${ACCESS_KEY}|" .env
-    replace_in_place "s|^AGENT_LEGION_S3_SECRET_KEY=.*|AGENT_LEGION_S3_SECRET_KEY=${SECRET_KEY}|" .env
+    cp .env.example .env
+    fill_env_key AGENT_LEGION_S3_ACCESS_KEY "$ACCESS_KEY"
+    fill_env_key AGENT_LEGION_S3_SECRET_KEY "$SECRET_KEY"
+    chmod 600 .env
     echo "已生成 .env <- .env.example（AGENT_LEGION_S3_ACCESS_KEY/SECRET_KEY 已填随机值，本地 RustFS 用）"
 else
-    echo ".env 已存在，跳过"
+    FILLED=()
+    if [[ -z "$(env_file_value AGENT_LEGION_S3_ACCESS_KEY)" ]]; then
+        fill_env_key AGENT_LEGION_S3_ACCESS_KEY "$(openssl rand -hex 20)"
+        FILLED+=("AGENT_LEGION_S3_ACCESS_KEY")
+    fi
+    if [[ -z "$(env_file_value AGENT_LEGION_S3_SECRET_KEY)" ]]; then
+        fill_env_key AGENT_LEGION_S3_SECRET_KEY "$(openssl rand -hex 40)"
+        FILLED+=("AGENT_LEGION_S3_SECRET_KEY")
+    fi
+    # .env 从此含真实凭据，权限收紧（幂等）。
+    chmod 600 .env
+    if [[ ${#FILLED[@]} -gt 0 ]]; then
+        echo ".env 已存在，但 ${FILLED[*]} 为空——已补填随机值"
+    else
+        echo ".env 已存在，跳过"
+    fi
 fi
 
 # 5. deploy/secrets/vault_master_key（env-only 配置，缺失时 vault 写入会抛错）

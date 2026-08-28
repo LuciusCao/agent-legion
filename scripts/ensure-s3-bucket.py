@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -61,28 +62,37 @@ def main() -> int:
     else:
         print(f"S3 bucket 已存在: {settings.bucket}")
     # 浏览器直传要求 bucket CORS 放行前端 dev server origin 的 PUT/GET，并暴露
-    # ETag（前端 complete 校验用）。端口约定见 Makefile：prod 前端 5173，dev
-    # worktree 默认 5174（DEV_FRONTEND_PORT）。幂等覆写，已存在的 bucket 也补齐。
-    client.put_bucket_cors(
-        Bucket=settings.bucket,
-        CORSConfiguration={
-            "CORSRules": [
-                {
-                    "AllowedOrigins": [
-                        "http://127.0.0.1:5173",
-                        "http://localhost:5173",
-                        "http://127.0.0.1:5174",
-                        "http://localhost:5174",
-                    ],
-                    "AllowedMethods": ["PUT", "GET", "HEAD"],
-                    "AllowedHeaders": ["*"],
-                    "ExposeHeaders": ["ETag"],
-                    "MaxAgeSeconds": 3600,
-                }
-            ]
-        },
-    )
-    print(f"已配置 bucket CORS（前端 dev origin 直传）: {settings.bucket}")
+    # ETag（前端 complete 校验用）。origin 集合 = 常用 5173/5174 + 本机
+    # DEV_FRONTEND_PORT（默认 5174；端口约定见 Makefile：prod 前端 5173，
+    # dev worktree 默认 5174），127.0.0.1/localhost 两种 host 形式。
+    dev_port = os.environ.get("DEV_FRONTEND_PORT", "").strip() or "5174"
+    wanted = {
+        f"http://{host}:{port}"
+        for port in ("5173", "5174", dev_port)
+        for host in ("127.0.0.1", "localhost")
+    }
+    # 与既有规则合并而非全量覆写：bucket 可能还有手工配置的其它 origin
+    # （如 prod 页面地址），读出现有 rules 后只在缺 origin 时追加一条规则。
+    try:
+        rules = client.get_bucket_cors(Bucket=settings.bucket)["CORSRules"]
+    except ClientError:  # NoSuchCORSConfiguration：bucket 还没有 CORS 配置
+        rules = []
+    known = {origin for rule in rules for origin in rule.get("AllowedOrigins", [])}
+    missing = sorted(wanted - known)
+    if missing:
+        rules.append(
+            {
+                "AllowedOrigins": missing,
+                "AllowedMethods": ["PUT", "GET", "HEAD"],
+                "AllowedHeaders": ["*"],
+                "ExposeHeaders": ["ETag"],
+                "MaxAgeSeconds": 3600,
+            }
+        )
+        client.put_bucket_cors(Bucket=settings.bucket, CORSConfiguration={"CORSRules": rules})
+        print(f"已配置 bucket CORS（前端 dev origin 直传）: {settings.bucket}")
+    else:
+        print(f"bucket CORS 已覆盖前端 dev origin: {settings.bucket}")
     return 0
 
 
