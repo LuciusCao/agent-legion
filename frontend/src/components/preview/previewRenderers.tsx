@@ -57,19 +57,23 @@ function useArtifactText(
   }
 }
 
+function TruncationChip({ total }: { total: number }) {
+  return (
+    <Chip
+      label={`已截断（${total.toLocaleString()} 字符）`}
+      size="small"
+      variant="outlined"
+      sx={{ mb: 1 }}
+    />
+  )
+}
+
 function TextBody({ content }: { content: string }) {
   const truncated = content.length > TEXT_PREVIEW_LIMIT
   const shown = truncated ? content.slice(0, TEXT_PREVIEW_LIMIT) : content
   return (
     <div>
-      {truncated && (
-        <Chip
-          label={`已截断（${content.length.toLocaleString()} 字符）`}
-          size="small"
-          variant="outlined"
-          sx={{ mb: 1 }}
-        />
-      )}
+      {truncated && <TruncationChip total={content.length} />}
       <pre className={styles.pre}>{shown}</pre>
     </div>
   )
@@ -101,14 +105,7 @@ export function MarkdownPreview({ jobId, name, detail }: PreviewRendererProps) {
   if (error) return <p className={styles.error}>{error}</p>
   return (
     <div>
-      {truncated && (
-        <Chip
-          label={`已截断（${content.length.toLocaleString()} 字符）`}
-          size="small"
-          variant="outlined"
-          sx={{ mb: 1 }}
-        />
-      )}
+      {truncated && <TruncationChip total={content.length} />}
       <div
         className={styles.markdownBody}
         dangerouslySetInnerHTML={{ __html: html }}
@@ -125,14 +122,7 @@ export function RichTextPreview({ jobId, name, detail }: PreviewRendererProps) {
   if (error) return <p className={styles.error}>{error}</p>
   return (
     <div>
-      {truncated && (
-        <Chip
-          label={`已截断（${content.length.toLocaleString()} 字符）`}
-          size="small"
-          variant="outlined"
-          sx={{ mb: 1 }}
-        />
-      )}
+      {truncated && <TruncationChip total={content.length} />}
       <RichText mode="block">{shown}</RichText>
     </div>
   )
@@ -143,6 +133,17 @@ export function TextPreview({ jobId, name, detail }: PreviewRendererProps) {
   if (loading) return <p className={styles.loading}>加载中...</p>
   if (error) return <p className={styles.error}>{error}</p>
   return <TextBody content={content} />
+}
+
+/** 媒体重试状态：epoch 同时驱动 remount key 与 src cache-bust。 */
+function useMediaRetry() {
+  const [failed, setFailed] = useState(false)
+  const [epoch, setEpoch] = useState(0)
+  const retry = () => {
+    setFailed(false)
+    setEpoch((n) => n + 1)
+  }
+  return { failed, epoch, setFailed, retry }
 }
 
 /** 媒体加载失败（404/格式不支持）的占位 + raw 新窗口兜底。 */
@@ -178,20 +179,8 @@ function MediaError({
 }
 
 export function ImagePreview({ jobId, name }: PreviewRendererProps) {
-  const [failed, setFailed] = useState(false)
-  const [epoch, setEpoch] = useState(0)
-  if (failed) {
-    return (
-      <MediaError
-        jobId={jobId}
-        name={name}
-        onRetry={() => {
-          setFailed(false)
-          setEpoch((n) => n + 1)
-        }}
-      />
-    )
-  }
+  const { failed, epoch, setFailed, retry } = useMediaRetry()
+  if (failed) return <MediaError jobId={jobId} name={name} onRetry={retry} />
   // epoch 进 query：重试时强制重新加载。
   return (
     <img
@@ -206,20 +195,8 @@ export function ImagePreview({ jobId, name }: PreviewRendererProps) {
 }
 
 export function VideoPreview({ jobId, name }: PreviewRendererProps) {
-  const [failed, setFailed] = useState(false)
-  const [epoch, setEpoch] = useState(0)
-  if (failed) {
-    return (
-      <MediaError
-        jobId={jobId}
-        name={name}
-        onRetry={() => {
-          setFailed(false)
-          setEpoch((n) => n + 1)
-        }}
-      />
-    )
-  }
+  const { failed, epoch, setFailed, retry } = useMediaRetry()
+  if (failed) return <MediaError jobId={jobId} name={name} onRetry={retry} />
   return (
     <video
       key={epoch}
@@ -233,20 +210,8 @@ export function VideoPreview({ jobId, name }: PreviewRendererProps) {
 }
 
 export function AudioPreview({ jobId, name }: PreviewRendererProps) {
-  const [failed, setFailed] = useState(false)
-  const [epoch, setEpoch] = useState(0)
-  if (failed) {
-    return (
-      <MediaError
-        jobId={jobId}
-        name={name}
-        onRetry={() => {
-          setFailed(false)
-          setEpoch((n) => n + 1)
-        }}
-      />
-    )
-  }
+  const { failed, epoch, setFailed, retry } = useMediaRetry()
+  if (failed) return <MediaError jobId={jobId} name={name} onRetry={retry} />
   return (
     <audio
       key={epoch}

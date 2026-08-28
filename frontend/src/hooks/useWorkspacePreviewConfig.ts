@@ -1,13 +1,11 @@
 /**
  * workspace 级产物预览勾选配置（issue #11 第 3 层）。
- *
- * 读：共享 extraQueryKeys.workspaceSettings 缓存（设置页/其他消费方同源），
- * previewHidden 从 settings payload 读取。
- * 写：乐观 setQueryData + PATCH settings/preview，失败回滚并 toast。
- * 勾选语义 = !hidden.includes(name)：默认空列表 = 全部显示，
- * 工作流升级产生的新产物自动可见。
+ * 读共享 workspaceSettings 缓存；写 = 乐观 setQueryData + PATCH
+ * settings/preview（失败回滚 + toast）。勾选语义 = !hidden.includes(name)：
+ * 默认空列表 = 全部显示，工作流升级产生的新产物自动可见。
  */
 import { useCallback, useMemo } from 'react'
+import type { JobDetail } from '../types/jobTypes'
 import { useQueryClient } from '@tanstack/react-query'
 import { updateWorkspacePreviewHidden } from '../api/workspacePreviewApi'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
@@ -55,14 +53,19 @@ export function useWorkspacePreviewConfig(
             snapshotBefore
           )
         }
-        showToast(
-          `预览配置保存失败：${err instanceof Error ? err.message : String(err)}`,
-          'error'
-        )
+        const reason = err instanceof Error ? err.message : String(err)
+        showToast(`预览配置保存失败：${reason}`, 'error')
       }
     },
     [workspaceId, queryClient, showToast]
   )
 
-  return { previewHidden, toggleArtifact }
+  /** 过滤出可见产物（hidden 语义归口本 hook）。 */
+  const visibleArtifacts = useCallback(
+    (artifacts: JobDetail['artifacts']) =>
+      artifacts.filter((name) => !previewHidden.includes(name)),
+    [previewHidden]
+  )
+
+  return { previewHidden, toggleArtifact, visibleArtifacts }
 }

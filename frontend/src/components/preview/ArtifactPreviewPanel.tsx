@@ -1,10 +1,7 @@
 /**
- * 通用产物预览面板：任何 job 的 artifacts 列表都能渲染（issue #11 的
- * 「什么都能看」层）。结构化业务面板（question 等）在其上方渲染，
- * 本面板兜底展示全部产物；面板头部的勾选菜单写 workspace 级
- * previewHidden 配置（取消勾选对该 workspace 的所有 job 生效）。
+ * 通用产物预览面板（issue #11「什么都能看」层）：结构化业务面板在上方，
+ * 本面板兜底全部产物；头部勾选菜单写 workspace 级 previewHidden。
  */
-import { useMemo } from 'react'
 import { ArtifactPreviewCard } from './ArtifactPreviewCard'
 import { ArtifactPreviewConfigMenu } from './ArtifactPreviewConfigMenu'
 import { useWorkspacePreviewConfig } from '../../hooks/useWorkspacePreviewConfig'
@@ -23,13 +20,9 @@ export function ArtifactPreviewPanel({
   detail,
   workspaceId,
 }: ArtifactPreviewPanelProps) {
-  const { previewHidden } = useWorkspacePreviewConfig(workspaceId)
-  const artifacts = useMemo(() => detail?.artifacts ?? [], [detail?.artifacts])
-  const hiddenSet = useMemo(() => new Set(previewHidden), [previewHidden])
-  const visible = useMemo(
-    () => artifacts.filter((name) => !hiddenSet.has(name)),
-    [artifacts, hiddenSet]
-  )
+  const { visibleArtifacts } = useWorkspacePreviewConfig(workspaceId)
+  const artifacts = detail?.artifacts ?? []
+  const visible = visibleArtifacts(artifacts)
 
   return (
     <div className={styles.panel} data-testid="artifact-preview-panel">

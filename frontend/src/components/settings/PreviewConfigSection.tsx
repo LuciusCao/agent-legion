@@ -7,7 +7,8 @@
  * （PUT /configuration）保存。
  */
 import { Checkbox } from '@mui/material'
-import styles from '../../pages/SettingsPage.module.css'
+import pageStyles from '../../pages/SettingsPage.module.css'
+import styles from './PreviewConfigSection.module.css'
 import type { WorkflowDefinitionRecord, WorkspaceSettings } from '../../types'
 
 interface Props {
@@ -41,45 +42,34 @@ export function PreviewConfigSection({
     .filter((group) => group.outputs.length > 0)
 
   return (
-    <section id="preview-config" className={styles.section}>
-      <h2 className={styles.sectionTitle}>产物预览</h2>
-      <hr className={styles.sectionDivider} />
-      <span style={{ fontSize: 12, color: '#616161' }}>
+    <section id="preview-config" className={pageStyles.section}>
+      <h2 className={pageStyles.sectionTitle}>产物预览</h2>
+      <hr className={pageStyles.sectionDivider} />
+      <span className={styles.hint}>
         勾选在任务详情左栏显示的产物文件（对该工作区的所有任务生效）；不勾选的产物仍可在
         「产物文件」弹窗中查看。工作流升级产生的新产物默认显示。
       </span>
       {nodeGroups.length === 0 ? (
-        <div style={{ marginTop: 12, fontSize: 13, color: '#43474e' }}>
-          当前工作流未声明产物文件。
-        </div>
+        <div className={styles.empty}>当前工作流未声明产物文件。</div>
       ) : (
-        <div style={{ marginTop: 12 }}>
+        <div className={styles.groups}>
           {nodeGroups.map((group) => (
-            <div key={group.key} style={{ marginBottom: 12 }}>
-              <span style={{ fontSize: 13, color: '#43474e' }}>
-                {group.label}
-              </span>
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 2,
-                  marginTop: 4,
-                }}
-              >
+            <div key={group.key} className={styles.group}>
+              <span className={styles.groupLabel}>{group.label}</span>
+              <div className={styles.outputs}>
                 {group.outputs.map((name) => {
                   const isChecked = !hiddenSet.has(name)
                   return (
                     <div
                       key={`${group.key}:${name}`}
-                      style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+                      className={styles.outputRow}
                     >
                       <Checkbox
                         checked={isChecked}
                         onChange={() => toggle(name, !isChecked)}
                         size="small"
                       />
-                      <span style={{ fontSize: 14 }}>{name}</span>
+                      <span className={styles.outputName}>{name}</span>
                     </div>
                   )
                 })}

@@ -19,6 +19,8 @@ vi.mock('../../hooks/useWorkspacePreviewConfig', () => ({
   useWorkspacePreviewConfig: () => ({
     previewHidden: mockPreviewHidden.value,
     toggleArtifact: mockToggleArtifact,
+    visibleArtifacts: (artifacts: string[]) =>
+      artifacts.filter((name) => !mockPreviewHidden.value.includes(name)),
   }),
 }))
 
