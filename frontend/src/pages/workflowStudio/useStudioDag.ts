@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import type { WorkflowDefinitionRecord } from '../../types'
-import type { AgentDefinition } from '../../types/executorTypes'
+import type { AgentDefinition } from '../../types/agentCatalogTypes'
 import { buildDagEdges, buildDagNodes } from './workflowStudioDag'
 
 // DAG 节点路由摘要的数据组装：agents 来自 workspace 级 catalog（P-0.5：无

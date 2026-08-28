@@ -11,7 +11,7 @@ def create_skill_catalog_router(settings: Settings) -> APIRouter:
     router = APIRouter()
     skills = SkillCatalogService(settings.database_url)
 
-    @router.get("/executors/skills/{skill_key:path}", response_model=SkillDetailResponse)
+    @router.get("/agent-catalog/skills/{skill_key:path}", response_model=SkillDetailResponse)
     def get_skill(skill_key: str, ref: str | None = None) -> SkillDetailResponse:
         require_workflows_enabled(settings)
         try:

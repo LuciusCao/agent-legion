@@ -1,5 +1,5 @@
 import type { WorkflowDefinitionRecord } from '../../types'
-import type { AgentDefinition } from '../../types/executorTypes'
+import type { AgentDefinition } from '../../types/agentCatalogTypes'
 import type { ChangeSummaryViewModel } from './workflowStudioChanges'
 import { WorkflowNodeDetailView } from './WorkflowNodeDetailView'
 import pageStyles from '../WorkflowStudioPageResponsive.module.css'

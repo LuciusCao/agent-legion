@@ -179,6 +179,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/agent-catalog': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Agent Catalog */
+    get: operations['get_agent_catalog_api_agent_catalog_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-catalog/skills/{skill_key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Skill */
+    get: operations['get_skill_api_agent_catalog_skills__skill_key__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/agent-definitions': {
     parameters: {
       query?: never
@@ -660,40 +694,6 @@ export interface paths {
     }
     /** Dashboard Events */
     get: operations['dashboard_events_api_dashboard_events_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/executors': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Executors */
-    get: operations['get_executors_api_executors_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/executors/skills/{skill_key}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Skill */
-    get: operations['get_skill_api_executors_skills__skill_key__get']
     put?: never
     post?: never
     delete?: never
@@ -1354,15 +1354,15 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/workspaces/{workspace_id}/executor-configuration': {
+  '/api/workspaces/{workspace_id}/execution-configuration': {
     parameters: {
       query?: never
       header?: never
       path?: never
       cookie?: never
     }
-    /** Get Workspace Executor Configuration */
-    get: operations['get_workspace_executor_configuration_api_workspaces__workspace_id__executor_configuration_get']
+    /** Get Workspace Execution Configuration */
+    get: operations['get_workspace_execution_configuration_api_workspaces__workspace_id__execution_configuration_get']
     put?: never
     post?: never
     delete?: never
@@ -2473,6 +2473,18 @@ export interface components {
       /** Archived */
       archived: number
     }
+    /**
+     * AgentCatalogResponse
+     * @description Agent catalog for Studio (issue #198: agents-only semantics).
+     *
+     *     The former ``executors`` half retired with the executor concept
+     *     (schema v47, EXEC-CODE-POOL-001); the endpoint was renamed from
+     *     ``/api/executors`` to match the agents-only meaning.
+     */
+    AgentCatalogResponse: {
+      /** Agents */
+      agents?: components['schemas']['AgentDefinitionResponse'][]
+    }
     /** AgentClaimResponse */
     AgentClaimResponse: {
       /** Agent Id */
@@ -3040,18 +3052,6 @@ export interface components {
       paused: boolean
       /** Target Node Key */
       target_node_key?: string | null
-    }
-    /**
-     * ExecutorCatalogResponse
-     * @description Execution catalog for Studio (P-0.5 step 2: Agents only).
-     *
-     *     The ``executors`` half retired with the executor concept (schema v47);
-     *     the response type keeps the pre-retirement name until the step-3
-     *     contract cleanup.
-     */
-    ExecutorCatalogResponse: {
-      /** Agents */
-      agents?: components['schemas']['AgentDefinitionResponse'][]
     }
     /** FailedNodeRunItem */
     FailedNodeRunItem: {
@@ -5574,7 +5574,7 @@ export interface components {
     WorkspaceConfigurationResponse: {
       /** Agent Capacity */
       agent_capacity?: number | null
-      executor_configuration: components['schemas']['WorkspaceExecutorConfigurationResponse']
+      execution_configuration: components['schemas']['WorkspaceExecutionConfigurationResponse']
       settings: components['schemas']['WorkspaceSettingsPayload']
       workspace: components['schemas']['WorkspaceRecord']
     }
@@ -5623,14 +5623,14 @@ export interface components {
       }
     }
     /**
-     * WorkspaceExecutorConfigurationResponse
+     * WorkspaceExecutionConfigurationResponse
      * @description Workspace execution configuration (P-0.5: node limits + Agent capacity).
      *
      *     Allocations and bindings retired with the executor concept (schema v47);
-     *     the response type keeps the pre-retirement route/type names until the
-     *     step-3 contract cleanup.
+     *     issue #198 renamed the type from the pre-retirement
+     *     ``WorkspaceExecutorConfigurationResponse`` wording.
      */
-    WorkspaceExecutorConfigurationResponse: {
+    WorkspaceExecutionConfigurationResponse: {
       /** Agent Capacity */
       agent_capacity?: number | null
       /** Migration Warnings */
@@ -6289,6 +6289,70 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['TokenUsagePricingConfigResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_agent_catalog_api_agent_catalog_get: {
+    parameters: {
+      query: {
+        workspace_id: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentCatalogResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_skill_api_agent_catalog_skills__skill_key__get: {
+    parameters: {
+      query?: {
+        ref?: string | null
+      }
+      header?: never
+      path: {
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillDetailResponse']
         }
       }
       /** @description Validation Error */
@@ -7207,70 +7271,6 @@ export interface operations {
         }
         content: {
           'text/event-stream': unknown
-        }
-      }
-    }
-  }
-  get_executors_api_executors_get: {
-    parameters: {
-      query: {
-        workspace_id: string
-      }
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorCatalogResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  get_skill_api_executors_skills__skill_key__get: {
-    parameters: {
-      query?: {
-        ref?: string | null
-      }
-      header?: never
-      path: {
-        skill_key: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['SkillDetailResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }
@@ -8648,7 +8648,7 @@ export interface operations {
       }
     }
   }
-  get_workspace_executor_configuration_api_workspaces__workspace_id__executor_configuration_get: {
+  get_workspace_execution_configuration_api_workspaces__workspace_id__execution_configuration_get: {
     parameters: {
       query?: never
       header?: never
@@ -8665,7 +8665,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['WorkspaceExecutorConfigurationResponse']
+          'application/json': components['schemas']['WorkspaceExecutionConfigurationResponse']
         }
       }
       /** @description Validation Error */

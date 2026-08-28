@@ -18,7 +18,7 @@ _LEGACY_VIDEO_ROUTE_MODULES = tuple(
 )
 
 _WORKSPACE_MODULE_PREFIXES = tuple(
-    """server/app/routes/jobs.py server/app/routes/job_artifacts.py server/app/routes/job_batches.py server/app/routes/workspace_ server/app/services/job_ server/app/services/workspace_ server/app/services/executor_catalog.py server/app/services/workflow_definitions.py""".split()
+    """server/app/routes/jobs.py server/app/routes/job_artifacts.py server/app/routes/job_batches.py server/app/routes/workspace_ server/app/services/job_ server/app/services/workspace_ server/app/services/agent_catalog_projection.py server/app/services/workflow_definitions.py""".split()
 )
 
 _PIPELINE_PHASES_MODULE = "server.app.pipeline.phases"

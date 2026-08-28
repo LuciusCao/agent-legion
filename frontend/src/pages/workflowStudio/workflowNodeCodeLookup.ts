@@ -1,6 +1,6 @@
 import { api } from '../../api'
 import type { components } from '../../generated/api'
-import type { AgentDefinition } from '../../types/executorTypes'
+import type { AgentDefinition } from '../../types/agentCatalogTypes'
 
 type NodeCodeTemplateResponse =
   components['schemas']['WorkflowNodeCodeTemplateResponse']

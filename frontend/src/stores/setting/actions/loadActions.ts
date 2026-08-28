@@ -21,8 +21,8 @@ export function loadActions(set: SettingStoreSet) {
           originalWorkspaceDescription: snapshot.workspaceDescription,
           settings: snapshot.settings,
           originalSettings: snapshot.settings,
-          executorConfiguration: snapshot.executorConfiguration,
-          originalExecutorConfiguration: snapshot.executorConfiguration,
+          executionConfiguration: snapshot.executionConfiguration,
+          originalExecutionConfiguration: snapshot.executionConfiguration,
         }
         return { ...nextState, isDirty: computeDirty(nextState) }
       })

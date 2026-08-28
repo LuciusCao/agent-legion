@@ -33,7 +33,7 @@ export function WorkflowNodeAgentEditor({
     })
     // Agent 发布/归档/回滚改变 capability 路由，Studio 目录同会话失效重取。
     void queryClient.invalidateQueries({
-      queryKey: extraQueryKeys.studioExecutorCatalog(workspaceId ?? ''),
+      queryKey: extraQueryKeys.studioAgentCatalog(workspaceId ?? ''),
     })
   }
 

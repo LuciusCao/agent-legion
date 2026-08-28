@@ -29,9 +29,9 @@ from .token_usage_pricing import create_token_usage_pricing_router
 from .worker import create_worker_router
 from .workflow_node_codes import create_workflow_node_codes_router
 from .workflow_revisions import create_workflow_revisions_router
+from .workspace_agent_catalog import create_workspace_agent_catalog_router
 from .workspace_agent_routes import create_workspace_agent_routes_router
 from .workspace_configuration import create_workspace_configuration_router
-from .workspace_executors import create_workspace_executors_router
 from .workspace_settings import create_workspace_settings_router
 from .workspaces import create_workspaces_router
 
@@ -114,10 +114,10 @@ def create_router(deps: RouterDeps) -> APIRouter:
     studio_secured(create_agent_definitions_router(deps.job_db, deps.settings))
     secured(create_skills_router(deps.settings))
     secured(create_workspace_configuration_router(deps.workspace_configuration, deps.settings))
-    executors_router = create_workspace_executors_router(
-        deps.executor_catalog, deps.workspace_executor_configuration, deps.settings
+    agent_catalog_router = create_workspace_agent_catalog_router(
+        deps.agent_catalog, deps.workspace_execution_configuration, deps.settings
     )
-    secured(executors_router)
+    secured(agent_catalog_router)
     secured(create_workspace_agent_routes_router(deps.job_db, deps.settings))
     secured(create_studio_agent_tools_router(deps.job_db, deps.settings))
     secured(create_studio_agent_context_router(deps.job_db))
@@ -133,7 +133,7 @@ def create_router(deps: RouterDeps) -> APIRouter:
         job_group,
         deps.job_db,
         deps.settings,
-        deps.workspace_executor_configuration,
+        deps.workspace_execution_configuration,
         deps.job_event_manager,
         deps.job_event_buffer,
         artifact_store=deps.artifact_store,

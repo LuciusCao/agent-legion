@@ -1,4 +1,4 @@
-def test_list_executors_endpoint(client):
+def test_list_agent_catalog_endpoint(client):
     # Agent 半区是 workspace 作用域（schema v46）：创建绑定 demo workflow 的
     # workspace（绑定时自动 seed demo agent 模板）后按其 scope 读取目录。
     created = client.post(
@@ -11,7 +11,7 @@ def test_list_executors_endpoint(client):
     from tests.helpers import seed_workspace_agent_definitions
 
     seed_workspace_agent_definitions(workspace_id)
-    response = client.get("/api/executors", params={"workspace_id": workspace_id})
+    response = client.get("/api/agent-catalog", params={"workspace_id": workspace_id})
     assert response.status_code == 200
     data = response.json()
     agent = next(item for item in data["agents"] if item["id"] == "example-review-questions-v1")
@@ -64,7 +64,7 @@ def test_get_configured_skill_detail(client_factory, tmp_path, monkeypatch):
     # the app must be created after the fake HOME is in place.
     with client_factory(fresh=True) as client:
         response = client.get(
-            "/api/executors/skills/education-video-problems-generation/generate-questions"
+            "/api/agent-catalog/skills/education-video-problems-generation/generate-questions"
         )
 
     assert response.status_code == 200
@@ -75,7 +75,7 @@ def test_get_configured_skill_detail(client_factory, tmp_path, monkeypatch):
     assert any(item["path"] == "SKILL.md" for item in data["files"])
 
 
-def test_get_workspace_executor_configuration_reports_no_warnings_after_v005(client):
+def test_get_workspace_execution_configuration_reports_no_warnings_after_v005(client):
     workspace_response = client.post(
         "/api/workspaces",
         json={"id": "education_video_problems_generation", "name": "Legacy"},
@@ -86,7 +86,7 @@ def test_get_workspace_executor_configuration_reports_no_warnings_after_v005(cli
     # The legacy workspace_agent_assignments table is removed by V005, so no
     # migration warnings are produced. P-0.5 (schema v47): allocations and
     # bindings are gone; only node limits remain.
-    response = client.get(f"/api/workspaces/{workspace_id}/executor-configuration")
+    response = client.get(f"/api/workspaces/{workspace_id}/execution-configuration")
     assert response.status_code == 200
     data = response.json()
     assert data["node_limits"] == []

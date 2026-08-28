@@ -18,25 +18,25 @@ def _budgets(tmp_path):
 
 def test_rejects_executor_response_field_typed_as_dict_any(tmp_path):
     write(
-        tmp_path / "server/app/routes/executor_contracts.py",
+        tmp_path / "server/app/routes/workspace_execution_contracts.py",
         "from typing import Any\n"
         "from pydantic import BaseModel\n"
-        "class WorkspaceExecutorConfigurationResponse(BaseModel):\n"
+        "class WorkspaceExecutionConfigurationResponse(BaseModel):\n"
         "    allocations: dict[str, Any]\n",
     )
 
     errors = check_repository(tmp_path)
 
-    assert any("executor response field" in error and "allocations" in error for error in errors)
+    assert any("catalog response field" in error and "allocations" in error for error in errors)
 
 
 def test_accepts_executor_response_field_typed_as_model_list(tmp_path):
     write(
-        tmp_path / "server/app/routes/executor_contracts.py",
+        tmp_path / "server/app/routes/workspace_execution_contracts.py",
         "from pydantic import BaseModel\n"
         "class ExecutorAllocationResponse(BaseModel):\n"
         "    executor_id: str\n"
-        "class WorkspaceExecutorConfigurationResponse(BaseModel):\n"
+        "class WorkspaceExecutionConfigurationResponse(BaseModel):\n"
         "    allocations: list[ExecutorAllocationResponse]\n",
     )
 
@@ -95,9 +95,9 @@ def test_accepts_frontend_executor_types_derived_from_generated_api(tmp_path):
         "type ApiSchemas = components['schemas']\n"
         "export type ExecutorDefinition = ApiSchemas['ExecutorDefinitionResponse']\n"
         "export type ExecutorAllocation = ApiSchemas['ExecutorAllocationResponse']\n"
-        "export type WorkspaceExecutorConfiguration = "
-        "ApiSchemas['WorkspaceExecutorConfigurationResponse']\n"
-        "export type ExecutorCatalogResponse = ApiSchemas['ExecutorCatalogResponse']\n",
+        "export type WorkspaceExecutionConfiguration = "
+        "ApiSchemas['WorkspaceExecutionConfigurationResponse']\n"
+        "export type AgentCatalogResponse = ApiSchemas['AgentCatalogResponse']\n",
     )
 
     assert check_repository(tmp_path) == []

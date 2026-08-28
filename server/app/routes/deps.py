@@ -17,8 +17,8 @@ from server.app.agent_control import AgentCompletionHandler, AgentWorkerRegistry
 from server.app.events import JobEventManager
 from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
+from server.app.services.agent_catalog_projection import AgentCatalogService
 from server.app.services.artifact_store import ArtifactStore
-from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.job_packages import JobPackageService
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
@@ -27,8 +27,8 @@ from server.app.services.quality_replays import QualityReplayService
 from server.app.services.quality_sampling import QualitySamplingService
 from server.app.services.quality_stats import QualityStatsService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
-from server.app.services.workspace_executor_configuration import (
-    WorkspaceExecutorConfigurationService,
+from server.app.services.workspace_execution_configuration import (
+    WorkspaceExecutionConfigurationService,
 )
 from server.app.settings import Settings
 from server.app.studio_chat.service import StudioChatService
@@ -42,8 +42,8 @@ class RouterDeps:
     job_db: JobQueries
     settings: Settings
     agent_manager: AgentStatusManager
-    executor_catalog: ExecutorCatalogService
-    workspace_executor_configuration: WorkspaceExecutorConfigurationService
+    agent_catalog: AgentCatalogService
+    workspace_execution_configuration: WorkspaceExecutionConfigurationService
     workspace_configuration: WorkspaceConfigurationService
     job_packages: JobPackageService
     # Optional integration seams: genuinely absent infrastructure (reduced

@@ -24,10 +24,10 @@ from server.app.routes import RouterDeps, create_router
 from server.app.routes.auth import create_auth_router
 from server.app.routes.quality_deps import build_quality_loop
 from server.app.scheduler_wakeup import unregister_wakeup
+from server.app.services.agent_catalog_projection import AgentCatalogService
 from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.demo_node_migration import migrate_demo_node_codes_to_workspaces
-from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.job_artifact_maintenance import JobArtifactMaintenanceThread
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
@@ -38,8 +38,8 @@ from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
-from server.app.services.workspace_executor_configuration import (
-    WorkspaceExecutorConfigurationService,
+from server.app.services.workspace_execution_configuration import (
+    WorkspaceExecutionConfigurationService,
 )
 from server.app.settings import load_settings, validate_settings
 from server.app.skills.seed import seed_skill_sources
@@ -218,8 +218,8 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.materials_service = MaterialsService(job_db.path, object_storage)
     app.state.job_artifact_objects = job_artifact_objects
     app.state.workspace_event_aggregator = workspace_event_aggregator
-    executor_catalog = ExecutorCatalogService(settings)
-    workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db, settings)
+    agent_catalog = AgentCatalogService(settings)
+    workspace_execution_configuration = WorkspaceExecutionConfigurationService(job_db, settings)
     workspace_configuration = WorkspaceConfigurationService(job_db, settings)
     job_packages = JobPackageService(job_db, settings, object_store=job_artifact_objects)
     app.include_router(create_auth_router(app.state.auth_service), prefix="/api")
@@ -231,8 +231,8 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 settings=settings,
                 agent_manager=agent_manager,
                 workspace_worker_control=workspace_worker_control,
-                executor_catalog=executor_catalog,
-                workspace_executor_configuration=workspace_executor_configuration,
+                agent_catalog=agent_catalog,
+                workspace_execution_configuration=workspace_execution_configuration,
                 workspace_configuration=workspace_configuration,
                 job_packages=job_packages,
                 job_event_manager=job_event_manager,

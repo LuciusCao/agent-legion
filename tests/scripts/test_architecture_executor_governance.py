@@ -28,8 +28,6 @@ WHITELIST: set[str] = {
     str(ROOT / "server" / "app" / "db" / "migrations"),
     # Legacy migration module is intentionally transitional.
     str(ROOT / "server" / "app" / "executors" / "legacy_migration.py"),
-    # Bootstrap state helper is transitional until all databases are past V005.
-    str(ROOT / "server" / "app" / "jobs" / "executor_configuration.py"),
     # Pipeline definition loader intentionally rejects removed 'runner'/'agent' fields.
     str(ROOT / "server" / "app" / "workflows" / "definition.py"),
     str(ROOT / "server" / "app" / "workflows" / "loader.py"),

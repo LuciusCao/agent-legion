@@ -1,14 +1,14 @@
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api'
-import { getWorkspaceExecutorConfiguration } from '../api/executorApi'
+import { getWorkspaceExecutionConfiguration } from '../api/agentCatalogApi'
 import type { components } from '../generated/api'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { useSettingStore } from '../stores/settingStore'
 import { useWorkflowDefinitionQuery } from './useWorkflowDefinitionQuery'
 import {
   defaultSettings,
-  normalizeExecutorConfiguration,
+  normalizeExecutionConfiguration,
   type HydrateSettingsInput,
 } from '../stores/setting/state'
 import type { WorkspaceResponse, WorkspaceSettings } from '../types'
@@ -30,7 +30,7 @@ export interface WorkspaceSettingsSnapshot extends HydrateSettingsInput {
 /**
  * 四个并行请求组装设置快照（原 settingStore.fetchSettings 的语义）：
  * 404 整体静默（返回 null，调用方不动 store）；agentRoutes 单独降级为空；
- * settings 合并 defaultSettings；executorConfiguration 走 normalize。
+ * settings 合并 defaultSettings；executionConfiguration 走 normalize。
  */
 async function fetchWorkspaceSettingsSnapshot(
   workspaceId: string
@@ -39,7 +39,7 @@ async function fetchWorkspaceSettingsSnapshot(
     const [
       workspaceResult,
       settingsResult,
-      executorConfigurationResult,
+      executionConfigurationResult,
       agentRoutesResult,
     ] = await Promise.all([
       api<WorkspaceResponse>(
@@ -48,7 +48,7 @@ async function fetchWorkspaceSettingsSnapshot(
       api<
         Partial<WorkspaceSettings> | { settings: Partial<WorkspaceSettings> }
       >(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`),
-      getWorkspaceExecutorConfiguration(workspaceId),
+      getWorkspaceExecutionConfiguration(workspaceId),
       api<WorkspaceAgentRoutesResponse>(
         `/api/workspaces/${encodeURIComponent(workspaceId)}/agent-routes`
       ).catch(() => null),
@@ -64,8 +64,8 @@ async function fetchWorkspaceSettingsSnapshot(
       workspaceName: workspaceData?.name || '',
       workspaceDescription: workspaceData?.description || '',
       settings: { ...defaultSettings, ...data },
-      executorConfiguration: normalizeExecutorConfiguration(
-        executorConfigurationResult
+      executionConfiguration: normalizeExecutionConfiguration(
+        executionConfigurationResult
       ),
       agentRoutes: agentRoutesResult?.routes ?? [],
     }

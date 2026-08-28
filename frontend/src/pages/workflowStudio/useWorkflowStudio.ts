@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useExecutorCatalog } from './useExecutorCatalog'
+import { useAgentCatalog } from './useAgentCatalog'
 import { useStudioDag } from './useStudioDag'
 import {
   buildStudioRevisionActions,
@@ -21,7 +21,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     reload,
     fetchRevisionDetail,
   } = useWorkflowStudioData(workspaceId)
-  const catalog = useExecutorCatalog(workspaceId)
+  const catalog = useAgentCatalog(workspaceId)
   const draft = useWorkflowStudioDraftStore(
     workspaceId,
     originalYaml,

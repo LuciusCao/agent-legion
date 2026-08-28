@@ -1,23 +1,27 @@
-"""Executor contract ratchets for Workspace Executor governance.
+"""Agent catalog contract ratchets for workspace catalog governance.
 
-These checks keep executor response models typed, frontend executor types derived
-from generated OpenAPI types, and workspace saves inside the aggregate transaction.
+These checks keep catalog/execution-configuration response models typed,
+frontend catalog types derived from generated OpenAPI types, and workspace
+saves inside the aggregate transaction. (Renamed from ``executor_contracts``
+with issue #198; the guarded fields keep their retired executor-era names so
+reintroduction of those contract fields still trips the ratchet.)
 """
 
 import ast
 import re
 from pathlib import Path
 
-EXECUTOR_CONTRACT_FILES = (
-    "server/app/routes/executor_contracts.py",
+CATALOG_CONTRACT_FILES = (
+    "server/app/routes/workspace_execution_contracts.py",
     "server/app/routes/job_contracts.py",
 )
-EXECUTOR_FIELD_NAMES = frozenset(
+CATALOG_FIELD_NAMES = frozenset(
     {
         "executor_allocations",
         "node_bindings",
         "node_limits",
         "executor_configuration",
+        "execution_configuration",
         "allocations",
         "bindings",
         "migration_warnings",
@@ -50,9 +54,9 @@ def _annotation_has_dict_of_any(node: ast.AST) -> bool:
     return has_dict and has_any
 
 
-def check_executor_contract_models(root: Path) -> list[str]:
+def check_agent_catalog_contract_models(root: Path) -> list[str]:
     errors: list[str] = []
-    for relative_path in EXECUTOR_CONTRACT_FILES:
+    for relative_path in CATALOG_CONTRACT_FILES:
         path = root / relative_path
         if not path.exists():
             continue
@@ -70,12 +74,12 @@ def check_executor_contract_models(root: Path) -> list[str]:
                 if not isinstance(item.target, ast.Name):
                     continue
                 field_name = item.target.id
-                if field_name not in EXECUTOR_FIELD_NAMES:
+                if field_name not in CATALOG_FIELD_NAMES:
                     continue
                 if item.annotation is not None and _annotation_has_dict_of_any(item.annotation):
                     errors.append(
                         f"{relative_path}:{item.lineno}: "
-                        f"executor response field {field_name} must not be typed as dict[str, Any]"
+                        f"catalog response field {field_name} must not be typed as dict[str, Any]"
                     )
     return errors
 
@@ -118,21 +122,21 @@ def check_workspace_save_outside_transaction(root: Path) -> list[str]:
     return []
 
 
-GENERATED_EXECUTOR_TYPES = (
+GENERATED_CATALOG_TYPES = (
     "ExecutorDefinition",
     "ExecutorAllocation",
-    "WorkspaceExecutorConfiguration",
-    "ExecutorCatalogResponse",
+    "WorkspaceExecutionConfiguration",
+    "AgentCatalogResponse",
 )
 
 
-def check_frontend_executor_types(root: Path) -> list[str]:
+def check_frontend_agent_catalog_types(root: Path) -> list[str]:
     path = root / "frontend/src/types.ts"
     if not path.exists():
         return []
     source = path.read_text(encoding="utf-8")
     errors: list[str] = []
-    for type_name in GENERATED_EXECUTOR_TYPES:
+    for type_name in GENERATED_CATALOG_TYPES:
         declaration = re.search(
             rf"^\s*(?:export\s+)?type\s+{re.escape(type_name)}\b\s*=\s*",
             source,
