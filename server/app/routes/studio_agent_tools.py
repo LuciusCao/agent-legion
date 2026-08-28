@@ -174,6 +174,6 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
             raise_job_http_error(exc)
         return WorkflowNodeCodeResponse(**state)
 
-    router.include_router(create_studio_agent_skill_tools_router(settings))
+    router.include_router(create_studio_agent_skill_tools_router(job_db, settings))
     router.include_router(workspace_scoped)
     return router

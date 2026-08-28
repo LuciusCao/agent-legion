@@ -102,7 +102,7 @@ def build_workspace_event_aggregator(
     from server.app.services.job_patch_queries import JobPatchQueryService
 
     query_service = JobPatchQueryService(job_db, settings)
-    buffer = JobEventBuffer(db_path=job_db.path)
+    buffer = JobEventBuffer(db_path=job_db)
     aggregator = WorkspaceJobEventAggregator(
         buffer,
         query_service,

@@ -19,7 +19,7 @@ import time
 from collections.abc import Callable, Mapping
 
 from server.app.agent_broker.empty_diagnostics import log_blocked_queue
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ class EmptyClaimTrigger:
         self._last_fired = 0.0
 
     def note_empty_claim(
-        self, dsn: DatabaseDsn, *, skip_reasons: Mapping[str, int] | None = None
+        self, dsn: ConnectSource, *, skip_reasons: Mapping[str, int] | None = None
     ) -> None:
         """Act on an empty claim: restock on true demand, warn on blockage.
 

@@ -48,7 +48,7 @@ def validate_workflow_for_publish(
     """
     errors: list[str] = []
     capability_counts: dict[str, int] = {}
-    for agent_definition in published_agent_definitions(job_db.path, workspace_id).values():
+    for agent_definition in published_agent_definitions(job_db, workspace_id).values():
         capability_counts[agent_definition.capability] = (
             capability_counts.get(agent_definition.capability, 0) + 1
         )
@@ -61,7 +61,7 @@ def validate_workflow_for_publish(
                 )
             continue
         node_code = resolve_dispatch_node_code(
-            job_db.path,
+            job_db,
             custom_nodes_enabled,
             workspace_id,
             definition.key,

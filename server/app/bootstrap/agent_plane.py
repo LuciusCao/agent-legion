@@ -48,7 +48,7 @@ def build_agent_plane(
 ) -> AgentPlane:
     bundle_dir = settings.data_dir / "agent_bundles"
     broker = AgentExecutionBroker(
-        job_db.path,
+        job_db,
         lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
         bundle_dir=bundle_dir,
         data_dir=settings.data_dir,
@@ -58,14 +58,14 @@ def build_agent_plane(
         job_event_buffer=job_event_buffer,
     )
     dispatch = AgentDispatchService(settings, broker, artifact_store)
-    skill_manager = build_skill_manager(settings.database_url, settings.skills_runs_dir)
+    skill_manager = build_skill_manager(job_db, settings.skills_runs_dir)
     executor_leases = ExecutorLeaseRepository(
         job_db,
         data_dir=settings.data_dir,
         job_event_manager=job_event_manager,
         job_event_buffer=job_event_buffer,
     )
-    worker_registry = AgentWorkerRegistry(job_db.path)
+    worker_registry = AgentWorkerRegistry(job_db)
     completion = AgentCompletionHandler(
         executor_leases,
         artifact_store,

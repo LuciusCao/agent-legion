@@ -94,7 +94,8 @@ exemptions:
     the short-TTL published-definition cache (hot claim-path reads) lives next
     to the lifecycle methods so publish/archive can invalidate it in one
     place. Split the cache into its own module when it gains more policy —
-    tracked with the wide-service structure batch (#196).
+    tracked with the wide-service structure batch (#196). The facade-connect
+    source aliasing (#187) adds the dsn-identity cache-key helper here.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/196
   ceiling: 135

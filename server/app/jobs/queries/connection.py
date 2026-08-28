@@ -18,6 +18,16 @@ from .base import JobQueriesBase
 
 
 class ConnectionQueriesMixin(JobQueriesBase):
+    @property
+    def dsn_identity(self) -> str:
+        """Stable hashable identity for caches keyed by database (#187).
+
+        The facade itself hashes by object identity, so cross-module caches
+        (published-agent catalog, memo dicts) must key on this string
+        instead — one value per database, stable across facade instances.
+        """
+        return str(self.path)
+
     @contextmanager
     def connect(self) -> Iterator[DatabaseConnection]:
         conn = connect_database(self.path)

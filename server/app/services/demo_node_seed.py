@@ -9,6 +9,7 @@ from server.app.services.node_code_seeding import seed_workspace_node_code
 from server.app.services.node_codes import NodeCodeService
 
 if TYPE_CHECKING:
+    from server.app.db.dialect import ConnectSource
     from server.app.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -27,11 +28,19 @@ def seed_demo_workspace_node_codes(
     workspace_id: str,
     *,
     legacy_codes: dict[str, str] | None = None,
+    connect_source: ConnectSource | None = None,
 ) -> list[str]:
-    """Publish the demo code into one workspace, preserving existing versions."""
+    """Publish the demo code into one workspace, preserving existing versions.
+
+    ``connect_source`` is the JobQueries facade (BOUNDARY-DATA-001, #187);
+    None falls back to the settings DSN (tests, scripts).
+    """
     if not settings.executor_runtime.workflows.custom_nodes_enabled:
         return []
-    service = NodeCodeService(settings.database_url, custom_nodes_enabled=True)
+    service = NodeCodeService(
+        connect_source if connect_source is not None else settings.database_url,
+        custom_nodes_enabled=True,
+    )
     seeded: list[str] = []
     for node_key, relative in DEMO_NODE_SOURCES:
         source_path = settings.root_dir / relative

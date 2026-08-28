@@ -1,13 +1,9 @@
 {
+  "version": 1,
   "files": {
     "server/app/services/agent_service.py": [
       3,
       2,
-      0
-    ],
-    "server/app/services/agent_version_pins.py": [
-      0,
-      1,
       0
     ],
     "server/app/services/artifact_orphan_gc.py": [
@@ -23,11 +19,11 @@
     "server/app/services/cleanup_sweep.py": [
       2,
       0,
-      1
+      0
     ],
     "server/app/services/cleanup_sweep_store.py": [
       3,
-      3,
+      2,
       0
     ],
     "server/app/services/connection_adapter_user_login.py": [
@@ -42,12 +38,12 @@
     ],
     "server/app/services/connection_tokens.py": [
       6,
-      3,
+      2,
       0
     ],
     "server/app/services/connections.py": [
       12,
-      3,
+      2,
       0
     ],
     "server/app/services/demo_material_seed.py": [
@@ -57,17 +53,17 @@
     ],
     "server/app/services/instance_settings.py": [
       0,
-      1,
+      0,
       1
     ],
     "server/app/services/instance_settings_store.py": [
       2,
-      3,
+      2,
       0
     ],
     "server/app/services/instance_vault.py": [
       3,
-      3,
+      2,
       0
     ],
     "server/app/services/job_artifact_gc.py": [
@@ -87,7 +83,7 @@
     ],
     "server/app/services/job_artifact_objects.py": [
       6,
-      3,
+      2,
       0
     ],
     "server/app/services/job_deletion.py": [
@@ -137,7 +133,7 @@
     ],
     "server/app/services/material_bundles.py": [
       13,
-      3,
+      2,
       0
     ],
     "server/app/services/material_cache.py": [
@@ -147,27 +143,17 @@
     ],
     "server/app/services/material_ttl.py": [
       9,
-      3,
-      0
-    ],
-    "server/app/services/material_ttl_sweeper.py": [
-      0,
-      1,
+      2,
       0
     ],
     "server/app/services/materials.py": [
       14,
-      3,
-      0
-    ],
-    "server/app/services/node_code_resolution.py": [
-      0,
-      1,
+      2,
       0
     ],
     "server/app/services/node_codes.py": [
       1,
-      1,
+      0,
       0
     ],
     "server/app/services/node_secrets.py": [
@@ -202,7 +188,7 @@
     ],
     "server/app/services/ops_metrics/service.py": [
       8,
-      4,
+      3,
       0
     ],
     "server/app/services/ops_metrics/summary.py": [
@@ -222,27 +208,27 @@
     ],
     "server/app/services/quality_labels.py": [
       10,
-      3,
+      2,
       0
     ],
     "server/app/services/quality_replay_setup.py": [
       4,
-      1,
+      0,
       0
     ],
     "server/app/services/quality_replays.py": [
-      20,
-      2,
+      17,
+      1,
       0
     ],
     "server/app/services/quality_sampling.py": [
       8,
-      3,
+      2,
       0
     ],
     "server/app/services/quality_stats.py": [
       3,
-      2,
+      1,
       0
     ],
     "server/app/services/run_bundle_candidate.py": [
@@ -260,14 +246,9 @@
       0,
       0
     ],
-    "server/app/services/skill_catalog.py": [
-      0,
-      1,
-      0
-    ],
     "server/app/services/skill_source_store.py": [
       2,
-      3,
+      2,
       0
     ],
     "server/app/services/token_usage.py": [
@@ -282,7 +263,7 @@
     ],
     "server/app/services/token_usage_pricing_store.py": [
       2,
-      3,
+      2,
       0
     ],
     "server/app/services/token_usage_workspace.py": [
@@ -292,20 +273,15 @@
     ],
     "server/app/services/vault.py": [
       5,
-      3,
+      2,
       0
     ],
     "server/app/services/versioned_entities.py": [
       20,
-      3,
+      2,
       0
     ],
     "server/app/services/workflow_draft_compare_conditions.py": [
-      0,
-      0,
-      2
-    ],
-    "server/app/services/workflow_drafts.py": [
       0,
       0,
       2
@@ -324,17 +300,6 @@
       2,
       0,
       0
-    ],
-    "server/app/services/workspace_node_config.py": [
-      0,
-      0,
-      1
-    ],
-    "server/app/services/workspace_secrets.py": [
-      0,
-      0,
-      1
     ]
-  },
-  "version": 1
+  }
 }

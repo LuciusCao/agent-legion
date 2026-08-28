@@ -16,7 +16,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from server.app.agent_control.registry import ONLINE_THRESHOLD_SECONDS as _ONLINE_THRESHOLD_SECONDS
-from server.app.db.connection import DatabaseConnection, DatabaseDsn
+from server.app.db.connection import DatabaseConnection
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.ops_metrics.catchup import sample_catch_up as _sample_catch_up
 from server.app.services.ops_metrics.sampling import _EMPTY_TOKENS, _upsert_sample
@@ -41,7 +42,8 @@ def _fetch_one(conn: DatabaseConnection, sql: str, params: tuple[Any, ...] = ())
 
 
 class OpsMetricsService:
-    def __init__(self, database_dsn: DatabaseDsn, config: dict[str, Any]) -> None:
+    def __init__(self, database_dsn: ConnectSource, config: dict[str, Any]) -> None:
+        # database_dsn: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187).
         self._database_dsn = database_dsn
         monitoring = config.get("monitoring", {})
         self._sample_interval_seconds = float(

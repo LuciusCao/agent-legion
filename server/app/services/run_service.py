@@ -108,13 +108,13 @@ class RunService:
         try:
             node_config = resolve_workflow_node_configs(
                 definition,
-                published_agent_definitions(self.settings.database_url, workspace_id),
+                published_agent_definitions(self.job_db, workspace_id),
                 workspace,
             )
         except ValueError as exc:
             raise InvalidOperationError(f"Invalid node configuration: {exc}") from exc
         node_code_versions = freeze_node_code_versions(
-            self.job_db.path,
+            self.job_db,
             self.settings.executor_runtime.workflows.custom_nodes_enabled,
             workspace_id,
             workflow_key,
@@ -225,7 +225,7 @@ class RunService:
             if item_type == "material":
                 candidates.append(self._material_candidate(workspace_id, item))
             elif item_type == "bundle":
-                candidates.append(bundle_candidate(self.job_db.path, workspace_id, item))
+                candidates.append(bundle_candidate(self.job_db, workspace_id, item))
             elif item_type == "ref":
                 candidates.append(self._ref_candidate(item))
             else:

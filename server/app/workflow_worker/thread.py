@@ -58,7 +58,7 @@ class WorkflowWorkerThread:
         self._thread: threading.Thread | None = None
         self._maintenance = WorkflowMaintenance(job_db, settings)
         # Code stockpile gate (issue #125): TTL-cached, shared across passes.
-        self.code_stock = CodeStockGate(settings.database_url, settings.executor_runtime.code_stock)
+        self.code_stock = CodeStockGate(job_db, settings.executor_runtime.code_stock)
 
     @staticmethod
     def is_enabled(settings: Settings) -> bool:
@@ -75,7 +75,7 @@ class WorkflowWorkerThread:
         created, re-keyed, or first-published. The list is fully built before
         the swap, so a failed reload leaves the previous snapshot untouched.
         """
-        self.state.scan_entries = load_workflow_scan_entries(self.settings)
+        self.state.scan_entries = load_workflow_scan_entries(self.job_db)
 
     def _ensure_pools(self) -> None:
         ensure_pools(self)
@@ -121,9 +121,7 @@ class WorkflowWorkerThread:
         snapshot = load_capacity_snapshot(
             self.leases.path, self.settings.executor_runtime.code_capacity
         )
-        if not snapshot.has_any_capacity() and not has_published_agent_definitions(
-            self.settings.database_url
-        ):
+        if not snapshot.has_any_capacity() and not has_published_agent_definitions(self.job_db):
             return False
 
         scan_started = time.monotonic()

@@ -37,6 +37,7 @@ from server.app.agent_broker.code_manifest import runtime_context_stub
 from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
 from server.app.agent_control.registry import CODE_PROTOCOL_VERSION as _CODE_PROTOCOL_VERSION
 from server.app.agent_control.registry import ONLINE_THRESHOLD_SECONDS as _ONLINE_THRESHOLD_SECONDS
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
 from server.app.executors.contracts import CodeCapabilityConfig
 from server.app.executors.models import ExecutionContext
@@ -153,8 +154,10 @@ def build_code_bundle(bundle_path: Path, *, code_text: str, workspace_libs_dir: 
         tar.addfile(info, io.BytesIO(data))
 
 
-def has_online_code_worker(database_dsn: Any, capability: str, workspace_id: str) -> bool:
+def has_online_code_worker(database_dsn: ConnectSource, capability: str, workspace_id: str) -> bool:
     """True when an online Worker can claim *capability* in *workspace_id*.
+
+    ``database_dsn``: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187).
 
     Mirrors the claim-side filters (capability, protocol v2, allowed_workspaces
     admission) — an inadmissible Worker would wedge the job in queued for good
@@ -200,7 +203,7 @@ class CodeDispatchService:
         now = time.monotonic()
         probed_at, result = self._online_probe.get((capability, workspace_id), (0.0, False))
         if now - probed_at >= _ONLINE_PROBE_TTL_SECONDS:
-            result = has_online_code_worker(self.settings.database_url, capability, workspace_id)
+            result = has_online_code_worker(self.job_db, capability, workspace_id)
             self._online_probe[(capability, workspace_id)] = (now, result)
         return result
 

@@ -17,7 +17,7 @@ import re
 from datetime import datetime
 from typing import Any
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.connection_adapters import (
     ConnectionAdapter,
@@ -59,8 +59,11 @@ def _secret_ref_fields(stored: dict[str, Any]) -> list[str]:
 
 
 class ConnectionService:
+    """Instance-level external connections CRUD; the DSN param also accepts
+    the JobQueries facade (BOUNDARY-DATA-001, #187)."""
+
     def __init__(
-        self, database_dsn: DatabaseDsn, settings_config: dict[str, Any] | None = None
+        self, database_dsn: ConnectSource, settings_config: dict[str, Any] | None = None
     ) -> None:
         self._dsn = database_dsn
         self._settings_config = settings_config

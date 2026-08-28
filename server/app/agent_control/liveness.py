@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from time import monotonic
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import write_transaction
 
 _WRITE_INTERVAL_SECONDS = 10.0
@@ -24,7 +24,7 @@ class WorkerLiveness:
         self._interval_seconds = interval_seconds
         self._writes: dict[str, float] = {}
 
-    def record_seen(self, database_dsn: DatabaseDsn, worker_id: str) -> None:
+    def record_seen(self, database_dsn: ConnectSource, worker_id: str) -> None:
         """Write last_seen_at at most once per worker per interval.
 
         The registry is shared across threadpool workers, so two threads may

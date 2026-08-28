@@ -5,6 +5,7 @@ import socket
 import threading
 from datetime import UTC, datetime
 
+from server.app.db.dialect import ConnectSource
 from server.app.db.retry import with_database_conflict_retry
 from server.app.db.transaction import read_connection, write_transaction
 
@@ -27,9 +28,18 @@ class WorkspaceWorkerControl:
     the same value; unknown workspaces default to paused. Resume state must
     NOT survive a restart — auto-dispatch coming back on its own after a
     reboot produces uncontrolled runs — so the app calls
-    :meth:`reset_all_to_paused` once at startup."""
+    :meth:`reset_all_to_paused` once at startup.
 
-    def __init__(self, db_path: str | None = None, *, process_id: str | None = None) -> None:
+    ``db_path`` accepts the JobQueries facade or a bare DSN string
+    (BOUNDARY-DATA-001, #187); None keeps the in-memory legacy mode.
+    """
+
+    def __init__(
+        self, db_path: ConnectSource | None = None, *, process_id: str | None = None
+    ) -> None:
+        # Facade (JobQueries) in production, bare DSN in tests, None = in-memory.
+        if not isinstance(db_path, (str, type(None))):
+            db_path = str(getattr(db_path, "dsn_identity", None) or "")
         self._db_path = db_path
         self._process_id = process_id or f"{socket.gethostname()}:{os.getpid()}"
         self._paused: dict[str, bool] = {}
