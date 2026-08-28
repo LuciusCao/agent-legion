@@ -186,8 +186,9 @@ def test_prepare_refuses_dir_with_pending_upload_marker(tmp_path: Path) -> None:
 
     assert marker.read_text(encoding="utf-8") == '{"version": 1, "execution_id": "exec-code-1"}'
     assert (job_dir / "output.json").read_text(encoding="utf-8") == "old result"
-    # bundle 下载未发生：目录内容原样。
-    assert [p.name for p in execution_dir.iterdir()] == ["job", PENDING_FILENAME]
+    # bundle 下载未发生：目录内容原样。iterdir 顺序随文件系统实现而异
+    # （CI 的 Linux 与本地 macOS 不同），按集合断言。
+    assert {p.name for p in execution_dir.iterdir()} == {"job", PENDING_FILENAME}
 
 
 def test_prepare_replaces_stale_dir_without_marker(tmp_path: Path) -> None:
