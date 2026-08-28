@@ -108,24 +108,13 @@ def main() -> None:
     args = parser.parse_args()
 
     with TemporaryDirectory() as temporary_directory:
-        # Gate before create_app (which runs init_db via JobQueries): a
-        # worktree missing .env silently resolves the shared/prod database
-        # and pushes whatever migrations its (possibly newer) code carries —
-        # the 2026-08-27 incident applied unreleased v59-61 to prod this
-        # way. load_settings first so a .env-provided DSN is covered too.
-        from server.app.db.schema_guard import SHARED_DB_NAME, dsn_database_name
+        # Gate before create_app (which runs init_db via JobQueries) — the
+        # 2026-08-27 incident pushed unreleased migrations to prod this way.
+        # load_settings first so a .env-provided DSN is covered too.
+        from server.app.db.schema_guard import refuse_shared_db_exit
         from server.app.settings import load_settings
 
-        dsn = load_settings().database_url
-        if dsn_database_name(dsn) == SHARED_DB_NAME:
-            raise SystemExit(
-                "refusing to export: the resolved database is the shared "
-                f"'{SHARED_DB_NAME}' (AGENT_LEGION_DATABASE_URL unset or "
-                "pointing at it). Exporting only needs a disposable "
-                "database — point AGENT_LEGION_DATABASE_URL at a "
-                "worktree/derived database (scripts/init-worktree.sh sets "
-                "one) instead of letting it fall back to the shared one."
-            )
+        refuse_shared_db_exit(load_settings().database_url)
         schema = build_openapi_schema(Path(temporary_directory))
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

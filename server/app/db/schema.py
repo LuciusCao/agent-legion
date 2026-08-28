@@ -20,14 +20,8 @@ def init_db(database_dsn: DatabaseDsn) -> None:
     (that remains the DDL upgrade mechanism) but only run data migrations
     with ``version > max(applied)`` — no more full replay of data
     migrations on upgrade. Databases recorded at the current version
-    (including legacy single-row installs) are a no-op.
-
-    Migrating the bare shared database additionally requires
-    AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1 (schema_guard): a process that
-    resolved the code default DSN (env unset, no .env) is far more likely a
-    misdirected tool (worktree script, CI export) than the intended prod
-    operator — those get a hard error with remediation instead of a silent
-    migration push.
+    (including legacy single-row installs) are a no-op. The bare shared
+    database additionally requires the schema_guard opt-in.
     """
     guard_shared_db(database_dsn)
     with write_transaction(database_dsn) as conn:

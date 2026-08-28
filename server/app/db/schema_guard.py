@@ -9,7 +9,8 @@ the refusal so ``schema.py`` stays focused on the migration mechanics.
 from __future__ import annotations
 
 import os
-from urllib.parse import urlsplit
+
+import psycopg.conninfo
 
 from server.app.db.connection import DatabaseDsn
 
@@ -26,7 +27,14 @@ class SharedDatabaseSchemaError(RuntimeError):
 
 
 def dsn_database_name(database_dsn: DatabaseDsn) -> str:
-    return urlsplit(str(database_dsn)).path.lstrip("/")
+    """The database name libpq would actually connect to.
+
+    Parsed with psycopg's conninfo (libpq semantics), not a plain URL path:
+    ``agent%5Flegion`` URL-decodes to the shared name and
+    ``?dbname=agent_legion`` is a legal DSN form that must not slip past
+    the guard.
+    """
+    return str(psycopg.conninfo.conninfo_to_dict(str(database_dsn)).get("dbname") or "")
 
 
 def guard_shared_db(database_dsn: DatabaseDsn) -> None:
@@ -51,3 +59,20 @@ def guard_shared_db(database_dsn: DatabaseDsn) -> None:
         f"{_SHARED_DB_SCHEMA_ENV}=1 if migrating the shared database is "
         "really intended."
     )
+
+
+def refuse_shared_db_exit(database_dsn: DatabaseDsn) -> None:
+    """CLI helper: SystemExit (not the init_db exception) when the resolved
+    DSN is the shared database — for tools that only need a disposable
+    database and must not build the app against prod at all (export_openapi,
+    2026-08-27 incident).
+    """
+    if dsn_database_name(database_dsn) == SHARED_DB_NAME:
+        raise SystemExit(
+            "refusing to run: the resolved database is the shared "
+            f"'{SHARED_DB_NAME}' (AGENT_LEGION_DATABASE_URL unset or "
+            "pointing at it). This tool only needs a disposable database — "
+            "point AGENT_LEGION_DATABASE_URL at a worktree/derived database "
+            "(scripts/init-worktree.sh sets one) instead of letting it fall "
+            "back to the shared one."
+        )

@@ -188,7 +188,7 @@ def test_main_refuses_shared_database(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(sys, "argv", ["export_openapi", str(tmp_path / "out.json")])
 
-    with pytest.raises(SystemExit, match="refusing to export"):
+    with pytest.raises(SystemExit, match="refusing to run"):
         export_openapi.main()
 
     assert not (tmp_path / "out.json").exists()

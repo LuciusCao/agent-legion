@@ -50,7 +50,9 @@ Agent Legion 是一个自托管控制台，把 AI agent 变成内容生产线的
 git clone https://github.com/LuciusCao/agent-legion.git
 cd agent-legion
 uv sync                                     # Python 依赖
-createdb agent_legion
+createdb agent_legion_dev                   # 不要用裸名 agent_legion：init_db 会在无
+                                            # AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1 时
+                                            # 拒绝迁移该库（共享库 schema 守卫）
 cp .env.example .env                        # 然后编辑：设置 AGENT_LEGION_DATABASE_URL
 cd frontend && npm install && cd ..
 ```

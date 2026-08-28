@@ -27,6 +27,31 @@ def test_dsn_database_name_parses_path() -> None:
 
 
 @pytest.mark.no_db
+def test_dsn_database_name_follows_libpq_semantics() -> None:
+    """Equivalent DSN forms must not slip past the guard: URL-encoded names
+    decode to the shared name, and ?dbname= is a legal override the URL
+    path alone would miss (codex review P1)."""
+    assert dsn_database_name("postgresql://host/agent%5Flegion") == SHARED_DB_NAME
+    assert dsn_database_name("postgresql://host/?dbname=" + SHARED_DB_NAME) == SHARED_DB_NAME
+    assert dsn_database_name("postgresql://host/other?dbname=" + SHARED_DB_NAME) == SHARED_DB_NAME
+    # And the non-shared lookalikes stay non-shared.
+    assert dsn_database_name("postgresql://host/agent%5Flegion%5Fdev") == "agent_legion_dev"
+
+
+@pytest.mark.no_db
+def test_guard_rejects_encoded_and_query_shared_dsn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA", raising=False)
+    for dsn in (
+        "postgresql://host/agent%5Flegion",
+        "postgresql://host/?dbname=agent_legion",
+    ):
+        with pytest.raises(SharedDatabaseSchemaError, match="refusing to initialize"):
+            guard_shared_db(dsn)
+
+
+@pytest.mark.no_db
 def test_guard_rejects_shared_db_without_opt_in(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
