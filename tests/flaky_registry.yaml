@@ -80,5 +80,10 @@ entries:
     correct response; if it recurs, widen the poll timeouts before
     considering a deeper fix.
   observed: Local pre-push quick gate for 9f479768 (pull request 175),
-    2026-08-26; retry run passed in 47s.
+    2026-08-26; retry run passed in 47s. Same family hit
+    tests/full/test_shard_fanout_e2e.py::test_shard_fanout_aggregates_to_completed
+    — CI workflow_dispatch run for PR #246 (2026-08-28) and a local
+    6-run stress where it failed once; the develop baseline reproduces the
+    same 1-in-6 rate, confirming pre-existing machine-load timing rather
+    than a PR regression.
   recurring: true
