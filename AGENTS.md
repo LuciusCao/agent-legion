@@ -74,8 +74,8 @@
   默认跑 smoke 级（静态 + 精选 smoke 测试层，成员见 `tests/conftest.py`；按推送路径
   裁剪 lane：纯前端改动跳过 backend pytest、纯 `velites/` 改动只跑 rust lane、docs
   改动只跑静态、共享文件/新分支一律全量）。用 `AGENT_LEGION_GATE_LEVEL=quick`
-  （完整 quick 套件）或 `AGENT_LEGION_GATE_LEVEL=full`（本地 full gate）升级单次
-  推送。full gate 由 GitHub CI 在 PR/push 执行，并按变更路径裁剪 lane
+  （unit 层 quick 套件，见上方完整档纪律）或 `AGENT_LEGION_GATE_LEVEL=full`
+  （本地 full gate）升级单次推送。full gate 由 GitHub CI 在 PR/push 执行，并按变更路径裁剪 lane
   （与本地 pre-push 一致：纯前端改动跳过 backend pytest shards 但保留
   api:check、纯 `velites/` 改动只跑 rust、`Dockerfile`/依赖锁/`worker/`/
   `shared/`/`deploy/` 改动加跑 docker-build 镜像构建 lane（CI-only）、

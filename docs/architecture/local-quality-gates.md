@@ -15,7 +15,7 @@ provide.
 | Commit | Fast | `scripts/check-fast.sh` |
 | Edit-test iteration (agent inner loop) | Affected: backend affected-test selection over the unit tier + frontend `vitest related` | `GATE_TIER=aff ./scripts/check-quick.sh` |
 | Push (any branch) | Smoke (default): static checks + smoke test tier, lanes trimmed by pushed paths | `scripts/check-quick.sh` with `GATE_TIER=smoke` |
-| Push with `AGENT_LEGION_GATE_LEVEL=quick` | Quick: full quick suite, lanes trimmed | `scripts/check-quick.sh` |
+| Push with `AGENT_LEGION_GATE_LEVEL=quick` | Quick: unit-tier quick suite, lanes trimmed | `scripts/check-quick.sh` |
 | Push with `AGENT_LEGION_GATE_LEVEL=full` | Full, locally | `scripts/check.sh` |
 | PR to `develop`/`main`/`master`, push to `main`/`master` | Full | CI jobs `backend-unit` + `backend-postgres-a/b/c` + `frontend-*` + `rust` + `e2e-smoke` |
 | Weekly schedule, manual dispatch | Extended | CI jobs `ci-extended` + `nightly-e2e` |
