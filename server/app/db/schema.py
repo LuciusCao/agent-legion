@@ -4,6 +4,9 @@ from pathlib import Path
 
 from server.app.db.connection import DatabaseDsn
 from server.app.db.migration_registry import MIGRATIONS
+from server.app.db.migrations.workspace_settings_retirement import (
+    drop_retired_workspace_setting_columns,
+)
 from server.app.db.schema_guard import guard_shared_db
 from server.app.db.transaction import write_transaction
 
@@ -64,17 +67,8 @@ def init_db(database_dsn: DatabaseDsn) -> None:
         # cms_config_json column is superseded by workspace_cms_config's
         # resource rows and must not survive any install path.
         conn.execute("alter table workspaces drop column if exists cms_config_json")
-        # Retired at schema v63 (workspace_settings_retirement): workspace-level
-        # Agent defaults are gone — execution config resolves from the node /
-        # workflow top-level execution block only. postgres_schema.sql still
-        # CREATES the columns so the v62 data migration can replay its insert
-        # on older databases; drop them post-chain (cms_config_json pattern).
-        for retired_column in (
-            "default_agent_provider",
-            "default_agent_model",
-            "default_agent_thinking",
-        ):
-            conn.execute(f"alter table workspaces drop column if exists {retired_column}")
+        # v63 retirement sweep (module docstring explains the post-chain timing).
+        drop_retired_workspace_setting_columns(conn)
         # Retired-table parity sweep: postgres_schema.sql still CREATES these
         # tables so older data migrations can replay against them (v34 reads
         # job_batches, v47 harvests the executor tables), and their owning

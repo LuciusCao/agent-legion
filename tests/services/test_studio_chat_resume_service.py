@@ -245,7 +245,7 @@ def test_resume_reaped_error_session_tears_down_stale_runtime(chat, job_db) -> N
     reaped = job_db.reap_zombie_studio_chat_sessions()
     assert reaped == 1
     assert service.get_session(session["id"])["status"] == "error"
-    assert service._runtime(session["id"]) is not None  # 旧 runtime 仍在册
+    assert service.runtime(session["id"]) is not None  # 旧 runtime 仍在册
 
     resumed = service.resume_session(session["id"], workspace_id, user_id)
 

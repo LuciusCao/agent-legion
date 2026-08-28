@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.routes.job_http import require_workflows_enabled
 from server.app.services.workspace_runtime_models import workspace_runtime_models
 from server.app.settings import Settings

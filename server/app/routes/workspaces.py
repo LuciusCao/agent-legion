@@ -3,7 +3,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.auth.dependencies import reject_studio_agent_scope, require_admin
 from server.app.events import JobEventManager
 from server.app.events.bus import workspace_channel

@@ -17,7 +17,8 @@ from server.app.auth.dependencies import enforce_scoped_workspace_binding
 from server.app.events import JobEventManager
 from server.app.routes.job_http import raise_job_http_error
 from server.app.services.job_errors import JobServiceError
-from server.app.studio_chat.service import StudioChatService, studio_chat_channel
+from server.app.studio_chat.channels import studio_chat_channel
+from server.app.studio_chat.service import StudioChatService
 
 
 def create_studio_chat_events_router(
