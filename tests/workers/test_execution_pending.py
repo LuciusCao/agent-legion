@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from worker.upload_queue import PENDING_FILENAME, PendingUploadExists
 from worker.execution.pending import refuse_if_pending_upload
+from worker.upload.queue import PENDING_FILENAME, PendingUploadExists
 
 pytestmark = pytest.mark.no_db
 

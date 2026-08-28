@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from worker.upload_queue import PENDING_FILENAME, PendingUploadExists
+from worker.upload.queue import PENDING_FILENAME, PendingUploadExists
 
 
 def refuse_if_pending_upload(execution_dir: Path, claim: dict[str, Any]) -> None:

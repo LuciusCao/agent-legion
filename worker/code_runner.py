@@ -46,9 +46,9 @@ from shared.material_cache import MATERIALS_CACHE_DIRNAME
 from worker._atomic import atomic_write
 from worker.binary_resolution import resolve_binary
 from worker.bundle_io import download_input_artifacts, safe_extract_tree
+from worker.execution.pending import refuse_if_pending_upload
 from worker.material_fetch import materialize_claim_material
 from worker.process_lifecycle import AGENT_PGID_FILENAME, terminate, wait_for_exit
-from worker.execution.pending import refuse_if_pending_upload
 from worker.upload.queue import UploadTask
 
 if TYPE_CHECKING:
