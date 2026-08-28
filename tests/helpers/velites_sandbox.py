@@ -1,7 +1,7 @@
 """Shared velites sandbox scaffolding for executor tests.
 
 Used by the code-executor unit tests (``tests/executors/test_code_executor.py``),
-the cancellation tests (``tests/test_executor_cancellation.py``) and the
+the cancellation tests (``tests/executors/test_executor_cancellation.py``) and the
 full-gate recovery evidence
 (``tests/full/test_executor_cancellation_recovery.py``); kept here so those
 suites do not import each other's test modules.

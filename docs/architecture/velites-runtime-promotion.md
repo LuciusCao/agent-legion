@@ -161,8 +161,8 @@ AgentDefinition.runtime = "openclaw" → 未实现，dispatch fail-fast（现状
 
 - 既有四条（EXEC-EVENT-SCHEMA-001、EXEC-HARNESS-ISOLATION/BUDGET/SANDBOX-001）**不改**：它们约束 harness 本体，与 runtime 定位无关。
 - 新增 invariant（registry 与证据矩阵各加一行）：
-  - `EXEC-RUNTIME-DISPATCH-001`："Agent command construction is selected by `AgentDefinition.runtime`: `velites` pins the velites builder regardless of `workflows.pi.flavor`; `pi` delegates implementation choice to flavor; unknown runtimes fail fast at dispatch." Evidence：`tests/workflows/test_velites_command.py`（runtime 分派用例）、`tests/test_agent_broker.py`（dispatch fail-fast 用例），gate quick。
-  - `EXEC-CLAIM-RUNTIME-001`（或与现有 claim invariant 合并）："A queued Agent request whose definition runtime is declared by no non-revoked Worker is failed by the unclaimable sweeper with an explicit runtime reason; it never rots in queued." Evidence：`tests/test_agent_broker.py` 新增 sweeper runtime 用例，gate quick。
+  - `EXEC-RUNTIME-DISPATCH-001`："Agent command construction is selected by `AgentDefinition.runtime`: `velites` pins the velites builder regardless of `workflows.pi.flavor`; `pi` delegates implementation choice to flavor; unknown runtimes fail fast at dispatch." Evidence：`tests/workflows/test_velites_command.py`（runtime 分派用例）、`tests/services/test_agent_broker.py`（dispatch fail-fast 用例），gate quick。
+  - `EXEC-CLAIM-RUNTIME-001`（或与现有 claim invariant 合并）："A queued Agent request whose definition runtime is declared by no non-revoked Worker is failed by the unclaimable sweeper with an explicit runtime reason; it never rots in queued." Evidence：`tests/services/test_agent_broker.py` 新增 sweeper runtime 用例，gate quick。
 - AGENTS.md §6 velites 条目在 Phase 2 更新为 runtime 模型表述。
 
 ## 5. 分阶段实施顺序
@@ -185,10 +185,10 @@ AgentDefinition.runtime = "openclaw" → 未实现，dispatch fail-fast（现状
 
 ## 6. 测试策略
 
-- **契约/枚举**：`tests/test_agent_catalog.py` 增加 `runtime: velites` 合法化与非法值 fail-fast 用例；`tests/routes/test_agent_workers.py` 增加 runtimes 含 velites 的注册用例；export_openapi 后前端 typecheck 过（generated api.ts 派生纪律）。
+- **契约/枚举**：`tests/services/test_agent_catalog.py` 增加 `runtime: velites` 合法化与非法值 fail-fast 用例；`tests/routes/test_agent_workers.py` 增加 runtimes 含 velites 的注册用例；export_openapi 后前端 typecheck 过（generated api.ts 派生纪律）。
 - **命令构建**：`tests/workflows/test_velites_command.py` 增加 runtime 分派用例——runtime=velites 时 flavor=pi 也产出 velites argv；runtime=pi + flavor 两值各产出对应 argv；openclaw fail-fast。
-- **claim 匹配**：`tests/test_agent_broker.py` 增加——仅声明 pi 的 Worker 不能 claim velites 请求；声明 velites 的可以；混合舰队各取所需。
-- **sweeper**：`tests/test_agent_broker.py` 增加——无 Worker 声明 velites 时 velites 请求被 fail 且 error 含 runtime reason；零 Worker 时不动作的保护不变。
+- **claim 匹配**：`tests/services/test_agent_broker.py` 增加——仅声明 pi 的 Worker 不能 claim velites 请求；声明 velites 的可以；混合舰队各取所需。
+- **sweeper**：`tests/services/test_agent_broker.py` 增加——无 Worker 声明 velites 时 velites 请求被 fail 且 error 含 runtime reason；零 Worker 时不动作的保护不变。
 - **迁移/双 runtime 并存**：增加迁移场景测试——队列中同时存在 pinned 旧 hash（runtime=pi）与新 hash（runtime=velites）请求时，stale sweeper 处理旧的、claim 正常处理新的；`tests/full/test_velites_harness_e2e.py` 补一条经 Agent Worker 全链路的 runtime=velites e2e（如已有 flavor e2e 则复制改 runtime）。
 - **回归**：`tests/executors/test_velites_event_contract.py` 等四条 invariant 证据测试保持绿（升格不改 harness）。
 - 新测试按子系统放入对应子目录（`tests/workflows/`、`tests/` 现有 broker 文件就近），不新增 `tests/` 根目录文件（纯静态的加 `@pytest.mark.no_db`）。

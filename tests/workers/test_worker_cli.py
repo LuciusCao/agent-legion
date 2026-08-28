@@ -11,7 +11,7 @@ import pytest
 import worker.cli as cli
 from worker.cli_args import build_parser, configure_payload
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class FakeClient:

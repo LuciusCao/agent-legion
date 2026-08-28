@@ -26,7 +26,7 @@ from worker.supervisor import (
     validate_config,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 FAKE_WORKER = """
 import os, sys, time
