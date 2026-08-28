@@ -196,6 +196,7 @@ describe('SettingsPage', () => {
     expect(headings.map((h) => h.textContent)).toEqual([
       '基本信息',
       '接入与资源',
+      '产物预览',
       'Agent 与 Worker',
       'Agent 默认配置',
       '代码节点并发',

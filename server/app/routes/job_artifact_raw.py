@@ -76,7 +76,14 @@ def raw_response(raw: RawArtifact) -> FileResponse | StreamingResponse:
         if raw.size_bytes is not None:
             headers["Content-Length"] = str(raw.size_bytes)
         if disposition == "attachment":
-            headers["Content-Disposition"] = f'attachment; filename="{raw.name}"'
+            # artifact 名只挡了路径分隔符；引号/换行会让 header 畸形，
+            # 按 RFC 6266 转义（starlette 的 quote 用法见 FileResponse）。
+            from urllib.parse import quote
+
+            escaped = quote(raw.name)
+            headers["Content-Disposition"] = (
+                f"attachment; filename=\"{escaped}\"; filename*=UTF-8''{escaped}"
+            )
         return StreamingResponse(
             iter(lambda: stream.read(_STREAM_CHUNK_BYTES), b""),
             media_type=media_type,

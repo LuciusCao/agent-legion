@@ -42,7 +42,7 @@ interface TextQueryResult {
 function useArtifactText(jobId: string, name: string, detail: JobDetail | null): TextQueryResult {
   const version = artifactVersion(detail, name)
   const query = useQuery({
-    queryKey: queryKeys.jobArtifact(jobId, name, version),
+    queryKey: queryKeys.jobArtifactText(jobId, name, version),
     queryFn: () => fetchJobArtifact(jobId, name),
     enabled: Boolean(detail),
   })
@@ -75,6 +75,10 @@ export function JsonPreview({ jobId, name, detail }: PreviewRendererProps) {
   const { content, loading, error } = useArtifactText(jobId, name, detail)
   if (loading) return <p className={styles.loading}>加载中...</p>
   if (error) return <p className={styles.error}>{error}</p>
+  // 超限 JSON 不进 JsonTree：浅层大数组的展开 DOM 同样无界。
+  if (content.length > TEXT_PREVIEW_LIMIT) {
+    return <TextBody content={content} />
+  }
   const parsed = tryParseJson(content)
   if (parsed === null) {
     // .json 但解析失败：按原文展示而不是空白。
@@ -201,7 +205,7 @@ export function VideoPreview({ jobId, name }: PreviewRendererProps) {
     <video
       key={epoch}
       className={styles.mediaVideo}
-      src={jobArtifactRawUrl(jobId, name)}
+      src={`${jobArtifactRawUrl(jobId, name)}?v=${epoch}`}
       controls
       preload="metadata"
       onError={() => setFailed(true)}
@@ -228,7 +232,7 @@ export function AudioPreview({ jobId, name }: PreviewRendererProps) {
     <audio
       key={epoch}
       className={styles.mediaAudio}
-      src={jobArtifactRawUrl(jobId, name)}
+      src={`${jobArtifactRawUrl(jobId, name)}?v=${epoch}`}
       controls
       preload="metadata"
       onError={() => setFailed(true)}

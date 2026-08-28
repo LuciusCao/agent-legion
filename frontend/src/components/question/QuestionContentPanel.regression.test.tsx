@@ -157,7 +157,7 @@ const realComprehension = {
 
 vi.mock('../../api', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../../api')>()
-  const { makeJobDetail } = await import('../../testing/fixtures')
+  const { makeJobDetail } = await import('../../testing/jobDetailFixtures')
   return {
     ...mod,
     fetchJobDetail: () =>

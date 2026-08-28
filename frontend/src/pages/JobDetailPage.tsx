@@ -115,7 +115,7 @@ export default function JobDetailPage() {
       <div className={styles.columns}>
         <div className={styles.left}>
           {jobId && (
-            <EntityPanel detail={detail} jobId={jobId} />
+            <EntityPanel detail={detail} jobId={jobId} workspaceId={workspaceId} />
           )}
         </div>
 

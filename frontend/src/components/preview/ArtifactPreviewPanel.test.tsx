@@ -12,6 +12,16 @@ function renderPanel(ui: ReactElement) {
 
 const mockFetchJobArtifact = vi.fn()
 
+const mockPreviewHidden = vi.hoisted(() => ({ value: [] as string[] }))
+const mockToggleArtifact = vi.fn()
+
+vi.mock('../../hooks/useWorkspacePreviewConfig', () => ({
+  useWorkspacePreviewConfig: () => ({
+    previewHidden: mockPreviewHidden.value,
+    toggleArtifact: mockToggleArtifact,
+  }),
+}))
+
 // 组件直连 ../../api/jobsApi（不经 barrel），mock 必须打在同一模块上。
 vi.mock('../../api/jobsApi', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../../api/jobsApi')>()
@@ -55,18 +65,36 @@ describe('ArtifactPreviewPanel', () => {
     expect(screen.getByText('暂无产物文件')).toBeInTheDocument()
   })
 
-  it('hiddenArtifacts 过滤对应卡片', () => {
+  it('workspace 预览配置隐藏对应卡片', () => {
+    mockPreviewHidden.value = ['questions.json']
     renderPanel(
       <ArtifactPreviewPanel
         jobId="j1"
         detail={makeDetail(['questions.json', 'frame.png'])}
-        hiddenArtifacts={['questions.json']}
+        workspaceId="ws1"
       />
     )
 
     expect(screen.queryByText('questions.json')).not.toBeInTheDocument()
     expect(screen.getByText('frame.png')).toBeInTheDocument()
     expect(screen.getByText('1 个文件')).toBeInTheDocument()
+    mockPreviewHidden.value = []
+  })
+
+  it('勾选菜单切换产物可见性（写 workspace 配置）', async () => {
+    mockPreviewHidden.value = []
+    renderPanel(
+      <ArtifactPreviewPanel
+        jobId="j1"
+        detail={makeDetail(['questions.json', 'frame.png'])}
+        workspaceId="ws1"
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '配置预览产物' }))
+    const item = await screen.findByRole('menuitem', { name: /questions\.json/ })
+    fireEvent.click(item)
+    expect(mockToggleArtifact).toHaveBeenCalledWith('questions.json', false)
   })
 
   it('detail 为 null 时不渲染卡片列表（等待 detail）', () => {

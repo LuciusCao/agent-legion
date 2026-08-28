@@ -186,7 +186,7 @@ function gateDetailNodes() {
 
 vi.mock('../../api', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../../api')>()
-  const { makeJobDetail } = await import('../../testing/fixtures')
+  const { makeJobDetail } = await import('../../testing/jobDetailFixtures')
   return {
     ...mod,
     fetchJobDetail: () => Promise.resolve(makeJobDetail(gateDetailNodes())),
@@ -339,13 +339,14 @@ describe('QuestionContentPanel', () => {
       })
     )
 
+    // 原 gate 关闭场景：审题区块不渲染，避免 chips 标签与 blank label 撞文本。
+    setPanelGates({ keyInfoCompleted: false, possibleErrorsCompleted: false, reviewAttempted: false })
     renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
-    // blank label 文本可能被 RichText/LaTeX 拆成多个节点，按存在性断言。
-    expect(screen.getAllByText(/第1空/).length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/第2空/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/第1空/)).toBeInTheDocument()
+    expect(screen.getByText(/第2空/)).toBeInTheDocument()
     expect(screen.getAllByText('68').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('52').length).toBeGreaterThan(0)
+    expect(screen.getByText('52')).toBeInTheDocument()
   })
 
   it('strips HTML paragraph tags from answer blank alternatives', async () => {
@@ -358,9 +359,10 @@ describe('QuestionContentPanel', () => {
       })
     )
 
+    setPanelGates({ keyInfoCompleted: false, possibleErrorsCompleted: false, reviewAttempted: false })
     renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
-    expect(screen.getAllByText(/第1空/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/第1空/)).toBeInTheDocument()
     expect(screen.queryByText('<p>')).not.toBeInTheDocument()
     expect(screen.queryByText('</p>')).not.toBeInTheDocument()
     expect(document.querySelector('.katex')).toBeInTheDocument()

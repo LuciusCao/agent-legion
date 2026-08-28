@@ -11,15 +11,21 @@ import { ArtifactPreviewPanel } from '../../components/preview/ArtifactPreviewPa
 export interface EntityPanelProps {
   detail: JobDetail | null | undefined
   jobId: string
+  workspaceId?: string
 }
 
-export function EntityPanel({ detail, jobId }: EntityPanelProps) {
+export function EntityPanel({ detail, jobId, workspaceId }: EntityPanelProps) {
   const isQuestion = detail?.job.source_type === 'question'
 
   return (
     <>
       {isQuestion && <QuestionContentPanel key={jobId} jobId={jobId} />}
-      <ArtifactPreviewPanel key={`${jobId}-artifacts`} jobId={jobId} detail={detail ?? null} />
+      <ArtifactPreviewPanel
+        key={`${jobId}-artifacts`}
+        jobId={jobId}
+        detail={detail ?? null}
+        workspaceId={workspaceId}
+      />
     </>
   )
 }

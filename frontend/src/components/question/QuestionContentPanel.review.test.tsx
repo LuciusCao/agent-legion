@@ -111,7 +111,7 @@ function makePossibleErrorsReviewReportJson() {
 
 vi.mock('../../api', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../../api')>()
-  const { makeJobDetail } = await import('../../testing/fixtures')
+  const { makeJobDetail } = await import('../../testing/jobDetailFixtures')
   return {
     ...mod,
     fetchJobDetail: () =>
@@ -140,6 +140,8 @@ vi.mock('../../api', async (importOriginal) => {
 describe('QuestionContentPanel review integration', () => {
   beforeEach(() => {
     mockFetchJobArtifact.mockReset()
+    // 断言失败时也复位，避免 override 泄漏到后续用例。
+    detailNodesOverride = null
   })
 
   it('shows review status icons on key-info and possible-error chips', async () => {
@@ -205,6 +207,5 @@ describe('QuestionContentPanel review integration', () => {
     )
     expect(mockFetchJobArtifact).not.toHaveBeenCalled()
     expect(screen.queryByTestId('CheckCircleIcon')).not.toBeInTheDocument()
-    detailNodesOverride = null
   })
 })

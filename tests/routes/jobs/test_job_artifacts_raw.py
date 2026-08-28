@@ -157,7 +157,8 @@ def test_raw_response_stream_attachment_disposition_for_unknown_type():
     response = raw_response(raw)
 
     assert response.media_type == "application/octet-stream"
-    assert response.headers["content-disposition"] == 'attachment; filename="page.html"'
+    expected = "attachment; filename=\"page.html\"; filename*=UTF-8''page.html"
+    assert response.headers["content-disposition"] == expected
 
 
 async def _collect(iterator):
