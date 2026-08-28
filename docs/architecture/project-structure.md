@@ -32,7 +32,10 @@ agent-legion/
 │       ├── main.py             # FastAPI app factory + lifespan worker
 │       ├── settings.py         # 配置加载与合并
 │       ├── routes/             # REST API 路由与合约
-│       ├── services/           # 业务逻辑服务层
+│       ├── services/           # 业务逻辑服务层；下划线前缀簇已归真子包：
+│       │                       # job_rerun/（rerun 与批量 delete/run-to）、
+│       │                       # ops_metrics/（采样与读侧查询）、
+│       │                       # failure_classification/（失败分类规则）
 │       ├── db/                 # PostgreSQL schema、连接池、事务与共享查询构造
 │       ├── jobs/               # Job 领域查询与类型
 │       ├── executors/          # Code executor、lease 调度与 capacity 控制

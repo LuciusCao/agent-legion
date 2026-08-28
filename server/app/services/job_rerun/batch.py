@@ -2,7 +2,7 @@
 
 Read/write split: one prefetch (narrow bulk job rows + node states + active
 leases, joined in memory) resolves every job's target node and eligibility
-with the exact per-job rules (``_job_rerun_preview_checks``); only jobs that
+with the exact per-job rules (``job_rerun.preview_checks``); only jobs that
 pass go through the write portion (``commit_rerun``), which still re-guards
 inside its DB transaction. Per-job results are identical to looping
 ``rerun()`` — same errors, same result dicts, same order.
@@ -15,22 +15,22 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from server.app.jobs.queries.job_filtering import JobListFilter
-from server.app.services._job_rerun_by_failure_results import (
+from server.app.services.job_operation_error import JobOperationError, JobOperationResult
+from server.app.services.job_rerun.by_failure_results import (
     assemble_rerun_targets,
     job_failure_result,
 )
-from server.app.services._job_rerun_eligibility import (
+from server.app.services.job_rerun.eligibility import (
     AUTO_STRATEGIES,
     failed_nodes_by_job,
     resolve_failure_rerun_targets,
 )
-from server.app.services._job_rerun_preview_checks import (
+from server.app.services.job_rerun.preview_checks import (
     PreviewDefinitions,
     rerun_ineligible_from_nodes,
     resolve_rerun_node_from_nodes,
 )
-from server.app.services._job_rerun_single import commit_rerun_result
-from server.app.services.job_operation_error import JobOperationError, JobOperationResult
+from server.app.services.job_rerun.single import commit_rerun_result
 from server.app.services.job_selection_resolver import resolve_batch_selection
 from server.app.workflows.workflow_branching import downstream_nodes
 

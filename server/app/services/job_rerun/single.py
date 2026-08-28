@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Any
 from server.app.events.aggregator import broadcast_job_update, record_job_update
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.scheduler_wakeup import notify_schedulable_work
-from server.app.services._job_rerun_eligibility import check_rerun_eligibility
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
+from server.app.services.job_rerun.eligibility import check_rerun_eligibility
 from server.app.services.job_staged_cleanup import commit_staged_outputs
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot

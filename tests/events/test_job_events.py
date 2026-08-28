@@ -384,8 +384,8 @@ def test_rerun_broadcasts_job_updated(manager, monkeypatch):
         intake=WorkflowIntake(),
         nodes={"n1": WorkflowNode(key="n1", label="N1", capability="c1")},
     )
-    import server.app.services._job_rerun_eligibility as _eligibility
-    import server.app.services._job_rerun_single as _single
+    import server.app.services.job_rerun.eligibility as _eligibility
+    import server.app.services.job_rerun.single as _single
 
     monkeypatch.setattr(
         _eligibility, "require_workspace_active_definition", lambda *args: definition
@@ -556,8 +556,8 @@ def test_rerun_conflict_does_not_broadcast(manager, tmp_path, monkeypatch):
         intake=WorkflowIntake(),
         nodes={"node_a": WorkflowNode(key="node_a", label="A", capability="cap_a")},
     )
-    import server.app.services._job_rerun_eligibility as _eligibility
-    import server.app.services._job_rerun_single as _single
+    import server.app.services.job_rerun.eligibility as _eligibility
+    import server.app.services.job_rerun.single as _single
 
     monkeypatch.setattr(
         _eligibility, "require_workspace_active_definition", lambda *args: definition

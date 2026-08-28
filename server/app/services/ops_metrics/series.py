@@ -1,9 +1,9 @@
 """Bucketed series queries for the Host operations metrics service.
 
-Split out of ``ops_metrics.py`` to respect that module's size budget. Reads
-minute rows or epoch-floor rollups from ``ops_metric_samples`` for one metric
-scope (global aggregate row or a single Worker). The window table and the UTC
-ISO row formatter moved here with the query; ``ops_metrics`` re-exports them.
+Reads minute rows or epoch-floor rollups from ``ops_metric_samples`` for one
+metric scope (global aggregate row or a single Worker). The window table and
+the UTC ISO row formatter live here with the query; the ``ops_metrics``
+package re-exports them.
 """
 
 from __future__ import annotations

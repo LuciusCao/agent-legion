@@ -1,6 +1,6 @@
 """Schema v48: partial index for the unclaimable_model sweep counter (issue #106).
 
-``_ops_metrics_queue.query_queue_summary`` counts ``job_nodes`` rows with
+``ops_metrics.queue.query_queue_summary`` counts ``job_nodes`` rows with
 ``failure_detail='unclaimable_model'`` finished within the last hour, both
 fleet-wide and per workspace. At prod scale (2.6M rows) the count seq-scanned
 the whole table (40s+ per collection); ``idx_job_nodes_unclaimable_finished``

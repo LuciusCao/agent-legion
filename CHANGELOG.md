@@ -131,6 +131,27 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ### Changed
 
+- Repacked the 19 underscore-prefixed private modules under
+  `server/app/services/` into real subpackages (issue #199, completing the
+  cluster-repack pattern proven by #191 and #234): `job_rerun/`
+  (batch / by_failure_results / eligibility / preview / preview_checks /
+  single / upstream_guard, plus the batch delete / run-to loops from
+  `_job_batch_ops` as `batch_ops`), `ops_metrics/` (catchup / queue /
+  queue_alert / runs / sampling / series / summary / workspace_sampling) and
+  `failure_classification/` (markers / rules). Import sites were rewritten to
+  the full new paths (no re-export facade). Each cluster's former flat entry
+  module moved into its package: `job_rerun.py` and `failure_classification.py`
+  became the package `__init__.py` (so `from server.app.services.job_rerun
+  import JobRerunService` and the `failure_classification` attribute imports
+  keep working unchanged, mirroring the #234 `status/` precedent), while
+  `ops_metrics.py` became `ops_metrics/service.py` with `OpsMetricsService` /
+  `Granularity` re-exported from the package root — a package shadows the
+  same-named flat module, so keeping `ops_metrics.py` flat was not an option.
+  Architecture baselines carry the old ceilings to the new path keys
+  (file budgets via the #236 rename-floor rule; the service-data-boundary
+  counts move as-is, with `job_rerun/__init__.py` newly registered at its
+  observed bypass count).
+
 - Repacked 21 of the flat `worker/` prefix-cluster modules into real
   subpackages (issue #234, mirroring #191 on the server side):
   `execution/` (heartbeat / lifecycle / prepare / run), `runtime/`

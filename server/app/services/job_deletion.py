@@ -14,10 +14,10 @@ from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
-from server.app.services._job_batch_ops import batch_delete as _batch_delete
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_artifact_gc import gc_deleted_job_artifacts, read_artifact_candidates
 from server.app.services.job_operation_error import JobOperationError
+from server.app.services.job_rerun.batch_ops import batch_delete as _batch_delete
 from server.app.settings import Settings
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
 

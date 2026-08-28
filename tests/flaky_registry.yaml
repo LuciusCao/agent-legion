@@ -25,8 +25,9 @@ entries:
 - id: FLAKY-007
   scope: backend:studio-chat-turn-tool-call-timing
   owner: test-infra
-  reason: tests/services/test_studio_chat_service.py::test_session_lifecycle_turn_and_token_revocation
-    failed once in a local full quick gate (2026-08-27, worktree arch-review)
+  reason: tests/services/test_studio_chat_service_sessions.py::test_session_lifecycle_turn_and_token_revocation
+    failed once in a local full quick gate (2026-08-27, worktree arch-review;
+    the file was since split out of test_studio_chat_service.py, #207)
     while two sibling worktrees ran their own vitest suites in parallel; the
     assertion saw the turn's agent message but not yet its tool_call content
     (async event coalescing), and an isolated rerun passed in 44.7s. Same

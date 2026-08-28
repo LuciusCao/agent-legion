@@ -1,6 +1,6 @@
 """Queue-alert classification for the ops-metrics summary (issue #13).
 
-Split out of ``_ops_metrics_queue.py`` for the file-size budget; pure
+Split out of the queue summary for the file-size budget; pure
 decision logic kept separate from the summary queries:
 ``blocked`` = a fresh signal from the empty-claim trigger (claims attempted,
 every candidate skipped — histogram carried in ``reasons``); ``stalled`` =
@@ -14,7 +14,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from server.app.services._ops_metrics_series import _isoformat_utc
+from server.app.services.ops_metrics.series import _isoformat_utc
 
 # A blocked signal fresher than this drives the red banner; older signals are
 # considered recovered and self-expire (nobody ever clears the row).

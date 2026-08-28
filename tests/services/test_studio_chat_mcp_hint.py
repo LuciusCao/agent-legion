@@ -4,7 +4,7 @@ The smoke signal answers one question: has this session ever shown an
 agent-legion MCP tool call? The hint is advisory, fires at most once per
 session (persisted as mcp_status='unverified', so the guarantee survives
 runtime rebuilds), and never on cancelled turns. Session-lifecycle happy
-paths live in tests/services/test_studio_chat_service.py.
+paths live in tests/services/test_studio_chat_service_sessions.py.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """Recent-hour Agent run stats for the ops-metrics summary.
 
-Split out of ``_ops_metrics_summary.py`` for the file-size budget. Run stats
+Split out of the summary for the file-size budget. Run stats
 cover Agent runs only — a run counts when an ``agent_execution_requests``
 row references it (same attribution the sampler uses); Host-local handler
 (code) nodes never have one and are excluded. The run table has no worker

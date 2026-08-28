@@ -1,46 +1,5 @@
 {
-  "version": 1,
   "files": {
-    "server/app/services/_job_batch_ops.py": [
-      2,
-      0,
-      0
-    ],
-    "server/app/services/_ops_metrics_catchup.py": [
-      1,
-      1,
-      0
-    ],
-    "server/app/services/_ops_metrics_queue.py": [
-      6,
-      1,
-      0
-    ],
-    "server/app/services/_ops_metrics_runs.py": [
-      2,
-      1,
-      0
-    ],
-    "server/app/services/_ops_metrics_sampling.py": [
-      1,
-      1,
-      0
-    ],
-    "server/app/services/_ops_metrics_series.py": [
-      2,
-      1,
-      0
-    ],
-    "server/app/services/_ops_metrics_summary.py": [
-      2,
-      1,
-      0
-    ],
-    "server/app/services/_ops_metrics_workspace_sampling.py": [
-      3,
-      1,
-      0
-    ],
     "server/app/services/agent_service.py": [
       3,
       2,
@@ -156,6 +115,11 @@
       0,
       0
     ],
+    "server/app/services/job_rerun/batch_ops.py": [
+      2,
+      0,
+      0
+    ],
     "server/app/services/job_selection_resolver.py": [
       1,
       0,
@@ -211,9 +175,44 @@
       0,
       0
     ],
-    "server/app/services/ops_metrics.py": [
+    "server/app/services/ops_metrics/catchup.py": [
+      1,
+      1,
+      0
+    ],
+    "server/app/services/ops_metrics/queue.py": [
+      6,
+      1,
+      0
+    ],
+    "server/app/services/ops_metrics/runs.py": [
+      2,
+      1,
+      0
+    ],
+    "server/app/services/ops_metrics/sampling.py": [
+      1,
+      1,
+      0
+    ],
+    "server/app/services/ops_metrics/series.py": [
+      2,
+      1,
+      0
+    ],
+    "server/app/services/ops_metrics/service.py": [
       8,
       4,
+      0
+    ],
+    "server/app/services/ops_metrics/summary.py": [
+      2,
+      1,
+      0
+    ],
+    "server/app/services/ops_metrics/workspace_sampling.py": [
+      3,
+      1,
       0
     ],
     "server/app/services/path_hygiene.py": [
@@ -336,5 +335,6 @@
       0,
       1
     ]
-  }
+  },
+  "version": 1
 }

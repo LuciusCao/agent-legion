@@ -7,7 +7,7 @@ global row (``worker_id=''``) plus one row per active Worker per minute into
 rows or epoch-floor rollups from the same table. The ``granularity`` query
 value names the window (``6h``/``24h``/``30d``) and implies the bin size
 (60s/300s/14400s); there are no separate window params. The response also
-carries a window-independent ``summary`` (see ``_ops_metrics_summary``).
+carries a window-independent ``summary`` (see ``ops_metrics.summary``).
 """
 
 from __future__ import annotations
@@ -18,11 +18,11 @@ from typing import Any, Literal
 from server.app.agent_control.registry import ONLINE_THRESHOLD_SECONDS as _ONLINE_THRESHOLD_SECONDS
 from server.app.db.connection import DatabaseConnection, DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
-from server.app.services._ops_metrics_catchup import sample_catch_up as _sample_catch_up
-from server.app.services._ops_metrics_sampling import _EMPTY_TOKENS, _upsert_sample
-from server.app.services._ops_metrics_series import query_series as _query_series
-from server.app.services._ops_metrics_summary import query_summary as _query_summary
-from server.app.services._ops_metrics_workspace_sampling import (
+from server.app.services.ops_metrics.catchup import sample_catch_up as _sample_catch_up
+from server.app.services.ops_metrics.sampling import _EMPTY_TOKENS, _upsert_sample
+from server.app.services.ops_metrics.series import query_series as _query_series
+from server.app.services.ops_metrics.summary import query_summary as _query_summary
+from server.app.services.ops_metrics.workspace_sampling import (
     collect_workspace_samples,
     upsert_workspace_samples,
 )
@@ -48,7 +48,7 @@ class OpsMetricsService:
             monitoring.get("sample_interval_seconds", _DEFAULT_SAMPLE_INTERVAL_SECONDS)
         )
         self._retention_days = int(monitoring.get("retention_days", _DEFAULT_RETENTION_DAYS))
-        # Short-TTL summary cache for UI polling; see _ops_metrics_summary.
+        # Short-TTL summary cache for UI polling; see ops_metrics.summary.
         self._summary_cache: dict[tuple[str, str], tuple[datetime, dict[str, Any]]] = {}
 
     @property

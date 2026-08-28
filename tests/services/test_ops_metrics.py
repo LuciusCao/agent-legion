@@ -810,7 +810,7 @@ def test_query_summary_serves_cached_result_within_ttl() -> None:
 
 
 def test_query_summary_cache_expires_after_ttl(monkeypatch) -> None:
-    monkeypatch.setattr("server.app.services._ops_metrics_summary._SUMMARY_CACHE_TTL_SECONDS", 0)
+    monkeypatch.setattr("server.app.services.ops_metrics.summary._SUMMARY_CACHE_TTL_SECONDS", 0)
     service = _service()
     now = datetime.now(UTC).replace(second=0, microsecond=0)
     _insert_sample(now - timedelta(minutes=1), online_workers=1)
