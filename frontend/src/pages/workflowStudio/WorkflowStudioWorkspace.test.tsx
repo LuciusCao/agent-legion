@@ -11,8 +11,8 @@ vi.mock('../../api', () => ({
   api: vi.fn(),
 }))
 
-vi.mock('../../api/executorApi', () => ({
-  getExecutorCatalog: vi.fn().mockResolvedValue({ executors: [], agents: [] }),
+vi.mock('../../api/agentCatalogApi', () => ({
+  getAgentCatalog: vi.fn().mockResolvedValue({ agents: [] }),
 }))
 
 vi.mock('../../components/dag/DagGraph', () => ({

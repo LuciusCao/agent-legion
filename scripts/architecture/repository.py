@@ -2,14 +2,14 @@ import ast
 from collections import Counter
 from pathlib import Path
 
-from scripts.architecture.budget_policy import BudgetConfigurationError, load_budget_policy
-from scripts.architecture.configuration import check_configuration_ownership
-from scripts.architecture.executor_contracts import (
-    check_executor_contract_models,
-    check_frontend_executor_types,
+from scripts.architecture.agent_catalog_contracts import (
+    check_agent_catalog_contract_models,
+    check_frontend_agent_catalog_types,
     check_settings_store_legacy_agents,
     check_workspace_save_outside_transaction,
 )
+from scripts.architecture.budget_policy import BudgetConfigurationError, load_budget_policy
+from scripts.architecture.configuration import check_configuration_ownership
 from scripts.architecture.executor_decoupling import (
     check_forbidden_patterns,
     check_legacy_modules_absent,
@@ -146,10 +146,10 @@ def check_repository(root: Path) -> list[str]:
                     )
 
     errors.extend(check_workflow_definitions(root))
-    errors.extend(check_executor_contract_models(root))
+    errors.extend(check_agent_catalog_contract_models(root))
     errors.extend(check_settings_store_legacy_agents(root))
     errors.extend(check_workspace_save_outside_transaction(root))
-    errors.extend(check_frontend_executor_types(root))
+    errors.extend(check_frontend_agent_catalog_types(root))
     errors.extend(check_legacy_modules_absent(root))
     errors.extend(check_forbidden_patterns(root))
     errors.extend(check_workflow_worker_capability_branching(root))

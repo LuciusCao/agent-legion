@@ -11,7 +11,7 @@ import { api } from '../../api'
 import { useSettingStore } from '../../stores/settingStore'
 import { useUiStore } from '../../stores/uiStore'
 import type { WorkflowNodeRecord } from '../../types'
-import type { AgentDefinition } from '../../types/executorTypes'
+import type { AgentDefinition } from '../../types/agentCatalogTypes'
 
 vi.mock('../../api', () => ({
   api: vi.fn(),

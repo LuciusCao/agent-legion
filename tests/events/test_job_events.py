@@ -20,8 +20,8 @@ from server.app.executors.models import ConfigurationFailureRequest, ExecutionRe
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_patch_queries import JobPatchQueryService
 from server.app.services.job_queries import JobQueryService
-from server.app.services.workspace_executor_configuration import (
-    WorkspaceExecutorConfigurationService,
+from server.app.services.workspace_execution_configuration import (
+    WorkspaceExecutionConfigurationService,
 )
 from server.app.settings import Settings
 from tests.helpers import publish_builtin_revision
@@ -85,7 +85,7 @@ def job_query_service(job_db, settings):
     return JobQueryService(
         job_db,
         settings,
-        WorkspaceExecutorConfigurationService(job_db),
+        WorkspaceExecutionConfigurationService(job_db),
     )
 
 
@@ -94,7 +94,7 @@ def job_patch_query_service(job_db, settings):
     return JobPatchQueryService(
         job_db,
         settings,
-        WorkspaceExecutorConfigurationService(job_db),
+        WorkspaceExecutionConfigurationService(job_db),
     )
 
 

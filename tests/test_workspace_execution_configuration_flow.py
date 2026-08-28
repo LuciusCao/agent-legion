@@ -10,7 +10,7 @@ WORKFLOW_KEY = "education_video_problems_generation"
 
 
 def _get_config(client: TestClient, workspace_id: str) -> dict:
-    response = client.get(f"/api/workspaces/{workspace_id}/executor-configuration")
+    response = client.get(f"/api/workspaces/{workspace_id}/execution-configuration")
     assert response.status_code == 200
     return response.json()
 
@@ -33,7 +33,7 @@ def test_workspace_execution_configuration_lifecycle(flow_client: TestClient) ->
 
     # 1. The execution catalog exposes only workspace-scoped Agents (schema
     # v46 + v47: the executors half is retired).
-    catalog_response = client.get("/api/executors", params={"workspace_id": "ws-none"})
+    catalog_response = client.get("/api/agent-catalog", params={"workspace_id": "ws-none"})
     assert catalog_response.status_code == 200
     assert "executors" not in catalog_response.json()
 
@@ -100,4 +100,4 @@ def test_workspace_execution_configuration_lifecycle(flow_client: TestClient) ->
 
     saved = _put_config(client, workspace_id, save_payload)
     assert saved["status_code"] == 200
-    assert saved["json"]["executor_configuration"]["migration_warnings"] == []
+    assert saved["json"]["execution_configuration"]["migration_warnings"] == []

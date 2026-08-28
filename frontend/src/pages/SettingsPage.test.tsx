@@ -71,7 +71,7 @@ function setSnapshot(partial: Partial<WorkspaceSettingsSnapshot>) {
       labelOverrides: {},
       workflowKey: '',
     },
-    executorConfiguration: {
+    executionConfiguration: {
       node_limits: [],
       migration_warnings: [],
       agent_capacity: null,
@@ -104,12 +104,12 @@ const defaultState: SettingState = {
   isDirty: false,
   isSaving: false,
   saveError: null,
-  executorConfiguration: {
+  executionConfiguration: {
     node_limits: [],
     migration_warnings: [],
     agent_capacity: null,
   },
-  originalExecutorConfiguration: null,
+  originalExecutionConfiguration: null,
   setWorkspaceId: vi.fn(),
   setWorkspaceName: vi.fn((name: string) => {
     useSettingStore.setState({ workspaceName: name, isDirty: true })
@@ -426,12 +426,12 @@ describe('SettingsPage', () => {
       originalWorkspaceDescription: '',
       settings,
       originalSettings: settings,
-      executorConfiguration: {
+      executionConfiguration: {
         node_limits: [],
         migration_warnings: [],
         agent_capacity: null,
       },
-      originalExecutorConfiguration: {
+      originalExecutionConfiguration: {
         node_limits: [],
         migration_warnings: [],
         agent_capacity: null,
@@ -445,7 +445,7 @@ describe('SettingsPage', () => {
     mockApi.mockResolvedValueOnce({
       workspace: { name: 'Flow Workspace', description: '' },
       settings,
-      executor_configuration: {
+      execution_configuration: {
         node_limits: [
           {
             workflow_key: 'sample_workflow',
@@ -469,7 +469,7 @@ describe('SettingsPage', () => {
 
     await waitFor(() => {
       expect(
-        useSettingStore.getState().executorConfiguration.node_limits
+        useSettingStore.getState().executionConfiguration.node_limits
       ).toEqual([
         {
           workflow_key: 'sample_workflow',

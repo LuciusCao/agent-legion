@@ -49,7 +49,7 @@ const workflowDefinition = {
 }
 
 // workflowDefinition/agentRoutes 已迁入 react-query；mock 快照 hook，
-// draft（executorConfiguration）仍写 store。
+// draft（executionConfiguration）仍写 store。
 vi.mock('../hooks/useWorkspaceSettingsQuery', () => ({
   useWorkspaceSettingsSnapshot: () => ({
     workflowDefinition,
@@ -67,7 +67,7 @@ describe('LocalNodeLimitSection', () => {
         labelOverrides: {},
         workflowKey: 'sample_workflow',
       },
-      executorConfiguration: {
+      executionConfiguration: {
         node_limits: [
           {
             workflow_key: 'sample_workflow',
@@ -97,7 +97,7 @@ describe('LocalNodeLimitSection', () => {
 
     await waitFor(() => {
       expect(
-        useSettingStore.getState().executorConfiguration.node_limits
+        useSettingStore.getState().executionConfiguration.node_limits
       ).toEqual([
         {
           workflow_key: 'sample_workflow',
@@ -116,7 +116,7 @@ describe('LocalNodeLimitSection', () => {
 
     await waitFor(() => {
       expect(
-        useSettingStore.getState().executorConfiguration.node_limits
+        useSettingStore.getState().executionConfiguration.node_limits
       ).toEqual([])
     })
   })
@@ -131,7 +131,7 @@ describe('LocalNodeLimitSection', () => {
 
     await waitFor(() => {
       expect(
-        useSettingStore.getState().executorConfiguration.node_limits
+        useSettingStore.getState().executionConfiguration.node_limits
       ).toEqual([
         {
           workflow_key: 'sample_workflow',

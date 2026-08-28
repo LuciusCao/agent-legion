@@ -6,8 +6,8 @@ from server.app.jobs import JobQueries
 from server.app.jobs.queries.job_pagination import list_jobs_paginated
 from server.app.services.job_patch_query_summaries import summarize_paginated_jobs
 from server.app.services.job_queries import JobQueryService
-from server.app.services.workspace_executor_configuration import (
-    WorkspaceExecutorConfigurationService,
+from server.app.services.workspace_execution_configuration import (
+    WorkspaceExecutionConfigurationService,
 )
 from server.app.settings import Settings
 
@@ -19,13 +19,13 @@ class JobPatchQueryService(JobQueryService):
         self,
         job_db: JobQueries,
         settings: Settings,
-        workspace_executor_config: WorkspaceExecutorConfigurationService | None = None,
+        workspace_execution_config: WorkspaceExecutionConfigurationService | None = None,
         job_event_buffer: Any | None = None,
     ):
-        workspace_executor_config = (
-            workspace_executor_config or WorkspaceExecutorConfigurationService(job_db)
+        workspace_execution_config = (
+            workspace_execution_config or WorkspaceExecutionConfigurationService(job_db)
         )
-        super().__init__(job_db, settings, workspace_executor_config)
+        super().__init__(job_db, settings, workspace_execution_config)
         self._job_event_buffer = job_event_buffer
 
     def list_patch_summaries(

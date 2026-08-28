@@ -25,8 +25,8 @@ from server.app.routes.token_usage import create_token_usage_router
 from server.app.routes.workspace_runs import create_workspace_runs_router
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_service_factory import JobServices
-from server.app.services.workspace_executor_configuration import (
-    WorkspaceExecutorConfigurationService,
+from server.app.services.workspace_execution_configuration import (
+    WorkspaceExecutionConfigurationService,
 )
 from server.app.settings import Settings
 
@@ -35,7 +35,7 @@ def include_job_routes(
     router: APIRouter,
     job_db: JobQueries,
     settings: Settings,
-    workspace_executor_configuration: WorkspaceExecutorConfigurationService,
+    workspace_execution_configuration: WorkspaceExecutionConfigurationService,
     job_event_manager: JobEventManager | None,
     job_event_buffer: Any | None = None,
     artifact_store: ArtifactStore | None = None,
@@ -44,7 +44,7 @@ def include_job_routes(
     services = JobServices(
         job_db,
         settings,
-        workspace_executor_configuration,
+        workspace_execution_configuration,
         job_event_manager,
         job_event_buffer,
         artifact_store=artifact_store,

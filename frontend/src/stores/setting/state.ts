@@ -1,5 +1,5 @@
 import type { WorkspaceSettings } from '../../types'
-import type { WorkspaceExecutorConfiguration } from '../../types/executorTypes'
+import type { WorkspaceExecutionConfiguration } from '../../types/agentCatalogTypes'
 
 /**
  * hydrateSettings 的输入（由 useWorkspaceSettingsQuery 拉取组装）。
@@ -9,7 +9,7 @@ export interface HydrateSettingsInput {
   workspaceName: string
   workspaceDescription: string
   settings: WorkspaceSettings
-  executorConfiguration: WorkspaceExecutorConfiguration
+  executionConfiguration: WorkspaceExecutionConfiguration
 }
 
 export type SettingState = {
@@ -23,8 +23,8 @@ export type SettingState = {
   isDirty: boolean
   isSaving: boolean
   saveError: string | null
-  executorConfiguration: WorkspaceExecutorConfiguration
-  originalExecutorConfiguration: WorkspaceExecutorConfiguration | null
+  executionConfiguration: WorkspaceExecutionConfiguration
+  originalExecutionConfiguration: WorkspaceExecutionConfiguration | null
   setWorkspaceId: (id: string) => void
   setWorkspaceName: (name: string) => void
   setWorkspaceDescription: (description: string) => void
@@ -55,16 +55,16 @@ export const defaultSettings: WorkspaceSettings = {
   workflowKey: '',
 }
 
-export const defaultExecutorConfiguration: WorkspaceExecutorConfiguration = {
+export const defaultExecutionConfiguration: WorkspaceExecutionConfiguration = {
   node_limits: [],
   migration_warnings: [],
   // Workspace-level agent concurrency cap; null = unset = unlimited.
   agent_capacity: null,
 }
 
-export function normalizeExecutorConfiguration(
-  config: Partial<WorkspaceExecutorConfiguration> | undefined
-): WorkspaceExecutorConfiguration {
+export function normalizeExecutionConfiguration(
+  config: Partial<WorkspaceExecutionConfiguration> | undefined
+): WorkspaceExecutionConfiguration {
   return {
     node_limits: config?.node_limits ?? [],
     migration_warnings: config?.migration_warnings ?? [],
@@ -80,8 +80,8 @@ export function computeDirty(state: Omit<SettingState, 'isDirty'>): boolean {
   if (JSON.stringify(state.settings) !== JSON.stringify(state.originalSettings))
     return true
   if (
-    JSON.stringify(state.executorConfiguration) !==
-    JSON.stringify(state.originalExecutorConfiguration)
+    JSON.stringify(state.executionConfiguration) !==
+    JSON.stringify(state.originalExecutionConfiguration)
   )
     return true
   return false

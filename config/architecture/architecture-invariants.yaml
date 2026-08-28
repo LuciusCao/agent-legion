@@ -310,7 +310,7 @@ invariants:
         target: tests/services/test_agent_catalog.py
         gate: quick
       - kind: integration
-        target: tests/services/test_executor_catalog_service.py::test_catalog_exposes_published_agent_definitions
+        target: tests/services/test_agent_catalog_service.py::test_catalog_exposes_published_agent_definitions
         gate: quick
       - kind: integration
         target: tests/services/test_agent_service.py

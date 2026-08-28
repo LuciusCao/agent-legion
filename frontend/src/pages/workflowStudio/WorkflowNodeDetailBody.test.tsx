@@ -1,20 +1,23 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../api'
-import { getSkillDetail } from '../../api/executorApi'
+import { getSkillDetail } from '../../api/agentCatalogApi'
 import { TestQueryProvider } from '../../testing/testQueryClient'
 import type { WorkflowDefinitionRecord } from '../../types'
-import type { AgentDefinition, SkillDetail } from '../../types/executorTypes'
+import type {
+  AgentDefinition,
+  SkillDetail,
+} from '../../types/agentCatalogTypes'
 import { WorkflowNodeDetailBody } from './WorkflowNodeDetailBody'
 import { WorkflowSkillPreviewPanel } from './WorkflowSkillPreviewPanel'
 
 // inspector 各 section（code/config/agentDefaults）统一走 '../../api' 的 api。
 vi.mock('../../api', () => ({ api: vi.fn() }))
-// 技能预览经 executorApi wrapper（直连 './core'，不经 '../../api' 聚合层）。
-vi.mock('../../api/executorApi', () => ({
-  getExecutorCatalog: vi.fn().mockResolvedValue({ agents: [] }),
+// 技能预览经 agentCatalogApi wrapper（直连 './core'，不经 '../../api' 聚合层）。
+vi.mock('../../api/agentCatalogApi', () => ({
+  getAgentCatalog: vi.fn().mockResolvedValue({ agents: [] }),
   getSkillDetail: vi.fn(),
-  getWorkspaceExecutorConfiguration: vi.fn(),
+  getWorkspaceExecutionConfiguration: vi.fn(),
 }))
 
 vi.mock('./AgentEditor', () => ({

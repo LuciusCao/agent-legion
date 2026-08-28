@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from server.app.routes.executor_contracts import NodeLimitRequest
+from server.app.routes.workspace_execution_contracts import NodeLimitRequest
 
 
 def test_node_limit_requires_positive_limit() -> None:

@@ -9,8 +9,8 @@ from server.app.jobs import JobQueries
 from server.app.services.job_artifacts import JobArtifactService
 from server.app.services.job_logs import JobLogService
 from server.app.services.job_queries import JobQueryService
-from server.app.services.workspace_executor_configuration import (
-    WorkspaceExecutorConfigurationService,
+from server.app.services.workspace_execution_configuration import (
+    WorkspaceExecutionConfigurationService,
 )
 from server.app.settings import load_settings
 from server.app.storage_paths import resolve_data_path, resolve_job_dir
@@ -157,8 +157,8 @@ def test_cross_root_path_portability(portable_roots: tuple[Path, Path]) -> None:
     log_result = log_service.read(JOB_ID, int(run["id"]))
     assert "old_root" in log_result["log"]
 
-    workspace_executor_config = WorkspaceExecutorConfigurationService(job_db)
-    job_queries = JobQueryService(job_db, settings, workspace_executor_config)
+    workspace_execution_config = WorkspaceExecutionConfigurationService(job_db)
+    job_queries = JobQueryService(job_db, settings, workspace_execution_config)
     # Snapshot-less job: its definition resolves from the workspace's active
     # revision (schema v50), so publish it before the detail query.
     publish_builtin_revision(job_db, WORKSPACE_ID)

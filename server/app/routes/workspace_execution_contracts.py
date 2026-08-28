@@ -9,12 +9,12 @@ class NodeLimitRequest(BaseModel):
     concurrency_limit: int = Field(ge=1)
 
 
-class WorkspaceExecutorConfigurationResponse(BaseModel):
+class WorkspaceExecutionConfigurationResponse(BaseModel):
     """Workspace execution configuration (P-0.5: node limits + Agent capacity).
 
     Allocations and bindings retired with the executor concept (schema v47);
-    the response type keeps the pre-retirement route/type names until the
-    step-3 contract cleanup.
+    issue #198 renamed the type from the pre-retirement
+    ``WorkspaceExecutorConfigurationResponse`` wording.
     """
 
     node_limits: list[NodeLimitRequest]
@@ -65,5 +65,5 @@ class WorkspaceConfigurationRequest(BaseModel):
 class WorkspaceConfigurationResponse(BaseModel):
     workspace: WorkspaceRecord
     settings: WorkspaceSettingsPayload
-    executor_configuration: WorkspaceExecutorConfigurationResponse
+    execution_configuration: WorkspaceExecutionConfigurationResponse
     agent_capacity: int | None = None
