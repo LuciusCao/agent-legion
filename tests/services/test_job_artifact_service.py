@@ -70,7 +70,10 @@ class _FakeObjectStore:
         self._error = error
 
     def lookup(self, job_id: str, name: str) -> dict:
-        return {"storage_key": f"jobs/ws/{job_id}/{name}"}
+        return {
+            "storage_key": f"jobs/ws/{job_id}/{name}",
+            "size_bytes": len(self._payload),
+        }
 
     def open_stream(self, row: dict) -> io.BytesIO:
         if self._error is not None:
@@ -137,19 +140,33 @@ def test_job_artifact_service_open_raw_local_path(job_db, job):
     assert raw.name == "frame.png"
     assert raw.path is not None
     assert raw.path.read_bytes() == b"\x89PNG-bytes"
-    assert not raw.is_stream
+    assert raw.stream is None
+
+
+def test_job_artifact_service_open_raw_local_wins_over_object_store(job_db, job):
+    """本地 job_dir 与对象存储同时有副本时，本地文件优先（与 read() 同序）。"""
+    storage = resolve_job_dir(job, job_db.jobs_dir)
+    storage.mkdir(parents=True, exist_ok=True)
+    (storage / "frame.png").write_bytes(b"local-bytes")
+    service = JobArtifactService(job_db, _FakeObjectStore(payload=b"store-bytes"))
+
+    raw = service.open_raw(job["id"], "frame.png")
+
+    assert raw.path is not None
+    assert raw.path.read_bytes() == b"local-bytes"
+    assert raw.stream is None
 
 
 def test_job_artifact_service_open_raw_object_stream(job_db, job):
-    """本地缓存已淘汰 → 对象存储流式输出。"""
+    """本地缓存已淘汰 → 对象存储流式输出（带 manifest 的 size_bytes）。"""
     service = JobArtifactService(job_db, _FakeObjectStore(payload=b"\x00\x01binary"))
 
     raw = service.open_raw(job["id"], "result.json")
 
-    assert raw.is_stream
     assert raw.stream is not None
     assert raw.stream.read() == b"\x00\x01binary"
     assert raw.path is None
+    assert raw.size_bytes == len(b"\x00\x01binary")
 
 
 def test_job_artifact_service_open_raw_missing(job_db, job):

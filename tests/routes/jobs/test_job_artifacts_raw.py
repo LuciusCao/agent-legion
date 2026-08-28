@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from server.app.routes.job_artifacts import raw_media_type
+from server.app.routes.job_artifact_raw import raw_media_type
 from tests.helpers import publish_legacy_intake_revision, seed_workspace_agent_definitions
 
 
@@ -78,7 +78,8 @@ def test_raw_endpoint_rejects_traversal(client_factory):
 
         response = c.get(f"/api/jobs/{job_id}/artifacts/..%2Fagent_legion.sqlite/raw")
 
-    assert response.status_code in (400, 404)
+    # InvalidOperationError 确定性映射 400；放宽到 404 会让守卫退化也绿灯。
+    assert response.status_code == 400
 
 
 def test_raw_endpoint_unknown_job_is_404(client_factory):
@@ -97,3 +98,47 @@ def test_raw_media_type_whitelist_matrix():
     assert raw_media_type("a.svg") == "application/octet-stream"
     assert raw_media_type("a") == "application/octet-stream"
     assert raw_media_type("png") == "application/octet-stream"
+
+
+def test_raw_response_object_stream_chunks_and_closes():
+    """流分支单元验证：BackgroundTask 挂 close 钩子，块迭代输出完整字节。"""
+    import asyncio
+    import io
+
+    from server.app.routes.job_artifact_raw import raw_response
+    from server.app.services.job_artifact_raw import RawArtifact
+
+    class _TrackableClose:
+        """组合式包装：BytesIO 的 close 不可靠被子类覆盖，改记录转发。"""
+
+        def __init__(self, payload: bytes):
+            self._buf = io.BytesIO(payload)
+            self.closed_flag = False
+
+        def read(self, size: int = -1) -> bytes:
+            return self._buf.read(size)
+
+        def close(self) -> None:
+            self.closed_flag = True
+            self._buf.close()
+
+    trackable = _TrackableClose(b"y" * 100)
+    raw = RawArtifact(name="frame.png", stream=trackable, size_bytes=100)
+    response = raw_response(raw)
+
+    body = b"".join(asyncio.run(_collect(response.body_iterator)))
+    assert body == b"y" * 100
+    # 白名单媒体内联渲染 + Content-Length 透传。
+    assert response.media_type == "image/png"
+    assert response.headers["content-length"] == "100"
+    # BackgroundTask 指向流的 close：客户端中断/正常完成都会执行。
+    assert response.background is not None
+    asyncio.run(response.background())
+    assert trackable.closed_flag is True
+
+
+async def _collect(iterator):
+    chunks = []
+    async for chunk in iterator:
+        chunks.append(chunk if isinstance(chunk, bytes) else chunk.encode())
+    return chunks

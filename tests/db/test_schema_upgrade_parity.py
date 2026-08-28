@@ -43,16 +43,16 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v62, workspace_id_key_binding) must leave
+# Effects the newest migration (v63, workspace_preview_config) must leave
 # behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v62 is a pure data migration — no DDL, no indexes, no
-# columns — so the undo inventory is empty; the previous newest (v61
-# workspace_workflow_drafts, DDL-only via the schema file) is part of the
-# v62-1 baseline shape.
+# SCHEMA_VERSION-1. v63 is DDL-only (workspaces.preview_config_json via the
+# schema-file replay) — one column, no tables, no indexes.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("workspaces", "preview_config_json", "text"),
+)
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "workspace_id_key_binding"
+_NEWEST_MIGRATION_NAME = "workspace_preview_config"
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]

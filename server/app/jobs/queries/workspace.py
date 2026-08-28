@@ -14,6 +14,7 @@ from server.app.jobs.node_limits import (
     replace_workspace_node_limits,
 )
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.workspace_records import workspace_record as _workspace_record
 
 _ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
@@ -25,24 +26,6 @@ def _safe_identifier(value: str, fallback: str) -> str:
 
 def _workspace_id(name: str) -> str:
     return _safe_identifier(name.lower(), "workspace")
-
-
-def _decode_json_object(value: Any) -> dict[str, Any]:
-    if not value:
-        return {}
-    try:
-        loaded = json.loads(str(value))
-    except json.JSONDecodeError:
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
-
-
-def _workspace_record(row: dict[str, Any]) -> dict[str, Any]:
-    record = dict(row)
-    record["resource_config"] = _decode_json_object(record.get("resource_config_json"))
-    record["intake_config"] = _decode_json_object(record.get("intake_config_json"))
-    record["node_config"] = _decode_json_object(record.get("node_config_json"))
-    return record
 
 
 class WorkspaceQueriesMixin(ConnectionQueriesMixin):
@@ -147,6 +130,7 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
         default_agent_provider: str | None = None,
         default_agent_model: str | None = None,
         default_agent_thinking: str | None = None,
+        preview_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         fields: dict[str, Any] = {}
         if name is not None:
@@ -185,6 +169,12 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
             fields["default_agent_model"] = default_agent_model.strip()
         if default_agent_thinking is not None:
             fields["default_agent_thinking"] = default_agent_thinking.strip()
+        if preview_config is not None:
+            fields["preview_config_json"] = json.dumps(
+                preview_config,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
         if not fields:
             workspace = self.get_workspace(workspace_id)
             if workspace is None:

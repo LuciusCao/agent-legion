@@ -864,9 +864,10 @@
     "server/app/jobs/queries/studio_chat_messages.py": 74,
     "server/app/jobs/queries/workflow_drafts.py": 47,
     "server/app/jobs/queries/workflow_revisions.py": 95,
-    "server/app/jobs/queries/workspace.py": 318,
+    "server/app/jobs/queries/workspace.py": 317,
     "server/app/jobs/queries/workspace_node_limits.py": 26,
     "server/app/jobs/queries/workspace_packages.py": 109,
+    "server/app/jobs/queries/workspace_records.py": 31,
     "server/app/jobs/run_freeze.py": 41,
     "server/app/jobs/storage_layout.py": 36,
     "server/app/jobs/workflow_upgrade_mutation.py": 55,
@@ -905,6 +906,7 @@
     "server/app/routes/instance_openclaw_contracts.py": 21,
     "server/app/routes/instance_settings.py": 47,
     "server/app/routes/instance_settings_contracts.py": 44,
+    "server/app/routes/job_artifact_raw.py": 92,
     "server/app/routes/job_artifacts.py": 44,
     "server/app/routes/job_batch_filter_contracts.py": 44,
     "server/app/routes/job_batches.py": 28,
@@ -1023,6 +1025,7 @@
     "server/app/services/job_artifact_maintenance.py": 304,
     "server/app/services/job_artifact_mutation.py": 124,
     "server/app/services/job_artifact_objects.py": 298,
+    "server/app/services/job_artifact_raw.py": 69,
     "server/app/services/job_artifacts.py": 72,
     "server/app/services/job_deletion.py": 194,
     "server/app/services/job_dir_index.py": 76,
@@ -1151,6 +1154,7 @@
     "server/app/services/workspace_package_contracts.py": 23,
     "server/app/services/workspace_package_create.py": 103,
     "server/app/services/workspace_package_lifecycle.py": 55,
+    "server/app/services/workspace_preview_settings.py": 63,
     "server/app/services/workspace_secrets.py": 37,
     "server/app/services/workspace_settings_payload.py": 43,
     "server/app/services/workspace_settings_schemas.py": 42,
@@ -1348,6 +1352,5 @@
     "workspace_libs/node_artifacts.py": 54,
     "workspace_libs/node_sdk.py": 197,
     "workspace_libs/url_guard.py": 52
-  },
-  "version": 3
+  }
 }

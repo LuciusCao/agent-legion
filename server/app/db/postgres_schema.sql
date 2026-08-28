@@ -12,7 +12,8 @@ create table if not exists workspaces (
   description text not null default '',
   default_agent_provider text not null default '',
   default_agent_model text not null default '',
-  default_agent_thinking text not null default ''
+  default_agent_thinking text not null default '',
+  preview_config_json text not null default '{}'
 );
 
 -- Idempotent upgrade path for databases created before schema v14:
@@ -27,6 +28,11 @@ alter table workspaces alter column default_workflow_key drop default;
 -- id (bound at creation, immutable; the v62 migration renamed legacy ids to
 -- their keys). Full retirement is tracked in issue #211; until then the
 -- column stays the runtime authority for revision/DAG resolution.
+
+-- Schema v63: workspace-level artifact preview config (job detail left
+-- panel; {"hidden": ["questions.json", ...]}). DDL-only — the idempotent
+-- replay adds the column, no data migration needed.
+alter table workspaces add column if not exists preview_config_json text not null default '{}';
 
 -- Executor allocations/bindings (retired at schema v47): the tables are
 -- still created here so the historical v17/v18 data migrations can replay

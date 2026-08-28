@@ -5605,6 +5605,8 @@ export interface components {
       labelOverrides?: {
         [key: string]: string
       } | null
+      /** Previewhidden */
+      previewHidden?: string[] | null
       /** Workflowkey */
       workflowKey?: string | null
     }
@@ -5831,6 +5833,8 @@ export interface components {
       labelOverrides: {
         [key: string]: string
       }
+      /** Previewhidden */
+      previewHidden?: string[]
       /** Workflowkey */
       workflowKey: string
     }
@@ -5861,6 +5865,8 @@ export interface components {
           [key: string]: unknown
         }
       } | null
+      /** Previewhidden */
+      previewHidden?: string[] | null
       /** Workflowkey */
       workflowKey?: string | null
     }

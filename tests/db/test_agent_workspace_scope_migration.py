@@ -244,4 +244,4 @@ def test_upgrade_from_v45_with_legacy_global_index() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "workspace_id_key_binding"
+    assert migration["name"] == "workspace_preview_config"
