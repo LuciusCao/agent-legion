@@ -6,9 +6,10 @@ import type {
 import editorStyles from './components/WorkflowStructuredEditor.module.css'
 import styles from './WorkflowNodeRuntimeSettings.module.css'
 import { useRuntimeModelOptions } from './runtimeModelOptions'
+import { WorkflowNodeThinkingField } from './WorkflowNodeThinkingField'
 import { patchWorkflowNodeExecution } from './workflowStudioYamlDraft.execution'
 import { parseWorkflowNode } from './workflowStudioYamlDraft.parse'
-import type { WorkflowYamlExecutionDefaults } from './workflowStudioYamlDraft.parse'
+import type { WorkflowYamlExecutionDefaults } from './workflowStudioYamlDraft.executionDefaults'
 import { WorkflowRuntimeInheritedField } from './WorkflowRuntimeInheritedField'
 
 export function WorkflowNodeRuntimeSettings(props: {
@@ -68,25 +69,12 @@ export function WorkflowNodeRuntimeSettings(props: {
         readOnly={props.readOnly}
         onChange={(value) => patch('model', value)}
       />
-      <label className={editorStyles.field}>
-        <span className={editorStyles.fieldLabel}>Thinking</span>
-        <select
-          aria-label="Thinking"
-          className={editorStyles.fieldInput}
-          value={execution.thinking ?? ''}
-          disabled={props.readOnly}
-          onChange={(event) => patch('thinking', event.target.value)}
-        >
-          <option value="">
-            {props.defaults.thinking
-              ? `继承 workflow 默认（${props.defaults.thinking}）`
-              : 'runtime 决定'}
-          </option>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-        </select>
-      </label>
+      <WorkflowNodeThinkingField
+        value={execution.thinking ?? ''}
+        inherited={props.defaults.thinking ?? ''}
+        readOnly={props.readOnly}
+        onChange={(value) => patch('thinking', value)}
+      />
       <label className={editorStyles.field}>
         <span className={editorStyles.fieldLabel}>节点补充指令</span>
         <textarea

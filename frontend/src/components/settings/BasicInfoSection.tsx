@@ -1,6 +1,7 @@
-import { MenuItem, TextField } from '@mui/material'
+import { TextField } from '@mui/material'
 import styles from '../../pages/SettingsPage.module.css'
 import type { WorkspaceSettings } from '../../types'
+import { EntityTypeSelect, SaveErrorAlert } from './BasicInfoFields'
 
 interface Props {
   workspaceName: string
@@ -45,29 +46,8 @@ export function BasicInfoSection({
           fullWidth
         />
       </div>
-      <div className={styles.field}>
-        <TextField
-          select
-          label="默认实体类型"
-          variant="outlined"
-          value={entityType}
-          onChange={(event) => onEntityTypeChange(event.target.value)}
-          fullWidth
-        >
-          <MenuItem value="question">question</MenuItem>
-          <MenuItem value="knowledge">knowledge</MenuItem>
-          <MenuItem value="video">video</MenuItem>
-        </TextField>
-      </div>
-      {saveError && (
-        <div
-          className="error-text"
-          role="alert"
-          style={{ color: '#d32f2f', marginTop: 12 }}
-        >
-          {saveError}
-        </div>
-      )}
+      <EntityTypeSelect value={entityType} onChange={onEntityTypeChange} />
+      <SaveErrorAlert message={saveError} />
     </section>
   )
 }

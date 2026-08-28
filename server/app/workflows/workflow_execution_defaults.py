@@ -69,3 +69,15 @@ def apply_execution_defaults(
     if not (defaults.provider or defaults.model or defaults.thinking):
         return nodes
     return {key: merge_execution_defaults(node, defaults) for key, node in nodes.items()}
+
+
+def apply_workflow_execution(
+    raw: dict[str, Any], nodes: dict[str, WorkflowNode]
+) -> tuple[WorkflowNodeExecution, dict[str, WorkflowNode]]:
+    """Load the top-level defaults and merge them into the loaded nodes.
+
+    Single wiring entry for the loader: returns the parsed defaults (for the
+    definition snapshot) alongside the merged node map.
+    """
+    execution = load_workflow_execution(raw)
+    return execution, apply_execution_defaults(nodes, execution)

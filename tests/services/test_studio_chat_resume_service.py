@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
+from server.app.studio_chat import resume as resume_module
 from server.app.studio_chat import service as service_module
 from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 from server.app.studio_chat.registry import StudioAgentRegistryStore
@@ -434,7 +435,7 @@ def test_concurrent_resume_loser_never_tears_down_winner_runtime(chat, monkeypat
     spawn_done = threading.Event()
     loser_thread_holder: list[threading.Thread] = []
     original_find_agent = service._registry.find_agent
-    original_spawn = service_module.spawn_session_runtime
+    original_spawn = resume_module.spawn_session_runtime
 
     def find_agent(agent_id: str):
         # 慢请求：读过 closed 快照后卡在 claim 前，直到 winner 完成 spawn——
@@ -450,7 +451,7 @@ def test_concurrent_resume_loser_never_tears_down_winner_runtime(chat, monkeypat
         return handle
 
     monkeypatch.setattr(service._registry, "find_agent", find_agent)
-    monkeypatch.setattr(service_module, "spawn_session_runtime", spawn_then_signal)
+    monkeypatch.setattr(resume_module, "spawn_session_runtime", spawn_then_signal)
 
     loser_errors: list[Exception] = []
 
@@ -487,7 +488,7 @@ def test_resume_skips_session_resumed_row_when_close_races(chat, monkeypatch) ->
     session = service.create_session(workspace_id, user_id, "fake-agent")
     service.close_session(session["id"], workspace_id)
 
-    original_spawn = service_module.spawn_session_runtime
+    original_spawn = resume_module.spawn_session_runtime
 
     def spawn_then_close(*args, **kwargs):
         handle = original_spawn(*args, **kwargs)
@@ -495,7 +496,7 @@ def test_resume_skips_session_resumed_row_when_close_races(chat, monkeypatch) ->
         service.close_session(session["id"], workspace_id)
         return handle
 
-    monkeypatch.setattr(service_module, "spawn_session_runtime", spawn_then_close)
+    monkeypatch.setattr(resume_module, "spawn_session_runtime", spawn_then_close)
 
     resumed = service.resume_session(session["id"], workspace_id, user_id)
     assert resumed["status"] == "closed"

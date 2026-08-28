@@ -1,4 +1,5 @@
 import editorStyles from './components/WorkflowStructuredEditor.module.css'
+import { WorkflowRuntimeOptionsDatalist } from './WorkflowRuntimeOptionsDatalist'
 
 /**
  * 节点 execution 输入框：空值继承 workflow 顶层 execution 默认（schema v63
@@ -26,13 +27,10 @@ export function WorkflowRuntimeInheritedField(props: {
         list={props.listId}
         onChange={(event) => props.onChange(event.target.value)}
       />
-      {props.listId && (
-        <datalist id={props.listId}>
-          {(props.options ?? []).map((option) => (
-            <option key={option} value={option} />
-          ))}
-        </datalist>
-      )}
+      <WorkflowRuntimeOptionsDatalist
+        id={props.listId}
+        options={props.options}
+      />
       <span className={editorStyles.fieldHint}>
         {props.value ? '覆盖 workflow 默认' : '继承 workflow 默认'}：
         {props.inherited || '未配置'}

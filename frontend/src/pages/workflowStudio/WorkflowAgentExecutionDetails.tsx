@@ -7,7 +7,7 @@ import type { WorkflowNodeRecord } from '../../types'
 import { useShowNodeDetailPreview } from './nodeDetailPreviewContext'
 import { useWorkspaceRuntimeModels } from './useWorkspaceRuntimeModels'
 import { WorkflowNodeRuntimeSettings } from './WorkflowNodeRuntimeSettings'
-import { parseWorkflowExecutionDefaults } from './workflowStudioYamlDraft.parse'
+import { parseWorkflowExecutionDefaults } from './workflowStudioYamlDraft.executionDefaults'
 import styles from './WorkflowAgentExecutionDetails.module.css'
 
 export function WorkflowAgentExecutionDetails(props: {
