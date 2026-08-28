@@ -662,3 +662,32 @@ def test_monotonic_check_shallow_opt_in_skips_anchor_errors(
     write_baseline(root, {"server/app/example.py": 130})
     errors = check_file_budgets(root, policy, ())
     assert any("rose above committed ceiling" in error for error in errors)
+
+
+def test_working_tree_revert_of_committed_raise_passes(tmp_path: Path) -> None:
+    # Documented semantics (review on PR #231): a working-tree fix reverting
+    # an already-committed raise to the older, lower value must pass — the
+    # floor is the minimum across anchors, so the pre-raise value wins.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+    write_baseline(root, {"server/app/example.py": 120})
+    commit_all(root, "raise ceiling by hand")
+    write_baseline(root, {"server/app/example.py": 110})  # revert in working tree
+    assert check_file_budgets(root, policy, ()) == []
+
+
+def test_monotonic_check_fails_when_head_itself_unresolvable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A git repo with zero commits (unborn HEAD) hits the same hard failure
+    # for HEAD itself, not just HEAD^ — the opt-out covers both anchors.
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
+    write_baseline(root, {"server/app/example.py": 105})
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+    ):
+        subprocess.run(argv, cwd=root, check=True)
+    monkeypatch.delenv("AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW", raising=False)
+    errors = check_file_budgets(root, policy, ())
+    assert any("HEAD" in error and "does not resolve" in error for error in errors)

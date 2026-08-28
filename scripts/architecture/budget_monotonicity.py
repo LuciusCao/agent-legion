@@ -22,8 +22,6 @@ __test__ = False
 
 BUDGETS_RELATIVE_PATH = "config/architecture/architecture-budgets.json"
 EXEMPTIONS_RELATIVE_PATH = "config/architecture/architecture-exemptions.yaml"
-
-# env name is long but self-documenting; keep one line
 _SHALLOW_OPT_OUT = "AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW"
 
 
@@ -72,8 +70,8 @@ def _unresolvable_anchor_errors(root: Path) -> list[str]:
             continue
         errors.append(
             f"budget monotonicity: git anchor {revision} does not resolve in this "
-            "checkout (shallow clone?); fetch history (CI: fetch-depth: 0) or set "
-            f"{_SHALLOW_OPT_OUT}=1 to deliberately skip the committed-raise check"
+            "checkout (shallow clone / git error?); fetch history (CI: "
+            f"fetch-depth: 0) or set {_SHALLOW_OPT_OUT}=1 to skip the check"
         )
     return errors
 

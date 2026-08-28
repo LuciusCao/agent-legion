@@ -122,9 +122,10 @@ jobs:
     timeout-minutes: 15
     steps:
       # Full history for the backend static round: budget_monotonicity
-      # compares ceilings against HEAD^ and silently skips missing anchors
-      # (shallow clones), which would gut the check exactly where PRs are
-      # gated (codex review on PR #231). changes already fetches depth 0.
+      # compares ceilings against HEAD^ and hard-fails when the anchor does
+      # not resolve — a depth-1 clone would red the job on every run. Deep
+      # history keeps the anchors resolvable (codex review on PR #231);
+      # changes already fetches depth 0.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
