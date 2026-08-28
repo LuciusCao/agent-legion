@@ -115,6 +115,31 @@ class SequencedLeaseRepository:
         return True
 
 
+class ExplodingHeartbeatRepository:
+    """Lease repository whose heartbeat always raises (#204 layering test)."""
+
+    def __init__(self, threshold: int = 1) -> None:
+        self.heartbeats = 0
+        self.finished: list[tuple[str, ExecutionResult]] = []
+        self.threshold = threshold
+
+    def heartbeat(self, lease_id: str, ttl_seconds: int) -> bool:
+        self.heartbeats += 1
+        raise RuntimeError("connection reset")
+
+    def finish(self, lease_id: str, result: ExecutionResult) -> bool:
+        self.finished.append((lease_id, result))
+        return True
+
+
+class CancelRaisingExecutor(FakeExecutor):
+    """Executor whose cancel() raises (#204 layering test)."""
+
+    def cancel(self, execution_id: str) -> None:
+        self.cancel_calls.append(execution_id)
+        raise RuntimeError("cancel exploded")
+
+
 @pytest.fixture
 def job_dir(tmp_path: Path) -> Path:
     return tmp_path / "job"
@@ -303,6 +328,79 @@ def test_runtime_tolerates_transient_heartbeat_failure(job_dir: Path) -> None:
     assert holder["result"].status == "completed"
     assert executor.cancel_calls == []
     assert len(leases.finished) == 1
+
+
+def test_runtime_heartbeat_exception_counts_as_missed_heartbeat(job_dir: Path) -> None:
+    """#204: an exception from the heartbeat store is treated as one missed
+    heartbeat (counted by the miss/threshold logic), never as a thread-killing
+    error — the heartbeat loop must survive store failures."""
+
+    class _CountingRepo(ExplodingHeartbeatRepository):
+        def heartbeat(self, lease_id: str, ttl_seconds: int) -> bool:
+            self.heartbeats += 1
+            if self.heartbeats <= 2:
+                raise RuntimeError("connection reset")
+            return True
+
+    executor = FakeExecutor("fake")
+    leases = _CountingRepo()
+    runtime = ExecutionRuntime(
+        leases=leases,
+        executor=executor,
+        heartbeat_interval_seconds=0.01,
+        lease_ttl_seconds=90,
+        heartbeat_failure_threshold=3,
+    )
+    claim = _make_claim()
+    context = _make_context(claim, job_dir)
+
+    thread, holder = _run_in_thread(runtime, claim, context)
+    try:
+        assert executor.execute_started.wait(timeout=1.0), "executor did not start in time"
+        time.sleep(0.05)
+        executor.unblock()
+    finally:
+        thread.join(timeout=1.0)
+        if thread.is_alive():
+            executor.unblock()
+            thread.join(timeout=1.0)
+
+    # Two failing heartbeats stayed below the threshold of 3: no cancellation,
+    # the execution completed, and the lease was finished exactly once.
+    assert holder["result"].status == "completed"
+    assert executor.cancel_calls == []
+    assert len(leases.finished) == 1
+
+
+def test_runtime_lost_lease_survives_cancel_failure(job_dir: Path) -> None:
+    """#204: when the lost-lease escalation (cancel) itself raises, the
+    lease-lost signal must still be delivered — the execution is failed via
+    the lease_lost path and the heartbeat thread stays alive to set it."""
+    executor = CancelRaisingExecutor("fake")
+    leases = FakeLeaseRepository(heartbeat_active=False)
+    runtime = ExecutionRuntime(
+        leases=leases,
+        executor=executor,
+        heartbeat_interval_seconds=0.01,
+        lease_ttl_seconds=30,
+    )
+    claim = _make_claim()
+    context = _make_context(claim, job_dir)
+
+    thread, holder = _run_in_thread(runtime, claim, context)
+    try:
+        assert executor.execute_started.wait(timeout=1.0), "executor did not start in time"
+        thread.join(timeout=1.0)
+    finally:
+        if thread.is_alive():
+            executor.unblock()
+            thread.join(timeout=1.0)
+
+    result = holder["result"]
+    assert result.status == "failed"
+    assert "lease" in result.error_message.lower()
+    assert len(leases.finished) == 1
+    assert leases.finished[0][0] == claim.lease_id
 
 
 def test_runtime_cancellation_result_finishes_lease(job_dir: Path) -> None:

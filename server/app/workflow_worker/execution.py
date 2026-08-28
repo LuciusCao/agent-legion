@@ -48,6 +48,15 @@ def run_claim(
     try:
         return worker.runtime.run(claim, context)
     except Exception as exc:
+        # #204 broad-except audit: pool-thread safety net. This function runs
+        # on an executor pool thread whose unhandled exception would be
+        # swallowed into the future by ThreadPoolExecutor — the lease would
+        # never be finished here and the node would hang until the sweeper
+        # expires it. ExecutionRuntime.run already normalizes executor
+        # adapter errors, so reaching this catch means the runtime itself
+        # failed (e.g. the lease finish inside it); the lease is finished as
+        # failed with the full traceback logged, and a failed result is
+        # returned so the worker's accounting stays consistent.
         logger.exception("workflow execution %s failed", claim.execution_id)
         result = ExecutionResult(
             status="failed",
@@ -66,6 +75,14 @@ def reap_futures(worker: WorkflowWorkerThread) -> None:
             try:
                 future.result()
             except Exception:
+                # #204 broad-except audit: reaping must continue — the worker
+                # bookkeeping (futures/future_claims entries) is popped below
+                # regardless, so one poisoned future cannot wedge the state
+                # dict. run_claim already reported and compensated the
+                # failure; this catch only guards against bookkeeping-time
+                # surprises (e.g. a cancel racing the result). The traceback
+                # is logged; nothing is masked because the result is
+                # discarded by design.
                 logger.exception("workflow future %s failed", execution_id)
             worker.state.futures.pop(execution_id, None)
             worker.state.future_claims.pop(execution_id, None)

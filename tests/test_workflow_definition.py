@@ -417,3 +417,32 @@ def test_node_config_schema_survives_revision_snapshot_round_trip(tmp_path: Path
 
     reloaded = workflow_definition_from_mapping(yaml.safe_load(definition_to_yaml(definition)))
     assert reloaded.nodes["one"].config_schema == schema
+
+
+def test_workflow_definition_from_dict_converts_corrupt_shapes_to_definition_error():
+    """Codex P1 on PR #243: structurally corrupt persisted payloads (nodes as
+    a list, null entries) used to escape as AttributeError/TypeError —
+    killing the whole workflow-worker scan and startup instead of degrading
+    just that workspace. All corrupt shapes must surface as the definition
+    error the scan path handles per-workspace."""
+    from server.app.workflows.definition import workflow_definition_from_dict
+    from server.app.workflows.schema import WorkflowDefinitionError
+
+    corrupt_payloads = [
+        {"key": "k", "nodes": [{"a": 1}]},  # nodes is a list
+        {"key": "k", "nodes": {"a": None}},  # null node entry
+        {"key": "k", "nodes": {"a": "string"}},  # non-mapping node entry
+        {"key": "k", "edges": {"a": 1}},  # edges is a mapping
+        {"key": "k", "edges": [None]},  # null edge entry
+        {"key": "k", "edges": ["string"]},  # non-mapping edge entry
+        # subagent review on PR #243: nested terminal/condition corruption
+        # used to escape as TypeError/ValueError/AttributeError — same
+        # worker-killing path as the shapes above.
+        {"key": "k", "nodes": {"a": {"terminal": "x"}}},  # terminal as str
+        {"key": "k", "nodes": {"a": {"terminal": 5}}},  # terminal as int
+        {"key": "k", "edges": [{"condition": "y"}]},  # condition as str
+        {"key": "k", "edges": [{"when": ["y"]}]},  # when as list
+    ]
+    for payload in corrupt_payloads:
+        with pytest.raises(WorkflowDefinitionError):
+            workflow_definition_from_dict(payload)

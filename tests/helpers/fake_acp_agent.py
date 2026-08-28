@@ -105,7 +105,19 @@ class _FakeAgent:
                 }
             )
         elif method == "session/prompt":
-            self._run_prompt(message["params"].get("sessionId", self.acp_session_id))
+            failure = self._run_prompt(message["params"].get("sessionId", self.acp_session_id))
+            if failure is not None:
+                # Agent-side turn failure: the prompt response is a JSON-RPC
+                # error, which the SDK surfaces as an exception inside the
+                # session thread's prompt loop (#204 layering tests).
+                self._send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {"code": -32000, "message": failure},
+                    }
+                )
+                return
             self._send(
                 {
                     "jsonrpc": "2.0",
@@ -122,7 +134,7 @@ class _FakeAgent:
         else:
             self._send({"jsonrpc": "2.0", "id": request_id, "result": {}})
 
-    def _run_prompt(self, session_id: str) -> None:
+    def _run_prompt(self, session_id: str) -> str | None:
         for step in self.script.get("on_prompt", []):
             if "notify" in step:
                 self._send(
@@ -138,8 +150,11 @@ class _FakeAgent:
             elif "terminal" in step:
                 outcome = self._run_terminal(session_id, step["terminal"])
                 self._sink({"terminal_outcome": outcome, "record": step.get("record")})
+            elif "fail" in step:
+                return str(step["fail"])
         if self.script.get("wait_for_cancel"):
             self.pump_until(lambda: self.cancelled)
+        return None
 
     def _request_permission(self, session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         request_id = f"fake-{self._next_request_id}"

@@ -161,9 +161,16 @@ def try_claim_code_worker_node(
             # fails this node instead of poisoning every later poll pass.
             fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
         except Exception:
-            # Unexpected failure (unconfigured bundle dir, DB errors): same
-            # trade-off as the agent enqueue pool — log and leave the node
-            # pending so the next poll pass re-evaluates it.
+            # #204 broad-except audit: deliberate per-node containment.
+            # Expected configuration failures (ValueError / VaultError /
+            # JobServiceError) are caught above and fail this node; whatever
+            # lands here is unexpected (unconfigured bundle dir, DB error).
+            # The poll pass must survive it: the node is left pending for the
+            # next pass to re-evaluate (the in-flight marker is discarded in
+            # the finally), so a transient outage self-heals while a
+            # persistent one repeats loudly — logger.exception keeps the full
+            # traceback. Narrowing this further would let one broken node
+            # abort the whole claim pass.
             logger.exception("code enqueue failed for %s.%s", job_id, node.key)
         finally:
             dispatch.discard_in_flight(job_id, node.key)

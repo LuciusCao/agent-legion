@@ -91,6 +91,16 @@ class WorkflowWorkerThread:
                 try:
                     processed = self._poll()
                 except Exception:
+                    # #204 broad-except audit: deliberate poll-loop safety
+                    # net. Killing this thread would stop ALL workflow
+                    # scheduling for the process until restart; the next pass
+                    # (0.2s/3s later) is the built-in retry. logger.exception
+                    # keeps the full traceback; processed=False merely widens
+                    # the backoff. _poll itself narrows expected per-job
+                    # failures into per-node outcomes (fail_node_config) and
+                    # per-evaluation skips (ready_cache), so anything landing
+                    # here is a pass-level programming error or
+                    # infrastructure outage — visible in logs, never fatal.
                     logger.exception("workflow worker poll failed")
                     processed = False
                 self.state.wake_event.wait(0.2 if processed else 3)
@@ -177,6 +187,10 @@ class WorkflowWorkerThread:
             try:
                 self.runtime.cancel(execution_id)
             except Exception:
+                # #204 broad-except audit: shutdown safety net — every
+                # remaining execution gets its cancel attempted; one failing
+                # cancel must not skip the others or break out of the
+                # shutdown sequence below (pool shutdown, state cleanup).
                 logger.exception("failed to cancel execution %s during shutdown", execution_id)
         futures = list(self.state.futures.values())
         done, pending = wait(futures, timeout=max(timeout, grace))
@@ -184,6 +198,10 @@ class WorkflowWorkerThread:
             try:
                 future.result()
             except Exception:
+                # #204 broad-except audit: same as reap_futures — the failure
+                # was already reported and compensated by run_claim; shutdown
+                # must keep draining the remaining futures instead of
+                # aborting mid-loop with pools still registered.
                 logger.exception("workflow future failed during shutdown")
         if pending:
             logger.warning(

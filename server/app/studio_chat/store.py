@@ -52,6 +52,13 @@ class StudioChatStore:
         try:
             self._bus.publish(studio_chat_channel(session_id), json.dumps(payload, default=str))
         except Exception:
+            # #204 broad-except audit: deliberate fire-and-forget publish.
+            # SSE delivery is lossy by design (a subscriber that reconnects
+            # re-reads the durable rows this store just wrote); one failed
+            # publish must not fail the DB write that already succeeded. The
+            # narrow interesting failure (bus down) is what the warning is
+            # for — the publish payload itself is regenerable, so a traceback
+            # would add no signal here.
             logger.warning("failed to publish studio chat event for %s", session_id)
 
     def mark_mcp_verified(self, session_id: str) -> None:

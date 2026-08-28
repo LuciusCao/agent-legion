@@ -181,6 +181,14 @@ class StudioChatService:
             # 'starting' row, no leaked token, no orphaned runtime. The status
             # write is guarded (#158): a close that raced the startup window
             # already owns the final 'closed' state.
+            # #204 broad-except audit: the catch stays broad because the
+            # outcome space is genuinely mixed — expected startup refusals
+            # (InvalidOperationError for agent-not-available / start timeout)
+            # AND programming errors must both run this compensation, and both
+            # keep propagating via the bare re-raise (the original type is
+            # never converted, so the two stay distinguishable to the caller
+            # and the route layer). This mirrors the #233 pattern: compensate
+            # broad, classify never.
             detail = str(exc) or exc.__class__.__name__
             self._db.update_studio_chat_session_if(
                 session_id, status_not_in=("closed",), status="error", error_detail=detail[:500]
@@ -193,7 +201,17 @@ class StudioChatService:
                     try:
                         revoke_scoped_token(self._db, token)
                     except Exception:
-                        logger.warning("failed to revoke studio chat token for %s", session_id)
+                        # #204: teardown safety net (same semantics as
+                        # runtime.teardown): a failed revoke must not mask
+                        # the startup failure that is already propagating.
+                        # The token TTL plus the maintenance purge are the
+                        # backstop; exc_info keeps the revoke root cause
+                        # visible for operators.
+                        logger.warning(
+                            "failed to revoke studio chat token for %s",
+                            session_id,
+                            exc_info=True,
+                        )
             else:
                 self.teardown_runtime(session_id, runtime)
             raise
@@ -396,5 +414,13 @@ class StudioChatService:
                     session_id, status="closed", closed_at=datetime.now(UTC)
                 )
             except Exception:
-                logger.warning("failed to mark studio chat session %s closed", session_id)
+                # #204 broad-except audit: shutdown safety net. The shutdown
+                # loop must reach every live session — one failing status
+                # write (e.g. DB already closing) must not skip the teardown
+                # of the remaining subprocesses and tokens. The row stays
+                # non-closed but is marked by the next startup's
+                # reap_zombie_sessions, so the state self-heals.
+                logger.warning(
+                    "failed to mark studio chat session %s closed", session_id, exc_info=True
+                )
             self.teardown_runtime(session_id, runtime)

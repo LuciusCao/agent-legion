@@ -18,6 +18,7 @@ from server.app.workflows.schema import (
     WorkflowShardSpec,
     WorkflowTerminal,
 )
+from server.app.workflows.snapshot_shape import ensure_mapping, snapshot_field
 from server.app.workflows.start_node import ensure_start_node, load_start_fields
 from server.app.workflows.validator import _validate_acyclic
 from server.app.workflows.workflow_node_execution import load_node_execution
@@ -305,8 +306,8 @@ def workflow_definition_from_mapping(
 def workflow_definition_from_dict(
     payload: dict[str, Any],
 ) -> WorkflowDefinition:
-    if not isinstance(payload, dict):
-        raise WorkflowDefinitionError("Workflow definition snapshot must be a mapping")
+    nodes_payload = snapshot_field(payload, "nodes", default={}, list_form=False)
+    edges_payload = snapshot_field(payload, "edges", default=[], list_form=True)
     raw = {
         "key": payload.get("key"),
         "label": payload.get("label"),
@@ -315,7 +316,7 @@ def workflow_definition_from_dict(
         "nodes": {},
         "edges": [],
     }
-    for node_key, node in (payload.get("nodes") or {}).items():
+    for node_key, node in nodes_payload.items():
         raw_node = dict(node)
         # Snapshots store the dataclass field name; the yaml spelling is ``type``.
         if "node_type" in raw_node:
@@ -336,17 +337,15 @@ def workflow_definition_from_dict(
                 raw_node.pop(placeholder, None)
         else:
             raw_node.pop("accepted_item_types", None)
-        terminal = raw_node.get("terminal")
-        if terminal is not None:
-            raw_node["terminal"] = dict(terminal)
+        ensure_mapping(raw_node.get("terminal"), f"node {node_key} 'terminal'")
         raw["nodes"][node_key] = raw_node
-    for edge in payload.get("edges") or []:
+    for edge in edges_payload:
         raw_edge = {
             "from": edge.get("source") or edge.get("from"),
             "to": edge.get("target") or edge.get("to"),
         }
-        condition = edge.get("condition") or edge.get("when")
-        if condition is not None:
+        condition = ensure_mapping(edge.get("condition") or edge.get("when"), "edge 'condition'")
+        if condition:
             raw_edge["when"] = {
                 "artifact": condition.get("artifact"),
                 "path": condition.get("path"),

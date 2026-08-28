@@ -46,6 +46,13 @@ class WorkflowMaintenance:
             if tokens:
                 logger.info("Purged %s expired scoped tokens", tokens)
         except Exception:
+            # #204 broad-except audit: this runs on the one-shot
+            # workflow-cleanup daemon thread — an unhandled exception would
+            # kill the thread before _cleanup_running is reset in the finally,
+            # so the broad catch plus finally is what keeps the next hourly
+            # cleanup eligible. All real failures here (missing dirs, DB
+            # errors during token purge) are logged with the full traceback;
+            # the next interval is the retry.
             logger.exception("Failed to clean up old logs")
         finally:
             self._cleanup_running = False
