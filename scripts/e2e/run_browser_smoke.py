@@ -1,11 +1,15 @@
-"""Deterministic browser smoke E2E runner (test architecture plan, Phase 4A).
+"""Deterministic browser smoke E2E runner (test architecture plan, Phase 4).
 
-Boots the real backend (uvicorn factory app, no workflow worker thread) and a
-vite preview static server, then runs the Playwright smoke specs in
+Boots the real backend (uvicorn factory app, workflow worker/sweeper threads
+on) and a vite preview static server, then runs the Playwright smoke specs in
 ``frontend/e2e``. Deterministic and offline: the E2E PostgreSQL database is
 recreated per run, CMS question-detail lookups are served by an in-process
 stub (the ``cms-internal`` external connection is seeded to point at it), and
-jobs stay queued after intake because no executor/worker is started.
+the main-flow spec's velites Agent node talks to an in-process stub LLM
+gateway (OpenAI SSE) claimed through a standalone Worker process
+(``worker/executor.py``). The demo workspace stays paused at startup, so the
+original smoke specs keep their queued-job behavior; only the dedicated
+``e2e_main_flow`` workspace is resumed and executes nodes for real.
 
 Example:
     uv run python scripts/e2e/run_browser_smoke.py
@@ -29,6 +33,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from scripts.e2e._cms_stub import seed_cms_connection, start_cms_stub  # noqa: E402
 from scripts.e2e._database import db_dsn, e2e_database_name, reset_database  # noqa: E402
+from scripts.e2e._demo_seed import seed_demo_workspace  # noqa: E402
+from scripts.e2e._llm_stub import StubGateway  # noqa: E402
+from scripts.e2e._worker import ensure_velites_binary, start_main_flow_runtime  # noqa: E402
 
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 RESULTS_DIR = FRONTEND_DIR / "e2e-results"
@@ -62,54 +69,12 @@ def _find_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _seed_demo_workspace(dsn: str, vault_key: str) -> None:
-    """Provision the demo workspace (id=education_video_problems_generation).
-
-    Schema v62 removed the create-path sample-template seed, so the demo DAG,
-    factory Agents, node codes and materials the smoke specs drive are seeded
-    up front via the same seeder `make import-demo` uses. The skill lock step
-    resolves refs via git, so the repo-shipped demo skills are first imported
-    into DATA_DIR (scripts/import-demo.sh via AGENT_LEGION_DEMO_SKILLS_DIR)
-    and passed as skill_root. load_settings reads AGENT_LEGION_* from
-    os.environ, so the e2e overrides wrap the seed call.
-    """
-    from scripts.seed_demo import seed_demo
-    from server.app.settings import load_settings
-
-    skills_root = DATA_DIR / "demo-skills"
-    skills_root.mkdir(parents=True, exist_ok=True)
-    imported = subprocess.run(
-        [str(PROJECT_ROOT / "scripts" / "import-demo.sh")],
-        cwd=PROJECT_ROOT,
-        env={**os.environ, "AGENT_LEGION_DEMO_SKILLS_DIR": str(skills_root)},
-        capture_output=True,
-        text=True,
-    )
-    if imported.returncode != 0:
-        raise RuntimeError(f"demo skill import failed:\n{imported.stdout}\n{imported.stderr}")
-
-    overrides = {
-        "AGENT_LEGION_SKIP_DOTENV": "1",
-        "AGENT_LEGION_DATABASE_URL": dsn,
-        "AGENT_LEGION_DATA_DIR": str(DATA_DIR),
-        "AGENT_LEGION_VAULT_MASTER_KEY": vault_key,
-    }
-    previous = {key: os.environ.get(key) for key in overrides}
-    os.environ.update(overrides)
-    try:
-        seed_demo(load_settings(), skill_root=skills_root)
-    finally:
-        for key, value in previous.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
-
 def _backend_env(port: int, db_name: str, vault_key: str) -> dict[str, str]:
     env = dict(os.environ)
     for key in _CMS_ENV_KEYS:
         env[key] = ""
+    # Host code-pool sandbox: velites is probed on PATH (shutil.which).
+    env["PATH"] = f"{PROJECT_ROOT / 'data' / 'bin'}:{env.get('PATH', '')}"
     env.update(
         {
             "AGENT_LEGION_SKIP_DOTENV": "1",
@@ -122,13 +87,13 @@ def _backend_env(port: int, db_name: str, vault_key: str) -> dict[str, str]:
 
 
 def _backend_command(port: int) -> list[str]:
-    # Factory app keeps start_worker=False: background intake still runs, but
-    # no workflow worker/sweeper threads, so nodes never execute (no LLM/pi).
+    # Factory wrapper flips start_worker=True: sweeper + workflow worker
+    # (Host code pool + agent dispatch enqueue) run inside the backend.
     return [
         sys.executable,
         "-m",
         "uvicorn",
-        "server.app.main:create_app",
+        "scripts.e2e._backend_factory:create_app",
         "--factory",
         "--host",
         "127.0.0.1",
@@ -216,9 +181,12 @@ def main() -> int:
     cms_base_url = f"http://127.0.0.1:{cms_stub_port}/v2"
     backend_log = RESULTS_DIR / "backend.log"
     frontend_log = RESULTS_DIR / "frontend-preview.log"
+    worker_log = RESULTS_DIR / "worker.log"
     backend_proc: subprocess.Popen | None = None
     frontend_proc: subprocess.Popen | None = None
+    worker_proc: subprocess.Popen | None = None
     cms_stub = None
+    llm_stub: StubGateway | None = None
     returncode = 1
 
     try:
@@ -231,6 +199,7 @@ def main() -> int:
         DATA_DIR.mkdir(parents=True)
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
+        ensure_velites_binary()
         cms_stub = start_cms_stub(cms_stub_port)
         backend_proc = _start_process(
             _backend_command(backend_port),
@@ -243,7 +212,17 @@ def main() -> int:
             logger.error("Backend failed to start; log tail:\n%s", _log_tail(backend_log))
             return 1
         seed_cms_connection(db_dsn(db_name), cms_base_url, vault_key)
-        _seed_demo_workspace(db_dsn(db_name), vault_key)
+        seed_demo_workspace(db_dsn(db_name), vault_key, DATA_DIR, PROJECT_ROOT)
+
+        # Main-flow runtime: stub LLM gateway + e2e_main_flow workspace seed +
+        # standalone Worker (real claim/execute/upload protocol) for the
+        # velites Agent node.
+        llm_stub, worker_proc = start_main_flow_runtime(
+            dsn=db_dsn(db_name),
+            data_dir=DATA_DIR,
+            backend_base_url=backend_base_url,
+            log_path=worker_log,
+        )
 
         if not _frontend_bundle_fresh():
             _build_frontend()
@@ -280,11 +259,14 @@ def main() -> int:
         )
         returncode = completed.returncode
     finally:
+        _terminate_process(worker_proc)
         _terminate_process(frontend_proc)
         _terminate_process(backend_proc)
         if cms_stub is not None:
             cms_stub.shutdown()
             cms_stub.server_close()
+        if llm_stub is not None:
+            llm_stub.close()
         elapsed = time.monotonic() - started
         logger.info("Total elapsed: %.1fs (results in %s)", elapsed, RESULTS_DIR)
     return returncode

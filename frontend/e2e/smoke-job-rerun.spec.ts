@@ -61,8 +61,9 @@ test('在 job 详情页通过重跑对话框重跑节点', async ({ page }, test
   await rerunDialog.getByRole('button', { name: '评审练习题' }).click()
   await rerunDialog.getByRole('button', { name: '确认重跑' }).click()
 
-  // No worker runs in this environment, so nodes stay pending; the rerun
-  // marks downstream nodes stale, which the progress panel shows as 已过期.
+  // The demo workspace stays paused at startup (only e2e_main_flow is
+  // resumed), so nodes stay pending; the rerun marks downstream nodes stale,
+  // which the progress panel shows as 已过期.
   await expect(rerunDialog).toBeHidden()
   await expect(page.getByText('已过期').first()).toBeVisible()
 })
