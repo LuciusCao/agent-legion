@@ -12,9 +12,7 @@ import { AgentRoutingSection } from '../components/AgentRoutingSection'
 import { LocalNodeLimitSection } from '../components/LocalNodeLimitSection'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { BasicInfoSection } from '../components/settings/BasicInfoSection'
-import { AgentDefaultsSection } from '../components/settings/AgentDefaultsSection'
 import { DangerZone } from '../components/settings/DangerZone'
-import { IntakeConfigSection } from '../components/settings/IntakeConfigSection'
 import { WorkerTokensSection } from '../components/settings/WorkerTokensSection'
 import { WorkspaceWorkersSection } from '../components/settings/WorkspaceWorkersSection'
 import { WorkspaceMembersSection } from '../components/settings/WorkspaceMembersSection'
@@ -65,9 +63,7 @@ export function SettingsPage() {
   const navItems = useMemo(
     () => [
       { id: 'basic-info', label: '基础信息' },
-      { id: 'intake-config', label: '接入与资源' },
       { id: 'agent-workers', label: 'Agent 与 Worker' },
-      { id: 'agent-defaults', label: 'Agent 默认配置' },
       ...(isAdmin ? [{ id: 'workspace-members', label: '成员管理' }] : []),
       ...(hasCodeNodes
         ? [{ id: 'code-node-concurrency', label: '代码节点并发' }]
@@ -133,15 +129,11 @@ export function SettingsPage() {
           <BasicInfoSection
             workspaceName={workspaceName}
             workspaceDescription={workspaceDescription}
+            entityType={settings.entityType}
+            saveError={saveError}
             onNameChange={setWorkspaceName}
             onDescriptionChange={setWorkspaceDescription}
-          />
-
-          <IntakeConfigSection
-            settings={settings}
-            workflowDefinition={workflowDefinition}
-            saveError={saveError}
-            setSettings={setSettings}
+            onEntityTypeChange={(entityType) => setSettings({ entityType })}
           />
 
           {/* schema v62：workflow key 与 workspace id 绑定且不可变，
@@ -159,11 +151,6 @@ export function SettingsPage() {
               <WorkspaceWorkersSection workspaceId={workspaceId ?? ''} />
             )}
           </section>
-          <AgentDefaultsSection
-            workspaceId={workspaceId}
-            agentDefaults={settings.agentDefaults}
-            onSaved={(agentDefaults) => setSettings({ agentDefaults })}
-          />
           {isAdmin && <WorkspaceMembersSection workspaceId={workspaceId} />}
           {hasCodeNodes && (
             <section id="code-node-concurrency" className={styles.section}>

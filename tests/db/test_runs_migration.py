@@ -130,6 +130,17 @@ def test_v52_database_upgrades_via_init_db() -> None:
     """v52 → v53: every legacy payload shape lands on the run/job columns."""
     with write_transaction(TEST_DATABASE_URL) as conn:
         _rebuild_v52_shape(conn)
+        # A real pre-v63 database still has the retired workspace Agent-default
+        # columns; the v62 migration replay inserts them (init_db's post-chain
+        # cleanup drops them again).
+        for column in (
+            "default_agent_provider",
+            "default_agent_model",
+            "default_agent_thinking",
+        ):
+            conn.execute(
+                f"alter table workspaces add column if not exists {column} text not null default ''"
+            )
         conn.execute(
             "insert into workspaces(id, name, default_workflow_key)"
             " values ('ws-run', 'runs-ws', 'wf_demo')"
@@ -240,7 +251,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "workspace_id_key_binding"
+    assert migration["name"] == "workspace_settings_retirement"
 
 
 @pytest.mark.fresh_schema

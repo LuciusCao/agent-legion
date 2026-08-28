@@ -72,24 +72,6 @@ def test_job_intake_rejects_missing_workspace(intake_service):
         )
 
 
-def test_job_intake_rejects_disabled_mode(intake_service):
-    workspace = intake_service.job_db.get_workspace("default")
-    workspace = intake_service.job_db.update_workspace(
-        workspace["id"], intake_config={"enabled_modes": []}
-    )
-
-    with pytest.raises(InvalidOperationError, match="Intake mode is disabled"):
-        intake_service.create_batch(
-            workspace["id"],
-            {
-                "workflow_key": "education_video_problems_generation",
-                "source_kind": "direct_ids",
-                "knowledge_point_ids": ["Q1"],
-                "knowledge_codes": [],
-            },
-        )
-
-
 def test_job_intake_rejects_unsupported_entity_mode(intake_service):
     with pytest.raises(InvalidOperationError, match="Unsupported entity and intake mode"):
         intake_service.create_batch(

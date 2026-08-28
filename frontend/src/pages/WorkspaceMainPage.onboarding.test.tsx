@@ -204,16 +204,12 @@ describe('WorkspaceMainPage onboarding guide', () => {
       workspaceDescription: '',
       settings: {
         entityType: 'question',
-        intakeModes: [],
-        labelOverrides: {},
         workflowKey: '',
       },
       originalWorkspaceName: 'WS One',
       originalWorkspaceDescription: '',
       originalSettings: {
         entityType: 'question',
-        intakeModes: [],
-        labelOverrides: {},
         workflowKey: '',
       },
       isDirty: false,
@@ -276,12 +272,13 @@ describe('WorkspaceMainPage onboarding guide', () => {
     expect(
       await screen.findByRole('button', { name: '进入 Studio' })
     ).toBeInTheDocument()
-    expect(screen.getByText('已完成')).toBeInTheDocument()
+    // 默认 mock 下无 agent 路由（无待配 agent 节点），步骤 1、2 均完成。
+    expect(screen.getAllByText('已完成')).toHaveLength(2)
   })
 
-  it('unlocks step 3 when agent nodes carry execution overrides even without workspace defaults', async () => {
-    // agent 节点 execution.* 已配齐：即使 workspace 默认为空（settings 快照
-    // 返回空 agentDefaults），解析链（节点覆盖优先）也应判定就绪。
+  it('unlocks step 3 when agent nodes carry effective execution', async () => {
+    // agent 节点 execution.* 已配齐（active revision 快照的节点值已被
+    // loader 合并顶层默认）：解析链就绪，步骤 2/3 解锁。
     mockApi.mockImplementation((path: string) => {
       if (path === '/api/workspaces/ws1/stats') {
         return Promise.resolve(baseStats)
@@ -289,10 +286,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
       if (path === '/api/workspaces/ws1/settings') {
         return Promise.resolve({
           entityType: 'question',
-          intakeModes: ['manual'],
-          labelOverrides: {},
           workflowKey: 'question_content',
-          agentDefaults: { provider: '', model: '', thinking: '' },
         })
       }
       if (path === '/api/workspaces/ws1/agent-routes') {
@@ -318,13 +312,13 @@ describe('WorkspaceMainPage onboarding guide', () => {
     expect(
       await screen.findByRole('button', { name: '添加条目' })
     ).toBeEnabled()
-    // 解析链就绪 + 接入模式已勾选 → 步骤 1、2 均完成。
+    // 解析链就绪 → 步骤 1、2 均完成。
     expect(screen.getAllByText('已完成')).toHaveLength(2)
   })
 
   it('keeps step 3 locked when an agent node lacks provider/model resolution', async () => {
-    // agent 节点存在（agentRoutes 命中）但 execution 未覆盖且 workspace
-    // 默认为空：解析链两端都缺，步骤 2/3 保持锁定。
+    // agent 节点存在（agentRoutes 命中）但 execution 未配 provider/model：
+    // 步骤 2/3 保持锁定。
     mockApi.mockImplementation((path: string) => {
       if (path === '/api/workspaces/ws1/stats') {
         return Promise.resolve(baseStats)
@@ -332,10 +326,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
       if (path === '/api/workspaces/ws1/settings') {
         return Promise.resolve({
           entityType: 'question',
-          intakeModes: ['manual'],
-          labelOverrides: {},
           workflowKey: 'question_content',
-          agentDefaults: { provider: '', model: '', thinking: '' },
         })
       }
       if (path === '/api/workspaces/ws1/agent-routes') {

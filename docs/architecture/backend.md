@@ -207,13 +207,14 @@ server/app/
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions` | `list_sessions` | routes/studio_chat.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `get_session` | routes/studio_chat.py |
 | DELETE | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `close_session` | routes/studio_chat.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/resume` | `resume_session` | routes/studio_chat.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `list_messages` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `send_message` | routes/studio_chat.py |
-| GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/events` | `session_events` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/cancel` | `cancel_turn` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/allow-all` | `set_allow_all` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/{request_id}` | `answer_permission` | routes/studio_chat.py |
 | PUT | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/context` | `update_context` | routes/studio_chat_context.py |
+| GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/events` | `session_events` | routes/studio_chat_events.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/token-usage` | `get_run_token_usage` | routes/token_usage.py |
 | GET | `/jobs/{job_id}/token-usage` | `get_job_token_usage` | routes/token_usage.py |
 | GET | `/workspaces/{workspace_id}/token-usage` | `get_workspace_token_usage` | routes/token_usage.py |
@@ -244,6 +245,7 @@ server/app/
 | GET | `/workspaces/{workspace_id}/executor-configuration` | `get_workspace_executor_configuration` | routes/workspace_executors.py |
 | GET | `/workspaces/{workspace_id}/node-runs` | `list_workspace_runs` | routes/workspace_runs.py |
 | GET | `/workspaces/{workspace_id}/dag` | `get_workspace_dag` | routes/workspace_runs.py |
+| GET | `/workspaces/{workspace_id}/runtime-models` | `get_workspace_runtime_models` | routes/workspace_runtime_models.py |
 | GET | `/workspaces/{workspace_id}/secrets` | `list_workspace_secrets` | routes/workspace_secrets.py |
 | PUT | `/workspaces/{workspace_id}/secrets/{name}` | `put_workspace_secret` | routes/workspace_secrets.py |
 | DELETE | `/workspaces/{workspace_id}/secrets/{name}` | `delete_workspace_secret` | routes/workspace_secrets.py |
@@ -325,8 +327,8 @@ server/app/
 | WorkspaceExecutorConfigurationResponse | BaseModel | node_limits: list[NodeLimitRequest], migration_warnings: list[str], agent_cap... | app/routes/executor_contracts.py |
 | WorkspaceAgentRouteEntry | BaseModel | workflow_key: str, node_key: str, node_label: str, capability: str, agent_id:... | app/routes/executor_contracts.py |
 | WorkspaceAgentRoutesResponse | BaseModel | routes: list[WorkspaceAgentRouteEntry] | app/routes/executor_contracts.py |
-| WorkspaceSettingsPayload | BaseModel | entityType: str, intakeModes: list[str], labelOverrides: dict[str, str], work... | app/routes/executor_contracts.py |
-| WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, intakeModes: list[str] | None, labelOverrides: dict[s... | app/routes/executor_contracts.py |
+| WorkspaceSettingsPayload | BaseModel | entityType: str, workflowKey: str | app/routes/executor_contracts.py |
+| WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, workflowKey: str | None | app/routes/executor_contracts.py |
 | WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/executor_contracts.py |
 | WorkspaceConfigurationResponse | BaseModel | workspace: WorkspaceRecord, settings: WorkspaceSettingsPayload, executor_conf... | app/routes/executor_contracts.py |
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
@@ -341,10 +343,10 @@ server/app/
 | JobSelectionMixin | BaseModel | job_ids: list[str] | None, filter: JobFilterPayload | None, exclude_ids: list... | app/routes/job_batch_filter_contracts.py |
 | JobBatchRequest | BaseModel | workflow_key: str, entity: str | None, source_kind: str, question_ids: list[s... | app/routes/job_contracts.py |
 | JobBatchResponse | BaseModel | batch: dict[str, Any], created_count: int, jobs: list[dict[str, Any]] | app/routes/job_contracts.py |
-| WorkspaceCreateRequest | BaseModel | id: str, name: str, default_entity: str, resource_config: dict[str, Any], int... | app/routes/job_contracts.py |
+| WorkspaceCreateRequest | BaseModel | id: str, name: str, default_entity: str, resource_config: dict[str, Any] | app/routes/job_contracts.py |
 | WorkspaceUpdateRequest | BaseModel | name: str | None, description: str | None, default_entity: str | None, resour... | app/routes/job_contracts.py |
 | WorkspaceSettingsResponse | BaseModel | settings: dict[str, Any] | app/routes/job_contracts.py |
-| WorkspaceSettingsSectionRequest | BaseModel | entityType: str | None, intakeModes: list[str] | None, labelOverrides: dict[s... | app/routes/job_contracts.py |
+| WorkspaceSettingsSectionRequest | BaseModel | entityType: str | None, workflowKey: str | None, nodeConfig: dict[str, dict[s... | app/routes/job_contracts.py |
 | WorkspaceResponse | BaseModel | workspace: WorkspaceRecord | app/routes/job_contracts.py |
 | WorkspacesResponse | BaseModel | workspaces: list[WorkspaceRecord] | app/routes/job_contracts.py |
 | DeleteJobResponse | BaseModel | deleted: str | app/routes/job_contracts.py |
@@ -521,6 +523,7 @@ server/app/
 | ActiveWorkflowRevisionResponse | BaseModel | revision: WorkflowRevisionSummary, workflow: workflow_contracts.WorkflowDefin... | app/routes/workflow_revisions_contracts.py |
 | WorkflowRevisionDetailResponse | BaseModel | revision: WorkflowRevisionSummary, workflow: workflow_contracts.WorkflowDefin... | app/routes/workflow_revisions_contracts.py |
 | WorkspaceRecord | BaseModel | id: str, name: str, description: str, default_workflow_key: str, default_enti... | app/routes/workspace_contracts.py |
+| WorkspaceRuntimeModelsResponse | BaseModel | runtimes: dict[str, dict[str, list[str]]] | app/routes/workspace_runtime_models.py |
 | WorkspaceSecretSetRequest | BaseModel | value: str | app/routes/workspace_secrets.py |
 | WorkspaceSecretMetadata | BaseModel | name: str, created_at: str, updated_at: str | app/routes/workspace_secrets.py |
 | WorkspaceSecretsResponse | BaseModel | secrets: list[WorkspaceSecretMetadata] | app/routes/workspace_secrets.py |

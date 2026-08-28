@@ -9,8 +9,9 @@ archivals inside the workspace are never overwritten or resurrected.
 
 Execution configuration (provider/model/thinking) is deliberately NOT part of
 these definitions — it resolves per node from node ``execution.*`` overrides
-to workspace defaults (``default_agent_*``); the demo expects the operator to
-configure workspace defaults. Skills resolve to the local source roots
+to the workflow top-level ``execution`` defaults (workspace-level defaults
+were retired at schema v63); the demo expects the operator to configure
+execution in Studio. Skills resolve to the local source roots
 imported by ``make import-demo`` (see ``server.app.skills.builtin_sources``).
 """
 

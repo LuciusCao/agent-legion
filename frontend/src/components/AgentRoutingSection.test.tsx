@@ -13,8 +13,6 @@ const executorConfiguration = {
 
 const settings = {
   entityType: 'video',
-  intakeModes: [],
-  labelOverrides: {},
   workflowKey: 'demo_video_workflow',
   resources: {},
 }

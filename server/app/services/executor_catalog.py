@@ -18,8 +18,8 @@ def execution_catalog(
     The Agent half is workspace-scoped (schema v46): Studio shows the
     workspace's own published definitions, with no global fallback. The
     executors half retired with the executor concept (schema v47). Execution
-    defaults are workspace-scoped: the Studio "继承默认" hints read the
-    workspace settings payload's agentDefaults.
+    defaults are workflow-scoped: the Studio default hints read the workflow
+    top-level ``execution`` block (workspace agentDefaults retired at v63).
     """
     if agent_definitions is None:
         agent_definitions = published_agent_definitions(settings.database_url, workspace_id)

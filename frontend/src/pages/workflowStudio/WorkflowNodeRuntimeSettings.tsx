@@ -1,19 +1,20 @@
-import type { WorkflowNodeRecord } from '../../types'
+import type {
+  WorkflowNodeRecord,
+  WorkspaceRuntimeModelsResponse,
+} from '../../types'
 import editorStyles from './components/WorkflowStructuredEditor.module.css'
 import styles from './WorkflowNodeRuntimeSettings.module.css'
+import { useRuntimeModelOptions } from './runtimeModelOptions'
 import { patchWorkflowNodeExecution } from './workflowStudioYamlDraft.execution'
 import { parseWorkflowNode } from './workflowStudioYamlDraft.parse'
+import type { WorkflowYamlExecutionDefaults } from './workflowStudioYamlDraft.parse'
 import { WorkflowRuntimeInheritedField } from './WorkflowRuntimeInheritedField'
-
-type RuntimeDefaults = {
-  provider?: string | null
-  model?: string | null
-  thinking?: string | null
-}
 
 export function WorkflowNodeRuntimeSettings(props: {
   node: WorkflowNodeRecord
-  defaults: RuntimeDefaults
+  runtime: string
+  defaults: WorkflowYamlExecutionDefaults
+  runtimeModels?: WorkspaceRuntimeModelsResponse['runtimes']
   definitionYaml: string
   setDefinitionYaml: (yaml: string) => void
   readOnly?: boolean
@@ -34,12 +35,22 @@ export function WorkflowNodeRuntimeSettings(props: {
         value
       )
     )
+
+  const { providerOptions, modelOptions } = useRuntimeModelOptions(
+    props.runtimeModels,
+    props.runtime,
+    execution.provider ?? ''
+  )
+  const datalistPrefix = `runtime-options-${props.node.key}`
+
   return (
     <div className={styles.fields}>
       <WorkflowRuntimeInheritedField
         label="Provider"
         value={execution.provider ?? ''}
         inherited={props.defaults.provider ?? ''}
+        options={providerOptions}
+        listId={`${datalistPrefix}-provider`}
         readOnly={props.readOnly}
         onChange={(value) => patch('provider', value)}
       />
@@ -47,6 +58,8 @@ export function WorkflowNodeRuntimeSettings(props: {
         label="Model"
         value={execution.model ?? ''}
         inherited={props.defaults.model ?? ''}
+        options={modelOptions}
+        listId={`${datalistPrefix}-model`}
         readOnly={props.readOnly}
         onChange={(value) => patch('model', value)}
       />
@@ -60,7 +73,9 @@ export function WorkflowNodeRuntimeSettings(props: {
           onChange={(event) => patch('thinking', event.target.value)}
         >
           <option value="">
-            继承全局（{props.defaults.thinking || '未配置'}）
+            {props.defaults.thinking
+              ? `继承 workflow 默认（${props.defaults.thinking}）`
+              : 'runtime 决定'}
           </option>
           <option value="low">Low</option>
           <option value="medium">Medium</option>

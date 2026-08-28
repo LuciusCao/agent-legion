@@ -109,6 +109,12 @@ MIGRATIONS: list[SchemaMigration] = [
     # workspace_id rows in every child table and the agent_workers scope
     # JSON, so it must see every other workspace-shape change settled.
     SchemaMigration(62, "workspace_id_key_binding", migrate_workspace_id_key_binding),
+    # v63 retires the workspace-level Agent defaults: the three
+    # default_agent_* columns are dropped in the post-chain cleanup sweep
+    # (schema.py) because the v62 data migration still replays inserts that
+    # reference them on older databases. No data migration — execution config
+    # is per-node / workflow-top-level now.
+    SchemaMigration(63, "workspace_settings_retirement"),
 ]
 
 assert [m.version for m in MIGRATIONS] == sorted(m.version for m in MIGRATIONS), (

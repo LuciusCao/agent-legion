@@ -181,6 +181,8 @@ def _node(provider: str = "", model: str = "", thinking: str = "") -> WorkflowNo
 
 @pytest.mark.no_db
 def test_resolve_execution_node_override_wins() -> None:
+    # schema v63：workspace 默认已退役，节点 execution（含 loader 合并的
+    # workflow 顶层默认）是唯一来源；workspace dict 不再被读取。
     workspace = {
         "default_agent_provider": "ws-provider",
         "default_agent_model": "ws-model",
@@ -200,13 +202,10 @@ def test_resolve_execution_node_override_wins() -> None:
 
 
 @pytest.mark.no_db
-def test_resolve_execution_falls_back_to_workspace_defaults() -> None:
+def test_resolve_execution_ignores_retired_workspace_defaults() -> None:
     workspace = {"default_agent_provider": "ws-provider", "default_agent_model": "ws-model"}
-    block = resolve_execution_block(_node(), workspace, "pi")
-    assert block["binary"] == "pi"
-    assert block["provider"] == "ws-provider"
-    assert block["model"] == "ws-model"
-    assert block["thinking"] == ""
+    with pytest.raises(ValueError, match="requires a provider"):
+        resolve_execution_block(_node(model="m"), workspace, "pi")
 
 
 @pytest.mark.no_db
@@ -215,6 +214,12 @@ def test_resolve_execution_requires_provider_and_model() -> None:
         resolve_execution_block(_node(model="m"), {}, "velites")
     with pytest.raises(ValueError, match="requires a model"):
         resolve_execution_block(_node(provider="p"), {}, "velites")
+
+
+@pytest.mark.no_db
+def test_resolve_execution_error_points_at_studio_and_top_level_defaults() -> None:
+    with pytest.raises(ValueError, match="workflow top-level execution default"):
+        resolve_execution_block(_node(), {}, "velites")
 
 
 @pytest.mark.no_db

@@ -27,6 +27,7 @@ export function WorkflowNodeExecutionSection(props: Props) {
           <WorkflowAgentDefinitionCard definition={agent} />
           <WorkflowAgentExecutionDetails
             node={props.node}
+            runtime={agent.runtime}
             definitionYaml={props.definitionYaml}
             setDefinitionYaml={props.setDefinitionYaml}
             readOnly={props.readOnly}

@@ -29,8 +29,6 @@ export function useWorkspaceOnboardingSteps(
         workflowKey,
         workflowDefinition,
         agentRoutes: settingsSnapshot?.agentRoutes ?? [],
-        agentDefaults: settingsSnapshot?.settings.agentDefaults,
-        intakeModes: settingsSnapshot?.settings.intakeModes,
         workspaceId,
         goStudio: () => navigate(`/workspaces/${workspaceId}/workflow-studio`),
         goSettings: () => navigate('settings'),

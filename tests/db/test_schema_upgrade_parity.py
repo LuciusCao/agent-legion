@@ -43,16 +43,22 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v62, workspace_id_key_binding) must leave
-# behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v62 is a pure data migration — no DDL, no indexes, no
-# columns — so the undo inventory is empty; the previous newest (v61
-# workspace_workflow_drafts, DDL-only via the schema file) is part of the
-# v62-1 baseline shape.
+# Effects the newest migration (v63, workspace_settings_retirement) must
+# leave behind so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. v63's only effect is the post-chain cleanup dropping the
+# three retired workspaces.default_agent_* columns — rewinding re-adds them
+# (a v62 database still has them) so the upgrade under test must drop them
+# again to match a fresh catalog.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "workspace_id_key_binding"
+_NEWEST_MIGRATION_NAME = "workspace_settings_retirement"
+# (table, column DDL) pairs re-created by the undo step.
+_NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = (
+    ("workspaces", "default_agent_provider text not null default ''"),
+    ("workspaces", "default_agent_model text not null default ''"),
+    ("workspaces", "default_agent_thinking text not null default ''"),
+)
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]
@@ -68,6 +74,8 @@ def _undo_newest_migration(database_dsn: str) -> None:
             conn.execute(f"alter table {table} drop column if exists {column}")
         for index_name in _NEWEST_MIGRATION_INDEXES:
             conn.execute(f"drop index if exists {index_name}")
+        for table, column_ddl in _NEWEST_MIGRATION_COLUMNS_RESTORE:
+            conn.execute(f"alter table {table} add column if not exists {column_ddl}")
         conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
 
 

@@ -20,6 +20,10 @@ from server.app.workflows.schema import (
 )
 from server.app.workflows.start_node import ensure_start_node, load_start_fields
 from server.app.workflows.validator import _validate_acyclic
+from server.app.workflows.workflow_execution_defaults import (
+    apply_execution_defaults,
+    load_workflow_execution,
+)
 from server.app.workflows.workflow_node_execution import load_node_execution
 
 
@@ -288,7 +292,8 @@ def workflow_definition_from_mapping(
         raise WorkflowDefinitionError("Workflow schema_version must be an integer")
 
     intake = _load_intake(raw)
-    nodes = _load_nodes(raw_nodes)
+    execution = load_workflow_execution(raw)
+    nodes = apply_execution_defaults(_load_nodes(raw_nodes), execution)
     edges = _load_edges(raw, nodes, schema_version)
     nodes, edges = ensure_start_node(nodes, edges)
     _validate_acyclic(nodes, edges)
@@ -299,6 +304,7 @@ def workflow_definition_from_mapping(
         nodes=nodes,
         edges=edges,
         schema_version=schema_version,
+        execution=execution,
     )
 
 
@@ -312,6 +318,7 @@ def workflow_definition_from_dict(
         "label": payload.get("label"),
         "schema_version": payload.get("schema_version", 1),
         "intake": payload.get("intake", {}),
+        "execution": payload.get("execution"),
         "nodes": {},
         "edges": [],
     }

@@ -294,7 +294,7 @@ def test_create_workspace_rejects_retired_fields(tmp_path):
     assert response.status_code == 422
 
 
-def test_create_workspace_stores_default_entity_and_intake_config(tmp_path):
+def test_create_workspace_stores_default_entity(tmp_path):
     from server.app.jobs import JobQueries
 
     db_path = TEST_DATABASE_URL
@@ -302,15 +302,13 @@ def test_create_workspace_stores_default_entity_and_intake_config(tmp_path):
     workspace = queries.create_workspace(
         "Intake WS",
         default_entity="knowledge",
-        intake_config={"allowed_entities": ["question", "knowledge"]},
         default_workflow_key="education_video_problems_generation",
     )
 
     assert workspace["default_entity"] == "knowledge"
-    assert workspace["intake_config"] == {"allowed_entities": ["question", "knowledge"]}
 
 
-def test_create_workspace_uses_default_entity_and_intake_config_defaults(tmp_path):
+def test_create_workspace_uses_default_entity_defaults(tmp_path):
     from server.app.jobs import JobQueries
 
     db_path = TEST_DATABASE_URL
@@ -320,10 +318,9 @@ def test_create_workspace_uses_default_entity_and_intake_config_defaults(tmp_pat
     )
 
     assert workspace["default_entity"] == "question"
-    assert workspace["intake_config"] == {}
 
 
-def test_update_workspace_persists_default_entity_and_intake_config(tmp_path):
+def test_update_workspace_persists_default_entity(tmp_path):
     from server.app.jobs import JobQueries
 
     db_path = TEST_DATABASE_URL
@@ -335,17 +332,14 @@ def test_update_workspace_persists_default_entity_and_intake_config(tmp_path):
     workspace = queries.update_workspace(
         workspace_id,
         default_entity="knowledge",
-        intake_config={"max_batch_size": 50},
     )
     fetched = queries.get_workspace(workspace_id)
 
     assert workspace["default_entity"] == "knowledge"
-    assert workspace["intake_config"] == {"max_batch_size": 50}
     assert fetched["default_entity"] == "knowledge"
-    assert fetched["intake_config"] == {"max_batch_size": 50}
 
 
-def test_create_workspace_with_intake_config(tmp_path):
+def test_create_workspace_rejects_retired_intake_config(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
@@ -363,13 +357,10 @@ def test_create_workspace_with_intake_config(tmp_path):
             },
         )
 
-    assert response.status_code == 200
-    workspace = response.json()["workspace"]
-    assert workspace["default_entity"] == "knowledge"
-    assert workspace["intake_config"] == {"allowed_entities": ["question", "knowledge"]}
+    assert response.status_code == 422
 
 
-def test_update_workspace_intake_config(tmp_path):
+def test_update_workspace_rejects_retired_intake_config(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
@@ -389,11 +380,5 @@ def test_update_workspace_intake_config(tmp_path):
                 "intake_config": {"max_batch_size": 50},
             },
         )
-        fetched = c.get(f"/api/workspaces/{workspace_id}")
 
-    assert response.status_code == 200
-    workspace = response.json()["workspace"]
-    assert workspace["default_entity"] == "knowledge"
-    assert workspace["intake_config"] == {"max_batch_size": 50}
-    assert fetched.json()["workspace"]["default_entity"] == "knowledge"
-    assert fetched.json()["workspace"]["intake_config"] == {"max_batch_size": 50}
+    assert response.status_code == 422

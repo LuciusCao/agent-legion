@@ -102,6 +102,12 @@ class WorkflowDefinition:
     nodes: dict[str, WorkflowNode]
     edges: list[WorkflowEdge] = field(default_factory=list)
     schema_version: int = 1
+    # Optional top-level execution defaults (provider/model/thinking only —
+    # prompt stays node-level). The loader merges them into every non-start
+    # node's execution (node value wins), so consumers always read the
+    # effective per-node value. Workspace-level Agent defaults were retired
+    # at schema v63; this block is their workflow-scoped replacement.
+    execution: WorkflowNodeExecution = field(default_factory=WorkflowNodeExecution)
 
     def __post_init__(self) -> None:
         if self.schema_version == 1 and not self.edges:

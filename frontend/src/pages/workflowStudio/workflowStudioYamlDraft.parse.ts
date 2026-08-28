@@ -5,9 +5,16 @@ export type WorkflowYamlObject = {
   label?: string
   schema_version?: number
   intake?: unknown
+  execution?: WorkflowYamlExecutionDefaults
   nodes?: Record<string, WorkflowYamlNode>
   edges?: WorkflowYamlEdge[]
 }
+
+/** 顶层 execution 默认块（provider/model/thinking 子集，prompt 仅节点级）。 */
+export type WorkflowYamlExecutionDefaults = Pick<
+  NonNullable<WorkflowYamlNode['execution']>,
+  'provider' | 'model' | 'thinking'
+>
 
 export type WorkflowYamlNode = {
   type?: 'start' | 'node'
@@ -77,6 +84,17 @@ export function parseWorkflowNode(
     return draft.nodes?.[nodeKey]
   } catch {
     return undefined
+  }
+}
+
+/** 顶层 execution 默认块；YAML 解析失败或缺失时返回空对象。 */
+export function parseWorkflowExecutionDefaults(
+  rawYaml: string
+): WorkflowYamlExecutionDefaults {
+  try {
+    return parseWorkflowYaml(rawYaml).execution ?? {}
+  } catch {
+    return {}
   }
 }
 

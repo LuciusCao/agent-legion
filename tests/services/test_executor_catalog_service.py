@@ -33,7 +33,8 @@ def test_catalog_exposes_published_agent_definitions(
     assert agent["capability"] == "review_questions"
     assert agent["skill"] == "education-video-problems-generation/review-questions"
     assert agent["tools"] == ["read", "write", "bash"]
-    # 全局 provider/model/thinking 投影已退役：执行默认走 workspace agentDefaults。
+    # 全局 provider/model/thinking 投影已退役：执行默认走 workflow 顶层
+    # execution 块（workspace agentDefaults 已随 schema v63 退役）。
     assert "provider" not in agent
     assert "model" not in agent
     assert "thinking" not in agent

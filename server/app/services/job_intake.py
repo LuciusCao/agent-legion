@@ -14,7 +14,6 @@ from server.app.services.job_intake_enqueue import enqueue_intake_batch
 from server.app.services.job_intake_registry import RESOLVERS
 from server.app.services.job_intake_resolution import normalize_values
 from server.app.services.job_intake_workspace import (
-    enabled_intake_modes,
     get_workspace,
     singular_field_name,
 )
@@ -52,12 +51,6 @@ class JobIntakeService:
         mode = definition.intake.modes.get(payload["source_kind"]) if definition.intake else None
         if mode is None:
             raise InvalidOperationError("Unsupported intake mode")
-        enabled_modes = enabled_intake_modes(workspace)
-        if enabled_modes is not None and payload["source_kind"] not in enabled_modes:
-            raise InvalidOperationError(
-                "Intake mode is disabled for this workspace; "
-                "configure enabled modes in workspace settings"
-            )
 
         raw_values = payload.get(mode.input_field)
         if not isinstance(raw_values, list):

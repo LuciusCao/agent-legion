@@ -1,8 +1,9 @@
 """execution_catalog：Agent 列表来自传入 catalog，不再投影全局 provider/model/thinking。
 
 全局 ``workflows.pi`` 投影已随 YAML 退役（agent 配置治理 phase 3）：执行默认
-是 workspace 级配置，全局 catalog 无从投影，前端「继承默认」提示改读
-workspace settings payload 的 agentDefaults。P-0.5（schema v47）后 catalog
+是 workflow 级配置（顶层 ``execution`` 块，schema v63 起 workspace
+agentDefaults 也已退役），全局 catalog 无从投影，前端「继承默认」提示改读
+草稿 YAML 的顶层 execution 块。P-0.5（schema v47）后 catalog
 只剩 Agent 半边：executor 概念整体退役。
 """
 

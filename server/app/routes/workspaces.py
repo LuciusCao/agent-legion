@@ -3,6 +3,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from server.app.agent_workers import AgentWorkerRegistry
 from server.app.auth.dependencies import reject_studio_agent_scope, require_admin
 from server.app.events import JobEventManager
 from server.app.events.bus import workspace_channel
@@ -17,6 +18,7 @@ from server.app.routes.job_contracts import (
 )
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
 from server.app.routes.workspace_contracts import WorkspaceRecord
+from server.app.routes.workspace_runtime_models import create_workspace_runtime_models_router
 from server.app.scheduler_wakeup import notify_schedulable_work, reload_worker_scan_entries
 from server.app.services.job_errors import JobServiceError
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
@@ -109,6 +111,11 @@ def create_workspaces_router(
 
     router.include_router(
         create_dashboard_events_router(settings, job_event_manager=job_event_manager)
+    )
+    # Studio 节点执行 datalist 的数据源（在线 Worker 的 runtime/model 声明）；
+    # registry 是 agent_workers 的既有门面（BOUNDARY-DATA-001）。
+    router.include_router(
+        create_workspace_runtime_models_router(AgentWorkerRegistry(settings.database_url), settings)
     )
     router.include_router(guarded)
 

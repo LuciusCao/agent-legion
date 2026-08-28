@@ -30,7 +30,6 @@ def test_replace_node_limits_is_authoritative(queries: JobQueries) -> None:
         default_workflow_key="demo_workflow",
         default_entity="question",
         resource_config={},
-        intake_config={},
         node_limits=[
             {
                 "workflow_key": "demo_workflow",
@@ -46,7 +45,6 @@ def test_replace_node_limits_is_authoritative(queries: JobQueries) -> None:
         default_workflow_key="demo_workflow",
         default_entity="question",
         resource_config={},
-        intake_config={},
         node_limits=[],
     )
 

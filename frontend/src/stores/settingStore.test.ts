@@ -24,8 +24,6 @@ const mockGetState = vi.mocked(useUiStore.getState)
 
 const defaultSettings: WorkspaceSettings = {
   entityType: 'question',
-  intakeModes: [],
-  labelOverrides: {},
   workflowKey: '',
 }
 
@@ -93,11 +91,9 @@ describe('settingStore', () => {
     expect(state.executorConfiguration.node_limits).toEqual([])
   })
 
-  it('updates labelOverrides via setSettings', () => {
-    useSettingStore.getState().setSettings({ labelOverrides: { a: 'B' } })
-    expect(useSettingStore.getState().settings.labelOverrides).toEqual({
-      a: 'B',
-    })
+  it('updates entityType via setSettings', () => {
+    useSettingStore.getState().setSettings({ entityType: 'knowledge' })
+    expect(useSettingStore.getState().settings.entityType).toBe('knowledge')
   })
 
   it('updates workspaceName and workspaceDescription', () => {
@@ -159,8 +155,6 @@ describe('settingStore', () => {
       workspaceDescription: 'A workspace',
       settings: {
         entityType: 'knowledge' as const,
-        intakeModes: ['direct_ids'],
-        labelOverrides: { direct_ids: '输入 ID' },
         workflowKey: 'knowledge_content',
       },
       executorConfiguration: {
@@ -257,7 +251,6 @@ describe('settingStore', () => {
       settings: {
         ...defaultSettings,
         workflowKey: 'question_content',
-        intakeModes: ['direct_ids'],
       },
       executor_configuration: {
         node_limits: [
@@ -279,7 +272,6 @@ describe('settingStore', () => {
       settings: {
         ...defaultSettings,
         workflowKey: 'question_content',
-        intakeModes: ['direct_ids'],
       },
       originalExecutorConfiguration: emptyExecutorConfiguration,
       executorConfiguration: {

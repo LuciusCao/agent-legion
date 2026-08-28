@@ -40,7 +40,6 @@ def _decode_json_object(value: Any) -> dict[str, Any]:
 def _workspace_record(row: dict[str, Any]) -> dict[str, Any]:
     record = dict(row)
     record["resource_config"] = _decode_json_object(record.get("resource_config_json"))
-    record["intake_config"] = _decode_json_object(record.get("intake_config_json"))
     record["node_config"] = _decode_json_object(record.get("node_config_json"))
     return record
 
@@ -54,7 +53,6 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
         default_workflow_key: str,
         resource_config: dict[str, Any] | None = None,
         default_entity: str = "question",
-        intake_config: dict[str, Any] | None = None,
         description: str = "",
         workspace_id: str | None = None,
     ) -> dict[str, Any]:
@@ -82,7 +80,6 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
             sort_keys=True,
         )
         clean_entity = (default_entity or "question").strip() or "question"
-        intake_config_json = json.dumps(intake_config or {}, ensure_ascii=False, sort_keys=True)
         clean_description = (description or "").strip()
 
         with self.connect() as conn:
@@ -104,9 +101,9 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
                 """
                 insert into workspaces(
                   id, name, description, default_workflow_key, resource_config_json,
-                  default_entity, intake_config_json
+                  default_entity
                 )
-                values (%s, %s, %s, %s, %s, %s, %s)
+                values (%s, %s, %s, %s, %s, %s)
                 """,
                 (
                     workspace_id,
@@ -115,7 +112,6 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
                     clean_workflow_key,
                     resource_config_json,
                     clean_entity,
-                    intake_config_json,
                 ),
             )
             row = conn.execute("select * from workspaces where id=%s", (workspace_id,)).fetchone()
@@ -142,11 +138,7 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
         default_workflow_key: str | None = None,
         resource_config: dict[str, Any] | None = None,
         default_entity: str | None = None,
-        intake_config: dict[str, Any] | None = None,
         node_config: dict[str, Any] | None = None,
-        default_agent_provider: str | None = None,
-        default_agent_model: str | None = None,
-        default_agent_thinking: str | None = None,
     ) -> dict[str, Any]:
         fields: dict[str, Any] = {}
         if name is not None:
@@ -167,24 +159,12 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
         if default_entity is not None:
             clean_entity = (default_entity or "question").strip() or "question"
             fields["default_entity"] = clean_entity
-        if intake_config is not None:
-            fields["intake_config_json"] = json.dumps(
-                intake_config,
-                ensure_ascii=False,
-                sort_keys=True,
-            )
         if node_config is not None:
             fields["node_config_json"] = json.dumps(
                 node_config,
                 ensure_ascii=False,
                 sort_keys=True,
             )
-        if default_agent_provider is not None:
-            fields["default_agent_provider"] = default_agent_provider.strip()
-        if default_agent_model is not None:
-            fields["default_agent_model"] = default_agent_model.strip()
-        if default_agent_thinking is not None:
-            fields["default_agent_thinking"] = default_agent_thinking.strip()
         if not fields:
             workspace = self.get_workspace(workspace_id)
             if workspace is None:
@@ -218,7 +198,6 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
         default_workflow_key: str,
         default_entity: str,
         resource_config: dict[str, Any],
-        intake_config: dict[str, Any],
         node_limits: Sequence[Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
         clean_name = name.strip()
@@ -234,7 +213,7 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
                 """
                 update workspaces
                 set name=%s, description=%s, default_workflow_key=%s, default_entity=%s,
-                    resource_config_json=%s, intake_config_json=%s,
+                    resource_config_json=%s,
                     updated_at=current_timestamp
                 where id=%s
                 """,
@@ -244,7 +223,6 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
                     default_workflow_key,
                     default_entity,
                     json.dumps(resource_config, ensure_ascii=False, sort_keys=True),
-                    json.dumps(intake_config, ensure_ascii=False, sort_keys=True),
                     workspace_id,
                 ),
             )

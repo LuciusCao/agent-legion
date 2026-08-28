@@ -115,7 +115,7 @@ describe('workspace api', () => {
     )
   })
 
-  it('patches workspace default_entity and intake_config', async () => {
+  it('patches workspace default_entity', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -125,7 +125,6 @@ describe('workspace api', () => {
             name: 'Math',
             default_workflow_key: 'demo_workflow',
             default_entity: 'knowledge',
-            intake_config: { enabled_modes: ['manual'] },
           },
         }),
     } as Response)
@@ -133,18 +132,15 @@ describe('workspace api', () => {
 
     const workspace = await updateWorkspace('math', {
       default_entity: 'knowledge',
-      intake_config: { enabled_modes: ['manual'] },
     })
 
     expect(workspace.default_entity).toBe('knowledge')
-    expect(workspace.intake_config).toEqual({ enabled_modes: ['manual'] })
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/workspaces/math',
       expect.objectContaining({
         method: 'PATCH',
         body: JSON.stringify({
           default_entity: 'knowledge',
-          intake_config: { enabled_modes: ['manual'] },
         }),
       })
     )
@@ -161,7 +157,6 @@ describe('workspace api', () => {
             default_workflow_key: 'demo_workflow',
             default_entity: 'knowledge',
             resource_config: { storage: 's3' },
-            intake_config: { enabled_modes: ['manual', 'cms'] },
           },
         }),
     } as Response)
@@ -170,9 +165,6 @@ describe('workspace api', () => {
     const workspace = await createWorkspace('physics', 'Physics')
 
     expect(workspace.default_entity).toBe('knowledge')
-    expect(workspace.intake_config).toEqual({
-      enabled_modes: ['manual', 'cms'],
-    })
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/workspaces',
       expect.objectContaining({

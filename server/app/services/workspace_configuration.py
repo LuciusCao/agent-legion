@@ -29,17 +29,6 @@ from server.app.workflows.builtin_demo import DEMO_WORKFLOW_KEY
 from server.app.workflows.definition import WorkflowDefinition
 
 
-def _build_intake_config(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "enabled_modes": patch["intakeModes"]
-        if patch.get("intakeModes") is not None
-        else current["intakeModes"],
-        "label_overrides": patch["labelOverrides"]
-        if patch.get("labelOverrides") is not None
-        else current["labelOverrides"],
-    }
-
-
 class WorkspaceConfigurationService:
     def __init__(
         self,
@@ -94,7 +83,6 @@ class WorkspaceConfigurationService:
                 default_workflow_key=workspace_id,
                 default_entity=payload.get("default_entity", "question"),
                 resource_config=payload.get("resource_config", {}),
-                intake_config=payload.get("intake_config", {}),
                 workspace_id=workspace_id,
             )
         except ValueError as exc:
@@ -120,7 +108,6 @@ class WorkspaceConfigurationService:
                 description=payload.get("description"),
                 default_entity=payload.get("default_entity"),
                 resource_config=payload.get("resource_config"),
-                intake_config=payload.get("intake_config"),
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
@@ -195,7 +182,6 @@ class WorkspaceConfigurationService:
         # untouched so legacy rows keep whatever the migration left behind.
         raw_resource_config = workspace.get("resource_config")
         resource_config = dict(raw_resource_config) if isinstance(raw_resource_config, dict) else {}
-        intake_config = _build_intake_config(current, settings_patch)
         if agent_capacity is not None and agent_capacity <= 0:
             raise InvalidOperationError("Agent capacity must be a positive integer")
         try:
@@ -206,7 +192,6 @@ class WorkspaceConfigurationService:
                 default_workflow_key=workflow_key,
                 default_entity=settings_patch.get("entityType") or str(current["entityType"]),
                 resource_config=resource_config,
-                intake_config=intake_config,
                 node_limits=node_limits,
             )
             # None means "leave unchanged" — the workspace keeps any
@@ -232,16 +217,11 @@ class WorkspaceConfigurationService:
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
         if section == "intake":
-            intake_config = workspace.get("intake_config")
-            next_intake_config = dict(intake_config) if isinstance(intake_config, dict) else {}
-            if patch.get("intakeModes") is not None:
-                next_intake_config["enabled_modes"] = patch["intakeModes"]
-            if patch.get("labelOverrides") is not None:
-                next_intake_config["label_overrides"] = patch["labelOverrides"]
+            # Intake modes / label overrides are retired (schema v63); only
+            # the entry entity type remains configurable here.
             workspace = self.job_db.update_workspace(
                 workspace_id,
                 default_entity=patch.get("entityType"),
-                intake_config=next_intake_config,
             )
         elif section == "workflow":
             # Schema v62: the workflow key is immutable (bound to the id).
@@ -261,22 +241,6 @@ class WorkspaceConfigurationService:
                 published_agent_definitions(self.settings.database_url, workspace_id),
                 workspace,
                 patch,
-            )
-        elif section == "agent-defaults":
-            defaults = patch.get("agentDefaults")
-            if not isinstance(defaults, dict):
-                raise InvalidOperationError("agentDefaults payload is required")
-            values: dict[str, Any] = {}
-            for key in ("provider", "model", "thinking"):
-                value = defaults.get(key)
-                if value is not None and not isinstance(value, str):
-                    raise InvalidOperationError(f"agentDefaults.{key} must be a string")
-                values[key] = value
-            workspace = self.job_db.update_workspace(
-                workspace_id,
-                default_agent_provider=values["provider"],
-                default_agent_model=values["model"],
-                default_agent_thinking=values["thinking"],
             )
 
         else:

@@ -15,13 +15,15 @@ vi.mock('./AgentEditor', () => ({
   AgentEditor: () => <div data-testid="agent-editor-stub" />,
 }))
 
-// 「继承默认」提示来自 workspace settings 的 agentDefaults（hook 拉取），
-// 不再读 executor catalog 的 agent 条目。
-vi.mock('./useWorkspaceAgentDefaults', () => ({
-  useWorkspaceAgentDefaults: () => ({
-    provider: 'deepseek',
-    model: 'your-model-b',
-    thinking: 'low',
+// 「继承默认」提示来自草稿 YAML 顶层 execution 块；datalist 选项来自
+// useWorkspaceRuntimeModels（在线 Worker 声明的 runtime/provider/model）。
+vi.mock('./useWorkspaceRuntimeModels', () => ({
+  useWorkspaceRuntimeModels: () => ({
+    data: {
+      runtimes: {
+        pi: { deepseek: ['your-model-b', 'your-model-c'] },
+      },
+    },
   }),
 }))
 
@@ -52,7 +54,7 @@ const agentCatalog: AgentDefinition[] = [
 ]
 
 const editorProps = {
-  definitionYaml: `nodes:\n  generate_key_info:\n    capability: generate_key_info\n`,
+  definitionYaml: `execution:\n  provider: deepseek\n  model: your-model-b\n  thinking: low\nnodes:\n  generate_key_info:\n    capability: generate_key_info\n`,
   setDefinitionYaml: () => {},
   agentCatalog,
   workflowKey: 'demo-wf',
@@ -123,7 +125,7 @@ describe('WorkflowNodeExecutionSection', () => {
         prompt: '',
       },
     }
-    const initialYaml = `nodes:\n  generate_key_info:\n    capability: generate_key_info\n    execution:\n      provider: deepseek\n`
+    const initialYaml = `execution:\n  provider: deepseek\nnodes:\n  generate_key_info:\n    capability: generate_key_info\n    execution:\n      provider: deepseek\n`
     const { rerender } = renderSection({
       node: nodeWithProvider,
       agentCatalog,
@@ -138,7 +140,8 @@ describe('WorkflowNodeExecutionSection', () => {
       target: { value: '' },
     })
 
-    expect(nextYaml).not.toContain('provider:')
+    // 顶层 execution 默认保留在 YAML，节点级 provider（6 空格缩进）必须被移除。
+    expect(nextYaml).not.toContain('      provider:')
     rerender(
       <TestQueryProvider>
         <WorkflowNodeExecutionSection
@@ -153,7 +156,40 @@ describe('WorkflowNodeExecutionSection', () => {
       </TestQueryProvider>
     )
     expect(screen.getByLabelText('Provider')).toHaveValue('')
-    expect(screen.getByText('继承全局：deepseek')).toBeInTheDocument()
+    expect(screen.getByText('继承 workflow 默认：deepseek')).toBeInTheDocument()
+  })
+
+  it('offers datalist options from the runtime models of online workers', () => {
+    renderSection({ node, ...editorProps })
+
+    const providerInput = screen.getByLabelText('Provider') as HTMLInputElement
+    const providerList = document.getElementById(
+      providerInput.getAttribute('list')!
+    ) as HTMLDataListElement
+    expect(providerList).not.toBeNull()
+    expect(
+      Array.from(providerList.options).map((option) => option.value)
+    ).toEqual(['deepseek'])
+
+    // Model 选项跟随当前 provider 之外的回退：未填 provider 时给全部型号。
+    const modelInput = screen.getByLabelText('Model') as HTMLInputElement
+    const modelList = document.getElementById(
+      modelInput.getAttribute('list')!
+    ) as HTMLDataListElement
+    expect(Array.from(modelList.options).map((option) => option.value)).toEqual(
+      ['your-model-b', 'your-model-c']
+    )
+  })
+
+  it('shows the workflow thinking default on the empty option', () => {
+    renderSection({ node, ...editorProps })
+
+    const thinkingSelect = screen.getByLabelText(
+      'Thinking'
+    ) as HTMLSelectElement
+    expect(thinkingSelect.options[0].textContent).toBe(
+      '继承 workflow 默认（low）'
+    )
   })
 
   it('shows the code-pool state and the create-agent entry when no agent routes the capability', () => {

@@ -10,12 +10,10 @@ export function makeWorkspace(
     default_workflow_key: 'demo_workflow',
     default_entity: 'question',
     resource_config_json: '{}',
-    intake_config_json: '{}',
     node_config_json: '{}',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     resource_config: {},
-    intake_config: {},
     node_config: {},
     ...overrides,
   }

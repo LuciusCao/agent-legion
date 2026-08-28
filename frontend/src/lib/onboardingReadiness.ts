@@ -1,4 +1,4 @@
-import type { AgentDefaults, WorkflowDefinitionRecord } from '../types'
+import type { WorkflowDefinitionRecord } from '../types'
 import type { WorkspaceAgentRouteEntry } from '../hooks/useWorkspaceSettingsQuery'
 
 export interface EmptyGuideVisibilityInput {
@@ -38,8 +38,6 @@ export interface OnboardingStepsInput {
   workflowKey: string | undefined
   workflowDefinition: WorkflowDefinitionRecord | null
   agentRoutes: WorkspaceAgentRouteEntry[]
-  agentDefaults: AgentDefaults | undefined
-  intakeModes: string[] | undefined
   workspaceId: string | undefined
   goStudio: () => void
   goSettings: () => void
@@ -50,17 +48,16 @@ export interface OnboardingStepsInput {
  * 新 workspace 引导的步骤构造与就绪判定（纯函数，便于独立测试）。
  * 「已发布」判定用 active revision 存在性而非 workflow_key 非空——
  * schema v62 起 key 在创建时就与 workspace id 绑定（恒非空），真正的
- * 发布信号是 active revision（workflowDefinition 非空）。
- * provider/model 的解析链与后端 resolve_execution_block 一致：agent 节点
- * execution.* 覆盖优先，缺失落回 workspace agentDefaults——节点侧已配齐时
- * workspace 默认为空同样是合法可运行状态（AGENTS.md 解析链条目）。接入
- * 模式须至少勾选一个（空列表时 AddItemsDialog 无可选模式）。
+ * 发布信号是 active revision（workflowDefinition 非空）。provider/model
+ * 的解析链与后端 resolve_execution_block 一致：agent 节点 execution.*
+ * 为准——active revision 快照里节点 execution 已被 loader 合并了顶层
+ * execution 默认，前端直接读节点值即为有效值（workspace agentDefaults
+ * 与接入模式勾选已随 schema v63 退役；接入可用性由「已发布 active
+ * revision」承载）。
  */
 export function buildOnboardingSteps(input: OnboardingStepsInput) {
   const published = !!input.workflowDefinition
-  const agentReady = published && agentNodesReady(input)
-  const intakeReady = intakeModesReady(input.intakeModes)
-  const configured = agentReady && intakeReady
+  const configured = published && agentNodesReady(input)
   return [
     {
       icon: 'account_tree',
@@ -73,9 +70,9 @@ export function buildOnboardingSteps(input: OnboardingStepsInput) {
     },
     {
       icon: 'settings',
-      title: '配置 Agent 与接入',
+      title: '配置 Agent 执行',
       description:
-        '为 Agent 节点设置 provider / model（Studio 节点覆盖或 Settings 默认），并勾选接入模式。',
+        '为 Agent 节点设置 provider / model（Studio 节点覆盖或 workflow 顶层 execution 默认）。',
       unlocked: published,
       completed: configured,
       actionLabel: '去配置',
@@ -96,7 +93,6 @@ function agentNodesReady({
   workflowDefinition,
   workflowKey,
   agentRoutes,
-  agentDefaults,
 }: OnboardingStepsInput): boolean {
   if (!workflowDefinition || !workflowKey) return false
   // agent 节点 = active revision 中路由到 published Agent 的节点（快照
@@ -108,12 +104,6 @@ function agentNodesReady({
   )
   return (workflowDefinition.nodes ?? []).every((node) => {
     if (!agentNodeKeys.has(node.key)) return true
-    const provider = node.execution?.provider || agentDefaults?.provider || ''
-    const model = node.execution?.model || agentDefaults?.model || ''
-    return Boolean(provider && model)
+    return Boolean(node.execution?.provider && node.execution?.model)
   })
-}
-
-function intakeModesReady(intakeModes: string[] | undefined): boolean {
-  return (intakeModes ?? []).length > 0
 }

@@ -9,8 +9,8 @@ export {
   createWorkspace,
   deleteWorkspace,
   fetchWorkspaces,
+  fetchWorkspaceRuntimeModels,
   fetchWorkspaceStats,
-  updateAgentDefaults,
   updateWorkspace,
 } from './workspaceApi'
 // prettier-ignore

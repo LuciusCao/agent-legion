@@ -56,8 +56,6 @@ const executorCatalog = [
 
 const baseSettings: WorkspaceSettings = {
   entityType: 'question',
-  intakeModes: [],
-  labelOverrides: {},
   workflowKey: '',
 }
 

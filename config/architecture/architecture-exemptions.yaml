@@ -78,8 +78,9 @@ exemptions:
 - check: architecture.file_budget
   path: server/app/agent_broker/dispatch.py
   reason: Agent config governance phase 3 moved the strict execution-block
-    resolution (node override -> workspace default -> fail fast, runtime-pinned
-    command builder) into the dispatch boundary; the manifest builder and the
+    resolution (node override -> workflow top-level default -> fail fast,
+    runtime-pinned command builder; the workspace default retired at schema
+    v63) into the dispatch boundary; the manifest builder and the
     resolver share the runtime binary constants, so splitting now would just
     scatter one cohesive rule. The per-run Agent version pin (schema v29,
     EXEC-QUALITY-REPLAY-001) added the pinned_agent_version passthrough. Extract
@@ -87,7 +88,7 @@ exemptions:
     dispatch boundary.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/198
-  ceiling: 174
+  ceiling: 170
 - check: architecture.file_budget
   path: server/app/services/agent_service.py
   reason: Schema v27 made this service the only Agent catalog source of truth;

@@ -1,48 +1,44 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
-import { IntakeConfigSection } from './IntakeConfigSection'
-import type { WorkspaceSettings, WorkflowDefinitionRecord } from '../../types'
+import { BasicInfoSection } from './BasicInfoSection'
 
-const baseSettings: WorkspaceSettings = {
-  entityType: 'question',
-  intakeModes: ['manual'],
-  labelOverrides: {},
-  workflowKey: 'question_content',
-}
-
-const workflowDefinition: WorkflowDefinitionRecord = {
-  key: 'question_content',
-  label: 'Question Content',
-  intake: {
-    modes: [
-      {
-        key: 'manual',
-        label: 'Manual',
-        input_field: 'id_list',
-      },
-      { key: 'auto', label: 'Auto', input_field: 'source' },
-    ],
-  },
-  edges: [],
-  nodes: [],
-}
-
-describe('IntakeConfigSection', () => {
-  const mockSetSettings = vi.fn()
+describe('BasicInfoSection', () => {
+  const mockNameChange = vi.fn()
+  const mockDescriptionChange = vi.fn()
+  const mockEntityTypeChange = vi.fn()
 
   beforeEach(() => {
-    mockSetSettings.mockReset()
+    mockNameChange.mockReset()
+    mockDescriptionChange.mockReset()
+    mockEntityTypeChange.mockReset()
+  })
+
+  function renderSection(saveError: string | null = null) {
+    return render(
+      <BasicInfoSection
+        workspaceName="Test Workspace"
+        workspaceDescription="描述"
+        entityType="question"
+        saveError={saveError}
+        onNameChange={mockNameChange}
+        onDescriptionChange={mockDescriptionChange}
+        onEntityTypeChange={mockEntityTypeChange}
+      />
+    )
+  }
+
+  it('edits the workspace name', () => {
+    renderSection()
+
+    fireEvent.change(screen.getByLabelText('Workspace 名称'), {
+      target: { value: 'New Name' },
+    })
+
+    expect(mockNameChange).toHaveBeenCalledWith('New Name')
   })
 
   it('changes entity type', async () => {
-    render(
-      <IntakeConfigSection
-        settings={baseSettings}
-        workflowDefinition={workflowDefinition}
-        saveError={null}
-        setSettings={mockSetSettings}
-      />
-    )
+    renderSection()
 
     const select = screen.getByRole('combobox', { name: '默认实体类型' })
     await act(async () => {
@@ -52,95 +48,12 @@ describe('IntakeConfigSection', () => {
       fireEvent.click(screen.getByRole('option', { name: 'knowledge' }))
     })
 
-    expect(mockSetSettings).toHaveBeenCalledWith({ entityType: 'knowledge' })
-  })
-
-  it('toggles an intake mode on', () => {
-    render(
-      <IntakeConfigSection
-        settings={{ ...baseSettings, intakeModes: [] }}
-        workflowDefinition={{
-          ...workflowDefinition,
-          intake: {
-            modes: [{ key: 'none', label: 'None', input_field: 'x' }],
-          },
-        }}
-        saveError={null}
-        setSettings={mockSetSettings}
-      />
-    )
-
-    const checkbox = document.querySelector(
-      'input[type="checkbox"]'
-    ) as HTMLInputElement
-    fireEvent.click(checkbox)
-
-    expect(mockSetSettings).toHaveBeenCalledWith({ intakeModes: ['none'] })
-  })
-
-  it('toggles an intake mode and only sends intakeModes', () => {
-    render(
-      <IntakeConfigSection
-        settings={{ ...baseSettings, intakeModes: [] }}
-        workflowDefinition={workflowDefinition}
-        saveError={null}
-        setSettings={mockSetSettings}
-      />
-    )
-
-    const checkbox = document.querySelector(
-      'input[type="checkbox"]'
-    ) as HTMLInputElement
-    fireEvent.click(checkbox)
-
-    expect(mockSetSettings).toHaveBeenCalledWith({
-      intakeModes: ['manual'],
-    })
-  })
-
-  it('unchecks an intake mode and only sends intakeModes', () => {
-    render(
-      <IntakeConfigSection
-        settings={baseSettings}
-        workflowDefinition={workflowDefinition}
-        saveError={null}
-        setSettings={mockSetSettings}
-      />
-    )
-
-    const checkbox = document.querySelector(
-      'input[type="checkbox"]'
-    ) as HTMLInputElement
-    fireEvent.click(checkbox)
-
-    expect(mockSetSettings).toHaveBeenCalledWith({
-      intakeModes: [],
-    })
+    expect(mockEntityTypeChange).toHaveBeenCalledWith('knowledge')
   })
 
   it('shows save error when provided', () => {
-    render(
-      <IntakeConfigSection
-        settings={baseSettings}
-        workflowDefinition={workflowDefinition}
-        saveError="保存失败"
-        setSettings={mockSetSettings}
-      />
-    )
+    renderSection('保存失败')
 
     expect(screen.getByText('保存失败')).toBeInTheDocument()
-  })
-
-  it('handles workflow definition without intake modes', () => {
-    render(
-      <IntakeConfigSection
-        settings={baseSettings}
-        workflowDefinition={{ ...workflowDefinition, intake: { modes: [] } }}
-        saveError={null}
-        setSettings={mockSetSettings}
-      />
-    )
-
-    expect(screen.queryByText('Manual')).not.toBeInTheDocument()
   })
 })

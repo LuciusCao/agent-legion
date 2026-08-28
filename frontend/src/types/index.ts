@@ -106,11 +106,11 @@ export type ConfigSchema = {
 }
 
 /**
- * Default execution config for Agent nodes (provider/model/thinking).
- * The generated WorkspaceSettingsPayload does not spell this key out yet;
- * it arrives inside the settings blob of GET /api/workspaces/{id}/settings.
+ * Workflow-level default execution config for Agent nodes
+ * (provider/model/thinking), declared as the workflow top-level
+ * ``execution`` block. Workspace-level defaults were retired (schema v63).
  */
-export type AgentDefaults = {
+export type WorkflowExecutionDefaults = {
   provider?: string
   model?: string
   thinking?: string
@@ -119,8 +119,10 @@ export type AgentDefaults = {
 export type WorkspaceSettings = ApiSchemas['WorkspaceSettingsPayload'] & {
   nodeConfig?: Record<string, Record<string, unknown>>
   nodeConfigSchemas?: Record<string, ConfigSchema>
-  agentDefaults?: AgentDefaults
 }
+
+export type WorkspaceRuntimeModelsResponse =
+  ApiSchemas['WorkspaceRuntimeModelsResponse']
 
 export type WorkspaceSettingsResponse = ApiSchemas['WorkspaceSettingsResponse']
 

@@ -17,6 +17,10 @@ export const extraQueryKeys = {
   // workspace 视角的 worker 列表（按 scoped token 注册过滤，issue #35）。
   workspaceWorkers: (workspaceId: string) =>
     ['workspaceWorkers', workspaceId] as const,
+  // 在线 Worker 上报的 (runtime, provider, model) 聚合，Studio 节点执行
+  // 配置 datalist 数据源。
+  workspaceRuntimeModels: (workspaceId: string) =>
+    ['workspaceRuntimeModels', workspaceId] as const,
   tokenUsagePricing: () => ['tokenUsagePricing'] as const,
   instanceSettings: () => ['instanceSettings'] as const,
   skillSources: () => ['skillSources'] as const,

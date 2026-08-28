@@ -28,18 +28,32 @@ def test_schema_version_pin() -> None:
     # The latest-migration record pin moved through
     # test_retire_global_register_tokens_migration.py (v58) →
     # test_jobs_run_id_index.py (v59) → back to the v58 file for the DDL-only
-    # v60; v62 owns its own module, so the pin lives here now.
-    assert SCHEMA_VERSION == 62
+    # v60; v62 owns its own module, and v63 is cleanup-only (the retired
+    # default_agent_* columns drop in schema.py's post-chain sweep, no
+    # migration module), so the pin stays here.
+    assert SCHEMA_VERSION == 63
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "workspace_id_key_binding"
+    assert row["name"] == "workspace_settings_retirement"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
+        # Direct-call on a v63 database: the retired default_agent_* columns
+        # are already dropped by the post-chain cleanup, but the v62
+        # migration's insert still references them (they exist on every real
+        # pre-v63 database) — restore the pre-v63 shape first.
+        for column in (
+            "default_agent_provider",
+            "default_agent_model",
+            "default_agent_thinking",
+        ):
+            conn.execute(
+                f"alter table workspaces add column if not exists {column} text not null default ''"
+            )
         _seed_workspace(conn, "bind-rename-ws", "bind_renamed_flow")
         _seed_workspace(conn, "bind-empty-ws", "")
         # One FK child row and one unconstrained-table row per workspace: the
@@ -99,6 +113,14 @@ def test_renames_ids_to_keys_and_cascades_children() -> None:
     assert job_ws == "bind_renamed_flow"
     assert metric_ws == {"bind_renamed_flow", "bind-empty-ws"}
     assert worker_scope == '["bind_renamed_flow"]'
+    # Leave the v63 shape behind for the rest of this worker's suite.
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        for column in (
+            "default_agent_provider",
+            "default_agent_model",
+            "default_agent_thinking",
+        ):
+            conn.execute(f"alter table workspaces drop column if exists {column}")
 
 
 def test_conflicting_target_fails_fast() -> None:

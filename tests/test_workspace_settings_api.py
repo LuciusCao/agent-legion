@@ -33,8 +33,6 @@ def test_workspace_settings_round_trip(tmp_path):
             f"/api/workspaces/{workspace_id}/settings/intake",
             json={
                 "entityType": "video",
-                "intakeModes": ["direct_ids"],
-                "labelOverrides": {"direct_ids": "输入 ID"},
             },
         )
         workflow = c.patch(
@@ -52,8 +50,10 @@ def test_workspace_settings_round_trip(tmp_path):
     assert "resources" not in settings
     assert settings["nodeConfig"]["intake_knowledge_points"]["timeout_seconds"] == 120
     assert settings["entityType"] == "video"
-    assert settings["intakeModes"] == ["direct_ids"]
-    assert settings["labelOverrides"] == {"direct_ids": "输入 ID"}
+    # intakeModes/labelOverrides/agentDefaults retired at schema v63.
+    assert "intakeModes" not in settings
+    assert "labelOverrides" not in settings
+    assert "agentDefaults" not in settings
     assert settings["workflowKey"] == "education_video_problems_generation"
     workspace = app.state.job_db.get_workspace(workspace_id)
     assert "pipeline_config" not in workspace
@@ -117,7 +117,9 @@ def test_lists_workspace_workflow_revisions(client):
     assert "revisions" in payload
 
 
-def test_workspace_settings_agent_defaults_round_trip(client):
+def test_workspace_settings_agent_defaults_section_retired(client):
+    # Schema v63: workspace-level Agent defaults are retired — the section
+    # endpoint no longer exists and the payload carries no agentDefaults.
     response = client.post(
         "/api/workspaces",
         json={"id": "education_video_problems_generation", "name": "agent_defaults_ws"},
@@ -126,63 +128,13 @@ def test_workspace_settings_agent_defaults_round_trip(client):
 
     fetched = client.get(f"/api/workspaces/{workspace_id}/settings")
     assert fetched.status_code == 200
-    assert fetched.json()["settings"]["agentDefaults"] == {
-        "provider": "",
-        "model": "",
-        "thinking": "",
-    }
+    assert "agentDefaults" not in fetched.json()["settings"]
 
     saved = client.patch(
         f"/api/workspaces/{workspace_id}/settings/agent-defaults",
-        json={
-            "agentDefaults": {
-                "provider": "deepseek",
-                "model": "deepseek-v4-flash",
-                "thinking": "low",
-            }
-        },
+        json={"agentDefaults": {"provider": "deepseek", "model": "m"}},
     )
-    assert saved.status_code == 200
-    assert saved.json()["settings"]["agentDefaults"] == {
-        "provider": "deepseek",
-        "model": "deepseek-v4-flash",
-        "thinking": "low",
-    }
-
-    # Partial patch: only the model changes; provider/thinking are kept.
-    partial = client.patch(
-        f"/api/workspaces/{workspace_id}/settings/agent-defaults",
-        json={"agentDefaults": {"model": "deepseek-v4-pro"}},
-    )
-    assert partial.status_code == 200
-    assert partial.json()["settings"]["agentDefaults"] == {
-        "provider": "deepseek",
-        "model": "deepseek-v4-pro",
-        "thinking": "low",
-    }
-
-    workspace = client.get(f"/api/workspaces/{workspace_id}/settings").json()
-    assert workspace["settings"]["agentDefaults"]["model"] == "deepseek-v4-pro"
-
-
-def test_workspace_settings_agent_defaults_reject_bad_payload(client):
-    response = client.post(
-        "/api/workspaces",
-        json={"id": "education_video_problems_generation", "name": "agent_defaults_bad"},
-    )
-    workspace_id = response.json()["workspace"]["id"]
-
-    missing = client.patch(
-        f"/api/workspaces/{workspace_id}/settings/agent-defaults",
-        json={},
-    )
-    assert missing.status_code == 400
-
-    wrong_type = client.patch(
-        f"/api/workspaces/{workspace_id}/settings/agent-defaults",
-        json={"agentDefaults": {"model": 5}},
-    )
-    assert wrong_type.status_code == 422
+    assert saved.status_code == 422
 
 
 def _inject_write_script_config_schema(workspace_id: str) -> None:

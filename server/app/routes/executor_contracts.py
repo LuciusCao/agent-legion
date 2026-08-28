@@ -37,8 +37,6 @@ class WorkspaceAgentRoutesResponse(BaseModel):
 
 class WorkspaceSettingsPayload(BaseModel):
     entityType: str
-    intakeModes: list[str]
-    labelOverrides: dict[str, str]
     workflowKey: str
 
 
@@ -46,8 +44,6 @@ class WorkspaceConfigurationSettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     entityType: str | None = None
-    intakeModes: list[str] | None = None
-    labelOverrides: dict[str, str] | None = None
     workflowKey: str | None = None
 
 
