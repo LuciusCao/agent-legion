@@ -717,16 +717,27 @@ jobs:
         working-directory: frontend
 
   # Deterministic Chromium smoke (test architecture plan, Phase 4): real
-  # backend + vite preview + Playwright, offline via the in-process CMS stub
-  # and a dedicated E2E database. Cold start stays well under the 3-minute
-  # budget; failure evidence (trace/screenshot/backend log) uploads only on
-  # failure with a short retention.
+  # backend + vite preview + Playwright, offline via the in-process CMS stub,
+  # an in-process stub LLM gateway (velites Agent node) and a dedicated E2E
+  # database; a standalone Worker process claims the Agent execution. The
+  # main-flow spec needs the velites binary (Host code sandbox + Worker
+  # runtime), so this job builds it like the rust lane does. Failure evidence
+  # (trace/screenshot/backend log) uploads only on failure with a short
+  # retention.
   e2e-smoke:
     name: e2e-smoke
     needs: changes
-    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+    # rust too: the main-flow spec depends on the velites binary and its
+    # models registry schema, so velites-only changes must still run this job
+    # (without widening them to the full backend+frontend gate).
+    if: >-
+      needs.changes.outputs.backend == 'true' ||
+      needs.changes.outputs.frontend == 'true' ||
+      needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25 min: covers a cold velites release build when the shared rust-cache
+    # misses (warm runs finish in a few minutes).
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:17
@@ -759,6 +770,28 @@ jobs:
 
       - run: npm ci
         working-directory: frontend
+
+      # velites binary: the main-flow spec's Host code sandbox and the
+      # standalone Worker's agent runtime are both fail-closed without it
+      # (the runner builds it via scripts/ensure-velites.sh --dest data/bin).
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: velites
+          # One shared cache across the rust lane and both e2e jobs: the e2e
+          # jobs build the same velites release binary, so they warm-start
+          # from the rust lane's cache instead of a ~14min cold build.
+          shared-key: velites
+
+      # velites sandbox backend for Host-side code nodes (sandbox wrap). It is
+      # fail-closed, and Ubuntu 24.04 restricts unprivileged userns via
+      # AppArmor (current bubblewrap has no setuid mode), so the disposable
+      # CI VM must explicitly enable userns — same as the other lanes.
+      - name: Install bubblewrap (velites sandbox backend)
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       # Browser binaries cache: a cold download stalled for 41 minutes once
       # (run 30816362118, FLAKY-004) and ate the whole nightly budget.
@@ -832,6 +865,25 @@ jobs:
       - run: npm ci
         working-directory: frontend
 
+      # velites binary + sandbox backend: same main-flow requirements as the
+      # e2e-smoke job (the runner builds velites via ensure-velites.sh).
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: velites
+          # One shared cache across the rust lane and both e2e jobs: the e2e
+          # jobs build the same velites release binary, so they warm-start
+          # from the rust lane's cache instead of a ~14min cold build.
+          shared-key: velites
+
+      # velites sandbox backend; see the e2e-smoke job for why the userns
+      # sysctl is required on Ubuntu 24.04 (fail-closed sandbox, AppArmor).
+      - name: Install bubblewrap (velites sandbox backend)
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       # Browser binaries cache: a cold download stalled for 41 minutes once
       # (run 30816362118, FLAKY-004) and ate the whole nightly budget.
       - name: Cache Playwright browsers
@@ -885,6 +937,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: velites
+          # One shared cache across the rust lane and both e2e jobs: the e2e
+          # jobs build the same velites release binary, so they warm-start
+          # from the rust lane's cache instead of a ~14min cold build.
+          shared-key: velites
 
       # Enables the bwrap-gated sandbox integration tests in cargo test.
       # Ubuntu 24.04 restricts unprivileged userns via AppArmor; enable it on

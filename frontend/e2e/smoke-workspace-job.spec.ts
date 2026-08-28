@@ -64,8 +64,9 @@ test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }, t
   // row before the close lands — a real risk on slow CI runners — fails).
   await expect(addItemsDialog).toBeHidden({ timeout: 15_000 })
 
-  // The runs API creates jobs synchronously; no workflow worker is started,
-  // so the job appears with all nodes still pending.
+  // The runs API creates jobs synchronously; the demo workspace stays paused
+  // at startup (only e2e_main_flow is resumed), so the job appears with all
+  // nodes still pending even though the backend's worker threads run.
   const jobRow = page.locator('[data-job]').first()
   await expect(jobRow).toBeVisible({ timeout: 30_000 })
   await jobRow.click()

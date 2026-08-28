@@ -88,7 +88,7 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 | `git-hooks/` | 版本化的 pre-commit / pre-push 钩子 dispatcher，由 `install-git-hooks.sh` 安装到 Git common directory，再转发到 worktree 根的 `.githooks/`。 |
 | `remote/` | 远程 LLM 网关（`llm_gateway.py` 及 HTTP/SSE/stream/config 模块），见 `docs/remote-execution-runbook.md`。 |
 | `stress/` | 压力测试：`simulate_agents.py` 合成负载生成器、`run_e2e_stress.py` 端到端压测 runner。 |
-| `e2e/` | 浏览器 smoke E2E：`run_browser_smoke.py`（确定性 Chromium 冒烟，CI e2e-smoke / nightly-e2e job 调用）与数据库 helper `_database.py`。 |
+| `e2e/` | 浏览器 smoke E2E：`run_browser_smoke.py`（确定性冒烟，真后端 + worker 线程 + 独立 Worker 进程 + 进程内 CMS/LLM stub，CI e2e-smoke / nightly-e2e job 调用）、数据库 helper `_database.py`、demo 种子 `_demo_seed.py`、主流程种子 `_main_flow_seed.py`、LLM stub `_llm_stub.py`、Worker 启动 `_worker.py`、backend factory `_backend_factory.py`。 |
 | `seed/` | workflow 种子包导出/导入工具（`export_seed.py` / `import_seed.py` / `seed_common.py`）：把 workflow 定义（DAG、Agent、节点代码、skill 源锁定）在实例间迁移，幂等；平台级通用工具，业务种子包留在私有侧。详见 `scripts/seed/README.md`。 |
 
 ## 约定
