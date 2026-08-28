@@ -1,0 +1,103 @@
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
+import { ArtifactPreviewPanel } from './ArtifactPreviewPanel'
+import { TestQueryProvider } from '../../testing/testQueryClient'
+import { makeJob } from '../../testing/fixtures'
+import type { JobDetail } from '../../types/jobTypes'
+
+function renderPanel(ui: ReactElement) {
+  return render(ui, { wrapper: TestQueryProvider })
+}
+
+const mockFetchJobArtifact = vi.fn()
+
+// 组件直连 ../../api/jobsApi（不经 barrel），mock 必须打在同一模块上。
+vi.mock('../../api/jobsApi', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../../api/jobsApi')>()
+  return {
+    ...mod,
+    fetchJobArtifact: (...args: unknown[]) => mockFetchJobArtifact(...args),
+  }
+})
+
+function makeDetail(artifacts: string[]): JobDetail {
+  return {
+    job: makeJob({ status: 'completed' }),
+    nodes: [],
+    runs: [],
+    artifacts,
+  }
+}
+
+describe('ArtifactPreviewPanel', () => {
+  it('渲染每个 artifact 一张卡片，含类型徽标', async () => {
+    mockFetchJobArtifact.mockResolvedValue({
+      content: JSON.stringify({ ok: true }),
+    })
+    renderPanel(
+      <ArtifactPreviewPanel jobId="j1" detail={makeDetail(['questions.json', 'frame.png'])} />
+    )
+
+    expect(await screen.findByText('questions.json')).toBeInTheDocument()
+    expect(screen.getByText('frame.png')).toBeInTheDocument()
+    expect(screen.getByText('JSON')).toBeInTheDocument()
+    expect(screen.getByText('图片')).toBeInTheDocument()
+    // JSON 卡片挂载 JsonTree（解析后的树渲染键名）。
+    await waitFor(() => {
+      expect(mockFetchJobArtifact).toHaveBeenCalledWith('j1', 'questions.json')
+    })
+  })
+
+  it('无产物时渲染空态而不是空白', () => {
+    renderPanel(<ArtifactPreviewPanel jobId="j1" detail={makeDetail([])} />)
+
+    expect(screen.getByText('暂无产物文件')).toBeInTheDocument()
+  })
+
+  it('hiddenArtifacts 过滤对应卡片', () => {
+    renderPanel(
+      <ArtifactPreviewPanel
+        jobId="j1"
+        detail={makeDetail(['questions.json', 'frame.png'])}
+        hiddenArtifacts={['questions.json']}
+      />
+    )
+
+    expect(screen.queryByText('questions.json')).not.toBeInTheDocument()
+    expect(screen.getByText('frame.png')).toBeInTheDocument()
+    expect(screen.getByText('1 个文件')).toBeInTheDocument()
+  })
+
+  it('detail 为 null 时不渲染卡片列表（等待 detail）', () => {
+    renderPanel(<ArtifactPreviewPanel jobId="j1" detail={null} />)
+
+    expect(screen.getByText('暂无产物文件')).toBeInTheDocument()
+    expect(screen.queryByTestId('artifact-preview-card')).not.toBeInTheDocument()
+  })
+
+  it('json 解析失败时按原文展示', async () => {
+    mockFetchJobArtifact.mockResolvedValue({ content: 'not-json{{' })
+    renderPanel(
+      <ArtifactPreviewPanel jobId="j1" detail={makeDetail(['broken.json'])} />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('not-json{{')).toBeInTheDocument()
+    })
+  })
+
+  it('文本超长时截断并显示提示', async () => {
+    const long = 'x'.repeat(512 * 1024 + 100)
+    mockFetchJobArtifact.mockResolvedValue({ content: long })
+    renderPanel(
+      <ArtifactPreviewPanel jobId="j1" detail={makeDetail(['big.log'])} />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(/已截断/)).toBeInTheDocument()
+    })
+    const pre = document.querySelector('pre')
+    expect(pre?.textContent?.length).toBe(512 * 1024)
+  })
+})

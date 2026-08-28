@@ -33,3 +33,18 @@ export function comprehensionVersion(detail: JobDetail | null): string {
     reviewPossibleErrorsNode?.finished_at,
   ].join(':')
 }
+
+/**
+ * 通用预览面板的 artifact 版本：优先产出节点（outputs 含该 artifact 名）
+ * 的状态三元组；无产出节点声明时回退 job 状态（job 重跑仍会失效缓存）。
+ */
+export function artifactVersion(detail: JobDetail | null, artifactName: string): string {
+  const producer = detail?.nodes.find((node) =>
+    node.outputs?.includes(artifactName)
+  )
+  if (producer) {
+    return [producer.status, producer.started_at, producer.finished_at].join(':')
+  }
+  const job = detail?.job
+  return job ? [job.status, job.created_at ?? '', job.id].join(':') : ''
+}

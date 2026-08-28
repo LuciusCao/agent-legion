@@ -1,0 +1,225 @@
+/**
+ * 产物预览渲染器：每个 PreviewKind 一个组件，props 统一为
+ * { jobId, name, version }。文本类经 TanStack Query 取 artifact 文本
+ * （版本失效机制沿用 producer-node 状态）；媒体类直接用同源 raw URL
+ * 作 src，由浏览器流式加载。
+ *
+ * 安全约定（与后端 raw 端点白名单对齐）：
+ * - html 走 RichText 的 sanitizeHtml 白名单（http(s)-only src）；
+ * - markdown 走 renderMarkdownHtml（marked + DOMPurify）；
+ * - svg 一律按 text 渲染源码，不经渲染引擎。
+ */
+import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { Chip } from '@mui/material'
+import { RichText } from '../RichText'
+import { JsonTree } from '../JsonTree'
+import { fetchJobArtifact, jobArtifactRawUrl } from '../../api/jobsApi'
+import { queryKeys } from '../../lib/queryKeys'
+import { artifactVersion } from '../../lib/jobArtifactVersions'
+import { renderMarkdownHtml } from '../../lib/markdownHtml'
+import { tryParseJson } from '../../lib/parsers'
+import { toErrorMessage } from '../../lib/queryError'
+import type { JobDetail } from '../../types/jobTypes'
+import styles from './previewRenderers.module.css'
+
+export interface PreviewRendererProps {
+  jobId: string
+  name: string
+  /** jobDetail 查询数据（用于版本失效），可空——面板未加载完成时渲染骨架。 */
+  detail: JobDetail | null
+}
+
+/** 文本截断阈值：>512KB 只展示前段，避免一次性挂载巨型 DOM。 */
+const TEXT_PREVIEW_LIMIT = 512 * 1024
+
+interface TextQueryResult {
+  content: string
+  loading: boolean
+  error: string
+}
+
+function useArtifactText(jobId: string, name: string, detail: JobDetail | null): TextQueryResult {
+  const version = artifactVersion(detail, name)
+  const query = useQuery({
+    queryKey: queryKeys.jobArtifact(jobId, name, version),
+    queryFn: () => fetchJobArtifact(jobId, name),
+    enabled: Boolean(detail),
+  })
+  return {
+    content: query.data?.content ?? '',
+    loading: query.isPending,
+    error: query.error ? toErrorMessage(query.error) : '',
+  }
+}
+
+function TextBody({ content }: { content: string }) {
+  const truncated = content.length > TEXT_PREVIEW_LIMIT
+  const shown = truncated ? content.slice(0, TEXT_PREVIEW_LIMIT) : content
+  return (
+    <div>
+      {truncated && (
+        <Chip
+          label={`已截断（${content.length.toLocaleString()} 字符）`}
+          size="small"
+          variant="outlined"
+          sx={{ mb: 1 }}
+        />
+      )}
+      <pre className={styles.pre}>{shown}</pre>
+    </div>
+  )
+}
+
+export function JsonPreview({ jobId, name, detail }: PreviewRendererProps) {
+  const { content, loading, error } = useArtifactText(jobId, name, detail)
+  if (loading) return <p className={styles.loading}>加载中...</p>
+  if (error) return <p className={styles.error}>{error}</p>
+  const parsed = tryParseJson(content)
+  if (parsed === null) {
+    // .json 但解析失败：按原文展示而不是空白。
+    return <TextBody content={content} />
+  }
+  return <JsonTree data={parsed} />
+}
+
+export function MarkdownPreview({ jobId, name, detail }: PreviewRendererProps) {
+  const { content, loading, error } = useArtifactText(jobId, name, detail)
+  const html = useMemo(() => (content ? renderMarkdownHtml(content) : ''), [content])
+  if (loading) return <p className={styles.loading}>加载中...</p>
+  if (error) return <p className={styles.error}>{error}</p>
+  return <div className={styles.markdownBody} dangerouslySetInnerHTML={{ __html: html }} />
+}
+
+export function RichTextPreview({ jobId, name, detail }: PreviewRendererProps) {
+  const { content, loading, error } = useArtifactText(jobId, name, detail)
+  if (loading) return <p className={styles.loading}>加载中...</p>
+  if (error) return <p className={styles.error}>{error}</p>
+  return <RichText mode="block">{content}</RichText>
+}
+
+export function TextPreview({ jobId, name, detail }: PreviewRendererProps) {
+  const { content, loading, error } = useArtifactText(jobId, name, detail)
+  if (loading) return <p className={styles.loading}>加载中...</p>
+  if (error) return <p className={styles.error}>{error}</p>
+  return <TextBody content={content} />
+}
+
+/** 媒体加载失败（404/格式不支持）的占位 + raw 新窗口兜底。 */
+function MediaError({ jobId, name, onRetry }: { jobId: string; name: string; onRetry: () => void }) {
+  return (
+    <div className={styles.mediaError}>
+      <span className={styles.mediaErrorText}>媒体加载失败</span>
+      <button type="button" className={styles.mediaErrorAction} onClick={onRetry}>
+        重试
+      </button>
+      <a
+        className={styles.mediaErrorAction}
+        href={jobArtifactRawUrl(jobId, name)}
+        target="_blank"
+        rel="noreferrer"
+      >
+        新窗口打开
+      </a>
+    </div>
+  )
+}
+
+export function ImagePreview({ jobId, name }: PreviewRendererProps) {
+  const [failed, setFailed] = useState(false)
+  const [epoch, setEpoch] = useState(0)
+  if (failed) {
+    return (
+      <MediaError
+        jobId={jobId}
+        name={name}
+        onRetry={() => {
+          setFailed(false)
+          setEpoch((n) => n + 1)
+        }}
+      />
+    )
+  }
+  // epoch 进 query：重试时强制重新加载。
+  return (
+    <img
+      key={epoch}
+      className={styles.mediaImage}
+      src={`${jobArtifactRawUrl(jobId, name)}?v=${epoch}`}
+      alt={name}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  )
+}
+
+export function VideoPreview({ jobId, name }: PreviewRendererProps) {
+  const [failed, setFailed] = useState(false)
+  const [epoch, setEpoch] = useState(0)
+  if (failed) {
+    return (
+      <MediaError
+        jobId={jobId}
+        name={name}
+        onRetry={() => {
+          setFailed(false)
+          setEpoch((n) => n + 1)
+        }}
+      />
+    )
+  }
+  return (
+    <video
+      key={epoch}
+      className={styles.mediaVideo}
+      src={jobArtifactRawUrl(jobId, name)}
+      controls
+      preload="metadata"
+      onError={() => setFailed(true)}
+    />
+  )
+}
+
+export function AudioPreview({ jobId, name }: PreviewRendererProps) {
+  const [failed, setFailed] = useState(false)
+  const [epoch, setEpoch] = useState(0)
+  if (failed) {
+    return (
+      <MediaError
+        jobId={jobId}
+        name={name}
+        onRetry={() => {
+          setFailed(false)
+          setEpoch((n) => n + 1)
+        }}
+      />
+    )
+  }
+  return (
+    <audio
+      key={epoch}
+      className={styles.mediaAudio}
+      src={jobArtifactRawUrl(jobId, name)}
+      controls
+      preload="metadata"
+      onError={() => setFailed(true)}
+    />
+  )
+}
+
+export function PdfPreview({ jobId, name }: PreviewRendererProps) {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return <MediaError jobId={jobId} name={name} onRetry={() => setFailed(false)} />
+  }
+  // sandbox：PDF 内嵌渲染但不给脚本/同源能力；浏览器无内嵌查看器时降级下载。
+  return (
+    <iframe
+      className={styles.mediaPdf}
+      src={jobArtifactRawUrl(jobId, name)}
+      title={name}
+      sandbox=""
+      onError={() => setFailed(true)}
+    />
+  )
+}
