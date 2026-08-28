@@ -56,8 +56,8 @@ velites（`velites/` Rust agent harness）已通过金丝雀验证：生产量�
 
 ### 2.5 Worker 侧
 
-- 执行天然 flavor/runtime 无关：`worker/execution_prepare.py:60-69` 对 `command_spec["command"]` 做 `{job_dir}` 等占位符替换，`worker/execution_run.py:182-183` 直接 `Popen(command)`（原 `worker/executor.py`，批次 2 拆出）。Worker 不需要认识 velites，只需要 PATH 上有 argv[0] 的二进制。
-- 声明链：`worker/config_store.py:40,80` → `worker/host_client.py:70` 注册上送 → Host `agent_workers.py:57-61` 校验落库。
+- 执行天然 flavor/runtime 无关：`worker/execution/prepare.py:60-69` 对 `command_spec["command"]` 做 `{job_dir}` 等占位符替换，`worker/execution/run.py:182-183` 直接 `Popen(command)`（原 `worker/executor.py`，批次 2 拆出）。Worker 不需要认识 velites，只需要 PATH 上有 argv[0] 的二进制。
+- 声明链：`worker/config_store.py:40,80` → `worker/host/client.py:70` 注册上送 → Host `agent_workers.py:57-61` 校验落库。
 - UI：`worker/ui/index.html:163-166` 两个 checkbox（pi / OpenClaw）；`worker/ui/app.js:143-144` 回填、`app.js:598` 提交 `data.getAll("runtimes")`——逻辑通用，加 checkbox 即可。
 - 二进制分发现状：手工 `cargo build` + PATH，无交付物机制。
 

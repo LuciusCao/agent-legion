@@ -21,12 +21,12 @@ from typing import Any
 from worker._atomic import atomic_write
 from worker.code_runner import cancel_executions, execute_code
 from worker.event_filter import spawn_event_pump
-from worker.execution_heartbeat import ExecutionHeartbeat, start_lease_heartbeat
-from worker.execution_prepare import prepare_execution
-from worker.host_client import Client
+from worker.execution.heartbeat import ExecutionHeartbeat, start_lease_heartbeat
+from worker.execution.prepare import prepare_execution
+from worker.host.client import Client
 from worker.process_lifecycle import AGENT_PGID_FILENAME, terminate, wait_for_exit
 from worker.status import ExecutionStatusReporter
-from worker.upload_queue import (
+from worker.upload.queue import (
     MAX_ERROR_MESSAGE_CHARS,
     PENDING_FILENAME,
     PendingUploadExists,

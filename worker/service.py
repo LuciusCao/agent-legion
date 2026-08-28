@@ -15,7 +15,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
 from worker.metrics_proxy import create_metrics_proxy_router
-from worker.registration_token import registration_token_configured
+from worker.registration.token import registration_token_configured
 from worker.service_bind import embed_control_token
 from worker.service_models import RegisterTokenPayload, WorkerConfigPayload
 from worker.supervisor import WorkerConfigStore, WorkerSupervisor, public_config
@@ -190,7 +190,7 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
     args = parser.parse_args()
-    worker_dir = Path(__file__).resolve().parent
+    worker_dir = Path(__file__).resolve().parent  # worker/ 包根（executor.py 与 ui/ 同级）
     store = WorkerConfigStore(args.state_dir.resolve(), args.config.resolve())
     supervisor = WorkerSupervisor(store, worker_dir / "executor.py")
     app = create_app(supervisor, worker_dir / "ui", embed_token=embed_control_token(args.host))

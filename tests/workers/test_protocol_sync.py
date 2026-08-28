@@ -17,14 +17,14 @@ from shared.protocol import (
     MODEL_RUNTIME_PROTOCOL_VERSION,
     PROTOCOL_VERSION,
 )
-from worker.host_client import Client
+from worker.host.client import Client
 
 pytestmark = pytest.mark.no_db
 
 
 def test_worker_declared_version_is_latest_shared() -> None:
     assert Client.__module__  # import sanity
-    from worker.host_client import PROTOCOL_VERSION as worker_declared
+    from worker.host.client import PROTOCOL_VERSION as worker_declared
 
     assert worker_declared is PROTOCOL_VERSION
     assert PROTOCOL_VERSION == MODEL_RUNTIME_PROTOCOL_VERSION

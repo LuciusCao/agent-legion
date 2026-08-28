@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from worker.runtime_models import discover_effective_models
-from worker.runtime_preflight import preflight_error
+from worker.runtime.models import discover_effective_models
+from worker.runtime.preflight import preflight_error
 
 
 def prepare_runtime_models(config: dict[str, Any], *, code_concurrency: int = 0) -> str | None:

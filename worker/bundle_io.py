@@ -1,6 +1,6 @@
 """Shared bundle/artifact IO for Worker execution preparation.
 
-Split out of ``worker.execution_prepare`` for the file-size budget: the agent
+Split out of ``worker.execution.prepare`` for the file-size budget: the agent
 path (``prepare_execution``) and the batch-2 code path (``code_runner``) both
 download a tar.gz bundle and a set of content-addressed input artifacts, and
 both apply the same untrusted-archive rules.
@@ -16,8 +16,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from worker._retry import run_with_retry
-from worker.artifact_download import download_object_artifact
-from worker.host_client import Client
+from worker.artifact.download import download_object_artifact
+from worker.host.client import Client
 
 # 与 host_transfer 同一 retry 语义：transient 失败指数退避，上限 3 次。
 _RETRY_BACKOFF_BASE_SECONDS = 1.0

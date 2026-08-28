@@ -1,4 +1,4 @@
-"""Unit tests for worker heartbeat liveness (worker/execution_lifecycle.py)."""
+"""Unit tests for worker heartbeat liveness (worker/execution/lifecycle.py)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import subprocess
 import sys
 import threading
 
-from worker.execution_lifecycle import HeartbeatConfig, heartbeat_loop
+from worker.execution.lifecycle import HeartbeatConfig, heartbeat_loop
 
 
 class FakeClient:

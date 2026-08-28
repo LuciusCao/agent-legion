@@ -1,4 +1,4 @@
-"""Unit tests for the Worker upload queue (worker/upload_queue.py)."""
+"""Unit tests for the Worker upload queue (worker/upload/queue.py)."""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from worker import upload_queue
-from worker.execution_lifecycle import HeartbeatConfig, heartbeat_loop
+from worker.execution.lifecycle import HeartbeatConfig, heartbeat_loop
 from worker.status import ExecutionStatusReporter
-from worker.upload_queue import PENDING_FILENAME, UploadQueue, UploadTask
+from worker.upload import queue as upload_queue
+from worker.upload.queue import PENDING_FILENAME, UploadQueue, UploadTask
 
 
 class QueueFakeClient:

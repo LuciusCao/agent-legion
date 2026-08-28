@@ -70,7 +70,13 @@ agent-legion/
 ├── worker/                     # Agent Worker 协议 v2 实现
 │   ├── service.py              # Worker Service 控制面入口
 │   ├── executor.py             # claim / 执行 / 心跳 / 结果上报主循环
-│   ├── runtime_controls.py     # 状态副本 YAML 热更控制
+│   ├── execution/              # 单次执行：准备 / 运行 / 心跳 / 生命周期
+│   ├── runtime/                # 声明解析与热更控制 / 模型发现 / 启动预检
+│   ├── upload/                 # 产物直传队列与 lane 调度
+│   ├── host/                   # Host 控制面 HTTP 客户端与状态同步
+│   ├── artifact/               # presigned GET/PUT 传输原语
+│   ├── registration/           # scoped token 与注册重试
+│   ├── status/                 # 执行状态文件写入/读取/聚合（包根为写入方）
 │   └── ...
 ├── velites/                    # 自研 Rust agent harness 与 OS 沙箱
 │   ├── src/

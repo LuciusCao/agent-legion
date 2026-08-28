@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from worker import runtime_models
+from worker.runtime import models as runtime_models
 
 
 def test_discovers_each_selected_runtime_and_applies_scoped_allowlist(

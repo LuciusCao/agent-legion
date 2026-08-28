@@ -11,7 +11,7 @@ import shutil
 from pathlib import Path
 
 from shared.material_cache import MATERIALS_CACHE_DIRNAME
-from worker.upload_queue import PENDING_FILENAME
+from worker.upload.queue import PENDING_FILENAME
 
 
 def clean_work_root(work_root: Path) -> None:

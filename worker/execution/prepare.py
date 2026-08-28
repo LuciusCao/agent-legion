@@ -17,8 +17,8 @@ from typing import Any
 from worker.binary_resolution import resolve_binary
 from worker.bundle_io import download_input_artifacts, safe_extract
 from worker.claim_manifest import apply_live_manifest
-from worker.host_client import Client
-from worker.workroot_pending import refuse_if_pending_upload
+from worker.execution.pending import refuse_if_pending_upload
+from worker.host.client import Client
 
 
 @dataclass(frozen=True)

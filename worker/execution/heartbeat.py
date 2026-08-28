@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from worker.execution_lifecycle import HeartbeatConfig, heartbeat_loop
+from worker.execution.lifecycle import HeartbeatConfig, heartbeat_loop
 
 
 @dataclass

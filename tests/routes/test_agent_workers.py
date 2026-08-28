@@ -802,7 +802,7 @@ def _archive_with_files(files: dict[str, str]) -> bytes:
 def test_code_result_with_expected_outputs_commits_completed(tmp_path: Path) -> None:
     """Cross-end contract: a completed code result with non-empty
     expected_outputs commits as completed — the Worker-side upload queue fills
-    the output_artifacts refs (worker/upload_queue.py) that the Host commit
+    the output_artifacts refs (worker/upload/queue.py) that the Host commit
     requires before promoting outputs (agent_completion.py)."""
     app = _make_app(tmp_path)
     _seed_code_request(app, expected_outputs=["out.json"])

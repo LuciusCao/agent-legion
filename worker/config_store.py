@@ -13,8 +13,8 @@ import yaml
 
 from worker import worker_declarations
 from worker._atomic import atomic_write
-from worker.registration_token import TOKEN_FILE_PATTERN, validated_registration_token
-from worker.runtime_controls import MAX_DYNAMIC_CONCURRENCY, validate_claim_controls
+from worker.registration.token import TOKEN_FILE_PATTERN, validated_registration_token
+from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY, validate_claim_controls
 
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _EDITABLE_FIELDS = {

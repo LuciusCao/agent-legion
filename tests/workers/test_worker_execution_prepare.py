@@ -1,4 +1,4 @@
-"""Unit tests for the Agent Worker execution preparation (worker/execution_prepare.py)."""
+"""Unit tests for the Agent Worker execution preparation (worker/execution/prepare.py)."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from server.app.agent_broker.agent_bundle import build_agent_bundle
-from worker.execution_prepare import prepare_execution
-from worker.upload_queue import PENDING_FILENAME, PendingUploadExists
+from worker.execution.prepare import prepare_execution
+from worker.upload.queue import PENDING_FILENAME, PendingUploadExists
 
 
 def _make_bundle(tmp_path: Path, manifest: dict) -> Path:

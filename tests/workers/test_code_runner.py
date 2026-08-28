@@ -33,7 +33,7 @@ from worker.code_runner import (
     unregister_cancellation,
 )
 from worker.status import ExecutionStatusReporter
-from worker.upload_queue import PENDING_FILENAME, PendingUploadExists, UploadTask
+from worker.upload.queue import PENDING_FILENAME, PendingUploadExists, UploadTask
 
 pytestmark = pytest.mark.no_db
 

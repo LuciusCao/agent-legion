@@ -1,4 +1,4 @@
-"""Unit tests for the Worker Host client (worker/host_client.py + host_transfer.py)."""
+"""Unit tests for the Worker Host client (worker/host/client.py + host_transfer.py)."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from typing import Any
 import pytest
 import requests
 
-from worker.host_client import Client, WorkerAuthError
-from worker.host_transfer import HostRequestError
+from worker.host.client import Client, WorkerAuthError
+from worker.host.transfer import HostRequestError
 
 
 def _artifact(tmp_path: Path) -> Path:

@@ -3,6 +3,9 @@
 The executor (child process) owns writes; the Worker Service (parent) polls reads.
 The file is runtime state only: the Supervisor deletes it when the executor exits,
 and readers treat a dead writer pid as "no current executions".
+
+Issue #234 归包：包根即原 ``worker/status.py``（写入方 ExecutionStatusReporter），
+``reader.py`` 读取、``aggregates.py`` 聚合计数。
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from worker._atomic import atomic_write
-from worker.status_reader import read_runtime_status
+from worker.status.reader import read_runtime_status
 
 ENV_VAR = "AGENT_WORKER_STATUS_FILE"
 STATUS_FILENAME = "current_executions.json"

@@ -85,6 +85,25 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ### Changed
 
+- Repacked 21 of the flat `worker/` prefix-cluster modules into real
+  subpackages (issue #234, mirroring #191 on the server side):
+  `execution/` (heartbeat / lifecycle / prepare / run), `runtime/`
+  (controls / models / preflight / setup), `upload/` (heartbeat / prepare /
+  queue / scheduler), `host/` (client / status_sync / transfer),
+  `artifact/` (download / upload), `registration/` (retry / token) and
+  `status/` (the former `status.py` reporter as the package root, plus
+  aggregates / reader). Import sites were rewritten to the full new paths
+  (no re-export facade); `from worker.status import …` keeps working because
+  the reporter now lives in `status/__init__.py`. Entry-point modules stay
+  at the package root — `worker.service`, `worker.executor`, `worker.cli` —
+  so the Dockerfile ENTRYPOINT, Makefile targets and
+  `scripts/native-prod-up.sh` keep working; the `service` / `cli` clusters
+  (`service_bind` / `service_models` / `cli_args`) stay flat because a
+  `worker/<name>/` package would shadow the `worker/<name>.py` entry module
+  and break `python -m worker.<name>` (Python resolves the package first).
+  The workerctl standalone COPY is unchanged, and the worker image smoke
+  import now covers `worker.upload.queue`.
+
 - **Breaking (API consumers):** workspace id and workflow key are one
   identifier (schema v62, DB-WORKSPACE-KEY-BINDING-001): `POST
   /api/workspaces` now requires an explicit `id`

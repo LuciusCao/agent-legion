@@ -2,7 +2,7 @@
 
 Bulk transfers move megabytes and share the Host with every other execution;
 they get a longer timeout and backoff retry on transient failures, unlike
-the control calls in ``worker.host_client``.
+the control calls in ``worker.host.client``.
 """
 
 from __future__ import annotations

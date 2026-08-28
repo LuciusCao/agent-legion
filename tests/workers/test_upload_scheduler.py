@@ -1,4 +1,4 @@
-"""Unit tests for the two-lane dynamic-concurrency scheduler (worker/upload_scheduler.py)."""
+"""Unit tests for the two-lane dynamic-concurrency scheduler (worker/upload/scheduler.py)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 import pytest
 
-from worker.upload_scheduler import LaneScheduler
+from worker.upload.scheduler import LaneScheduler
 
 pytestmark = pytest.mark.no_db
 

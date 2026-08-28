@@ -11,8 +11,8 @@ from typing import Any
 
 import pytest
 
-import worker.registration_retry as registration_retry
-from worker.host_status_sync import sync_host_status
+import worker.registration.retry as registration_retry
+from worker.host.status_sync import sync_host_status
 from worker.metrics_cache import WorkerMetricsCache
 from worker.status import ExecutionStatusReporter, read_runtime_status
 
