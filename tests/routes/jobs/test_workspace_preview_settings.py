@@ -109,6 +109,11 @@ def test_settings_get_put_round_trip_accepted(client_factory):
         ws_id = _create_workspace(c)
         settings = c.get(f"/api/workspaces/{ws_id}/settings").json()["settings"]
 
+        # GET 必须覆盖白名单全集：某键不再返回时前端的 pick 会静默漏项。
+        assert not (put_whitelist - set(settings)), (
+            "GET /settings must return every PUT whitelist key"
+        )
+
         # 模拟前端的白名单 pick。
         picked = {key: settings[key] for key in put_whitelist if key in settings}
         put = c.put(
