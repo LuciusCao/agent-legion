@@ -25,16 +25,11 @@ import threading
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from server.app.auth.scoped_tokens import (
-    mint_scoped_token,
-    renew_scoped_token,
-    revoke_scoped_token,
-)
+from server.app.auth.scoped_tokens import renew_scoped_token
 from server.app.events.bus import EventBus
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.settings import Settings
-from server.app.studio_chat.acp_session import AcpSessionHandle, build_mcp_server_spec
 from server.app.studio_chat.availability import AgentAvailabilityProbe
 from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.registry import StudioAgentRegistryStore
@@ -42,15 +37,14 @@ from server.app.studio_chat.runtime import (
     SessionRuntime,
     teardown_runtime,
 )
+from server.app.studio_chat.spawn import spawn_session_runtime
 from server.app.studio_chat.store import StudioChatStore
+from server.app.studio_chat.transcript import build_resume_transcript
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import AcpEventHandlers
 
 logger = logging.getLogger(__name__)
-
-# Time to wait for the agent subprocess to finish initialize + session/new.
-SESSION_START_TIMEOUT_SECONDS = 60
 
 # Global cap on live chat sessions (#158): every session owns an agent
 # subprocess, a dedicated thread/event loop, and a minted scoped token, so
@@ -148,57 +142,20 @@ class StudioChatService:
                 f"Too many active studio chat sessions (limit {MAX_ACTIVE_STUDIO_CHAT_SESSIONS});"
                 " close an existing session first"
             )
-        token: str | None = None
-        runtime: SessionRuntime | None = None
-        try:
-            # The run token is bound to this session's workspace (schema v45):
-            # the tool surface then refuses other workspaces for it.
-            token = mint_scoped_token(self._db, user_id, origin="run", workspace_id=workspace_id)
-            handle = AcpSessionHandle(
-                command=command,
-                args=[str(arg) for arg in agent.get("args", [])],
-                cwd=str(self._settings.root_dir),
-                mcp_server=build_mcp_server_spec(
-                    token=token,
-                    api_base=str(self._registry.get()["api_base"]),
-                    session_id=session_id,
-                ),
-                env=None,
-                callbacks=ServiceCallbacks(self, session_id),
-            )
-            runtime = SessionRuntime(handle, token)
-            with self._runtimes_lock:
-                self._runtimes[session_id] = runtime
-            handle.start()
-            if not handle.ready_event.wait(timeout=SESSION_START_TIMEOUT_SECONDS):
-                raise InvalidOperationError("Studio agent failed to start (timeout)")
-            session = self._db.get_studio_chat_session(session_id)
-            if session is None or session["status"] != "idle":
-                detail = (session or {}).get("error_detail") or "agent startup failed"
-                raise InvalidOperationError(f"Studio agent failed to start: {detail}")
-        except Exception as exc:
-            # One cleanup path for every startup failure: no half-applied
-            # 'starting' row, no leaked token, no orphaned runtime. The status
-            # write is guarded (#158): a close that raced the startup window
-            # already owns the final 'closed' state.
-            detail = str(exc) or exc.__class__.__name__
-            self._db.update_studio_chat_session_if(
-                session_id, status_not_in=("closed",), status="error", error_detail=detail[:500]
-            )
-            if runtime is None:
-                # The handle never materialized: nothing to tear down, but a
-                # minted token must not leak (token is None when the mint
-                # itself failed).
-                if token is not None:
-                    try:
-                        revoke_scoped_token(self._db, token)
-                    except Exception:
-                        logger.warning("failed to revoke studio chat token for %s", session_id)
-            else:
-                self.teardown_runtime(session_id, runtime)
-            raise
+        spawn_session_runtime(
+            self._db,
+            self._settings,
+            self._registry,
+            self._runtimes,
+            self._runtimes_lock,
+            ServiceCallbacks(self, session_id),
+            session_id,
+            agent,
+            user_id,
+            workspace_id,
+        )
         self.store.publish_session(session_id)
-        return session
+        return self.get_session(session_id)
 
     def list_sessions(self, workspace_id: str) -> list[dict[str, Any]]:
         return self._db.list_studio_chat_sessions(workspace_id)
@@ -226,6 +183,80 @@ class StudioChatService:
         )
         self.teardown_runtime(session_id, runtime)
         self.store.append_message(session_id, "status", "system", {"event": "session_closed"})
+        self.store.publish_session(session_id)
+        return self.get_session(session_id)
+
+    def resume_session(self, session_id: str, workspace_id: str, user_id: str) -> dict[str, Any]:
+        """Rebuild the runtime of a closed/error session; history is kept.
+
+        The agent regains context two ways (session_load.open_acp_session):
+        ACP session/load of the prior acp_session_id when the
+        freshly-initialized agent advertises loadSession, otherwise a fresh
+        ACP session plus the persisted transcript injected once into the
+        first post-resume prompt (runtime.resume_transcript_pending).
+        Resuming a session that is still live on this server is an idempotent
+        no-op.
+        """
+        if self._shutdown:
+            raise ConflictError("Studio chat service is shutting down")
+        session = self.get_session(session_id, workspace_id)
+        if session["status"] not in ("closed", "error"):
+            if self.runtime(session_id) is not None:
+                return session
+            # Live status without a runtime must not be respawned blind: the
+            # startup reaper owns that reconciliation (marks it error, after
+            # which it becomes resumable).
+            raise ConflictError(f"Chat session is {session['status']} and cannot be resumed")
+        # A closed/error session can still have a registered runtime winding
+        # down (fatal error -> _on_exit window) or left over by a reap that
+        # raced a live handle: settle it before claiming, so the respawn
+        # never orphans the old agent subprocess (idempotent no-op when the
+        # registry holds nothing).
+        self.teardown_runtime(session_id, self.runtime(session_id))
+        agent_id = str(session["agent_id"])
+        agent = self._registry.find_agent(agent_id)
+        if agent is None:
+            raise InvalidOperationError(f"Unknown studio agent: {agent_id}")
+        command = str(agent["command"])
+        if not self._probe.available(command):
+            raise InvalidOperationError(
+                f"Studio agent '{agent_id}' is not available on this host"
+                f" (command not found: {command})"
+            )
+        # Atomic closed/error -> starting claim under the creation cap's
+        # advisory lock: a resume spawns a subprocess, so it counts against
+        # the same active-session cap and cannot race creators past it.
+        if not self._db.claim_studio_chat_resume(
+            session_id, max_active=MAX_ACTIVE_STUDIO_CHAT_SESSIONS
+        ):
+            current = self._db.get_studio_chat_session(session_id) or {}
+            if current.get("status") not in ("closed", "error"):
+                raise ConflictError("Chat session was resumed concurrently")
+            raise ConflictError(
+                f"Too many active studio chat sessions (limit {MAX_ACTIVE_STUDIO_CHAT_SESSIONS});"
+                " close an existing session first"
+            )
+        # Re-read after the claim (cross-process discipline): the row we
+        # spawn for is the one we just transitioned, never a stale snapshot.
+        claimed = self.get_session(session_id, workspace_id)
+        handle = spawn_session_runtime(
+            self._db,
+            self._settings,
+            self._registry,
+            self._runtimes,
+            self._runtimes_lock,
+            ServiceCallbacks(self, session_id),
+            session_id,
+            agent,
+            user_id,
+            workspace_id,
+            resume_acp_session_id=claimed["acp_session_id"],
+        )
+        runtime = self.runtime(session_id)
+        if runtime is not None and not handle.loaded_existing:
+            with runtime.lock:
+                runtime.resume_transcript_pending = True
+        self.store.append_message(session_id, "status", "system", {"event": "session_resumed"})
         self.store.publish_session(session_id)
         return self.get_session(session_id)
 
@@ -262,6 +293,19 @@ class StudioChatService:
         from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 
         prompt_text = (STUDIO_AUTHORING_BOOTSTRAP + text) if first_prompt else text
+        # Resume fallback context (one-shot): the fresh agent could not reload
+        # the prior ACP session, so prepend the persisted transcript. Consumed
+        # under the runtime lock before any send_prompt so a retry after a
+        # failed turn never double-injects, and only when the session actually
+        # has history (first_prompt sessions get the bootstrap instead).
+        if not first_prompt:
+            with runtime.lock:
+                inject_transcript = runtime.resume_transcript_pending
+                runtime.resume_transcript_pending = False
+            if inject_transcript:
+                transcript = build_resume_transcript(self._db.list_studio_chat_messages(session_id))
+                if transcript:
+                    prompt_text = transcript + prompt_text
         if not runtime.handle.send_prompt(prompt_text):
             # Guarded (#158): a close racing this turn owns the final state.
             self._db.update_studio_chat_session_if(

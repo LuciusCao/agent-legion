@@ -45,6 +45,10 @@ class SessionRuntime:
         # into that turn's rows (#98).
         self.stream = TurnStreamState()
         self.mcp_observed = False
+        # Set by resume_session when the fresh agent could not reload the
+        # prior ACP session: the first post-resume prompt gets the persisted
+        # transcript prepended (consumed and cleared in send_message).
+        self.resume_transcript_pending = False
         # Whether the one-time advisory mcp_unverified hint was already
         # posted for this session (per-session, not per-turn).
         self.mcp_hint_shown = False

@@ -1,0 +1,29 @@
+.resumeBar {
+  margin: 0 12px;
+  padding: 8px 10px;
+  background: #e3f2fd;
+  border: 1px solid #bbdefb;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #0d47a1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.resumeButton {
+  flex: none;
+  padding: 4px 12px;
+  border: 1px solid #90caf9;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #0d47a1;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.resumeButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

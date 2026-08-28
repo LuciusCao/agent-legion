@@ -33,7 +33,6 @@ from acp.schema import (
 )
 from acp.schema import (
     ClientCapabilities,
-    HttpHeader,
     HttpMcpServer,
     Implementation,
     RequestPermissionResponse,
@@ -43,9 +42,8 @@ from acp.schema import (
     DeniedOutcome as AcpDeniedOutcome,
 )
 
-from server.app.mcp_server.config import SESSION_ID_HEADER
-from server.app.mcp_server.http_app import MCP_URL_PATH
 from server.app.studio_chat.capabilities import capability_snapshot
+from server.app.studio_chat.session_load import open_acp_session
 from server.app.studio_chat.terminals import AcpTerminalStore, TerminalClientMixin
 
 logger = logging.getLogger(__name__)
@@ -131,6 +129,7 @@ class AcpSessionHandle:
         mcp_server: HttpMcpServer,
         env: Mapping[str, str] | None,
         callbacks: AcpSessionCallbacks,
+        resume_acp_session_id: str | None = None,
     ) -> None:
         self.command = command
         self.args = args
@@ -138,6 +137,12 @@ class AcpSessionHandle:
         self.mcp_server = mcp_server
         self.env = dict(env or {})
         self.callbacks = callbacks
+        # Resume path: try session/load of this prior ACP session when the
+        # freshly-initialized agent advertises loadSession (session_load.py).
+        self._resume_acp_session_id = resume_acp_session_id
+        # Set once startup completed: True only when session/load actually
+        # restored the prior ACP session (False on the session/new fallback).
+        self.loaded_existing = False
         self._queue: queue.Queue[Any] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._closed = False
@@ -247,13 +252,20 @@ class AcpSessionHandle:
                     ),
                 )
                 capabilities = capability_snapshot(initialize)
-                session = await conn.new_session(cwd=self.cwd, mcp_servers=[self.mcp_server])
+                acp_session_id, loaded = await open_acp_session(
+                    conn,
+                    cwd=self.cwd,
+                    mcp_server=self.mcp_server,
+                    resume_acp_session_id=self._resume_acp_session_id,
+                    capabilities=capabilities,
+                )
                 with self._state_lock:
-                    self._acp_session_id = session.session_id
-                self.callbacks.on_ready(capabilities, session.session_id)
+                    self._acp_session_id = acp_session_id
+                self.loaded_existing = loaded
+                self.callbacks.on_ready(capabilities, acp_session_id)
                 # Startup handshake complete: release the create_session waiter.
                 self.ready_event.set()
-                await self._prompt_loop(conn, session.session_id)
+                await self._prompt_loop(conn, acp_session_id)
         except Exception as exc:
             # exc_info: this is the primary failure signal for the whole ACP
             # session lifecycle — losing the traceback makes spawn/transport
@@ -294,24 +306,3 @@ class AcpSessionHandle:
                 logger.debug("studio chat agent stderr: %s", line.decode(errors="replace").rstrip())
 
         asyncio.get_running_loop().create_task(drain())
-
-
-def build_mcp_server_spec(*, token: str, api_base: str, session_id: str) -> HttpMcpServer:
-    """The session-scoped agent-legion MCP entry injected into session/new.
-
-    kimi ≥ 0.38 only accepts http/sse MCP servers over ACP, so the backend
-    serves the tool surface itself (server.app.mcp_server.http_app) and the
-    session points at that URL. The raw scoped token crosses only as an HTTP
-    header inside the ACP session/new request — never persisted, never logged
-    (STUDIO-AGENT-001). The chat session id rides along (SESSION_ID_HEADER)
-    so the get_studio_context tool can resolve this session's live context.
-    """
-    return HttpMcpServer(
-        type="http",
-        name="agent-legion-studio",
-        url=f"{api_base}{MCP_URL_PATH}",
-        headers=[
-            HttpHeader(name="Authorization", value=f"Bearer {token}"),
-            HttpHeader(name=SESSION_ID_HEADER, value=session_id),
-        ],
-    )

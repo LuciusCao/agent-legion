@@ -24,14 +24,18 @@ import {
   type ChatMessage,
 } from './studioChatMessages'
 import { mergeMessages } from './studioChatRefill'
+import { useStudioChatResume } from './useStudioChatResume'
+import {
+  isStudioChatBusy,
+  useStudioChatRunTiming,
+} from './useStudioChatRunTiming'
+import { useStudioChatSessionMemory } from './useStudioChatSessionMemory'
 
 type SsePayload = {
   type?: string
   message?: Partial<ChatMessage> & { id: string }
   session?: StudioChatSessionRecord
 }
-
-const BUSY_STATUSES = new Set(['starting', 'running', 'awaiting_permission'])
 
 /** Studio「Agent 助手」对话面板的状态与动作：会话/消息经 REST 拉取，
  * 实时更新走 SSE（message 按 id upsert，session 为状态快照）；SSE
@@ -43,10 +47,6 @@ export function useStudioChat(workspaceId: string | undefined) {
   const [session, setSession] = useState<StudioChatSessionRecord | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
-  const [runTiming, setRunTiming] = useState<{
-    startedAt: number | null
-    lastMs: number | null
-  }>({ startedAt: null, lastMs: null })
   const messagesRef = useRef<ChatMessage[]>([])
   useEffect(() => {
     messagesRef.current = messages
@@ -71,20 +71,9 @@ export function useStudioChat(workspaceId: string | undefined) {
     setSession(next)
   }, [])
 
-  // run 计时：会话状态快照进出 busy 状态时记开始/用时。
+  // run 计时：会话状态快照进出 busy 状态时记开始/用时，切换会话重置。
   const sessionStatus = session?.status ?? null
-  useEffect(() => {
-    if (sessionStatus === null) return
-    const busy = BUSY_STATUSES.has(sessionStatus)
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 计时器跟随 SSE 会话状态快照翻转
-    setRunTiming((previous) => {
-      if (busy) {
-        return { startedAt: previous.startedAt ?? Date.now(), lastMs: null }
-      }
-      if (previous.startedAt === null) return previous
-      return { startedAt: null, lastMs: Date.now() - previous.startedAt }
-    })
-  }, [sessionStatus])
+  const runTiming = useStudioChatRunTiming(sessionStatus, activeSessionId)
 
   const refillMessages = useCallback(
     async (fromSeq?: number) => {
@@ -121,7 +110,6 @@ export function useStudioChat(workspaceId: string | undefined) {
       previous && previous.id === activeSessionId ? previous : null
     )
     setActionError(null)
-    setRunTiming({ startedAt: null, lastMs: null })
     void fetchStudioChatMessages(workspaceId, activeSessionId).then(
       (fetched) => {
         if (!stale) setMessages(fetched)
@@ -275,7 +263,22 @@ export function useStudioChat(workspaceId: string | undefined) {
   const { toolCalls, workflowDraft, agentDrafts, nodeDrafts, permissions } =
     useMemo(() => deriveChatViews(messages), [messages])
 
-  const busy = session ? BUSY_STATUSES.has(session.status) : false
+  // 「继续对话」：closed/error 会话重建 runtime（转录/session load 由后端决定）。
+  const { resume, resuming } = useStudioChatResume(
+    workspaceId,
+    activeSessionId,
+    runAction,
+    applySession
+  )
+  // 按 workspace 记忆选中会话；未选择时恢复上次或回落最近会话。
+  useStudioChatSessionMemory(
+    workspaceId,
+    sessionsQuery.data ?? [],
+    activeSessionId,
+    selectSession
+  )
+
+  const busy = session ? isStudioChatBusy(session.status) : false
   const closed = session
     ? session.status === 'closed' || session.status === 'error'
     : false
@@ -298,6 +301,8 @@ export function useStudioChat(workspaceId: string | undefined) {
     starting,
     actionError,
     lastRunMs: runTiming.lastMs,
+    resume,
+    resuming,
     selectSession,
     startSession,
     send,

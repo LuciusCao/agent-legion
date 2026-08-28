@@ -20,6 +20,10 @@ Script shape::
       "wait_for_cancel": true           # hold the turn until session/cancel
     }
 
+Set ``"load_error": true`` to make session/load fail with a JSON-RPC error
+(the client must then fall back to session/new); otherwise session/load
+succeeds with an empty result.
+
 Single-threaded message pump: ``pump_until`` re-enters dispatch so a prompt
 turn can await a permission response or a cancel notification while keeps
 reading.
@@ -104,6 +108,17 @@ class _FakeAgent:
                     "result": {"sessionId": self.acp_session_id},
                 }
             )
+        elif method == "session/load":
+            if self.script.get("load_error"):
+                self._send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {"code": -32000, "message": "no such session"},
+                    }
+                )
+            else:
+                self._send({"jsonrpc": "2.0", "id": request_id, "result": {}})
         elif method == "session/prompt":
             self._run_prompt(message["params"].get("sessionId", self.acp_session_id))
             self._send(

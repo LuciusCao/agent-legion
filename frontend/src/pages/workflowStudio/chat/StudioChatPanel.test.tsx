@@ -19,8 +19,6 @@ const mockCompare = vi.mocked(compareWorkflowDraft)
 
 const baseSettings: WorkspaceSettings = {
   entityType: 'question',
-  intakeModes: [],
-  labelOverrides: {},
   workflowKey: '',
 }
 

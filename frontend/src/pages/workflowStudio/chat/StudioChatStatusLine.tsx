@@ -24,6 +24,8 @@ export function StatusLine({ message }: { message: ChatMessage }) {
       ? '已请求取消当前运行'
       : event === 'session_closed'
         ? '会话已关闭'
-        : detail || event
+        : event === 'session_resumed'
+          ? '会话已恢复，可继续对话'
+          : detail || event
   return <div className={styles.statusLine}>{text}</div>
 }

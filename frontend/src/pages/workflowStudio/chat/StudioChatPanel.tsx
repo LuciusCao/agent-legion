@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useSettingStore } from '../../../stores/settingStore'
 import { useStudioChat } from './useStudioChat'
 import { useStudioChatQueue } from './useStudioChatQueue'
@@ -7,6 +7,7 @@ import { useStudioDraftSync } from './useStudioDraftSync'
 import { StudioChatSessionBar } from './StudioChatSessionBar'
 import { StudioChatMessageList } from './StudioChatMessageList'
 import { StudioChatQueueBar } from './StudioChatQueueBar'
+import { StudioChatResumeBar } from './StudioChatResumeBar'
 import { StudioChatRunBar } from './StudioChatRunBar'
 import { StudioChatInput } from './StudioChatInput'
 import styles from './StudioChatPanel.module.css'
@@ -31,14 +32,6 @@ export function StudioChatPanel(props: Props) {
   // 未手动选择时跟随 agent 列表第一项（picker 只列本机可用 agent）。
   const selectedAgentId = chosenAgentId || (chat.agents[0]?.id ?? '')
 
-  // 会话列表到达后默认打开最近会话。
-  useEffect(() => {
-    if (chat.activeSessionId === null && chat.sessions.length > 0) {
-      void chat.selectSession(chat.sessions[0].id)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在「未选择」时回填一次
-  }, [chat.sessions, chat.activeSessionId])
-
   if (!workspaceId) {
     return <div className={styles.emptyState}>未选择 workspace</div>
   }
@@ -60,7 +53,7 @@ export function StudioChatPanel(props: Props) {
   const disabledReason = !chat.session
     ? '先选择会话或新建对话'
     : chat.closed
-      ? '会话已关闭，请新建对话'
+      ? '会话已关闭或中断，点「继续对话」恢复'
       : null
 
   return (
@@ -103,6 +96,7 @@ export function StudioChatPanel(props: Props) {
         onCancel={() => void chat.cancel()}
       />
       <StudioChatQueueBar queue={queue} />
+      {chat.closed && chat.session && <StudioChatResumeBar chat={chat} />}
       <StudioChatInput
         busy={chat.busy}
         disabled={inputDisabled}
