@@ -4,7 +4,7 @@ These cover the pure logic: coverage-context extraction from a synthetic
 SQLite file, repo-relative path mapping, and conservative selection
 semantics (unknown test files run wholesale; mapped files union their
 recorded tests). End-to-end behavior of the gate tiers lives in
-tests/test_quality_gate_scripts.py.
+tests/scripts/test_quality_gate_scripts.py.
 """
 
 from __future__ import annotations
