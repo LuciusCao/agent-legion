@@ -18,6 +18,7 @@ from worker.binary_resolution import resolve_binary
 from worker.bundle_io import download_input_artifacts, safe_extract
 from worker.claim_manifest import apply_live_manifest
 from worker.host_client import Client
+from worker.workroot_pending import refuse_if_pending_upload
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,9 @@ def prepare_execution(
     session_dir = run_dir / "session"
     prompt_file = run_dir / "prompt.md"
     if execution_dir.exists():
+        # #203：marker 归属本 claim 的 lease 才拒绝（排队中的未投递结果）；
+        # 旧 lease 的孤儿 marker（report 必 409）随 stale 目录一起清掉。
+        refuse_if_pending_upload(execution_dir, claim)
         # Stale dir from a crashed run or a re-claimed execution: drop it.
         print(f"removing stale execution dir for {execution_id}", flush=True)
         shutil.rmtree(execution_dir, ignore_errors=True)

@@ -55,6 +55,11 @@ from worker.upload_scheduler import LaneScheduler
 PENDING_FILENAME = "upload_pending.json"
 _PENDING_VERSION = 1
 
+
+class PendingUploadExists(RuntimeError):
+    """#203：execution dir 已带未投递 marker——该目录归 UploadQueue 所有。"""
+
+
 _RETRY_BASE_SECONDS = 2.0
 _RETRY_CAP_SECONDS = 60.0
 _HEARTBEAT_JOIN_SECONDS = 5.0
