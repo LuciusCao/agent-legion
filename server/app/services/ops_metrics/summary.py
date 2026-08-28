@@ -2,7 +2,7 @@
 
 Token and gauge values always come from minute-resolution samples
 (``bucket_start >= now - 1h`` for tokens, latest minute row for gauges);
-run stats aggregate ``node_runs`` on demand (see ``_ops_metrics_runs``).
+run stats aggregate ``node_runs`` on demand (see ``ops_metrics.runs``).
 The UI polls this endpoint, so results are cached for a few seconds per
 (worker, workspace) scope on the service instance — the run aggregate would
 otherwise rescan ``node_runs`` on every poll. ``worker_id`` scopes
@@ -16,8 +16,8 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from server.app.db.transaction import read_connection
-from server.app.services._ops_metrics_queue import query_queue_summary
-from server.app.services._ops_metrics_runs import query_recent_hour_runs
+from server.app.services.ops_metrics.queue import query_queue_summary
+from server.app.services.ops_metrics.runs import query_recent_hour_runs
 
 if TYPE_CHECKING:
     from server.app.services.ops_metrics import OpsMetricsService

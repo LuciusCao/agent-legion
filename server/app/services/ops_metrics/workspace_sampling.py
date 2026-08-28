@@ -1,10 +1,10 @@
 """Per-workspace sampling for the Host operations metrics service (schema v23).
 
-Split out of ``ops_metrics.py`` for the file-size budget. Writes one sample
-row per active workspace per minute (``worker_id=''`` + ``workspace_id=X``)
-so the monitoring panel can scope queue depth, active executions and token
-throughput to a single workspace; mirrors the per-Worker row pattern —
-workspaces with no activity in the bucket simply get no row.
+Writes one sample row per active workspace per minute (``worker_id=''`` +
+``workspace_id=X``) so the monitoring panel can scope queue depth, active
+executions and token throughput to a single workspace; mirrors the
+per-Worker row pattern — workspaces with no activity in the bucket simply
+get no row.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any
 
 from server.app.db.connection import DatabaseConnection
-from server.app.services._ops_metrics_sampling import _EMPTY_TOKENS, _upsert_sample
+from server.app.services.ops_metrics.sampling import _EMPTY_TOKENS, _upsert_sample
 
 
 def collect_workspace_samples(

@@ -3,7 +3,7 @@
 ``blocked`` (fresh signal from the empty-claim trigger; fleet-level, shown in
 a workspace view only while that workspace has queued rows) vs ``stalled``
 (queued rows, zero activity, no claim attempts at all) — the classification
-itself lives in ``_ops_metrics_queue_alert.py``.
+itself lives in ``ops_metrics.queue_alert``.
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from server.app.db.transaction import read_connection
-from server.app.services._ops_metrics_queue_alert import queue_alert
-from server.app.services._ops_metrics_series import _isoformat_utc
+from server.app.services.ops_metrics.queue_alert import queue_alert
+from server.app.services.ops_metrics.series import _isoformat_utc
 
 if TYPE_CHECKING:
     from server.app.services.ops_metrics import OpsMetricsService

@@ -1,3 +1,12 @@
+"""Job rerun service and its set-based batch / preview / eligibility modules.
+
+Issue #199 归包：包根即原 ``services/job_rerun.py``（``JobRerunService``
+门面），``single.py`` 单节点路径、``batch.py`` 批量路径、``preview.py`` /
+``preview_checks.py`` 只读预览、``eligibility.py`` 共享资格规则、
+``upstream_guard.py`` 失败上游守卫、``by_failure_results.py`` 按失败
+类别批量的逐 job 结果组装、``batch_ops.py`` 批量 remove / run-to 循环。
+"""
+
 from collections.abc import Callable, Collection
 from datetime import UTC, datetime
 from typing import Any
@@ -6,13 +15,13 @@ from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.queries.job_filtering import JobListFilter
-from server.app.services._job_rerun_batch import batch_rerun as _batch_rerun
-from server.app.services._job_rerun_batch import (
-    rerun_by_failure_category as _rerun_by_failure,
-)
-from server.app.services._job_rerun_single import execute_rerun, resolve_rerun_node
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
+from server.app.services.job_rerun.batch import batch_rerun as _batch_rerun
+from server.app.services.job_rerun.batch import (
+    rerun_by_failure_category as _rerun_by_failure,
+)
+from server.app.services.job_rerun.single import execute_rerun, resolve_rerun_node
 from server.app.settings import Settings
 
 

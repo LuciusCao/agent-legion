@@ -4,7 +4,7 @@ Set-based, not per-job: the selection is materialized with one page scan,
 then jobs / job nodes / active leases are fetched with one bulk query each
 and joined in memory, so a multi-thousand-job selection costs a constant
 number of round trips instead of several per job. The per-job predicates live
-in ``_job_rerun_preview_checks`` (pure bulk-data equivalents of the write
+in ``job_rerun.preview_checks`` (pure bulk-data equivalents of the write
 path's checks). Nothing in this module writes.
 """
 
@@ -14,17 +14,17 @@ from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING, Any
 
 from server.app.jobs.queries.job_filtering import JobListFilter
-from server.app.services._job_rerun_eligibility import (
+from server.app.services.job_operation_error import JobOperationError
+from server.app.services.job_rerun.eligibility import (
     AUTO_STRATEGIES,
     failed_nodes_by_job,
     resolve_failure_rerun_targets,
 )
-from server.app.services._job_rerun_preview_checks import (
+from server.app.services.job_rerun.preview_checks import (
     PreviewDefinitions,
     rerun_ineligible_from_nodes,
     resolve_rerun_node_from_nodes,
 )
-from server.app.services.job_operation_error import JobOperationError
 from server.app.services.job_selection_resolver import resolve_batch_selection
 
 if TYPE_CHECKING:

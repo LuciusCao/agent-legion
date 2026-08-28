@@ -2,7 +2,7 @@
 
 run-to-with-start 与 rerun 共用 mark_nodes_for_rerun 重置语义（只重置
 起始节点+下游），存在同样的 queued+failed 死状态隐患，因此共用
-_job_rerun_upstream_guard。run-to 不指定起始节点时走 apply_run_to，
+job_rerun.upstream_guard。run-to 不指定起始节点时走 apply_run_to，
 会把 closure 内 failed 节点一并重置，无此隐患。
 """
 
