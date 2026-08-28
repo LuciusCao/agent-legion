@@ -49,15 +49,10 @@ export default function JobDetailPage() {
     return reset
   }, [jobId])
 
-  const {
-    dagNodes,
-    dagEdges,
-    nodeCatalog,
-    keyInfoPreviewable,
-    possibleErrorsPreviewable,
-    keyInfoReviewAttempted,
-    possibleErrorsReviewAttempted,
-  } = useMemo(() => deriveJobDetailPresentation(detail), [detail])
+  const { dagNodes, dagEdges, nodeCatalog } = useMemo(
+    () => deriveJobDetailPresentation(detail),
+    [detail]
+  )
 
   const openArtifact = useCallback(
     async (name: string) => {
@@ -120,14 +115,7 @@ export default function JobDetailPage() {
       <div className={styles.columns}>
         <div className={styles.left}>
           {jobId && (
-            <EntityPanel
-              detail={detail}
-              jobId={jobId}
-              keyInfoPreviewable={keyInfoPreviewable}
-              possibleErrorsPreviewable={possibleErrorsPreviewable}
-              keyInfoReviewAttempted={keyInfoReviewAttempted}
-              possibleErrorsReviewAttempted={possibleErrorsReviewAttempted}
-            />
+            <EntityPanel detail={detail} jobId={jobId} />
           )}
         </div>
 

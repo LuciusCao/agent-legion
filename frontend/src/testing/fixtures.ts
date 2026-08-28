@@ -1,7 +1,7 @@
 import { vi } from 'vitest'
 import type { AgentsState } from '../stores/agentsStore'
 import type { UiState } from '../stores/uiStore'
-import type { JobSummary } from '../types/jobTypes'
+import type { JobDetail, JobSummary } from '../types/jobTypes'
 
 export function createMockAgentsState(
   partial: Partial<AgentsState> = {}
@@ -62,6 +62,35 @@ export function makeJob(overrides: Partial<JobSummary> = {}): JobSummary {
     current_workflow_revision_version: null,
     is_workflow_outdated: false,
     packed: 0,
+    ...overrides,
+  }
+}
+
+/** question 面板 gating 所需的最小 jobDetail（manifest 求值用 nodes）。 */
+export function makeJobDetail(
+  nodes: Array<Partial<JobDetail['nodes'][number]>> = [],
+  overrides: Partial<JobDetail> = {}
+): JobDetail {
+  return {
+    job: makeJob(),
+    nodes: nodes.map((node, idx) => ({
+      id: idx + 1,
+      job_id: 'j1',
+      node_key: node.node_key ?? `node_${idx + 1}`,
+      label: node.label ?? node.node_key ?? `node_${idx + 1}`,
+      status: node.status ?? 'completed',
+      capability: node.capability ?? node.node_key ?? `node_${idx + 1}`,
+      created_at: node.created_at ?? '',
+      after: node.after ?? [],
+      inputs: node.inputs ?? [],
+      outputs: node.outputs ?? [],
+      error_message: node.error_message ?? '',
+      stale_reason: node.stale_reason ?? '',
+      executor_kind: node.executor_kind ?? 'code',
+      ...node,
+    })),
+    runs: [],
+    artifacts: overrides.artifacts ?? [],
     ...overrides,
   }
 }

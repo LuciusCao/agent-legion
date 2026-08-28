@@ -10,6 +10,27 @@ function renderPanel(ui: ReactElement) {
 
 const mockFetchJobArtifact = vi.fn()
 
+// panel 内部经 manifest 求 gate（issue #11 第 2 层）：detail 查询带终态
+// generate/review 节点，等价于旧 props keyInfoPreviewable/ReviewAttempted。
+// vi.mock factory 被 hoist 到 import 之前，fixture 数据用 vi.hoisted 定义。
+const { GATE_NODES, GATE_NODES_NO_REVIEW } = vi.hoisted(() => ({
+  GATE_NODES: [
+    { node_key: 'generate_key_info', status: 'completed' },
+    { node_key: 'generate_possible_errors', status: 'completed' },
+    { node_key: 'review_key_info', status: 'completed' },
+    { node_key: 'review_possible_errors', status: 'completed' },
+  ],
+  // 生成完成但评审未到终态：generate gate 开、review attempted 关。
+  GATE_NODES_NO_REVIEW: [
+    { node_key: 'generate_key_info', status: 'completed' },
+    { node_key: 'generate_possible_errors', status: 'completed' },
+    { node_key: 'review_key_info', status: 'running' },
+    { node_key: 'review_possible_errors', status: 'pending' },
+  ],
+}))
+
+let detailNodesOverride: Array<{ node_key: string; status: string }> | null = null
+
 const mockComprehensionInfo = {
   question_id: 'Q1',
   fingerprint: 'fp1',
@@ -90,8 +111,11 @@ function makePossibleErrorsReviewReportJson() {
 
 vi.mock('../../api', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../../api')>()
+  const { makeJobDetail } = await import('../../testing/fixtures')
   return {
     ...mod,
+    fetchJobDetail: () =>
+      Promise.resolve(makeJobDetail(detailNodesOverride ?? GATE_NODES)),
     fetchJobArtifact: (...args: unknown[]) => {
       const artifactName = args[1] as string
       if (artifactName === 'comprehension_info.json') {
@@ -122,10 +146,6 @@ describe('QuestionContentPanel review integration', () => {
     renderPanel(
       <QuestionContentPanel
         jobId="job1"
-        keyInfoPreviewable
-        possibleErrorsPreviewable
-        keyInfoReviewAttempted
-        possibleErrorsReviewAttempted
       />
     )
 
@@ -142,8 +162,6 @@ describe('QuestionContentPanel review integration', () => {
     renderPanel(
       <QuestionContentPanel
         jobId="job1"
-        keyInfoPreviewable
-        keyInfoReviewAttempted
       />
     )
 
@@ -163,8 +181,6 @@ describe('QuestionContentPanel review integration', () => {
     renderPanel(
       <QuestionContentPanel
         jobId="job1"
-        possibleErrorsPreviewable
-        possibleErrorsReviewAttempted
       />
     )
 
@@ -181,18 +197,14 @@ describe('QuestionContentPanel review integration', () => {
   })
 
   it('does not show review icons when review has not been attempted', async () => {
-    renderPanel(
-      <QuestionContentPanel
-        jobId="job1"
-        keyInfoPreviewable
-        possibleErrorsPreviewable
-      />
-    )
+    detailNodesOverride = GATE_NODES_NO_REVIEW
+    renderPanel(<QuestionContentPanel jobId="job1" />)
 
     await waitFor(() =>
       expect(screen.getByText('审题信息')).toBeInTheDocument()
     )
     expect(mockFetchJobArtifact).not.toHaveBeenCalled()
     expect(screen.queryByTestId('CheckCircleIcon')).not.toBeInTheDocument()
+    detailNodesOverride = null
   })
 })
