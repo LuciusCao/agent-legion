@@ -279,11 +279,21 @@ run_round() {
   fi
 }
 
-run_round "static-check" "static" "static" "static"
+# GATE_SKIP_STATIC=1 (set only by scripts/check.sh's postgres segment): the
+# segment re-enters this gate for the backend test tier alone, so the static
+# round and the api-contract integration step are skipped — the unit segment
+# already ran every static check, and re-running them per tier would double
+# the full gate's cost for identical results. Lock, slot queue, and coverage
+# handling are untouched; standalone invocations never set the knob.
+if [[ "${GATE_SKIP_STATIC:-0}" == "1" ]]; then
+  echo "Static round skipped (GATE_SKIP_STATIC=1; test rounds only)."
+else
+  run_round "static-check" "static" "static" "static"
+fi
 # Integration step: the OpenAPI contract spans backend (schema export boots the
 # full app) and frontend (type generation), so it runs once here instead of
 # competing for CPU/memory inside the parallel static round.
-if lane_enabled backend && lane_enabled frontend; then
+if [[ "${GATE_SKIP_STATIC:-0}" != "1" ]] && lane_enabled backend && lane_enabled frontend; then
   FRONTEND_GATE_PHASE="api-contract" \
     "$ROOT_DIR/scripts/check-quick-frontend.sh"
 fi

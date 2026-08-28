@@ -13,7 +13,7 @@
 | `gate-queue.sh` | 机器级 gate 排队：quick gate 在 git common dir 的共享 slot 目录取位，默认 `AGENT_LEGION_MAX_PARALLEL_GATES=1`（串行，各自独占整机预算；并发 2 仍会让各 lane 互相抢 CPU、超时类 flaky 复发，大机器可显式调回 2），满位则打印持有者并等待；陈旧 slot（pid 已死或超龄）自动回收。防多 agent worktree 并行跑门时互相拖垮（曾观察到 4 并发把最后一个 quick gate 拖到 ~1 小时）。 |
 | `pytest_aff_selection.py` | backend 受影响测试选择：从 `--cov-context=test` 的 coverage 数据蒸馏「源文件 → 测试 nodeid」逆索引（`build`），并按 git 改动选出受影响测试（`select`）；内环加速用，非 gate 凭证。 |
 | `check-fast.sh` | pre-commit 实际调用的 fast gate：ruff/mypy/前端 lint，不跑测试。 |
-| `check.sh` | 完整质量门（提交前）：分段串行——backend unit 段（带 coverage）→ backend postgres 段（coverage 追加到同一文件）→ frontend/rust 段，最后并行 full backend evidence/前端 bundle；quick gate 的 full 档缩到 unit 层后，本地全量语义由本脚本保持（两层都跑、覆盖率合并）。 |
+| `check.sh` | 完整质量门（提交前）：分段串行——backend unit 段（带 coverage）→ backend postgres 段（仅测试轮：`GATE_SKIP_STATIC=1` 跳过静态轮与 api-contract 步、`BACKEND_SKIP_WORKER_UI_TESTS=1` 跳过 worker UI 测试，coverage 追加到同一文件）→ frontend/rust 段，最后并行 full backend evidence/前端 bundle；quick gate 的 full 档缩到 unit 层后，本地全量语义由本脚本保持（两层都跑、每项检查恰好一次、覆盖率合并）。 |
 | `check-ci.sh` | CI 质量门：完整 gate 的 CI 扩展版本。 |
 | `check-deps-audit.sh` | 依赖漏洞审计（pip-audit + npm audit）；非阻塞，需网络。 |
 | `run-local-gate.sh` | 对精确 commit 执行 quick/full gate，并在 Git common directory 记录可复用的本地通过凭证。 |

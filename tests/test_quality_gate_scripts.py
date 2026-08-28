@@ -30,6 +30,7 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
         "AGENT_LEGION_RUST_WORKERS",
         "AGENT_LEGION_TEST_WORKERS",
         "BACKEND_GATE_PHASE",
+        "BACKEND_SKIP_WORKER_UI_TESTS",
         "COVERAGE_FILE",
         "FRONTEND_API_CHECK",
         "FRONTEND_COVERAGE_BLOB_DIR",
@@ -38,6 +39,7 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
         "FRONTEND_TEST_PROJECT",
         "GATE_LANES",
         "GATE_SHARD",
+        "GATE_SKIP_STATIC",
         "GATE_TIER",
         "KEEP_COVERAGE",
     ):
@@ -128,6 +130,47 @@ def test_quick_gate_hoists_api_contract_out_of_parallel_static_round(tmp_path: P
     # The static lane skips the inline api:check; the contract runs exactly
     # once as the integration step between the static and test rounds.
     assert calls == ["static:0", "api-contract:unset", "test:1"]
+
+
+def test_quick_gate_skip_static_runs_test_round_only(tmp_path: Path) -> None:
+    """GATE_SKIP_STATIC=1 (check.sh's postgres segment) re-enters the gate for
+    the test rounds alone: no lane may run the static phase again, and the
+    api-contract integration step between the rounds is skipped too — the
+    unit segment already ran those checks."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    quick_gate = scripts / "check-quick.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
+    # The quick gate sources the shared job-count helper.
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
+    gate_log = tmp_path / "gate.log"
+
+    _write_executable(
+        scripts / "check-quick-backend.sh",
+        '#!/usr/bin/env bash\nprintf "backend:%s\\n" "${BACKEND_GATE_PHASE:-unset}" >>"$GATE_LOG"\n',
+    )
+    _write_executable(
+        scripts / "check-quick-frontend.sh",
+        '#!/usr/bin/env bash\nprintf "frontend:%s\\n" "${FRONTEND_GATE_PHASE:-unset}" >>"$GATE_LOG"\n',
+    )
+
+    result = _run(
+        quick_gate,
+        cwd=tmp_path,
+        env={
+            "GATE_LANES": "backend frontend",
+            "GATE_LOG": str(gate_log),
+            "GATE_SKIP_STATIC": "1",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Static round skipped" in result.stdout
+    calls = gate_log.read_text(encoding="utf-8").splitlines()
+    # Only the staggered test rounds run: backend first, frontend after —
+    # no static phase, no api-contract integration step.
+    assert calls == ["backend:test", "frontend:test"]
 
 
 def _quick_gate_fixture(scripts: Path) -> Path:
@@ -250,9 +293,10 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
     _write_executable(
         scripts / "check-quick.sh",
         "#!/usr/bin/env bash\n"
-        'printf "quick:lanes=%s,cov=%s,mode=%s,tier=%s\\n" '
+        'printf "quick:lanes=%s,cov=%s,mode=%s,tier=%s,skip_static=%s,skip_worker_ui=%s\\n" '
         '"${GATE_LANES:-unset}" "${AGENT_LEGION_COV:-unset}" '
-        '"${FRONTEND_TEST_MODE:-unset}" "${GATE_TIER:-unset}" >>"$GATE_LOG"\n',
+        '"${FRONTEND_TEST_MODE:-unset}" "${GATE_TIER:-unset}" '
+        '"${GATE_SKIP_STATIC:-unset}" "${BACKEND_SKIP_WORKER_UI_TESTS:-unset}" >>"$GATE_LOG"\n',
     )
     _write_executable(scripts / "check-deps-audit.sh", "#!/usr/bin/env bash\nexit 0\n")
     for command in ("uv", "npm"):
@@ -277,10 +321,14 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
     # The backend segments run the unit and postgres tiers separately (the
     # quick gate's full tier is unit-only) and append coverage onto the same
     # COVERAGE_FILE, so the combined report below still sees the whole suite.
+    # The postgres segment re-enters the quick gate for its test round only
+    # (GATE_SKIP_STATIC=1, BACKEND_SKIP_WORKER_UI_TESTS=1): segment 1a already
+    # ran the static checks and the tier-independent worker UI tests, so every
+    # check still runs exactly once per full gate.
     assert quick_calls == [
-        "quick:lanes=backend,cov=1,mode=unset,tier=unit",
-        "quick:lanes=backend,cov=1,mode=unset,tier=postgres",
-        "quick:lanes=frontend rust,cov=unset,mode=coverage,tier=unset",
+        "quick:lanes=backend,cov=1,mode=unset,tier=unit,skip_static=unset,skip_worker_ui=unset",
+        "quick:lanes=backend,cov=1,mode=unset,tier=postgres,skip_static=1,skip_worker_ui=1",
+        "quick:lanes=frontend rust,cov=unset,mode=coverage,tier=unset,skip_static=unset,skip_worker_ui=unset",
     ]
     assert calls.count("npm:run build:bundle") == 1
     assert not any("test:coverage" in call for call in calls)
@@ -386,6 +434,61 @@ def test_backend_smoke_tier_runs_the_curated_subset(tmp_path: Path) -> None:
     # The curated tier includes PostgreSQL-backed tests, so it must not be
     # pinned to the unit tier's unreachable database URL.
     assert "agent_legion_unit_offline" not in calls
+
+
+def test_backend_gate_can_skip_worker_ui_tests(tmp_path: Path) -> None:
+    """BACKEND_SKIP_WORKER_UI_TESTS=1 (check.sh's postgres segment) skips the
+    node --test run: the unit segment already ran the identical invocation,
+    and the tier selection cannot affect these tier-independent tests."""
+
+    def run_backend_gate(workdir: Path, extra_env: dict[str, str]) -> tuple[str, str]:
+        scripts = workdir / "scripts"
+        fake_bin = workdir / "bin"
+        scripts.mkdir(parents=True)
+        fake_bin.mkdir(parents=True)
+        backend_gate = scripts / "check-quick-backend.sh"
+        shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+        # The backend lane sources the shared job-count helper.
+        shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+        shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
+        # The worker/ui test file must exist, or the suite is skipped for an
+        # unrelated reason (fixture repos without the worker console).
+        (workdir / "worker" / "ui").mkdir(parents=True)
+        (workdir / "worker" / "ui" / "app.test.mjs").write_text("", encoding="utf-8")
+        gate_log = workdir / "gate.log"
+        _write_executable(
+            fake_bin / "uv",
+            '#!/usr/bin/env bash\nprintf "uv:%s\\n" "$*" >>"$GATE_LOG"\n',
+        )
+        _write_executable(
+            fake_bin / "node",
+            '#!/usr/bin/env bash\nprintf "node:%s\\n" "$*" >>"$GATE_LOG"\n',
+        )
+
+        result = _run(
+            backend_gate,
+            cwd=workdir,
+            env={
+                "BACKEND_GATE_PHASE": "test",
+                "GATE_LOG": str(gate_log),
+                "GATE_TIER": "postgres",
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                **extra_env,
+            },
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        return gate_log.read_text(encoding="utf-8"), result.stdout
+
+    control_calls, _ = run_backend_gate(tmp_path / "run", {})
+    assert "node:--test" in control_calls
+
+    skipped_calls, skipped_stdout = run_backend_gate(
+        tmp_path / "skip", {"BACKEND_SKIP_WORKER_UI_TESTS": "1"}
+    )
+    assert "node:" not in skipped_calls
+    assert "skipped: BACKEND_SKIP_WORKER_UI_TESTS=1" in skipped_stdout
+    # The tier's own pytest run is untouched.
+    assert "uv:run pytest" in skipped_calls
 
 
 def test_backend_full_coverage_defers_floor_to_combined_report(tmp_path: Path) -> None:

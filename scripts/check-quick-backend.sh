@@ -38,7 +38,13 @@ run_tests() {
   # built-in runner. Skip with a notice when node is absent — or when the
   # test file is missing (gate-script tests run this script inside fixture
   # repos that only contain a copy of the script itself).
-  if ! command -v node >/dev/null 2>&1; then
+  # BACKEND_SKIP_WORKER_UI_TESTS=1 (set only by scripts/check.sh's postgres
+  # segment) skips the suite there: the unit segment already ran the
+  # identical invocation, and the tier selection below cannot affect these
+  # tier-independent tests.
+  if [[ "${BACKEND_SKIP_WORKER_UI_TESTS:-0}" == "1" ]]; then
+    echo "=== Worker UI Tests (skipped: BACKEND_SKIP_WORKER_UI_TESTS=1) ==="
+  elif ! command -v node >/dev/null 2>&1; then
     echo "node not found; skipping worker/ui tests (install Node.js to enable them)."
   elif [[ ! -f "$ROOT_DIR/worker/ui/app.test.mjs" ]]; then
     echo "worker/ui/app.test.mjs not present; skipping worker/ui tests."

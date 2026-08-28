@@ -113,7 +113,13 @@ handing off database-touching work, run `GATE_TIER=postgres
 ./scripts/check-quick-backend.sh` explicitly (or rely on CI).
 `scripts/check.sh` — the local full-gate substitute — still pins both tiers
 itself (unit segment, then postgres appended onto the same coverage file),
-so its combined coverage report keeps seeing the whole suite.
+so its combined coverage report keeps seeing the whole suite. The postgres
+segment re-enters the quick gate for its test round only
+(`GATE_SKIP_STATIC=1` skips the static round and the api-contract step;
+`BACKEND_SKIP_WORKER_UI_TESTS=1` skips the tier-independent worker UI
+tests): the unit segment already ran those, so every check still runs
+exactly once per full gate, and the worktree lock, machine slot, and
+coverage append semantics are unchanged.
 
 The affected tier (`GATE_TIER=aff`) is the edit-test iteration loop for
 agents and humans alike: the backend lane selects tests whose recorded

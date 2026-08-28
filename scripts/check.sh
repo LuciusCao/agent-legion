@@ -42,10 +42,17 @@ echo "=== Quick Gate (segmented) ==="
 # full tier shrank to the unit layer: segment 1a runs the unit tier, segment
 # 1b appends the postgres tier onto the same COVERAGE_FILE (AGENT_LEGION_
 # COV_APPEND=1), so the combined report below still sees the whole suite.
+# Segment 1b re-enters check-quick.sh with GATE_SKIP_STATIC=1 (no static
+# round, no api-contract step) and BACKEND_SKIP_WORKER_UI_TESTS=1: segment
+# 1a already ran every static check and the tier-independent worker UI
+# tests, so the postgres segment pays only its own pytest run and every
+# check still runs exactly once. Lock, slot queue, and coverage append
+# semantics are unchanged.
 echo "--- Segment 1a: backend unit tier with coverage (exclusive machine) ---"
 GATE_LANES="backend" GATE_TIER=unit AGENT_LEGION_COV=1 "$ROOT_DIR/scripts/check-quick.sh"
 echo "--- Segment 1b: backend postgres tier with coverage (exclusive machine) ---"
-GATE_LANES="backend" GATE_TIER=postgres AGENT_LEGION_COV=1 AGENT_LEGION_COV_APPEND=1 "$ROOT_DIR/scripts/check-quick.sh"
+GATE_LANES="backend" GATE_TIER=postgres GATE_SKIP_STATIC=1 BACKEND_SKIP_WORKER_UI_TESTS=1 \
+  AGENT_LEGION_COV=1 AGENT_LEGION_COV_APPEND=1 "$ROOT_DIR/scripts/check-quick.sh"
 echo "--- Segment 2: frontend + rust lanes (no backend coverage) ---"
 GATE_LANES="frontend rust" FRONTEND_TEST_MODE=coverage "$ROOT_DIR/scripts/check-quick.sh"
 
