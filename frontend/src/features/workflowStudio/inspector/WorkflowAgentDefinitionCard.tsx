@@ -1,4 +1,4 @@
-import type { AgentDefinition } from '../../../types/executorTypes'
+import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import styles from './WorkflowExecutorBindingList.module.css'
 
 /** 节点绑定 Agent 的只读摘要卡；编辑经节点详情的内嵌 AgentEditor。 */

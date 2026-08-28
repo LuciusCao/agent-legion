@@ -4,11 +4,11 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter
 
-from server.app.routes.executor_contracts import (
+from server.app.routes.job_http import require_workflows_enabled
+from server.app.routes.workspace_execution_contracts import (
     WorkspaceAgentRouteEntry,
     WorkspaceAgentRoutesResponse,
 )
-from server.app.routes.job_http import require_workflows_enabled
 from server.app.services.workspace_agent_routes import list_workspace_agent_routes
 from server.app.settings import Settings
 

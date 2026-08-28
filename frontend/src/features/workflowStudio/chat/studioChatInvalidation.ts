@@ -12,7 +12,7 @@ export function invalidateStudioTurnEndQueries(
     queryKey: extraQueryKeys.workflowStudioData(workspaceId),
   })
   void queryClient.invalidateQueries({
-    queryKey: extraQueryKeys.studioExecutorCatalog(workspaceId),
+    queryKey: extraQueryKeys.studioAgentCatalog(workspaceId),
   })
   void queryClient.invalidateQueries({ queryKey: ['studioSkillDetail'] })
 }

@@ -80,11 +80,11 @@ vi.mock('../api/jobBatchUpgradeWorkflowApi', () => ({
   ) => mockBatchUpgradeJobsWorkflow(...args),
 }))
 
-const mockGetWorkspaceExecutorConfiguration = vi.fn()
+const mockGetWorkspaceExecutionConfiguration = vi.fn()
 
-vi.mock('../api/executorApi', () => ({
-  getWorkspaceExecutorConfiguration: (...args: unknown[]) =>
-    mockGetWorkspaceExecutorConfiguration(...args),
+vi.mock('../api/agentCatalogApi', () => ({
+  getWorkspaceExecutionConfiguration: (...args: unknown[]) =>
+    mockGetWorkspaceExecutionConfiguration(...args),
 }))
 
 function renderPage(workspaceId = 'ws1') {
@@ -194,8 +194,8 @@ describe('WorkspaceMainPage', () => {
     mockBatchRunToJobs.mockReset()
     mockUpgradeJobWorkflow.mockReset()
     mockBatchUpgradeJobsWorkflow.mockReset()
-    mockGetWorkspaceExecutorConfiguration.mockReset()
-    mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
+    mockGetWorkspaceExecutionConfiguration.mockReset()
+    mockGetWorkspaceExecutionConfiguration.mockResolvedValue({
       node_limits: [],
       migration_warnings: [],
       agent_capacity: null,
@@ -288,12 +288,12 @@ describe('WorkspaceMainPage', () => {
       isDirty: false,
       isSaving: false,
       saveError: null,
-      executorConfiguration: {
+      executionConfiguration: {
         node_limits: [],
         migration_warnings: [],
         agent_capacity: null,
       },
-      originalExecutorConfiguration: null,
+      originalExecutionConfiguration: null,
     })
   })
 

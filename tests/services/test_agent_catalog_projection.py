@@ -1,4 +1,4 @@
-"""execution_catalog：Agent 列表来自传入 catalog，不再投影全局 provider/model/thinking。
+"""agent_catalog：Agent 列表来自传入 catalog，不再投影全局 provider/model/thinking。
 
 全局 ``workflows.pi`` 投影已随 YAML 退役（agent 配置治理 phase 3）：执行默认
 是 workflow 级配置（顶层 ``execution`` 块，schema v63 起 workspace
@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from server.app.agent_catalog import AgentDefinition
-from server.app.services.executor_catalog import execution_catalog
+from server.app.services.agent_catalog_projection import agent_catalog
 from server.app.settings import Settings
 
 
@@ -45,7 +45,7 @@ _AGENTS = {
 
 @pytest.mark.no_db
 def test_catalog_lists_agents_without_execution_projection(tmp_path: Path) -> None:
-    catalog = execution_catalog(_settings(tmp_path), _StubSkills(), "ws-test", _AGENTS)
+    catalog = agent_catalog(_settings(tmp_path), _StubSkills(), "ws-test", _AGENTS)
 
     agents = {entry["id"]: entry for entry in catalog["agents"]}
     assert set(agents) == set(_AGENTS)
@@ -63,6 +63,6 @@ def test_catalog_lists_agents_without_execution_projection(tmp_path: Path) -> No
 @pytest.mark.no_db
 def test_catalog_has_no_executors_half(tmp_path: Path) -> None:
     """P-0.5（schema v47）：executor 概念退役，catalog 只剩 Agent 半边。"""
-    catalog = execution_catalog(_settings(tmp_path), _StubSkills(), "ws-test", _AGENTS)
+    catalog = agent_catalog(_settings(tmp_path), _StubSkills(), "ws-test", _AGENTS)
 
     assert set(catalog) == {"agents"}

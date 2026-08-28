@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react'
 import type { WorkflowDefinitionRecord } from '../../../types'
-import type { AgentDefinition } from '../../../types/executorTypes'
+import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 
 // Studio 内「打开某 Agent」的导航通道：由页面层提供，Inspector 深层组件
 // 直接消费。Agent 管理弹窗删除后收敛为「选中绑定该 capability 的节点」，

@@ -5,7 +5,7 @@ import { useUiStore } from './uiStore'
 import { createMockUiState } from '../testing/fixtures'
 import { api } from '../api'
 import type { WorkspaceSettings } from '../types'
-import type { WorkspaceExecutorConfiguration } from '../types/executorTypes'
+import type { WorkspaceExecutionConfiguration } from '../types/agentCatalogTypes'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
@@ -28,7 +28,7 @@ const defaultSettings: WorkspaceSettings = {
 }
 
 // P-0.5：执行配置只剩节点并发上限 + Agent 容量。
-const initialExecutorConfiguration: WorkspaceExecutorConfiguration = {
+const initialExecutionConfiguration: WorkspaceExecutionConfiguration = {
   node_limits: [
     {
       workflow_key: 'question_content',
@@ -40,7 +40,7 @@ const initialExecutorConfiguration: WorkspaceExecutorConfiguration = {
   agent_capacity: null,
 }
 
-const emptyExecutorConfiguration: WorkspaceExecutorConfiguration = {
+const emptyExecutionConfiguration: WorkspaceExecutionConfiguration = {
   node_limits: [],
   migration_warnings: [],
   agent_capacity: null,
@@ -57,8 +57,8 @@ const defaultState: Partial<SettingState> = {
   isDirty: false,
   isSaving: false,
   saveError: null,
-  executorConfiguration: initialExecutorConfiguration,
-  originalExecutorConfiguration: null,
+  executionConfiguration: initialExecutionConfiguration,
+  originalExecutionConfiguration: null,
 }
 
 describe('settingStore', () => {
@@ -80,15 +80,15 @@ describe('settingStore', () => {
 
   it('clears stale node configuration when the workflow changes', () => {
     useSettingStore.setState({
-      executorConfiguration: initialExecutorConfiguration,
+      executionConfiguration: initialExecutionConfiguration,
       originalSettings: defaultSettings,
-      originalExecutorConfiguration: initialExecutorConfiguration,
+      originalExecutionConfiguration: initialExecutionConfiguration,
     })
 
     useSettingStore.getState().setSettings({ workflowKey: 'legacy_workflow' })
 
     const state = useSettingStore.getState()
-    expect(state.executorConfiguration.node_limits).toEqual([])
+    expect(state.executionConfiguration.node_limits).toEqual([])
   })
 
   it('updates entityType via setSettings', () => {
@@ -107,7 +107,7 @@ describe('settingStore', () => {
     useSettingStore.setState({
       originalWorkspaceName: 'Old Name',
       originalSettings: defaultSettings,
-      originalExecutorConfiguration: initialExecutorConfiguration,
+      originalExecutionConfiguration: initialExecutionConfiguration,
     })
     useSettingStore.getState().setWorkspaceName('New Name')
     expect(useSettingStore.getState().isDirty).toBe(true)
@@ -116,7 +116,7 @@ describe('settingStore', () => {
   it('isDirty is true when settings differ from original', () => {
     useSettingStore.setState({
       originalSettings: defaultSettings,
-      originalExecutorConfiguration: initialExecutorConfiguration,
+      originalExecutionConfiguration: initialExecutionConfiguration,
     })
     useSettingStore.getState().setSettings({ workflowKey: 'knowledge_content' })
     expect(useSettingStore.getState().isDirty).toBe(true)
@@ -129,8 +129,8 @@ describe('settingStore', () => {
       originalWorkspaceName: 'Name',
       originalWorkspaceDescription: 'Desc',
       originalSettings: defaultSettings,
-      originalExecutorConfiguration: initialExecutorConfiguration,
-      executorConfiguration: initialExecutorConfiguration,
+      originalExecutionConfiguration: initialExecutionConfiguration,
+      executionConfiguration: initialExecutionConfiguration,
     })
     useSettingStore.getState().setWorkspaceName('Name')
     expect(useSettingStore.getState().isDirty).toBe(false)
@@ -139,7 +139,7 @@ describe('settingStore', () => {
   it('isDirty is true when node limit differs from original', () => {
     useSettingStore.setState({
       originalSettings: defaultSettings,
-      originalExecutorConfiguration: initialExecutorConfiguration,
+      originalExecutionConfiguration: initialExecutionConfiguration,
     })
     useSettingStore.getState().setNodeLimit('question_content', 'ingest', 3)
     expect(useSettingStore.getState().isDirty).toBe(true)
@@ -157,7 +157,7 @@ describe('settingStore', () => {
         entityType: 'knowledge' as const,
         workflowKey: 'knowledge_content',
       },
-      executorConfiguration: {
+      executionConfiguration: {
         node_limits: [],
         migration_warnings: [],
         agent_capacity: 7,
@@ -172,9 +172,9 @@ describe('settingStore', () => {
     expect(state.originalWorkspaceName).toBe('Test Workspace')
     expect(state.settings.workflowKey).toBe('knowledge_content')
     expect(state.originalSettings).toEqual(state.settings)
-    expect(state.executorConfiguration.agent_capacity).toBe(7)
-    expect(state.originalExecutorConfiguration).toEqual(
-      state.executorConfiguration
+    expect(state.executionConfiguration.agent_capacity).toBe(7)
+    expect(state.originalExecutionConfiguration).toEqual(
+      state.executionConfiguration
     )
     expect(state.isDirty).toBe(false)
     expect(state.saveError).toBeNull()
@@ -186,22 +186,22 @@ describe('settingStore', () => {
       workspaceName: '',
       workspaceDescription: '',
       settings: defaultSettings,
-      executorConfiguration: initialExecutorConfiguration,
+      executionConfiguration: initialExecutionConfiguration,
     })
     expect(useSettingStore.getState().isDirty).toBe(false)
   })
 
-  it('setAgentCapacity updates executorConfiguration and marks dirty', () => {
+  it('setAgentCapacity updates executionConfiguration and marks dirty', () => {
     useSettingStore.setState({
       originalSettings: defaultSettings,
-      executorConfiguration: emptyExecutorConfiguration,
-      originalExecutorConfiguration: emptyExecutorConfiguration,
+      executionConfiguration: emptyExecutionConfiguration,
+      originalExecutionConfiguration: emptyExecutionConfiguration,
     })
 
     useSettingStore.getState().setAgentCapacity(5)
 
     const state = useSettingStore.getState()
-    expect(state.executorConfiguration.agent_capacity).toBe(5)
+    expect(state.executionConfiguration.agent_capacity).toBe(5)
     expect(state.isDirty).toBe(true)
   })
 
@@ -209,14 +209,14 @@ describe('settingStore', () => {
     mockApi.mockResolvedValue({
       workspace: { name: 'Test', description: '' },
       settings: defaultSettings,
-      executor_configuration: {
+      execution_configuration: {
         node_limits: [],
         migration_warnings: [],
         agent_capacity: 6,
       },
     })
     useSettingStore.setState({
-      executorConfiguration: {
+      executionConfiguration: {
         node_limits: [],
         migration_warnings: [],
         agent_capacity: 6,
@@ -227,17 +227,17 @@ describe('settingStore', () => {
     let body = JSON.parse(mockApi.mock.calls[0][1]?.body as string)
     expect(body.agent_capacity).toBe(6)
     expect(
-      useSettingStore.getState().executorConfiguration.agent_capacity
+      useSettingStore.getState().executionConfiguration.agent_capacity
     ).toBe(6)
 
     mockApi.mockClear()
     mockApi.mockResolvedValue({
       workspace: { name: 'Test', description: '' },
       settings: defaultSettings,
-      executor_configuration: emptyExecutorConfiguration,
+      execution_configuration: emptyExecutionConfiguration,
     })
     useSettingStore.setState({
-      executorConfiguration: emptyExecutorConfiguration,
+      executionConfiguration: emptyExecutionConfiguration,
     })
 
     await useSettingStore.getState().saveAll()
@@ -252,7 +252,7 @@ describe('settingStore', () => {
         ...defaultSettings,
         workflowKey: 'question_content',
       },
-      executor_configuration: {
+      execution_configuration: {
         node_limits: [
           {
             workflow_key: 'question_content',
@@ -273,8 +273,8 @@ describe('settingStore', () => {
         ...defaultSettings,
         workflowKey: 'question_content',
       },
-      originalExecutorConfiguration: emptyExecutorConfiguration,
-      executorConfiguration: {
+      originalExecutionConfiguration: emptyExecutionConfiguration,
+      executionConfiguration: {
         node_limits: [
           {
             workflow_key: 'question_content',
@@ -313,7 +313,7 @@ describe('settingStore', () => {
   })
 
   it('saveAll replaces original snapshots from the response', async () => {
-    const responseConfiguration: WorkspaceExecutorConfiguration = {
+    const responseConfiguration: WorkspaceExecutionConfiguration = {
       node_limits: [],
       migration_warnings: [],
       agent_capacity: null,
@@ -324,7 +324,7 @@ describe('settingStore', () => {
         ...defaultSettings,
         workflowKey: 'question_content',
       },
-      executor_configuration: responseConfiguration,
+      execution_configuration: responseConfiguration,
     })
     useSettingStore.setState({
       workspaceName: 'Test',
@@ -336,14 +336,14 @@ describe('settingStore', () => {
         ...defaultSettings,
         workflowKey: 'question_content',
       },
-      originalExecutorConfiguration: emptyExecutorConfiguration,
-      executorConfiguration: emptyExecutorConfiguration,
+      originalExecutionConfiguration: emptyExecutionConfiguration,
+      executionConfiguration: emptyExecutionConfiguration,
     })
     await useSettingStore.getState().saveAll()
     const state = useSettingStore.getState()
     expect(state.workspaceName).toBe('Saved')
     expect(state.originalWorkspaceName).toBe('Saved')
-    expect(state.originalExecutorConfiguration).toEqual(responseConfiguration)
+    expect(state.originalExecutionConfiguration).toEqual(responseConfiguration)
     expect(state.isDirty).toBe(false)
   })
 
@@ -360,7 +360,7 @@ describe('settingStore', () => {
     mockApi.mockResolvedValueOnce({
       workspace: { name: 'Test', description: '' },
       settings: defaultSettings,
-      executor_configuration: emptyExecutorConfiguration,
+      execution_configuration: emptyExecutionConfiguration,
     })
     await expect(useSettingStore.getState().saveAll()).resolves.toBe(true)
 
@@ -385,7 +385,7 @@ describe('settingStore', () => {
     release({
       workspace: { name: 'Test', description: '' },
       settings: defaultSettings,
-      executor_configuration: emptyExecutorConfiguration,
+      execution_configuration: emptyExecutionConfiguration,
     })
     await expect(first).resolves.toBe(true)
     expect(useSettingStore.getState().isSaving).toBe(false)
@@ -394,12 +394,12 @@ describe('settingStore', () => {
   it('setNodeLimit updates or creates a node limit', () => {
     useSettingStore.setState({
       originalSettings: defaultSettings,
-      originalExecutorConfiguration: initialExecutorConfiguration,
+      originalExecutionConfiguration: initialExecutionConfiguration,
     })
     useSettingStore.getState().setNodeLimit('question_content', 'ingest', 3)
     const limit = useSettingStore
       .getState()
-      .executorConfiguration.node_limits.find(
+      .executionConfiguration.node_limits.find(
         (l) => l.workflow_key === 'question_content' && l.node_key === 'ingest'
       )
     expect(limit?.concurrency_limit).toBe(3)
@@ -408,13 +408,13 @@ describe('settingStore', () => {
   it('setNodeLimit with null removes a node limit', () => {
     useSettingStore.setState({
       originalSettings: defaultSettings,
-      originalExecutorConfiguration: initialExecutorConfiguration,
+      originalExecutionConfiguration: initialExecutionConfiguration,
     })
     useSettingStore.getState().setNodeLimit('question_content', 'ingest', null)
     expect(
       useSettingStore
         .getState()
-        .executorConfiguration.node_limits.some(
+        .executionConfiguration.node_limits.some(
           (l) =>
             l.workflow_key === 'question_content' && l.node_key === 'ingest'
         )

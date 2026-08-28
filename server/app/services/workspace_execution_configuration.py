@@ -9,11 +9,12 @@ if TYPE_CHECKING:
     from server.app.settings import Settings
 
 
-class WorkspaceExecutorConfigurationService:
+class WorkspaceExecutionConfigurationService:
     """Workspace execution configuration read model (P-0.5: node limits only).
 
-    The class/route names keep the pre-retirement wording until the step-3
-    contract cleanup; allocations and bindings no longer exist (schema v47).
+    Allocations and bindings no longer exist (schema v47); issue #198 renamed
+    the class from the pre-retirement ``WorkspaceExecutorConfigurationService``
+    wording.
     """
 
     def __init__(self, job_db: JobQueries, settings: Settings | None = None) -> None:

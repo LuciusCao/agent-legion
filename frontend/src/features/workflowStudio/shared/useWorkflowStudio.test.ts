@@ -54,7 +54,7 @@ const mocks = {
   validateWorkflowDraft: vi.fn(),
   fetchWorkflowDraft: vi.fn(),
   putWorkflowDraft: vi.fn(),
-  getExecutorCatalog: vi.fn(),
+  getAgentCatalog: vi.fn(),
 }
 
 vi.mock('../../../api', () => ({
@@ -75,8 +75,8 @@ vi.mock('../../../api', () => ({
   putWorkflowDraft: (...args: unknown[]) => mocks.putWorkflowDraft(...args),
 }))
 
-vi.mock('../../../api/executorApi', () => ({
-  getExecutorCatalog: (...args: unknown[]) => mocks.getExecutorCatalog(...args),
+vi.mock('../../../api/agentCatalogApi', () => ({
+  getAgentCatalog: (...args: unknown[]) => mocks.getAgentCatalog(...args),
 }))
 
 describe('useWorkflowStudio', () => {
@@ -89,7 +89,7 @@ describe('useWorkflowStudio', () => {
     mocks.fetchWorkspaces.mockResolvedValue({
       workspaces: [{ id: 'ws1', default_workflow_key: 'demo' }],
     })
-    mocks.getExecutorCatalog.mockResolvedValue({ executors: [] })
+    mocks.getAgentCatalog.mockResolvedValue({ agents: [] })
     mocks.publishWorkflowDraft.mockResolvedValue({ valid: true, errors: [] })
     mocks.validateWorkflowDraft.mockResolvedValue({ valid: true, errors: [] })
     mocks.fetchWorkflowDraft.mockResolvedValue({

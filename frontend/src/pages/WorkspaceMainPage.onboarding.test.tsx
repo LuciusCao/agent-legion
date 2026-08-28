@@ -45,11 +45,11 @@ vi.mock('../api', () => ({
   ) => mockFetchWorkflowDefinition(...args),
 }))
 
-const mockGetWorkspaceExecutorConfiguration = vi.fn()
+const mockGetWorkspaceExecutionConfiguration = vi.fn()
 
-vi.mock('../api/executorApi', () => ({
-  getWorkspaceExecutorConfiguration: (...args: unknown[]) =>
-    mockGetWorkspaceExecutorConfiguration(...args),
+vi.mock('../api/agentCatalogApi', () => ({
+  getWorkspaceExecutionConfiguration: (...args: unknown[]) =>
+    mockGetWorkspaceExecutionConfiguration(...args),
 }))
 
 function renderPage() {
@@ -127,8 +127,8 @@ describe('WorkspaceMainPage onboarding guide', () => {
     mockFetchWorkspaceStats.mockReset()
     mockFetchWorkspacePackages.mockReset()
     mockFetchWorkflowDefinition.mockReset()
-    mockGetWorkspaceExecutorConfiguration.mockReset()
-    mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
+    mockGetWorkspaceExecutionConfiguration.mockReset()
+    mockGetWorkspaceExecutionConfiguration.mockResolvedValue({
       node_limits: [],
       migration_warnings: [],
       agent_capacity: null,
@@ -215,12 +215,12 @@ describe('WorkspaceMainPage onboarding guide', () => {
       isDirty: false,
       isSaving: false,
       saveError: null,
-      executorConfiguration: {
+      executionConfiguration: {
         node_limits: [],
         migration_warnings: [],
         agent_capacity: null,
       },
-      originalExecutorConfiguration: null,
+      originalExecutionConfiguration: null,
     })
   })
 
@@ -367,7 +367,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
 
   it('does not fetch the settings snapshot when jobs exist and the guide is hidden', async () => {
     // 引导隐藏（有任务）：settings 快照的四个请求（workspace / settings /
-    // executor-configuration / agent-routes）都不应发出。
+    // execution-configuration / agent-routes）都不应发出。
     mockFetchJobsSnapshot.mockImplementation(() =>
       Promise.resolve({
         workspace_id: 'ws1',
@@ -409,6 +409,6 @@ describe('WorkspaceMainPage onboarding guide', () => {
       screen.queryByRole('heading', { name: '开始使用 Workspace' })
     ).not.toBeInTheDocument()
     expect(settingsCalls).toEqual([])
-    expect(mockGetWorkspaceExecutorConfiguration).not.toHaveBeenCalled()
+    expect(mockGetWorkspaceExecutionConfiguration).not.toHaveBeenCalled()
   })
 })

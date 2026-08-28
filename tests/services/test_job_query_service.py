@@ -9,8 +9,8 @@ from server.app.executors._lease_transactions import database_timestamp
 from server.app.jobs.storage_layout import job_shard
 from server.app.services.job_queries import JobQueryService
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from server.app.services.workspace_executor_configuration import (
-    WorkspaceExecutorConfigurationService,
+from server.app.services.workspace_execution_configuration import (
+    WorkspaceExecutionConfigurationService,
 )
 from server.app.storage_paths import make_data_relative, resolve_job_dir
 from tests.helpers import (
@@ -25,7 +25,7 @@ def query_service(job_db, settings):
     return JobQueryService(
         job_db,
         settings,
-        WorkspaceExecutorConfigurationService(job_db),
+        WorkspaceExecutionConfigurationService(job_db),
     )
 
 

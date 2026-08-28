@@ -16,8 +16,8 @@ from server.app.services.job_workflow_versions import is_workflow_outdated
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.services.workspace_dag import build_workspace_dag
-from server.app.services.workspace_executor_configuration import (
-    WorkspaceExecutorConfigurationService,
+from server.app.services.workspace_execution_configuration import (
+    WorkspaceExecutionConfigurationService,
 )
 from server.app.settings import Settings
 from server.app.workflows.definition import WorkflowDefinition
@@ -31,12 +31,12 @@ class JobQueryService:
         self,
         job_db: JobQueries,
         settings: Settings,
-        workspace_executor_config: WorkspaceExecutorConfigurationService,
+        workspace_execution_config: WorkspaceExecutionConfigurationService,
         object_store: Any = None,
     ):
         self.job_db = job_db
         self.settings = settings
-        self.workspace_executor_config = workspace_executor_config
+        self.workspace_execution_config = workspace_execution_config
         # D12: artifact listing is the local job_dir ∪ the object-storage
         # manifest (evicted cache entries stay listed).
         self.object_store = object_store

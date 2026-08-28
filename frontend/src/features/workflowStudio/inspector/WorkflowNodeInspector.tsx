@@ -1,5 +1,5 @@
 import type { WorkflowDefinitionRecord } from '../../../types'
-import type { AgentDefinition } from '../../../types/executorTypes'
+import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import { WorkflowInspectorEmptyState } from './WorkflowInspectorOverviewFallback'
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
 import { inspectorNodeDetails } from './workflowStudioInspectorDetails'

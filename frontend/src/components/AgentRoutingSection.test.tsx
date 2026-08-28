@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { AgentRoutingSection } from './AgentRoutingSection'
 import { useSettingStore } from '../stores/settingStore'
 
-const executorConfiguration = {
+const executionConfiguration = {
   allocations: [],
   bindings: [],
   node_limits: [],
@@ -22,8 +22,8 @@ describe('AgentRoutingSection', () => {
     useSettingStore.setState({
       settings,
       originalSettings: settings,
-      executorConfiguration,
-      originalExecutorConfiguration: executorConfiguration,
+      executionConfiguration,
+      originalExecutionConfiguration: executionConfiguration,
       isDirty: false,
     })
   })
@@ -39,7 +39,10 @@ describe('AgentRoutingSection', () => {
 
   it('renders an empty capacity input when the cap is unset', () => {
     useSettingStore.setState({
-      executorConfiguration: { ...executorConfiguration, agent_capacity: null },
+      executionConfiguration: {
+        ...executionConfiguration,
+        agent_capacity: null,
+      },
     })
     render(<AgentRoutingSection />)
     expect(screen.getByLabelText('Agent 并发上限')).toHaveValue(null)
@@ -51,7 +54,7 @@ describe('AgentRoutingSection', () => {
       target: { value: '8' },
     })
     const state = useSettingStore.getState()
-    expect(state.executorConfiguration.agent_capacity).toBe(8)
+    expect(state.executionConfiguration.agent_capacity).toBe(8)
     expect(state.isDirty).toBe(true)
   })
 
@@ -61,7 +64,7 @@ describe('AgentRoutingSection', () => {
     fireEvent.change(input, { target: { value: '0' } })
     fireEvent.change(input, { target: { value: 'abc' } })
     expect(
-      useSettingStore.getState().executorConfiguration.agent_capacity
+      useSettingStore.getState().executionConfiguration.agent_capacity
     ).toBe(4)
     fireEvent.blur(input)
     expect(input).toHaveValue(4)

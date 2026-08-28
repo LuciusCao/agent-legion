@@ -205,7 +205,7 @@ class WorkspaceConfigurationService:
         return {
             "workspace": saved_workspace,
             "settings": self._payload(saved_workspace),
-            "executor_configuration": {
+            "execution_configuration": {
                 "node_limits": self.job_db.get_workspace_node_limits(workspace_id),
                 "migration_warnings": [],
             },

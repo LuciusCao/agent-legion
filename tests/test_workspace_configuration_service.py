@@ -45,7 +45,7 @@ def test_replace_configuration_saves_workspace_and_node_limits_in_one_transactio
     )
     assert result["workspace"]["name"] == "Reading"
     assert result["settings"]["workflowKey"] == "education_video_problems_generation"
-    assert result["executor_configuration"]["node_limits"][0]["concurrency_limit"] == 2
+    assert result["execution_configuration"]["node_limits"][0]["concurrency_limit"] == 2
 
 
 def test_replace_configuration_rolls_back_workspace_on_invalid_node_limit(

@@ -3,7 +3,7 @@ import { useSettingStore } from '../stores/settingStore'
 import { useWorkspaceSettingsSnapshot } from '../hooks/useWorkspaceSettingsQuery'
 
 export function LocalNodeLimitSection() {
-  const { executorConfiguration, setNodeLimit } = useSettingStore()
+  const { executionConfiguration, setNodeLimit } = useSettingStore()
   const { workflowDefinition, agentRoutes } = useWorkspaceSettingsSnapshot()
 
   if (!workflowDefinition) return null
@@ -43,7 +43,7 @@ export function LocalNodeLimitSection() {
         }}
       >
         {codeNodes.map((node) => {
-          const limit = executorConfiguration.node_limits.find(
+          const limit = executionConfiguration.node_limits.find(
             (l) => l.workflow_key === workflowKey && l.node_key === node.key
           )
 

@@ -25,7 +25,7 @@ frontend/src/
 │   ├── core.ts             # 通用请求封装
 │   ├── workspaceApi.ts / jobsApi.ts / jobApi.ts / jobBatchApi.ts / jobSnapshot.ts
 │   ├── workflows.ts / workflowRevisions.ts / workflowDraftCompare.ts
-│   └── ...                 # executorApi、packages、tokenUsage 等
+│   └── ...                 # agentCatalogApi、packages、tokenUsage 等
 ├── generated/
 │   └── api.ts              # OpenAPI 生成的传输类型
 ├── pages/                  # 路由级页面

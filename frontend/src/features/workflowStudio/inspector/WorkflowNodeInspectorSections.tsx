@@ -1,4 +1,4 @@
-import type { AgentDefinition } from '../../../types/executorTypes'
+import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { SelectedWorkflowNodeDetails } from '../shared/workflowStudioModel'
 import { WorkflowNodeCodeSection } from '../code-editor/WorkflowNodeCodeSection'
 import { WorkflowNodeConfigSection } from './WorkflowNodeConfigSection'

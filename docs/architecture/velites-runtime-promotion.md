@@ -41,7 +41,7 @@ velites（`velites/` Rust agent harness）已通过金丝雀验证：生产量�
 - `dispatch.py:59` 读全局 `PiConfig.from_runtime(settings.executor_runtime.workflows.pi)`；`dispatch.py:79-87` 把 `binary/flavor/provider/model/thinking/timeout_seconds/velites_no_sandbox` 冻结进 `manifest["pi"]`；`dispatch.py:68` 写 `manifest["runtime"] = definition.runtime`；`dispatch.py:113` `render_command_spec(manifest)`。
 - 命令链：`server/app/workflows/pi_protocol.py:108-129` `render_command_spec` → `server/app/workflows/velites_command.py:38-64` `build_command_for_flavor` 按 `manifest["pi"]["flavor"]` 分发到 `build_velites_command`（velites_command.py:67-112）或 `pi_fallback`（pi_protocol.py:73-105 `build_command`）；未知 flavor fail-fast（velites_command.py:64）。
 - claim 时重渲染：`server/app/agent_broker/agent_claim_compatibility.py:21-40` `live_claim_manifest` 用 manifest 内冻结的 `pi` 块叠加 revision 的 provider/model/thinking 覆盖后再次 `render_command_spec`（:38-39）。**manifest 冻结的 flavor 即权威，重渲染自动一致。**
-- `server/app/services/executor_catalog.py:80` — `if definition.runtime in ("pi", "velites")` 才把 provider/model/thinking 投影进执行目录。
+- `server/app/services/agent_catalog_projection.py（issue #198 前名为 executor_catalog.py）:80` — `if definition.runtime in ("pi", "velites")` 才把 provider/model/thinking 投影进执行目录。
 
 ### 2.3 claim 匹配
 
@@ -108,7 +108,7 @@ AgentDefinition.runtime = "openclaw" → 未实现，dispatch fail-fast（现状
   - `runtime == "velites"`：在构建 `manifest["pi"]` 处（dispatch.py:79-87）强制 `flavor = "velites"`，`binary` 未显式配置时归一化为 `velites`（与 `runtime_config.py:31-32` `_flavor_binary` 同一规则），随后走原链——`render_command_spec` 经 `build_command_for_flavor` 产出 velites argv；`live_claim_manifest` 重渲染自动一致。
   - `runtime == "pi"`：现状逐比特不变（flavor 决定实现）。
   - 其他（openclaw）：保留 fail-fast，报错文案列出已支持集合。
-- `server/app/services/executor_catalog.py:80` — 条件放宽为 `runtime in ("pi", "velites")`（velites 同样需要 provider/model/thinking 投影）。**已落地**（executor_catalog 四文件合并时一并完成）。
+- `server/app/services/agent_catalog_projection.py（issue #198 前名为 executor_catalog.py）:80` — 条件放宽为 `runtime in ("pi", "velites")`（velites 同样需要 provider/model/thinking 投影）。**已落地**（executor_catalog 四文件合并时一并完成，后随 #198 改名 agent_catalog_projection）。
 - manifest 的 `"pi"` 块暂不改名（改名是破坏性变更，留 Phase 3 与 command_spec version 升级一起做）。
 
 ### 4.3 claim 匹配与 unclaimable sweeper
@@ -171,7 +171,7 @@ AgentDefinition.runtime = "openclaw" → 未实现，dispatch fail-fast（现状
 
 - **Phase 1 — 枚举与链路放开**（纯代码，无生产行为变化）：
   1. §4.1 全部枚举点 + OpenAPI 重新生成；
-  2. §4.2 dispatch 分派 + executor_catalog 投影放宽（`services/executor_catalog.py`，已落地）；
+  2. §4.2 dispatch 分派 + executor_catalog 投影放宽（`services/agent_catalog_projection.py`，已落地；模块随 #198 改名）；
   3. §4.3 sweeper runtime 维度；
   4. §6 测试；
   5. invariant registry 与证据矩阵加 §4.8 条目。

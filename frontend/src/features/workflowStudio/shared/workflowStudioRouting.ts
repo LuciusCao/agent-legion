@@ -1,5 +1,5 @@
 import type { WorkflowNodeRecord } from '../../../types'
-import type { AgentDefinition } from '../../../types/executorTypes'
+import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { ExecutorKind } from '../../../types/jobTypes'
 
 export type StudioNodeRouting = {

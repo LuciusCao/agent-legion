@@ -1,7 +1,7 @@
 import { MenuItem, TextField } from '@mui/material'
 import { useQueryClient } from '@tanstack/react-query'
 import { extraQueryKeys } from '../../../lib/queryKeysExtra'
-import type { SkillDetail } from '../../../types/executorTypes'
+import type { SkillDetail } from '../../../types/agentCatalogTypes'
 import styles from './WorkflowSkillPreviewPanel.module.css'
 
 /** 技能预览的版本选择：数据源为预览响应的 tags（skill repo 全部 git tag，

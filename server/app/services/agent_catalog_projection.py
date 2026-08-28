@@ -7,7 +7,7 @@ from server.app.services.skill_catalog import SkillCatalogService
 from server.app.settings import Settings
 
 
-def execution_catalog(
+def agent_catalog(
     settings: Settings,
     skills: SkillCatalogService,
     workspace_id: str,
@@ -35,12 +35,13 @@ def execution_catalog(
     }
 
 
-class ExecutorCatalogService:
-    """Agents-only execution catalog (keeps the pre-retirement name until step 3)."""
+class AgentCatalogService:
+    """Agents-only catalog for Studio (issue #198 renamed the pre-retirement
+    ``ExecutorCatalogService`` wording to the agents-only semantics)."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.skills = SkillCatalogService(settings.database_url)
 
     def catalog(self, workspace_id: str) -> dict[str, Any]:
-        return execution_catalog(self.settings, self.skills, workspace_id)
+        return agent_catalog(self.settings, self.skills, workspace_id)

@@ -1,6 +1,6 @@
 import pytest
 
-from server.app.services.executor_catalog import ExecutorCatalogService
+from server.app.services.agent_catalog_projection import AgentCatalogService
 from tests.helpers import seed_workspace_agent_definitions
 
 
@@ -11,17 +11,17 @@ def workspace_id(job_db) -> str:
 
 @pytest.fixture
 def service(job_db, settings, agent_manager):
-    return ExecutorCatalogService(settings)
+    return AgentCatalogService(settings)
 
 
-def test_catalog_has_no_executors_half(service: ExecutorCatalogService, workspace_id: str) -> None:
+def test_catalog_has_no_executors_half(service: AgentCatalogService, workspace_id: str) -> None:
     """P-0.5（schema v47）：executor 概念退役，catalog 只剩 Agent 半边。"""
     result = service.catalog(workspace_id)
     assert set(result) == {"agents"}
 
 
 def test_catalog_exposes_published_agent_definitions(
-    service: ExecutorCatalogService, workspace_id: str
+    service: AgentCatalogService, workspace_id: str
 ) -> None:
     # Agent 目录是 workspace 作用域（schema v46）：把 demo 模板播进本 workspace。
     seed_workspace_agent_definitions(workspace_id)

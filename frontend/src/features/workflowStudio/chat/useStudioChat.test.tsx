@@ -369,7 +369,7 @@ describe('useStudioChat', () => {
       })
     )
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ['studioExecutorCatalog', 'ws1'],
+      queryKey: ['studioAgentCatalog', 'ws1'],
     })
     // agent 可能已提交新的 skill 版本：技能预览查询按前缀整体失效。
     expect(invalidateSpy).toHaveBeenCalledWith({

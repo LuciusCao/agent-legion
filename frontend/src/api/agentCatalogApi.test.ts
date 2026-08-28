@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { getSkillDetail } from './executorApi'
+import { getSkillDetail } from './agentCatalogApi'
 
 const originalFetch = global.fetch
 
@@ -18,7 +18,7 @@ function mockFetchJson(response: unknown) {
   } as Response)
 }
 
-describe('executorApi', () => {
+describe('agentCatalogApi', () => {
   it('fetches skill detail without a ref by default', async () => {
     const payload = { key: 'demo/review', ref: 'v1.2.0', commit: 'abc' }
     const fetchMock = mockFetchJson(payload)
@@ -28,7 +28,7 @@ describe('executorApi', () => {
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/executors/skills/demo/review',
+      '/api/agent-catalog/skills/demo/review',
       expect.anything()
     )
   })
@@ -42,7 +42,7 @@ describe('executorApi', () => {
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/executors/skills/demo/review?ref=v1.3.0',
+      '/api/agent-catalog/skills/demo/review?ref=v1.3.0',
       expect.anything()
     )
   })

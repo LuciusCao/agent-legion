@@ -1,6 +1,6 @@
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined'
 import { Button } from '@mui/material'
-import type { SkillFile } from '../../../types/executorTypes'
+import type { SkillFile } from '../../../types/agentCatalogTypes'
 import styles from './WorkflowSkillPreviewPanel.module.css'
 
 /** 技能预览左侧的文件列表（与 panel 共用样式模块）。 */

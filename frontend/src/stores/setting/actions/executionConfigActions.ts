@@ -1,11 +1,11 @@
 import { computeDirty, type SettingStoreSet } from '../state'
 
 // P-0.5：executor 概念退役后，工作区级执行配置只剩节点并发上限与 Agent 容量。
-export function executorActions(set: SettingStoreSet) {
+export function executionConfigActions(set: SettingStoreSet) {
   return {
     setNodeLimit(workflowKey: string, nodeKey: string, limit: number | null) {
       set((state) => {
-        const node_limits = state.executorConfiguration.node_limits.filter(
+        const node_limits = state.executionConfiguration.node_limits.filter(
           (l) => !(l.workflow_key === workflowKey && l.node_key === nodeKey)
         )
         if (limit !== null) {
@@ -16,20 +16,23 @@ export function executorActions(set: SettingStoreSet) {
           })
         }
         const nextConfiguration = {
-          ...state.executorConfiguration,
+          ...state.executionConfiguration,
           node_limits,
         }
-        const nextState = { ...state, executorConfiguration: nextConfiguration }
+        const nextState = {
+          ...state,
+          executionConfiguration: nextConfiguration,
+        }
         return { ...nextState, isDirty: computeDirty(nextState) }
       })
     },
     setAgentCapacity(capacity: number) {
       set((state) => {
-        const executorConfiguration = {
-          ...state.executorConfiguration,
+        const executionConfiguration = {
+          ...state.executionConfiguration,
           agent_capacity: capacity,
         }
-        const nextState = { ...state, executorConfiguration }
+        const nextState = { ...state, executionConfiguration }
         return { ...nextState, isDirty: computeDirty(nextState) }
       })
     },

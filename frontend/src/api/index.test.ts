@@ -16,10 +16,10 @@ import {
   updateWorkspacePackage,
 } from './index'
 import {
-  getExecutorCatalog,
+  getAgentCatalog,
   getSkillDetail,
-  getWorkspaceExecutorConfiguration,
-} from './executorApi'
+  getWorkspaceExecutionConfiguration,
+} from './agentCatalogApi'
 
 const originalFetch = global.fetch
 
@@ -317,7 +317,7 @@ describe('job helpers', () => {
   })
 })
 
-describe('executor configuration api', () => {
+describe('agent catalog api', () => {
   function mockFetchJson(response: unknown) {
     return vi.fn().mockResolvedValue({
       ok: true,
@@ -325,31 +325,29 @@ describe('executor configuration api', () => {
     } as Response)
   }
 
-  it('loads normalized executor catalog', async () => {
-    const fetchMock = mockFetchJson({ executors: [] })
+  it('loads the agent catalog', async () => {
+    const fetchMock = mockFetchJson({ agents: [] })
     global.fetch = fetchMock
 
-    await getExecutorCatalog('ws1')
+    await getAgentCatalog('ws1')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/executors?workspace_id=ws1',
+      '/api/agent-catalog?workspace_id=ws1',
       expect.objectContaining({ cache: 'no-store' })
     )
   })
 
-  it('loads workspace executor configuration', async () => {
+  it('loads workspace execution configuration', async () => {
     const fetchMock = mockFetchJson({
-      allocations: [],
-      bindings: [],
       node_limits: [],
       migration_warnings: [],
     })
     global.fetch = fetchMock
 
-    await getWorkspaceExecutorConfiguration('reading team')
+    await getWorkspaceExecutionConfiguration('reading team')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/workspaces/reading%20team/executor-configuration',
+      '/api/workspaces/reading%20team/execution-configuration',
       expect.objectContaining({ cache: 'no-store' })
     )
   })
@@ -361,7 +359,7 @@ describe('executor configuration api', () => {
     await getSkillDetail('demo/review')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/executors/skills/demo/review',
+      '/api/agent-catalog/skills/demo/review',
       expect.objectContaining({ cache: 'no-store' })
     )
   })

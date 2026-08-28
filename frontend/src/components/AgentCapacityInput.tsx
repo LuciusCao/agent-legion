@@ -12,7 +12,7 @@ import { useSettingStore } from '../stores/settingStore'
  */
 export function AgentCapacityInput() {
   const agentCapacity = useSettingStore(
-    (state) => state.executorConfiguration.agent_capacity ?? null
+    (state) => state.executionConfiguration.agent_capacity ?? null
   )
   const setAgentCapacity = useSettingStore((state) => state.setAgentCapacity)
 

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { WorkflowDefinitionRecord } from '../../../types'
-import type { AgentDefinition } from '../../../types/executorTypes'
+import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
 import {
   NodeDetailPreviewContext,

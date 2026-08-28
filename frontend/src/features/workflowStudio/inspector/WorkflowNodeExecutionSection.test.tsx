@@ -2,12 +2,12 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TestQueryProvider } from '../../../testing/testQueryClient'
 import { useSettingStore } from '../../../stores/settingStore'
-import type { AgentDefinition } from '../../../types/executorTypes'
+import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { WorkflowNodeRecord } from '../../../types'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
 
-vi.mock('../../../api/executorApi', () => ({
-  getExecutorCatalog: vi.fn().mockResolvedValue({ agents: [] }),
+vi.mock('../../../api/agentCatalogApi', () => ({
+  getAgentCatalog: vi.fn().mockResolvedValue({ agents: [] }),
 }))
 
 // 内嵌编辑器的完整行为由 WorkflowNodeAgentEditor.test.tsx 覆盖。
