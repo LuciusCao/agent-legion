@@ -220,7 +220,9 @@
   消费的 pi 兼容子集，禁止引入 delta 事件（`message_update` /
   `tool_execution_update`）。
 - Agent 执行的 provider/model/thinking 解析链：节点 `execution.*` 覆盖 →
-  workspace Settings 默认（`default_agent_*` 三列）→ 报错，无 yaml/全局兜底；
+  workflow 顶层 `execution` 默认（定义级可选块，loader 合并进节点、随
+  revision 版本化）→ 报错，无 workspace/yaml/全局兜底（workspace Settings 的
+  `default_agent_*` 三列已随 schema v63 退役）；
   manifest 只携带解析后的 `execution.*` 块（enqueue 冻结 + claim 重解析，节点
   覆盖随 revision 升级实时生效，EXEC-RUNTIME-DISPATCH-001）。一个 capability
   在每个 workspace 只允许一个 published Agent（DB partial unique index 兜底）。

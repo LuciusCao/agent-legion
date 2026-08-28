@@ -46,8 +46,8 @@
 │  Studio 节点级覆盖                  │  node.execution.provider/model/thinking
 │  (workflow revision 定义)           │  优先级最高，用于特殊节点
 ├─────────────────────────────────────┤
-│  Workspace Settings 默认            │  workspace.default_agent_provider/model/thinking
-│  (workspace 配置)                   │  该 workspace 所有 agent 节点的默认值
+│  Workflow 顶层 execution 默认       │  定义级可选块，loader 合并进节点、
+│  (workflow revision 定义)           │  随 revision 版本化
 ├─────────────────────────────────────┤
 │  Agent Definition                   │  capability/runtime/skill/tools/config_schema
 │  (versioned_entities 表)            │  纯净定义，不含执行配置
@@ -56,13 +56,17 @@
 
 **model 解析链（严格模式）**：
 ```python
-model = node.execution.model or workspace.default_agent_model
+model = node.execution.model  # 节点覆盖，loader 已合并 workflow 顶层 execution 默认
 if not model:
     raise ValueError(
-        f"Node {node.key} requires model configuration. "
-        f"Set workspace default in Settings or override in Studio."
+        f"node {node.key} requires a model: set the node execution model "
+        "in Studio or the workflow-level execution block."
     )
 ```
+
+> 历史说明：早期版本还有第三层「Workspace Settings 默认」
+> （`default_agent_provider/model/thinking` 三列），已随 schema v63 退役——
+> 执行配置只存在于 versioned 的 workflow 定义里。
 
 ### 2. AgentDefinition（纯净版）
 
@@ -79,21 +83,33 @@ class AgentDefinition(BaseModel):
     enabled: bool = True
 ```
 
-**注意**：AgentDefinition **不包含** provider/model/thinking。这些执行配置由 Workspace Settings 和 Studio 节点管理。
+**注意**：AgentDefinition **不包含** provider/model/thinking。这些执行配置由 workflow 定义（顶层默认 + Studio 节点覆盖）管理。
 
-### 3. Workspace Settings 扩展
+### 3. Workflow 顶层 execution 默认
 
-```python
-# workspaces 表新增字段（或并入现有 settings JSON）
-default_agent_provider: str = ""     # 如 "deepseek", "openai", "gateway"
-default_agent_model: str = ""        # 如 "deepseek-v4-flash", "gpt-5.2"
-default_agent_thinking: str = "low"  # low / medium / high
+```yaml
+# workflow 定义（draft YAML）的可选顶层块，随 revision 版本化
+key: my_workflow
+execution:
+  provider: "deepseek"        # 如 "deepseek", "openai", "gateway"
+  model: "deepseek-v4-flash"  # 如 "deepseek-v4-flash", "gpt-5.2"
+  thinking: "low"             # low / medium / high，可空 = runtime 决定
+nodes:
+  write_script:
+    capability: write_script
+    execution:                # 节点覆盖优先于顶层默认，逐字段合并
+      model: "gpt-5.2"
 ```
 
-**Settings UI 新增区块**："Agent 默认配置"
-- Provider: 文本输入
-- Model: 文本输入
-- Thinking: 下拉选择（low/medium/high）
+loader 在定义加载时把顶层块逐字段合并进每个 agent 路由节点（节点值优先；
+start/code 节点不受影响），dispatch 拿到的节点 execution 即是有效值。
+Studio 节点编辑器的 provider/model 输入框按节点 Agent 的 runtime 给出在线
+Worker 上报的可用选项（`GET /api/workspaces/{id}/runtime-models`），也允许
+自由输入。
+
+> 历史说明：本节原为「Workspace Settings 扩展」（workspaces 表
+> `default_agent_*` 三列 + Settings「Agent 默认配置」区块），已随 schema
+> v63 退役删列。
 
 ### 4. VersionedEntity 抽象（合并表）
 
@@ -157,9 +173,9 @@ manifest = {
     "log_path": "...",
     "execution": {
         "binary": "velites",
-        "provider": "deepseek",           # node.execution.provider or workspace.default_agent_provider
-        "model": "deepseek-v4-flash",        # node.execution.model or workspace.default_agent_model
-        "thinking": "low",            # node.execution.thinking or workspace.default_agent_thinking
+        "provider": "deepseek",           # node.execution.provider（已合并 workflow 顶层默认）
+        "model": "deepseek-v4-flash",        # node.execution.model（已合并 workflow 顶层默认）
+        "thinking": "low",            # node.execution.thinking（已合并 workflow 顶层默认）
         "timeout_seconds": 1800,
         "no_sandbox": false,
     },
@@ -170,19 +186,13 @@ manifest = {
 
 **不需要独立的 Agent 管理页**，而是融入现有结构：
 
-#### Settings → Workspace 设置 → Agent 默认配置
+#### Studio → Workflow 编辑器 → 执行配置（顶层默认 + 节点覆盖）
 
-```
-┌────────────────────────────────────┐
-│ Agent 默认配置                      │
-├────────────────────────────────────┤
-│ Provider:  [deepseek              ]    │
-│ Model:     [deepseek-v4-flash        ]    │
-│ Thinking:  [low ▼]                 │
-│                                    │
-│ [保存]                              │
-└────────────────────────────────────┘
-```
+执行配置只存在于 workflow 定义里：顶层 `execution:` 块为整个 workflow
+配一处，节点 `execution.*` 按需覆盖；节点编辑器的 provider/model 输入框
+按节点 Agent 的 runtime 给出在线 Worker 上报的可用选项（datalist，可自由
+输入），thinking 空值 = runtime 决定。（早期的 Workspace Settings
+「Agent 默认配置」区块已随 schema v63 退役。）
 
 #### Studio → Agents 页签（Agent 定义管理）
 
@@ -255,9 +265,8 @@ POST   /api/agents/{agent_id}/archive        # 归档
 POST   /api/agents/{agent_id}/rollback       # 回滚
 POST   /api/agents/{agent_id}/copy           # 复制创建新 Agent
 
-# Workspace Agent 默认配置
-GET    /api/workspaces/{id}/settings/agent-defaults
-PATCH  /api/workspaces/{id}/settings/agent-defaults
+# Runtime 可用模型聚合（Studio 节点 execution 下拉的选项来源）
+GET    /api/workspaces/{id}/runtime-models
 
 # Skill 校验与 tag 获取
 POST   /api/skills/validate                  # 校验 skill 路径

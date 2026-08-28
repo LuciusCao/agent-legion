@@ -6,6 +6,52 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Added
+
+- `make install`: one-command setup for fresh clones — detects and (on macOS)
+  installs missing prerequisites (uv, Python 3.11+, Node 18+, PostgreSQL 17,
+  cargo, Docker), then runs `uv sync`, creates the database, generates `.env`
+  with random local-RustFS credentials, builds the velites sandbox binary,
+  installs frontend dependencies, and seeds the worker config and vault key
+  (`scripts/install-deps.sh`, idempotent).
+- Dev object storage works out of the box: `make dev-up` now starts the local
+  RustFS container (via the existing `materials-local` compose profile, gated
+  by `local-s3-decide.sh`) and ensures the bucket + CORS exist
+  (`scripts/ensure-s3-bucket.py`, shared with `init-worktree.sh`). Switching to
+  a cloud S3 is still just an `.env` edit — the local RustFS is then skipped
+  automatically.
+- Workflow definitions accept an optional top-level `execution:` block
+  (provider/model/thinking) that the loader merges into every agent-routed
+  node (node values win), versioned with the revision — one place to configure
+  execution per workflow instead of per node.
+- Studio node execution editor: provider/model inputs now offer runtime-aware
+  suggestions aggregated from the workspace's online workers
+  (`GET /api/workspaces/{id}/runtime-models`), with free-text fallback.
+- Studio chat sessions can be resumed after close/error/backend restart:
+  `POST /api/workspaces/{id}/studio-chat/sessions/{sid}/resume` respawns the
+  ACP runtime with a fresh scoped token and rebuilds context via ACP
+  `session/load` when advertised, otherwise by replaying a bounded transcript
+  of the persisted history into the first prompt. The panel offers a
+  「继续对话」 action and remembers the last selected session per workspace.
+- Studio start-node contract editor rewritten in user-facing terms: each
+  accepted item type (上传文件 / 外部平台内容 / 整个文件夹) carries a label
+  plus a one-line scenario description, shared with the read-only view and the
+  AddItemsDialog banner (internal jargon like `accepted_item_types` removed).
+
+### Removed (workspace settings retirement)
+
+- Workspace Settings「Agent 默认配置」(`default_agent_provider/model/thinking`):
+  the provider/model/thinking resolution chain is now node `execution.*` →
+  workflow-level `execution` default → actionable error; the three columns are
+  dropped in schema v63 (cleanup-phase drop after the v62 replay, per the
+  `cms_config_json` precedent). New manifests no longer bake
+  `execution_defaults`; claim re-resolution stays tolerant of legacy in-flight
+  manifests.
+- Workspace Settings「接入与资源」 intake-mode toggles: item types are
+  declared solely by the start node's `accepted_item_types` in Studio; the
+  legacy `/job-batches` API is no longer gated by enabled intake modes. The
+  default entity type (entityType) survives and moved into「基础信息」.
+
 ### Removed (dead code and stale artifacts)
 
 - Removed the dead `server/app/services/vault_resources.py` module: zero

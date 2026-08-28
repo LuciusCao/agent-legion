@@ -23,9 +23,10 @@ intake_knowledge_points → write_script → review_script →
 generate_questions → review_questions → publish_content（模拟入库，
 不发网络请求）。
 
-跑通示例还需要：`make import-demo` 已执行，并配置 agent 执行所需的模型默认值
-（workspace Settings 的 `default_agent_provider` /
-`default_agent_model`），同时开启 workspace 自动调度和 Worker claim。
+跑通示例还需要：`make import-demo` 已执行，并在 Studio 里配置 agent 执行的
+provider/model（在 workflow 顶层 `execution:` 配一处即可，也可逐节点
+`execution.*` 覆盖；Studio 会按节点 Agent 的 runtime 给出在线 Worker 上报的
+可用 provider/model 选项），同时开启 workspace 自动调度和 Worker claim。
 
 两个 code 节点（intake/publish）的出厂代码在绑定示例 workflow 时发布为
 workspace 作用域 node_code 版本（seed-if-absent，源自 `workflow_nodes/` 的
