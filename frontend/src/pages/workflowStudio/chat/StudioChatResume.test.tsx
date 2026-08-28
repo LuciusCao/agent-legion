@@ -137,6 +137,27 @@ describe('StudioChatPanel resume', () => {
     expect(screen.getByLabelText('消息输入')).toBeDisabled()
   })
 
+  it('refreshes the sessions list after a successful resume', async () => {
+    mockResume.resumeStudioChatSession.mockResolvedValue(
+      sessionRecord({ status: 'idle' })
+    )
+    renderPanel()
+
+    const resumeButton = await screen.findByRole('button', { name: '继续对话' })
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatSessions).toHaveBeenCalledTimes(1)
+    )
+    await act(async () => {
+      fireEvent.click(resumeButton)
+    })
+    // sessions 缓存失效 → 列表重拉，下拉不再长期滞留「（已关闭）」。
+    await waitFor(() =>
+      expect(
+        mockApi.fetchStudioChatSessions.mock.calls.length
+      ).toBeGreaterThanOrEqual(2)
+    )
+  })
+
   it('restores the remembered session for the workspace on re-entry', async () => {
     storage.setItem(MEMORY_KEY, 's2')
     mockApi.fetchStudioChatSessions.mockResolvedValue([

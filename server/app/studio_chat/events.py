@@ -128,7 +128,7 @@ class AcpEventHandlers:
             )
         self._backend.store.publish_session(session_id)
 
-    def on_exit(self, session_id: str) -> None:
+    def on_exit(self, session_id: str, *, close_initiated: bool = False) -> None:
         # Agent death teardown (#158): runs on the ACP thread itself, so the
         # handle close must be skipped (self-join); the subprocess is already
         # gone. Still pops the registry entry, settles parked permissions, and
@@ -138,6 +138,12 @@ class AcpEventHandlers:
         self._backend.teardown_runtime(
             session_id, self._backend.runtime(session_id), close_handle=False
         )
+        # close_initiated: the exit came from handle.close() (close/shutdown/
+        # resume's winner-side teardown), not from an agent death — stamping
+        # the row error here would clobber the resume claim's 'starting' row
+        # and add a bogus error row to the timeline.
+        if close_initiated:
+            return
         current = self._backend.db.get_studio_chat_session(session_id) or {}
         if current.get("status") in ("closed", "error"):
             return

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import type { StudioChatSessionRecord } from './studioChatApi'
 
 const KEY_PREFIX = 'studio-chat.active-session.'
@@ -20,9 +20,15 @@ export function useStudioChatSessionMemory(
   selectSession: (sessionId: string) => void
 ) {
   // 只在有选中时写入：初始 null（尚未恢复）不得清掉记忆值，否则同 commit
-  // 的恢复效应读到的就是空。
+  // 的恢复效应读到的就是空。workspace 刚切换（React Router 复用组件实例）
+  // 时 activeSessionId 还是旧 workspace 的残留选中，同样不得写入——
+  // useStudioChat 的重置效应会在下一 render 把它归零，再由恢复效应按新
+  // workspace 的记忆重新选择。
+  const previousWorkspaceRef = useRef(workspaceId)
   useEffect(() => {
-    if (!workspaceId || !activeSessionId) return
+    const staleWorkspace = previousWorkspaceRef.current !== workspaceId
+    previousWorkspaceRef.current = workspaceId
+    if (!workspaceId || !activeSessionId || staleWorkspace) return
     try {
       window.localStorage.setItem(KEY_PREFIX + workspaceId, activeSessionId)
     } catch {

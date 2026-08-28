@@ -3,7 +3,7 @@
 Split from acp_session.py (file budget). session/load is attempted only when
 the freshly-initialized agent advertises the loadSession capability; any load
 failure falls back to a fresh session, and the service rebuilds context from
-the persisted transcript instead (studio_chat.transcript).
+the persisted transcript instead (studio_chat.resume_context).
 """
 
 from __future__ import annotations

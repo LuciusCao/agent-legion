@@ -48,13 +48,11 @@ export function useStudioChat(workspaceId: string | undefined) {
   const [actionError, setActionError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
   const messagesRef = useRef<ChatMessage[]>([])
-  useEffect(() => {
-    messagesRef.current = messages
-  }, [messages])
   const activeSessionIdRef = useRef<string | null>(null)
   useEffect(() => {
+    messagesRef.current = messages
     activeSessionIdRef.current = activeSessionId
-  }, [activeSessionId])
+  }, [messages, activeSessionId])
 
   const agentsQuery = useQuery({
     queryKey: queryKeys.studioChatAgents(workspaceId ?? ''),
@@ -66,10 +64,6 @@ export function useStudioChat(workspaceId: string | undefined) {
     queryFn: () => fetchStudioChatSessions(workspaceId!),
     enabled: Boolean(workspaceId),
   })
-
-  const applySession = useCallback((next: StudioChatSessionRecord) => {
-    setSession(next)
-  }, [])
 
   // run 计时：会话状态快照进出 busy 状态时记开始/用时，切换会话重置。
   const sessionStatus = session?.status ?? null
@@ -130,8 +124,8 @@ export function useStudioChat(workspaceId: string | undefined) {
       (row) => row.id === activeSessionId
     )
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 用已加载的会话列表回填快照
-    if (fromList) applySession(fromList)
-  }, [activeSessionId, session, sessionsQuery.data, applySession])
+    if (fromList) setSession(fromList)
+  }, [activeSessionId, session, sessionsQuery.data])
 
   useEffect(() => {
     if (!workspaceId || !activeSessionId || typeof EventSource === 'undefined')
@@ -163,7 +157,7 @@ export function useStudioChat(workspaceId: string | undefined) {
             invalidateStudioTurnEndQueries(queryClient, workspaceId)
           }
         } else if (payload.type === 'session' && payload.session) {
-          applySession(payload.session)
+          setSession(payload.session)
         }
       },
       onStatus: (status) => {
@@ -174,13 +168,13 @@ export function useStudioChat(workspaceId: string | undefined) {
         // status 滞留 running，approve/deny 永远 disabled。刷新失败不阻断
         // 消息补齐：sessions 列表兜底与后续 SSE 会再校准。
         void fetchStudioChatSession(workspaceId, activeSessionId).then(
-          applySession,
+          setSession,
           () => undefined
         )
       },
     })
     return () => channel.close()
-  }, [workspaceId, activeSessionId, applySession, refillMessages, queryClient])
+  }, [workspaceId, activeSessionId, refillMessages, queryClient])
 
   async function runAction(action: () => Promise<void>) {
     setActionError(null)
@@ -193,10 +187,6 @@ export function useStudioChat(workspaceId: string | undefined) {
     }
   }
 
-  async function selectSession(sessionId: string) {
-    setActiveSessionId(sessionId)
-  }
-
   async function startSession(agentId: string) {
     if (!workspaceId || starting) return
     setStarting(true)
@@ -205,7 +195,7 @@ export function useStudioChat(workspaceId: string | undefined) {
       await queryClient.invalidateQueries({
         queryKey: queryKeys.studioChatSessions(workspaceId),
       })
-      applySession(created)
+      setSession(created)
       setActiveSessionId(created.id)
     })
     setStarting(false)
@@ -229,14 +219,14 @@ export function useStudioChat(workspaceId: string | undefined) {
   async function cancel() {
     if (!workspaceId || !activeSessionId) return
     await runAction(async () => {
-      applySession(await cancelStudioChatTurn(workspaceId, activeSessionId))
+      setSession(await cancelStudioChatTurn(workspaceId, activeSessionId))
     })
   }
 
   async function setAllowAll(enabled: boolean) {
     if (!workspaceId || !activeSessionId) return
     await runAction(async () => {
-      applySession(
+      setSession(
         await setStudioChatAllowAll(workspaceId, activeSessionId, enabled)
       )
     })
@@ -264,24 +254,39 @@ export function useStudioChat(workspaceId: string | undefined) {
     useMemo(() => deriveChatViews(messages), [messages])
 
   // 「继续对话」：closed/error 会话重建 runtime（转录/session load 由后端决定）。
+  // 响应归属守卫（refillMessages 的 activeSessionIdRef 同款模式）：resume 在途
+  // 时切换了会话，旧会话的响应不得覆盖当前选中会话的快照；成功后失效 sessions
+  // 列表缓存，否则下拉里该会话长期滞留「（已关闭）」。
+  const applyResumedSession = useCallback(
+    (resumed: StudioChatSessionRecord) => {
+      if (activeSessionIdRef.current !== resumed.id) return
+      setSession(resumed)
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.studioChatSessions(resumed.workspace_id),
+      })
+    },
+    [queryClient]
+  )
   const { resume, resuming } = useStudioChatResume(
     workspaceId,
     activeSessionId,
     runAction,
-    applySession
+    applyResumedSession
   )
+  // 切换 workspace（React Router 复用组件实例）时清空旧选中：残留 id 会让
+  // 记忆恢复效应被 !== null 跳过、写效应把旧 id 写进新 workspace 的记忆。
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- 会话切换时重置选中（与上方消息重置同一模式）
+  useEffect(() => setActiveSessionId(null), [workspaceId])
   // 按 workspace 记忆选中会话；未选择时恢复上次或回落最近会话。
   useStudioChatSessionMemory(
     workspaceId,
     sessionsQuery.data ?? [],
     activeSessionId,
-    selectSession
+    setActiveSessionId
   )
 
   const busy = session ? isStudioChatBusy(session.status) : false
-  const closed = session
-    ? session.status === 'closed' || session.status === 'error'
-    : false
+  const closed = session?.status === 'closed' || session?.status === 'error'
 
   return {
     agents: agentsQuery.data ?? [],
@@ -303,7 +308,7 @@ export function useStudioChat(workspaceId: string | undefined) {
     lastRunMs: runTiming.lastMs,
     resume,
     resuming,
-    selectSession,
+    selectSession: setActiveSessionId,
     startSession,
     send,
     cancel,

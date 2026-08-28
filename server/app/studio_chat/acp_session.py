@@ -88,7 +88,7 @@ class AcpSessionCallbacks(Protocol):
     def on_error(self, detail: str) -> None:
         """The whole ACP run collapsed (startup failure or connection loss)."""
 
-    def on_exit(self) -> None: ...
+    def on_exit(self, *, close_initiated: bool) -> None: ...
 
 
 class _ClientImpl(TerminalClientMixin):
@@ -228,7 +228,10 @@ class AcpSessionHandle:
             self.callbacks.on_error("ACP session loop crashed")
         finally:
             self.ready_event.set()
-            self.callbacks.on_exit()
+            # _closed was set before _CLOSE was queued, so by the time the
+            # thread drains it and lands here the flag is reliably visible:
+            # an intentional teardown must not be reported as an agent death.
+            self.callbacks.on_exit(close_initiated=self._closed)
 
     async def _run(self) -> None:
         client = _ClientImpl()

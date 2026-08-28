@@ -33,13 +33,13 @@ from server.app.settings import Settings
 from server.app.studio_chat.availability import AgentAvailabilityProbe
 from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.registry import StudioAgentRegistryStore
+from server.app.studio_chat.resume_context import prepare_resume_prompt, rearm_resume_transcript
 from server.app.studio_chat.runtime import (
     SessionRuntime,
     teardown_runtime,
 )
 from server.app.studio_chat.spawn import spawn_session_runtime
 from server.app.studio_chat.store import StudioChatStore
-from server.app.studio_chat.transcript import build_resume_transcript
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import AcpEventHandlers
@@ -209,10 +209,8 @@ class StudioChatService:
             raise ConflictError(f"Chat session is {session['status']} and cannot be resumed")
         # A closed/error session can still have a registered runtime winding
         # down (fatal error -> _on_exit window) or left over by a reap that
-        # raced a live handle: settle it before claiming, so the respawn
-        # never orphans the old agent subprocess (idempotent no-op when the
-        # registry holds nothing).
-        self.teardown_runtime(session_id, self.runtime(session_id))
+        # raced a live handle: the resume winner settles it below, right
+        # after the atomic claim.
         agent_id = str(session["agent_id"])
         agent = self._registry.find_agent(agent_id)
         if agent is None:
@@ -236,6 +234,12 @@ class StudioChatService:
                 f"Too many active studio chat sessions (limit {MAX_ACTIVE_STUDIO_CHAT_SESSIONS});"
                 " close an existing session first"
             )
+        # Winner-only teardown, strictly after the atomic claim and before
+        # the spawn: teardown pops the registry's CURRENT entry (never the
+        # caller's snapshot), so a pre-claim teardown let a resume that went
+        # on to lose the claim destroy the winner's freshly registered
+        # runtime. Idempotent no-op when the registry holds nothing.
+        self.teardown_runtime(session_id, self.runtime(session_id))
         # Re-read after the claim (cross-process discipline): the row we
         # spawn for is the one we just transitioned, never a stale snapshot.
         claimed = self.get_session(session_id, workspace_id)
@@ -256,7 +260,11 @@ class StudioChatService:
         if runtime is not None and not handle.loaded_existing:
             with runtime.lock:
                 runtime.resume_transcript_pending = True
-        self.store.append_message(session_id, "status", "system", {"event": "session_resumed"})
+        # A close that raced the spawn owns the final state: the misleading
+        # session_resumed row must not land on an already-closed timeline.
+        latest = self._db.get_studio_chat_session(session_id) or {}
+        if str(latest.get("status")) in ("starting", "idle", "running", "awaiting_permission"):
+            self.store.append_message(session_id, "status", "system", {"event": "session_resumed"})
         self.store.publish_session(session_id)
         return self.get_session(session_id)
 
@@ -293,20 +301,22 @@ class StudioChatService:
         from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 
         prompt_text = (STUDIO_AUTHORING_BOOTSTRAP + text) if first_prompt else text
-        # Resume fallback context (one-shot): the fresh agent could not reload
-        # the prior ACP session, so prepend the persisted transcript. Consumed
-        # under the runtime lock before any send_prompt so a retry after a
-        # failed turn never double-injects, and only when the session actually
-        # has history (first_prompt sessions get the bootstrap instead).
-        if not first_prompt:
-            with runtime.lock:
-                inject_transcript = runtime.resume_transcript_pending
-                runtime.resume_transcript_pending = False
-            if inject_transcript:
-                transcript = build_resume_transcript(self._db.list_studio_chat_messages(session_id))
-                if transcript:
-                    prompt_text = transcript + prompt_text
+        # Resume fallback context (one-shot): the fresh agent could not
+        # reload the prior ACP session, so prepend the persisted transcript.
+        # prepare_resume_prompt consumes the marker unconditionally (a
+        # first-prompt turn takes the bootstrap instead) and builds the
+        # transcript from messages before the one just appended, so the
+        # current message never appears both in the transcript and as the
+        # prompt tail.
+        prompt_text, resume_pending = prepare_resume_prompt(
+            runtime, self._db, session_id, first_prompt, prompt_text, message["seq"]
+        )
         if not runtime.handle.send_prompt(prompt_text):
+            # The prompt never reached the agent: re-arm the one-shot marker
+            # so the next turn retries the injection instead of silently
+            # losing the resume context (nothing was injected — no double
+            # injection risk).
+            rearm_resume_transcript(runtime, resume_pending)
             # Guarded (#158): a close racing this turn owns the final state.
             self._db.update_studio_chat_session_if(
                 session_id, status_not_in=("closed",), status="error"
@@ -409,8 +419,8 @@ class StudioChatService:
     def _on_error(self, session_id: str, detail: str, *, fatal: bool) -> None:
         self._events().on_error(session_id, detail, fatal=fatal)
 
-    def _on_exit(self, session_id: str) -> None:
-        self._events().on_exit(session_id)
+    def _on_exit(self, session_id: str, *, close_initiated: bool = False) -> None:
+        self._events().on_exit(session_id, close_initiated=close_initiated)
 
     def _events(self) -> AcpEventHandlers:
         from server.app.studio_chat.events import AcpEventHandlers

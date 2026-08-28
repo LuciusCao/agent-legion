@@ -36,5 +36,5 @@ class ServiceCallbacks:
     def on_error(self, detail: str) -> None:
         self._service._on_error(self._session_id, detail, fatal=True)
 
-    def on_exit(self) -> None:
-        self._service._on_exit(self._session_id)
+    def on_exit(self, *, close_initiated: bool) -> None:
+        self._service._on_exit(self._session_id, close_initiated=close_initiated)

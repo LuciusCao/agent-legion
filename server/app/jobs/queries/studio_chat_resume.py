@@ -8,14 +8,14 @@ concurrent creators past the active-session cap.
 
 from __future__ import annotations
 
-from server.app.jobs.queries.studio_chat_messages import StudioChatMessageQueriesMixin
+from server.app.jobs.queries.studio_chat_transcript import StudioChatTranscriptQueriesMixin
 
 # Advisory-lock key serializing session creation AND resume against the
 # active cap (studio_chat.py imports it for the creation path).
 _CAP_LOCK_KEY = "studio_chat_session_cap"
 
 
-class StudioChatResumeQueriesMixin(StudioChatMessageQueriesMixin):
+class StudioChatResumeQueriesMixin(StudioChatTranscriptQueriesMixin):
     """Atomic closed/error -> starting resume claim for studio_chat_sessions."""
 
     def claim_studio_chat_resume(self, session_id: str, *, max_active: int) -> bool:

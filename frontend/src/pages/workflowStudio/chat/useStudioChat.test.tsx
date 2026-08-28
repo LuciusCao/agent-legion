@@ -4,13 +4,37 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { useStudioChat } from './useStudioChat'
 import * as chatApi from './studioChatApi'
+import * as resumeApi from './studioChatResumeApi'
 import type { StudioChatSessionRecord } from './studioChatApi'
 import { EventSourceMock } from '../../../testing/eventSourceMock'
 import { createTestQueryClient } from '../../../testing/testQueryClient'
 
 vi.mock('./studioChatApi')
+vi.mock('./studioChatResumeApi')
 
 const mockApi = vi.mocked(chatApi)
+const mockResume = vi.mocked(resumeApi)
+
+// 该 jsdom 环境不提供 localStorage：用内存 stub 验证持久化读写（同
+// StudioChatResume.test.tsx 的模式）。
+function installLocalStorageStub() {
+  const store = new Map<string, string>()
+  const stub: Storage = {
+    get length() {
+      return store.size
+    },
+    clear: () => store.clear(),
+    getItem: (key) => store.get(key) ?? null,
+    key: (index) => [...store.keys()][index] ?? null,
+    removeItem: (key) => void store.delete(key),
+    setItem: (key, value) => void store.set(key, String(value)),
+  }
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: stub,
+  })
+  return stub
+}
 
 function sessionRecord(
   overrides?: Partial<StudioChatSessionRecord>
@@ -50,6 +74,7 @@ function textMessage(id: string, seq: number, text: string) {
 describe('useStudioChat', () => {
   const originalEventSource = globalThis.EventSource
   let testClient = createTestQueryClient()
+  let storage: Storage
   const wrapper = ({ children }: { children: ReactNode }) =>
     createElement(QueryClientProvider, { client: testClient }, children)
 
@@ -57,6 +82,7 @@ describe('useStudioChat', () => {
     testClient = createTestQueryClient()
     EventSourceMock.reset()
     globalThis.EventSource = EventSourceMock as unknown as typeof EventSource
+    storage = installLocalStorageStub()
     vi.clearAllMocks()
     mockApi.fetchStudioChatAgents.mockResolvedValue([
       { id: 'kimi', label: 'Kimi Code' },
@@ -417,5 +443,77 @@ describe('useStudioChat', () => {
     })
     expect(result.current.starting).toBe(false)
     expect(result.current.activeSessionId).toBe('s2')
+  })
+
+  it('applies the resumed snapshot and invalidates the sessions list cache', async () => {
+    mockResume.resumeStudioChatSession.mockResolvedValue(
+      sessionRecord({ status: 'idle' })
+    )
+    const { result } = await renderChat()
+    const invalidateSpy = vi.spyOn(testClient, 'invalidateQueries')
+
+    await act(async () => {
+      await result.current.resume()
+    })
+
+    expect(mockResume.resumeStudioChatSession).toHaveBeenCalledWith('ws1', 's1')
+    // sessions 列表缓存失效：下拉里不再长期滞留「（已关闭）」。
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['studio-chat-sessions', 'ws1'],
+    })
+  })
+
+  it('ignores a resume response that lands after switching sessions', async () => {
+    type ResumeResult = Awaited<
+      ReturnType<typeof resumeApi.resumeStudioChatSession>
+    >
+    let resolveResume: (session: ResumeResult) => void = () => {}
+    mockResume.resumeStudioChatSession.mockImplementation(
+      () =>
+        new Promise<ResumeResult>((resolve) => {
+          resolveResume = resolve
+        })
+    )
+    const { result } = await renderChat()
+
+    let resumeDone: Promise<void> | undefined
+    act(() => {
+      resumeDone = result.current.resume()
+    })
+    await act(async () => {
+      await result.current.selectSession('s2')
+    })
+    await act(async () => {
+      resolveResume(sessionRecord({ id: 's1', status: 'idle' }))
+      await resumeDone
+    })
+
+    // 旧会话的 resume 响应不得覆盖当前选中会话的快照。
+    expect(result.current.activeSessionId).toBe('s2')
+    expect(result.current.session?.id).not.toBe('s1')
+  })
+
+  it('clears the active session when the workspace changes', async () => {
+    mockApi.fetchStudioChatSessions.mockImplementation((workspaceId: string) =>
+      Promise.resolve(workspaceId === 'ws1' ? [sessionRecord()] : [])
+    )
+    const view = renderHook(({ ws }: { ws: string }) => useStudioChat(ws), {
+      wrapper,
+      initialProps: { ws: 'ws1' },
+    })
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatSessions).toHaveBeenCalled()
+    )
+    await act(async () => {
+      await view.result.current.selectSession('s1')
+    })
+    expect(storage.getItem('studio-chat.active-session.ws1')).toBe('s1')
+
+    view.rerender({ ws: 'ws2' })
+
+    await waitFor(() => expect(view.result.current.activeSessionId).toBeNull())
+    // 旧选中不得写进新 workspace 的记忆；旧 workspace 的记忆本身保留。
+    expect(storage.getItem('studio-chat.active-session.ws2')).toBeNull()
+    expect(storage.getItem('studio-chat.active-session.ws1')).toBe('s1')
   })
 })
