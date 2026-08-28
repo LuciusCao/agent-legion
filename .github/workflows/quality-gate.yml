@@ -121,7 +121,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Full history for the backend static round: budget_monotonicity
+      # compares ceilings against HEAD^ and silently skips missing anchors
+      # (shallow clones), which would gut the check exactly where PRs are
+      # gated (codex review on PR #231). changes already fetches depth 0.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@v5
         with:

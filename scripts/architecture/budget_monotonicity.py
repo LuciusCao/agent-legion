@@ -3,26 +3,16 @@
 Budget ceilings are a one-way ratchet: an entry may stay or go down, never
 up. The ratchet script itself never raises, but hand edits to
 ``architecture-budgets.json`` and hand-raised exemption ceilings previously
-passed ``check_architecture`` untouched — the ratchet degenerated from a
-constraint into bookkeeping.
-
-This module compares the working-tree registries against their recent
-committed state. The floor for each file is the lowest effective ceiling
-recorded at any anchor (HEAD, HEAD^), so a raise is caught whichever layer
-it was introduced at, while a working-tree fix reverting a committed raise
-passes. A committed effective ceiling is the higher of a file's baseline
-entry and its exemption ceiling, so retiring an exemption onto a baseline
-entry at or below the frozen value is a tightening, not a raise. New entries
-(newly registered files, newly filed exemptions) are unrestricted:
-registering at actual + buffer_lines is the sanctioned way a ceiling
-appears, and anything beyond that must go through a dated
-``architecture.file_budget`` exemption (``remove_when`` + 30-day age
-reporting in ``scripts/quality/exemption_age.py``).
+passed ``check_architecture`` untouched — the ratchet degenerated from
+constraint into bookkeeping. Floor semantics live on
+``ceiling_regression_errors``; new entries at actual + buffer_lines and
+first-time dated exemptions stay unrestricted.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -33,35 +23,64 @@ __test__ = False
 BUDGETS_RELATIVE_PATH = "config/architecture/architecture-budgets.json"
 EXEMPTIONS_RELATIVE_PATH = "config/architecture/architecture-exemptions.yaml"
 
+# env name is long but self-documenting; keep one line
+_SHALLOW_OPT_OUT = "AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW"
 
-def _committed_file_text(root: Path, revision: str, rel_path: str) -> str | None:
-    """Return a governed file's content at a git revision, None if unavailable.
 
-    Unavailable covers non-git checkouts (tests, tarballs), missing paths at
-    that revision, and shallow clones whose parents are not fetched. A missing
-    anchor never produces errors — the monotonic check only fires when an
-    entry exists on both sides.
-    """
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     try:
-        proc = subprocess.run(
-            ["git", "-C", str(root), "show", f"{revision}:{rel_path}"],
+        return subprocess.run(
+            ["git", "-C", str(root), *args],
             capture_output=True,
             text=True,
             timeout=10,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if proc.returncode != 0:
-        return None
-    return proc.stdout
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return subprocess.CompletedProcess(args, returncode=1, stdout="", stderr=str(exc))
+
+
+def _committed_file_text(root: Path, revision: str, rel_path: str) -> str | None:
+    """Content at a git revision, None when unavailable (non-git checkout,
+    path predating the registry). A missing anchor never errors — the check
+    only fires when an entry exists on both sides."""
+    proc = _git(root, "show", f"{revision}:{rel_path}")
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def _is_git_repository(root: Path) -> bool:
+    return _git(root, "rev-parse", "--git-dir").returncode == 0
+
+
+def _revision_resolvable(root: Path, revision: str) -> bool:
+    """True when the anchor revision exists locally (not a shallow-clone hole)."""
+    return _git(root, "rev-parse", "--verify", f"{revision}^{{commit}}").returncode == 0
+
+
+def _unresolvable_anchor_errors(root: Path) -> list[str]:
+    """Hard-fail on git checkouts whose anchors do not resolve: a shallow
+    clone missing HEAD^ silently guts the committed-raise check exactly
+    where CI gates PRs (codex review on PR #231). The env opt-out covers
+    depth-1 checkouts that cannot fetch history; non-git checkouts stay
+    quiet (nothing to compare against)."""
+    if not _is_git_repository(root):
+        return []
+    errors: list[str] = []
+    for revision in ("HEAD", "HEAD^"):
+        if _revision_resolvable(root, revision):
+            continue
+        if os.environ.get(_SHALLOW_OPT_OUT) == "1":
+            continue
+        errors.append(
+            f"budget monotonicity: git anchor {revision} does not resolve in this "
+            "checkout (shallow clone?); fetch history (CI: fetch-depth: 0) or set "
+            f"{_SHALLOW_OPT_OUT}=1 to deliberately skip the committed-raise check"
+        )
+    return errors
 
 
 def _committed_budget_ceilings(text: str | None) -> dict[str, int]:
-    """Extract the path -> ceiling map from a committed budgets JSON.
-
-    Deliberately lenient: committed revisions may predate the current schema,
-    so only the ``files`` mapping of positive integer ceilings is read.
-    """
+    """Path -> ceiling map from a committed budgets JSON (lenient: committed
+    revisions may predate the current schema)."""
     if text is None:
         return {}
     try:
@@ -79,7 +98,7 @@ def _committed_budget_ceilings(text: str | None) -> dict[str, int]:
 
 
 def _committed_exemption_ceilings(text: str | None) -> dict[str, int]:
-    """Extract file_budget exemption ceilings from a committed registry YAML."""
+    """file_budget exemption ceilings from a committed registry YAML."""
     if text is None:
         return {}
     try:
@@ -107,15 +126,13 @@ def ceiling_regression_errors(
 ) -> list[str]:
     """Reject ceiling increases against the committed monotonic floor.
 
-    The floor for each file is the lowest effective ceiling recorded at any
-    recent anchor revision (HEAD, HEAD^). Taking the minimum means a raise is
-    caught no matter which layer it was introduced at — an uncommitted manual
-    edit against HEAD, or a raise already smuggled into the pending commit
-    against HEAD^ (on CI merge refs the first parent is the PR base branch,
-    so the PR's own change is in view) — while a working-tree fix that
-    reverts an already-committed raise to the older, lower value passes.
+    The min-across-anchors floor catches a raise introduced at any layer
+    (uncommitted edit vs HEAD, smuggled-into-pending-commit vs HEAD^; on CI
+    merge refs the first parent is the PR base, so the PR's own change is in
+    view), while a working-tree revert of a committed raise passes. The
+    anchor semantics live in ``_unresolvable_anchor_errors``.
     """
-    errors: list[str] = []
+    errors = _unresolvable_anchor_errors(root)
     budget_floors: dict[str, int] = {}
     exemption_floors: dict[str, int] = {}
     for revision in ("HEAD", "HEAD^"):

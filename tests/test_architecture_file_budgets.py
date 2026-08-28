@@ -78,7 +78,11 @@ def git_repo(
     The monotonic ceiling check compares against committed revisions, so its
     tests need an actual git history; ``init`` + ``commit`` of the initial
     state provides the HEAD anchor, and a second commit (or an uncommitted
-    working-tree edit) plays the role of the raise attempt.
+    working-tree edit) plays the role of the raise attempt. The leading
+    empty commit keeps HEAD^ resolvable in every fixture — an unresolvable
+    anchor is itself an error since the codex review on PR #231 (shallow
+    clones must not silently gut the check), and only the dedicated
+    unresolvable-anchor tests build that shape deliberately.
     """
     root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
     write_baseline(root, files if files is not None else {"server/app/example.py": 110})
@@ -88,6 +92,8 @@ def git_repo(
         ["git", "init", "-q"],
         ["git", "config", "user.email", "test@example.com"],
         ["git", "config", "user.name", "test"],
+        # Empty seed commit: HEAD^ must resolve in the fixture repos.
+        ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
         ["git", "add", "-A"],
         ["git", "commit", "-q", "-m", "init"],
     ):
@@ -618,3 +624,41 @@ def test_monotonic_check_silent_without_git_history(tmp_path: Path) -> None:
     root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
     write_baseline(root, {"server/app/example.py": 105})
     assert check_file_budgets(root, policy, ()) == []
+
+
+def test_monotonic_check_fails_when_git_anchor_unresolvable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A git checkout whose HEAD^ does not resolve (shallow clone, depth 1)
+    # silently guts the committed-raise check exactly where CI gates PRs —
+    # codex review on PR #231. An unresolvable anchor is a hard error unless
+    # explicitly opted out. Built by hand: git_repo's fixture always carries
+    # a resolvable HEAD^, so this test deliberately commits only once.
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
+    write_baseline(root, {"server/app/example.py": 105})
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+        ["git", "add", "-A"],
+        ["git", "commit", "-q", "-m", "init"],
+    ):
+        subprocess.run(argv, cwd=root, check=True)
+    monkeypatch.delenv("AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW", raising=False)
+    errors = check_file_budgets(root, policy, ())
+    assert any("HEAD^" in error and "does not resolve" in error for error in errors)
+
+
+def test_monotonic_check_shallow_opt_in_skips_anchor_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The explicit opt-out exists for depth-1 checkouts that genuinely
+    # cannot fetch history; it skips the anchor errors but keeps the
+    # against-HEAD comparison alive (uncommitted raises are still caught).
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 105})
+    monkeypatch.setenv("AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW", "1")
+    assert check_file_budgets(root, policy, ()) == []
+    # ...and an uncommitted raise over the resolved HEAD anchor still fails.
+    write_baseline(root, {"server/app/example.py": 130})
+    errors = check_file_budgets(root, policy, ())
+    assert any("rose above committed ceiling" in error for error in errors)
