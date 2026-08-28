@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { ArtifactPreviewPanel } from './ArtifactPreviewPanel'
 import { TestQueryProvider } from '../../testing/testQueryClient'
@@ -85,6 +85,35 @@ describe('ArtifactPreviewPanel', () => {
     await waitFor(() => {
       expect(screen.getByText('not-json{{')).toBeInTheDocument()
     })
+  })
+
+  it('图片加载失败展示错误占位并可重试', async () => {
+    renderPanel(
+      <ArtifactPreviewPanel jobId="j1" detail={makeDetail(['frame.png'])} />
+    )
+
+    const img = await screen.findByRole('img', { name: 'frame.png' })
+    fireEvent.error(img)
+    expect(screen.getByText('媒体加载失败')).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: '新窗口打开' })
+    ).toHaveAttribute('href', '/api/jobs/j1/artifacts/frame.png/raw')
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    // 重试后重新挂载 <img>（失败占位消失）。
+    await waitFor(() => {
+      expect(screen.queryByText('媒体加载失败')).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole('img', { name: 'frame.png' })).toBeInTheDocument()
+  })
+
+  it('卡片头部提供原始字节下载链接', () => {
+    renderPanel(
+      <ArtifactPreviewPanel jobId="j1" detail={makeDetail(['frame.png'])} />
+    )
+
+    const link = screen.getByRole('link', { name: '下载' })
+    expect(link).toHaveAttribute('href', '/api/jobs/j1/artifacts/frame.png/raw')
   })
 
   it('文本超长时截断并显示提示', async () => {

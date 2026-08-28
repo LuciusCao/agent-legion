@@ -1,6 +1,12 @@
+/**
+ * 左栏实体面板的统一入口（issue #11）：
+ * - question：结构化业务面板在上 + 通用产物预览在下；
+ * - 其余 source_type：通用产物预览兜底（替代旧的 return null / video 空态）。
+ * 结构化面板的 gating 布尔在 Phase 5 挪进 manifest 声明，此处暂保留透传。
+ */
 import type { JobDetail } from '../../types/jobTypes'
 import { QuestionContentPanel } from '../../components/question/QuestionContentPanel'
-import { VideoContentPanel } from '../../components/VideoContentPanel'
+import { ArtifactPreviewPanel } from '../../components/preview/ArtifactPreviewPanel'
 
 export interface EntityPanelProps {
   detail: JobDetail | null | undefined
@@ -19,22 +25,21 @@ export function EntityPanel({
   keyInfoReviewAttempted,
   possibleErrorsReviewAttempted,
 }: EntityPanelProps) {
-  if (detail?.job.source_type === 'question') {
-    return (
-      <QuestionContentPanel
-        key={jobId}
-        jobId={jobId}
-        keyInfoPreviewable={keyInfoPreviewable}
-        possibleErrorsPreviewable={possibleErrorsPreviewable}
-        keyInfoReviewAttempted={keyInfoReviewAttempted}
-        possibleErrorsReviewAttempted={possibleErrorsReviewAttempted}
-      />
-    )
-  }
+  const isQuestion = detail?.job.source_type === 'question'
 
-  if (detail?.job.source_type === 'video') {
-    return <VideoContentPanel key={jobId} jobId={jobId} />
-  }
-
-  return null
+  return (
+    <>
+      {isQuestion && (
+        <QuestionContentPanel
+          key={jobId}
+          jobId={jobId}
+          keyInfoPreviewable={keyInfoPreviewable}
+          possibleErrorsPreviewable={possibleErrorsPreviewable}
+          keyInfoReviewAttempted={keyInfoReviewAttempted}
+          possibleErrorsReviewAttempted={possibleErrorsReviewAttempted}
+        />
+      )}
+      <ArtifactPreviewPanel key={`${jobId}-artifacts`} jobId={jobId} detail={detail ?? null} />
+    </>
+  )
 }

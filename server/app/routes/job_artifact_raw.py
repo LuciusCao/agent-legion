@@ -63,16 +63,20 @@ def raw_response(raw: RawArtifact) -> FileResponse | StreamingResponse:
     object-store streams are served whole-body with a 64 KiB chunk iterator
     and a BackgroundTask that closes the stream on both completion and client
     disconnect (starlette runs background tasks after either path).
+
+    Whitelisted media renders inline; anything else is forced to a download
+    on both branches (octet-stream alone doesn't render, the attachment
+    disposition keeps direct navigation from trying).
     """
     media_type = raw_media_type(raw.name)
-    # 白名单内联渲染；白名单外强制 attachment 下载（双保险：octet-stream
-    # 本身不渲染，disposition 保证浏览器导航到该 URL 也只会下载）。
     disposition = "inline" if _is_whitelisted(media_type) else "attachment"
     if raw.stream is not None:
         stream = raw.stream
         headers = {}
         if raw.size_bytes is not None:
             headers["Content-Length"] = str(raw.size_bytes)
+        if disposition == "attachment":
+            headers["Content-Disposition"] = f'attachment; filename="{raw.name}"'
         return StreamingResponse(
             iter(lambda: stream.read(_STREAM_CHUNK_BYTES), b""),
             media_type=media_type,

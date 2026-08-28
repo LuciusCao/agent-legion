@@ -101,40 +101,63 @@ def test_raw_media_type_whitelist_matrix():
 
 
 def test_raw_response_object_stream_chunks_and_closes():
-    """流分支单元验证：BackgroundTask 挂 close 钩子，块迭代输出完整字节。"""
+    """流分支单元验证：64 KiB 分块、BackgroundTask 挂 close、白名单内联。"""
     import asyncio
     import io
 
     from server.app.routes.job_artifact_raw import raw_response
     from server.app.services.job_artifact_raw import RawArtifact
 
-    class _TrackableClose:
-        """组合式包装：BytesIO 的 close 不可靠被子类覆盖，改记录转发。"""
+    class _TrackableStream:
+        """组合式包装：BytesIO 的 close 不可靠被子类覆盖；记录 read 尺寸。"""
 
         def __init__(self, payload: bytes):
             self._buf = io.BytesIO(payload)
             self.closed_flag = False
+            self.read_sizes: list[int] = []
 
         def read(self, size: int = -1) -> bytes:
+            self.read_sizes.append(size)
             return self._buf.read(size)
 
         def close(self) -> None:
             self.closed_flag = True
             self._buf.close()
 
-    trackable = _TrackableClose(b"y" * 100)
-    raw = RawArtifact(name="frame.png", stream=trackable, size_bytes=100)
+    # 150 KiB payload：按 64 KiB 分块应为 3 块（64K + 64K + 22K）。
+    payload = b"y" * (64 * 1024 * 2 + 22 * 1024)
+    trackable = _TrackableStream(payload)
+    raw = RawArtifact(name="frame.png", stream=trackable, size_bytes=len(payload))
     response = raw_response(raw)
 
-    body = b"".join(asyncio.run(_collect(response.body_iterator)))
-    assert body == b"y" * 100
+    chunks = asyncio.run(_collect(response.body_iterator))
+    body = b"".join(chunks)
+    assert body == payload
+    # 分块读取请求的尺寸即 _STREAM_CHUNK_BYTES（而非 botocore 默认 1 KiB）。
+    assert all(size == 64 * 1024 for size in trackable.read_sizes)
+    assert len(chunks) == 3
     # 白名单媒体内联渲染 + Content-Length 透传。
     assert response.media_type == "image/png"
-    assert response.headers["content-length"] == "100"
+    assert response.headers["content-length"] == str(len(payload))
     # BackgroundTask 指向流的 close：客户端中断/正常完成都会执行。
     assert response.background is not None
     asyncio.run(response.background())
     assert trackable.closed_flag is True
+
+
+def test_raw_response_stream_attachment_disposition_for_unknown_type():
+    """流分支的白名单外产物也带 attachment（与本地分支一致的强制下载）。"""
+    import io
+
+    from server.app.routes.job_artifact_raw import raw_response
+    from server.app.services.job_artifact_raw import RawArtifact
+
+    stream = io.BytesIO(b"<script>x</script>")
+    raw = RawArtifact(name="page.html", stream=stream, size_bytes=24)
+    response = raw_response(raw)
+
+    assert response.media_type == "application/octet-stream"
+    assert response.headers["content-disposition"] == 'attachment; filename="page.html"'
 
 
 async def _collect(iterator):

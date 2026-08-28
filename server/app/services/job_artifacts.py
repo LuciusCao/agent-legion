@@ -80,7 +80,7 @@ class JobArtifactService:
         """Locate a binary-servable artifact (see job_artifact_raw module)."""
         job = self._job_or_404(job_id)
         path = self._artifact_path(job, artifact_name)
-        return open_raw_artifact(job, path, self.object_store, job_id, artifact_name)
+        return open_raw_artifact(path, self.object_store, job_id, artifact_name)
 
     def reject_subpath(self, job_id: str) -> None:
         self._job_or_404(job_id)

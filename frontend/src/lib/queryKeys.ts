@@ -14,8 +14,6 @@ export const queryKeys = {
   // 替代旧的 refreshKey props 管道。
   jobArtifact: (jobId: string, name: string, version: string) =>
     ['jobArtifact', jobId, name, version] as const,
-  jobVideoDetail: (jobId: string, version: string) =>
-    ['jobVideoDetail', jobId, version] as const,
   studioChatAgents: (workspaceId: string) =>
     ['studio-chat-agents', workspaceId] as const,
   studioChatSessions: (workspaceId: string) =>

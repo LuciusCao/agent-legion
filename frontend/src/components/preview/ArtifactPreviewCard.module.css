@@ -24,6 +24,19 @@
   white-space: nowrap;
 }
 
+.rawLink {
+  flex: none;
+  margin-left: auto;
+  color: #43474e;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.rawLink:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
 .kindBadge {
   flex: none;
   display: inline-flex;

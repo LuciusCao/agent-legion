@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import BinaryIO
 
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_errors import NotFoundError
@@ -33,7 +33,6 @@ class RawArtifact:
 
 
 def open_raw_artifact(
-    job: dict[str, Any],
     artifact_path: Path,
     object_store: JobArtifactObjectStore | None,
     job_id: str,

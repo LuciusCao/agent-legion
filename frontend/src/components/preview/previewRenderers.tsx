@@ -85,17 +85,46 @@ export function JsonPreview({ jobId, name, detail }: PreviewRendererProps) {
 
 export function MarkdownPreview({ jobId, name, detail }: PreviewRendererProps) {
   const { content, loading, error } = useArtifactText(jobId, name, detail)
-  const html = useMemo(() => (content ? renderMarkdownHtml(content) : ''), [content])
+  // 截断在渲染管线之前：多 MB 的 .md 全量 mount 会拖垮页面。
+  const truncated = content.length > TEXT_PREVIEW_LIMIT
+  const shown = truncated ? content.slice(0, TEXT_PREVIEW_LIMIT) : content
+  const html = useMemo(() => (shown ? renderMarkdownHtml(shown) : ''), [shown])
   if (loading) return <p className={styles.loading}>加载中...</p>
   if (error) return <p className={styles.error}>{error}</p>
-  return <div className={styles.markdownBody} dangerouslySetInnerHTML={{ __html: html }} />
+  return (
+    <div>
+      {truncated && (
+        <Chip
+          label={`已截断（${content.length.toLocaleString()} 字符）`}
+          size="small"
+          variant="outlined"
+          sx={{ mb: 1 }}
+        />
+      )}
+      <div className={styles.markdownBody} dangerouslySetInnerHTML={{ __html: html }} />
+    </div>
+  )
 }
 
 export function RichTextPreview({ jobId, name, detail }: PreviewRendererProps) {
   const { content, loading, error } = useArtifactText(jobId, name, detail)
+  const truncated = content.length > TEXT_PREVIEW_LIMIT
+  const shown = truncated ? content.slice(0, TEXT_PREVIEW_LIMIT) : content
   if (loading) return <p className={styles.loading}>加载中...</p>
   if (error) return <p className={styles.error}>{error}</p>
-  return <RichText mode="block">{content}</RichText>
+  return (
+    <div>
+      {truncated && (
+        <Chip
+          label={`已截断（${content.length.toLocaleString()} 字符）`}
+          size="small"
+          variant="outlined"
+          sx={{ mb: 1 }}
+        />
+      )}
+      <RichText mode="block">{shown}</RichText>
+    </div>
+  )
 }
 
 export function TextPreview({ jobId, name, detail }: PreviewRendererProps) {
@@ -208,18 +237,24 @@ export function AudioPreview({ jobId, name }: PreviewRendererProps) {
 }
 
 export function PdfPreview({ jobId, name }: PreviewRendererProps) {
-  const [failed, setFailed] = useState(false)
-  if (failed) {
-    return <MediaError jobId={jobId} name={name} onRetry={() => setFailed(false)} />
-  }
-  // sandbox：PDF 内嵌渲染但不给脚本/同源能力；浏览器无内嵌查看器时降级下载。
+  // sandbox：PDF 内嵌渲染但不给脚本/同源能力。iframe 没有可靠的 error 事件
+  // （加载失败也触发 load），失败不可检测——新窗口/下载兜底常驻展示。
   return (
-    <iframe
-      className={styles.mediaPdf}
-      src={jobArtifactRawUrl(jobId, name)}
-      title={name}
-      sandbox=""
-      onError={() => setFailed(true)}
-    />
+    <div>
+      <iframe
+        className={styles.mediaPdf}
+        src={jobArtifactRawUrl(jobId, name)}
+        title={name}
+        sandbox=""
+      />
+      <a
+        className={styles.pdfOpenLink}
+        href={jobArtifactRawUrl(jobId, name)}
+        target="_blank"
+        rel="noreferrer"
+      >
+        新窗口打开
+      </a>
+    </div>
   )
 }

@@ -2,8 +2,8 @@
 
 Registration is scoped-token-only now; the migration revokes any legacy
 ``agent_register_tokens`` row with ``workspace_id IS NULL`` still marked
-live. The registry test also pinned SCHEMA_VERSION and its recorded name;
-that pin now lives in tests/db/test_jobs_run_id_index.py (v59).
+live. The SCHEMA_VERSION pin lives with the newest migration's module
+(tests/db/test_workspace_preview_config.py, v63).
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import secrets
 
-from server.app.db.schema import SCHEMA_VERSION
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -41,19 +40,6 @@ def _insert_register_token(
         (token_id, token_hash, workspace_id, token_id, revoked),
     )
     return plaintext
-
-
-def test_schema_version_pin() -> None:
-    # The latest-migration record pin moved through test_jobs_run_id_index.py
-    # (v59), the DDL-only v60/v61 entries, test_workspace_id_key_binding.py
-    # (v62), and now lives in tests/db/test_workspace_preview_config.py (v63).
-    assert SCHEMA_VERSION == 63
-    with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute(
-            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
-        ).fetchone()
-    assert row is not None
-    assert row["name"] == "workspace_preview_config"
 
 
 def test_migration_revokes_only_live_all_workspaces_tokens() -> None:

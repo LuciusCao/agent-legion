@@ -127,3 +127,15 @@
 .mediaErrorAction:hover {
   text-decoration: underline;
 }
+
+.pdfOpenLink {
+  display: inline-block;
+  margin-top: 8px;
+  color: #1d4ed8;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.pdfOpenLink:hover {
+  text-decoration: underline;
+}
