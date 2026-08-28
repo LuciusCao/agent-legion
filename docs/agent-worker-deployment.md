@@ -305,7 +305,7 @@ docker compose -f deploy/compose.worker.yaml exec worker \
   python3 -c "import socket; socket.create_connection(('192.0.2.1', 9000), timeout=5); print('ok')"
 ```
 
-第三条不可省略：远程 Worker 的材料与 bundle 成员走 presigned GET（`worker/material_fetch.py`、`worker/bundle_fetch.py`），产物回传走 presigned PUT staging（`worker/artifact_upload.py`），全部指向 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`；compose 内部地址 `rustfs:9000` 从远程不可达。注意内置 RustFS 默认只发布在 `127.0.0.1`（`deploy/compose.host.yaml` 的 `${AGENT_LEGION_S3_BIND:-127.0.0.1}` 端口映射）：远程 Worker 场景必须同时在 `deploy/.env` 设 `AGENT_LEGION_S3_BIND=<部署机 Tailnet IP>` 并把 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向同一地址（presigned URL 按该地址签发），否则本条探测必然失败。若改用 HTTP 探测，根路径返回 4xx 也算可达（S3 匿名 GET `/` 本就会被拒），只有连接拒绝/超时才是失败。
+第三条不可省略：远程 Worker 的材料与 bundle 成员走 presigned GET（`worker/material_fetch.py`、`worker/bundle_fetch.py`），产物回传走 presigned PUT staging（`worker/artifact/upload.py`），全部指向 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`；compose 内部地址 `rustfs:9000` 从远程不可达。注意内置 RustFS 默认只发布在 `127.0.0.1`（`deploy/compose.host.yaml` 的 `${AGENT_LEGION_S3_BIND:-127.0.0.1}` 端口映射）：远程 Worker 场景必须同时在 `deploy/.env` 设 `AGENT_LEGION_S3_BIND=<部署机 Tailnet IP>` 并把 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向同一地址（presigned URL 按该地址签发），否则本条探测必然失败。若改用 HTTP 探测，根路径返回 4xx 也算可达（S3 匿名 GET `/` 本就会被拒），只有连接拒绝/超时才是失败。
 
 三条都成功后才允许承接生产任务。如果容器内无法解析或路由到 Tailnet 地址，不要把它隐式塞进业务容器——先单独设计 Tailscale sidecar，再重新验证。
 

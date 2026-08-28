@@ -7,7 +7,7 @@ artifact upload, result report — to this queue. Upload concurrency stays
 small (default 4) so a completion wave of dozens of executions never turns
 into a transfer storm against the Host.
 
-Two lanes share one scheduler (worker/upload_scheduler.py): the bulk lane
+Two lanes share one scheduler (worker/upload/scheduler.py): the bulk lane
 runs prepare + artifact uploads, the report lane runs the final report and
 is drained strictly first, so a completion wave cannot delay small reports
 behind other tasks' bulk transfers. The lane limit is hot-adjustable via
@@ -21,7 +21,7 @@ re-upload is harmless).
 
 Lease ownership: the per-execution heartbeat started at claim time keeps
 beating through the upload. It is quiesced for the final report and resumed
-only while a transient report failure backs off (worker/upload_heartbeat.py).
+only while a transient report failure backs off (worker/upload/heartbeat.py).
 """
 
 from __future__ import annotations
@@ -33,24 +33,24 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from worker import upload_heartbeat
 from worker._atomic import atomic_write
 from worker._retry import run_with_retry
-from worker.artifact_upload import DirectUploadError, upload_artifact_direct
-from worker.host_transfer import HostRequestError
-from worker.runtime_controls import MAX_DYNAMIC_CONCURRENCY
+from worker.artifact.upload import DirectUploadError, upload_artifact_direct
+from worker.host.transfer import HostRequestError
+from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY
+from worker.upload import heartbeat as upload_heartbeat
 
 # MAX_ERROR_MESSAGE_CHARS 的定义在 upload_prepare（failed_metadata 的截断
 # 上限）；execution_run 沿本模块导入，`as` 惯用法重导出而非再定义一份
 # 副本（#200/#201 同族的 sync-by-comment 反模式）。
-from worker.upload_prepare import (
+from worker.upload.prepare import (
     MAX_ERROR_MESSAGE_CHARS as MAX_ERROR_MESSAGE_CHARS,
 )
-from worker.upload_prepare import (
+from worker.upload.prepare import (
     failed_metadata,
     prepare_or_failed,
 )
-from worker.upload_scheduler import LaneScheduler
+from worker.upload.scheduler import LaneScheduler
 
 PENDING_FILENAME = "upload_pending.json"
 _PENDING_VERSION = 1

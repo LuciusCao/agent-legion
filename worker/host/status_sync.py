@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from worker.host_client import Client, WorkerAuthError
+from worker.host.client import Client, WorkerAuthError
 from worker.metrics_cache import WorkerMetricsCache
-from worker.registration_retry import last_registration_workspaces
+from worker.registration.retry import last_registration_workspaces
 from worker.status import ExecutionStatusReporter
 
 

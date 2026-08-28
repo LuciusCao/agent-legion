@@ -1,6 +1,6 @@
 """Result preparation for the upload queue bulk lane.
 
-Split out of ``upload_queue.py`` so the queue module stays within its size
+Split out of ``queue.py`` so the queue module stays within its size
 budget: this is the "process" task path that scans events, builds the result
 archive, and derives the report metadata before any byte leaves the Worker.
 """
@@ -17,7 +17,7 @@ from shared.pi_events import (
 )
 
 if TYPE_CHECKING:
-    from worker.upload_queue import UploadTask
+    from worker.upload.queue import UploadTask
 
 MAX_ERROR_MESSAGE_CHARS = 4000
 

@@ -1,4 +1,4 @@
-"""Agent Worker 启动预检（worker/runtime_preflight.py）与 runtime 声明一致性测试。"""
+"""Agent Worker 启动预检（worker/runtime/preflight.py）与 runtime 声明一致性测试。"""
 
 from __future__ import annotations
 
@@ -11,10 +11,11 @@ from pathlib import Path
 
 import pytest
 
-from worker import binary_resolution, runtime_setup
+from worker import binary_resolution
 from worker import executor as agent_worker
 from worker.binary_resolution import resolve_binary
-from worker.runtime_preflight import preflight_error
+from worker.runtime import setup as runtime_setup
+from worker.runtime.preflight import preflight_error
 
 ROOT = Path(__file__).resolve().parents[2]
 

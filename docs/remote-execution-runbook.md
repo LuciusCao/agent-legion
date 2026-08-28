@@ -125,7 +125,7 @@ worker machine, provide the same token to the Worker container via
 deployment doc, §2) and set the pi provider's `apiKey` to
 `"$LLM_GATEWAY_TOKEN"` in the mounted `models.json` — the pi CLI interpolates
 the variable and sends it as `Authorization: Bearer`, which the gateway
-accepts. `worker/execution_run.py::agent_subprocess_env` takes the token from the
+accepts. `worker/execution/run.py::agent_subprocess_env` takes the token from the
 worker environment; a value in the config file is ignored. The variable is
 passed through to the pi subprocess environment.
 
@@ -213,7 +213,7 @@ in:
   requires a resolvable `velites` binary: with velites missing, the in-loop
   hot guard rejects the change and logs it, and the new capacity takes effect
   on the next loop iteration once velites is installed
-  (`worker/runtime_controls.py:58-67`). Editing the state-copy YAML
+  (`worker/runtime/controls.py:58-67`). Editing the state-copy YAML
   `data/agent-worker-service/worker.yaml` directly works the same way — that
   is the bare-metal path; in container deployments the state copy lives in
   the control volume.
@@ -337,6 +337,6 @@ flipping the field:
 - **Bundle/archive safety:** execution bundles and result archives are
   path-validated on both ends (no absolute paths, `..`, or links) before
   extraction. With the presigned channel enabled, the result archive no
-  longer embeds artifacts (`worker/upload_queue.py`).
+  longer embeds artifacts (`worker/upload/queue.py`).
 - **Policy:** precondition 1 (§2) is a hard blocker — encrypted transport is
   not policy approval.

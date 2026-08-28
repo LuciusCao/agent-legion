@@ -71,7 +71,7 @@ COPY worker/cli_args.py /usr/local/bin/agent_worker_cli_args.py
 COPY --chmod=755 worker/cli.py /usr/local/bin/workerctl
 # Smoke: the image must be able to import every worker entry point;
 # a missing COPY fails the build here instead of crash-looping at runtime.
-RUN python3 -c "import worker.service, worker.executor, worker.upload_queue"
+RUN python3 -c "import worker.service, worker.executor, worker.upload.queue"
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8787
 ENTRYPOINT ["python3", "-m", "worker.service"]

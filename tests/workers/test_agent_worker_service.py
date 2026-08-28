@@ -16,7 +16,7 @@ import worker.service as service_module
 import worker.supervisor as state_module
 from tests.helpers import wait_for_predicate
 from worker.metrics_cache import WorkerMetricsCache, metrics_cache_key, metrics_cache_path
-from worker.registration_token import registration_token_configured
+from worker.registration.token import registration_token_configured
 from worker.service import create_app
 from worker.service_bind import embed_control_token
 from worker.supervisor import (

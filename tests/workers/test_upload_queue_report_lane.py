@@ -20,7 +20,7 @@ import pytest
 
 from tests.helpers import wait_for_predicate
 from worker.status import ExecutionStatusReporter
-from worker.upload_queue import UploadQueue, UploadTask
+from worker.upload.queue import UploadQueue, UploadTask
 
 pytestmark = pytest.mark.no_db
 

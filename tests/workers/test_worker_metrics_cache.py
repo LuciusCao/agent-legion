@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from worker.host_client import WorkerAuthError
-from worker.host_status_sync import sync_host_status
+from worker.host.client import WorkerAuthError
+from worker.host.status_sync import sync_host_status
 from worker.metrics_cache import (
     METRIC_WINDOWS,
     WorkerMetricsCache,

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from worker.runtime_controls import MAX_DYNAMIC_CONCURRENCY, load_config
+from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY, load_config
 
 
 @dataclass(frozen=True)

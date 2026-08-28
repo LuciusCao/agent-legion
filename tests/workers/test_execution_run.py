@@ -1,4 +1,4 @@
-"""Unit tests for one claimed execution's lifecycle (worker/execution_run.py).
+"""Unit tests for one claimed execution's lifecycle (worker/execution/run.py).
 
 Split from tests/test_agent_worker.py to stay under the test-file line
 budget; the executor's protocol/registration/hot-reload/status surface
@@ -23,7 +23,7 @@ import pytest
 from server.app.agent_broker.agent_bundle import build_agent_bundle
 from worker import executor as agent_worker
 from worker.status import ExecutionStatusReporter
-from worker.upload_queue import PENDING_FILENAME, UploadQueue
+from worker.upload.queue import PENDING_FILENAME, UploadQueue
 
 
 def _make_bundle(tmp_path: Path, manifest: dict) -> Path:

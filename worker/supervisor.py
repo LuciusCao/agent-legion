@@ -18,9 +18,9 @@ from yaml import YAMLError
 from worker.config_store import WorkerConfigStore, public_config, validate_config
 from worker.metrics_cache import METRICS_FILENAME
 from worker.orphan_reaper import reap_orphaned_agents
-from worker.registration_token import registration_tokens
+from worker.registration.token import registration_tokens
 from worker.status import ENV_VAR, STATUS_FILENAME, read_runtime_status
-from worker.status_aggregates import execution_counts
+from worker.status.aggregates import execution_counts
 
 __all__ = ["WorkerConfigStore", "WorkerSupervisor", "public_config", "validate_config"]
 

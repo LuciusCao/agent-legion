@@ -46,7 +46,7 @@ def _open_download(url: str) -> BinaryIO:
 
 def download_object_artifact(url: str, target: Path) -> None:
     """Stream a presigned GET to an atomic temp+rename (same .part hygiene
-    as the Host-channel download in worker.host_client)."""
+    as the Host-channel download in worker.host.client)."""
     if not url:
         raise RuntimeError("input artifact is missing its download URL")
     target.parent.mkdir(parents=True, exist_ok=True)

@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from shared.material_cache import MATERIALS_CACHE_DIRNAME
-from worker.upload_queue import PENDING_FILENAME
+from worker.upload.queue import PENDING_FILENAME
 
 STALE_EXECUTION_MAX_AGE_SECONDS = 24 * 3600
 SWEEP_INTERVAL_SECONDS = 3600

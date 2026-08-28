@@ -1,4 +1,4 @@
-"""Unit tests for pending-marker ownership checks (worker/workroot_pending.py).
+"""Unit tests for pending-marker ownership checks (worker/execution/pending.py).
 
 #203 P1：仅凭 marker 存在就跳过 claim 会让旧 lease 的孤儿 marker 耗尽当前
 重试次数（claim 每次 attempt+1，sweeper 超过 requeue_limit 不再重排）。
@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from worker.upload_queue import PENDING_FILENAME, PendingUploadExists
-from worker.workroot_pending import refuse_if_pending_upload
+from worker.execution.pending import refuse_if_pending_upload
+from worker.upload.queue import PENDING_FILENAME, PendingUploadExists
 
 pytestmark = pytest.mark.no_db
 

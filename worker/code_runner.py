@@ -46,14 +46,14 @@ from shared.material_cache import MATERIALS_CACHE_DIRNAME
 from worker._atomic import atomic_write
 from worker.binary_resolution import resolve_binary
 from worker.bundle_io import download_input_artifacts, safe_extract_tree
+from worker.execution.pending import refuse_if_pending_upload
 from worker.material_fetch import materialize_claim_material
 from worker.process_lifecycle import AGENT_PGID_FILENAME, terminate, wait_for_exit
-from worker.upload_queue import UploadTask
-from worker.workroot_pending import refuse_if_pending_upload
+from worker.upload.queue import UploadTask
 
 if TYPE_CHECKING:
-    from worker.execution_heartbeat import ExecutionHeartbeat
-    from worker.host_client import Client
+    from worker.execution.heartbeat import ExecutionHeartbeat
+    from worker.host.client import Client
     from worker.status import ExecutionStatusReporter
 
 # Where the sandboxed child writes its JSON result (sibling of the Host-side
@@ -283,7 +283,7 @@ def execute_code(
 ) -> UploadTask | None:
     """Run one kind='code' claim sandboxed; None = lease lost (Host owns it).
 
-    Called from ``worker.execution_run.run_execution``'s kind branch, which
+    Called from ``worker.execution.run.run_execution``'s kind branch, which
     owns the shared post-exit tail (release-slot, heartbeat adoption, upload)."""
     execution_id = str(claim["execution_id"])
     job_dir = execution_dir / "job"

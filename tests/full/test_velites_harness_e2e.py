@@ -257,7 +257,7 @@ def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -
             assert flag not in command
         assert command[command.index("--require-output") + 1] == OUTPUT_NAME
 
-        # Worker 执行语义：占位符替换后 Popen（worker/execution_prepare.py 同款）。
+        # Worker 执行语义：占位符替换后 Popen（worker/execution/prepare.py 同款）。
         session_dir = tmp_path / "session"
         session_dir.mkdir()
         prompt_file = tmp_path / "prompt.md"

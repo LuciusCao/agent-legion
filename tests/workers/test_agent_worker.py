@@ -25,7 +25,7 @@ import requests
 
 from worker import executor as agent_worker
 from worker.process_lifecycle import terminate
-from worker.registration_retry import register_with_retry
+from worker.registration.retry import register_with_retry
 from worker.status import ExecutionStatusReporter, read_runtime_status
 
 

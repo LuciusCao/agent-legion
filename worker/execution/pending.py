@@ -1,6 +1,6 @@
 """Pending-upload marker ownership for Worker execution preparation (#203).
 
-The two prepare paths (``worker.execution_prepare`` agent path and
+The two prepare paths (``worker.execution.prepare`` agent path and
 ``worker.code_runner`` code path) both stage a claimed execution into
 ``work_root/<execution_id>`` and must clear any leftover dir first — except
 when the dir holds an ``upload_pending.json`` marker owned by *this* claim's
@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from worker.upload_queue import PENDING_FILENAME, PendingUploadExists
+from worker.upload.queue import PENDING_FILENAME, PendingUploadExists
 
 
 def refuse_if_pending_upload(execution_dir: Path, claim: dict[str, Any]) -> None:

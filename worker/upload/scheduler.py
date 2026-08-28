@@ -1,6 +1,6 @@
 """Generic two-lane scheduler with a dynamic in-flight concurrency limit.
 
-Split out of ``upload_queue.py`` so the queue module stays within its size
+Split out of ``queue.py`` so the queue module stays within its size
 budget. Two pending lanes share one thread pool: the priority lane is drained
 strictly before the bulk lane, and the two lanes together never exceed the
 current limit in flight. Raising the limit backfills immediately; lowering it

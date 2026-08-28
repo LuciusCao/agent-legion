@@ -1,4 +1,4 @@
-"""prepare_execution 的 argv[0] 二进制解析（worker/execution_prepare.py）。
+"""prepare_execution 的 argv[0] 二进制解析（worker/execution/prepare.py）。
 
 启动预检（runtime_preflight）放行「自带副本或 PATH 可解析」的 runtime，
 spawn 侧必须解析到同一个二进制，否则预检通过、claim 后 spawn 即失败。
@@ -15,7 +15,7 @@ import pytest
 
 from server.app.agent_broker.agent_bundle import build_agent_bundle
 from worker import binary_resolution
-from worker.execution_prepare import prepare_execution
+from worker.execution.prepare import prepare_execution
 
 pytestmark = pytest.mark.no_db
 

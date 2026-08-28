@@ -1,6 +1,6 @@
 """HTTP client for the Worker's pull protocol: control calls (register/claim/
 heartbeat/metrics) live here; retried bulk transfers come from the
-``TransferOperations`` mixin in ``worker.host_transfer``.
+``TransferOperations`` mixin in ``worker.host.transfer``.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any, BinaryIO
 import requests
 
 from shared.protocol import PROTOCOL_VERSION
-from worker.host_transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
+from worker.host.transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
 
 # Protocol history lives in shared/protocol.py (shipped in the worker image,
 # imported by both sides): v3 = runtime-scoped model declarations. A v3

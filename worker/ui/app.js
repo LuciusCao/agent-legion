@@ -195,7 +195,7 @@ export function phaseProgress(phase) {
   return { claimed: 16, downloading: 34, running: 68, queued_upload: 80, uploading: 88 }[phase] ?? 12;
 }
 
-// 与 worker/status_aggregates.py 的运行中口径一致：上传阶段已释放运行槽位。
+// 与 worker/status/aggregates.py 的运行中口径一致：上传阶段已释放运行槽位。
 export function runOccupancy(executions = []) {
   return (executions || []).filter((execution) => ["claimed", "downloading", "running"].includes(execution.phase)).length;
 }

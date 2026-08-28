@@ -1,6 +1,6 @@
 """Lease-heartbeat lifecycle helpers for upload tasks.
 
-Split out of ``upload_queue.py`` so the queue module stays within its size
+Split out of ``queue.py`` so the queue module stays within its size
 budget. The upload queue quiesces the heartbeat for the final report (the
 report itself is the last proof of life) and resumes it only while a
 transient report failure backs off.
@@ -11,7 +11,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from worker.execution_lifecycle import HeartbeatConfig, heartbeat_loop
+from worker.execution.lifecycle import HeartbeatConfig, heartbeat_loop
 
 
 def start_upload_heartbeat(

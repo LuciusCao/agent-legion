@@ -18,12 +18,14 @@ from typing import Any, BinaryIO
 import pytest
 import requests
 
-from worker import artifact_download, artifact_upload, bundle_io
-from worker.artifact_upload import DirectUploadError, upload_artifact_direct
+from worker import bundle_io
+from worker.artifact import download as artifact_download
+from worker.artifact import upload as artifact_upload
+from worker.artifact.upload import DirectUploadError, upload_artifact_direct
 from worker.bundle_io import download_input_artifacts
 from worker.code_runner import prepare_code_result
 from worker.status import ExecutionStatusReporter
-from worker.upload_queue import UploadQueue, UploadTask
+from worker.upload.queue import UploadQueue, UploadTask
 
 pytestmark = pytest.mark.no_db
 

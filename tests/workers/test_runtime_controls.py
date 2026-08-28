@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from worker import binary_resolution, runtime_controls
+from worker import binary_resolution
+from worker.runtime import controls as runtime_controls
 
 pytestmark = pytest.mark.no_db
 

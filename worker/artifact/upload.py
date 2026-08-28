@@ -9,7 +9,7 @@ every ref before applying it (server/app/agent_control/completion.py).
 
 The URL arrives over the authenticated claim channel, so no SSRF guard
 applies (same rule as the material download in ``worker.material_fetch``).
-Retry semantics mirror ``worker.host_transfer``: transient network errors
+Retry semantics mirror ``worker.host.transfer``: transient network errors
 and 5xx get exponential backoff, 4xx is a terminal verdict.
 """
 
@@ -23,7 +23,7 @@ from typing import Any, BinaryIO
 import requests
 
 from worker._retry import run_with_retry
-from worker.artifact_download import describe_transfer_error
+from worker.artifact.download import describe_transfer_error
 from worker.bundle_io import sha256_file
 
 _PUT_TIMEOUT_SECONDS = 120

@@ -3,8 +3,8 @@
 解析顺序：先查 Worker 自带副本 ``data/bin/<binary>``（仓库根相对，Docker
 镜像外的裸机部署经 ``scripts/ensure-velites.sh --dest data/bin`` 按平台
 安置），再查 PATH；都找不到返回 None（调用方 fail-closed）。启动预检
-（worker/runtime_preflight.py）、code 执行（worker/code_runner.py）与
-agent spawn（worker/execution_prepare.py）统一走 ``resolve_binary``，
+（worker/runtime/preflight.py）、code 执行（worker/code_runner.py）与
+agent spawn（worker/execution/prepare.py）统一走 ``resolve_binary``，
 保证「预检通过 = 运行时可解析到同一个二进制」。
 """
 

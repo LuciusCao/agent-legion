@@ -56,8 +56,8 @@ velites（`velites/` Rust agent harness）已通过金丝雀验证：生产量�
 
 ### 2.5 Worker 侧
 
-- 执行天然 flavor/runtime 无关：`worker/execution_prepare.py:60-69` 对 `command_spec["command"]` 做 `{job_dir}` 等占位符替换，`worker/execution_run.py:182-183` 直接 `Popen(command)`（原 `worker/executor.py`，批次 2 拆出）。Worker 不需要认识 velites，只需要 PATH 上有 argv[0] 的二进制。
-- 声明链：`worker/config_store.py:40,80` → `worker/host_client.py:70` 注册上送 → Host `agent_workers.py:57-61` 校验落库。
+- 执行天然 flavor/runtime 无关：`worker/execution/prepare.py:60-69` 对 `command_spec["command"]` 做 `{job_dir}` 等占位符替换，`worker/execution/run.py:182-183` 直接 `Popen(command)`（原 `worker/executor.py`，批次 2 拆出）。Worker 不需要认识 velites，只需要 PATH 上有 argv[0] 的二进制。
+- 声明链：`worker/config_store.py:40,80` → `worker/host/client.py:70` 注册上送 → Host `agent_workers.py:57-61` 校验落库。
 - UI：`worker/ui/index.html:163-166` 两个 checkbox（pi / OpenClaw）；`worker/ui/app.js:143-144` 回填、`app.js:598` 提交 `data.getAll("runtimes")`——逻辑通用，加 checkbox 即可。
 - 二进制分发现状：手工 `cargo build` + PATH，无交付物机制。
 
@@ -139,7 +139,7 @@ AgentDefinition.runtime = "openclaw" → 未实现，dispatch fail-fast（现状
 
 ### 4.6 Worker 侧
 
-- **声明与 UI**：`worker/ui/index.html:163-166` 增加 `<input name="runtimes" type="checkbox" value="velites" /> Velites`；`app.js` 通用逻辑无需改。Worker 配置 `runtimes` 加 `velites` 后注册上送（host_client.py:70）。
+- **声明与 UI**：`worker/ui/index.html:163-166` 增加 `<input name="runtimes" type="checkbox" value="velites" /> Velites`；`app.js` 通用逻辑无需改。Worker 配置 `runtimes` 加 `velites` 后注册上送（worker/host/client.py:70）。
 - **二进制分发（Phase 2 定夺选型）**：
   - 方案 1（推荐起步）：维持手工 `cargo build --release` + PATH，安装/版本核对/与 Host 契约版本对齐写进 `docs/remote-execution-runbook.md`。零机制成本，与金丝雀期一致。
   - 方案 2：打进 worker 部署交付物（`deploy/compose.worker.yaml` 镜像），随 worker 版本化。worker 数量增长后再做。

@@ -9,8 +9,8 @@ from typing import Any
 import requests
 
 from worker._retry import run_with_retry
-from worker.host_client import Client, TransientHostError, WorkerAuthError
-from worker.registration_token import registration_tokens
+from worker.host.client import Client, TransientHostError, WorkerAuthError
+from worker.registration.token import registration_tokens
 
 _last_registration_workspaces: list[dict[str, Any]] = []
 
