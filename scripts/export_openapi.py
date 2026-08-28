@@ -108,6 +108,13 @@ def main() -> None:
     args = parser.parse_args()
 
     with TemporaryDirectory() as temporary_directory:
+        # Gate before create_app (which runs init_db via JobQueries) — the
+        # 2026-08-27 incident pushed unreleased migrations to prod this way.
+        # load_settings first so a .env-provided DSN is covered too.
+        from server.app.db.schema_guard import refuse_shared_db_exit
+        from server.app.settings import load_settings
+
+        refuse_shared_db_exit(load_settings().database_url)
         schema = build_openapi_schema(Path(temporary_directory))
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

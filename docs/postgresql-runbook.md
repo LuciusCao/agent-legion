@@ -19,10 +19,19 @@ volume in place (the on-disk format is not compatible across majors).
 ## Local setup
 
 ```bash
-createdb agent_legion
-export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion
+createdb agent_legion_dev
+export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_dev
 uv run uvicorn server.app.main:create_prod_app --factory --reload
 ```
+
+Use a derived database name (as above), not the bare `agent_legion`:
+`init_db` refuses to initialize/migrate the bare shared name without
+`AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1` — that name is the code-default DSN
+a misdirected process (worktree script without .env) would silently resolve,
+and the refusal is the 2026-08-27 incident's structural fix. The prod
+launchers (`scripts/native-prod-up.sh`, `deploy/compose.host.yaml`) set the
+opt-in themselves; a manual `uvicorn` against the shared database must set
+it explicitly.
 
 The server creates the current schema under a PostgreSQL advisory migration
 lock. The configured role needs permission to connect and to create/alter

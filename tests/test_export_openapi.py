@@ -169,3 +169,51 @@ def test_legacy_exemption_matches_endpoint_source_file_and_name():
 
     assert legacy_route.unique_id in operation_ids
     assert unrelated_route.unique_id not in operation_ids
+
+
+def test_main_refuses_shared_database(tmp_path, monkeypatch):
+    """The 2026-08-27 incident: a worktree without .env resolves the shared
+    prod database and pushes unreleased migrations via create_app→init_db.
+    main() must refuse before the app is ever built."""
+    import sys
+
+    from server.app.db.schema_guard import SHARED_DB_NAME
+
+    monkeypatch.setattr(
+        "server.app.settings.load_settings",
+        lambda *a, **k: type(
+            "S", (), {"database_url": f"postgresql://127.0.0.1:5432/{SHARED_DB_NAME}"}
+        )(),
+        raising=False,
+    )
+    monkeypatch.setattr(sys, "argv", ["export_openapi", str(tmp_path / "out.json")])
+
+    with pytest.raises(SystemExit, match="refusing to run"):
+        export_openapi.main()
+
+    assert not (tmp_path / "out.json").exists()
+
+
+def test_main_allows_derived_database(tmp_path, monkeypatch):
+    """A worktree/derived database exports normally (guard stays silent)."""
+    import sys
+
+    built = []
+    monkeypatch.setattr(
+        "server.app.settings.load_settings",
+        lambda *a, **k: type(
+            "S", (), {"database_url": "postgresql://127.0.0.1:5432/agent_legion_dev"}
+        )(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        export_openapi,
+        "build_openapi_schema",
+        lambda data_dir: built.append(data_dir) or {"info": {"title": "Agent Legion"}},
+    )
+    monkeypatch.setattr(sys, "argv", ["export_openapi", str(tmp_path / "out.json")])
+
+    export_openapi.main()
+
+    assert built  # schema was built, no refusal
+    assert (tmp_path / "out.json").exists()

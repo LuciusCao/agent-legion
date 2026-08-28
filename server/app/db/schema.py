@@ -4,6 +4,7 @@ from pathlib import Path
 
 from server.app.db.connection import DatabaseDsn
 from server.app.db.migration_registry import MIGRATIONS
+from server.app.db.schema_guard import guard_shared_db
 from server.app.db.transaction import write_transaction
 
 SCHEMA_VERSION = 62
@@ -19,8 +20,10 @@ def init_db(database_dsn: DatabaseDsn) -> None:
     (that remains the DDL upgrade mechanism) but only run data migrations
     with ``version > max(applied)`` — no more full replay of data
     migrations on upgrade. Databases recorded at the current version
-    (including legacy single-row installs) are a no-op.
+    (including legacy single-row installs) are a no-op. The bare shared
+    database additionally requires the schema_guard opt-in.
     """
+    guard_shared_db(database_dsn)
     with write_transaction(database_dsn) as conn:
         # Serialize migrations per database, not cluster-wide: worktrees run
         # against dedicated databases (tests/postgres_support.py derives one

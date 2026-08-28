@@ -781,6 +781,7 @@
     "server/app/db/retry.py": 42,
     "server/app/db/rows.py": 46,
     "server/app/db/schema.py": 57,
+    "server/app/db/schema_guard.py": 62,
     "server/app/db/transaction.py": 39,
     "server/app/events/__init__.py": 51,
     "server/app/events/agent_broadcast.py": 35,

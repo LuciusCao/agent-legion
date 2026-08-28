@@ -12,9 +12,12 @@ Prerequisites: Python 3.11+, Node 18+, PostgreSQL 17, and
 
 ```bash
 uv sync                                     # Python deps
-createdb agent_legion
+createdb agent_legion_dev                   # NOT the bare `agent_legion` name —
+                                            # init_db refuses to migrate that one
+                                            # without AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1
+                                            # (the shared-database schema guard)
 cp .env.example .env                        # adjust values as needed
-export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion
+export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_dev
 cd frontend && npm install && cd ..
 make dev-up                                 # backend + frontend + worker, background
 ```
