@@ -21,7 +21,7 @@ from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 
 _MAX_NAME_LENGTH = 128
@@ -79,11 +79,17 @@ def _timestamp(value: Any) -> str:
 
 
 class VaultService:
-    """Fernet encryption plus workspace_secrets persistence in one boundary."""
+    """Fernet encryption plus workspace_secrets persistence in one boundary.
+
+    ``database_dsn`` accepts the JobQueries facade or a bare DSN string
+    (BOUNDARY-DATA-001, #187): production wiring passes the facade; tests
+    and CLI entry points keep the DSN form. The value only feeds the
+    read/write connection helpers below.
+    """
 
     def __init__(
         self,
-        database_dsn: DatabaseDsn,
+        database_dsn: ConnectSource,
         settings_config: dict[str, Any] | None = None,
         memo: dict[tuple[str, str], str | None] | None = None,
     ) -> None:

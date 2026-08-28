@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import json
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import write_transaction
 
 
-def delete_register_token_cascading(database_dsn: DatabaseDsn, token_id: str) -> list[str] | None:
+def delete_register_token_cascading(database_dsn: ConnectSource, token_id: str) -> list[str] | None:
     """Hard-delete a register token and cascade-cut dependent Workers.
 
     A Worker whose bound keys are ALL gone after this deletion loses its

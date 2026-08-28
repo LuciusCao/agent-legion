@@ -167,7 +167,7 @@ def sweep_expired_node_runs(
     vs 3d by default), and a shared cursor would skip log deletion for rows
     the run-dir pass already advanced past.
     """
-    sweep_store = CleanupSweepStore(db.path)
+    sweep_store = CleanupSweepStore(db)
     totals = {"log": 0, "run_dir": 0}
     for status in ("completed", "failed"):
         for action, cutoff in (("log", log_cutoff), ("run_dir", run_dir_cutoff)):

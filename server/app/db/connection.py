@@ -8,7 +8,8 @@ from psycopg.pq import TransactionStatus
 from psycopg_pool import ConnectionPool
 
 from server.app.db.cursor import Cursor
-from server.app.db.dialect import DatabaseDsn, postgres_sql
+from server.app.db.dialect import ConnectSource, postgres_sql, resolve_dsn
+from server.app.db.dialect import DatabaseDsn as DatabaseDsn  # noqa: F401 (re-export)
 from server.app.db.pools import close_database_pools as close_database_pools
 from server.app.db.pools import pool_for
 
@@ -70,11 +71,12 @@ class DatabaseConnection:
             self.rollback()
 
 
-def connect_database(dsn: DatabaseDsn) -> DatabaseConnection:
+def connect_database(dsn: ConnectSource) -> DatabaseConnection:
+    """Pooled connection; ``dsn`` also accepts the JobQueries facade (#187)."""
+    dsn = resolve_dsn(dsn)
     if not dsn.startswith(("postgresql://", "postgres://")):
         raise ValueError("AGENT_LEGION_DATABASE_URL must be a PostgreSQL URL")
+    # A failed checkout must not tear down any pool: ConnectionPool recovers
+    # on its own, and other threads may still hold healthy connections.
     pool = pool_for(dsn)
-    # A failed checkout (pool timeout or unreachable server) must not tear down
-    # any pool: ConnectionPool recovers on its own, and other threads may still
-    # hold healthy connections checked out from it.
     return DatabaseConnection(pool.getconn(), pool, dsn)

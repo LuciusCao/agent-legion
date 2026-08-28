@@ -26,8 +26,10 @@ _CODE_V2 = "def run(ctx):\n    return {'v': 2}\n"
 
 
 def _stub_worker() -> SimpleNamespace:
+    # job_db mimics the JobQueries facade's connect surface (#187): services
+    # hand the facade itself to connection helpers.
     return SimpleNamespace(
-        job_db=SimpleNamespace(path=TEST_DATABASE_URL),
+        job_db=SimpleNamespace(path=TEST_DATABASE_URL, dsn_identity=TEST_DATABASE_URL),
         settings=SimpleNamespace(
             executor_runtime=SimpleNamespace(workflows=SimpleNamespace(custom_nodes_enabled=True))
         ),

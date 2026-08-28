@@ -47,7 +47,7 @@ def resolve_code_node_dispatch(
         node_code = cached[1]
     else:
         node_code = resolve_dispatch_node_code(
-            worker.job_db.path,
+            worker.job_db,
             worker.settings.executor_runtime.workflows.custom_nodes_enabled,
             workspace_id,
             workflow_key,

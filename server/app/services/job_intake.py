@@ -77,7 +77,7 @@ class JobIntakeService:
         try:
             node_config = resolve_workflow_node_configs(
                 definition,
-                published_agent_definitions(self.settings.database_url, workspace_id),
+                published_agent_definitions(self.job_db, workspace_id),
                 workspace,
             )
         except ValueError as exc:
@@ -87,7 +87,7 @@ class JobIntakeService:
         # running jobs are immune to later edits (EXEC-CODE-002); empty when
         # every node is builtin or the feature gate is off.
         node_code_versions = freeze_node_code_versions(
-            self.job_db.path,
+            self.job_db,
             self.settings.executor_runtime.workflows.custom_nodes_enabled,
             workspace_id,
             workflow_key,

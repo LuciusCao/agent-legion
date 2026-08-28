@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.storage import ObjectStorage
 
@@ -75,7 +75,8 @@ def _sha256(path: Path) -> str:
 class JobArtifactObjectStore:
     """Upload/register/lookup service for job artifacts in object storage."""
 
-    def __init__(self, database_dsn: DatabaseDsn, storage: ObjectStorage | None = None) -> None:
+    def __init__(self, database_dsn: ConnectSource, storage: ObjectStorage | None = None) -> None:
+        # database_dsn: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187).
         self._dsn = database_dsn
         # Public seam: tests inject a fake ObjectStorage; an unconfigured
         # instance keeps None and every caller falls back to the job_dir.

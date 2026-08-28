@@ -16,7 +16,7 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.job_errors import NotFoundError
 
@@ -71,7 +71,10 @@ on conflict (batch_id, node_run_id) do nothing
 
 
 class QualitySamplingService:
-    def __init__(self, db_path: DatabaseDsn) -> None:
+    """Deterministic sampling; ``db_path`` is the JobQueries facade (or a
+    bare DSN for tests) — BOUNDARY-DATA-001, #187."""
+
+    def __init__(self, db_path: ConnectSource) -> None:
         self.db_path = db_path
 
     def create_batch(

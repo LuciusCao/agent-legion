@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.job_errors import (
     ConflictError,
@@ -68,16 +68,12 @@ def _record(row: dict[str, Any]) -> dict[str, Any]:
 
 
 class MaterialsService:
-    def __init__(self, database_dsn: DatabaseDsn, storage: ObjectStorage | None = None) -> None:
+    def __init__(self, database_dsn: ConnectSource, storage: ObjectStorage | None = None) -> None:
+        # ``_dsn`` doubles as the bundles adjunct's connect source.
         self._dsn = database_dsn
         # Public seam: tests inject a fake ObjectStorage; an unconfigured
         # instance keeps None and the API degrades to 503.
         self.storage = storage
-
-    @property
-    def database_dsn(self) -> DatabaseDsn:
-        """The workspace DSN; adjunct services (bundles) share it."""
-        return self._dsn
 
     def _require_storage(self) -> ObjectStorage:
         if self.storage is None:

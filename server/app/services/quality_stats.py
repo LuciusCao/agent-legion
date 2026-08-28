@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
 from server.app.services.job_errors import NotFoundError
 
@@ -39,7 +39,10 @@ def _confusion(row: dict[str, Any]) -> dict[str, Any] | None:
 
 
 class QualityStatsService:
-    def __init__(self, db_path: DatabaseDsn) -> None:
+    """Batch aggregates; ``db_path`` is the JobQueries facade (or a bare DSN
+    for tests) — BOUNDARY-DATA-001, #187."""
+
+    def __init__(self, db_path: ConnectSource) -> None:
         self.db_path = db_path
 
     def batch_stats(self, workspace_id: str, batch_id: str) -> list[dict[str, Any]]:

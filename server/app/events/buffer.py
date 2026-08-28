@@ -9,6 +9,10 @@ from server.app.events.models import CompactedJobEvents, JobEvent, JobEventKind
 
 
 class JobEventBuffer:
+    """In-memory event buffer; ``db_path`` (the JobQueries facade in
+    production wiring, a bare DSN in tests, None for the legacy in-memory
+    mode) only feeds the revision sequence bump — BOUNDARY-DATA-001, #187."""
+
     def __init__(self, db_path: str | None = None, max_events: int = 10000) -> None:
         self._db_path = db_path
         self._max_events = max_events

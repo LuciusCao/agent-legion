@@ -39,7 +39,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.connection_adapters import ConnectionAdapterError
 from server.app.services.connection_gate import lock_connection_gate
@@ -70,8 +70,11 @@ def _parse_expiry(value: Any) -> datetime | None:
 
 
 class ConnectionTokenService:
+    """Token cache with single-flight refresh (module docstring); the DSN
+    param also accepts the JobQueries facade (BOUNDARY-DATA-001, #187)."""
+
     def __init__(
-        self, database_dsn: DatabaseDsn, settings_config: dict[str, Any] | None = None
+        self, database_dsn: ConnectSource, settings_config: dict[str, Any] | None = None
     ) -> None:
         self._dsn = database_dsn
         self._connections = ConnectionService(database_dsn, settings_config)

@@ -16,7 +16,6 @@ import logging
 import shutil
 from typing import TYPE_CHECKING, Any
 
-from server.app.db.transaction import write_transaction
 from server.app.jobs.atomic_mutations import prepare_replay_copy
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_errors import InvalidOperationError, JobServiceError
@@ -39,11 +38,9 @@ class QualityReplaySetup:
         self,
         job_db: JobQueries,
         artifact_store: ArtifactStore | None,
-        db_path: str,
     ) -> None:
         self.job_db = job_db
         self.artifact_store = artifact_store
-        self.db_path = db_path
 
     def build_copy_job(
         self,
@@ -130,7 +127,7 @@ class QualityReplaySetup:
                 & definition.executable_nodes.keys()
             )
             downstream = sorted(downstream_nodes(definition, node.key))
-            with write_transaction(self.db_path) as conn:
+            with self.job_db.write() as conn:
                 prepare_replay_copy(
                     conn, copy_job_id, completed_nodes=ancestors, skipped_nodes=downstream
                 )
@@ -146,7 +143,7 @@ class QualityReplaySetup:
             self.discard_empty_run(str(batch["id"]))
             # Never leave a fully-pending copy job behind: the scheduler would
             # run the whole workflow. Fail it so it drops out of the scan.
-            with write_transaction(self.db_path) as conn:
+            with self.job_db.write() as conn:
                 conn.execute(
                     "update jobs set status='failed',"
                     " error_message='quality replay setup failed',"
@@ -211,7 +208,7 @@ class QualityReplaySetup:
                 self.artifact_store.add_ref(copy_job_id, ref["node_key"], ref["name"], ref["hash"])
 
     def _fail_replay(self, replay_id: str, message: str) -> None:
-        with write_transaction(self.db_path) as conn:
+        with self.job_db.write() as conn:
             conn.execute(
                 "update quality_replays set status = 'failed', error_message = %s,"
                 " finished_at = current_timestamp where id = %s",

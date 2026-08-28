@@ -2,6 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query
 
+from server.app.jobs import JobQueries
 from server.app.routes.agent_catalog_contracts import AgentCatalogResponse
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
 from server.app.routes.skill_catalog_route import create_skill_catalog_router
@@ -20,6 +21,7 @@ def create_workspace_agent_catalog_router(
     catalog: AgentCatalogService,
     workspace_configuration: WorkspaceExecutionConfigurationService,
     settings: Settings,
+    job_db: JobQueries | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -46,5 +48,5 @@ def create_workspace_agent_catalog_router(
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
-    router.include_router(create_skill_catalog_router(settings))
+    router.include_router(create_skill_catalog_router(settings, job_db))
     return router

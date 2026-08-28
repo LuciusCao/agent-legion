@@ -83,7 +83,7 @@ def try_claim_code_worker_node(
     # (resolve_dispatch_node_code, EXEC-CODE-002).
     try:
         code_text = resolve_dispatch_node_code(
-            worker.job_db.path,
+            worker.job_db,
             worker.settings.executor_runtime.workflows.custom_nodes_enabled,
             workspace_id,
             workflow_key,
@@ -121,11 +121,11 @@ def try_claim_code_worker_node(
         # reference or connection fails the node at dispatch, not mid-claim.
         # The resolved plaintext itself is discarded — only references and
         # non-secret values are persisted (VAULT-SECRET-001).
-        resolved = VaultService(worker.job_db.path, worker.settings.config).resolve_secret_refs(
+        resolved = VaultService(worker.job_db, worker.settings.config).resolve_secret_refs(
             {**config, **secret_config}, workspace_id
         )
         inject_connection_config(
-            resolved, schema, ConnectionTokenService(worker.job_db.path, worker.settings.config)
+            resolved, schema, ConnectionTokenService(worker.job_db, worker.settings.config)
         )
     except (ValueError, VaultError, JobServiceError) as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))

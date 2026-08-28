@@ -5,6 +5,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 
 from server.app.auth.dependencies import require_admin
+from server.app.jobs import JobQueries
 from server.app.routes.connections_contracts import (
     ConnectionCreate,
     ConnectionListResponse,
@@ -20,10 +21,10 @@ from server.app.services.job_errors import JobServiceError
 from server.app.settings import Settings
 
 
-def create_connections_router(settings: Settings) -> APIRouter:
+def create_connections_router(job_db: JobQueries, settings: Settings) -> APIRouter:
     """Admin endpoints managing instance-level external connections."""
     router = APIRouter()
-    service = ConnectionService(settings.database_url, settings.config)
+    service = ConnectionService(job_db, settings.config)
 
     @router.get("/admin/connections", response_model=ConnectionListResponse)
     def list_connections(

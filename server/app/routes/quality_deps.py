@@ -35,8 +35,8 @@ def build_quality_loop(
     object_store: JobArtifactObjectStore | None = None,
 ) -> QualityLoopDeps:
     return QualityLoopDeps(
-        quality_sampling=QualitySamplingService(job_db.path),
-        quality_labels=QualityLabelService(job_db.path, artifact_store, object_store=object_store),
-        quality_stats=QualityStatsService(job_db.path),
+        quality_sampling=QualitySamplingService(job_db),
+        quality_labels=QualityLabelService(job_db, artifact_store, object_store=object_store),
+        quality_stats=QualityStatsService(job_db),
         quality_replays=QualityReplayService(job_db, artifact_store, object_store=object_store),
     )

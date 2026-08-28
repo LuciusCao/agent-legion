@@ -44,7 +44,7 @@ def update_workspace_node_config(
     workflow_key = str(workspace.get("default_workflow_key") or "")
     definition = require_workspace_active_definition(job_db, workspace_id, workflow_key)
     schemas = workflow_node_config_schemas(definition, agent_definitions)
-    vault = VaultService(job_db.path, settings.config)
+    vault = VaultService(job_db, settings.config)
     node_config = workspace.get("node_config")
     next_node_config = dict(node_config) if isinstance(node_config, dict) else {}
     workflow_overrides = next_node_config.get(workflow_key)

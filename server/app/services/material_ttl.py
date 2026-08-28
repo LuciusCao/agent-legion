@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.instance_settings_store import InstanceSettingsStore
 from server.app.storage import ObjectStorage
@@ -38,14 +38,18 @@ DEFAULT_SWEEP_INTERVAL_SECONDS = 3600.0
 DELETE_GRACE_SECONDS = 600
 
 
-def materials_ttl_days(database_dsn: DatabaseDsn) -> int:
+def materials_ttl_days(database_dsn: ConnectSource) -> int:
     """Effective materials TTL in days (0 = disabled); read fresh per call.
 
-    Unlike the restart-hydrated instance scalars, the TTL is consumed at
-    material completion/sweep time, so it is read from the DB document on
-    every use — edits take effect without a restart. Defensive against
-    out-of-band writes: anything but a positive int degrades to 0.
+    ``database_dsn`` accepts the JobQueries facade or a bare DSN string
+    (BOUNDARY-DATA-001, #187). Unlike the restart-hydrated instance scalars,
+    the TTL is consumed at material completion/sweep time, so it is read from
+    the DB document on every use — edits take effect without a restart.
+    Defensive against out-of-band writes: anything but a positive int
+    degrades to 0.
     """
+    if not isinstance(database_dsn, str):
+        database_dsn = str(getattr(database_dsn, "dsn_identity", None) or "")
     stored = InstanceSettingsStore(database_dsn).get()
     if stored is None:
         return 0
@@ -55,11 +59,13 @@ def materials_ttl_days(database_dsn: DatabaseDsn) -> int:
     return value
 
 
-def mark_ready(conn: Any, database_dsn: DatabaseDsn, material_id: str) -> None:
+def mark_ready(conn: Any, database_dsn: ConnectSource, material_id: str) -> None:
     """Mark a verified material ready, stamping expires_at from the TTL.
 
-    The TTL is read fresh from the instance document at every completion —
-    0/absent disables expiry (``expires_at`` stays NULL).
+    ``database_dsn`` accepts the JobQueries facade or a bare DSN string
+    (BOUNDARY-DATA-001, #187). The TTL is read fresh from the instance
+    document at every completion — 0/absent disables expiry
+    (``expires_at`` stays NULL).
     """
     ttl_days = materials_ttl_days(database_dsn)
     conn.execute(
@@ -70,7 +76,7 @@ def mark_ready(conn: Any, database_dsn: DatabaseDsn, material_id: str) -> None:
     )
 
 
-def expire_due_materials(database_dsn: DatabaseDsn) -> int:
+def expire_due_materials(database_dsn: ConnectSource) -> int:
     """Flip ready rows past ``expires_at`` to expired; returns the count."""
     with write_transaction(database_dsn) as conn:
         updated = conn.execute(
@@ -81,7 +87,7 @@ def expire_due_materials(database_dsn: DatabaseDsn) -> int:
 
 
 def collect_expired_materials(
-    database_dsn: DatabaseDsn,
+    database_dsn: ConnectSource,
     storage: ObjectStorage,
     *,
     grace_seconds: int = DELETE_GRACE_SECONDS,

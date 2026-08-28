@@ -5,11 +5,12 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from server.app.db.connection import DatabaseConnection, DatabaseDsn, connect_database
+from server.app.db.connection import DatabaseConnection, connect_database
+from server.app.db.dialect import ConnectSource
 
 
 @contextmanager
-def write_transaction(database_dsn: DatabaseDsn) -> Iterator[DatabaseConnection]:
+def write_transaction(database_dsn: ConnectSource) -> Iterator[DatabaseConnection]:
     """Yield one PostgreSQL transaction and deterministically release it."""
     conn = connect_database(database_dsn)
     try:
@@ -26,7 +27,7 @@ def write_transaction(database_dsn: DatabaseDsn) -> Iterator[DatabaseConnection]
 
 
 @contextmanager
-def read_connection(database_dsn: DatabaseDsn) -> Iterator[DatabaseConnection]:
+def read_connection(database_dsn: ConnectSource) -> Iterator[DatabaseConnection]:
     """Yield a pooled PostgreSQL connection for bounded read operations."""
     conn = connect_database(database_dsn)
     try:

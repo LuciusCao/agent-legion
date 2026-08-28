@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 def create_studio_agents_admin_router(job_db: JobQueries) -> APIRouter:
     router = APIRouter()
-    store = StudioAgentRegistryStore(job_db.path)
+    store = StudioAgentRegistryStore(job_db)
     availability_probe = AgentAvailabilityProbe()
 
     def _response(document: dict[str, Any]) -> StudioAgentRegistryResponse:
