@@ -117,6 +117,38 @@ def test_scan_entries_contain_unparsable_active_revision(settings, job_db, caplo
     )
 
 
+def test_scan_entries_contain_malformed_json_revision(settings, job_db, caplog) -> None:
+    """Codex P1 on PR #243: JSONDecodeError is a *sibling* ValueError subclass
+    (not covered by WorkflowDefinitionError) — catching only the latter let
+    one malformed definition_json row kill load_workflow_scan_entries, and
+    with it worker startup and scheduling for every workspace. Malformed JSON
+    must hit the same per-workspace degradation as schema violations."""
+    workspace = job_db.create_workspace("scan-badjson", default_workflow_key="bad_json_flow")
+    job_db.create_workflow_revision(
+        revision_id=f"rev-{uuid.uuid4().hex[:8]}",
+        workspace_id=str(workspace["id"]),
+        workflow_key="bad_json_flow",
+        version=1,
+        status="active",
+        # Not JSON at all — the JSONDecodeError path.
+        definition_json="{not valid json",
+        definition_hash="hash-badjson",
+    )
+
+    with caplog.at_level("WARNING", logger="server.app.workflow_worker.catalog_scan"):
+        entries = load_workflow_scan_entries(settings)
+
+    by_workspace = {ws: (key, definition) for ws, key, definition in entries}
+    assert str(workspace["id"]) in by_workspace
+    key, definition = by_workspace[str(workspace["id"])]
+    assert key == "bad_json_flow"
+    assert definition is None
+    assert any(
+        "failed to parse" in rec.message and "bad_json_flow" in rec.message
+        for rec in caplog.records
+    )
+
+
 def test_scan_entries_propagate_programming_errors(settings, job_db, monkeypatch) -> None:
     """#204 layering guard: only the definition-validation business failure
     is contained. A genuine programming error while parsing a revision must
