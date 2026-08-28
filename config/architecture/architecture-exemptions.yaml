@@ -88,7 +88,7 @@ exemptions:
     dispatch boundary.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/198
-  ceiling: 170
+  ceiling: 160
 - check: architecture.file_budget
   path: server/app/services/agent_service.py
   reason: Schema v27 made this service the only Agent catalog source of truth;

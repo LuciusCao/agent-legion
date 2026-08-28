@@ -1998,7 +1998,16 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** Get Workspace Runtime Models */
+    /**
+     * Get Workspace Runtime Models
+     * @description Studio 节点执行 datalist 的数据源（在线 Worker 的声明聚合）。
+     *
+     *     ``online`` 来自 30s 活性阈值（agent_control.registry
+     *     ONLINE_THRESHOLD_SECONDS）：刚 revoked / 离线的 Worker 在活性窗口
+     *     内仍可能短暂贡献 models——可接受边界，datalist 只是提示，claim
+     *     匹配才是权威。通配 ``*`` 声明原样透传，字面 ``*`` 选项的过滤在
+     *     前端 datalist 层（runtimeModelOptions.ts）。
+     */
     get: operations['get_workspace_runtime_models_api_workspaces__workspace_id__runtime_models_get']
     put?: never
     post?: never

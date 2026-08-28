@@ -105,17 +105,6 @@ export type ConfigSchema = {
   required?: string[]
 }
 
-/**
- * Workflow-level default execution config for Agent nodes
- * (provider/model/thinking), declared as the workflow top-level
- * ``execution`` block. Workspace-level defaults were retired (schema v63).
- */
-export type WorkflowExecutionDefaults = {
-  provider?: string
-  model?: string
-  thinking?: string
-}
-
 export type WorkspaceSettings = ApiSchemas['WorkspaceSettingsPayload'] & {
   nodeConfig?: Record<string, Record<string, unknown>>
   nodeConfigSchemas?: Record<string, ConfigSchema>

@@ -64,7 +64,6 @@ function buildSteps(overrides: {
     agentRoutes: overrides.routes ?? [],
     workspaceId: 'ws1',
     goStudio: () => {},
-    goSettings: () => {},
     openAddItems: () => {},
   })
 }

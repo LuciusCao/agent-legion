@@ -21,7 +21,7 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   a cloud S3 is still just an `.env` edit — the local RustFS is then skipped
   automatically.
 - Workflow definitions accept an optional top-level `execution:` block
-  (provider/model/thinking) that the loader merges into every agent-routed
+  (provider/model/thinking) that the loader merges into every non-start
   node (node values win), versioned with the revision — one place to configure
   execution per workflow instead of per node.
 - Studio node execution editor: provider/model inputs now offer runtime-aware

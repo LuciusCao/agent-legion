@@ -105,9 +105,15 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
                 for key, mode in definition.intake.modes.items()
             }
         },
-        "nodes": {},
-        "edges": [],
     }
+    # prompt 不是顶层默认键（loader 拒绝），asdict 带出的空 prompt 过滤掉。
+    top_execution = {k: v for k, v in asdict(definition.execution).items() if k != "prompt" and v}
+    # Top-level defaults precede ``nodes:`` so the echo reads as defaults,
+    # not as another per-node block.
+    if top_execution:
+        payload["execution"] = top_execution
+    payload["nodes"] = {}
+    payload["edges"] = []
     for key, node in definition.nodes.items():
         # Start nodes carry the entry contract, never a capability (D1).
         raw_node: dict[str, Any] = {"label": node.label}
@@ -121,7 +127,15 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
         raw_node["outputs"] = node.outputs
         if node.terminal is not None:
             raw_node["terminal"] = {"outcome": node.terminal.outcome}
-        execution = {key: value for key, value in asdict(node.execution).items() if value}
+        # The loader bakes the top-level defaults into every non-start node;
+        # subtract them back out key by key so the echo only carries genuine
+        # node-level overrides — otherwise a later edit of the top-level
+        # defaults would silently lose to the baked per-node values.
+        execution = {
+            key: value
+            for key, value in asdict(node.execution).items()
+            if value and (key == "prompt" or value != top_execution.get(key))
+        }
         if execution:
             raw_node["execution"] = execution
         if node.config:

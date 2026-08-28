@@ -41,6 +41,7 @@ from server.app.db.migrations import (
     migrate_versioned_entities,
     migrate_workflow_catalog_retirement,
     migrate_workspace_cms_config,
+    migrate_workspace_execution_defaults,
     migrate_workspace_id_key_binding,
     migrate_workspace_job_node_status_counts,
     migrate_workspace_secrets,
@@ -109,12 +110,15 @@ MIGRATIONS: list[SchemaMigration] = [
     # workspace_id rows in every child table and the agent_workers scope
     # JSON, so it must see every other workspace-shape change settled.
     SchemaMigration(62, "workspace_id_key_binding", migrate_workspace_id_key_binding),
-    # v63 retires the workspace-level Agent defaults: the three
-    # default_agent_* columns are dropped in the post-chain cleanup sweep
-    # (schema.py) because the v62 data migration still replays inserts that
-    # reference them on older databases. No data migration — execution config
-    # is per-node / workflow-top-level now.
-    SchemaMigration(63, "workspace_settings_retirement"),
+    # v63 retires the workspace-level Agent defaults: the data migration
+    # backfills non-empty default_agent_* values into the active revision's
+    # top-level execution block (migrations/workspace_execution_defaults.py),
+    # then the three columns (plus the fully retired intake_config_json) are
+    # dropped in the post-chain cleanup sweep
+    # (migrations/workspace_settings_retirement.py, called from schema.py)
+    # because the v62 data migration still replays inserts that
+    # reference them on older databases.
+    SchemaMigration(63, "workspace_settings_retirement", migrate_workspace_execution_defaults),
 ]
 
 assert [m.version for m in MIGRATIONS] == sorted(m.version for m in MIGRATIONS), (

@@ -81,6 +81,15 @@ def test_runtime_models_empty_without_workers(tmp_path: Path) -> None:
     assert response.json()["runtimes"] == {}
 
 
+def test_runtime_models_requires_auth(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with TestClient(app) as client:
+        response = client.get("/api/workspaces/test-workspace/runtime-models")
+
+    assert response.status_code == 401
+
+
 class _FakeRegistry:
     def __init__(self, workers: list[dict]) -> None:
         self._workers = workers

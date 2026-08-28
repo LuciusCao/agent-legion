@@ -275,9 +275,9 @@ flipping the field:
 - **Sandbox:** the `workflows.pi.velites_no_sandbox` escape hatch is retired
   with the yaml block; `execution.no_sandbox` is always false in manifests, so
   a sandbox incident currently requires a code change, not a config flip.
-- **Execution defaults:** provider/model/thinking come from the workspace
-  Settings「Agent 默认配置」or per-node Studio overrides (strict chain, no
-  global fallback) — runtime migration never touches them.
+- **Execution defaults:** provider/model/thinking come from the workflow-level
+  `execution:` default or per-node Studio overrides (strict chain, no
+  workspace/global fallback) — runtime migration never touches them.
 
   > **Status note:** the runtime migration described above is complete; the
   > canary playbook is kept as operational context for future runtime changes.

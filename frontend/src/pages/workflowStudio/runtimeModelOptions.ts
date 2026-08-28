@@ -6,6 +6,11 @@ type RuntimeModels = WorkspaceRuntimeModelsResponse['runtimes']
 /**
  * 该节点 agent.runtime 可见的 provider → models 映射：在线 Worker 声明的
  * 精确 runtime 条目加上对所有 runtime 生效的 '*' 通配条目。
+ *
+ * 字面 '*' 选项在这里过滤（后端聚合保留 Worker 的原始声明作诊断用途）：
+ * '*' provider/model 是「任意值均可 claim」的通配声明，不是可提交的字面值
+ * ——选中它会冻结出一个没有任何 Worker 能精确匹配的 execution。声明了
+ * 通配 model 的 provider 仍保留在 provider 选项里（具体型号自由输入）。
  */
 function optionsForRuntime(
   runtimeModels: RuntimeModels | undefined,
@@ -16,8 +21,9 @@ function optionsForRuntime(
     for (const [provider, models] of Object.entries(
       runtimeModels?.[key] ?? {}
     )) {
+      if (provider === '*') continue
       const bucket = (merged[provider] ??= new Set())
-      for (const model of models) bucket.add(model)
+      for (const model of models) if (model !== '*') bucket.add(model)
     }
   }
   return Object.fromEntries(

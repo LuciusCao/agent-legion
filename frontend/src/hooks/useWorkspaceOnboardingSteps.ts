@@ -6,9 +6,10 @@ import { buildOnboardingSteps } from '../lib/onboardingReadiness'
 import type { WorkflowDefinitionRecord } from '../types'
 
 /**
- * 新 workspace 空态的分步引导：发布 workflow → 配置 Agent 与接入 → 添加
- * 第一个任务（步骤文案与就绪判定见 onboardingReadiness）。settings 快照
- * 仅在引导实际展示（enabled）时加载，正常 workspace 主页不产生额外请求。
+ * 新 workspace 空态的分步引导：发布 workflow → 配置 Agent 执行（Studio
+ * 节点覆盖 / 顶层 execution 默认）→ 添加第一个任务（步骤文案与就绪判定
+ * 见 onboardingReadiness）。settings 快照仅在引导实际展示（enabled）时
+ * 加载，正常 workspace 主页不产生额外请求。
  */
 export function useWorkspaceOnboardingSteps(
   workspaceId: string | undefined,
@@ -31,7 +32,6 @@ export function useWorkspaceOnboardingSteps(
         agentRoutes: settingsSnapshot?.agentRoutes ?? [],
         workspaceId,
         goStudio: () => navigate(`/workspaces/${workspaceId}/workflow-studio`),
-        goSettings: () => navigate('settings'),
         openAddItems: () => setAddItemsDialogOpen(true),
       }),
     [

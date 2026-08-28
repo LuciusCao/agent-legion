@@ -45,10 +45,13 @@ from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SC
 
 # Effects the newest migration (v63, workspace_settings_retirement) must
 # leave behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v63's only effect is the post-chain cleanup dropping the
-# three retired workspaces.default_agent_* columns — rewinding re-adds them
-# (a v62 database still has them) so the upgrade under test must drop them
-# again to match a fresh catalog.
+# SCHEMA_VERSION-1. v63's catalog effect is the post-chain cleanup dropping
+# the three retired workspaces.default_agent_* columns plus
+# intake_config_json — rewinding re-adds them (a v62 database still has them)
+# so the upgrade under test must drop them again to match a fresh catalog.
+# v63 also carries a data migration (backfilling default_agent_* into the
+# active revision's top-level execution); it changes rows, not the catalog,
+# and is a no-op on this test's empty scratch schema.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
@@ -58,6 +61,7 @@ _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = (
     ("workspaces", "default_agent_provider text not null default ''"),
     ("workspaces", "default_agent_model text not null default ''"),
     ("workspaces", "default_agent_thinking text not null default ''"),
+    ("workspaces", "intake_config_json text not null default '{}'"),
 )
 
 # (table, column, data_type) and (table, index, indexdef) triples.

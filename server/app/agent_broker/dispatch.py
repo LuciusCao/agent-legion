@@ -25,10 +25,8 @@ EXECUTION_TIMEOUT_SECONDS = 1800
 _RUNTIME_BINARIES = {"pi": "pi", "velites": "velites"}
 
 
-def resolve_execution_block(
-    node: WorkflowNode, workspace: dict[str, Any], runtime: str
-) -> dict[str, Any]:
-    """Resolve the manifest ``execution`` block (strict, no workspace fallback).
+def resolve_execution_block(node: WorkflowNode, runtime: str) -> dict[str, Any]:
+    """Resolve the manifest ``execution`` block (strict, node-only source).
 
     provider/model resolve from the node-level execution only — the loader
     has already merged the workflow top-level execution defaults into the
@@ -101,7 +99,7 @@ class AgentDispatchService:
     ) -> bool:
         if self.broker.has_active_request(str(job["id"]), node.key):
             return False
-        execution = resolve_execution_block(node, workspace, definition.runtime)
+        execution = resolve_execution_block(node, definition.runtime)
         execution_id = str(uuid.uuid4())
         skill_dir = resolve_skill_dir(self.skill_manager, definition.skill, execution_id)
         try:

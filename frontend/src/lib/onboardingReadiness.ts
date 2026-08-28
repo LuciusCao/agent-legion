@@ -40,7 +40,6 @@ export interface OnboardingStepsInput {
   agentRoutes: WorkspaceAgentRouteEntry[]
   workspaceId: string | undefined
   goStudio: () => void
-  goSettings: () => void
   openAddItems: () => void
 }
 
@@ -76,12 +75,15 @@ export function buildOnboardingSteps(input: OnboardingStepsInput) {
       unlocked: published,
       completed: configured,
       actionLabel: '去配置',
-      onAction: input.goSettings,
+      // Settings 已无 provider/model 配置面（schema v63 退役），配置面在
+      // Studio 的节点详情 / 顶层 execution。
+      onAction: input.goStudio,
     },
     {
       icon: 'add_task',
       title: '添加第一个任务',
-      description: '按接入模式添加条目，启动你的第一个任务。',
+      description:
+        '按条目类型（material / ref / bundle）添加条目，启动你的第一个任务。',
       unlocked: published && configured,
       actionLabel: '添加条目',
       onAction: input.openAddItems,

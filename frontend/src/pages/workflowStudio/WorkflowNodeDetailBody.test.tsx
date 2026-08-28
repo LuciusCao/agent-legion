@@ -8,7 +8,7 @@ import type { AgentDefinition, SkillDetail } from '../../types/executorTypes'
 import { WorkflowNodeDetailBody } from './WorkflowNodeDetailBody'
 import { WorkflowSkillPreviewPanel } from './WorkflowSkillPreviewPanel'
 
-// inspector 各 section（code/config/agentDefaults）统一走 '../../api' 的 api。
+// inspector 各 section（code/config/agent 执行详情）统一走 '../../api' 的 api。
 vi.mock('../../api', () => ({ api: vi.fn() }))
 // 技能预览经 executorApi wrapper（直连 './core'，不经 '../../api' 聚合层）。
 vi.mock('../../api/executorApi', () => ({

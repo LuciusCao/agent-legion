@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import type {
   WorkflowNodeRecord,
   WorkspaceRuntimeModelsResponse,
@@ -19,7 +20,11 @@ export function WorkflowNodeRuntimeSettings(props: {
   setDefinitionYaml: (yaml: string) => void
   readOnly?: boolean
 }) {
-  const draft = parseWorkflowNode(props.definitionYaml, props.node.key)
+  // 全量 YAML parse 按草稿内容 + 节点 key memo，不随每次渲染重算。
+  const draft = useMemo(
+    () => parseWorkflowNode(props.definitionYaml, props.node.key),
+    [props.definitionYaml, props.node.key]
+  )
   const execution = draft
     ? (draft.execution ?? {})
     : (props.node.execution ?? {})

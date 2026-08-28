@@ -219,9 +219,9 @@ export function AddItemsDialog({
             <div className={styles.errorHint} data-testid="item-type-hint">
               当前工作流只接受：
               {
-                // 规范顺序 material/ref/bundle；逐布尔展开而不是把整个
-                // acceptedTypes 数组传给 helper——React Compiler 会把「memo 之后
-                // 数组可能被 opaque 函数 mutate」当成依赖污染。
+                // 规范顺序 material/ref/bundle：逐布尔展开（而不是 filter
+                // acceptedTypes）让顺序与契约常量 ACCEPTED_ITEM_TYPES 解耦，
+                // 改数组顺序不会意外改变展示顺序。
                 [
                   materialAccepted && itemTypeLabel('material'),
                   refAccepted && itemTypeLabel('ref'),
