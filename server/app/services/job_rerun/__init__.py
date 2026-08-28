@@ -4,7 +4,7 @@ Issue #199 归包：包根即原 ``services/job_rerun.py``（``JobRerunService``
 门面），``single.py`` 单节点路径、``batch.py`` 批量路径、``preview.py`` /
 ``preview_checks.py`` 只读预览、``eligibility.py`` 共享资格规则、
 ``upstream_guard.py`` 失败上游守卫、``by_failure_results.py`` 按失败
-类别批量的逐 job 结果组装、``batch_ops.py`` 批量 delete / run-to 循环。
+类别批量的逐 job 结果组装、``batch_ops.py`` 批量 remove / run-to 循环。
 """
 
 from collections.abc import Callable, Collection

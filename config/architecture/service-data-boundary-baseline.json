@@ -1,5 +1,4 @@
 {
-  "version": 1,
   "files": {
     "server/app/services/agent_service.py": [
       3,
@@ -112,11 +111,6 @@
       0
     ],
     "server/app/services/job_packages.py": [
-      1,
-      0,
-      0
-    ],
-    "server/app/services/job_rerun/__init__.py": [
       1,
       0,
       0
@@ -341,5 +335,6 @@
       0,
       1
     ]
-  }
+  },
+  "version": 1
 }
