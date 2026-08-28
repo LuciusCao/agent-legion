@@ -114,14 +114,18 @@ make import-demo      # install/lock skills and create+seed a demo workspace if 
 Then in the console:
 
 1. Open the demo workspace printed by the command (reruns reuse it).
-2. In workspace **Settings → Agent 默认配置**, set the provider/model your
-   LLM endpoint serves.
+2. Configure agent execution in Studio: open the workflow and fill the
+   top-level `execution:` block with the provider/model your LLM endpoint
+   serves (one place covers every agent node; individual nodes can override
+   via `execution.*`; the input lists the provider/model options reported by
+   online Workers for that node's Agent runtime, and free text works too).
 3. Enable automatic scheduling for the workspace and claiming in the Worker
    console.
-4. Submit items through the workspace console's **添加条目** (add) panel:
-   upload the knowledge-point markdown as materials or select the seeded
-   example materials (one material becomes one job), or paste external IDs
-   bound to a configured connection.
+4. Submit a batch: in the workspace's **添加条目** (add) dialog, upload the
+   knowledge-point markdown, or select the seeded example materials in the
+   panel, then confirm to create the run — one material becomes one job.
+   (The "paste ID" panel is for **ref items**: configure an external service
+   connection in admin first, then paste an external ID under it.)
 5. Watch the DAG light up in real time, and inspect each node's trace and
    artifacts when it finishes.
 
