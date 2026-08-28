@@ -210,7 +210,10 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
         resource_config: dict[str, Any],
         intake_config: dict[str, Any],
         node_limits: Sequence[Mapping[str, Any]] | None = None,
+        preview_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # preview_config 与其余字段同一事务写入（codex P1：分离的第二事务
+        # 会让 PUT 在瞬时故障时留下半应用状态）。None = 沿用已存值。
         clean_name = name.strip()
         if not clean_name:
             raise ValueError("Workspace name is required")
@@ -225,6 +228,7 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
                 update workspaces
                 set name=%s, description=%s, default_workflow_key=%s, default_entity=%s,
                     resource_config_json=%s, intake_config_json=%s,
+                    preview_config_json=coalesce(%s, preview_config_json),
                     updated_at=current_timestamp
                 where id=%s
                 """,
@@ -235,6 +239,11 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
                     default_entity,
                     json.dumps(resource_config, ensure_ascii=False, sort_keys=True),
                     json.dumps(intake_config, ensure_ascii=False, sort_keys=True),
+                    (
+                        json.dumps(preview_config, ensure_ascii=False, sort_keys=True)
+                        if preview_config is not None
+                        else None
+                    ),
                     workspace_id,
                 ),
             )

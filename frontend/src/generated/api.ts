@@ -7415,7 +7415,9 @@ export interface operations {
   get_artifact_raw_api_jobs__job_id__artifacts__artifact_name__raw_get: {
     parameters: {
       query?: never
-      header?: never
+      header?: {
+        Range?: string | null
+      }
       path: {
         job_id: string
         artifact_name: string

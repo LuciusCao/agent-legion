@@ -178,15 +178,16 @@ function MediaError({
   )
 }
 
-export function ImagePreview({ jobId, name }: PreviewRendererProps) {
+export function ImagePreview({ jobId, name, detail }: PreviewRendererProps) {
   const { failed, epoch, setFailed, retry } = useMediaRetry()
   if (failed) return <MediaError jobId={jobId} name={name} onRetry={retry} />
-  // epoch 进 query：重试时强制重新加载。
+  // v = artifact 版本（重跑覆盖同名产物时失效缓存）+ epoch（手动重试）。
+  const src = `${jobArtifactRawUrl(jobId, name)}?v=${artifactVersion(detail, name)}&r=${epoch}`
   return (
     <img
-      key={epoch}
+      key={src}
       className={styles.mediaImage}
-      src={`${jobArtifactRawUrl(jobId, name)}?v=${epoch}`}
+      src={src}
       alt={name}
       loading="lazy"
       onError={() => setFailed(true)}
@@ -194,14 +195,15 @@ export function ImagePreview({ jobId, name }: PreviewRendererProps) {
   )
 }
 
-export function VideoPreview({ jobId, name }: PreviewRendererProps) {
+export function VideoPreview({ jobId, name, detail }: PreviewRendererProps) {
   const { failed, epoch, setFailed, retry } = useMediaRetry()
   if (failed) return <MediaError jobId={jobId} name={name} onRetry={retry} />
+  const src = `${jobArtifactRawUrl(jobId, name)}?v=${artifactVersion(detail, name)}&r=${epoch}`
   return (
     <video
-      key={epoch}
+      key={src}
       className={styles.mediaVideo}
-      src={`${jobArtifactRawUrl(jobId, name)}?v=${epoch}`}
+      src={src}
       controls
       preload="metadata"
       onError={() => setFailed(true)}
@@ -209,14 +211,15 @@ export function VideoPreview({ jobId, name }: PreviewRendererProps) {
   )
 }
 
-export function AudioPreview({ jobId, name }: PreviewRendererProps) {
+export function AudioPreview({ jobId, name, detail }: PreviewRendererProps) {
   const { failed, epoch, setFailed, retry } = useMediaRetry()
   if (failed) return <MediaError jobId={jobId} name={name} onRetry={retry} />
+  const src = `${jobArtifactRawUrl(jobId, name)}?v=${artifactVersion(detail, name)}&r=${epoch}`
   return (
     <audio
-      key={epoch}
+      key={src}
       className={styles.mediaAudio}
-      src={`${jobArtifactRawUrl(jobId, name)}?v=${epoch}`}
+      src={src}
       controls
       preload="metadata"
       onError={() => setFailed(true)}
@@ -224,20 +227,17 @@ export function AudioPreview({ jobId, name }: PreviewRendererProps) {
   )
 }
 
-export function PdfPreview({ jobId, name }: PreviewRendererProps) {
+export function PdfPreview({ jobId, name, detail }: PreviewRendererProps) {
   // sandbox：PDF 内嵌渲染但不给脚本/同源能力。iframe 没有可靠的 error 事件
   // （加载失败也触发 load），失败不可检测——新窗口/下载兜底常驻展示。
+  // v = artifact 版本：重跑覆盖同名产物时失效缓存。
+  const src = `${jobArtifactRawUrl(jobId, name)}?v=${artifactVersion(detail, name)}`
   return (
     <div>
-      <iframe
-        className={styles.mediaPdf}
-        src={jobArtifactRawUrl(jobId, name)}
-        title={name}
-        sandbox=""
-      />
+      <iframe className={styles.mediaPdf} src={src} title={name} sandbox="" />
       <a
         className={styles.pdfOpenLink}
-        href={jobArtifactRawUrl(jobId, name)}
+        href={src}
         target="_blank"
         rel="noreferrer"
       >

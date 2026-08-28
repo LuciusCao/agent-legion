@@ -187,3 +187,53 @@ def test_job_artifact_service_open_raw_object_error_is_404(job_db, job):
 def test_job_artifact_service_open_raw_rejects_traversal(artifact_service, job):
     with pytest.raises(InvalidOperationError, match="Invalid artifact name"):
         artifact_service.open_raw(job["id"], "../agent_legion.sqlite")
+
+
+class _FakeRangedObjectStore:
+    """记录 open_range_stream 调用区间的对象存储 double。"""
+
+    enabled = True
+
+    def __init__(self, payload: bytes):
+        self._payload = payload
+        self.range_calls: list[tuple[int, int]] = []
+
+    def lookup(self, job_id: str, name: str) -> dict:
+        return {
+            "storage_key": f"jobs/ws/{job_id}/{name}",
+            "size_bytes": len(self._payload),
+        }
+
+    def open_stream(self, row: dict) -> io.BytesIO:
+        return io.BytesIO(self._payload)
+
+    def open_range_stream(self, row: dict, start: int, end: int) -> io.BytesIO:
+        self.range_calls.append((start, end))
+        return io.BytesIO(self._payload[start : end + 1])
+
+
+def test_job_artifact_service_open_raw_ranged(job_db, job):
+    """Range 请求走 open_range_stream（闭区间），流分支 seek 可用。"""
+    store = _FakeRangedObjectStore(b"0123456789")
+    service = JobArtifactService(job_db, store)
+
+    raw = service.open_raw(job["id"], "clip.mp4", range_header="bytes=2-5")
+
+    assert raw.stream is not None
+    assert raw.stream.read() == b"2345"
+    assert raw.size_bytes == 10
+    assert raw.range_start == 2
+    assert raw.range_end == 5
+    assert store.range_calls == [(2, 5)]
+
+
+def test_job_artifact_service_open_raw_no_range_uses_full_stream(job_db, job):
+    """无 Range 参数仍走 open_stream 全量（不误入 ranged 分支）。"""
+    store = _FakeRangedObjectStore(b"0123456789")
+    service = JobArtifactService(job_db, store)
+
+    raw = service.open_raw(job["id"], "clip.mp4")
+
+    assert raw.stream is not None
+    assert raw.stream.read() == b"0123456789"
+    assert store.range_calls == []

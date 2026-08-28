@@ -13,9 +13,7 @@ logger = logging.getLogger(__name__)
 
 class JobArtifactService:
     def __init__(
-        self,
-        job_db: JobQueries,
-        object_store: JobArtifactObjectStore | None = None,
+        self, job_db: JobQueries, object_store: JobArtifactObjectStore | None = None
     ) -> None:
         self.job_db = job_db
         # D12 read path: object storage first, local job_dir fallback (legacy
@@ -76,11 +74,13 @@ class JobArtifactService:
             return stored
         raise NotFoundError("Artifact not found")
 
-    def open_raw(self, job_id: str, artifact_name: str) -> RawArtifact:
-        """Locate a binary-servable artifact (see job_artifact_raw module)."""
+    def open_raw(
+        self, job_id: str, artifact_name: str, range_header: str | None = None
+    ) -> RawArtifact:
+        """二进制产物句柄；range_header 只对对象存储分支生效（见 raw 模块）。"""
         job = self._job_or_404(job_id)
         path = self._artifact_path(job, artifact_name)
-        return open_raw_artifact(path, self.object_store, job_id, artifact_name)
+        return open_raw_artifact(path, self.object_store, job_id, artifact_name, range_header)
 
     def reject_subpath(self, job_id: str) -> None:
         self._job_or_404(job_id)

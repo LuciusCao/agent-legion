@@ -166,3 +166,46 @@ async def _collect(iterator):
     async for chunk in iterator:
         chunks.append(chunk if isinstance(chunk, bytes) else chunk.encode())
     return chunks
+
+
+def test_parse_range_header_matrix():
+    from server.app.http_range import parse_range_header
+
+    assert parse_range_header("bytes=0-99", 100) == (0, 99)
+    assert parse_range_header("bytes=10-", 100) == (10, 99)
+    # 越界 end 裁剪到 size-1。
+    assert parse_range_header("bytes=0-999", 100) == (0, 99)
+    # 起点越界 / 无效形态 / 多区间 / 后缀区间 → None（全量回退）。
+    assert parse_range_header("bytes=100-", 100) is None
+    assert parse_range_header("bytes=abc", 100) is None
+    assert parse_range_header("bytes=0-10,20-30", 100) is None
+    assert parse_range_header("bytes=-10", 100) is None
+    assert parse_range_header(None, 100) is None
+    assert parse_range_header("bytes=0-99", None) is None
+
+
+def test_raw_response_ranged_stream_is_206():
+    """对象存储分支的 ranged handle：206 + Content-Range + 正确 Content-Length。"""
+    import asyncio
+    import io
+
+    from server.app.routes.job_artifact_raw import raw_response
+    from server.app.services.job_artifact_raw import RawArtifact
+
+    # open_range_stream 语义：流本身只含区间字节（端到端由 service 测试覆盖）。
+    stream = io.BytesIO(b"2345")
+    raw = RawArtifact(
+        name="clip.mp4",
+        stream=stream,
+        size_bytes=10,
+        range_start=2,
+        range_end=5,
+    )
+    response = raw_response(raw)
+
+    assert response.status_code == 206
+    assert response.headers["content-range"] == "bytes 2-5/10"
+    assert response.headers["content-length"] == "4"
+    assert response.headers["accept-ranges"] == "bytes"
+    body = b"".join(asyncio.run(_collect(response.body_iterator)))
+    assert body == b"2345"

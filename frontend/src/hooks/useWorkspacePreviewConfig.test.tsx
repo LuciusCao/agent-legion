@@ -105,6 +105,37 @@ describe('useWorkspacePreviewConfig', () => {
     expect(cached?.settings.previewHidden).toEqual(['frame.png'])
   })
 
+  it('快速连点两项时 PATCH 串行化（后跳基线含前跳变更）', async () => {
+    // 第一跳挂起直到 resolveFirst；第二跳必须等它完成再读基线，
+    // 否则全量列表 PATCH 会以旧基线覆盖第一跳。
+    let resolveFirst: (() => void) | undefined
+    mockUpdate.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (resolveFirst = resolve))
+    )
+    mockUpdate.mockImplementationOnce(() => Promise.resolve({}))
+    const { result } = renderWithCache(['questions.json'])
+
+    void result.current.toggleArtifact('a.png', false)
+    await act(async () => {})
+    void result.current.toggleArtifact('b.png', false)
+    await act(async () => {})
+
+    // 第一跳未完成：第二跳不得发出。
+    expect(mockUpdate).toHaveBeenCalledTimes(1)
+    expect(mockUpdate).toHaveBeenCalledWith('ws1', ['a.png', 'questions.json'])
+
+    act(() => resolveFirst?.())
+    await act(async () => {})
+
+    // 串行完成后第二跳带着第一跳的基线发出。
+    expect(mockUpdate).toHaveBeenCalledTimes(2)
+    expect(mockUpdate).toHaveBeenLastCalledWith('ws1', [
+      'a.png',
+      'b.png',
+      'questions.json',
+    ])
+  })
+
   it('保存失败回滚缓存并 toast', async () => {
     mockUpdate.mockRejectedValue(new Error('boom'))
     const showToast = vi.fn()

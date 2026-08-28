@@ -7,29 +7,16 @@ text read path stays in JobArtifactService.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO
 
+from server.app.http_range import parse_range_header
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from server.app.services.job_artifact_raw_types import RawArtifact
+
+__all__ = ["RawArtifact", "open_raw_artifact"]
 from server.app.services.job_errors import NotFoundError
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class RawArtifact:
-    """A binary artifact handle: local file path or an object-store stream.
-
-    Local files are served by FileResponse (native Range support for media
-    seeking); stream-backed artifacts come from object storage and stream
-    whole-body on first response.
-    """
-
-    name: str
-    path: Path | None = None
-    stream: BinaryIO | None = None
-    size_bytes: int | None = None
 
 
 def open_raw_artifact(
@@ -37,13 +24,14 @@ def open_raw_artifact(
     object_store: JobArtifactObjectStore | None,
     job_id: str,
     artifact_name: str,
+    range_header: str | None = None,
 ) -> RawArtifact:
     """Locate a binary-servable artifact: local job_dir file first, then the
     object-store stream (mirrors the text read()'s ordering).
 
-    Storage failures raise NotFoundError, matching read()'s degrade-to-404
-    semantics; the caller is responsible for consuming (and closing) the
-    returned handle.
+    range_header 解析为单区间后走对象存储的 ranged read（本地分支忽略
+    区间——FileResponse 自行处理 Range 头）。存储故障按 NotFoundError
+    降级，与 read() 一致；消费（与关闭）返回句柄是调用方责任。
     """
     if artifact_path.exists() and artifact_path.is_file():
         return RawArtifact(name=artifact_name, path=artifact_path)
@@ -51,8 +39,14 @@ def open_raw_artifact(
     if store is not None and store.enabled:
         row = store.lookup(job_id, artifact_name)
         if row is not None:
+            size = row.get("size_bytes")
+            size_bytes = int(size) if isinstance(size, int) else None
+            byte_range = parse_range_header(range_header, size_bytes)
             try:
-                stream = store.open_stream(row)
+                if byte_range is not None:
+                    stream = store.open_range_stream(row, *byte_range)
+                else:
+                    stream = store.open_stream(row)
             except Exception:
                 logger.warning(
                     "failed to open raw artifact %s of job %s from object storage",
@@ -61,10 +55,11 @@ def open_raw_artifact(
                     exc_info=True,
                 )
                 raise NotFoundError("Artifact not found") from None
-            size = row.get("size_bytes")
             return RawArtifact(
                 name=artifact_name,
                 stream=stream,
-                size_bytes=int(size) if isinstance(size, int) else None,
+                size_bytes=size_bytes,
+                range_start=byte_range[0] if byte_range else None,
+                range_end=byte_range[1] if byte_range else None,
             )
     raise NotFoundError("Artifact not found")
