@@ -1,4 +1,4 @@
-"""Unit tests for one claimed execution's lifecycle (worker/execution_run.py).
+"""Unit tests for one claimed execution's lifecycle (worker/execution/run.py).
 
 Split from tests/test_agent_worker.py to stay under the test-file line
 budget; the executor's protocol/registration/hot-reload/status surface

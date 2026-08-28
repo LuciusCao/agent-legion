@@ -1,4 +1,4 @@
-"""Unit tests for the Worker Host client (worker/host/client.py + host_transfer.py)."""
+"""Unit tests for the Worker Host client (worker/host/client.py + worker/host/transfer.py)."""
 
 from __future__ import annotations
 

@@ -139,7 +139,7 @@ AgentDefinition.runtime = "openclaw" → 未实现，dispatch fail-fast（现状
 
 ### 4.6 Worker 侧
 
-- **声明与 UI**：`worker/ui/index.html:163-166` 增加 `<input name="runtimes" type="checkbox" value="velites" /> Velites`；`app.js` 通用逻辑无需改。Worker 配置 `runtimes` 加 `velites` 后注册上送（host_client.py:70）。
+- **声明与 UI**：`worker/ui/index.html:163-166` 增加 `<input name="runtimes" type="checkbox" value="velites" /> Velites`；`app.js` 通用逻辑无需改。Worker 配置 `runtimes` 加 `velites` 后注册上送（worker/host/client.py:70）。
 - **二进制分发（Phase 2 定夺选型）**：
   - 方案 1（推荐起步）：维持手工 `cargo build --release` + PATH，安装/版本核对/与 Host 契约版本对齐写进 `docs/remote-execution-runbook.md`。零机制成本，与金丝雀期一致。
   - 方案 2：打进 worker 部署交付物（`deploy/compose.worker.yaml` 镜像），随 worker 版本化。worker 数量增长后再做。
