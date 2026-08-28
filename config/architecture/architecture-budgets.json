@@ -1319,7 +1319,7 @@
     "worker/service_bind.py": 27,
     "worker/service_models.py": 29,
     "worker/stale_sweep.py": 68,
-    "worker/status/__init__.py": 91,
+    "worker/status/__init__.py": 89,
     "worker/status/aggregates.py": 29,
     "worker/status/reader.py": 34,
     "worker/supervisor.py": 254,
