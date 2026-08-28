@@ -29,7 +29,12 @@ from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import prepare_replay_copy
 from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.artifact_store import ArtifactStore
-from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
+from server.app.services.job_errors import (
+    ConflictError,
+    InvalidOperationError,
+    JobServiceError,
+    NotFoundError,
+)
 from server.app.services.node_config_batch import frozen_node_config, run_frozen_payload
 from server.app.services.quality_artifact_contents import artifact_contents
 from server.app.services.versioned_entities import VersionedEntityStore
@@ -116,9 +121,11 @@ class QualityReplayService:
                 workspace_id, item, job, definition, node, replay_id, pin
             )
         except Exception as exc:
-            logger.warning("Replay %s setup failed", replay_id, exc_info=True)
-            self._fail_replay(replay_id, f"replay setup failed: {exc}")
-            if isinstance(exc, (InvalidOperationError, NotFoundError, ConflictError)):
+            # Business failures (expected, user-relevant) are recorded as a
+            # failed replay; programming errors are NOT masked as replay
+            # business failures — they leave no row behind and propagate.
+            self._compensate_failed_setup(replay_id, exc)
+            if isinstance(exc, JobServiceError):
                 raise
             raise InvalidOperationError(f"replay setup failed: {exc}") from exc
         with write_transaction(self.db_path) as conn:
@@ -260,6 +267,26 @@ class QualityReplayService:
         }
         return agent_id, pin
 
+    def _compensate_failed_setup(self, replay_id: str, exc: Exception) -> None:
+        """Undo the replay row after ``_build_copy_job`` failed (#204).
+
+        Business failures are a normal outcome (the failed attempt is recorded
+        as a replay row), so they mark the replay failed. Unexpected errors
+        must not masquerade as replay business failures: the half-created
+        replay row is removed (it would otherwise block retries at the
+        one-active-replay guard) and the error is logged with its traceback
+        for operators while the exception keeps propagating.
+        """
+        if isinstance(exc, JobServiceError):
+            self._fail_replay(replay_id, f"replay setup failed: {exc}")
+            return
+        logger.error("Replay %s setup crashed", replay_id, exc_info=exc)
+        with write_transaction(self.db_path) as conn:
+            conn.execute(
+                "delete from quality_replays where id = %s and status in ('pending', 'running')",
+                (replay_id,),
+            )
+
     def _build_copy_job(
         self,
         workspace_id: str,
@@ -326,6 +353,10 @@ class QualityReplayService:
                 frozen_config={node.key: frozen} if frozen is not None else {},
             )[0]
         except Exception:
+            # #204: both business rejections (ValueError → 400 in the run
+            # service) and programming errors land here; either way the
+            # orphaned run row must go. The bare re-raise keeps the original
+            # error type for the classification in create_replay above.
             # create_run committed before create_jobs_bulk ran; compensate the
             # orphaned run row like the items/sync-intake paths do.
             self._discard_empty_run(str(batch["id"]))
@@ -346,6 +377,12 @@ class QualityReplayService:
                     conn, copy_job_id, completed_nodes=ancestors, skipped_nodes=downstream
                 )
         except Exception:
+            # #204: mixed outcome space (InvalidOperationError from missing
+            # frozen inputs, ValueError/JobServiceError from the shared
+            # helpers, programming errors) — compensation must run for all of
+            # them, so the catch stays broad; classification happens in
+            # create_replay. The bare re-raise never converts one failure
+            # kind into another.
             # Best-effort: the not-exists guard keeps the run once the copy
             # job exists, so this only cleans up if job creation rolled back.
             self._discard_empty_run(str(batch["id"]))
@@ -364,7 +401,11 @@ class QualityReplayService:
 
     def _discard_empty_run(self, run_id: str) -> None:
         # Best-effort cleanup of the run row after copy-job creation failed;
-        # never mask the original failure.
+        # never mask the original failure. The broad catch (#204) is the
+        # deliberate safety net here: cleanup must not replace the original
+        # error, whatever it was, and the fallback warning (run id, failure
+        # of the cleanup itself) is the actionable signal — the original
+        # exception keeps propagating to the caller either way.
         try:
             self.job_db.delete_run_without_jobs(run_id)
         except Exception:

@@ -1087,7 +1087,7 @@
     "server/app/services/path_hygiene.py": 62,
     "server/app/services/quality_artifact_contents.py": 67,
     "server/app/services/quality_labels.py": 205,
-    "server/app/services/quality_replays.py": 437,
+    "server/app/services/quality_replays.py": 460,
     "server/app/services/quality_sampling.py": 184,
     "server/app/services/quality_stats.py": 110,
     "server/app/services/run_bundle_candidate.py": 48,

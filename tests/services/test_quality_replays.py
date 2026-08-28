@@ -379,10 +379,77 @@ def test_copy_job_creation_failure_compensates_run(env, monkeypatch) -> None:
 
     monkeypatch.setattr(env.job_db, "create_jobs_bulk", fail_bulk)
 
+    # A programming error is not a replay business failure (#204): the
+    # half-created replay row is compensated away and the error surfaces
+    # as a 400-wrapped setup failure instead of a recorded failed replay.
     with pytest.raises(InvalidOperationError, match="replay setup failed"):
         env.service().create_replay(env.workspace_id, "item-1")
 
     assert env.job_db.list_runs(env.workspace_id) == []
-    # The failed attempt is recorded and does not block a later retry.
+    # No replay row is left behind and a later retry is not blocked.
+    assert env.service().list_replays(env.workspace_id, "item-1") == []
+    monkeypatch.undo()
+    retry = env.service().create_replay(env.workspace_id, "item-1")
+    assert retry["status"] == "pending"
+
+
+def test_programming_error_is_not_recorded_as_replay_failure(env, monkeypatch) -> None:
+    """#204: an unexpected error in copy-job setup must not masquerade as a
+    replay business failure — no replay row is recorded, the traceback is
+    logged, and a retry after the bug is fixed is not blocked."""
+
+    service = env.service()
+    real_build = service._build_copy_job
+
+    def broken_build(*args, **kwargs):
+        raise TypeError("cannot unpack non-iterable None (injected bug)")
+
+    monkeypatch.setattr(service, "_build_copy_job", broken_build)
+
+    with pytest.raises(InvalidOperationError, match="replay setup failed"):
+        service.create_replay(env.workspace_id, "item-1")
+
+    assert service.list_replays(env.workspace_id, "item-1") == []
+    assert env.job_db.list_runs(env.workspace_id) == []
+
+    # Once the bug is fixed the same item replays without residue.
+    monkeypatch.setattr(service, "_build_copy_job", real_build)
+    replay = service.create_replay(env.workspace_id, "item-1")
+    assert replay["status"] == "pending"
+
+
+def test_programming_error_in_copy_setup_keeps_runtime_error_visible(
+    env, monkeypatch, caplog
+) -> None:
+    """A programming error reaching the route layer must stay distinguishable
+    from a 4xx business failure: the original exception is chained on the
+    wrapped InvalidOperationError and logged with its traceback."""
+
+    def fail_bulk(**kwargs):
+        raise TypeError("injected bug: 'NoneType' object is not iterable")
+
+    monkeypatch.setattr(env.job_db, "create_jobs_bulk", fail_bulk)
+
+    with (
+        caplog.at_level("ERROR", logger="server.app.services.quality_replays"),
+        pytest.raises(InvalidOperationError, match="replay setup failed") as caught,
+    ):
+        env.service().create_replay(env.workspace_id, "item-1")
+
+    assert isinstance(caught.value.__cause__, TypeError)
+    assert any("setup crashed" in record.message for record in caplog.records)
+    assert any(record.exc_info for record in caplog.records)
+
+
+def test_business_failure_still_records_failed_replay(env) -> None:
+    """#204 counterpart: business failures keep the legacy behavior — the
+    attempt is recorded as a failed replay row and retriable."""
+
+    resolve_job_dir(env.job, env.job_db.jobs_dir).joinpath("question.json").unlink()
+    with pytest.raises(InvalidOperationError, match="frozen inputs"):
+        env.service().create_replay(env.workspace_id, "item-1")
+
     (replay,) = env.service().list_replays(env.workspace_id, "item-1")
     assert replay["status"] == "failed"
+    assert "frozen inputs" in replay["error_message"]
+    assert replay["finished_at"] is not None
