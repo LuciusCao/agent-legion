@@ -459,3 +459,23 @@ def test_reconciler_skips_job_with_non_mapping_revision_json(
     store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
 
     assert reupload_missing(store, job_db, _settings(tmp_path)) == 0
+
+
+def test_reconciler_propagates_parser_valueerror_not_swallowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex round-3 on PR #251: a plain ValueError from a definition-parser
+    bug must propagate (the job's artifacts must not be silently stranded),
+    unlike the #243-family JSON corruption which skips per-job."""
+    job = _seed_job()
+    monkeypatch.setattr(job_artifact_maintenance, "definition_from_job_snapshot", lambda job: None)
+
+    def _boom(job_db, workspace_id, workflow_key):
+        raise ValueError("parser implementation bug")
+
+    monkeypatch.setattr(job_artifact_maintenance, "require_workspace_active_definition", _boom)
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    with pytest.raises(ValueError, match="parser implementation bug"):
+        reupload_missing(store, _job_db(job), _settings(tmp_path))
