@@ -149,5 +149,15 @@ class AgentStatusManager:
             try:
                 asyncio.run_coroutine_threadsafe(ws.send_json(envelope), loop)
             except Exception:
+                # #204 broad-except audit: per-client containment on the
+                # no-bus fallback path (test/direct-construction only in
+                # production code the bus handles fan-out). run_coroutine_
+                # threadsafe raises when the submit races loop shutdown
+                # (RuntimeError) or the websocket object rejects the
+                # coroutine; either way one dead client must not abort the
+                # envelope delivery to the remaining clients in this loop.
+                # Discarding the client mirrors disconnect(); the warning
+                # with traceback is the signal — nothing is masked because
+                # broadcasting is fire-and-forget by design.
                 logger.warning("agent WS send failed, dropping client", exc_info=True)
                 self._clients.discard(ws)

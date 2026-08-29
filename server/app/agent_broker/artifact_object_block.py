@@ -49,6 +49,16 @@ def inject_artifact_object_block(
         uploads = build_artifact_uploads(object_store, manifest)
         inputs = upgrade_input_artifacts(object_store, manifest)
     except Exception:
+        # #204 broad-except audit: deliberate degradation, verified against
+        # the channel contract. The try covers two presign loops whose
+        # outcome space is the storage driver surface (botocore ClientError
+        # et al., not a business family) plus DB reads of manifest rows.
+        # All-or-nothing assignment means either the whole object channel is
+        # injected or none of it — a partial manifest key set is impossible
+        # by construction. The Worker seeing no ``artifact_uploads`` uses the
+        # legacy per-file POST channel, so an outage degrades throughput,
+        # never correctness. The traceback is logged so the outage is
+        # diagnosable.
         logger.warning(
             "artifact object-block injection failed for job %s; "
             "the Worker falls back to the legacy artifact channel",

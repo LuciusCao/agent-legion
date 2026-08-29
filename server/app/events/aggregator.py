@@ -86,8 +86,17 @@ class WorkspaceJobEventAggregator:
             try:
                 await asyncio.to_thread(self.flush_once)
             except Exception:
-                # A transient failure (e.g. DB hiccup) must not kill the event
-                # pipeline: log, back off, and keep flushing.
+                # #204 broad-except audit: the flush pipeline's life support.
+                # The aggregator's run() is the only consumer of the event
+                # buffer — if this task dies, the buffer keeps recording
+                # (compaction prevents unbounded growth) but subscribers
+                # never see another patch and the resync/overflow signals
+                # never fire. The flush touches the DB (stats queries, patch
+                # summaries) and the bus, whose failure space cannot be
+                # enumerated as a business family; a transient DB restart is
+                # the expected case the backoff exists for. The full
+                # traceback is logged before the backoff so the root cause
+                # stays diagnosable.
                 logger.exception("workspace event flush failed; retrying after backoff")
                 await asyncio.sleep(failure_backoff_seconds)
                 continue
@@ -162,6 +171,14 @@ def record_job_update(
         if workspace_id:
             job_event_buffer.record_job_updated(workspace_id, job_id)
     except Exception:
+        # #204 broad-except audit: observability must not fail the caller.
+        # record_job_update is invoked from the lease/claim write paths
+        # (broker claim, lease transitions, job workflow upgrade) — an event
+        # bookkeeping failure must never roll back or fail the business
+        # operation that already succeeded. The outcome space is the DB
+        # surface plus the buffer's own record path, not a business family;
+        # the missed update self-heals (the aggregator's periodic stats
+        # refresh and the next state change re-record the job).
         logger.exception("Failed to record job update for %s", job_id)
 
 
@@ -182,4 +199,10 @@ def broadcast_job_update(
         stats = job_db.count_jobs_by_status(workspace_id)
         job_event_manager.broadcast_job_updated(workspace_id, job_id, stats)
     except Exception:
+        # #204 broad-except audit: same discipline as record_job_update
+        # above — fire-and-forget broadcasting off the business write path.
+        # A failed broadcast (DB read for the job row/stats, bus publish)
+        # degrades to a stale UI patch until the next state change or the
+        # aggregator's periodic stats flush; the operation that triggered it
+        # has already committed and must not fail retroactively.
         logger.exception("Failed to broadcast job update for %s", job_id)

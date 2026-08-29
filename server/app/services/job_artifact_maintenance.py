@@ -29,6 +29,7 @@ from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from server.app.services.job_errors import NotFoundError
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.settings import Settings
@@ -113,7 +114,18 @@ def reupload_missing(
                 job_db, str(job["workspace_id"]), str(job["workflow_key"])
             )
             job_dir = resolve_job_dir(job, settings.jobs_dir)
-        except Exception:  # skip jobs whose definition/dir cannot be resolved
+        except (NotFoundError, ManagedPathError) as exc:
+            # #204: expected per-job failures only. A job whose snapshot AND
+            # workspace revision both fail to parse, a workspace with no
+            # active revision, or an unmappable storage_dir is skipped — one
+            # unresolvable job must not abort the reconciler pass for every
+            # other job. The (previously silent) debug log names the skipped
+            # job; a definition parse bug in workflow_definition_from_dict
+            # surfaces via its own warning inside definition_from_job_snapshot
+            # and falls into the NotFoundError branch here, keeping the pass
+            # alive. Programming errors now propagate to the thread's safety
+            # net instead of silently zeroing this pass.
+            logger.debug("reconciler skips job %s: %s", job_id, exc)
             continue
         if not job_dir.is_dir():
             continue
@@ -140,6 +152,16 @@ def reupload_missing(
                     )
                     uploaded += 1
                 except Exception:
+                    # #204 broad-except audit: per-file best-effort re-upload.
+                    # The upload path's outcome space is genuinely mixed —
+                    # declared storage outages (botocore ClientError after the
+                    # bounded retries inside upload), DB errors from the
+                    # manifest upsert, and unexpected programming errors must
+                    # all leave this pass alive for the other artifacts: the
+                    # reconciler IS the retry mechanism (next pass re-finds
+                    # the still-missing/stale row). A narrow business family
+                    # cannot enumerate the storage layer; the traceback is
+                    # logged so the outage is diagnosable.
                     logger.warning(
                         "reconciler re-upload failed for job %s node %s artifact %s",
                         job_id,
@@ -328,6 +350,15 @@ class JobArtifactMaintenanceThread:
             try:
                 self.run_once()
             except Exception:
+                # #204 broad-except audit: the maintenance thread's life
+                # support. run_once (reupload + eviction) is a long walk over
+                # the jobs table, manifest rows, and the filesystem — any
+                # unexpected failure (DB restart mid-walk, a narrow catch
+                # above missing a case) must not kill the only thread that
+                # performs either duty: the local cache would then grow
+                # unbounded and missing manifest rows would never self-heal.
+                # The full traceback is logged; the next interval is the
+                # retry.
                 logger.exception("job artifact maintenance failed")
 
     def stop(self, timeout: float = 3.0) -> None:

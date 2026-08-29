@@ -334,3 +334,86 @@ def test_eviction_rechecks_precondition_before_every_unlink(
     assert calls == 2
     remaining = [path for path in job_dir.iterdir() if path.is_file()]
     assert len(remaining) == 1
+
+
+def test_reconciler_skips_job_without_active_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#204 窄化：workspace 无 active revision（NotFoundError）→ 跳过该 job、
+    pass 继续（返回 0 而不是上抛）。"""
+    job = _seed_job()
+    # 无快照 + 无 active revision → require_workspace_active_definition 抛 NotFoundError
+    monkeypatch.setattr(job_artifact_maintenance, "definition_from_job_snapshot", lambda job: None)
+
+    job_db = _job_db(job)
+    job_db.get_active_workflow_revision = lambda ws, key: None
+
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    assert reupload_missing(store, job_db, _settings(tmp_path)) == 0
+
+
+def test_reconciler_skips_job_with_unmappable_storage_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#204 窄化：storage_dir 无法映射进 data 根（ManagedPathError）→ 跳过。"""
+    job = _seed_job()
+    _definition(monkeypatch)
+    job["storage_dir"] = "/etc/passwd"  # 绝对路径无法回基到 data 根内
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    assert reupload_missing(store, _job_db(job), _settings(tmp_path)) == 0
+
+
+def test_reconciler_propagates_programming_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#204 窄化：定义解析抛出非预期编程错误（TypeError）→ 上抛给线程保命网，
+    不再被静默吞成「本 pass 零上传」。"""
+    job = _seed_job()
+
+    def _boom(job: dict[str, Any]) -> Any:
+        raise TypeError("parser bug")
+
+    monkeypatch.setattr(job_artifact_maintenance, "definition_from_job_snapshot", _boom)
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    with pytest.raises(TypeError, match="parser bug"):
+        reupload_missing(store, _job_db(job), _settings(tmp_path))
+
+
+def test_reconciler_survives_upload_failure_and_continues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#204 保留补强：单产物上传失败（存储异常）→ warning 日志、其余产物
+    继续上传，pass 不中断（reconciler 即重试机制）。"""
+    job = _seed_job()
+    definition = SimpleNamespace(nodes={"n1": SimpleNamespace(outputs=["a.json", "b.json"])})
+    monkeypatch.setattr(
+        job_artifact_maintenance, "definition_from_job_snapshot", lambda job: definition
+    )
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    job_dir = tmp_path / "jobs" / "ws" / "job-1"
+    job_dir.mkdir(parents=True)
+    (job_dir / "a.json").write_bytes(OLD_PAYLOAD)
+    (job_dir / "b.json").write_bytes(OLD_PAYLOAD)
+    real_upload = store.upload
+
+    def _flaky_upload(**kwargs: Any) -> Any:
+        if kwargs["name"] == "a.json":
+            raise RuntimeError("storage outage")
+        return real_upload(**kwargs)
+
+    monkeypatch.setattr(store, "upload", _flaky_upload)
+
+    with caplog.at_level("WARNING", logger="server.app.services.job_artifact_maintenance"):
+        assert reupload_missing(store, _job_db(job), _settings(tmp_path)) == 1
+
+    # b.json 上传成功；a.json 的失败被 warning 记录（含 job 上下文）
+    assert storage.objects["jobs/ws-1/job-1/b.json"] == OLD_PAYLOAD
+    assert "jobs/ws-1/job-1/a.json" not in storage.objects
+    assert any("reconciler re-upload failed" in record.message for record in caplog.records)

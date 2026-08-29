@@ -65,6 +65,16 @@ class AgentRegistry:
                 for r in records
             ]
         except Exception:
+            # #204 broad-except audit: deliberate discovery containment. The
+            # callable is the openclaw discovery adapter — an external
+            # process/HTTP surface whose failure space (subprocess errors,
+            # malformed agent records, timeouts) is not a business family
+            # this panel state layer could enumerate. The panel is a
+            # status view: an empty row set on failure is strictly better
+            # than killing the caller (the broker's registry upkeep and the
+            # agents WS snapshot). The existing test pins the
+            # clears-rows-and-returns-empty contract; the traceback goes to
+            # the warning log.
             logger.warning("agent discovery failed, returning empty list", exc_info=True)
             agents = []
         with self._lock:

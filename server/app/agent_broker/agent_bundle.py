@@ -35,6 +35,16 @@ def cleanup_bundle_on_error(bundle_path: Path) -> Iterator[None]:
     try:
         yield
     except Exception:
+        # #204 broad-except audit: compensate-then-bare-re-raise (#233
+        # pattern). The with-block spans bundle build + broker enqueue, whose
+        # outcome space is mixed on purpose — expected enqueue refusals,
+        # storage staging failures, and programming errors all must delete
+        # the half-built bundle file before propagating; the bare re-raise
+        # preserves the original type so the caller's handling (and tests)
+        # never see a converted failure. No logging here: the caller re-raises
+        # with full context (the pool thread or dispatch path logs the
+        # traceback), and the unlink failure mode (missing_ok) is silent by
+        # design.
         bundle_path.unlink(missing_ok=True)
         raise
 
