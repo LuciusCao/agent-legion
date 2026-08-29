@@ -417,3 +417,26 @@ def test_reconciler_survives_upload_failure_and_continues(
     assert storage.objects["jobs/ws-1/job-1/b.json"] == OLD_PAYLOAD
     assert "jobs/ws-1/job-1/a.json" not in storage.objects
     assert any("reconciler re-upload failed" in record.message for record in caplog.records)
+
+
+def test_reconciler_skips_job_with_corrupt_active_revision_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex review on PR #251: an active revision whose definition_json is
+    corrupt (JSONDecodeError / WorkflowDefinitionError — the #243 family) must
+    skip that job, not abort the reconciler pass (which would also stall
+    eviction for every other job)."""
+
+    class _CorruptRevision(dict):
+        pass
+
+    job = _seed_job()
+    monkeypatch.setattr(job_artifact_maintenance, "definition_from_job_snapshot", lambda job: None)
+    job_db = _job_db(job)
+    # definition_json 不是合法 JSON → json.loads 抛 JSONDecodeError
+    job_db.get_active_workflow_revision = lambda ws, key: {"definition_json": "{not valid json"}
+
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    assert reupload_missing(store, job_db, _settings(tmp_path)) == 0

@@ -123,14 +123,15 @@ def _remove_row_artifacts(
         try:
             remove_path(resolve_data_path(log_path_str, data_dir, allow_missing=True))
             return 1
-        except ManagedPathError as exc:
+        except (ManagedPathError, OSError, RuntimeError) as exc:
             # Expected per-row failure (#204): the stored log path cannot be
             # resolved inside data_dir (legacy absolute path with an
-            # unrecognizable layout, or an empty/escaping value). One bad row
-            # must not abort the sweep — the mark still advances past it
-            # (best-effort contract, see the store docstring).
-            # remove_path itself already contains the OSError net, so the
-            # only escape route out of this try block is ManagedPathError.
+            # unrecognizable layout, or an empty/escaping value), or the
+            # filesystem refuses the resolve (permissions, symlink loop —
+            # resolve_data_path deliberately propagates those, codex review
+            # on PR #251). One bad row must not abort the sweep — the mark
+            # still advances past it (best-effort contract, store docstring).
+            # remove_path itself already contains the OSError net.
             logger.warning("Skip log with unresolvable path %r: %s", log_path_str, exc)
             return 0
     run_dir_str = row["run_dir"]
@@ -143,12 +144,13 @@ def _remove_row_artifacts(
     try:
         remove_path(resolve_data_path(run_dir_str, data_dir, allow_missing=True))
         return 1
-    except ManagedPathError as exc:
+    except (ManagedPathError, OSError, RuntimeError) as exc:
         # Same per-row discipline as the log branch above (#204): a row whose
         # run_dir cannot be mapped inside data_dir is skipped (warning), the
-        # sweep keeps walking. The high-water mark advances past it either way,
-        # so a permanently unresolvable row warns once per pass, not once per
-        # page, and never wedges the cursor.
+        # sweep keeps walking — OS-level resolve failures (permissions,
+        # symlink loops) included (codex review on PR #251). The high-water
+        # mark advances past it either way, so a permanently unresolvable row
+        # warns once per pass, not once per page, and never wedges the cursor.
         logger.warning("Skip run_dir with unresolvable path %r: %s", run_dir_str, exc)
         return 0
 
