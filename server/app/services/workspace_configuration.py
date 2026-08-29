@@ -34,6 +34,8 @@ from server.app.settings import Settings
 from server.app.workflows.builtin_demo import DEMO_WORKFLOW_KEY
 from server.app.workflows.definition import WorkflowDefinition
 
+_WORKFLOW_KEY_IMMUTABLE = "Workflow key is bound to the workspace id and immutable"
+
 
 class WorkspaceConfigurationService:
     def __init__(
@@ -106,7 +108,7 @@ class WorkspaceConfigurationService:
         self._workspace(workspace_id)
         # Schema v62: the workflow key (= workspace id) is immutable.
         if payload.get("default_workflow_key") is not None:
-            raise InvalidOperationError("Workflow key is bound to the workspace id and immutable")
+            raise InvalidOperationError(_WORKFLOW_KEY_IMMUTABLE)
         try:
             return self.job_db.update_workspace(
                 workspace_id,
@@ -159,7 +161,7 @@ class WorkspaceConfigurationService:
         if not workflow_key:
             raise InvalidOperationError("Workspace workflow is not set")
         if workflow_key != str(workspace["default_workflow_key"]):
-            raise InvalidOperationError("Workflow key is bound to the workspace id and immutable")
+            raise InvalidOperationError(_WORKFLOW_KEY_IMMUTABLE)
         workflow = self._definition_for_seed(workspace_id, workflow_key)
         # workflow is None before the first publish; the validator then runs
         # only the definition-independent checks, and publish-time validation
@@ -235,12 +237,9 @@ class WorkspaceConfigurationService:
             # The section stays so legacy clients sending an unchanged key
             # keep working; any change is rejected.
             workflow_key = patch.get("workflowKey")
-            if workflow_key is not None and str(workflow_key) != str(
-                workspace["default_workflow_key"]
-            ):
-                raise InvalidOperationError(
-                    "Workflow key is bound to the workspace id and immutable"
-                )
+            bound_key = str(workspace["default_workflow_key"])
+            if workflow_key is not None and str(workflow_key) != bound_key:
+                raise InvalidOperationError(_WORKFLOW_KEY_IMMUTABLE)
         elif section == "nodes":
             workspace = update_workspace_node_config(
                 self.job_db,

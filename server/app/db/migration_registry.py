@@ -125,6 +125,5 @@ MIGRATIONS: list[SchemaMigration] = [
     SchemaMigration(64, "workspace_settings_retirement", migrate_workspace_execution_defaults),
 ]
 
-assert [m.version for m in MIGRATIONS] == sorted(m.version for m in MIGRATIONS), (
-    "MIGRATIONS must stay version-sorted"
-)
+_VERSIONS = [m.version for m in MIGRATIONS]
+assert sorted(_VERSIONS) == _VERSIONS, "MIGRATIONS must stay version-sorted"
