@@ -68,8 +68,12 @@ _RESULT_BASENAME = ".custom_node_result.json"
 def _velites_binary(executor: CodeExecutor) -> str | None:
     """PATH probe for the velites sandbox wrapper, cached per executor."""
     if not executor._velites_probed:
-        executor._velites_probed = True
+        # Assign the path before flipping the flag: concurrent first probes
+        # (a fresh executor's first parallel dispatch batch after a backend
+        # reload) must never observe probed=True with the path still unset,
+        # which would fail-closed with a spurious "no velites binary" error.
         executor._velites_path = shutil.which("velites")
+        executor._velites_probed = True
     return executor._velites_path
 
 

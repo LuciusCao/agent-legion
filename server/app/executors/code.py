@@ -100,8 +100,11 @@ class CodeExecutor:
     def _object_store(self) -> Any | None:
         """Instance object storage for materialization, probed lazily."""
         if not self._storage_probed:
-            self._storage_probed = True
+            # Assign before flipping the flag (same first-probe race as the
+            # velites probe in _code_sandbox): concurrent readers must not
+            # see probed=True with the storage still None.
             self._object_storage = build_s3_storage()
+            self._storage_probed = True
         return self._object_storage
 
     def _artifact_object_store(self) -> JobArtifactObjectStore | None:
