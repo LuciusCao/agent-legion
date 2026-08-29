@@ -1,3 +1,4 @@
+import json
 from contextlib import closing
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from server.app.services.job_selection_resolver import EmptyJobSelectionError
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
 from server.app.services.job_workflow_upgrade_batch import batch_upgrade
 from server.app.services.workflow_revisions import WorkflowRevisionService
+from server.app.workflows.schema import WorkflowDefinition, WorkflowIntake, WorkflowNode
 from tests.helpers import load_builtin_definition
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -442,3 +444,132 @@ def test_batch_upgrade_raises_on_empty_selection(tmp_path: Path) -> None:
         batch_upgrade(service, workspace["id"], [])
     with pytest.raises(EmptyJobSelectionError):
         batch_upgrade(service, workspace["id"], job_filter=JobListFilter(status="failed"))
+
+
+def _config_definition(config_schema: dict | None = None) -> WorkflowDefinition:
+    return WorkflowDefinition(
+        key="wf",
+        label="Wf",
+        intake=WorkflowIntake(),
+        nodes={
+            "fetch": WorkflowNode(
+                key="fetch",
+                label="Fetch",
+                capability="fetch",
+                config_schema=config_schema or {},
+            )
+        },
+    )
+
+
+def _config_setup(tmp_path: Path, config_schema: dict | None = None):
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("ws1", default_workflow_key="wf")
+    current = WorkflowRevisionService(queries).publish_workspace_revision(
+        workspace["id"], _config_definition(config_schema)
+    )
+    service = JobWorkflowUpgradeService(
+        queries,
+        ExecutorLeaseRepository(queries, data_dir=tmp_path),
+    )
+    return queries, workspace, current, service
+
+
+def test_upgrade_job_workflow_refreshes_stale_snapshot_on_current_revision(
+    tmp_path: Path,
+) -> None:
+    # A job pinning the active revision id but carrying a stale snapshot must
+    # be re-pinned, not skipped: dispatch resolves from the snapshot.
+    queries, workspace, current, service = _config_setup(tmp_path)
+    job = queries.create_job(
+        workflow_key="wf",
+        source_type="question",
+        source_id="Q1",
+        run_id="batch1",
+        title="Question 1",
+        node_keys=["fetch"],
+        workspace_id=workspace["id"],
+        workflow_revision_id=current["id"],
+        workflow_version=current["version"],
+        workflow_definition_hash="stale-hash",
+        workflow_definition_snapshot_json="{}",
+    )
+    queries.update_job_status(job["id"], "failed")
+
+    result = service.upgrade(workspace["id"], job["id"])
+
+    upgraded = queries.get_job(job["id"])
+    assert result["status"] == "succeeded"
+    assert upgraded["workflow_revision_id"] == current["id"]
+    assert upgraded["workflow_definition_hash"] == current["definition_hash"]
+    assert upgraded["workflow_definition_snapshot_json"] == current["definition_json"]
+    assert upgraded["status"] == "queued"
+
+
+def test_upgrade_job_workflow_reresolves_frozen_node_config(tmp_path: Path) -> None:
+    schema = {
+        "type": "object",
+        "properties": {"bank_version": {"type": "string", "default": "v5"}},
+    }
+    queries, workspace, current, service = _config_setup(tmp_path, schema)
+    job = queries.create_job(
+        workflow_key="wf",
+        source_type="question",
+        source_id="Q1",
+        run_id="batch1",
+        title="Question 1",
+        node_keys=["fetch"],
+        workspace_id=workspace["id"],
+        workflow_revision_id=current["id"],
+        workflow_version=current["version"],
+        workflow_definition_hash="stale-hash",
+        workflow_definition_snapshot_json="{}",
+    )
+    queries.update_job_status(job["id"], "failed")
+    with closing(connect_database(queries.path)) as conn, conn:
+        conn.execute(
+            "update jobs set frozen_config_json=%s where id=%s",
+            (json.dumps({"fetch": {"connection": "cms-internal"}}), job["id"]),
+        )
+
+    result = service.upgrade(workspace["id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    frozen = json.loads(queries.get_job(job["id"])["frozen_config_json"])
+    # Re-resolved as intake would on the active revision: schema defaults
+    # (plus platform-reserved execution keys) replace the stale freeze.
+    assert frozen["fetch"]["bank_version"] == "v5"
+    assert "connection" not in frozen["fetch"]
+
+
+def test_upgrade_job_workflow_fails_on_invalid_node_config_without_mutation(
+    tmp_path: Path,
+) -> None:
+    schema = {
+        "type": "object",
+        "properties": {"bank_version": {"type": "string", "default": "v5"}},
+    }
+    queries, workspace, current, service = _config_setup(tmp_path, schema)
+    queries.update_workspace(workspace["id"], node_config={"wf": {"fetch": {"unknown_key": "x"}}})
+    job = queries.create_job(
+        workflow_key="wf",
+        source_type="question",
+        source_id="Q1",
+        run_id="batch1",
+        title="Question 1",
+        node_keys=["fetch"],
+        workspace_id=workspace["id"],
+        workflow_revision_id=current["id"],
+        workflow_version=current["version"],
+        workflow_definition_hash="stale-hash",
+        workflow_definition_snapshot_json="{}",
+    )
+    queries.update_job_status(job["id"], "failed")
+
+    result = service.upgrade(workspace["id"], job["id"])
+
+    assert result["status"] == "failed"
+    assert result["reason_code"] == "invalid_node_config"
+    upgraded = queries.get_job(job["id"])
+    assert upgraded["workflow_definition_hash"] == "stale-hash"
+    assert upgraded["status"] == "failed"

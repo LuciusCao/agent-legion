@@ -1106,6 +1106,7 @@
     "server/app/services/job_staged_cleanup.py": 32,
     "server/app/services/job_workflow_upgrade.py": 97,
     "server/app/services/job_workflow_upgrade_batch.py": 42,
+    "server/app/services/job_workflow_upgrade_config.py": 37,
     "server/app/services/job_workflow_versions.py": 22,
     "server/app/services/log_cleanup.py": 77,
     "server/app/services/material_bundle_cache.py": 171,
