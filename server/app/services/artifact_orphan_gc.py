@@ -29,7 +29,10 @@ _SCAN_BATCH = 500
 def _orphan_batches(store: ArtifactStore) -> Iterator[list[dict]]:
     after = ""
     while True:
-        with read_connection(store.db_path) as conn:
+        # Public connect_source property (#187): the store holds the
+        # JobQueries facade (or a bare DSN), and read_connection accepts
+        # ConnectSource — never unwrap it here.
+        with read_connection(store.connect_source) as conn:
             rows = conn.execute(
                 "select a.hash, a.size, a.created_at from artifacts a"
                 " where a.hash > %s"

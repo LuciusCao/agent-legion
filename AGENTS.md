@@ -116,10 +116,10 @@
   新路径沿用旧路径地板，改名不再重置 ceiling；真正的全新文件首次登记
   （actual + buffer）不受约束。release train（develop→main）例外：main 的
   floor 落后 develop 整整一个发布周期，而每次上调在合入 develop 时都已过了
-  本守卫——CI 仅在 `base=main && head=develop` 时设
-  `AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN=1` 让锚点只看 HEAD（#249
-  首次撞线，0.4.0）；feature→develop 的 PR、本地门禁与 push 一律保持
-  HEAD^ 基线锚点的完整严格性。
+  本守卫——CI 在 `base=main && head=develop` 的 PR 与 main/master 合并后
+  push 重跑时设 `AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN=1` 让锚点
+  只看 HEAD（#249 首次撞线，0.4.0，PR 与 main push 各一次）；feature→develop
+  的 PR 与本地门禁一律保持 HEAD^ 基线锚点的完整严格性。
 
 ## 6. Boundary Rules（禁止模式摘要）
 

@@ -14,6 +14,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
+from server.app.db.dialect import ConnectSource
 from server.app.services.connection_tokens import ConnectionTokenService
 
 logger = logging.getLogger(__name__)
@@ -34,17 +35,18 @@ def report_node_auth_failure(runtime: Mapping[str, Any]) -> None:
     )
     # The code executors pop ``_job_db_path`` before invoking node code and
     # hand the node a JobQueries handle instead (``runtime["job_db"]``, see
-    # server/app/executors/code.py and _code_sandbox.py): resolve the DSN from
-    # that handle first and keep ``_job_db_path`` only as a fallback for
-    # runtimes that still carry the raw path.
+    # server/app/executors/code.py and _code_sandbox.py): pass that handle
+    # straight to the token service (ConnectSource, #187) — never unwrap it
+    # to a DSN via getattr (BOUNDARY-DATA-001) — and keep ``_job_db_path``
+    # only as a fallback for runtimes that still carry the raw path.
     job_db = runtime.get("job_db")
-    job_db_path = getattr(job_db, "path", None)
-    dsn = str(job_db_path).strip() if job_db_path else ""
-    if not dsn:
-        dsn = str(runtime.get("_job_db_path") or "").strip()
-    if not key or not dsn:
+    if job_db is not None:
+        connect_source: ConnectSource = job_db
+    else:
+        connect_source = str(runtime.get("_job_db_path") or "").strip()
+    if not key or not connect_source:
         return
     try:
-        ConnectionTokenService(dsn).report_auth_failure(key)
+        ConnectionTokenService(connect_source).report_auth_failure(key)
     except Exception:  # reporting must never mask the original failure
         logger.exception("connection %s: failed to report auth failure", key)

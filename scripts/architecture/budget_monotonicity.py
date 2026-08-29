@@ -41,10 +41,10 @@ def _anchors() -> tuple[str, ...]:
     The release train (develop→main) merges a head branch whose ceilings
     legitimately evolved over the whole release cycle: every raise passed
     this guard against develop's own anchors when its PR landed, so main's
-    lagging floors would reject already-reviewed history (first hit by the
-    0.4.0 release, PR #249). The CI workflow sets the opt-out only for
-    base=main && head=develop; every other context (feature→develop PRs,
-    local gates, pushes) keeps the HEAD^ base anchor at full strictness.
+    lagging floors reject already-reviewed history (0.4.0, PR #249 and its
+    post-merge push run — the merge's first parent is the old, stale main).
+    The CI workflow sets the opt-out for base=main && head=develop and for
+    push runs on main/master; every other context keeps the HEAD^ anchor.
     """
     return ("HEAD",) if os.environ.get(_RELEASE_TRAIN_OPT_OUT) == "1" else _ANCHORS
 

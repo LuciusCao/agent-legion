@@ -45,16 +45,23 @@ class ArtifactNotFoundError(ArtifactStoreError):
 
 
 class ArtifactStore:
-    """Content-addressed blob store; ``db_path`` accepts the JobQueries facade
-    or a bare DSN string (BOUNDARY-DATA-001, #187)."""
+    """Content-addressed blob store; the connect source accepts the JobQueries
+    facade or a bare DSN string (BOUNDARY-DATA-001, #187)."""
 
     def __init__(
         self, root: Path, db_path: ConnectSource, gc_grace_seconds: float = GC_GRACE_SECONDS
     ) -> None:
         self.root = root
-        self.db_path = db_path
+        self._connect_source = db_path
         self.gc_grace_seconds = gc_grace_seconds
         (self.root / ".staging").mkdir(parents=True, exist_ok=True)
+
+    @property
+    def connect_source(self) -> ConnectSource:
+        """The store's connection source (#187): hand it straight to the
+        connection helpers — the retired ``db_path`` name lied about holding
+        a path while carrying the facade."""
+        return self._connect_source
 
     def put(self, data: bytes) -> str:
         digest = hashlib.sha256(data).hexdigest()
@@ -72,7 +79,7 @@ class ArtifactStore:
         # Always (re)assert the catalog row: a crash between the file publish
         # and this insert (or a GC race) can leave a blob without a row, and
         # artifact_refs.hash has an FK to artifacts(hash).
-        with write_transaction(self.db_path) as conn:
+        with write_transaction(self._connect_source) as conn:
             conn.execute(
                 "insert into artifacts(hash, size) values (%s, %s) on conflict(hash) do nothing",
                 (digest, len(data)),
@@ -94,7 +101,7 @@ class ArtifactStore:
         return path
 
     def add_ref(self, job_id: str, node_key: str, name: str, hash: str) -> None:
-        with write_transaction(self.db_path) as conn:
+        with write_transaction(self._connect_source) as conn:
             conn.execute(
                 "insert into artifact_refs(job_id, node_key, name, hash) values (%s, %s, %s, %s)"
                 " on conflict(job_id, node_key, name) do update set hash=excluded.hash",
@@ -102,7 +109,7 @@ class ArtifactStore:
             )
 
     def refs_for_job(self, job_id: str) -> list[dict]:
-        with read_connection(self.db_path) as conn:
+        with read_connection(self._connect_source) as conn:
             rows = conn.execute(
                 "select job_id, node_key, name, hash from artifact_refs where job_id = %s"
                 " order by node_key, name",
@@ -112,7 +119,7 @@ class ArtifactStore:
 
     def delete_refs_for_job(self, job_id: str) -> list[str]:
         # 单事务内“先删后查孤儿”：返回删除后不再被任何 job 引用的 hash。
-        with write_transaction(self.db_path) as conn:
+        with write_transaction(self._connect_source) as conn:
             hashes = [
                 row["hash"]
                 for row in conn.execute(
@@ -139,7 +146,7 @@ class ArtifactStore:
         # never leave refs pointing at deleted blobs.
         cutoff = (now or datetime.now(UTC)) - timedelta(seconds=self.gc_grace_seconds)
         deleted_paths: list[Path] = []
-        with write_transaction(self.db_path) as conn:
+        with write_transaction(self._connect_source) as conn:
             for h in hashes:
                 refs_row = conn.execute(
                     "select count(*) as cnt from artifact_refs where hash = %s", (h,)

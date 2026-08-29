@@ -231,3 +231,34 @@ def test_prefetch_bundle_block_fails_closed_without_job_db(bundle, storage, tmp_
     executor = _FakeExecutor(None, tmp_path, storage)
     with pytest.raises(MaterializeError, match="job database"):
         prefetch_bundle_block(executor, _job(bundle["id"]), WORKSPACE_ID)
+
+
+def test_prefetch_bundle_block_facade_passthrough_no_getattr_escape(
+    job_db, bundle, storage, tmp_path: Path, monkeypatch
+) -> None:
+    """#187 getattr 逃逸收口：executor.job_db 是 facade 形态时必须原样直通
+    给连接层（ConnectSource），不得经 getattr(job_db, "path") 抽回裸 DSN。"""
+    import server.app.services.material_bundle_cache as module
+    from server.app.db.transaction import read_connection as real_read_connection
+
+    received: list[object] = []
+
+    class FakeFacade:
+        dsn_identity = job_db.dsn_identity  # real DSN behind the facade
+
+        @property
+        def path(self):  # pragma: no cover - must not be touched
+            raise AssertionError("facade must pass through, not unwrap .path")
+
+    def recording_read_connection(source):
+        received.append(source)
+        return real_read_connection(source)
+
+    monkeypatch.setattr(module, "read_connection", recording_read_connection)
+    executor = _FakeExecutor(FakeFacade(), tmp_path, storage)
+
+    block = prefetch_bundle_block(executor, _job(bundle["id"]), WORKSPACE_ID)
+
+    assert block is not None
+    assert block["kind"] == "bundle"
+    assert received and isinstance(received[0], FakeFacade)
