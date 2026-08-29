@@ -146,10 +146,8 @@ class JobQueryService:
         definition = self._definition_for_job(job)
         nodes = self.job_db.list_job_nodes(job_id)
         nodes_with_definition = job_nodes_with_definition(nodes, definition)
-        worker_map = claimed_worker_map(self.job_db.path, job_id)
-        agent_map = agent_route_map(
-            self.job_db.path, str(job["workspace_id"]), str(job["workflow_key"])
-        )
+        worker_map = claimed_worker_map(self.job_db, job_id)
+        agent_map = agent_route_map(self.job_db, str(job["workspace_id"]), str(job["workflow_key"]))
         for node in nodes_with_definition:
             # P-0.5: non-Agent-routed nodes always run on the implicit code
             # pool; the projection is a constant, no configuration lookup.

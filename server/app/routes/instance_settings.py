@@ -21,7 +21,7 @@ def create_instance_settings_router(job_queries, settings: Settings) -> APIRoute
     restart (no runtime hot-reload).
     """
     router = APIRouter()
-    store = InstanceSettingsStore(job_queries.path)
+    store = InstanceSettingsStore(job_queries)
 
     @router.get(
         "/admin/instance-settings",

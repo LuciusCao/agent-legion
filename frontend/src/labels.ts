@@ -27,6 +27,7 @@ export const JOB_STATUS_LABELS = STATUS_LABELS
 export const JOB_SOURCE_TYPE_LABELS: Record<string, string> = {
   question: '题目',
   knowledge: '知识点',
+  video: '视频',
 }
 
 export const WORKSPACE_LABELS = {

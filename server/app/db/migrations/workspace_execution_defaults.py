@@ -1,4 +1,4 @@
-"""Schema v63 data migration: backfill workflow top-level execution defaults.
+"""Schema v64 data migration: backfill workflow top-level execution defaults.
 
 The retired ``workspaces.default_agent_*`` columns were the execution-config
 default source; their workflow-scoped replacement is the top-level

@@ -19,8 +19,13 @@ def workspace_settings_payload(workspace: dict[str, Any]) -> dict[str, Any]:
     node_overrides = node_config.get(workflow_key)
     if not isinstance(node_overrides, dict):
         node_overrides = {}
+    preview_config = workspace.get("preview_config")
+    if not isinstance(preview_config, dict):
+        preview_config = {}
+    hidden = preview_config.get("hidden")
     return {
         "entityType": str(workspace.get("default_entity") or "question"),
         "workflowKey": workflow_key,
         "nodeConfig": node_overrides,
+        "previewHidden": hidden if isinstance(hidden, list) else [],
     }

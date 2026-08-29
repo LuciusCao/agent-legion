@@ -95,7 +95,19 @@ exemptions:
     the short-TTL published-definition cache (hot claim-path reads) lives next
     to the lifecycle methods so publish/archive can invalidate it in one
     place. Split the cache into its own module when it gains more policy —
-    tracked with the wide-service structure batch (#196).
+    tracked with the wide-service structure batch (#196). The facade-connect
+    source aliasing (#187) adds the dsn-identity cache-key helper here.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/196
   ceiling: 135
+- check: architecture.file_budget
+  path: server/app/storage/s3_client.py
+  reason: The job-detail artifact preview (issue 11) added open_range (ranged
+    GET) to the storage protocol and the S3 client implementation so
+    object-store-only media can serve browser Range requests (seekable
+    playback without whole-object downloads). The protocol and its S3
+    implementation must stay in one file; revisit when the storage layer
+    grows a second backend implementation.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/11
+  ceiling: 155

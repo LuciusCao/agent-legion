@@ -51,6 +51,7 @@ export type SettingStoreSet = (
 export const defaultSettings: WorkspaceSettings = {
   entityType: 'question',
   workflowKey: '',
+  previewHidden: [],
 }
 
 export const defaultExecutionConfiguration: WorkspaceExecutionConfiguration = {

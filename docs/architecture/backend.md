@@ -133,6 +133,7 @@ server/app/
 | POST | `/workspaces/{workspace_id}/jobs/rerun-by-failure` | `rerun_jobs_by_failure_category` | routes/failed_node_runs.py |
 | GET | `/admin/instance-settings` | `get_instance_settings` | routes/instance_settings.py |
 | PUT | `/admin/instance-settings` | `put_instance_settings` | routes/instance_settings.py |
+| GET | `/jobs/{job_id}/artifacts/{artifact_name}/raw` | `get_artifact_raw` | routes/job_artifact_raw.py |
 | GET | `/jobs/{job_id}/artifacts/{artifact_name:path}` | `get_artifact` | routes/job_artifacts.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/log` | `get_job_run_log` | routes/job_artifacts.py |
 | POST | `/workspaces/{workspace_id}/job-batches` | `create_workspace_job_batch` | routes/job_batches.py |
@@ -164,6 +165,7 @@ server/app/
 | GET | `/workspaces/{workspace_id}/materials/{material_id}` | `get_material` | routes/materials.py |
 | DELETE | `/workspaces/{workspace_id}/materials/{material_id}` | `delete_material` | routes/materials.py |
 | GET | `/metrics/overview` | `get_metrics_overview` | routes/metrics.py |
+| POST | `/workspaces/{workspace_id}/jobs/clear-packed` | `clear_workspace_jobs_packed_status` | routes/package_clear_packed.py |
 | GET | `/workspaces/{workspace_id}/packages` | `list_workspace_packages` | routes/packages.py |
 | DELETE | `/workspaces/{workspace_id}/packages/{package_id:int}` | `delete_workspace_package_route` | routes/packages.py |
 | PATCH | `/workspaces/{workspace_id}/packages/{package_id:int}` | `update_workspace_package_route` | routes/packages.py |
@@ -619,7 +621,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 ## Database
 
 - PostgreSQL 服务 Agent Legion workflow 与平台状态（当前版本见 `server/app/db/schema.py` 的 `SCHEMA_VERSION`）：
-  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`（schema v62 起 = workspace id，deprecated，见 DB-WORKSPACE-KEY-BINDING-001）, `node_config_json`, `default_entity`；`intake_config_json` 已随 schema v63 退役 drop）。`node_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（见下文 Secrets Vault）；旧 `resource_config_json`（resource binding）已在 v24 迁移为节点覆盖并清空
+  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`（schema v62 起 = workspace id，deprecated，见 DB-WORKSPACE-KEY-BINDING-001）, `node_config_json`, `default_entity`, `preview_config_json`（v63，产物预览隐藏列表 `{"hidden": [...]}`，见 Job Detail 预览段）；`intake_config_json` 与 `default_agent_*` 三列已随 schema v64 退役 drop）。`node_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（见下文 Secrets Vault）；旧 `resource_config_json`（resource binding）已在 v24 迁移为节点覆盖并清空
   - `workspace_secrets` — vault 加密存储的 workspace 密钥（Fernet 密文，`(workspace_id, name)` 唯一，v16 新增）
   - `external_connections` / `instance_secrets` / `connection_tokens` — 实例级外部服务连接：连接只存非敏感配置，敏感字段 Fernet 加密入 `instance_secrets`（`conn:<key>:<field>` 引用），鉴权 token 加密缓存在 `connection_tokens`（v34 新增，见下文外部服务连接段）
   - `runs`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表（`job_batches` 已随 schema v53 drop，由 `runs` 取代）
@@ -644,7 +646,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 Workflow Studio 提供可视化 workflow 编辑能力，与版本修订历史集成。
 
 - **Routes**: `routes/workflow_revisions.py`, `routes/workflow_draft_compare.py`
-- **Services**: `services/workflow_drafts.py`, `services/workflow_draft_publish.py`, `services/workflow_revision_format.py`, `services/job_workflow_versions.py`, `services/job_workflow_upgrade.py`; `/api/agent-catalog` 同时返回已发布 Agent Catalog 投影（versioned_entities），供编辑器按 capability 获取 runtime、skill、tools；provider/model/thinking 的「继承默认」提示读 Studio 草稿 YAML 的顶层 `execution` 块（workspace 级 Agent 默认已随 schema v63 退役），可 claim 的选项来自 `GET /api/workspaces/{id}/runtime-models`（在线 Worker 声明聚合）
+- **Services**: `services/workflow_drafts.py`, `services/workflow_draft_publish.py`, `services/workflow_revision_format.py`, `services/job_workflow_versions.py`, `services/job_workflow_upgrade.py`; `/api/agent-catalog` 同时返回已发布 Agent Catalog 投影（versioned_entities），供编辑器按 capability 获取 runtime、skill、tools；provider/model/thinking 的「继承默认」提示读 Studio 草稿 YAML 的顶层 `execution` 块（workspace 级 Agent 默认已随 schema v64 退役），可 claim 的选项来自 `GET /api/workspaces/{id}/runtime-models`（在线 Worker 声明聚合）
 - **DB**: PostgreSQL `workflow_revisions` 表与版本化 schema 初始化
 - **Frontend**: `pages/WorkflowStudioPage.tsx`, `features/workflowStudio/`
 
@@ -671,6 +673,12 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 - `invariants.py`: 读取 `config/architecture/architecture-invariants.yaml` 并校验。
 - `exemptions.py`: 读取 `config/architecture/architecture-exemptions.yaml` 并校验。
 - 对应脚本：`scripts/check_invariants.py`。
+
+### Job Detail 产物预览（issue #11）
+
+- **raw 字节端点** `GET /api/jobs/{job_id}/artifacts/{artifact_name}/raw`（`routes/job_artifact_raw.py`）：本地 job_dir 副本走 `FileResponse`（原生 Range，媒体可拖动进度条），仅存对象存储的产物走 64 KiB 分块 `StreamingResponse`（`BackgroundTask` 兜底关流）。**content-type 白名单即安全边界**：仅 image/video/audio/pdf 扩展名映射真实 media type 并 `inline` 渲染，其余（含 .html/.svg——同源渲染即脚本执行面）一律 `application/octet-stream` + `attachment` 强制下载。
+- **文本端点**（`{artifact_name:path}`）遇本地二进制产物的 `UnicodeDecodeError` 按 404 降级（字节由 raw 端点负责），不冒泡 500。
+- **workspace 级预览配置**：`preview_config_json` 存 `{"hidden": [<artifact name>, ...]}`；settings payload 键 `previewHidden`（默认 `[]` = 全部显示，工作流升级产生的新产物自动可见）。写路径两条：`PATCH /settings/preview` section（job 详情左栏勾选菜单，立即生效）与 `PUT /configuration` 全量保存（设置页 draft；缺省 `previewHidden` = 沿用已存值，旧客户端不抹勾选）。
 
 ### Secrets Vault
 
@@ -701,7 +709,7 @@ env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不�
 
 token 用量计价已产品化：定价存于 `global_settings` 表（`token_usage` 文档），由 admin 在「全局设置」页（`GET/PUT /api/admin/token-usage-pricing`）维护，成本按每条 run 的 provider + model 匹配定价逐行计算；不再有任何 yaml 侧配置。
 
-Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 schema v27 退役，出现在 yaml 中启动即报错）：AgentDefinition 存于 `versioned_entities` 表（schema v46 起 workspace 作用域，解析严格限定本 workspace、零全局兜底），经 Studio「Agent 管理」或 `/api/agent-definitions`（`workspace_id` 查询参数）做 draft → publish → archive 生命周期管理；热读路径经 `AgentService` 的短 TTL（5s）published 缓存。执行配置（provider/model/thinking）不含在 AgentDefinition 内，按严格链解析：节点 `execution.*` 覆盖 → workflow 顶层 `execution` 默认（loader 加载时合并进每个非 start 节点）→ 报错（workspace `default_agent_*` 已随 schema v63 退役，无全局兜底）；thinking 可空（空 = runtime 决定）。
+Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 schema v27 退役，出现在 yaml 中启动即报错）：AgentDefinition 存于 `versioned_entities` 表（schema v46 起 workspace 作用域，解析严格限定本 workspace、零全局兜底），经 Studio「Agent 管理」或 `/api/agent-definitions`（`workspace_id` 查询参数）做 draft → publish → archive 生命周期管理；热读路径经 `AgentService` 的短 TTL（5s）published 缓存。执行配置（provider/model/thinking）不含在 AgentDefinition 内，按严格链解析：节点 `execution.*` 覆盖 → workflow 顶层 `execution` 默认（loader 加载时合并进每个非 start 节点）→ 报错（workspace `default_agent_*` 已随 schema v64 退役，无全局兜底）；thinking 可空（空 = runtime 决定）。
 
 其他配置文件：
 

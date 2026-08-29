@@ -1,0 +1,33 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1c1e;
+  margin: 0;
+}
+
+.count {
+  font-size: 12px;
+  font-weight: 400;
+  color: #43474e;
+}
+
+.empty {
+  padding: 24px;
+  color: #43474e;
+  font-style: italic;
+  text-align: center;
+  background: #fafafa;
+  border-radius: 12px;
+}

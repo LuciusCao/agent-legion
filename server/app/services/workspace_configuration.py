@@ -19,6 +19,12 @@ from server.app.services.workspace_node_config import update_workspace_node_conf
 from server.app.services.workspace_node_limit_validation import (
     validate_workspace_node_limits,
 )
+from server.app.services.workspace_preview_settings import (
+    clean_preview_hidden as _clean_preview_hidden,
+)
+from server.app.services.workspace_preview_settings import (
+    write_preview_hidden,
+)
 from server.app.services.workspace_settings_payload import workspace_settings_payload
 from server.app.services.workspace_settings_schemas import (
     workspace_settings_payload_with_schemas,
@@ -45,21 +51,21 @@ class WorkspaceConfigurationService:
         return workspace
 
     def _vault(self) -> VaultService:
-        return VaultService(self.job_db.path, self.settings.config)
+        return VaultService(self.job_db, self.settings.config)
 
     def _payload(self, workspace: dict[str, Any]) -> dict[str, Any]:
         return workspace_settings_payload_with_schemas(
             self.job_db,
-            published_agent_definitions(self.settings.database_url, str(workspace["id"])),
+            published_agent_definitions(self.job_db, str(workspace["id"])),
             workspace,
         )
 
     def _ensure_active_revision(self, workspace_id: str, definition: WorkflowDefinition) -> None:
         if definition.key == DEMO_WORKFLOW_KEY:
-            seed_demo_workspace_node_codes(self.settings, workspace_id)
+            seed_demo_workspace_node_codes(self.settings, workspace_id, connect_source=self.job_db)
             # Demo materials (design §9): seed-if-absent, skipped with a
             # warning when object storage is not configured.
-            seed_demo_workspace_materials(self.settings, workspace_id)
+            seed_demo_workspace_materials(self.settings, workspace_id, connect_source=self.job_db)
         WorkflowRevisionService(
             self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
         ).ensure_active_revision(workspace_id, definition)
@@ -164,9 +170,7 @@ class WorkspaceConfigurationService:
             node_limits=node_limits,
             agent_capabilities={
                 definition.capability
-                for definition in published_agent_definitions(
-                    self.settings.database_url, workspace_id
-                ).values()
+                for definition in published_agent_definitions(self.job_db, workspace_id).values()
             },
             code_capacity=self.settings.executor_runtime.code_capacity,
         )
@@ -182,6 +186,7 @@ class WorkspaceConfigurationService:
         # untouched so legacy rows keep whatever the migration left behind.
         raw_resource_config = workspace.get("resource_config")
         resource_config = dict(raw_resource_config) if isinstance(raw_resource_config, dict) else {}
+        preview_hidden = _clean_preview_hidden(settings_patch)
         if agent_capacity is not None and agent_capacity <= 0:
             raise InvalidOperationError("Agent capacity must be a positive integer")
         try:
@@ -198,6 +203,8 @@ class WorkspaceConfigurationService:
             # previously saved (or schema-seeded) Agent capacity.
             if agent_capacity is not None:
                 self.job_db.set_workspace_agent_capacity(workspace_id, agent_capacity)
+            if preview_hidden is not None:
+                saved_workspace = write_preview_hidden(self.job_db, workspace_id, preview_hidden)
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
         if workflow is not None:
@@ -217,7 +224,7 @@ class WorkspaceConfigurationService:
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
         if section == "intake":
-            # Intake modes / label overrides are retired (schema v63); only
+            # Intake modes / label overrides are retired (schema v64); only
             # the entry entity type remains configurable here.
             workspace = self.job_db.update_workspace(
                 workspace_id,
@@ -238,11 +245,15 @@ class WorkspaceConfigurationService:
             workspace = update_workspace_node_config(
                 self.job_db,
                 self.settings,
-                published_agent_definitions(self.settings.database_url, workspace_id),
+                published_agent_definitions(self.job_db, workspace_id),
                 workspace,
                 patch,
             )
-
+        elif section == "preview":
+            hidden = _clean_preview_hidden(patch)
+            if hidden is None:
+                raise InvalidOperationError("previewHidden payload is required")
+            workspace = write_preview_hidden(self.job_db, workspace_id, hidden)
         else:
             raise NotFoundError("Unknown settings section")
         return self._payload(workspace)

@@ -32,7 +32,7 @@ def resolve_execution_block(node: WorkflowNode, runtime: str) -> dict[str, Any]:
     has already merged the workflow top-level execution defaults into the
     node, so the value seen here is the effective one; either one missing
     fails the enqueue with an actionable error (agent config governance,
-    workspace-level defaults retired at schema v63). thinking stays optional
+    workspace-level defaults retired at schema v64). thinking stays optional
     — empty means the runtime decides. The runtime pins the command builder
     (EXEC-RUNTIME-DISPATCH-001); unknown runtimes fail fast so no manifest
     is ever frozen with an unbuildable command spec.
@@ -76,7 +76,12 @@ class AgentDispatchService:
         self.settings = settings
         self.broker = broker
         self.artifact_store = artifact_store
-        self.skill_manager = build_skill_manager(settings.database_url, settings.skills_runs_dir)
+        # The broker carries the connect source (facade or DSN) in production
+        # wiring; the settings DSN is the fallback for test-only brokers.
+        self.skill_manager = build_skill_manager(
+            getattr(broker, "database_dsn", None) or settings.database_url,
+            settings.skills_runs_dir,
+        )
         enqueue_config = settings.executor_runtime.agent_enqueue
         self.enqueue_pool = AgentEnqueuePool(
             workers=enqueue_config.workers, max_pending=enqueue_config.max_pending

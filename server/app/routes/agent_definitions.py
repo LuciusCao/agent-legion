@@ -81,7 +81,7 @@ def create_agent_definitions_router(job_db: JobQueries, settings: Settings) -> A
     router = APIRouter()
 
     def _service(workspace_id: str) -> AgentService:
-        return AgentService(job_db.path, workspace_id)
+        return AgentService(job_db, workspace_id)
 
     @router.get("/agent-definitions", response_model=AgentListResponse)
     def list_agent_definitions(workspace_id: WorkspaceId) -> AgentListResponse:

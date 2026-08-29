@@ -11,7 +11,7 @@ Execution configuration (provider/model/thinking) is deliberately NOT part of
 these definitions — the loader merges the workflow top-level ``execution``
 defaults into every non-start node (code nodes simply never read them) and
 node ``execution.*`` overrides win; workspace-level defaults were retired at
-schema v63. The demo expects the operator to configure execution in Studio.
+schema v64. The demo expects the operator to configure execution in Studio.
 Skills resolve to the local source roots
 imported by ``make import-demo`` (see ``server.app.skills.builtin_sources``).
 """
@@ -19,7 +19,7 @@ imported by ``make import-demo`` (see ``server.app.skills.builtin_sources``).
 from __future__ import annotations
 
 from server.app.agent_catalog import AgentDefinition
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.services.agent_service import AgentService
 
 _DEMO_SKILL_PREFIX = "education-video-problems-generation"
@@ -54,10 +54,12 @@ BUILTIN_AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
 
 
 def seed_demo_workspace_agent_definitions(
-    database_dsn: DatabaseDsn, workspace_id: str
+    database_dsn: ConnectSource, workspace_id: str
 ) -> list[str]:
     """Publish each built-in demo agent into the workspace when absent.
 
+    ``database_dsn`` accepts the JobQueries facade or a bare DSN string
+    (BOUNDARY-DATA-001, #187); production callers pass the facade.
     Called when a workspace binds the demo workflow (workspace create /
     workflow switch). Seed-if-absent: an agent the admin already touched in
     this workspace (published a new definition, or archived every version to

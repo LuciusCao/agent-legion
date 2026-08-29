@@ -50,7 +50,7 @@ def test_workspace_settings_round_trip(tmp_path):
     assert "resources" not in settings
     assert settings["nodeConfig"]["intake_knowledge_points"]["timeout_seconds"] == 120
     assert settings["entityType"] == "video"
-    # intakeModes/labelOverrides/agentDefaults retired at schema v63.
+    # intakeModes/labelOverrides/agentDefaults retired at schema v64.
     assert "intakeModes" not in settings
     assert "labelOverrides" not in settings
     assert "agentDefaults" not in settings
@@ -118,7 +118,7 @@ def test_lists_workspace_workflow_revisions(client):
 
 
 def test_workspace_settings_agent_defaults_section_retired(client):
-    # Schema v63: workspace-level Agent defaults are retired — the section
+    # Schema v64: workspace-level Agent defaults are retired — the section
     # endpoint no longer exists and the payload carries no agentDefaults.
     response = client.post(
         "/api/workspaces",

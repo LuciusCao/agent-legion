@@ -57,6 +57,7 @@ class WorkspaceSettingsSectionRequest(BaseModel):
     entityType: str | None = None
     workflowKey: str | None = None
     nodeConfig: dict[str, dict[str, Any]] | None = None
+    previewHidden: list[str] | None = None
 
 
 class WorkspaceResponse(BaseModel):

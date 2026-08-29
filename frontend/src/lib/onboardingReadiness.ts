@@ -51,7 +51,7 @@ export interface OnboardingStepsInput {
  * 的解析链与后端 resolve_execution_block 一致：agent 节点 execution.*
  * 为准——active revision 快照里节点 execution 已被 loader 合并了顶层
  * execution 默认，前端直接读节点值即为有效值（workspace agentDefaults
- * 与接入模式勾选已随 schema v63 退役；接入可用性由「已发布 active
+ * 与接入模式勾选已随 schema v64 退役；接入可用性由「已发布 active
  * revision」承载）。
  */
 export function buildOnboardingSteps(input: OnboardingStepsInput) {
@@ -75,7 +75,7 @@ export function buildOnboardingSteps(input: OnboardingStepsInput) {
       unlocked: published,
       completed: configured,
       actionLabel: '去配置',
-      // Settings 已无 provider/model 配置面（schema v63 退役），配置面在
+      // Settings 已无 provider/model 配置面（schema v64 退役），配置面在
       // Studio 的节点详情 / 顶层 execution。
       onAction: input.goStudio,
     },

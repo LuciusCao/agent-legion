@@ -21,7 +21,7 @@ export function WorkflowAgentExecutionDetails(props: {
   const showPreview = useShowNodeDetailPreview()
   const { workspaceId } = useParams<{ workspaceId: string }>()
   // 「继承默认」提示的来源：草稿 YAML 顶层 execution 块（workspace 级
-  // Agent 默认配置已随 schema v63 退役）。全量 YAML parse 按草稿内容 memo，
+  // Agent 默认配置已随 schema v64 退役）。全量 YAML parse 按草稿内容 memo，
   // 不随每次渲染重算。
   const defaults = useMemo(
     () => parseWorkflowExecutionDefaults(props.definitionYaml),

@@ -16,14 +16,15 @@ from collections.abc import Sequence
 from typing import Any
 
 from server.app.agent_control.register_token_deletion import delete_register_token_cascading
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 
 _MAX_TOKEN_LABEL_LENGTH = 128
 
 
 class AgentRegisterTokenStore:
-    def __init__(self, database_dsn: DatabaseDsn) -> None:
+    def __init__(self, database_dsn: ConnectSource) -> None:
+        # database_dsn: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187).
         self.database_dsn = database_dsn
 
     def issue_register_token(self, *, workspace_id: str, label: str = "") -> tuple[str, str]:

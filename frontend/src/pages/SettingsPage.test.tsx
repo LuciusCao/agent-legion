@@ -191,6 +191,7 @@ describe('SettingsPage', () => {
     const headings = screen.getAllByRole('heading', { level: 2 })
     expect(headings.map((h) => h.textContent)).toEqual([
       '基本信息',
+      '产物预览',
       'Agent 与 Worker',
       '代码节点并发',
       '危险操作',

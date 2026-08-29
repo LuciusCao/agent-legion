@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.services import skill_detail, skill_repo
 from server.app.services.job_errors import NotFoundError
 from server.app.services.skill_source_store import SkillSourceStore
@@ -14,7 +14,8 @@ _MAX_FILE_BYTES = skill_repo.MAX_FILE_BYTES
 
 
 class SkillCatalogService:
-    def __init__(self, database_dsn: DatabaseDsn, base_dir: Path | None = None) -> None:
+    def __init__(self, database_dsn: ConnectSource, base_dir: Path | None = None) -> None:
+        # database_dsn: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187).
         self._store = SkillSourceStore(database_dsn)
         self.base_dir = base_dir or Path.home() / ".agents" / "skills" / "agent-legion"
 

@@ -181,7 +181,7 @@ def _node(provider: str = "", model: str = "", thinking: str = "") -> WorkflowNo
 
 @pytest.mark.no_db
 def test_resolve_execution_node_values_win() -> None:
-    # schema v63：workspace 默认已退役，节点 execution（含 loader 合并的
+    # schema v64：workspace 默认已退役，节点 execution（含 loader 合并的
     # workflow 顶层默认）是唯一来源。
     block = resolve_execution_block(_node("node-provider", "node-model", "low"), "velites")
     assert block == {

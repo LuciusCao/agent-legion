@@ -13,6 +13,7 @@ import { LocalNodeLimitSection } from '../components/LocalNodeLimitSection'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { BasicInfoSection } from '../components/settings/BasicInfoSection'
 import { DangerZone } from '../components/settings/DangerZone'
+import { PreviewConfigSection } from '../components/settings/PreviewConfigSection'
 import { WorkerTokensSection } from '../components/settings/WorkerTokensSection'
 import { WorkspaceWorkersSection } from '../components/settings/WorkspaceWorkersSection'
 import { WorkspaceMembersSection } from '../components/settings/WorkspaceMembersSection'
@@ -134,6 +135,12 @@ export function SettingsPage() {
             onNameChange={setWorkspaceName}
             onDescriptionChange={setWorkspaceDescription}
             onEntityTypeChange={(entityType) => setSettings({ entityType })}
+          />
+
+          <PreviewConfigSection
+            settings={settings}
+            workflowDefinition={workflowDefinition}
+            setSettings={setSettings}
           />
 
           {/* schema v62：workflow key 与 workspace id 绑定且不可变，

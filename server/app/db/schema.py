@@ -10,7 +10,7 @@ from server.app.db.migrations.workspace_settings_retirement import (
 from server.app.db.schema_guard import guard_shared_db
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 63
+SCHEMA_VERSION = 64
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 
@@ -67,7 +67,7 @@ def init_db(database_dsn: DatabaseDsn) -> None:
         # cms_config_json column is superseded by workspace_cms_config's
         # resource rows and must not survive any install path.
         conn.execute("alter table workspaces drop column if exists cms_config_json")
-        # v63 retirement sweep (module docstring explains the post-chain timing).
+        # v64 retirement sweep (module docstring explains the post-chain timing).
         drop_retired_workspace_setting_columns(conn)
         # Retired-table parity sweep: postgres_schema.sql still CREATES these
         # tables so older data migrations can replay against them (v34 reads

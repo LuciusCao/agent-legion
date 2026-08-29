@@ -14,7 +14,7 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
@@ -48,9 +48,12 @@ _ITEM_COLUMNS = """
 
 
 class QualityLabelService:
+    """Labels on sampled items; ``db_path`` is the JobQueries facade (or a
+    bare DSN for tests) — BOUNDARY-DATA-001, #187."""
+
     def __init__(
         self,
-        db_path: DatabaseDsn,
+        db_path: ConnectSource,
         artifact_store: ArtifactStore | None = None,
         object_store: Any = None,
     ) -> None:

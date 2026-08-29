@@ -165,7 +165,7 @@ def test_enqueue_builds_an_immutable_manifest_and_bundle(harness: SimpleNamespac
         "timeout_seconds": 1800,
         "no_sandbox": False,
     }
-    # schema v63：workspace Agent 默认退役，新 manifest 不再写 execution_defaults。
+    # schema v64：workspace Agent 默认退役，新 manifest 不再写 execution_defaults。
     assert "execution_defaults" not in manifest
 
     context = harness.stage_agent_inputs.call_args.args[1]

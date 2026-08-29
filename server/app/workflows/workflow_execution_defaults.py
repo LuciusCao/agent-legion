@@ -1,4 +1,4 @@
-"""Workflow 顶层 execution 默认（schema v63）：校验与向节点的合并。
+"""Workflow 顶层 execution 默认（schema v64）：校验与向节点的合并。
 
 workspace 级 Agent 默认（default_agent_*）退役后，顶层 ``execution`` 块是
 workflow 作用域的默认来源：loader 在定义加载时把它合并进每个非 start

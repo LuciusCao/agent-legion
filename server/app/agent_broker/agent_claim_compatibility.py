@@ -27,7 +27,7 @@ def live_claim_manifest(row: Mapping[str, Any]) -> dict[str, Any]:
         node = (definition.get("nodes") or {}).get(str(row["node_key"])) or {}
         node_execution = node.get("execution") or {}
     frozen = manifest.get("execution") or {}
-    # Legacy key, absent on manifests enqueued after schema v63 (workspace
+    # Legacy key, absent on manifests enqueued after schema v64 (workspace
     # Agent defaults retired): kept so in-flight queued manifests still
     # resolve exactly as enqueued.
     defaults = manifest.get("execution_defaults") or {}

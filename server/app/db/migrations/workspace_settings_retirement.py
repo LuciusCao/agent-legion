@@ -1,7 +1,7 @@
-"""Schema v63 post-chain cleanup: drop retired workspace columns.
+"""Schema v64 post-chain cleanup: drop retired workspace columns.
 
-Workspace-level Agent defaults are retired at v63 — execution config resolves
-from the node / workflow top-level execution block only; the v63 data migration
+Workspace-level Agent defaults are retired at v64 — execution config resolves
+from the node / workflow top-level execution block only; the v64 data migration
 (migrations/workspace_execution_defaults.py) backfills them into the active
 revision first. ``intake_config_json`` retires alongside. The schema file still
 CREATEs the columns so the v62 data migration can replay its insert on older

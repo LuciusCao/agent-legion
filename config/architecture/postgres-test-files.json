@@ -36,6 +36,7 @@
     "tests/db/test_workspace_cms_migration.py",
     "tests/db/test_workspace_execution_defaults_migration.py",
     "tests/db/test_workspace_id_key_binding.py",
+    "tests/db/test_workspace_preview_config.py",
     "tests/db/test_workspace_secrets_migration.py",
     "tests/events/test_job_event_buffer_db.py",
     "tests/events/test_job_events.py",

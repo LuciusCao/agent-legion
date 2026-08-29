@@ -2,7 +2,7 @@
 
 解析链（每个 key）：当前 revision 节点 execution（loader 已合并 workflow
 顶层默认）→ enqueue 冻结的 workspace 默认（execution_defaults，legacy
-manifest 容错，schema v63 起新 manifest 不再写）→ enqueue 冻结的已解析
+manifest 容错，schema v64 起新 manifest 不再写）→ enqueue 冻结的已解析
 execution（兜底）。
 """
 
@@ -109,7 +109,7 @@ def test_missing_revision_keeps_defaults_then_frozen() -> None:
 
 @pytest.mark.no_db
 def test_new_manifest_without_defaults_resolves_revision_then_frozen() -> None:
-    # schema v63 后的新 manifest 没有 execution_defaults：revision 的节点
+    # schema v64 后的新 manifest 没有 execution_defaults：revision 的节点
     # execution（已含合并的顶层默认）优先，节点覆盖被删且顶层无默认时落回
     # enqueue 冻结的 execution。
     manifest = _manifest()

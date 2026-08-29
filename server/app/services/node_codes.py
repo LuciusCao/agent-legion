@@ -21,7 +21,7 @@ import hashlib
 import logging
 from typing import Any
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.services.job_errors import (
     ConflictError,
     CustomNodesDisabledError,
@@ -109,9 +109,13 @@ def code_hash(code: str) -> str:
 
 
 class NodeCodeService:
-    """Versioned custom node code storage and publish flow."""
+    """Versioned custom node code storage and publish flow.
 
-    def __init__(self, database_dsn: DatabaseDsn, custom_nodes_enabled: bool = True) -> None:
+    ``database_dsn`` accepts the JobQueries facade or a bare DSN string
+    (BOUNDARY-DATA-001, #187); production wiring passes the facade.
+    """
+
+    def __init__(self, database_dsn: ConnectSource, custom_nodes_enabled: bool = True) -> None:
         self._store = VersionedEntityStore(database_dsn, _ENTITY_TYPE)
         self._enabled = custom_nodes_enabled
 

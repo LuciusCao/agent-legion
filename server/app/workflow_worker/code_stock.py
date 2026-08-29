@@ -19,7 +19,7 @@ import time
 
 from server.app.agent_control.registry import CODE_PROTOCOL_VERSION, ONLINE_THRESHOLD_SECONDS
 from server.app.configuration.executor_knobs import CodeStockConfig as CodeStockConfig
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
 
 
@@ -31,7 +31,7 @@ class CodeStockGate:
     unique index stays the authoritative dedup.
     """
 
-    def __init__(self, database_dsn: DatabaseDsn, config: CodeStockConfig) -> None:
+    def __init__(self, database_dsn: ConnectSource, config: CodeStockConfig) -> None:
         self._dsn = database_dsn
         self._config = config
         self._loaded_at = 0.0

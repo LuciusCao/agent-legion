@@ -754,6 +754,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/jobs/{job_id}/artifacts/{artifact_name}/raw': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Artifact Raw */
+    get: operations['get_artifact_raw_api_jobs__job_id__artifacts__artifact_name__raw_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/jobs/{job_id}/continue': {
     parameters: {
       query?: never
@@ -5625,6 +5642,8 @@ export interface components {
     WorkspaceConfigurationSettingsRequest: {
       /** Entitytype */
       entityType?: string | null
+      /** Previewhidden */
+      previewHidden?: string[] | null
       /** Workflowkey */
       workflowKey?: string | null
     }
@@ -5844,6 +5863,8 @@ export interface components {
     WorkspaceSettingsPayload: {
       /** Entitytype */
       entityType: string
+      /** Previewhidden */
+      previewHidden?: string[]
       /** Workflowkey */
       workflowKey: string
     }
@@ -5864,6 +5885,8 @@ export interface components {
           [key: string]: unknown
         }
       } | null
+      /** Previewhidden */
+      previewHidden?: string[] | null
       /** Workflowkey */
       workflowKey?: string | null
     }
@@ -7392,6 +7415,40 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ArtifactResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_artifact_raw_api_jobs__job_id__artifacts__artifact_name__raw_get: {
+    parameters: {
+      query?: never
+      header?: {
+        Range?: string | null
+      }
+      path: {
+        job_id: string
+        artifact_name: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
         }
       }
       /** @description Validation Error */

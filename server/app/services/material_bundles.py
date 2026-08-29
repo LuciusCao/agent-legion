@@ -17,7 +17,7 @@ from typing import Any
 
 from psycopg import IntegrityError
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.job_errors import (
     ConflictError,
@@ -87,7 +87,8 @@ def _record(row: dict[str, Any], members: list[dict[str, Any]] | None = None) ->
 
 
 class MaterialBundlesService:
-    def __init__(self, database_dsn: DatabaseDsn) -> None:
+    def __init__(self, database_dsn: ConnectSource) -> None:
+        # database_dsn: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187).
         self._dsn = database_dsn
 
     def create(

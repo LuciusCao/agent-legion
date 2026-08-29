@@ -2,7 +2,7 @@ import editorStyles from './WorkflowStructuredEditor.module.css'
 import { WorkflowRuntimeOptionsDatalist } from './WorkflowRuntimeOptionsDatalist'
 
 /**
- * 节点 execution 输入框：空值继承 workflow 顶层 execution 默认（schema v63
+ * 节点 execution 输入框：空值继承 workflow 顶层 execution 默认（schema v64
  * 起 workspace 级默认已退役）。options 非空时挂 datalist——在线 Worker
  * 实际声明的 provider/model，自由输入仍然可用。
  */

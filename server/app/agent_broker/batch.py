@@ -9,14 +9,14 @@ walking the ``idx_agent_requests_one_active_node`` partial index. Split from
 
 from __future__ import annotations
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
 
 # Keep the IN list well under driver and statement-size limits.
 _CHUNK_SIZE = 500
 
 
-def active_request_keys(dsn: DatabaseDsn, job_ids: list[str]) -> set[tuple[str, str]]:
+def active_request_keys(dsn: ConnectSource, job_ids: list[str]) -> set[tuple[str, str]]:
     """Return the (job_id, node_key) pairs with an active request."""
     keys: set[tuple[str, str]] = set()
     if not job_ids:

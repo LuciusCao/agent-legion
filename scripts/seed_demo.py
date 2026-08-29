@@ -151,7 +151,7 @@ def seed_demo(
     workspace_name: str = DEMO_WORKSPACE_NAME,
 ) -> SeedDemoResult:
     job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
-    apply_instance_settings(settings, job_db.path)
+    apply_instance_settings(settings, job_db)
 
     # Establish the target first, then hydrate the workflow assets into that
     # workspace. Nothing in this onboarding path creates global node code.
@@ -175,23 +175,25 @@ def seed_demo(
     )
     workspace_id = str(workspace["id"])
 
-    seed_skill_sources(settings.database_url, settings.root_dir)
-    store = SkillSourceStore(settings.database_url)
+    seed_skill_sources(job_db, settings.root_dir)
+    store = SkillSourceStore(job_db)
     sources, sources_added = _merge_demo_sources(store, _desired_sources(skill_root))
     locks_updated = _lock_local_demo_sources(store, sources)
     node_codes_added = migrate_demo_node_codes_to_workspaces(settings, job_db)
-    node_codes_added += len(seed_demo_workspace_node_codes(settings, workspace_id))
+    node_codes_added += len(
+        seed_demo_workspace_node_codes(settings, workspace_id, connect_source=job_db)
+    )
 
     # Older demo workspaces may have a revision but lack one of the factory
     # Agents, so seed the two resources independently.
     agents_added = len(
-        agent_catalog_builtin.seed_demo_workspace_agent_definitions(
-            settings.database_url, workspace_id
-        )
+        agent_catalog_builtin.seed_demo_workspace_agent_definitions(job_db, workspace_id)
     )
     # Sample materials (design §9): seed-if-absent; skipped with a warning
     # when object storage is not configured on this instance.
-    materials_added = len(seed_demo_workspace_materials(settings, workspace_id))
+    materials_added = len(
+        seed_demo_workspace_materials(settings, workspace_id, connect_source=job_db)
+    )
     WorkflowRevisionService(
         job_db,
         settings.executor_runtime.workflows.custom_nodes_enabled,

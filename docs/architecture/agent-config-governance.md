@@ -65,7 +65,7 @@ if not model:
 ```
 
 > 历史说明：早期版本还有第三层「Workspace Settings 默认」
-> （`default_agent_provider/model/thinking` 三列），已随 schema v63 退役——
+> （`default_agent_provider/model/thinking` 三列），已随 schema v64 退役——
 > 执行配置只存在于 versioned 的 workflow 定义里。
 
 ### 2. AgentDefinition（纯净版）
@@ -109,7 +109,7 @@ Worker 上报的可用选项（`GET /api/workspaces/{id}/runtime-models`），�
 
 > 历史说明：本节原为「Workspace Settings 扩展」（workspaces 表
 > `default_agent_*` 三列 + Settings「Agent 默认配置」区块），已随 schema
-> v63 退役删列。
+> v64 退役删列。
 
 ### 4. VersionedEntity 抽象（合并表）
 
@@ -192,7 +192,7 @@ manifest = {
 配一处，节点 `execution.*` 按需覆盖；节点编辑器的 provider/model 输入框
 按节点 Agent 的 runtime 给出在线 Worker 上报的可用选项（datalist，可自由
 输入），thinking 空值 = runtime 决定。（早期的 Workspace Settings
-「Agent 默认配置」区块已随 schema v63 退役。）
+「Agent 默认配置」区块已随 schema v64 退役。）
 
 #### Studio → Agents 页签（Agent 定义管理）
 

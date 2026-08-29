@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
 
+from server.app.routes.job_artifact_raw import register_raw_artifact_route
 from server.app.routes.job_contracts import ArtifactResponse
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
 from server.app.routes.job_view_contracts import JobLogResponse
@@ -16,6 +17,8 @@ def create_job_artifacts_router(
     log_service: JobLogService,
 ) -> APIRouter:
     router = APIRouter()
+    # 注册顺序敏感：raw 端点必须先于 {artifact_name:path} 注册。
+    register_raw_artifact_route(router, service, settings)
 
     @router.get("/jobs/{job_id}/artifacts/{artifact_name:path}", response_model=ArtifactResponse)
     def get_artifact(job_id: str, artifact_name: str) -> ArtifactResponse:

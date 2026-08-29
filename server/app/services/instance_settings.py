@@ -27,7 +27,7 @@ from server.app.configuration.instance_defaults import (
     DEFAULT_MONITORING_CONFIG,
 )
 from server.app.configuration.openclaw_defaults import DEFAULT_OPENCLAW_CONFIG
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.services.instance_settings_store import InstanceSettingsStore
 from server.app.settings import Settings
 
@@ -111,8 +111,12 @@ def effective_instance_document(stored: dict[str, Any] | None) -> dict[str, Any]
     return _merge(default_instance_document(), _strip_retired_openclaw_keys(stored))
 
 
-def apply_instance_settings(settings: Settings, database_dsn: DatabaseDsn) -> None:
-    """Overlay the stored instance document onto ``settings``; no-op when unset."""
+def apply_instance_settings(settings: Settings, database_dsn: ConnectSource) -> None:
+    """Overlay the stored instance document onto ``settings``; no-op when unset.
+
+    ``database_dsn`` accepts the JobQueries facade or a bare DSN string
+    (BOUNDARY-DATA-001, #187).
+    """
     stored = InstanceSettingsStore(database_dsn).get()
     if stored is None:
         return

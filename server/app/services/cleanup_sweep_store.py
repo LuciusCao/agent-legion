@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 
 GLOBAL_SETTINGS_KEY = "cleanup_sweep"
@@ -38,7 +38,8 @@ class CleanupSweepStore:
     action advances independently because log and run-dir retentions differ.
     """
 
-    def __init__(self, database_dsn: DatabaseDsn) -> None:
+    def __init__(self, database_dsn: ConnectSource) -> None:
+        # database_dsn: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187).
         self._dsn = database_dsn
 
     def load(self, cursor_key: str) -> tuple[datetime, int]:

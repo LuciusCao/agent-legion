@@ -130,7 +130,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
     """v52 → v53: every legacy payload shape lands on the run/job columns."""
     with write_transaction(TEST_DATABASE_URL) as conn:
         _rebuild_v52_shape(conn)
-        # A real pre-v63 database still has the retired workspace Agent-default
+        # A real pre-v64 database still has the retired workspace Agent-default
         # and intake_config_json columns; the v62 migration replay inserts
         # them (init_db's post-chain cleanup drops them again).
         for column in (

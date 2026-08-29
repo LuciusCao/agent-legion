@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import threading
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.services.material_ttl import (
     DEFAULT_SWEEP_INTERVAL_SECONDS,
     collect_expired_materials,
@@ -30,11 +30,12 @@ class MaterialTtlSweeperThread:
 
     def __init__(
         self,
-        database_dsn: DatabaseDsn,
+        database_dsn: ConnectSource,
         storage: ObjectStorage | None,
         *,
         interval_seconds: float = DEFAULT_SWEEP_INTERVAL_SECONDS,
     ) -> None:
+        # database_dsn: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187).
         self._dsn = database_dsn
         self._storage = storage
         self._interval_seconds = interval_seconds

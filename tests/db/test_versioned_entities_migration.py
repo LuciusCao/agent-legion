@@ -90,7 +90,7 @@ def test_versioned_entities_table_exists() -> None:
 
 
 def test_workspaces_agent_default_columns_retired() -> None:
-    # Schema v63: the post-chain cleanup drops the workspace-level Agent
+    # Schema v64: the post-chain cleanup drops the workspace-level Agent
     # default columns (execution config is per-node / workflow-level now);
     # postgres_schema.sql still creates them so the v62 migration can replay.
     with read_connection(TEST_DATABASE_URL) as conn:

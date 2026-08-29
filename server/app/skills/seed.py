@@ -21,7 +21,7 @@ from pathlib import Path
 
 import yaml
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.services.skill_source_store import SkillSourceStore
 from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_SOURCES
 from server.app.skills.config import SkillsConfig, SkillsLock
@@ -29,8 +29,12 @@ from server.app.skills.config import SkillsConfig, SkillsLock
 logger = logging.getLogger(__name__)
 
 
-def seed_skill_sources(database_dsn: DatabaseDsn, root_dir: Path) -> None:
-    """Seed-if-absent the skill source documents into ``global_settings``."""
+def seed_skill_sources(database_dsn: ConnectSource, root_dir: Path) -> None:
+    """Seed-if-absent the skill source documents into ``global_settings``.
+
+    ``database_dsn`` accepts the JobQueries facade or a bare DSN string
+    (BOUNDARY-DATA-001, #187).
+    """
     store = SkillSourceStore(database_dsn)
     if store.get_sources() is not None:
         return

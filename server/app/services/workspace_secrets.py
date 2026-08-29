@@ -15,7 +15,7 @@ class WorkspaceSecretsService:
 
     def __init__(self, job_db: JobQueries, settings: Settings) -> None:
         self._job_db = job_db
-        self._vault = VaultService(job_db.path, settings.config)
+        self._vault = VaultService(job_db, settings.config)
 
     def _ensure_workspace(self, workspace_id: str) -> None:
         if self._job_db.get_workspace(workspace_id) is None:

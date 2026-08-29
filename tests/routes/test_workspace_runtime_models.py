@@ -1,7 +1,7 @@
 """GET /api/workspaces/{workspace_id}/runtime-models 路由与聚合测试。
 
 Studio 节点执行 datalist 的数据源：workspace 在线 Worker 声明的
-(runtime, provider, model) 三元组聚合（schema v63 起 workspace Agent
+(runtime, provider, model) 三元组聚合（schema v64 起 workspace Agent
 默认配置退役，节点 execution 的自由输入靠它提示可 claim 的型号）。
 """
 

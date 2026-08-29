@@ -32,3 +32,12 @@ export async function fetchJobArtifact(
     `/api/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifactName)}`
   )
 }
+
+/**
+ * raw 字节端点的同源 URL：媒体渲染器 <img>/<video>/<audio>/<iframe> 直接
+ * 作 src 用（session cookie 自动携带，GET 免 CSRF）。不经 api() fetch——
+ * 返回的是二进制流而非 JSON。
+ */
+export function jobArtifactRawUrl(jobId: string, artifactName: string): string {
+  return `/api/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifactName)}/raw`
+}

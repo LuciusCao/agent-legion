@@ -10,6 +10,7 @@ lock — publishing (ref change + relock) stays a human admin action.
 
 from fastapi import APIRouter
 
+from server.app.jobs import JobQueries
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
 from server.app.routes.skill_contracts import SkillDetailResponse
 from server.app.routes.studio_agent_skill_contracts import (
@@ -24,12 +25,10 @@ from server.app.services.skill_source_store import SkillSourceStore
 from server.app.settings import Settings
 
 
-def create_studio_agent_skill_tools_router(settings: Settings) -> APIRouter:
+def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Settings) -> APIRouter:
     router = APIRouter()
-    catalog = SkillCatalogService(settings.database_url)
-    editing = SkillEditingService(
-        SkillSourceStore(settings.database_url), runs_dir=settings.skills_runs_dir
-    )
+    catalog = SkillCatalogService(job_db)
+    editing = SkillEditingService(SkillSourceStore(job_db), runs_dir=settings.skills_runs_dir)
 
     @router.get("/studio-agent/tools/skills/{skill_key:path}", response_model=SkillDetailResponse)
     def get_skill(skill_key: str, ref: str | None = None) -> SkillDetailResponse:
