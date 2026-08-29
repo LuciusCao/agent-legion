@@ -39,7 +39,7 @@ workflow key 是同一个标识：创建时显式提供 id（即 `default_workfl
 | `server/app/routes/workspace_execution_contracts.py:26` `WorkspaceAgentRouteEntry` | `workflow_key: str` | 前端 Agent 路由/LocalNodeLimit 过滤 | 需契约协调 | 过滤键（`route.workflow_key === workflowKey`），改用 workspace_id 语义不变 |
 | `server/app/routes/workspace_execution_contracts.py:7` `NodeLimitRequest` | `workflow_key: str`（min_length=1） | 节点并发限制 PUT | 需契约协调（请求+响应同形） | 与 workspace_id 组合 PK 的一维 |
 | `server/app/routes/studio_agent_context_contracts.py:27` `StudioContextWorkflow` | `workflow_key: str` | MCP studio context | 需契约协调 | MCP 工具面，外部 Agent 可能消费 |
-| `server/app/routes/studio_agent_tool_contracts.py:19` `StudioAgentActiveWorkflowResponse` | `workflow_key: str \| None` | MCP 工具 | 需契约协调 | empty 分支在 v62 后不可达（key 恒非空） |
+| `server/app/routes/studio_agent_tool_contracts.py:19` `StudioAgentActiveWorkflowResponse` | `workflow_key: str \| None` | MCP 工具 | 需契约协调 | empty 分支**仍可达**（`studio_agent_tools.py:108-110`：workspace 无已发布 revision 时返回 state=empty——创建路径刻意不 seed revision，from-scratch 流程依赖它；Phase 4 只能收紧 workflow_key 可空性，**不得删 empty 分支**，codex on #256） |
 | `server/app/routes/agent_workers_contracts.py:129` `AgentClaimResponse` | `workflow_key: str` | Worker claim 协议（外部进程） | 需契约协调（跨进程协议，需 Worker 同步发版） | `worker/code_runner.py:178`、`worker/execution/run.py:136` 读 manifest/claim 的该字段 |
 | `server/app/routes/workflow_draft_compare_contracts.py:35` `WorkflowRevisionSummaryItem` | `workflow_key: str` | Studio diff 视图 | 需契约协调 | 同 revision 派生 |
 | `server/app/routes/workspace_execution_contracts.py:40` `WorkspaceSettingsPayload` | `workflowKey: str`（required） | 前端 settingStore 快照 | 需契约协调（Phase 2 重点：blob 字段） | settings 快照 blob 往返透传；编辑器已删但仍 required |
@@ -83,9 +83,9 @@ workflow key 是同一个标识：创建时显式提供 id（即 `default_workfl
 | `workspace_node_bindings.workflow_key`（:54） | 组合 PK 第 2 列 | 无运行时查询（v47 已退役，表保留供历史 migration replay） | 保留（迁移考古） | `migrations/executor_retirement.py` drop |
 | `executor_leases.workflow_key`（:202） | `idx_executor_leases_workflow_node_active`(:654) 第 3 列 | lease 容量查询（`executors/_lease_claims.py:54,87`） | **需 schema 迁移** | 索引重建（去 workflow_key 维度） |
 | `agent_execution_requests.workflow_key`（:315） | `idx_agent_execution_requests`(:360) 成员 | claim 扫描投影 | **需 schema 迁移** | Worker claim 协议字段同源 |
-| `workspace_job_node_status_counts.workflow_key`（:544） | **组合 PK 第 2 列** | 触发器维护（3 个 plpgsql 函数 + 2 个 trigger：`bump_job_node_status_counts`、`sync_job_node_status_counts`、`deduct/rekey_job_node_status_counts`，schema.sql :550-651） | **需 schema 迁移（触发器全链重写）** | `rekey` trigger 的 `after update of workflow_key on jobs`(:650) 本身就是「key 会变」时代残留 |
+| `workspace_job_node_status_counts.workflow_key`（:544） | **组合 PK 第 2 列** | 触发器维护（**4 个函数 + 3 个触发器**：`bump_job_node_status_counts`、`sync_job_node_status_counts`、`deduct_job_node_status_counts`、`rekey_job_node_status_counts`，触发器 node_sync / job_deduct / job_rekey，schema.sql :550-651——codex on #256 修正计数） | **需 schema 迁移（触发器全链重写，七个对象逐一处理）** | `rekey` trigger 的 `after update of workflow_key on jobs` 本身就是「key 会变」时代残留；删 jobs.workflow_key 前漏掉任一链路会 DDL 失败或计数失维护 |
 | `workflow_revisions.workflow_key`（:225） | **unique 第 2 列** `(workspace_id, workflow_key, version)`(:232) + `idx_workflow_revisions_active`(:661) | revision 解析（全链最热的查询之一，`queries/workflow_revisions.py:150-161`） | **需 schema 迁移** | unique 约束重建；revision_id 组合串成分（类别 3） |
-| `workflow_node_codes.workflow_key`（:833） | **unique 第 2 列**(:843) + partial unique(:846) | node code 解析（`services/node_codes.py`） | **需 schema 迁移** | 兼容 `versioned_entities.entity_key` 的 `key:node` 编码（类别 3） |
+| `workflow_node_codes.workflow_key`（:833） | **unique 第 2 列**(:843) + partial unique(:846) | **迁移考古表**：运行时解析走 `versioned_entities`（`NodeCodeService`），本表仅由 schema replay 创建、供 v26 `migrate_versioned_entities` 搬运历史数据（`migrations/versioned_entities.py:65` 读它） | **保留**（旧表形状保持至 v26 重放策略改写，或 post-chain drop；fresh install 的迁移链依赖其形状，codex on #256） | 兼容 `versioned_entities.entity_key` 的 `key:node` 编码（类别 3） |
 | `quality_sample_batches.workflow_key`（:891，default ''） | 无索引 | 抽样过滤谓词（`quality_sampling.py:101-103`） | **需 schema 迁移** | 可空语义（default ''），抽样可跨 workflow——退役后过滤维度只剩 workspace |
 
 迁移链中的 workflow_key 数据迁移（不改现状，仅记录在案）：
@@ -202,10 +202,19 @@ workflow key 是同一个标识：创建时显式提供 id（即 `default_workfl
   整体退役（legacy 投影）。
 - `workflow_revisions` / `workflow_node_codes` 的 unique 约束重建与
   `versioned_entities.entity_key` 编码简化可合并评估（同为 `key:node` 家族）。
+  **例外：legacy 全局 node_code 行**（`workspace_id IS NULL`，`node_codes.py:148`
+  的 `get_global_code_by_version` 仍经 `workflow_key:node_key` 查找，quality
+  replay 的冻结 pin 经此解析）——全局行没有可替代的 workspace id，直接去 key 段
+  会使不同 workflow 的同名节点冲突、历史 replay pin 失解析。该族必须保留旧编码
+  双读或先迁移全局行（codex on #256）。
 - 组合字符串 id（run_id/job_id/revision_id）：**不建议重写存量**——沿用 v62
   的「旧行自解析」先例，只改新行构造（去 key 段）；外部引用（工单/导出/审计）
   按 id 前缀自解析。vault secret 名是唯一必须显式处理存量的（改名或双读），
-  单独 PR。
+  单独 PR。**例外：run_id 是幂等键**（`queries` 的 `create_run` 以确定性 run_id
+  作重复提交幂等键；异步 intake 在 job 去重前先 upsert run）——发布前已提交的
+  相同异步 payload，发布后会算出不同 ID、无法命中旧 run 的 upsert/requeue 分支，
+  留下重复 run/审计记录。切版点需要旧 ID 探测或兼容映射，不能只靠旧行自解析
+  （codex on #256）。
 - 存量磁盘/S3 路径：与 v62 决策保持一致——不强制迁移，读路径已双候选兼容；
   若 Phase 4 想清理，做成可选的运维脚本而非迁移。
 
