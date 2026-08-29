@@ -41,6 +41,7 @@ from server.app.services.skill_repo_edit import (
     run_edit_git,
 )
 from server.app.skills.config import SkillsConfig, SkillsLock
+from server.app.skills.skill_roots import default_skill_base_dir
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ class SkillEditingService:
         runs_dir: Path | None = None,
     ) -> None:
         self._store = store
-        self.base_dir = base_dir or Path.home() / ".agents" / "skills" / "agent-legion"
+        self.base_dir = base_dir or default_skill_base_dir()
         # None resolves lazily to default_skills_runs_dir(); the route passes
         # settings.skills_runs_dir so the lock domain matches SkillManager's.
         self._runs_dir = runs_dir

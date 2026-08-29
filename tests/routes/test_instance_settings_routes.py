@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from server.app.skills.skill_roots import SKILLS_ROOT_DISPLAY
+
 CSRF = {"x-agent-legion-request": "1"}
 INSTANCE_SETTINGS_URL = "/api/admin/instance-settings"
 
@@ -58,7 +60,14 @@ def test_member_forbidden(client) -> None:
 def test_get_returns_code_defaults_when_unset(client) -> None:
     response = client.get(INSTANCE_SETTINGS_URL)
     assert response.status_code == 200
-    assert response.json() == _payload()
+    assert response.json() == {**_payload(), "skills_root": SKILLS_ROOT_DISPLAY}
+
+
+def test_get_includes_readonly_skills_root(client) -> None:
+    """The response carries the on-disk skills root as a read-only field."""
+    response = client.get(INSTANCE_SETTINGS_URL)
+    assert response.status_code == 200
+    assert response.json()["skills_root"] == SKILLS_ROOT_DISPLAY
 
 
 def test_get_normalizes_legacy_stored_openclaw_keys(client) -> None:
@@ -93,10 +102,18 @@ def test_put_roundtrip(client) -> None:
     payload["cleanup"]["log_retention_days"] = 14
     response = client.put(INSTANCE_SETTINGS_URL, json=payload)
     assert response.status_code == 200, response.text
-    assert response.json() == payload
+    assert response.json() == {**payload, "skills_root": SKILLS_ROOT_DISPLAY}
 
     response = client.get(INSTANCE_SETTINGS_URL)
-    assert response.json() == payload
+    assert response.json() == {**payload, "skills_root": SKILLS_ROOT_DISPLAY}
+
+
+def test_put_rejects_skills_root(client) -> None:
+    """skills_root is read-only (server-injected); writing it 422s like any
+    other unknown key (InstanceSettingsUpdate is extra="forbid")."""
+    payload = _payload()
+    payload["skills_root"] = "/somewhere/else"
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
 
 
 def test_put_rejects_unknown_keys(client) -> None:
@@ -165,7 +182,7 @@ def test_put_openclaw_roundtrip(client) -> None:
     payload["openclaw"]["cwd"] = "/tmp/openclaw"
     response = client.put(INSTANCE_SETTINGS_URL, json=payload)
     assert response.status_code == 200, response.text
-    assert response.json() == payload
+    assert response.json() == {**payload, "skills_root": SKILLS_ROOT_DISPLAY}
 
     response = client.get(INSTANCE_SETTINGS_URL)
-    assert response.json() == payload
+    assert response.json() == {**payload, "skills_root": SKILLS_ROOT_DISPLAY}

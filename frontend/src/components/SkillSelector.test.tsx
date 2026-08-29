@@ -24,17 +24,45 @@ describe('SkillSelector', () => {
       locked_ref: 'abc123',
     })
     const onChange = vi.fn()
-    render(<SkillSelector value="" onChange={onChange} />)
+    render(<SkillSelector workspaceId="ws-1" value="" onChange={onChange} />)
 
-    fireEvent.change(screen.getByLabelText('Skill 路径（绝对路径）'), {
-      target: { value: '/abs/skill' },
+    // 只读前缀 + 相对目录名输入。
+    expect(screen.getByText('~/.agents/skills/ws-1/')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Skill 目录名'), {
+      target: { value: 'write-script' },
     })
     fireEvent.click(screen.getByRole('button', { name: '校验' }))
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith('ns/skill'))
-    expect(mockValidate).toHaveBeenCalledWith('/abs/skill')
+    // 相对名拼上 workspace 技能根前缀（后端 validator 自行展开 ~）。
+    expect(mockValidate).toHaveBeenCalledWith(
+      '~/.agents/skills/ws-1/write-script'
+    )
     expect(screen.getByText('当前锁定 ref：abc123')).toBeInTheDocument()
     expect(screen.getByLabelText('可用 tag（参考）')).toBeInTheDocument()
+  })
+
+  it('strips leading slashes from the relative name before composing', async () => {
+    mockValidate.mockResolvedValue({
+      valid: true,
+      path: '/abs/skill',
+      skill_key: 'ns/skill',
+      tags: [],
+      latest_tag: null,
+      locked_ref: null,
+    })
+    render(<SkillSelector workspaceId="ws-1" value="" onChange={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('Skill 目录名'), {
+      target: { value: '/write-script' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '校验' }))
+
+    await waitFor(() =>
+      expect(mockValidate).toHaveBeenCalledWith(
+        '~/.agents/skills/ws-1/write-script'
+      )
+    )
   })
 
   it('shows the validation error when the path is invalid', async () => {
@@ -44,10 +72,10 @@ describe('SkillSelector', () => {
       error: 'SKILL.md 不存在',
     })
     const onChange = vi.fn()
-    render(<SkillSelector value="" onChange={onChange} />)
+    render(<SkillSelector workspaceId="ws-1" value="" onChange={onChange} />)
 
-    fireEvent.change(screen.getByLabelText('Skill 路径（绝对路径）'), {
-      target: { value: '/abs/nope' },
+    fireEvent.change(screen.getByLabelText('Skill 目录名'), {
+      target: { value: 'nope' },
     })
     fireEvent.click(screen.getByRole('button', { name: '校验' }))
 
@@ -66,10 +94,10 @@ describe('SkillSelector', () => {
       latest_tag: 'v1.2.0',
       locked_ref: null,
     })
-    render(<SkillSelector value="" onChange={vi.fn()} />)
+    render(<SkillSelector workspaceId="ws-1" value="" onChange={vi.fn()} />)
 
-    fireEvent.change(screen.getByLabelText('Skill 路径（绝对路径）'), {
-      target: { value: '/abs/skill' },
+    fireEvent.change(screen.getByLabelText('Skill 目录名'), {
+      target: { value: 'write-script' },
     })
     fireEvent.click(screen.getByRole('button', { name: '校验' }))
 

@@ -21,6 +21,7 @@ from server.app.settings import load_settings
 from server.app.skills.config import SkillsLock
 from server.app.skills.manager import SkillManager, SkillStore
 from server.app.skills.refresh import refresh_source
+from server.app.skills.skill_roots import default_skill_base_dir
 
 
 def refresh_lock(store: SkillStore, base_dir: Path, runs_dir: Path | None = None) -> None:
@@ -44,7 +45,7 @@ def main() -> None:
     parser.add_argument("--database-url", default=None, help="PostgreSQL DSN override")
     parser.add_argument(
         "--base-dir",
-        default=str(Path.home() / ".agents" / "skills" / "agent-legion"),
+        default=str(default_skill_base_dir()),
         type=Path,
     )
     parser.add_argument(

@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import type { WorkflowDefinitionRecord } from '../../../types'
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
@@ -18,31 +17,27 @@ type Props = {
   setDefinitionYaml: (value: string) => void
   compareSummary?: ChangeSummaryViewModel | null
   readOnly: boolean
+  /** 预览态（WorkflowNodeDetailView 持有，带 nodeKey 印记后下发）。 */
+  activeKind: NodeDetailPreviewKind | null
+  onShowPreview: (kind: NodeDetailPreviewKind) => void
   onClose: () => void
 }
 
 /** 详情 panel 内容区：默认节点 inspector；「查看 Prompt / 浏览技能文件」原位
- * 切换为预览视图（不开 dialog，右侧 Agent 对话保持可见可聊）。预览状态带
- * nodeKey 印记，切换选中节点即自然失效，无需 effect 重置。 */
+ * 切换为预览视图（不开 dialog，右侧 Agent 对话保持可见可聊）。预览状态由
+ * DetailView 持有（面包屑需要感知），本组件只做分发与 context 下发。 */
 export function WorkflowNodeDetailBody(props: Props) {
-  const [preview, setPreview] = useState<{
-    nodeKey: string
-    kind: NodeDetailPreviewKind
-  } | null>(null)
   const details = inspectorNodeDetails(props, props.nodeKey)
-  const activeKind =
-    details && preview?.nodeKey === props.nodeKey ? preview.kind : null
   return (
-    <NodeDetailPreviewContext.Provider
-      value={(kind) => setPreview({ nodeKey: props.nodeKey, kind })}
-    >
-      {activeKind && details ? (
+    <NodeDetailPreviewContext.Provider value={props.onShowPreview}>
+      {props.activeKind && details ? (
         <WorkflowNodePreview
-          kind={activeKind}
+          kind={props.activeKind}
           node={details.node}
           agentCatalog={props.agentCatalog}
           definitionYaml={props.definitionYaml}
-          onBack={() => setPreview(null)}
+          setDefinitionYaml={props.setDefinitionYaml}
+          readOnly={props.readOnly}
         />
       ) : (
         <WorkflowNodeInspector

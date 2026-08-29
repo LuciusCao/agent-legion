@@ -108,6 +108,8 @@ def test_loopback_tools_are_async() -> None:
         "save_node_code_draft",
         "get_node_code",
         "save_agent_definition_draft",
+        "get_node_prompt",
+        "save_node_prompt",
         "get_skill",
         "validate_skill",
         "save_skill_version",
@@ -229,6 +231,36 @@ def test_get_skill_without_ref(recorded) -> None:
     _run_tool(server, "get_skill", {"skill_key": "wf/review"})
     assert calls[0]["method"] == "GET"
     assert calls[0]["url"].endswith("/skills/wf/review")
+
+
+def test_get_node_prompt_posts_node_key(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_node_prompt", {"workspace_id": "ws-1", "node_key": "gen"})
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/node-prompt")
+    assert calls[0]["json"] == {"node_key": "gen"}
+
+
+def test_get_node_prompt_forwards_definition_yaml(recorded) -> None:
+    server, calls = recorded
+    _run_tool(
+        server,
+        "get_node_prompt",
+        {"workspace_id": "ws-1", "node_key": "gen", "definition_yaml": "key: wf"},
+    )
+    assert calls[0]["json"] == {"node_key": "gen", "definition_yaml": "key: wf"}
+
+
+def test_save_node_prompt_puts_prompt(recorded) -> None:
+    server, calls = recorded
+    _run_tool(
+        server,
+        "save_node_prompt",
+        {"workspace_id": "ws-1", "node_key": "gen", "prompt": "House style."},
+    )
+    assert calls[0]["method"] == "PUT"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/node-prompt")
+    assert calls[0]["json"] == {"node_key": "gen", "prompt": "House style."}
 
 
 def test_get_skill_with_ref_appends_query(recorded) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from server.app.routes.instance_openclaw_contracts import InstanceOpenClawSettings
+from server.app.skills.skill_roots import SKILLS_ROOT_DISPLAY
 
 
 class InstanceCleanupSettings(BaseModel):
@@ -57,7 +58,10 @@ class InstanceSettingsDocument(BaseModel):
 
 
 class InstanceSettingsResponse(InstanceSettingsDocument):
-    pass
+    # Read-only, server-injected: the on-disk skills root (single source of
+    # truth in server.app.skills.paths). Not part of the PUT document —
+    # InstanceSettingsUpdate is extra="forbid" and rejects writes to it.
+    skills_root: str = SKILLS_ROOT_DISPLAY
 
 
 class InstanceSettingsUpdate(InstanceSettingsDocument):

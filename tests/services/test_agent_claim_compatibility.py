@@ -136,6 +136,23 @@ def test_new_manifest_without_defaults_resolves_revision_then_frozen() -> None:
 
 
 @pytest.mark.no_db
+def test_revision_node_label_refreshes_manifest_node_label() -> None:
+    # node_label 喂给重渲染时自动组装的默认指令：revision 改名实时生效；
+    # revision 无 label（或节点缺失）时保留 enqueue 冻结值。
+    row = _row(
+        manifest=_manifest(node_label="Old Label"),
+        revision_nodes={"generate": {"capability": "x", "label": "New Label"}},
+    )
+    assert live_claim_manifest(row)["node_label"] == "New Label"
+
+    row = _row(
+        manifest=_manifest(node_label="Old Label"),
+        revision_nodes={"generate": {"capability": "x"}},
+    )
+    assert live_claim_manifest(row)["node_label"] == "Old Label"
+
+
+@pytest.mark.no_db
 def test_model_declaration_is_scoped_to_agent_runtime() -> None:
     candidate = {"runtime": "velites", "capability": "review"}
     manifest = {"execution": {"provider": "sqai", "model": "kimi"}}

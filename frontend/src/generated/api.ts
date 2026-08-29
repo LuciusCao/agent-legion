@@ -1078,6 +1078,24 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/node-prompt': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Save Node Prompt Route */
+    put: operations['save_node_prompt_route_api_studio_agent_tools_workspaces__workspace_id__node_prompt_put']
+    /** Get Node Prompt */
+    post: operations['get_node_prompt_api_studio_agent_tools_workspaces__workspace_id__node_prompt_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active': {
     parameters: {
       query?: never
@@ -2430,6 +2448,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/workflow/node-prompt-preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Preview Node Prompt Route */
+    post: operations['preview_node_prompt_route_api_workspaces__workspace_id__workflow_node_prompt_preview_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code': {
     parameters: {
       query?: never
@@ -3196,6 +3231,11 @@ export interface components {
       materials_ttl_days: number
       monitoring: components['schemas']['InstanceMonitoringSettings']
       openclaw: components['schemas']['InstanceOpenClawSettings']
+      /**
+       * Skills Root
+       * @default ~/.agents/skills
+       */
+      skills_root: string
       /** Sweeper Enabled */
       sweeper_enabled: boolean
       /** Sweeper Interval Seconds */
@@ -3838,6 +3878,44 @@ export interface components {
       node_key: string
       /** Workflow Key */
       workflow_key: string
+    }
+    /** NodePromptPreviewRequest */
+    NodePromptPreviewRequest: {
+      /** Definition Yaml */
+      definition_yaml?: string | null
+      /** Node Key */
+      node_key: string
+    }
+    /** NodePromptPreviewResponse */
+    NodePromptPreviewResponse: {
+      /** Custom Instructions */
+      custom_instructions: string
+      /** Default Instructions */
+      default_instructions: string
+      /** Effective Prompt */
+      effective_prompt: string
+      /** Is Default */
+      is_default: boolean
+      /** Skill Key */
+      skill_key?: string | null
+    }
+    /** NodePromptSaveRequest */
+    NodePromptSaveRequest: {
+      /** Node Key */
+      node_key: string
+      /** Prompt */
+      prompt: string
+    }
+    /** NodePromptSaveResponse */
+    NodePromptSaveResponse: {
+      /** Definition Yaml */
+      definition_yaml: string
+      /** Is Default */
+      is_default: boolean
+      /** Node Key */
+      node_key: string
+      /** Updated At */
+      updated_at?: string | null
     }
     /** NodeRunResponse */
     NodeRunResponse: {
@@ -8071,6 +8149,76 @@ export interface operations {
       }
     }
   }
+  save_node_prompt_route_api_studio_agent_tools_workspaces__workspace_id__node_prompt_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NodePromptSaveRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NodePromptSaveResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_node_prompt_api_studio_agent_tools_workspaces__workspace_id__node_prompt_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NodePromptPreviewRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NodePromptPreviewResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_active_revision_api_studio_agent_tools_workspaces__workspace_id__workflow_active_get: {
     parameters: {
       query?: never
@@ -11206,6 +11354,41 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowRevisionDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_node_prompt_route_api_workspaces__workspace_id__workflow_node_prompt_preview_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NodePromptPreviewRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NodePromptPreviewResponse']
         }
       }
       /** @description Validation Error */

@@ -57,7 +57,7 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
     # 工具面清单变化时同步这里与工具文档（server/app/mcp_server/server.py）。
     # get_authoring_guide 是本地静态工具（不发 HTTP），不影响下方
     # recorded == table 的路由比对。
-    assert len(tools) == 11
+    assert len(tools) == 13
     for tool in tools:
         schema = tool.inputSchema
         args = {}

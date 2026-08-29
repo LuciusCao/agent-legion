@@ -26,6 +26,11 @@ def live_claim_manifest(row: Mapping[str, Any]) -> dict[str, Any]:
         definition = json.loads(str(raw_revision))
         node = (definition.get("nodes") or {}).get(str(row["node_key"])) or {}
         node_execution = node.get("execution") or {}
+        # The label feeds the auto-assembled default instructions at re-render
+        # time; keep it in step with the revision (legacy manifests lack it
+        # and fall back to the node key inside build_prompt).
+        if label := str(node.get("label") or ""):
+            manifest["node_label"] = label
     frozen = manifest.get("execution") or {}
     # Legacy key, absent on manifests enqueued after schema v64 (workspace
     # Agent defaults retired): kept so in-flight queued manifests still

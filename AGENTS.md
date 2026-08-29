@@ -277,6 +277,10 @@ CodeExecutor(...).execute(context)
 ## 7. Pi / External Skills
 
 - Skill 只在外部仓库（如 `~/.agents/skills/agent-legion/...`）修改，不要复制或 symlink 到项目根。
+- skill root 统一为 `~/.agents/skills`（单一来源 `server/app/skills/skill_roots.py`，实例设置
+  只读展示，暂不支持修改）；workspace 的 agent skill 默认位于
+  `~/.agents/skills/<workspace_id>/`，SkillSelector 以只读前缀 + 相对目录名录入。
+  skill 缓存目录缺失时 SkillManager 按 DB skill_lock 自动 re-clone 自愈。
 - skill 源与锁已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB
   `global_settings`（key=`skill_sources` / `skill_lock`）；tracked
   `config/skills.yaml` / `config/skills.lock` 已退役，残留文件只在 DB 无记录时

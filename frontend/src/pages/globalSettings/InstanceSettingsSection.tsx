@@ -212,6 +212,14 @@ function InstanceSettingsEditor({
           ))}
         </div>
       ))}
+      <div className={styles.row}>
+        <span className={styles.label}>Skill 根目录</span>
+        <code>{initial.skills_root}</code>
+        <span className={styles.hint}>
+          暂不支持修改；workspace 技能默认位于{' '}
+          {`${initial.skills_root}/<workspace>/`}
+        </span>
+      </div>
       <OpenClawInstanceFields values={values} setValues={setValues} />
       <button
         type="button"

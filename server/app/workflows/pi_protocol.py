@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from server.app.workflows.node_prompt import build_node_instructions
 from server.app.workflows.velites_command import build_command_for_flavor
 from shared.pi_model_error import detect_model_error, fold_model_error
 
@@ -38,6 +39,12 @@ PROMPT_FILE_PLACEHOLDER = "{prompt_file}"
 
 
 def build_prompt(manifest: dict[str, Any], *, job_dir: Path, skill_dir: Path) -> str:
+    """Fixed platform envelope plus exactly one node-instructions section.
+
+    The envelope (job/skill paths, validator, declared IO, output discipline)
+    never varies; the closing section semantics live in
+    ``node_prompt.build_node_instructions``.
+    """
     lines = [
         "Execute the loaded node skill for this Agent Legion workflow job.",
         "",
@@ -62,10 +69,10 @@ def build_prompt(manifest: dict[str, Any], *, job_dir: Path, skill_dir: Path) ->
             "and the skill directory. "
             "Finish after all required outputs are written and correct."
         ),
+        "",
+        "Node instructions:",
+        build_node_instructions(manifest),
     ]
-    additional = str(manifest.get("additional_prompt", "")).strip()
-    if additional:
-        lines.extend(["", "Additional node instructions:", additional])
     return "\n".join(lines) + "\n"
 
 

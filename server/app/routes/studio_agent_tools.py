@@ -23,6 +23,7 @@ from server.app.routes.agent_definition_contracts import (
     AgentVersionResponse,
 )
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.studio_agent_prompt_tools import create_studio_agent_prompt_tools_router
 from server.app.routes.studio_agent_skill_tools import create_studio_agent_skill_tools_router
 from server.app.routes.studio_agent_tool_contracts import (
     StudioAgentActiveWorkflowResponse,
@@ -175,5 +176,6 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         return WorkflowNodeCodeResponse(**state)
 
     router.include_router(create_studio_agent_skill_tools_router(job_db, settings))
+    workspace_scoped.include_router(create_studio_agent_prompt_tools_router(job_db, settings))
     router.include_router(workspace_scoped)
     return router

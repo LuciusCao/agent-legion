@@ -1,7 +1,7 @@
 """Skill path validation and tag discovery for the Studio Agent editor.
 
 A skill is a directory under the managed skills base dir
-(``~/.agents/skills/agent-legion``) containing a ``SKILL.md``; each skill
+(``~/.agents/skills``) containing a ``SKILL.md``; each skill
 directory is its own git repository whose tags are the selectable refs
 (the DB ``skill_lock`` document stays the authority on which ref is pinned —
 the validator only reports what exists, it never mutates the lock).
