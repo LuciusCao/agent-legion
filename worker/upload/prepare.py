@@ -15,27 +15,10 @@ from shared.pi_events import (
     compress_pi_events,
     scan_and_compress_pi_events,
 )
+from worker.upload.result_metadata import failed_metadata, write_empty_archive
 
 if TYPE_CHECKING:
     from worker.upload.queue import UploadTask
-
-MAX_ERROR_MESSAGE_CHARS = 4000
-
-
-def write_empty_archive(archive: Path) -> None:
-    with tarfile.open(archive, "w:gz"):
-        pass
-
-
-def failed_metadata(task: UploadTask, error_message: str) -> dict[str, Any]:
-    # failed 上报的统一载荷（prepare 失败 / CAS 4xx 终态共用）。
-    return {
-        "status": "failed",
-        "exit_code": 1,
-        "error_message": error_message[:MAX_ERROR_MESSAGE_CHARS],
-        "command": list(task.command),
-        "output_artifacts": {},
-    }
 
 
 def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:

@@ -14,6 +14,7 @@ from typing import Any, BinaryIO
 import requests
 
 from shared.protocol import PROTOCOL_VERSION
+from worker.host.errors import TransientHostError, WorkerAuthError
 from worker.host.transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
 
 # Protocol history lives in shared/protocol.py (shipped in the worker image,
@@ -23,18 +24,7 @@ from worker.host.transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
 
 DEFAULT_TIMEOUT = 30
 
-
-class WorkerAuthError(RuntimeError):
-    """Server rejected this Worker as unknown or revoked; re-registration is required."""
-
-
-class TransientHostError(requests.RequestException):
-    """Host answered with a transient failure (5xx/429); retrying is correct.
-
-    A RequestException subclass on purpose: the retry loop treats transport
-    failures and these answers alike as "Host temporarily unavailable", while
-    WorkerAuthError (a verdict) and programming errors still fail fast.
-    """
+__all__ = ["Client", "TransientHostError", "WorkerAuthError"]
 
 
 class Client(TransferOperations):

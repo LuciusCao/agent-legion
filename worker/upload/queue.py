@@ -40,15 +40,16 @@ from worker.host.transfer import HostRequestError
 from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY
 from worker.upload import heartbeat as upload_heartbeat
 
-# MAX_ERROR_MESSAGE_CHARS 的定义在 upload_prepare（failed_metadata 的截断
+# MAX_ERROR_MESSAGE_CHARS 的定义在 result_metadata（failed_metadata 的截断
 # 上限）；execution_run 沿本模块导入，`as` 惯用法重导出而非再定义一份
-# 副本（#200/#201 同族的 sync-by-comment 反模式）。
-from worker.upload.prepare import (
-    MAX_ERROR_MESSAGE_CHARS as MAX_ERROR_MESSAGE_CHARS,
-)
+# 副本（#200/#201 同族的 sync-by-comment 反模式）。failed_metadata 经
+# prepare 重导出（prepare_or_failed 同车）。
 from worker.upload.prepare import (
     failed_metadata,
     prepare_or_failed,
+)
+from worker.upload.result_metadata import (
+    MAX_ERROR_MESSAGE_CHARS as MAX_ERROR_MESSAGE_CHARS,
 )
 from worker.upload.scheduler import LaneScheduler
 
