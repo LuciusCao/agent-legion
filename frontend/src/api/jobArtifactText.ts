@@ -39,7 +39,7 @@ export async function fetchJobArtifactText(
     headers: { Range: `bytes=0-${maxBytes}` },
   })
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`)
+    throw new Error(`HTTP ${response.status}: ${await response.text()}`)
   }
   return jobArtifactTextPreviewOf(
     await response.text(),

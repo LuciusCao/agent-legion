@@ -783,13 +783,11 @@ describe('JobDetailPage', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-        if (url === '/api/jobs/j1/artifacts/question.json') {
+        if (url === '/api/jobs/j1/artifacts/question.json/raw') {
           return Promise.resolve({
             ok: true,
-            json: async () => ({
-              name: 'question.json',
-              content: 'artifact-body',
-            }),
+            headers: { get: () => null },
+            text: async () => 'artifact-body',
           })
         }
         return base(url, init)
@@ -844,12 +842,11 @@ describe('JobDetailPage', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-        if (url === '/api/jobs/j1/artifacts/question.json') {
+        if (url === '/api/jobs/j1/artifacts/question.json/raw') {
           return Promise.resolve({
             ok: false,
             status: 500,
             text: async () => 'server boom',
-            json: async () => ({}),
           })
         }
         return base(url, init)
