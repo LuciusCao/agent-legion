@@ -521,8 +521,8 @@ server/app/
 | WorkspaceExecutionConfigurationResponse | BaseModel | node_limits: list[NodeLimitRequest], migration_warnings: list[str], agent_cap... | app/routes/workspace_execution_contracts.py |
 | WorkspaceAgentRouteEntry | BaseModel | workflow_key: str, node_key: str, node_label: str, capability: str, agent_id:... | app/routes/workspace_execution_contracts.py |
 | WorkspaceAgentRoutesResponse | BaseModel | routes: list[WorkspaceAgentRouteEntry] | app/routes/workspace_execution_contracts.py |
-| WorkspaceSettingsPayload | BaseModel | entityType: str, workflowKey: str | app/routes/workspace_execution_contracts.py |
-| WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, workflowKey: str | None | app/routes/workspace_execution_contracts.py |
+| WorkspaceSettingsPayload | BaseModel | entityType: str, workflowKey: str, previewHidden: list[str] | app/routes/workspace_execution_contracts.py |
+| WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, workflowKey: str | None, previewHidden: list[str] | N... | app/routes/workspace_execution_contracts.py |
 | WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/workspace_execution_contracts.py |
 | WorkspaceConfigurationResponse | BaseModel | workspace: WorkspaceRecord, settings: WorkspaceSettingsPayload, execution_con... | app/routes/workspace_execution_contracts.py |
 | WorkspaceRuntimeModelsResponse | BaseModel | runtimes: dict[str, dict[str, list[str]]] | app/routes/workspace_runtime_models.py |
