@@ -50,8 +50,8 @@ Agent Legion 是一个自托管控制台，把 AI agent 变成内容生产线的
 git clone https://github.com/LuciusCao/agent-legion.git
 cd agent-legion
 make install    # 装依赖、uv sync、建开发库 agent_legion_dev、生成 .env（含本地
-                # RustFS 随机凭据）、构建 velites、装前端依赖、种子 worker
-                # 配置——幂等，可重跑
+                # RustFS 随机凭据）、生成 vault 主密钥、构建 velites、装前端
+                # 依赖、种子 worker 配置——幂等，可重跑
 ```
 
 开发库用派生名 `agent_legion_dev` 而非裸名 `agent_legion`：裸名是共享/prod

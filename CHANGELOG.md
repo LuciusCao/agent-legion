@@ -45,7 +45,7 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 - Workspace Settings「Agent 默认配置」(`default_agent_provider/model/thinking`):
   the provider/model/thinking resolution chain is now node `execution.*` →
   workflow-level `execution` default → actionable error; the three columns are
-  dropped in schema v63 (cleanup-phase drop after the v62 replay, per the
+  dropped in schema v64 (cleanup-phase drop after the v62 replay, per the
   `cms_config_json` precedent). New manifests no longer bake
   `execution_defaults`; claim re-resolution stays tolerant of legacy in-flight
   manifests.

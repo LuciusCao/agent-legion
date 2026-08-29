@@ -138,8 +138,8 @@ def _reject_retired_register_token_config(config: dict[str, Any]) -> None:
     AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE) env vars are dead config that
     must not be silently ignored: an operator could otherwise believe a
     rotated token is active while every registration actually uses scoped
-    tokens. Remove the keys; workers register with scoped tokens issued in
-    the admin UI (设置 → Worker Token)."""
+    tokens. Remove the keys; workers register with scoped tokens issued in the
+    workspace settings (设置 → Agent 与 Worker)."""
     retired_keys = sorted(
         key
         for key in ("register_token", "register_token_file")
@@ -150,8 +150,8 @@ def _reject_retired_register_token_config(config: dict[str, Any]) -> None:
             "Unsupported agent_workers keys: "
             + ", ".join(f"agent_workers.{key}" for key in retired_keys)
             + ". The global worker register token was retired (issue #35); "
-            "registration uses scoped tokens issued in the admin UI "
-            "(设置 → Worker Token). Remove these keys."
+            "registration uses scoped tokens issued in the workspace settings "
+            "(设置 → Agent 与 Worker). Remove these keys."
         )
     for env_var in (
         "AGENT_LEGION_WORKER_REGISTER_TOKEN",
@@ -161,7 +161,8 @@ def _reject_retired_register_token_config(config: dict[str, Any]) -> None:
             raise ValueError(
                 f"Unsupported environment variable: {env_var}. The global worker "
                 "register token was retired (issue #35); registration uses scoped "
-                "tokens issued in the admin UI (设置 → Worker Token). Unset it."
+                "tokens issued in the workspace settings (设置 → Agent 与 Worker). "
+                "Unset it."
             )
 
 

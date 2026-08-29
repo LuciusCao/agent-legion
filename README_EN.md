@@ -59,8 +59,9 @@ git clone https://github.com/LuciusCao/agent-legion.git
 cd agent-legion
 make install    # install prerequisites, uv sync, create the agent_legion_dev
                 # database, generate .env (with random local-RustFS
-                # credentials), build velites, install frontend deps, seed
-                # the worker config — idempotent, safe to re-run
+                # credentials), generate the vault master key, build velites,
+                # install frontend deps, seed the worker config — idempotent,
+                # safe to re-run
 ```
 
 The development database uses the derived name `agent_legion_dev`, never the
@@ -105,10 +106,9 @@ no backend restart needed (see
 The repository ships a minimal demo workflow,
 **`education_video_problems_generation`**: ten generic K-12 math knowledge
 points under `examples/` are seeded as example materials into the demo
-workspace (requires `AGENT_LEGION_S3_*` object storage; seeding is skipped
-when it is not configured), each fanned out into one job — draft a teaching
-video script, review it, generate five exercises, review them, then a
-simulated (no-network) publish.
+workspace, each fanned out into one job — draft a teaching video script,
+review it, generate five exercises, review them, then a simulated (no-network)
+publish.
 
 ```bash
 make import-demo      # install/lock skills and create+seed a demo workspace if absent
@@ -148,6 +148,7 @@ Then in the console:
 |------------|------|
 | Get it running / run the demo | this file + `examples/README.md` |
 | Operate it (deploy, workers, remote execution) | [docs/](docs/README.md) — deployment, worker, and runbook docs |
+| Material storage (RustFS/S3) | [docs/materials-storage-deployment.md](docs/materials-storage-deployment.md) |
 | Understand how it works (architecture, config reference, runtimes) | [docs/architecture/](docs/architecture/README.md) |
 | Contribute code | [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) |
 | Track changes | [CHANGELOG.md](CHANGELOG.md) |
