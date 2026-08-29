@@ -79,8 +79,11 @@ skipped automatically (see
 
 When Docker is unavailable (not installed or not running), `make dev-up`
 skips the local RustFS: demo material seeding is skipped, materials-related
-APIs degrade to 503, everything else keeps working; re-run `make dev-up`
-once Docker is up to fill the gap.
+APIs degrade to 503, everything else keeps working. Once Docker is up,
+re-running `make dev-up` restores storage (the RustFS container + bucket);
+if demo material seeding was skipped in the meantime (you had already run
+`make import-demo`), run `make import-demo` again (idempotent) to seed the
+materials — `make dev-up` itself never re-seeds them.
 
 ### 2. Start everything
 

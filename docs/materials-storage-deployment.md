@@ -49,7 +49,9 @@ bucket 处告警暴露。起完后调用
 `scripts/ensure-s3-bucket.py` 确保 bucket 与浏览器直传 CORS 就绪
 （与 `init-worktree.sh` 共用同一脚本）。docker 缺失、启动失败或建 bucket
 失败都只告警不阻断：材料 API 降级为 503，其余功能不受影响，就绪后重跑
-`make dev-up` 即可补齐。`make dev-status` 会顺带显示 rustfs 容器状态。
+`make dev-up` 可补齐存储；若期间跳过了 demo 示例材料播种，需另跑一次
+`make import-demo`（幂等）补播种——`make dev-up` 本身不会重播材料。
+`make dev-status` 会顺带显示 rustfs 容器状态。
 
 开发环境切外部对象存储：改根 `.env` 的 `AGENT_LEGION_S3_ENDPOINT` /
 凭据 / `AGENT_LEGION_S3_BUCKET` 三样即可（AWS 默认端点写法是显式留空
