@@ -125,6 +125,15 @@ def resolve_code_runtime_context(
         try:
             run = _fetch_row(database_dsn, "select * from runs where id=%s", batch_id)
         except Exception:
+            # #204 broad-except audit: deliberate degradation, mirrored from
+            # the enqueue-time prefetch (code_dispatch._prefetch_job_batch).
+            # The batch row is a nice-to-have for node SDK ctx.batch; a
+            # missing row and a transient DB error degrade to None with a
+            # debug log (the claim still succeeds), while the job/workspace
+            # reads above stay strict because node code cannot run without
+            # them. The failure space is the DB driver surface — psycopg
+            # OperationalError et al. — not a business-exception family;
+            # debug level because the enqueue-side twin logs the same.
             logger.debug("claim-time get_run failed for run %s", batch_id, exc_info=True)
             run = None
         # The SDK-facing batch row: run columns plus the payload rebuilt from
@@ -189,6 +198,10 @@ def _claim_time_skill_versions(database_dsn: Any, job_id: str) -> dict[str, str]
                 (job_id,),
             ).fetchall()
     except Exception:
+        # #204 broad-except audit: same deliberate degradation as the batch
+        # fetch above — the skill_versions map is an audit nice-to-have, an
+        # empty mapping keeps the claim succeeding on a transient DB error.
+        # Debug level matches the enqueue-time twin's log contract.
         logger.debug("claim-time list_node_runs failed for job %s", job_id, exc_info=True)
         return {}
     return {

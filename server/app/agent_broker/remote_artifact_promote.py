@@ -78,6 +78,15 @@ def promote_all(
             )
             promoted.append(name)
     except Exception:
+        # #204 broad-except audit: compensate-then-bare-re-raise (#233
+        # pattern). The batch loop's outcome space is mixed — storage-layer
+        # errors (botocore surface), ValueError from Worker-untrusted refs,
+        # and programming errors all must roll back the already-overwritten
+        # authority keys before propagating; the re-raise preserves the
+        # original type for apply_remote_artifact_refs' classification, so
+        # nothing is converted or masked. The rollback loop below is itself
+        # per-key best-effort: a failed restore logs a warning and the next
+        # key is still attempted.
         # Roll back the keys this batch already overwrote; keys without a
         # backup had no prior object (the orphan is lifecycle's backstop).
         for name in promoted:
@@ -87,6 +96,12 @@ def promote_all(
             try:
                 storage.copy_object(rollback_key, authority_keys[name])
             except Exception:
+                # Best-effort restore of one overwritten authority key: the
+                # warning names the key that still holds new bytes while its
+                # manifest row points at old bytes (the mismatch the backup
+                # exists to prevent); the orphan-GC/lifecycle pass is the
+                # backstop for the leftovers. The original promote error
+                # keeps propagating regardless.
                 logger.warning(
                     "failed to roll back artifact object %s", authority_keys[name], exc_info=True
                 )

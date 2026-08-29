@@ -84,12 +84,26 @@ class InProcessEventBus:
                 # with the sentinel (dropping the oldest queued item to make
                 # room) so its stream ends and the client reconnects/resyncs,
                 # instead of leaving it on a heartbeat-only zombie connection.
+                # #204 suppress audit: the two suppressed calls below can only
+                # fail in the QueueFull race (the queue filled between the
+                # except above and the room-making get_nowait) — the sentinel
+                # then never lands, but the eviction below still removes the
+                # subscriber, which is the whole point; the dropped payload is
+                # already lost by definition of the overflow. Nothing else is
+                # suppressible here (get/put on an unbounded asyncio.Queue
+                # have no other failure mode), so the suppression cannot eat a
+                # programming error from unrelated code.
                 with contextlib.suppress(Exception):
                     queue.get_nowait()
                     queue.put_nowait(_EVICTED)
                 dead.add(queue)
             except Exception:
-                # 其他异常视为死连接，直接移除。
+                # #204 audit (PR #251): a non-QueueFull failure on put marks
+                # the subscriber as dead — an unbounded asyncio.Queue has no
+                # other failure mode, so anything landing here means the
+                # connection is gone; removing it protects the fan-out for
+                # the remaining subscribers. The QueueFull race itself is
+                # handled by the suppress branch above.
                 dead.add(queue)
         for queue in dead:
             self.unsubscribe(channel, queue)
@@ -100,6 +114,13 @@ class InProcessEventBus:
             if not queues:
                 continue
             oldest = next(iter(queues))
+            # #204 suppress audit: same single-purpose suppression as in
+            # _send — only the QueueFull race on the room-making put_nowait
+            # can be suppressed, and the eviction itself does not depend on
+            # the sentinel landing (the client's stream end is confirmed by
+            # unsubscribe + the subscribe-side MAX_CLIENTS check). A failure
+            # to enqueue the sentinel merely means the evicted client sees
+            # its stream end on the next reconnect instead.
             with contextlib.suppress(Exception):
                 oldest.put_nowait(_EVICTED)
             self.unsubscribe(channel, oldest)

@@ -145,5 +145,16 @@ def apply_remote_artifact_refs(
             execution_id,
         )
     except Exception as exc:
+        # #204 broad-except audit: deliberate whole-batch containment. The
+        # guarded block's outcome space is mixed by design — Worker-report
+        # validation failures (ValueError from verify_remote / hash checks,
+        # on untrusted input), storage-layer errors (botocore surface, not a
+        # business-exception family), AND unexpected programming errors all
+        # must convert into a failed ExecutionResult instead of propagating:
+        # this runs inside the completion handler's finish(), where an
+        # escape would kill the lease finish path. No partial state escapes
+        # (verify-everything-then-apply + promote_all's rollback), and the
+        # message embeds the exception so the failure lands on the node row
+        # for the operator.
         return set(remote), f"failed to apply Worker artifact uploads: {exc}"
     return set(remote), None

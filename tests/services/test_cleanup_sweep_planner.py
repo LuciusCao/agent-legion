@@ -85,3 +85,96 @@ def test_sweep_forces_index_and_serves_pages(tmp_path, monkeypatch):
     for index in page_indices:
         assert normalized[index - 2] == "set local enable_seqscan = off"
         assert normalized[index - 1] == "set local statement_timeout = '30s'"
+
+
+def test_sweep_skips_unresolvable_log_path_and_continues(tmp_path, monkeypatch):
+    """#204 窄化：log_path 无法映射进 data 根（ManagedPathError）→ 该行跳过
+    （warning），同一 pass 里其余行照常清理，游标照常推进。"""
+    data_dir, db = _make_db(tmp_path)
+    good_log = data_dir / "logs" / "jobs" / "job-2-node-a.log"
+    good_log.parent.mkdir(parents=True, exist_ok=True)
+    good_log.write_text("old log")
+    old_finished = (datetime.now(UTC) - timedelta(days=40)).isoformat()
+    with db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'demo_workflow')"
+        )
+        conn.execute(
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)"
+            " values ('job-1', 'ws1', 'wf', 'question', 'job-1', ''),"
+            " ('job-2', 'ws1', 'wf', 'question', 'job-2', '')"
+        )
+        conn.execute(
+            "insert into node_runs(job_id, node_key, status, log_path, finished_at)"
+            " values ('job-1', 'node-a', 'completed', %s, %s),"
+            " ('job-2', 'node-a', 'completed', %s, %s)",
+            (
+                "/absolutely/outside/root.log",
+                old_finished,
+                make_data_relative(good_log, data_dir),
+                old_finished,
+            ),
+        )
+
+    cutoff = datetime.now(UTC) - timedelta(days=30)
+    logs, _dirs = cleanup_sweep.sweep_expired_node_runs(db, data_dir, cutoff, cutoff, {})
+
+    # 不可解析路径的行被跳过；可解析的行照常删除
+    assert logs == 1
+    assert good_log.exists() is False
+
+
+def test_sweep_unresolvable_run_dir_warns_without_raising(tmp_path):
+    """#204 窄化：run_dir 指向 data 根外（ManagedPathError）→ warning + 跳过，
+    不再是宽捕获的静默 warning-everything（编程错误会上抛）。"""
+    data_dir, db = _make_db(tmp_path)
+    old_finished = (datetime.now(UTC) - timedelta(days=40)).isoformat()
+    with db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'demo_workflow')"
+        )
+        conn.execute(
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)"
+            " values ('job-1', 'ws1', 'wf', 'question', 'job-1', '')"
+        )
+        conn.execute(
+            "insert into node_runs(job_id, node_key, status, run_dir, finished_at)"
+            " values ('job-1', 'node-a', 'completed', '/outside/data/root', %s)",
+            (old_finished,),
+        )
+
+    cutoff = datetime.now(UTC) - timedelta(days=30)
+    # ManagedPathError 被窄捕获 → 不上抛；返回 0（该行跳过）
+    logs, dirs = cleanup_sweep.sweep_expired_node_runs(db, data_dir, cutoff, cutoff, {})
+    assert (logs, dirs) == (0, 0)
+
+
+def test_sweep_survives_os_level_resolve_failures(tmp_path, monkeypatch):
+    """Codex review on PR #251: resolve_data_path deliberately propagates
+    PermissionError / RuntimeError (symlink loops) — one such row must be
+    skipped (warning), not wedge the sweep cursor on every pass."""
+
+    def _resolve_raises(path, data_dir, allow_missing=False):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(cleanup_sweep, "resolve_data_path", _resolve_raises)
+    data_dir, db = _make_db(tmp_path)
+    old_finished = (datetime.now(UTC) - timedelta(days=40)).isoformat()
+    with db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'demo_workflow')"
+        )
+        conn.execute(
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)"
+            " values ('job-1', 'ws1', 'wf', 'question', 'job-1', '')"
+        )
+        conn.execute(
+            "insert into node_runs(job_id, node_key, status, log_path, finished_at)"
+            " values ('job-1', 'node-a', 'completed', %s, %s)",
+            ("logs/jobs/job-1.log", old_finished),
+        )
+
+    cutoff = datetime.now(UTC) - timedelta(days=30)
+    # PermissionError 被 per-row 吞掉（warning），不上抛、游标推进
+    logs, _dirs = cleanup_sweep.sweep_expired_node_runs(db, data_dir, cutoff, cutoff, {})
+    assert logs == 0

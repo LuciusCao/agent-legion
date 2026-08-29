@@ -21,6 +21,7 @@ discipline:
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import threading
@@ -29,10 +30,20 @@ from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from server.app.services.job_errors import NotFoundError
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.settings import Settings
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
+from server.app.workflows.schema import WorkflowDefinitionError
+
+#: Per-job definition failures (#204): #243-family corrupt revisions (incl.
+#: non-mapping JSON) and missing active revisions.
+_DEFINITION_FAILURES = (NotFoundError, json.JSONDecodeError, WorkflowDefinitionError)
+
+#: Per-job path-resolution failures (#204): unmappable storage_dir plus the
+#: OS errors resolve_data_path deliberately propagates.
+_PATH_FAILURES = (ManagedPathError, OSError, RuntimeError)
 
 logger = logging.getLogger(__name__)
 
@@ -112,8 +123,21 @@ def reupload_missing(
             definition = definition_from_job_snapshot(job) or require_workspace_active_definition(
                 job_db, str(job["workspace_id"]), str(job["workflow_key"])
             )
+        except _DEFINITION_FAILURES as exc:
+            # #204: per-job definition failures only — corrupt revision JSON
+            # (#243 family incl. non-mapping top level) or no active revision.
+            # A plain ValueError/RuntimeError from a parser bug must propagate
+            # (codex round-3 on PR #251), not silently strand the job.
+            logger.debug("reconciler skips job %s: %s", job_id, exc)
+            continue
+        try:
             job_dir = resolve_job_dir(job, settings.jobs_dir)
-        except Exception:  # skip jobs whose definition/dir cannot be resolved
+        except _PATH_FAILURES as exc:
+            # Path resolution deliberately propagates OS errors (permissions,
+            # symlink loops) and raises ManagedPathError for unmappable
+            # storage_dir — both per-job expected here (same family as the
+            # cleanup_sweep branches, codex review on PR #251).
+            logger.debug("reconciler skips job %s: %s", job_id, exc)
             continue
         if not job_dir.is_dir():
             continue
@@ -140,6 +164,16 @@ def reupload_missing(
                     )
                     uploaded += 1
                 except Exception:
+                    # #204 broad-except audit: per-file best-effort re-upload.
+                    # The upload path's outcome space is genuinely mixed —
+                    # declared storage outages (botocore ClientError after the
+                    # bounded retries inside upload), DB errors from the
+                    # manifest upsert, and unexpected programming errors must
+                    # all leave this pass alive for the other artifacts: the
+                    # reconciler IS the retry mechanism (next pass re-finds
+                    # the still-missing/stale row). A narrow business family
+                    # cannot enumerate the storage layer; the traceback is
+                    # logged so the outage is diagnosable.
                     logger.warning(
                         "reconciler re-upload failed for job %s node %s artifact %s",
                         job_id,
@@ -328,6 +362,15 @@ class JobArtifactMaintenanceThread:
             try:
                 self.run_once()
             except Exception:
+                # #204 broad-except audit: the maintenance thread's life
+                # support. run_once (reupload + eviction) is a long walk over
+                # the jobs table, manifest rows, and the filesystem — any
+                # unexpected failure (DB restart mid-walk, a narrow catch
+                # above missing a case) must not kill the only thread that
+                # performs either duty: the local cache would then grow
+                # unbounded and missing manifest rows would never self-heal.
+                # The full traceback is logged; the next interval is the
+                # retry.
                 logger.exception("job artifact maintenance failed")
 
     def stop(self, timeout: float = 3.0) -> None:

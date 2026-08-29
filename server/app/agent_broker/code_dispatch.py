@@ -334,6 +334,13 @@ class CodeDispatchService:
         try:
             run = self.job_db.get_run(run_id)
         except Exception:
+            # #204 broad-except audit: deliberate degradation on the enqueue
+            # path. The batch row is an SDK convenience (ctx.batch); only its
+            # audit hash was persisted (#142) and the claim-response path
+            # re-fetches it strictly, so a transient DB error here degrades
+            # to None (debug log) instead of failing the dispatch — the poll
+            # pass would only retry the same enqueue next time anyway. The
+            # DB driver surface is not a business-exception family.
             logger.debug("get_run failed for job %s", job.get("id"), exc_info=True)
             return None
         batch_row = sdk_batch_row(run, job)

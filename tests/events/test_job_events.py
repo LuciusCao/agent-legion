@@ -10,6 +10,7 @@ from fastapi import Request
 from server.app.db.connection import DatabaseConnection, connect_database
 from server.app.events import JobEventManager
 from server.app.events.aggregator import (
+    broadcast_job_update,
     build_job_patch_batch_payload,
     build_resync_required_payload,
     record_job_update,
@@ -693,3 +694,30 @@ def test_job_query_service_lists_patch_summaries_by_ids(job_patch_query_service,
     assert "completed_nodes" in summaries[0]
     assert "total_nodes" in summaries[0]
     assert job2["id"] not in [summary["id"] for summary in summaries]
+
+
+def test_record_job_update_survives_bookkeeping_failure(fake_job_db, caplog):
+    """#204 审定保留：buffer 记账抛错 → exception 日志，不向业务调用方
+    （lease 写路径）上抛。"""
+    buffer = FakeJobEventBuffer()
+    fake_job_db.jobs["job1"] = {"id": "job1", "workspace_id": "ws1"}
+    buffer.record_job_updated = lambda workspace_id, job_id: (_ for _ in ()).throw(
+        RuntimeError("buffer exploded")
+    )
+
+    with caplog.at_level("ERROR", logger="server.app.events.aggregator"):
+        record_job_update(fake_job_db, buffer, "job1")  # 不上抛
+
+    assert "Failed to record job update" in caplog.text
+    assert "buffer exploded" in caplog.text
+
+
+def test_broadcast_job_update_survives_read_failure(fake_job_db, caplog):
+    """#204 审定保留：job 读取抛错 → exception 日志，不向业务调用方上抛。"""
+    fake_job_db.get_job = lambda job_id: (_ for _ in ()).throw(RuntimeError("db exploded"))
+
+    with caplog.at_level("ERROR", logger="server.app.events.aggregator"):
+        broadcast_job_update(fake_job_db, object(), "job1")  # 不上抛
+
+    assert "Failed to broadcast job update" in caplog.text
+    assert "db exploded" in caplog.text

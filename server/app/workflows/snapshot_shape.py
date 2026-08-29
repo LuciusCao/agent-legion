@@ -22,6 +22,8 @@ def snapshot_field(
     the error the scan path degrades on per-workspace — not AttributeError /
     TypeError killing worker startup. list_form=False wants a mapping of
     mappings (nodes); True wants a list of mappings (edges)."""
+    if not isinstance(payload, dict):
+        raise WorkflowDefinitionError("snapshot must be a mapping")
     value = payload.get(field_name)
     if value is None:
         return default
