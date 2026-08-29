@@ -25,32 +25,25 @@ import threading
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from server.app.auth.scoped_tokens import (
-    mint_scoped_token,
-    renew_scoped_token,
-    revoke_scoped_token,
-)
+from server.app.auth.scoped_tokens import renew_scoped_token
 from server.app.events.bus import EventBus
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.settings import Settings
-from server.app.studio_chat.acp_session import AcpSessionHandle, build_mcp_server_spec
 from server.app.studio_chat.availability import AgentAvailabilityProbe
 from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.registry import StudioAgentRegistryStore
-from server.app.studio_chat.runtime import (
-    SessionRuntime,
-    teardown_runtime,
-)
+from server.app.studio_chat.resume import resume_session
+from server.app.studio_chat.resume_context import prepare_resume_prompt, rearm_resume_transcript
+from server.app.studio_chat.runtime import SessionRuntime
+from server.app.studio_chat.spawn import spawn_session_runtime
 from server.app.studio_chat.store import StudioChatStore
+from server.app.studio_chat.teardown import teardown_runtime
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import AcpEventHandlers
 
 logger = logging.getLogger(__name__)
-
-# Time to wait for the agent subprocess to finish initialize + session/new.
-SESSION_START_TIMEOUT_SECONDS = 60
 
 # Global cap on live chat sessions (#158): every session owns an agent
 # subprocess, a dedicated thread/event loop, and a minted scoped token, so
@@ -88,16 +81,15 @@ class StudioChatService:
             return self._runtimes.get(session_id)
 
     def teardown_runtime(
-        self, session_id: str, runtime: SessionRuntime | None, *, close_handle: bool = True
-    ) -> None:
-        teardown_runtime(
-            self._db,
-            self._runtimes,
-            self._runtimes_lock,
-            session_id,
-            runtime,
-            close_handle=close_handle,
-        )
+        self,
+        session_id: str,
+        runtime: SessionRuntime | None,
+        *,
+        close_handle: bool = True,
+        expected: SessionRuntime | None = None,
+    ) -> bool:
+        args = (self._db, self._runtimes, self._runtimes_lock, session_id, runtime)
+        return teardown_runtime(*args, close_handle=close_handle, expected=expected)
 
     # -- registry (agent catalog) ----------------------------------------
 
@@ -148,75 +140,20 @@ class StudioChatService:
                 f"Too many active studio chat sessions (limit {MAX_ACTIVE_STUDIO_CHAT_SESSIONS});"
                 " close an existing session first"
             )
-        token: str | None = None
-        runtime: SessionRuntime | None = None
-        try:
-            # The run token is bound to this session's workspace (schema v45):
-            # the tool surface then refuses other workspaces for it.
-            token = mint_scoped_token(self._db, user_id, origin="run", workspace_id=workspace_id)
-            handle = AcpSessionHandle(
-                command=command,
-                args=[str(arg) for arg in agent.get("args", [])],
-                cwd=str(self._settings.root_dir),
-                mcp_server=build_mcp_server_spec(
-                    token=token,
-                    api_base=str(self._registry.get()["api_base"]),
-                    session_id=session_id,
-                ),
-                env=None,
-                callbacks=ServiceCallbacks(self, session_id),
-            )
-            runtime = SessionRuntime(handle, token)
-            with self._runtimes_lock:
-                self._runtimes[session_id] = runtime
-            handle.start()
-            if not handle.ready_event.wait(timeout=SESSION_START_TIMEOUT_SECONDS):
-                raise InvalidOperationError("Studio agent failed to start (timeout)")
-            session = self._db.get_studio_chat_session(session_id)
-            if session is None or session["status"] != "idle":
-                detail = (session or {}).get("error_detail") or "agent startup failed"
-                raise InvalidOperationError(f"Studio agent failed to start: {detail}")
-        except Exception as exc:
-            # One cleanup path for every startup failure: no half-applied
-            # 'starting' row, no leaked token, no orphaned runtime. The status
-            # write is guarded (#158): a close that raced the startup window
-            # already owns the final 'closed' state.
-            # #204 broad-except audit: the catch stays broad because the
-            # outcome space is genuinely mixed — expected startup refusals
-            # (InvalidOperationError for agent-not-available / start timeout)
-            # AND programming errors must both run this compensation, and both
-            # keep propagating via the bare re-raise (the original type is
-            # never converted, so the two stay distinguishable to the caller
-            # and the route layer). This mirrors the #233 pattern: compensate
-            # broad, classify never.
-            detail = str(exc) or exc.__class__.__name__
-            self._db.update_studio_chat_session_if(
-                session_id, status_not_in=("closed",), status="error", error_detail=detail[:500]
-            )
-            if runtime is None:
-                # The handle never materialized: nothing to tear down, but a
-                # minted token must not leak (token is None when the mint
-                # itself failed).
-                if token is not None:
-                    try:
-                        revoke_scoped_token(self._db, token)
-                    except Exception:
-                        # #204: teardown safety net (same semantics as
-                        # runtime.teardown): a failed revoke must not mask
-                        # the startup failure that is already propagating.
-                        # The token TTL plus the maintenance purge are the
-                        # backstop; exc_info keeps the revoke root cause
-                        # visible for operators.
-                        logger.warning(
-                            "failed to revoke studio chat token for %s",
-                            session_id,
-                            exc_info=True,
-                        )
-            else:
-                self.teardown_runtime(session_id, runtime)
-            raise
+        spawn_session_runtime(
+            self._db,
+            self._settings,
+            self._registry,
+            self._runtimes,
+            self._runtimes_lock,
+            ServiceCallbacks(self, session_id),
+            session_id,
+            agent,
+            user_id,
+            workspace_id,
+        )
         self.store.publish_session(session_id)
-        return session
+        return self.get_session(session_id)
 
     def list_sessions(self, workspace_id: str) -> list[dict[str, Any]]:
         return self._db.list_studio_chat_sessions(workspace_id)
@@ -246,6 +183,16 @@ class StudioChatService:
         self.store.append_message(session_id, "status", "system", {"event": "session_closed"})
         self.store.publish_session(session_id)
         return self.get_session(session_id)
+
+    def resume_session(self, session_id: str, workspace_id: str, user_id: str) -> dict[str, Any]:
+        """Rebuild the runtime of a closed/error session; history is kept.
+
+        Thin delegate — the claim/teardown/spawn state machine lives in
+        studio_chat.resume (file budget).
+        """
+        if self._shutdown:
+            raise ConflictError("Studio chat service is shutting down")
+        return resume_session(self, session_id, workspace_id, user_id)
 
     # -- messaging ---------------------------------------------------------
 
@@ -280,7 +227,22 @@ class StudioChatService:
         from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 
         prompt_text = (STUDIO_AUTHORING_BOOTSTRAP + text) if first_prompt else text
+        # Resume fallback context (one-shot): the fresh agent could not
+        # reload the prior ACP session, so prepend the persisted transcript.
+        # prepare_resume_prompt consumes the marker unconditionally (a
+        # first-prompt turn takes the bootstrap instead) and builds the
+        # transcript from messages before the one just appended, so the
+        # current message never appears both in the transcript and as the
+        # prompt tail.
+        prompt_text, resume_pending = prepare_resume_prompt(
+            runtime, self._db, session_id, first_prompt, prompt_text, message["seq"]
+        )
         if not runtime.handle.send_prompt(prompt_text):
+            # The prompt never reached the agent: re-arm the one-shot marker
+            # so the next turn retries the injection instead of silently
+            # losing the resume context (nothing was injected — no double
+            # injection risk).
+            rearm_resume_transcript(runtime, resume_pending)
             # Guarded (#158): a close racing this turn owns the final state.
             self._db.update_studio_chat_session_if(
                 session_id, status_not_in=("closed",), status="error"
@@ -383,8 +345,8 @@ class StudioChatService:
     def _on_error(self, session_id: str, detail: str, *, fatal: bool) -> None:
         self._events().on_error(session_id, detail, fatal=fatal)
 
-    def _on_exit(self, session_id: str) -> None:
-        self._events().on_exit(session_id)
+    def _on_exit(self, session_id: str, *, close_initiated: bool = False) -> None:
+        self._events().on_exit(session_id, close_initiated=close_initiated, expected=None)
 
     def _events(self) -> AcpEventHandlers:
         from server.app.studio_chat.events import AcpEventHandlers

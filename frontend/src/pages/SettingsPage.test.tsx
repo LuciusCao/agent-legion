@@ -67,8 +67,6 @@ function setSnapshot(partial: Partial<WorkspaceSettingsSnapshot>) {
     workspaceDescription: '',
     settings: {
       entityType: 'question',
-      intakeModes: [],
-      labelOverrides: {},
       workflowKey: '',
     },
     executionConfiguration: {
@@ -94,8 +92,6 @@ const defaultState: SettingState = {
   workspaceDescription: '测试描述',
   settings: {
     entityType: 'question',
-    intakeModes: [],
-    labelOverrides: {},
     workflowKey: '',
   },
   originalWorkspaceName: '测试空间',
@@ -195,10 +191,8 @@ describe('SettingsPage', () => {
     const headings = screen.getAllByRole('heading', { level: 2 })
     expect(headings.map((h) => h.textContent)).toEqual([
       '基本信息',
-      '接入与资源',
       '产物预览',
       'Agent 与 Worker',
-      'Agent 默认配置',
       '代码节点并发',
       '危险操作',
     ])
@@ -212,9 +206,7 @@ describe('SettingsPage', () => {
     const navButtons = within(nav).getAllByRole('button')
     expect(navButtons.map((b) => b.textContent)).toEqual([
       '基础信息',
-      '接入与资源',
       'Agent 与 Worker',
-      'Agent 默认配置',
       '危险操作',
     ])
     expect(navButtons[0]).toHaveAttribute('aria-current', 'true')
@@ -297,73 +289,6 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('renders checked checkbox for enabled intake modes', async () => {
-    setWorkflowDefinition({
-      key: 'demo_workflow',
-      label: '题目审题信息生成',
-      intake: {
-        modes: [
-          {
-            key: 'batch_by_knowledge',
-            label: '按知识点批量',
-            input_field: 'knowledge_codes',
-          },
-          {
-            key: 'batch_by_ids',
-            label: '按题目ID批量',
-            input_field: 'question_ids',
-          },
-        ],
-      },
-      edges: [],
-      nodes: [],
-    })
-    useSettingStore.setState({
-      settings: {
-        ...defaultState.settings,
-        intakeModes: ['batch_by_ids'],
-      },
-    })
-    const { container } = renderPage()
-    await act(async () => {})
-    const checkboxes = Array.from(
-      container.querySelectorAll('input[type="checkbox"]')
-    ) as HTMLInputElement[]
-    expect(checkboxes[0].checked).toBe(false)
-    expect(checkboxes[1].checked).toBe(true)
-  })
-
-  it('renders unchecked checkbox for disabled intake modes', async () => {
-    setWorkflowDefinition({
-      key: 'demo_workflow',
-      label: '题目审题信息生成',
-      intake: {
-        modes: [
-          {
-            key: 'batch_by_ids',
-            label: '按题目ID批量',
-            input_field: 'question_ids',
-          },
-        ],
-      },
-      edges: [],
-      nodes: [],
-    })
-    useSettingStore.setState({
-      settings: {
-        ...defaultState.settings,
-        intakeModes: [],
-      },
-    })
-    const { container } = renderPage()
-    await act(async () => {})
-    const checkbox = container.querySelector(
-      'input[type="checkbox"]'
-    ) as HTMLInputElement
-    expect(checkbox).toBeTruthy()
-    expect(checkbox.checked).toBe(false)
-  })
-
   it('renders the code node concurrency section for code-pool nodes', async () => {
     // P-0.5：无 Agent 路由的节点一律进 code 池，节点并发区直接列出。
     setWorkflowDefinition({
@@ -391,15 +316,13 @@ describe('SettingsPage', () => {
     expect(labels).toContain('代码节点并发')
     expect(labels).not.toContain('执行器')
     expect(labels.indexOf('代码节点并发')).toBeGreaterThan(
-      labels.indexOf('Agent 默认配置')
+      labels.indexOf('Agent 与 Worker')
     )
   })
 
   it('saves node limits in one PUT request', async () => {
     const settings: WorkspaceSettings = {
       entityType: 'question',
-      intakeModes: [],
-      labelOverrides: {},
       workflowKey: 'sample_workflow',
     }
     setSnapshot({ agentRoutes: [] })

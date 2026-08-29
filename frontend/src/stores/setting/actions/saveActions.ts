@@ -33,12 +33,10 @@ export function saveActions(set: SettingStoreSet, get: () => SettingState) {
               name: workspaceName,
               description: workspaceDescription,
               // 契约是 extra=forbid：GET /settings 返回的 nodeConfig/
-              // agentDefaults/nodeConfigSchemas 等服务端附加键不在 PUT
-              // 白名单里（各有自己的 PATCH section），全量回传会 422。
+              // nodeConfigSchemas 等服务端附加键不在 PUT 白名单里（各有
+              // 自己的 PATCH section），全量回传会 422。
               settings: {
                 entityType: settings.entityType,
-                intakeModes: settings.intakeModes,
-                labelOverrides: settings.labelOverrides,
                 workflowKey: settings.workflowKey,
                 previewHidden: settings.previewHidden,
               },

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from server.app.db.schema import SCHEMA_VERSION
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -23,8 +24,43 @@ def _seed_workspace(conn, workspace_id: str, key: str) -> None:
     )
 
 
+def test_schema_version_pin() -> None:
+    # The latest-migration record pin moved through
+    # test_retire_global_register_tokens_migration.py (v58) →
+    # test_jobs_run_id_index.py (v59) → back to the v58 file for the DDL-only
+    # v60; v62 owns its own module, v63 is DDL-only (workspace_preview_config),
+    # and v64's data migration lives in
+    # tests/db/test_workspace_execution_defaults_migration.py (the retired
+    # default_agent_* / intake_config_json columns still drop in schema.py's
+    # post-chain sweep), so the pin stays here.
+    assert SCHEMA_VERSION == 64
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute(
+            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
+        ).fetchone()
+    assert row is not None
+    assert row["name"] == "workspace_settings_retirement"
+
+
 def test_renames_ids_to_keys_and_cascades_children() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
+        # Direct-call on a v64 database: the retired default_agent_* and
+        # intake_config_json columns are already dropped by the post-chain
+        # cleanup, but the v62 migration's insert still references them (they
+        # exist on every real pre-v64 database) — restore the pre-v64 shape
+        # first.
+        for column in (
+            "default_agent_provider",
+            "default_agent_model",
+            "default_agent_thinking",
+        ):
+            conn.execute(
+                f"alter table workspaces add column if not exists {column} text not null default ''"
+            )
+        conn.execute(
+            "alter table workspaces add column if not exists"
+            " intake_config_json text not null default '{}'"
+        )
         _seed_workspace(conn, "bind-rename-ws", "bind_renamed_flow")
         _seed_workspace(conn, "bind-empty-ws", "")
         # One FK child row and one unconstrained-table row per workspace: the
@@ -84,6 +120,15 @@ def test_renames_ids_to_keys_and_cascades_children() -> None:
     assert job_ws == "bind_renamed_flow"
     assert metric_ws == {"bind_renamed_flow", "bind-empty-ws"}
     assert worker_scope == '["bind_renamed_flow"]'
+    # Leave the v64 shape behind for the rest of this worker's suite.
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        for column in (
+            "default_agent_provider",
+            "default_agent_model",
+            "default_agent_thinking",
+            "intake_config_json",
+        ):
+            conn.execute(f"alter table workspaces drop column if exists {column}")
 
 
 def test_conflicting_target_fails_fast() -> None:

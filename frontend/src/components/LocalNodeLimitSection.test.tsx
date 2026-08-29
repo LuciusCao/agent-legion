@@ -63,8 +63,6 @@ describe('LocalNodeLimitSection', () => {
       workspaceId: 'ws1',
       settings: {
         entityType: 'question',
-        intakeModes: [],
-        labelOverrides: {},
         workflowKey: 'sample_workflow',
       },
       executionConfiguration: {

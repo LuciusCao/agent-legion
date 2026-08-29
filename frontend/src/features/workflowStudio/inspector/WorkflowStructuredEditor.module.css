@@ -1,0 +1,58 @@
+.structuredSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fieldStack {
+  display: grid;
+  gap: 12px;
+}
+.structuredTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1a1c1e;
+  margin: 0;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fieldLabel {
+  font-size: 11px;
+  font-weight: 500;
+  color: #43474e;
+}
+.fieldInput {
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid #c4c6cf;
+  border-radius: 6px;
+  color: #1a1c1e;
+  background: #fff;
+}
+.fieldInput:focus {
+  outline: none;
+  border-color: #1976d2;
+}
+.fieldHint {
+  font-size: 11px;
+  color: #43474e;
+  margin: 0;
+}
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+}
+.itemTypeOption {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+}
+.itemTypeOption .fieldHint {
+  grid-column: 2;
+}

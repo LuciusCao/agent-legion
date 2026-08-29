@@ -43,16 +43,28 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v63, workspace_preview_config) must leave
-# behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v63 is DDL-only (workspaces.preview_config_json via the
-# schema-file replay) — one column, no tables, no indexes.
+# Effects the newest migration (v64, workspace_settings_retirement) must
+# leave behind so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. v64's catalog effect is the post-chain cleanup dropping
+# the three retired workspaces.default_agent_* columns plus
+# intake_config_json — rewinding re-adds them (a v63 database still has them)
+# so the upgrade under test must drop them again to match a fresh catalog.
+# v64 also carries a data migration (backfilling default_agent_* into the
+# active revision's top-level execution); it changes rows, not the catalog,
+# and is a no-op on this test's empty scratch schema. v63
+# (workspace_preview_config) adds preview_config_json, which exists at
+# SCHEMA_VERSION-1, so the undo step leaves it in place.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("workspaces", "preview_config_json", "text"),
-)
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "workspace_preview_config"
+_NEWEST_MIGRATION_NAME = "workspace_settings_retirement"
+# (table, column DDL) pairs re-created by the undo step.
+_NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = (
+    ("workspaces", "default_agent_provider text not null default ''"),
+    ("workspaces", "default_agent_model text not null default ''"),
+    ("workspaces", "default_agent_thinking text not null default ''"),
+    ("workspaces", "intake_config_json text not null default '{}'"),
+)
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]
@@ -68,6 +80,8 @@ def _undo_newest_migration(database_dsn: str) -> None:
             conn.execute(f"alter table {table} drop column if exists {column}")
         for index_name in _NEWEST_MIGRATION_INDEXES:
             conn.execute(f"drop index if exists {index_name}")
+        for table, column_ddl in _NEWEST_MIGRATION_COLUMNS_RESTORE:
+            conn.execute(f"alter table {table} add column if not exists {column_ddl}")
         conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
 
 

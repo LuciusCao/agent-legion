@@ -20,13 +20,9 @@ from server.app.services.workspace_node_limit_validation import (
     validate_workspace_node_limits,
 )
 from server.app.services.workspace_preview_settings import (
-    build_intake_config as _build_intake_config,
-)
-from server.app.services.workspace_preview_settings import (
     clean_preview_hidden as _clean_preview_hidden,
 )
 from server.app.services.workspace_preview_settings import (
-    update_agent_defaults,
     write_preview_hidden,
 )
 from server.app.services.workspace_settings_payload import workspace_settings_payload
@@ -37,6 +33,8 @@ from server.app.services.workspace_stats import build_workspace_stats
 from server.app.settings import Settings
 from server.app.workflows.builtin_demo import DEMO_WORKFLOW_KEY
 from server.app.workflows.definition import WorkflowDefinition
+
+_WORKFLOW_KEY_IMMUTABLE = "Workflow key is bound to the workspace id and immutable"
 
 
 class WorkspaceConfigurationService:
@@ -93,7 +91,6 @@ class WorkspaceConfigurationService:
                 default_workflow_key=workspace_id,
                 default_entity=payload.get("default_entity", "question"),
                 resource_config=payload.get("resource_config", {}),
-                intake_config=payload.get("intake_config", {}),
                 workspace_id=workspace_id,
             )
         except ValueError as exc:
@@ -111,7 +108,7 @@ class WorkspaceConfigurationService:
         self._workspace(workspace_id)
         # Schema v62: the workflow key (= workspace id) is immutable.
         if payload.get("default_workflow_key") is not None:
-            raise InvalidOperationError("Workflow key is bound to the workspace id and immutable")
+            raise InvalidOperationError(_WORKFLOW_KEY_IMMUTABLE)
         try:
             return self.job_db.update_workspace(
                 workspace_id,
@@ -119,7 +116,6 @@ class WorkspaceConfigurationService:
                 description=payload.get("description"),
                 default_entity=payload.get("default_entity"),
                 resource_config=payload.get("resource_config"),
-                intake_config=payload.get("intake_config"),
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
@@ -165,7 +161,7 @@ class WorkspaceConfigurationService:
         if not workflow_key:
             raise InvalidOperationError("Workspace workflow is not set")
         if workflow_key != str(workspace["default_workflow_key"]):
-            raise InvalidOperationError("Workflow key is bound to the workspace id and immutable")
+            raise InvalidOperationError(_WORKFLOW_KEY_IMMUTABLE)
         workflow = self._definition_for_seed(workspace_id, workflow_key)
         # workflow is None before the first publish; the validator then runs
         # only the definition-independent checks, and publish-time validation
@@ -192,7 +188,6 @@ class WorkspaceConfigurationService:
         # untouched so legacy rows keep whatever the migration left behind.
         raw_resource_config = workspace.get("resource_config")
         resource_config = dict(raw_resource_config) if isinstance(raw_resource_config, dict) else {}
-        intake_config = _build_intake_config(current, settings_patch)
         preview_hidden = _clean_preview_hidden(settings_patch)
         if agent_capacity is not None and agent_capacity <= 0:
             raise InvalidOperationError("Agent capacity must be a positive integer")
@@ -204,7 +199,6 @@ class WorkspaceConfigurationService:
                 default_workflow_key=workflow_key,
                 default_entity=settings_patch.get("entityType") or str(current["entityType"]),
                 resource_config=resource_config,
-                intake_config=intake_config,
                 node_limits=node_limits,
             )
             # None means "leave unchanged" — the workspace keeps any
@@ -232,28 +226,20 @@ class WorkspaceConfigurationService:
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
         if section == "intake":
-            intake_config = workspace.get("intake_config")
-            next_intake_config = dict(intake_config) if isinstance(intake_config, dict) else {}
-            if patch.get("intakeModes") is not None:
-                next_intake_config["enabled_modes"] = patch["intakeModes"]
-            if patch.get("labelOverrides") is not None:
-                next_intake_config["label_overrides"] = patch["labelOverrides"]
+            # Intake modes / label overrides are retired (schema v64); only
+            # the entry entity type remains configurable here.
             workspace = self.job_db.update_workspace(
                 workspace_id,
                 default_entity=patch.get("entityType"),
-                intake_config=next_intake_config,
             )
         elif section == "workflow":
             # Schema v62: the workflow key is immutable (bound to the id).
             # The section stays so legacy clients sending an unchanged key
             # keep working; any change is rejected.
             workflow_key = patch.get("workflowKey")
-            if workflow_key is not None and str(workflow_key) != str(
-                workspace["default_workflow_key"]
-            ):
-                raise InvalidOperationError(
-                    "Workflow key is bound to the workspace id and immutable"
-                )
+            bound_key = str(workspace["default_workflow_key"])
+            if workflow_key is not None and str(workflow_key) != bound_key:
+                raise InvalidOperationError(_WORKFLOW_KEY_IMMUTABLE)
         elif section == "nodes":
             workspace = update_workspace_node_config(
                 self.job_db,
@@ -262,8 +248,6 @@ class WorkspaceConfigurationService:
                 workspace,
                 patch,
             )
-        elif section == "agent-defaults":
-            workspace = update_agent_defaults(self.job_db, workspace_id, patch)
         elif section == "preview":
             hidden = _clean_preview_hidden(patch)
             if hidden is None:

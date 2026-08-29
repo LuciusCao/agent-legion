@@ -26,8 +26,6 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
                 "description": "Atomic settings",
                 "settings": {
                     "entityType": "video",
-                    "intakeModes": ["direct_ids"],
-                    "labelOverrides": {"direct_ids": "Direct IDs"},
                     "workflowKey": "education_video_problems_generation",
                 },
                 "node_limits": [

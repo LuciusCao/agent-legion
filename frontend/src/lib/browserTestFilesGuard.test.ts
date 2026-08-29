@@ -99,8 +99,8 @@ const DOM_INFRASTRUCTURE_MODULES = [
 const NODE_SAFE_TEST_EXEMPTIONS = [
   'src/lib/questionHighlight.test.ts: questionHighlight.ts falls back to regex entity decoding when window is undefined',
   'src/pages/jobDetail/jobNodeHelpers.test.ts: DagGraph imports are type-only; runtime stays pure',
-  'src/pages/workflowStudio/workflowStudioDag.test.ts: DagGraph imports are type-only; runtime stays pure',
-  'src/pages/workflowStudio/workflowStudioDagChanges.test.ts: DagGraph imports are type-only; runtime stays pure',
+  'src/features/workflowStudio/canvas/workflowStudioDag.test.ts: DagGraph imports are type-only; runtime stays pure',
+  'src/features/workflowStudio/canvas/workflowStudioDagChanges.test.ts: DagGraph imports are type-only; runtime stays pure',
   'src/stores/job/actions/batchAllMatching.test.ts: fixtures.ts only types the WebSocket mock shape',
   'src/stores/job/derivedStateInvariant.test.ts: fixtures.ts only types the WebSocket mock shape',
   'src/stores/jobStore.rerunByFailure.test.ts: fixtures.ts only types the WebSocket mock shape',

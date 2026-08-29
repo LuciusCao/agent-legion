@@ -8,6 +8,9 @@ create table if not exists workspaces (
   resource_config_json text not null default '{}',
   node_config_json text not null default '{}',
   default_entity text not null default 'question',
+  -- Retired at schema v63 (workspace_settings_retirement): still created here
+  -- so the v62 data migration can replay its insert on older databases; the
+  -- post-chain cleanup in schema.py drops all four columns.
   intake_config_json text not null default '{}',
   description text not null default '',
   default_agent_provider text not null default '',

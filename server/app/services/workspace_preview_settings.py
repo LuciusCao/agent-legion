@@ -33,36 +33,3 @@ def write_preview_hidden(
 ) -> dict[str, Any]:
     """Persist a normalized hidden list and return the updated workspace record."""
     return job_db.update_workspace(workspace_id, preview_config=apply_preview_hidden(hidden))
-
-
-def build_intake_config(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
-    """Merge an intake settings patch over the current payload (None = 未改)."""
-    return {
-        "enabled_modes": patch["intakeModes"]
-        if patch.get("intakeModes") is not None
-        else current["intakeModes"],
-        "label_overrides": patch["labelOverrides"]
-        if patch.get("labelOverrides") is not None
-        else current["labelOverrides"],
-    }
-
-
-def update_agent_defaults(
-    job_db: JobQueries, workspace_id: str, patch: dict[str, Any]
-) -> dict[str, Any]:
-    """Validate and persist the agent-defaults settings section."""
-    defaults = patch.get("agentDefaults")
-    if not isinstance(defaults, dict):
-        raise InvalidOperationError("agentDefaults payload is required")
-    values: dict[str, Any] = {}
-    for key in ("provider", "model", "thinking"):
-        value = defaults.get(key)
-        if value is not None and not isinstance(value, str):
-            raise InvalidOperationError(f"agentDefaults.{key} must be a string")
-        values[key] = value
-    return job_db.update_workspace(
-        workspace_id,
-        default_agent_provider=values["provider"],
-        default_agent_model=values["model"],
-        default_agent_thinking=values["thinking"],
-    )

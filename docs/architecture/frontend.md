@@ -40,9 +40,10 @@ frontend/src/
 │   ├── UsersAdminPage.tsx
 │   ├── QualityPage.tsx
 │   ├── TokenUsagePage.tsx
-│   ├── WorkflowStudioPage.tsx
-│   ├── jobDetail/          # Job Detail 子组件
-│   └── workflowStudio/     # Workflow Studio 子组件与 hooks（含 chat/ Studio chat 面板）
+│   ├── WorkflowStudioPage.tsx   # 薄页面壳（实现体在 features/workflowStudio/）
+│   └── jobDetail/          # Job Detail 子组件
+├── features/               # 跨页面的大型功能域
+│   └── workflowStudio/     # Workflow Studio（canvas / inspector / code-editor / chat / validation / shared 子域）
 ├── layouts/                # 布局组件
 │   ├── AppShell.tsx
 │   └── WorkspaceLayout.tsx

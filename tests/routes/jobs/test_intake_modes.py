@@ -48,38 +48,6 @@ def test_workspace_batch_delete_removes_jobs(tmp_path):
     assert detail.status_code == 404
 
 
-def test_workspace_intake_config_rejects_disabled_mode(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
-    with authenticate_client(TestClient(app)) as c:
-        workspace_response = c.post(
-            "/api/workspaces",
-            json={
-                "id": "education_video_problems_generation",
-                "name": "intake-filtered",
-                "intake_config": {"enabled_modes": []},
-            },
-        )
-        workspace_id = workspace_response.json()["workspace"]["id"]
-        publish_legacy_intake_revision(c.app.state.job_db, workspace_id)
-
-        response = c.post(
-            f"/api/workspaces/{workspace_id}/job-batches",
-            json={
-                "workflow_key": workspace_id,
-                "source_kind": "direct_ids",
-                "knowledge_point_ids": ["K001"],
-            },
-        )
-
-    assert response.status_code == 400
-    assert "Intake mode is disabled" in response.json()["detail"]
-
-
 def test_workspace_default_entity_is_used_when_batch_omits_entity(tmp_path):
     import json
 
@@ -96,7 +64,6 @@ def test_workspace_default_entity_is_used_when_batch_omits_entity(tmp_path):
                 "id": "education_video_problems_generation",
                 "name": "question-default",
                 "default_entity": "question",
-                "intake_config": {"enabled_modes": ["direct_ids"]},
             },
         )
         workspace_id = workspace_response.json()["workspace"]["id"]

@@ -16,6 +16,10 @@ PI_MODELS_JSON       ?=
 export UV_CACHE_DIR
 
 # 依赖与开发
+.PHONY: install
+install: ## 一键安装前置依赖并初始化项目（全新 clone 后第一步，幂等）
+	./scripts/install-deps.sh
+
 .PHONY: sync
 sync: ## 同步 Python 依赖 (uv sync)
 	$(UV) sync

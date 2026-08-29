@@ -7,7 +7,6 @@ type UpdateWorkspaceFields = {
   description?: string
   default_entity?: string
   resource_config?: Record<string, unknown>
-  intake_config?: Record<string, unknown>
 }
 
 /**

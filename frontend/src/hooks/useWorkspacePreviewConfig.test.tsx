@@ -25,8 +25,6 @@ function makeSnapshot(previewHidden: string[]): WorkspaceSettingsSnapshot {
     workspaceDescription: '',
     settings: {
       entityType: 'question',
-      intakeModes: [],
-      labelOverrides: {},
       workflowKey: 'wf',
       previewHidden,
     },

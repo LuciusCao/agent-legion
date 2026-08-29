@@ -350,7 +350,10 @@ describe('AddItemsDialog', () => {
     )
     expect(screen.getByRole('tab', { name: '上传材料' })).toBeEnabled()
     expect(screen.getByRole('tab', { name: '已有材料' })).toBeEnabled()
-    expect(screen.getByTestId('item-type-hint')).toHaveTextContent('材料条目')
+    expect(screen.getByTestId('item-type-hint')).toHaveTextContent('上传文件')
+    expect(screen.getByTestId('item-type-hint')).not.toHaveTextContent(
+      'accepted_item_types'
+    )
   })
 
   it('disables the material tabs when the start node accepts refs only', async () => {
@@ -367,7 +370,7 @@ describe('AddItemsDialog', () => {
     expect(screen.getByRole('tab', { name: '已有材料' })).toBeDisabled()
     expect(screen.getByRole('tab', { name: '粘贴 ID' })).toBeEnabled()
     expect(screen.getByTestId('item-type-hint')).toHaveTextContent(
-      '外部引用条目'
+      '外部平台内容'
     )
   })
 

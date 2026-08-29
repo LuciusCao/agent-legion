@@ -1,9 +1,8 @@
 import { api } from './core'
 import type {
-  AgentDefaults,
   WorkspaceRecord,
   WorkspaceResponse,
-  WorkspaceSettingsResponse,
+  WorkspaceRuntimeModelsResponse,
   WorkspacesResponse,
 } from '../types'
 import type { WorkspaceStats } from '../types/workspaceTypes'
@@ -32,7 +31,6 @@ export async function updateWorkspace(
     description?: string
     default_entity?: string
     resource_config?: Record<string, unknown>
-    intake_config?: Record<string, unknown>
   }
 ): Promise<WorkspaceRecord> {
   const result = await api<WorkspaceResponse>(
@@ -57,15 +55,14 @@ export async function deleteWorkspace(workspaceId: string): Promise<void> {
   })
 }
 
-export async function updateAgentDefaults(
-  workspaceId: string,
-  agentDefaults: AgentDefaults
-): Promise<WorkspaceSettingsResponse> {
+/**
+ * {runtime: {provider: [models]}} aggregated from the workspace's online
+ * Workers — feeds the Studio node execution datalists.
+ */
+export async function fetchWorkspaceRuntimeModels(
+  workspaceId: string
+): Promise<WorkspaceRuntimeModelsResponse> {
   return api(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/settings/agent-defaults`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify({ agentDefaults }),
-    }
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/runtime-models`
   )
 }

@@ -166,7 +166,6 @@ def test_create_workspace_job_batch_from_direct_ids_uses_opaque_title(tmp_path):
             json={
                 "id": "direct_id_batch",
                 "name": "Direct Id Batch",
-                "intake_config": {"enabled_modes": ["direct_ids"]},
             },
         ).json()["workspace"]
         publish_legacy_intake_revision(c.app.state.job_db, workspace["id"])

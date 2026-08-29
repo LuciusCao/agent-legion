@@ -37,51 +37,41 @@ Agent Legion 是一个自托管控制台，把 AI agent 变成内容生产线的
 
 ### 前置要求
 
-- Python 3.11+、Node 18+、PostgreSQL 17（Homebrew：`brew install postgresql@17`）
-- Python 依赖管理工具 [`uv`](https://docs.astral.sh/uv/)
-- Rust 工具链（`cargo`），用于构建 **velites**——所有节点代码都在它的
-  沙箱里执行
+- macOS + Homebrew：`make install` 会自动检测并安装缺失的依赖
+  （Python 3.11+、Node 18+、PostgreSQL 17、[`uv`](https://docs.astral.sh/uv/)、
+  Rust 工具链、Docker）。其他平台请先手动安装这些依赖，`make install`
+  会逐项检测并给出指引。
 - 一个 LLM provider 供 agent 节点使用（任何 OpenAI 兼容端点均可；
-  demo workflow 需要一个）
+  demo workflow 需要一个）。
 
 ### 1. 克隆与安装
 
 ```bash
 git clone https://github.com/LuciusCao/agent-legion.git
 cd agent-legion
-uv sync                                     # Python 依赖
-createdb agent_legion_dev                   # 不要用裸名 agent_legion：init_db 会在无
-                                            # AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1 时
-                                            # 拒绝迁移该库（共享库 schema 守卫）
-cp .env.example .env                        # 然后编辑：设置 AGENT_LEGION_DATABASE_URL
-cd frontend && npm install && cd ..
+make install    # 装依赖、uv sync、建开发库 agent_legion_dev、生成 .env（含本地
+                # RustFS 随机凭据）、构建 velites、装前端依赖、种子 worker
+                # 配置——幂等，可重跑
 ```
 
-同时需要配置 `AGENT_LEGION_S3_*` 对象存储（本地可起 RustFS，见
+开发库用派生名 `agent_legion_dev` 而非裸名 `agent_legion`：裸名是共享/prod
+库，`init_db` 在没有 `AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1` 时会拒绝迁移它
+（共享库 schema 守卫）。
+
+对象存储默认使用本地 **RustFS**（`make dev-up` 自动启动容器并建好 bucket，
+凭据由 `make install` 生成进 `.env`），开箱即用；要切换到云端 S3（AWS 或
+其他兼容服务），只需在 `.env` 里改 `AGENT_LEGION_S3_ENDPOINT` / 凭据 /
+`AGENT_LEGION_S3_BUCKET` 三样，本地 RustFS 会被自动跳过（详见
 [docs/materials-storage-deployment.md](docs/materials-storage-deployment.md)）。
-未配置时实例其余功能正常，但材料 API 降级为 503，示例材料播种跳过。
 
-### 2. 一次性本地配置
+docker 不可用（未安装或未启动）时 `make dev-up` 会跳过本地 RustFS：
+示例材料播种同步跳过、材料相关 API 降级返回 503，其余功能不受影响；
+docker 就绪后重跑 `make dev-up` 即可补齐。
 
-```bash
-# 构建用于沙箱执行节点代码的 velites 二进制
-./scripts/ensure-velites.sh --dest data/bin
-
-# 本地 worker 配置（把 host_url 改为 http://127.0.0.1:8001、
-# work_root 改为 data/agent-worker——详见示例文件里的注释）
-cp config/agent-worker.example.yaml config/agent-worker.yaml
-```
-
-worker 注册不再使用全局 token：启动后在 Host Web UI 的
-「设置 → Worker Token」为 workspace 签发 scoped token，到 Worker 控制台
-（`http://127.0.0.1:8789`）的「Workspace 访问」区块粘贴添加即可——token
-随时可以补，无需重启后端（详见
-[docs/agent-worker-deployment.md](docs/agent-worker-deployment.md)）。
-
-### 3. 启动
+### 2. 启动
 
 ```bash
-make dev-up         # 后端 :8001，控制台 :5174，worker :8789——幂等
+make dev-up         # 本地 RustFS + 后端 :8001 + 控制台 :5174 + worker :8789——幂等
 make dev-status     # 查看各组件状态与 URL
 make dev-down       # 全部停止
 ```
@@ -90,12 +80,17 @@ make dev-down       # 全部停止
 worker 按设计默认关闭任务领取，到 worker 控制台 http://127.0.0.1:8789
 打开。
 
-### 4. 跑通 demo workflow
+worker 注册不再使用全局 token：启动后在 Host Web UI 的
+「设置 → Worker Token」为 workspace 签发 scoped token，到 Worker 控制台
+（`http://127.0.0.1:8789`）的「Workspace 访问」区块粘贴添加即可——token
+随时可以补，无需重启后端（详见
+[docs/agent-worker-deployment.md](docs/agent-worker-deployment.md)）。
+
+### 3. 跑通 demo workflow
 
 仓库自带一个极简 demo workflow
 **`education_video_problems_generation`**：`examples/` 下 10 个通用中小学
-数学知识点 markdown 随 demo workspace 播种为示例材料（需配置
-`AGENT_LEGION_S3_*` 对象存储，未配置则跳过播种），每个材料展开为一个
+数学知识点 markdown 随 demo workspace 播种为示例材料，每个材料展开为一个
 job——撰写教学视频脚本、评审、生成 5 道练习题、评审，最后模拟发布
 （不发网络请求）。
 
@@ -106,8 +101,10 @@ make import-demo      # 安装并锁定 demo skills；不存在时创建并 seed
 然后在控制台里：
 
 1. 打开命令输出中的 demo workspace（重复运行不会创建第二个）。
-2. 在 workspace **设置 → Agent 默认配置** 里填入你的 LLM 端点提供的
-   provider/model。
+2. 在 Studio 里配置 agent 执行：打开 workflow，在顶层 `execution:` 填入你的
+   LLM 端点提供的 provider/model（一处即覆盖全部 agent 节点，也可逐节点
+   `execution.*` 覆盖；输入框会按节点 Agent 的 runtime 给出在线 Worker
+   上报的可用 provider/model 选项，也可手输）。
 3. 打开 workspace 的自动调度，并在 Worker 控制台打开 claim。
 4. 提交一批任务：在 workspace 里「添加条目」对话框上传知识点 markdown，
    或在面板中勾选已播种的示例材料，确认后创建运行——每个材料一个

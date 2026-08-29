@@ -2008,6 +2008,32 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/runtime-models': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Get Workspace Runtime Models
+     * @description Studio 节点执行 datalist 的数据源（在线 Worker 的声明聚合）。
+     *
+     *     ``online`` 来自 30s 活性阈值（agent_control.registry
+     *     ONLINE_THRESHOLD_SECONDS）：刚 revoked / 离线的 Worker 在活性窗口
+     *     内仍可能短暂贡献 models——可接受边界，datalist 只是提示，claim
+     *     匹配才是权威。通配 ``*`` 声明原样透传，字面 ``*`` 选项的过滤在
+     *     前端 datalist 层（runtimeModelOptions.ts）。
+     */
+    get: operations['get_workspace_runtime_models_api_workspaces__workspace_id__runtime_models_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/secrets': {
     parameters: {
       query?: never
@@ -2244,6 +2270,23 @@ export interface paths {
     put?: never
     /** Answer Permission */
     post: operations['answer_permission_api_workspaces__workspace_id__studio_chat_sessions__session_id__permissions__request_id__post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/resume': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Resume Session */
+    post: operations['resume_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__resume_post']
     delete?: never
     options?: never
     head?: never
@@ -5599,12 +5642,6 @@ export interface components {
     WorkspaceConfigurationSettingsRequest: {
       /** Entitytype */
       entityType?: string | null
-      /** Intakemodes */
-      intakeModes?: string[] | null
-      /** Labeloverrides */
-      labelOverrides?: {
-        [key: string]: string
-      } | null
       /** Previewhidden */
       previewHidden?: string[] | null
       /** Workflowkey */
@@ -5619,10 +5656,6 @@ export interface components {
       default_entity: string
       /** Id */
       id: string
-      /** Intake Config */
-      intake_config?: {
-        [key: string]: unknown
-      }
       /** Name */
       name: string
       /** Resource Config */
@@ -5761,12 +5794,6 @@ export interface components {
       description: string
       /** Id */
       id: string
-      /** Intake Config */
-      intake_config: {
-        [key: string]: unknown
-      }
-      /** Intake Config Json */
-      intake_config_json: string
       /** Name */
       name: string
       /** Node Config */
@@ -5794,6 +5821,15 @@ export interface components {
       runs: {
         [key: string]: unknown
       }[]
+    }
+    /** WorkspaceRuntimeModelsResponse */
+    WorkspaceRuntimeModelsResponse: {
+      /** Runtimes */
+      runtimes: {
+        [key: string]: {
+          [key: string]: string[]
+        }
+      }
     }
     /** WorkspaceSecretDeleteResponse */
     WorkspaceSecretDeleteResponse: {
@@ -5827,12 +5863,6 @@ export interface components {
     WorkspaceSettingsPayload: {
       /** Entitytype */
       entityType: string
-      /** Intakemodes */
-      intakeModes: string[]
-      /** Labeloverrides */
-      labelOverrides: {
-        [key: string]: string
-      }
       /** Previewhidden */
       previewHidden?: string[]
       /** Workflowkey */
@@ -5847,18 +5877,8 @@ export interface components {
     }
     /** WorkspaceSettingsSectionRequest */
     WorkspaceSettingsSectionRequest: {
-      /** Agentdefaults */
-      agentDefaults?: {
-        [key: string]: string
-      } | null
       /** Entitytype */
       entityType?: string | null
-      /** Intakemodes */
-      intakeModes?: string[] | null
-      /** Labeloverrides */
-      labelOverrides?: {
-        [key: string]: string
-      } | null
       /** Nodeconfig */
       nodeConfig?: {
         [key: string]: {
@@ -5896,10 +5916,6 @@ export interface components {
       default_entity?: string | null
       /** Description */
       description?: string | null
-      /** Intake Config */
-      intake_config?: {
-        [key: string]: unknown
-      } | null
       /** Name */
       name?: string | null
       /** Resource Config */
@@ -10235,6 +10251,37 @@ export interface operations {
       }
     }
   }
+  get_workspace_runtime_models_api_workspaces__workspace_id__runtime_models_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceRuntimeModelsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   list_workspace_secrets_api_workspaces__workspace_id__secrets_get: {
     parameters: {
       query?: never
@@ -10823,6 +10870,38 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['StudioChatPermissionAnswerResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  resume_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__resume_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
         }
       }
       /** @description Validation Error */

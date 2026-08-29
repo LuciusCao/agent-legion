@@ -51,8 +51,6 @@ function buildSteps(overrides: {
   workflowKey?: string | null
   definition?: ReturnType<typeof makeDefinition> | null
   routes?: WorkspaceAgentRouteEntry[]
-  agentDefaults?: { provider: string; model: string }
-  intakeModes?: string[]
 }) {
   return buildOnboardingSteps({
     workflowKey:
@@ -64,11 +62,8 @@ function buildSteps(overrides: {
         ? makeDefinition([])
         : overrides.definition,
     agentRoutes: overrides.routes ?? [],
-    agentDefaults: overrides.agentDefaults,
-    intakeModes: overrides.intakeModes,
     workspaceId: 'ws1',
     goStudio: () => {},
-    goSettings: () => {},
     openAddItems: () => {},
   })
 }
@@ -123,53 +118,26 @@ describe('buildOnboardingSteps readiness', () => {
     expect(steps[2].unlocked).toBe(false)
   })
 
-  it('resolves agent nodes via node execution overrides', () => {
-    // workspace 默认为空，但节点 execution.* 配齐 → 就绪（解析链节点覆盖优先）。
+  it('resolves agent nodes via their effective node execution', () => {
+    // active revision 快照的节点 execution 已被 loader 合并顶层默认，
+    // provider+model 齐备即就绪（workspace 默认已退役）。
     const steps = buildSteps({
       definition: makeDefinition([
         { key: 'agent', execution: { provider: 'openai', model: 'gpt-5' } },
       ]),
       routes: [makeRoute('agent')],
-      agentDefaults: { provider: '', model: '' },
-      intakeModes: ['manual'],
     })
     expect(steps[1].completed).toBe(true)
     expect(steps[2].unlocked).toBe(true)
   })
 
-  it('falls back to workspace defaults when the node override is absent', () => {
+  it('stays locked when the agent node execution is incomplete', () => {
     const steps = buildSteps({
       definition: makeDefinition([{ key: 'agent' }]),
       routes: [makeRoute('agent')],
-      agentDefaults: { provider: 'openai', model: 'gpt-5' },
-      intakeModes: ['manual'],
-    })
-    expect(steps[1].completed).toBe(true)
-    expect(steps[2].unlocked).toBe(true)
-  })
-
-  it('stays locked when both override and defaults are missing', () => {
-    const steps = buildSteps({
-      definition: makeDefinition([{ key: 'agent' }]),
-      routes: [makeRoute('agent')],
-      agentDefaults: { provider: '', model: '' },
-      intakeModes: ['manual'],
     })
     expect(steps[1].completed).toBe(false)
     expect(steps[2].unlocked).toBe(false)
-  })
-
-  it('mixes node override fields with workspace default fields', () => {
-    // provider 来自默认、model 来自节点：两字段都能解析即就绪。
-    const steps = buildSteps({
-      definition: makeDefinition([
-        { key: 'agent', execution: { model: 'gpt-5' } },
-      ]),
-      routes: [makeRoute('agent')],
-      agentDefaults: { provider: 'openai', model: '' },
-      intakeModes: ['manual'],
-    })
-    expect(steps[1].completed).toBe(true)
   })
 
   it('requires every agent node to resolve', () => {
@@ -179,7 +147,6 @@ describe('buildOnboardingSteps readiness', () => {
         { key: 'a2' },
       ]),
       routes: [makeRoute('a1'), makeRoute('a2')],
-      intakeModes: ['manual'],
     })
     expect(steps[1].completed).toBe(false)
   })
@@ -189,25 +156,15 @@ describe('buildOnboardingSteps readiness', () => {
     const steps = buildSteps({
       definition: makeDefinition([{ key: 'agent' }]),
       routes: [otherWorkflowRoute],
-      intakeModes: ['manual'],
     })
     expect(steps[1].completed).toBe(true)
   })
 
-  it('treats non-agent nodes as ready and needs no defaults', () => {
+  it('treats non-agent nodes as ready', () => {
     const steps = buildSteps({
       definition: makeDefinition([{ key: 'code' }]),
-      intakeModes: ['manual'],
     })
     expect(steps[1].completed).toBe(true)
-  })
-
-  it('locks step 3 until at least one intake mode is enabled', () => {
-    const steps = buildSteps({
-      definition: makeDefinition([{ key: 'code' }]),
-      intakeModes: [],
-    })
-    expect(steps[1].completed).toBe(false)
-    expect(steps[2].unlocked).toBe(false)
+    expect(steps[2].unlocked).toBe(true)
   })
 })

@@ -1,7 +1,8 @@
 """Persistence for studio chat sessions (schema v43, phase 3 chunk 4).
 
-Message CRUD lives in studio_chat_messages.py (file budget split); this mixin
-inherits it so the composed JobQueries surface is unchanged.
+Message CRUD lives in studio_chat_messages.py and the resume claim in
+studio_chat_resume.py (file budget splits); this mixin inherits the latter so
+the composed JobQueries surface is unchanged.
 """
 
 from __future__ import annotations
@@ -10,16 +11,16 @@ import json
 from typing import Any
 from uuid import uuid4
 
-from server.app.jobs.queries.studio_chat_messages import StudioChatMessageQueriesMixin
+from server.app.jobs.queries.studio_chat_resume import (
+    _CAP_LOCK_KEY,
+    StudioChatResumeQueriesMixin,
+)
 
 _SESSION_COLUMNS = (
     "id, workspace_id, user_id, agent_id, title, status, acp_session_id,"
     " capability_snapshot_json, allow_all_permissions, mcp_status,"
     " selected_node_key, draft_yaml, error_detail, created_at, updated_at, closed_at"
 )
-
-# Advisory-lock key serializing session creation against the active cap.
-_CAP_LOCK_KEY = "studio_chat_session_cap"
 
 
 def _session_record(row: Any) -> dict[str, Any]:
@@ -52,8 +53,8 @@ def _build_session_updates(fields: dict[str, Any]) -> dict[str, Any]:
     return updates
 
 
-class StudioChatQueriesMixin(StudioChatMessageQueriesMixin):
-    """CRUD for studio_chat_sessions (messages via the inherited mixin)."""
+class StudioChatQueriesMixin(StudioChatResumeQueriesMixin):
+    """CRUD for studio_chat_sessions (messages/resume via inherited mixins)."""
 
     def create_studio_chat_session(
         self, workspace_id: str, user_id: str, agent_id: str, *, max_active: int | None = None

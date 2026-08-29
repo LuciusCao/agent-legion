@@ -26,11 +26,11 @@ const browserTestFiles = [
   'src/lib/sanitizeHtml.test.ts',
   'src/hooks/useJobFilterRefetch.test.ts',
   'src/pages/jobDetail/useUpgradeWorkflowAction.test.ts',
-  'src/pages/workflowStudio/useWorkflowStudio.test.ts',
-  'src/pages/workflowStudio/useWorkflowDraftPersistence.test.ts',
-  'src/pages/workflowStudio/useWorkflowStudioActions.test.ts',
-  'src/pages/workflowStudio/useWorkflowStudioMobilePanel.test.ts',
-  'src/pages/workflowStudio/useWorkflowStudioPageView.test.ts',
+  'src/features/workflowStudio/shared/useWorkflowStudio.test.ts',
+  'src/features/workflowStudio/shared/useWorkflowDraftPersistence.test.ts',
+  'src/features/workflowStudio/shared/useWorkflowStudioActions.test.ts',
+  'src/features/workflowStudio/shared/useWorkflowStudioMobilePanel.test.ts',
+  'src/features/workflowStudio/shared/useWorkflowStudioPageView.test.ts',
   'src/stores/agentsStore.test.ts',
 ]
 

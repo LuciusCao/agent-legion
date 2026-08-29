@@ -11,8 +11,6 @@ from server.app.workflows.schema import (
     WorkflowDefinition,
     WorkflowDefinitionError,
     WorkflowEdge,
-    WorkflowIntake,
-    WorkflowIntakeMode,
     WorkflowNode,
     WorkflowReduceSpec,
     WorkflowShardSpec,
@@ -21,6 +19,8 @@ from server.app.workflows.schema import (
 from server.app.workflows.snapshot_shape import ensure_mapping, snapshot_field
 from server.app.workflows.start_node import ensure_start_node, load_start_fields
 from server.app.workflows.validator import _validate_acyclic
+from server.app.workflows.workflow_execution_defaults import apply_workflow_execution
+from server.app.workflows.workflow_intake import load_intake
 from server.app.workflows.workflow_node_execution import load_node_execution
 
 
@@ -158,38 +158,6 @@ def _load_edges(
     return edges
 
 
-def _load_intake(raw: dict[str, Any]) -> WorkflowIntake:
-    raw_intake = raw.get("intake", {})
-    if raw_intake is None:
-        raw_intake = {}
-    if not isinstance(raw_intake, dict):
-        raise WorkflowDefinitionError("Workflow intake must be a mapping")
-    raw_modes = raw_intake.get("modes", {})
-    if raw_modes is None:
-        raw_modes = {}
-    if not isinstance(raw_modes, dict):
-        raise WorkflowDefinitionError("Workflow intake.modes must be a mapping")
-
-    modes: dict[str, WorkflowIntakeMode] = {}
-    for mode_key, raw_mode in raw_modes.items():
-        if not isinstance(mode_key, str) or not mode_key:
-            raise WorkflowDefinitionError("Intake mode keys must be non-empty strings")
-        if not isinstance(raw_mode, dict):
-            raise WorkflowDefinitionError(f"Intake mode {mode_key} must be a mapping")
-        label = raw_mode.get("label", mode_key)
-        input_field = raw_mode.get("input_field", mode_key)
-        if not isinstance(label, str) or not label:
-            raise WorkflowDefinitionError(f"Intake mode {mode_key}.label must be a string")
-        if not isinstance(input_field, str) or not input_field:
-            raise WorkflowDefinitionError(f"Intake mode {mode_key}.input_field must be a string")
-        modes[mode_key] = WorkflowIntakeMode(
-            key=mode_key,
-            label=label,
-            input_field=input_field,
-        )
-    return WorkflowIntake(modes=modes)
-
-
 def _load_nodes(
     raw_nodes: dict[str, Any],
 ) -> dict[str, WorkflowNode]:
@@ -288,8 +256,8 @@ def workflow_definition_from_mapping(
     if not isinstance(schema_version, int):
         raise WorkflowDefinitionError("Workflow schema_version must be an integer")
 
-    intake = _load_intake(raw)
-    nodes = _load_nodes(raw_nodes)
+    intake = load_intake(raw)
+    execution, nodes = apply_workflow_execution(raw, _load_nodes(raw_nodes))
     edges = _load_edges(raw, nodes, schema_version)
     nodes, edges = ensure_start_node(nodes, edges)
     _validate_acyclic(nodes, edges)
@@ -300,6 +268,7 @@ def workflow_definition_from_mapping(
         nodes=nodes,
         edges=edges,
         schema_version=schema_version,
+        execution=execution,
     )
 
 
@@ -313,6 +282,7 @@ def workflow_definition_from_dict(
         "label": payload.get("label"),
         "schema_version": payload.get("schema_version", 1),
         "intake": payload.get("intake", {}),
+        "execution": payload.get("execution"),
         "nodes": {},
         "edges": [],
     }

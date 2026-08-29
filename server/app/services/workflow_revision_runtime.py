@@ -18,6 +18,10 @@ def _structural_payload(definition: WorkflowDefinition) -> dict:
     payload = asdict(definition)
     for node in payload["nodes"].values():
         node.pop("execution", None)
+    # Top-level execution defaults are runtime settings like the node-level
+    # block: editing them updates the active revision in place instead of
+    # publishing a structural revision.
+    payload.pop("execution", None)
     return payload
 
 

@@ -28,7 +28,7 @@ vi.mock('../stores/authStore', () => ({
     selector ? selector(authState) : authState,
 }))
 
-vi.mock('./workflowStudio/chat/StudioChatPanel', () => ({
+vi.mock('../features/workflowStudio/chat/StudioChatPanel', () => ({
   StudioChatPanel: () => <div>chat panel stub</div>,
 }))
 

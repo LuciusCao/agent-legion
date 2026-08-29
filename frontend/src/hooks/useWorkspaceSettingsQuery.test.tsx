@@ -40,8 +40,6 @@ function mockSnapshotApi(workspaceName = '空间一') {
     if (path === '/api/workspaces/ws1/settings') {
       return Promise.resolve({
         entityType: 'knowledge',
-        intakeModes: ['direct_ids'],
-        labelOverrides: { direct_ids: '输入 ID' },
         workflowKey: 'knowledge_content',
       })
     }
@@ -77,8 +75,6 @@ function resetStore() {
     workspaceDescription: '',
     settings: {
       entityType: 'question',
-      intakeModes: [],
-      labelOverrides: {},
       workflowKey: '',
     },
     originalWorkspaceName: '',
@@ -116,8 +112,7 @@ describe('useWorkspaceSettingsQuery', () => {
     expect(snapshot.workspaceName).toBe('空间一')
     expect(snapshot.workspaceDescription).toBe('描述一')
     expect(snapshot.settings.entityType).toBe('knowledge')
-    expect(snapshot.settings.intakeModes).toEqual(['direct_ids'])
-    expect(snapshot.settings.labelOverrides).toEqual({ direct_ids: '输入 ID' })
+    expect(snapshot.settings.workflowKey).toBe('knowledge_content')
     expect(snapshot.executionConfiguration.migration_warnings).toEqual([
       'legacy migration',
     ])

@@ -3,8 +3,8 @@ import type { WorkspaceSettings } from '../../types'
 
 /**
  * saveAll 的 PUT /configuration 契约：settings 必须是白名单 pick。
- * GET /settings 返回的服务端附加键（nodeConfig/agentDefaults/
- * nodeConfigSchemas）不在 PUT 契约（extra=forbid）里，全量回传会 422。
+ * GET /settings 返回的服务端附加键（nodeConfig/nodeConfigSchemas）
+ * 不在 PUT 契约（extra=forbid）里，全量回传会 422。
  */
 
 const mockApi = vi.fn()
@@ -27,13 +27,10 @@ async function setupStore(overrides: Partial<WorkspaceSettings> = {}) {
   const { useSettingStore } = (await import('./index')) as SettingsStoreModule
   const settings: WorkspaceSettings = {
     entityType: 'question',
-    intakeModes: [],
-    labelOverrides: {},
     workflowKey: 'wf',
     previewHidden: ['questions.json'],
     // 服务端 GET 附加键（真实水合后 draft 会带上）。
     nodeConfig: { some_node: { timeout_seconds: 10 } },
-    agentDefaults: { provider: 'p', model: 'm', thinking: '' },
     nodeConfigSchemas: { some_node: { fields: [] } },
     ...overrides,
   } as unknown as WorkspaceSettings
@@ -82,17 +79,10 @@ describe('saveActions PUT body', () => {
     expect(ok).toBe(true)
     const body = JSON.parse(mockApi.mock.calls[0][1].body)
     expect(Object.keys(body.settings).sort()).toEqual(
-      [
-        'entityType',
-        'intakeModes',
-        'labelOverrides',
-        'previewHidden',
-        'workflowKey',
-      ].sort()
+      ['entityType', 'previewHidden', 'workflowKey'].sort()
     )
     expect(body.settings.previewHidden).toEqual(['questions.json'])
     expect(body.settings.nodeConfig).toBeUndefined()
-    expect(body.settings.agentDefaults).toBeUndefined()
     expect(body.settings.nodeConfigSchemas).toBeUndefined()
   })
 

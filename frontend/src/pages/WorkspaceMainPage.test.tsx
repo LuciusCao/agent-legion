@@ -224,16 +224,12 @@ describe('WorkspaceMainPage', () => {
       workspaceDescription: '',
       settings: {
         entityType: 'question',
-        intakeModes: [],
-        labelOverrides: {},
         workflowKey: '',
       },
       originalWorkspaceName: 'WS One',
       originalWorkspaceDescription: '',
       originalSettings: {
         entityType: 'question',
-        intakeModes: [],
-        labelOverrides: {},
         workflowKey: '',
       },
       isDirty: false,
