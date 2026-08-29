@@ -17,6 +17,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
 from server.app.services.material_cache import _input_document, _require_storage
 from server.app.storage import ObjectStorage
@@ -32,13 +33,13 @@ def is_bundle_input(job: Mapping[str, Any]) -> bool:
 
 
 def _ready_bundle(
-    database_dsn: Any, workspace_id: str, input_doc: Mapping[str, Any]
+    connect_source: ConnectSource, workspace_id: str, input_doc: Mapping[str, Any]
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """The validated (existing, all-members-ready) bundle and member rows."""
     bundle_id = str(input_doc.get("bundle_id") or "").strip()
     if not bundle_id:
         raise MaterializeError("bundle job input is missing bundle_id")
-    with read_connection(database_dsn) as conn:
+    with read_connection(connect_source) as conn:
         bundle = conn.execute(
             "select * from material_bundles where id=%s and workspace_id=%s",
             (bundle_id, workspace_id),
@@ -80,7 +81,7 @@ def _entries_block(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def bundle_runtime_block(
-    database_dsn: Any,
+    connect_source: ConnectSource,
     cache_root: Path,
     workspace_id: str,
     job: Mapping[str, Any],
@@ -91,7 +92,7 @@ def bundle_runtime_block(
     input_doc = _input_document(job)
     if input_doc.get("type") != "bundle":
         return None
-    bundle, members = _ready_bundle(database_dsn, workspace_id, input_doc)
+    bundle, members = _ready_bundle(connect_source, workspace_id, input_doc)
     bundle_id = str(bundle["id"])
     storage = _require_storage(storage, bundle_id)
     manifest = [(_member_address(member), str(member["path"])) for member in members]
@@ -139,11 +140,13 @@ def prefetch_bundle_block(
     if not is_bundle_input(job):
         return None
     job_db = executor.job_db
-    dsn = str(getattr(job_db, "path", "") or "") if job_db is not None else ""
-    if not dsn:
+    if job_db is None:
         raise MaterializeError("bundle job input cannot be materialized without the job database")
+    # Facade passthrough (#187, BOUNDARY-DATA-001): read_connection accepts
+    # ConnectSource, so the executor's job_db handle goes straight through —
+    # never unwrapped to a DSN via getattr.
     return bundle_runtime_block(
-        dsn,
+        job_db,
         executor._materials_cache_root,
         workspace_id,
         job,
@@ -152,7 +155,7 @@ def prefetch_bundle_block(
 
 
 def bundle_claim_block(
-    database_dsn: Any,
+    connect_source: ConnectSource,
     workspace_id: str,
     job: Mapping[str, Any],
     *,
@@ -163,7 +166,7 @@ def bundle_claim_block(
     input_doc = _input_document(job)
     if input_doc.get("type") != "bundle":
         return None
-    bundle, members = _ready_bundle(database_dsn, workspace_id, input_doc)
+    bundle, members = _ready_bundle(connect_source, workspace_id, input_doc)
     bundle_id = str(bundle["id"])
     storage = _require_storage(storage, bundle_id)
     return {

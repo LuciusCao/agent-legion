@@ -260,6 +260,43 @@ def test_report_node_auth_failure_silent_without_context(job_db) -> None:
     )
 
 
+def test_report_node_auth_failure_facade_passthrough_no_getattr_escape(monkeypatch, job_db) -> None:
+    """#187 getattr-escape closure: a facade-shaped ``job_db`` must reach
+    ConnectionTokenService as the object itself, never unwrapped through
+    ``getattr(job_db, "path")``/``dsn_identity``."""
+    from server.app.services import connection_token_legacy
+
+    received: list[object] = []
+
+    class FakeFacade:
+        # The facade surface services may rely on; accessing ``path`` here
+        # would prove the legacy hook still unwraps the facade.
+        dsn_identity = str(job_db.path)
+
+        @property
+        def path(self) -> str:  # pragma: no cover - must not be touched
+            raise AssertionError("facade must pass through, not unwrap .path")
+
+    class RecorderService:
+        def __init__(self, connect_source, settings_config=None) -> None:
+            received.append(connect_source)
+
+        def report_auth_failure(self, key: str) -> None:
+            return None
+
+    monkeypatch.setattr(connection_token_legacy, "ConnectionTokenService", RecorderService)
+    facade = FakeFacade()
+    report_node_auth_failure({"node_config": {"connection": "c1"}, "job_db": facade})
+    assert received == [facade]
+
+    # Fallback branch keeps handing the bare DSN string through.
+    received.clear()
+    report_node_auth_failure(
+        {"node_config": {"connection": "c1"}, "_job_db_path": str(job_db.path)}
+    )
+    assert received == [str(job_db.path)]
+
+
 def test_get_token_single_flight_under_concurrency(services, monkeypatch) -> None:
     """Concurrent get_token calls on one connection trigger exactly one
     credential exchange; every caller gets the same token."""

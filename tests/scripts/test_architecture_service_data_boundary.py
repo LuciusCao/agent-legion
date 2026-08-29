@@ -97,6 +97,33 @@ def test_counts_dsn_path_attribute_access():
     assert dsn_path_refs == 2
 
 
+def test_counts_dsn_identity_attribute_access():
+    # #187: `.dsn_identity` is the facade's cache-key identity — reading it
+    # in a service (outside the sanctioned resolver) is the same escape.
+    source = "key = job_db.dsn_identity\n"
+
+    _, _, dsn_escape_refs = count_service_data_bypasses(source)
+
+    assert dsn_escape_refs == 1
+
+
+def test_counts_getattr_form_dsn_escapes():
+    # #187 getattr-escape closure: `getattr(x, "path"/"dsn_identity", ...)`
+    # is the dynamic twin of the attribute escape and must be counted —
+    # with or without the default argument.
+    source = (
+        'a = getattr(job_db, "path", None)\n'
+        'b = getattr(job_db, "dsn_identity", "")\n'
+        'c = getattr(job_db, "path")\n'
+        'd = getattr(other, "unrelated", None)\n'
+        "e = getattr(job_db, name_var)\n"
+    )
+
+    _, _, dsn_escape_refs = count_service_data_bypasses(source)
+
+    assert dsn_escape_refs == 3
+
+
 def test_collect_only_scans_services_root(tmp_path):
     write(tmp_path / "server/app/services/bypass.py", 'SQL = "SELECT 1 FROM t"\n')
     write(tmp_path / "server/app/routes/allowed.py", 'SQL = "SELECT 1 FROM t"\n')
@@ -183,7 +210,7 @@ def test_rejects_dsn_path_escape_without_baseline_entry(tmp_path):
     errors = check_repository(tmp_path)
 
     assert any(
-        "no baseline entry" in error and "sneaky.py" in error and "DSN path" in error
+        "no baseline entry" in error and "sneaky.py" in error and "DSN escape" in error
         for error in errors
     )
 
@@ -199,6 +226,49 @@ def test_rejects_dsn_path_growth_above_baseline(tmp_path):
     errors = check_repository(tmp_path)
 
     assert any("exceeds baseline" in error and "legacy.py" in error for error in errors)
+
+
+def test_rejects_getattr_form_escape_without_baseline_entry(tmp_path):
+    # The #187 getattr escape: pulling the DSN out of a facade-shaped object
+    # via getattr must trip the ratchet exactly like the attribute form.
+    write(
+        tmp_path / "server/app/services/sneaky.py",
+        'dsn = str(getattr(job_db, "path", "") or "")\n',
+    )
+    write_neutral_budget_governance(tmp_path)
+
+    errors = check_repository(tmp_path)
+
+    assert any(
+        "no baseline entry" in error and "sneaky.py" in error and "DSN" in error for error in errors
+    )
+
+
+def test_rejects_getattr_form_growth_above_baseline(tmp_path):
+    write(
+        tmp_path / "server/app/services/legacy.py",
+        'A = "SELECT 1"\nB = getattr(job_db, "dsn_identity", None)\n',
+    )
+    write_neutral_budget_governance(tmp_path)
+    write_boundary_baseline(tmp_path, {"server/app/services/legacy.py": [1, 0, 0]})
+
+    errors = check_repository(tmp_path)
+
+    assert any("exceeds baseline" in error and "legacy.py" in error for error in errors)
+
+
+def test_rejects_dsn_identity_attribute_escape_without_baseline_entry(tmp_path):
+    write(
+        tmp_path / "server/app/services/sneaky.py",
+        "identity = job_db.dsn_identity\n",
+    )
+    write_neutral_budget_governance(tmp_path)
+
+    errors = check_repository(tmp_path)
+
+    assert any(
+        "no baseline entry" in error and "sneaky.py" in error and "DSN" in error for error in errors
+    )
 
 
 def test_accepts_counts_within_baseline(tmp_path):

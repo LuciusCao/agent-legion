@@ -186,3 +186,38 @@ def test_claim_block_carries_presigned_url_without_storage_key(job_db, material,
         )
         is None
     )
+
+
+def test_runtime_block_facade_passthrough_no_getattr_escape(
+    job_db, material, storage, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#187 getattr 逃逸收口：connect source 是 facade 形态时必须原样
+    直通给连接层（ConnectSource），不得经 getattr 抽回裸 DSN。"""
+    import server.app.services.material_cache as module
+    from server.app.db.transaction import read_connection as real_read_connection
+
+    received: list[object] = []
+
+    class FakeFacade:
+        dsn_identity = job_db.dsn_identity  # real DSN behind the facade
+
+        @property
+        def path(self):  # pragma: no cover - must not be touched
+            raise AssertionError("facade must pass through, not unwrap .path")
+
+    def recording_read_connection(source):
+        received.append(source)
+        return real_read_connection(source)
+
+    monkeypatch.setattr(module, "read_connection", recording_read_connection)
+    block = material_runtime_block(
+        FakeFacade(),
+        tmp_path,
+        WORKSPACE_ID,
+        _job({"type": "material", "material_id": material}),
+        storage=storage,
+    )
+
+    assert block is not None
+    assert block["material_id"] == material
+    assert received and isinstance(received[0], FakeFacade)

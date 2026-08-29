@@ -11,7 +11,7 @@ from server.app.db.transaction import read_connection, write_transaction
 
 
 @with_database_conflict_retry
-def _persist_pause(db_path: str, scope: str, paused: bool, process_id: str) -> None:
+def _persist_pause(db_path: ConnectSource, scope: str, paused: bool, process_id: str) -> None:
     now = datetime.now(UTC)
     with write_transaction(db_path) as conn:
         conn.execute(
@@ -38,8 +38,10 @@ class WorkspaceWorkerControl:
         self, db_path: ConnectSource | None = None, *, process_id: str | None = None
     ) -> None:
         # Facade (JobQueries) in production, bare DSN in tests, None = in-memory.
-        if not isinstance(db_path, (str, type(None))):
-            db_path = str(getattr(db_path, "dsn_identity", None) or "")
+        # The source passes through untouched (#187): read_connection /
+        # write_transaction / connect_database all accept ConnectSource, so
+        # unwrapping a facade to its DSN here would be the very escape
+        # BOUNDARY-DATA-001 retires.
         self._db_path = db_path
         self._process_id = process_id or f"{socket.gethostname()}:{os.getpid()}"
         self._paused: dict[str, bool] = {}

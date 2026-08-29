@@ -134,3 +134,24 @@ def test_delete_unreferenced_tolerates_unlink_failure(store, monkeypatch):
         row = conn.execute("select hash from artifacts where hash = %s", (h,)).fetchone()
     assert row is None
     assert (store.root / h[:2] / h).is_file()
+
+
+def test_connect_source_property_passthrough(tmp_path):
+    """#187 命名债收口：store 持 facade 时 ``connect_source`` 原样交出对象
+    本身，孤儿 GC 等消费方直通给 read_connection，不抽 DSN。"""
+    init_db(TEST_DATABASE_URL)
+
+    class FakeFacade:
+        dsn_identity = TEST_DATABASE_URL
+
+        @property
+        def path(self):  # pragma: no cover - must not be touched
+            raise AssertionError("facade must pass through, not unwrap .path")
+
+    facade = FakeFacade()
+    store = ArtifactStore(tmp_path / "artifacts", facade)  # type: ignore[arg-type]
+
+    assert store.connect_source is facade
+    # The store round-trips real writes through the facade-backed source.
+    h = store.put(b"facade-backed")
+    assert store.open(h).read_bytes() == b"facade-backed"

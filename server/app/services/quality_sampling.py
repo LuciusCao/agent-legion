@@ -71,11 +71,13 @@ on conflict (batch_id, node_run_id) do nothing
 
 
 class QualitySamplingService:
-    """Deterministic sampling; ``db_path`` is the JobQueries facade (or a
-    bare DSN for tests) — BOUNDARY-DATA-001, #187."""
+    """Deterministic sampling; the connect source is the JobQueries facade
+    (or a bare DSN for tests) — BOUNDARY-DATA-001, #187."""
 
     def __init__(self, db_path: ConnectSource) -> None:
-        self.db_path = db_path
+        # Named ``connect_source`` per the #187 convention: the attribute
+        # holds the facade, not a path.
+        self._connect_source = db_path
 
     def create_batch(
         self,
@@ -114,7 +116,7 @@ class QualitySamplingService:
         query = _CANDIDATE_QUERY.format(where_clause=" and ".join(clauses))
 
         batch_id = uuid.uuid4().hex
-        with write_transaction(self.db_path) as conn:
+        with write_transaction(self._connect_source) as conn:
             workspace = conn.execute(
                 "select id from workspaces where id = %s", (workspace_id,)
             ).fetchone()
@@ -169,7 +171,7 @@ class QualitySamplingService:
         return result
 
     def list_batches(self, workspace_id: str) -> list[dict[str, Any]]:
-        with read_connection(self.db_path) as conn:
+        with read_connection(self._connect_source) as conn:
             rows = conn.execute(
                 """
                 select * from quality_sample_batches
@@ -181,7 +183,7 @@ class QualitySamplingService:
         return [dict(row) for row in rows]
 
     def get_batch(self, workspace_id: str, batch_id: str) -> dict[str, Any]:
-        with read_connection(self.db_path) as conn:
+        with read_connection(self._connect_source) as conn:
             row = conn.execute(
                 "select * from quality_sample_batches where id = %s and workspace_id = %s",
                 (batch_id, workspace_id),
