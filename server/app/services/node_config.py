@@ -33,11 +33,7 @@ from server.app.workflows.schema import WorkflowDefinition, WorkflowNode
 def _agent_schemas(
     agent_definitions: Mapping[str, AgentDefinition],
 ) -> dict[str, dict[str, Any]]:
-    return {
-        definition.capability: definition.config_schema
-        for definition in agent_definitions.values()
-        if definition.config_schema
-    }
+    return {d.capability: d.config_schema for d in agent_definitions.values() if d.config_schema}
 
 
 def capability_config_schemas(
@@ -83,7 +79,8 @@ def workflow_node_config_schemas(
     schemas: dict[str, dict[str, Any]] = {}
     for node in definition.executable_nodes.values():
         schema = _node_config_schema(node, agent_schemas, agent_capabilities)
-        if schema:
+        # Approval gates never dispatch (EXEC-APPROVAL-001): no config surface.
+        if schema and node.node_type != "approval":
             schemas[node.key] = schema
     return schemas
 
@@ -150,7 +147,12 @@ def resolve_workflow_node_configs(
     for node in definition.executable_nodes.values():
         node_schema = _node_config_schema(node, agent_schemas, agent_capabilities)
         workspace_override = overrides.get(node.key, {})
-        if not node_schema and not node.config and not workspace_override:
+        # Approval gates never dispatch (EXEC-APPROVAL-001): their config
+        # (rework_target/feedback_artifact) is platform semantics consumed by
+        # the approval service, not an execution config to validate/freeze.
+        if node.node_type == "approval" or (
+            not node_schema and not node.config and not workspace_override
+        ):
             continue
         try:
             resolved[node.key] = resolve_node_config(node_schema, node.config, workspace_override)

@@ -38,6 +38,10 @@
   border-color: #d1d5db;
 }
 
+.node.awaiting_approval {
+  background: var(--status-approval-bg);
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -68,7 +72,6 @@
 .iconnot_applicable {
   color: #9ca3af;
 }
-
 .label {
   flex: 1;
   font-weight: 600;

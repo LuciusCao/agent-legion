@@ -21,6 +21,7 @@ const STATUS_ICONS: Record<string, string> = {
   failed: 'error',
   stale: 'schedule',
   pending: 'schedule',
+  awaiting_approval: 'pending_actions',
 }
 
 const NODE_STATUS_CLASS: Record<string, string> = {
@@ -29,6 +30,7 @@ const NODE_STATUS_CLASS: Record<string, string> = {
   failed: styles.statusFailed,
   stale: styles.statusPending,
   pending: styles.statusPending,
+  awaiting_approval: styles.statusAwaitingApproval,
 }
 
 const BADGE_STATUS_CLASS: Record<string, string> = {
@@ -37,6 +39,7 @@ const BADGE_STATUS_CLASS: Record<string, string> = {
   failed: styles.badgeFailed,
   stale: styles.badgePending,
   pending: styles.badgePending,
+  awaiting_approval: styles.badgeAwaitingApproval,
 }
 
 interface JobProgressPanelProps {

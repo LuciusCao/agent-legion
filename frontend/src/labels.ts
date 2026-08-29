@@ -14,6 +14,7 @@ export const STATUS_LABELS: Record<string, string> = {
   paused: '已暂停',
   pending: '等待中',
   stale: '已过期',
+  awaiting_approval: '待审批',
 }
 
 export const INTERACTION_TYPE_LABELS: Record<string, string> = {

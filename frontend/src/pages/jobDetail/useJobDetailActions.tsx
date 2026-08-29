@@ -16,6 +16,7 @@ type Options = {
   onClearPacked: () => void
   onDelete: () => void
   onOpenArtifacts: () => void
+  onOpenApproval: () => void
 }
 
 /**
@@ -67,6 +68,7 @@ export function useJobDetailActions(options: Options) {
         onClearPacked={snapshot.onClearPacked}
         onDelete={snapshot.onDelete}
         onOpenArtifacts={snapshot.onOpenArtifacts}
+        onOpenApproval={snapshot.onOpenApproval}
       />
     )
     return () => setDetailPageActions(null)

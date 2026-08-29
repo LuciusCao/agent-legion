@@ -53,6 +53,7 @@
     "tests/full/test_workspace_sse.py",
     "tests/routes/jobs/test_failed_node_runs.py",
     "tests/routes/jobs/test_intake_modes.py",
+    "tests/routes/jobs/test_job_approvals.py",
     "tests/routes/jobs/test_job_batch_pause.py",
     "tests/routes/jobs/test_job_batches.py",
     "tests/routes/jobs/test_job_lifecycle.py",

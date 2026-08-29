@@ -869,3 +869,11 @@ def test_dispatch_fails_fast_on_unsupported_runtime(job_db, tmp_path) -> None:
             log_path=tmp_path / "job.log",
             inputs=(),
         )
+
+
+def test_awaiting_approval_jobs_stay_claimable() -> None:
+    """EXEC-APPROVAL-001（Codex P2）：审批关只阻塞自身下游——job 处于
+    awaiting_approval 时，其并行分支的远程 claim 不得被当成终态取消。"""
+    from server.app.agent_broker.claim_scan import RUNNABLE_JOB_STATUSES
+
+    assert "awaiting_approval" in RUNNABLE_JOB_STATUSES

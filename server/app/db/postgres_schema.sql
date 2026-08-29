@@ -1125,3 +1125,24 @@ create table if not exists workspace_workflow_drafts (
   created_at timestamptz not null default current_timestamp,
   updated_at timestamptz not null default current_timestamp
 );
+
+-- Approval decisions (schema v63): the insert-only audit of human verdicts
+-- on ``type: approval`` gates (EXEC-APPROVAL-001). One row per decision,
+-- never updated or deleted; the newest row per (job_id, node_key) is the
+-- current decision and the full history reconstructs the review rounds
+-- (rework loops re-park the node, so several rows per gate are normal).
+-- ``decided_by`` follows the uniform actor format ``user:{id}``; decisions
+-- are accepted from human sessions only — studio_agent scoped tokens are
+-- rejected at the route layer.
+create table if not exists approval_decisions (
+  id text primary key,
+  job_id text not null references jobs(id) on delete cascade,
+  node_key text not null,
+  verdict text not null check(verdict in ('approved', 'rework', 'rejected')),
+  note text not null default '',
+  rework_target text not null default '',
+  decided_by text not null default '',
+  created_at timestamptz not null default current_timestamp
+);
+create index if not exists idx_approval_decisions_job_node
+  on approval_decisions(job_id, node_key, created_at desc);

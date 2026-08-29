@@ -67,6 +67,10 @@ def summarize_job_status(statuses: list[str]) -> str:
         return "running"
     if any(status == "failed" for status in statuses):
         return "failed"
+    # A parked approval gate outranks queued once nothing is running: the
+    # job is waiting on a human, not on capacity (EXEC-APPROVAL-001).
+    if any(status == "awaiting_approval" for status in statuses):
+        return "awaiting_approval"
     if all(status in TERMINAL_SUCCESS_STATUSES for status in statuses):
         return "completed"
     return "queued"

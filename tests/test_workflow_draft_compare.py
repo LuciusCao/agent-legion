@@ -531,3 +531,28 @@ def test_compare_shape_invalid_active_revision_degrades_to_invalid_schema(app_wi
     assert result["summary"] is None
     assert result["errors"][0]["category"] == "schema"
     assert "Failed to parse active revision" in result["errors"][0]["message"]
+
+
+def test_compare_accepts_added_approval_gate(app_with_workspace):
+    """审批节点（EXEC-APPROVAL-001）进 diff 不再 500：node_type 契约含 'approval'。"""
+    import yaml as _yaml
+
+    app, workspace_id = app_with_workspace
+    definition = load_builtin_definition("education_video_problems_generation")
+    raw_doc = _yaml.safe_load(definition_to_yaml(definition))
+    raw_doc["nodes"]["gate_script"] = {
+        "type": "approval",
+        "label": "审批 · 脚本关",
+        "inputs": ["script.md"],
+        "config": {"rework_target": "write_script"},
+    }
+    raw_doc["edges"].append({"from": "write_script", "to": "gate_script"})
+    raw = _yaml.safe_dump(raw_doc, allow_unicode=True, sort_keys=False)
+
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, raw)
+
+    assert result["valid"] is True
+    change = next(c for c in result["summary"]["node_changes"] if c["node_key"] == "gate_script")
+    assert change["type"] == "added"
+    assert change["node_type"] == "approval"

@@ -9,9 +9,12 @@ const VALID_STATUSES = new Set<DagGraphNode['status']>([
   'failed',
   'stale',
   'not_applicable',
+  'awaiting_approval',
 ])
 
-const POLLING_STATUSES = new Set(['queued', 'running'])
+// awaiting_approval polls too: another editor may decide the gate in a
+// different session, and the detail page has no SSE channel to hear it.
+const POLLING_STATUSES = new Set(['queued', 'running', 'awaiting_approval'])
 
 export function normalizeStatus(status: string): DagGraphNode['status'] {
   if (VALID_STATUSES.has(status as DagGraphNode['status'])) {

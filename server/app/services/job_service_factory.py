@@ -5,6 +5,7 @@ from typing import Any
 from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
+from server.app.services.approval_decisions import ApprovalDecisionService
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_artifacts import JobArtifactService
@@ -72,6 +73,9 @@ class JobServices:
             settings,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
+        )
+        self.approvals = ApprovalDecisionService(
+            job_db, settings, self.rerun, object_store=object_store
         )
         self.workflow_upgrade = JobWorkflowUpgradeService(
             job_db,
