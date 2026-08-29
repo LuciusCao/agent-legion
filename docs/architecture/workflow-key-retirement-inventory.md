@@ -109,7 +109,7 @@ workflow key 是同一个标识：创建时显式提供 id（即 `default_workfl
 | `server/app/jobs/queries/batch.py:36` | `run_id = f"{workspace_id}_{workflow_key}_{source_kind}_{payload_digest}"` | **需 schema 迁移 + 外部引用评估** | run_id 是对外持久 id；去掉 key 段会改变**新** run 的 id 形状（旧 id 无需重写——逐行自解析）；API/审计/质量抽样按 id 引用 |
 | `server/app/jobs/queries/job_nodes.py:14-16`、`job_bulk.py:14-16` | `job_id = f"{workspace_id}_{workflow_key}_{safe_source_id}"`（两处 `_job_id` 重复实现） | **需 schema 迁移 + 外部引用评估** | job_id 是最外露的持久 id；v62 已证明「id 中含改名前缀」的行可自解析（`resolve_job_dir_candidates` 双路径读），但 id 形状变化影响一切外部记录（工单、导出、人工引用） |
 | `server/app/services/workflow_revisions.py:51-52` | `revision_id = f"{workspace_id}:{definition.key}:v{version}"`（`definition.key` 即 workspace key） | **需 schema 迁移 + 外部引用评估** | revision_id 落 `jobs.workflow_revision_id` 冻结列、出现在 API 响应与 job 详情；快照行按 id 自解析，旧行不受影响 |
-| `server/app/services/node_codes.py:42-52` | `entity_key = f"{workflow_key}:{node_key}"`（`versioned_entities.entity_key`，v26 迁移同构） | **需 schema 迁移** | `_ENTITY_KEY_SEPARATOR` 校验（key 不许含 `:`）在 v62 id 契约后已是冗余防御；历史行按 `:` 自解析 |
+| `server/app/services/node_codes.py:42-52` | `entity_key = f"{workflow_key}:{node_key}"`（`versioned_entities.entity_key`，v26 迁移同构） | **需 schema 迁移（存量键迁移或双读）** | VersionedEntityStore 全部读写（`node_codes.py:131,145,160-162,178` 的 get_effective/get_by_version/list_versions）按精确键相等查询——**只改新行构造会让存量 workspace 行立即不可见并分叉历史**（codex on #256）：要么存量键一次性迁移，要么构造点双读两代键；`_ENTITY_KEY_SEPARATOR` 校验在 v62 后已是冗余防御 |
 | `server/app/services/node_secrets.py:21-23` | vault 名 `f"node:{workflow_key}:{node_key}:{field}"` | **需 schema 迁移（vault 名重写）** | 存量 secret 名不改写即失联——退役时需要一次性 vault 键改名或双读；`node_cms_config.py:129` 迁移也生成过该形状 |
 | `worker/code_runner.py:178`、`worker/execution/run.py:136` | manifest/claim 透传 `workflow_key` | 需契约协调（跨进程） | 与 AgentClaimResponse 同源 |
 | `server/app/jobs/storage_layout.py:26-35` | 磁盘 `data/jobs/<workspace_id>/<shard>/<job_id>`（storage_dir 落列 `jobs.storage_dir`，目录含 job_id——job_id 又含 key 段） | 保留（v62 有意未重写存量） | **issue 明示的存量问题**：v62 改 workspace id 时旧行 storage_dir 指向旧前缀，靠 `resolve_job_dir_candidates` 双候选读兼容；Phase 3/4 需决定是否顺带迁移磁盘路径 |
@@ -160,7 +160,7 @@ on #256 补遗）：`stores/setting/actions/executionConfigActions.ts:6-15` 按
 | 前端 camel `workflowKey`（24 文件，含 api.ts 3） | 63 处 |
 | 前端 snake `workflow_key`（14 文件，含 api.ts 54） | 77 处 |
 | 类别 1 API 契约字段（Pydantic） | 响应 14 + 请求 6 = 20 个字段，另有 10 条 URL 路径/查询参数 |
-| 类别 2 DB 列 | 活跃表 12 列（含 PK/unique/索引成员 9 列）+ 历史迁移表 2 列；6 个 jobs 索引、3 个触发器函数、2 个 unique 约束 |
+| 类别 2 DB 列 | 运行时活跃 11 列（含 PK/unique/索引成员 8 列）+ 考古表 3 列（workflow_node_codes / workspace_node_bindings / job_batches，不参与约束重建——codex on #256）；6 个 jobs 索引、**4 个触发器函数 + 3 个触发器**、workflow_revisions 1 个 unique 约束 |
 | 类别 3 组合字符串 id | 5 个构造族（run_id / job_id ×2 实现 / revision_id / entity_key / vault secret 名）+ 3 类存储路径（磁盘 job dir / S3 artifact / S3 material） |
 | 类别 4 前端消费点 | 24 个手写文件 + 1 个生成物 |
 
