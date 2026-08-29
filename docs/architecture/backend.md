@@ -594,7 +594,8 @@ server/app/
 - 当 `start_worker=True` 时，生命周期内启动 `WorkflowWorkerThread`：
   - 在 DB 实例设置 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
   - 节点按 capability 分发：DB 中按 workspace 发布的 code 节点（EXEC-CODE-002/003，demo 节点在 workspace 初始化时注入）进入本地 code 池或 Worker code 池；agent 节点（pi / velites runtime）经 broker 派发给 Worker。
-- worker 默认处于**暂停**状态；调用 `POST /api/worker/resume` 开始处理。
+- 调度暂停是 **workspace 级**状态：每个 workspace 默认暂停，恢复经
+  `POST /api/worker/resume?workspace_id=<id>`（或对应控制台开关）开始处理。
 - 后端每次启动会把全部 workspace 重置为暂停（刻意设计，防失控自跑）；恢复调度走
   `scripts/resume-workspaces.sh`（必须在后端首次启动建表之后执行才生效）或在控制台手动恢复。
 - 内置示例 workflow `education_video_problems_generation` 的节点序列

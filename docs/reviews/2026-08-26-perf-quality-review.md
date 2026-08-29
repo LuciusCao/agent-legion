@@ -1,5 +1,14 @@
 # 前后端性能与代码质量 Review（origin/develop @ f9bc9456）
 
+> **落地状态（2026-08-26 补注）**：§六落地顺序的前 7 项（前端 #1/#4/#5、
+> 后端 P0-1/H2/H1 及前端 #2 的行组件 memo 等）已随 PR #179（`0d18c671`）
+> 落地：jobs(run_id) 索引（schema v59）、事件循环上的 gzip 压缩降档、
+> 4 处 async 路由的同步 DB auth 下放线程池、material TTL sweep 的 S3
+> 调用移出事务、connection_tokens 行锁改 advisory lock 单飞、App.tsx /
+> WorkspaceLayout 字段级 selector、Job 列表行 memo 化等。本文其余内容
+> 是时点快照，`path:line` 证据反映审查时代码；当前状态以代码与
+> CHANGELOG 0.3.0 起的对应条目为准。
+
 Review 于独立 worktree `.worktrees/perf-review`（分支 `review/perf-quality`）。
 方法：4 个并行深度排查（后端 async 阻塞 / DB 查询模式 / 后端质量 / 前端性能与质量）+ 静态工具（ruff、mypy、tsc、eslint 全绿）+ 对全部 P0/高严重度发现逐条人工核验代码。
 

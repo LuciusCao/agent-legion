@@ -165,10 +165,13 @@ EOF
   解析下沉到 jobs）。**存量 jobs 较多时迁移 UPDATE 可能耗时数分钟，
   务必先备份数据库并在低峰执行**；迁移幂等可重入，中断后重启
   会继续。
-- 当前 schema 已到 v57：v54（`job_artifacts` 产物清单表）、v55
-  （`material_bundles`）、v56（`job_node_status_counts` 触发器维护的
-  状态计数）与 v57（`studio_chat_sessions.draft_yaml`）均为 additive
-  迁移，随启动自动执行。
+- 当前 schema 版本以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准
+  （目前 v64）。本部署面相关的近期迁移均为 additive、随启动自动执行：v54
+  （`job_artifacts` 产物清单表）、v55（`material_bundles`）、v56
+  （`job_node_status_counts` 触发器维护的状态计数）、v57
+  （`studio_chat_sessions.draft_yaml`）、v58（scoped worker token，全局
+  register token 退役）、v61–v62（workspace id 与 workflow key 绑定）、
+  v63（产物预览隐藏列表）、v64（workspace 级 Agent 默认配置三列退役 drop）。
 - bundle 条目（文件夹整体一个条目）复用同一 bucket 与材料缓存，无额外
   存储配置。
 - 上传一个文件验证闭环：`POST /api/workspaces/{id}/materials/presign`

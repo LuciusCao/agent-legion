@@ -81,8 +81,8 @@ worker 按设计默认关闭任务领取，到 worker 控制台 http://127.0.0.1
 打开。
 
 worker 注册不再使用全局 token：启动后在 Host Web UI 的
-「设置 → Worker Token」为 workspace 签发 scoped token，到 Worker 控制台
-（`http://127.0.0.1:8789`）的「Workspace 访问」区块粘贴添加即可——token
+workspace「设置 → Agent 与 Worker」为 workspace 签发 scoped token，到 Worker
+控制台（`http://127.0.0.1:8789`）的「Workspace 访问」区块粘贴添加即可——token
 随时可以补，无需重启后端（详见
 [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md)）。
 

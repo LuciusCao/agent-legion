@@ -193,9 +193,9 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 - **Breaking (deployments):** the global worker register token is retired —
   registration uses workspace-scoped tokens only, issued per workspace in the
-  admin UI (设置 → Worker Token, workspace is now mandatory at issuance) and
-  managed in the Worker console's new "Workspace 访问" panel; leftover
-  `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` env vars or yaml
+  admin UI (workspace 设置 → Agent 与 Worker, workspace is now mandatory at
+  issuance) and managed in the Worker console's new "Workspace 访问" panel;
+  leftover `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` env vars or yaml
   `agent_workers.register_token(_file)` keys now fail startup with migration
   guidance (#35, schema v58).
 - Worker registration presents all configured scoped tokens in one call
