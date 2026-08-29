@@ -316,8 +316,8 @@ flipping the field:
   `models.json`, Compose YAML, or on a command line.
 - **Registration token handling:** registration uses workspace-scoped tokens
   (issue #35): issue them per workspace in the Host Web UI
-  （设置 → Worker Token） and add them on each worker machine via the Worker
-  console or `workerctl configure --register-token-file` — never in
+  （workspace 设置 → Agent 与 Worker） and add them on each worker machine via
+  the Worker console or `workerctl configure --register-token-file` — never in
   `config/*.yaml`, worker YAML, images (`.dockerignore` excludes `**/secrets`
   and `**/.env`), or logs. The former global
   `AGENT_LEGION_WORKER_REGISTER_TOKEN`（or `_FILE`）env vars are retired and

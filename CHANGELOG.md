@@ -45,7 +45,7 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 - Workspace Settings「Agent 默认配置」(`default_agent_provider/model/thinking`):
   the provider/model/thinking resolution chain is now node `execution.*` →
   workflow-level `execution` default → actionable error; the three columns are
-  dropped in schema v63 (cleanup-phase drop after the v62 replay, per the
+  dropped in schema v64 (cleanup-phase drop after the v62 replay, per the
   `cms_config_json` precedent). New manifests no longer bake
   `execution_defaults`; claim re-resolution stays tolerant of legacy in-flight
   manifests.
@@ -193,9 +193,9 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 - **Breaking (deployments):** the global worker register token is retired —
   registration uses workspace-scoped tokens only, issued per workspace in the
-  admin UI (设置 → Worker Token, workspace is now mandatory at issuance) and
-  managed in the Worker console's new "Workspace 访问" panel; leftover
-  `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` env vars or yaml
+  admin UI (workspace 设置 → Agent 与 Worker, workspace is now mandatory at
+  issuance) and managed in the Worker console's new "Workspace 访问" panel;
+  leftover `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` env vars or yaml
   `agent_workers.register_token(_file)` keys now fail startup with migration
   guidance (#35, schema v58).
 - Worker registration presents all configured scoped tokens in one call
