@@ -98,7 +98,12 @@ class InProcessEventBus:
                     queue.put_nowait(_EVICTED)
                 dead.add(queue)
             except Exception:
-                # 其他异常视为死连接，直接移除。
+                # #204 audit (PR #251): a non-QueueFull failure on put marks
+                # the subscriber as dead — an unbounded asyncio.Queue has no
+                # other failure mode, so anything landing here means the
+                # connection is gone; removing it protects the fan-out for
+                # the remaining subscribers. The QueueFull race itself is
+                # handled by the suppress branch above.
                 dead.add(queue)
         for queue in dead:
             self.unsubscribe(channel, queue)

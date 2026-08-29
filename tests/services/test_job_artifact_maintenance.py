@@ -479,3 +479,22 @@ def test_reconciler_propagates_parser_valueerror_not_swallowed(
 
     with pytest.raises(ValueError, match="parser implementation bug"):
         reupload_missing(store, _job_db(job), _settings(tmp_path))
+
+
+def test_reconciler_skips_job_on_os_resolve_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR #251 review P2-2: _PATH_FAILURES (OSError/RuntimeError from
+    resolve_job_dir — permissions, symlink loops) must skip just that job;
+    narrowing it back to ManagedPathError alone would turn red here."""
+    job = _seed_job()
+    _definition(monkeypatch)
+
+    def _boom(job, jobs_dir):
+        raise RuntimeError("symlink loop detected")
+
+    monkeypatch.setattr(job_artifact_maintenance, "resolve_job_dir", _boom)
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    assert reupload_missing(store, _job_db(job), _settings(tmp_path)) == 0
