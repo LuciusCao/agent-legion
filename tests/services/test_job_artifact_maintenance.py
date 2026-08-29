@@ -440,3 +440,22 @@ def test_reconciler_skips_job_with_corrupt_active_revision_json(
     store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
 
     assert reupload_missing(store, job_db, _settings(tmp_path)) == 0
+
+
+def test_reconciler_skips_job_with_non_mapping_revision_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex round-2 on PR #251: a revision whose definition_json parses as
+    valid JSON but a non-mapping top level ([], null) used to escape the
+    narrow catch as AttributeError (payload.get) and abort the whole pass —
+    now the shape guard in snapshot_shape converts it to
+    WorkflowDefinitionError and the job is skipped."""
+    job = _seed_job()
+    monkeypatch.setattr(job_artifact_maintenance, "definition_from_job_snapshot", lambda job: None)
+    job_db = _job_db(job)
+    job_db.get_active_workflow_revision = lambda ws, key: {"definition_json": "[]"}
+
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    assert reupload_missing(store, job_db, _settings(tmp_path)) == 0

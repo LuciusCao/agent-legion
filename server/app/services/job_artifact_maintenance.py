@@ -21,7 +21,6 @@ discipline:
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
 import threading
@@ -35,7 +34,16 @@ from server.app.services.workflow_definitions import require_workspace_active_de
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.settings import Settings
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
-from server.app.workflows.schema import WorkflowDefinitionError
+
+#: Per-job expected failures (#204): #243-family corrupt revisions (incl.
+#: non-mapping JSON), no active revision, unmappable/OS-failing storage_dir.
+_EXPECTED_JOB_FAILURES = (
+    NotFoundError,
+    ManagedPathError,
+    ValueError,  # #243 family: JSONDecodeError + WorkflowDefinitionError
+    OSError,
+    RuntimeError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,20 +124,14 @@ def reupload_missing(
                 job_db, str(job["workspace_id"]), str(job["workflow_key"])
             )
             job_dir = resolve_job_dir(job, settings.jobs_dir)
-        except (
-            NotFoundError,
-            ManagedPathError,
-            json.JSONDecodeError,
-            WorkflowDefinitionError,
-        ) as exc:
-            # #204: expected per-job failures only. A job whose snapshot AND
-            # workspace revision both fail to parse (corrupt revision JSON —
-            # JSONDecodeError/WorkflowDefinitionError, the #243 family, added
-            # after codex review on PR #251), a workspace with no active
-            # revision, or an unmappable storage_dir is skipped — one bad job
-            # must not abort the reconciler pass (and thereby eviction) for
-            # every other job. The debug log names the skipped job; genuine
-            # programming errors propagate to the thread's safety net.
+        except _EXPECTED_JOB_FAILURES as exc:
+            # #204: expected per-job failures only — corrupt revision JSON
+            # (JSONDecodeError/WorkflowDefinitionError, the #243 family incl.
+            # non-mapping top level), no active revision, unmappable
+            # storage_dir, or OS-level resolve failures (permissions/symlink
+            # loops, codex review on PR #251). One bad job must not abort the
+            # reconciler pass (and thereby eviction) for every other job;
+            # genuine programming errors propagate to the thread's safety net.
             logger.debug("reconciler skips job %s: %s", job_id, exc)
             continue
         if not job_dir.is_dir():
