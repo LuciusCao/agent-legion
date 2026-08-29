@@ -39,11 +39,13 @@ def _confusion(row: dict[str, Any]) -> dict[str, Any] | None:
 
 
 class QualityStatsService:
-    """Batch aggregates; ``db_path`` is the JobQueries facade (or a bare DSN
-    for tests) — BOUNDARY-DATA-001, #187."""
+    """Batch aggregates; the connect source is the JobQueries facade (or a
+    bare DSN for tests) — BOUNDARY-DATA-001, #187."""
 
     def __init__(self, db_path: ConnectSource) -> None:
-        self.db_path = db_path
+        # Named ``connect_source`` per the #187 convention: the attribute
+        # holds the facade, not a path.
+        self._connect_source = db_path
 
     def batch_stats(self, workspace_id: str, batch_id: str) -> list[dict[str, Any]]:
         """Group items by (node_key, skill_version, provider, model).
@@ -57,7 +59,7 @@ class QualityStatsService:
         matrix is computed for every group — only review_* nodes give it a
         meaningful reading, which is a presentation concern.
         """
-        with read_connection(self.db_path) as conn:
+        with read_connection(self._connect_source) as conn:
             batch = conn.execute(
                 "select id from quality_sample_batches where id = %s and workspace_id = %s",
                 (batch_id, workspace_id),

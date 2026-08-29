@@ -36,7 +36,7 @@ def _make_job(job_id: str) -> None:
 
 
 def _age(store: ArtifactStore, hash: str, seconds: float) -> None:
-    with write_transaction(store.db_path) as conn:
+    with write_transaction(store.connect_source) as conn:
         conn.execute(
             "update artifacts set created_at=%s where hash=%s",
             (datetime.now(UTC) - timedelta(seconds=seconds), hash),

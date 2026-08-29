@@ -19,6 +19,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
 from server.app.storage import ObjectStorage, build_s3_storage
 from shared.material_cache import MaterializeError, materialize_stream
@@ -43,8 +44,10 @@ def is_material_input(job: Mapping[str, Any]) -> bool:
     return _input_document(job).get("type") == "material"
 
 
-def _fetch_material_row(database_dsn: Any, workspace_id: str, material_id: str) -> dict[str, Any]:
-    with read_connection(database_dsn) as conn:
+def _fetch_material_row(
+    connect_source: ConnectSource, workspace_id: str, material_id: str
+) -> dict[str, Any]:
+    with read_connection(connect_source) as conn:
         row = conn.execute(
             "select * from materials where id=%s and workspace_id=%s",
             (material_id, workspace_id),
@@ -55,13 +58,13 @@ def _fetch_material_row(database_dsn: Any, workspace_id: str, material_id: str) 
 
 
 def _ready_row(
-    database_dsn: Any, workspace_id: str, input_doc: Mapping[str, Any]
+    connect_source: ConnectSource, workspace_id: str, input_doc: Mapping[str, Any]
 ) -> dict[str, Any]:
     """The validated (existing, ready) material row for an input document."""
     material_id = str(input_doc.get("material_id") or "").strip()
     if not material_id:
         raise MaterializeError("material job input is missing material_id")
-    row = _fetch_material_row(database_dsn, workspace_id, material_id)
+    row = _fetch_material_row(connect_source, workspace_id, material_id)
     status = str(row.get("status") or "")
     if status != "ready":
         raise MaterializeError(f"material {material_id} is not ready (status: {status})")
@@ -81,7 +84,7 @@ def _require_storage(storage: ObjectStorage | None, material_id: str) -> ObjectS
 
 
 def material_runtime_block(
-    database_dsn: Any,
+    connect_source: ConnectSource,
     cache_root: Path,
     workspace_id: str,
     job: Mapping[str, Any],
@@ -97,7 +100,7 @@ def material_runtime_block(
     input_doc = _input_document(job)
     if input_doc.get("type") != "material":
         return None
-    row = _ready_row(database_dsn, workspace_id, input_doc)
+    row = _ready_row(connect_source, workspace_id, input_doc)
     material_id = str(row["id"])
     storage = _require_storage(storage, material_id)
     content_hash = str(row.get("content_hash") or "")
@@ -148,11 +151,13 @@ def prefetch_material_block(
     if not is_material_input(job):
         return None
     job_db = executor.job_db
-    dsn = str(getattr(job_db, "path", "") or "") if job_db is not None else ""
-    if not dsn:
+    if job_db is None:
         raise MaterializeError("material job input cannot be materialized without the job database")
+    # Facade passthrough (#187, BOUNDARY-DATA-001): read_connection accepts
+    # ConnectSource, so the executor's job_db handle goes straight through —
+    # never unwrapped to a DSN via getattr.
     return material_runtime_block(
-        dsn,
+        job_db,
         executor._materials_cache_root,
         workspace_id,
         job,
@@ -161,7 +166,7 @@ def prefetch_material_block(
 
 
 def material_claim_block(
-    database_dsn: Any,
+    connect_source: ConnectSource,
     workspace_id: str,
     job: Mapping[str, Any],
     *,
@@ -181,7 +186,7 @@ def material_claim_block(
         from server.app.services.material_bundle_cache import bundle_claim_block
 
         return bundle_claim_block(
-            database_dsn,
+            connect_source,
             workspace_id,
             job,
             storage=storage,
@@ -189,7 +194,7 @@ def material_claim_block(
         )
     if input_doc.get("type") != "material":
         return None
-    row = _ready_row(database_dsn, workspace_id, input_doc)
+    row = _ready_row(connect_source, workspace_id, input_doc)
     material_id = str(row["id"])
     storage = _require_storage(storage, material_id)
     return {

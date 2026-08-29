@@ -72,6 +72,25 @@ def test_memory_only_fallback_unchanged():
     assert control.is_paused("ws1") is False
 
 
+def test_facade_connect_source_passthrough(db_path):
+    # #187 getattr-escape closure: the constructor must hand the JobQueries
+    # facade (or any facade-shaped source) straight through to the connection
+    # helpers instead of unwrapping it to a bare DSN via getattr.
+    class FakeFacade:
+        dsn_identity = db_path
+
+        def __str__(self) -> str:  # pragma: no cover - must not be called
+            raise AssertionError("facade must pass through, not be stringified")
+
+    facade = FakeFacade()
+    control = WorkspaceWorkerControl(db_path=facade)  # type: ignore[arg-type]
+    assert control._db_path is facade  # 直通：不抽 DSN（BOUNDARY-DATA-001）
+
+    # Bare-DSN and None branches stay unchanged.
+    assert WorkspaceWorkerControl(db_path=db_path)._db_path == db_path
+    assert WorkspaceWorkerControl()._db_path is None
+
+
 def test_persist_pause_retries_on_transaction_conflict(db_path, monkeypatch):
     from psycopg.errors import SerializationFailure
 

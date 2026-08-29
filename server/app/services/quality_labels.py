@@ -57,7 +57,9 @@ class QualityLabelService:
         artifact_store: ArtifactStore | None = None,
         object_store: Any = None,
     ) -> None:
-        self.db_path = db_path
+        # Named ``connect_source`` per the #187 convention: the attribute
+        # holds the facade, not a path.
+        self._connect_source = db_path
         self.artifact_store = artifact_store
         self.object_store = object_store
 
@@ -96,7 +98,7 @@ class QualityLabelService:
         if target == "replay" and replay_id is None:
             raise InvalidOperationError("replay labels require a replay_id")
         label_id = uuid.uuid4().hex
-        with write_transaction(self.db_path) as conn:
+        with write_transaction(self._connect_source) as conn:
             self._get_item(conn, workspace_id, item_id)
             if replay_id is not None:
                 replay = conn.execute(
@@ -127,7 +129,7 @@ class QualityLabelService:
         """Items of a batch, each with its current (latest 'run'-target) label."""
         limit = max(1, min(limit, 1000))
         offset = max(0, offset)
-        with read_connection(self.db_path) as conn:
+        with read_connection(self._connect_source) as conn:
             batch = conn.execute(
                 "select id from quality_sample_batches where id = %s and workspace_id = %s",
                 (batch_id, workspace_id),
@@ -194,7 +196,7 @@ class QualityLabelService:
 
     def get_item_detail(self, workspace_id: str, item_id: str) -> dict[str, Any]:
         """Snapshot plus full label history and node output artifact contents."""
-        with read_connection(self.db_path) as conn:
+        with read_connection(self._connect_source) as conn:
             item = self._get_item(conn, workspace_id, item_id)
             rows = conn.execute(
                 """
