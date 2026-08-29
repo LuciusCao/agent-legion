@@ -23,6 +23,11 @@ const TOKEN_MISSING = !CONTROL_TOKEN;
 // 与 worker/config_store.py 的 _DEFAULTS 对齐：数字字段留空时回退到后端默认值。
 export const NUMBER_DEFAULTS = { max_concurrency: 1, max_code_concurrency: 0, upload_max_concurrency: 4, poll_interval_seconds: 2, heartbeat_interval_seconds: 15, shutdown_grace_seconds: 25 };
 
+// Agent 运行时（issue #254）：最近一次 GET /api/config 的探测状态与停用集合。
+// 保存时保留「未安装但历史上被停用」的项，避免二进制重装后意外自动启用。
+let currentRuntimeStatus = [];
+let currentDisabledRuntimes = [];
+
 async function api(path, options = {}) {
   const headers = { Authorization: `Bearer ${CONTROL_TOKEN}`, ...(options.headers || {}) };
   if (options.body) headers["Content-Type"] = "application/json";
@@ -153,8 +158,13 @@ function renderStatus(status) {
 
 function fillForm(config) {
   for (const [key, value] of Object.entries(config)) {
-    if (key === "runtimes") {
-      form.querySelectorAll('[name="runtimes"]').forEach((input) => { input.checked = value.includes(input.value); });
+    if (key === "runtime_status") {
+      currentRuntimeStatus = Array.isArray(value) ? value : [];
+      renderRuntimes(currentRuntimeStatus);
+    } else if (key === "disabled_runtimes") {
+      currentDisabledRuntimes = Array.isArray(value) ? value : [];
+    } else if (key === "runtimes") {
+      // 派生值（探测 − 停用），仅展示于 runtime 卡片，无表单控件
     } else if (key === "capabilities") {
       form.elements.capabilities.value = value.join("\n");
     } else if (key === "models") {
@@ -177,6 +187,68 @@ export function formatElapsed(started_at, now = Date.now()) {
 
 export function executionLabel(execution) {
   return [execution.agent_id, execution.node_key].filter(Boolean).join(" · ") || execution.execution_id || "unknown";
+}
+
+// ---- Agent 运行时（issue #254）：自动探测状态卡片渲染与停用收集 ----
+export function runtimeCardState(row) {
+  if (!row.installed) return { state: "missing", label: "未安装" };
+  return row.enabled ? { state: "enabled", label: "已启用" } : { state: "disabled", label: "已停用" };
+}
+
+export function mergeDisabledRuntimes(previousDisabled, statusRows, uncheckedNow) {
+  // 未安装的 runtime 没有可操作的开关：保留其历史停用状态，避免重装后意外自动启用。
+  const installed = new Set((statusRows || []).filter((row) => row.installed).map((row) => row.runtime));
+  const preserved = (previousDisabled || []).filter((runtime) => !installed.has(runtime));
+  return [...new Set([...preserved, ...(uncheckedNow || [])])].sort();
+}
+
+function renderRuntimeCard(row) {
+  const { state, label } = runtimeCardState(row);
+  const badgeClass = state === "enabled" ? "ok" : state === "missing" ? "missing" : "off";
+  const binary = row.installed ? `<span class="runtime-binary" title="探测到的二进制">${escapeHtml(row.binary || "")}</span>` : "";
+  const hint = row.installed ? "" : `<p class="runtime-hint">未检测到二进制；${escapeHtml(row.install_hint || "安装后重启 Worker 自动启用")}。</p>`;
+  const switchTitle = row.installed ? "停用后不再承接该 runtime 的任务" : "未安装，无法启用";
+  return `<div class="runtime-card" data-state="${state}" data-runtime="${escapeHtml(row.runtime)}">
+    <div class="runtime-main">
+      <div class="runtime-title"><span class="runtime-name">${escapeHtml(row.name || row.runtime)}</span><span class="runtime-state ${badgeClass}">${label}</span></div>
+      <p class="runtime-desc">${escapeHtml(row.description || "")}</p>
+      ${binary}${hint}
+    </div>
+    <label class="runtime-switch" title="${switchTitle}">
+      <input type="checkbox" name="runtime_enabled" value="${escapeHtml(row.runtime)}" ${row.enabled ? "checked" : ""} ${row.installed ? "" : "disabled"} />
+      <span class="slider"></span>
+    </label>
+  </div>`;
+}
+
+function syncRuntimeBadge(input) {
+  const card = input.closest(".runtime-card");
+  if (!card || card.dataset.state === "missing") return;
+  const badge = card.querySelector(".runtime-state");
+  card.dataset.state = input.checked ? "enabled" : "disabled";
+  badge.className = `runtime-state ${input.checked ? "ok" : "off"}`;
+  badge.textContent = input.checked ? "已启用" : "已停用";
+}
+
+function renderRuntimes(rows) {
+  const listEl = document.querySelector("#runtime-list");
+  if (!listEl) return;
+  const emptyEl = listEl.querySelector("#runtime-empty");
+  listEl.querySelectorAll(".runtime-card").forEach((el) => el.remove());
+  if (emptyEl) emptyEl.hidden = rows.some((row) => row.installed);
+  for (const row of rows) {
+    listEl.insertAdjacentHTML("beforeend", renderRuntimeCard(row));
+  }
+  listEl.querySelectorAll('.runtime-card input[name="runtime_enabled"]').forEach((input) => {
+    input.addEventListener("change", () => syncRuntimeBadge(input));
+  });
+}
+
+function collectDisabledRuntimes() {
+  const unchecked = [...form.querySelectorAll('.runtime-card input[name="runtime_enabled"]')]
+    .filter((input) => !input.disabled && !input.checked)
+    .map((input) => input.value);
+  return mergeDisabledRuntimes(currentDisabledRuntimes, currentRuntimeStatus, unchecked);
 }
 
 export function groupExecutions(executions = []) {
@@ -712,7 +784,7 @@ if (hasDom) {
       const payload = {
         host_url: data.get("host_url"), worker_id: data.get("worker_id"), name: data.get("name"),
         max_concurrency: numberField(data, "max_concurrency"), max_code_concurrency: numberField(data, "max_code_concurrency"), upload_max_concurrency: numberField(data, "upload_max_concurrency"),
-        runtimes: data.getAll("runtimes"), capabilities: linesFromText(data.get("capabilities")),
+        disabled_runtimes: collectDisabledRuntimes(), capabilities: linesFromText(data.get("capabilities")),
         models: modelsFromText(data.get("models")), labels: labelsFromText(data.get("labels")),
         poll_interval_seconds: numberField(data, "poll_interval_seconds"),
         heartbeat_interval_seconds: numberField(data, "heartbeat_interval_seconds"),

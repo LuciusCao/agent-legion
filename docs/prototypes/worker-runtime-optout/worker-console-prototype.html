@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Worker 控制台 — Agent 运行时自动探测原型</title>
+    <link rel="stylesheet" href="../../../worker/ui/styles.css" />
+    <style>
+      /* ===== 以下为 runtime 自动探测新增样式（最终会并入 styles.css） ===== */
+
+      /* 「运行时」checkbox fieldset → Agent 运行时状态卡片列表 */
+      .runtime-list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+      .runtime-card {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 14px;
+        padding: 12px 14px;
+        border: 1px solid #2b5044;
+        border-radius: 10px;
+        background: #081512;
+      }
+      .runtime-card[data-state="disabled"] { opacity: .72; }
+      .runtime-card[data-state="missing"] { border-style: dashed; }
+      .runtime-card .runtime-main { min-width: 0; }
+      .runtime-title { display: flex; align-items: center; gap: 10px; }
+      .runtime-name { color: #eef8f3; font-weight: 700; font-size: 13px; }
+      .runtime-state {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .runtime-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+      .runtime-state.ok { color: var(--mint); }
+      .runtime-state.off { color: var(--dim); }
+      .runtime-state.missing { color: var(--amber); }
+      .runtime-desc { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+      .runtime-binary {
+        display: block;
+        margin-top: 5px;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 11px;
+        color: #b9cdc5;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .runtime-hint { margin-top: 5px; font-size: 11px; color: var(--amber); }
+      .runtime-hint code {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 10px;
+        color: #b9cdc5;
+        background: rgba(85, 230, 166, .08);
+        padding: 1px 5px;
+        border-radius: 5px;
+      }
+
+      /* 启用开关（未安装时置灰） */
+      .runtime-switch { position: relative; width: 38px; height: 22px; flex: 0 0 auto; }
+      .runtime-switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+      .runtime-switch .slider {
+        position: absolute; inset: 0;
+        border-radius: 999px;
+        background: #1c332b;
+        border: 1px solid #2b5044;
+        transition: background .15s ease;
+        pointer-events: none;
+      }
+      .runtime-switch .slider::after {
+        content: ""; position: absolute; top: 2px; left: 2px;
+        width: 16px; height: 16px; border-radius: 50%;
+        background: #b9cdc5;
+        transition: transform .15s ease, background .15s ease;
+      }
+      .runtime-switch input:checked + .slider { background: rgba(85, 230, 166, .25); border-color: rgba(102, 232, 173, .5); }
+      .runtime-switch input:checked + .slider::after { transform: translateX(16px); background: var(--mint); }
+      .runtime-switch input:disabled { cursor: not-allowed; }
+      .runtime-switch input:disabled + .slider { opacity: .4; }
+
+      .runtime-empty { color: var(--dim); font-size: 12px; padding: 10px 2px; }
+
+      /* 原型演示控制条 */
+      .demo-bar {
+        position: fixed;
+        bottom: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 99;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border: 1px solid #2b5044;
+        border-radius: 12px;
+        background: rgba(4, 13, 11, .96);
+        box-shadow: 0 8px 28px rgba(0, 0, 0, .45);
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .demo-bar .chip { cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <svg class="icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#hub"></use></svg>
+          <span>AGENT LEGION</span>
+        </div>
+        <nav aria-label="Worker 控制台">
+          <button class="nav-button" data-page="overview">
+            <svg class="icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#grid"></use></svg><span>概览</span>
+          </button>
+          <button class="nav-button active" data-page="config" aria-current="page">
+            <svg class="icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#settings"></use></svg><span>配置</span>
+          </button>
+          <button class="nav-button" data-page="diagnostics">
+            <svg class="icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#diagnostics"></use></svg><span>诊断</span>
+          </button>
+        </nav>
+        <div class="sidebar-meta">
+          <span>Worker Service</span>
+          <small>local control plane</small>
+        </div>
+      </aside>
+
+      <div class="app-main">
+        <header class="topbar">
+          <div class="topbar-title">
+            <h1>Worker 控制台</h1>
+            <span id="global-notice" class="global-notice" role="status"></span>
+          </div>
+          <div class="topbar-actions">
+            <div class="worker-identity">
+              <svg class="icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#memory"></use></svg>
+              <span id="worker-name">host-local-1</span>
+              <span class="online-dot ok" title="已连接"></span>
+            </div>
+            <button id="toggle-claiming" class="primary-action" data-enabled="true">
+              <svg class="icon claim-play-icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#play"></use></svg>
+              <span>暂停领取</span>
+            </button>
+          </div>
+        </header>
+
+        <main class="content">
+          <!-- ============ 配置页：核心改动 ============ -->
+          <section class="page-view active" data-view="config">
+            <section class="page-panel">
+              <div class="page-heading">
+                <div><p class="eyebrow">CONFIGURATION</p><h2>连接与能力</h2><p>配置本机执行节点，并控制它向 Host 声明的能力范围。</p></div>
+                <button id="save-config" class="save-button" type="submit" form="config-form">
+                  <svg class="icon" aria-hidden="true"><use href="../../../worker/ui/icons.svg#save"></use></svg>保存并应用
+                </button>
+              </div>
+              <form id="config-form">
+                <div class="form-section">
+                  <div class="form-section-heading"><h3>连接与身份</h3><span class="muted"></span></div>
+                  <div class="form-grid">
+                    <label class="wide">Host 地址<input name="host_url" type="url" value="http://host:8000" required /></label>
+                    <label>Worker ID<input name="worker_id" value="host-local-1" required /></label>
+                    <label>显示名称<input name="name" value="Host-local Worker" /></label>
+                    <label>最大并发<input name="max_concurrency" type="number" value="10" required /></label>
+                    <label>代码并发 <span class="hint">code 节点沙箱执行，0 = 不领取；热更新免重启，0→&gt;0 需本机已装 velites</span><input name="max_code_concurrency" type="number" value="0" required /></label>
+                    <label>上传并发<input name="upload_max_concurrency" type="number" value="4" required /></label>
+                    <!-- 原「运行时」checkbox fieldset 已移除，由下方独立区块替代 -->
+                  </div>
+                </div>
+
+                <!-- ★ 新增区块：Agent 运行时（自动探测 + 反选停用，替代原 checkbox） -->
+                <div class="form-section" id="runtime-section">
+                  <div class="form-section-heading">
+                    <div>
+                      <h3>Agent 运行时</h3>
+                      <p>Worker 自动探测本机已安装的运行时并全部启用；不需要的可在此停用。任务实际使用哪个运行时由 Workflow 节点的 Agent 定义决定，这里只控制本机承接哪些 runtime 的任务。新装运行时将在 Worker 重启后自动启用。</p>
+                    </div>
+                  </div>
+                  <div class="runtime-list" id="runtime-list">
+                    <!-- 状态 A：已安装 + 已启用（默认） -->
+                    <div class="runtime-card" data-state="enabled" data-runtime="velites">
+                      <div class="runtime-main">
+                        <div class="runtime-title">
+                          <span class="runtime-name">Velites</span>
+                          <span class="runtime-state ok">已启用</span>
+                        </div>
+                        <p class="runtime-desc">内置 harness；code 节点的沙箱执行也依赖它。</p>
+                        <span class="runtime-binary" title="探测到的二进制">/opt/agent-legion/data/bin/velites</span>
+                      </div>
+                      <label class="runtime-switch" title="停用后不再承接 velites 任务">
+                        <input type="checkbox" name="runtime_enabled" value="velites" checked />
+                        <span class="slider"></span>
+                      </label>
+                    </div>
+
+                    <!-- 状态 B：已安装 + 已停用（装了但刻意不接） -->
+                    <div class="runtime-card" data-state="disabled" data-runtime="pi">
+                      <div class="runtime-main">
+                        <div class="runtime-title">
+                          <span class="runtime-name">Pi</span>
+                          <span class="runtime-state off">已停用</span>
+                        </div>
+                        <p class="runtime-desc">外部 Pi runtime；与 Velites 平级，按 Agent 定义选用。</p>
+                        <span class="runtime-binary" title="探测到的二进制">/usr/local/bin/pi</span>
+                      </div>
+                      <label class="runtime-switch" title="启用后承接 pi 任务">
+                        <input type="checkbox" name="runtime_enabled" value="pi" />
+                        <span class="slider"></span>
+                      </label>
+                    </div>
+
+                    <!-- 状态 C：未安装（开关置灰，附安装指引） -->
+                    <div class="runtime-card" data-state="missing" data-runtime="openclaw">
+                      <div class="runtime-main">
+                        <div class="runtime-title">
+                          <span class="runtime-name">OpenClaw</span>
+                          <span class="runtime-state missing">未安装</span>
+                        </div>
+                        <p class="runtime-desc">外部 OpenClaw runtime（当前版本尚未开放任务派发）。</p>
+                        <p class="runtime-hint">未检测到 <code>openclaw</code> 二进制；安装到 PATH（或 <code>data/bin/</code>）并重启 Worker 后将自动启用。</p>
+                      </div>
+                      <label class="runtime-switch" title="未安装，无法启用">
+                        <input type="checkbox" name="runtime_enabled" value="openclaw" disabled />
+                        <span class="slider"></span>
+                      </label>
+                    </div>
+
+                    <!-- 空状态：任何运行时都没装（demo 切换显示） -->
+                    <div class="runtime-empty" id="runtime-empty" hidden>未检测到任何已安装的运行时。安装运行时二进制并重启 Worker 后会自动出现在这里并默认启用；此前本机只能承接 code 任务（需配置代码并发）。</div>
+                  </div>
+                </div>
+
+                <div class="form-section">
+                  <div class="form-section-heading"><div><h3>Workspace 访问（Scoped Token）</h3><p>与本原型无关，保持现状，略。</p></div></div>
+                </div>
+
+                <div class="form-section">
+                  <div class="form-section-heading"><div><h3>能力与模型</h3><p>每行一项，保存后由 Worker 重新向 Host 登记。</p></div></div>
+                  <div class="form-grid">
+                    <label class="wide">Worker 能力 <span class="hint">与节点 capability 完全匹配</span><textarea name="capabilities" rows="3">generate_key_info</textarea></label>
+                    <label>模型 allowlist <span class="hint">[runtime:]provider/model；留空允许 runtime 已发现的全部模型；runtime 取值不再要求已启用</span><textarea name="models" rows="3">velites:openai/gpt-5</textarea></label>
+                    <label>标签 <span class="hint">key=value</span><textarea name="labels" rows="3">os=linux</textarea></label>
+                  </div>
+                </div>
+              </form>
+            </section>
+          </section>
+
+          <!-- 概览 / 诊断页保持不动，仅占位 -->
+          <section class="page-view" data-view="overview" hidden>
+            <section class="page-panel"><div class="page-heading"><div><p class="eyebrow">OVERVIEW</p><h2>概览</h2><p>本原型聚焦配置页的 Agent 运行时区块，其余页面不变。</p></div></div></section>
+          </section>
+          <section class="page-view" data-view="diagnostics" hidden>
+            <section class="page-panel"><div class="page-heading"><div><p class="eyebrow">DIAGNOSTICS</p><h2>诊断</h2><p>本原型聚焦配置页的 Agent 运行时区块，其余页面不变。</p></div></div></section>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <!-- 原型演示控制：切换场景状态 -->
+    <div class="demo-bar">
+      <span>演示状态：</span>
+      <button class="chip active" data-demo="typical">典型（velites 启用 / pi 停用 / openclaw 未装）</button>
+      <button class="chip" data-demo="all">全部已安装并启用</button>
+      <button class="chip" data-demo="none">未安装任何运行时</button>
+    </div>
+
+    <script>
+      // ---- 原型交互：页面切换 + 场景演示 + 开关联动状态徽章 ----
+      document.querySelectorAll(".nav-button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll(".nav-button").forEach((b) => b.classList.toggle("active", b === btn));
+          document.querySelectorAll(".page-view").forEach((v) => (v.hidden = v.dataset.view !== btn.dataset.page));
+        });
+      });
+
+      const cards = [...document.querySelectorAll(".runtime-card")];
+      const emptyEl = document.getElementById("runtime-empty");
+
+      function syncBadge(card) {
+        if (card.dataset.state === "missing") return;
+        const input = card.querySelector("input");
+        const badge = card.querySelector(".runtime-state");
+        const enabled = input.checked;
+        card.dataset.state = enabled ? "enabled" : "disabled";
+        badge.className = `runtime-state ${enabled ? "ok" : "off"}`;
+        badge.textContent = enabled ? "已启用" : "已停用";
+      }
+      cards.forEach((card) => card.querySelector("input").addEventListener("change", () => syncBadge(card)));
+
+      const scenarios = {
+        typical: { velites: "enabled", pi: "disabled", openclaw: "missing" },
+        all: { velites: "enabled", pi: "enabled", openclaw: "enabled" },
+        none: {},
+      };
+      function applyScenario(name) {
+        const states = scenarios[name];
+        cards.forEach((card) => {
+          const state = states[card.dataset.runtime];
+          card.hidden = !state;
+          if (!state) return;
+          const input = card.querySelector("input");
+          const badge = card.querySelector(".runtime-state");
+          const hint = card.querySelector(".runtime-hint");
+          const binary = card.querySelector(".runtime-binary");
+          if (state === "missing") {
+            card.dataset.state = "missing";
+            input.checked = false;
+            input.disabled = true;
+            badge.className = "runtime-state missing";
+            badge.textContent = "未安装";
+            if (hint) hint.hidden = false;
+            if (binary) binary.hidden = true;
+          } else {
+            input.disabled = false;
+            input.checked = state === "enabled";
+            if (hint) hint.hidden = true;
+            if (binary) binary.hidden = false;
+            syncBadge(card);
+          }
+        });
+        emptyEl.hidden = name !== "none";
+      }
+      document.querySelectorAll(".demo-bar .chip").forEach((chip) => {
+        chip.addEventListener("click", () => {
+          document.querySelectorAll(".demo-bar .chip").forEach((c) => c.classList.toggle("active", c === chip));
+          applyScenario(chip.dataset.demo);
+        });
+      });
+      applyScenario("typical");
+    </script>
+  </body>
+</html>

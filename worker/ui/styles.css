@@ -698,6 +698,72 @@ code { color: var(--mint); }
 }
 .token-add-btn:hover { background: rgba(85, 230, 166, .2); }
 .token-add-btn:disabled { opacity: .5; cursor: default; }
+
+/* ---- Agent 运行时（issue #254）：自动探测状态卡片 + 反选停用开关 ---- */
+.runtime-list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.runtime-empty { color: var(--dim); font-size: 12px; padding: 10px 2px; }
+.runtime-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid #2b5044;
+  border-radius: 10px;
+  background: #081512;
+}
+.runtime-card[data-state="disabled"] { opacity: .72; }
+.runtime-card[data-state="missing"] { border-style: dashed; }
+.runtime-card .runtime-main { min-width: 0; }
+.runtime-title { display: flex; align-items: center; gap: 10px; }
+.runtime-name { color: #eef8f3; font-weight: 700; font-size: 13px; }
+.runtime-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.runtime-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.runtime-state.ok { color: var(--mint); }
+.runtime-state.off { color: var(--dim); }
+.runtime-state.missing { color: var(--amber); }
+.runtime-desc { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.runtime-binary {
+  display: block;
+  margin-top: 5px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: #b9cdc5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runtime-hint { margin: 5px 0 0; font-size: 11px; color: var(--amber); }
+.runtime-switch { position: relative; width: 38px; height: 22px; flex: 0 0 auto; }
+.runtime-switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.runtime-switch .slider {
+  position: absolute; inset: 0;
+  border-radius: 999px;
+  background: #1c332b;
+  border: 1px solid #2b5044;
+  transition: background .15s ease;
+  pointer-events: none;
+}
+.runtime-switch .slider::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #b9cdc5;
+  transition: transform .15s ease, background .15s ease;
+}
+.runtime-switch input:checked + .slider { background: rgba(85, 230, 166, .25); border-color: rgba(102, 232, 173, .5); }
+.runtime-switch input:checked + .slider::after { transform: translateX(16px); background: var(--mint); }
+.runtime-switch input:disabled { cursor: not-allowed; }
+.runtime-switch input:disabled + .slider { opacity: .4; }
+@media (max-width: 720px) {
+  .runtime-card { grid-template-columns: 1fr; }
+}
 .ws-scope-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .ws-scope-chip {
   padding: 3px 10px;

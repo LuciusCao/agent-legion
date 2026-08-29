@@ -155,7 +155,11 @@ make stack-logs STACK=worker
 页面保存配置后会原子写入控制卷。身份、能力、可用模型或注册 Token 变化时会重启执行进程并重新注册；领取开关和三个容量参数（`max_concurrency` / `max_code_concurrency` / `upload_max_concurrency`）都会热更新，无需重启。每次 Worker 执行进程启动（包括服务启动、手动重启和崩溃后的自动重启）都会先把 claim 置为关闭，即使上次退出前处于开启状态也不会自动恢复；用户必须在控制台点击「开始领取」，或执行 `workerctl claim enable`，之后 Worker 才会按本机 `max_concurrency` 拉取任务。
 
 Worker 必须声明 `capabilities`；`models` 是可选的 runtime-scoped allowlist，不再是
-模型事实源。启动时 Worker 对每个选中的 runtime 执行其发现 adapter（velites 使用
+模型事实源。Agent runtime 声明由本机探测推导（issue #254）：启动时按二进制解析
+（自带副本 `data/bin/` 优先、PATH 兜底）探测已安装的 runtime 并默认全部启用，
+`disabled_runtimes`（控制台「配置 → Agent 运行时」或 `workerctl configure
+--disable-runtime`）反选停用。Worker 对每个生效的 runtime 执行其发现 adapter
+（velites 使用
 `velites models list --json`），最终注册集合 = 发现结果 ∩ allowlist；该 runtime 没有
 allowlist 条目时允许其全部发现结果。只有 runtime、capability、provider、model 全部匹配，
 Host 才会下发任务。
@@ -223,7 +227,7 @@ docker compose -f deploy/compose.worker.yaml exec worker workerctl configure \
   --host-url http://192.0.2.1:8000 \
   --worker-id remote-worker-1 \
   --name 'Remote Worker' \
-  --runtime pi \
+  --disable-runtime openclaw \
   --max-concurrency 10 \
   --capability subtitle_review \
   --model openai/gpt-5.2 \
@@ -237,7 +241,7 @@ docker compose -f deploy/compose.worker.yaml exec worker workerctl configure \
 
 ### 崩溃重启与失败状态
 
-Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程内指数退避重试注册，不会打印 traceback，也不会触发 supervisor 重启。执行进程因其他原因崩溃后按指数退避自动重启：5 秒起步、每次 ×2、封顶 300 秒；稳定运行满 60 秒后重置退避。退出码 2（Host 明确拒绝注册——例如持有的全部 key 已被删除，或启动预检失败——例如声明了某个 runtime 但其二进制在自带副本与 PATH 上都找不到）不自动重启，进入 failed 状态，需修正配置后手动 `workerctl restart`。`status` 中的 `restart_count`、`next_restart_delay`、`failed` 字段反映这些状态；容器 healthcheck 会把 failed 或已配置但进程未运行视为 unhealthy。
+Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程内指数退避重试注册，不会打印 traceback，也不会触发 supervisor 重启。执行进程因其他原因崩溃后按指数退避自动重启：5 秒起步、每次 ×2、封顶 300 秒；稳定运行满 60 秒后重置退避。退出码 2（Host 明确拒绝注册——例如持有的全部 key 已被删除，或启动预检失败——例如 `max_code_concurrency > 0` 但 velites 二进制在自带副本与 PATH 上都找不到）不自动重启，进入 failed 状态，需修正配置后手动 `workerctl restart`。`status` 中的 `restart_count`、`next_restart_delay`、`failed` 字段反映这些状态；容器 healthcheck 会把 failed 或已配置但进程未运行视为 unhealthy。
 
 ### 挂载配置与状态副本不一致
 
