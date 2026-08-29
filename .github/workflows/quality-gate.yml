@@ -123,12 +123,13 @@ jobs:
       - name: Backend static checks
         run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
         env:
-          # Release train only (develop→main): main's budget floors lag a
-          # whole release cycle behind develop's already-gated evolution, so
-          # the monotonicity guard anchors on HEAD alone (every raise passed
-          # the guard when its PR landed on develop). Feature→develop PRs
-          # keep the HEAD^ base anchor at full strictness.
-          AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN: ${{ github.base_ref == 'main' && github.head_ref == 'develop' && '1' || '0' }}
+          # Release train (develop→main)与 main 合并后 push 重跑：main 的
+          # 预算 floor 落后 develop 整整一个发布周期，HEAD^ 锚点会把刚合入
+          # 的、已经过门禁的历史再拒一遍（0.4.0 的 PR #249 与其 main push
+          # run 各撞一次）。进入 main 的合并都已被对应 PR 门覆盖
+          # （release train 走本 env，hotfix PR 走严格锚点），push 重跑
+          # 锚点只看 HEAD。feature→develop PR 保持 HEAD^ 完整严格性。
+          AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN: ${{ (github.base_ref == 'main' && github.head_ref == 'develop') || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) && '1' || '0' }}
 
       - name: Backend unit tests (PostgreSQL offline)
         run: |
