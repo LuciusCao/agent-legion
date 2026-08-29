@@ -34,15 +34,15 @@ from worker.token_status import token_status
 
 __all__ = ["WorkerConfigStore", "WorkerSupervisor", "public_config", "validate_config"]
 
-# 退避曲线常量从 worker/restart_policy.py 归位（#250 拆分），但按值重新绑定到
-# 本命名空间：测试锚点 monkeypatch worker.supervisor._RESTART_BACKOFF_INITIAL
-# 必须继续命中 _collect_logs 的活引用（函数体引用模块全局，而非原模块）。
-_EXIT_REFUSED = _EXIT_REFUSED
-_KILL_WAIT = _KILL_WAIT
+# 退避两端归位（#250）后经 _current_restart_delay 封装消费：monkeypatch 本
+# 模块常量即命中（按值重绑救不了跨命名空间函数体引用——review on #257）。
+# 其余四个常量无测试锚点，直接以 restart_policy 限定名消费、不重绑。
 _RESTART_BACKOFF_INITIAL = _RESTART_BACKOFF_INITIAL
 _RESTART_BACKOFF_MAX = _RESTART_BACKOFF_MAX
-_STABLE_AFTER = _STABLE_AFTER
-_STOP_GRACE_MAX = _STOP_GRACE_MAX
+
+
+def _current_restart_delay(restart_count: int) -> float:
+    return restart_delay(restart_count, initial=_RESTART_BACKOFF_INITIAL, cap=_RESTART_BACKOFF_MAX)
 
 
 class WorkerSupervisor:
@@ -195,7 +195,7 @@ class WorkerSupervisor:
             if self._started_at is not None and time.time() - self._started_at >= _STABLE_AFTER:
                 self._restart_count = 0
             self._restart_count += 1
-            delay = restart_delay(self._restart_count)
+            delay = _current_restart_delay(self._restart_count)
             self._next_restart_delay = delay
             self._log(f"{delay:.0f} 秒后自动重启 Worker 执行进程（第 {self._restart_count} 次）")
         if self._restart_event.wait(delay):

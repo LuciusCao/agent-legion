@@ -1,10 +1,11 @@
-"""Restart-backoff policy constants for the supervisor's crash loop.
+"""Restart-backoff policy for the supervisor's crash loop.
 
-Split from ``worker/supervisor.py`` (#250 budget floors) so the supervisor
-keeps process orchestration while the backoff curve lives next to its
-documentation. ``worker/supervisor.py`` re-binds each constant under its own
-module namespace (``_RESTART_BACKOFF_INITIAL`` etc.), so the existing test
-anchors that monkeypatch the supervisor module keep steering the live loop.
+Split from ``worker/supervisor.py`` (#250 budget floors). The curve reads its
+initial/cap constants from **caller-supplied arguments**, not this module's
+globals: the supervisor passes its own module-level constants, so the
+existing test anchors that monkeypatch ``worker.supervisor`` keep steering
+the live loop (the value-rebinding alone did NOT do that — subagent review
+on PR #257 caught the dead anchor).
 """
 
 from __future__ import annotations
@@ -17,6 +18,6 @@ _STOP_GRACE_MAX = 22.0  # kill 后再等 3s，总预算 25s，低于 compose 的
 _KILL_WAIT = 3.0
 
 
-def restart_delay(restart_count: int) -> float:
+def restart_delay(restart_count: int, *, initial: float, cap: float) -> float:
     """Exponential backoff for the Nth automatic restart (1-based), capped."""
-    return min(_RESTART_BACKOFF_INITIAL * (2 ** (restart_count - 1)), _RESTART_BACKOFF_MAX)
+    return min(initial * (2 ** (restart_count - 1)), cap)
