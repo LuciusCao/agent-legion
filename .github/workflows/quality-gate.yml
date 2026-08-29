@@ -122,6 +122,13 @@ jobs:
 
       - name: Backend static checks
         run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
+        env:
+          # Release train only (develop→main): main's budget floors lag a
+          # whole release cycle behind develop's already-gated evolution, so
+          # the monotonicity guard anchors on HEAD alone (every raise passed
+          # the guard when its PR landed on develop). Feature→develop PRs
+          # keep the HEAD^ base anchor at full strictness.
+          AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN: ${{ github.base_ref == 'main' && github.head_ref == 'develop' && '1' || '0' }}
 
       - name: Backend unit tests (PostgreSQL offline)
         run: |

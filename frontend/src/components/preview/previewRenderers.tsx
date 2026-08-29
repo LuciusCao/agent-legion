@@ -1,20 +1,19 @@
 /**
- * 产物预览渲染器：每个 PreviewKind 一个组件，props 统一为
- * { jobId, name, version }。文本类经 TanStack Query 取 artifact 文本
- * （版本失效机制沿用 producer-node 状态）；媒体类直接用同源 raw URL
- * 作 src，由浏览器流式加载。
+ * 文本类产物预览渲染器：每个 PreviewKind 一个组件，props 统一为
+ * { jobId, name, version }。经 TanStack Query 取 artifact 文本
+ * （版本失效机制沿用 producer-node 状态，Range 有界读取见
+ * api/jobArtifactText）；媒体类渲染器在 ./previewMediaRenderers。
  *
  * 安全约定（与后端 raw 端点白名单对齐）：
  * - html 走 RichText 的 sanitizeHtml 白名单（http(s)-only src）；
  * - markdown 走 renderMarkdownHtml（marked + DOMPurify）；
  * - svg 一律按 text 渲染源码，不经渲染引擎。
  */
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Chip } from '@mui/material'
 import { RichText } from '../RichText'
 import { JsonTree } from '../JsonTree'
-import { jobArtifactRawUrl } from '../../api/jobsApi'
 import { fetchJobArtifactText } from '../../api/jobArtifactText'
 import { queryKeys } from '../../lib/queryKeys'
 import { artifactVersion } from '../../lib/jobArtifactVersions'
@@ -161,116 +160,4 @@ export function TextPreview({ jobId, name, detail }: PreviewRendererProps) {
   if (loading) return <p className={styles.loading}>加载中...</p>
   if (error) return <p className={styles.error}>{error}</p>
   return <TextBody content={content} truncated={truncated} total={total} />
-}
-
-/** 媒体重试状态：epoch 同时驱动 remount key 与 src cache-bust。 */
-function useMediaRetry() {
-  const [failed, setFailed] = useState(false)
-  const [epoch, setEpoch] = useState(0)
-  const retry = () => {
-    setFailed(false)
-    setEpoch((n) => n + 1)
-  }
-  return { failed, epoch, setFailed, retry }
-}
-
-/** 媒体加载失败（404/格式不支持）的占位 + raw 新窗口兜底。 */
-function MediaError({
-  jobId,
-  name,
-  onRetry,
-}: {
-  jobId: string
-  name: string
-  onRetry: () => void
-}) {
-  return (
-    <div className={styles.mediaError}>
-      <span className={styles.mediaErrorText}>媒体加载失败</span>
-      <button
-        type="button"
-        className={styles.mediaErrorAction}
-        onClick={onRetry}
-      >
-        重试
-      </button>
-      <a
-        className={styles.mediaErrorAction}
-        href={jobArtifactRawUrl(jobId, name)}
-        target="_blank"
-        rel="noreferrer"
-      >
-        新窗口打开
-      </a>
-    </div>
-  )
-}
-
-export function ImagePreview({ jobId, name, detail }: PreviewRendererProps) {
-  const { failed, epoch, setFailed, retry } = useMediaRetry()
-  if (failed) return <MediaError jobId={jobId} name={name} onRetry={retry} />
-  // v = artifact 版本（重跑覆盖同名产物时失效缓存）+ epoch（手动重试）。
-  const src = `${jobArtifactRawUrl(jobId, name)}?v=${artifactVersion(detail, name)}&r=${epoch}`
-  return (
-    <img
-      key={src}
-      className={styles.mediaImage}
-      src={src}
-      alt={name}
-      loading="lazy"
-      onError={() => setFailed(true)}
-    />
-  )
-}
-
-export function VideoPreview({ jobId, name, detail }: PreviewRendererProps) {
-  const { failed, epoch, setFailed, retry } = useMediaRetry()
-  if (failed) return <MediaError jobId={jobId} name={name} onRetry={retry} />
-  const src = `${jobArtifactRawUrl(jobId, name)}?v=${artifactVersion(detail, name)}&r=${epoch}`
-  return (
-    <video
-      key={src}
-      className={styles.mediaVideo}
-      src={src}
-      controls
-      preload="metadata"
-      onError={() => setFailed(true)}
-    />
-  )
-}
-
-export function AudioPreview({ jobId, name, detail }: PreviewRendererProps) {
-  const { failed, epoch, setFailed, retry } = useMediaRetry()
-  if (failed) return <MediaError jobId={jobId} name={name} onRetry={retry} />
-  const src = `${jobArtifactRawUrl(jobId, name)}?v=${artifactVersion(detail, name)}&r=${epoch}`
-  return (
-    <audio
-      key={src}
-      className={styles.mediaAudio}
-      src={src}
-      controls
-      preload="metadata"
-      onError={() => setFailed(true)}
-    />
-  )
-}
-
-export function PdfPreview({ jobId, name, detail }: PreviewRendererProps) {
-  // sandbox：PDF 内嵌渲染但不给脚本/同源能力。iframe 没有可靠的 error 事件
-  // （加载失败也触发 load），失败不可检测——新窗口/下载兜底常驻展示。
-  // v = artifact 版本：重跑覆盖同名产物时失效缓存。
-  const src = `${jobArtifactRawUrl(jobId, name)}?v=${artifactVersion(detail, name)}`
-  return (
-    <div>
-      <iframe className={styles.mediaPdf} src={src} title={name} sandbox="" />
-      <a
-        className={styles.pdfOpenLink}
-        href={src}
-        target="_blank"
-        rel="noreferrer"
-      >
-        新窗口打开
-      </a>
-    </div>
-  )
 }

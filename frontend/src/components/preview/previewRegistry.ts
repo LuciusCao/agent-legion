@@ -9,12 +9,14 @@ import type { PreviewRendererProps } from './previewRenderers'
 import {
   AudioPreview,
   ImagePreview,
+  PdfPreview,
+  VideoPreview,
+} from './previewMediaRenderers'
+import {
   JsonPreview,
   MarkdownPreview,
-  PdfPreview,
   RichTextPreview,
   TextPreview,
-  VideoPreview,
 } from './previewRenderers'
 
 export const PREVIEW_RENDERERS: Record<

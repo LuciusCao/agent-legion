@@ -693,6 +693,24 @@ def test_monotonic_check_fails_when_head_itself_unresolvable(
     assert any("HEAD" in error and "does not resolve" in error for error in errors)
 
 
+def test_release_train_opt_out_skips_lagging_base_anchor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # develop→main release train (#249): a ceiling that rose in an
+    # already-merged commit — gated against develop's own anchors when its
+    # PR landed — must not be rejected by the lagging base anchor once the
+    # workflow sets the release-train opt-out; without the opt-out the same
+    # committed raise is still an error.
+    root, policy = git_repo(tmp_path, files={"server/app/example.py": 105})
+    write_baseline(root, {"server/app/example.py": 110})
+    commit_all(root, "raise ceiling by hand")
+    monkeypatch.delenv("AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN", raising=False)
+    errors = check_file_budgets(root, policy, ())
+    assert any("rose above committed ceiling" in error for error in errors)
+    monkeypatch.setenv("AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN", "1")
+    assert check_file_budgets(root, policy, ()) == []
+
+
 def test_rejects_ceiling_raise_via_rename_in_single_commit(tmp_path: Path) -> None:
     # The path-keyed floor treats a renamed file as a brand-new entry, so
     # "rename + grow + re-register" resets the ceiling — issue #236. The

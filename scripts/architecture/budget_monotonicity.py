@@ -31,7 +31,22 @@ from .budget_registry_history import (
 __test__ = False
 
 _SHALLOW_OPT_OUT = "AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW"
+_RELEASE_TRAIN_OPT_OUT = "AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN"
 _ANCHORS = ("HEAD", "HEAD^")
+
+
+def _anchors() -> tuple[str, ...]:
+    """Anchor revisions the working tree's ceilings must not rise above.
+
+    The release train (develop→main) merges a head branch whose ceilings
+    legitimately evolved over the whole release cycle: every raise passed
+    this guard against develop's own anchors when its PR landed, so main's
+    lagging floors would reject already-reviewed history (first hit by the
+    0.4.0 release, PR #249). The CI workflow sets the opt-out only for
+    base=main && head=develop; every other context (feature→develop PRs,
+    local gates, pushes) keeps the HEAD^ base anchor at full strictness.
+    """
+    return ("HEAD",) if os.environ.get(_RELEASE_TRAIN_OPT_OUT) == "1" else _ANCHORS
 
 
 def _unresolvable_anchor_errors(git: GitHelper) -> list[str]:
@@ -47,18 +62,15 @@ def _unresolvable_anchor_errors(git: GitHelper) -> list[str]:
             return [f"budget monotonicity: git failed to run; cause: {git.diagnostics()}"]
         return []
     errors: list[str] = []
-    for revision in _ANCHORS:
-        if git.revision_resolvable(revision):
-            continue
-        if os.environ.get(_SHALLOW_OPT_OUT) == "1":
+    for revision in _anchors():
+        if git.revision_resolvable(revision) or os.environ.get(_SHALLOW_OPT_OUT) == "1":
             continue
         details = git.diagnostics()
-        suffix = f"; git failure: {details}" if details else ""
         errors.append(
             f"budget monotonicity: git anchor {revision} does not resolve in this "
             "checkout (shallow clone / git error?); fetch history (CI: "
             f"fetch-depth: 0) or set {_SHALLOW_OPT_OUT}=1 to skip the check"
-            f"{suffix}"
+            + (f"; git failure: {details}" if details else "")
         )
     return errors
 
@@ -75,7 +87,7 @@ def _anchor_floors(git: GitHelper) -> tuple[dict[str, int], dict[str, int]]:
     """
     budget_floors: dict[str, int] = {}
     exemption_floors: dict[str, int] = {}
-    for revision in _ANCHORS:
+    for revision in _anchors():
         previous_budgets = committed_budget_ceilings(
             git.committed_file_text(revision, BUDGETS_RELATIVE_PATH)
         )
