@@ -128,7 +128,11 @@ workflow key 是同一个标识：创建时显式提供 id（即 `default_workfl
 `StudioAgentActiveWorkflowResponse`、`WorkspaceSettingsPayload.workflowKey` 及 9 条
 `workflows/{workflow_key}` 路径模板。
 
-手写消费点（63 处 camel + 77 处 snake，24 个文件）：
+手写消费点（63 处 camel + 77 处 snake，24 个文件）。**读写链完整提示**（codex
+on #256 补遗）：`stores/setting/actions/executionConfigActions.ts:6-15` 按
+`workflow_key` 过滤并构造 `node_limits` 的 PUT 载荷、`pages/SettingsPage.tsx:50-53`
+用该字段识别 Agent 路由节点——Phase 2/3 下线字段时这两处必须同批改造，否则
+节点限制保存会继续发送已退役字段、设置页把 Agent 节点误判为 code 节点：
 
 | 位置 | 用途 | 处置建议 | 风险注记 |
 |---|---|---|---|
@@ -194,14 +198,19 @@ workflow key 是同一个标识：创建时显式提供 id（即 `default_workfl
 
 **Phase 3（DB 列与组合 id，逐 PR）**
 
-- 迁移最重的是 `jobs.workflow_key`（6 个索引 + 扫描谓词 + dedup 键 + 2 个
-  status-count 触发器链）。建议顺序：先把全部查询谓词换绑 workspace_id
-  （可原地替换部分，独立 PR 可验证）→ 再做「删列 + 索引重建」的纯 DDL 迁移。
+- 迁移最重的是 `jobs.workflow_key`（6 个索引 + 扫描谓词 + dedup 键 +
+  **status-count 触发器全链：4 个函数 + 3 个触发器**，见类别 2 表格）。建议
+  顺序：先把全部查询谓词换绑 workspace_id（可原地替换部分，独立 PR 可验证）→
+  再做「删列 + 索引重建」的纯 DDL 迁移——**删列前必须逐一处理全部七个对象**
+  （`jobs_node_status_counts_rekey` 直接依赖 `UPDATE OF workflow_key`，漏掉
+  即 DDL 失败；deduct 链漏掉则计数失维护）。
 - 组合 PK 子表三张（node_limits / node_routes / node_capacities）适合一个
   PR：同构的 PK 重建（去掉 key 维度），`workspace_node_capacities` 顺带评估
   整体退役（legacy 投影）。
-- `workflow_revisions` / `workflow_node_codes` 的 unique 约束重建与
-  `versioned_entities.entity_key` 编码简化可合并评估（同为 `key:node` 家族）。
+- `workflow_revisions` 的 unique 约束重建与 `versioned_entities.entity_key`
+  编码简化可合并评估（`key:node` 家族）。**`workflow_node_codes` 除外**——它是
+  迁移考古表（类别 2 表格已定性「保留」），不参与约束重建；若 Phase 3 想动它，
+  必须同步改写 v26 的 fresh-install 历史重放策略，否则迁移链断裂。
   **例外：legacy 全局 node_code 行**（`workspace_id IS NULL`，`node_codes.py:148`
   的 `get_global_code_by_version` 仍经 `workflow_key:node_key` 查找，quality
   replay 的冻结 pin 经此解析）——全局行没有可替代的 workspace id，直接去 key 段
@@ -222,8 +231,10 @@ workflow key 是同一个标识：创建时显式提供 id（即 `default_workfl
 
 - 删 `workspaces.default_workflow_key` 列（终态：workspaces 只有 id）；
   `jobs/queries/workspace.py` 的 create/update 签名去 `default_workflow_key`
-  参数；`workspace_stats.py` 空分支、`AddItemsDialog` 的 `!workflowKey` 分支、
-  `StudioAgentActiveWorkflowResponse` 的 empty 分支等防御残留一并清理。
+  参数；`workspace_stats.py` 空分支与 `AddItemsDialog` 的 `!workflowKey` 分支
+  （v62 后不可达的防御残留）一并清理。**`StudioAgentActiveWorkflowResponse` 的
+  empty 分支除外**——它由「无已发布 revision」驱动而非 key 可空（类别 1 表格），
+  from-scratch 流程依赖，只能收紧 `workflow_key` 可空性、不得删该状态。
 - 更新 invariant `DB-WORKSPACE-KEY-BINDING-001` statement 为终态描述
   （config/architecture/architecture-invariants.yaml），同步 AGENTS.md §6
   workflow 边界条目、`postgres_schema.sql` workspaces 表注释、
