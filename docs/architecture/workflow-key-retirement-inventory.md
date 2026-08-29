@@ -96,9 +96,11 @@ workflow key 是同一个标识：创建时显式提供 id（即 `default_workfl
 `code_executor.py`（旧 executor 绑定）、`workflow_catalog_retirement.py`（v50 退役
 全局 catalog 时把 key 降级为纯文本）、`workspace_id_key_binding.py`（v62 本体）。
 
-**DB 侧汇总**：12 张活跃表的 12 个列 + 6 个 jobs 索引 + 3 张组合 PK 子表 + 3 个
-触发器函数链 + 2 个 unique 约束（revision/node_codes）全部是「需 schema 迁移」，
-没有一列可原地删除（列值即数据）。真正的「可原地替换」发生在**读法层**：所有
+**DB 侧汇总**：运行时活跃 11 列（6 个 jobs 索引 + 3 张组合 PK 子表 + status-count
+触发器全链 4 函数 + 3 触发器 + workflow_revisions 的 1 个 unique 约束）是「需
+schema 迁移」；另有 3 张迁移考古表（workflow_node_codes / workspace_node_bindings /
+job_batches）按类别 2 表格定性**保留**、不参与约束重建（动 node_codes 需改写 v26
+重放策略）。没有一列可原地删除（列值即数据）。真正的「可原地替换」发生在**读法层**：所有
 `select ... where workflow_key=%s` 谓词都可以先改为绑定 workspace_id（值恒等，
 无需等列删除），列删除留到 Phase 4。
 
@@ -125,10 +127,10 @@ workflow key 是同一个标识：创建时显式提供 id（即 `default_workfl
 `AgentClaimResponse`、`FailedNodeRunItem`、`JobBatchRequest`、`NodeLimitRequest`、
 `QualitySampleBatch(CreateRequest)`、`WorkspaceAgentRouteEntry`、
 `WorkflowRevisionSummary(Item)`、`StudioContextWorkflow`、
-`StudioAgentActiveWorkflowResponse`、`WorkspaceSettingsPayload.workflowKey` 及 9 条
-`workflows/{workflow_key}` 路径模板。
+`StudioAgentActiveWorkflowResponse`、`WorkspaceSettingsPayload.workflowKey` 及 7 条
+`workflows/{workflow_key}` 路径模板（api.ts 实测 7）。
 
-手写消费点（63 处 camel + 77 处 snake，24 个文件）。**读写链完整提示**（codex
+手写消费点（63 处 camel + 77 处 snake，**28 个手写文件**（含 workspaceEventRefresh.ts 的 1 处注释性提及）——camel+snake 并集实测；类别 4 统计行的 24 是 camel-only 口径）。**读写链完整提示**（codex
 on #256 补遗）：`stores/setting/actions/executionConfigActions.ts:6-15` 按
 `workflow_key` 过滤并构造 `node_limits` 的 PUT 载荷、`pages/SettingsPage.tsx:50-53`
 用该字段识别 Agent 路由节点——Phase 2/3 下线字段时这两处必须同批改造，否则
@@ -143,7 +145,7 @@ on #256 补遗）：`stores/setting/actions/executionConfigActions.ts:6-15` 按
 | `frontend/src/hooks/useWorkspaceRerunActions.ts:11-13` | 失败重跑上下文传 key | 需契约协调 | 同 failureApi 链 |
 | `frontend/src/api/failureApi.ts:10,13` + `lib/queryKeysExtra.ts:35-36` | `workflow_key` 查询参数 + react-query 缓存键 | 需契约协调 | 缓存键含 key——字段下线时缓存键要同步换 workspace_id，避免灰度期串缓存 |
 | `frontend/src/components/AddItemsDialog.tsx:81,134,157,171,193,268` | intake 提交 + 未发布守卫（`!workflowKey` 分支） | 需契约协调 | v62 后 key 恒非空，`!workflowKey` 空分支不可达（防御残留） |
-| `frontend/src/components/LocalNodeLimitSection.tsx:11,16,47,69`、`AgentRoutingSection`（同构） | 节点限制/路由过滤 | 需契约协调 | 过滤键 |
+| `frontend/src/components/LocalNodeLimitSection.tsx:11,16,47,69` | 节点限制过滤 | 需契约协调 | 过滤键 |
 | `frontend/src/features/workflowStudio/**`（code-editor/inspector/validation/shared 9 文件） | `/workflows/{workflowKey}/` URL 拼接与展示 | 需契约协调（与 URL 路径参数同批） | `WorkflowNodeCodeSection.tsx:19` 硬拼 API 路径 |
 | `frontend/src/pages/DashboardPage.tsx:20` | `default_workflow_key` 作 label 兜底 | 需契约协调（最后批） | 应改 workflow_label |
 | `frontend/src/lib/workflowNodes.ts:16-19,48`、`pages/jobDetail/deriveJobDetailPresentation.ts:8-9,27` | job↔定义匹配、详情 label | 需契约协调 | 匹配键改 workspace 维度 |
@@ -155,27 +157,28 @@ on #256 补遗）：`stores/setting/actions/executionConfigActions.ts:6-15` 按
 
 | 维度 | 数量 |
 |---|---|
-| 后端 `workflow_key` 词匹配（106 文件） | 598 处（其中 migrations+schema 98、routes 契约 20） |
+| 后端 `workflow_key` 词匹配（119 文件全量；106 为排除 db/ 迁移考古 13 文件后的口径） | 598 处（其中 migrations+schema 98、routes 契约 20） |
 | 后端 `default_workflow_key` | 59 处（20 文件） |
 | 前端 camel `workflowKey`（24 文件，含 api.ts 3） | 63 处 |
-| 前端 snake `workflow_key`（14 文件，含 api.ts 54） | 77 处 |
-| 类别 1 API 契约字段（Pydantic） | 响应 14 + 请求 6 = 20 个字段，另有 10 条 URL 路径/查询参数 |
+| 前端 snake `workflow_key`（含 api.ts 54） | 77 处（排除规则 `!*test*`——同时排除 *.test.* 与 testing/fixtures 等测试辅助文件；用 `!*.test.*` 则为 80） |
+| 类别 1 API 契约字段（Pydantic） | 响应 14 + 请求 6 = 20 个字段，另有 11 条 URL 路径/查询参数（node-code 路由 7 + MCP 工具 2 + 查询参数 2） |
 | 类别 2 DB 列 | 运行时活跃 11 列（含 PK/unique/索引成员 8 列）+ 考古表 3 列（workflow_node_codes / workspace_node_bindings / job_batches，不参与约束重建——codex on #256）；6 个 jobs 索引、**4 个触发器函数 + 3 个触发器**、workflow_revisions 1 个 unique 约束 |
 | 类别 3 组合字符串 id | 5 个构造族（run_id / job_id ×2 实现 / revision_id / entity_key / vault secret 名）+ 3 类存储路径（磁盘 job dir / S3 artifact / S3 material） |
-| 类别 4 前端消费点 | 24 个手写文件 + 1 个生成物 |
+| 类别 4 前端消费点 | 28 个手写文件（camel+snake 并集）+ 1 个生成物 |
 
 处置分布（按引用点粗分）：
 
 - **可原地替换**（改读法/改谓词，值恒等、无数据迁移）：约 70% ——包括全部
   service/queries 层的 `where workflow_key=%s` 谓词、worker 扫描、路由过滤键、
   前端过滤/匹配键。这些可先行绑定 workspace_id 读法，不等列删除。
-- **需 schema 迁移**（列值重写/删列/索引与 PK 重建/触发器重写）：类别 2 全部
-  （12 列 + 配套索引/约束/触发器）+ 类别 3 的 5 个组合 id 构造点 + vault 名——
-  约占 20%，且是全部的重活。
+- **需 schema 迁移**（列值重写/删列/索引与 PK 重建/触发器重写）：类别 2 的
+  运行时活跃 11 列（+ 配套索引/约束/触发器全链）+ 类别 3 的 5 个组合 id 构造点
+  + vault 名——约占 20%，且是全部的重活。
 - **需契约协调**（API 字段下线需前端/Worker/MCP 同步）：类别 1 全部 26 个
   契约触点 + 类别 4 前端消费链 ——约占 10%，但决定退役节奏（必须先于 DB）。
-- **保留**：历史迁移考古表（job_batches、workspace_node_bindings）、磁盘/S3
-  存量路径（v62 已有意不重写，读路径按行自解析）、审计性质的外部 id 引用。
+- **保留**：迁移考古表（workflow_node_codes、workspace_node_bindings、
+  job_batches）、磁盘/S3 存量路径（v62 已有意不重写，读路径按行自解析）、
+  审计性质的外部 id 引用。
 
 ## Phase 2-4 建议切分
 
@@ -208,14 +211,14 @@ on #256 补遗）：`stores/setting/actions/executionConfigActions.ts:6-15` 按
   PR：同构的 PK 重建（去掉 key 维度），`workspace_node_capacities` 顺带评估
   整体退役（legacy 投影）。
 - `workflow_revisions` 的 unique 约束重建与 `versioned_entities.entity_key`
-  编码简化可合并评估（`key:node` 家族）。**`workflow_node_codes` 除外**——它是
-  迁移考古表（类别 2 表格已定性「保留」），不参与约束重建；若 Phase 3 想动它，
-  必须同步改写 v26 的 fresh-install 历史重放策略，否则迁移链断裂。
-  **例外：legacy 全局 node_code 行**（`workspace_id IS NULL`，`node_codes.py:148`
-  的 `get_global_code_by_version` 仍经 `workflow_key:node_key` 查找，quality
-  replay 的冻结 pin 经此解析）——全局行没有可替代的 workspace id，直接去 key 段
-  会使不同 workflow 的同名节点冲突、历史 replay pin 失解析。该族必须保留旧编码
-  双读或先迁移全局行（codex on #256）。
+  编码简化可合并评估（`key:node` 家族）——**但 entity_key 的编码简化有存量键
+  硬约束**（类别 3 表格）：VersionedEntityStore 全部读写按精确键相等查询，只改
+  新行构造会让存量 workspace 行立即不可见并分叉历史——必须存量键一次性迁移或
+  构造点双读两代键，**全局行与 workspace 行同此约束**（全局行额外没有可替代的
+  workspace id，直接去 key 段还会使同名节点冲突、历史 replay pin 失解析）。
+  **`workflow_node_codes` 除外**——它是迁移考古表（类别 2 表格已定性「保留」），
+  不参与约束重建；若 Phase 3 想动它，必须同步改写 v26 的 fresh-install 历史重放
+  策略，否则迁移链断裂（codex on #256）。
 - 组合字符串 id（run_id/job_id/revision_id）：**不建议重写存量**——沿用 v62
   的「旧行自解析」先例，只改新行构造（去 key 段）；外部引用（工单/导出/审计）
   按 id 前缀自解析。vault secret 名是唯一必须显式处理存量的（改名或双读），
