@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
 from server.app.workflow_worker.agent_stock import (
     UNKNOWN_PRIORITY,
@@ -70,7 +70,7 @@ def _node_depths(definition_json: str) -> dict[str, int]:
     return depths
 
 
-def load_stock_snapshot(dsn: DatabaseDsn, config: AgentStockConfig) -> StockSnapshot:
+def load_stock_snapshot(dsn: ConnectSource, config: AgentStockConfig) -> StockSnapshot:
     """Aggregate queued counts, the recent done rate, the live fleet capacity,
     and the per-bucket workflow tiers for the shared capacity floor."""
     queued: dict[tuple[str, str], int] = {}

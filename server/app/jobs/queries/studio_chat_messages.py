@@ -11,10 +11,10 @@ import json
 from typing import Any
 from uuid import uuid4
 
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
-class StudioChatMessageQueriesMixin(JobQueriesBase):
+class StudioChatMessageQueriesMixin(ConnectionQueriesMixin):
     """CRUD for studio_chat_messages."""
 
     def append_studio_chat_message(

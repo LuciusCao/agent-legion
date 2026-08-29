@@ -13,8 +13,8 @@ import yaml
 
 from worker import worker_declarations
 from worker._atomic import atomic_write
-from worker.registration_token import normalized_registration_token
-from worker.runtime_controls import MAX_DYNAMIC_CONCURRENCY, validate_claim_controls
+from worker.registration.token import TOKEN_FILE_PATTERN, validated_registration_token
+from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY, validate_claim_controls
 
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _EDITABLE_FIELDS = {
@@ -45,7 +45,9 @@ _DEFAULTS: dict[str, Any] = {
     "upload_max_concurrency": 4,
     "models": [],
     "labels": {},
-    "register_token_file": "/run/secrets/agent_worker_register_token",
+    # scoped token 目录：state_dir/register_tokens/，每个 token 一个
+    # "<id>.token" 文件（issue #35：多 workspace scoped token 注册）。
+    "register_token_dir": "",
     "work_root": "/var/lib/agent-legion-worker",
     "poll_interval_seconds": 2,
     "heartbeat_interval_seconds": 15,
@@ -159,6 +161,52 @@ class WorkerConfigStore:
         raw = yaml.safe_load(self.path.read_text(encoding="utf-8"))
         return validate_config(raw, require_identity=require_identity)
 
+    def token_dir(self) -> Path:
+        """Directory holding one "<id>.token" file per scoped register token."""
+        configured = str(self.read(require_identity=False).get("register_token_dir") or "")
+        return Path(configured) if configured else self.state_dir / "register_tokens"
+
+    def read_registration_tokens(self) -> list[dict[str, Any]]:
+        """List configured scoped tokens as [{'token_id', 'token'}] rows."""
+        directory = self.token_dir()
+        tokens: list[dict[str, Any]] = []
+        try:
+            files = sorted(directory.iterdir())
+        except OSError:
+            return tokens
+        for path in files:
+            if not TOKEN_FILE_PATTERN.fullmatch(path.name):
+                continue
+            try:
+                token = path.read_text(encoding="utf-8").strip()
+            except OSError:
+                continue
+            if token:
+                tokens.append({"token_id": path.name[: -len(".token")], "token": token})
+        return tokens
+
+    def upsert_registration_token(self, token: str) -> dict[str, Any]:
+        """Atomically add (or replace) one scoped register token; returns its row.
+
+        The token file name is derived from the token's own id prefix so the
+        console can correlate a card with its file. Writing is idempotent."""
+        token_id, normalized = validated_registration_token(token)
+        path = self.token_dir() / f"{token_id}.token"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(path, normalized + "\n", mode=0o600)
+        return {"token_id": token_id, "token": normalized}
+
+    def remove_registration_token(self, token_id: str) -> bool:
+        """Delete one scoped token file; True when a file was removed."""
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", token_id):
+            return False
+        path = self.token_dir() / f"{token_id}.token"
+        try:
+            path.unlink()
+        except OSError:
+            return False
+        return True
+
     def update_public(
         self, payload: dict[str, Any], *, registration_token: str | None = None
     ) -> dict[str, Any]:
@@ -170,13 +218,16 @@ class WorkerConfigStore:
             current = self.read(require_identity=False)
             updated = validate_config({**current, **payload})
             if registration_token is not None:
-                token = normalized_registration_token(registration_token)
-                token_path = self.state_dir / "register_token"
-                updated["register_token_file"] = str(token_path)
-                # yaml 先于 token 落盘：中间崩溃留下的是「引用了缺失 token」的可见
-                # 状态（启动日志提示、重新配置即可恢复），而不是无人引用的孤儿 token。
+                # 兼容路径：老客户端/脚本仍以单 token 字段提交；落成
+                # register_tokens/ 下的一个文件，与 UI 的添加操作同构。
+                # 先校验 token：校验失败时配置不落盘，避免 API 422 但配置
+                # 已生效的半应用状态。写入顺序保持 配置 → token 文件：中途
+                # 崩溃只留孤儿 token 文件（重新提交即可收敛），而配置引用的
+                # 是目录而非单个 token，不会出现配置指向缺失文件的状态。
+                validated_registration_token(registration_token)
+                updated["register_token_dir"] = str(self.state_dir / "register_tokens")
                 self.write(updated)
-                atomic_write(token_path, token + "\n", mode=0o600)
+                self.upsert_registration_token(registration_token)
                 return updated
             self.write(updated)
             return updated

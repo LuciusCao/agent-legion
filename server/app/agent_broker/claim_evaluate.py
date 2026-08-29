@@ -25,7 +25,7 @@ from server.app.agent_broker.claim_scan import (
     labels_satisfy,
 )
 from server.app.agent_broker.code_manifest import CODE_MANIFEST_TRIM
-from server.app.agent_workers import CODE_PROTOCOL_VERSION
+from server.app.agent_control.registry import CODE_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker

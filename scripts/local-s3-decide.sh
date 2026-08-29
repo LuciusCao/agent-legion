@@ -82,6 +82,9 @@ lookup() {
 }
 
 # 解析 env 行的值部分：去 = 前缀、首尾空白与一层配对的引号（与 dotenv 对齐）。
+# 注意：这是仓库里第二份 shell dotenv 解析（另一份是 scripts/dev_stack.sh 的
+# read_env_value，语义更窄、仅够读扁平 KEY=VALUE 凭据）。需要扩展语义时不要
+# 各自漂移，应合并为一份实现。
 _dotenv_value() {
     local value="${1#*=}"
     value="$(printf '%s' "$value" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"

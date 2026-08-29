@@ -19,7 +19,7 @@ def app_with_workspace(tmp_path):
     app.state.settings.executor_runtime.workflows.enabled = True
     response = authenticate_client(TestClient(app)).post(
         "/api/workspaces",
-        json={"name": "Studio", "default_workflow_key": "education_video_problems_generation"},
+        json={"id": "education_video_problems_generation", "name": "Studio"},
     )
     workspace_id = response.json()["workspace"]["id"]
     definition = load_builtin_definition("education_video_problems_generation")
@@ -311,6 +311,40 @@ def test_compare_allow_missing_baseline_previews_full_draft(tmp_path):
         flag["code"] == "no_baseline" and flag["severity"] == "info"
         for flag in result["summary"]["risk_flags"]
     )
+
+
+def test_compare_node_changes_carry_node_type(tmp_path):
+    """A draft without a start node gets the loader-injected synthetic
+    ``_start``; its added change is marked node_type 'start' so the canvas can
+    synthesize the ghost node's inspector details."""
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    workspace = app.state.job_db.create_workspace("Empty", default_workflow_key="demo")
+    raw = (
+        "key: demo\n"
+        "label: Demo\n"
+        "schema_version: 2\n"
+        "nodes:\n"
+        "  fetch:\n"
+        "    label: 拉取\n"
+        "    capability: fetch\n"
+        "  report:\n"
+        "    label: 汇总\n"
+        "    capability: report\n"
+        "edges:\n"
+        "  - {from: fetch, to: report}\n"
+    )
+
+    result = compare_workflow_draft(
+        app.state.job_db, workspace["id"], raw, allow_missing_baseline=True
+    )
+
+    assert result["valid"] is True
+    changes = {change["node_key"]: change for change in result["summary"]["node_changes"]}
+    assert changes["_start"]["type"] == "added"
+    assert changes["_start"]["node_type"] == "start"
+    assert changes["fetch"]["node_type"] == "node"
+    assert changes["report"]["node_type"] == "node"
 
 
 def test_compare_route_accepts_allow_missing_baseline(tmp_path):

@@ -85,7 +85,7 @@ class JobLogService:
         secrets = self._collect_secrets(self.settings.config)
         if workspace_id:
             # Vault-resolved plaintexts are redacted too (VAULT-SECRET-001).
-            vault = VaultService(self.job_db.path, self.settings.config)
+            vault = VaultService(self.job_db, self.settings.config)
             secrets.extend(collect_vault_plaintexts(vault, workspace_id))
         secrets.sort(key=len, reverse=True)
         for secret in secrets:

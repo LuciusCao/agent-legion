@@ -20,7 +20,7 @@ def migrate_demo_node_codes_to_workspaces(settings: Settings, job_db: JobQueries
     """Copy active legacy globals into bound workspaces, then archive them."""
     if not settings.executor_runtime.workflows.custom_nodes_enabled:
         return 0
-    service = NodeCodeService(settings.database_url, custom_nodes_enabled=True)
+    service = NodeCodeService(job_db, custom_nodes_enabled=True)
     legacy_codes = {
         node_key: str(row["code"])
         for node_key, _relative in DEMO_NODE_SOURCES
@@ -35,7 +35,10 @@ def migrate_demo_node_codes_to_workspaces(settings: Settings, job_db: JobQueries
         if workspace.get("default_workflow_key") == DEMO_WORKFLOW_KEY:
             seeded += len(
                 seed_demo_workspace_node_codes(
-                    settings, str(workspace["id"]), legacy_codes=legacy_codes
+                    settings,
+                    str(workspace["id"]),
+                    legacy_codes=legacy_codes,
+                    connect_source=job_db,
                 )
             )
     for node_key, _relative in DEMO_NODE_SOURCES:

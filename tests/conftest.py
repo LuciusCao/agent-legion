@@ -1,6 +1,7 @@
 import json
 import os
 from contextlib import contextmanager
+from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
@@ -15,7 +16,6 @@ from tests.postgres_support import (
 )
 
 os.environ["AGENT_LEGION_DATABASE_URL"] = TEST_DATABASE_URL
-os.environ["AGENT_LEGION_SKIP_MODULE_APP"] = "1"
 
 import psycopg
 from psycopg import sql
@@ -32,9 +32,11 @@ from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_
 # Test Agent catalog: Agent definitions are workspace-scoped (schema v46), so
 # there is no global seed here — workspaces do not exist at schema-reset time.
 # Tests seed the built-in demo agents into their own workspace via
-# tests/helpers.seed_workspace_agent_definitions (API-created workspaces
-# binding the demo workflow get the demo seed automatically through
-# ensure_active_revision).
+# tests/helpers.seed_workspace_agent_definitions, and revisions via
+# tests/helpers.publish_builtin_revision / publish_legacy_intake_revision
+# (schema v62: workspace creation no longer seeds the demo template —
+# ensure_active_revision runs only through `make import-demo` /
+# scripts/seed_demo.py).
 
 
 # Test executor catalog: none. Executor definitions are retired (schema v47,
@@ -45,7 +47,7 @@ from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_
 # Test skill sources: the built-in constants (retired config/skills.yaml +
 # skills.lock transcription) re-seeded into global_settings after every
 # TRUNCATE, mirroring the app startup seed so DB-driven skill resolution
-# (SkillManager, skill catalog, openclaw skill_safety) sees the pinned skills.
+# (SkillManager, skill catalog) sees the pinned skills.
 def _seed_skill_sources() -> None:
     store = SkillSourceStore(TEST_DATABASE_URL)
     store.put_sources(BUILTIN_SKILL_SOURCES.model_copy(deep=True))
@@ -103,7 +105,6 @@ _CMS_ENV_KEYS = (
     "BASECMS_SECRET",
     "BASECMS_TOKEN_URL",
     "AGENT_LEGION_CMS_TOKEN",
-    "AGENT_LEGION_CMS_TOKEN_GEN_SECRET",
     "AGENT_LEGION_REMOTE_WORKER_TOKEN",
 )
 
@@ -119,170 +120,29 @@ def pytest_configure() -> None:
 # high-value tests that keeps the local push feedback loop around a minute
 # while the full quick suite stays the CI boundary. Membership is path-based:
 # every architecture governance test is smoke by default, plus one core
-# behavioral file per subsystem. Add new entries here when a new subsystem
-# gains tests; keep the tier under ~90s.
-_SMOKE_TEST_FILES = frozenset(
-    {
-        "tests/routes/test_auth_routes.py",
-        "tests/routes/jobs/test_job_lifecycle.py",
-        "tests/services/test_vault.py",
-        "tests/executors/test_shard_contract.py",
-        "tests/executors/test_executor_kinds.py",
-        "tests/executors/leases/test_claim_basics.py",
-        "tests/workflows/test_sharding.py",
-        "tests/db/test_retry.py",
-    }
-)
+# behavioral file per subsystem. The manifest lives in
+# config/architecture/smoke-test-files.json (#192); add new entries there
+# when a new subsystem gains tests; keep the tier under ~90s.
 
 
 # Files that connect to PostgreSQL directly instead of through a root fixture.
 # Keep this inventory explicit so new direct consumers are visible in review;
-# fixture-based consumers are classified by _POSTGRES_FIXTURES below.
-_POSTGRES_TEST_FILES = frozenset(
-    {
-        "tests/ci/test_executor_worker_stress.py",
-        "tests/db/test_agent_catalog_cutover_migration.py",
-        "tests/db/test_agent_request_kind_window.py",
-        "tests/db/test_agent_workspace_scope_migration.py",
-        "tests/db/test_agent_request_kind_schema.py",
-        "tests/db/test_auth_scoped_tokens_migration.py",
-        "tests/db/test_studio_chat_schema.py",
-        "tests/db/test_custom_node_codes_migration.py",
-        "tests/db/test_executor_retirement_migration.py",
-        "tests/db/test_external_connections_migration.py",
-        "tests/db/test_hmac_connection_type_migration.py",
-        "tests/db/test_job_nodes_unclaimable_index.py",
-        "tests/db/test_job_artifacts_schema.py",
-        "tests/db/test_job_node_status_counts_migration.py",
-        "tests/db/test_job_status_counts_migration.py",
-        "tests/db/test_materials_schema.py",
-        "tests/db/test_material_bundles_schema.py",
-        "tests/db/test_monitoring_hotpath_indexes.py",
-        "tests/db/test_node_cms_config_migration.py",
-        "tests/db/test_postgres_runtime.py",
-        "tests/db/test_quality_loop_schema.py",
-        "tests/db/test_runs_migration.py",
-        "tests/db/test_versioned_entities_migration.py",
-        "tests/db/test_workflow_catalog_retirement.py",
-        "tests/db/test_workspace_cms_migration.py",
-        "tests/db/test_workspace_secrets_migration.py",
-        "tests/executors/leases/test_expire_race.py",
-        "tests/executors/leases/test_shard_expiry.py",
-        "tests/executors/test_leases.py",
-        "tests/full/test_agent_worker_control_plane.py",
-        "tests/full/test_executor_cancellation_recovery.py",
-        "tests/full/test_executor_worker_fairness.py",
-        "tests/full/test_storage_path_corruption.py",
-        "tests/full/test_velites_harness_e2e.py",
-        "tests/full/test_split_config_startup.py",
-        "tests/full/test_workspace_sse.py",
-        "tests/routes/jobs/test_failed_node_runs.py",
-        "tests/routes/jobs/test_intake_modes.py",
-        "tests/routes/jobs/test_job_batches.py",
-        "tests/routes/jobs/test_job_batch_pause.py",
-        "tests/routes/jobs/test_job_lifecycle.py",
-        "tests/routes/jobs/test_job_rerun.py",
-        "tests/routes/jobs/test_job_run_to.py",
-        "tests/routes/jobs/test_openapi_contracts.py",
-        "tests/routes/jobs/test_workflow_upgrade.py",
-        "tests/routes/test_agent_workers.py",
-        "tests/routes/test_agent_claim_artifact_channel.py",
-        "tests/routes/test_agent_worker_result_spool.py",
-        "tests/routes/test_video_job_projection.py",
-        "tests/routes/test_workspace_secrets.py",
-        "tests/test_cors.py",
-        "tests/test_workflow_draft_compare.py",
-        "tests/routes/test_workflow_draft_publish_routes.py",
-        "tests/routes/test_workflow_draft_validate.py",
-        "tests/test_workspace_executor_configuration_flow.py",
-        "tests/test_workspace_job_control_flow.py",
-        "tests/test_workspace_settings_api.py",
-        "tests/routes/jobs/test_workspace_configuration.py",
-        "tests/routes/jobs/test_workspace_crud.py",
-        "tests/routes/test_artifacts_route.py",
-        "tests/routes/test_metrics.py",
-        "tests/routes/test_quality.py",
-        "tests/routes/test_quality_replay_routes.py",
-        "tests/routes/test_skill_sources.py",
-        "tests/routes/test_workspace_agent_routes.py",
-        "tests/scripts/test_backfill_comprehension_ids.py",
-        "tests/scripts/test_backfill_comprehension_jobdir_ids.py",
-        "tests/services/test_agent_artifacts.py",
-        "tests/services/test_agent_artifact_inject.py",
-        "tests/services/test_agent_completion_remote.py",
-        "tests/services/test_agent_broker_claim_scan.py",
-        "tests/services/test_agent_broker_claim_windows.py",
-        "tests/services/test_agent_version_pin.py",
-        "tests/services/test_agent_worker_liveness.py",
-        "tests/services/test_artifact_orphan_gc.py",
-        "tests/services/test_builtin_agent_seed.py",
-        "tests/services/test_cleanup_sweep_planner.py",
-        "tests/services/test_code_claim.py",
-        "tests/services/test_code_claim_sweeper.py",
-        "tests/services/test_code_dispatch.py",
-        "tests/services/test_code_manifest_trim.py",
-        "tests/services/test_artifact_store.py",
-        "tests/services/test_dispatch_claim_caches.py",
-        "tests/services/test_job_rerun_batch.py",
-        "tests/services/test_job_artifact_maintenance.py",
-        "tests/services/test_material_ttl.py",
-        "tests/services/test_job_rerun_preview.py",
-        "tests/services/test_ops_metrics.py",
-        "tests/services/test_studio_chat_service.py",
-        "tests/services/test_studio_chat_issue158.py",
-        "tests/services/test_studio_chat_availability.py",
-        "tests/services/test_quality_labels.py",
-        "tests/services/test_quality_replays.py",
-        "tests/services/test_quality_sampling.py",
-        "tests/services/test_quality_stats.py",
-        "tests/services/test_scoped_tokens.py",
-        "tests/services/test_skill_source_store.py",
-        "tests/services/test_token_usage.py",
-        "tests/test_export_openapi.py",
-        "tests/test_jobs_route_contracts.py",
-        "tests/test_legacy_worker_disabled.py",
-        "tests/test_main.py",
-        "tests/routes/test_misc.py",
-        "tests/services/test_workflow_draft_publish.py",
-        "tests/test_agent_broker.py",
-        "tests/test_agent_broker_batch.py",
-        "tests/test_agent_broker_concurrency.py",
-        "tests/test_agent_broker_empty.py",
-        "tests/services/test_agent_broker_reaper.py",
-        "tests/test_agent_catalog.py",
-        "tests/test_agent_stock.py",
-        "tests/test_auth_queries.py",
-        "tests/test_db.py",
-        "tests/test_executor_recovery.py",
-        "tests/test_job_event_buffer_db.py",
-        "tests/test_job_events.py",
-        "tests/test_job_log_service.py",
-        "tests/test_job_workflow_upgrade.py",
-        "tests/test_jobs.py",
-        "tests/test_jobs_queries.py",
-        "tests/test_log_cleanup.py",
-        "tests/test_relative_path_portability.py",
-        "tests/test_run_dir_cleanup.py",
-        "tests/test_skill_catalog_service.py",
-        "tests/test_worker_control_db.py",
-        "tests/test_workflow_execution_control.py",
-        "tests/test_workflow_revisions.py",
-        "tests/test_workflow_worker_concurrency.py",
-        "tests/test_workspace_executor_queries.py",
-        "tests/workers/test_code_stock_gate.py",
-        "tests/workers/test_scheduler_wakeup.py",
-        "tests/workers/test_workspace_scan.py",
-        "tests/workers/test_workflow_worker_capacity.py",
-        "tests/workers/test_workflow_worker_mark_scan.py",
-        "tests/workers/test_workflow_worker_node_code.py",
-        "tests/workers/test_workflow_worker_node_config.py",
-        "tests/workers/test_workflow_worker_ready_queue.py",
-        "tests/workers/test_workflow_worker_thread_local.py",
-        "tests/workers/test_workflow_worker_thread_paths.py",
-        "tests/workers/test_workflow_worker_thread_pi.py",
-        "tests/workflows/test_sharding.py",
-    }
-)
+# fixture-based consumers are classified by _POSTGRES_FIXTURES below. Both
+# directions are enforced by tests/test_pytest_postgres_boundaries.py: a file
+# importing tests.postgres_support (or calling psycopg.connect) must be listed
+# in the manifest, and every listed path must still exist. The manifest lives
+# in config/architecture/postgres-test-files.json (#192).
+def _load_manifest(name: str) -> frozenset[str]:
+    path = Path(__file__).resolve().parents[1] / "config" / "architecture" / name
+    document = json.loads(path.read_text(encoding="utf-8"))
+    files = document.get("files")
+    if not isinstance(files, list) or not all(isinstance(entry, str) for entry in files):
+        raise RuntimeError(f"malformed manifest {path}: files must be a list of strings")
+    return frozenset(files)
+
+
+_SMOKE_TEST_FILES = _load_manifest("smoke-test-files.json")
+_POSTGRES_TEST_FILES = _load_manifest("postgres-test-files.json")
 
 _POSTGRES_FIXTURES = frozenset(
     {
@@ -513,7 +373,7 @@ def _session_test_schema():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_postgres_database(request):
+def _isolate_postgres_database(_assert_shared_app_invariants, request):
     if request.node.get_closest_marker("no_db") is not None:
         # Tests marked no_db never touch the database (pure static governance
         # checks, fully mocked script tests); skip TRUNCATE-based isolation.
@@ -550,13 +410,16 @@ def _isolate_postgres_database(request):
 def _assert_shared_app_invariants():
     """Fail a test that left the worker-session shared app dirty.
 
-    Naming is load-bearing: same-scope autouse fixtures are set up in
-    alphabetical order (and torn down in reverse), and monkeypatch is torn
-    down only after every fixture that grabbed it. Sorting before
-    ``_block_real_cms_http`` — the first autouse fixture that requests
-    monkeypatch — puts this teardown after the monkeypatch undo, so it
-    observes the post-undo in-memory state of any shared app the test
-    touched. fresh=True apps are private and never tracked.
+    The guard must run its teardown AFTER the monkeypatch undo: a test may
+    scope an app.state mutation with monkeypatch (auto-restored), and the
+    guard has to observe the post-undo state or it would false-red on
+    exactly those tests. Teardown is reverse setup order, so the guard is
+    the first autouse fixture set up: every other autouse fixture in this
+    conftest declares ``_assert_shared_app_invariants`` as its first
+    parameter. That makes the ordering an explicit dependency chain instead
+    of alphabetical fixture-name sorting; the structure is enforced by
+    tests/test_pytest_postgres_boundaries.py. fresh=True apps are private
+    and never tracked.
     """
     _SHARED_APP_USAGE.clear()
     yield
@@ -570,7 +433,7 @@ def _assert_shared_app_invariants():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_project_dotenv(monkeypatch):
+def _isolate_project_dotenv(_assert_shared_app_invariants, monkeypatch):
     """Keep unit tests from inheriting real local credentials by default.
 
     Production and local app runs still load the project .env normally. Tests
@@ -585,7 +448,7 @@ def _isolate_project_dotenv(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _block_real_cms_http(monkeypatch):
+def _block_real_cms_http(_assert_shared_app_invariants, monkeypatch):
     if os.environ.get("AGENT_LEGION_TEST_REAL_CMS") == "1":
         return
     # The repo yaml no longer carries a global cms: section; tests loading the
@@ -646,7 +509,7 @@ def _fake_cms_question_item(question_id: str) -> dict[str, object]:
 
 
 @pytest.fixture(autouse=True)
-def _fast_password_hashing(monkeypatch):
+def _fast_password_hashing(_assert_shared_app_invariants, monkeypatch):
     """Tests mint a session per client; keep pbkdf2 cheap so the suite stays fast."""
     monkeypatch.setattr("server.app.auth.passwords._ITERATIONS", 1_000)
 

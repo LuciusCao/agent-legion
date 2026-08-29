@@ -1,5 +1,5 @@
 import type { JobState } from '../state'
-import type { WorkflowDefinitionRecord } from '../../../types'
+import type { NodeCatalog } from '../../../lib/nodeCatalog'
 import type {
   JobFilterNodeOption,
   WorkflowVersionOptions,
@@ -9,9 +9,7 @@ import {
   versionOptionsFromFacets,
 } from '../filterLogic/facets'
 
-export function makeSelectNodeOptions(
-  workflowDefinition: WorkflowDefinitionRecord | null
-) {
+export function makeSelectNodeOptions(workflowDefinition: NodeCatalog | null) {
   const cache = new Map<Set<string>, JobFilterNodeOption[]>()
   const defined = new Map<string, string>()
   for (const node of workflowDefinition?.nodes ?? []) {

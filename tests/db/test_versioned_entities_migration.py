@@ -89,18 +89,17 @@ def test_versioned_entities_table_exists() -> None:
     }
 
 
-def test_workspaces_agent_default_columns_exist() -> None:
+def test_workspaces_agent_default_columns_retired() -> None:
+    # Schema v64: the post-chain cleanup drops the workspace-level Agent
+    # default columns (execution config is per-node / workflow-level now);
+    # postgres_schema.sql still creates them so the v62 migration can replay.
     with read_connection(TEST_DATABASE_URL) as conn:
         rows = conn.execute(
-            "select column_name, column_default from information_schema.columns"
+            "select column_name from information_schema.columns"
             " where table_schema=current_schema() and table_name='workspaces'"
             " and column_name like 'default_agent_%'"
         ).fetchall()
-    assert {row["column_name"] for row in rows} == {
-        "default_agent_provider",
-        "default_agent_model",
-        "default_agent_thinking",
-    }
+    assert rows == []
 
 
 def test_published_partial_unique_index_covers_null_workspace() -> None:

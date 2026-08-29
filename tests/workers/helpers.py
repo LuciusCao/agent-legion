@@ -3,10 +3,10 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+from server.app.configuration.executor_runtime import ExecutorRuntimeConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.runtime import ExecutionRuntime
-from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.settings import Settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -87,7 +87,6 @@ def _make_worker(
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
             "workflows": {"enabled": True},
-            "openclaw": {"command_template": ["openclaw"]},
             "code_capacity": 2,
         }
     )
@@ -97,7 +96,7 @@ def _make_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._scan_entries = scan_entries(*definitions)
+    worker.state.scan_entries = scan_entries(*definitions)
     return worker
 
 

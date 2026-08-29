@@ -9,14 +9,12 @@ on:
     # on the trunk branches only so a merge does not burn a second full gate.
     branches: [main, master]
     paths-ignore: ['docs/**', '**/*.md', 'LICENSE']
-  # Weekly run: the only scheduled trigger, and it runs ONLY the nightly-e2e
-  # stress and ci-extended jobs — the changes job turns every regular lane
-  # off on schedule events (the full gate already ran on the push/PR that
-  # produced this code). Weekly, not nightly, to fit the Actions minutes
-  # budget.
-  schedule:
-    - cron: '23 3 * * 1'
   workflow_dispatch:
+  # The weekly schedule moved to nightly-gate.yml (issue #193): the stress
+  # jobs never run on PR/push anyway, and a scheduled run on a trunk ref
+  # shared this file's concurrency group, so it could cancel an in-flight
+  # push gate for the same ref. Dispatch here runs the regular lanes only;
+  # dispatch nightly-gate.yml for the stress jobs.
 
 concurrency:
   group: quality-gate-${{ github.ref }}
@@ -26,30 +24,23 @@ env:
   # Gate scripts default UV_CACHE_DIR to the in-project .uv-cache; point it back
   # at the default location so astral-sh/setup-uv caching covers it.
   UV_CACHE_DIR: /home/runner/.cache/uv
-  # Fresh per-run databases on the service container below. export_openapi's
-  # create_app writes worker_control_state at startup, so the backend-postgres
-  # job (which hosts the api:check contract step) needs a live database.
+  # Fresh per-run databases on the service containers below. export_openapi's
+  # create_app writes worker_control_state at startup, so the api-check job
+  # (which hosts the api:check contract step) needs a live database.
   AGENT_LEGION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/agent_legion_ci
   AGENT_LEGION_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/agent_legion_test_ci
-  # check-skills-shared.py compares skill repos at machine-local paths
-  # (~/.agents/skills/...) that only exist on maintainer machines.
-  AGENT_LEGION_SKIP_SKILLS_SHARED_CHECK: "1"
-  # agent_workers.register_token_file points at the gitignored
-  # deploy/secrets/; a dummy inline token keeps settings from
-  # reading the absent file. Not a real secret — CI-only placeholder.
-  AGENT_LEGION_WORKER_REGISTER_TOKEN: ci-only-dummy-register-token
+  # The global worker register token was retired (issue #35): registration
+  # uses scoped tokens and settings fails fast on this variable, so CI must
+  # not inject it anymore.
 
 jobs:
   # Lane detection (Actions minutes cost control): push/PR runs narrow the
   # gate by changed paths, mirroring the local pre-push lane policy —
-  # frontend-only changes skip the backend pytest shards (postgres-a still
-  # runs api:check), velites-only changes run just the rust job, docs-only
-  # changes skip the gate entirely. Shared files (config, scripts, tests,
+  # frontend-only changes skip the backend pytest shards (api-check still
+  # runs), velites-only changes run just the rust job, docs-only changes
+  # skip the gate entirely. Shared files (config, scripts, tests,
   # workflows, anything outside frontend//velites//docs/) run the full
-  # backend+frontend gate; dispatch runs always get every lane. Schedule
-  # (weekly) runs get NO regular lane — the full gate already ran on the
-  # push/PR that produced this code, and the schedule exists only for the
-  # nightly-e2e / ci-extended jobs at the bottom of this file.
+  # backend+frontend gate; dispatch runs always get every lane.
   changes:
     name: changes
     runs-on: ubuntu-latest
@@ -61,7 +52,6 @@ jobs:
       docker: ${{ steps.filter.outputs.docker }}
     steps:
       - uses: actions/checkout@v4
-        if: github.event_name == 'push' || github.event_name == 'pull_request'
         with:
           fetch-depth: 0
 
@@ -79,13 +69,8 @@ jobs:
           elif [ "$EVENT_NAME" = "push" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ]; then
             base="$PUSH_BEFORE"
           fi
-          # Weekly schedule: turn every regular lane off. The trigger exists
-          # only for the nightly-e2e / ci-extended jobs; the full gate
-          # already ran on the push/PR that produced this code.
-          if [ "$EVENT_NAME" = "schedule" ]; then
-            backend=false; frontend=false; rust=false; docker=false
           # No usable base (dispatch, brand-new branch): full gate.
-          elif [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
+          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
             backend=false; frontend=false; rust=false; docker=false
             while IFS= read -r f; do
               case "$f" in
@@ -107,17 +92,11 @@ jobs:
   # Backend is sharded by database dependency (test architecture plan, Phase
   # 5C): backend-unit runs the static checks and the PostgreSQL-offline unit
   # tier with no service container, while the postgres side (Phase 5C-2/5C-3)
-  # is split into three parallel jobs. backend-postgres-a hosts the api:check
-  # contract step (Python env + Postgres + node_modules) and postgres tier
-  # shard 1/3, then waits for the peer shards' coverage artifacts, downloads
-  # every shard's coverage artifact, merges them via `coverage combine`, and
-  # enforces the 85% floor once — the same combined-coverage semantics the
-  # single job previously got from AGENT_LEGION_COV_APPEND. backend-postgres-b
-  # runs shard 2/3 plus the full-gate layer; backend-postgres-c runs shard
-  # 3/3. Both upload coverage + telemetry as 1-day artifacts. Sharding is a
-  # deterministic md5(nodeid) % 3 collection filter
-  # (scripts/pytest_gate_shard.py, GATE_SHARD=i/n), so the three shards
-  # partition the tier with no overlap.
+  # runs as the three-shard backend-postgres matrix job below. backend-coverage
+  # merges every shard's coverage artifact and enforces the 85% floor once
+  # (issue #193: this used to be the aggregator half of backend-postgres-a,
+  # which polled `gh api` for peer artifacts — the needs-DAG makes the merge
+  # event-driven instead).
   backend-unit:
     name: backend-unit
     needs: changes
@@ -125,7 +104,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Full history for the backend static round: budget_monotonicity
+      # compares ceilings against HEAD^ and hard-fails when the anchor does
+      # not resolve — a depth-1 clone would red the job on every run. Deep
+      # history keeps the anchors resolvable (codex review on PR #231);
+      # changes already fetches depth 0.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@v5
         with:
@@ -136,6 +122,13 @@ jobs:
 
       - name: Backend static checks
         run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
+        env:
+          # Release train only (develop→main): main's budget floors lag a
+          # whole release cycle behind develop's already-gated evolution, so
+          # the monotonicity guard anchors on HEAD alone (every raise passed
+          # the guard when its PR landed on develop). Feature→develop PRs
+          # keep the HEAD^ base anchor at full strictness.
+          AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN: ${{ github.base_ref == 'main' && github.head_ref == 'develop' && '1' || '0' }}
 
       - name: Backend unit tests (PostgreSQL offline)
         run: |
@@ -150,7 +143,7 @@ jobs:
 
       # Artifacts carry only data files (coverage data = paths + line counts,
       # no source; JUnit/rerun telemetry), retention 1 day per the repository
-      # artifact policy. backend-postgres-a downloads them for the combined
+      # artifact policy. backend-coverage downloads them for the combined
       # coverage floor and the aggregate summary.
       - name: Upload unit shard coverage data
         if: always()
@@ -182,21 +175,20 @@ jobs:
             --output test-results/backend-unit-summary.md
           cat test-results/backend-unit-summary.md >> "$GITHUB_STEP_SUMMARY"
 
-  # Aggregator shard: hosts api:check (needs node_modules) and postgres tier
-  # shard 1/3, then merges all coverage shards and enforces the 85% floor.
-  backend-postgres-a:
-    name: backend-postgres-a
+  # API contract + worker UI lane (issue #193): api:check boots create_app to
+  # export the OpenAPI schema (Python env + live Postgres) and regenerates
+  # the frontend API types from frontend/node_modules, so it used to live in
+  # backend-postgres-a and dragged a heavy postgres-test job along on every
+  # frontend-only PR. As its own job it runs on the frontend lane too, with
+  # no test shard, no bubblewrap, and no coverage bookkeeping. It also hosts
+  # the worker UI tests: worker/ui has no build step and its node:test suite
+  # needs Node 22, which no other backend-lane job installs.
+  api-check:
+    name: api-check
     needs: changes
-    # Runs on the frontend lane too: it hosts api:check. The backend-test
-    # steps inside are gated individually on the backend lane.
     if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    # actions: read lets the pre-merge step poll this run's artifact list via
-    # `gh api`; contents: read is the checkout baseline.
-    permissions:
-      actions: read
-      contents: read
+    timeout-minutes: 10
     services:
       postgres:
         image: postgres:17
@@ -234,6 +226,65 @@ jobs:
       - run: npm ci
         working-directory: frontend
 
+      - name: API contract check
+        run: FRONTEND_GATE_PHASE=api-contract ./scripts/check-quick-frontend.sh
+
+      # Backend lane only: the worker UI suite is a backend artifact.
+      - name: Worker UI tests
+        if: needs.changes.outputs.backend == 'true'
+        run: node --test worker/ui/app.test.mjs
+
+  # Postgres test tier (test architecture plan, Phase 5C-2/5C-3): the three
+  # hash shards (deterministic md5(nodeid) % 3 collection filter,
+  # scripts/pytest_gate_shard.py, GATE_SHARD=i/n — the shards partition the
+  # tier with no overlap) run as one matrix job, so the service container
+  # and setup steps are declared once instead of pasted per shard
+  # (issue #193). Shard b additionally runs the velites sandbox integration
+  # check and the full-gate (tests/full) evidence layer. Every shard
+  # uploads coverage + telemetry as 1-day artifacts; backend-coverage
+  # merges them after the needs-DAG guarantees all shards finished — no
+  # artifact polling. fail-fast stays off so a failing shard does not
+  # cancel its peers' evidence.
+  backend-postgres:
+    name: backend-postgres-${{ matrix.shard }}
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: a
+            gate_shard: 1/3
+          - shard: b
+            gate_shard: 2/3
+          - shard: c
+            gate_shard: 3/3
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agent_legion_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
       # velites' Linux filesystem sandbox (EXEC-HARNESS-SANDBOX-001) is
       # fail-closed: the postgres tier's velites sandbox tests need a real
       # bubblewrap binary on the runner. Ubuntu 24.04 restricts unprivileged
@@ -244,109 +295,189 @@ jobs:
           sudo apt-get update && sudo apt-get install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-      # api:check boots create_app to export the OpenAPI schema, so it lives
-      # in this job (Python env + Postgres) instead of backend-unit or the
-      # frontend jobs.
-      - name: API contract check
-        run: FRONTEND_GATE_PHASE=api-contract ./scripts/check-quick-frontend.sh
+      # Shard b only: run the real namespace + Python-child integration
+      # before the long coverage shard. Inside the hash shard the test
+      # self-skips so it is not repeated after hundreds of
+      # coverage-instrumented tests.
+      - name: Velites sandbox integration
+        if: matrix.shard == 'b'
+        run: >-
+          uv run pytest -q
+          tests/workers/test_workflow_worker_thread_local.py::test_make_workflow_worker_runs_demo_intake_local_node
+        env:
+          TMPDIR: /var/tmp
 
-      # worker/ui has no build step; its node:test suite runs locally inside
-      # check-quick-backend.sh, but the backend-unit job has no Node, so CI
-      # runs it here where setup-node already provides Node 22.
-      - name: Worker UI tests
-        if: needs.changes.outputs.backend == 'true'
-        run: node --test worker/ui/app.test.mjs
-
-      - name: Backend PostgreSQL tests (shard 1/3)
-        if: needs.changes.outputs.backend == 'true'
+      - name: Backend PostgreSQL tests (shard ${{ matrix.gate_shard }})
         run: |
           mkdir -p coverage-data
           BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
         env:
           AGENT_LEGION_COV: "1"
           AGENT_LEGION_TEST_RESULTS_DIR: test-results
-          AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-a
-          COVERAGE_FILE: coverage-data/backend-postgres-a.coverage
+          AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-${{ matrix.shard }}
+          COVERAGE_FILE: coverage-data/backend-postgres-${{ matrix.shard }}.coverage
           GATE_TIER: postgres
-          GATE_SHARD: 1/3
+          GATE_SHARD: ${{ matrix.gate_shard }}
 
-      # Peer shards upload coverage only after their pytest run; under load
-      # the aggregator can reach the merge first (5C-2 race, run
-      # 30811145691). Poll until all shard coverage artifacts exist (40 x 15s
-      # = 10 min cap, then fail); the explicit download steps below stay the
-      # fail-fast guard. backend-unit (~2.6 min) almost always lands first,
-      # but runner queuing is not a guarantee, so it is polled too (codex
-      # review on PR #25).
-      - name: Wait for peer shard coverage artifacts
-        if: needs.changes.outputs.backend == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Shard b only. Like the tier shards, the full gate writes its own
+      # COVERAGE_FILE, so it must not enforce the 85% floor on partial data
+      # (--cov-fail-under=0); the combined report in backend-coverage
+      # enforces it once.
+      - name: Full gate evidence (tests/full)
+        if: matrix.shard == 'b'
         run: |
-          for attempt in $(seq 1 40); do
-            missing=0
-            for name in backend-unit-coverage backend-postgres-b-coverage backend-postgres-c-coverage; do
-              count=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?name=${name}" --jq '.total_count')
-              [[ "$count" -ge 1 ]] || missing=1
-            done
-            [[ "$missing" -eq 0 ]] && exit 0
-            sleep 15
-          done
-          echo "peer coverage artifacts did not appear within 10 minutes" >&2
-          exit 1
+          mkdir -p coverage-data test-results
+          uv run pytest -q tests/full -m full_gate \
+            --durations=30 \
+            --junitxml=test-results/backend-full-junit.xml \
+            -p scripts.pytest_telemetry \
+            --cov=server --cov-report= --cov-append \
+            --cov-fail-under=0
+        env:
+          AGENT_LEGION_RERUN_REPORT: test-results/backend-full-reruns.json
+          COVERAGE_FILE: coverage-data/backend-full.coverage
 
-      # backend-unit (~3 min) and the postgres peer shards finish long before
-      # this job reaches the merge, so their artifacts are always available
-      # here (the wait step above guarantees it). If a shard failed before
-      # uploading, failing this step keeps the gate red instead of computing
-      # the floor on partial coverage data.
+      # Artifacts carry only data files (coverage data = paths + line counts,
+      # no source; JUnit/rerun telemetry), retention 1 day per the repository
+      # artifact policy. backend-coverage downloads them for the combined
+      # coverage floor and the aggregate summary; a missing upload fails the
+      # corresponding download step there, keeping the gate red.
+      - name: Upload shard coverage data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-postgres-${{ matrix.shard }}-coverage
+          path: coverage-data/backend-postgres-${{ matrix.shard }}.coverage
+          retention-days: 1
+
+      - name: Upload full-gate coverage data
+        if: always() && matrix.shard == 'b'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-full-coverage
+          path: coverage-data/backend-full.coverage
+          retention-days: 1
+
+      - name: Upload shard test telemetry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-postgres-${{ matrix.shard }}-telemetry
+          path: |
+            test-results/backend-postgres-${{ matrix.shard }}-junit.xml
+            test-results/backend-postgres-${{ matrix.shard }}-reruns.json
+          retention-days: 1
+
+      - name: Upload full-gate test telemetry
+        if: always() && matrix.shard == 'b'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-full-telemetry
+          path: |
+            test-results/backend-full-junit.xml
+            test-results/backend-full-reruns.json
+          retention-days: 1
+
+  # Combined coverage floor + aggregate backend evidence (issue #193): the
+  # needs-DAG guarantees backend-unit and every backend-postgres shard
+  # finished before this job starts, replacing the old 40x15s `gh api`
+  # artifact poll (5C-2 race workaround) with an event-driven merge. The
+  # floor is only computed on complete data — a failed shard keeps the gate
+  # red through its own check — while the summary step always runs and
+  # lists any missing evidence files.
+  backend-coverage:
+    name: backend-coverage
+    needs: [changes, backend-unit, backend-postgres]
+    if: always() && needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
+      # Uploads are `if: always()`, so the artifacts exist even when a shard
+      # failed after running pytest; a shard that died before uploading
+      # fails its upload step, and the missing artifact fails this download
+      # step instead of computing the floor on partial coverage data.
       - name: Download unit shard coverage data
-        if: needs.changes.outputs.backend == 'true'
         uses: actions/download-artifact@v4
         with:
           name: backend-unit-coverage
           path: coverage-data
 
+      - name: Download postgres shard A coverage data
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-postgres-a-coverage
+          path: coverage-data
+
       - name: Download postgres shard B coverage data
-        if: needs.changes.outputs.backend == 'true'
         uses: actions/download-artifact@v4
         with:
           name: backend-postgres-b-coverage
           path: coverage-data
 
       - name: Download postgres shard C coverage data
-        if: needs.changes.outputs.backend == 'true'
         uses: actions/download-artifact@v4
         with:
           name: backend-postgres-c-coverage
           path: coverage-data
 
+      - name: Download full-gate coverage data
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-full-coverage
+          path: coverage-data
+
       - name: Download unit shard test telemetry
-        if: always() && needs.changes.outputs.backend == 'true'
+        if: always()
         uses: actions/download-artifact@v4
         with:
           name: backend-unit-telemetry
           path: test-results
 
+      - name: Download postgres shard A test telemetry
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-postgres-a-telemetry
+          path: test-results
+
       - name: Download postgres shard B test telemetry
-        if: always() && needs.changes.outputs.backend == 'true'
+        if: always()
         uses: actions/download-artifact@v4
         with:
           name: backend-postgres-b-telemetry
           path: test-results
 
       - name: Download postgres shard C test telemetry
-        if: always() && needs.changes.outputs.backend == 'true'
+        if: always()
         uses: actions/download-artifact@v4
         with:
           name: backend-postgres-c-telemetry
           path: test-results
 
+      - name: Download full-gate test telemetry
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-full-telemetry
+          path: test-results
+
       # Merging the shard data files replaces the old single-job
       # AGENT_LEGION_COV_APPEND flow; `coverage report` enforces the 85% floor
       # (pyproject [tool.coverage.report] fail_under) once, against the
-      # combined data, exactly as before.
+      # combined data, exactly as before. Only computed when every producer
+      # succeeded — a failed shard keeps the gate red through its own check,
+      # and partial data would silently drop lines from the floor.
       - name: Combined coverage report
-        if: needs.changes.outputs.backend == 'true'
+        if: needs.backend-unit.result == 'success' && needs.backend-postgres.result == 'success'
         run: |
           for shard in coverage-data/*.coverage; do
             cp "$shard" ".coverage.$(basename "$shard" .coverage)"
@@ -357,9 +488,10 @@ jobs:
       # Only aggregate counts go to the persistent job summary. Raw JUnit and
       # coverage files stay off the persistent record: the unit and shard-B
       # copies are 1-day artifacts, everything else remains ephemeral on the
-      # runner.
+      # runner. summarize_test_results.py lists missing evidence files
+      # instead of failing, so this runs even when a shard failed.
       - name: Backend test summary
-        if: always() && needs.changes.outputs.backend == 'true'
+        if: always()
         env:
           AGENT_LEGION_COV: "1"
         run: |
@@ -378,185 +510,13 @@ jobs:
             --output test-results/backend-summary.md
           cat test-results/backend-summary.md >> "$GITHUB_STEP_SUMMARY"
 
-  # Second postgres shard plus the full-gate layer. No node/npm: tests/full
-  # does not touch frontend build artifacts. bwrap stays because the
-  # tests/full velites e2e needs the fail-closed sandbox backend.
-  backend-postgres-b:
-    name: backend-postgres-b
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: agent_legion_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          python-version: "3.13"
-
-      - run: uv sync
-
-      - name: Install bubblewrap (velites sandbox backend)
-        run: |
-          sudo apt-get update && sudo apt-get install -y bubblewrap
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-
-      # Run the real namespace + Python-child integration before the long
-      # coverage shard. Inside the hash shard the test self-skips so it is
-      # not repeated after hundreds of coverage-instrumented tests.
-      - name: Velites sandbox integration
-        run: >-
-          uv run pytest -q
-          tests/workers/test_workflow_worker_thread_local.py::test_make_workflow_worker_runs_demo_intake_local_node
-        env:
-          TMPDIR: /var/tmp
-
-      - name: Backend PostgreSQL tests (shard 2/3)
-        run: |
-          mkdir -p coverage-data
-          BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
-        env:
-          AGENT_LEGION_COV: "1"
-          AGENT_LEGION_TEST_RESULTS_DIR: test-results
-          AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-b
-          COVERAGE_FILE: coverage-data/backend-postgres-b.coverage
-          GATE_TIER: postgres
-          GATE_SHARD: 2/3
-
-      # Like the tier shards, the full gate writes its own COVERAGE_FILE, so
-      # it must not enforce the 85% floor on partial data
-      # (--cov-fail-under=0); the combined report in backend-postgres-a
-      # enforces it once.
-      - name: Full gate evidence (tests/full)
-        run: |
-          mkdir -p coverage-data test-results
-          uv run pytest -q tests/full -m full_gate \
-            --durations=30 \
-            --junitxml=test-results/backend-full-junit.xml \
-            -p scripts.pytest_telemetry \
-            --cov=server --cov-report= --cov-append \
-            --cov-fail-under=0
-        env:
-          AGENT_LEGION_RERUN_REPORT: test-results/backend-full-reruns.json
-          COVERAGE_FILE: coverage-data/backend-full.coverage
-
-      # Artifacts carry only data files (coverage data = paths + line counts,
-      # no source; JUnit/rerun telemetry), retention 1 day per the repository
-      # artifact policy. backend-postgres-a downloads them for the combined
-      # coverage floor and the aggregate summary; a missing upload fails the
-      # corresponding download step there, keeping the gate red.
-      - name: Upload postgres shard B coverage data
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-postgres-b-coverage
-          path: |
-            coverage-data/backend-postgres-b.coverage
-            coverage-data/backend-full.coverage
-          retention-days: 1
-
-      - name: Upload postgres shard B test telemetry
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-postgres-b-telemetry
-          path: |
-            test-results/backend-postgres-b-junit.xml
-            test-results/backend-postgres-b-reruns.json
-            test-results/backend-full-junit.xml
-            test-results/backend-full-reruns.json
-          retention-days: 1
-
-  # Third postgres shard, nothing else. No node/npm; bwrap is installed for
-  # uniformity with the other shards even though the tier's only
-  # bwrap-dependent tests live in the unit tier / tests/full.
-  backend-postgres-c:
-    name: backend-postgres-c
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: agent_legion_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          python-version: "3.13"
-
-      - run: uv sync
-
-      - name: Install bubblewrap (velites sandbox backend)
-        run: |
-          sudo apt-get update && sudo apt-get install -y bubblewrap
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-
-      - name: Backend PostgreSQL tests (shard 3/3)
-        run: |
-          mkdir -p coverage-data
-          BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
-        env:
-          AGENT_LEGION_COV: "1"
-          AGENT_LEGION_TEST_RESULTS_DIR: test-results
-          AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-c
-          COVERAGE_FILE: coverage-data/backend-postgres-c.coverage
-          GATE_TIER: postgres
-          GATE_SHARD: 3/3
-
-      - name: Upload postgres shard C coverage data
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-postgres-c-coverage
-          path: coverage-data/backend-postgres-c.coverage
-          retention-days: 1
-
-      - name: Upload postgres shard C test telemetry
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-postgres-c-telemetry
-          path: |
-            test-results/backend-postgres-c-junit.xml
-            test-results/backend-postgres-c-reruns.json
-          retention-days: 1
-
   # Frontend is sharded into the two Vitest projects (test architecture plan,
   # Phase 5B): pure logic tests (node) and component tests (jsdom) run as
   # parallel jobs, each emitting a blob report that embeds raw V8 coverage.
   # frontend-coverage then merges the blobs and enforces the global coverage
   # thresholds + inventory once, against the combined data. The OpenAPI
-  # contract check lives in the backend-postgres-a job (Phase 5A/5C), so these
-  # jobs need neither Python nor Postgres.
+  # contract check lives in the api-check job (Phase 5A/5C), so these jobs
+  # need neither Python nor Postgres.
   frontend-logic:
     name: frontend-logic
     needs: changes
@@ -575,7 +535,7 @@ jobs:
       - run: npm ci
         working-directory: frontend
 
-      # FRONTEND_API_CHECK=0: the contract check runs in the backend-postgres-a job.
+      # FRONTEND_API_CHECK=0: the contract check runs in the api-check job.
       - name: Frontend static checks
         run: FRONTEND_GATE_PHASE=static FRONTEND_TEST_MODE=coverage FRONTEND_API_CHECK=0 ./scripts/check-quick-frontend.sh
 
@@ -714,16 +674,27 @@ jobs:
         working-directory: frontend
 
   # Deterministic Chromium smoke (test architecture plan, Phase 4): real
-  # backend + vite preview + Playwright, offline via the in-process CMS stub
-  # and a dedicated E2E database. Cold start stays well under the 3-minute
-  # budget; failure evidence (trace/screenshot/backend log) uploads only on
-  # failure with a short retention.
+  # backend + vite preview + Playwright, offline via the in-process CMS stub,
+  # an in-process stub LLM gateway (velites Agent node) and a dedicated E2E
+  # database; a standalone Worker process claims the Agent execution. The
+  # main-flow spec needs the velites binary (Host code sandbox + Worker
+  # runtime), so this job builds it like the rust lane does. Failure evidence
+  # (trace/screenshot/backend log) uploads only on failure with a short
+  # retention.
   e2e-smoke:
     name: e2e-smoke
     needs: changes
-    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+    # rust too: the main-flow spec depends on the velites binary and its
+    # models registry schema, so velites-only changes must still run this job
+    # (without widening them to the full backend+frontend gate).
+    if: >-
+      needs.changes.outputs.backend == 'true' ||
+      needs.changes.outputs.frontend == 'true' ||
+      needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25 min: covers a cold velites release build when the shared rust-cache
+    # misses (warm runs finish in a few minutes).
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:17
@@ -757,6 +728,28 @@ jobs:
       - run: npm ci
         working-directory: frontend
 
+      # velites binary: the main-flow spec's Host code sandbox and the
+      # standalone Worker's agent runtime are both fail-closed without it
+      # (the runner builds it via scripts/ensure-velites.sh --dest data/bin).
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: velites
+          # One shared cache across the rust lane and both e2e jobs: the e2e
+          # jobs build the same velites release binary, so they warm-start
+          # from the rust lane's cache instead of a ~14min cold build.
+          shared-key: velites
+
+      # velites sandbox backend for Host-side code nodes (sandbox wrap). It is
+      # fail-closed, and Ubuntu 24.04 restricts unprivileged userns via
+      # AppArmor (current bubblewrap has no setuid mode), so the disposable
+      # CI VM must explicitly enable userns — same as the other lanes.
+      - name: Install bubblewrap (velites sandbox backend)
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       # Browser binaries cache: a cold download stalled for 41 minutes once
       # (run 30816362118, FLAKY-004) and ate the whole nightly budget.
       - name: Cache Playwright browsers
@@ -782,89 +775,6 @@ jobs:
           path: frontend/e2e-results/
           retention-days: 5
 
-  # Weekly workspace stress + multi-browser smoke (test architecture plan,
-  # Phase 4C). The stress step runs the existing five-minute scenario against
-  # a real backend and uploads report.md + frontend-metrics.json for
-  # diagnostics; the smoke step re-runs the deterministic browser suite on
-  # Firefox/WebKit as well (PR/push stays Chromium-only via E2E_BROWSERS).
-  # Stress profile rationale: 50 agents / 2000 jobs / 300s at 200 events/s
-  # keeps the page under live SSE traffic long enough for stable click
-  # latency / long task / memory samples while the whole job stays well
-  # under the 45-minute timeout (local 5-agent/60s validation: ~95s total).
-  nightly-e2e:
-    name: nightly-e2e
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: agent_legion_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          python-version: "3.13"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - run: uv sync
-
-      - run: npm ci
-        working-directory: frontend
-
-      # Browser binaries cache: a cold download stalled for 41 minutes once
-      # (run 30816362118, FLAKY-004) and ate the whole nightly budget.
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium firefox webkit
-        working-directory: frontend
-
-      - name: Multi-browser smoke E2E
-        run: uv run python scripts/e2e/run_browser_smoke.py
-        env:
-          AGENT_LEGION_E2E_ADMIN_DSN: postgresql://postgres:postgres@127.0.0.1:5432/postgres
-          E2E_BROWSERS: chromium,firefox,webkit
-
-      - name: Workspace stress run
-        run: >-
-          uv run python scripts/stress/run_e2e_stress.py
-          --agents 50 --jobs 2000 --duration 300 --event-rate 200
-        env:
-          # Shared runners hiccup under load: allow occasional probe timeouts
-          # while the p95 click-latency assertion still guards regressions.
-          STRESS_PROBE_TIMEOUT_MS: "5000"
-          STRESS_MAX_PROBE_ERRORS: "3"
-
-      - name: Upload stress report and metrics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nightly-stress-${{ github.run_id }}
-          path: stress-results/
-          retention-days: 14
-
   rust:
     name: rust
     needs: changes
@@ -882,6 +792,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: velites
+          # One shared cache across the rust lane and both e2e jobs: the e2e
+          # jobs build the same velites release binary, so they warm-start
+          # from the rust lane's cache instead of a ~14min cold build.
+          shared-key: velites
 
       # Enables the bwrap-gated sandbox integration tests in cargo test.
       # Ubuntu 24.04 restricts unprivileged userns via AppArmor; enable it on
@@ -950,73 +864,3 @@ jobs:
           push: false
           cache-from: type=gha,scope=worker
           cache-to: type=gha,mode=max,scope=worker
-
-  ci-extended:
-    name: ci-extended
-    # Repeated stress scenarios; too slow for the PR/push loop. Runs weekly
-    # (schedule) and on manual dispatch, replacing the old per-push policy.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          # api:check's create_app connects to AGENT_LEGION_DATABASE_URL; the
-          # service only auto-creates POSTGRES_DB (tests create their own).
-          POSTGRES_DB: agent_legion_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          python-version: "3.13"
-
-      - run: uv sync
-
-      # --reruns 1 matches the tier gates and is what makes the flaky
-      # governance below meaningful: registered flakes get one retry and
-      # land in the rerun report; without it a flake fails outright and the
-      # report is always empty (codex review on PR #25).
-      - name: CI extended architecture evidence
-        run: |
-          mkdir -p test-results
-          uv run pytest -q tests/ci -m ci_extended \
-            --durations=30 \
-            --junitxml=test-results/ci-extended-junit.xml \
-            --reruns 1 \
-            --reruns-delay 2 \
-            -p scripts.pytest_telemetry
-        env:
-          AGENT_LEGION_RERUN_REPORT: test-results/ci-extended-reruns.json
-
-      - name: CI extended test summary
-        if: always()
-        env:
-          AGENT_LEGION_COV: "0"
-        run: |
-          uv run python scripts/summarize_test_results.py \
-            --title "CI extended test evidence" \
-            --junit test-results/ci-extended-junit.xml \
-            --rerun-report test-results/ci-extended-reruns.json \
-            --output test-results/ci-extended-summary.md
-          cat test-results/ci-extended-summary.md >> "$GITHUB_STEP_SUMMARY"
-
-      # Flaky governance (test architecture plan, Phase 5D): reruns are fine
-      # only for nodeids registered in tests/flaky_registry.yaml with a live
-      # deadline. Schedule/dispatch-only; PR/push lanes never run this job.
-      - name: Fail on unregistered reruns
-        if: always()
-        run: >-
-          uv run python scripts/check_reruns.py
-          --rerun-report test-results/ci-extended-reruns.json

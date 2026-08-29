@@ -5,7 +5,7 @@ the Studio UI endpoints it mirrors; tool-only shapes live here.
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import server.app.routes.workflow_contracts as workflow_contracts
 from server.app.routes.workflow_node_code_contracts import WorkflowNodeCodeDraftRequest
@@ -24,6 +24,7 @@ class StudioAgentActiveWorkflowResponse(BaseModel):
 
 class StudioAgentNodeCodeDraftRequest(WorkflowNodeCodeDraftRequest):
     """``expected_capability``: validated for existing nodes (mismatch -> 400);
-    its presence authorizes a skeleton draft for a not-yet-published node."""
+    its presence authorizes a skeleton draft for a not-yet-published node.
+    ``min_length=1``: an empty string must not bypass the presence gate."""
 
-    expected_capability: str | None = None
+    expected_capability: str | None = Field(default=None, min_length=1)

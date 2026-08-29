@@ -6,11 +6,17 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from server.app.agent_control.register_token_workspace_removal import (
+    cascade_delete_workspace_register_tokens,
+)
 from server.app.jobs.node_limits import (
     get_workspace_node_limits,
     replace_workspace_node_limits,
 )
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.workspace_records import workspace_record as _workspace_record
+
+_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
 def _safe_identifier(value: str, fallback: str) -> str:
@@ -22,25 +28,7 @@ def _workspace_id(name: str) -> str:
     return _safe_identifier(name.lower(), "workspace")
 
 
-def _decode_json_object(value: Any) -> dict[str, Any]:
-    if not value:
-        return {}
-    try:
-        loaded = json.loads(str(value))
-    except json.JSONDecodeError:
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
-
-
-def _workspace_record(row: dict[str, Any]) -> dict[str, Any]:
-    record = dict(row)
-    record["resource_config"] = _decode_json_object(record.get("resource_config_json"))
-    record["intake_config"] = _decode_json_object(record.get("intake_config_json"))
-    record["node_config"] = _decode_json_object(record.get("node_config_json"))
-    return record
-
-
-class WorkspaceQueriesMixin(JobQueriesBase):
+class WorkspaceQueriesMixin(ConnectionQueriesMixin):
     jobs_dir: Path
 
     def create_workspace(
@@ -49,39 +37,57 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         default_workflow_key: str,
         resource_config: dict[str, Any] | None = None,
         default_entity: str = "question",
-        intake_config: dict[str, Any] | None = None,
         description: str = "",
+        workspace_id: str | None = None,
     ) -> dict[str, Any]:
+        """Create a workspace row.
+
+        ``workspace_id`` (schema v62) is the explicit caller-provided id; the
+        HTTP service layer always passes it equal to ``default_workflow_key``
+        (the id==key invariant lives there — this raw layer also serves test
+        fixtures and low-level seeders that build pre-v62 shapes). When
+        omitted the id is derived from the name with a dedup suffix.
+        """
         clean_name = name.strip()
         if not clean_name:
             raise ValueError("Workspace name is required")
-        # The workflow key slot may stay empty (schema v50): a blank-canvas
-        # workspace has no workflow until the first publish adopts one.
         clean_workflow_key = (default_workflow_key or "").strip()
+        if workspace_id is not None:
+            workspace_id = workspace_id.strip()
+            if workspace_id != clean_workflow_key:
+                raise ValueError("Workspace id must equal default_workflow_key (schema v62)")
+            if not _ID_PATTERN.match(workspace_id):
+                raise ValueError("Workspace id must match ^[a-z0-9][a-z0-9_-]{0,63}$ (schema v62)")
         resource_config_json = json.dumps(
             resource_config or {},
             ensure_ascii=False,
             sort_keys=True,
         )
         clean_entity = (default_entity or "question").strip() or "question"
-        intake_config_json = json.dumps(intake_config or {}, ensure_ascii=False, sort_keys=True)
         clean_description = (description or "").strip()
 
-        base_id = _workspace_id(clean_name)
         with self.connect() as conn:
-            workspace_id = base_id
-            suffix = 2
-            while conn.execute("select 1 from workspaces where id=%s", (workspace_id,)).fetchone():
-                workspace_id = f"{base_id}_{suffix}"
-                suffix += 1
+            if workspace_id is None:
+                workspace_id = _workspace_id(clean_name)
+                suffix = 2
+                while conn.execute(
+                    "select 1 from workspaces where id=%s", (workspace_id,)
+                ).fetchone():
+                    workspace_id = f"{workspace_id}_{suffix}"
+                    suffix += 1
+            elif (
+                conn.execute("select 1 from workspaces where id=%s", (workspace_id,)).fetchone()
+                is not None
+            ):
+                raise ValueError(f"Workspace id already exists: {workspace_id}")
 
             conn.execute(
                 """
                 insert into workspaces(
                   id, name, description, default_workflow_key, resource_config_json,
-                  default_entity, intake_config_json
+                  default_entity
                 )
-                values (%s, %s, %s, %s, %s, %s, %s)
+                values (%s, %s, %s, %s, %s, %s)
                 """,
                 (
                     workspace_id,
@@ -90,7 +96,6 @@ class WorkspaceQueriesMixin(JobQueriesBase):
                     clean_workflow_key,
                     resource_config_json,
                     clean_entity,
-                    intake_config_json,
                 ),
             )
             row = conn.execute("select * from workspaces where id=%s", (workspace_id,)).fetchone()
@@ -117,11 +122,8 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         default_workflow_key: str | None = None,
         resource_config: dict[str, Any] | None = None,
         default_entity: str | None = None,
-        intake_config: dict[str, Any] | None = None,
         node_config: dict[str, Any] | None = None,
-        default_agent_provider: str | None = None,
-        default_agent_model: str | None = None,
-        default_agent_thinking: str | None = None,
+        preview_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         fields: dict[str, Any] = {}
         if name is not None:
@@ -142,24 +144,18 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         if default_entity is not None:
             clean_entity = (default_entity or "question").strip() or "question"
             fields["default_entity"] = clean_entity
-        if intake_config is not None:
-            fields["intake_config_json"] = json.dumps(
-                intake_config,
-                ensure_ascii=False,
-                sort_keys=True,
-            )
         if node_config is not None:
             fields["node_config_json"] = json.dumps(
                 node_config,
                 ensure_ascii=False,
                 sort_keys=True,
             )
-        if default_agent_provider is not None:
-            fields["default_agent_provider"] = default_agent_provider.strip()
-        if default_agent_model is not None:
-            fields["default_agent_model"] = default_agent_model.strip()
-        if default_agent_thinking is not None:
-            fields["default_agent_thinking"] = default_agent_thinking.strip()
+        if preview_config is not None:
+            fields["preview_config_json"] = json.dumps(
+                preview_config,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
         if not fields:
             workspace = self.get_workspace(workspace_id)
             if workspace is None:
@@ -193,9 +189,11 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         default_workflow_key: str,
         default_entity: str,
         resource_config: dict[str, Any],
-        intake_config: dict[str, Any],
         node_limits: Sequence[Mapping[str, Any]] | None = None,
+        preview_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # preview_config 与其余字段同一事务写入（codex P1：分离的第二事务
+        # 会让 PUT 在瞬时故障时留下半应用状态）。None = 沿用已存值。
         clean_name = name.strip()
         if not clean_name:
             raise ValueError("Workspace name is required")
@@ -209,7 +207,8 @@ class WorkspaceQueriesMixin(JobQueriesBase):
                 """
                 update workspaces
                 set name=%s, description=%s, default_workflow_key=%s, default_entity=%s,
-                    resource_config_json=%s, intake_config_json=%s,
+                    resource_config_json=%s,
+                    preview_config_json=coalesce(%s, preview_config_json),
                     updated_at=current_timestamp
                 where id=%s
                 """,
@@ -219,7 +218,11 @@ class WorkspaceQueriesMixin(JobQueriesBase):
                     default_workflow_key,
                     default_entity,
                     json.dumps(resource_config, ensure_ascii=False, sort_keys=True),
-                    json.dumps(intake_config, ensure_ascii=False, sort_keys=True),
+                    (
+                        json.dumps(preview_config, ensure_ascii=False, sort_keys=True)
+                        if preview_config is not None
+                        else None
+                    ),
                     workspace_id,
                 ),
             )
@@ -241,6 +244,12 @@ class WorkspaceQueriesMixin(JobQueriesBase):
             ).fetchone()
             if running is not None:
                 raise ValueError("Cannot delete workspace with running jobs")
+            # The FK on agent_register_tokens.workspace_id is on delete
+            # cascade: without this per-key cascade the workspace's keys
+            # would vanish silently while bound Worker rows keep the dead
+            # workspace in their scope — and a same-name recreation reuses
+            # the slug id, instantly re-admitting those stale Workers.
+            cascade_delete_workspace_register_tokens(conn, workspace_id)
             conn.execute(
                 "delete from job_nodes where job_id in (select id from jobs where workspace_id = %s)",
                 (workspace_id,),

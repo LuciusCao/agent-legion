@@ -17,25 +17,10 @@ from __future__ import annotations
 import math
 import time
 
-from pydantic import BaseModel, ConfigDict, Field
-
-from server.app.agent_workers import CODE_PROTOCOL_VERSION, ONLINE_THRESHOLD_SECONDS
-from server.app.db.connection import DatabaseDsn
+from server.app.agent_control.registry import CODE_PROTOCOL_VERSION, ONLINE_THRESHOLD_SECONDS
+from server.app.configuration.executor_knobs import CodeStockConfig as CodeStockConfig
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
-
-
-class CodeStockConfig(BaseModel):
-    """Tuning for the code stockpile gate (``executor_runtime.code_stock``)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = True
-    # Fleet-capacity amplifier: a factor above 1 keeps a claimable buffer
-    # ahead of the fleet so Workers never poll a dry queue between passes.
-    factor: float = Field(default=1.5, gt=0)
-    min_stock: int = Field(default=8, ge=0)
-    max_stock: int = Field(default=256, ge=1)
-    refresh_seconds: float = Field(default=5.0, gt=0)
 
 
 class CodeStockGate:
@@ -46,7 +31,7 @@ class CodeStockGate:
     unique index stays the authoritative dedup.
     """
 
-    def __init__(self, database_dsn: DatabaseDsn, config: CodeStockConfig) -> None:
+    def __init__(self, database_dsn: ConnectSource, config: CodeStockConfig) -> None:
         self._dsn = database_dsn
         self._config = config
         self._loaded_at = 0.0

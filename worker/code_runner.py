@@ -7,27 +7,25 @@ claim-time-resolved secrets, no ``secret_config`` key) and the bundle carries
 ``server/app/agent_broker/code_dispatch.py`` builds both sides).
 
 The node code runs inside the velites OS sandbox exactly like the Host-side
-custom-code path: ``server/app/executors/_code_sandbox.py`` is the reference
-implementation; the argv/env/stdin-payload construction below is copied and
-adapted from it (Worker has no repo checkout, only the bundle snapshot), and
-both sides carry cross-referencing comments — keep them in sync.
+custom-code path; argv/env/read-roots/result parsing live in the shared
+``shared/code_sandbox.py`` module imported by both sides (the worker image
+ships worker/ + shared/, no repo checkout).
 
 Secret boundary (VAULT-SECRET-001 extended to the Worker): the resolved
 manifest lives only in memory and crosses into the child as a stdin pickle;
-nothing derived from ``config`` may touch disk or logs. Any future
-persistence must go through ``strip_secret_config`` first.
+nothing derived from ``config`` may touch disk or logs. The Host-side
+``split_manifest_config`` (server/app/agent_broker/code_dispatch.py) keeps
+secret-marked keys out of the dispatch manifest before it ever reaches the
+Worker.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import pickle
 import shutil
-import site
 import subprocess
-import sys
 import tarfile
 import threading
 from collections.abc import Mapping
@@ -35,30 +33,33 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+from shared.code_sandbox import (
+    AUTH_FAILURE_MARKER_PATH,
+    CODE_BUNDLE_NODE_FILE,
+    CODE_RESULT_LOG_MEMBER,
+    MAX_CONNECTION_KEY_CHARS,
+    build_sandbox_argv,
+    child_env,
+    read_result_error,
+)
 from shared.material_cache import MATERIALS_CACHE_DIRNAME
 from worker._atomic import atomic_write
 from worker.binary_resolution import resolve_binary
 from worker.bundle_io import download_input_artifacts, safe_extract_tree
+from worker.execution.pending import refuse_if_pending_upload
 from worker.material_fetch import materialize_claim_material
 from worker.process_lifecycle import AGENT_PGID_FILENAME, terminate, wait_for_exit
-from worker.upload_queue import UploadTask
+from worker.upload.queue import UploadTask
 
 if TYPE_CHECKING:
-    from worker.execution_heartbeat import ExecutionHeartbeat
-    from worker.host_client import Client
+    from worker.execution.heartbeat import ExecutionHeartbeat
+    from worker.host.client import Client
     from worker.status import ExecutionStatusReporter
 
-# Mirrors server/app/agent_broker/agent_bundle.py (worker image ships only
-# worker/ + shared/, so the constants are duplicated; keep in sync).
-CODE_BUNDLE_NODE_FILE = "node_code.py"
-CODE_BUNDLE_LIBS_DIR = "workspace_libs"
-CODE_RESULT_LOG_MEMBER = "node.log"
-# Mirrors workspace_libs/node_sdk.py NODE_RUNTIME_DIR / AUTH_FAILURE_MARKER.
-AUTH_FAILURE_MARKER_PATH = PurePosixPath(".node_runtime") / "auth_failure"
-# Sibling of server/app/executors/_code_sandbox.py _RESULT_BASENAME.
+# Where the sandboxed child writes its JSON result (sibling of the Host-side
+# .custom_node_result.json; deliberately a different filename so the two
+# paths cannot collide in shared tooling).
 RESULT_BASENAME = ".code_result.json"
-# Mirrors server/app/routes/agent_worker_results.py _MAX_CONNECTION_KEY_CHARS.
-MAX_CONNECTION_KEY_CHARS = 128
 
 _CANCEL_EVENTS: dict[str, threading.Event] = {}
 _CANCEL_LOCK = threading.Lock()
@@ -95,28 +96,6 @@ def cancel_executions(execution_ids: list[str]) -> int:
     return len(matched)
 
 
-def strip_secret_config(config: Mapping[str, Any], schema: Mapping[str, Any]) -> dict[str, Any]:
-    """Drop schema-secret keys and the injected connection block.
-
-    Mandatory filter before ANY disk/log persistence of config-derived data
-    (VAULT-SECRET-001 on the Worker). Counterpart of the Host-side
-    ``split_manifest_config`` in server/app/agent_broker/code_dispatch.py —
-    keep the key-selection rules in sync. The full resolved config may only
-    exist in memory and in the stdin payload to the child."""
-    raw_properties = schema.get("properties") if isinstance(schema, Mapping) else None
-    properties = raw_properties if isinstance(raw_properties, Mapping) else {}
-    secret_keys = {
-        key
-        for key, prop in properties.items()
-        if isinstance(prop, Mapping) and prop.get("secret", False)
-    }
-    return {
-        str(key): value
-        for key, value in config.items()
-        if key not in secret_keys and key != "connection_config"
-    }
-
-
 @dataclass(frozen=True)
 class PreparedCode:
     manifest: dict[str, Any]
@@ -143,6 +122,9 @@ def prepare_code_execution(
     extracted = execution_dir / "bundle"
     job_dir = execution_dir / "job"
     if execution_dir.exists():
+        # #203：marker 归属本 claim 的 lease 才拒绝（排队中的未投递结果）；
+        # 旧 lease 的孤儿 marker（report 必 409）随 stale 目录一起清掉。
+        refuse_if_pending_upload(execution_dir, claim)
         # Stale dir from a crashed run or a re-claimed execution: drop it.
         print(f"removing stale execution dir for {execution_id}", flush=True)
         shutil.rmtree(execution_dir, ignore_errors=True)
@@ -214,76 +196,6 @@ def build_child_payload(
     }
 
 
-def child_env(libs_root: Path) -> dict[str, str]:
-    """Minimal environment for the sandboxed child.
-
-    Copied/adapted from ``_code_sandbox.py::_child_env`` (keep in sync): the
-    Worker env's database DSNs, tokens and LLM keys stay out of the sandbox;
-    PYTHONPATH points at the bundle snapshot instead of a repo checkout."""
-    env: dict[str, str] = {}
-    # sandbox-exec/bwrap are spawned by name inside the wrapper.
-    if path := os.environ.get("PATH"):
-        env["PATH"] = path
-    for key in ("TMPDIR", "HOME"):
-        if value := os.environ.get(key):
-            env[key] = value
-    for key, value in os.environ.items():
-        if key == "LANG" or key.startswith("LC_"):
-            env[key] = value
-    python_paths = [str(libs_root), *(str(Path(p).resolve()) for p in site.getsitepackages())]
-    if python_path := os.environ.get("PYTHONPATH"):
-        python_paths.append(python_path)
-    env["PYTHONPATH"] = os.pathsep.join(python_paths)
-    return env
-
-
-def _read_roots(libs_root: Path, materials_cache_root: Path | None = None) -> list[str]:
-    """Read-only allowlist: the bundle snapshot plus interpreter prefixes.
-
-    Copied/adapted from ``_code_sandbox.py::_read_roots`` (keep in sync); the
-    Host side allow-lists repo subdirs, the Worker side only the extracted
-    bundle (node_code.py + workspace_libs) — nothing else of the Worker
-    filesystem is needed by node code. The materials cache root (design
-    §6.2) is the only material path node code may read: a static root,
-    never a per-material dynamic grant (MATERIAL-ACCESS-001)."""
-    roots = [str(libs_root)]
-    if materials_cache_root is not None and materials_cache_root.is_dir():
-        roots.append(str(materials_cache_root))
-    for prefix in {sys.prefix, sys.base_prefix}:
-        if prefix:
-            roots.append(str(Path(prefix).resolve()))
-    return roots
-
-
-def build_sandbox_argv(
-    velites: str,
-    job_dir: Path,
-    libs_root: Path,
-    result_path: Path,
-    *,
-    sandbox_network: bool,
-    materials_cache_root: Path | None = None,
-) -> list[str]:
-    """``velites sandbox wrap`` argv for one code node (EXEC-CODE-003).
-
-    Copied/adapted from ``_code_sandbox.py::execute_custom_sandboxed`` (keep
-    in sync): on the Worker every code execution — builtin or custom — goes
-    through the sandbox (batch 2 design §7.2)."""
-    command = [velites, "sandbox", "wrap", "--cwd", str(job_dir)]
-    for root in _read_roots(libs_root, materials_cache_root):
-        command += ["--allow-read", root]
-    if sandbox_network:
-        command.append("--allow-network")
-    command += [
-        "--",
-        str(Path(sys.executable).resolve()),
-        "-m",
-        "workspace_libs.code_child",
-        str(result_path),
-    ]
-    return command
-
-
 def read_auth_failure_key(job_dir: Path, manifest: dict[str, Any]) -> str:
     """Read the connection key a node recorded via ``report_auth_failure``.
 
@@ -304,29 +216,6 @@ def read_auth_failure_key(job_dir: Path, manifest: dict[str, Any]) -> str:
         if isinstance(config, Mapping):
             key = str(config.get("connection") or "").strip()
     return key[:MAX_CONNECTION_KEY_CHARS]
-
-
-def _read_result_error(result_path: Path) -> str | None:
-    """Parse the child's JSON result with a strict schema check.
-
-    Copied/adapted from ``_code_sandbox.py::_read_result`` (keep in sync):
-    None = the child reported success; any non-conforming content is a
-    failure — the file sits in a sandbox-writable directory and must never
-    be trusted blindly."""
-    try:
-        document = json.loads(result_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        document = None
-    if (
-        not isinstance(document, dict)
-        or set(document) != {"status", "message"}
-        or document["status"] not in ("ok", "error")
-        or not (document["message"] is None or isinstance(document["message"], str))
-    ):
-        return "sandboxed code node did not return a result"
-    if document["status"] == "error":
-        return str(document["message"])
-    return None
 
 
 def _outcome(
@@ -354,7 +243,7 @@ def _outcome(
                 f"code child exited before reading its payload ({type(write_error[0]).__name__})"
             ),
         }
-    result_error = _read_result_error(result_path)
+    result_error = read_result_error(result_path)
     if result_error is not None:
         return {"status": "failed", "error_message": result_error}
     missing = [name for name in expected_outputs if not (job_dir / PurePosixPath(name)).is_file()]
@@ -394,7 +283,7 @@ def execute_code(
 ) -> UploadTask | None:
     """Run one kind='code' claim sandboxed; None = lease lost (Host owns it).
 
-    Called from ``worker.execution_run.run_execution``'s kind branch, which
+    Called from ``worker.execution.run.run_execution``'s kind branch, which
     owns the shared post-exit tail (release-slot, heartbeat adoption, upload)."""
     execution_id = str(claim["execution_id"])
     job_dir = execution_dir / "job"
@@ -426,10 +315,11 @@ def execute_code(
         command = build_sandbox_argv(
             velites,
             job_dir,
-            prepared.libs_root,
+            [prepared.libs_root],
             result_path,
-            sandbox_network=bool(manifest.get("sandbox_network")),
+            sandbox_network=manifest.get("sandbox_network"),
             materials_cache_root=execution_dir.parent / MATERIALS_CACHE_DIRNAME,
+            marker=f"agent-legion-{execution_id}",
         )
         payload = pickle.dumps(
             build_child_payload(manifest, prepared.code_text, job_dir, materials=materials)
@@ -450,7 +340,9 @@ def execute_code(
             )
         finally:
             os.close(log_fd)
-        # executor 被 SIGKILL 时 supervisor 按此 killpg 兜底（同 agent 路径）。
+        # executor 被 SIGKILL 时 supervisor 经 orphan_reaper 兜底回收：argv 尾部
+        # 的 agent-legion-<execution_id> 标记让 reaper 能把进程组归属到本执行
+        # （同 agent 路径的 --name 注入，#186）。
         atomic_write(execution_dir / AGENT_PGID_FILENAME, str(proc.pid))
         heartbeat.proc_ref["proc"] = proc
         write_error: list[BaseException] = []
@@ -516,9 +408,10 @@ def prepare_code_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[st
     auth_failure = str(outcome.get("auth_failure_connection") or "").strip()
     if auth_failure:
         metadata["auth_failure_connection"] = auth_failure
-    # #160 D12：直传判定与 upload_queue._bulk_transfer 一致；直传时产物不
-    # 内嵌归档（字节走 presigned PUT），node.log 照常携带。
-    direct = bool(task.artifact_uploads) and all(name in task.artifact_uploads for name in outputs)
+    # #160 D12：直传判定与 upload_queue._bulk_transfer 一致（#201 收敛进
+    # UploadTask.is_direct_upload）；直传时产物不内嵌归档（字节走 presigned
+    # PUT），node.log 照常携带。
+    direct = task.is_direct_upload(outputs)
     with tarfile.open(archive, "w:gz") as tar:
         if not direct:
             for name in outputs:

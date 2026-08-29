@@ -4,7 +4,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from server.app import agent_catalog_builtin
+from server.app.agent_catalog import builtin as agent_catalog_builtin
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.workflow_revision_format import (
@@ -35,7 +35,7 @@ class WorkflowRevisionService:
         # #115 they are an audit record and the quality-replay pin source —
         # ordinary jobs dispatch the latest published code instead.
         pins = freeze_node_code_versions(
-            self.job_db.path,
+            self.job_db,
             self.custom_nodes_enabled,
             workspace_id,
             definition.key,
@@ -75,7 +75,7 @@ class WorkflowRevisionService:
         without a matching published Agent keep their handler/executor path.
         """
         by_capability: dict[str, list[str]] = {}
-        catalog = published_agent_definitions(self.job_db.path, workspace_id)
+        catalog = published_agent_definitions(self.job_db, workspace_id)
         for agent_id, agent_definition in catalog.items():
             by_capability.setdefault(agent_definition.capability, []).append(agent_id)
         routes: dict[str, str] = {}
@@ -105,9 +105,7 @@ class WorkflowRevisionService:
             # built-in demo workflow gets the factory agent templates
             # instantiated into its own catalog, seed-if-absent. Admin edits
             # inside the workspace are never overwritten.
-            agent_catalog_builtin.seed_demo_workspace_agent_definitions(
-                self.job_db.path, workspace_id
-            )
+            agent_catalog_builtin.seed_demo_workspace_agent_definitions(self.job_db, workspace_id)
         return self.publish_workspace_revision(workspace_id, definition)
 
     def reconcile_active_agent_routes(self) -> None:
@@ -124,7 +122,7 @@ class WorkflowRevisionService:
         for revision in self.job_db.list_active_workflow_revisions():
             workspace_id = str(revision["workspace_id"])
             workflow_key = str(revision["workflow_key"])
-            if not published_agent_definitions(self.job_db.path, workspace_id):
+            if not published_agent_definitions(self.job_db, workspace_id):
                 logger.warning(
                     "Agent route reconcile skipped for workspace %s workflow %s (revision %s): "
                     "no published Agent Definitions in the workspace; keeping existing routes",

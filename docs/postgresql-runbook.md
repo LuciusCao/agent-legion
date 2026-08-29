@@ -19,14 +19,60 @@ volume in place (the on-disk format is not compatible across majors).
 ## Local setup
 
 ```bash
-createdb agent_legion
-export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion
-uv run uvicorn server.app.main:app --reload
+createdb agent_legion_dev
+export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_dev
+uv run uvicorn server.app.main:create_prod_app --factory --reload
 ```
+
+Use a derived database name (as above), not the bare `agent_legion`:
+`init_db` refuses to initialize/migrate the bare shared name without
+`AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1` — that name is the code-default DSN
+a misdirected process (worktree script without .env) would silently resolve,
+and the refusal is the 2026-08-27 incident's structural fix. The prod
+launchers (`scripts/native-prod-up.sh`, `deploy/compose.host.yaml`) set the
+opt-in themselves; a manual `uvicorn` against the shared database must set
+it explicitly.
 
 The server creates the current schema under a PostgreSQL advisory migration
 lock. The configured role needs permission to connect and to create/alter
 objects in its application schema.
+
+Schema upgrades are per-version: `schema_migrations` records one row per
+registered version, and `init_db` only runs data migrations above
+`max(version)` (the DDL file still replays in full on upgrade — it is
+idempotent by construction). A database recorded at the current version is
+a no-op, including legacy single-row installs.
+
+## Dev-machine role isolation and worktree DB cleanup
+
+`DROP DATABASE` requires the database owner or a superuser. To make the
+routine cleanup path physically unable to drop the shared/prod database,
+dev machines should use two dedicated roles:
+
+```sql
+CREATE ROLE agent_legion_prod NOLOGIN;
+CREATE ROLE agent_legion_dev LOGIN CREATEDB;
+ALTER DATABASE agent_legion OWNER TO agent_legion_prod;
+-- and for every derived worktree database:
+ALTER DATABASE <agent_legion_worktree> OWNER TO agent_legion_dev;
+```
+
+- `agent_legion` (the code-default shared/prod database) is owned by the
+  NOLOGIN `agent_legion_prod` role; derived per-worktree databases
+  (`agent_legion_<worktree>` / `agent_legion_test_<worktree>`) belong to the
+  non-superuser `agent_legion_dev` role. `scripts/init-worktree.sh` and the
+  test bootstrap (`tests/postgres_support.py`) align ownership on creation
+  when the role exists.
+- Always remove a retired worktree's databases through
+  `scripts/drop-worktree-db.sh <worktree-name>`, never a bare `dropdb`. The
+  script derives the two database names from the worktree name (the bare
+  shared/prod name is unreachable by construction), connects as
+  `agent_legion_dev` when the role exists (PostgreSQL then rejects any drop
+  outside the derived set), and prints owner/size before asking for
+  confirmation.
+- Day-to-day superuser connections (such as the OS-user role) can still
+  drop anything — the guarantee covers the scripted routine path, not
+  deliberate superuser operations.
 
 ## Capacity for 200–300 agents
 

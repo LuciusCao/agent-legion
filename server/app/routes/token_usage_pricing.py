@@ -16,7 +16,7 @@ from server.app.settings import Settings
 def create_token_usage_pricing_router(job_queries, settings: Settings) -> APIRouter:
     """Admin endpoints managing the global token_usage pricing document."""
     router = APIRouter()
-    store = TokenUsagePricingStore(job_queries.path)
+    store = TokenUsagePricingStore(job_queries)
 
     @router.get(
         "/admin/token-usage-pricing",

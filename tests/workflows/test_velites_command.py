@@ -5,10 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from server.app.agent_broker.dispatch import resolve_execution_block
-from server.app.executors.runtime_config import PiRuntimeConfig
 from server.app.workflows.pi_protocol import (
     PROMPT_INSTRUCTION,
     build_command,
@@ -63,23 +61,6 @@ def _dispatch(manifest: dict) -> list[str]:
 
 def _execution(manifest: dict, **patch: object) -> dict:
     return {**manifest, "execution": {**MANIFEST["execution"], **patch}}
-
-
-def test_runtime_config_flavor_defaults_to_pi() -> None:
-    config = PiRuntimeConfig()
-    assert config.flavor == "pi"
-    assert config.binary == "pi"
-
-
-def test_runtime_config_velites_defaults_binary() -> None:
-    config = PiRuntimeConfig.model_validate({"flavor": "velites"})
-    assert config.flavor == "velites"
-    assert config.binary == "velites"
-
-
-def test_runtime_config_rejects_unknown_flavor() -> None:
-    with pytest.raises(ValidationError):
-        PiRuntimeConfig.model_validate({"flavor": "rust"})
 
 
 def test_velites_command_exact_argv() -> None:
@@ -199,15 +180,10 @@ def _node(provider: str = "", model: str = "", thinking: str = "") -> WorkflowNo
 
 
 @pytest.mark.no_db
-def test_resolve_execution_node_override_wins() -> None:
-    workspace = {
-        "default_agent_provider": "ws-provider",
-        "default_agent_model": "ws-model",
-        "default_agent_thinking": "high",
-    }
-    block = resolve_execution_block(
-        _node("node-provider", "node-model", "low"), workspace, "velites"
-    )
+def test_resolve_execution_node_values_win() -> None:
+    # schema v64：workspace 默认已退役，节点 execution（含 loader 合并的
+    # workflow 顶层默认）是唯一来源。
+    block = resolve_execution_block(_node("node-provider", "node-model", "low"), "velites")
     assert block == {
         "binary": "velites",
         "provider": "node-provider",
@@ -216,28 +192,25 @@ def test_resolve_execution_node_override_wins() -> None:
         "timeout_seconds": 1800,
         "no_sandbox": False,
     }
-
-
-@pytest.mark.no_db
-def test_resolve_execution_falls_back_to_workspace_defaults() -> None:
-    workspace = {"default_agent_provider": "ws-provider", "default_agent_model": "ws-model"}
-    block = resolve_execution_block(_node(), workspace, "pi")
-    assert block["binary"] == "pi"
-    assert block["provider"] == "ws-provider"
-    assert block["model"] == "ws-model"
-    assert block["thinking"] == ""
+    # runtime 直接钉死命令构建器：pi → pi argv。
+    assert resolve_execution_block(_node("p", "m"), "pi")["binary"] == "pi"
 
 
 @pytest.mark.no_db
 def test_resolve_execution_requires_provider_and_model() -> None:
     with pytest.raises(ValueError, match="requires a provider"):
-        resolve_execution_block(_node(model="m"), {}, "velites")
+        resolve_execution_block(_node(model="m"), "velites")
     with pytest.raises(ValueError, match="requires a model"):
-        resolve_execution_block(_node(provider="p"), {}, "velites")
+        resolve_execution_block(_node(provider="p"), "velites")
+
+
+@pytest.mark.no_db
+def test_resolve_execution_error_points_at_studio_and_top_level_defaults() -> None:
+    with pytest.raises(ValueError, match="workflow top-level execution default"):
+        resolve_execution_block(_node(), "velites")
 
 
 @pytest.mark.no_db
 def test_resolve_execution_fails_fast_on_unknown_runtime() -> None:
-    workspace = {"default_agent_provider": "p", "default_agent_model": "m"}
     with pytest.raises(ValueError, match=r"supported runtimes: pi, velites"):
-        resolve_execution_block(_node(), workspace, "openclaw")
+        resolve_execution_block(_node(), "openclaw")

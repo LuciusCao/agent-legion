@@ -45,4 +45,7 @@ def add_http_middleware(app: FastAPI, settings: Settings) -> None:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.add_middleware(SelectiveGZipMiddleware)
+    # Level 6 is the zlib sweet spot: ~3-4x faster than the starlette default
+    # 9 for a few percent worse ratio. Compression runs synchronously on the
+    # event loop, so the CPU saved here is loop latency for every SSE/WS peer.
+    app.add_middleware(SelectiveGZipMiddleware, compresslevel=6)

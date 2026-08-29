@@ -30,7 +30,6 @@ _FORBIDDEN_PATTERNS = {
 _FORBIDDEN_PATTERN_WHITELIST = {
     "server/app/db/migrations",
     "server/app/executors/legacy_migration.py",
-    "server/app/jobs/executor_configuration.py",
     "server/app/workflows/definition.py",
     "server/app/workflows/loader.py",
     # AgentStatusManager payloads key incremental WS envelopes by "agent" (Decision 8

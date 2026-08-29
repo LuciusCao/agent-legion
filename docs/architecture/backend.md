@@ -44,7 +44,14 @@ server/app/
 │   └── schema.py           # 表结构定义
 ├── jobs/                   # Job 领域查询与类型
 │   └── queries/            # JobQueries（含 WorkspaceQueriesMixin）等
-├── configuration/          # 配置加载与 owned-keys 校验
+├── agent_control/          # Agent Worker 控制面（issue #191 归包）：registry.py
+│                         # 注册/鉴权/liveness、register_tokens*.py scoped token
+│                         # 生命周期、completion.py 执行结果提交、
+│                         # declarations.py 声明归一化
+├── agent_catalog/          # Agent 定义目录：definition.py AgentDefinition 模型、
+│                         # builtin.py demo workflow 内置模板
+├── configuration/          # 配置加载与 owned-keys 校验；executor_runtime.py
+│                         # executor_runtime 配置模型（issue #188 中立化）
 ├── executors/              # Code executor、租赁调度与 capacity 控制
 ├── events/                 # 事件总线、Agent 发现与状态跟踪（agents.py）、WS 广播
 ├── workflow_worker/      # DAG workflow worker：thread.py 线程、ready.py 每 pass
@@ -72,7 +79,7 @@ server/app/
 ## Key Decisions
 
 - PostgreSQL 是唯一运行时数据库，通过连接池支撑多进程、多设备并发协调。
-- Agent Legion DAG 是唯一的执行模型；workflow 是 workspace 内部的一份 DAG（schema v50 退役全局 catalog），示例 workflow（`education_video_problems_generation`）随仓库内置为可选示例模板，业务 workflow 经 workspace revision 发布 + 自定义节点发布承载。
+- Agent Legion DAG 是唯一的执行模型；workflow 是 workspace 内部的一份 DAG（schema v50 退役全局 catalog）。schema v62 起 workspace id 即 workflow key（创建时显式提供、终身不可变），创建路径不再种子示例模板——示例 workflow（`education_video_problems_generation`）仅经 `make import-demo` 提供 demo workspace，业务 workflow 经 workspace revision 发布 + 自定义节点发布承载。
 - 所有文件 I/O 限制在 `data/` 目录内，由 `security.py` 做路径校验。
 - 路由、服务、执行器之间有明确的边界：Route 只做 HTTP 适配，Service 处理业务逻辑，Executor 通过租赁（lease）申请容量。详见 [AGENTS.md](../../AGENTS.md)。
 - 外部服务凭据与端点配置走实例级外部服务连接（admin 全局设置「外部服务连接」），见下文 Configuration Reference。
@@ -97,15 +104,15 @@ server/app/
 | POST | `/agent-definitions/{agent_id}/rollback` | `rollback_agent_definition` | routes/agent_definitions.py |
 | POST | `/agent-definitions/{agent_id}/copy` | `copy_agent_definition` | routes/agent_definitions.py |
 | DELETE | `/agent-definitions/{agent_id}` | `archive_agent_definition` | routes/agent_definitions.py |
+| POST | `/agent-register-tokens` | `create_register_token` | routes/agent_register_tokens.py |
+| GET | `/agent-register-tokens` | `list_register_tokens` | routes/agent_register_tokens.py |
+| DELETE | `/agent-register-tokens/{token_id}` | `delete_register_token` | routes/agent_register_tokens.py |
 | POST | `/agent-executions/claim` | `claim` | routes/agent_worker_claims.py |
 | POST | `/agent-executions/{execution_id}/heartbeat` | `heartbeat` | routes/agent_worker_claims.py |
 | GET | `/agent-workers/self/metrics` | `get_worker_metrics` | routes/agent_worker_metrics.py |
 | POST | `/agent-workers/register` | `register` | routes/agent_workers.py |
-| POST | `/agent-register-tokens` | `create_register_token` | routes/agent_workers.py |
-| GET | `/agent-register-tokens` | `list_register_tokens` | routes/agent_workers.py |
-| POST | `/agent-register-tokens/{token_id}/revoke` | `revoke_register_token` | routes/agent_workers.py |
 | GET | `/agent-workers/self` | `get_worker_self` | routes/agent_workers.py |
-| POST | `/agent-workers/{worker_id}/revoke` | `revoke_worker` | routes/agent_workers.py |
+| DELETE | `/agent-workers/{worker_id}` | `delete_worker` | routes/agent_workers.py |
 | GET | `/agent-workers` | `list_workers` | routes/agent_workers.py |
 | GET | `/agent-executions/{execution_id}/bundle` | `bundle` | routes/agent_workers.py |
 | POST | `/agent-executions/{execution_id}/release-slot` | `release_slot` | routes/agent_workers.py |
@@ -126,6 +133,7 @@ server/app/
 | POST | `/workspaces/{workspace_id}/jobs/rerun-by-failure` | `rerun_jobs_by_failure_category` | routes/failed_node_runs.py |
 | GET | `/admin/instance-settings` | `get_instance_settings` | routes/instance_settings.py |
 | PUT | `/admin/instance-settings` | `put_instance_settings` | routes/instance_settings.py |
+| GET | `/jobs/{job_id}/artifacts/{artifact_name}/raw` | `get_artifact_raw` | routes/job_artifact_raw.py |
 | GET | `/jobs/{job_id}/artifacts/{artifact_name:path}` | `get_artifact` | routes/job_artifacts.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/log` | `get_job_run_log` | routes/job_artifacts.py |
 | POST | `/workspaces/{workspace_id}/job-batches` | `create_workspace_job_batch` | routes/job_batches.py |
@@ -157,6 +165,7 @@ server/app/
 | GET | `/workspaces/{workspace_id}/materials/{material_id}` | `get_material` | routes/materials.py |
 | DELETE | `/workspaces/{workspace_id}/materials/{material_id}` | `delete_material` | routes/materials.py |
 | GET | `/metrics/overview` | `get_metrics_overview` | routes/metrics.py |
+| POST | `/workspaces/{workspace_id}/jobs/clear-packed` | `clear_workspace_jobs_packed_status` | routes/package_clear_packed.py |
 | GET | `/workspaces/{workspace_id}/packages` | `list_workspace_packages` | routes/packages.py |
 | DELETE | `/workspaces/{workspace_id}/packages/{package_id:int}` | `delete_workspace_package_route` | routes/packages.py |
 | PATCH | `/workspaces/{workspace_id}/packages/{package_id:int}` | `update_workspace_package_route` | routes/packages.py |
@@ -174,13 +183,16 @@ server/app/
 | POST | `/workspaces/{workspace_id}/runs` | `create_run` | routes/runs.py |
 | GET | `/workspaces/{workspace_id}/runs` | `list_runs` | routes/runs.py |
 | GET | `/workspaces/{workspace_id}/runs/{run_id}` | `get_run` | routes/runs.py |
-| GET | `/executors/skills/{skill_key:path}` | `get_skill` | routes/skill_catalog_route.py |
+| GET | `/agent-catalog/skills/{skill_key:path}` | `get_skill` | routes/skill_catalog_route.py |
 | GET | `/admin/skill-sources` | `get_skill_sources` | routes/skill_sources.py |
 | PUT | `/admin/skill-sources/{skill_key:path}` | `put_skill_source` | routes/skill_sources.py |
 | POST | `/admin/skill-sources/relock` | `relock_skill_sources` | routes/skill_sources.py |
 | POST | `/skills/validate` | `validate_skill` | routes/skills.py |
 | GET | `/skills/tags` | `list_skill_tags` | routes/skills.py |
 | GET | `/studio-agent/tools/chat-sessions/{session_id}/context` | `get_chat_session_context` | routes/studio_agent_context.py |
+| GET | `/studio-agent/tools/skills/{skill_key:path}` | `get_skill` | routes/studio_agent_skill_tools.py |
+| POST | `/studio-agent/tools/skills/{skill_key:path}/validate` | `validate_skill` | routes/studio_agent_skill_tools.py |
+| POST | `/studio-agent/tools/skills/{skill_key:path}/versions` | `save_skill_version` | routes/studio_agent_skill_tools.py |
 | POST | `/studio-agent-tokens` | `mint_token` | routes/studio_agent_tokens.py |
 | GET | `/studio-agent-tokens` | `list_tokens` | routes/studio_agent_tokens.py |
 | DELETE | `/studio-agent-tokens/{token_id}` | `revoke_token` | routes/studio_agent_tokens.py |
@@ -197,13 +209,14 @@ server/app/
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions` | `list_sessions` | routes/studio_chat.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `get_session` | routes/studio_chat.py |
 | DELETE | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `close_session` | routes/studio_chat.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/resume` | `resume_session` | routes/studio_chat.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `list_messages` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `send_message` | routes/studio_chat.py |
-| GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/events` | `session_events` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/cancel` | `cancel_turn` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/allow-all` | `set_allow_all` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/{request_id}` | `answer_permission` | routes/studio_chat.py |
 | PUT | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/context` | `update_context` | routes/studio_chat_context.py |
+| GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/events` | `session_events` | routes/studio_chat_events.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/token-usage` | `get_run_token_usage` | routes/token_usage.py |
 | GET | `/jobs/{job_id}/token-usage` | `get_job_token_usage` | routes/token_usage.py |
 | GET | `/workspaces/{workspace_id}/token-usage` | `get_workspace_token_usage` | routes/token_usage.py |
@@ -215,6 +228,8 @@ server/app/
 | POST | `/workspaces/{workspace_id}/workflow-drafts/compare` | `compare_workflow_draft_route` | routes/workflow_draft_compare.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/validate` | `validate_workflow_draft` | routes/workflow_draft_publish.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/publish` | `publish_draft` | routes/workflow_draft_publish.py |
+| GET | `/workspaces/{workspace_id}/workflow-draft` | `get_draft` | routes/workflow_draft_store.py |
+| PUT | `/workspaces/{workspace_id}/workflow-draft` | `put_draft` | routes/workflow_draft_store.py |
 | GET | `/workflow-node-code-template` | `get_node_code_template` | routes/workflow_node_codes.py |
 | GET | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `get_node_code` | routes/workflow_node_codes.py |
 | PUT | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `save_node_code_draft` | routes/workflow_node_codes.py |
@@ -226,12 +241,13 @@ server/app/
 | GET | `/workspaces/{workspace_id}/workflow-revisions` | `list_workflow_revisions` | routes/workflow_revisions.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions/active` | `get_active_workflow_revision` | routes/workflow_revisions.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions/{revision_id}` | `get_workflow_revision_detail` | routes/workflow_revisions.py |
+| GET | `/agent-catalog` | `get_agent_catalog` | routes/workspace_agent_catalog.py |
+| GET | `/workspaces/{workspace_id}/execution-configuration` | `get_workspace_execution_configuration` | routes/workspace_agent_catalog.py |
 | GET | `/workspaces/{workspace_id}/agent-routes` | `get_workspace_agent_routes` | routes/workspace_agent_routes.py |
 | PUT | `/workspaces/{workspace_id}/configuration` | `replace_workspace_configuration` | routes/workspace_configuration.py |
-| GET | `/executors` | `get_executors` | routes/workspace_executors.py |
-| GET | `/workspaces/{workspace_id}/executor-configuration` | `get_workspace_executor_configuration` | routes/workspace_executors.py |
 | GET | `/workspaces/{workspace_id}/node-runs` | `list_workspace_runs` | routes/workspace_runs.py |
 | GET | `/workspaces/{workspace_id}/dag` | `get_workspace_dag` | routes/workspace_runs.py |
+| GET | `/workspaces/{workspace_id}/runtime-models` | `get_workspace_runtime_models` | routes/workspace_runtime_models.py |
 | GET | `/workspaces/{workspace_id}/secrets` | `list_workspace_secrets` | routes/workspace_secrets.py |
 | PUT | `/workspaces/{workspace_id}/secrets/{name}` | `put_workspace_secret` | routes/workspace_secrets.py |
 | DELETE | `/workspaces/{workspace_id}/secrets/{name}` | `delete_workspace_secret` | routes/workspace_secrets.py |
@@ -249,17 +265,17 @@ server/app/
 
 | 模型 | 类型 | 字段 | 文件 |
 |------|------|------|------|
-| AgentEnqueueConfig | BaseModel | workers: int, max_pending: int | app/agent_broker/dispatch_pool.py |
-| AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/agent_catalog.py |
+| AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/agent_catalog/definition.py |
+| AgentEnqueueConfig | BaseModel | workers: int, max_pending: int | app/configuration/executor_knobs.py |
+| AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/configuration/executor_knobs.py |
+| CodeStockConfig | BaseModel | enabled: bool, factor: float, min_stock: int, max_stock: int, refresh_seconds... | app/configuration/executor_knobs.py |
+| OpenClawRuntimeConfig | BaseModel | cwd: str | app/configuration/executor_runtime.py |
+| WorkflowsRuntimeConfig | BaseModel | enabled: bool, custom_nodes_enabled: bool | app/configuration/executor_runtime.py |
+| AgentWorkersRuntimeConfig | BaseModel | max_archive_bytes: int, min_protocol_version: int | app/configuration/executor_runtime.py |
+| ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/configuration/executor_runtime.py |
 | CodeCapabilityConfig | BaseModel | timeout_seconds: int, sandbox_network: bool, config_schema: dict[str, Any] | app/executors/contracts.py |
-| PiRuntimeConfig | BaseModel | flavor: Literal['pi', 'velites'], binary: str, provider: str, model: str, thi... | app/executors/runtime_config.py |
-| OpenClawSkillSafetyRepo | BaseModel | path: str | app/executors/runtime_config.py |
-| OpenClawSkillSafetyRuntimeConfig | BaseModel | enabled: bool, repos: list[OpenClawSkillSafetyRepo] | app/executors/runtime_config.py |
-| OpenClawRuntimeConfig | BaseModel | command_template: tuple[str, ...], cwd: str, timeout_seconds: int, cancellati... | app/executors/runtime_config.py |
-| WorkflowsRuntimeConfig | BaseModel | enabled: bool, custom_nodes_enabled: bool, pi: PiRuntimeConfig | app/executors/runtime_config.py |
-| AgentWorkersRuntimeConfig | BaseModel | register_token: str, register_token_file: str, max_archive_bytes: int, min_pr... | app/executors/runtime_config.py |
-| ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/executors/runtime_config.py |
 | AgentDefinitionResponse | BaseModel | id: str, runtime: Literal['pi', 'openclaw', 'velites'], capability: str, skil... | app/routes/agent_catalog_contracts.py |
+| AgentCatalogResponse | BaseModel | agents: list[AgentDefinitionResponse] | app/routes/agent_catalog_contracts.py |
 | AgentDefinitionPayload | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/routes/agent_definition_contracts.py |
 | AgentCopyRequest | BaseModel | new_agent_id: str | app/routes/agent_definition_contracts.py |
 | AgentRollbackRequest | BaseModel | version: int | app/routes/agent_definition_contracts.py |
@@ -271,19 +287,20 @@ server/app/
 | AgentVersionsResponse | BaseModel | versions: list[AgentVersionSummary] | app/routes/agent_definition_contracts.py |
 | AgentArchiveResponse | BaseModel | archived: int | app/routes/agent_definition_contracts.py |
 | RegisterAgentWorkerRequest | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
-| RegisterAgentWorkerResponse | BaseModel | worker_token: str, host_protocol_version: int, allowed_workspaces: list[str] | app/routes/agent_workers_contracts.py |
-| CreateAgentRegisterTokenRequest | BaseModel | workspace_id: str | None, label: str | app/routes/agent_workers_contracts.py |
-| AgentRegisterTokenCreatedResponse | BaseModel | token_id: str, register_token: str, workspace_id: str | None, label: str | app/routes/agent_workers_contracts.py |
+| AgentWorkerWorkspace | BaseModel | workspace_id: str, workspace_name: str, token_ids: list[str] | app/routes/agent_workers_contracts.py |
+| RegisterAgentWorkerResponse | BaseModel | worker_token: str, host_protocol_version: int, allowed_workspaces: list[str],... | app/routes/agent_workers_contracts.py |
+| CreateAgentRegisterTokenRequest | BaseModel | workspace_id: str, label: str | app/routes/agent_workers_contracts.py |
+| AgentRegisterTokenCreatedResponse | BaseModel | token_id: str, register_token: str, workspace_id: str, label: str | app/routes/agent_workers_contracts.py |
 | AgentRegisterTokenSummary | BaseModel | token_id: str, workspace_id: str | None, label: str, created_at: str, revoked... | app/routes/agent_workers_contracts.py |
 | AgentRegisterTokensResponse | BaseModel | tokens: list[AgentRegisterTokenSummary] | app/routes/agent_workers_contracts.py |
-| AgentRegisterTokenRevokeResponse | BaseModel | revoked: bool | app/routes/agent_workers_contracts.py |
+| AgentRegisterTokenDeleteResponse | BaseModel | token_id: str, deleted: bool, cascaded_worker_ids: list[str] | app/routes/agent_workers_contracts.py |
 | ClaimAgentExecutionRequest | BaseModel | worker_id: str, max_concurrency: int | None, max_code_concurrency: int | None | app/routes/agent_workers_contracts.py |
 | AgentWorkerSummary | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
 | AgentWorkersResponse | BaseModel | workers: list[AgentWorkerSummary] | app/routes/agent_workers_contracts.py |
-| AgentWorkerRevokeResponse | BaseModel | worker_id: str, revoked: bool | app/routes/agent_workers_contracts.py |
+| AgentWorkerDeleteResponse | BaseModel | worker_id: str, deleted: bool | app/routes/agent_workers_contracts.py |
 | AgentClaimResponse | BaseModel | execution_id: str, lease_id: str, workspace_id: str, job_id: str, workflow_ke... | app/routes/agent_workers_contracts.py |
 | AgentHeartbeatResponse | BaseModel | cancelled_execution_ids: list[str] | app/routes/agent_workers_contracts.py |
-| AgentStatusResponse | BaseModel | id: str, name: str, busy: bool, current_video_id: str | None, current_title: ... | app/routes/agents.py |
+| AgentStatusResponse | BaseModel | id: str, name: str, busy: bool | app/routes/agents.py |
 | AgentsResponse | BaseModel | agents: list[AgentStatusResponse] | app/routes/agents.py |
 | ArtifactUploadResponse | BaseModel | hash: str | app/routes/artifacts.py |
 | LoginRequest | BaseModel | username: str, password: str | app/routes/auth_contracts.py |
@@ -308,20 +325,9 @@ server/app/
 | ConnectionTypeView | BaseModel | type: str, description: str, required_config_keys: list[str], secret_keys: li... | app/routes/connections_contracts.py |
 | ConnectionTypesResponse | BaseModel | types: list[ConnectionTypeView] | app/routes/connections_contracts.py |
 | ConnectionTestResponse | BaseModel | ok: bool, message: str | app/routes/connections_contracts.py |
-| ExecutorCatalogResponse | BaseModel | agents: list[AgentDefinitionResponse] | app/routes/executor_catalog_contracts.py |
-| NodeLimitRequest | BaseModel | workflow_key: str, node_key: str, concurrency_limit: int | app/routes/executor_contracts.py |
-| WorkspaceExecutorConfigurationResponse | BaseModel | node_limits: list[NodeLimitRequest], migration_warnings: list[str], agent_cap... | app/routes/executor_contracts.py |
-| WorkspaceAgentRouteEntry | BaseModel | workflow_key: str, node_key: str, node_label: str, capability: str, agent_id:... | app/routes/executor_contracts.py |
-| WorkspaceAgentRoutesResponse | BaseModel | routes: list[WorkspaceAgentRouteEntry] | app/routes/executor_contracts.py |
-| WorkspaceSettingsPayload | BaseModel | entityType: str, intakeModes: list[str], labelOverrides: dict[str, str], work... | app/routes/executor_contracts.py |
-| WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, intakeModes: list[str] | None, labelOverrides: dict[s... | app/routes/executor_contracts.py |
-| WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/executor_contracts.py |
-| WorkspaceConfigurationResponse | BaseModel | workspace: WorkspaceRecord, settings: WorkspaceSettingsPayload, executor_conf... | app/routes/executor_contracts.py |
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
-| InstanceOpenClawSkillSafetyRepo | BaseModel | path: str | app/routes/instance_openclaw_contracts.py |
-| InstanceOpenClawSkillSafetySettings | BaseModel | enabled: bool, repos: list[InstanceOpenClawSkillSafetyRepo] | app/routes/instance_openclaw_contracts.py |
-| InstanceOpenClawSettings | BaseModel | cwd: str, timeout_seconds: int, isolated_workspace_root: str, command_templat... | app/routes/instance_openclaw_contracts.py |
+| InstanceOpenClawSettings | BaseModel | cwd: str | app/routes/instance_openclaw_contracts.py |
 | InstanceCleanupSettings | BaseModel | log_retention_days: int, run_dir_retention_days: int, interval_seconds: int | app/routes/instance_settings_contracts.py |
 | InstanceMonitoringSettings | BaseModel | sample_interval_seconds: float, retention_days: int | app/routes/instance_settings_contracts.py |
 | InstanceWorkflowsSettings | BaseModel | enabled: bool | app/routes/instance_settings_contracts.py |
@@ -331,10 +337,10 @@ server/app/
 | JobSelectionMixin | BaseModel | job_ids: list[str] | None, filter: JobFilterPayload | None, exclude_ids: list... | app/routes/job_batch_filter_contracts.py |
 | JobBatchRequest | BaseModel | workflow_key: str, entity: str | None, source_kind: str, question_ids: list[s... | app/routes/job_contracts.py |
 | JobBatchResponse | BaseModel | batch: dict[str, Any], created_count: int, jobs: list[dict[str, Any]] | app/routes/job_contracts.py |
-| WorkspaceCreateRequest | BaseModel | name: str, default_workflow_key: str | None, workflow_mode: Literal['demo', '... | app/routes/job_contracts.py |
-| WorkspaceUpdateRequest | BaseModel | name: str | None, description: str | None, default_workflow_key: str | None, ... | app/routes/job_contracts.py |
+| WorkspaceCreateRequest | BaseModel | id: str, name: str, default_entity: str, resource_config: dict[str, Any] | app/routes/job_contracts.py |
+| WorkspaceUpdateRequest | BaseModel | name: str | None, description: str | None, default_entity: str | None, resour... | app/routes/job_contracts.py |
 | WorkspaceSettingsResponse | BaseModel | settings: dict[str, Any] | app/routes/job_contracts.py |
-| WorkspaceSettingsSectionRequest | BaseModel | entityType: str | None, intakeModes: list[str] | None, labelOverrides: dict[s... | app/routes/job_contracts.py |
+| WorkspaceSettingsSectionRequest | BaseModel | entityType: str | None, workflowKey: str | None, nodeConfig: dict[str, dict[s... | app/routes/job_contracts.py |
 | WorkspaceResponse | BaseModel | workspace: WorkspaceRecord | app/routes/job_contracts.py |
 | WorkspacesResponse | BaseModel | workspaces: list[WorkspaceRecord] | app/routes/job_contracts.py |
 | DeleteJobResponse | BaseModel | deleted: str | app/routes/job_contracts.py |
@@ -423,7 +429,7 @@ server/app/
 | RunJobStats | BaseModel | total: int, by_status: dict[str, int] | app/routes/run_contracts.py |
 | RunDetailResponse | BaseModel | run: RunRecord, job_stats: RunJobStats | app/routes/run_contracts.py |
 | SkillFileResponse | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/skill_contracts.py |
-| SkillDetailResponse | BaseModel | key: str, ref: str, commit: str, available: bool, files: list[SkillFileRespon... | app/routes/skill_contracts.py |
+| SkillDetailResponse | BaseModel | key: str, ref: str, commit: str, available: bool, tags: list[str], files: lis... | app/routes/skill_contracts.py |
 | SkillValidateRequest | BaseModel | path: str | app/routes/skill_contracts.py |
 | SkillValidateResponse | BaseModel | valid: bool, path: str, skill_key: str | None, error: str | None, tags: list[... | app/routes/skill_contracts.py |
 | SkillTagsResponse | BaseModel | path: str, tags: list[str], latest_tag: str | None | app/routes/skill_contracts.py |
@@ -433,7 +439,12 @@ server/app/
 | StudioContextNode | BaseModel | key: str, capability: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextEdge | BaseModel | source: str, target: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextWorkflow | BaseModel | workflow_key: str, version: int, nodes: list[StudioContextNode], edges: list[... | app/routes/studio_agent_context_contracts.py |
-| StudioChatContextResponse | BaseModel | workspace_id: str, selected_node_key: str | None, workflow: StudioContextWork... | app/routes/studio_agent_context_contracts.py |
+| StudioChatContextResponse | BaseModel | workspace_id: str, selected_node_key: str | None, draft_yaml: str | None, wor... | app/routes/studio_agent_context_contracts.py |
+| SkillValidationIssue | BaseModel | path: str, error: str | app/routes/studio_agent_skill_contracts.py |
+| SkillValidateToolResponse | BaseModel | key: str, valid: bool, errors: list[SkillValidationIssue] | app/routes/studio_agent_skill_contracts.py |
+| SkillVersionFileWrite | BaseModel | path: str, content: str | app/routes/studio_agent_skill_contracts.py |
+| SkillSaveVersionRequest | BaseModel | files: list[SkillVersionFileWrite], new_tag: str, message: str | app/routes/studio_agent_skill_contracts.py |
+| SkillSaveVersionResponse | BaseModel | key: str, tag: str, commit: str, files: list[str] | app/routes/studio_agent_skill_contracts.py |
 | StudioAgentTokenMintRequest | BaseModel | ttl_hours: int | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenMintResponse | BaseModel | id: str, token: str, expires_at: str | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenEntry | BaseModel | id: str, created_at: str, expires_at: str, revoked_at: str | None | app/routes/studio_agent_token_contracts.py |
@@ -453,7 +464,7 @@ server/app/
 | StudioChatMessageResponse | BaseModel | message: StudioChatMessageRecord | app/routes/studio_chat_contracts.py |
 | StudioChatMessagesResponse | BaseModel | messages: list[StudioChatMessageRecord] | app/routes/studio_chat_contracts.py |
 | StudioChatAllowAllRequest | BaseModel | enabled: bool | app/routes/studio_chat_contracts.py |
-| StudioChatContextUpdateRequest | BaseModel | selected_node_key: str | None | app/routes/studio_chat_contracts.py |
+| StudioChatContextUpdateRequest | BaseModel | selected_node_key: str | None, draft_yaml: str | None | app/routes/studio_chat_contracts.py |
 | StudioChatPermissionAnswerRequest | BaseModel | option_id: str | None, deny: bool | app/routes/studio_chat_contracts.py |
 | StudioChatPermissionAnswerResponse | BaseModel | resolved: str | app/routes/studio_chat_contracts.py |
 | TokenUsageRunItem | BaseModel | run_id: int, node_key: str, status: str, usage: RunUsage | None, reason: str ... | app/routes/token_usage_contracts.py |
@@ -479,13 +490,15 @@ server/app/
 | WorkflowDraftCompareError | BaseModel | category: str, message: str, line: int | None, column: int | None, node_key: ... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowRevisionSummaryItem | BaseModel | id: str, version: int, workflow_key: str, definition_hash: str | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowDraftSummaryItem | BaseModel | key: str, label: str, version: int | app/routes/workflow_draft_compare_contracts.py |
-| WorkflowNodeChange | BaseModel | type: WorkflowChangeType, node_key: str, label: str, fields: list[str], risk:... | app/routes/workflow_draft_compare_contracts.py |
+| WorkflowNodeChange | BaseModel | type: WorkflowChangeType, node_key: str, label: str, node_type: Literal['star... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowEdgeChange | BaseModel | type: WorkflowEdgeChangeType, source: str, target: str, before_condition: str... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowIntakeChange | BaseModel | type: WorkflowIntakeChangeType, mode_key: str, field_key: str | None, risk: W... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowRiskFlag | BaseModel | code: str, severity: WorkflowRiskLevel, message: str | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowCompareSummary | BaseModel | risk_level: WorkflowRiskLevel, node_changes: list[WorkflowNodeChange], edge_c... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowDraftCompareResponse | BaseModel | valid: bool, creates_revision: bool, base_revision: WorkflowRevisionSummaryIt... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowMetadataChange | BaseModel | type: Literal['modified'], field: str, before_value: str | None, after_value:... | app/routes/workflow_draft_compare_metadata_contracts.py |
+| WorkflowDraftStoreRequest | BaseModel | definition_yaml: str | app/routes/workflow_draft_store_contracts.py |
+| WorkflowDraftStoreResponse | BaseModel | definition_yaml: str | None, updated_at: str | None | app/routes/workflow_draft_store_contracts.py |
 | WorkflowNodeCodeResponse | BaseModel | origin: Literal['builtin', 'custom', 'none'], code: str, version: int | None,... | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeTemplateResponse | BaseModel | code: str | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeDraftRequest | BaseModel | code: str, change_note: str | None | app/routes/workflow_node_code_contracts.py |
@@ -504,6 +517,15 @@ server/app/
 | ActiveWorkflowRevisionResponse | BaseModel | revision: WorkflowRevisionSummary, workflow: workflow_contracts.WorkflowDefin... | app/routes/workflow_revisions_contracts.py |
 | WorkflowRevisionDetailResponse | BaseModel | revision: WorkflowRevisionSummary, workflow: workflow_contracts.WorkflowDefin... | app/routes/workflow_revisions_contracts.py |
 | WorkspaceRecord | BaseModel | id: str, name: str, description: str, default_workflow_key: str, default_enti... | app/routes/workspace_contracts.py |
+| NodeLimitRequest | BaseModel | workflow_key: str, node_key: str, concurrency_limit: int | app/routes/workspace_execution_contracts.py |
+| WorkspaceExecutionConfigurationResponse | BaseModel | node_limits: list[NodeLimitRequest], migration_warnings: list[str], agent_cap... | app/routes/workspace_execution_contracts.py |
+| WorkspaceAgentRouteEntry | BaseModel | workflow_key: str, node_key: str, node_label: str, capability: str, agent_id:... | app/routes/workspace_execution_contracts.py |
+| WorkspaceAgentRoutesResponse | BaseModel | routes: list[WorkspaceAgentRouteEntry] | app/routes/workspace_execution_contracts.py |
+| WorkspaceSettingsPayload | BaseModel | entityType: str, workflowKey: str, previewHidden: list[str] | app/routes/workspace_execution_contracts.py |
+| WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, workflowKey: str | None, previewHidden: list[str] | N... | app/routes/workspace_execution_contracts.py |
+| WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/workspace_execution_contracts.py |
+| WorkspaceConfigurationResponse | BaseModel | workspace: WorkspaceRecord, settings: WorkspaceSettingsPayload, execution_con... | app/routes/workspace_execution_contracts.py |
+| WorkspaceRuntimeModelsResponse | BaseModel | runtimes: dict[str, dict[str, list[str]]] | app/routes/workspace_runtime_models.py |
 | WorkspaceSecretSetRequest | BaseModel | value: str | app/routes/workspace_secrets.py |
 | WorkspaceSecretMetadata | BaseModel | name: str, created_at: str, updated_at: str | app/routes/workspace_secrets.py |
 | WorkspaceSecretsResponse | BaseModel | secrets: list[WorkspaceSecretMetadata] | app/routes/workspace_secrets.py |
@@ -519,8 +541,6 @@ server/app/
 | SkillsConfig | BaseModel | skills: dict[str, SkillSourceConfig] | app/skills/config.py |
 | LockedSkillSource | BaseModel | repo: str, ref: str, commit: str | app/skills/config.py |
 | SkillsLock | BaseModel | version: str, resolved_at: str | None, skills: dict[str, LockedSkillSource] | app/skills/config.py |
-| AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/workflow_worker/agent_stock.py |
-| CodeStockConfig | BaseModel | enabled: bool, factor: float, min_stock: int, max_stock: int, refresh_seconds... | app/workflow_worker/code_stock.py |
 
 <!-- END AUTO-GENERATED -->
 
@@ -538,11 +558,33 @@ server/app/
   UV_CACHE_DIR=.uv-cache uv run python -m scripts.check_architecture
   ```
 
-  ratchet 脚本不会提高 ceiling；超出预算的文件必须拆分或回退。ceiling 按有效行数计
+  ratchet 脚本不会提高 ceiling（`--rebase` / `--bump` 上抬通道已随 #209 移除）；
+  `scripts/architecture/budget_monotonicity.py` 在 `check_architecture` 中按 git 锚点
+  （HEAD / HEAD^）对照近期提交的基线与豁免冻结值，拒绝**已跟踪条目**的任何
+  ceiling 上抬——手工改 `architecture-budgets.json` 抬高数值、或抬高豁免 ceiling
+  同样会被拒绝。ceiling 上抬的唯一合法通道是带 `remove_when` 的
+  `architecture.file_budget` 豁免。改名绕过已随 #236 加固：检测交给 git 自身的
+  rename 相似度引擎（`git diff --find-renames`，含未提交改动），命中的新路径沿用
+  旧路径地板——改名不再重置 ceiling，真正的全新文件首次登记
+  （actual + buffer）不受约束（删旧建新的正常重构不会误判，因为只有 git 判定
+  内容相似才配对）；深克隆缺锚点时硬失败，git 超时/仓库损坏会在错误中携带真实
+  原因（不再是纯浅克隆猜测），逃生口 env
+  `AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW=1`。超出预算的文件必须拆分或回退。
+  ceiling 按有效行数计
   （排除注释行与空行，实现见 `scripts/architecture/effective_lines.py`），压缩注释
   对预算没有帮助。此外 production 文件有
   800 行绝对上限（`production.max_lines`，按原始行数计），豁免也不能突破；挂账超过 30 天的豁免由
   `scripts/check_exemption_age.py` 在 full gate 中告警（不阻断）。
+
+### Agent Worker 协议响应形态（response model 豁免的依据）
+
+两条 Agent Worker 协议端点按协议设计没有 JSON response model 可命名，
+是 `architecture.route_response_model` 检查的长期豁免（锚定本节）：
+
+- `POST /api/agent-executions/{execution_id}/result`（routes/agent_workers.py）：结果上报
+  的确认按协议返回空 body 的 204 响应（`Response(status_code=204)`），无 JSON 可建模。
+- `POST /api/agent-executions/{execution_id}/release-slot`（routes/agent_workers.py）：
+  释放槽位的确认同样按协议返回空 204 响应，无 body。
 
 ## Runtime Architecture
 
@@ -579,7 +621,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 ## Database
 
 - PostgreSQL 服务 Agent Legion workflow 与平台状态（当前版本见 `server/app/db/schema.py` 的 `SCHEMA_VERSION`）：
-  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`, `node_config_json`, `default_entity`, `intake_config_json`）。`node_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（见下文 Secrets Vault）；旧 `resource_config_json`（resource binding）已在 v24 迁移为节点覆盖并清空
+  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`（schema v62 起 = workspace id，deprecated，见 DB-WORKSPACE-KEY-BINDING-001）, `node_config_json`, `default_entity`, `preview_config_json`（v63，产物预览隐藏列表 `{"hidden": [...]}`，见 Job Detail 预览段）；`intake_config_json` 与 `default_agent_*` 三列已随 schema v64 退役 drop）。`node_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（见下文 Secrets Vault）；旧 `resource_config_json`（resource binding）已在 v24 迁移为节点覆盖并清空
   - `workspace_secrets` — vault 加密存储的 workspace 密钥（Fernet 密文，`(workspace_id, name)` 唯一，v16 新增）
   - `external_connections` / `instance_secrets` / `connection_tokens` — 实例级外部服务连接：连接只存非敏感配置，敏感字段 Fernet 加密入 `instance_secrets`（`conn:<key>:<field>` 引用），鉴权 token 加密缓存在 `connection_tokens`（v34 新增，见下文外部服务连接段）
   - `runs`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表（`job_batches` 已随 schema v53 drop，由 `runs` 取代）
@@ -587,11 +629,15 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
   - `job_artifacts` — Job 产物清单（权威副本在实例对象存储，schema v54）
   - `workflow_revisions` — workflow 版本修订历史
   - `workspace_packages` — 已创建 package 路径
-- 初始化器在 PostgreSQL advisory lock 下按版本应用 schema。
+- 初始化器在 PostgreSQL advisory lock 下按版本应用 schema。数据迁移经
+  `server/app/db/migration_registry.py` 的 `MIGRATIONS` 注册表按版本有序应用
+  （DB-SCHEMA-001）；`db/migrations/__init__.py` 的平铺 re-export 随版本每次
+  +2 行，长期收敛方向是从注册表派生该导出。
 - `JobQueries.connect()` 是上下文管理器（定义在 `JobQueriesBase`），确保 `conn.close()`；workspace 侧查询由 `WorkspaceQueriesMixin` 合并进统一的 `JobQueries`。
 - `JobDeletionService` 级联删除 Job 记录、`node_runs`、本地 Job 目录与日志；同时快照 `job_artifacts` 清单行并删除对象存储副本（`server/app/services/job_deletion.py`）。
 - 存储路径以**相对 POSIX 路径**保存在 `settings.data_dir` 下（前缀为 `videos/`, `jobs/`, `logs/`, `packages/`），API 返回时投影为绝对路径。
 - SQL 占位符约定：**新 SQL 一律写 psycopg 的 `%s`**，不要再写 SQLite 风格的 `?`。存量 `?` 由 `server/app/db/dialect.py` 盲替换为 `%s`，该层无法区分占位符与 Postgres JSON 的 `?`/`?|`/`?&` 操作符；`scripts/check_architecture.py` 的 SQL 占位符检查（基线 `config/architecture/sql-placeholders-baseline.json`）按 ratchet 方式只降不升，新文件出现任何 SQL `?` 即失败，改写存量后同步下调基线。
+- 服务层数据边界（BOUNDARY-DATA-001）：`server/app/services/` 下的新服务**必须经 `JobQueries` 门面访问数据库**（范式见 `services/job_pause.py` 等 38+ 个 facade-only 服务）；裸 SQL 字面量与 `server.app.db.transaction`/`connection` 直接 import 由 `scripts/architecture/service_data_boundary.py` 检查冻结（基线 `config/architecture/service-data-boundary-baseline.json`，只降不升）。存量服务迁移到门面后手动（或重跑 ratchet）下调基线；新文件出现任一绕行即失败。
 
 ## New Subsystems
 
@@ -600,9 +646,9 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 Workflow Studio 提供可视化 workflow 编辑能力，与版本修订历史集成。
 
 - **Routes**: `routes/workflow_revisions.py`, `routes/workflow_draft_compare.py`
-- **Services**: `services/workflow_drafts.py`, `services/workflow_draft_publish.py`, `services/workflow_revision_format.py`, `services/job_workflow_versions.py`, `services/job_workflow_upgrade.py`; `/api/executors` 同时返回已发布 Agent Catalog 投影（versioned_entities），供编辑器按 capability 获取 runtime、skill、tools；provider/model/thinking 的「继承默认」提示改读 workspace settings 的 agentDefaults
+- **Services**: `services/workflow_drafts.py`, `services/workflow_draft_publish.py`, `services/workflow_revision_format.py`, `services/job_workflow_versions.py`, `services/job_workflow_upgrade.py`; `/api/agent-catalog` 同时返回已发布 Agent Catalog 投影（versioned_entities），供编辑器按 capability 获取 runtime、skill、tools；provider/model/thinking 的「继承默认」提示读 Studio 草稿 YAML 的顶层 `execution` 块（workspace 级 Agent 默认已随 schema v64 退役），可 claim 的选项来自 `GET /api/workspaces/{id}/runtime-models`（在线 Worker 声明聚合）
 - **DB**: PostgreSQL `workflow_revisions` 表与版本化 schema 初始化
-- **Frontend**: `pages/WorkflowStudioPage.tsx`, `pages/workflowStudio/`
+- **Frontend**: `pages/WorkflowStudioPage.tsx`, `features/workflowStudio/`
 
 ### Token Usage
 
@@ -628,6 +674,12 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 - `exemptions.py`: 读取 `config/architecture/architecture-exemptions.yaml` 并校验。
 - 对应脚本：`scripts/check_invariants.py`。
 
+### Job Detail 产物预览（issue #11）
+
+- **raw 字节端点** `GET /api/jobs/{job_id}/artifacts/{artifact_name}/raw`（`routes/job_artifact_raw.py`）：本地 job_dir 副本走 `FileResponse`（原生 Range，媒体可拖动进度条），仅存对象存储的产物走 64 KiB 分块 `StreamingResponse`（`BackgroundTask` 兜底关流）。**content-type 白名单即安全边界**：仅 image/video/audio/pdf 扩展名映射真实 media type 并 `inline` 渲染，其余（含 .html/.svg——同源渲染即脚本执行面）一律 `application/octet-stream` + `attachment` 强制下载。
+- **文本端点**（`{artifact_name:path}`）遇本地二进制产物的 `UnicodeDecodeError` 按 404 降级（字节由 raw 端点负责），不冒泡 500。
+- **workspace 级预览配置**：`preview_config_json` 存 `{"hidden": [<artifact name>, ...]}`；settings payload 键 `previewHidden`（默认 `[]` = 全部显示，工作流升级产生的新产物自动可见）。写路径两条：`PATCH /settings/preview` section（job 详情左栏勾选菜单，立即生效）与 `PUT /configuration` 全量保存（设置页 draft；缺省 `previewHidden` = 沿用已存值，旧客户端不抹勾选）。
+
 ### Secrets Vault
 
 `server/app/services/vault.py` 提供按 workspace 隔离的凭证保管库（VAULT-SECRET-001）。
@@ -644,8 +696,8 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 `config/app.yaml` 已整体退役：bootstrap/安全类键转 env-only，实例级可调配置迁入 DB：
 
-- env-only：`database.url` → `AGENT_LEGION_DATABASE_URL`（唯一权威变量，G4；缺省 `postgresql://127.0.0.1:5432/agent_legion`）；`data_dir` → `AGENT_LEGION_DATA_DIR`（缺省 `data`）；`server.cors` → `AGENT_LEGION_CORS_ALLOW_ORIGINS`（逗号分隔）/ `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`；`agent_workers.register_token[_file]` → `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]`（缺省读 `deploy/secrets/agent_worker_register_token`）。
-- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`workflows.enabled`（是否启用 Agent Legion DAG workflow worker）、`agent_workers.max_archive_bytes` / `min_protocol_version`、`openclaw.cwd` / `timeout_seconds` / `isolated_workspace_root` / `command_template`（含 `{prompt_text}`、`{video_id}`、`{timestamp}` 占位符的命令参数列表）/ `skill_safety`（OpenClaw skill 安全校验；`repos` 只声明允许强制恢复的 path 白名单，恢复 ref 统一从 DB `skill_lock` 文档（`global_settings`）解析——config 治理 G3 单源化，实例设置 API 写 `ref` 返回 422，explicit 单文件配置写 `ref` 启动即报错）。代码默认值 = 退役前 tracked yaml 的生效值；`AGENT_LEGION_OPENCLAW_CWD` 作为 env 覆盖优先级高于 DB 文档。
+- env-only：`database.url` → `AGENT_LEGION_DATABASE_URL`（唯一权威变量，G4；缺省 `postgresql://127.0.0.1:5432/agent_legion`）；`data_dir` → `AGENT_LEGION_DATA_DIR`（缺省 `data`）；`server.cors` → `AGENT_LEGION_CORS_ALLOW_ORIGINS`（逗号分隔）/ `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`；`agent_workers` 的全局 register token 已随 issue #35 退役（遗留的 `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]` 或 yaml `register_token[_file]` 会让启动直接报错）。
+- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`workflows.enabled`（是否启用 Agent Legion DAG workflow worker）、`agent_workers.max_archive_bytes` / `min_protocol_version`、`openclaw.cwd`（唯一保留键；退役键 `command_template` / `timeout_seconds` / `isolated_workspace_root` / `skill_safety` 随业务工作流管线一并退役——存量 DB 文档读取时剥离、写入返回 422，explicit 单文件配置里的残留键被忽略，但 `skill_safety.repos[].ref` 仍按 config 治理 G3 启动即报错：ref 以 DB `skill_lock` 文档为唯一权威）。代码默认值 `cwd="."`；`AGENT_LEGION_OPENCLAW_CWD` 作为 env 覆盖优先级高于 DB 文档。
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 
@@ -657,12 +709,12 @@ env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不�
 
 token 用量计价已产品化：定价存于 `global_settings` 表（`token_usage` 文档），由 admin 在「全局设置」页（`GET/PUT /api/admin/token-usage-pricing`）维护，成本按每条 run 的 provider + model 匹配定价逐行计算；不再有任何 yaml 侧配置。
 
-Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 schema v27 退役，出现在 yaml 中启动即报错）：AgentDefinition 存于 `versioned_entities` 表（schema v46 起 workspace 作用域，解析严格限定本 workspace、零全局兜底），经 Studio「Agent 管理」或 `/api/agent-definitions`（`workspace_id` 查询参数）做 draft → publish → archive 生命周期管理；热读路径经 `AgentService` 的短 TTL（5s）published 缓存。执行配置（provider/model/thinking）不含在 AgentDefinition 内，按严格链解析：节点 `execution.*` 覆盖 → workspace `default_agent_*`（Settings「Agent 默认配置」）→ 报错（无全局兜底）；thinking 可空（空 = runtime 决定）。
+Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 schema v27 退役，出现在 yaml 中启动即报错）：AgentDefinition 存于 `versioned_entities` 表（schema v46 起 workspace 作用域，解析严格限定本 workspace、零全局兜底），经 Studio「Agent 管理」或 `/api/agent-definitions`（`workspace_id` 查询参数）做 draft → publish → archive 生命周期管理；热读路径经 `AgentService` 的短 TTL（5s）published 缓存。执行配置（provider/model/thinking）不含在 AgentDefinition 内，按严格链解析：节点 `execution.*` 覆盖 → workflow 顶层 `execution` 默认（loader 加载时合并进每个非 start 节点）→ 报错（workspace `default_agent_*` 已随 schema v64 退役，无全局兜底）；thinking 可空（空 = runtime 决定）。
 
 其他配置文件：
 
 - 外部 Pi skill 仓库源与固定 commit 已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB `global_settings`（`skill_sources` / `skill_lock` 文档），lock 是 skill ref 的唯一权威（G3）；经 admin API（`GET/PUT /api/admin/skill-sources`、`POST /api/admin/skill-sources/relock`）与 /admin/settings「Skill 源管理」维护，CLI `make skills-lock`（`uv run python -m server.app.skills.lock`）刷新锁。tracked `config/skills.yaml` / `config/skills.lock` 已退役：DB 无记录且文件存在时启动一次性导入并 warning，否则用内置常量（`server/app/skills/builtin_sources.py`）seed，此后文件不再读取。
-- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；它是创建 workspace 时可选的示例模板种子。workflow 没有全局注册表（schema v40 的 `workflow_catalog` 表已于 schema v50 退役，DB-WORKFLOW-CATALOG-001）：workflow 就是 workspace 内部的一份 DAG，`workspaces.default_workflow_key` 是普通文本标识，权威定义是该 workspace 的 active revision（schema v50 起节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部改读它）；blank workspace 的 key 槽为空，首次成功 publish 会认领草稿的 key。
+- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；schema v62 起创建 workspace 不再种子模板，demo workspace 由 `make import-demo`（`scripts/seed_demo.py`）提供，其 id 与 key 同为 `education_video_problems_generation`。workflow 没有全局注册表（schema v40 的 `workflow_catalog` 表已于 schema v50 退役，DB-WORKFLOW-CATALOG-001）：workflow 就是 workspace 内部的一份 DAG，权威定义是该 workspace 的 active revision（schema v50 起节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部改读它）。schema v62（DB-WORKSPACE-KEY-BINDING-001）起 workspace id 与 `workspaces.default_workflow_key` 是同一个标识：创建时显式填写、终身不可变（PATCH / PUT configuration 改 key 一律 400，发布草稿 key 不匹配 422）；v62 迁移把存量 workspace 的 id 改成已绑定的 key（key 为空的按 id 回填），`default_workflow_key` 作为独立概念已标 deprecated（退役评估 issue 待开）。
 - `config/agent-worker.example.yaml`：Worker Service 引导配置样例（`host_url` / `worker_id` / `runtimes` / `capabilities` / `max_concurrency` 等），Worker 侧独立加载，不经 server 的 owned-key 校验。
 - `config/architecture/*`：架构不变量、豁免、源文件体积预算。
 

@@ -24,8 +24,6 @@ export type BatchRerunPreviewResult =
 export type BatchJobIdsRequest = components['schemas']['BatchJobIdsRequest']
 export type WorkspacePackageResult =
   components['schemas']['WorkspacePackageResponse']
-export type WorkspacePackageResultItem =
-  components['schemas']['WorkspacePackageResultResponse']
 export type WorkspacePackageStatusResetResult =
   components['schemas']['WorkspacePackageStatusResetResponse']
 export type RunToRequest = components['schemas']['RunToRequest']

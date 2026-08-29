@@ -1,0 +1,305 @@
+{
+  "version": 1,
+  "files": {
+    "server/app/services/agent_service.py": [
+      3,
+      2,
+      0
+    ],
+    "server/app/services/artifact_orphan_gc.py": [
+      1,
+      1,
+      0
+    ],
+    "server/app/services/artifact_store.py": [
+      9,
+      2,
+      0
+    ],
+    "server/app/services/cleanup_sweep.py": [
+      2,
+      0,
+      0
+    ],
+    "server/app/services/cleanup_sweep_store.py": [
+      3,
+      2,
+      0
+    ],
+    "server/app/services/connection_adapter_user_login.py": [
+      0,
+      0,
+      1
+    ],
+    "server/app/services/connection_gate.py": [
+      2,
+      0,
+      0
+    ],
+    "server/app/services/connection_tokens.py": [
+      6,
+      2,
+      0
+    ],
+    "server/app/services/connections.py": [
+      12,
+      2,
+      0
+    ],
+    "server/app/services/demo_material_seed.py": [
+      2,
+      2,
+      0
+    ],
+    "server/app/services/instance_settings.py": [
+      0,
+      0,
+      1
+    ],
+    "server/app/services/instance_settings_store.py": [
+      2,
+      2,
+      0
+    ],
+    "server/app/services/instance_vault.py": [
+      3,
+      2,
+      0
+    ],
+    "server/app/services/job_artifact_gc.py": [
+      2,
+      0,
+      0
+    ],
+    "server/app/services/job_artifact_maintenance.py": [
+      3,
+      0,
+      0
+    ],
+    "server/app/services/job_artifact_mutation.py": [
+      1,
+      0,
+      0
+    ],
+    "server/app/services/job_artifact_objects.py": [
+      6,
+      2,
+      0
+    ],
+    "server/app/services/job_deletion.py": [
+      4,
+      0,
+      0
+    ],
+    "server/app/services/job_dir_index.py": [
+      2,
+      0,
+      0
+    ],
+    "server/app/services/job_node_worker_projection.py": [
+      2,
+      1,
+      0
+    ],
+    "server/app/services/job_operation_error.py": [
+      3,
+      0,
+      0
+    ],
+    "server/app/services/job_packages.py": [
+      1,
+      0,
+      0
+    ],
+    "server/app/services/job_rerun/batch_ops.py": [
+      2,
+      0,
+      0
+    ],
+    "server/app/services/job_selection_resolver.py": [
+      1,
+      0,
+      0
+    ],
+    "server/app/services/log_cleanup.py": [
+      2,
+      0,
+      0
+    ],
+    "server/app/services/material_bundle_cache.py": [
+      2,
+      1,
+      0
+    ],
+    "server/app/services/material_bundles.py": [
+      13,
+      2,
+      0
+    ],
+    "server/app/services/material_cache.py": [
+      1,
+      1,
+      0
+    ],
+    "server/app/services/material_ttl.py": [
+      9,
+      2,
+      0
+    ],
+    "server/app/services/materials.py": [
+      14,
+      2,
+      0
+    ],
+    "server/app/services/node_codes.py": [
+      1,
+      0,
+      0
+    ],
+    "server/app/services/node_secrets.py": [
+      1,
+      0,
+      0
+    ],
+    "server/app/services/ops_metrics/catchup.py": [
+      1,
+      1,
+      0
+    ],
+    "server/app/services/ops_metrics/queue.py": [
+      6,
+      1,
+      0
+    ],
+    "server/app/services/ops_metrics/runs.py": [
+      2,
+      1,
+      0
+    ],
+    "server/app/services/ops_metrics/sampling.py": [
+      1,
+      1,
+      0
+    ],
+    "server/app/services/ops_metrics/series.py": [
+      2,
+      1,
+      0
+    ],
+    "server/app/services/ops_metrics/service.py": [
+      8,
+      3,
+      0
+    ],
+    "server/app/services/ops_metrics/summary.py": [
+      2,
+      1,
+      0
+    ],
+    "server/app/services/ops_metrics/workspace_sampling.py": [
+      3,
+      1,
+      0
+    ],
+    "server/app/services/path_hygiene.py": [
+      2,
+      0,
+      0
+    ],
+    "server/app/services/quality_labels.py": [
+      10,
+      2,
+      0
+    ],
+    "server/app/services/quality_replay_setup.py": [
+      4,
+      0,
+      0
+    ],
+    "server/app/services/quality_replays.py": [
+      17,
+      1,
+      0
+    ],
+    "server/app/services/quality_sampling.py": [
+      8,
+      2,
+      0
+    ],
+    "server/app/services/quality_stats.py": [
+      3,
+      1,
+      0
+    ],
+    "server/app/services/run_bundle_candidate.py": [
+      1,
+      1,
+      0
+    ],
+    "server/app/services/run_dir_cleanup.py": [
+      1,
+      1,
+      0
+    ],
+    "server/app/services/run_service.py": [
+      3,
+      0,
+      0
+    ],
+    "server/app/services/skill_source_store.py": [
+      2,
+      2,
+      0
+    ],
+    "server/app/services/token_usage.py": [
+      3,
+      1,
+      0
+    ],
+    "server/app/services/token_usage_lease.py": [
+      2,
+      2,
+      0
+    ],
+    "server/app/services/token_usage_pricing_store.py": [
+      2,
+      2,
+      0
+    ],
+    "server/app/services/token_usage_workspace.py": [
+      8,
+      0,
+      0
+    ],
+    "server/app/services/vault.py": [
+      5,
+      2,
+      0
+    ],
+    "server/app/services/versioned_entities.py": [
+      20,
+      2,
+      0
+    ],
+    "server/app/services/workflow_draft_compare_conditions.py": [
+      0,
+      0,
+      2
+    ],
+    "server/app/services/workflow_revision_runtime.py": [
+      1,
+      0,
+      0
+    ],
+    "server/app/services/workflow_revisions.py": [
+      1,
+      0,
+      0
+    ],
+    "server/app/services/workspace_agent_routes.py": [
+      2,
+      0,
+      0
+    ]
+  }
+}

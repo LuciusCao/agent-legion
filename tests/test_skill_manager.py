@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import os
+import stat
 import subprocess
 import time
 import uuid
@@ -220,9 +221,12 @@ def test_cache_lock_files_live_under_runs_dir(tmp_path: Path) -> None:
     cache_dir = tmp_path / "skills" / "demo_workflow" / "generate_key_info"
 
     with manager._cache_lock_for(cache_dir):
-        held = sorted(path.name for path in (tmp_path / "runs" / ".locks").glob("*.lock"))
+        lock_dir = tmp_path / "runs" / ".locks"
+        held = sorted(path.name for path in lock_dir.glob("*.lock"))
         assert held == ["demo_workflow--generate_key_info.lock"]
         assert list((tmp_path / "skills").rglob("*.lock")) == []
+        # The lock dir is private to the service user (shared-temp hygiene).
+        assert stat.S_IMODE(lock_dir.stat().st_mode) == 0o700
 
 
 def test_get_skill_dir_works_with_read_only_skills_base(tmp_path: Path) -> None:

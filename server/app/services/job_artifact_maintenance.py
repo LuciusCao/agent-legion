@@ -27,7 +27,6 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from server.app.db.transaction import read_connection
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.workflow_definitions import require_workspace_active_definition
@@ -94,7 +93,7 @@ def reupload_missing(
     """
     if not store.enabled:
         return 0
-    with read_connection(job_db.path) as conn:
+    with job_db.read() as conn:
         rows = conn.execute(
             "select distinct job_id, node_key from node_runs"
             " where status='completed'"
@@ -179,7 +178,7 @@ def _eviction_candidates(
     instead of trusting the row. The hash cost is only paid here — i.e. when
     the cache is already over budget and eviction is actually needed.
     """
-    with read_connection(job_db.path) as conn:
+    with job_db.read() as conn:
         rows = conn.execute(
             "select id, workspace_id, storage_dir from jobs"
             " where status='completed'"
@@ -231,7 +230,7 @@ def _job_still_evictable(job_db: JobQueries, job_id: str) -> bool:
     local copies. Never evict bytes for a job that is no longer ``completed``
     or has acquired an active lease in the meantime.
     """
-    with read_connection(job_db.path) as conn:
+    with job_db.read() as conn:
         row = conn.execute(
             "select 1 from jobs"
             " where id=%s and status='completed'"

@@ -25,15 +25,15 @@ EXECUTION_TIMEOUT_SECONDS = 1800
 _RUNTIME_BINARIES = {"pi": "pi", "velites": "velites"}
 
 
-def resolve_execution_block(
-    node: WorkflowNode, workspace: dict[str, Any], runtime: str
-) -> dict[str, Any]:
-    """Resolve the manifest ``execution`` block (strict, no global fallback).
+def resolve_execution_block(node: WorkflowNode, runtime: str) -> dict[str, Any]:
+    """Resolve the manifest ``execution`` block (strict, node-only source).
 
-    provider/model resolve from the node-level override first, then the
-    workspace default; either one missing fails the enqueue with an
-    actionable error (agent config governance). thinking stays optional —
-    empty means the runtime decides. The runtime pins the command builder
+    provider/model resolve from the node-level execution only — the loader
+    has already merged the workflow top-level execution defaults into the
+    node, so the value seen here is the effective one; either one missing
+    fails the enqueue with an actionable error (agent config governance,
+    workspace-level defaults retired at schema v64). thinking stays optional
+    — empty means the runtime decides. The runtime pins the command builder
     (EXEC-RUNTIME-DISPATCH-001); unknown runtimes fail fast so no manifest
     is ever frozen with an unbuildable command spec.
     """
@@ -42,24 +42,23 @@ def resolve_execution_block(
         raise ValueError(
             f"Agent runtime {runtime!r} is not implemented yet (supported runtimes: pi, velites)"
         )
-    provider = node.execution.provider or str(workspace.get("default_agent_provider") or "")
-    model = node.execution.model or str(workspace.get("default_agent_model") or "")
+    provider = node.execution.provider
+    model = node.execution.model
     if not provider:
         raise ValueError(
             f"node {node.key} requires a provider: set the node execution provider "
-            "in Studio or the workspace default in Settings"
+            "in Studio or a workflow top-level execution default"
         )
     if not model:
         raise ValueError(
             f"node {node.key} requires a model: set the node execution model "
-            "in Studio or the workspace default in Settings"
+            "in Studio or a workflow top-level execution default"
         )
-    thinking = node.execution.thinking or str(workspace.get("default_agent_thinking") or "")
     return {
         "binary": binary,
         "provider": provider,
         "model": model,
-        "thinking": thinking,
+        "thinking": node.execution.thinking,
         "timeout_seconds": EXECUTION_TIMEOUT_SECONDS,
         "no_sandbox": False,
     }
@@ -77,7 +76,10 @@ class AgentDispatchService:
         self.settings = settings
         self.broker = broker
         self.artifact_store = artifact_store
-        self.skill_manager = build_skill_manager(settings.database_url)
+        # The broker carries the connect source (facade or DSN) in production
+        # wiring; the settings DSN is the fallback for test-only brokers.
+        broker_dsn = getattr(broker, "database_dsn", None) or settings.database_url
+        self.skill_manager = build_skill_manager(broker_dsn, settings.skills_runs_dir)
         enqueue_config = settings.executor_runtime.agent_enqueue
         self.enqueue_pool = AgentEnqueuePool(
             workers=enqueue_config.workers, max_pending=enqueue_config.max_pending
@@ -100,13 +102,7 @@ class AgentDispatchService:
     ) -> bool:
         if self.broker.has_active_request(str(job["id"]), node.key):
             return False
-        execution = resolve_execution_block(node, workspace, definition.runtime)
-        # enqueue 时的 workspace 默认原始值（未经节点覆盖）：claim 重解析在
-        # 节点覆盖被移除时落回这里，而不是落回已烘焙旧覆盖的 execution 块。
-        execution_defaults = {
-            key: str(workspace.get(f"default_agent_{key}") or "")
-            for key in ("provider", "model", "thinking")
-        }
+        execution = resolve_execution_block(node, definition.runtime)
         execution_id = str(uuid.uuid4())
         skill_dir = resolve_skill_dir(self.skill_manager, definition.skill, execution_id)
         try:
@@ -130,7 +126,6 @@ class AgentDispatchService:
                 "skill_version": get_skill_version(self.skill_manager, definition.skill),
                 "log_path": str(log_path),
                 "execution": execution,
-                "execution_defaults": execution_defaults,
             }
             # Quality replay audit trail: the pinned immutable version that
             # produced this manifest (absent on the normal published path).

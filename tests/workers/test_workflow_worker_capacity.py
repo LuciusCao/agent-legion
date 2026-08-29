@@ -114,7 +114,7 @@ def test_multi_claim_uses_single_scan_per_pass(
     assert worker._poll() is True
     assert scan_calls["count"] == 1
     assert worker.leases.active_counts("code")["global"] == 2
-    assert len(worker._futures) == 2
+    assert len(worker.state.futures) == 2
 
     block_event.set()
     worker.stop()

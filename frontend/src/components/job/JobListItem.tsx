@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { JOB_STATUS_LABELS } from '../../labels'
 import type { JobSummary, JobNodeSummary } from '../../types/jobTypes'
@@ -11,7 +12,7 @@ export interface JobListItemProps {
   job: JobSummary
   selected: boolean
   selectMode: boolean
-  onToggleSelect: () => void
+  onToggleSelect: (jobId: string) => void
   workspaceId?: string
 }
 
@@ -80,7 +81,11 @@ function currentNodeSummary(job: JobSummary): JobNodeSummary | undefined {
   )
 }
 
-export function JobListItem({
+// Memoized: the job list re-renders on every SSE patch batch (jobsById is
+// rebuilt), but only the rows whose job object actually changed should render.
+// The virtual-row parents must pass stable props (jobId + a toggle callback
+// that takes the id) for this memo to hold.
+export const JobListItem = memo(function JobListItem({
   job,
   selected,
   selectMode,
@@ -120,7 +125,7 @@ export function JobListItem({
           checked={selected}
           onChange={(e) => {
             e.stopPropagation()
-            onToggleSelect()
+            onToggleSelect(job.id)
           }}
           onClick={(e) => e.stopPropagation()}
           aria-label={`选择任务 ${job.source_id}`}
@@ -167,4 +172,4 @@ export function JobListItem({
       </div>
     </div>
   )
-}
+})

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.services.node_codes import (
     _ENTITY_TYPE,
     NodeCodeService,
@@ -20,7 +20,7 @@ from server.app.services.versioned_entities import VersionedEntityStore
 
 
 def freeze_node_code_versions(
-    database_dsn: DatabaseDsn,
+    database_dsn: ConnectSource,
     custom_nodes_enabled: bool,
     workspace_id: str,
     workflow_key: str,
@@ -28,6 +28,8 @@ def freeze_node_code_versions(
 ) -> dict[str, dict[str, Any]]:
     """Intake freeze: published ``{node_key: {version, code_hash}}`` pins.
 
+    ``database_dsn`` accepts the JobQueries facade or a bare DSN string
+    (BOUNDARY-DATA-001, #187); production callers pass the facade.
     Covers workspace-scoped published versions, so jobs pin the exact code
     they start with. Nodes with no published code simply do not appear; the gate
     short-circuits to an empty mapping so intake never touches the table when
@@ -65,7 +67,7 @@ def _get_pinned_rows(
 
 
 def resolve_dispatch_node_code(
-    database_dsn: DatabaseDsn,
+    database_dsn: ConnectSource,
     custom_nodes_enabled: bool,
     workspace_id: str,
     workflow_key: str,
@@ -78,6 +80,8 @@ def resolve_dispatch_node_code(
     hash mismatch raises, and a pinned version missing at BOTH scopes is data
     corruption and raises too — never silently substituted.
 
+    ``database_dsn`` accepts the JobQueries facade or a bare DSN string
+    (BOUNDARY-DATA-001, #187); production callers pass the facade.
     One DB read per call. The workflow worker's claim path memoizes this per
     (pass, node) in ``workflow_worker/code_dispatch.py`` (issue #124), tagged
     with the publish generation so an in-process publish takes effect on the

@@ -1,5 +1,6 @@
 import { Chip, DialogContent, DialogTitle } from '@mui/material'
-import type { JobSummary, WorkflowDefinitionRecord } from '../../types'
+import type { JobSummary } from '../../types'
+import type { NodeCatalog } from '../../lib/nodeCatalog'
 import {
   computeOrderedNodes,
   type WorkflowNodesByKey,
@@ -15,7 +16,7 @@ import styles from './JobRerunDialog.module.css'
 
 export type JobRerunDialogContentProps = {
   jobs: JobSummary[]
-  workflowDefinition?: WorkflowDefinitionRecord | null
+  workflowDefinition?: NodeCatalog | null
   workflowNodesByKey?: WorkflowNodesByKey | null
   itemLabel?: string
   allowFailedNodeMode?: boolean

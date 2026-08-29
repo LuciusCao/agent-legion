@@ -15,7 +15,7 @@ from scripts.architecture.route_mutations import (
 )
 
 _WORKSPACE_MODULE_PREFIXES = tuple(
-    """server/app/routes/jobs.py server/app/routes/job_artifacts.py server/app/routes/job_batches.py server/app/routes/workspace_ server/app/services/job_ server/app/services/workspace_ server/app/services/executor_catalog.py server/app/services/workflow_definitions.py""".split()
+    """server/app/routes/jobs.py server/app/routes/job_artifacts.py server/app/routes/job_batches.py server/app/routes/workspace_ server/app/services/job_ server/app/services/workspace_ server/app/services/agent_catalog_projection.py server/app/services/workflow_definitions.py""".split()
 )
 
 _LEGACY_VIDEO_MODULE_PREFIXES = tuple("""server.app.pipeline.""".split())
@@ -193,7 +193,8 @@ def check_job_deletion_service_is_singular(root: Path) -> list[str]:
                     "job deletion must use JobDeletionService, not JobRerunService"
                 )
 
-    service_path = root / "server/app/services/job_rerun.py"
+    # #199 归包后路径随迁：守卫目标 job_rerun/__init__.py（原平铺模块归包根）。
+    service_path = root / "server/app/services/job_rerun/__init__.py"
     if service_path.exists():
         source = service_path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(service_path.relative_to(root)))

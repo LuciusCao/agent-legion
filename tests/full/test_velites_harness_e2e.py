@@ -23,14 +23,14 @@ import pytest
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.dispatch import AgentDispatchService
 from server.app.agent_catalog import AgentDefinition
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.services.artifact_store import ArtifactStore
 from server.app.settings import Settings
 from server.app.workflows.schema import WorkflowNode, WorkflowNodeExecution
 from tests.helpers import replace_agent_catalog
+from tests.helpers.agent_worker_api import insert_job_rows as _insert_job_rows
 from tests.helpers.executor_worker import make_pi_skill
 from tests.postgres_support import TEST_DATABASE_URL
-from tests.test_agent_broker import _insert_job_rows
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VELITES_BINARY = REPO_ROOT / "velites" / "target" / "debug" / "velites"
@@ -257,7 +257,7 @@ def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -
             assert flag not in command
         assert command[command.index("--require-output") + 1] == OUTPUT_NAME
 
-        # Worker 执行语义：占位符替换后 Popen（worker/execution_prepare.py 同款）。
+        # Worker 执行语义：占位符替换后 Popen（worker/execution/prepare.py 同款）。
         session_dir = tmp_path / "session"
         session_dir.mkdir()
         prompt_file = tmp_path / "prompt.md"
@@ -273,10 +273,15 @@ def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -
         argv = [str(binary), *command[1:]]
         for placeholder, value in substitutions.items():
             argv = [part.replace(placeholder, value) for part in argv]
+        # gateway provider 走 config::resolve()（env 凭据）的前提是 models
+        # registry 不存在；开发机上 ~/.velites/models.json 存在时 resolve
+        # 会先撞上 "provider gateway is not configured"。指向不存在的路径
+        # 强制走迁移桥分支，与 test_velites_controllability 的隔离先例一致。
         env = {
             **os.environ,
             "VELITES_BASE_URL": gateway.base_url,
             "VELITES_API_KEY": "stub-key",
+            "VELITES_MODELS_PATH": str(tmp_path / "no-models.json"),
         }
         proc = subprocess.run(
             argv, cwd=job_dir, env=env, capture_output=True, text=True, timeout=300

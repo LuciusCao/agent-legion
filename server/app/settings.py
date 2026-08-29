@@ -9,16 +9,14 @@ from dotenv import load_dotenv
 
 from server.app.configuration import load_application_config
 from server.app.configuration.cors import CorsSettings, load_cors_settings
-from server.app.configuration.instance_defaults import (
-    apply_instance_config_defaults,
-    resolve_worker_register_token,
-)
-from server.app.executors.runtime_config import (
+from server.app.configuration.executor_runtime import (
     ExecutorRuntimeConfig,
     OpenClawRuntimeConfig,
     WorkflowsRuntimeConfig,
     validate_runtime,
 )
+from server.app.configuration.instance_defaults import apply_instance_config_defaults
+from server.app.skills.paths import default_skills_runs_dir
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -35,11 +33,15 @@ class Settings:
     jobs_dir: Path
     config: dict[str, Any]
     database_url: str = "postgresql://127.0.0.1:5432/agent_legion"
+    # Host-side scratch for skill snapshots/cache locks; must resolve
+    # identically in every process sharing the skill cache (FileLock
+    # domain) — per-process temp dirs pin it via AGENT_LEGION_SKILLS_RUNS_DIR.
+    skills_runs_dir: Path = field(default_factory=default_skills_runs_dir)
     cors: CorsSettings = field(default_factory=CorsSettings)
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
             workflows=WorkflowsRuntimeConfig(),
-            openclaw=OpenClawRuntimeConfig(command_template=("openclaw",)),
+            openclaw=OpenClawRuntimeConfig(),
         )
     )
 
@@ -84,16 +86,16 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
         _bool_parser,
     ),
     "AGENT_LEGION_OPENCLAW_CWD": (("openclaw", "cwd"), _path_parser),
-    "AGENT_LEGION_WORKER_REGISTER_TOKEN": (("agent_workers", "register_token"), _str_parser),
-    "AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE": (
-        ("agent_workers", "register_token_file"),
-        _path_parser,
-    ),
+    # AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE) removed with the global token
+    # retirement (issue #35): registration is scoped-token-only now. A leftover
+    # variable must fail loudly at load time instead of silently ignoring a
+    # credential the operator still believes is active.
     "AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD": (("auth", "bootstrap_admin_password"), _str_parser),
     "AGENT_LEGION_CORS_ALLOW_ORIGINS": (("server", "cors", "allow_origins"), _csv_parser),
     "AGENT_LEGION_CORS_ALLOW_CREDENTIALS": (("server", "cors", "allow_credentials"), _bool_parser),
     "AGENT_LEGION_VAULT_MASTER_KEY": (("vault", "master_key"), _str_parser),
     "AGENT_LEGION_VAULT_MASTER_KEY_FILE": (("vault", "master_key_file"), _path_parser),
+    "AGENT_LEGION_SKILLS_RUNS_DIR": (("skills", "runs_dir"), _path_parser),
 }
 
 _DATABASE_URL_ENV = "AGENT_LEGION_DATABASE_URL"
@@ -125,6 +127,42 @@ def _apply_env_overrides(config: dict[str, Any]) -> None:
                 node[key] = {}
             node = node[key]
         node[path[-1]] = parser(raw)
+
+
+def _reject_retired_register_token_config(config: dict[str, Any]) -> None:
+    """Fail fast on any leftover global register token configuration.
+
+    The global token was retired with issue #35 (registration is scoped-token
+    only, issued per workspace from the admin UI). Both the yaml
+    ``agent_workers.register_token(_file)`` keys and the
+    AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE) env vars are dead config that
+    must not be silently ignored: an operator could otherwise believe a
+    rotated token is active while every registration actually uses scoped
+    tokens. Remove the keys; workers register with scoped tokens issued in
+    the admin UI (设置 → Worker Token)."""
+    retired_keys = sorted(
+        key
+        for key in ("register_token", "register_token_file")
+        if key in (config.get("agent_workers") or {})
+    )
+    if retired_keys:
+        raise ValueError(
+            "Unsupported agent_workers keys: "
+            + ", ".join(f"agent_workers.{key}" for key in retired_keys)
+            + ". The global worker register token was retired (issue #35); "
+            "registration uses scoped tokens issued in the admin UI "
+            "(设置 → Worker Token). Remove these keys."
+        )
+    for env_var in (
+        "AGENT_LEGION_WORKER_REGISTER_TOKEN",
+        "AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE",
+    ):
+        if os.environ.get(env_var):
+            raise ValueError(
+                f"Unsupported environment variable: {env_var}. The global worker "
+                "register token was retired (issue #35); registration uses scoped "
+                "tokens issued in the admin UI (设置 → Worker Token). Unset it."
+            )
 
 
 def _reject_retired_cms_yaml_keys(config: dict[str, Any]) -> None:
@@ -186,6 +224,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     config = loaded.config
     _reject_retired_cms_yaml_keys(config)
     _reject_retired_agent_yaml_keys(config)
+    _reject_retired_register_token_config(config)
     _apply_database_url_env(config)
     _apply_env_overrides(config)
     apply_instance_config_defaults(config)
@@ -204,7 +243,10 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir, jobs_dir]:
         path.mkdir(parents=True, exist_ok=True)
     executor_runtime = ExecutorRuntimeConfig.model_validate(config)
-    resolve_worker_register_token(executor_runtime.agent_workers, root_dir)
+    # skills.runs_dir is env-only by contract (AGENT_LEGION_SKILLS_RUNS_DIR);
+    # a hand-written yaml skills section would also land here (the loader
+    # does not own a skills key), which is tolerated but unsupported.
+    skills_override = config.get("skills", {}).get("runs_dir")
     return Settings(
         root_dir=root_dir,
         database_url=database_url,
@@ -214,6 +256,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         packages_dir=packages_dir,
         jobs_dir=jobs_dir,
         config=config,
+        skills_runs_dir=Path(skills_override) if skills_override else default_skills_runs_dir(),
         cors=load_cors_settings(config),
         executor_runtime=executor_runtime,
     )

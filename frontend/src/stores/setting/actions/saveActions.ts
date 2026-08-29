@@ -3,7 +3,7 @@ import type { WorkspaceConfigurationResponse } from '../../../types'
 import { queryClient } from '../../../lib/queryClient'
 import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import {
-  normalizeExecutorConfiguration,
+  normalizeExecutionConfiguration,
   type SettingState,
   type SettingStoreSet,
 } from '../state'
@@ -17,7 +17,7 @@ export function saveActions(set: SettingStoreSet, get: () => SettingState) {
         workspaceName,
         workspaceDescription,
         settings,
-        executorConfiguration,
+        executionConfiguration,
       } = get()
       // 重入守卫：并发 PUT 乱序会让先发的旧响应回写覆盖新快照；调用方靠
       // isDirty 仍为 true 感知未保存状态。返回值告知保存是否成功（绑定编辑
@@ -32,17 +32,24 @@ export function saveActions(set: SettingStoreSet, get: () => SettingState) {
             body: JSON.stringify({
               name: workspaceName,
               description: workspaceDescription,
-              settings,
-              node_limits: executorConfiguration.node_limits,
+              // 契约是 extra=forbid：GET /settings 返回的 nodeConfig/
+              // nodeConfigSchemas 等服务端附加键不在 PUT 白名单里（各有
+              // 自己的 PATCH section），全量回传会 422。
+              settings: {
+                entityType: settings.entityType,
+                workflowKey: settings.workflowKey,
+                previewHidden: settings.previewHidden,
+              },
+              node_limits: executionConfiguration.node_limits,
               // null = unset：省略该字段，PUT 保留后端已存的 agent_capacity。
-              ...(executorConfiguration.agent_capacity != null
-                ? { agent_capacity: executorConfiguration.agent_capacity }
+              ...(executionConfiguration.agent_capacity != null
+                ? { agent_capacity: executionConfiguration.agent_capacity }
                 : {}),
             }),
           }
         )
-        const savedExecutorConfiguration = normalizeExecutorConfiguration(
-          result.executor_configuration
+        const savedExecutionConfiguration = normalizeExecutionConfiguration(
+          result.execution_configuration
         )
         set({
           workspaceName: result.workspace.name,
@@ -51,8 +58,8 @@ export function saveActions(set: SettingStoreSet, get: () => SettingState) {
           originalWorkspaceName: result.workspace.name,
           originalWorkspaceDescription: result.workspace.description || '',
           originalSettings: result.settings,
-          executorConfiguration: savedExecutorConfiguration,
-          originalExecutorConfiguration: savedExecutorConfiguration,
+          executionConfiguration: savedExecutionConfiguration,
+          originalExecutionConfiguration: savedExecutionConfiguration,
           isDirty: false,
         })
         useUiStore.getState().showToast('设置已保存', 'success')

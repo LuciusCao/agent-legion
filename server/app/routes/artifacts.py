@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette import concurrency
 
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.services.artifact_store import ArtifactNotFoundError, ArtifactStore
 from server.app.settings import Settings
 
@@ -37,13 +37,13 @@ def create_artifacts_router(
             if agent_worker_registry.authenticate(agent_token) is not None:
                 return
             raise HTTPException(status_code=401, detail="invalid Agent Worker token")
-        if not agent_config.register_token:
-            raise HTTPException(status_code=503, detail="Agent Worker execution is disabled")
         raise HTTPException(status_code=401, detail="missing Agent Worker token")
 
     @router.post("", status_code=201, response_model=ArtifactUploadResponse)
     async def upload_artifact(request: Request) -> ArtifactUploadResponse:
-        authorize_artifact(request)
+        # authenticate() is a synchronous DB read; keep it off the loop like
+        # the store.put below (deprecated route, but same-loop discipline).
+        await concurrency.run_in_threadpool(authorize_artifact, request)
         declared = request.headers.get("content-length")
         if (
             declared is not None

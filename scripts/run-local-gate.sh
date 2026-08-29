@@ -28,11 +28,22 @@ if [[ "$gate" == "full" && "$lanes" != "backend frontend rust" ]]; then
   exit 2
 fi
 # Test tier for the quick gate's backend lane: smoke/unit (all pure tests with
-# PostgreSQL offline) or full (whole quick suite). The full gate always runs
-# the full tier. The tier is part of the evidence fingerprint below.
+# PostgreSQL offline) or full (the unit layer since PR #225 — the postgres
+# integration layer runs on CI or via an explicit GATE_TIER=postgres run, and
+# scripts/check.sh still covers both tiers for the local full gate); aff is
+# the agent inner-loop
+# combination (unit backend + vitest related frontend) and never produces
+# reusable push evidence — run-local-gate requires the quick/full gates, so aff
+# is only reachable through scripts/check-quick.sh directly. The full gate
+# always runs the full tier. The tier is part of the evidence fingerprint below.
 tier="${GATE_TIER:-full}"
 case "$tier" in
   smoke|unit|postgres|full) ;;
+  aff)
+    echo "GATE_TIER=aff is an inner-loop tier; it produces no push evidence." >&2
+    echo "Run scripts/check-quick.sh directly for the inner loop, or use smoke/quick here." >&2
+    exit 2
+    ;;
   *)
     echo "Unsupported GATE_TIER: $tier" >&2
     exit 2
@@ -88,6 +99,45 @@ for command_name in uv python3 node npm cargo rustc; do
     fingerprint_input+="$command_name=${version%%$'\n'*}"$'\n'
   fi
 done
+
+# Machine identity is part of the fingerprint (#206): the evidence cache is
+# shared across worktrees via the common git dir, so without it machine A's
+# pass would be replayed on machine B for the same SHA + toolchain. uname -srm
+# alone is NOT a host identity (identical OS/arch machines share it — codex
+# review), so resolve a per-host unique id: AGENT_LEGION_MACHINE_ID_FILE
+# override (also the test seam), /etc/machine-id (or its dbus mirror) on
+# Linux, IOPlatformUUID on macOS, hostname as the last resort.
+resolve_machine_identity() {
+  local candidate override
+  override="${AGENT_LEGION_MACHINE_ID_FILE:-}"
+  if [[ -n "$override" && -r "$override" ]]; then
+    candidate="$(tr -d '[:space:]' <"$override")"
+    if [[ -n "$candidate" ]]; then
+      printf 'machine-id:%s' "$candidate"
+      return 0
+    fi
+  fi
+  for candidate in /etc/machine-id /var/lib/dbus/machine-id; do
+    if [[ -r "$candidate" ]]; then
+      candidate="$(tr -d '[:space:]' <"$candidate")"
+      if [[ -n "$candidate" ]]; then
+        printf 'machine-id:%s' "$candidate"
+        return 0
+      fi
+    fi
+  done
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    candidate="$(ioreg -rd1 -c IOPlatformExpertDevice 2>/dev/null | sed -n 's/.*IOPlatformUUID" = "\([^"]*\)".*/\1/p' | head -n 1)"
+    if [[ -n "$candidate" ]]; then
+      printf 'platform-uuid:%s' "$candidate"
+      return 0
+    fi
+  fi
+  candidate="$(hostname 2>/dev/null || true)"
+  printf 'hostname:%s' "${candidate:-unknown}"
+}
+machine_identity="$(resolve_machine_identity)"
+fingerprint_input+="machine=${machine_identity%%$'\n'*}"$'\n'
 
 fingerprint="$(printf '%s' "$fingerprint_input" | git hash-object --stdin)"
 cache_dir="$common_dir/local-gates/$head_sha"

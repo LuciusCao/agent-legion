@@ -5,7 +5,7 @@ Worker 直传到每次 execution 唯一的 staging key（jobs-staging/...）；H
 服务端 copy 提升到权威 key + 原子落盘（只落 expected_outputs 白名单）+
 record_remote 登记 + best-effort 删 staging；任一失败整个 result 判
 failed，且不留半应用状态。旧形态 str ref 的 add_ref 路径不变（回归由
-tests/test_agent_completion_validation.py 覆盖）。
+tests/services/test_agent_completion_validation.py 覆盖）。
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from typing import Any, BinaryIO
 import pytest
 from psycopg import IntegrityError
 
-from server.app.agent_completion import AgentCompletionHandler, AgentOutcome
+from server.app.agent_control.completion import AgentCompletionHandler, AgentOutcome
 from server.app.db.schema import init_db
 from server.app.db.transaction import write_transaction
 from server.app.services.job_artifact_objects import JobArtifactObjectStore

@@ -6,14 +6,15 @@ import json
 from pathlib import PurePosixPath
 from typing import Any
 
-from server.app.agent_completion import AgentOutcome
+from server.app.agent_control.completion import AgentOutcome
 from server.app.routes.agent_worker_result_refs import parse_artifact_ref
+from shared.code_sandbox import MAX_CONNECTION_KEY_CHARS
 
 _MAX_COMMAND_PARTS = 64
 _MAX_OUTPUT_ARTIFACTS = 128
 _MAX_ERROR_MESSAGE_CHARS = 4000
 _MAX_RUN_DIR_CHARS = 256
-_MAX_CONNECTION_KEY_CHARS = 128
+_MAX_CONNECTION_KEY_CHARS = MAX_CONNECTION_KEY_CHARS
 
 
 def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:

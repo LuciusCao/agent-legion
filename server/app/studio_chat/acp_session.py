@@ -25,7 +25,7 @@ import logging
 import queue
 import threading
 from collections.abc import Mapping
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from acp import PROTOCOL_VERSION, spawn_agent_process
 from acp.schema import (
@@ -33,7 +33,6 @@ from acp.schema import (
 )
 from acp.schema import (
     ClientCapabilities,
-    HttpHeader,
     HttpMcpServer,
     Implementation,
     RequestPermissionResponse,
@@ -43,9 +42,12 @@ from acp.schema import (
     DeniedOutcome as AcpDeniedOutcome,
 )
 
-from server.app.mcp_server.config import SESSION_ID_HEADER
-from server.app.mcp_server.http_app import MCP_URL_PATH
 from server.app.studio_chat.capabilities import capability_snapshot
+from server.app.studio_chat.session_load import open_acp_session
+from server.app.studio_chat.terminals import AcpTerminalStore, TerminalClientMixin
+
+if TYPE_CHECKING:
+    from server.app.studio_chat.runtime import SessionRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +59,7 @@ def _log_cancel_result(task: asyncio.Task[Any]) -> None:
     unretrieved-exception warning on an otherwise healthy loop."""
     if task.cancelled():
         return
-    exc = task.exception()
-    if exc is not None:
+    if (exc := task.exception()) is not None:
         logger.warning("studio chat ACP cancel failed: %s", exc)
 
 
@@ -71,6 +72,11 @@ CLOSE_GRACE_SECONDS = 5
 
 class AcpSessionCallbacks(Protocol):
     """Service-side hooks invoked from the session thread; must be thread-safe."""
+
+    # Bound by spawn_session_runtime right after the runtime is created
+    # (before handle.start()): the death-echo on_exit pins this identity so a
+    # stale exit cannot tear down a newer runtime registered by resume (ABA).
+    runtime: SessionRuntime | None
 
     def on_ready(self, capabilities: dict[str, Any], acp_session_id: str) -> None: ...
 
@@ -89,14 +95,12 @@ class AcpSessionCallbacks(Protocol):
     def on_error(self, detail: str) -> None:
         """The whole ACP run collapsed (startup failure or connection loss)."""
 
-    def on_exit(self) -> None: ...
+    def on_exit(self, *, close_initiated: bool) -> None: ...
 
 
-class _ClientImpl:
-    """ACP client surface the agent calls back into (duck-typed protocol)."""
-
-    def __init__(self, handle: AcpSessionHandle) -> None:
-        self._handle = handle
+class _ClientImpl(TerminalClientMixin):
+    """ACP client surface the agent calls back into (duck-typed protocol);
+    ``_handle``/``terminals`` are bound by the factory in ``_run``."""
 
     async def session_update(self, session_id: str, update: Any, **kwargs: Any) -> None:
         payload = update.model_dump(by_alias=True, exclude_none=True, mode="json")
@@ -132,6 +136,7 @@ class AcpSessionHandle:
         mcp_server: HttpMcpServer,
         env: Mapping[str, str] | None,
         callbacks: AcpSessionCallbacks,
+        resume_acp_session_id: str | None = None,
     ) -> None:
         self.command = command
         self.args = args
@@ -139,6 +144,12 @@ class AcpSessionHandle:
         self.mcp_server = mcp_server
         self.env = dict(env or {})
         self.callbacks = callbacks
+        # Resume path: try session/load of this prior ACP session when the
+        # freshly-initialized agent advertises loadSession (session_load.py).
+        self._resume_acp_session_id = resume_acp_session_id
+        # Set once startup completed: True only when session/load actually
+        # restored the prior ACP session (False on the session/new fallback).
+        self.loaded_existing = False
         self._queue: queue.Queue[Any] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._closed = False
@@ -224,10 +235,14 @@ class AcpSessionHandle:
             self.callbacks.on_error("ACP session loop crashed")
         finally:
             self.ready_event.set()
-            self.callbacks.on_exit()
+            # _closed was set before _CLOSE was queued, so by the time the
+            # thread drains it and lands here the flag is reliably visible:
+            # an intentional teardown must not be reported as an agent death.
+            self.callbacks.on_exit(close_initiated=self._closed)
 
     async def _run(self) -> None:
-        client = _ClientImpl(self)
+        client = _ClientImpl()
+        client._handle, client.terminals = self, AcpTerminalStore()
         try:
             async with spawn_agent_process(
                 cast(Any, client), self.command, *self.args, env=self.env, cwd=self.cwd
@@ -239,22 +254,38 @@ class AcpSessionHandle:
                 self._drain_stderr(process)
                 initialize = await conn.initialize(
                     protocol_version=PROTOCOL_VERSION,
-                    client_capabilities=ClientCapabilities(),
+                    # terminal=True: kimi's Bash/Grep run via the ACP
+                    # terminal protocol; without the flag they fail upfront.
+                    client_capabilities=ClientCapabilities(terminal=True),
                     client_info=Implementation(
                         name="agent-legion-studio", title="Agent Legion", version="1"
                     ),
                 )
                 capabilities = capability_snapshot(initialize)
-                session = await conn.new_session(cwd=self.cwd, mcp_servers=[self.mcp_server])
+                acp_session_id, loaded = await open_acp_session(
+                    conn,
+                    cwd=self.cwd,
+                    mcp_server=self.mcp_server,
+                    resume_acp_session_id=self._resume_acp_session_id,
+                    capabilities=capabilities,
+                )
                 with self._state_lock:
-                    self._acp_session_id = session.session_id
-                self.callbacks.on_ready(capabilities, session.session_id)
+                    self._acp_session_id = acp_session_id
+                self.loaded_existing = loaded
+                self.callbacks.on_ready(capabilities, acp_session_id)
                 # Startup handshake complete: release the create_session waiter.
                 self.ready_event.set()
-                await self._prompt_loop(conn, session.session_id)
+                await self._prompt_loop(conn, acp_session_id)
         except Exception as exc:
-            logger.warning("studio chat ACP session failed: %s", exc)
+            # exc_info: this is the primary failure signal for the whole ACP
+            # session lifecycle — losing the traceback makes spawn/transport
+            # problems undiagnosable from the logs alone.
+            logger.warning("studio chat ACP session failed: %s", exc, exc_info=True)
             self.callbacks.on_error(str(exc))
+        finally:
+            # Reap terminals a crashed/killed agent never released itself.
+            with contextlib.suppress(Exception):
+                await client.terminals.close_all()
 
     async def _prompt_loop(self, conn: Any, acp_session_id: str) -> None:
         while True:
@@ -268,7 +299,14 @@ class AcpSessionHandle:
                 )
                 self.callbacks.on_turn_end(str(response.stop_reason))
             except Exception as exc:
-                self.callbacks.on_turn_error(str(exc))
+                # #204 broad-except audit: deliberate per-turn containment —
+                # the prompt loop is the session's life support, so one failed
+                # turn must not kill the loop and the session with it; the
+                # service records the turn error and the user can send the
+                # next prompt, and the traceback is logged for the agent-side
+                # failures that dominate here.
+                self.callbacks.on_turn_error(f"{type(exc).__name__}: {exc}")
+                logger.warning("studio chat prompt turn failed: %s", exc, exc_info=True)
 
     def _drain_stderr(self, process: Any) -> None:
         """Discard agent stderr on a reader task so a chatty agent never
@@ -285,24 +323,3 @@ class AcpSessionHandle:
                 logger.debug("studio chat agent stderr: %s", line.decode(errors="replace").rstrip())
 
         asyncio.get_running_loop().create_task(drain())
-
-
-def build_mcp_server_spec(*, token: str, api_base: str, session_id: str) -> HttpMcpServer:
-    """The session-scoped agent-legion MCP entry injected into session/new.
-
-    kimi ≥ 0.38 only accepts http/sse MCP servers over ACP, so the backend
-    serves the tool surface itself (server.app.mcp_server.http_app) and the
-    session points at that URL. The raw scoped token crosses only as an HTTP
-    header inside the ACP session/new request — never persisted, never logged
-    (STUDIO-AGENT-001). The chat session id rides along (SESSION_ID_HEADER)
-    so the get_studio_context tool can resolve this session's live context.
-    """
-    return HttpMcpServer(
-        type="http",
-        name="agent-legion-studio",
-        url=f"{api_base}{MCP_URL_PATH}",
-        headers=[
-            HttpHeader(name="Authorization", value=f"Bearer {token}"),
-            HttpHeader(name=SESSION_ID_HEADER, value=session_id),
-        ],
-    )

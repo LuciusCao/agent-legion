@@ -25,7 +25,7 @@ from typing import Any, Literal
 
 from psycopg import IntegrityError
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.job_errors import ConflictError, NotFoundError
 
@@ -95,11 +95,20 @@ def _integrity_conflict(exc: IntegrityError, entity_type: EntityType) -> Conflic
 
 
 class VersionedEntityStore:
-    """Draft → published → archived lifecycle engine for one entity type."""
+    """Draft → published → archived lifecycle engine for one entity type.
 
-    def __init__(self, database_dsn: DatabaseDsn, entity_type: EntityType) -> None:
+    ``database_dsn`` accepts the JobQueries facade or a bare DSN
+    (BOUNDARY-DATA-001, #187); it only feeds the connection helpers.
+    """
+
+    def __init__(self, database_dsn: ConnectSource, entity_type: EntityType) -> None:
         self._dsn = database_dsn
         self._entity_type = entity_type
+
+    @property
+    def dsn(self) -> ConnectSource:
+        """Connect-source identity for cache keys (facade or DSN)."""
+        return self._dsn
 
     def get_published(self, entity_key: str, workspace_id: str | None) -> VersionedEntity | None:
         with read_connection(self._dsn) as conn:

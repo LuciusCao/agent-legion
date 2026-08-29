@@ -15,7 +15,6 @@ const commonTestExcludes = [
 const browserTestFiles = [
   'src/api/core.test.ts',
   'src/components/useJobListLoadMore.test.ts',
-  'src/hooks/useAsync.test.ts',
   'src/hooks/useDashboardEvents.test.ts',
   'src/hooks/useDebouncedCallback.test.ts',
   'src/hooks/useJobComprehensionInfo.test.ts',
@@ -24,15 +23,15 @@ const browserTestFiles = [
   'src/lib/download.test.ts',
   'src/lib/htmlText.test.ts',
   'src/lib/latex.test.ts',
-  'src/lib/materialWeb.test.ts',
   'src/lib/sanitizeHtml.test.ts',
   'src/hooks/useJobFilterRefetch.test.ts',
   'src/pages/jobDetail/useUpgradeWorkflowAction.test.ts',
-  'src/pages/workflowStudio/useWorkflowStudio.test.ts',
-  'src/pages/workflowStudio/useWorkflowStudioActions.test.ts',
-  'src/pages/workflowStudio/useWorkflowStudioMobilePanel.test.ts',
+  'src/features/workflowStudio/shared/useWorkflowStudio.test.ts',
+  'src/features/workflowStudio/shared/useWorkflowDraftPersistence.test.ts',
+  'src/features/workflowStudio/shared/useWorkflowStudioActions.test.ts',
+  'src/features/workflowStudio/shared/useWorkflowStudioMobilePanel.test.ts',
+  'src/features/workflowStudio/shared/useWorkflowStudioPageView.test.ts',
   'src/stores/agentsStore.test.ts',
-  'src/stores/uiStore.test.ts',
 ]
 
 // Dev-server proxy noise filter: when the browser reloads / HMR restarts, the
@@ -104,6 +103,21 @@ export default defineConfig(({ mode }) => {
             ) {
               return 'vendor-react'
             }
+            // Markdown rendering (studio chat) and the JSON artifact viewer
+            // are heavy and used by few routes — keep them out of the catch-all
+            // vendor bucket, which the entry loads on first paint.
+            if (id.includes('marked')) {
+              return 'vendor-marked'
+            }
+            if (id.includes('react18-json-view')) {
+              return 'vendor-json-view'
+            }
+            if (id.includes('uplot')) {
+              return 'vendor-uplot'
+            }
+            if (id.includes('dompurify')) {
+              return 'vendor-dompurify'
+            }
             return 'vendor'
           },
         },
@@ -131,6 +145,13 @@ export default defineConfig(({ mode }) => {
             include: ['src/**/*.test.tsx', ...browserTestFiles],
             exclude: commonTestExcludes,
             setupFiles: ['./src/test-setup.ts'],
+            // Project-level timeout policy (FLAKY-002 root cause): jsdom
+            // rendering is CPU-bound, and under parallel runner load the
+            // default 5s per-test timeout fires in batches on tests that pass
+            // in isolation. 20s matches the per-test override the historical
+            // offender carried; heavy renders get the slack they need while
+            // genuine hangs still fail bounded.
+            testTimeout: 20_000,
           },
         },
       ],

@@ -21,10 +21,11 @@ from typing import Any
 
 import pytest
 
+from shared.code_sandbox import build_sandbox_argv
 from shared.material_cache import MATERIALS_CACHE_DIRNAME, MaterializeError
 from worker import binary_resolution, material_fetch
 from worker.cleanup import clean_work_root
-from worker.code_runner import build_sandbox_argv, execute_code
+from worker.code_runner import execute_code
 from worker.material_fetch import materialize_claim_material
 from worker.stale_sweep import sweep_stale_executions
 from worker.status import ExecutionStatusReporter
@@ -121,7 +122,7 @@ def test_sandbox_argv_grants_static_cache_root(tmp_path: Path) -> None:
     argv = build_sandbox_argv(
         "/usr/bin/velites",
         tmp_path / "job",
-        tmp_path / "bundle",
+        [tmp_path / "bundle"],
         tmp_path / "job" / ".code_result.json",
         sandbox_network=False,
         materials_cache_root=cache_root,
@@ -133,7 +134,7 @@ def test_sandbox_argv_grants_static_cache_root(tmp_path: Path) -> None:
     argv = build_sandbox_argv(
         "/usr/bin/velites",
         tmp_path / "job",
-        tmp_path / "bundle",
+        [tmp_path / "bundle"],
         tmp_path / "job" / ".code_result.json",
         sandbox_network=False,
         materials_cache_root=cache_root,

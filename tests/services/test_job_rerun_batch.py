@@ -1,4 +1,4 @@
-"""批量执行路径（_job_rerun_batch）与逐条 rerun() 的等价性 + 读查询上界。"""
+"""批量执行路径（job_rerun.batch）与逐条 rerun() 的等价性 + 读查询上界。"""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ _NODE_KEYS = ["intake_knowledge_points", "write_script", "review_script"]
 def rerun_service(job_db, settings):
     return JobRerunService(
         job_db,
-        ExecutorLeaseRepository(job_db.path, data_dir=settings.data_dir),
+        ExecutorLeaseRepository(job_db, data_dir=settings.data_dir),
         settings,
         JobArtifactMutationService(settings.jobs_dir),
     )

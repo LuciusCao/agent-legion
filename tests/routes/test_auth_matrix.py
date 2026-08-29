@@ -101,7 +101,7 @@ def test_workspace_create_is_admin_only(client) -> None:
 
     allowed = client.post(
         "/api/workspaces",
-        json={"name": "admin ws", "default_workflow_key": "matrix_create_flow"},
+        json={"id": "matrix_create_flow", "name": "admin ws"},
     )
     assert allowed.status_code == 200, allowed.text
 

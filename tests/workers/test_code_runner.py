@@ -22,19 +22,18 @@ from typing import Any
 
 import pytest
 
+from shared.code_sandbox import build_sandbox_argv
 from worker import binary_resolution
 from worker.code_runner import (
-    build_sandbox_argv,
     cancel_executions,
     execute_code,
     prepare_code_execution,
     prepare_code_result,
     register_cancellation,
-    strip_secret_config,
     unregister_cancellation,
 )
 from worker.status import ExecutionStatusReporter
-from worker.upload_queue import UploadTask
+from worker.upload.queue import PENDING_FILENAME, PendingUploadExists, UploadTask
 
 pytestmark = pytest.mark.no_db
 
@@ -172,6 +171,65 @@ def test_prepare_rejects_bundle_without_node_code(tmp_path: Path) -> None:
         _prepare(tmp_path, _code_claim(), FakeClient(bundle))
 
 
+def test_prepare_refuses_dir_with_pending_upload_marker(tmp_path: Path) -> None:
+    """#203：marker 属于当前 claim 的 lease 时目录归 UploadQueue 所有，prepare
+    不得删除或覆盖（restore() 恢复的 pending 结果可能正排队中）。"""
+    execution_dir = tmp_path / "work" / "exec-code-1"
+    job_dir = execution_dir / "job"
+    job_dir.mkdir(parents=True)
+    (job_dir / "output.json").write_text("old result", encoding="utf-8")
+    marker = execution_dir / PENDING_FILENAME
+    marker.write_text(
+        '{"version": 1, "execution_id": "exec-code-1", "lease_id": "lease-1"}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PendingUploadExists, match=PENDING_FILENAME):
+        _prepare(tmp_path, _code_claim(), FakeClient(_code_bundle(tmp_path)))
+
+    assert (
+        marker.read_text(encoding="utf-8")
+        == '{"version": 1, "execution_id": "exec-code-1", "lease_id": "lease-1"}'
+    )
+    assert (job_dir / "output.json").read_text(encoding="utf-8") == "old result"
+    # bundle 下载未发生：目录内容原样。iterdir 顺序随文件系统实现而异
+    # （CI 的 Linux 与本地 macOS 不同），按集合断言。
+    assert {p.name for p in execution_dir.iterdir()} == {"job", PENDING_FILENAME}
+
+
+def test_prepare_clears_orphan_marker_from_stale_lease(tmp_path: Path) -> None:
+    """#203 P1：旧 lease 的孤儿 marker（report 必 409）不得牺牲当前 claim
+    （attempt 预算有限，最后一次重试不能为过期结果殉葬）——目录随 stale
+    一起清掉，本次执行照常准备。"""
+    execution_dir = tmp_path / "work" / "exec-code-1"
+    job_dir = execution_dir / "job"
+    job_dir.mkdir(parents=True)
+    (job_dir / "output.json").write_text("dead result", encoding="utf-8")
+    marker = execution_dir / PENDING_FILENAME
+    marker.write_text(
+        '{"version": 1, "execution_id": "exec-code-1", "lease_id": "lease-old"}',
+        encoding="utf-8",
+    )
+
+    _prepare(tmp_path, _code_claim(), FakeClient(_code_bundle(tmp_path)))
+
+    assert not marker.exists()
+    assert not (job_dir / "output.json").exists()
+    assert (execution_dir / "bundle" / "node_code.py").is_file()
+
+
+def test_prepare_replaces_stale_dir_without_marker(tmp_path: Path) -> None:
+    """无 marker 的崩溃残留目录仍被清理（既有行为回归）。"""
+    execution_dir = tmp_path / "work" / "exec-code-1"
+    execution_dir.mkdir(parents=True)
+    (execution_dir / "junk").write_text("leftover", encoding="utf-8")
+
+    _prepare(tmp_path, _code_claim(), FakeClient(_code_bundle(tmp_path)))
+
+    assert not (execution_dir / "junk").exists()
+    assert (execution_dir / "bundle" / "node_code.py").is_file()
+
+
 def test_prepare_rejects_unsafe_bundle_member(tmp_path: Path) -> None:
     bundle = tmp_path / "evil.tar.gz"
     with tarfile.open(bundle, "w:gz") as tar:
@@ -183,22 +241,11 @@ def test_prepare_rejects_unsafe_bundle_member(tmp_path: Path) -> None:
         _prepare(tmp_path, _code_claim(), FakeClient(bundle))
 
 
-def test_strip_secret_config_drops_secret_keys_and_connection_block() -> None:
-    schema = {
-        "properties": {
-            "token": {"type": "string", "secret": True},
-            "threshold": {"type": "number"},
-        }
-    }
-    config = {"token": "s3cr3t", "threshold": 0.5, "connection_config": {"token": "abc"}}
-    assert strip_secret_config(config, schema) == {"threshold": 0.5}
-
-
 def test_build_sandbox_argv_structure() -> None:
     argv = build_sandbox_argv(
         "/usr/bin/velites",
         Path("/work/e1/job"),
-        Path("/work/e1/bundle"),
+        [Path("/work/e1/bundle")],
         Path("/work/e1/job/.code_result.json"),
         sandbox_network=True,
     )
@@ -215,11 +262,25 @@ def test_build_sandbox_argv_structure() -> None:
     no_network = build_sandbox_argv(
         "/usr/bin/velites",
         Path("/work/e1/job"),
-        Path("/work/e1/bundle"),
+        [Path("/work/e1/bundle")],
         Path("/work/e1/job/.code_result.json"),
         sandbox_network=False,
     )
     assert "--allow-network" not in no_network
+
+    # marker 挂在子命令 argv 尾部（result_path 之后）：ps 系孤儿回收靠它把
+    # 进程组归属到 execution（#186）；不传则 argv 不多任何元素。
+    marked = build_sandbox_argv(
+        "/usr/bin/velites",
+        Path("/work/e1/job"),
+        [Path("/work/e1/bundle")],
+        Path("/work/e1/job/.code_result.json"),
+        sandbox_network=False,
+        marker="agent-legion-exec-1",
+    )
+    assert marked[-1] == "agent-legion-exec-1"
+    assert marked[-2] == "/work/e1/job/.code_result.json"
+    assert no_network[-1] == "/work/e1/job/.code_result.json"
 
 
 def _fake_velites(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -286,6 +347,20 @@ def test_execute_code_completed_and_result_pack(
     # 归档契约：expected_outputs 按 job-dir 相对名 + 根部 node.log。
     assert "output.json" in names
     assert "node.log" in names
+
+
+def test_execute_code_marks_group_for_orphan_reaper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#186：code argv 尾部携带 agent-legion-<execution_id>，否则 supervisor 崩溃后
+    orphan_reaper 无法识别 code 进程组身份，孤儿子进程树无人回收（双执行）。"""
+    client = FakeClient(_code_bundle(tmp_path))
+    task = _execute(tmp_path, monkeypatch, _code_claim(), client)
+
+    assert task is not None
+    assert task.command[-1] == "agent-legion-exec-code-1"
+    metadata, _, _ = prepare_code_result(task)
+    assert metadata["command"][-1] == "agent-legion-exec-code-1"
 
 
 def test_execute_code_reports_auth_failure_connection(

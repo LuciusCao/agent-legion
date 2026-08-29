@@ -108,6 +108,9 @@ def test_loopback_tools_are_async() -> None:
         "save_node_code_draft",
         "get_node_code",
         "save_agent_definition_draft",
+        "get_skill",
+        "validate_skill",
+        "save_skill_version",
     ):
         assert inspect.iscoroutinefunction(tools[name].fn), name
     # The local-only playbook tool never blocks, so it stays sync.
@@ -221,6 +224,59 @@ def test_save_agent_definition_draft_default_tools(recorded) -> None:
     }
 
 
+def test_get_skill_without_ref(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_skill", {"skill_key": "wf/review"})
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/skills/wf/review")
+
+
+def test_get_skill_with_ref_appends_query(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_skill", {"skill_key": "wf/review", "ref": "v1.2.0+exp"})
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/skills/wf/review?ref=v1.2.0%2Bexp")
+
+
+def test_skill_tools_url_encode_skill_key_segments(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_skill", {"skill_key": "wf/re view"})
+    assert "/skills/wf/re%20view" in calls[0]["url"]
+    _run_tool(server, "validate_skill", {"skill_key": "wf/re view"})
+    assert "/skills/wf/re%20view/validate" in calls[1]["url"]
+    _run_tool(
+        server,
+        "save_skill_version",
+        {
+            "skill_key": "wf/re view",
+            "files": [{"path": "SKILL.md", "content": "x"}],
+            "new_tag": "v2",
+            "message": "m",
+        },
+    )
+    assert "/skills/wf/re%20view/versions" in calls[2]["url"]
+
+
+def test_validate_skill_posts(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "validate_skill", {"skill_key": "wf/review"})
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["url"].endswith("/skills/wf/review/validate")
+
+
+def test_save_skill_version_posts_body(recorded) -> None:
+    server, calls = recorded
+    files = [{"path": "SKILL.md", "content": "# v2\n"}]
+    _run_tool(
+        server,
+        "save_skill_version",
+        {"skill_key": "wf/review", "files": files, "new_tag": "v2.0.0", "message": "revise"},
+    )
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["url"].endswith("/skills/wf/review/versions")
+    assert calls[0]["json"] == {"files": files, "new_tag": "v2.0.0", "message": "revise"}
+
+
 def test_get_studio_context_uses_the_bound_session(monkeypatch) -> None:
     calls: list[dict] = []
 
@@ -267,6 +323,28 @@ def test_connection_error_returns_text_not_exception(monkeypatch) -> None:
     text = _run_tool(server, "get_active_workflow", {"workspace_id": "ws-1"})
     assert text.startswith("request failed: ")
     assert "refused" in text
+
+
+def test_loopback_client_ignores_env_proxies(monkeypatch) -> None:
+    """A socks ALL_PROXY without socksio must not break the loopback client."""
+    captured: dict = {}
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def request(self, method, url, json=None, headers=None):  # noqa: A002
+            return _FakeResponse(200)
+
+    monkeypatch.setattr("server.app.mcp_server.tool_client.httpx.AsyncClient", FakeAsyncClient)
+    asyncio.run(ToolClient(_CONFIG).call("GET", "/workspaces/ws-1/workflow"))
+    assert captured.get("trust_env") is False
 
 
 def test_config_requires_token() -> None:

@@ -1,0 +1,81 @@
+.layout {
+  display: flex;
+  gap: 24px;
+  min-height: 420px;
+}
+
+.list {
+  width: 280px;
+  flex-shrink: 0;
+  border-right: 1px solid #e0e0e0;
+  padding-right: 16px;
+}
+
+.listItems {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.listItem,
+.listItemActive {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.listItem:hover {
+  background-color: #f0f0f0;
+}
+
+.listItemMeta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #616161;
+}
+
+.editor {
+  flex: 1;
+  min-width: 0;
+}
+
+.editorActions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.field {
+  margin-bottom: 16px;
+}
+
+.error {
+  color: #d32f2f;
+  font-size: 13px;
+}
+
+.hint {
+  font-size: 12px;
+  color: #616161;
+}
+
+.empty {
+  color: #616161;
+  font-size: 14px;
+}

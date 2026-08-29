@@ -14,11 +14,11 @@ tests/test_configuration_loader.py):
 - the ``asr:`` section stays retired — business parameters live in the
   transcribe_media capability ``config_schema``; machine paths arrive via the
   ``AGENT_LEGION_ASR_*`` env overrides only;
-- ``openclaw.skill_safety.repos`` stay a pure path allowlist — the yaml
-  ``openclaw:`` section retired into the DB instance settings document, so
-  the code defaults in ``configuration/instance_defaults.py`` are the
-  tracked source; refs are pinned by the DB ``skill_lock`` document (config
-  governance G3);
+- the ``openclaw:`` section is cwd-only — the retired knobs
+  (command_template / timeout_seconds / isolated_workspace_root /
+  skill_safety) were configurable but never consumed and have been removed;
+  the code defaults in ``configuration/openclaw_defaults.py`` are the
+  tracked source;
 - env-only sections (``vault``, ``auth``) stay out of every yaml file — they
   are injected via environment variables only.
 """
@@ -63,14 +63,11 @@ def test_tracked_config_files_have_no_asr_section():
         )
 
 
-def test_skill_safety_repos_are_path_only():
-    repos = DEFAULT_OPENCLAW_CONFIG["skill_safety"]["repos"]
-    assert isinstance(repos, list)
-    for repo in repos:
-        assert set(repo) <= {"path"}, (
-            "skill_safety repos are a pure path allowlist (G3); "
-            "refs resolve from the DB skill_lock document"
-        )
+def test_openclaw_defaults_are_cwd_only():
+    assert set(DEFAULT_OPENCLAW_CONFIG) == {"cwd"}, (
+        "openclaw code defaults must stay cwd-only; retired knobs "
+        "(command_template/skill_safety/...) were never consumed"
+    )
 
 
 def test_tracked_config_files_have_no_env_only_sections():

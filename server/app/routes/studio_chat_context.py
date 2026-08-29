@@ -1,4 +1,4 @@
-"""Studio chat context route (schema v45): human-side selected-node push.
+"""Studio chat context route (schema v45): human-side canvas state push.
 
 Split from studio_chat.py (file budget); create_studio_chat_router mounts it.
 The route lives on the guarded surface (reject_studio_agent_scope,
@@ -30,7 +30,16 @@ def create_studio_chat_context_router(service: StudioChatService) -> APIRouter:
         workspace_id: str, session_id: str, payload: StudioChatContextUpdateRequest
     ) -> StudioChatSessionResponse:
         try:
-            session = service.set_selected_node(session_id, workspace_id, payload.selected_node_key)
+            # Partial update: selected_node_key writes only when the field is
+            # present (explicit null still clears); the in-process draft
+            # mirror updates only on a non-null draft_yaml.
+            session = service.get_session(session_id, workspace_id)
+            if "selected_node_key" in payload.model_fields_set:
+                session = service.set_selected_node(
+                    session_id, workspace_id, payload.selected_node_key
+                )
+            if payload.draft_yaml is not None:
+                session = service.set_draft_yaml(session_id, workspace_id, payload.draft_yaml)
         except JobServiceError as exc:
             raise_job_http_error(exc)
         return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))

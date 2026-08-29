@@ -9,8 +9,8 @@ export {
   createWorkspace,
   deleteWorkspace,
   fetchWorkspaces,
+  fetchWorkspaceRuntimeModels,
   fetchWorkspaceStats,
-  updateAgentDefaults,
   updateWorkspace,
 } from './workspaceApi'
 // prettier-ignore
@@ -28,11 +28,16 @@ export {
 // prettier-ignore
 export { compareWorkflowDraft, fetchActiveWorkflowRevision, fetchWorkflowRevisionDetail, fetchWorkflowRevisions } from './workflowRevisions'
 export { publishWorkflowDraft, validateWorkflowDraft } from './workflows'
+export { fetchWorkflowDraft, putWorkflowDraft } from './workflowDraft'
 export { fetchOpsMetrics } from './metrics'
 export { presignMaterial, completeMaterial, createRun } from './materialsApi'
 // prettier-ignore
 export type { MetricBucket, OpsGranularity, OpsMetricsParams, OpsMetricsResponse } from './metrics'
 // prettier-ignore
-export { createRegisterToken, listAgentWorkers, listRegisterTokens, revokeAgentWorker, revokeRegisterToken } from './workerTokens'
+export { createRegisterToken, deleteRegisterToken, listRegisterTokens } from './workerTokens'
 // prettier-ignore
-export type { AgentRegisterTokenCreatedResponse, AgentRegisterTokenSummary, AgentWorkerSummary } from './workerTokens'
+export { deleteAgentWorker, listAgentWorkers } from './agentWorkers'
+// prettier-ignore
+export type { AgentRegisterTokenCreatedResponse, AgentRegisterTokenSummary } from './workerTokens'
+// prettier-ignore
+export type { AgentWorkerSummary } from './agentWorkers'

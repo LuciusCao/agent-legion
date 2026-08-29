@@ -1,10 +1,10 @@
 """Pydantic contracts for the Agent Worker control-plane routes."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from server.app.agent_control.registry import MODEL_RUNTIME_PROTOCOL_VERSION
 
 
 class RegisterAgentWorkerRequest(BaseModel):
@@ -22,17 +22,28 @@ class RegisterAgentWorkerRequest(BaseModel):
     image_version: str = Field(default="", max_length=128)
 
 
+class AgentWorkerWorkspace(BaseModel):
+    workspace_id: str
+    workspace_name: str
+    # Ids of the presented register tokens that opened this workspace, so the
+    # Worker console can associate each token card with its workspace.
+    token_ids: list[str] = Field(default_factory=list)
+
+
 class RegisterAgentWorkerResponse(BaseModel):
     worker_token: str
-    # Negotiated Host capability level. A v3 Worker must not continue against
-    # an older Host that would erase runtime-scoped model declarations.
-    host_protocol_version: int = 3
+    host_protocol_version: int = MODEL_RUNTIME_PROTOCOL_VERSION
     # Server-resolved workspace admission scope; [] means all workspaces.
     allowed_workspaces: list[str]
+    # Same scope enriched with workspace names (one row per presented token's
+    # workspace, deduplicated) so the Worker console can label each token.
+    workspaces: list[AgentWorkerWorkspace] = Field(default_factory=list)
 
 
 class CreateAgentRegisterTokenRequest(BaseModel):
-    workspace_id: str | None = Field(default=None, max_length=128)
+    # Required: the all-workspaces token variant was retired with the global
+    # register token (issue #35).
+    workspace_id: str = Field(min_length=1, max_length=128)
     label: str = Field(default="", max_length=128)
 
 
@@ -40,12 +51,14 @@ class AgentRegisterTokenCreatedResponse(BaseModel):
     token_id: str
     # Plaintext, returned exactly once at issuance.
     register_token: str
-    workspace_id: str | None
+    workspace_id: str
     label: str
 
 
 class AgentRegisterTokenSummary(BaseModel):
     token_id: str
+    # The None case is unreachable via the API (issuance requires a
+    # workspace); it only models pre-v58 rows read straight from the table.
     workspace_id: str | None
     label: str
     created_at: str
@@ -56,8 +69,12 @@ class AgentRegisterTokensResponse(BaseModel):
     tokens: list[AgentRegisterTokenSummary]
 
 
-class AgentRegisterTokenRevokeResponse(BaseModel):
-    revoked: bool
+class AgentRegisterTokenDeleteResponse(BaseModel):
+    token_id: str
+    deleted: bool
+    # Workers whose registration records were cascade-deleted in the same
+    # transaction (no live key left); their credentials die immediately.
+    cascaded_worker_ids: list[str] = Field(default_factory=list)
 
 
 class ClaimAgentExecutionRequest(BaseModel):
@@ -83,6 +100,10 @@ class AgentWorkerSummary(BaseModel):
     protocol_version: int
     # Server-side workspace admission scope; [] means all workspaces.
     allowed_workspaces: list[str]
+    # Ids of the workspace-scoped register tokens that admitted the latest
+    # (re)registration — the worker↔key binding shown in the admin UI. [] for
+    # workers registered before schema v59.
+    register_token_ids: list[str] = Field(default_factory=list)
     registered_at: str
     last_seen_at: str
     # True while the Worker's last authenticated call is within the online
@@ -95,9 +116,9 @@ class AgentWorkersResponse(BaseModel):
     workers: list[AgentWorkerSummary]
 
 
-class AgentWorkerRevokeResponse(BaseModel):
+class AgentWorkerDeleteResponse(BaseModel):
     worker_id: str
-    revoked: bool
+    deleted: bool
 
 
 class AgentClaimResponse(BaseModel):

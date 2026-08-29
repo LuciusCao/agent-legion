@@ -97,9 +97,83 @@ def test_evaluate_once_per_job_per_pass(tmp_path: Path, monkeypatch: pytest.Monk
 
     assert worker._poll() is True
     assert worker.leases.active_counts("code")["global"] == 3
-    assert len(worker._futures) == 3
+    assert len(worker.state.futures) == 3
     assert loader_calls["count"] == 1
     assert snapshot_calls["count"] == 1
+
+    block_event.set()
+    worker.stop()
+
+
+def test_execution_control_error_yields_no_candidates_without_killing_pass(
+    tmp_path: Path, caplog
+) -> None:
+    """#204: ExecutionControlError is the expected business failure — the job
+    yields no ready nodes (WARNING with the control snapshot) and the pass
+    keeps going. A programming error in allowed_nodes, by contrast, is NOT
+    swallowed here: it propagates to the poll-loop safety net (next test)."""
+    db_path = TEST_DATABASE_URL
+    job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="demo_workflow")
+    block_event = threading.Event()
+    executor = BlockingExecutor("code", block_event)
+    definition = make_definition([local_node("fetch")])
+    job = job_db.create_job(
+        workflow_key="test",
+        source_type="question",
+        source_id="Q1",
+        run_id="",
+        title="Q1",
+        node_keys=["fetch"],
+        workspace_id=ws["id"],
+    )
+    # until_node with a target that is not in the definition: the business
+    # failure the ready evaluation must contain per job.
+    job_db.set_job_execution_mode(job["id"], "until_node", target_node_key="no-such-node")
+    worker = make_worker(tmp_path, db_path, executor, [definition], code_capacity=2)
+
+    with caplog.at_level("WARNING", logger="server.app.workflow_worker.ready_cache"):
+        processed = worker._poll()
+
+    # The pass completed (no raise) and the job produced no claims.
+    assert processed is False
+    assert len(worker.state.futures) == 0
+    assert any("invalid execution control" in rec.message for rec in caplog.records)
+    block_event.set()
+    worker.stop()
+
+
+def test_programming_error_in_ready_evaluation_is_not_swallowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#204 layering guard: only the ExecutionControlError business failure
+    is contained per job. A genuine programming error from allowed_nodes
+    propagates — it must reach the poll-loop safety net instead of silently
+    dropping the job."""
+    db_path = TEST_DATABASE_URL
+    job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="demo_workflow")
+    block_event = threading.Event()
+    executor = BlockingExecutor("code", block_event)
+    definition = make_definition([local_node("fetch")])
+    job_db.create_job(
+        workflow_key="test",
+        source_type="question",
+        source_id="Q1",
+        run_id="",
+        title="Q1",
+        node_keys=["fetch"],
+        workspace_id=ws["id"],
+    )
+    worker = make_worker(tmp_path, db_path, executor, [definition], code_capacity=2)
+
+    def exploding_allowed(*args, **kwargs):
+        raise TypeError("programmer mistake")
+
+    monkeypatch.setattr("server.app.workflow_worker.ready_cache.allowed_nodes", exploding_allowed)
+
+    with pytest.raises(TypeError, match="programmer mistake"):
+        worker._poll()
 
     block_event.set()
     worker.stop()
@@ -162,7 +236,7 @@ def test_multi_ready_node_job_claimed_within_one_pass(tmp_path: Path) -> None:
 
     assert worker._poll() is True
     assert worker.leases.active_counts("code")["global"] == 2
-    assert len(worker._futures) == 2
+    assert len(worker.state.futures) == 2
     job = worker.job_db.list_jobs(workspace_id=ws["id"], workflow_key="test")[0]
     statuses = {
         node["node_key"]: node["status"] for node in worker.job_db.list_job_nodes(job["id"])

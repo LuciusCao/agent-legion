@@ -65,28 +65,19 @@ def test_agents_websocket_broadcasts_busy_idle_updates(client, monkeypatch):
     with client.websocket_connect("/api/agents") as ws:
         snapshot = ws.receive_json()
         assert snapshot["type"] == "snapshot"
-        agent_manager.set_busy(
-            "main",
-            {
-                "id": "v1",
-                "title": "T1",
-                "content_type": "knowledge",
-                "external_id": "K001",
-                "current_phase": "download",
-            },
-        )
+        agent_manager.set_busy("main")
+
         data = ws.receive_json()
         assert data["type"] == "agent_busy"
         assert data["agent"]["id"] == "main"
         assert data["agent"]["busy"] is True
-        assert data["agent"]["current_video_id"] == "v1"
-        assert data["agent"]["current_title"] == "T1"
+        assert data["agent"]["task_count"] == 1
 
         agent_manager.set_idle("main")
         data = ws.receive_json()
         assert data["type"] == "agent_idle"
         assert data["agent"]["busy"] is False
-        assert data["agent"]["current_video_id"] is None
+        assert data["agent"]["task_count"] == 0
 
 
 def test_agents_websocket_clean_disconnect_stays_silent(caplog):

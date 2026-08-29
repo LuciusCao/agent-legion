@@ -17,24 +17,24 @@ from typing import Any
 
 from yaml import YAMLError
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]  # worker/ 包根
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from worker import runtime_controls
 from worker.cleanup import clean_work_root
-from worker.execution_run import agent_subprocess_env as agent_subprocess_env
-from worker.execution_run import run_execution
+from worker.execution.run import agent_subprocess_env as agent_subprocess_env
+from worker.execution.run import run_execution
 from worker.fd_limits import raise_fd_limit
-from worker.host_client import Client, WorkerAuthError
-from worker.host_status_sync import sync_host_status
+from worker.host.client import Client, WorkerAuthError
+from worker.host.status_sync import sync_host_status
 from worker.metrics_cache import WorkerMetricsCache
-from worker.registration_retry import register_from_config
-from worker.runtime_setup import prepare_runtime_models
+from worker.registration.retry import register_from_config
+from worker.runtime import controls as runtime_controls
+from worker.runtime.setup import prepare_runtime_models
 from worker.stale_sweep import SWEEP_INTERVAL_SECONDS, sweep_stale_executions
 from worker.status import ExecutionStatusReporter
 from worker.transfer_controls import claim_availability, load_transfer_controls
-from worker.upload_queue import UploadQueue
+from worker.upload.queue import UploadQueue
 
 CLAIM_BACKOFF_CAP_SECONDS = 60.0
 
@@ -63,7 +63,7 @@ def main() -> int:
     metrics = WorkerMetricsCache.from_env()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
-    poll_interval, registration = register_from_config(client, config, stop)
+    poll_interval, registration = register_from_config(client, config, stop, args.config.parent)
     if registration is not True:
         return 2 if registration is False else 0
     host_worker: dict[str, Any] | None = {

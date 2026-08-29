@@ -14,6 +14,13 @@ export const extraQueryKeys = {
   workspaceMaterials: (workspaceId: string) =>
     ['workspaceMaterials', workspaceId] as const,
   workerTokens: () => ['workerTokens'] as const,
+  // workspace 视角的 worker 列表（按 scoped token 注册过滤，issue #35）。
+  workspaceWorkers: (workspaceId: string) =>
+    ['workspaceWorkers', workspaceId] as const,
+  // 在线 Worker 上报的 (runtime, provider, model) 聚合，Studio 节点执行
+  // 配置 datalist 数据源。
+  workspaceRuntimeModels: (workspaceId: string) =>
+    ['workspaceRuntimeModels', workspaceId] as const,
   tokenUsagePricing: () => ['tokenUsagePricing'] as const,
   instanceSettings: () => ['instanceSettings'] as const,
   skillSources: () => ['skillSources'] as const,
@@ -42,11 +49,18 @@ export const extraQueryKeys = {
     ['runTokenUsage', jobId, runId, runStatus] as const,
   workflowStudioData: (workspaceId: string) =>
     ['workflowStudioData', workspaceId] as const,
+  // Studio 编辑器的服务端持久化草稿（GET/PUT workflow-draft）。
+  workflowStudioDraft: (workspaceId: string) =>
+    ['workflowStudioDraft', workspaceId] as const,
   agentDefinitions: (workspaceId: string) => k('agentDefinitions', workspaceId),
   // Studio DAG/Inspector 共享的 Agent 目录（P-0.5：executors 半区已退役）；
   // 面板发布/归档后失效重取。
-  studioExecutorCatalog: (workspaceId: string) =>
-    ['studioExecutorCatalog', workspaceId] as const,
+  studioAgentCatalog: (workspaceId: string) =>
+    ['studioAgentCatalog', workspaceId] as const,
+  // Studio 节点详情的技能文件预览；ref 进 key（版本切换重取），Studio 对话
+  // turn_end 按首段 'studioSkillDetail' 前缀整体失效（useStudioChat）。
+  studioSkillDetail: (skillKey: string, ref: string | null) =>
+    ['studioSkillDetail', skillKey, ref] as const,
   agentVersions: (workspaceId: string, agentId: string) =>
     ['agentVersions', workspaceId, agentId] as const,
   qualityBatches: (workspaceId: string) =>

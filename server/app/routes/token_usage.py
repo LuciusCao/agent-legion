@@ -20,7 +20,7 @@ from server.app.settings import Settings
 
 def create_token_usage_router(job_queries, settings: Settings) -> APIRouter:
     router = APIRouter()
-    pricing_store = TokenUsagePricingStore(job_queries.job_db.path)
+    pricing_store = TokenUsagePricingStore(job_queries.job_db)
 
     def effective_config() -> dict:
         return pricing_store.effective_config(settings.config)

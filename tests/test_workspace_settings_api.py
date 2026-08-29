@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from server.app.agent_catalog import AgentDefinition
 from server.app.main import create_app
 from server.app.services.agent_service import AgentService
+from tests.helpers import publish_builtin_revision, seed_workspace_agent_definitions
 from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -15,10 +16,13 @@ def test_workspace_settings_round_trip(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
-            json={"name": "test_ws", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "education_video_problems_generation", "name": "test_ws"},
         )
         assert ws.status_code == 200
         workspace_id = ws.json()["workspace"]["id"]
+        # Schema v62: creation seeds nothing; publish the demo DAG so the
+        # node-level settings below have a workflow to resolve against.
+        publish_builtin_revision(c.app.state.job_db, workspace_id)
         connection = c.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",
             json={
@@ -29,8 +33,6 @@ def test_workspace_settings_round_trip(tmp_path):
             f"/api/workspaces/{workspace_id}/settings/intake",
             json={
                 "entityType": "video",
-                "intakeModes": ["direct_ids"],
-                "labelOverrides": {"direct_ids": "输入 ID"},
             },
         )
         workflow = c.patch(
@@ -48,8 +50,10 @@ def test_workspace_settings_round_trip(tmp_path):
     assert "resources" not in settings
     assert settings["nodeConfig"]["intake_knowledge_points"]["timeout_seconds"] == 120
     assert settings["entityType"] == "video"
-    assert settings["intakeModes"] == ["direct_ids"]
-    assert settings["labelOverrides"] == {"direct_ids": "输入 ID"}
+    # intakeModes/labelOverrides/agentDefaults retired at schema v64.
+    assert "intakeModes" not in settings
+    assert "labelOverrides" not in settings
+    assert "agentDefaults" not in settings
     assert settings["workflowKey"] == "education_video_problems_generation"
     workspace = app.state.job_db.get_workspace(workspace_id)
     assert "pipeline_config" not in workspace
@@ -61,7 +65,7 @@ def test_workspace_settings_workflow_rejects_legacy_concurrency_fields(tmp_path)
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
-            json={"name": "test_ws", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "education_video_problems_generation", "name": "test_ws"},
         )
         assert ws.status_code == 200
         workspace_id = ws.json()["workspace"]["id"]
@@ -102,10 +106,7 @@ def test_workflow_openapi_contract_is_capability_only(tmp_path: Path) -> None:
 def test_lists_workspace_workflow_revisions(client):
     response = client.post(
         "/api/workspaces",
-        json={
-            "name": "Workflow Studio",
-            "default_workflow_key": "education_video_problems_generation",
-        },
+        json={"id": "education_video_problems_generation", "name": "Workflow Studio"},
     )
     workspace_id = response.json()["workspace"]["id"]
 
@@ -116,78 +117,24 @@ def test_lists_workspace_workflow_revisions(client):
     assert "revisions" in payload
 
 
-def test_workspace_settings_agent_defaults_round_trip(client):
+def test_workspace_settings_agent_defaults_section_retired(client):
+    # Schema v64: workspace-level Agent defaults are retired — the section
+    # endpoint no longer exists and the payload carries no agentDefaults.
     response = client.post(
         "/api/workspaces",
-        json={
-            "name": "agent_defaults_ws",
-            "default_workflow_key": "education_video_problems_generation",
-        },
+        json={"id": "education_video_problems_generation", "name": "agent_defaults_ws"},
     )
     workspace_id = response.json()["workspace"]["id"]
 
     fetched = client.get(f"/api/workspaces/{workspace_id}/settings")
     assert fetched.status_code == 200
-    assert fetched.json()["settings"]["agentDefaults"] == {
-        "provider": "",
-        "model": "",
-        "thinking": "",
-    }
+    assert "agentDefaults" not in fetched.json()["settings"]
 
     saved = client.patch(
         f"/api/workspaces/{workspace_id}/settings/agent-defaults",
-        json={
-            "agentDefaults": {
-                "provider": "deepseek",
-                "model": "deepseek-v4-flash",
-                "thinking": "low",
-            }
-        },
+        json={"agentDefaults": {"provider": "deepseek", "model": "m"}},
     )
-    assert saved.status_code == 200
-    assert saved.json()["settings"]["agentDefaults"] == {
-        "provider": "deepseek",
-        "model": "deepseek-v4-flash",
-        "thinking": "low",
-    }
-
-    # Partial patch: only the model changes; provider/thinking are kept.
-    partial = client.patch(
-        f"/api/workspaces/{workspace_id}/settings/agent-defaults",
-        json={"agentDefaults": {"model": "deepseek-v4-pro"}},
-    )
-    assert partial.status_code == 200
-    assert partial.json()["settings"]["agentDefaults"] == {
-        "provider": "deepseek",
-        "model": "deepseek-v4-pro",
-        "thinking": "low",
-    }
-
-    workspace = client.get(f"/api/workspaces/{workspace_id}/settings").json()
-    assert workspace["settings"]["agentDefaults"]["model"] == "deepseek-v4-pro"
-
-
-def test_workspace_settings_agent_defaults_reject_bad_payload(client):
-    response = client.post(
-        "/api/workspaces",
-        json={
-            "name": "agent_defaults_bad",
-            "default_workflow_key": "education_video_problems_generation",
-        },
-    )
-    workspace_id = response.json()["workspace"]["id"]
-
-    missing = client.patch(
-        f"/api/workspaces/{workspace_id}/settings/agent-defaults",
-        json={},
-    )
-    assert missing.status_code == 400
-
-    wrong_type = client.patch(
-        f"/api/workspaces/{workspace_id}/settings/agent-defaults",
-        json={"agentDefaults": {"model": 5}},
-    )
-    assert wrong_type.status_code == 422
+    assert saved.status_code == 422
 
 
 def _inject_write_script_config_schema(workspace_id: str) -> None:
@@ -219,13 +166,12 @@ def test_workspace_settings_nodes_round_trip(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
-            json={
-                "name": "nodes_ws",
-                "default_workflow_key": "education_video_problems_generation",
-            },
+            json={"id": "education_video_problems_generation", "name": "nodes_ws"},
         )
         assert ws.status_code == 200
         workspace_id = ws.json()["workspace"]["id"]
+        publish_builtin_revision(c.app.state.job_db, workspace_id)
+        seed_workspace_agent_definitions(workspace_id)
         _inject_write_script_config_schema(workspace_id)
 
         fetched = c.get(f"/api/workspaces/{workspace_id}/settings")
@@ -277,12 +223,11 @@ def test_workspace_settings_nodes_reject_invalid_overrides(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
-            json={
-                "name": "nodes_ws_bad",
-                "default_workflow_key": "education_video_problems_generation",
-            },
+            json={"id": "education_video_problems_generation", "name": "nodes_ws_bad"},
         )
         workspace_id = ws.json()["workspace"]["id"]
+        publish_builtin_revision(c.app.state.job_db, workspace_id)
+        seed_workspace_agent_definitions(workspace_id)
         _inject_write_script_config_schema(workspace_id)
 
         unknown_key = c.patch(
@@ -316,9 +261,10 @@ def test_workspace_settings_node_config_is_schema_validated(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
-            json={"name": "res_ws", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "education_video_problems_generation", "name": "res_ws"},
         )
         workspace_id = ws.json()["workspace"]["id"]
+        publish_builtin_revision(c.app.state.job_db, workspace_id)
 
         fetched = c.get(f"/api/workspaces/{workspace_id}/settings")
         assert fetched.status_code == 200
@@ -365,13 +311,17 @@ def test_node_override_validation_uses_workspace_active_revision(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
-            json={"name": "rev_ws", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "education_video_problems_generation", "name": "rev_ws"},
         )
         assert ws.status_code == 200
         workspace_id = ws.json()["workspace"]["id"]
 
-        # Publish v2: the demo DAG minus review_questions (and its edges).
+        # Publish v1 (the demo DAG), then v2: the demo DAG minus
+        # review_questions (and its edges).
         definition = load_builtin_definition("education_video_problems_generation")
+        WorkflowRevisionService(app.state.job_db).publish_workspace_revision(
+            workspace_id, definition
+        )
         nodes = {
             key: replace(node, after=[a for a in node.after if a != "review_questions"])
             for key, node in definition.nodes.items()
@@ -403,9 +353,10 @@ def test_node_override_validation_uses_workspace_active_revision(tmp_path):
 
 
 def test_blank_workspace_first_publish_adopts_key_and_runs_job(tmp_path):
-    """Full catalog-free flow (#112 acceptance): create a blank workspace (no
-    workflow picked), publish a draft — the first publish adopts the draft key
-    — then intake a job."""
+    """Full catalog-free flow (#112 acceptance, v62 semantics): create a
+    workspace with an explicit id (which IS the workflow key), publish a
+    draft whose key matches, then intake a job. A mismatched draft key is
+    rejected with 422 — the key is immutable."""
     from server.app.services.node_codes import NodeCodeService
 
     app = create_app(data_dir=tmp_path, start_worker=False)
@@ -413,12 +364,13 @@ def test_blank_workspace_first_publish_adopts_key_and_runs_job(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
-            json={"name": "blank_ws", "workflow_mode": "blank"},
+            json={"id": "acme_flow", "name": "acme_flow"},
         )
         assert ws.status_code == 200, ws.text
         workspace = ws.json()["workspace"]
         workspace_id = workspace["id"]
-        assert workspace["default_workflow_key"] == ""
+        # Schema v62: the key is bound at creation (id == key), not adopted.
+        assert workspace["default_workflow_key"] == "acme_flow"
 
         # The code node needs published code before the first revision (the
         # known bootstrap constraint; node code is workspace-scoped).
@@ -454,6 +406,14 @@ def test_blank_workspace_first_publish_adopts_key_and_runs_job(tmp_path):
         )
         assert published.status_code == 200, published.text
         assert published.json()["valid"] is True
+
+        # A draft key that does not match the bound key is rejected (422),
+        # even before any revision exists.
+        mismatched = c.post(
+            f"/api/workspaces/{workspace_id}/workflow-drafts/publish",
+            json={"definition_yaml": draft_yaml.replace("key: acme_flow", "key: typo_flow")},
+        )
+        assert mismatched.status_code == 422
 
         fetched = c.get(f"/api/workspaces/{workspace_id}")
         assert fetched.json()["workspace"]["default_workflow_key"] == "acme_flow"

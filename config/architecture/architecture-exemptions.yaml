@@ -10,20 +10,23 @@ exemptions:
   path: server/app/routes/agent_workers.py:result
   reason: Agent Worker result acknowledgement returns an empty 204 response by protocol.
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  remove_when: docs/architecture/backend.md#agent-worker-protocol-responses
 - check: architecture.route_response_model
   path: server/app/routes/agent_workers.py:release_slot
   reason: Agent Worker release-slot acknowledgement returns an empty 204 response by protocol.
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-- check: architecture.scheduler_threadpool
-  path: server/app/workflow_worker/thread.py:self._pools[executor_id]
-  reason: WorkflowWorkerThread creates one shared ThreadPoolExecutor for the
-    single implicit code pool (constant CODE_EXECUTOR_ID,
-    server/app/workflow_worker/pools.py) to submit adapter executions; the
-    pool is bounded by the instance code_capacity setting, not workspace.
+  remove_when: docs/architecture/backend.md#agent-worker-protocol-responses
+- check: architecture.file_budget
+  path: server/app/routes/artifacts.py
+  reason: Artifact routes authenticate the per-Worker token used by Agent
+    execution transport, and the per-file upload path grew past the plain
+    baseline with the scoped-token work (#35). The routes serve the retired
+    CAS transfer channel that only pre-D12 Workers still call; the durable
+    resolution is deleting this router when that Worker generation is gone
+    (#160), not splitting deprecated code.
   owner: workspace-executor
-  remove_when: issues/open/032-P2-event-driven-worker.md
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/160
+  ceiling: 61
 - check: architecture.file_budget
   path: server/app/worker_control.py
   reason: Task 8 of the phase2 state-externalization plan persists pause state
@@ -33,7 +36,7 @@ exemptions:
     in-memory-era baseline and the budget will be re-ratcheted if the module
     shrinks.
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase2-state-externalization.md#task-8
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/190
   ceiling: 70
 - check: architecture.file_budget
   path: server/app/jobs/queries/workflow_revisions.py
@@ -43,7 +46,7 @@ exemptions:
     pruning rows absent from the new projection. Extract the projection write helper
     after rollout.
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-02-workflow-studio-change-review.md#task-1
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/195
   ceiling: 209
 - check: architecture.file_budget
   path: server/app/settings.py
@@ -59,28 +62,8 @@ exemptions:
     governance G4). Extract database settings into the configuration
     package after rollout.
   owner: config
-  remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
-  ceiling: 190
-- check: architecture.file_budget
-  path: server/app/routes/__init__.py
-  reason: Composition adds the Agent Worker control-plane router, the artifact
-    authentication dependency, the workspace-scoped custom node code
-    router (EXEC-CODE-002), the DB-backed Agent definition catalog +
-    skill validation routers (agent config governance, schema v26), the
-    quality replay router (schema v29, EXEC-QUALITY-REPLAY-001), the
-    studio-agent tool surface router (STUDIO-AGENT-001, phase 3 chunk 3),
-    the studio-agent self-service token router (schema v42), and the Studio
-    chat conversation + ACP agent registry routers (phase 3 chunk 4, schema
-    v43).
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-  ceiling: 146
-- check: architecture.file_budget
-  path: server/app/routes/artifacts.py
-  reason: Artifact routes authenticate the per-Worker token used by Agent execution transport.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-  ceiling: 61
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/188
+  ceiling: 216
 - check: architecture.file_budget
   path: server/app/services/workflow_revisions.py
   reason: Active revisions reconcile Agent routes at Host startup (capacity is
@@ -90,34 +73,70 @@ exemptions:
     an empty-catalog regression. Publish also snapshots node_code_pins (the
     published custom code versions, EXEC-CODE-002) alongside the definition.
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/195
   ceiling: 131
 - check: architecture.file_budget
   path: server/app/agent_broker/dispatch.py
   reason: Agent config governance phase 3 moved the strict execution-block
-    resolution (node override -> workspace default -> fail fast, runtime-pinned
-    command builder) into the dispatch boundary; the manifest builder and the
+    resolution (node override -> workflow top-level default -> fail fast,
+    runtime-pinned command builder; the workspace default retired at schema
+    v63) into the dispatch boundary; the manifest builder and the
     resolver share the runtime binary constants, so splitting now would just
     scatter one cohesive rule. The per-run Agent version pin (schema v29,
     EXEC-QUALITY-REPLAY-001) added the pinned_agent_version passthrough. Extract
-    the resolver with the phase 4 pi cleanup.
+    the resolver when the agent-broker structure-debt batch (#198) reworks the
+    dispatch boundary.
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
-  ceiling: 174
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/198
+  ceiling: 160
 - check: architecture.file_budget
   path: server/app/services/agent_service.py
   reason: Schema v27 made this service the only Agent catalog source of truth;
     the short-TTL published-definition cache (hot claim-path reads) lives next
     to the lifecycle methods so publish/archive can invalidate it in one
-    place. Split the cache into its own module if it gains more policy.
+    place. Split the cache into its own module when it gains more policy —
+    tracked with the wide-service structure batch (#196). The facade-connect
+    source aliasing (#187) adds the dsn-identity cache-key helper here.
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/196
   ceiling: 135
 - check: architecture.file_budget
-  path: server/app/db/migrations/__init__.py
-  reason: The module is the flat export point for the idempotent migration
-    chain and grows by two lines per schema version (v56
-    job_node_status_counts).
+  path: server/app/storage/s3_client.py
+  reason: The job-detail artifact preview (issue 11) added open_range (ranged
+    GET) to the storage protocol and the S3 client implementation so
+    object-store-only media can serve browser Range requests (seekable
+    playback without whole-object downloads). The protocol and its S3
+    implementation must stay in one file; revisit when the storage layer
+    grows a second backend implementation.
   owner: workspace-executor
-  remove_when: docs/architecture/studio-phase3-implementation-plan.md
-  ceiling: 52
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/11
+  ceiling: 155
+- check: architecture.file_budget
+  path: worker/config_store.py
+  reason: The ceiling rose past the main-side floor before the only-down
+    ratchet existed (#35-era scoped-token work, 2026-08-26); the 0.4.0 release
+    merge anchors on main and rejects the historical raise. The baseline
+    entry is pinned back at the main floor and the overage is carried here
+    as tracked debt — split the store below the floor (#250) and this
+    exemption goes stale automatically.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/250
+  ceiling: 229
+- check: architecture.file_budget
+  path: worker/service.py
+  reason: Same release-merge grandfathering as worker/config_store.py — the
+    pre-ratchet ceiling rise is legitimate develop history that main has not
+    caught up with; split the service below the main floor (#250) to retire
+    this exemption.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/250
+  ceiling: 167
+- check: architecture.file_budget
+  path: worker/supervisor.py
+  reason: Same release-merge grandfathering as worker/config_store.py — the
+    pre-ratchet ceiling rise is legitimate develop history that main has not
+    caught up with; split the supervisor below the main floor (#250) to
+    retire this exemption.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/250
+  ceiling: 254

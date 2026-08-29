@@ -66,8 +66,8 @@ class AgentPassState:
 
 def request_restock(worker: WorkflowWorkerThread) -> None:
     """Empty-claim signal: expire the stock snapshot and wake the poll loop."""
-    worker._agent_pass.force_refresh()
-    worker._wake_event.set()
+    worker.state.agent_pass.force_refresh()
+    worker.state.wake_event.set()
 
 
 def prepare_agent_pass(
@@ -75,12 +75,12 @@ def prepare_agent_pass(
 ) -> None:
     """Load the per-pass gate inputs in bulk, once per poll pass."""
     dispatch = worker.agent_dispatch
-    if dispatch is None or not has_published_agent_definitions(worker.settings.database_url):
+    if dispatch is None or not has_published_agent_definitions(worker.job_db):
         return
     job_ids = _candidate_job_ids(worker, queues)
     if not job_ids:
         return
-    state = worker._agent_pass
+    state = worker.state.agent_pass
     state.active_nodes = batch.active_request_keys(dispatch.broker.database_dsn, sorted(job_ids))
     config = worker.settings.executor_runtime.agent_stock
     if not config.enabled:
@@ -105,7 +105,7 @@ def _candidate_job_ids(
     job_ids: set[str] = set()
     for workspace_id, queue in queues.items():
         for candidate in queue:
-            cached = worker._route_cache.get(
+            cached = worker.state.route_cache.get(
                 (workspace_id, candidate.definition.key, candidate.node.key)
             )
             if cached is not None and cached[1].kind != "agent":
@@ -122,7 +122,7 @@ def agent_claim_allowed(
     agent_id: str,
 ) -> bool:
     """In-memory per-pass gates before config resolution; zero DB here."""
-    state = worker._agent_pass
+    state = worker.state.agent_pass
     if (job_id, node_key) in state.active_nodes or (job_id, node_key) in state.in_flight:
         return False
     snapshot = state.stock_snapshot

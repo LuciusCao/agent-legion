@@ -26,12 +26,14 @@ _CODE_V2 = "def run(ctx):\n    return {'v': 2}\n"
 
 
 def _stub_worker() -> SimpleNamespace:
+    # job_db mimics the JobQueries facade's connect surface (#187): services
+    # hand the facade itself to connection helpers.
     return SimpleNamespace(
-        job_db=SimpleNamespace(path=TEST_DATABASE_URL),
+        job_db=SimpleNamespace(path=TEST_DATABASE_URL, dsn_identity=TEST_DATABASE_URL),
         settings=SimpleNamespace(
             executor_runtime=SimpleNamespace(workflows=SimpleNamespace(custom_nodes_enabled=True))
         ),
-        _node_code_cache={},
+        state=SimpleNamespace(node_code_cache={}, secret_memo={}, batch_payload_cache={}),
     )
 
 
@@ -89,7 +91,7 @@ def test_node_code_unpublished_memoized_until_published() -> None:
             pass
         else:  # pragma: no cover - the node has no published code
             raise AssertionError("unpublished node must fail fast")
-    generation, code = worker._node_code_cache[("ws-ncc2", "wf", "node-missing")]
+    generation, code = worker.state.node_code_cache[("ws-ncc2", "wf", "node-missing")]
     assert code is None
     # Publishing the missing node invalidates the memoized None in the same
     # pass: the next claim resolves the fresh code.

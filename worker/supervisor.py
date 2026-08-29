@@ -18,8 +18,9 @@ from yaml import YAMLError
 from worker.config_store import WorkerConfigStore, public_config, validate_config
 from worker.metrics_cache import METRICS_FILENAME
 from worker.orphan_reaper import reap_orphaned_agents
+from worker.registration.token import registration_tokens
 from worker.status import ENV_VAR, STATUS_FILENAME, read_runtime_status
-from worker.status_aggregates import execution_counts
+from worker.status.aggregates import execution_counts
 
 __all__ = ["WorkerConfigStore", "WorkerSupervisor", "public_config", "validate_config"]
 
@@ -71,9 +72,10 @@ class WorkerSupervisor:
             # 刻意设计（含崩溃自动重启路径）：重启后默认暂停认领，需人工重新打开。
             self._log("启动时已将 claim_enabled 重置为 false，需在控制台重新打开认领")
             config = self.store.read()
-            token_file = Path(str(config["register_token_file"]))
-            if not token_file.is_file():
-                self._log(f"配置等待中：注册密钥文件不存在：{token_file}")
+            tokens = registration_tokens(config, self.store.state_dir)
+            if not tokens:
+                directory = self.store.token_dir()
+                self._log(f"配置等待中：没有可用的注册 Token（{directory} 为空）")
                 return
             if not self._warned_divergence and self._mounted_config_diverged():
                 self._warned_divergence = True
@@ -252,3 +254,24 @@ class WorkerSupervisor:
             "current_executions": executions,
             **remote,
         }
+
+    def token_status(self) -> dict[str, str]:
+        """Per-token registration state keyed by token_id.
+
+        The Host resolves the union scope and rejects the whole registration
+        when any token is bad, so per-token granularity is limited: 'ok' once
+        a registration round succeeded (the workspaces detail in the runtime
+        file names which workspaces the tokens opened), 'rejected' when the
+        supervisor recorded a registration failure, 'pending' otherwise."""
+        runtime = read_runtime_status(self.store.state_dir / STATUS_FILENAME)
+        remote = runtime["remote"] or {}
+        workspaces = remote.get("workspaces")
+        tokens = self.store.read_registration_tokens()
+        if isinstance(workspaces, list) and workspaces:
+            # 本轮注册已成功，Host 汇报的 workspaces 即所有有效 token 的并集。
+            return {row["token_id"]: "ok" for row in tokens}
+        with self._lock:
+            failed = self._failed_reason is not None
+        registered = bool(remote.get("registered"))
+        state = "rejected" if failed else ("ok" if registered else "pending")
+        return {row["token_id"]: state for row in tokens}

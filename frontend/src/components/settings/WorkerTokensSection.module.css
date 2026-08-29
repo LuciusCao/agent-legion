@@ -92,6 +92,11 @@
   background: #e6f4ea;
   color: #1e7e34;
 }
+/* workspace 绑定 chip（token 归属 / worker 注册 scope） */
+.chipScope {
+  background: #e8f0fe;
+  color: #1a56b0;
+}
 .chipRevoked {
   background: #ffebee;
   color: #b71c1c;

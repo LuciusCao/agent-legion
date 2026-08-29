@@ -12,11 +12,10 @@ import { AgentRoutingSection } from '../components/AgentRoutingSection'
 import { LocalNodeLimitSection } from '../components/LocalNodeLimitSection'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { BasicInfoSection } from '../components/settings/BasicInfoSection'
-import { AgentDefaultsSection } from '../components/settings/AgentDefaultsSection'
 import { DangerZone } from '../components/settings/DangerZone'
-import { WorkflowSection } from '../components/settings/WorkflowSection'
-import { IntakeConfigSection } from '../components/settings/IntakeConfigSection'
+import { PreviewConfigSection } from '../components/settings/PreviewConfigSection'
 import { WorkerTokensSection } from '../components/settings/WorkerTokensSection'
+import { WorkspaceWorkersSection } from '../components/settings/WorkspaceWorkersSection'
 import { WorkspaceMembersSection } from '../components/settings/WorkspaceMembersSection'
 import styles from './SettingsPage.module.css'
 
@@ -65,10 +64,7 @@ export function SettingsPage() {
   const navItems = useMemo(
     () => [
       { id: 'basic-info', label: '基础信息' },
-      { id: 'intake-config', label: '接入与资源' },
-      { id: 'workflow', label: '工作流' },
       { id: 'agent-workers', label: 'Agent 与 Worker' },
-      { id: 'agent-defaults', label: 'Agent 默认配置' },
       ...(isAdmin ? [{ id: 'workspace-members', label: '成员管理' }] : []),
       ...(hasCodeNodes
         ? [{ id: 'code-node-concurrency', label: '代码节点并发' }]
@@ -134,33 +130,34 @@ export function SettingsPage() {
           <BasicInfoSection
             workspaceName={workspaceName}
             workspaceDescription={workspaceDescription}
+            entityType={settings.entityType}
+            saveError={saveError}
             onNameChange={setWorkspaceName}
             onDescriptionChange={setWorkspaceDescription}
+            onEntityTypeChange={(entityType) => setSettings({ entityType })}
           />
 
-          <IntakeConfigSection
+          <PreviewConfigSection
             settings={settings}
             workflowDefinition={workflowDefinition}
-            saveError={saveError}
             setSettings={setSettings}
           />
 
-          <WorkflowSection
-            workflowKey={settings.workflowKey}
-            onChange={(key) => setSettings({ workflowKey: key })}
-          />
+          {/* schema v62：workflow key 与 workspace id 绑定且不可变，
+              原 WorkflowSection 编辑器已移除（后端 PATCH /configuration
+              对 key 变更一律 400）。settings.workflowKey 仅作为快照字段
+              在保存时原样回传。 */}
 
           <section id="agent-workers" className={styles.section}>
             <h2 className={styles.sectionTitle}>Agent 与 Worker</h2>
             <hr className={styles.sectionDivider} />
             <AgentRoutingSection />
-            <WorkerTokensSection />
+            {isAdmin ? (
+              <WorkerTokensSection workspaceId={workspaceId ?? ''} />
+            ) : (
+              <WorkspaceWorkersSection workspaceId={workspaceId ?? ''} />
+            )}
           </section>
-          <AgentDefaultsSection
-            workspaceId={workspaceId}
-            agentDefaults={settings.agentDefaults}
-            onSaved={(agentDefaults) => setSettings({ agentDefaults })}
-          />
           {isAdmin && <WorkspaceMembersSection workspaceId={workspaceId} />}
           {hasCodeNodes && (
             <section id="code-node-concurrency" className={styles.section}>

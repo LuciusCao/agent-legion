@@ -10,6 +10,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.storage_paths import resolve_managed_path
 
@@ -44,8 +45,11 @@ class ArtifactNotFoundError(ArtifactStoreError):
 
 
 class ArtifactStore:
+    """Content-addressed blob store; ``db_path`` accepts the JobQueries facade
+    or a bare DSN string (BOUNDARY-DATA-001, #187)."""
+
     def __init__(
-        self, root: Path, db_path: str, gc_grace_seconds: float = GC_GRACE_SECONDS
+        self, root: Path, db_path: ConnectSource, gc_grace_seconds: float = GC_GRACE_SECONDS
     ) -> None:
         self.root = root
         self.db_path = db_path

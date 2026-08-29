@@ -14,7 +14,6 @@ from server.app.services.job_intake_enqueue import enqueue_intake_batch
 from server.app.services.job_intake_registry import RESOLVERS
 from server.app.services.job_intake_resolution import normalize_values
 from server.app.services.job_intake_workspace import (
-    enabled_intake_modes,
     get_workspace,
     singular_field_name,
 )
@@ -52,12 +51,6 @@ class JobIntakeService:
         mode = definition.intake.modes.get(payload["source_kind"]) if definition.intake else None
         if mode is None:
             raise InvalidOperationError("Unsupported intake mode")
-        enabled_modes = enabled_intake_modes(workspace)
-        if enabled_modes is not None and payload["source_kind"] not in enabled_modes:
-            raise InvalidOperationError(
-                "Intake mode is disabled for this workspace; "
-                "configure enabled modes in workspace settings"
-            )
 
         raw_values = payload.get(mode.input_field)
         if not isinstance(raw_values, list):
@@ -77,7 +70,7 @@ class JobIntakeService:
         try:
             node_config = resolve_workflow_node_configs(
                 definition,
-                published_agent_definitions(self.settings.database_url, workspace_id),
+                published_agent_definitions(self.job_db, workspace_id),
                 workspace,
             )
         except ValueError as exc:
@@ -87,7 +80,7 @@ class JobIntakeService:
         # running jobs are immune to later edits (EXEC-CODE-002); empty when
         # every node is builtin or the feature gate is off.
         node_code_versions = freeze_node_code_versions(
-            self.job_db.path,
+            self.job_db,
             self.settings.executor_runtime.workflows.custom_nodes_enabled,
             workspace_id,
             workflow_key,

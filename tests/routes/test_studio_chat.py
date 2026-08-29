@@ -5,10 +5,11 @@ from __future__ import annotations
 import contextlib
 import json
 import sys
-import time
 from pathlib import Path
 
 import pytest
+
+from tests.helpers import wait_for_predicate
 
 FAKE_AGENT = Path(__file__).resolve().parents[1] / "helpers" / "fake_acp_agent.py"
 CSRF = {"x-agent-legion-request": "1"}
@@ -58,12 +59,7 @@ HUMAN_PERMISSION_SCRIPT = {
 
 
 def _wait_for(condition, timeout: float = 20.0, interval: float = 0.05) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if condition():
-            return
-        time.sleep(interval)
-    raise AssertionError("condition not met within timeout")
+    wait_for_predicate(condition, timeout=timeout, interval=interval)
 
 
 def _register_fake_agent(
@@ -89,13 +85,32 @@ def _register_fake_agent(
     return script_path
 
 
+_CREATE_COUNT = 0
+
+
 def _create_workspace(client, name="Chat WS") -> str:
+    # v62: id==key and unique per call within a test (TRUNCATE isolation
+    # resets the counter each test).
+    global _CREATE_COUNT
+    _CREATE_COUNT += 1
+    ws_id = (
+        "education_video_problems_generation"
+        if _CREATE_COUNT == 1
+        else f"education_video_problems_generation_{_CREATE_COUNT}"
+    )
     response = client.post(
         "/api/workspaces",
-        json={"name": name, "default_workflow_key": "education_video_problems_generation"},
+        json={"id": ws_id, "name": name},
     )
     assert response.status_code == 200, response.text
     return response.json()["workspace"]["id"]
+
+
+@pytest.fixture(autouse=True)
+def _reset_create_count():
+    global _CREATE_COUNT
+    _CREATE_COUNT = 0
+    yield
 
 
 def _create_session(client, workspace_id: str) -> str:
@@ -355,6 +370,35 @@ def test_context_update_route_roundtrip_and_scope_guard(client, tmp_path) -> Non
         )
         assert scoped.status_code == 403
         assert client.get(url).json()["session"]["selected_node_key"] is None
+    finally:
+        client.delete(url)
+
+
+def test_context_update_partial_fields(client, tmp_path) -> None:
+    """PUT context is a partial update: a draft-only push keeps the pushed
+    selected node, and a selection-only push keeps the pushed draft."""
+    _register_fake_agent(client, tmp_path)
+    workspace_id = _create_workspace(client)
+    session_id = _create_session(client, workspace_id)
+    url = _session_url(workspace_id, session_id)
+    try:
+        response = client.put(
+            f"{url}/context", json={"selected_node_key": "node-a", "draft_yaml": "key: wf\n"}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["session"]["selected_node_key"] == "node-a"
+        assert response.json()["session"]["draft_yaml"] == "key: wf\n"
+
+        draft_only = client.put(f"{url}/context", json={"draft_yaml": "key: wf2\n"})
+        assert draft_only.status_code == 200, draft_only.text
+        assert draft_only.json()["session"]["selected_node_key"] == "node-a"
+        assert draft_only.json()["session"]["draft_yaml"] == "key: wf2\n"
+
+        selection_only = client.put(f"{url}/context", json={"selected_node_key": None})
+        assert selection_only.status_code == 200, selection_only.text
+        assert selection_only.json()["session"]["selected_node_key"] is None
+        assert selection_only.json()["session"]["draft_yaml"] == "key: wf2\n"
+        assert client.get(url).json()["session"]["draft_yaml"] == "key: wf2\n"
     finally:
         client.delete(url)
 

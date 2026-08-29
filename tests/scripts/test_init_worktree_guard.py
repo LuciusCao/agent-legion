@@ -19,6 +19,8 @@ pytestmark = pytest.mark.no_db
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "init-worktree.sh"
+# init-worktree.sh 的 S3 建桶步骤委托给该脚本，合成布局里要一并复制。
+ENSURE_S3_SCRIPT = ROOT / "scripts" / "ensure-s3-bucket.py"
 
 _GIT_STUB = """#!/usr/bin/env bash
 if [[ "$1" == "worktree" && "$2" == "list" ]]; then
@@ -68,6 +70,7 @@ def _setup(tmp_path: Path, script_rel: str, git_stub: str = _GIT_STUB) -> tuple[
     script_path = main / script_rel
     script_path.parent.mkdir(parents=True)
     shutil.copy(SCRIPT, script_path)
+    shutil.copy(ENSURE_S3_SCRIPT, script_path.parent / ENSURE_S3_SCRIPT.name)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_stub(bin_dir / "git", git_stub.format(main=main))
@@ -120,7 +123,8 @@ def test_flat_worktree_passes_guard_and_initializes(tmp_path: Path) -> None:
         "AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_flat"
         in (worktree / ".env").read_text()
     )
-    assert (worktree / "deploy/secrets/agent_worker_register_token").is_file()
+    # issue #35：全局 register token 已退役，init-worktree 不再生成。
+    assert not (worktree / "deploy/secrets/agent_worker_register_token").exists()
     assert (worktree / "deploy/secrets/vault_master_key").read_text().strip() == (
         "stub-vault-master-key"
     )
@@ -161,9 +165,9 @@ def test_worker_config_seeded_from_base_with_rewritten_identity(tmp_path: Path) 
     assert "worker_id: flat" in config
     assert "name: flat (worktree)" in config
     assert "runtimes: [velites]" in config
-    # 容器路径 /run/secrets/... 必须改写为本 worktree 生成的本地密钥文件。
-    assert "/run/secrets" not in config
-    assert f"register_token_file: {worktree}/deploy/secrets/agent_worker_register_token" in config
+    # issue #35：token 不再经配置文件注入（原容器路径行保留原样，注册走
+    # worker 控制台粘贴 scoped token）。
+    assert "register_token_file: /run/secrets/agent_worker_register_token" in config
 
 
 def test_worker_config_host_url_uses_dev_backend_port(tmp_path: Path) -> None:
@@ -269,10 +273,11 @@ def test_missing_env_fails_fast_without_side_effects(tmp_path: Path) -> None:
     assert not (worktree / "deploy").exists()
 
 
-# S3 建桶块的 heredoc 桩：uv stub 把 `uv run python -` 转给真实 python3，
-# PYTHONPATH 前置探针模块——dotenv 桩对无参 load_dotenv() 抛
-# AssertionError（复现 find_dotenv 在 stdin heredoc 下的崩溃），boto3 桩
-# 把 head_bucket 记进 STUB_LOG 作为「越过 load_dotenv」的证据。
+# S3 建桶块的桩：uv stub 把 `uv run python scripts/ensure-s3-bucket.py` 转给
+# 真实 python3 执行抽出的脚本，PYTHONPATH 前置探针模块——dotenv 桩对无参
+# load_dotenv() 抛 AssertionError（复现 find_dotenv 在 stdin heredoc 下的
+# 崩溃），boto3 桩把 head_bucket 记进 STUB_LOG 作为「越过 load_dotenv」的
+# 证据。
 _DOTENV_PROBE = """
 def load_dotenv(dotenv_path=None, override=False):
     if dotenv_path is None:
@@ -322,22 +327,22 @@ def load_s3_settings():
     )
 """
 
-_UV_STUB_REAL_HEREDOC = """#!/usr/bin/env bash
-if [[ "$1" == "run" && "$2" == "python" && "$3" == "-" ]]; then
-  PYTHONPATH="{pystub}:${{PYTHONPATH:-}}" exec python3 -
+_UV_STUB_REAL_SCRIPT = """#!/usr/bin/env bash
+if [[ "$1" == "run" && "$2" == "python" && "$3" == *ensure-s3-bucket.py ]]; then
+  PYTHONPATH="{pystub}:${{PYTHONPATH:-}}" exec python3 "$3" "$4"
 fi
 echo "stub-vault-master-key"
 """
 
 
 def test_s3_bucket_step_loads_dotenv_with_explicit_path(tmp_path: Path) -> None:
-    """回归：S3 建桶块的 load_dotenv 必须显式传路径。
+    """回归：S3 建桶脚本（ensure-s3-bucket.py）的 load_dotenv 必须显式传路径。
 
     无参 load_dotenv() 走 find_dotenv 的调用栈探测，在脚本的 stdin
     heredoc（uv run python - <<PY）模式下必抛 AssertionError，被外层
     降级吞成「endpoint 不可达」的误导性提示（2026-08-24 实测）。本测试
-    用真实 python3 执行 heredoc + 探针桩，断言执行确实越过 load_dotenv
-    到达 head_bucket。
+    用真实 python3 执行抽出的脚本 + 探针桩，断言执行确实越过
+    load_dotenv 到达 head_bucket。
     """
     main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
     develop = main / ".worktrees/develop"
@@ -353,7 +358,7 @@ def test_s3_bucket_step_loads_dotenv_with_explicit_path(tmp_path: Path) -> None:
     (pystub / "server/__init__.py").write_text("")
     (pystub / "server/app/__init__.py").write_text("")
     (pystub / "server/app/storage/__init__.py").write_text(_STORAGE_PROBE)
-    _write_stub(bin_dir / "uv", _UV_STUB_REAL_HEREDOC.format(pystub=pystub))
+    _write_stub(bin_dir / "uv", _UV_STUB_REAL_SCRIPT.format(pystub=pystub))
     stub_log = tmp_path / "stub.log"
 
     result = _run(

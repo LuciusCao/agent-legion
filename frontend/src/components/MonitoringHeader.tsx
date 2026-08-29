@@ -6,7 +6,7 @@ import {
   ToggleButtonGroup,
 } from '@mui/material'
 import type { OpsGranularity } from '../api/metrics'
-import type { listAgentWorkers } from '../api/workerTokens'
+import type { listAgentWorkers } from '../api/agentWorkers'
 import styles from './MonitoringPanel.module.css'
 
 type WorkerSummary = Awaited<ReturnType<typeof listAgentWorkers>>[number]

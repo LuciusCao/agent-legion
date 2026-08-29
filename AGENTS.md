@@ -9,10 +9,12 @@
 - worktree 一律建为主仓库根的平级子目录：先 `cd` 到主仓库根（`git worktree list` 的第一个条目），再 `git worktree add .worktrees/<name> -b <branch> <base>`。禁止嵌套（在其他 worktree 里用相对路径 `git worktree add .worktrees/<name>` 会建进当前 worktree 内部）——嵌套会让 `data/`、测试库派生、端口隔离和清理路径全部混乱。
 - 不同 worktree 使用不同 backend/frontend 端口与独立 `data/` 目录，避免数据库、视频、日志、package 互相覆盖。
 - 创建新 worktree 后，从基准 worktree 复制 `.env` 到新的 worktree 根目录，确保测试、后端服务与外部集成配置一致。
-- 推荐用 `scripts/init-worktree.sh` 一键完成初始化（幂等）：复制 `.env`（复制源是「第一个非 bare、非当前、非主仓库根的 worktree」；**无法复制到 `.env` 时 fail-fast**——缺 `.env` 会让后端回落代码默认的共享库即 prod 库，2026-08-18 事故根因）、按 worktree 名派生并创建专属 Postgres 库、按 worktree 名派生 `AGENT_LEGION_S3_BUCKET`（材料存储，endpoint 可达时建 bucket，不可达仅 warning）、生成缺失的 `deploy/secrets/agent_worker_register_token` 与 `deploy/secrets/vault_master_key`、缺失时从基准 worktree 种子 `config/agent-worker.yaml`（改写 host_url/worker_id）。手工初始化时必须自行补上这两个 secrets 文件。两个 secret 缺失的后果不同：register token 若被 `register_token_file` 显式引用而文件缺失，启动 fail fast（未显式配置时启动只尝试读 repo 默认路径 `deploy/secrets/agent_worker_register_token`，存在才生效）；vault master key 是 env-only（`AGENT_LEGION_VAULT_MASTER_KEY` / `_FILE`），代码没有默认读文件路径，缺 key 服务照常启动，但 vault 写入与 `secret_ref` 解析会抛 `VaultMasterKeyMissingError`。
+- **创建 worktree 后必须立即跑 `scripts/init-worktree.sh`（强制，非推荐）**（幂等）：复制 `.env`（复制源是「第一个非 bare、非当前、非主仓库根的 worktree」；**无法复制到 `.env` 时 fail-fast**——缺 `.env` 会让后端回落代码默认的共享库即 prod 库，2026-08-18 事故根因）、按 worktree 名派生并创建专属 Postgres 库、按 worktree 名派生 `AGENT_LEGION_S3_BUCKET`（材料存储，endpoint 可达时建 bucket，不可达仅 warning）、生成缺失的 `deploy/secrets/vault_master_key`、缺失时从基准 worktree 种子 `config/agent-worker.yaml`（改写 host_url/worker_id）。即使只是临时试验（门禁脚本、一次性工具）也不例外——2026-08-27 事故正是两个没跑 init 的临时 worktree 让 `export_openapi` 误连共享库，把未发布迁移 v59-61 推上了生产库。手工初始化时必须自行补上 vault_master_key：它是 env-only（`AGENT_LEGION_VAULT_MASTER_KEY` / `_FILE`），代码没有默认读文件路径，缺 key 服务照常启动，但 vault 写入与 `secret_ref` 解析会抛 `VaultMasterKeyMissingError`。全局 worker register token 已随 issue #35 退役：init-worktree.sh 不再生成 `deploy/secrets/agent_worker_register_token`；遗留的 `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` env 或 yaml `agent_workers.register_token(_file)` 启动即报错（fail-fast 带迁移指引）。注册改用 workspace-scoped token：admin UI（workspace 设置 → Agent 与 Worker）按 workspace 签发（key 删除即级联切断绑定 Worker，见 `docs/agent-worker-deployment.md`），worker 控制台添加后按全部 token 重注册。
 - 开发实例两个默认关闭的开关（刻意设计，防失控自跑）：后端每次启动把全部 workspace 重置为暂停，需恢复调度时跑 `scripts/resume-workspaces.sh`（**必须在后端首次启动建表之后**执行才生效）或在控制台手动恢复；worker 的 `claim_enabled` 默认 false，启动后经 worker 控制台或 `PUT /api/config` 打开。worker 生效配置是状态副本 `data/agent-worker-service/worker.yaml`，首次导入后改 `config/agent-worker.yaml` 不生效。
-- 新 worktree 必须配置独立 Postgres 数据库：在 `.env` 中加 `AGENT_LEGION_DATABASE_URL` 指向专属库（`database.url` 为 env-only，代码默认库是共享库，不要依赖默认值）。共享库会让任一 worktree 的进程启动（含质量门里的 `export_openapi`）清掉其他实例的 `worker_control_state` 等运行时状态。
+- 新 worktree 必须配置独立 Postgres 数据库：在 `.env` 中加 `AGENT_LEGION_DATABASE_URL` 指向专属库（`database.url` 为 env-only，代码默认库是共享库，不要依赖默认值）。共享库会让任一 worktree 的进程启动（含质量门里的 `export_openapi`）清掉其他实例的 `worker_control_state` 等运行时状态，并可能推送未发布迁移（2026-08-27 事故）。结构防线：`init_db` 对裸共享库名（`agent_legion`）要求 `AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1` 才放行（prod 启动器已内置），`export_openapi` 则直接拒绝在共享库上运行。
 - 测试库无需手动配置：`tests/postgres_support.py` 按 worktree 目录名派生专属测试库（`agent_legion_test_<worktree>`）并在首次测试运行时自动建库；只有需要覆盖时才设 `AGENT_LEGION_TEST_DATABASE_URL`。
+- 清理已移除 worktree 的派生库一律走 `scripts/drop-worktree-db.sh <worktree名>`，不要裸 `dropdb`：目标库名按 worktree 名派生（结构上碰不到共享/prod 库），集群存在 `agent_legion_dev` role 时脚本以该非 superuser role 连接，对共享/prod 库（属主为 NOLOGIN 的 `agent_legion_prod`）物理不可 drop；role 设置见 [docs/postgresql-runbook.md](docs/postgresql-runbook.md)。
+- worktree 任务收尾（用户确认清理后）统一用 `scripts/clean-worktree.sh <worktree名> [--yes]` 一键完成 worktree/本地分支/派生库/派生 bucket 清理，每步 skip-if-absent 幂等可重跑；不要手工拼删：脚本自带护栏（拒绝清理自身与 prod、只删 `agent-legion-` 前缀的派生 bucket、脏 worktree 与未合并分支交给 git 自己拒绝），远端分支默认只提示不删（`--delete-remote-branch` 才 push --delete）。
 - 测试并行度默认克制：后端 pytest-xdist 默认 min(4, 核数)（`AGENT_LEGION_TEST_WORKERS` 覆盖），前端 vitest 经 gate 脚本默认 `--maxWorkers=4`（`AGENT_LEGION_FRONTEND_TEST_WORKERS` 覆盖；直接 `npm run test` 不带 cap），rust lane cargo `-j` 默认 min(4, 核数)（`AGENT_LEGION_RUST_WORKERS` 覆盖）；CI 4 核 runner 上这些默认值与不设上限时的并行度相当。多 worktree 并行开发时如仍抢 CPU，把这些 env 再调低（建议值 ≈ CPU 核数 ÷ 并行 worktree 数）。
 - 同一 worktree 内不允许并发跑测试：`check-quick.sh` 已用 `.quick-gate.lock` 串行化（后来者等待，崩溃残留自动回收）；直接 `uv run pytest` 不受锁保护，必须自己确保没有其他测试进程在跑——测试库按 worktree 共享、xdist worker schema 固定为 gw0..gwN，两个进程并发会互相 TRUNCATE（现场症状：随机测试报 "Bootstrap is only available before the first user exists" 等 setup 错误，单跑必过）。
 - 不要污染主工作区或他人 worktree 的运行时数据。
@@ -33,37 +35,71 @@
 
 ## 4. Quality Gates（必须执行）
 
-- 任何代码修改后先跑 `./scripts/check-quick.sh`。
+- 修改-验证内环用 `GATE_TIER=aff ./scripts/check-quick.sh`：backend 按覆盖逆索引
+  只跑受影响测试、前端 `vitest related` 只跑导入改动文件的测试。aff 档不是 gate
+  凭证（`run-local-gate.sh` 拒绝该档）——无索引、索引盲区（改动的源文件不在索引里）
+  或选择面太宽时自动回落 unit 全量，回落只会更慢、不会漏跑。任何代码修改后至少跑
+  一次完整 `./scripts/check-quick.sh`（aff 通过不能替代）。
+- **quick gate 的完整档默认只跑 unit 层**（PostgreSQL 离线，`-m "not postgres and
+  not repository_gate"`）：postgres 集成层（约占 quick 套件 47% 的测试、约 2.5 倍
+  unit 层耗时）交给 CI（每个 PR 的 backend-postgres-a/b/c 必跑）。**碰数据库的改动
+  （schema、migration、queries、routes 的 DB 行为）交接前必须显式跑
+  `GATE_TIER=postgres ./scripts/check-quick-backend.sh`**；本地全量替代品
+  `./scripts/check.sh` 自身仍包含两层（unit 段 + postgres 追加段）。
+- **gate 内部 test 轮错峰**：backend lane 先单独跑完，frontend/rust 随后并行——
+  三条测试 lane 同时起会从 gate 内部超订机器（backend 8 worker + vitest + cargo
+  ≈ 20 个任务挤 10 核，实测空闲机器上 unit 层单独 44 秒、全并行 gate 里拖到 10
+  分钟以上）。静态轮保持全并行（lint/typecheck 很轻）。
+- **aff 索引纪律**：`.pytest-aff-index.json` 是 gitignore 的本地工件，每个 worktree
+  首次用 aff 前必须先跑 `GATE_TIER=aff-index ./scripts/check-quick-backend.sh` 建
+  索引（约 2.5 分钟）；依赖或 `tests/conftest.py` 变更后重建。索引缺失时 aff 自动
+  回落 unit 全量——如果你发现 aff 跑了全量（输出含「aff fallback」），先建索引
+  再继续内环。
+- **机器级 gate 排队**：多个 agent worktree 并行跑质量门会互相拖垮（曾观察到 4 个
+  并行 quick gate 把最后一个拖到 ~1 小时；并发 2 也会让各 lane 抢 CPU，超时类 flaky
+  就是这么来的）。quick gate 经 git common dir 的 slot 排队（`scripts/gate-queue.sh`）：
+  默认 `AGENT_LEGION_MAX_PARALLEL_GATES=1`——同机串行，一次一个 gate 独占整机预算，
+  排队等价于按序各跑各的全速（大机器想恢复并发可显式设 2）；后来者打印持有者并等待。
+  每 lane worker 数按并发 gate 数均分（`(cores-2)/N`，夹在 2..8；串行时 N=1 即全额），
+  backend pytest 统一 `--dist worksteal` 消尾部延迟。agent 不需要也不应该用
+  `--no-verify` 之外的方式绕过排队——排队本身就是正确行为，等待期可以做读代码/写代码
+  等不占 CPU 的事。
 - quick gate 的 backend lane 同时跑 `worker/ui/app.test.mjs`（node:test，无 node 时跳过并提示）；
-  CI 侧在 backend-postgres-a job 执行同一入口。
+  CI 侧在 api-check job 执行同一入口。
 - 提交或交接前确认 GitHub Actions full gate 通过（`.github/workflows/quality-gate.yml`
-  的 backend-unit、backend-postgres-a/b/c、frontend-logic、frontend-component、
+  的 backend-unit、api-check、backend-postgres-a/b/c（matrix job `backend-postgres`
+  的三个 shard）、backend-coverage、frontend-logic、frontend-component、
   frontend-coverage、e2e-smoke、rust、docker-build 等 job）；CI 不可用时本地跑
   `./scripts/check.sh` 代替。
 - 运行 `make install-hooks` 启用版本化本地门禁：pre-commit 跑 fast gate，pre-push
   默认跑 smoke 级（静态 + 精选 smoke 测试层，成员见 `tests/conftest.py`；按推送路径
   裁剪 lane：纯前端改动跳过 backend pytest、纯 `velites/` 改动只跑 rust lane、docs
   改动只跑静态、共享文件/新分支一律全量）。用 `AGENT_LEGION_GATE_LEVEL=quick`
-  （完整 quick 套件）或 `AGENT_LEGION_GATE_LEVEL=full`（本地 full gate）升级单次
-  推送。full gate 由 GitHub CI 在 PR/push 执行，并按变更路径裁剪 lane
+  （unit 层 quick 套件，见上方完整档纪律）或 `AGENT_LEGION_GATE_LEVEL=full`
+  （本地 full gate）升级单次推送。full gate 由 GitHub CI 在 PR/push 执行，并按变更路径裁剪 lane
   （与本地 pre-push 一致：纯前端改动跳过 backend pytest shards 但保留
   api:check、纯 `velites/` 改动只跑 rust、`Dockerfile`/依赖锁/`worker/`/
   `shared/`/`deploy/` 改动加跑 docker-build 镜像构建 lane（CI-only）、
   docs-only 全跳过、共享文件全量，检测逻辑见 workflow 的 `changes` job）；push 触发只留
   main/master（develop 合并已由 PR gate 覆盖）；ci-extended 压力门与
-  nightly-e2e 改为每周 schedule + 手动 dispatch，schedule 不重复跑
-  普通 lane。
+  nightly-e2e 在 `.github/workflows/nightly-gate.yml` 每周 schedule + 手动
+  dispatch 执行，不占用 quality-gate 的 concurrency group。
 - 不要使用 `git commit --no-verify` 或 `git push --no-verify` 绕过本地质量门。
 - 禁止在质量门未通过时声明完成。
 - 后端测试隔离基于 TRUNCATE：每个 xdist worker 每 session 只建一次 schema，每个测试
   清空所有表（`tests/conftest.py`）。改动 DDL 的测试必须加 `@pytest.mark.fresh_schema`
   走完整重建。本地 quick gate 默认不带覆盖率（`AGENT_LEGION_COV=1` 开启；85% floor 由
-  CI 与 `./scripts/check.sh` 强制）。pytest worker 数默认 min(4, 核数)，用
-  `AGENT_LEGION_TEST_WORKERS` 覆盖。
+  CI 与 `./scripts/check.sh` 强制）。pytest worker 数默认 worktree 感知（无兄弟
+  worktree 跑 gate 时 cores-2、上限 8，有竞争时 min(4, 核数)；探测逻辑见
+  `scripts/gate-jobs.sh`），用 `AGENT_LEGION_TEST_WORKERS` 覆盖。
 - 新测试必须放进对应子系统子目录（如 `tests/services/`、`tests/scripts/`），不要新增
   `tests/` 根目录文件（静态检查 `scripts/architecture/test_placement.py` 强制，基线
   `config/architecture/test-root-files-baseline.json`）；确定不碰数据库的纯静态测试可加
   `@pytest.mark.no_db` 跳过 TRUNCATE 隔离。
+- 测试文件超过 800 行就应拆分（gate 的 1000 行上限是硬底线）：主动按被测主题拆到
+  同目录姊妹文件（用例零改动迁移），比逼近上限被 gate 拦下再被动拆要好——被动拆分
+  总是卡在收尾关口，还得在同一 PR 里补做（#207）。存量超 800 行的文件不要求一次性
+  清偿，随下次触碰该文件时顺手拆。
 
 ## 5. Architecture Governance
 
@@ -73,10 +109,25 @@
 - 不要手写 frontend transport types，必须从 `frontend/src/generated/api.ts` 派生。
 - 超出体积预算的文件必须拆分或回退，不能手动抬高 ceiling。ceiling 按有效行数计
   （排除注释行与空行），不要为凑预算压缩注释；`max_lines` 绝对上限按原始行数计。
+  ceiling 单调只降不升（#209）：ratchet 的 `--rebase` / `--bump` 上抬通道已移除，
+  `check_architecture` 会按 git 锚点拒绝**已跟踪条目**的任何上抬（含手改 budgets
+  JSON 与抬高豁免 ceiling）；唯一合法上抬通道是带 `remove_when` 的
+  `architecture.file_budget` 豁免。改名绕过已随 #236 加固：git rename 检测命中的
+  新路径沿用旧路径地板，改名不再重置 ceiling；真正的全新文件首次登记
+  （actual + buffer）不受约束。release train（develop→main）例外：main 的
+  floor 落后 develop 整整一个发布周期，而每次上调在合入 develop 时都已过了
+  本守卫——CI 仅在 `base=main && head=develop` 时设
+  `AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN=1` 让锚点只看 HEAD（#249
+  首次撞线，0.4.0）；feature→develop 的 PR、本地门禁与 push 一律保持
+  HEAD^ 基线锚点的完整严格性。
 
 ## 6. Boundary Rules（禁止模式摘要）
 
 - Workspace API 扩展顺序：contract → service → focused route。
+- 新 service 的数据库访问必须走 `JobQueries` 门面（`server/app/jobs/queries`），
+  不在 service 里手写 SQL、import `server.app.db.transaction`/`connection` 或经
+  `job_db.path` 取 DSN 自建连接（BOUNDARY-DATA-001；基线 ratchet 检查见
+  `config/architecture/service-data-boundary-baseline.json`）。
 - 用户鉴权经 `server/app/auth/dependencies.py` 注入（`require_user` /
   `require_admin` / `require_workspace_access`），不要在路由里手写 cookie /
   token 解析；公开端点仅限 `/api/health` 与 `/api/auth/login|bootstrap`。
@@ -88,11 +139,16 @@
   （EXEC-CODE-POOL-001）。
 - Phase 6 Job 边界：route 不做 DAG 遍历和文件系统删除。
 - Workflow 是 workspace 内部的一份 DAG：全局 workflow_catalog 已随 schema v50 退役
-  （#112，DB-WORKFLOW-CATALOG-001），`workspaces.default_workflow_key` 是普通文本标识，
-  权威定义是该 workspace 的 active revision——节点覆盖校验、settings schema、无快照 job
-  的定义回退、worker 扫描列表全部读它，不再有列表/注册 API；示例 DAG
-  （`server/app/workflows/builtin.py`）只是创建 workspace 时可选的示例模板种子，blank
-  workspace 首次成功 publish 认领草稿的 key。
+  （#112，DB-WORKFLOW-CATALOG-001），权威定义是该 workspace 的 active revision——
+  节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部读它，
+  不再有列表/注册 API。schema v62（#211，DB-WORKSPACE-KEY-BINDING-001）起
+  workspace id 与 workflow key 是同一个标识：创建时显式填写 id（即
+  `default_workflow_key`，`^[a-z0-9][a-z0-9_-]{0,63}$`）且终身不可变——PATCH /
+  configuration 改 key 一律 400，发布草稿 key 不匹配 422，创建路径不做任何种子
+  （示例 DAG `server/app/workflows/builtin.py` 仅经 `make import-demo` /
+  `scripts/seed_demo.py` 提供 demo workspace）；v62 迁移把存量 workspace 的 id 改成
+  已绑定的 key（key 为空的按 id 回填）。`default_workflow_key` 作为独立概念已标
+  deprecated（退役评估 #211）。
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
   唯一例外是 `type: start` 的入口节点：恰好一个、豁免 capability、承载入口契约
   `accepted_item_types`、永不执行（调度视为恒 completed、不进 job_nodes、不 dispatch）、
@@ -173,7 +229,9 @@
   消费的 pi 兼容子集，禁止引入 delta 事件（`message_update` /
   `tool_execution_update`）。
 - Agent 执行的 provider/model/thinking 解析链：节点 `execution.*` 覆盖 →
-  workspace Settings 默认（`default_agent_*` 三列）→ 报错，无 yaml/全局兜底；
+  workflow 顶层 `execution` 默认（定义级可选块，loader 合并进节点、随
+  revision 版本化）→ 报错，无 workspace/yaml/全局兜底（workspace Settings 的
+  `default_agent_*` 三列已随 schema v63 退役）；
   manifest 只携带解析后的 `execution.*` 块（enqueue 冻结 + claim 重解析，节点
   覆盖随 revision 升级实时生效，EXEC-RUNTIME-DISPATCH-001）。一个 capability
   在每个 workspace 只允许一个 published Agent（DB partial unique index 兜底）。
@@ -227,8 +285,7 @@ CodeExecutor(...).execute(context)
   或 admin API（`PUT /api/admin/skill-sources/{skill_key}`）更新 ref → relock
   （`POST /api/admin/skill-sources/relock`，或 CLI `make skills-lock` /
   `uv run python -m server.app.skills.lock`）解析并冻结 commit。
-- 修改后同步 shared assets，跑 `UV_CACHE_DIR=.uv-cache uv run python scripts/check-skills-shared.py`
-  验证共享引用文件一致（skill 清单来自 `server/app/skills/builtin_sources.py` 常量）。
+  （skill 共享资源一致性检查 `check-skills-shared.py` 已随业务 skill 源退役删除。）
 - 完整流程见 [README.md](README.md) 的 Agent Runtimes 章节。
 
 ## 8. Security & Data

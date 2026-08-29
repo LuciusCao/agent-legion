@@ -1,4 +1,4 @@
-"""Data migration applied alongside the idempotent DDL replay (v17)."""
+"""Data migration applied alongside the idempotent DDL replay (v24)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ _CODE_NODE_BINDINGS = (
 
 
 def migrate_code_executor_bindings(conn: Any) -> None:
-    """Rebind the two CMS first nodes to the code executor (v17).
+    """Rebind the two CMS first nodes to the code executor (v24).
 
     Existing workspaces bound ``fetch_questions`` / ``download_video`` to
     ``local-default``; the code executor now owns those capabilities

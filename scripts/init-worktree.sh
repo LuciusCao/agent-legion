@@ -6,7 +6,7 @@
 #   2. 把 AGENT_LEGION_DATABASE_URL 指向按 worktree 名派生的专属 Postgres 库并尝试建库
 #   2.5 按 worktree 名派生 AGENT_LEGION_S3_BUCKET 写入 .env，endpoint 可达时
 #       建 bucket 并配置浏览器直传所需的前端 dev origin CORS
-#   3. 生成缺失的 deploy/secrets（agent_worker_register_token / vault_master_key）
+#   3. 生成缺失的 deploy/secrets（vault_master_key；worker 全局注册 token 已退役，见 issue #35）
 # 用法: scripts/init-worktree.sh [基准 worktree 路径]（默认取第一个非 bare 且非当前的 worktree）
 set -euo pipefail
 
@@ -77,6 +77,8 @@ if [[ ! -f .env ]]; then
     echo "缺少 .env 时后端会回落共享默认库（prod）——请手工从其他 worktree 复制 .env 后重跑本脚本。" >&2
     exit 1
 fi
+# .env 含真实凭据（S3 key 等），权限收紧（幂等，与 install-deps.sh 一致）。
+chmod 600 .env
 
 # 2. 专属 Postgres 库
 NAME="$(printf '%s' "$(basename "$ROOT")" | tr -c 'a-zA-Z0-9_' '_')"
@@ -92,6 +94,15 @@ if [[ -f .env ]]; then
 fi
 if command -v createdb >/dev/null 2>&1; then
     createdb "$DB" 2>/dev/null && echo "已创建数据库 ${DB}" || echo "数据库 ${DB} 已存在或建库失败（如已存在可忽略）"
+    # role 隔离护栏（scripts/drop-worktree-db.sh）：派生库属主对齐
+    # agent_legion_dev（集群存在该 role 时），清理路径走非 superuser
+    # role，对共享/prod 库物理不可 drop；best-effort，失败仅 warning。
+    if command -v psql >/dev/null 2>&1 \
+        && psql -d postgres -tAc "select 1 from pg_roles where rolname='agent_legion_dev'" 2>/dev/null | grep -q 1; then
+        psql -d postgres -qc "ALTER DATABASE \"$DB\" OWNER TO agent_legion_dev" 2>/dev/null \
+            && echo "数据库 ${DB} 属主已对齐 agent_legion_dev" \
+            || echo "提示: ${DB} 属主对齐 agent_legion_dev 失败（可手动 ALTER DATABASE OWNER）" >&2
+    fi
 else
     echo "提示: 未找到 createdb，请手动创建数据库 ${DB}" >&2
 fi
@@ -111,70 +122,11 @@ else
     echo "AGENT_LEGION_S3_BUCKET=${BUCKET}" >> .env
 fi
 echo "AGENT_LEGION_S3_BUCKET -> ${BUCKET}"
-# 建 bucket：复用 server/app/storage 的 env 加载（.env 经 load_dotenv 生效，
+# 建 bucket：逻辑抽在 scripts/ensure-s3-bucket.py（与 dev_stack.sh 共用），
+# 复用 server/app/storage 的 env 加载（.env 经 load_dotenv 生效，
 # override=False——调用 shell 已导出的同名变量优先）。任何失败（endpoint
 # 不可达、boto3 缺失、凭据错误）都降级为提示，不阻断初始化。
-if PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run python - <<'PY'
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-# 显式传路径：无参 load_dotenv() 走 find_dotenv 的调用栈探测，在本脚本的
-# stdin heredoc（python -）模式下必抛 AssertionError，被外层降级吞成
-# 「endpoint 不可达」的误导性提示。
-load_dotenv(Path(".env"), override=False)
-
-import boto3
-from botocore.exceptions import ClientError
-
-from server.app.storage import load_s3_settings
-
-settings = load_s3_settings()
-if settings is None:
-    print("提示: AGENT_LEGION_S3_BUCKET 未配置，跳过建 bucket")
-    raise SystemExit(0)
-kwargs = {"region_name": settings.region}
-if settings.endpoint_url:
-    kwargs["endpoint_url"] = settings.endpoint_url
-if settings.access_key:
-    kwargs["aws_access_key_id"] = settings.access_key
-    kwargs["aws_secret_access_key"] = settings.secret_key
-client = boto3.client("s3", **kwargs)
-try:
-    client.head_bucket(Bucket=settings.bucket)
-except ClientError as exc:
-    code = str(exc.response.get("Error", {}).get("Code", ""))
-    if code not in ("404", "NoSuchBucket", "NotFound"):
-        raise
-    client.create_bucket(Bucket=settings.bucket)
-    print(f"已创建 S3 bucket: {settings.bucket}")
-else:
-    print(f"S3 bucket 已存在: {settings.bucket}")
-# 浏览器直传要求 bucket CORS 放行前端 dev server origin 的 PUT/GET，并暴露
-# ETag（前端 complete 校验用）。端口约定见 Makefile：prod 前端 5173，dev
-# worktree 默认 5174（DEV_FRONTEND_PORT）。幂等覆写，已存在的 bucket 也补齐。
-client.put_bucket_cors(
-    Bucket=settings.bucket,
-    CORSConfiguration={
-        "CORSRules": [
-            {
-                "AllowedOrigins": [
-                    "http://127.0.0.1:5173",
-                    "http://localhost:5173",
-                    "http://127.0.0.1:5174",
-                    "http://localhost:5174",
-                ],
-                "AllowedMethods": ["PUT", "GET", "HEAD"],
-                "AllowedHeaders": ["*"],
-                "ExposeHeaders": ["ETag"],
-                "MaxAgeSeconds": 3600,
-            }
-        ]
-    },
-)
-print(f"已配置 bucket CORS（前端 dev origin 直传）: {settings.bucket}")
-PY
-then
+if PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run python scripts/ensure-s3-bucket.py .env; then
     :
 else
     echo "提示: S3 endpoint 不可达或未配置，跳过建 bucket（材料 API 将降级为 503；" >&2
@@ -183,17 +135,13 @@ fi
 
 # 3. deploy/secrets
 mkdir -p deploy/secrets
-if [[ ! -s deploy/secrets/agent_worker_register_token ]]; then
-    openssl rand -hex 32 > deploy/secrets/agent_worker_register_token
-    echo "已生成 deploy/secrets/agent_worker_register_token"
-fi
 if [[ ! -s deploy/secrets/vault_master_key ]]; then
     UV_CACHE_DIR=.uv-cache uv run python -c \
         "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
         > deploy/secrets/vault_master_key
     echo "已生成 deploy/secrets/vault_master_key"
 fi
-chmod 600 deploy/secrets/agent_worker_register_token deploy/secrets/vault_master_key
+chmod 600 deploy/secrets/vault_master_key
 
 # 4. config/agent-worker.yaml：缺失时从基准 worktree 复制并改写本实例字段
 #    （host_url 指向开发后端、worker_id 按 worktree 派生）。注意生效配置是
@@ -203,14 +151,13 @@ if [[ ! -f config/agent-worker.yaml ]]; then
     if [[ -n "$BASE" && -f "$BASE/config/agent-worker.yaml" ]]; then
         mkdir -p config
         cp "$BASE/config/agent-worker.yaml" config/agent-worker.yaml
-        # host_url 指向本实例的开发后端端口（与 make dev-backend 的 DEV_BACKEND_PORT 一致），
-        # register_token_file 指向本 worktree 生成的本地密钥（基准配置里的
-        # /run/secrets/... 是容器路径，宿主机 make dev-worker 读不到）。
+        # host_url 指向本实例的开发后端端口（与 make dev-backend 的 DEV_BACKEND_PORT 一致）。
+        # 注册 token 不再经配置文件注入（issue #35）：启动 worker 控制台后在
+        # 「Workspace 访问（Scoped Token）」区块粘贴 Host 管理员签发的 scoped token。
         replace_in_place "s|^host_url:.*|host_url: http://127.0.0.1:${DEV_BACKEND_PORT:-8001}|" config/agent-worker.yaml
         replace_in_place "s|^worker_id:.*|worker_id: ${NAME}|" config/agent-worker.yaml
         replace_in_place "s|^name:.*|name: ${NAME} (worktree)|" config/agent-worker.yaml
-        replace_in_place "s|^register_token_file:.*|register_token_file: ${ROOT}/deploy/secrets/agent_worker_register_token|" config/agent-worker.yaml
-        echo "已生成 config/agent-worker.yaml <- ${BASE}（host_url/worker_id/name/register_token_file 已改写）"
+        echo "已生成 config/agent-worker.yaml <- ${BASE}（host_url/worker_id/name 已改写）"
     else
         echo "提示: 基准 worktree 无 config/agent-worker.yaml，跳过 worker 配置种子" >&2
     fi
@@ -219,6 +166,9 @@ fi
 cat <<EOF
 完成。剩余手工步骤（如未做过）：
   - frontend: cd frontend && npm ci
+  - 质量门内环索引: GATE_TIER=aff-index ./scripts/check-quick-backend.sh
+    （一次性 ~2.5 分钟，建 .pytest-aff-index.json；此后改动后用
+    GATE_TIER=aff ./scripts/check-quick.sh 快速内环，依赖/conftest 变更后重建）
   - 质量门: ./scripts/check-quick.sh
   - 材料存储: 若上方提示跳过了建 bucket，先启动共享 RustFS
     （deploy/compose.host.yaml 的 rustfs 服务）再重跑本脚本；未配置 S3 时

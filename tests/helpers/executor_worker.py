@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from server.app.configuration.executor_runtime import ExecutorRuntimeConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.runtime import ExecutionRuntime
-from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.settings import Settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -79,7 +79,6 @@ def make_worker(
         or ExecutorRuntimeConfig.model_validate(
             {
                 "workflows": {"enabled": True},
-                "openclaw": {"command_template": ["openclaw"]},
                 "code_capacity": code_capacity,
             }
         ),
@@ -107,5 +106,5 @@ def make_worker(
                     "def run(job, job_dir, runtime):\n    pass\n",
                     "test seed",
                 )
-    worker._scan_entries = scan_entries(*definitions)
+    worker.state.scan_entries = scan_entries(*definitions)
     return worker

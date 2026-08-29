@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from server.app.agent_broker import AgentExecutionBroker
@@ -22,11 +23,16 @@ class SweeperThread:
         broker: AgentExecutionBroker,
         interval_seconds: float = 5.0,
         lease_ttl_seconds: int = 90,
+        skill_sweeper: Callable[[], int] | None = None,
     ) -> None:
         self._leases = leases
         self._broker = broker
         self._interval_seconds = interval_seconds
         self._lease_ttl_seconds = lease_ttl_seconds
+        # Leak GC for the skills runs dir (stale execution snapshots), e.g.
+        # ``SkillManager.sweep_stale_executions``. Optional: tests and
+        # replicas without a local skill manager pass None.
+        self._skill_sweeper = skill_sweeper
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -48,6 +54,16 @@ class SweeperThread:
         self._thread.start()
 
     def _sweep_once(self, *, reap_bundles: bool = True) -> None:
+        # #204 broad-except audit: every catch below is the deliberate safety
+        # net of a periodic background sweep. The thread must survive ANY
+        # failure of ANY sub-sweep — otherwise one flaky sub-sweep (e.g. a
+        # transient DB error during claim expiry) would permanently stop lease
+        # expiry, orphan recovery, and bundle GC for the whole process. Each
+        # block logs the full traceback (logger.exception) so the failure is
+        # diagnosable, and each is scoped to exactly one sub-sweep so an early
+        # failure never skips the remaining ones. Converting these to narrow
+        # business-exception catches would reintroduce the lost-thread
+        # failure mode this loop exists to prevent.
         now = datetime.now(UTC)
         try:
             self._broker.sweep_expired_claims()
@@ -83,6 +99,13 @@ class SweeperThread:
                 logger.warning("recovered orphaned running jobs: %s", ", ".join(recovered))
         except Exception:
             logger.exception("orphaned job recovery failed")
+        if self._skill_sweeper is not None:
+            try:
+                swept = self._skill_sweeper()
+                if swept:
+                    logger.info("swept %d stale skill execution dirs", swept)
+            except Exception:
+                logger.exception("skill execution-dir sweep failed")
 
     def stop(self, timeout: float = 3.0) -> None:
         self._stop_event.set()

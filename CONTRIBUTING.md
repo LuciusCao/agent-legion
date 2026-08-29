@@ -12,9 +12,12 @@ Prerequisites: Python 3.11+, Node 18+, PostgreSQL 17, and
 
 ```bash
 uv sync                                     # Python deps
-createdb agent_legion
+createdb agent_legion_dev                   # NOT the bare `agent_legion` name —
+                                            # init_db refuses to migrate that one
+                                            # without AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1
+                                            # (the shared-database schema guard)
 cp .env.example .env                        # adjust values as needed
-export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion
+export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_dev
 cd frontend && npm install && cd ..
 make dev-up                                 # backend + frontend + worker, background
 ```
@@ -46,6 +49,11 @@ See [README.md](README.md) for the full quick start and the demo workflow.
   (`make api-generate`) — never hand-write them.
 - New tests go into the subsystem subdirectory under `tests/` (e.g.
   `tests/services/`, `tests/routes/`), not the `tests/` root.
+- Split test files proactively once they pass 800 lines (the gate's 1000-line
+  cap is a hard floor to stay clear of): moving cases untouched into sibling
+  files by theme beats being blocked at the gate right before handoff.
+  Existing files over the line are not expected to be paid down at once —
+  split them the next time you touch the file.
 - Secrets never enter tracked config files, the database, API responses, or
   logs — use the vault / env channels described in AGENTS.md §8.
 - Architecture boundary changes must be reflected in

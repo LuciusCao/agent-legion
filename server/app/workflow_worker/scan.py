@@ -48,16 +48,16 @@ def collect_ready_candidates(
     ``jobs`` carries lightweight marks (see
     ``JobScanMarksMixin.list_active_job_marks``); fat rows and node statuses
     are loaded only for jobs whose mark changed since the previous pass.
-    Results are stored in ``worker._job_evals`` keyed by job id.
+    Results are stored in ``worker.state.job_evals`` keyed by job id.
     """
     runnable = [(definition, mark) for definition, mark in jobs if is_runnable(mark)]
     changed: list[tuple[WorkflowDefinition | None, dict[str, Any]]] = []
     for definition, mark in runnable:
-        cached = worker._job_evals.get(mark["id"])
+        cached = worker.state.job_evals.get(mark["id"])
         if cached is not None and cached[0] == mark_key(mark) and mark.get("status") != "running":
-            worker._last_ready_stats["hit"] += 1
+            worker.state.last_ready_stats["hit"] += 1
             continue
-        worker._last_ready_stats["miss"] += 1
+        worker.state.last_ready_stats["miss"] += 1
         changed.append((definition, mark))
     if changed:
         workspace_id = str(changed[0][1]["workspace_id"])
@@ -69,16 +69,16 @@ def collect_ready_candidates(
             )
         }
         nodes_by_job = worker.job_db.list_job_nodes_for_jobs([mark["id"] for _, mark in changed])
-        phases = worker._scan_phases
+        phases = worker.state.scan_phases
         phases["miss_fetch"] = phases.get("miss_fetch", 0.0) + monotonic() - fetch_started
         eval_started = monotonic()
-        worker._job_evals.update(
+        worker.state.job_evals.update(
             evaluate_changed_jobs(worker, changed, fat_rows, nodes_by_job, mark_key)
         )
         phases["eval"] = phases.get("eval", 0.0) + monotonic() - eval_started
     candidates: list[ReadyCandidate] = []
     for _, mark in runnable:
-        cached = worker._job_evals.get(mark["id"])
+        cached = worker.state.job_evals.get(mark["id"])
         if cached is not None:
             candidates.extend(cached[1])
     return candidates

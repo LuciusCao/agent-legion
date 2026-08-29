@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -20,7 +20,7 @@ def test_authenticate_throttles_last_seen_at_writes(job_db, monkeypatch) -> None
         max_concurrency=1,
     )
     clock = [1000.0]
-    monkeypatch.setattr("server.app.agent_worker_liveness.monotonic", lambda: clock[0])
+    monkeypatch.setattr("server.app.agent_control.liveness.monotonic", lambda: clock[0])
 
     def db_last_seen() -> datetime:
         with job_db.connect() as conn:
@@ -66,7 +66,7 @@ def test_throttle_boundary_writes_at_exactly_the_interval(job_db, monkeypatch) -
         max_concurrency=1,
     )
     clock = [1000.0]
-    monkeypatch.setattr("server.app.agent_worker_liveness.monotonic", lambda: clock[0])
+    monkeypatch.setattr("server.app.agent_control.liveness.monotonic", lambda: clock[0])
 
     assert registry.authenticate(token) is not None
     assert registry._liveness._writes["boundary-worker"] == 1000.0
@@ -75,6 +75,6 @@ def test_throttle_boundary_writes_at_exactly_the_interval(job_db, monkeypatch) -
     assert registry.authenticate(token) is not None
     assert registry._liveness._writes["boundary-worker"] == 1010.0
 
-    # Revoking evicts the memo entry so the dict stays bounded.
-    assert registry.revoke("boundary-worker") is True
+    # Deleting the record evicts the memo entry so the dict stays bounded.
+    assert registry.delete_worker("boundary-worker") == "deleted"
     assert "boundary-worker" not in registry._liveness._writes

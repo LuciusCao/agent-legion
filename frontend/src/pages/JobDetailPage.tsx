@@ -2,16 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { JobProgressPanel } from '../components/job/JobProgressPanel'
 import { fetchJobArtifact } from '../api'
-import { useUiStore } from '../stores/uiStore'
 import { deriveJobDetailPresentation } from './jobDetail/deriveJobDetailPresentation'
 import styles from './JobDetailPage.module.css'
 import { ArtifactListDialog } from '../components/artifact/ArtifactListDialog'
 import { ArtifactPreviewDialog } from '../components/artifact/ArtifactPreviewDialog'
 import { DagFullscreenDialog } from '../components/dag/DagFullscreenDialog'
 import { TokenUsageDialog } from '../components/tokenUsage/TokenUsageDialog'
-import { JobDetailActions } from '../components/job/JobDetailActions'
 import { NonUploadableNotice } from '../components/job/NonUploadableNotice'
 import { useJobDetail } from './jobDetail/useJobDetail'
+import { useJobDetailActions } from './jobDetail/useJobDetailActions'
 import { EntityPanel } from './jobDetail/EntityPanel'
 
 export default function JobDetailPage() {
@@ -19,7 +18,6 @@ export default function JobDetailPage() {
     workspaceId: string
     jobId: string
   }>()
-  const { setDetailPageActions } = useUiStore()
   const {
     detail,
     error,
@@ -51,15 +49,10 @@ export default function JobDetailPage() {
     return reset
   }, [jobId])
 
-  const {
-    dagNodes,
-    dagEdges,
-    workflowDefinition,
-    keyInfoPreviewable,
-    possibleErrorsPreviewable,
-    keyInfoReviewAttempted,
-    possibleErrorsReviewAttempted,
-  } = useMemo(() => deriveJobDetailPresentation(detail), [detail])
+  const { dagNodes, dagEdges, nodeCatalog } = useMemo(
+    () => deriveJobDetailPresentation(detail),
+    [detail]
+  )
 
   const openArtifact = useCallback(
     async (name: string) => {
@@ -83,40 +76,21 @@ export default function JobDetailPage() {
     [jobId]
   )
 
-  useEffect(() => {
-    if (!detail) {
-      setDetailPageActions(null)
-      return
-    }
-    setDetailPageActions(
-      <JobDetailActions
-        jobs={[detail.job]}
-        workflowDefinition={workflowDefinition}
-        loading={actionLoading}
-        onRerun={handleRerun}
-        onRunTo={handleRunTo}
-        onContinue={handleContinue}
-        onUpgradeWorkflow={handleUpgradeWorkflow}
-        onPackage={handlePackage}
-        onClearPacked={handleClearPacked}
-        onDelete={handleDelete}
-        onOpenArtifacts={() => setArtifactListOpen(true)}
-      />
-    )
-    return () => setDetailPageActions(null)
-  }, [
+  const openArtifactList = useCallback(() => setArtifactListOpen(true), [])
+
+  useJobDetailActions({
     detail,
-    setDetailPageActions,
-    workflowDefinition,
+    nodeCatalog,
     actionLoading,
-    handleRerun,
-    handleRunTo,
-    handleContinue,
-    handleUpgradeWorkflow,
-    handlePackage,
-    handleClearPacked,
-    handleDelete,
-  ])
+    onRerun: handleRerun,
+    onRunTo: handleRunTo,
+    onContinue: handleContinue,
+    onUpgradeWorkflow: handleUpgradeWorkflow,
+    onPackage: handlePackage,
+    onClearPacked: handleClearPacked,
+    onDelete: handleDelete,
+    onOpenArtifacts: openArtifactList,
+  })
 
   if (!jobId) {
     return <p className="error-text">缺少任务 ID</p>
@@ -144,10 +118,7 @@ export default function JobDetailPage() {
             <EntityPanel
               detail={detail}
               jobId={jobId}
-              keyInfoPreviewable={keyInfoPreviewable}
-              possibleErrorsPreviewable={possibleErrorsPreviewable}
-              keyInfoReviewAttempted={keyInfoReviewAttempted}
-              possibleErrorsReviewAttempted={possibleErrorsReviewAttempted}
+              workspaceId={workspaceId}
             />
           )}
         </div>

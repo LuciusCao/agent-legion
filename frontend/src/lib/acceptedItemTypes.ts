@@ -14,7 +14,30 @@ export function acceptedItemTypes(
 ): AcceptedItemType[] {
   const start = workflow?.nodes.find((node) => node.node_type === 'start')
   const types = start?.accepted_item_types
-  return types && types.length > 0
-    ? (types as AcceptedItemType[])
-    : ['material', 'ref']
+  return types?.length ? (types as AcceptedItemType[]) : ['material', 'ref']
 }
+
+type ItemTypeDisplay = { label: string; description: string }
+
+/**
+ * 条目类型的用户视角展示信息（label + 一行说明），三处消费方共用一份：
+ * Studio 入口契约编辑器（WorkflowNodeStartContractEditor）、readOnly 入口
+ * 契约视图（WorkflowNodeStartSection）、「添加条目」提示条（AddItemsDialog）。
+ * 新增条目类型在这里补一条，三处文案自动一致；key 顺序即规范顺序
+ * （material/ref/bundle）。
+ */
+export const ITEM_TYPE_DISPLAY: Record<AcceptedItemType, ItemTypeDisplay> = {
+  material: { label: '上传文件', description: '单个材料文件，浏览器直接上传' },
+  ref: { label: '外部平台内容', description: '粘贴 ID 或链接引用外部平台内容' },
+  bundle: { label: '整个文件夹', description: '保持目录结构，整体算一个条目' },
+}
+
+/** 条目类型的用户视角 label；未知类型回退原始值（前向兼容）。 */
+export function itemTypeLabel(type: string): string {
+  const hit = (ITEM_TYPE_DISPLAY as Record<string, ItemTypeDisplay>)[type]
+  return hit?.label ?? type
+}
+
+/** 条目类型列表的展示串（顿号连接）；空列表回退占位符（未声明）。 */
+export const itemTypeLabels = (types: readonly string[]): string =>
+  types.map(itemTypeLabel).join('、') || '（未声明）'

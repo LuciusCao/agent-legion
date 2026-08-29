@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.services.skill_source_store import SkillSourceStore
 from server.app.skills.manager import SkillManager
 from server.app.workflows.skill_version import resolve_skill_version
@@ -47,9 +47,18 @@ def resolve_skill_dir(
         raise
 
 
-def build_skill_manager(database_dsn: DatabaseDsn) -> SkillManager:
-    """Project-standard SkillManager: DB-backed sources, shared user-level base dir."""
+def build_skill_manager(database_dsn: ConnectSource, runs_dir: Path | None = None) -> SkillManager:
+    """Project-standard SkillManager: DB-backed sources, shared user-level base dir.
+
+    ``database_dsn`` accepts the JobQueries facade or a bare DSN string
+    (BOUNDARY-DATA-001, #187).
+
+    ``runs_dir`` must come from ``settings.skills_runs_dir`` so every process
+    sharing the skill cache (server, lock-refresh CLI) resolves the same
+    lock domain; None falls back to the deterministic temp default.
+    """
     return SkillManager(
         store=SkillSourceStore(database_dsn),
         base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
+        runs_dir=runs_dir,
     )

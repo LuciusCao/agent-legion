@@ -19,9 +19,9 @@ if TYPE_CHECKING:
 
 def ensure_pools(worker: WorkflowWorkerThread) -> None:
     capacity = worker.settings.executor_runtime.code_capacity
-    pool = worker._pools.get(CODE_EXECUTOR_ID)
+    pool = worker.state.pools.get(CODE_EXECUTOR_ID)
     # ThreadPoolExecutor exposes no public max_workers getter.
     if pool is None or pool._max_workers != capacity:
         if pool is not None:
             pool.shutdown(wait=False)
-        worker._pools[CODE_EXECUTOR_ID] = ThreadPoolExecutor(max_workers=capacity)
+        worker.state.pools[CODE_EXECUTOR_ID] = ThreadPoolExecutor(max_workers=capacity)

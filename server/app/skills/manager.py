@@ -17,6 +17,11 @@ from server.app.skills.cache_state import cache_at_commit
 from server.app.skills.config import LockedSkillSource, SkillsConfig, SkillsLock, SkillSourceConfig
 from server.app.skills.doc_cache import SkillDocCache
 from server.app.skills.errors import SkillConfigError, SkillPathError, SkillRepoError
+from server.app.skills.paths import default_skills_runs_dir, ensure_secure_runs_dir
+from server.app.skills.runs_gc import (
+    DEFAULT_MAX_AGE_SECONDS,
+    sweep_stale_execution_dirs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +53,7 @@ class SkillManager:
     ) -> None:
         self._store = store
         self.base_dir = Path(base_dir)
-        self.runs_dir = (
-            Path(runs_dir) if runs_dir else self.base_dir.parent / f"{self.base_dir.name}.runs"
-        )
+        self.runs_dir = Path(runs_dir) if runs_dir else default_skills_runs_dir()
         self.git_command = git_command or ["git"]
         self._cache_locks: dict[str, FileLock] = {}
         # Serializes the read-modify-write of the DB lock document within this
@@ -85,6 +88,9 @@ class SkillManager:
 
             if run_dir.exists():
                 shutil.rmtree(run_dir)
+            # Secure-root first use: never mkdir into a pre-created or
+            # symlinked runs dir on a shared temp filesystem.
+            ensure_secure_runs_dir(self.runs_dir)
             shutil.copytree(cache_dir, run_dir, ignore=shutil.ignore_patterns(".git"))
         return run_dir
 
@@ -93,6 +99,10 @@ class SkillManager:
         execution_dir = self._resolve_execution_dir(execution_id)
         if execution_dir.exists():
             shutil.rmtree(execution_dir)
+
+    def sweep_stale_executions(self, *, max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS) -> int:
+        """Leak GC over the runs dir; see ``runs_gc.sweep_stale_execution_dirs``."""
+        return sweep_stale_execution_dirs(self.runs_dir, max_age_seconds=max_age_seconds)
 
     def _validate_execution_id(self, execution_id: str) -> None:
         if not execution_id:
@@ -291,8 +301,22 @@ class SkillManager:
         key = str(cache_dir.resolve())
         if key not in self._cache_locks:
             # Skills base dir is a read-only input (issue #42): locks live under runs_dir.
+            ensure_secure_runs_dir(self.runs_dir)
             lock_dir = self.runs_dir / ".locks"
-            lock_dir.mkdir(parents=True, exist_ok=True)
+            # Defense in depth: exist_ok would let a symlinked .locks (inside
+            # a root an operator pinned to an already-polluted path) redirect
+            # the FileLocks; reject anything not owned-by-us real dir, and
+            # normalize a stale mode (older-version creation).
+            try:
+                lock_dir.mkdir(mode=0o700)
+            except FileExistsError:
+                if os.path.islink(lock_dir) or not os.path.isdir(lock_dir):
+                    raise OSError(
+                        f"refusing to use skills lock dir {lock_dir}: it exists "
+                        "but is not a directory (possible redirected lock "
+                        "path). Remove it or pin AGENT_LEGION_SKILLS_RUNS_DIR."
+                    ) from None
+                os.chmod(lock_dir, 0o700)
             name = f"{cache_dir.parent.name}--{cache_dir.name}.lock"
             self._cache_locks[key] = FileLock(str(lock_dir / name))
         return self._cache_locks[key]

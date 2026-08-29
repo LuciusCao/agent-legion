@@ -9,12 +9,14 @@ interface Toast {
 export interface UiState {
   workspacePackageDialogOpen: boolean
   tokenUsageDialogOpen: boolean
+  addItemsDialogOpen: boolean
   toast: Toast | null
   pageTitle: string | null
   pageSubtitle: ReactNode | null
   detailPageActions: ReactNode | null
   setWorkspacePackageDialogOpen: (open: boolean) => void
   setTokenUsageDialogOpen: (open: boolean) => void
+  setAddItemsDialogOpen: (open: boolean) => void
   showToast: (message: string, type: 'success' | 'error') => void
   clearToast: () => void
   setPageTitle: (title: string | null) => void
@@ -25,6 +27,7 @@ export interface UiState {
 export const useUiStore = create<UiState>((set) => ({
   workspacePackageDialogOpen: false,
   tokenUsageDialogOpen: false,
+  addItemsDialogOpen: false,
   toast: null,
   pageTitle: null,
   pageSubtitle: null,
@@ -33,6 +36,7 @@ export const useUiStore = create<UiState>((set) => ({
   setWorkspacePackageDialogOpen: (open) =>
     set({ workspacePackageDialogOpen: open }),
   setTokenUsageDialogOpen: (open) => set({ tokenUsageDialogOpen: open }),
+  setAddItemsDialogOpen: (open) => set({ addItemsDialogOpen: open }),
   showToast: (message, type) => set({ toast: { message, type } }),
   clearToast: () => set({ toast: null }),
   setPageTitle: (pageTitle) => set({ pageTitle }),

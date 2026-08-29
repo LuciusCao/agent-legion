@@ -23,11 +23,11 @@ from server.app.services.material_bundles import MaterialBundlesService
 from server.app.services.material_cache import material_claim_block
 from server.app.services.material_ttl import (
     DELETE_GRACE_SECONDS,
-    MaterialTtlSweeperThread,
     collect_expired_materials,
     expire_due_materials,
     materials_ttl_days,
 )
+from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from server.app.services.materials import MaterialsService
 from server.app.storage import ObjectHead
 from shared.material_cache import MaterializeError
@@ -166,6 +166,32 @@ def test_materials_ttl_days_defensive_reads(service: MaterialsService) -> None:
         assert materials_ttl_days(TEST_DATABASE_URL) == 0
 
 
+def test_materials_ttl_days_passes_facade_through_untouched(
+    service: MaterialsService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#247: a JobQueries facade must reach InstanceSettingsStore as the
+    facade itself, never unwrapped to a bare DSN — the original bug (drawing
+    the DSN back out via dsn_identity) was invisible to every existing test
+    because they all pass DSN strings."""
+
+    class FakeFacade:
+        """Stands in for JobQueries: any non-str ConnectSource shape."""
+
+        dsn_identity = TEST_DATABASE_URL
+
+    facade = FakeFacade()
+    received: list[object] = []
+    real_init = InstanceSettingsStore.__init__
+
+    def spy_init(self: InstanceSettingsStore, database_dsn: object) -> None:
+        received.append(database_dsn)
+        real_init(self, database_dsn)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(InstanceSettingsStore, "__init__", spy_init)
+    materials_ttl_days(facade)  # type: ignore[arg-type]
+    assert received and received[0] is facade
+
+
 def test_expire_due_materials_flips_only_past_due(
     service: MaterialsService, storage: FakeStorage
 ) -> None:
@@ -294,16 +320,21 @@ def test_collect_keeps_material_within_grace(
 def test_collect_keeps_row_when_object_delete_fails(
     service: MaterialsService, storage: FakeStorage
 ) -> None:
+    """行先删、对象后删（事务外）：对象删除失败留下孤儿对象交给 bucket
+    lifecycle 兜底，行已删除（不再原地重试同一行）。"""
     material_id = _ready_material(service, storage, "retry.txt")
     _set_expires_at(material_id, f"-{DELETE_GRACE_SECONDS + 60} seconds")
     expire_due_materials(TEST_DATABASE_URL)
+    storage_key = str(_material_row(material_id)["storage_key"])
     storage.fail_deletes = True
 
-    assert collect_expired_materials(TEST_DATABASE_URL, storage) == 0
-    assert _material_row(material_id)["status"] == "expired"  # 留行下轮重试
-
-    storage.fail_deletes = False
+    # collect 仍成功（行删除与对象删除解耦），对象删除异常被逐条吞掉。
     assert collect_expired_materials(TEST_DATABASE_URL, storage) == 1
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute("select 1 from materials where id=%s", (material_id,)).fetchone()
+    assert row is None
+    # 对象删除失败 → 孤儿对象留存（bucket lifecycle rule 兜底，不重试行）。
+    assert storage_key in storage.objects
 
 
 def test_thread_run_once_noop_without_storage(service: MaterialsService) -> None:

@@ -13,16 +13,20 @@ from typing import Any
 
 from cryptography.fernet import InvalidToken
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.vault import _MAX_NAME_LENGTH, VaultError, _fernet
 
 
 class InstanceVaultService:
-    """Fernet encryption plus instance_secrets persistence in one boundary."""
+    """Fernet encryption plus instance_secrets persistence in one boundary.
+
+    ``database_dsn`` accepts the JobQueries facade or a bare DSN string
+    (BOUNDARY-DATA-001, #187); production wiring passes the facade.
+    """
 
     def __init__(
-        self, database_dsn: DatabaseDsn, settings_config: dict[str, Any] | None = None
+        self, database_dsn: ConnectSource, settings_config: dict[str, Any] | None = None
     ) -> None:
         self._dsn = database_dsn
         self._settings_config = settings_config

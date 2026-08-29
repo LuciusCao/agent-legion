@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
-class ScopedTokenManagementQueriesMixin(JobQueriesBase):
+class ScopedTokenManagementQueriesMixin(ConnectionQueriesMixin):
     """Self-service management queries for auth_scoped_tokens (schema v42).
 
     Backs /api/studio-agent-tokens: users list and revoke their own

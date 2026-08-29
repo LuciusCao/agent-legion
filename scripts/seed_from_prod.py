@@ -32,6 +32,8 @@ import urllib.parse
 from collections.abc import Sequence
 from pathlib import Path
 
+from server.app.db.schema_guard import dsn_database_name
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 PROD_DB_NAME = "agent_legion"
@@ -117,7 +119,9 @@ def guard_target_dsn(dsn: str) -> None:
     """Refuse to run against anything that looks like the prod database."""
     parsed = parse_dsn(dsn)
     host = parsed.hostname or ""
-    dbname = parsed.path.lstrip("/")
+    # libpq semantics (URL-decoding, ?dbname= override, PGDATABASE fallback)
+    # — a plain urlparse path would let `agent%5Flegion` through.
+    dbname = dsn_database_name(dsn)
     if dbname == PROD_DB_NAME:
         raise SeedError(f"拒绝执行：目标库名 {dbname!r} 与生产库同名，疑似指向生产。")
     if host not in LOOPBACK_HOSTS:

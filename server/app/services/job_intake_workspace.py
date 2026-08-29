@@ -19,13 +19,3 @@ def singular_field_name(value: str) -> str:
     if value.endswith("s"):
         return value[:-1]
     return value
-
-
-def enabled_intake_modes(workspace: dict[str, Any]) -> set[str] | None:
-    intake_config = workspace.get("intake_config")
-    if not isinstance(intake_config, dict) or "enabled_modes" not in intake_config:
-        return None
-    enabled_modes = intake_config.get("enabled_modes")
-    if not isinstance(enabled_modes, list):
-        return None
-    return {str(mode) for mode in enabled_modes}

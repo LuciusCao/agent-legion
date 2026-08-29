@@ -22,7 +22,7 @@ from server.app.studio_chat.payloads import pick_allow_option
 from server.app.studio_chat.runtime import PendingPermission
 
 if TYPE_CHECKING:
-    from server.app.studio_chat.service import StudioChatService
+    from server.app.studio_chat.events import ServiceBackend
 
 logger = logging.getLogger(__name__)
 
@@ -40,27 +40,29 @@ def is_read_only_tool_call(tool_call: dict[str, Any]) -> bool:
 
 
 def handle_permission_request(
-    service: StudioChatService,
+    backend: ServiceBackend,
     session_id: str,
     tool_call: dict[str, Any],
     options: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Apply the permission policy; blocks on the human answer when parked."""
-    if service._is_agent_legion_tool_call(tool_call):
-        runtime = service._runtime(session_id)
+    from server.app.studio_chat.events import is_agent_legion_tool_call
+
+    if is_agent_legion_tool_call(tool_call):
+        runtime = backend.runtime(session_id)
         if runtime is not None:
             with runtime.lock:
                 runtime.mcp_observed = True
-        service._mark_mcp_verified(session_id)
-        return auto_approve(service, session_id, tool_call, options, decision="auto_approved")
+        backend.store.mark_mcp_verified(session_id)
+        return auto_approve(backend, session_id, tool_call, options, decision="auto_approved")
     if is_read_only_tool_call(tool_call):
-        return auto_approve(service, session_id, tool_call, options, decision="auto_read_only")
-    session = service._db.get_studio_chat_session(session_id) or {}
+        return auto_approve(backend, session_id, tool_call, options, decision="auto_read_only")
+    session = backend.db.get_studio_chat_session(session_id) or {}
     if session.get("allow_all_permissions"):
-        return auto_approve(service, session_id, tool_call, options, decision="allow_all")
+        return auto_approve(backend, session_id, tool_call, options, decision="allow_all")
     request_id = uuid4().hex
     pending = PendingPermission(request_id)
-    runtime = service._runtime(session_id)
+    runtime = backend.runtime(session_id)
     if runtime is None:
         return {"deny": True}
     with runtime.lock:
@@ -69,7 +71,7 @@ def handle_permission_request(
         if runtime.closed:
             return {"deny": True}
         runtime.pending_permissions[request_id] = pending
-    service._append_message(
+    backend.store.append_message(
         session_id,
         "permission",
         "agent",
@@ -85,7 +87,7 @@ def handle_permission_request(
     # allowed current state because concurrent prompts of the same turn
     # re-park. When the guard fails the session is closing or dead: deny at
     # once instead of parking against a torn-down runtime.
-    parked = service._db.update_studio_chat_session_if(
+    parked = backend.db.update_studio_chat_session_if(
         session_id,
         status_in=("running", "awaiting_permission"),
         status="awaiting_permission",
@@ -95,7 +97,7 @@ def handle_permission_request(
             runtime.pending_permissions.pop(request_id, None)
         pending.decision = {"deny": True, "via": "session_closed"}
     else:
-        service._publish_session(session_id)
+        backend.store.publish_session(session_id)
         try:
             settled = pending.event.wait(timeout=PERMISSION_TIMEOUT_SECONDS)
             if not settled:
@@ -115,12 +117,12 @@ def handle_permission_request(
             # only once no prompt of this turn is still parked: a close (or
             # fatal error) that settled this waiter must not be overwritten
             # back to running (ghost live session, #158).
-            if not still_parked and service._db.update_studio_chat_session_if(
+            if not still_parked and backend.db.update_studio_chat_session_if(
                 session_id, status_in=("awaiting_permission",), status="running"
             ):
-                service._publish_session(session_id)
+                backend.store.publish_session(session_id)
     decision = pending.decision
-    service._append_message(
+    backend.store.append_message(
         session_id,
         "permission",
         "user",
@@ -130,7 +132,7 @@ def handle_permission_request(
 
 
 def auto_approve(
-    service: StudioChatService,
+    backend: ServiceBackend,
     session_id: str,
     tool_call: dict[str, Any],
     options: list[dict[str, Any]],
@@ -142,7 +144,7 @@ def auto_approve(
         outcome: dict[str, Any] = {"deny": True}
     else:
         outcome = {"option_id": option["optionId"]}
-    service._append_message(
+    backend.store.append_message(
         session_id,
         "permission",
         "system",

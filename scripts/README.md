@@ -6,11 +6,14 @@
 
 | 脚本 | 用途 |
 |------|------|
-| `check-quick.sh` | 日常快速质量门：先并行 backend/frontend 静态检查，再并行 pytest/Vitest，避免静态检查与两套测试 runner 同时争抢 CPU。 |
-| `check-quick-backend.sh` | quick gate 后端 lane；支持 `BACKEND_GATE_PHASE=static\|test\|all`。 |
-| `check-quick-frontend.sh` | quick gate 前端 lane；支持 `FRONTEND_GATE_PHASE=static\|test\|all`，并通过 `FRONTEND_TEST_MODE=test\|coverage` 选择 Vitest 模式。 |
+| `check-quick.sh` | 日常快速质量门：静态轮并行 backend/frontend/rust，测试轮错峰——backend 先单独跑完，frontend/rust 随后并行（三条测试 lane 同时起会从 gate 内部超订机器；静态轮很轻保持全并行）。`GATE_TIER=aff` 是 agent 内环组合档（backend 受影响测试 + 前端 `vitest related`，非 gate 凭证）。 |
+| `check-quick-backend.sh` | quick gate 后端 lane；支持 `BACKEND_GATE_PHASE=static\|test\|all`。测试档位 `GATE_TIER=smoke\|unit\|postgres\|full`：`full`（默认）与 `unit` 同选 PostgreSQL 离线 unit 层——postgres 集成层交给 CI，碰 db 改动交接前显式跑 `postgres` 档；pytest 统一 `-n <workers> --dist worksteal`（空闲 worker 窃取待跑测试，消掉单个慢测试拖尾整批的尾部延迟）；`aff` 按 `.pytest-aff-index.json` 选择受影响测试（无索引回落 unit），`aff-index` 一次性重建索引（带 `--cov-context=test` 的 unit 全量跑）。 |
+| `check-quick-frontend.sh` | quick gate 前端 lane；支持 `FRONTEND_GATE_PHASE=static\|test\|all`，并通过 `FRONTEND_TEST_MODE=test\|coverage\|related` 选择 Vitest 模式（`related` = 只跑导入改动源文件的测试，`vitest related`）。 |
+| `gate-jobs.sh` | 各 lane 默认并行度策略：机器预算按并发 gate 数均分（`(cores-2)/N` 夹在 2..8，N 为机器级 slot 数）；队列不可见时回落兄弟 worktree 探测（`min(4, cores)` / `cores-2`）。 |
+| `gate-queue.sh` | 机器级 gate 排队：quick gate 在 git common dir 的共享 slot 目录取位，默认 `AGENT_LEGION_MAX_PARALLEL_GATES=1`（串行，各自独占整机预算；并发 2 仍会让各 lane 互相抢 CPU、超时类 flaky 复发，大机器可显式调回 2），满位则打印持有者并等待；陈旧 slot（pid 已死或超龄）自动回收。防多 agent worktree 并行跑门时互相拖垮（曾观察到 4 并发把最后一个 quick gate 拖到 ~1 小时）。 |
+| `pytest_aff_selection.py` | backend 受影响测试选择：从 `--cov-context=test` 的 coverage 数据蒸馏「源文件 → 测试 nodeid」逆索引（`build`），并按 git 改动选出受影响测试（`select`）；内环加速用，非 gate 凭证。 |
 | `check-fast.sh` | pre-commit 实际调用的 fast gate：ruff/mypy/前端 lint，不跑测试。 |
-| `check.sh` | 完整质量门（提交前）：coverage 模式 quick gate + 并行的 full backend evidence/前端 bundle，避免重复 Vitest 与 typecheck。 |
+| `check.sh` | 完整质量门（提交前）：分段串行——backend unit 段（带 coverage）→ backend postgres 段（仅测试轮：`GATE_SKIP_STATIC=1` 跳过静态轮与 api-contract 步、`BACKEND_SKIP_WORKER_UI_TESTS=1` 跳过 worker UI 测试，coverage 追加到同一文件）→ frontend/rust 段，最后并行 full backend evidence/前端 bundle；quick gate 的 full 档缩到 unit 层后，本地全量语义由本脚本保持（两层都跑、每项检查恰好一次、覆盖率合并）。 |
 | `check-ci.sh` | CI 质量门：完整 gate 的 CI 扩展版本。 |
 | `check-deps-audit.sh` | 依赖漏洞审计（pip-audit + npm audit）；非阻塞，需网络。 |
 | `run-local-gate.sh` | 对精确 commit 执行 quick/full gate，并在 Git common directory 记录可复用的本地通过凭证。 |
@@ -39,10 +42,9 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 
 ## Spec / Skill 治理
 
-| 脚本 | 用途 |
-|------|------|
-| `verify_specs.py` | 检查 design specs 的引用健康，自动分类到 `specs/`、`completed/`、`archive/`，并生成 `SPEC_HEALTH.md`。 |
-| `check-skills-shared.py` | 校验外部 Pi skill 仓库与项目共享引用文件的一致性。 |
+`verify_specs.py` 与 `check-skills-shared.py` 已退役删除：前者随未发布的
+`docs/superpowers/` 设计 specs（`f4e7e46f`）一同失去操作对象，后者随业务
+workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 
 ## 示例 workflow
 
@@ -62,7 +64,7 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 | `resume-workspaces.sh` | 按需恢复本 worktree 全部 workspace 调度（后端每次启动重置为暂停；须在后端首次启动建表后执行，未建表时退出码 1 并提示）。 |
 | `dev_stack.sh` | 开发环境一键启停（`make dev-up` / `dev-down` / `dev-status`）：后台编排 backend + frontend + worker（复用 Makefile `dev-*` target），幂等，日志在 `data/logs/dev-*.log`，up 完成后打印各服务 URL。 |
 | `native-prod-up.sh` / `native-prod-down.sh` | 启停原生（非 Docker）生产环境（后端 8000 + worker 8787，前端由后端直接服务 `frontend/dist`；幂等，仅 prod worktree 使用）。由 `make prod-up` / `make prod-down` 调用。 |
-| `stack-prod-up.sh` | 一键启动本地 Docker 生产 stack（PostgreSQL + Host + Worker）：secrets 预检、postgres 健康断言、ASR 模型预热、全 stack 健康等待（仅 prod worktree 使用）。由 `make prod-up docker` 调用，停止用 `make prod-down docker`。 |
+| `stack-prod-up.sh` | 一键启动本地 Docker 生产 stack（PostgreSQL + Host + Worker）：secrets 预检、postgres 健康断言、全 stack 健康等待（仅 prod worktree 使用）。由 `make prod-up docker` 调用，停止用 `make prod-down docker`。 |
 | `seed_from_prod.py` | 从本地 prod Docker stack 的 Postgres 只读导出并种子 develop 库（目标库名为 prod 名或 host 非 loopback 时拒绝执行）。无 make target，直接 `uv run python scripts/seed_from_prod.py` 调用。 |
 | `gc_artifacts.py` | 报告/回收 content-addressed artifact store 中零引用且超过在途宽限期的孤儿 blob（默认 dry-run，`--apply` 回收）。 |
 
@@ -72,14 +74,10 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 
 | 脚本 | 用途 | 退役条件 |
 |------|------|----------|
-| `backfill_failure_classification.py` | 为历史 failed `node_runs` 回填 `failure_category`/`failure_detail`（幂等，支持 `--dry-run` / `--include-unknown`）。 | 生产库中无未分类的 failed 行，且分类规则稳定不再需要重评 `unknown`。 |
-| `backfill_worker_output_validation.py` | 补跑 EXEC-VALIDATION-001 之前 Worker 完成节点的输出校验，失败的标记节点/任务 failed（幂等，支持 `--dry-run`）。 | 所有存量 Worker-run 节点完成重校验（无候选行）。 |
 | `view-session.py` | 将 OpenClaw session JSONL 渲染为人类可读的对话日志。 | OpenClaw runner 退役或控制台内置 session 查看能力。 |
-| `velites_diff_events.py` | 结构对比 Node Pi 与 velites 的 `events.jsonl` 事件流（忽略时序字段与 delta 事件差异）。 | velites 完全替代 Node Pi 且回归基线归档后。 |
-| `migrate_job_dirs_to_shards.py` | 一次性迁移：把扁平 `jobs/<workspace>/<job_id>` 目录改名为分片布局并同步 `jobs.storage_dir`（幂等可重入，`--apply` 需停后端/worker）。 | 生产库不再有 3 段 legacy `storage_dir` 行（全部迁移到 4 段分片布局）。 |
-| `velites_replay.py` | velites 灰度 Phase 1 影子回放：抽样生产 run 目录，离线双跑 Node Pi 与 velites 并对比事件流与声明输出（只读生产数据，不碰 DB）。 | velites 灰度完成、影子回放基线归档后。 |
+| `trim_terminal_code_manifests.py` | 收缩已终态节点的膨胀 code manifest 行（issue #142 止血）。 | 生产库存量膨胀行排空（新代码路径不再膨胀）。 |
 
-一次性脚本（`diagnose_cms.py`、`cleanup-agent-pollution.py`、`backfill-node-run-dirs.py`、`archive/backfill_source_uuid.py`）已于 2026-07-22 退役删除；一次性迁移脚本（`import-sqlite-to-postgres.py` + `sqlite_import_support.py`、`migrate-config-layout.py`）已于 2026-07-23 随 SQLite→PostgreSQL 迁移与配置布局拆分完成退役删除；历史用法见 git 历史。
+一次性脚本（`diagnose_cms.py`、`cleanup-agent-pollution.py`、`backfill-node-run-dirs.py`、`archive/backfill_source_uuid.py`）已于 2026-07-22 退役删除；一次性迁移脚本（`import-sqlite-to-postgres.py` + `sqlite_import_support.py`、`migrate-config-layout.py`）已于 2026-07-23 随 SQLite→PostgreSQL 迁移与配置布局拆分完成退役删除；`backfill_failure_classification.py`、`backfill_worker_output_validation.py`、`migrate_job_dirs_to_shards.py`（存量行迁移完毕）、`backfill_workflow_revision_resources.py`（loader 已硬拒绝 `resources` 字段）、`velites_replay.py`（灰度完成、基线归档）、`velites_diff_events.py`（阶段 C 取消、条件不再适用）、`bench_gzip_exemption.py`（一次性基准，决策已落地）已于 2026-08-26 退役删除；历史用法见 git 历史。
 
 ## 子目录
 
@@ -90,12 +88,12 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 | `git-hooks/` | 版本化的 pre-commit / pre-push 钩子 dispatcher，由 `install-git-hooks.sh` 安装到 Git common directory，再转发到 worktree 根的 `.githooks/`。 |
 | `remote/` | 远程 LLM 网关（`llm_gateway.py` 及 HTTP/SSE/stream/config 模块），见 `docs/remote-execution-runbook.md`。 |
 | `stress/` | 压力测试：`simulate_agents.py` 合成负载生成器、`run_e2e_stress.py` 端到端压测 runner。 |
-| `e2e/` | 浏览器 smoke E2E：`run_browser_smoke.py`（确定性 Chromium 冒烟，CI e2e-smoke / nightly-e2e job 调用）与数据库 helper `_database.py`。 |
+| `e2e/` | 浏览器 smoke E2E：`run_browser_smoke.py`（确定性冒烟，真后端 + worker 线程 + 独立 Worker 进程 + 进程内 CMS/LLM stub，CI e2e-smoke / nightly-e2e job 调用）、数据库 helper `_database.py`、demo 种子 `_demo_seed.py`、主流程种子 `_main_flow_seed.py`、LLM stub `_llm_stub.py`、Worker 启动 `_worker.py`、backend factory `_backend_factory.py`。 |
 | `seed/` | workflow 种子包导出/导入工具（`export_seed.py` / `import_seed.py` / `seed_common.py`）：把 workflow 定义（DAG、Agent、节点代码、skill 源锁定）在实例间迁移，幂等；平台级通用工具，业务种子包留在私有侧。详见 `scripts/seed/README.md`。 |
 
 ## 约定
 
-- 新脚本统一使用下划线命名（`check_xxx.py`）；连字符命名（`check-skills-shared.py` 等）为存量，不强改。
+- 新脚本统一使用下划线命名（`check_xxx.py`）。
 - 包内可导入的脚本通过 `uv run python -m scripts.<name>` 运行，不再复制 `sys.path` bootstrap；
   同包共享逻辑直接 `from scripts._xxx import ...`。
 - 以下存量场景保留 `sys.path` bootstrap：`worker/executor.py`（Docker 已改为整体拷贝 `worker/` 包，bootstrap 仅为兼容直接以脚本方式运行）、

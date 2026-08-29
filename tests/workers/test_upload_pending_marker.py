@@ -1,4 +1,4 @@
-"""Regression tests for the atomic upload-pending marker (worker/upload_queue.py).
+"""Regression tests for the atomic upload-pending marker (worker/upload/queue.py).
 
 The marker is the Durability anchor of the upload queue: a crash that leaves
 a half-written JSON marker makes restore() rmtree a finished execution dir.
@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from worker.status import ExecutionStatusReporter
-from worker.upload_queue import PENDING_FILENAME, UploadQueue, UploadTask
+from worker.upload.queue import PENDING_FILENAME, UploadQueue, UploadTask
 
 pytestmark = pytest.mark.no_db
 

@@ -39,7 +39,7 @@ def resolve_code_node_dispatch(
     frozen = frozen_dispatch_pin(snapshot_pins, batch_payload, node.key)
     cache_key = (workspace_id, workflow_key, node.key)
     generation = node_code_publish_generation()
-    cached = worker._node_code_cache.get(cache_key)
+    cached = worker.state.node_code_cache.get(cache_key)
     # Per-pass memo (issue #124): same-pass claims of one node share a single
     # published-code read; an in-process publish bumps the generation, so new
     # code lands on the very next claim rather than the next pass.
@@ -47,7 +47,7 @@ def resolve_code_node_dispatch(
         node_code = cached[1]
     else:
         node_code = resolve_dispatch_node_code(
-            worker.job_db.path,
+            worker.job_db,
             worker.settings.executor_runtime.workflows.custom_nodes_enabled,
             workspace_id,
             workflow_key,
@@ -55,7 +55,7 @@ def resolve_code_node_dispatch(
             frozen,
         )
         if frozen is None:
-            worker._node_code_cache[cache_key] = (generation, node_code)
+            worker.state.node_code_cache[cache_key] = (generation, node_code)
     if node_code is None:
         raise ValueError(
             f"capability {node.capability!r} has no published node code "

@@ -33,7 +33,7 @@ _SCAN_ROOTS = ("server", "tests", "scripts")
 
 # Fixture files that intentionally contain "?" SQL strings.
 _EXCLUDE = {
-    "tests/test_architecture_sql_placeholders.py",  # this checker's own fixtures
+    "tests/scripts/test_architecture_sql_placeholders.py",  # this checker's own fixtures
     "tests/db/test_dialect_guard.py",  # runtime-guard fixtures keep one "?"
 }
 

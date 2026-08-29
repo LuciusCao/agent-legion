@@ -13,7 +13,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def test_expired_shard_lease_fails_shard_and_aggregates(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    repo = ExecutorLeaseRepository(job_db.path, job_db=job_db, data_dir=tmp_path)
+    repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     workspace_id, job_id = _setup_workspace(
         job_db,
         "ws",

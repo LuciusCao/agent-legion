@@ -20,6 +20,20 @@ def _columns(conn, table: str) -> set[str]:
     }
 
 
+def test_schema_v57_recorded() -> None:
+    """Latest-migration record pin (moved from
+    tests/db/test_job_node_status_counts_migration.py, v56)."""
+    # The pin now lives in tests/db/test_retire_global_register_tokens_migration.py
+    # (v58+): schema_migrations only ever records the latest version, so the
+    # current SCHEMA_VERSION row must exist with the latest migration's name.
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute(
+            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
+        ).fetchone()
+    assert row is not None
+    assert row["name"] == "workspace_settings_retirement"
+
+
 def test_studio_chat_tables_exist() -> None:
     # The autouse fixture already ran init_db at the current SCHEMA_VERSION.
     with read_connection(TEST_DATABASE_URL) as conn:
@@ -37,6 +51,7 @@ def test_studio_chat_tables_exist() -> None:
         "allow_all_permissions",
         "mcp_status",
         "selected_node_key",
+        "draft_yaml",
         "error_detail",
         "created_at",
         "updated_at",
@@ -45,6 +60,25 @@ def test_studio_chat_tables_exist() -> None:
     assert {"id", "seq", "session_id", "kind", "role", "content_json", "created_at"} == (
         message_columns
     )
+
+
+@pytest.mark.fresh_schema
+def test_v56_database_gains_draft_yaml_via_init_db() -> None:
+    # Pre-v57 databases have the sessions table without the draft column;
+    # init_db replays the schema file whose alter statement adds it.
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
+        conn.execute("alter table studio_chat_sessions drop column draft_yaml")
+
+    init_db(TEST_DATABASE_URL)
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        assert "draft_yaml" in _columns(conn, "studio_chat_sessions")
+        migration = conn.execute(
+            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
+        ).fetchone()
+        assert migration is not None
+        assert migration["name"] == "workspace_settings_retirement"
 
 
 @pytest.mark.fresh_schema
@@ -60,7 +94,9 @@ def test_v42_database_upgrades_via_init_db() -> None:
         conn.execute("drop table if exists studio_chat_sessions")
         conn.execute("insert into users(id, username) values ('u-legacy', 'legacy-user')")
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('w-legacy', 'legacy-ws', 'demo_workflow')"
+            # v62 invariant: id == key (the migration renames mismatched ids,
+            # so seed rows that already satisfy it keep their ids stable).
+            "insert into workspaces(id, name, default_workflow_key) values ('demo_workflow', 'legacy-ws', 'demo_workflow')"
         )
 
     init_db(TEST_DATABASE_URL)
@@ -71,15 +107,15 @@ def test_v42_database_upgrades_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration is not None
-    assert migration["name"] == "job_node_status_counts"
+        assert migration is not None
+        assert migration["name"] == "workspace_settings_retirement"
 
     # Rows written through the new tables survive a replay (init_db runs at
     # every backend startup).
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into studio_chat_sessions(id, workspace_id, user_id, agent_id)"
-            " values ('s-1', 'w-legacy', 'u-legacy', 'fake-agent')"
+            " values ('s-1', 'demo_workflow', 'u-legacy', 'fake-agent')"
         )
         conn.execute(
             "insert into studio_chat_messages(id, session_id, kind, role)"

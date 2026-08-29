@@ -13,7 +13,6 @@ LLM gateway 是独立基础设施，不属于 Agent Worker 协议。Worker 容�
 ```bash
 mkdir -p deploy/secrets
 openssl rand -hex 32 > deploy/secrets/postgres_password
-openssl rand -hex 32 > deploy/secrets/agent_worker_register_token
 UV_CACHE_DIR=.uv-cache uv run python -c \
   "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
   > deploy/secrets/vault_master_key
@@ -28,7 +27,7 @@ postgres:5432:agent_legion:agent_legion:<postgres-password>
 将这一行保存为 `deploy/secrets/postgres_pgpass`，然后限制密钥文件权限：
 
 ```bash
-chmod 600 deploy/secrets/postgres_password deploy/secrets/postgres_pgpass deploy/secrets/agent_worker_register_token deploy/secrets/vault_master_key
+chmod 600 deploy/secrets/postgres_password deploy/secrets/postgres_pgpass deploy/secrets/vault_master_key
 ```
 
 `vault_master_key` 是实例 vault 的主密钥：必须是 32 字节密钥的 URL-safe Base64 编码（Fernet 格式），所以用上面的 `Fernet.generate_key()` 生成而不是 `openssl rand`——格式不对会在 vault 写入 / `secret_ref` 解析时报 `Vault master key is not a valid Fernet key`。compose 把它挂为 `AGENT_LEGION_VAULT_MASTER_KEY_FILE` 注入 Host（见 `deploy/compose.host.yaml`），`scripts/stack-prod-up.sh` 启动前对它 fail-fast 检查，缺失会直接拒绝启动并指向本节。
@@ -100,14 +99,15 @@ mkdir -p deploy/secrets
 
 无需先复制或编辑 Worker YAML：首次启动会导入仓库内的引导配置，随后在本机控制台填写 Host 地址、Worker ID 和能力。已有引导 YAML（如复制自 `deploy/worker.remote.example.yaml`）的机器可继续使用；启动前设置 `AGENT_WORKER_CONFIG=./<your-worker>.yaml`，Worker Service 会在首次启动时导入它。
 
-Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope**，`worker.yaml` 不需要也不允许声明 workspace。两种 token：
+Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope**，`worker.yaml` 不需要也不允许声明 workspace（issue #35 后全局 token 已退役，只保留 scoped token 一种）：
 
-- **全局 token**：把部署机的 `deploy/secrets/agent_worker_register_token` 安全复制到 Worker 机器的同一路径；不要把它提交到 Git。Worker 注册后可承接全部 workspace 的任务。
-- **Scoped token（需要把 Worker 隔离到单个 workspace 时使用）**：推荐在 Host Web UI 的「设置 → Worker Token」页面签发与管理：填写标签与可选的 workspace 范围即可创建，明文只显示一次，复制后保存为 Worker 机器上的 `deploy/secrets/agent_worker_register_token`（权限 600）。该页面同时支持查看/吊销已签发 token 与吊销已注册 Worker。
+- **Scoped token（唯一方式）**：在 Host Web UI 的 workspace「设置 → Agent 与 Worker」页面签发与管理：填写 Key 名称即可创建（固定绑定当前 workspace），明文 token 只显示一次。复制后到 Worker 机器的 Worker 控制台（`http://<worker>:8787` 配置页）「Workspace 访问（Scoped Token）」区块粘贴添加；无显示器的设备可用 `workerctl configure --register-token-file <file>` 导入。一个 Worker 可添加多个不同 workspace 的 token：注册时全部呈现，Host 取并集作为 scope；任何一个 token 失效（已删除/未知）都会让整次注册 401。该页面同时支持删除已签发的 key 与清理已注册 Worker 的记录：**删除 key 是切断 Worker 访问的唯一方式**——删除即级联，仅绑定该 key 的 Worker 记录一并删除、凭证立即失效，持有其它 key 的 Worker 同步收窄 scope——没有单独的「吊销 Worker」操作，正如作废 API key 才能作废它的全部客户端。
 
-  该 Worker 注册后只能看到并 claim 对应 workspace 的任务。
+  该 Worker 注册后只能看到并 claim 对应 workspace 的任务；Host 侧每个 workspace 的设置页也只显示用本 workspace token 注册的 Worker（管理员仍可见全量）。
 
-  注意：这些管理端点（UI 与下列 curl 共用的 `/api/agent-register-tokens*`、`/api/agent-workers/*/revoke`）要求 **admin 会话**调用，必须携带登录 cookie 与 CSRF header（见 Host Web UI 登录后的会话）。Worker 注册本身仍必须凭 register token（全局或 scoped），不受影响。
+  从旧模型迁移的运维提示：per-worker revoke 已退役，旧版「已吊销（revoked）」的 Worker 记录不再持久生效——只要该 Worker 还持有存活 key，重新注册即恢复正常（列表中显示「已失效（旧版吊销）」只是遗留标记）。要永久切断一个旧 Worker 的访问，必须删除它持有的全部 key（删除 key 即级联切断），只吊销记录是无效的。
+
+  注意：这些管理端点（UI 与下列 curl 共用的 `/api/agent-register-tokens*`、`DELETE /api/agent-workers/{id}`）要求 **admin 会话**调用，必须携带登录 cookie 与 CSRF header（见 Host Web UI 登录后的会话）。Worker 注册本身仍必须凭 scoped token，不受影响。
 
   也可以用 curl 在部署机上签发（备选方式）。这些请求需要 admin 会话：先在 Host Web UI 登录（或调用 `/api/auth/login`）取得登录 cookie，并在请求中带上 CSRF header，否则返回 401/403。
 
@@ -119,14 +119,14 @@ curl -sS -X POST http://192.0.2.1:8000/api/agent-register-tokens \
 ```
 
 ```bash
-# 列表（不含明文与 hash，含吊销状态）
+# 列表（不含明文与 hash）
 curl -sS http://192.0.2.1:8000/api/agent-register-tokens
 
-# 吊销
-curl -sS -X POST http://192.0.2.1:8000/api/agent-register-tokens/<token_id>/revoke
+# 删除 key（硬删，立即失效）
+curl -sS -X DELETE http://192.0.2.1:8000/api/agent-register-tokens/<token_id>
 ```
 
-注意：吊销 scoped token 只影响后续注册；已注册 Worker 落库的 scope 在重新注册前不变。需要立即收缩时，吊销后让该 Worker 重新注册（换用新 token）。
+注意：删除 scoped token 会级联生效——同一事务内，不再持有任何存活 key 的 Worker 会被一并删除（其凭证立即失效，不需要等它重启或重注册）；仍持有其它存活 key 的 Worker 保留记录，但失效绑定被剔除、落库 scope 同步收窄到剩余 key 的范围。无绑定记录的 legacy Worker 不受级联影响，可在同一页面手动删除。
 
 Worker 机器上继续挂载它自己的 Pi 配置，并在 gateway 设置了 token 时同样提供 `LLM_GATEWAY_TOKEN`（见 §2）：
 
@@ -174,7 +174,7 @@ Host 才会下发任务。
 - **Docker 部署**：worker 镜像已内置 velites（`/usr/local/bin/velites`，Dockerfile 的 velites-build 阶段按目标平台构建），无需任何额外动作；
 - **裸机/开发部署**（直接跑 `worker.executor`，如 `make dev-worker`）：在**与 Worker 同 OS/架构**的机器上、仓库根执行 `./scripts/ensure-velites.sh --dest data/bin`，脚本按 velites/ 源码指纹决定是否需要 `cargo build --release`（指纹不变的重复执行直接跳过），产物原子安置到 `data/bin/velites`。打包分发时按平台分别构建：把对应平台的 `data/bin/velites` 随仓库（或 worker 代码包）一起带到目标机器即可。macOS 产物用 seatbelt、Linux 产物用 bubblewrap（Linux 主机需可用的 bwrap：setuid 或非特权 user namespace），沙箱后端不可用同样 fail-closed。
 
-**secret 边界**：节点 secret（vault 解出的连接凭据）只在 claim 响应里经既有 HTTPS 通道注入——落库的 manifest 与 bundle 都不含 secret；Worker 仅内存持有、经 stdin 传给沙箱子进程，任何持久化前强制剔除（`strip_secret_config`），secret 不接触 Worker 文件系统与日志。随 manifest 下发的 settings 快照按 section 白名单过滤（`node_safe_settings_config`）——白名单当前为空（`NODE_SETTINGS_CONFIG_SECTIONS = ()`，业务 section 已随业务节点迁出），vault/auth/database/agent_workers 等实例级 section 不落库、不下发、不进沙箱 stdin。
+**secret 边界**：节点 secret（vault 解出的连接凭据）只在 claim 响应里经既有 HTTPS 通道注入——落库的 manifest 与 bundle 都不含 secret；Worker 仅内存持有、经 stdin 传给沙箱子进程——secret 标记键在 Host 侧 `split_manifest_config` 就不进下发 manifest，Worker 侧没有任何 config 派生数据落盘，secret 不接触 Worker 文件系统与日志。随 manifest 下发的 settings 快照按 section 白名单过滤（`node_safe_settings_config`）——白名单当前为空（`NODE_SETTINGS_CONFIG_SECTIONS = ()`，业务 section 已随业务节点迁出），vault/auth/database/agent_workers 等实例级 section 不落库、不下发、不进沙箱 stdin。
 
 **协议兼容**：当前协议版本为 v3（新增 runtime-scoped model triples）；v2 的 code claim
 和 heartbeat 取消 body 语义不变。Host 把旧 Worker 的二元 provider/model 声明解释成
@@ -227,15 +227,17 @@ docker compose -f deploy/compose.worker.yaml exec worker workerctl configure \
   --max-concurrency 10 \
   --capability subtitle_review \
   --model openai/gpt-5.2 \
-  --register-token-file /run/secrets/agent_worker_register_token \
+  --register-token-file ./marketing.token \
   --label os=linux --label arch=arm64
 ```
 
-`--register-token-file` 在 Worker 本机读取 Host 签发的 token，再通过 loopback 控制 API 写入权限为 0600 的状态文件；不要把 token 明文放进命令参数或 shell 历史。对于树莓派、云服务器等无显示器设备，上述 `workerctl` 命令覆盖初始化、状态检查、能力和模型声明、动态扩容、claim 开关、日志与进程重启，不依赖浏览器。
+`./marketing.token` 是本机保存的 scoped token 文件（从 Host Web UI 复制明文后以 0600 权限保存，文件名自定）；compose 不再挂载全局 token。
+
+`--register-token-file` 在 Worker 本机读取 Host 签发的 scoped token，再通过 loopback 控制 API 写入权限为 0600 的状态文件（与控制台「添加并验证」同构）；不要把 token 明文放进命令参数或 shell 历史。重复执行可添加多个 workspace 的 token。对于树莓派、云服务器等无显示器设备，上述 `workerctl` 命令覆盖初始化、状态检查、能力和模型声明、动态扩容、claim 开关、日志与进程重启，不依赖浏览器。
 
 ### 崩溃重启与失败状态
 
-Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程内指数退避重试注册，不会打印 traceback，也不会触发 supervisor 重启。执行进程因其他原因崩溃后按指数退避自动重启：5 秒起步、每次 ×2、封顶 300 秒；稳定运行满 60 秒后重置退避。退出码 2（Host 明确拒绝注册、Worker 已被吊销，或启动预检失败——例如声明了某个 runtime 但其二进制在自带副本与 PATH 上都找不到）不自动重启，进入 failed 状态，需修正配置后手动 `workerctl restart`。`status` 中的 `restart_count`、`next_restart_delay`、`failed` 字段反映这些状态；容器 healthcheck 会把 failed 或已配置但进程未运行视为 unhealthy。
+Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程内指数退避重试注册，不会打印 traceback，也不会触发 supervisor 重启。执行进程因其他原因崩溃后按指数退避自动重启：5 秒起步、每次 ×2、封顶 300 秒；稳定运行满 60 秒后重置退避。退出码 2（Host 明确拒绝注册——例如持有的全部 key 已被删除，或启动预检失败——例如声明了某个 runtime 但其二进制在自带副本与 PATH 上都找不到）不自动重启，进入 failed 状态，需修正配置后手动 `workerctl restart`。`status` 中的 `restart_count`、`next_restart_delay`、`failed` 字段反映这些状态；容器 healthcheck 会把 failed 或已配置但进程未运行视为 unhealthy。
 
 ### 挂载配置与状态副本不一致
 
@@ -254,12 +256,12 @@ Quick Start 已含命令）：
 
 1. `cp config/agent-worker.example.yaml config/agent-worker.yaml`，按本机改
    `host_url`（dev 栈后端端口，默认 `http://127.0.0.1:8001`）、
-   `register_token_file: deploy/secrets/agent_worker_register_token`、
    `work_root: data/agent-worker`，并按要跑的 workflow 声明
    `capabilities` / `models`。
-2. 注册 token 文件必须在**后端首次启动之前**创建——后端在启动时读取它；
-   先起后端、后补 token 文件会导致 Worker 注册 401，此时重启一次后端即可
-   对齐。
+2. 起后端并登录 Host Web UI，在「设置 → Worker Token」为目标 workspace 签发
+   scoped token；到 Worker 控制台（默认 `http://127.0.0.1:8789`）的
+   「Workspace 访问（Scoped Token）」区块粘贴添加。Worker 侧 token 随时可以
+   补——注册失败只影响 Worker 自身，不需要重启后端。
 3. 重跑 `make dev-up`（幂等）启动 Worker，然后在 worker 控制台打开
    `claim_enabled`（默认关闭，见下方检查单第 3 条）。
 
@@ -303,7 +305,7 @@ docker compose -f deploy/compose.worker.yaml exec worker \
   python3 -c "import socket; socket.create_connection(('192.0.2.1', 9000), timeout=5); print('ok')"
 ```
 
-第三条不可省略：远程 Worker 的材料与 bundle 成员走 presigned GET（`worker/material_fetch.py`、`worker/bundle_fetch.py`），产物回传走 presigned PUT staging（`worker/artifact_upload.py`），全部指向 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`；compose 内部地址 `rustfs:9000` 从远程不可达。注意内置 RustFS 默认只发布在 `127.0.0.1`（`deploy/compose.host.yaml` 的 `${AGENT_LEGION_S3_BIND:-127.0.0.1}` 端口映射）：远程 Worker 场景必须同时在 `deploy/.env` 设 `AGENT_LEGION_S3_BIND=<部署机 Tailnet IP>` 并把 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向同一地址（presigned URL 按该地址签发），否则本条探测必然失败。若改用 HTTP 探测，根路径返回 4xx 也算可达（S3 匿名 GET `/` 本就会被拒），只有连接拒绝/超时才是失败。
+第三条不可省略：远程 Worker 的材料与 bundle 成员走 presigned GET（`worker/material_fetch.py`、`worker/bundle_fetch.py`），产物回传走 presigned PUT staging（`worker/artifact/upload.py`），全部指向 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`；compose 内部地址 `rustfs:9000` 从远程不可达。注意内置 RustFS 默认只发布在 `127.0.0.1`（`deploy/compose.host.yaml` 的 `${AGENT_LEGION_S3_BIND:-127.0.0.1}` 端口映射）：远程 Worker 场景必须同时在 `deploy/.env` 设 `AGENT_LEGION_S3_BIND=<部署机 Tailnet IP>` 并把 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向同一地址（presigned URL 按该地址签发），否则本条探测必然失败。若改用 HTTP 探测，根路径返回 4xx 也算可达（S3 匿名 GET `/` 本就会被拒），只有连接拒绝/超时才是失败。
 
 三条都成功后才允许承接生产任务。如果容器内无法解析或路由到 Tailnet 地址，不要把它隐式塞进业务容器——先单独设计 Tailscale sidecar，再重新验证。
 

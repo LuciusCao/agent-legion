@@ -12,23 +12,25 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.app.agent_catalog import AgentDefinition
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.main import create_app
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from tests.db.test_postgres_runtime import (
-    test_schema_initialization_is_idempotent as _assert_schema_idempotent,
-)
 from tests.helpers import (
     load_builtin_definition,
     replace_agent_catalog,
     seed_workspace_agent_definitions,
 )
-from tests.postgres_support import TEST_DATABASE_URL
-from tests.test_agent_broker import _seed_request
-from tests.test_agent_broker import (
-    test_node_twenty_and_three_workers_ten_never_claim_more_than_twenty as _assert_capacity_matrix,
+from tests.helpers.agent_worker_api import (
+    assert_capacity_matrix as _assert_capacity_matrix,
 )
+from tests.helpers.agent_worker_api import (
+    seed_request as _seed_request,
+)
+from tests.helpers.postgres_schema import (
+    assert_schema_initialization_is_idempotent as _assert_schema_idempotent,
+)
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 @pytest.mark.full_gate
@@ -57,7 +59,7 @@ def test_agent_definition_catalog_snapshot_lifecycle(job_db) -> None:
 
 
 @pytest.mark.full_gate
-def test_worker_token_is_hashed_and_revocable(job_db) -> None:
+def test_worker_token_is_hashed_and_deleted_worker_loses_access(job_db) -> None:
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     token = registry.issue_token(
         worker_id="secure-worker",
@@ -75,7 +77,9 @@ def test_worker_token_is_hashed_and_revocable(job_db) -> None:
     assert row["token_hash"] == hashlib.sha256(secret.encode()).hexdigest()
     assert secret not in row["token_hash"]
     assert registry.authenticate(token) is not None
-    assert registry.revoke(worker_id)
+    # Direct registry registration has no recorded key binding, so the record
+    # is deletable; deleting it kills the credential.
+    assert registry.delete_worker(worker_id) == "deleted"
     assert registry.authenticate(token) is None
 
 
@@ -88,7 +92,7 @@ def test_postgres_agent_schema_initialization_is_idempotent() -> None:
 def test_scoped_register_token_lifecycle(job_db) -> None:
     """EXEC-WORKERACL-001 evidence: scoped tokens are hashed at rest, resolve
     to their workspace scope, stamp it onto registered Workers, and stop
-    resolving after revoke."""
+    resolving after the key is deleted."""
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     with job_db.connect() as conn:
         conn.execute(
@@ -99,14 +103,16 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
     token_id, plaintext = registry.issue_register_token(
         workspace_id="acl-workspace", label="full-gate"
     )
-    assert registry.resolve_register_scope(plaintext) == ["acl-workspace"]
+    scope = registry.resolve_register_scope([plaintext])
+    assert scope is not None
+    assert [row["workspace_id"] for row in scope] == ["acl-workspace"]
 
     worker_token = registry.issue_token(
         worker_id="acl-worker",
         name="ACL Worker",
         runtimes=["pi"],
         max_concurrency=1,
-        allowed_workspaces=registry.resolve_register_scope(plaintext),
+        allowed_workspaces=[row["workspace_id"] for row in scope],
     )
     worker = registry.authenticate(worker_token)
     assert worker is not None
@@ -116,8 +122,8 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
     entry = next(item for item in listed if item["token_id"] == token_id)
     assert "token_hash" not in entry and "register_token" not in entry
 
-    assert registry.revoke_register_token(token_id)
-    assert registry.resolve_register_scope(plaintext) is None
+    assert registry.delete_register_token(token_id) == []
+    assert registry.resolve_register_scope([plaintext]) is None
 
 
 @pytest.mark.full_gate
@@ -170,16 +176,19 @@ def test_http_claim_cycle_releases_capacity_and_updates_panel(tmp_path: Path) ->
     HTTP must close the request, release both capacity domains, complete the
     node, and mirror busy/idle into the workspace Agent panel."""
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.agent_workers.register_token = "management-secret"
     # Dispatch defaults to paused after every startup; resume the seeded
     # workspace the way an operator would.
     app.state.workspace_worker_control.resume("test-workspace")
     _seed_request(app.state.job_db, job_id="job-e2e", limit=2)
+    # 全局 register token 已退役（issue #35）：按 workspace 签发 scoped token。
+    _, management_secret = AgentWorkerRegistry(TEST_DATABASE_URL).issue_register_token(
+        workspace_id="test-workspace", label="e2e"
+    )
 
     with TestClient(app) as client:
         token = client.post(
             "/api/agent-workers/register",
-            headers={"X-Agent-Worker-Register-Token": "management-secret"},
+            headers={"X-Agent-Worker-Register-Token": management_secret},
             json={
                 "worker_id": "e2e-worker",
                 "name": "E2E Worker",

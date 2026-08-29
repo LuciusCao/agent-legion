@@ -1,4 +1,6 @@
 {
   "version": 1,
-  "files": {}
+  "files": {
+    "tests/scripts/test_pytest_aff_selection.py": 7
+  }
 }

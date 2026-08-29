@@ -15,3 +15,14 @@ class AgentDefinitionResponse(BaseModel):
     thinking: str | None = None
     skill_ref: str | None = None
     skill_commit: str | None = None
+
+
+class AgentCatalogResponse(BaseModel):
+    """Agent catalog for Studio (issue #198: agents-only semantics).
+
+    The former ``executors`` half retired with the executor concept
+    (schema v47, EXEC-CODE-POOL-001); the endpoint was renamed from
+    ``/api/executors`` to match the agents-only meaning.
+    """
+
+    agents: list[AgentDefinitionResponse] = Field(default_factory=list)

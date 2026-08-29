@@ -32,7 +32,10 @@ agent-legion/
 │       ├── main.py             # FastAPI app factory + lifespan worker
 │       ├── settings.py         # 配置加载与合并
 │       ├── routes/             # REST API 路由与合约
-│       ├── services/           # 业务逻辑服务层
+│       ├── services/           # 业务逻辑服务层；下划线前缀簇已归真子包：
+│       │                       # job_rerun/（rerun 与批量 delete/run-to）、
+│       │                       # ops_metrics/（采样与读侧查询）、
+│       │                       # failure_classification/（失败分类规则）
 │       ├── db/                 # PostgreSQL schema、连接池、事务与共享查询构造
 │       ├── jobs/               # Job 领域查询与类型
 │       ├── executors/          # Code executor、lease 调度与 capacity 控制
@@ -70,7 +73,13 @@ agent-legion/
 ├── worker/                     # Agent Worker 协议 v2 实现
 │   ├── service.py              # Worker Service 控制面入口
 │   ├── executor.py             # claim / 执行 / 心跳 / 结果上报主循环
-│   ├── runtime_controls.py     # 状态副本 YAML 热更控制
+│   ├── execution/              # 单次执行：准备 / 运行 / 心跳 / 生命周期
+│   ├── runtime/                # 声明解析与热更控制 / 模型发现 / 启动预检
+│   ├── upload/                 # 产物直传队列与 lane 调度
+│   ├── host/                   # Host 控制面 HTTP 客户端与状态同步
+│   ├── artifact/               # presigned GET/PUT 传输原语
+│   ├── registration/           # scoped token 与注册重试
+│   ├── status/                 # 执行状态文件写入/读取/聚合（包根为写入方）
 │   └── ...
 ├── velites/                    # 自研 Rust agent harness 与 OS 沙箱
 │   ├── src/
@@ -88,8 +97,6 @@ agent-legion/
 │   ├── check-ci.sh             # CI 质量门
 │   ├── check_architecture.py   # 架构契约检查
 │   ├── check_invariants.py     # 不变量/豁免校验
-│   ├── check-skills-shared.py  # Skill 共享资源一致性检查
-│   ├── verify_specs.py         # Spec 健康检查
 │   ├── ratchet_architecture_budgets.py # 架构预算基线更新
 │   ├── generate_architecture.py # 自动生成架构文档表格
 │   ├── generate-api-types.sh   # 生成前端 API 类型

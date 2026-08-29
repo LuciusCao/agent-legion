@@ -41,8 +41,8 @@ def _candidate(definition: WorkflowDefinition, node: WorkflowNode, job_id: str) 
 def _worker(*, stock: AgentStockConfig | None = None) -> MagicMock:
     worker = MagicMock()
     worker.settings.executor_runtime.agent_stock = stock or AgentStockConfig()
-    worker._route_cache = {}
-    worker._agent_pass = AgentPassState()
+    worker.state.route_cache = {}
+    worker.state.agent_pass = AgentPassState()
     return worker
 
 
@@ -68,7 +68,7 @@ def test_prepare_batch_loads_and_filters_by_route_cache() -> None:
         key="test", label="Test", intake=WorkflowIntake(), nodes={node.key: node}
     )
     # Cached non-agent route: excluded from the batch query without any DB.
-    worker._route_cache[("ws1", "test", node.key)] = (
+    worker.state.route_cache[("ws1", "test", node.key)] = (
         time.monotonic(),
         NodeRoute("executor", target_id="local-default"),
     )
@@ -90,8 +90,8 @@ def test_prepare_batch_loads_and_filters_by_route_cache() -> None:
         prepare_agent_pass(worker, queues)
 
     batch.assert_called_once_with(worker.agent_dispatch.broker.database_dsn, ["job-agent"])
-    assert worker._agent_pass.active_nodes == {("job-agent", "review")}
-    assert worker._agent_pass.stock_snapshot is snapshot
+    assert worker.state.agent_pass.active_nodes == {("job-agent", "review")}
+    assert worker.state.agent_pass.stock_snapshot is snapshot
 
 
 def test_prepare_skips_stock_when_disabled() -> None:
@@ -110,7 +110,7 @@ def test_prepare_skips_stock_when_disabled() -> None:
         prepare_agent_pass(worker, queues)
 
     stock.assert_not_called()
-    assert worker._agent_pass.stock_snapshot is None
+    assert worker.state.agent_pass.stock_snapshot is None
 
 
 def test_stock_snapshot_refreshes_on_interval() -> None:
@@ -130,14 +130,14 @@ def test_stock_snapshot_refreshes_on_interval() -> None:
         prepare_agent_pass(worker, queues)
         prepare_agent_pass(worker, queues)
         assert stock.call_count == 1
-        worker._agent_pass.stock_loaded_at -= 31.0
+        worker.state.agent_pass.stock_loaded_at -= 31.0
         prepare_agent_pass(worker, queues)
         assert stock.call_count == 2
 
 
 def test_agent_claim_allowed_counts_enqueued_since_snapshot() -> None:
     worker = _worker()
-    state = worker._agent_pass
+    state = worker.state.agent_pass
     state.stock_snapshot = StockSnapshot(
         config=AgentStockConfig(min_stock=2, max_stock=10),
         buckets={("ws1", "agent-x"): StockBucket(queued=1)},
@@ -168,19 +168,19 @@ def test_stock_reload_clears_enqueued_counter() -> None:
     ):
         stock.return_value = StockSnapshot(config=AgentStockConfig())
         prepare_agent_pass(worker, queues)
-        worker._agent_pass.stock_enqueued[("ws1", "agent-x")] = 5
+        worker.state.agent_pass.stock_enqueued[("ws1", "agent-x")] = 5
         # Within the window the counter survives (snapshot stays frozen).
         prepare_agent_pass(worker, queues)
-        assert worker._agent_pass.stock_enqueued == {("ws1", "agent-x"): 5}
+        assert worker.state.agent_pass.stock_enqueued == {("ws1", "agent-x"): 5}
         # On reload the fresh snapshot sees the real queued rows again.
-        worker._agent_pass.stock_loaded_at -= 31.0
+        worker.state.agent_pass.stock_loaded_at -= 31.0
         prepare_agent_pass(worker, queues)
-        assert worker._agent_pass.stock_enqueued == {}
+        assert worker.state.agent_pass.stock_enqueued == {}
 
 
 def test_agent_claim_allowed_skips_in_flight_submission() -> None:
     worker = _worker()
-    state = worker._agent_pass
+    state = worker.state.agent_pass
     # Submitted to the enqueue pool but not yet visible in the DB: the
     # pass must not resubmit a duplicate bundle build for it.
     state.in_flight = {("job1", "fetch")}
@@ -214,7 +214,7 @@ def test_reset_pass_clears_per_pass_fields_but_keeps_snapshot() -> None:
 
 def test_agent_claim_allowed_gates() -> None:
     worker = _worker()
-    state = worker._agent_pass
+    state = worker.state.agent_pass
     state.active_nodes = {("job1", "fetch")}
     assert agent_claim_allowed(worker, "ws1", "job1", "fetch", "agent-x") is False
 
@@ -243,7 +243,7 @@ def test_force_refresh_expires_stock_snapshot() -> None:
 
 def test_request_restock_expires_snapshot_and_wakes_worker() -> None:
     worker = _worker()
-    worker._agent_pass.stock_loaded_at = 123.0
+    worker.state.agent_pass.stock_loaded_at = 123.0
     request_restock(worker)
-    assert worker._agent_pass.stock_loaded_at == 0.0
-    worker._wake_event.set.assert_called_once_with()
+    assert worker.state.agent_pass.stock_loaded_at == 0.0
+    worker.state.wake_event.set.assert_called_once_with()

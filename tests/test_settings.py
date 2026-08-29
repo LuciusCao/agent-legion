@@ -23,7 +23,6 @@ def _clear_agent_legion_env(monkeypatch):
         "BASECMS_SECRET",
         "BASECMS_TOKEN_URL",
         "AGENT_LEGION_CMS_TOKEN",
-        "AGENT_LEGION_CMS_TOKEN_GEN_SECRET",
         "AGENT_LEGION_OPENCLAW_CWD",
         "AGENT_LEGION_SKIP_DOTENV",
     ):
@@ -291,45 +290,48 @@ def test_load_settings_rejects_retired_workflows_pi_yaml(tmp_path, monkeypatch):
 def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
-        "data_dir: data\n"
-        "workflows:\n"
-        "  enabled: true\n"
-        "openclaw:\n"
-        "  cwd: .\n"
-        "  timeout_seconds: 600\n"
-        "  skill_safety:\n"
-        "    enabled: true\n"
-        "    repos:\n"
-        "      - path: ~/.openclaw/workspace/skills/s1\n"
-        "  command_template:\n"
-        "    - openclaw\n"
-        "    - agent\n",
+        "data_dir: data\nworkflows:\n  enabled: true\nopenclaw:\n  cwd: .\n",
         encoding="utf-8",
     )
 
     settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
     assert settings.executor_runtime.workflows.enabled is True
-    # workflows.pi 块已退役：PiRuntimeConfig 只剩硬编码默认（死路径 executors/pi.py 专用）。
-    assert settings.executor_runtime.workflows.pi.flavor == "pi"
-    assert settings.executor_runtime.workflows.pi.binary == "pi"
     assert settings.executor_runtime.openclaw.cwd == "."
-    assert settings.executor_runtime.openclaw.timeout_seconds == 600
-    assert settings.executor_runtime.openclaw.command_template == ("openclaw", "agent")
-    assert settings.executor_runtime.openclaw.skill_safety.enabled is True
-    assert [repo.path for repo in settings.executor_runtime.openclaw.skill_safety.repos] == [
-        "~/.openclaw/workspace/skills/s1"
-    ]
+    # 退役的 openclaw 旋钮（command_template/timeout_seconds/skill_safety）随
+    # 配置面清理移除：extra="ignore" 使 yaml 里的残留键被静默丢弃。
 
 
-def test_load_settings_rejects_skill_safety_ref(tmp_path, monkeypatch):
-    """skill_safety refs were retired (config governance G3); lock is the source."""
+def test_load_settings_ignores_retired_openclaw_knobs(tmp_path, monkeypatch):
+    """Retired openclaw keys are ignored, not validated."""
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
         "data_dir: data\n"
         "openclaw:\n"
-        "  command_template:\n"
-        "    - openclaw\n"
+        "  cwd: .\n"
+        "  timeout_seconds: 600\n"
+        "  command_template: []\n"
+        "  skill_safety:\n"
+        "    enabled: true\n"
+        "    repos:\n"
+        "      - path: ~/.openclaw/workspace/skills/s1\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.executor_runtime.openclaw.cwd == "."
+
+
+def test_load_settings_rejects_skill_safety_ref(tmp_path, monkeypatch):
+    """skill_safety refs stay rejected at startup (config governance G3): the
+    DB skill_lock document is the single source of truth for refs, so the
+    retired-key ignore rule must not swallow a ref silently."""
+    config_path = tmp_path / "workflow.yaml"
+    config_path.write_text(
+        "data_dir: data\n"
+        "openclaw:\n"
+        "  cwd: .\n"
         "  skill_safety:\n"
         "    enabled: true\n"
         "    repos:\n"
@@ -338,23 +340,8 @@ def test_load_settings_rejects_skill_safety_ref(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    with pytest.raises(ValidationError) as exc_info:
+    with pytest.raises(ValidationError, match="ref"):
         load_settings(data_dir=tmp_path / "data", config_path=config_path)
-
-    assert "ref" in str(exc_info.value)
-
-
-def test_load_settings_rejects_empty_openclaw_command_template(tmp_path, monkeypatch):
-    config_path = tmp_path / "workflow.yaml"
-    config_path.write_text(
-        "data_dir: data\nopenclaw:\n  command_template: []\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ValidationError) as exc_info:
-        load_settings(data_dir=tmp_path / "data", config_path=config_path)
-
-    assert "command_template" in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
@@ -373,14 +360,7 @@ def test_env_override_precedes_yaml(
     if layout == "legacy":
         config_path_file = tmp_path / "workflow.yaml"
         config_path_file.write_text(
-            "data_dir: data\n"
-            "workflows:\n"
-            "  enabled: false\n"
-            "openclaw:\n"
-            "  cwd: yaml-cwd\n"
-            "  command_template:\n"
-            "    - openclaw\n"
-            "    - agent\n",
+            "data_dir: data\nworkflows:\n  enabled: false\nopenclaw:\n  cwd: yaml-cwd\n",
             encoding="utf-8",
         )
     else:
@@ -398,3 +378,68 @@ def test_env_override_precedes_yaml(
     for key in config_path[:-1]:
         node = node[key]
     assert node[config_path[-1]] == expected
+
+
+def test_load_settings_rejects_retired_register_token_config(tmp_path, monkeypatch):
+    """issue #35：全局 register token 退役后，遗留 yaml 键与 env 变量都 fail-fast。"""
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
+
+    config_path = tmp_path / "explicit.yaml"
+    config_path.write_text(
+        "database: {url: postgresql://configured/app}\n"
+        "agent_workers:\n"
+        "  register_token: legacy-secret\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match=r"agent_workers\.register_token"):
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    config_path.write_text(
+        "database: {url: postgresql://configured/app}\n"
+        "agent_workers:\n"
+        "  register_token_file: /run/secrets/legacy\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match=r"agent_workers\.register_token_file"):
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
+    monkeypatch.setenv("AGENT_LEGION_WORKER_REGISTER_TOKEN", "legacy-secret")
+    with pytest.raises(ValueError, match="AGENT_LEGION_WORKER_REGISTER_TOKEN"):
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+    monkeypatch.delenv("AGENT_LEGION_WORKER_REGISTER_TOKEN")
+    monkeypatch.setenv("AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE", "/run/secrets/legacy")
+    with pytest.raises(ValueError, match="AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE"):
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+
+def test_load_settings_skills_runs_dir_defaults_to_temp(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
+    monkeypatch.delenv("AGENT_LEGION_SKILLS_RUNS_DIR", raising=False)
+    config_path = tmp_path / "explicit.yaml"
+    config_path.write_text("{}\n", encoding="utf-8")
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    from server.app.skills.paths import default_skills_runs_dir
+
+    assert settings.skills_runs_dir == default_skills_runs_dir()
+    assert "agent-legion-skills.runs" in settings.skills_runs_dir.name
+
+
+def test_load_settings_skills_runs_dir_env_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
+    override = tmp_path / "pinned-scratch"
+    monkeypatch.setenv("AGENT_LEGION_SKILLS_RUNS_DIR", str(override))
+    config_path = tmp_path / "explicit.yaml"
+    config_path.write_text("{}\n", encoding="utf-8")
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.skills_runs_dir == override
+
+
+def test_env_example_documents_skills_runs_dir():
+    example_path = Path(__file__).resolve().parents[1] / ".env.example"
+    example = example_path.read_text(encoding="utf-8")
+    assert "AGENT_LEGION_SKILLS_RUNS_DIR=" in example

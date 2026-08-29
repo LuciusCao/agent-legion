@@ -90,7 +90,7 @@ class StudioAgentToolsService:
     def save_agent_definition_draft(
         self, workspace_id: str, agent_id: str, definition: AgentDefinition, user_id: str
     ) -> VersionedEntity:
-        return AgentService(self._job_db.path, workspace_id).save_draft(
+        return AgentService(self._job_db, workspace_id).save_draft(
             agent_id, definition, studio_agent_created_by(user_id)
         )
 

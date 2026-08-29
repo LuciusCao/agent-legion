@@ -5,6 +5,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 
 from server.app.auth.dependencies import require_admin
+from server.app.jobs import JobQueries
 from server.app.routes.skill_source_contracts import (
     SkillSourceEntry,
     SkillSourcesResponse,
@@ -41,10 +42,10 @@ def _merged_view(store: SkillSourceStore) -> SkillSourcesResponse:
     return SkillSourcesResponse(skills=entries)
 
 
-def create_skill_sources_router(settings: Settings) -> APIRouter:
+def create_skill_sources_router(job_db: JobQueries, settings: Settings) -> APIRouter:
     """Admin endpoints managing the DB-backed skill sources and lock."""
     router = APIRouter()
-    store = SkillSourceStore(settings.database_url)
+    store = SkillSourceStore(job_db)
 
     @router.get("/admin/skill-sources", response_model=SkillSourcesResponse)
     def get_skill_sources(
@@ -76,8 +77,12 @@ def create_skill_sources_router(settings: Settings) -> APIRouter:
         _admin: Annotated[dict[str, Any], Depends(require_admin)],
     ) -> SkillSourcesResponse:
         # Local git resolution over a handful of repos; runs synchronously.
-        manager = build_skill_manager(settings.database_url)
-        refresh_lock(SkillSourceStore(settings.database_url), manager.base_dir)
+        manager = build_skill_manager(job_db, settings.skills_runs_dir)
+        refresh_lock(
+            SkillSourceStore(job_db),
+            manager.base_dir,
+            runs_dir=settings.skills_runs_dir,
+        )
         return _merged_view(store)
 
     return router

@@ -39,40 +39,6 @@ export type AgentStatus = ApiSchemas['AgentStatusResponse'] & {
   max_tasks: number
 }
 
-export type Chapter = {
-  id?: string
-  start: number
-  end?: number
-  title: string
-}
-
-export type InteractionOption = {
-  id: string
-  text: string
-  is_distractor: boolean
-}
-
-export type InteractionNode = {
-  id?: string
-  type?: string
-  trigger_time?: number | string
-  instruction?: string
-  hint?: string
-  reference_sentence?: string
-  options?: InteractionOption[]
-  answer?: string[]
-  grading_mode?: string
-}
-
-export type VideoArtifacts = {
-  subtitles: Array<{ index: number; start: number; end: number; text: string }>
-  chapters: Chapter[]
-  interactions: InteractionNode[]
-  metadata: Record<string, unknown> | null
-  review: Record<string, unknown> | null
-  checklist: Record<string, unknown> | null
-}
-
 export type WorkspaceRecord = ApiSchemas['WorkspaceRecord']
 export type WorkspaceResponse = ApiSchemas['WorkspaceResponse']
 export type WorkspaceConfigurationResponse =
@@ -105,22 +71,13 @@ export type ConfigSchema = {
   required?: string[]
 }
 
-/**
- * Default execution config for Agent nodes (provider/model/thinking).
- * The generated WorkspaceSettingsPayload does not spell this key out yet;
- * it arrives inside the settings blob of GET /api/workspaces/{id}/settings.
- */
-export type AgentDefaults = {
-  provider?: string
-  model?: string
-  thinking?: string
-}
-
 export type WorkspaceSettings = ApiSchemas['WorkspaceSettingsPayload'] & {
   nodeConfig?: Record<string, Record<string, unknown>>
   nodeConfigSchemas?: Record<string, ConfigSchema>
-  agentDefaults?: AgentDefaults
 }
+
+export type WorkspaceRuntimeModelsResponse =
+  ApiSchemas['WorkspaceRuntimeModelsResponse']
 
 export type WorkspaceSettingsResponse = ApiSchemas['WorkspaceSettingsResponse']
 
@@ -138,7 +95,6 @@ export type SkillValidateResponse = ApiSchemas['SkillValidateResponse']
 export type SkillTagsResponse = ApiSchemas['SkillTagsResponse']
 
 export type WorkflowNodeRecord = ApiSchemas['WorkflowNodeResponse']
-export type WorkflowIntakeModeRecord = ApiSchemas['WorkflowIntakeModeResponse']
 export type WorkflowDefinitionRecord = ApiSchemas['WorkflowDefinitionResponse']
 export type WorkflowRevisionSummary = ApiSchemas['WorkflowRevisionSummary']
 export type ActiveWorkflowRevisionResponse =

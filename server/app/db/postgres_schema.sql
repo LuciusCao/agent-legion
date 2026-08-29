@@ -8,11 +8,15 @@ create table if not exists workspaces (
   resource_config_json text not null default '{}',
   node_config_json text not null default '{}',
   default_entity text not null default 'question',
+  -- Retired at schema v63 (workspace_settings_retirement): still created here
+  -- so the v62 data migration can replay its insert on older databases; the
+  -- post-chain cleanup in schema.py drops all four columns.
   intake_config_json text not null default '{}',
   description text not null default '',
   default_agent_provider text not null default '',
   default_agent_model text not null default '',
-  default_agent_thinking text not null default ''
+  default_agent_thinking text not null default '',
+  preview_config_json text not null default '{}'
 );
 
 -- Idempotent upgrade path for databases created before schema v14:
@@ -22,6 +26,16 @@ alter table workspaces add column if not exists node_config_json text not null d
 -- The platform ships no default workflow: existing databases keep their
 -- stored values, only the column default is dropped.
 alter table workspaces alter column default_workflow_key drop default;
+
+-- Schema v62: default_workflow_key is DEPRECATED — it mirrors the workspace
+-- id (bound at creation, immutable; the v62 migration renamed legacy ids to
+-- their keys). Full retirement is tracked in issue #211; until then the
+-- column stays the runtime authority for revision/DAG resolution.
+
+-- Schema v63: workspace-level artifact preview config (job detail left
+-- panel; {"hidden": ["questions.json", ...]}). DDL-only — the idempotent
+-- replay adds the column, no data migration needed.
+alter table workspaces add column if not exists preview_config_json text not null default '{}';
 
 -- Executor allocations/bindings (retired at schema v47): the tables are
 -- still created here so the historical v17/v18 data migrations can replay
@@ -263,11 +277,16 @@ create table if not exists agent_workers (
   -- the registration credential (global register token or scoped token),
   -- never from Worker-supplied fields.
   allowed_workspaces_json text not null default '[]',
+  -- Ids of the workspace-scoped register tokens presented at the latest
+  -- (re)registration (schema v59): the worker↔key binding, refreshed on every
+  -- re-registration. [] for workers registered before v59.
+  register_token_ids_json text not null default '[]',
   registered_at timestamptz not null,
   last_seen_at timestamptz not null,
   revoked_at timestamptz
 );
 alter table agent_workers add column if not exists allowed_workspaces_json text not null default '[]';
+alter table agent_workers add column if not exists register_token_ids_json text not null default '[]';
 alter table agent_workers add column if not exists capabilities_json text not null default '[]';
 alter table agent_workers add column if not exists models_json text not null default '[]';
 alter table agent_workers add column if not exists max_code_concurrency integer not null default 0;
@@ -276,9 +295,10 @@ alter table agent_workers add constraint agent_workers_max_code_concurrency_chec
   check(max_code_concurrency >= 0);
 
 -- Workspace-scoped Agent Worker registration tokens (EXEC-WORKERACL-001).
--- workspace_id NULL means the token admits Workers to ALL workspaces; a
--- scoped row admits only its workspace. Only token_hash is stored; the
--- plaintext is returned exactly once at issuance.
+-- Every live token admits Workers to exactly one workspace; the
+-- workspace_id IS NULL all-workspaces variant was retired at schema v58
+-- (issue #35) and any remaining NULL rows stay revoked. Only token_hash is
+-- stored; the plaintext is returned exactly once at issuance.
 create table if not exists agent_register_tokens (
   id text primary key,
   token_hash text not null,
@@ -1007,6 +1027,9 @@ create table if not exists studio_chat_sessions (
   -- The node the human currently has selected in Studio (v45); pushed by the
   -- frontend, read live by the get_studio_context MCP tool.
   selected_node_key text,
+  -- The canvas' unpublished workflow draft YAML (v57); pushed by the frontend
+  -- through the same PUT context route, read by get_studio_context.
+  draft_yaml text,
   error_detail text not null default '',
   created_at timestamptz not null default current_timestamp,
   updated_at timestamptz not null default current_timestamp,
@@ -1016,6 +1039,8 @@ create index if not exists idx_studio_chat_sessions_workspace
   on studio_chat_sessions(workspace_id, created_at desc);
 -- Upgrade path for pre-v45 databases.
 alter table studio_chat_sessions add column if not exists selected_node_key text;
+-- Upgrade path for pre-v57 databases.
+alter table studio_chat_sessions add column if not exists draft_yaml text;
 
 create table if not exists studio_chat_messages (
   id text primary key,
@@ -1088,3 +1113,15 @@ create table if not exists material_bundle_members (
 );
 create index if not exists idx_material_bundle_members_material
   on material_bundle_members(material_id);
+
+-- Workflow Studio draft (schema v61): the workspace's single unpublished
+-- workflow YAML draft, autosaved by the Studio editor so a refresh no longer
+-- loses it. One row per workspace (the Studio draft model is single-draft);
+-- publish does not clear it — the published YAML becomes the new draft
+-- content and the dirty flag fades against the new baseline.
+create table if not exists workspace_workflow_drafts (
+  workspace_id text primary key references workspaces(id) on delete cascade,
+  definition_yaml text not null,
+  created_at timestamptz not null default current_timestamp,
+  updated_at timestamptz not null default current_timestamp
+);

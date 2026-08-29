@@ -1,7 +1,9 @@
 """live_claim_manifest：claim 时按 revision 实时重解析 execution。
 
-解析链（每个 key）：当前 revision 节点覆盖 → enqueue 冻结的 workspace 默认
-（execution_defaults）→ enqueue 冻结的已解析 execution（旧 manifest 兜底）。
+解析链（每个 key）：当前 revision 节点 execution（loader 已合并 workflow
+顶层默认）→ enqueue 冻结的 workspace 默认（execution_defaults，legacy
+manifest 容错，schema v64 起新 manifest 不再写）→ enqueue 冻结的已解析
+execution（兜底）。
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ import json
 import pytest
 
 from server.app.agent_broker.agent_claim_compatibility import live_claim_manifest, worker_can_run
-from server.app.agent_worker_declarations import normalize_models
+from server.app.agent_control.declarations import normalize_models
 
 
 def _row(
@@ -103,6 +105,34 @@ def test_missing_revision_keeps_defaults_then_frozen() -> None:
 
     assert resolved["execution"]["provider"] == "ws-provider"
     assert resolved["execution"]["model"] == "ws-model"
+
+
+@pytest.mark.no_db
+def test_new_manifest_without_defaults_resolves_revision_then_frozen() -> None:
+    # schema v64 后的新 manifest 没有 execution_defaults：revision 的节点
+    # execution（已含合并的顶层默认）优先，节点覆盖被删且顶层无默认时落回
+    # enqueue 冻结的 execution。
+    manifest = _manifest()
+    del manifest["execution_defaults"]
+    row = _row(
+        manifest=manifest,
+        revision_nodes={
+            "generate": {
+                "capability": "x",
+                "execution": {"provider": "top-provider", "model": "top-model"},
+            }
+        },
+    )
+    resolved = live_claim_manifest(row)
+    assert resolved["execution"]["provider"] == "top-provider"
+    assert resolved["execution"]["model"] == "top-model"
+    # 节点未覆盖的 key 无默认可落，回退到冻结值。
+    assert resolved["execution"]["thinking"] == "low"
+
+    row = _row(manifest=manifest, revision_nodes={"generate": {"capability": "x"}})
+    resolved = live_claim_manifest(row)
+    assert resolved["execution"]["provider"] == "old-provider"
+    assert resolved["execution"]["model"] == "old-model"
 
 
 @pytest.mark.no_db

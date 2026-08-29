@@ -1,4 +1,5 @@
 import type { JobSummary, WorkflowDefinitionRecord } from '../types'
+import type { CatalogSource } from './nodeCatalog'
 import type { DagNode } from './jobDag'
 
 export type WorkflowNodesByKey = Record<string, WorkflowDefinitionRecord>
@@ -6,7 +7,7 @@ export type WorkflowNodesByKey = Record<string, WorkflowDefinitionRecord>
 export function nodesForJob(
   job: JobSummary,
   workflowNodesByKey?: WorkflowNodesByKey | null,
-  workflowDefinition?: WorkflowDefinitionRecord | null
+  workflowDefinition?: CatalogSource
 ): DagNode[] | null {
   // `type: start` entry nodes never execute and never appear in job_nodes;
   // hide them from job views (rerun / run-to pickers, DAG ordering).
@@ -23,7 +24,7 @@ export function nodesForJob(
 
 export function computeOrderedNodes(
   jobs: JobSummary[],
-  workflowDefinition: WorkflowDefinitionRecord | null | undefined,
+  workflowDefinition: CatalogSource,
   workflowNodesByKey: WorkflowNodesByKey | null | undefined
 ): DagNode[] {
   if (jobs.length === 0) return []
@@ -66,7 +67,7 @@ export function excludedJobs(
   jobs: JobSummary[],
   nodeKey: string,
   workflowNodesByKey: WorkflowNodesByKey | null | undefined,
-  workflowDefinition: WorkflowDefinitionRecord | null | undefined
+  workflowDefinition: CatalogSource
 ): JobSummary[] {
   return jobs.filter((job) => {
     const nodes = nodesForJob(job, workflowNodesByKey, workflowDefinition)

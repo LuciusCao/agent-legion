@@ -16,7 +16,7 @@ from fastapi import HTTPException
 
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.result_spool import publish_staged_result
-from server.app.agent_completion import (
+from server.app.agent_control.completion import (
     AgentCompletionHandler,
     AgentOutcome,
     report_auth_failure_safe,

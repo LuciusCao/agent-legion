@@ -28,7 +28,7 @@ def lease_repo(tmp_path: Path):
     jobs_dir = data_dir / "jobs"
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir)
-    repo = ExecutorLeaseRepository(db_path, job_db=job_db, data_dir=data_dir)
+    repo = ExecutorLeaseRepository(job_db, data_dir=data_dir)
     return repo, job_db, data_dir
 
 

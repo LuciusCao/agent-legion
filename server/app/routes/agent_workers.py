@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hmac
 import re
 from typing import Annotated, Any
 
@@ -11,20 +10,19 @@ from starlette import concurrency
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.agent_result_commit import commit_agent_result
 from server.app.agent_broker.result_spool import discard_staged_result, spool_result_body
-from server.app.agent_completion import AgentCompletionHandler
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.completion import AgentCompletionHandler
+from server.app.agent_control.register_key_guard import RegisterKeyDeleted
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.auth.dependencies import require_admin, require_user
+from server.app.routes.agent_register_tokens import create_agent_register_tokens_router
 from server.app.routes.agent_worker_claims import create_agent_worker_claim_router
 from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router
 from server.app.routes.agent_worker_results import parse_result_metadata
 from server.app.routes.agent_workers_contracts import (
-    AgentRegisterTokenCreatedResponse,
-    AgentRegisterTokenRevokeResponse,
-    AgentRegisterTokensResponse,
-    AgentWorkerRevokeResponse,
+    AgentWorkerDeleteResponse,
     AgentWorkersResponse,
     AgentWorkerSummary,
-    CreateAgentRegisterTokenRequest,
+    AgentWorkerWorkspace,
     RegisterAgentWorkerRequest,
     RegisterAgentWorkerResponse,
 )
@@ -46,17 +44,25 @@ def create_agent_workers_router(
     router = APIRouter(tags=["agent-workers"])
     config = settings.executor_runtime.agent_workers
 
-    def resolve_registration_scope(request: Request) -> list[str]:
-        """Resolve the presented registration credential to a workspace scope.
+    def resolve_registration_scope(request: Request) -> list[dict[str, Any]]:
+        """Resolve the presented registration credentials to a workspace scope.
 
-        The global register token admits Workers to ALL workspaces ([]); a
-        scoped register token (agent_register_tokens) admits only its
-        workspace. Anything else is rejected."""
-        supplied = request.headers.get("x-agent-worker-register-token", "")
+        The Worker presents every scoped register token it holds (comma-joined
+        in X-Agent-Worker-Register-Tokens); all of them must be live
+        workspace-scoped tokens — any revoked or unknown token fails the whole
+        registration so a stale token can never silently narrow the scope.
+        Returns [{'workspace_id', 'workspace_name', 'token_ids'}] rows so the
+        Worker console can label each token with its workspace name."""
+        supplied = [
+            token.strip()
+            for token in request.headers.get("x-agent-worker-register-tokens", "").split(",")
+            if token.strip()
+        ]
+        # 单 token 兼容头：旧版 worker 客户端仍以单值头注册（等价于一个元素）。
+        supplied = supplied or [request.headers.get("x-agent-worker-register-token", "")]
+        supplied = [token for token in supplied if token]
         if not supplied:
             raise HTTPException(status_code=401, detail="missing Agent Worker registration token")
-        if config.register_token and hmac.compare_digest(supplied, config.register_token):
-            return []
         scope = registry.resolve_register_scope(supplied)
         if scope is None:
             raise HTTPException(status_code=401, detail="invalid Agent Worker registration token")
@@ -108,75 +114,80 @@ def create_agent_workers_router(
         if payload.protocol_version < config.min_protocol_version:
             raise HTTPException(status_code=400, detail="unsupported Agent Worker protocol")
         try:
-            token = registry.issue_token(**payload.model_dump(), allowed_workspaces=scope)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return RegisterAgentWorkerResponse(worker_token=token, allowed_workspaces=scope)
-
-    @router.post(
-        "/agent-register-tokens",
-        status_code=201,
-        response_model=AgentRegisterTokenCreatedResponse,
-    )
-    def create_register_token(
-        payload: CreateAgentRegisterTokenRequest,
-        _admin: Annotated[dict[str, Any], Depends(require_admin)],
-    ) -> AgentRegisterTokenCreatedResponse:
-        try:
-            token_id, plaintext = registry.issue_register_token(
-                workspace_id=payload.workspace_id, label=payload.label
+            token = registry.issue_token(
+                **payload.model_dump(),
+                # The stored scope is re-derived from the locked key rows
+                # inside issue_token's transaction; allowed_workspaces is
+                # not passed here (that legacy parameter only serves direct
+                # registry callers without a key binding).
+                register_token_ids=[
+                    str(token_id) for row in scope for token_id in row["token_ids"]
+                ],
             )
+        except RegisterKeyDeleted as exc:
+            # A bound key was deleted after the read-only resolve (guard
+            # re-checks under lock): the credential is dead, not malformed.
+            # str() of a KeyError subclass wraps the message in quotes —
+            # args[0] carries the clean text.
+            detail = exc.args[0] if exc.args else str(exc)
+            raise HTTPException(status_code=401, detail=detail) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return AgentRegisterTokenCreatedResponse(
-            token_id=token_id,
-            register_token=plaintext,
-            workspace_id=payload.workspace_id,
-            label=payload.label,
+        return RegisterAgentWorkerResponse(
+            worker_token=token,
+            allowed_workspaces=[row["workspace_id"] for row in scope],
+            workspaces=[
+                AgentWorkerWorkspace(
+                    workspace_id=str(row["workspace_id"]),
+                    workspace_name=str(row["workspace_name"]),
+                    token_ids=[str(token_id) for token_id in row["token_ids"]],
+                )
+                for row in scope
+            ],
         )
-
-    @router.get("/agent-register-tokens", response_model=AgentRegisterTokensResponse)
-    def list_register_tokens(
-        _admin: Annotated[dict[str, Any], Depends(require_admin)],
-    ) -> AgentRegisterTokensResponse:
-        return AgentRegisterTokensResponse.model_validate(
-            {"tokens": registry.list_register_tokens()}
-        )
-
-    @router.post(
-        "/agent-register-tokens/{token_id}/revoke",
-        response_model=AgentRegisterTokenRevokeResponse,
-    )
-    def revoke_register_token(
-        token_id: str,
-        _admin: Annotated[dict[str, Any], Depends(require_admin)],
-    ) -> AgentRegisterTokenRevokeResponse:
-        if not registry.revoke_register_token(token_id):
-            raise HTTPException(status_code=404, detail="Agent register token not found")
-        return AgentRegisterTokenRevokeResponse(revoked=True)
 
     @router.get("/agent-workers/self", response_model=AgentWorkerSummary)
     def get_worker_self(request: Request) -> AgentWorkerSummary:
         """Let a Worker inspect only its own registration with its issued token."""
         return AgentWorkerSummary.model_validate(authorize_worker(request))
 
-    @router.post(
-        "/agent-workers/{worker_id}/revoke",
-        response_model=AgentWorkerRevokeResponse,
+    @router.delete(
+        "/agent-workers/{worker_id}",
+        response_model=AgentWorkerDeleteResponse,
     )
-    def revoke_worker(
+    def delete_worker(
         worker_id: str,
         _admin: Annotated[dict[str, Any], Depends(require_admin)],
-    ) -> AgentWorkerRevokeResponse:
-        if not registry.revoke(worker_id):
+    ) -> AgentWorkerDeleteResponse:
+        """Hard-delete a worker registration (record cleanup step).
+
+        There is no per-worker revocation: access is cut by deleting the
+        Worker's register keys. Deleting the record only opens once none of
+        its bound keys exist anymore, so a reachable Worker can never vanish
+        from under in-flight claims."""
+        outcome = registry.delete_worker(worker_id)
+        if outcome == "not_found":
             raise HTTPException(status_code=404, detail="Agent Worker not found")
-        return AgentWorkerRevokeResponse(worker_id=worker_id, revoked=True)
+        if outcome == "keys_active":
+            raise HTTPException(
+                status_code=409,
+                detail="Agent Worker still has live register keys; delete them first",
+            )
+        return AgentWorkerDeleteResponse(worker_id=worker_id, deleted=True)
 
     @router.get("/agent-workers", response_model=AgentWorkersResponse)
     def list_workers(
         _user: Annotated[dict[str, Any], Depends(require_user)],
+        workspace_id: str | None = None,
     ) -> AgentWorkersResponse:
-        return AgentWorkersResponse.model_validate({"workers": registry.list_workers()})
+        """List registered workers; workspace_id narrows to that workspace.
+
+        The workspace view only shows workers registered with that
+        workspace's scoped tokens (legacy [] scope is excluded); without the
+        parameter every logged-in user still sees the full list — the UI is
+        responsible for passing the current workspace, and the admin settings
+        page intentionally keeps the unfiltered view."""
+        return AgentWorkersResponse.model_validate({"workers": registry.list_workers(workspace_id)})
 
     @router.get("/agent-executions/{execution_id}/bundle")
     def bundle(execution_id: str, request: Request) -> FileResponse:
@@ -202,7 +213,9 @@ def create_agent_workers_router(
 
     @router.post("/agent-executions/{execution_id}/result", status_code=204)
     async def result(execution_id: str, request: Request) -> Response:
-        worker = authorize_worker(request)
+        # authenticate() hits the DB (read + throttled liveness write) per
+        # report; it must not run on the loop alongside the SSE/WS heartbeats.
+        worker = await concurrency.run_in_threadpool(authorize_worker, request)
         worker_id = str(worker["worker_id"])
         lease_id = require_lease_id(request)
         # Validate metadata fully BEFORE writing the archive: malformed input
@@ -246,5 +259,9 @@ def create_agent_workers_router(
             # place; on any failure it is reclaimed here.
             discard_staged_result(staged)
         return Response(status_code=204)
+
+    # The /agent-register-tokens management surface lives in its own module
+    # (file-size budget) but ships as part of this router.
+    router.include_router(create_agent_register_tokens_router(registry))
 
     return router

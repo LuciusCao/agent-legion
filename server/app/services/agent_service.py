@@ -14,14 +14,15 @@ import time
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource, resolve_dsn
 from server.app.db.transaction import read_connection
 from server.app.services.job_errors import ConflictError, InvalidOperationError
 from server.app.services.versioned_entities import EntityType, VersionedEntity, VersionedEntityStore
 
 _ENTITY_TYPE: EntityType = "agent"
 
-# Published catalog cache keyed by (DSN, workspace): definitions change rarely
-# but the claim path reads them per candidate; publishes/archives invalidate.
+# Published catalog cache keyed by (DSN, workspace); publishes/archives
+# invalidate. Claim-path reads hit it per candidate.
 PUBLISHED_CACHE_TTL_SECONDS = 5.0
 _published_cache: dict[tuple[DatabaseDsn, str], tuple[float, dict[str, AgentDefinition]]] = {}
 
@@ -32,15 +33,16 @@ def reset_published_agent_cache() -> None:
 
 
 def published_agent_definitions(
-    database_dsn: DatabaseDsn, workspace_id: str
+    connect_source: ConnectSource, workspace_id: str
 ) -> dict[str, AgentDefinition]:
-    """Published Agent definitions of one workspace, keyed by agent_id, cached ~5s."""
+    """Published Agent definitions of one workspace, keyed by agent_id, cached ~5s
+    (``connect_source``: JobQueries facade or bare DSN — BOUNDARY-DATA-001, #187)."""
     now = time.monotonic()
-    cache_key = (database_dsn, workspace_id)
+    cache_key = (resolve_dsn(connect_source), workspace_id)
     cached = _published_cache.get(cache_key)
     if cached is not None and now - cached[0] < PUBLISHED_CACHE_TTL_SECONDS:
         return cached[1]
-    entities = VersionedEntityStore(database_dsn, _ENTITY_TYPE).list_published(workspace_id)
+    entities = VersionedEntityStore(connect_source, _ENTITY_TYPE).list_published(workspace_id)
     definitions = {
         entity.entity_key: AgentDefinition.model_validate(entity.definition) for entity in entities
     }
@@ -48,27 +50,27 @@ def published_agent_definitions(
     return definitions
 
 
-def has_published_agent_definitions(database_dsn: DatabaseDsn) -> bool:
+def has_published_agent_definitions(connect_source: ConnectSource) -> bool:
     """Cheap cross-workspace probe for poll-loop gates; never used for resolution."""
-    with read_connection(database_dsn) as conn:
+    with read_connection(resolve_dsn(connect_source)) as conn:
         row = conn.execute(
-            "select exists(select 1 from versioned_entities"
-            " where entity_type='agent' and status='published') as has_any"
+            "select exists(select 1 from versioned_entities where"
+            " entity_type='agent' and status='published') as has_any"
         ).fetchone()
     return bool(row["has_any"]) if row is not None else False
 
 
-def _invalidate_published_cache(database_dsn: DatabaseDsn, workspace_id: str) -> None:
-    _published_cache.pop((database_dsn, workspace_id), None)
+def _invalidate_published_cache(connect_source: ConnectSource, workspace_id: str) -> None:
+    _published_cache.pop((resolve_dsn(connect_source), workspace_id), None)
 
 
 class AgentService:
     """Versioned Agent definition storage/publish flow, bound to one workspace."""
 
-    def __init__(self, database_dsn: DatabaseDsn, workspace_id: str) -> None:
+    def __init__(self, connect_source: ConnectSource, workspace_id: str) -> None:
         if not workspace_id:
             raise InvalidOperationError("workspace id must be a non-empty string")
-        self._store = VersionedEntityStore(database_dsn, _ENTITY_TYPE)
+        self._store = VersionedEntityStore(connect_source, _ENTITY_TYPE)
         self._workspace_id = workspace_id
 
     def list_latest(self) -> list[VersionedEntity]:
@@ -111,7 +113,7 @@ class AgentService:
             self._workspace_id,
             created_by,
         )
-        _invalidate_published_cache(self._store._dsn, self._workspace_id)
+        _invalidate_published_cache(self._store.dsn, self._workspace_id)
         return entity
 
     def publish(self, agent_id: str) -> VersionedEntity:
@@ -126,7 +128,7 @@ class AgentService:
             self._require_free_capability(agent_id, str(draft.definition.get("capability") or ""))
         # draft None → the store raises the canonical NotFoundError.
         entity = self._store.publish(agent_id, self._workspace_id)
-        _invalidate_published_cache(self._store._dsn, self._workspace_id)
+        _invalidate_published_cache(self._store.dsn, self._workspace_id)
         return entity
 
     def _require_free_capability(self, agent_id: str, capability: str) -> None:
@@ -147,13 +149,13 @@ class AgentService:
         if source is not None:
             self._require_free_capability(agent_id, str(source.definition.get("capability") or ""))
         entity = self._store.rollback(agent_id, version, self._workspace_id, created_by)
-        _invalidate_published_cache(self._store._dsn, self._workspace_id)
+        _invalidate_published_cache(self._store.dsn, self._workspace_id)
         return entity
 
     def archive_all(self, agent_id: str) -> int:
         """Archive every version; the Agent stops routing (no published row)."""
         archived = self._store.archive_all(agent_id, self._workspace_id)
-        _invalidate_published_cache(self._store._dsn, self._workspace_id)
+        _invalidate_published_cache(self._store.dsn, self._workspace_id)
         return archived
 
     def copy(self, source_agent_id: str, new_agent_id: str, created_by: str) -> VersionedEntity:
@@ -161,5 +163,5 @@ class AgentService:
         if not new_agent_id:
             raise InvalidOperationError("agent id must be a non-empty string")
         entity = self._store.copy(source_agent_id, new_agent_id, self._workspace_id, created_by)
-        _invalidate_published_cache(self._store._dsn, self._workspace_id)
+        _invalidate_published_cache(self._store.dsn, self._workspace_id)
         return entity

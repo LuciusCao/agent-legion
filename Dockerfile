@@ -35,7 +35,7 @@ COPY . ./
 COPY --from=frontend /src/frontend/dist /app/frontend/dist
 RUN uv sync --frozen --no-dev
 EXPOSE 8000
-CMD ["uvicorn", "server.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "20"]
+CMD ["uvicorn", "server.app.main:create_prod_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "20"]
 
 FROM python:${PYTHON_VERSION}-slim-bookworm AS worker
 ARG NODE_VERSION=22.17.0
@@ -71,7 +71,7 @@ COPY worker/cli_args.py /usr/local/bin/agent_worker_cli_args.py
 COPY --chmod=755 worker/cli.py /usr/local/bin/workerctl
 # Smoke: the image must be able to import every worker entry point;
 # a missing COPY fails the build here instead of crash-looping at runtime.
-RUN python3 -c "import worker.service, worker.executor, worker.upload_queue"
+RUN python3 -c "import worker.service, worker.executor, worker.upload.queue"
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8787
 ENTRYPOINT ["python3", "-m", "worker.service"]

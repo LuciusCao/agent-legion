@@ -5,18 +5,15 @@ export type AgentRegisterTokenSummary =
   components['schemas']['AgentRegisterTokenSummary']
 export type AgentRegisterTokenCreatedResponse =
   components['schemas']['AgentRegisterTokenCreatedResponse']
-export type AgentWorkerSummary = components['schemas']['AgentWorkerSummary']
 
 type TokensResponse = components['schemas']['AgentRegisterTokensResponse']
-type WorkersResponse = components['schemas']['AgentWorkersResponse']
 type CreateTokenRequest =
   components['schemas']['CreateAgentRegisterTokenRequest']
-type RevokeTokenResponse =
-  components['schemas']['AgentRegisterTokenRevokeResponse']
-type RevokeWorkerResponse = components['schemas']['AgentWorkerRevokeResponse']
+type DeleteTokenResponse =
+  components['schemas']['AgentRegisterTokenDeleteResponse']
 
 // Management endpoints require an admin session: every route below is gated
-// by require_admin on the backend (server/app/routes/agent_workers.py).
+// by require_admin on the backend (server/app/routes/agent_register_tokens.py).
 export async function listRegisterTokens(): Promise<
   AgentRegisterTokenSummary[]
 > {
@@ -33,25 +30,13 @@ export async function createRegisterToken(
   })
 }
 
-export async function revokeRegisterToken(
+// Hard-delete is the only lifecycle action on a key: it stops resolving
+// immediately, so Workers holding it fail their next re-registration.
+export async function deleteRegisterToken(
   tokenId: string
-): Promise<RevokeTokenResponse> {
-  return api<RevokeTokenResponse>(
-    `/api/agent-register-tokens/${encodeURIComponent(tokenId)}/revoke`,
-    { method: 'POST' }
-  )
-}
-
-export async function listAgentWorkers(): Promise<AgentWorkerSummary[]> {
-  const data = await api<WorkersResponse>('/api/agent-workers')
-  return data.workers ?? []
-}
-
-export async function revokeAgentWorker(
-  workerId: string
-): Promise<RevokeWorkerResponse> {
-  return api<RevokeWorkerResponse>(
-    `/api/agent-workers/${encodeURIComponent(workerId)}/revoke`,
-    { method: 'POST' }
+): Promise<DeleteTokenResponse> {
+  return api<DeleteTokenResponse>(
+    `/api/agent-register-tokens/${encodeURIComponent(tokenId)}`,
+    { method: 'DELETE' }
   )
 }

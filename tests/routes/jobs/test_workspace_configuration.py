@@ -6,7 +6,7 @@ def _create_workspace(
 ):
     return client.post(
         "/api/workspaces",
-        json={"name": name, "default_workflow_key": default_workflow_key},
+        json={"id": default_workflow_key, "name": name},
     ).json()["workspace"]["id"]
 
 
@@ -26,8 +26,6 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
                 "description": "Atomic settings",
                 "settings": {
                     "entityType": "video",
-                    "intakeModes": ["direct_ids"],
-                    "labelOverrides": {"direct_ids": "Direct IDs"},
                     "workflowKey": "education_video_problems_generation",
                 },
                 "node_limits": [
@@ -44,8 +42,8 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     body = response.json()
     assert body["workspace"]["name"] == "Updated Workspace"
     assert body["settings"]["entityType"] == "video"
-    # P-0.5：executor_configuration 只剩 node_limits（allocations/bindings 已退役）。
-    assert body["executor_configuration"]["node_limits"] == [
+    # P-0.5：execution_configuration 只剩 node_limits（allocations/bindings 已退役）。
+    assert body["execution_configuration"]["node_limits"] == [
         {
             "workflow_key": "education_video_problems_generation",
             "node_key": "publish_content",
@@ -103,7 +101,7 @@ def test_workspace_configuration_rejects_invalid_node_limit_without_partial_upda
     assert app.state.job_db.get_workspace_node_limits(ws_id) == original_limits
 
 
-def test_workspace_executor_configuration_lifecycle(tmp_path):
+def test_workspace_execution_configuration_lifecycle(tmp_path):
     """P-0.5: GET returns node limits only; a PUT echoing the GET round-trips."""
     from fastapi.testclient import TestClient
 
@@ -128,7 +126,7 @@ def test_workspace_executor_configuration_lifecycle(tmp_path):
         )
         assert saved.status_code == 200
 
-        loaded = c.get(f"/api/workspaces/{ws_id}/executor-configuration")
+        loaded = c.get(f"/api/workspaces/{ws_id}/execution-configuration")
         assert loaded.status_code == 200
         config = loaded.json()
         assert config["node_limits"] == [
@@ -180,7 +178,7 @@ def test_workspace_configuration_agent_capacity_round_trip(tmp_path):
         assert saved.status_code == 200
         assert saved.json()["agent_capacity"] == 7
 
-        loaded = c.get(f"/api/workspaces/{ws_id}/executor-configuration")
+        loaded = c.get(f"/api/workspaces/{ws_id}/execution-configuration")
         assert loaded.status_code == 200
         assert loaded.json()["agent_capacity"] == 7
 

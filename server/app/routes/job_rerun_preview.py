@@ -9,8 +9,8 @@ from server.app.routes.job_rerun_preview_contracts import (
     BatchRerunPreviewResponse,
     JobBatchRerunPreviewRequest,
 )
-from server.app.services._job_rerun_preview import batch_rerun_preview
 from server.app.services.job_rerun import JobRerunService
+from server.app.services.job_rerun.preview import batch_rerun_preview
 from server.app.settings import Settings
 
 

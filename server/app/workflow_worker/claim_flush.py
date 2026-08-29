@@ -38,7 +38,7 @@ class PreparedClaim:
 
 def flush_prepared_claims(worker: WorkflowWorkerThread) -> None:
     """Lease all buffered claims (one transaction per executor) and submit."""
-    pending = worker._pending_claims
+    pending = worker.state.pending_claims
     if not pending:
         return
     for executor_id in sorted({p.executor_id for p in pending}):

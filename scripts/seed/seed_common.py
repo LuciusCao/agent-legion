@@ -48,7 +48,7 @@ MAX_CODE_BYTES = 64 * 1024
 DEFAULT_FORBIDDEN_IMPORT_PREFIXES: tuple[str, ...] = ("server.app",)
 
 # The only Agent definition fields the platform API accepts and stores
-# (server/app/agent_catalog.py AgentDefinition). Export filters to these.
+# (server/app/agent_catalog/definition.py AgentDefinition). Export filters to these.
 AGENT_DEFINITION_FIELDS: tuple[str, ...] = (
     "capability",
     "runtime",

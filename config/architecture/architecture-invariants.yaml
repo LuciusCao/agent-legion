@@ -17,7 +17,7 @@ invariants:
         target: scripts/check_architecture.py
         gate: quick
       - kind: contract
-        target: tests/test_architecture_configuration.py
+        target: tests/scripts/test_architecture_configuration.py
         gate: quick
 
   - id: SECURITY-PATH-001
@@ -38,7 +38,7 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_job_deletion_service.py
+        target: tests/services/test_job_deletion_service.py
         gate: quick
       - kind: integration
         target: tests/full/test_job_deletion_races.py
@@ -57,15 +57,12 @@ invariants:
         gate: quick
 
   - id: EXEC-STATS-001
-    statement: "Workspace runtime stats report the single implicit code pool (P-0.5: instance code_capacity, per-workspace and global active leases) without consulting AgentStatusManager or any executor configuration table."
+    statement: "Workspace runtime stats report the single implicit code pool (P-0.5: instance code_capacity, per-workspace and global active leases) without consulting AgentStatusManager or any executor configuration table. The AgentStatusManager dependency was removed from WorkspaceConfigurationService outright (2026-08, issue #2 phase 1): the coupling is now structurally impossible rather than behaviorally guarded."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: integration
         target: tests/test_workspace_configuration_service.py::test_code_pool_stats_report_capacity_and_leases
-        gate: quick
-      - kind: integration
-        target: tests/test_workspace_configuration_service.py::test_code_pool_stats_does_not_consult_agent_status_manager
         gate: quick
       - kind: integration
         target: tests/routes/jobs/test_workspace_stats.py::test_workspace_stats_code_pool_reflects_leases
@@ -134,7 +131,7 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_executor_cancellation.py
+        target: tests/executors/test_executor_cancellation.py
         gate: quick
       - kind: integration
         target: tests/full/test_executor_cancellation_recovery.py
@@ -180,7 +177,7 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_job_events.py
+        target: tests/events/test_job_events.py
         gate: quick
       - kind: integration
         target: tests/full/test_workspace_sse.py
@@ -204,16 +201,16 @@ invariants:
         target: scripts/check_architecture.py
         gate: quick
       - kind: contract
-        target: tests/test_check_architecture.py
+        target: tests/scripts/test_check_architecture.py
         gate: quick
       - kind: contract
-        target: tests/test_architecture_file_budgets.py
+        target: tests/scripts/test_architecture_file_budgets.py
         gate: quick
       - kind: contract
-        target: tests/test_ratchet_architecture_budgets.py
+        target: tests/scripts/test_ratchet_architecture_budgets.py
         gate: quick
       - kind: contract
-        target: tests/test_architecture_exemption_age.py
+        target: tests/scripts/test_architecture_exemption_age.py
         gate: quick
 
   - id: BOUNDARY-VIDEO-001
@@ -225,7 +222,7 @@ invariants:
         target: scripts/check_architecture.py
         gate: quick
       - kind: contract
-        target: tests/test_architecture_video_legacy.py
+        target: tests/scripts/test_architecture_video_legacy.py
         gate: quick
 
   - id: BOUNDARY-VIDEO-002
@@ -237,7 +234,7 @@ invariants:
         target: scripts/check_architecture.py
         gate: quick
       - kind: contract
-        target: tests/test_architecture_video_legacy.py
+        target: tests/scripts/test_architecture_video_legacy.py
         gate: quick
 
   - id: BOUNDARY-VIDEO-003
@@ -249,10 +246,10 @@ invariants:
         target: scripts/check_architecture.py
         gate: quick
       - kind: contract
-        target: tests/test_architecture_phase6.py
+        target: tests/scripts/test_architecture_phase6.py
         gate: quick
       - kind: contract
-        target: tests/test_architecture_video_legacy.py
+        target: tests/scripts/test_architecture_video_legacy.py
         gate: quick
 
   - id: DB-STATE-001
@@ -261,11 +258,11 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_agent_broker.py
+        target: tests/services/test_agent_broker.py
         gate: quick
 
       - kind: integration
-        target: tests/test_job_event_buffer_db.py
+        target: tests/events/test_job_event_buffer_db.py
         gate: quick
       - kind: integration
         target: tests/routes/jobs/test_job_batches.py::test_async_batch_claim_is_atomic_across_consumers
@@ -280,13 +277,13 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_agent_worker_service.py
+        target: tests/workers/test_agent_worker_service.py
         gate: quick
       - kind: integration
-        target: tests/test_agent_worker.py::test_registration_retries_transient_host_errors_without_traceback
+        target: tests/workers/test_agent_worker.py::test_registration_retries_transient_host_errors_without_traceback
         gate: quick
       - kind: integration
-        target: tests/test_worker_cli.py
+        target: tests/workers/test_worker_cli.py
         gate: quick
 
   - id: EXEC-AGENTCLAIM-001
@@ -295,7 +292,7 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_agent_broker.py
+        target: tests/services/test_agent_broker.py
         gate: quick
       - kind: integration
         target: tests/routes/test_agent_workers.py
@@ -310,10 +307,10 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_agent_catalog.py
+        target: tests/services/test_agent_catalog.py
         gate: quick
       - kind: integration
-        target: tests/test_executor_catalog_service.py::test_catalog_exposes_published_agent_definitions
+        target: tests/services/test_agent_catalog_service.py::test_catalog_exposes_published_agent_definitions
         gate: quick
       - kind: integration
         target: tests/services/test_agent_service.py
@@ -322,7 +319,7 @@ invariants:
         target: tests/db/test_agent_workspace_scope_migration.py
         gate: quick
       - kind: integration
-        target: tests/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity
+        target: tests/services/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity
         gate: quick
       - kind: integration
         target: tests/full/test_agent_worker_control_plane.py::test_agent_definition_catalog_snapshot_lifecycle
@@ -334,7 +331,7 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_agent_broker.py
+        target: tests/services/test_agent_broker.py
         gate: quick
       - kind: integration
         target: tests/routes/test_agent_workers.py
@@ -349,16 +346,16 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_agent_broker.py
+        target: tests/services/test_agent_broker.py
         gate: quick
       - kind: integration
         target: tests/routes/test_agent_workers.py::test_release_slot_requires_and_validates_lease_id
         gate: quick
       - kind: integration
-        target: tests/test_agent_worker.py
+        target: tests/workers/test_agent_worker.py
         gate: quick
       - kind: integration
-        target: tests/test_worker_upload_queue.py
+        target: tests/workers/test_worker_upload_queue.py
         gate: quick
 
   - id: EXEC-VALIDATION-001
@@ -367,7 +364,7 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_agent_completion_validation.py
+        target: tests/services/test_agent_completion_validation.py
         gate: quick
 
   - id: EXEC-CODE-001
@@ -459,13 +456,13 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/executors/test_code_executor.py::test_build_runtime_prefetches_inputs_and_hides_db
+        target: tests/executors/test_code_executor_runtime.py::test_build_runtime_prefetches_inputs_and_hides_db
         gate: quick
       - kind: integration
-        target: tests/executors/test_code_executor.py::test_sandboxed_child_auth_failure_marker_reaches_parent
+        target: tests/executors/test_code_executor_runtime.py::test_sandboxed_child_auth_failure_marker_reaches_parent
         gate: quick
       - kind: integration
-        target: tests/executors/test_code_executor.py::test_sandboxed_custom_node_can_use_node_sdk
+        target: tests/executors/test_code_executor_runtime.py::test_sandboxed_custom_node_can_use_node_sdk
         gate: quick
       - kind: contract
         target: tests/workflow_nodes/test_node_sdk.py
@@ -517,7 +514,7 @@ invariants:
         gate: quick
 
   - id: SECURITY-WORKER-001
-    statement: "Agent Worker credentials are per-worker and revocable, persisted only as sha256 hashes; registration alone accepts the management token and execution endpoints require the per-worker token."
+    statement: "Agent Worker credentials are per-worker and cut by deleting the worker's register keys (no per-worker revoke), persisted only as sha256 hashes; registration alone accepts the management token and execution endpoints require the per-worker token."
     owner: security
     risk: critical
     evidence:
@@ -525,10 +522,10 @@ invariants:
         target: tests/routes/test_agent_workers.py
         gate: quick
       - kind: integration
-        target: tests/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity
+        target: tests/services/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity
         gate: quick
       - kind: integration
-        target: tests/full/test_agent_worker_control_plane.py::test_worker_token_is_hashed_and_revocable
+        target: tests/full/test_agent_worker_control_plane.py::test_worker_token_is_hashed_and_deleted_worker_loses_access
         gate: full
 
   - id: DB-FAILURE-001
@@ -543,7 +540,7 @@ invariants:
         target: tests/executors/leases/test_failure_classification_persistence.py
         gate: quick
       - kind: integration
-        target: tests/test_agent_broker_concurrency.py::test_stale_definition_requests_are_failed_by_sweeper
+        target: tests/services/test_agent_broker_concurrency.py::test_stale_definition_requests_are_failed_by_sweeper
         gate: quick
 
   - id: DB-FAILURE-002
@@ -582,14 +579,14 @@ invariants:
         target: tests/routes/test_auth_matrix.py
         gate: quick
       - kind: integration
-        target: tests/test_auth_queries.py
+        target: tests/db/test_auth_queries.py
         gate: quick
       - kind: integration
         target: tests/full/test_auth_control_plane.py
         gate: full
 
   - id: STUDIO-AGENT-001
-    statement: "Studio agent conversation runs authenticate with short-lived scoped tokens minted by the server (auth_scoped_tokens persists only sha256 digests; each token binds the initiating user and actor_scope='studio_agent', carries a TTL that is fixed at mint time and slides forward only at studio chat turn start when close to expiry (#158 — the agent's MCP headers cannot be re-pointed mid-session; renewal never revives an already-expired token), and is revocable; a leaked token still dies on its own once the session goes idle or closes). Run tokens additionally bind the chat session's workspace (schema v45, auth_scoped_tokens.workspace_id): workspace-path tool endpoints refuse a bound token operating on any other workspace with 403, the studio chat read endpoints (session/message reads and the SSE stream) enforce the same binding (#158), and the session-context endpoint hides foreign (bound) or non-member (unbound) sessions behind 404; unbound self-service tokens (origin='user') follow workspace membership, mirroring require_workspace_access. Scoped tokens resolve only through the Bearer channel, and every effecting endpoint mounts reject_studio_agent_scope to refuse them with 403 while draft/validate endpoints stay reachable. Effecting endpoints comprise the publish/rollback/archive flows (workflow drafts, node code, agent definitions — the executor definition endpoints retired with the executor concept, schema v47), job lifecycle and execution triggers (job delete, rerun/run-to/continue and their batch variants, batch intake, workflow upgrade, quality replays), workspace/secret/package/member/settings/configuration writes, worker pause/resume, and the studio chat effecting endpoints (session create/close, message send/cancel, permission answers, context push — a scoped token must not mint fresh run tokens, self-approve permission prompts, nor rewrite the context it reads back); require_admin additionally refuses any scoped identity outright, so admin endpoints stay unreachable even though a scoped token inherits the initiating user's role."
+    statement: "Studio agent conversation runs authenticate with short-lived scoped tokens minted by the server (auth_scoped_tokens persists only sha256 digests; each token binds the initiating user and actor_scope='studio_agent', carries a TTL that is fixed at mint time and slides forward only at studio chat turn start when close to expiry (#158 — the agent's MCP headers cannot be re-pointed mid-session; renewal never revives an already-expired token), and is revocable; a leaked token still dies on its own once the session goes idle or closes). Run tokens additionally bind the chat session's workspace (schema v45, auth_scoped_tokens.workspace_id): workspace-path tool endpoints refuse a bound token operating on any other workspace with 403, the studio chat read endpoints (session/message reads and the SSE stream) enforce the same binding (#158), and the session-context endpoint hides foreign (bound) or non-member (unbound) sessions behind 404; unbound self-service tokens (origin='user') follow workspace membership, mirroring require_workspace_access. Scoped tokens resolve only through the Bearer channel, and every effecting endpoint mounts reject_studio_agent_scope to refuse them with 403 while draft/validate endpoints stay reachable. Effecting endpoints comprise the publish/rollback/archive flows (workflow drafts, node code, agent definitions — the executor definition endpoints retired with the executor concept, schema v47), job lifecycle and execution triggers (job delete, rerun/run-to/continue and their batch variants, batch intake, workflow upgrade, quality replays), workspace/secret/package/member/settings/configuration writes, worker pause/resume, and the studio chat effecting endpoints (session create/close, message send/cancel, permission answers, context push — a scoped token must not mint fresh run tokens, self-approve permission prompts, nor rewrite the context it reads back); require_admin additionally refuses any scoped identity outright, so admin endpoints stay unreachable even though a scoped token inherits the initiating user's role. The skill tool endpoints (get/validate/save-version, #217) are instance-scoped by design: they sit on the global tool router with no workspace binding, so a run token bound to workspace A can read and tag every local skill repo — skills are instance-level shared resources, save_skill_version never touches the skill lock (release stays a human admin relock), and token minting is admin-only."
     owner: security
     risk: high
     evidence:
@@ -610,7 +607,7 @@ invariants:
         gate: quick
 
   - id: STUDIO-AGENT-002
-    statement: "Studio chat sessions (phase 3 chunk 4) run user-selected ACP agents whose command lines come only from the admin-maintained instance-level registry (global_settings key 'studio_agents'); non-admin users pick an agent by id and the picker API never exposes command/args and only lists agents whose command currently resolves on this host (PATH-level probe, ~60s TTL cache, warmed at backend startup); creating a session with an unavailable agent fails with a clear error before any spawn, and creation is rejected once a global cap of live sessions is reached — the cap check and the session-row INSERT share one transaction under an advisory lock so concurrent creators cannot race past it, and backend startup reconciles rows left in a live status by a crashed or restarted process to error (sessions are in-process only; zombies would otherwise hold cap slots forever) (#158). Each session mints one scoped token (origin='run', TTL renewed at turn start per STUDIO-AGENT-001) that crosses the process boundary only as an HTTP header inside the ACP session/new request — kimi >= 0.38 accepts only http/sse MCP servers there, so the tool surface is served in-app as a streamable-HTTP endpoint at /api/studio-agent/mcp guarded solely by an ASGI-level studio-agent scoped-token check (the Mount bypasses route-layer auth dependencies), with the token riding Authorization Bearer and the chat session binding riding x-agent-legion-mcp-session-id — never persisted, never logged, never present in message or SSE payloads — and is revoked when the session closes or the agent process dies (#158 teardown). The registry's api_base is the egress target for these tokens: the write side validates it as a plain absolute http(s) URL and warns when the host is not loopback/private, and the MCP loopback resolves it per request so an admin edit cannot split the injected URL from the loopback target (#158). Permission requests for agent-legion MCP tools auto-approve (the scoped token is the authority boundary), and local read-only ACP tool kinds (read/search — the Read/Glob/Grep class) auto-approve as side-effect-free; all other tool calls default to human confirmation (auto-denied after a 120s timeout so an abandoned tab cannot park a turn) with a per-session allow-all switch, and cancelling a turn settles every pending permission as denied."
+    statement: "Studio chat sessions (phase 3 chunk 4) run user-selected ACP agents whose command lines come only from the admin-maintained instance-level registry (global_settings key 'studio_agents'); non-admin users pick an agent by id and the picker API never exposes command/args and only lists agents whose command currently resolves on this host (PATH-level probe, ~60s TTL cache, warmed at backend startup); creating a session with an unavailable agent fails with a clear error before any spawn, and creation is rejected once a global cap of live sessions is reached — the cap check and the session-row INSERT share one transaction under an advisory lock so concurrent creators cannot race past it, and backend startup reconciles rows left in a live status by a crashed or restarted process to error (sessions are in-process only; zombies would otherwise hold cap slots forever) (#158). Closed or errored sessions (including reaped zombies) can be resumed via POST .../resume: the resume claim (closed/error -> starting) rides the same cap advisory lock with the active-count predicate inside the UPDATE, any stale registered runtime is torn down by the claim winner immediately after the atomic claim and before the spawn (a pre-claim teardown would let a claim loser destroy the winner's freshly registered runtime), and a stale exit echo from the old runtime's thread may only tear down its own pinned runtime identity — never the registry's current entry or the newer generation's session row (ABA), so no agent subprocess is orphaned, a fresh scoped token is minted (the old one was revoked at close or dies on TTL), and the agent subprocess is respawned — ACP session/load of the persisted acp_session_id when the freshly-initialized agent advertises loadSession, otherwise a fresh ACP session with the persisted user/agent transcript injected once into the first post-resume prompt; resuming a session still live on this server is an idempotent no-op, and the persisted message timeline is never rewritten. Each session mints one scoped token (origin='run', TTL renewed at turn start per STUDIO-AGENT-001) that crosses the process boundary only as an HTTP header inside the ACP session/new request — kimi >= 0.38 accepts only http/sse MCP servers there, so the tool surface is served in-app as a streamable-HTTP endpoint at /api/studio-agent/mcp guarded solely by an ASGI-level studio-agent scoped-token check (the Mount bypasses route-layer auth dependencies), with the token riding Authorization Bearer and the chat session binding riding x-agent-legion-mcp-session-id — never persisted, never logged, never present in message or SSE payloads — and is revoked when the session closes or the agent process dies (#158 teardown). The registry's api_base is the egress target for these tokens: the write side validates it as a plain absolute http(s) URL and warns when the host is not loopback/private, and the MCP loopback resolves it per request so an admin edit cannot split the injected URL from the loopback target (#158). Permission requests for agent-legion MCP tools auto-approve (the scoped token is the authority boundary), and local read-only ACP tool kinds (read/search — the Read/Glob/Grep class) auto-approve as side-effect-free; all other tool calls default to human confirmation (auto-denied after a 120s timeout so an abandoned tab cannot park a turn) with a per-session allow-all switch, and cancelling a turn settles every pending permission as denied."
     owner: security
     risk: high
     evidence:
@@ -618,10 +615,22 @@ invariants:
         target: tests/routes/test_studio_chat.py
         gate: quick
       - kind: integration
+        target: tests/routes/test_studio_chat_resume.py
+        gate: quick
+      - kind: integration
         target: tests/routes/test_studio_agents_admin.py
         gate: quick
       - kind: integration
-        target: tests/services/test_studio_chat_service.py
+        target: tests/services/test_studio_chat_service_sessions.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_service_permissions.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_service_lifecycle.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_resume_service.py
         gate: quick
       - kind: integration
         target: tests/db/test_studio_chat_schema.py
@@ -670,7 +679,7 @@ invariants:
         gate: quick
 
   - id: VAULT-SECRET-001
-    statement: "Workspace secret values are Fernet-encrypted at rest in workspace_secrets, never persisted as plaintext in node configs or intake batch snapshots (only `secret_ref` markers are stored), never returned by any API (secrets endpoints are write-only and the settings payload exposes only `secret_set` markers), and are resolved to plaintext in memory only at the server-side consumption points, with vault-resolved values covered by log redaction. Instance-scope secrets (external connection credentials and acquired connection tokens) follow the same rules in instance_secrets / connection_tokens. The code→Worker path extends the same boundary across machines: queued code manifests and bundles are stored secret-free (secret keys are stripped at enqueue; a plaintext secret value makes the node ineligible for Worker dispatch), the Host resolves vault refs and injects plaintext only into the claim/download response over the existing HTTPS channel, and the Worker holds secrets in memory only — passed to the child via stdin, never written to disk or logs, with a defensive scrub (strip_secret_config) before any persistence. The runtime settings snapshot crossing the same boundary is section-whitelisted (node_safe_settings_config in server/app/config_schema.py): only the business sections the node SDK service_config actually consumes (asr) are included — vault/auth/database/agent_workers sections never enter the manifest, the sandbox stdin payload, or the database."
+    statement: "Workspace secret values are Fernet-encrypted at rest in workspace_secrets, never persisted as plaintext in node configs or intake batch snapshots (only `secret_ref` markers are stored), never returned by any API (secrets endpoints are write-only and the settings payload exposes only `secret_set` markers), and are resolved to plaintext in memory only at the server-side consumption points, with vault-resolved values covered by log redaction. Instance-scope secrets (external connection credentials and acquired connection tokens) follow the same rules in instance_secrets / connection_tokens. The code→Worker path extends the same boundary across machines: queued code manifests and bundles are stored secret-free (secret keys are stripped at enqueue; a plaintext secret value makes the node ineligible for Worker dispatch), the Host resolves vault refs and injects plaintext only into the claim/download response over the existing HTTPS channel, and the Worker holds secrets in memory only — passed to the child via stdin, never written to disk or logs (secret-marked keys never reach the Worker in the first place: the Host-side split_manifest_config keeps them out of the dispatch manifest, and nothing config-derived is persisted on the Worker). The runtime settings snapshot crossing the same boundary is section-whitelisted (node_safe_settings_config in server/app/config_schema.py): only the business sections the node SDK service_config actually consumes (asr) are included — vault/auth/database/agent_workers sections never enter the manifest, the sandbox stdin payload, or the database."
     owner: security
     risk: critical
     evidence:
@@ -690,16 +699,13 @@ invariants:
         target: tests/services/test_code_dispatch.py::test_enqueue_strips_instance_settings_from_manifest_and_child_payload
         gate: quick
       - kind: integration
-        target: tests/executors/test_code_executor.py::test_build_runtime_whitelists_settings_config_sections
+        target: tests/executors/test_code_executor_runtime.py::test_build_runtime_whitelists_settings_config_sections
         gate: quick
       - kind: integration
         target: tests/services/test_code_dispatch.py::test_resolve_code_manifest_config_injects_and_strips_secrets
         gate: quick
       - kind: integration
         target: tests/workers/test_code_runner.py::test_secrets_stay_off_disk
-        gate: quick
-      - kind: integration
-        target: tests/workers/test_code_runner.py::test_strip_secret_config_drops_secret_keys_and_connection_block
         gate: quick
       - kind: integration
         target: tests/full/test_vault_secret_freeze.py
@@ -786,6 +792,27 @@ invariants:
         target: tests/test_skill_manager.py::test_cache_lock_files_live_under_runs_dir
         gate: quick
 
+  - id: EXEC-SKILL-RUNS-SCRATCH-001
+    statement: "The skills runs dir is OS-managed scratch, never a sibling of the shared skills base dir: the default is a deterministic per-user temp dir (tempfile.gettempdir() + 'agent-legion-skills.runs[-uid]'), overridable via AGENT_LEGION_SKILLS_RUNS_DIR, and every process sharing the skill cache (server, lock-refresh CLI) resolves the identical path so the FileLock domain stays whole. Leaked execution snapshots (hard crash between copytree and the finally-cleanup) are reclaimed by the sweeper-thread GC (runs_gc.sweep_stale_execution_dirs: mtime older than 1h, .locks and non-directories/symlinks untouched), with the OS temp-dir TTL as backstop — leaked snapshots can no longer accumulate permanently under ~/.agents/skills."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/skills/test_runs_dir_location.py::test_default_runs_dir_is_in_temp_dir
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_runs_dir_location.py::test_manager_default_runs_dir_uses_temp_default
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_runs_dir_location.py::test_sweep_removes_stale_execution_dirs_only
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_runs_dir_location.py::test_sweep_never_follows_symlinked_execution_dirs
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_sweeper_startup.py::test_periodic_sweep_runs_skill_execution_gc
+        gate: quick
+
   - id: EXEC-SKILL-CLEAN-TTL-001
     statement: "Skill cache cleanliness verification (rev-parse + status probes) is memoized per cache dir for the doc-cache TTL (SkillManager._verified_clean, deriving from doc_cache_ttl_seconds): within the TTL a dirtied or externally switched cache is served as-is, and the first probe after expiry repairs it via checkout -f + clean -fd — dirty detection is TTL-bounded, never lost. A commit change always misses the memo and re-probes, so relocks never serve a stale commit beyond the doc-cache TTL they already tolerate; doc_cache_ttl_seconds=0 restores per-call probing."
     owner: workspace-executor
@@ -829,7 +856,7 @@ invariants:
         gate: quick
 
   - id: EXEC-RUNTIME-DISPATCH-001
-    statement: "Agent command construction is pinned by AgentDefinition.runtime: pi builds the pi argv, velites builds the velites argv (the retired workflows.pi.flavor selection layer is gone); provider/model/thinking resolve strictly from the node execution override, then the workspace default, else dispatch fails fast before any manifest is frozen; the provider identity is passed unchanged to the selected runtime, and unknown runtimes fail fast."
+    statement: "Agent command construction is pinned by AgentDefinition.runtime: pi builds the pi argv, velites builds the velites argv (the retired workflows.pi.flavor selection layer is gone); provider/model/thinking resolve strictly from the node execution override, then the workflow top-level execution default (merged into the node's effective execution at definition load — the workspace-level default retired at schema v63), else dispatch fails fast before any manifest is frozen; the provider identity is passed unchanged to the selected runtime, and unknown runtimes fail fast."
     owner: workspace-executor
     risk: high
     evidence:
@@ -837,7 +864,7 @@ invariants:
         target: tests/workflows/test_velites_command.py
         gate: quick
       - kind: integration
-        target: tests/test_agent_broker.py::test_dispatch_fails_fast_on_unsupported_runtime
+        target: tests/services/test_agent_broker.py::test_dispatch_fails_fast_on_unsupported_runtime
         gate: quick
       - kind: integration
         target: tests/full/test_velites_harness_e2e.py::test_velites_runtime_agent_worker_chain_end_to_end
@@ -887,13 +914,13 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_agent_broker_concurrency.py::test_unclaimable_sweeper_fails_on_runtime_mismatch
+        target: tests/services/test_agent_broker_concurrency.py::test_unclaimable_sweeper_fails_on_runtime_mismatch
         gate: quick
       - kind: integration
-        target: tests/test_agent_broker_concurrency.py::test_unclaimable_sweeper_fails_on_cross_worker_combination
+        target: tests/services/test_agent_broker_concurrency.py::test_unclaimable_sweeper_fails_on_cross_worker_combination
         gate: quick
       - kind: integration
-        target: tests/test_agent_broker.py::test_pi_only_worker_cannot_claim_velites_request
+        target: tests/services/test_agent_broker.py::test_pi_only_worker_cannot_claim_velites_request
         gate: quick
 
   - id: EXEC-QUALITY-REPLAY-001
@@ -953,7 +980,7 @@ invariants:
         gate: quick
 
   - id: DB-WORKFLOW-CATALOG-001
-    statement: "The global workflow catalog (workflow_catalog table, schema v40) is retired at schema v50 (issue #112): a workflow is the DAG inside one workspace, so workspaces.default_workflow_key is a plain text identifier (old job rows keep their workflow_key as text) and the workspace's ACTIVE workflow_revision is the only runtime definition source — node override validation and settings schemas (workspace_node_config / workspace_settings_schemas), snapshot-less job fallbacks (job detail, run-to, rerun, preview), package artifact curation, and the worker scan list all resolve it; the catalog list/register HTTP APIs and the studio-agent register/list tools are gone, and the built-in demo definition stays in the repo (server/app/workflows/builtin.py) as the optional sample-template seed at workspace creation. Creating a workspace no longer selects or validates a workflow: demo mode seeds the sample template (defaulting to it when no key is given), blank mode leaves the key slot empty and the first successful draft publish adopts the draft's key; the v50 migration drops the table after warning about registered keys no workspace references."
+    statement: "The global workflow catalog (workflow_catalog table, schema v40) is retired at schema v50 (issue #112): a workflow is the DAG inside one workspace, so workspaces.default_workflow_key is a plain text identifier (old job rows keep their workflow_key as text) and the workspace's ACTIVE workflow_revision is the only runtime definition source — node override validation and settings schemas (workspace_node_config / workspace_settings_schemas), snapshot-less job fallbacks (job detail, run-to, rerun, preview), package artifact curation, and the worker scan list all resolve it; the catalog list/register HTTP APIs and the studio-agent register/list tools are gone, and the built-in demo definition stays in the repo (server/app/workflows/builtin.py). Schema v62 supersedes the creation semantics: workspace creation takes an explicit caller-provided id which IS the workflow key (bound and immutable, no demo/blank modes and no create-path seeding — demo workspaces are provisioned by `make import-demo` / scripts/seed_demo.py), the first-publish key adoption path is removed, and the v62 migration renames legacy workspace ids to their bound keys; see DB-WORKSPACE-KEY-BINDING-001. The v50 migration drops the catalog table after warning about registered keys no workspace references."
     owner: workspace-executor
     risk: high
     evidence:
@@ -965,6 +992,21 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/routes/test_studio_agent_tools.py
+        gate: quick
+
+  - id: DB-WORKSPACE-KEY-BINDING-001
+    statement: "Workspace id and workflow key are one identifier (schema v62, issue #211): POST /api/workspaces requires an explicit id (pattern ^[a-z0-9][a-z0-9_-]{0,63}$) that is written to default_workflow_key at creation and never changes afterwards — PATCH /api/workspaces and PUT /configuration reject any key change with 400, the publish guard (require_draft_workflow_key_match) rejects drafts whose key differs with 422, and the create path seeds nothing (demo provisioning lives in `make import-demo` / scripts/seed_demo.py, which pins the demo workspace id to its key). The v62 migration renames legacy workspaces to id == key (cascading workspace_id through every child table plus the FK-less auth_scoped_tokens and ops_metric_samples, fail-fast on id conflicts and on two workspaces sharing one key — both would rename onto a single id) and backfills never-published workspaces with key = id. The invariant is enforced at the HTTP service layer (workspace_configuration) and by the migration; JobQueries.create_workspace validates id == key and the id pattern only when the caller passes workspace_id explicitly, because the raw layer also serves test fixtures and low-level seeders that build pre-v62 shapes. default_workflow_key is deprecated as a separate concept pending full retirement (issue #211)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/db/test_workspace_id_key_binding.py
+        gate: quick
+      - kind: contract
+        target: tests/routes/jobs/test_workspace_crud.py
+        gate: quick
+      - kind: contract
+        target: tests/test_workspace_settings_api.py
         gate: quick
 
   - id: MATERIAL-ACCESS-001
@@ -1085,4 +1127,28 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/routes/test_runs_api.py::test_item_type_rejected_by_start_contract
+        gate: quick
+
+  - id: BOUNDARY-DATA-001
+    statement: Service-layer database access is ratcheted toward the JobQueries facade — raw SQL literals, server.app.db.transaction/connection imports, and Name.path DSN escape-hatch accesses under server/app/services are frozen by config/architecture/service-data-boundary-baseline.json (only-down ratchet per counter; new service files with any bypass are rejected).
+    owner: architecture
+    risk: high
+    evidence:
+      - kind: contract
+        target: scripts/architecture/service_data_boundary.py
+        gate: quick
+      - kind: contract
+        target: tests/scripts/test_architecture_service_data_boundary.py
+        gate: quick
+
+  - id: DB-SCHEMA-001
+    statement: schema_migrations records one row per registered version (MIGRATIONS in server/app/db/migration_registry.py); init_db upgrades run only migrations with version > max(applied) while fresh installs apply the full idempotent DDL file plus every migration in version order.
+    owner: db
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/db/test_schema_version_registry.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_db.py::test_database_initialization_records_postgres_schema
         gate: quick

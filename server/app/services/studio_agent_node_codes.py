@@ -31,7 +31,7 @@ class StudioAgentNodeCodeTools:
 
     def _service(self) -> NodeCodeService:
         return NodeCodeService(
-            self._job_db.path, self._settings.executor_runtime.workflows.custom_nodes_enabled
+            self._job_db, self._settings.executor_runtime.workflows.custom_nodes_enabled
         )
 
     def _revision_node_capability(
@@ -47,14 +47,17 @@ class StudioAgentNodeCodeTools:
             return None
         return node.capability
 
-    def _require_known_node(self, workspace_id: str, workflow_key: str, node_key: str) -> None:
+    def _reject_start_node(self, workspace_id: str, workflow_key: str, node_key: str) -> None:
+        """404 only for start nodes of the active revision (never execute, no
+        code to read). Draft-only/skeleton nodes are readable so an agent can
+        read back the draft it saved before the workflow revision exists."""
         revision = self._job_db.get_active_workflow_revision(workspace_id, workflow_key)
-        if self._revision_node_capability(revision, node_key) is None:
-            raise NotFoundError(
-                "No active workflow revision"
-                if revision is None
-                else f"Unknown workflow node: {node_key}"
-            )
+        if revision is None:
+            return
+        definition = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
+        node = definition.nodes.get(node_key)
+        if node is not None and node.node_type == START_NODE_TYPE:
+            raise NotFoundError(f"Unknown workflow node: {node_key}")
 
     def save_draft(
         self,
@@ -88,7 +91,7 @@ class StudioAgentNodeCodeTools:
 
     def get_state(self, workspace_id: str, workflow_key: str, node_key: str) -> dict[str, Any]:
         """Effective code plus any pending draft (mirrors the Studio read)."""
-        self._require_known_node(workspace_id, workflow_key, node_key)
+        self._reject_start_node(workspace_id, workflow_key, node_key)
         versions = self._service().list_versions(workspace_id, workflow_key, node_key)
         published = next((row for row in versions if row["status"] == "published"), None)
         # list_versions is version-descending: the first draft is the current one.

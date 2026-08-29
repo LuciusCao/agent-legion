@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.claim import cancel_request
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.db.transaction import write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
 

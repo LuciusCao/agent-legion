@@ -10,10 +10,15 @@ window ladder with its own attempt budget (``claim_windows``).
 from __future__ import annotations
 
 from server.app.agent_broker import AgentExecutionBroker, claim_windows
-from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agent_control.registry import AgentWorkerRegistry
+from tests.helpers.agent_worker_api import (
+    enqueue_code as _enqueue_code,
+)
+from tests.helpers.agent_worker_api import (
+    insert_code_job_rows as _insert_code_job_rows,
+)
+from tests.helpers.agent_worker_api import seed_request as _seed_request
 from tests.postgres_support import TEST_DATABASE_URL
-from tests.services.test_code_claim import _enqueue_code, _insert_code_job_rows
-from tests.test_agent_broker import _seed_request
 
 # Above the deepest SCAN_ROUNDS per-workspace cap (512): a cross-kind FIFO
 # window can never page through this flood to reach the agent request.

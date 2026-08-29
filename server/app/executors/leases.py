@@ -31,19 +31,28 @@ __all__ = ["ExecutorLeaseRepository"]
 class ExecutorLeaseRepository:
     def __init__(
         self,
-        path: str,
-        job_db: JobQueries | None = None,
+        job_db: JobQueries | str,
         job_event_manager: JobEventManager | None = None,
         *,
         data_dir: Path,
         job_event_buffer: Any | None = None,
     ):
-        self.path = path
-        self.job_db = job_db
+        # #187: the repository is constructed from the JobQueries facade (a
+        # bare DSN string stays accepted so tests and the transition period
+        # keep working). It lives BELOW the service boundary on purpose —
+        # like queries/atomic_mutations, it is one of the data-layer-adjacent
+        # components that legitimately hold the connection source; services
+        # must not.
+        if isinstance(job_db, str):
+            self.job_db = None
+            self.path: str = job_db
+        else:
+            self.job_db = job_db
+            self.path = job_db.path
         self.job_event_manager = job_event_manager
         self.data_dir = data_dir
         self.job_event_buffer = job_event_buffer
-        init_db(path)
+        init_db(self.path)
 
     def _broadcast_job_update(self, job_id: str) -> None:
         try:
@@ -74,14 +83,6 @@ class ExecutorLeaseRepository:
         return retry_on_database_conflict(
             lambda: _lease_write_paths.heartbeat(self, lease_id, ttl_seconds)
         )
-
-    def lease_status(self, lease_id: str) -> str | None:
-        """Return the lease's current status, or None when unknown."""
-        with read_connection(self.path) as conn:
-            row = conn.execute(
-                "select status from executor_leases where id=%s", (lease_id,)
-            ).fetchone()
-        return str(row["status"]) if row is not None else None
 
     def finish(self, lease_id: str, result: ExecutionResult) -> bool:
         return retry_on_database_conflict(lambda: _lease_write_paths.finish(self, lease_id, result))

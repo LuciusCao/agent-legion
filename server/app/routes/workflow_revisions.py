@@ -7,6 +7,7 @@ from server.app.jobs import JobQueries
 from server.app.routes.job_http import require_workflows_enabled
 from server.app.routes.workflow_draft_compare import create_workflow_draft_compare_router
 from server.app.routes.workflow_draft_publish import create_workflow_draft_publish_router
+from server.app.routes.workflow_draft_store import create_workflow_draft_store_router
 from server.app.routes.workflow_revisions_contracts import (
     ActiveWorkflowRevisionResponse,
     WorkflowRevisionDetailResponse,
@@ -86,4 +87,5 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
 
     router.include_router(create_workflow_draft_publish_router(job_db, settings))
     router.include_router(create_workflow_draft_compare_router(job_db, settings))
+    router.include_router(create_workflow_draft_store_router(job_db, settings))
     return router

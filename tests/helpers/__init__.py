@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from server.app.executors.runtime_config import ExecutorRuntimeConfig
+from server.app.configuration.executor_runtime import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.settings import Settings, load_settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -47,15 +48,21 @@ def load_demo_legacy_intake_definition() -> WorkflowDefinition:
 def publish_legacy_intake_revision(job_db: JobQueries, workspace_id: str) -> dict[str, Any]:
     """Publish the legacy-intake demo variant as the workspace's active revision.
 
-    API workspace creation seeds the intake-less demo revision; tests that
-    post job-batches call this right after creation so the legacy intake
-    service path keeps resolving ``direct_ids``.
+    This helper's callers create workspaces through the HTTP API, where
+    schema v62 binds the workflow key to the workspace id — so the variant's
+    definition key is rewritten to the workspace id first, or the publish
+    guard (require_draft_workflow_key_match) rejects the mismatched draft
+    with 422. Tests that post job-batches call this right after creation so
+    the legacy intake service path keeps resolving ``direct_ids``.
     """
+    from dataclasses import replace
+
     from server.app.services.workflow_revisions import WorkflowRevisionService
 
-    return WorkflowRevisionService(job_db).publish_workspace_revision(
-        workspace_id, load_demo_legacy_intake_definition()
-    )
+    definition = load_demo_legacy_intake_definition()
+    if definition.key != workspace_id:
+        definition = replace(definition, key=workspace_id)
+    return WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, definition)
 
 
 def publish_builtin_revision(
@@ -68,15 +75,19 @@ def publish_builtin_revision(
     Mirrors the workspace-create demo seed (ensure_active_revision is
     seed-if-absent): tests that bypass the API and create the workspace row
     directly use this so definition resolution (workspace active revision,
-    schema v50) sees the DAG.
+    schema v50) sees the DAG. Unlike publish_legacy_intake_revision, no key
+    rewrite happens here: these callers build workspaces at the JobQueries
+    level, which keeps id and key independent (the id==key invariant is
+    enforced at the HTTP service layer and by the migration, not at this raw
+    layer), and ensure_active_revision has no draft-key guard — so the
+    revision is published under *workflow_key* as given.
     """
     from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
     from server.app.services.workflow_revisions import WorkflowRevisionService
 
     seed_demo_workspace_node_codes(load_settings(), workspace_id)
-    return WorkflowRevisionService(job_db).ensure_active_revision(
-        workspace_id, load_builtin_workflow(workflow_key)
-    )
+    definition = load_builtin_workflow(workflow_key)
+    return WorkflowRevisionService(job_db).ensure_active_revision(workspace_id, definition)
 
 
 def scan_entries(*definitions: WorkflowDefinition) -> list[tuple[str, str, WorkflowDefinition]]:
@@ -95,8 +106,6 @@ def make_workflow_worker(
     queries: JobQueries,
     *,
     workflow_key: str = "education_video_problems_generation",
-    pi_binary: str | None = "echo",
-    pi_timeout: int = 1,
 ) -> tuple[WorkflowWorkerThread, WorkflowDefinition]:
     """Build a configured WorkflowWorkerThread for *workflow_key*."""
     from server.app import main as app_main
@@ -107,13 +116,7 @@ def make_workflow_worker(
     settings = app_main.load_settings(data_dir=tmp_path)
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
-            "workflows": {
-                "enabled": True,
-                "pi": {"binary": pi_binary, "timeout_seconds": pi_timeout}
-                if pi_binary is not None
-                else {},
-            },
-            "openclaw": {"command_template": ["openclaw", "agent"]},
+            "workflows": {"enabled": True},
         }
     )
 
@@ -125,7 +128,7 @@ def make_workflow_worker(
         settings_config=settings.config,
         job_db=queries,
     )
-    leases = ExecutorLeaseRepository(queries.path, data_dir=tmp_path)
+    leases = ExecutorLeaseRepository(queries, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
         executor=executor,
@@ -139,7 +142,7 @@ def make_workflow_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._scan_entries = scan_entries(definition)
+    worker.state.scan_entries = scan_entries(definition)
     return worker, definition
 
 
@@ -194,6 +197,31 @@ def wait_for_predicate(
         time.sleep(interval)
 
 
+def pid_is_running(pid: int) -> bool:
+    """True when *pid* names a live (non-zombie) process.
+
+    os.kill(pid, 0) alone also succeeds for zombies: an unreaped orphan
+    keeps its PID until somebody wait()s it, so a kill-probe liveness loop
+    spins to its deadline in containers without a reaping init. On Linux,
+    consult /proc for the state field; elsewhere fall back to the signal
+    probe (macOS launchd reaps orphans promptly).
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except OSError:
+        return True
+    # comm may contain spaces and parens; the state letter is the first
+    # field after the final ')'.
+    tail = stat.rsplit(")", 1)[1] if ")" in stat else ""
+    return tail.split()[0] != "Z" if tail else True
+
+
 def seed_workspace_agent_definitions(workspace_id: str) -> list[str]:
     """Seed the built-in demo Agent definitions into *workspace_id*.
 
@@ -201,7 +229,7 @@ def seed_workspace_agent_definitions(workspace_id: str) -> list[str]:
     longer seeds a global catalog, so tests that run the demo workflow end to
     end instantiate the factory templates into their own workspace here.
     """
-    from server.app.agent_catalog_builtin import seed_demo_workspace_agent_definitions
+    from server.app.agent_catalog.builtin import seed_demo_workspace_agent_definitions
     from tests.postgres_support import TEST_DATABASE_URL
 
     return seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id)

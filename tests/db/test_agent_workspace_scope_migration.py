@@ -20,10 +20,14 @@ _DEMO_WORKFLOW = "education_video_problems_generation"
 
 
 def _seed_workspace(conn, workspace_id: str) -> None:
+    # key = id: the v45 upgrade test replays every migration up to the
+    # current version, including the v62 id/key binding rename — shared
+    # per-file keys would collide there (two workspaces renaming onto one
+    # id). The v46 migration below reads revisions, not this column.
     conn.execute(
         "insert into workspaces(id, name, default_workflow_key)"
-        " values (%s, %s, 'demo_workflow') on conflict(id) do nothing",
-        (workspace_id, workspace_id),
+        " values (%s, %s, %s) on conflict(id) do nothing",
+        (workspace_id, workspace_id, workspace_id),
     )
 
 
@@ -216,8 +220,9 @@ def test_upgrade_from_v45_with_legacy_global_index() -> None:
         _seed_global_agent(conn, "writer", "write_script")
         _seed_revision(conn, "ws-up-a", "flow-a", ["write_script"])
         _seed_revision(conn, "ws-up-b", "flow-b", ["write_script"])
-        # Pretend v46 was never applied so init_db replays the full upgrade.
-        conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
+        # Pretend the database stopped at v45 so init_db runs the v46+
+        # incremental upgrade (v46 migration + all later versions).
+        conn.execute("delete from schema_migrations where version >= 46")
 
     init_db(TEST_DATABASE_URL)
 
@@ -239,4 +244,4 @@ def test_upgrade_from_v45_with_legacy_global_index() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "job_node_status_counts"
+    assert migration["name"] == "workspace_settings_retirement"

@@ -4,7 +4,7 @@ The queue splits delivery into a bulk lane (prepare + artifact uploads) and a
 strictly-prioritized report lane (quiesce heartbeat → report → drop marker).
 These tests pin the lane ordering and the runtime concurrency adjustment;
 heartbeat quiesce/resume and marker durability stay covered by
-tests/test_worker_upload_queue.py and tests/workers/test_upload_pending_marker.py,
+tests/workers/test_worker_upload_queue.py and tests/workers/test_upload_pending_marker.py,
 whose assertions exercise the same code after the split.
 """
 
@@ -20,7 +20,7 @@ import pytest
 
 from tests.helpers import wait_for_predicate
 from worker.status import ExecutionStatusReporter
-from worker.upload_queue import UploadQueue, UploadTask
+from worker.upload.queue import UploadQueue, UploadTask
 
 pytestmark = pytest.mark.no_db
 

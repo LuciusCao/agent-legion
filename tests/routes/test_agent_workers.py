@@ -12,73 +12,30 @@ from fastapi.testclient import TestClient
 
 from server.app.agent_broker import AgentExecutionRequest
 from server.app.db.transaction import write_transaction
-from server.app.main import create_app
 from server.app.services.vault import VaultService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import workflow_definition_from_mapping
-from tests.test_agent_broker import _seed_request
+from tests.helpers.agent_worker_api import (
+    authenticate_admin,
+    claim,
+    empty_archive,
+    issue_scoped_token,
+    make_app,
+    register,
+    seed_request,
+)
 
-_MANAGEMENT = {"X-Agent-Worker-Register-Token": "management-secret"}
+_seed_request = seed_request
+
 _CSRF = {"x-agent-legion-request": "1"}
 
 
-def _authenticate_admin(client: TestClient) -> None:
-    """Bootstrap the first admin and keep its session cookie on the client."""
-    response = client.post(
-        "/api/auth/bootstrap",
-        json={"username": "admin", "password": "admin-pw"},
-    )
-    assert response.status_code == 200, response.text
-    client.headers["x-agent-legion-request"] = "1"
-
-
-def _make_app(tmp_path: Path):
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.agent_workers.register_token = "management-secret"
-    # Workspace dispatch defaults to paused (reset at every startup); the
-    # operator resume is part of the environment these tests exercise.
-    app.state.workspace_worker_control.resume("test-workspace")
-    return app
-
-
-def _register(client: TestClient, credential: str = "management-secret", **overrides) -> dict:
-    payload = {
-        "worker_id": "home-mini",
-        "name": "Home Mac mini",
-        "runtimes": ["pi"],
-        "capabilities": ["generate"],
-        "models": [{"provider": "gateway", "model": "test-model"}],
-        "max_concurrency": 10,
-        "labels": {"arch": "arm64"},
-        "protocol_version": 1,
-        "image_version": "agent-legion-worker:test",
-    }
-    payload.update(overrides)
-    response = client.post(
-        "/api/agent-workers/register",
-        headers={"X-Agent-Worker-Register-Token": credential},
-        json=payload,
-    )
-    assert response.status_code == 201, response.text
-    assert response.json()["host_protocol_version"] == 3
-    return dict(response.json())
-
-
-def _claim(client: TestClient, token: str) -> dict:
-    response = client.post(
-        "/api/agent-executions/claim",
-        headers={"X-Agent-Worker-Token": token},
-        json={"worker_id": "home-mini"},
-    )
-    assert response.status_code == 200, response.text
-    return dict(response.json())
-
-
-def _empty_archive() -> bytes:
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:gz"):
-        pass
-    return buffer.getvalue()
+_authenticate_admin = authenticate_admin
+_make_app = make_app
+_issue_scoped_token = issue_scoped_token
+_register = register
+_claim = claim
+_empty_archive = empty_archive
 
 
 def test_agent_worker_register_and_claim_api(tmp_path: Path) -> None:
@@ -86,6 +43,7 @@ def test_agent_worker_register_and_claim_api(tmp_path: Path) -> None:
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register(client)["worker_token"]
         assert app.state.job_db.get_job_node("job-1", "generate")["status"] == "pending"
         claimed = _claim(client, token)
@@ -100,6 +58,7 @@ def test_agent_worker_register_accepts_velites_runtime(tmp_path: Path) -> None:
     _seed_request(app.state.job_db, job_id="job-1", limit=2, runtime="velites")
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register(client, runtimes=["pi", "velites"])["worker_token"]
         worker = client.get("/api/agent-workers/self", headers={"X-Agent-Worker-Token": token})
         claimed = _claim(client, token)
@@ -114,9 +73,11 @@ def test_agent_worker_register_rejects_unknown_runtime(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
+        credential = _issue_scoped_token(client)
         response = client.post(
             "/api/agent-workers/register",
-            headers={"X-Agent-Worker-Register-Token": "management-secret"},
+            headers={"X-Agent-Worker-Register-Token": credential},
             json={
                 "worker_id": "home-mini",
                 "name": "Home Mac mini",
@@ -133,6 +94,7 @@ def test_worker_can_read_only_its_own_status_with_issued_token(tmp_path: Path) -
     app = _make_app(tmp_path)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register(client)["worker_token"]
         own_status = client.get(
             "/api/agent-workers/self",
@@ -163,6 +125,7 @@ def test_worker_metrics_require_token_and_are_forced_to_own_worker(tmp_path: Pat
             )
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register(client)["worker_token"]
         path = "/api/agent-workers/self/metrics?granularity=6h&worker_id=other-worker"
         own = client.get(path, headers={"X-Agent-Worker-Token": token})
@@ -184,6 +147,7 @@ def test_claim_requires_matching_worker_capability_and_model(tmp_path: Path) -> 
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         wrong_capability = _register(
             client, capabilities=["review"], models=[{"provider": "gateway", "model": "test-model"}]
         )["worker_token"]
@@ -227,6 +191,7 @@ def test_queued_claim_uses_latest_execution_config_from_same_revision(tmp_path: 
         conn.execute("update jobs set workflow_revision_id=%s where id='job-1'", (revision["id"],))
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register(
             client,
             capabilities=["generate"],
@@ -242,6 +207,7 @@ def test_heartbeat_requires_and_validates_lease_id(tmp_path: Path) -> None:
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register(client)["worker_token"]
         claimed = _claim(client, token)
         execution_id = claimed["execution_id"]
@@ -268,6 +234,7 @@ def test_release_slot_requires_and_validates_lease_id(tmp_path: Path) -> None:
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register(client)["worker_token"]
         claimed = _claim(client, token)
         execution_id = claimed["execution_id"]
@@ -305,6 +272,7 @@ def test_protocol_floor_is_enforced_after_registration(tmp_path: Path) -> None:
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register(client)["worker_token"]
         # Server raises its minimum after the worker registered at v1.
         app.state.settings.executor_runtime.agent_workers.min_protocol_version = 2
@@ -324,10 +292,12 @@ def test_register_rejects_malformed_worker_id_and_label_overflow(tmp_path: Path)
     app = _make_app(tmp_path)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
+        credential = _issue_scoped_token(client)
         for bad_id in ("has.dot", "has space", "", "x" * 65):
             response = client.post(
                 "/api/agent-workers/register",
-                headers=_MANAGEMENT,
+                headers={"X-Agent-Worker-Register-Token": credential},
                 json={
                     "worker_id": bad_id,
                     "runtimes": ["pi"],
@@ -340,7 +310,7 @@ def test_register_rejects_malformed_worker_id_and_label_overflow(tmp_path: Path)
         too_many_labels = {f"key-{index}": "v" for index in range(33)}
         response = client.post(
             "/api/agent-workers/register",
-            headers=_MANAGEMENT,
+            headers={"X-Agent-Worker-Register-Token": credential},
             json={
                 "worker_id": "home-mini",
                 "runtimes": ["pi"],
@@ -357,6 +327,7 @@ def test_result_rejects_bad_metadata_without_orphaning_archive(tmp_path: Path) -
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register(client)["worker_token"]
         claimed = _claim(client, token)
         execution_id = claimed["execution_id"]
@@ -405,6 +376,7 @@ def test_result_rejects_oversized_archive(tmp_path: Path) -> None:
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register(client)["worker_token"]
         claimed = _claim(client, token)
         response = client.post(
@@ -422,144 +394,11 @@ def test_result_rejects_oversized_archive(tmp_path: Path) -> None:
         assert not bundle_dir.exists() or list(bundle_dir.glob("*.result.tar.gz")) == []
 
 
-def test_agent_register_token_management_api(tmp_path: Path) -> None:
-    app = _make_app(tmp_path)
-    _seed_request(app.state.job_db, job_id="job-1", limit=2)
-
-    with TestClient(app) as client:
-        # Management endpoints require an admin session (SECURITY-AUTH-001):
-        # anonymous calls and the legacy register-token header both get 401.
-        unauthenticated = client.post(
-            "/api/agent-register-tokens",
-            json={"workspace_id": "test-workspace", "label": "no header"},
-        )
-        assert unauthenticated.status_code == 401
-        legacy = client.post(
-            "/api/agent-register-tokens",
-            headers={"X-Agent-Worker-Register-Token": "nope"},
-            json={"label": "legacy header"},
-        )
-        assert legacy.status_code == 401
-        _authenticate_admin(client)
-
-        created = client.post(
-            "/api/agent-register-tokens",
-            headers=_MANAGEMENT,
-            json={"workspace_id": "test-workspace", "label": "home mini"},
-        )
-        assert created.status_code == 201, created.text
-        body = created.json()
-        assert body["workspace_id"] == "test-workspace"
-        assert body["label"] == "home mini"
-        plaintext = body["register_token"]
-        assert plaintext.startswith(f"{body['token_id']}.")
-
-        # The list view never carries secret material.
-        listed = client.get("/api/agent-register-tokens", headers=_MANAGEMENT)
-        assert listed.status_code == 200
-        entry = next(t for t in listed.json()["tokens"] if t["token_id"] == body["token_id"])
-        assert entry["workspace_id"] == "test-workspace"
-        assert entry["revoked"] is False
-        assert "token_hash" not in entry
-        assert "register_token" not in entry
-
-        # A scoped token for a nonexistent workspace is rejected.
-        missing = client.post(
-            "/api/agent-register-tokens",
-            headers=_MANAGEMENT,
-            json={"workspace_id": "no-such-workspace"},
-        )
-        assert missing.status_code == 400
-
-        # Revoke kills the credential.
-        revoked = client.post(
-            f"/api/agent-register-tokens/{body['token_id']}/revoke", headers=_MANAGEMENT
-        )
-        assert revoked.status_code == 200
-        assert revoked.json() == {"revoked": True}
-        register_after_revoke = client.post(
-            "/api/agent-workers/register",
-            headers={"X-Agent-Worker-Register-Token": plaintext},
-            json={"worker_id": "w1", "runtimes": ["pi"], "max_concurrency": 1},
-        )
-        assert register_after_revoke.status_code == 401
-        unknown = client.post("/api/agent-register-tokens/no-such/revoke", headers=_MANAGEMENT)
-        assert unknown.status_code == 404
-
-
-def test_agent_worker_revoke_api(tmp_path: Path) -> None:
-    app = _make_app(tmp_path)
-    _seed_request(app.state.job_db, job_id="job-1", limit=2)
-
-    with TestClient(app) as client:
-        # Management endpoints require an admin session (SECURITY-AUTH-001):
-        # anonymous calls and the legacy register-token header both get 401.
-        unauthenticated = client.post("/api/agent-workers/no-such/revoke")
-        assert unauthenticated.status_code == 401
-        legacy = client.post(
-            "/api/agent-workers/no-such/revoke",
-            headers={"X-Agent-Worker-Register-Token": "nope"},
-        )
-        assert legacy.status_code == 401
-        _authenticate_admin(client)
-
-        token = _register(client)["worker_token"]
-        revoked = client.post("/api/agent-workers/home-mini/revoke", headers=_MANAGEMENT)
-        assert revoked.status_code == 200, revoked.text
-        assert revoked.json() == {"worker_id": "home-mini", "revoked": True}
-
-        # The revoked Worker's credential is dead: authenticate rejects it, so
-        # the claim poll fails before ever reaching the broker.
-        claim = client.post(
-            "/api/agent-executions/claim",
-            headers={"X-Agent-Worker-Token": token},
-            json={"worker_id": "home-mini"},
-        )
-        assert claim.status_code in (401, 409)
-
-        listed = client.get("/api/agent-workers").json()["workers"]
-        assert listed[0]["revoked"] is True
-
-        # Re-revoke is idempotent: the row still exists, so it succeeds again.
-        again = client.post("/api/agent-workers/home-mini/revoke", headers=_MANAGEMENT)
-        assert again.status_code == 200
-        assert again.json() == {"worker_id": "home-mini", "revoked": True}
-
-
-def test_register_with_scoped_token_stores_and_returns_scope(tmp_path: Path) -> None:
-    app = _make_app(tmp_path)
-    _seed_request(app.state.job_db, job_id="job-1", limit=2)
-
-    with TestClient(app) as client:
-        _authenticate_admin(client)
-        created = client.post(
-            "/api/agent-register-tokens",
-            headers=_MANAGEMENT,
-            json={"workspace_id": "test-workspace", "label": "scoped"},
-        )
-        scoped = created.json()["register_token"]
-
-        scoped_registration = _register(client, credential=scoped, worker_id="scoped-worker")
-        assert scoped_registration["allowed_workspaces"] == ["test-workspace"]
-
-        global_registration = _register(client, worker_id="global-worker")
-        assert global_registration["allowed_workspaces"] == []
-
-        listed = client.get("/api/agent-workers")
-        assert listed.status_code == 200
-        workers = {w["worker_id"]: w for w in listed.json()["workers"]}
-        assert workers["scoped-worker"]["allowed_workspaces"] == ["test-workspace"]
-        assert workers["global-worker"]["allowed_workspaces"] == []
-
-        # Re-registering with the global credential refreshes the scope.
-        refreshed = _register(client, worker_id="scoped-worker")
-        assert refreshed["allowed_workspaces"] == []
-
-
 def test_worker_online_flag_tracks_last_seen(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         _authenticate_admin(client)
         token = _register(client)["worker_token"]
         workers = client.get("/api/agent-workers").json()["workers"]
@@ -600,6 +439,7 @@ def test_result_run_dir_promotes_events_for_logs_and_token_usage(tmp_path: Path)
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register(client)["worker_token"]
         claimed = _claim(client, token)
         execution_id = claimed["execution_id"]
@@ -736,7 +576,7 @@ def _register_code_worker(client: TestClient, **overrides) -> str:
     payload.update(overrides)
     response = client.post(
         "/api/agent-workers/register",
-        headers=_MANAGEMENT,
+        headers={"X-Agent-Worker-Register-Token": _issue_scoped_token(client)},
         json=payload,
     )
     assert response.status_code == 201, response.text
@@ -757,6 +597,7 @@ def test_register_roundtrips_code_capacity(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         _register_code_worker(client)
         _register(client)  # legacy v1 registration without the field
         _authenticate_admin(client)
@@ -771,9 +612,11 @@ def test_register_rejects_code_capacity_on_protocol_v1(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
+        credential = _issue_scoped_token(client)
         response = client.post(
             "/api/agent-workers/register",
-            headers=_MANAGEMENT,
+            headers={"X-Agent-Worker-Register-Token": credential},
             json={
                 "worker_id": "legacy-code",
                 "runtimes": ["pi"],
@@ -796,6 +639,7 @@ def test_code_claim_injects_secrets_into_response_manifest(tmp_path: Path, monke
     VaultService(app.state.job_db.path, {}).set("test-workspace", "api-token", "s3cr3t")
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register_code_worker(client)
         claimed = _claim_code(client, token)
 
@@ -816,6 +660,7 @@ def test_code_claim_injects_secrets_into_response_manifest(tmp_path: Path, monke
     assert "runtime_context" not in json.loads(stored["manifest_json"])
     # The bundle endpoint serves the code bundle like any other.
     with TestClient(app) as client:
+        _authenticate_admin(client)
         bundle = client.get(
             f"/api/agent-executions/{claimed['execution_id']}/bundle",
             headers={"X-Agent-Worker-Token": token},
@@ -830,6 +675,7 @@ def test_agent_only_worker_never_claims_code(tmp_path: Path) -> None:
     _seed_code_request(app)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register_code_worker(client, max_code_concurrency=0)
         claim = client.post(
             "/api/agent-executions/claim",
@@ -845,6 +691,7 @@ def test_heartbeat_v2_returns_cancel_body_for_code_executions(tmp_path: Path) ->
     _seed_code_request(app)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register_code_worker(client)
         claimed = _claim_code(client, token)
         execution_id = claimed["execution_id"]
@@ -873,6 +720,7 @@ def test_result_auth_failure_invalidates_cached_connection_token(tmp_path: Path)
         )
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register_code_worker(client)
         claimed = _claim_code(client, token)
         (app.state.settings.jobs_dir / "job-code-1").mkdir(parents=True, exist_ok=True)
@@ -915,6 +763,7 @@ def test_code_result_promotes_node_log_to_canonical_log_path(tmp_path: Path) -> 
     _seed_code_request(app)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register_code_worker(client)
         claimed = _claim_code(client, token)
         (app.state.settings.jobs_dir / "job-code-1").mkdir(parents=True, exist_ok=True)
@@ -953,12 +802,13 @@ def _archive_with_files(files: dict[str, str]) -> bytes:
 def test_code_result_with_expected_outputs_commits_completed(tmp_path: Path) -> None:
     """Cross-end contract: a completed code result with non-empty
     expected_outputs commits as completed — the Worker-side upload queue fills
-    the output_artifacts refs (worker/upload_queue.py) that the Host commit
+    the output_artifacts refs (worker/upload/queue.py) that the Host commit
     requires before promoting outputs (agent_completion.py)."""
     app = _make_app(tmp_path)
     _seed_code_request(app, expected_outputs=["out.json"])
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register_code_worker(client)
         claimed = _claim_code(client, token)
         (app.state.settings.jobs_dir / "job-code-1").mkdir(parents=True, exist_ok=True)

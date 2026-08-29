@@ -12,9 +12,9 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from server.app.configuration.executor_runtime import ExecutorRuntimeConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.runtime import ExecutionRuntime
-from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.services.node_code_pins import node_code_pins_from_job_snapshot
 from server.app.services.node_codes import NodeCodeService, code_hash
@@ -62,7 +62,6 @@ def _make_worker(
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
             "workflows": {"enabled": True, "custom_nodes_enabled": custom_nodes_enabled},
-            "openclaw": {"command_template": ["openclaw"]},
             "code_capacity": 2,
         }
     )
@@ -72,7 +71,7 @@ def _make_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._scan_entries = scan_entries(*definitions)
+    worker.state.scan_entries = scan_entries(*definitions)
     return worker
 
 
@@ -107,7 +106,7 @@ def _prepare_job(tmp_path: Path, node: WorkflowNode, batch_payload: dict | None 
 
 def _dispatch(tmp_path: Path, worker: WorkflowWorkerThread) -> None:
     worker._poll()
-    for future in worker._futures.values():
+    for future in worker.state.futures.values():
         future.result(timeout=5)
 
 
@@ -383,8 +382,8 @@ def _claim_via_code_worker(
     worker = MagicMock()
     worker.job_db = job_db
     worker.code_dispatch = dispatch
-    worker._batch_payload_cache = {}
-    worker._pass_claim_counts = {}
+    worker.state.batch_payload_cache = {}
+    worker.state.pass_claim_counts = {}
     worker.settings.root_dir = tmp_path
     worker.settings.config = {}
     worker.settings.executor_runtime.workflows.custom_nodes_enabled = True

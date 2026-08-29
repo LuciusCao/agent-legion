@@ -9,7 +9,10 @@ export interface JsonTreeProps {
 }
 
 export function JsonTree({ data }: JsonTreeProps) {
-  const [collapsed, setCollapsed] = useState(false)
+  // Default to 2 collapsed levels: artifact payloads can be deeply nested,
+  // and a fully expanded tree mounts the entire DOM at once. `false` (from
+  // the toolbar) expands all levels.
+  const [collapsed, setCollapsed] = useState<number | false>(2)
   // Bumped on every toolbar click to re-apply `collapsed` even when its
   // value is unchanged (the user may have toggled nodes manually meanwhile).
   const [epoch, setEpoch] = useState(0)
@@ -20,7 +23,7 @@ export function JsonTree({ data }: JsonTreeProps) {
   }, [])
 
   const collapseAll = useCallback(() => {
-    setCollapsed(true)
+    setCollapsed(1)
     setEpoch((n) => n + 1)
   }, [])
 
@@ -48,8 +51,6 @@ export function JsonTree({ data }: JsonTreeProps) {
         dark
         theme="vscode"
         collapsed={collapsed}
-        collapseObjectsAfterLength={Infinity}
-        collapseStringsAfterLength={Infinity}
         displayArrayIndex={false}
         enableClipboard={false}
         editable={false}

@@ -71,20 +71,19 @@ Without it the rest of the instance works, but the materials API degrades to
 ### 2. One-time local setup
 
 ```bash
-# Registration token shared by the backend and local workers.
-# Create it BEFORE the first backend start (the backend reads it at startup).
-mkdir -p deploy/secrets
-openssl rand -hex 24 > deploy/secrets/agent_worker_register_token
-chmod 600 deploy/secrets/agent_worker_register_token
-
 # Build the velites binary used to sandbox node code
 ./scripts/ensure-velites.sh --dest data/bin
 
-# Local worker config (edit host_url to http://127.0.0.1:8001 and set
-# register_token_file: deploy/secrets/agent_worker_register_token,
-# work_root: data/agent-worker — see the comments in the example file)
+# Local worker config (edit host_url to http://127.0.0.1:8001 and
+# work_root to data/agent-worker — see the comments in the example file)
 cp config/agent-worker.example.yaml config/agent-worker.yaml
 ```
+
+Worker registration no longer uses a global token: after startup, issue a
+scoped token per workspace in the Host Web UI (Settings → Worker Token) and
+paste it into the "Workspace access" section of the Worker console
+(`http://127.0.0.1:8789`) — tokens can be added at any time, no backend
+restart needed (see [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md)).
 
 ### 3. Start everything
 
@@ -115,14 +114,18 @@ make import-demo      # install/lock skills and create+seed a demo workspace if 
 Then in the console:
 
 1. Open the demo workspace printed by the command (reruns reuse it).
-2. In workspace **Settings → Agent 默认配置**, set the provider/model your
-   LLM endpoint serves.
+2. Configure agent execution in Studio: open the workflow and fill the
+   top-level `execution:` block with the provider/model your LLM endpoint
+   serves (one place covers every agent node; individual nodes can override
+   via `execution.*`; the input lists the provider/model options reported by
+   online Workers for that node's Agent runtime, and free text works too).
 3. Enable automatic scheduling for the workspace and claiming in the Worker
    console.
-4. Submit items through the workspace console's **添加条目** (add) panel:
-   upload the knowledge-point markdown as materials or select the seeded
-   example materials (one material becomes one job), or paste external IDs
-   bound to a configured connection.
+4. Submit a batch: in the workspace's **添加条目** (add) dialog, upload the
+   knowledge-point markdown, or select the seeded example materials in the
+   panel, then confirm to create the run — one material becomes one job.
+   (The "paste ID" panel is for **ref items**: configure an external service
+   connection in admin first, then paste an external ID under it.)
 5. Watch the DAG light up in real time, and inspect each node's trace and
    artifacts when it finishes.
 

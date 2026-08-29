@@ -31,11 +31,11 @@ def build_ready_queues(
     """Build the workspace row and ready queue per workspace with candidates."""
     workspaces: dict[str, dict[str, Any]] = {}
     queues: dict[str, deque[ReadyCandidate]] = {}
-    worker._last_ready_stats = {"hit": 0, "miss": 0}
+    worker.state.last_ready_stats = {"hit": 0, "miss": 0}
     for workspace_id in workspace_ids:
         query_started = monotonic()
         workspace = worker.job_db.get_workspace(workspace_id)
-        phases = worker._scan_phases
+        phases = worker.state.scan_phases
         phases["ws_query"] = phases.get("ws_query", 0.0) + monotonic() - query_started
         if workspace is None:
             continue
@@ -50,7 +50,7 @@ def build_ready_queues(
     runnable_ids = {
         mark["id"] for jobs in jobs_by_workspace.values() for _, mark in jobs if is_runnable(mark)
     }
-    for cached_id in list(worker._job_evals):
+    for cached_id in list(worker.state.job_evals):
         if cached_id not in runnable_ids:
-            del worker._job_evals[cached_id]
+            del worker.state.job_evals[cached_id]
     return workspaces, queues

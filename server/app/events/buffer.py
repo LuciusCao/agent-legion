@@ -3,13 +3,18 @@ from __future__ import annotations
 from collections import deque
 from threading import Lock
 
+from server.app.db.dialect import ConnectSource
 from server.app.db.retry import with_database_conflict_retry
 from server.app.db.transaction import write_transaction
 from server.app.events.models import CompactedJobEvents, JobEvent, JobEventKind
 
 
 class JobEventBuffer:
-    def __init__(self, db_path: str | None = None, max_events: int = 10000) -> None:
+    """In-memory event buffer; ``db_path`` (the JobQueries facade in
+    production wiring, a bare DSN in tests, None for the legacy in-memory
+    mode) only feeds the revision sequence bump — BOUNDARY-DATA-001, #187."""
+
+    def __init__(self, db_path: ConnectSource | None = None, max_events: int = 10000) -> None:
         self._db_path = db_path
         self._max_events = max_events
         self._events: deque[JobEvent] = deque()
@@ -47,9 +52,6 @@ class JobEventBuffer:
 
     def record_job_updated(self, workspace_id: str, job_id: str) -> int:
         return self.record(workspace_id, job_id, "updated")
-
-    def record_job_created(self, workspace_id: str, job_id: str) -> int:
-        return self.record(workspace_id, job_id, "created")
 
     def record_jobs_created(self, workspace_id: str, job_ids: list[str]) -> int:
         if not job_ids:

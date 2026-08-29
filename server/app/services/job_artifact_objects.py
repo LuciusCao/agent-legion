@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.storage import ObjectStorage
 
@@ -75,7 +75,8 @@ def _sha256(path: Path) -> str:
 class JobArtifactObjectStore:
     """Upload/register/lookup service for job artifacts in object storage."""
 
-    def __init__(self, database_dsn: DatabaseDsn, storage: ObjectStorage | None = None) -> None:
+    def __init__(self, database_dsn: ConnectSource, storage: ObjectStorage | None = None) -> None:
+        # database_dsn: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187).
         self._dsn = database_dsn
         # Public seam: tests inject a fake ObjectStorage; an unconfigured
         # instance keeps None and every caller falls back to the job_dir.
@@ -278,6 +279,11 @@ class JobArtifactObjectStore:
     def open_stream(self, row: dict[str, Any]) -> BinaryIO:
         assert self.storage is not None
         return self.storage.open_stream(str(row["storage_key"]))
+
+    def open_range_stream(self, row: dict[str, Any], start: int, end: int) -> BinaryIO:
+        """Ranged read for media seek: [start, end] inclusive."""
+        assert self.storage is not None
+        return self.storage.open_range(str(row["storage_key"]), start, end)
 
     def delete_objects(self, rows: list[dict[str, Any]]) -> None:
         """Best-effort object deletion for manifest rows snapshot before a

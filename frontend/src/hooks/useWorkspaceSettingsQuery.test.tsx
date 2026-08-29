@@ -9,22 +9,22 @@ import {
 } from './useWorkspaceSettingsQuery'
 import { useSettingStore } from '../stores/settingStore'
 import { api } from '../api'
-import { getWorkspaceExecutorConfiguration } from '../api/executorApi'
+import { getWorkspaceExecutionConfiguration } from '../api/agentCatalogApi'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
 }))
 
-vi.mock('../api/executorApi', () => ({
-  getWorkspaceExecutorConfiguration: vi.fn(),
+vi.mock('../api/agentCatalogApi', () => ({
+  getWorkspaceExecutionConfiguration: vi.fn(),
 }))
 
 const mockApi = vi.mocked(api)
-const mockGetWorkspaceExecutorConfiguration = vi.mocked(
-  getWorkspaceExecutorConfiguration
+const mockGetWorkspaceExecutionConfiguration = vi.mocked(
+  getWorkspaceExecutionConfiguration
 )
 
-const executorConfig = {
+const executionConfig = {
   node_limits: [],
   migration_warnings: ['legacy migration'],
   agent_capacity: null,
@@ -40,8 +40,6 @@ function mockSnapshotApi(workspaceName = '空间一') {
     if (path === '/api/workspaces/ws1/settings') {
       return Promise.resolve({
         entityType: 'knowledge',
-        intakeModes: ['direct_ids'],
-        labelOverrides: { direct_ids: '输入 ID' },
         workflowKey: 'knowledge_content',
       })
     }
@@ -61,7 +59,7 @@ function mockSnapshotApi(workspaceName = '空间一') {
     }
     return Promise.resolve({})
   })
-  mockGetWorkspaceExecutorConfiguration.mockResolvedValue(executorConfig)
+  mockGetWorkspaceExecutionConfiguration.mockResolvedValue(executionConfig)
 }
 
 function makeWrapper(client: QueryClient) {
@@ -77,8 +75,6 @@ function resetStore() {
     workspaceDescription: '',
     settings: {
       entityType: 'question',
-      intakeModes: [],
-      labelOverrides: {},
       workflowKey: '',
     },
     originalWorkspaceName: '',
@@ -86,19 +82,19 @@ function resetStore() {
     originalSettings: null,
     isDirty: false,
     saveError: null,
-    executorConfiguration: {
+    executionConfiguration: {
       node_limits: [],
       migration_warnings: [],
       agent_capacity: null,
     },
-    originalExecutorConfiguration: null,
+    originalExecutionConfiguration: null,
   })
 }
 
 describe('useWorkspaceSettingsQuery', () => {
   beforeEach(() => {
     mockApi.mockReset()
-    mockGetWorkspaceExecutorConfiguration.mockReset()
+    mockGetWorkspaceExecutionConfiguration.mockReset()
     resetStore()
   })
 
@@ -116,9 +112,8 @@ describe('useWorkspaceSettingsQuery', () => {
     expect(snapshot.workspaceName).toBe('空间一')
     expect(snapshot.workspaceDescription).toBe('描述一')
     expect(snapshot.settings.entityType).toBe('knowledge')
-    expect(snapshot.settings.intakeModes).toEqual(['direct_ids'])
-    expect(snapshot.settings.labelOverrides).toEqual({ direct_ids: '输入 ID' })
-    expect(snapshot.executorConfiguration.migration_warnings).toEqual([
+    expect(snapshot.settings.workflowKey).toBe('knowledge_content')
+    expect(snapshot.executionConfiguration.migration_warnings).toEqual([
       'legacy migration',
     ])
     expect(snapshot.agentRoutes).toHaveLength(1)
@@ -129,7 +124,7 @@ describe('useWorkspaceSettingsQuery', () => {
       Object.assign(new Error('Not Found'), { status: 404 })
     )
     mockApi.mockResolvedValue({})
-    mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
+    mockGetWorkspaceExecutionConfiguration.mockResolvedValue({
       node_limits: [],
       migration_warnings: [],
     })
@@ -170,7 +165,7 @@ describe('useWorkspaceSettingsQuery', () => {
     mockApi.mockRejectedValue(
       Object.assign(new Error('HTTP 500'), { status: 500 })
     )
-    mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
+    mockGetWorkspaceExecutionConfiguration.mockResolvedValue({
       node_limits: [],
       migration_warnings: [],
     })
@@ -187,7 +182,7 @@ describe('useWorkspaceSettingsQuery', () => {
 describe('useSettingStoreHydration', () => {
   beforeEach(() => {
     mockApi.mockReset()
-    mockGetWorkspaceExecutorConfiguration.mockReset()
+    mockGetWorkspaceExecutionConfiguration.mockReset()
     resetStore()
   })
 
@@ -276,7 +271,7 @@ describe('useSettingStoreHydration', () => {
 
   it('writes saveError when the snapshot load fails', async () => {
     mockApi.mockRejectedValue(new Error('HTTP 500: Internal Server Error'))
-    mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
+    mockGetWorkspaceExecutionConfiguration.mockResolvedValue({
       node_limits: [],
       migration_warnings: [],
     })

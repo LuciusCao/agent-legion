@@ -125,7 +125,7 @@ worker machine, provide the same token to the Worker container via
 deployment doc, §2) and set the pi provider's `apiKey` to
 `"$LLM_GATEWAY_TOKEN"` in the mounted `models.json` — the pi CLI interpolates
 the variable and sends it as `Authorization: Bearer`, which the gateway
-accepts. `worker/execution_run.py::agent_subprocess_env` takes the token from the
+accepts. `worker/execution/run.py::agent_subprocess_env` takes the token from the
 worker environment; a value in the config file is ignored. The variable is
 passed through to the pi subprocess environment.
 
@@ -150,11 +150,18 @@ essentials, for orientation:
 
 - One Worker **container** per machine; an internal supervisor runs up to
   `max_concurrency` concurrent Agent executions.
-- The Worker registers with the Host using a registration token delivered as a
-  **secret file** (`AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE` on the Host,
-  `/run/secrets/agent_worker_register_token` in the container) — never in the
-  image, Compose YAML or command line — and receives a per-worker token in
-  exchange. Per-worker tokens are stored server-side as sha256 hashes only.
+- The Worker registers with the Host using **scoped registration tokens**
+  issued per workspace in the admin UI (workspace 设置 → Agent 与 Worker,
+  issue #35). The global register token and the "all workspaces" token
+  variant are retired: tokens are pasted into the Worker console
+  (配置 → Workspace 访问) and every registration presents all configured
+  tokens at once — the Host resolves the union workspace scope and rejects
+  the whole registration if any token is unknown or deleted. Registration
+  returns the per-workspace rows (id + name) so the console can label each
+  token. Per-worker tokens are stored server-side as sha256 hashes only.
+  Deleting a key is the only way to cut access and it is immediate: the
+  Host cascade-deletes Workers bound solely to that key in the same
+  transaction (their worker_token dies on the next claim/heartbeat).
 - Protocol: `register → claim → heartbeat → result` over
   `/api/agent-workers/register`, `/api/agent-executions/claim`,
   `/api/agent-executions/{id}/heartbeat` and `/api/agent-executions/{id}/result`.
@@ -206,7 +213,7 @@ in:
   requires a resolvable `velites` binary: with velites missing, the in-loop
   hot guard rejects the change and logs it, and the new capacity takes effect
   on the next loop iteration once velites is installed
-  (`worker/runtime_controls.py:58-67`). Editing the state-copy YAML
+  (`worker/runtime/controls.py:58-67`). Editing the state-copy YAML
   `data/agent-worker-service/worker.yaml` directly works the same way — that
   is the bare-metal path; in container deployments the state copy lives in
   the control volume.
@@ -268,9 +275,9 @@ flipping the field:
 - **Sandbox:** the `workflows.pi.velites_no_sandbox` escape hatch is retired
   with the yaml block; `execution.no_sandbox` is always false in manifests, so
   a sandbox incident currently requires a code change, not a config flip.
-- **Execution defaults:** provider/model/thinking come from the workspace
-  Settings「Agent 默认配置」or per-node Studio overrides (strict chain, no
-  global fallback) — runtime migration never touches them.
+- **Execution defaults:** provider/model/thinking come from the workflow-level
+  `execution:` default or per-node Studio overrides (strict chain, no
+  workspace/global fallback) — runtime migration never touches them.
 
   > **Status note:** the runtime migration described above is complete; the
   > canary playbook is kept as operational context for future runtime changes.
@@ -280,9 +287,9 @@ flipping the field:
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | Worker stays up but reports registration unavailable | Host unreachable or returning 5xx | The Worker retries registration in-process; verify `host_url` and the §3 smoke test, then inspect Host logs if 5xx persists |
-| Worker becomes unhealthy with registration rejected | Registration token mismatch or Worker revoked | `make stack-logs STACK=worker`; verify the token file and registration status |
+| Worker becomes unhealthy with registration rejected | Registration token mismatch, or every key the Worker holds was deleted on the Host | `make stack-logs STACK=worker`; verify the configured keys still exist in the workspace settings and the Worker's registration status |
 | Worker exits with code 2 and logs `启动预检失败` / startup preflight failure | A declared runtime's binary cannot be resolved (e.g. `velites` declared but not installed), or `max_code_concurrency > 0` without `velites` | Install the binary — either on PATH (`cargo build --release` in `velites/`) or as the bundled copy (`./scripts/ensure-velites.sh --dest data/bin`, per-platform) — drop the runtime from the Worker's `runtimes`, or set `max_code_concurrency: 0`, then restart |
-| Registration returns 401 | `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` on the Host does not match the worker's token file | Re-copy `deploy/secrets/agent_worker_register_token` to the worker machine (deployment doc §4) |
+| Registration returns 401 | A scoped token is unknown or deleted on the Host (the Host rejects the whole registration when any token fails — deletion is the only lifecycle action, there is no revoke) | Issue a new key in the admin UI (workspace 设置 → Agent 与 Worker), add it in the Worker console (配置 → Workspace 访问), and delete the stale key — deletion cascade-cuts every Worker still bound to it |
 | Registration returns 400 `unsupported Agent Worker protocol` | Worker's `protocol_version` below `agent_workers.min_protocol_version` | Rebuild the worker image from the current repo; lower the minimum only as a short emergency escape hatch |
 | Claim returns 204 forever | No queued executions compatible with the worker's runtimes/labels | Check the workflow's Agent node routing and the worker's declared `runtimes` / `labels` |
 | Heartbeat/result 409 (`execution is not owned by this Worker`) | Network partition or Host restart — the execution lease expired and was reassigned/failed | Terminal for that execution; rerun the job. Persistent storms mean the tailnet is unstable |
@@ -307,23 +314,29 @@ flipping the field:
   `deploy/.env`/environment passthrough and is referenced from the worker pi
   provider config as `"$LLM_GATEWAY_TOKEN"` — never as a literal in
   `models.json`, Compose YAML, or on a command line.
-- **Registration token handling:** `AGENT_LEGION_WORKER_REGISTER_TOKEN` (or the
-  `_FILE` variant) lives in the Host's environment/secret mount and in
-  `deploy/secrets/` on each worker machine — never in `config/*.yaml`, worker
-  YAML, images (`.dockerignore` excludes `**/secrets` and `**/.env`), or logs.
+- **Registration token handling:** registration uses workspace-scoped tokens
+  (issue #35): issue them per workspace in the Host Web UI
+  （设置 → Worker Token） and add them on each worker machine via the Worker
+  console or `workerctl configure --register-token-file` — never in
+  `config/*.yaml`, worker YAML, images (`.dockerignore` excludes `**/secrets`
+  and `**/.env`), or logs. The former global
+  `AGENT_LEGION_WORKER_REGISTER_TOKEN`（or `_FILE`）env vars are retired and
+  **fail startup** when set.
 - **Worker hygiene:** no credentials, secret-bearing prompts, or API keys in
   worker logs; the Worker workdir volume holds only transient execution data
   and may be cleaned per retention policy. Code executions receive
   vault-resolved node secrets over the claim response; they are held in memory
-  only, fed to the child via stdin, and scrubbed before any persistence — a
-  secret value must never appear in the workdir volume or logs (enforced by
-  `strip_secret_config`, tested by `test_secrets_stay_off_disk`).
+  only and fed to the child via stdin — the Host-side
+  `split_manifest_config` keeps secret-marked keys out of the dispatch
+  manifest before it ever reaches the Worker, and nothing config-derived is
+  persisted on the Worker side, so a secret value must never appear in the
+  workdir volume or logs (tested by `test_secrets_stay_off_disk`).
 - **Worker labels:** labels travel in the register payload and are listed by
   `GET /api/agent-workers`. They are routing metadata — never put secrets,
   tokens, or other sensitive values into label keys or values.
 - **Bundle/archive safety:** execution bundles and result archives are
   path-validated on both ends (no absolute paths, `..`, or links) before
   extraction. With the presigned channel enabled, the result archive no
-  longer embeds artifacts (`worker/upload_queue.py`).
+  longer embeds artifacts (`worker/upload/queue.py`).
 - **Policy:** precondition 1 (§2) is a hard blocker — encrypted transport is
   not policy approval.

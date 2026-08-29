@@ -83,7 +83,7 @@ def try_claim_code_worker_node(
     # (resolve_dispatch_node_code, EXEC-CODE-002).
     try:
         code_text = resolve_dispatch_node_code(
-            worker.job_db.path,
+            worker.job_db,
             worker.settings.executor_runtime.workflows.custom_nodes_enabled,
             workspace_id,
             workflow_key,
@@ -121,11 +121,11 @@ def try_claim_code_worker_node(
         # reference or connection fails the node at dispatch, not mid-claim.
         # The resolved plaintext itself is discarded — only references and
         # non-secret values are persisted (VAULT-SECRET-001).
-        resolved = VaultService(worker.job_db.path, worker.settings.config).resolve_secret_refs(
+        resolved = VaultService(worker.job_db, worker.settings.config).resolve_secret_refs(
             {**config, **secret_config}, workspace_id
         )
         inject_connection_config(
-            resolved, schema, ConnectionTokenService(worker.job_db.path, worker.settings.config)
+            resolved, schema, ConnectionTokenService(worker.job_db, worker.settings.config)
         )
     except (ValueError, VaultError, JobServiceError) as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
@@ -161,9 +161,16 @@ def try_claim_code_worker_node(
             # fails this node instead of poisoning every later poll pass.
             fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
         except Exception:
-            # Unexpected failure (unconfigured bundle dir, DB errors): same
-            # trade-off as the agent enqueue pool — log and leave the node
-            # pending so the next poll pass re-evaluates it.
+            # #204 broad-except audit: deliberate per-node containment.
+            # Expected configuration failures (ValueError / VaultError /
+            # JobServiceError) are caught above and fail this node; whatever
+            # lands here is unexpected (unconfigured bundle dir, DB error).
+            # The poll pass must survive it: the node is left pending for the
+            # next pass to re-evaluate (the in-flight marker is discarded in
+            # the finally), so a transient outage self-heals while a
+            # persistent one repeats loudly — logger.exception keeps the full
+            # traceback. Narrowing this further would let one broken node
+            # abort the whole claim pass.
             logger.exception("code enqueue failed for %s.%s", job_id, node.key)
         finally:
             dispatch.discard_in_flight(job_id, node.key)
@@ -175,5 +182,5 @@ def try_claim_code_worker_node(
         dispatch.discard_in_flight(job_id, node.key)
         return False
     key = f"code:{node.capability}"
-    worker._pass_claim_counts[key] = worker._pass_claim_counts.get(key, 0) + 1
+    worker.state.pass_claim_counts[key] = worker.state.pass_claim_counts.get(key, 0) + 1
     return True

@@ -2,9 +2,9 @@
 
 The bundled MCP server exposes one context tool per chat session; this module
 resolves the session, enforces the run token's workspace binding, and assembles
-the payload: the bound workspace id, the human's currently selected Studio node
-(live value — the frontend pushes selection changes onto the session row), and
-a structural summary of the workspace's active workflow revision.
+the payload: the bound workspace id, the human's live Studio node selection and
+the canvas' unpublished draft YAML (both session-row columns pushed by the
+frontend), plus the active workflow revision's structural summary.
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ def build_session_context(
     return {
         "workspace_id": session["workspace_id"],
         "selected_node_key": session.get("selected_node_key"),
+        "draft_yaml": session.get("draft_yaml"),
         "workflow": _active_workflow_summary(job_db, str(session["workspace_id"])),
     }
 

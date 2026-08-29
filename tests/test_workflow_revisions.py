@@ -425,10 +425,14 @@ def test_get_active_workflow_revision_returns_definition_and_yaml(tmp_path: Path
     with authenticate_client(TestClient(app)) as client:
         response = client.post(
             "/api/workspaces",
-            json={"name": "Studio", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "education_video_problems_generation", "name": "Studio"},
         )
         assert response.status_code == 200
         workspace_id = response.json()["workspace"]["id"]
+        # v62: creation seeds nothing; publish the demo revision explicitly.
+        from tests.helpers import publish_builtin_revision
+
+        publish_builtin_revision(app.state.job_db, workspace_id)
 
         active = client.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
 
@@ -452,10 +456,14 @@ def test_get_workflow_revision_detail_returns_definition_and_yaml(tmp_path: Path
     with authenticate_client(TestClient(app)) as client:
         response = client.post(
             "/api/workspaces",
-            json={"name": "Studio", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "education_video_problems_generation", "name": "Studio"},
         )
         assert response.status_code == 200
         workspace_id = response.json()["workspace"]["id"]
+        # v62: creation seeds nothing; publish the demo revision explicitly.
+        from tests.helpers import publish_builtin_revision
+
+        publish_builtin_revision(app.state.job_db, workspace_id)
 
         active = client.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
         assert active.status_code == 200
@@ -496,16 +504,27 @@ def test_get_workflow_revision_detail_rejects_other_workspace_revision(
     with authenticate_client(TestClient(app)) as client:
         first = client.post(
             "/api/workspaces",
-            json={"name": "First", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "first_ws", "name": "First"},
         )
         second = client.post(
             "/api/workspaces",
-            json={"name": "Second", "default_workflow_key": "education_video_problems_generation"},
+            json={"id": "second_ws", "name": "Second"},
         )
         assert first.status_code == 200
         assert second.status_code == 200
         first_id = first.json()["workspace"]["id"]
         second_id = second.json()["workspace"]["id"]
+        # v62: creation seeds nothing; publish into the first workspace. The
+        # /active lookup resolves default_workflow_key, which equals the
+        # workspace id here — so the built-in definition is published with
+        # its key rewritten to the id (the JobQueries-level key rewrite the
+        # publish guard would demand of an HTTP draft anyway).
+        from dataclasses import replace
+
+        definition = load_builtin_definition("education_video_problems_generation")
+        if definition.key != first_id:
+            definition = replace(definition, key=first_id)
+        WorkflowRevisionService(app.state.job_db).publish_workspace_revision(first_id, definition)
         active = client.get(f"/api/workspaces/{first_id}/workflow-revisions/active")
         assert active.status_code == 200
         first_revision_id = active.json()["revision"]["id"]

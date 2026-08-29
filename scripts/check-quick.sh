@@ -96,6 +96,20 @@ cleanup_lock() {
   rm -rf "$lock_dir"
 }
 
+# Machine-wide gate queue (scripts/gate-queue.sh): with several agent
+# worktrees on one host, parallel gates thrash the CPU (observed ~1h for the
+# last of 4 concurrent quick gates; even 2 concurrent gates made
+# timing-sensitive tests flake on timeouts). A slot in the shared git common
+# directory therefore serializes gates at AGENT_LEGION_MAX_PARALLEL_GATES
+# (default 1); later gates queue with holder announcements and then run at
+# the full machine budget. Acquired after the worktree lock so same-worktree
+# serialization stays first.
+source "$ROOT_DIR/scripts/gate-queue.sh"
+acquire_gate_slot
+cleanup_gate_slot() {
+  release_gate_slot
+}
+
 COVERAGE_FILE="${COVERAGE_FILE:-$ROOT_DIR/.coverage.check-quick.$$}"
 export COVERAGE_FILE
 if [[ -z "${KEEP_COVERAGE:-}" ]]; then
@@ -112,20 +126,22 @@ cleanup_logs() {
   rm -rf "$log_dir"
 }
 if [[ -z "${KEEP_COVERAGE:-}" ]]; then
-  trap 'cleanup_lock; cleanup_logs; cleanup_coverage' EXIT
+  trap 'cleanup_lock; cleanup_gate_slot; cleanup_logs; cleanup_coverage' EXIT
 else
-  trap 'cleanup_lock; cleanup_logs' EXIT
+  trap 'cleanup_lock; cleanup_gate_slot; cleanup_logs' EXIT
 fi
 
 echo "=== Parallel Quick Gate ==="
 echo "Parallel static/test rounds; the API contract check runs once between them."
 lanes_started_at=$SECONDS
 
-# Shared per-lane job cap: min(4, core count) keeps parallel lanes polite on
-# machines running several worktrees (per-lane envs override; CI 4-vCPU
-# runners are unaffected).
+# Shared per-lane job cap: worktree-aware (scripts/gate-jobs.sh) — the
+# machine budget divides across live gates ((cores-2)/N, clamped to [2,8]);
+# the sibling-lock probe applies when the queue is not visible (per-lane envs
+# override; CI 4-vCPU runners are unaffected). Recomputed per round, not
+# snapshotted once: a second gate may take its slot between rounds, and each
+# round should run against the concurrency that round actually sees.
 source "$ROOT_DIR/scripts/gate-jobs.sh"
-default_gate_jobs="$(detect_gate_default_jobs)"
 
 lane_enabled() {
   [[ "$GATE_LANES" == "static" || " $GATE_LANES " == *" $1 "* ]]
@@ -146,7 +162,7 @@ run_rust_round() {
   # Cargo defaults to one rustc job per core; keep the gate polite on machines
   # running several worktrees (AGENT_LEGION_RUST_WORKERS overrides; CI 4-vCPU
   # runners are unaffected).
-  rust_jobs="${AGENT_LEGION_RUST_WORKERS:-$default_gate_jobs}"
+  rust_jobs="${AGENT_LEGION_RUST_WORKERS:-$(detect_gate_default_jobs_worktree_aware)}"
   if [[ "$round" == "static-check" ]]; then
     cargo fmt --all -- --check
     cargo clippy --all-targets --locked -j "$rust_jobs" -- -D warnings
@@ -159,6 +175,7 @@ run_round() {
   round="$1"
   backend_phase="$2"
   frontend_phase="$3"
+  rust_phase="$4"
   backend_log="$log_dir/backend-${round}.log"
   frontend_log="$log_dir/frontend-${round}.log"
   rust_log="$log_dir/rust-${round}.log"
@@ -167,30 +184,39 @@ run_round() {
   backend_pid=""
   frontend_pid=""
   rust_pid=""
+  # An empty phase means the lane runs in another round of this gate (test-round
+  # staggering below), not that it was trimmed away — stay silent so the
+  # staggering does not spam "Skipping" lines; a GATE_LANES trim still announces.
   if lane_enabled backend; then
-    BACKEND_GATE_PHASE="$backend_phase" \
-      "$ROOT_DIR/scripts/check-quick-backend.sh" >"$backend_log" 2>&1 &
-    backend_pid=$!
+    if [[ -n "$backend_phase" ]]; then
+      BACKEND_GATE_PHASE="$backend_phase" \
+        "$ROOT_DIR/scripts/check-quick-backend.sh" >"$backend_log" 2>&1 &
+      backend_pid=$!
+    fi
   else
     echo "Skipping backend ${round} lane (GATE_LANES=$GATE_LANES)."
   fi
   if lane_enabled frontend; then
-    frontend_api_check="${FRONTEND_API_CHECK:-1}"
-    if [[ "$round" == "static-check" && -z "${FRONTEND_API_CHECK:-}" ]] && lane_enabled backend; then
-      # api:check boots the backend app; the integration step below runs it once.
-      frontend_api_check=0
+    if [[ -n "$frontend_phase" ]]; then
+      frontend_api_check="${FRONTEND_API_CHECK:-1}"
+      if [[ "$round" == "static-check" && -z "${FRONTEND_API_CHECK:-}" ]] && lane_enabled backend; then
+        # api:check boots the backend app; the integration step below runs it once.
+        frontend_api_check=0
+      fi
+      FRONTEND_GATE_PHASE="$frontend_phase" \
+        FRONTEND_API_CHECK="$frontend_api_check" \
+        FRONTEND_TEST_MODE="${FRONTEND_TEST_MODE:-test}" \
+        "$ROOT_DIR/scripts/check-quick-frontend.sh" >"$frontend_log" 2>&1 &
+      frontend_pid=$!
     fi
-    FRONTEND_GATE_PHASE="$frontend_phase" \
-      FRONTEND_API_CHECK="$frontend_api_check" \
-      FRONTEND_TEST_MODE="${FRONTEND_TEST_MODE:-test}" \
-      "$ROOT_DIR/scripts/check-quick-frontend.sh" >"$frontend_log" 2>&1 &
-    frontend_pid=$!
   else
     echo "Skipping frontend ${round} lane (GATE_LANES=$GATE_LANES)."
   fi
   if lane_enabled rust; then
-    run_rust_round "$round" >"$rust_log" 2>&1 &
-    rust_pid=$!
+    if [[ -n "$rust_phase" ]]; then
+      run_rust_round "$round" >"$rust_log" 2>&1 &
+      rust_pid=$!
+    fi
   else
     echo "Skipping rust ${round} lane (GATE_LANES=$GATE_LANES)."
   fi
@@ -253,17 +279,55 @@ run_round() {
   fi
 }
 
-run_round "static-check" "static" "static"
+# GATE_SKIP_STATIC=1 (set only by scripts/check.sh's postgres segment): the
+# segment re-enters this gate for the backend test tier alone, so the static
+# round and the api-contract integration step are skipped — the unit segment
+# already ran every static check, and re-running them per tier would double
+# the full gate's cost for identical results. Lock, slot queue, and coverage
+# handling are untouched; standalone invocations never set the knob.
+if [[ "${GATE_SKIP_STATIC:-0}" == "1" ]]; then
+  echo "Static round skipped (GATE_SKIP_STATIC=1; test rounds only)."
+else
+  run_round "static-check" "static" "static" "static"
+fi
 # Integration step: the OpenAPI contract spans backend (schema export boots the
 # full app) and frontend (type generation), so it runs once here instead of
 # competing for CPU/memory inside the parallel static round.
-if lane_enabled backend && lane_enabled frontend; then
+if [[ "${GATE_SKIP_STATIC:-0}" != "1" ]] && lane_enabled backend && lane_enabled frontend; then
   FRONTEND_GATE_PHASE="api-contract" \
     "$ROOT_DIR/scripts/check-quick-frontend.sh"
 fi
 if [[ "$GATE_LANES" != "static" ]]; then
-  echo "Backend test tier: ${GATE_TIER:-full}"
-  run_round "test" "test" "test"
+  # GATE_TIER=aff is the agent inner-loop combination: backend affected-test
+  # selection over the unit tier (PostgreSQL offline, index-backed; falls
+  # back to the plain unit tier without an index) + frontend affected-test
+  # selection (`vitest related`). A pass is NOT a full-gate pass — the full
+  # suite stays the pre-push/CI boundary; aff only trims the edit-test
+  # iteration cost. Prime the backend index with GATE_TIER=aff-index.
+  #
+  # Test-round staggering: the three test lanes used to start together and
+  # oversubscribe the machine — backend xdist workers + vitest + cargo
+  # (~20 jobs on a 10-core box), the same CPU contention the machine-wide
+  # queue removed *between* gates. Measured on an otherwise idle machine:
+  # the backend unit tier alone takes ~44s, yet inside a fully parallel gate
+  # the same suite stretched past 10 minutes. The backend lane now runs
+  # alone first; frontend and rust follow in parallel once it finishes. A
+  # backend failure does not skip the rest — every lane still reports. The
+  # static round stays fully parallel (lint/typecheck are light).
+  test_failed=0
+  if [[ "${GATE_TIER:-full}" == "aff" ]]; then
+    echo "Backend test tier: aff (inner loop)"
+    GATE_TIER=aff run_round "test-backend" "test" "" "" || test_failed=1
+    FRONTEND_TEST_MODE=related run_round "test-rest" "" "test" "test" || test_failed=1
+  else
+    echo "Backend test tier: ${GATE_TIER:-full}"
+    run_round "test-backend" "test" "" "" || test_failed=1
+    FRONTEND_TEST_MODE="${FRONTEND_TEST_MODE:-test}" run_round "test-rest" "" "test" "test" || test_failed=1
+  fi
+  if [[ "$test_failed" -ne 0 ]]; then
+    echo "Test round failed (see lane outputs above)." >&2
+    exit 1
+  fi
 fi
 
 echo "Parallel quick gate passed in $((SECONDS - lanes_started_at))s."

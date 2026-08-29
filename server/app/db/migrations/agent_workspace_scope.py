@@ -27,6 +27,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from server.app.db.migrations.agent_workspace_scope_pinned import (
+    warn_pinned_versions_left_behind,
+)
+
 logger = logging.getLogger(__name__)
 
 # Seed-if-absent per (workspace, capability): a workspace that already has a
@@ -107,5 +111,6 @@ def migrate_agent_workspace_scope(conn: Any) -> None:
             row["workspace_id"],
             row["capability"],
         )
+    warn_pinned_versions_left_behind(conn)
     conn.execute(_DELETE_GLOBAL_AGENTS)
     conn.execute(_CREATE_WORKSPACE_INDEX)

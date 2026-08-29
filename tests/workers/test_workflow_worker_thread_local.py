@@ -32,8 +32,8 @@ def test_worker_creates_the_single_code_pool(tmp_path: Path) -> None:
     worker._poll()
 
     # P-0.5: exactly one implicit code pool, sized from code_capacity.
-    assert set(worker._pools) == {"code"}
-    assert worker._pools["code"]._max_workers == 2
+    assert set(worker.state.pools) == {"code"}
+    assert worker.state.pools["code"]._max_workers == 2
     # No per-workspace pools should exist
     assert not hasattr(worker, "_ws_local_executors") or not worker._ws_local_executors
     assert not hasattr(worker, "_ws_agent_executors") or not worker._ws_agent_executors
@@ -66,7 +66,7 @@ def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
 
     assert processed is True
     assert worker.leases.active_counts("code").get("global", 0) == 1
-    assert len(worker._futures) == 1
+    assert len(worker.state.futures) == 1
 
     executor.block_event.set()
     worker.stop()
@@ -172,10 +172,47 @@ def test_stop_shuts_down_shared_pools(tmp_path: Path) -> None:
     worker = _make_worker(tmp_path, db_path, executor, [_make_definition([_local_node("fetch")])])
 
     worker._poll()
-    pool = worker._pools["code"]
+    pool = worker.state.pools["code"]
     worker.stop()
 
     assert pool._shutdown is True
+
+
+def test_poll_loop_thread_survives_repeated_poll_failures(tmp_path: Path, caplog) -> None:
+    """#204: the poll loop's broad catch is the thread's life support — a
+    failing _poll (programming error or infrastructure outage) is logged
+    with its traceback and the loop keeps running; the next pass is the
+    built-in retry."""
+    import logging
+    import time
+
+    db_path = TEST_DATABASE_URL
+    executor = RecordingExecutor("code")
+    worker = _make_worker(tmp_path, db_path, executor, [_make_definition([_local_node("fetch")])])
+
+    calls = {"count": 0}
+
+    def failing_poll():
+        calls["count"] += 1
+        raise RuntimeError("infra outage")
+
+    real_poll = worker._poll
+    worker._poll = failing_poll
+
+    with caplog.at_level(logging.ERROR, logger="server.app.workflow_worker.thread"):
+        worker.start()
+        try:
+            deadline = time.monotonic() + 5
+            while calls["count"] < 2 and time.monotonic() < deadline:
+                time.sleep(0.05)
+        finally:
+            worker._poll = real_poll
+            worker.stop()
+
+    assert calls["count"] >= 2, "the poll loop died instead of retrying after a failure"
+    failures = [rec for rec in caplog.records if "workflow worker poll failed" in rec.message]
+    assert len(failures) >= 2
+    assert all(rec.exc_info for rec in failures), "poll failures must log the traceback"
 
 
 def test_poll_skips_paused_job(tmp_path: Path) -> None:
@@ -203,7 +240,7 @@ def test_poll_skips_paused_job(tmp_path: Path) -> None:
 
     assert processed is False
     assert worker.leases.active_counts("code").get("global", 0) == 0
-    assert len(worker._futures) == 0
+    assert len(worker.state.futures) == 0
 
     worker.stop()
 
@@ -374,8 +411,8 @@ def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkey
     processed = worker._poll()
 
     assert processed is True
-    assert worker._futures
-    for future in worker._futures.values():
+    assert worker.state.futures
+    for future in worker.state.futures.values():
         future.result(timeout=5)
 
     node = queries.get_job_node(job["id"], "intake_knowledge_points")

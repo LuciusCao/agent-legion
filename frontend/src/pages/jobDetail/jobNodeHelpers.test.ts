@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { deriveJobDetailPresentation } from './deriveJobDetailPresentation'
 import { toDagNodes } from './jobNodeHelpers'
+import { toNodeCatalog } from './deriveJobDetailPresentation'
 import type { JobDetail } from '../../types/jobTypes'
 
 function makeNode(
@@ -70,78 +70,52 @@ function makeDetail(nodes: JobDetail['nodes']): JobDetail {
   }
 }
 
-describe('deriveJobDetailPresentation', () => {
-  it('returns previewable flags based on generate nodes', () => {
+describe('toNodeCatalog', () => {
+  it('carries key, label, capability and the after edges for every node', () => {
+    // Regression pin for fd74c5e1: dropping `after` silently broke run-to
+    // start-node validation (ancestorClosure walks these edges).
     const detail = makeDetail([
       makeNode('generate_key_info', 'completed'),
-      makeNode('generate_possible_errors', 'completed'),
-      makeNode('review_key_info', 'running'),
-      makeNode('review_possible_errors', 'pending'),
-      makeNode('assemble_items', 'pending'),
+      makeNode('review_key_info', 'running', {
+        label: 'Review key info',
+        capability: 'review_key_info',
+        after: ['generate_key_info'],
+      }),
+      makeNode('assemble_items', 'pending', {
+        after: ['generate_key_info', 'review_key_info'],
+      }),
     ])
 
-    const result = deriveJobDetailPresentation(detail)
+    const catalog = toNodeCatalog(detail)
 
-    expect(result.keyInfoPreviewable).toBe(true)
-    expect(result.possibleErrorsPreviewable).toBe(true)
-    expect(result.keyInfoReviewAttempted).toBe(false)
-    expect(result.possibleErrorsReviewAttempted).toBe(false)
+    expect(catalog).toEqual({
+      key: 'demo_workflow',
+      label: 'demo_workflow',
+      nodes: [
+        {
+          key: 'generate_key_info',
+          label: 'generate_key_info',
+          capability: 'generate_key_info',
+          after: [],
+        },
+        {
+          key: 'review_key_info',
+          label: 'Review key info',
+          capability: 'review_key_info',
+          after: ['generate_key_info'],
+        },
+        {
+          key: 'assemble_items',
+          label: 'assemble_items',
+          capability: 'assemble_items',
+          after: ['generate_key_info', 'review_key_info'],
+        },
+      ],
+    })
   })
 
-  it('returns reviewed flags based on review nodes', () => {
-    const detail = makeDetail([
-      makeNode('generate_key_info', 'completed'),
-      makeNode('generate_possible_errors', 'completed'),
-      makeNode('review_key_info', 'completed'),
-      makeNode('review_possible_errors', 'completed'),
-      makeNode('assemble_items', 'pending'),
-    ])
-
-    const result = deriveJobDetailPresentation(detail)
-
-    expect(result.keyInfoPreviewable).toBe(true)
-    expect(result.possibleErrorsPreviewable).toBe(true)
-    expect(result.keyInfoReviewAttempted).toBe(true)
-    expect(result.possibleErrorsReviewAttempted).toBe(true)
-  })
-
-  it('does not preview before generate completes', () => {
-    const detail = makeDetail([
-      makeNode('generate_key_info', 'running'),
-      makeNode('generate_possible_errors', 'pending'),
-      makeNode('review_key_info', 'completed'),
-      makeNode('review_possible_errors', 'completed'),
-      makeNode('assemble_items', 'pending'),
-    ])
-
-    const result = deriveJobDetailPresentation(detail)
-
-    expect(result.keyInfoPreviewable).toBe(false)
-    expect(result.possibleErrorsPreviewable).toBe(false)
-  })
-
-  it('treats failed review nodes as attempted so reports are still fetched', () => {
-    const detail = makeDetail([
-      makeNode('generate_key_info', 'completed'),
-      makeNode('generate_possible_errors', 'completed'),
-      makeNode('review_key_info', 'failed'),
-      makeNode('review_possible_errors', 'failed'),
-      makeNode('assemble_items', 'pending'),
-    ])
-
-    const result = deriveJobDetailPresentation(detail)
-
-    expect(result.keyInfoReviewAttempted).toBe(true)
-    expect(result.possibleErrorsReviewAttempted).toBe(true)
-  })
-
-  it('returns all flags false when detail is null', () => {
-    const result = deriveJobDetailPresentation(null)
-
-    expect(result.keyInfoPreviewable).toBe(false)
-    expect(result.possibleErrorsPreviewable).toBe(false)
-    expect(result.keyInfoReviewAttempted).toBe(false)
-    expect(result.possibleErrorsReviewAttempted).toBe(false)
+  it('returns null when detail is null', () => {
+    expect(toNodeCatalog(null)).toBeNull()
   })
 })
 

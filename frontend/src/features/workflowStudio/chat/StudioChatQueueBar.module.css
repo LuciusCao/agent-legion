@@ -1,0 +1,36 @@
+.queueBar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 12px 0;
+}
+.queueItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px dashed #bbdefb;
+  background: #f5f9ff;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: #424242;
+}
+.queueBadge {
+  color: #1565c0;
+  white-space: nowrap;
+}
+.queueText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queueRemove {
+  border: 0;
+  background: none;
+  color: #c62828;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}

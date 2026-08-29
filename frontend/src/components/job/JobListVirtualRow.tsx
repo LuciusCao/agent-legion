@@ -1,4 +1,4 @@
-import type { VirtualItem } from '@tanstack/react-virtual'
+import { memo } from 'react'
 import type { JobSummary } from '../../types/jobTypes'
 import { JobListItem } from './JobListItem'
 import styles from './JobList.module.css'
@@ -7,16 +7,16 @@ interface JobListVirtualRowProps {
   job: JobSummary
   selected: boolean
   selectMode: boolean
-  virtualRow: VirtualItem
+  virtualRowStart: number
   workspaceId: string
-  onToggleSelect: () => void
+  onToggleSelect: (jobId: string) => void
 }
 
-export function JobListVirtualRow({
+export const JobListVirtualRow = memo(function JobListVirtualRow({
   job,
   selected,
   selectMode,
-  virtualRow,
+  virtualRowStart,
   workspaceId,
   onToggleSelect,
 }: JobListVirtualRowProps) {
@@ -24,7 +24,7 @@ export function JobListVirtualRow({
     <div
       className={styles.item}
       role="listitem"
-      style={{ transform: `translateY(${virtualRow.start}px)` }}
+      style={{ transform: `translateY(${virtualRowStart}px)` }}
     >
       <JobListItem
         job={job}
@@ -35,4 +35,4 @@ export function JobListVirtualRow({
       />
     </div>
   )
-}
+})

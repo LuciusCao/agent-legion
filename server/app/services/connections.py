@@ -17,13 +17,14 @@ import re
 from datetime import datetime
 from typing import Any
 
-from server.app.db.connection import DatabaseDsn
+from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.connection_adapters import (
     ConnectionAdapter,
     ConnectionAdapterError,
     get_adapter,
 )
+from server.app.services.connection_gate import lock_connection_gate
 from server.app.services.instance_vault import InstanceVaultService
 from server.app.services.job_errors import (
     ConflictError,
@@ -58,8 +59,11 @@ def _secret_ref_fields(stored: dict[str, Any]) -> list[str]:
 
 
 class ConnectionService:
+    """Instance-level external connections CRUD; the DSN param also accepts
+    the JobQueries facade (BOUNDARY-DATA-001, #187)."""
+
     def __init__(
-        self, database_dsn: DatabaseDsn, settings_config: dict[str, Any] | None = None
+        self, database_dsn: ConnectSource, settings_config: dict[str, Any] | None = None
     ) -> None:
         self._dsn = database_dsn
         self._settings_config = settings_config
@@ -175,7 +179,12 @@ class ConnectionService:
             )
         # Phase 2: one transaction — config update, token-cache invalidation,
         # vault writes and vault deletes (last) commit or roll back together.
+        # The connection gate (shared with ConnectionTokenService refresh)
+        # serializes this against an in-flight credential exchange: without it
+        # a refresh that already resolved the old config would re-insert its
+        # token after this delete commits (see connection_gate).
         with write_transaction(self._dsn) as conn:
+            lock_connection_gate(conn, key)
             if display_name is not None:
                 conn.execute(
                     "update external_connections set display_name=%s, updated_at=current_timestamp"
@@ -211,8 +220,10 @@ class ConnectionService:
         # adapter: deletion must work even when the adapter fails to load.
         ref_names = _secret_ref_fields(self._decode_config(row))
         # One transaction: the row and its vault entries disappear together
-        # (connection_tokens rows follow via ON DELETE CASCADE).
+        # (connection_tokens rows follow via ON DELETE CASCADE). Same gate as
+        # update: deletion must queue behind an in-flight token refresh too.
         with write_transaction(self._dsn) as conn:
+            lock_connection_gate(conn, key)
             conn.execute("delete from external_connections where key=%s", (key,))
             for name in ref_names:
                 InstanceVaultService.delete_in(conn, name)

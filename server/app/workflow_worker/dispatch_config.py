@@ -60,12 +60,12 @@ def resolve_dispatch_node_config(
     )
     # Per-pass memo (issue #124): one scheduling pass re-reads each
     # secret_ref once no matter how many claimed nodes reference it.
-    vault = VaultService(worker.job_db.path, worker.settings.config, memo=worker._secret_memo)
+    vault = VaultService(worker.job_db, worker.settings.config, memo=worker.state.secret_memo)
     node_config = vault.resolve_secret_refs(node_config, workspace_id)
     # Plaintext tokens never enter agent manifests (CONFIG-MANIFEST-001); the
     # connection block is injected in memory for the code runtime only.
     return inject_connection_config(
         node_config,
         config_schema,
-        ConnectionTokenService(worker.job_db.path, worker.settings.config),
+        ConnectionTokenService(worker.job_db, worker.settings.config),
     ), snapshot_json

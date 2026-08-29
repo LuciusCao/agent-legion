@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useParams, useNavigate, Outlet, useLocation } from 'react-router-dom'
 import { IconButton } from '@mui/material'
 import { useCurrentWorkspace } from '../hooks/useWorkspaces'
@@ -17,17 +17,21 @@ export default function WorkspaceLayout() {
   const location = useLocation()
   const currentWorkspace = useCurrentWorkspace()
 
-  const { fetchWorkerStatus } = useAgentsStore()
-  const {
-    setWorkspacePackageDialogOpen,
-    setTokenUsageDialogOpen,
-    pageTitle,
-    pageSubtitle,
-    detailPageActions,
-  } = useUiStore()
+  // Field selectors only: whole-store subscriptions here would re-render the
+  // page skeleton + <Outlet/> subtree on every unrelated store write (agent
+  // heartbeats, toast flags).
+  const fetchWorkerStatus = useAgentsStore((s) => s.fetchWorkerStatus)
+  const setWorkspacePackageDialogOpen = useUiStore(
+    (s) => s.setWorkspacePackageDialogOpen
+  )
+  const setTokenUsageDialogOpen = useUiStore((s) => s.setTokenUsageDialogOpen)
+  const addItemsDialogOpen = useUiStore((s) => s.addItemsDialogOpen)
+  const setAddItemsDialogOpen = useUiStore((s) => s.setAddItemsDialogOpen)
+  const pageTitle = useUiStore((s) => s.pageTitle)
+  const pageSubtitle = useUiStore((s) => s.pageSubtitle)
+  const detailPageActions = useUiStore((s) => s.detailPageActions)
   const selectMode = useJobStore((state) => state.selectMode)
   const toggleSelectMode = useJobStore((state) => state.toggleSelectMode)
-  const [addItemsOpen, setAddItemsOpen] = useState(false)
   const isDetailPage =
     workspaceId &&
     location.pathname.startsWith(`/workspaces/${workspaceId}/jobs/`)
@@ -79,7 +83,7 @@ export default function WorkspaceLayout() {
                   aria-label="添加"
                   onClick={() => {
                     if (workspaceId) {
-                      setAddItemsOpen(true)
+                      setAddItemsDialogOpen(true)
                     }
                   }}
                 >
@@ -131,8 +135,8 @@ export default function WorkspaceLayout() {
     >
       <Outlet />
       <AddItemsDialog
-        open={addItemsOpen}
-        onClose={() => setAddItemsOpen(false)}
+        open={addItemsDialogOpen}
+        onClose={() => setAddItemsDialogOpen(false)}
         workspaceId={workspaceId}
       />
     </AppShell>

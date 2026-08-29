@@ -34,7 +34,7 @@ def evaluate_changed_jobs(
     """Evaluate a batch of changed jobs with only two DB round trips.
 
     Returns a mapping from job id to the cached evaluation tuple that the
-    caller stores in ``worker._job_evals``.
+    caller stores in ``worker.state.job_evals``.
     """
     eval_contexts: list[dict[str, Any]] = []
     not_applicable_entries: list[tuple[str, list[str], str]] = []

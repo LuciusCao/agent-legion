@@ -7,9 +7,9 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet
 
+from server.app.configuration.executor_runtime import ExecutorRuntimeConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.runtime import ExecutionRuntime
-from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.services.node_codes import NodeCodeService
 from server.app.services.vault import VaultService
@@ -56,7 +56,6 @@ def _make_worker(
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
             "workflows": {"enabled": True},
-            "openclaw": {"command_template": ["openclaw"]},
             "code_capacity": 2,
         }
     )
@@ -66,7 +65,7 @@ def _make_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._scan_entries = scan_entries(*definitions)
+    worker.state.scan_entries = scan_entries(*definitions)
     return worker
 
 
@@ -115,7 +114,7 @@ def test_dispatch_injects_live_node_config_chain(tmp_path: Path) -> None:
     executor.block_event.set()
 
     assert worker._poll() is True
-    for future in worker._futures.values():
+    for future in worker.state.futures.values():
         future.result(timeout=5)
 
     # schema default ← workflow node config ← workspace override; the
@@ -154,7 +153,7 @@ def test_dispatch_prefers_frozen_batch_node_config(tmp_path: Path) -> None:
     executor.block_event.set()
 
     assert worker._poll() is True
-    for future in worker._futures.values():
+    for future in worker.state.futures.values():
         future.result(timeout=5)
 
     # The intake snapshot wins over any live layer; reserved execution keys
@@ -198,7 +197,7 @@ def test_dispatch_pads_frozen_batch_with_node_declared_reserved_values(tmp_path:
     executor.block_event.set()
 
     assert worker._poll() is True
-    for future in worker._futures.values():
+    for future in worker.state.futures.values():
         future.result(timeout=5)
 
     assert executor.contexts[0].node_config == {
@@ -259,7 +258,7 @@ def test_dispatch_resolves_vault_secret_refs_in_memory(tmp_path: Path, monkeypat
     executor.block_event.set()
 
     assert worker._poll() is True
-    for future in worker._futures.values():
+    for future in worker.state.futures.values():
         future.result(timeout=5)
 
     # The executor sees the resolved plaintext; the marker never leaves the server.

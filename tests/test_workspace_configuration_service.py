@@ -7,15 +7,13 @@ from server.app.services.workspace_configuration import WorkspaceConfigurationSe
 
 
 @pytest.fixture
-def workspace_service(job_db, settings, agent_manager):
-    return WorkspaceConfigurationService(job_db, settings, agent_manager)
+def workspace_service(job_db, settings):
+    return WorkspaceConfigurationService(job_db, settings)
 
 
 @pytest.fixture
 def workspace(workspace_service):
-    return workspace_service.create(
-        {"name": "Test", "default_workflow_key": "education_video_problems_generation"}
-    )
+    return workspace_service.create({"id": "education_video_problems_generation", "name": "Test"})
 
 
 def test_workspace_configuration_missing_workspace_raises_domain_error(workspace_service):
@@ -47,7 +45,7 @@ def test_replace_configuration_saves_workspace_and_node_limits_in_one_transactio
     )
     assert result["workspace"]["name"] == "Reading"
     assert result["settings"]["workflowKey"] == "education_video_problems_generation"
-    assert result["executor_configuration"]["node_limits"][0]["concurrency_limit"] == 2
+    assert result["execution_configuration"]["node_limits"][0]["concurrency_limit"] == 2
 
 
 def test_replace_configuration_rolls_back_workspace_on_invalid_node_limit(
@@ -84,7 +82,7 @@ def test_workspace_configuration_settings_payload(workspace_service, workspace):
 
 
 def _claim_code_lease(job_db, workspace_id: str, job_id: str, settings, capacity: int = 16):
-    repo = ExecutorLeaseRepository(job_db.path, data_dir=job_db.jobs_dir.parent)
+    repo = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
     claim = repo.try_claim(
         LeaseClaimRequest(
             executor_id="code",
@@ -126,29 +124,10 @@ def test_code_pool_stats_report_capacity_and_leases(workspace_service, workspace
     assert pool == {"capacity": 16, "running": 1, "available": 15}
 
 
-def test_code_pool_stats_does_not_consult_agent_status_manager(
-    workspace_service, workspace, job_db, settings, monkeypatch
-):
-    consulted = []
-    original_get_all = workspace_service.agent_manager.get_all
-
-    def tracking_get_all():
-        consulted.append(("get_all",))
-        return original_get_all()
-
-    monkeypatch.setattr(workspace_service.agent_manager, "get_all", tracking_get_all)
-
-    stats = workspace_service.stats(workspace["id"])
-    assert "code_pool" in stats
-    assert not consulted, "stats() should not consult AgentStatusManager"
-
-
 def test_code_pool_stats_available_respects_global_usage_by_other_workspaces(
     workspace_service, workspace, job_db, settings
 ):
-    other = workspace_service.create(
-        {"name": "Other", "default_workflow_key": "education_video_problems_generation"}
-    )
+    other = workspace_service.create({"id": "other_ws", "name": "Other"})
     for i in range(16):
         job = _code_job(job_db, other["id"], f"global-{i}")
         _claim_code_lease(job_db, other["id"], job["id"], settings)
@@ -159,15 +138,13 @@ def test_code_pool_stats_available_respects_global_usage_by_other_workspaces(
     assert pool["available"] == 0
 
 
-def test_create_workspace_seeds_active_workflow_revision(workspace_service, job_db):
-    workspace = workspace_service.create(
-        {"name": "WS", "default_workflow_key": "education_video_problems_generation"}
-    )
-    active = job_db.get_active_workflow_revision(
-        workspace["id"], "education_video_problems_generation"
-    )
-    assert active is not None
-    assert active["version"] == 1
+def test_create_workspace_binds_key_and_seeds_nothing(workspace_service, job_db):
+    """Schema v62: the id is bound as the workflow key; creation seeds no
+    revision (demo provisioning is `make import-demo` / scripts/seed_demo.py)."""
+    workspace = workspace_service.create({"id": "fresh_ws", "name": "WS"})
+    assert workspace["id"] == "fresh_ws"
+    assert workspace["default_workflow_key"] == "fresh_ws"
+    assert job_db.get_active_workflow_revision(workspace["id"], "fresh_ws") is None
 
 
 def _save(workspace_service, workspace_id: str, agent_capacity: int | None = None):
@@ -203,14 +180,30 @@ def test_replace_configuration_rejects_non_positive_agent_capacity(workspace_ser
     assert workspace_service.job_db.get_workspace_agent_capacity(workspace["id"]) is None
 
 
-def test_update_workflow_seeds_revision_for_new_workflow(workspace_service, job_db):
+def test_update_workflow_rejects_key_change(workspace_service, job_db):
+    """Schema v62: the workflow key is bound to the workspace id; changing it
+    (even before any revision exists) is rejected."""
     workspace = workspace_service.create(
-        {"name": "WS", "default_workflow_key": "education_video_problems_generation"}
+        {"id": "education_video_problems_generation", "name": "WS"}
     )
-    workspace_service.update_section(
-        workspace["id"], "workflow", {"workflowKey": "education_video_problems_generation"}
-    )
+    with pytest.raises(InvalidOperationError, match="immutable"):
+        workspace_service.update_section(workspace["id"], "workflow", {"workflowKey": "other_flow"})
     assert (
         job_db.get_active_workflow_revision(workspace["id"], "education_video_problems_generation")
-        is not None
+        is None
     )
+
+
+def test_update_workflow_accepts_unchanged_key(workspace_service, job_db):
+    """Legacy clients that resend the bound key (no-op) keep working: the
+    section answers 200 with the unchanged workspace instead of 400."""
+    workspace = workspace_service.create(
+        {"id": "education_video_problems_generation", "name": "WS"}
+    )
+    result = workspace_service.update_section(
+        workspace["id"], "workflow", {"workflowKey": "education_video_problems_generation"}
+    )
+    assert result["workflowKey"] == "education_video_problems_generation"
+    stored = job_db.get_workspace(workspace["id"])
+    assert stored is not None
+    assert stored["default_workflow_key"] == "education_video_problems_generation"

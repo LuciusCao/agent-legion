@@ -1,13 +1,13 @@
 import { create } from 'zustand'
 import {
   computeDirty,
-  defaultExecutorConfiguration,
+  defaultExecutionConfiguration,
   defaultSettings,
   type SettingState,
 } from './state'
 import { loadActions } from './actions/loadActions'
 import { saveActions } from './actions/saveActions'
-import { executorActions } from './actions/executorActions'
+import { executionConfigActions } from './actions/executionConfigActions'
 
 export const useSettingStore = create<SettingState>((set, get) => ({
   workspaceId: null,
@@ -20,8 +20,8 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   isDirty: false,
   isSaving: false,
   saveError: null,
-  executorConfiguration: defaultExecutorConfiguration,
-  originalExecutorConfiguration: null,
+  executionConfiguration: defaultExecutionConfiguration,
+  originalExecutionConfiguration: null,
 
   setWorkspaceId(id) {
     set({ workspaceId: id })
@@ -47,16 +47,16 @@ export const useSettingStore = create<SettingState>((set, get) => ({
       const workflowChanged =
         s.workflowKey !== undefined &&
         s.workflowKey !== state.settings.workflowKey
-      const nextExecutorConfiguration = workflowChanged
+      const nextExecutionConfiguration = workflowChanged
         ? {
-            ...state.executorConfiguration,
+            ...state.executionConfiguration,
             node_limits: [],
           }
-        : state.executorConfiguration
+        : state.executionConfiguration
       const nextState = {
         ...state,
         settings: nextSettings,
-        executorConfiguration: nextExecutorConfiguration,
+        executionConfiguration: nextExecutionConfiguration,
       }
       return { ...nextState, isDirty: computeDirty(nextState) }
     })
@@ -64,5 +64,5 @@ export const useSettingStore = create<SettingState>((set, get) => ({
 
   ...loadActions(set),
   ...saveActions(set, get),
-  ...executorActions(set),
+  ...executionConfigActions(set),
 }))

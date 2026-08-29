@@ -16,10 +16,10 @@ import {
   updateWorkspacePackage,
 } from './index'
 import {
-  getExecutorCatalog,
+  getAgentCatalog,
   getSkillDetail,
-  getWorkspaceExecutorConfiguration,
-} from './executorApi'
+  getWorkspaceExecutionConfiguration,
+} from './agentCatalogApi'
 
 const originalFetch = global.fetch
 
@@ -115,7 +115,7 @@ describe('workspace api', () => {
     )
   })
 
-  it('patches workspace default_entity and intake_config', async () => {
+  it('patches workspace default_entity', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -125,7 +125,6 @@ describe('workspace api', () => {
             name: 'Math',
             default_workflow_key: 'demo_workflow',
             default_entity: 'knowledge',
-            intake_config: { enabled_modes: ['manual'] },
           },
         }),
     } as Response)
@@ -133,24 +132,21 @@ describe('workspace api', () => {
 
     const workspace = await updateWorkspace('math', {
       default_entity: 'knowledge',
-      intake_config: { enabled_modes: ['manual'] },
     })
 
     expect(workspace.default_entity).toBe('knowledge')
-    expect(workspace.intake_config).toEqual({ enabled_modes: ['manual'] })
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/workspaces/math',
       expect.objectContaining({
         method: 'PATCH',
         body: JSON.stringify({
           default_entity: 'knowledge',
-          intake_config: { enabled_modes: ['manual'] },
         }),
       })
     )
   })
 
-  it('creates workspace with the sample template mode', async () => {
+  it('creates workspace with an explicit id', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -161,31 +157,27 @@ describe('workspace api', () => {
             default_workflow_key: 'demo_workflow',
             default_entity: 'knowledge',
             resource_config: { storage: 's3' },
-            intake_config: { enabled_modes: ['manual', 'cms'] },
           },
         }),
     } as Response)
     global.fetch = fetchMock
 
-    const workspace = await createWorkspace('Physics', 'demo')
+    const workspace = await createWorkspace('physics', 'Physics')
 
     expect(workspace.default_entity).toBe('knowledge')
-    expect(workspace.intake_config).toEqual({
-      enabled_modes: ['manual', 'cms'],
-    })
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/workspaces',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
+          id: 'physics',
           name: 'Physics',
-          workflow_mode: 'demo',
         }),
       })
     )
   })
 
-  it('forwards blank workflow mode on workspace creation', async () => {
+  it('rejects retired workflow_mode field at the type level (smoke)', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -195,15 +187,16 @@ describe('workspace api', () => {
     } as Response)
     global.fetch = fetchMock
 
-    await createWorkspace('Blank', 'blank')
+    // v62: createWorkspace(id, name); the workflow_mode contract is gone.
+    await createWorkspace('blank_ws', 'Blank')
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/workspaces',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
+          id: 'blank_ws',
           name: 'Blank',
-          workflow_mode: 'blank',
         }),
       })
     )
@@ -324,7 +317,7 @@ describe('job helpers', () => {
   })
 })
 
-describe('executor configuration api', () => {
+describe('agent catalog api', () => {
   function mockFetchJson(response: unknown) {
     return vi.fn().mockResolvedValue({
       ok: true,
@@ -332,31 +325,29 @@ describe('executor configuration api', () => {
     } as Response)
   }
 
-  it('loads normalized executor catalog', async () => {
-    const fetchMock = mockFetchJson({ executors: [] })
+  it('loads the agent catalog', async () => {
+    const fetchMock = mockFetchJson({ agents: [] })
     global.fetch = fetchMock
 
-    await getExecutorCatalog('ws1')
+    await getAgentCatalog('ws1')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/executors?workspace_id=ws1',
+      '/api/agent-catalog?workspace_id=ws1',
       expect.objectContaining({ cache: 'no-store' })
     )
   })
 
-  it('loads workspace executor configuration', async () => {
+  it('loads workspace execution configuration', async () => {
     const fetchMock = mockFetchJson({
-      allocations: [],
-      bindings: [],
       node_limits: [],
       migration_warnings: [],
     })
     global.fetch = fetchMock
 
-    await getWorkspaceExecutorConfiguration('reading team')
+    await getWorkspaceExecutionConfiguration('reading team')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/workspaces/reading%20team/executor-configuration',
+      '/api/workspaces/reading%20team/execution-configuration',
       expect.objectContaining({ cache: 'no-store' })
     )
   })
@@ -368,7 +359,7 @@ describe('executor configuration api', () => {
     await getSkillDetail('demo/review')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/executors/skills/demo/review',
+      '/api/agent-catalog/skills/demo/review',
       expect.objectContaining({ cache: 'no-store' })
     )
   })

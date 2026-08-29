@@ -1,11 +1,9 @@
 from tests.helpers import publish_legacy_intake_revision
 
 
-def _create_workspace(
-    client, name="default", default_workflow_key="education_video_problems_generation"
-):
+def _create_workspace(client, name="Stats WS", default_workflow_key="stats_ws"):
     workspace_id = client.post(
-        "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
+        "/api/workspaces", json={"id": default_workflow_key, "name": name}
     ).json()["workspace"]["id"]
     # The demo workflow no longer declares intake modes (#154); these tests
     # post job-batches, so publish the legacy-intake variant.
@@ -23,17 +21,14 @@ def test_workspace_stats_returns_counts_and_executor_status(client_factory):
     with client_factory(workflows_enabled=True) as c:
         ws = c.post(
             "/api/workspaces",
-            json={
-                "name": "Stats WS",
-                "default_workflow_key": "education_video_problems_generation",
-            },
+            json={"id": "stats_ws", "name": "Stats WS"},
         ).json()
         ws_id = ws["workspace"]["id"]
         publish_legacy_intake_revision(c.app.state.job_db, ws_id)
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "stats_ws",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q301", "Q302"],
             },
@@ -44,7 +39,7 @@ def test_workspace_stats_returns_counts_and_executor_status(client_factory):
     body = stats.json()
     assert body["workspace_id"] == ws_id
     assert body["name"] == "Stats WS"
-    assert body["workflow_key"] == "education_video_problems_generation"
+    assert body["workflow_key"] == "stats_ws"
     assert body["workflow_label"] == "教学视频脚本与题目生成（示例）"
     assert body["job_stats"]["pending"] == 2
     assert "queued" not in body["job_stats"]
@@ -57,17 +52,14 @@ def test_workspace_stats_code_pool_reflects_leases(client_factory):
         job_db = c.app.state.job_db
         ws = c.post(
             "/api/workspaces",
-            json={
-                "name": "Stats WS",
-                "default_workflow_key": "education_video_problems_generation",
-            },
+            json={"id": "stats_ws", "name": "Stats WS"},
         ).json()
         ws_id = ws["workspace"]["id"]
         publish_legacy_intake_revision(c.app.state.job_db, ws_id)
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "stats_ws",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q301"],
             },
@@ -77,7 +69,7 @@ def test_workspace_stats_code_pool_reflects_leases(client_factory):
         from server.app.executors.models import LeaseClaimRequest
 
         job_id = job_db.list_jobs(workspace_id=ws_id)[0]["id"]
-        repo = ExecutorLeaseRepository(job_db.path, data_dir=job_db.jobs_dir.parent)
+        repo = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
         claim = repo.try_claim(
             LeaseClaimRequest(
                 executor_id="code",
@@ -106,7 +98,7 @@ def test_workspace_stats_latest_run_reflects_node_runs(client_factory):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
+                "workflow_key": "stats_ws",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q401"],
             },

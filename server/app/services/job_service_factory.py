@@ -18,8 +18,8 @@ from server.app.services.job_queries import JobQueryService
 from server.app.services.job_rerun import JobRerunService
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
 from server.app.services.run_service import RunService
-from server.app.services.workspace_executor_configuration import (
-    WorkspaceExecutorConfigurationService,
+from server.app.services.workspace_execution_configuration import (
+    WorkspaceExecutionConfigurationService,
 )
 from server.app.settings import Settings
 
@@ -29,15 +29,14 @@ class JobServices:
         self,
         job_db: JobQueries,
         settings: Settings,
-        workspace_executor_configuration: WorkspaceExecutorConfigurationService,
+        workspace_execution_configuration: WorkspaceExecutionConfigurationService,
         job_event_manager: JobEventManager | None,
         job_event_buffer: Any | None,
         artifact_store: ArtifactStore | None = None,
         object_store: Any = None,
     ) -> None:
         self.executor_leases = ExecutorLeaseRepository(
-            job_db.path,
-            job_db=job_db,
+            job_db,
             data_dir=settings.data_dir,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
@@ -55,7 +54,7 @@ class JobServices:
             job_event_buffer=job_event_buffer,
         )
         self.queries = JobQueryService(
-            job_db, settings, workspace_executor_configuration, object_store=object_store
+            job_db, settings, workspace_execution_configuration, object_store=object_store
         )
         self.patch_queries = JobPatchQueryService(
             job_db, settings, job_event_buffer=job_event_buffer

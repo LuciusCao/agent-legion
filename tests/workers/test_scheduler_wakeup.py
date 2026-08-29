@@ -62,11 +62,11 @@ def test_notify_survives_failing_callback(registered) -> None:
 def test_worker_wake_sets_wake_event(tmp_path: Path, registered) -> None:
     worker = _make_worker(tmp_path, TEST_DATABASE_URL, RecordingExecutor("local-default"), [])
     try:
-        assert not worker._wake_event.is_set()
+        assert not worker.state.wake_event.is_set()
         registered.append(worker.wake)
         register_wakeup(worker.wake)
         notify_schedulable_work()
-        assert worker._wake_event.is_set()
+        assert worker.state.wake_event.is_set()
     finally:
         worker.stop()
 

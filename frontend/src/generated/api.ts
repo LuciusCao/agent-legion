@@ -179,6 +179,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/agent-catalog': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Agent Catalog */
+    get: operations['get_agent_catalog_api_agent_catalog_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-catalog/skills/{skill_key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Skill */
+    get: operations['get_skill_api_agent_catalog_skills__skill_key__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/agent-definitions': {
     parameters: {
       query?: never
@@ -403,7 +437,7 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/agent-register-tokens/{token_id}/revoke': {
+  '/api/agent-register-tokens/{token_id}': {
     parameters: {
       query?: never
       header?: never
@@ -412,9 +446,15 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** Revoke Register Token */
-    post: operations['revoke_register_token_api_agent_register_tokens__token_id__revoke_post']
-    delete?: never
+    post?: never
+    /**
+     * Delete Register Token
+     * @description Hard-delete a key and cascade-cut dependent workers: workers left
+     *     without any live key lose their registration record in the same
+     *     transaction (their credential dies immediately); workers with other
+     *     live keys are narrowed to the surviving keys' scope.
+     */
+    delete: operations['delete_register_token_api_agent_register_tokens__token_id__delete']
     options?: never
     head?: never
     patch?: never
@@ -427,7 +467,16 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** List Workers */
+    /**
+     * List Workers
+     * @description List registered workers; workspace_id narrows to that workspace.
+     *
+     *     The workspace view only shows workers registered with that
+     *     workspace's scoped tokens (legacy [] scope is excluded); without the
+     *     parameter every logged-in user still sees the full list — the UI is
+     *     responsible for passing the current workspace, and the admin settings
+     *     page intentionally keeps the unfiltered view.
+     */
     get: operations['list_workers_api_agent_workers_get']
     put?: never
     post?: never
@@ -491,7 +540,7 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/agent-workers/{worker_id}/revoke': {
+  '/api/agent-workers/{worker_id}': {
     parameters: {
       query?: never
       header?: never
@@ -500,9 +549,17 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** Revoke Worker */
-    post: operations['revoke_worker_api_agent_workers__worker_id__revoke_post']
-    delete?: never
+    post?: never
+    /**
+     * Delete Worker
+     * @description Hard-delete a worker registration (record cleanup step).
+     *
+     *     There is no per-worker revocation: access is cut by deleting the
+     *     Worker's register keys. Deleting the record only opens once none of
+     *     its bound keys exist anymore, so a reachable Worker can never vanish
+     *     from under in-flight claims.
+     */
+    delete: operations['delete_worker_api_agent_workers__worker_id__delete']
     options?: never
     head?: never
     patch?: never
@@ -645,40 +702,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/executors': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Executors */
-    get: operations['get_executors_api_executors_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/executors/skills/{skill_key}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Skill */
-    get: operations['get_skill_api_executors_skills__skill_key__get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/health': {
     parameters: {
       query?: never
@@ -723,6 +746,23 @@ export interface paths {
     }
     /** Get Artifact */
     get: operations['get_artifact_api_jobs__job_id__artifacts__artifact_name__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/jobs/{job_id}/artifacts/{artifact_name}/raw': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Artifact Raw */
+    get: operations['get_artifact_raw_api_jobs__job_id__artifacts__artifact_name__raw_get']
     put?: never
     post?: never
     delete?: never
@@ -964,6 +1004,57 @@ export interface paths {
     get: operations['get_chat_session_context_api_studio_agent_tools_chat_sessions__session_id__context_get']
     put?: never
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/skills/{skill_key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Skill */
+    get: operations['get_skill_api_studio_agent_tools_skills__skill_key__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/skills/{skill_key}/validate': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Validate Skill */
+    post: operations['validate_skill_api_studio_agent_tools_skills__skill_key__validate_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/skills/{skill_key}/versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Save Skill Version */
+    post: operations['save_skill_version_api_studio_agent_tools_skills__skill_key__versions_post']
     delete?: never
     options?: never
     head?: never
@@ -1280,15 +1371,15 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/workspaces/{workspace_id}/executor-configuration': {
+  '/api/workspaces/{workspace_id}/execution-configuration': {
     parameters: {
       query?: never
       header?: never
       path?: never
       cookie?: never
     }
-    /** Get Workspace Executor Configuration */
-    get: operations['get_workspace_executor_configuration_api_workspaces__workspace_id__executor_configuration_get']
+    /** Get Workspace Execution Configuration */
+    get: operations['get_workspace_execution_configuration_api_workspaces__workspace_id__execution_configuration_get']
     put?: never
     post?: never
     delete?: never
@@ -1917,6 +2008,32 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/runtime-models': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Get Workspace Runtime Models
+     * @description Studio 节点执行 datalist 的数据源（在线 Worker 的声明聚合）。
+     *
+     *     ``online`` 来自 30s 活性阈值（agent_control.registry
+     *     ONLINE_THRESHOLD_SECONDS）：刚 revoked / 离线的 Worker 在活性窗口
+     *     内仍可能短暂贡献 models——可接受边界，datalist 只是提示，claim
+     *     匹配才是权威。通配 ``*`` 声明原样透传，字面 ``*`` 选项的过滤在
+     *     前端 datalist 层（runtimeModelOptions.ts）。
+     */
+    get: operations['get_workspace_runtime_models_api_workspaces__workspace_id__runtime_models_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/secrets': {
     parameters: {
       query?: never
@@ -2159,6 +2276,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/resume': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Resume Session */
+    post: operations['resume_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__resume_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/token-usage': {
     parameters: {
       query?: never
@@ -2169,6 +2303,24 @@ export interface paths {
     /** Get Workspace Token Usage */
     get: operations['get_workspace_token_usage_api_workspaces__workspace_id__token_usage_get']
     put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/workflow-draft': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Draft */
+    get: operations['get_draft_api_workspaces__workspace_id__workflow_draft_get']
+    /** Put Draft */
+    put: operations['put_draft_api_workspaces__workspace_id__workflow_draft_put']
     post?: never
     delete?: never
     options?: never
@@ -2381,6 +2533,18 @@ export interface components {
       /** Archived */
       archived: number
     }
+    /**
+     * AgentCatalogResponse
+     * @description Agent catalog for Studio (issue #198: agents-only semantics).
+     *
+     *     The former ``executors`` half retired with the executor concept
+     *     (schema v47, EXEC-CODE-POOL-001); the endpoint was renamed from
+     *     ``/api/executors`` to match the agents-only meaning.
+     */
+    AgentCatalogResponse: {
+      /** Agents */
+      agents?: components['schemas']['AgentDefinitionResponse'][]
+    }
     /** AgentClaimResponse */
     AgentClaimResponse: {
       /** Agent Id */
@@ -2547,12 +2711,16 @@ export interface components {
       /** Token Id */
       token_id: string
       /** Workspace Id */
-      workspace_id: string | null
+      workspace_id: string
     }
-    /** AgentRegisterTokenRevokeResponse */
-    AgentRegisterTokenRevokeResponse: {
-      /** Revoked */
-      revoked: boolean
+    /** AgentRegisterTokenDeleteResponse */
+    AgentRegisterTokenDeleteResponse: {
+      /** Cascaded Worker Ids */
+      cascaded_worker_ids?: string[]
+      /** Deleted */
+      deleted: boolean
+      /** Token Id */
+      token_id: string
     }
     /** AgentRegisterTokenSummary */
     AgentRegisterTokenSummary: {
@@ -2581,28 +2749,6 @@ export interface components {
     AgentStatusResponse: {
       /** Busy */
       busy: boolean
-      /**
-       * Current Content Type
-       * @default
-       */
-      current_content_type: string
-      /**
-       * Current External Id
-       * @default
-       */
-      current_external_id: string
-      /**
-       * Current Phase
-       * @default
-       */
-      current_phase: string
-      /**
-       * Current Title
-       * @default
-       */
-      current_title: string
-      /** Current Video Id */
-      current_video_id?: string | null
       /** Id */
       id: string
       /** Name */
@@ -2667,10 +2813,10 @@ export interface components {
       /** Versions */
       versions: components['schemas']['AgentVersionSummary'][]
     }
-    /** AgentWorkerRevokeResponse */
-    AgentWorkerRevokeResponse: {
-      /** Revoked */
-      revoked: boolean
+    /** AgentWorkerDeleteResponse */
+    AgentWorkerDeleteResponse: {
+      /** Deleted */
+      deleted: boolean
       /** Worker Id */
       worker_id: string
     }
@@ -2700,6 +2846,8 @@ export interface components {
       online: boolean
       /** Protocol Version */
       protocol_version: number
+      /** Register Token Ids */
+      register_token_ids?: string[]
       /** Registered At */
       registered_at: string
       /** Revoked */
@@ -2708,6 +2856,15 @@ export interface components {
       runtimes: string[]
       /** Worker Id */
       worker_id: string
+    }
+    /** AgentWorkerWorkspace */
+    AgentWorkerWorkspace: {
+      /** Token Ids */
+      token_ids?: string[]
+      /** Workspace Id */
+      workspace_id: string
+      /** Workspace Name */
+      workspace_name: string
     }
     /** AgentWorkersResponse */
     AgentWorkersResponse: {
@@ -2923,7 +3080,7 @@ export interface components {
        */
       label: string
       /** Workspace Id */
-      workspace_id?: string | null
+      workspace_id: string
     }
     /** DeleteJobResponse */
     DeleteJobResponse: {
@@ -2955,18 +3112,6 @@ export interface components {
       paused: boolean
       /** Target Node Key */
       target_node_key?: string | null
-    }
-    /**
-     * ExecutorCatalogResponse
-     * @description Execution catalog for Studio (P-0.5 step 2: Agents only).
-     *
-     *     The ``executors`` half retired with the executor concept (schema v47);
-     *     the response type keeps the pre-retirement name until the step-3
-     *     contract cleanup.
-     */
-    ExecutorCatalogResponse: {
-      /** Agents */
-      agents?: components['schemas']['AgentDefinitionResponse'][]
     }
     /** FailedNodeRunItem */
     FailedNodeRunItem: {
@@ -3032,27 +3177,8 @@ export interface components {
     }
     /** InstanceOpenClawSettings */
     InstanceOpenClawSettings: {
-      /** Command Template */
-      command_template: string[]
       /** Cwd */
       cwd: string
-      /** Isolated Workspace Root */
-      isolated_workspace_root: string
-      skill_safety: components['schemas']['InstanceOpenClawSkillSafetySettings']
-      /** Timeout Seconds */
-      timeout_seconds: number
-    }
-    /** InstanceOpenClawSkillSafetyRepo */
-    InstanceOpenClawSkillSafetyRepo: {
-      /** Path */
-      path: string
-    }
-    /** InstanceOpenClawSkillSafetySettings */
-    InstanceOpenClawSkillSafetySettings: {
-      /** Enabled */
-      enabled: boolean
-      /** Repos */
-      repos: components['schemas']['InstanceOpenClawSkillSafetyRepo'][]
     }
     /** InstanceSettingsResponse */
     InstanceSettingsResponse: {
@@ -4175,6 +4301,8 @@ export interface components {
       host_protocol_version: number
       /** Worker Token */
       worker_token: string
+      /** Workspaces */
+      workspaces?: components['schemas']['AgentWorkerWorkspace'][]
     }
     /** RunCreateRequest */
     RunCreateRequest: {
@@ -4333,7 +4461,15 @@ export interface components {
       /** Total */
       total: number | null
     }
-    /** SkillDetailResponse */
+    /**
+     * SkillDetailResponse
+     * @description Skill detail; with the ``ref`` query param the content comes from that
+     *     git tag instead of the working tree (lock and checkout untouched). An
+     *     unknown or non-tag ``ref`` is a 404, not a 422: the tag is the addressed
+     *     resource and it does not exist in the repo. ``tags`` lists every git tag
+     *     of the skill repo, latest version first — the data source for the Studio
+     *     version picker.
+     */
     SkillDetailResponse: {
       /** Available */
       available: boolean
@@ -4345,6 +4481,8 @@ export interface components {
       key: string
       /** Ref */
       ref: string
+      /** Tags */
+      tags?: string[]
     }
     /** SkillFileResponse */
     SkillFileResponse: {
@@ -4359,6 +4497,26 @@ export interface components {
        * @default false
        */
       truncated: boolean
+    }
+    /** SkillSaveVersionRequest */
+    SkillSaveVersionRequest: {
+      /** Files */
+      files: components['schemas']['SkillVersionFileWrite'][]
+      /** Message */
+      message: string
+      /** New Tag */
+      new_tag: string
+    }
+    /** SkillSaveVersionResponse */
+    SkillSaveVersionResponse: {
+      /** Commit */
+      commit: string
+      /** Files */
+      files?: string[]
+      /** Key */
+      key: string
+      /** Tag */
+      tag: string
     }
     /**
      * SkillSourceEntry
@@ -4421,6 +4579,29 @@ export interface components {
       /** Valid */
       valid: boolean
     }
+    /** SkillValidateToolResponse */
+    SkillValidateToolResponse: {
+      /** Errors */
+      errors?: components['schemas']['SkillValidationIssue'][]
+      /** Key */
+      key: string
+      /** Valid */
+      valid: boolean
+    }
+    /** SkillValidationIssue */
+    SkillValidationIssue: {
+      /** Error */
+      error: string
+      /** Path */
+      path: string
+    }
+    /** SkillVersionFileWrite */
+    SkillVersionFileWrite: {
+      /** Content */
+      content: string
+      /** Path */
+      path: string
+    }
     /** StorageStatus */
     StorageStatus: {
       /** Configured */
@@ -4449,6 +4630,7 @@ export interface components {
      * StudioAgentNodeCodeDraftRequest
      * @description ``expected_capability``: validated for existing nodes (mismatch -> 400);
      *     its presence authorizes a skeleton draft for a not-yet-published node.
+     *     ``min_length=1``: an empty string must not bypass the presence gate.
      */
     StudioAgentNodeCodeDraftRequest: {
       /** Change Note */
@@ -4563,10 +4745,13 @@ export interface components {
     /**
      * StudioChatContextResponse
      * @description What the get_studio_context MCP tool returns: the session's bound
-     *     workspace, the human's live Studio node selection, and the active
+     *     workspace, the human's live Studio node selection, the canvas' unpublished
+     *     workflow draft (None until the frontend pushes it), and the active
      *     workflow's structure. ``workflow`` is None when nothing is published yet.
      */
     StudioChatContextResponse: {
+      /** Draft Yaml */
+      draft_yaml: string | null
       /** Selected Node Key */
       selected_node_key: string | null
       workflow: components['schemas']['StudioContextWorkflow'] | null
@@ -4575,9 +4760,13 @@ export interface components {
     }
     /**
      * StudioChatContextUpdateRequest
-     * @description Human-side context push: the Studio node currently selected (or null).
+     * @description Human-side context push (partial update): the selected Studio node
+     *     (field presence decides, null clears) and/or the canvas' unpublished
+     *     workflow draft YAML (null = leave the mirror untouched).
      */
     StudioChatContextUpdateRequest: {
+      /** Draft Yaml */
+      draft_yaml?: string | null
       /** Selected Node Key */
       selected_node_key?: string | null
     }
@@ -4670,6 +4859,8 @@ export interface components {
        * Format: date-time
        */
       created_at: string
+      /** Draft Yaml */
+      draft_yaml?: string | null
       /** Error Detail */
       error_detail: string
       /** Id */
@@ -5084,6 +5275,18 @@ export interface components {
       /** Definition Yaml */
       definition_yaml: string
     }
+    /** WorkflowDraftStoreRequest */
+    WorkflowDraftStoreRequest: {
+      /** Definition Yaml */
+      definition_yaml: string
+    }
+    /** WorkflowDraftStoreResponse */
+    WorkflowDraftStoreResponse: {
+      /** Definition Yaml */
+      definition_yaml?: string | null
+      /** Updated At */
+      updated_at?: string | null
+    }
     /** WorkflowDraftSummaryItem */
     WorkflowDraftSummaryItem: {
       /** Key */
@@ -5187,6 +5390,12 @@ export interface components {
       label: string
       /** Node Key */
       node_key: string
+      /**
+       * Node Type
+       * @default node
+       * @enum {string}
+       */
+      node_type: 'start' | 'node'
       /**
        * Risk
        * @enum {string}
@@ -5425,7 +5634,7 @@ export interface components {
     WorkspaceConfigurationResponse: {
       /** Agent Capacity */
       agent_capacity?: number | null
-      executor_configuration: components['schemas']['WorkspaceExecutorConfigurationResponse']
+      execution_configuration: components['schemas']['WorkspaceExecutionConfigurationResponse']
       settings: components['schemas']['WorkspaceSettingsPayload']
       workspace: components['schemas']['WorkspaceRecord']
     }
@@ -5433,12 +5642,8 @@ export interface components {
     WorkspaceConfigurationSettingsRequest: {
       /** Entitytype */
       entityType?: string | null
-      /** Intakemodes */
-      intakeModes?: string[] | null
-      /** Labeloverrides */
-      labelOverrides?: {
-        [key: string]: string
-      } | null
+      /** Previewhidden */
+      previewHidden?: string[] | null
       /** Workflowkey */
       workflowKey?: string | null
     }
@@ -5449,24 +5654,14 @@ export interface components {
        * @default question
        */
       default_entity: string
-      /** Default Workflow Key */
-      default_workflow_key?: string | null
-      /** Intake Config */
-      intake_config?: {
-        [key: string]: unknown
-      }
+      /** Id */
+      id: string
       /** Name */
       name: string
       /** Resource Config */
       resource_config?: {
         [key: string]: unknown
       }
-      /**
-       * Workflow Mode
-       * @default demo
-       * @enum {string}
-       */
-      workflow_mode: 'demo' | 'blank'
     }
     /** WorkspaceDagResponse */
     WorkspaceDagResponse: {
@@ -5480,14 +5675,14 @@ export interface components {
       }
     }
     /**
-     * WorkspaceExecutorConfigurationResponse
+     * WorkspaceExecutionConfigurationResponse
      * @description Workspace execution configuration (P-0.5: node limits + Agent capacity).
      *
      *     Allocations and bindings retired with the executor concept (schema v47);
-     *     the response type keeps the pre-retirement route/type names until the
-     *     step-3 contract cleanup.
+     *     issue #198 renamed the type from the pre-retirement
+     *     ``WorkspaceExecutorConfigurationResponse`` wording.
      */
-    WorkspaceExecutorConfigurationResponse: {
+    WorkspaceExecutionConfigurationResponse: {
       /** Agent Capacity */
       agent_capacity?: number | null
       /** Migration Warnings */
@@ -5599,12 +5794,6 @@ export interface components {
       description: string
       /** Id */
       id: string
-      /** Intake Config */
-      intake_config: {
-        [key: string]: unknown
-      }
-      /** Intake Config Json */
-      intake_config_json: string
       /** Name */
       name: string
       /** Node Config */
@@ -5632,6 +5821,15 @@ export interface components {
       runs: {
         [key: string]: unknown
       }[]
+    }
+    /** WorkspaceRuntimeModelsResponse */
+    WorkspaceRuntimeModelsResponse: {
+      /** Runtimes */
+      runtimes: {
+        [key: string]: {
+          [key: string]: string[]
+        }
+      }
     }
     /** WorkspaceSecretDeleteResponse */
     WorkspaceSecretDeleteResponse: {
@@ -5665,12 +5863,8 @@ export interface components {
     WorkspaceSettingsPayload: {
       /** Entitytype */
       entityType: string
-      /** Intakemodes */
-      intakeModes: string[]
-      /** Labeloverrides */
-      labelOverrides: {
-        [key: string]: string
-      }
+      /** Previewhidden */
+      previewHidden?: string[]
       /** Workflowkey */
       workflowKey: string
     }
@@ -5683,24 +5877,16 @@ export interface components {
     }
     /** WorkspaceSettingsSectionRequest */
     WorkspaceSettingsSectionRequest: {
-      /** Agentdefaults */
-      agentDefaults?: {
-        [key: string]: string
-      } | null
       /** Entitytype */
       entityType?: string | null
-      /** Intakemodes */
-      intakeModes?: string[] | null
-      /** Labeloverrides */
-      labelOverrides?: {
-        [key: string]: string
-      } | null
       /** Nodeconfig */
       nodeConfig?: {
         [key: string]: {
           [key: string]: unknown
         }
       } | null
+      /** Previewhidden */
+      previewHidden?: string[] | null
       /** Workflowkey */
       workflowKey?: string | null
     }
@@ -5728,14 +5914,8 @@ export interface components {
     WorkspaceUpdateRequest: {
       /** Default Entity */
       default_entity?: string | null
-      /** Default Workflow Key */
-      default_workflow_key?: string | null
       /** Description */
       description?: string | null
-      /** Intake Config */
-      intake_config?: {
-        [key: string]: unknown
-      } | null
       /** Name */
       name?: string | null
       /** Resource Config */
@@ -6148,6 +6328,70 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['TokenUsagePricingConfigResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_agent_catalog_api_agent_catalog_get: {
+    parameters: {
+      query: {
+        workspace_id: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentCatalogResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_skill_api_agent_catalog_skills__skill_key__get: {
+    parameters: {
+      query?: {
+        ref?: string | null
+      }
+      header?: never
+      path: {
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillDetailResponse']
         }
       }
       /** @description Validation Error */
@@ -6676,7 +6920,7 @@ export interface operations {
       }
     }
   }
-  revoke_register_token_api_agent_register_tokens__token_id__revoke_post: {
+  delete_register_token_api_agent_register_tokens__token_id__delete: {
     parameters: {
       query?: never
       header?: never
@@ -6693,7 +6937,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['AgentRegisterTokenRevokeResponse']
+          'application/json': components['schemas']['AgentRegisterTokenDeleteResponse']
         }
       }
       /** @description Validation Error */
@@ -6709,7 +6953,9 @@ export interface operations {
   }
   list_workers_api_agent_workers_get: {
     parameters: {
-      query?: never
+      query?: {
+        workspace_id?: string | null
+      }
       header?: never
       path?: never
       cookie?: never
@@ -6723,6 +6969,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['AgentWorkersResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }
@@ -6811,7 +7066,7 @@ export interface operations {
       }
     }
   }
-  revoke_worker_api_agent_workers__worker_id__revoke_post: {
+  delete_worker_api_agent_workers__worker_id__delete: {
     parameters: {
       query?: never
       header?: never
@@ -6828,7 +7083,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['AgentWorkerRevokeResponse']
+          'application/json': components['schemas']['AgentWorkerDeleteResponse']
         }
       }
       /** @description Validation Error */
@@ -7059,68 +7314,6 @@ export interface operations {
       }
     }
   }
-  get_executors_api_executors_get: {
-    parameters: {
-      query: {
-        workspace_id: string
-      }
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorCatalogResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  get_skill_api_executors_skills__skill_key__get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        skill_key: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['SkillDetailResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
   health_api_health_get: {
     parameters: {
       query?: never
@@ -7222,6 +7415,40 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ArtifactResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_artifact_raw_api_jobs__job_id__artifacts__artifact_name__raw_get: {
+    parameters: {
+      query?: never
+      header?: {
+        Range?: string | null
+      }
+      path: {
+        job_id: string
+        artifact_name: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
         }
       }
       /** @description Validation Error */
@@ -7696,6 +7923,105 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['StudioChatContextResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_skill_api_studio_agent_tools_skills__skill_key__get: {
+    parameters: {
+      query?: {
+        ref?: string | null
+      }
+      header?: never
+      path: {
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  validate_skill_api_studio_agent_tools_skills__skill_key__validate_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillValidateToolResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_skill_version_api_studio_agent_tools_skills__skill_key__versions_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SkillSaveVersionRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillSaveVersionResponse']
         }
       }
       /** @description Validation Error */
@@ -8395,7 +8721,7 @@ export interface operations {
       }
     }
   }
-  get_workspace_executor_configuration_api_workspaces__workspace_id__executor_configuration_get: {
+  get_workspace_execution_configuration_api_workspaces__workspace_id__execution_configuration_get: {
     parameters: {
       query?: never
       header?: never
@@ -8412,7 +8738,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['WorkspaceExecutorConfigurationResponse']
+          'application/json': components['schemas']['WorkspaceExecutionConfigurationResponse']
         }
       }
       /** @description Validation Error */
@@ -9925,6 +10251,37 @@ export interface operations {
       }
     }
   }
+  get_workspace_runtime_models_api_workspaces__workspace_id__runtime_models_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceRuntimeModelsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   list_workspace_secrets_api_workspaces__workspace_id__secrets_get: {
     parameters: {
       query?: never
@@ -10526,6 +10883,38 @@ export interface operations {
       }
     }
   }
+  resume_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__resume_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_workspace_token_usage_api_workspaces__workspace_id__token_usage_get: {
     parameters: {
       query?: {
@@ -10552,6 +10941,72 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['TokenUsageWorkspaceResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_draft_api_workspaces__workspace_id__workflow_draft_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowDraftStoreResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  put_draft_api_workspaces__workspace_id__workflow_draft_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowDraftStoreRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowDraftStoreResponse']
         }
       }
       /** @description Validation Error */
