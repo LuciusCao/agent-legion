@@ -10,7 +10,7 @@ function renderPanel(ui: ReactElement) {
   return render(ui, { wrapper: TestQueryProvider })
 }
 
-const mockFetchJobArtifact = vi.fn()
+const mockFetchJobArtifactText = vi.fn()
 
 const mockPreviewHidden = vi.hoisted(() => ({ value: [] as string[] }))
 const mockToggleArtifact = vi.fn()
@@ -24,14 +24,21 @@ vi.mock('../../hooks/useWorkspacePreviewConfig', () => ({
   }),
 }))
 
-// 组件直连 ../../api/jobsApi（不经 barrel），mock 必须打在同一模块上。
-vi.mock('../../api/jobsApi', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../../api/jobsApi')>()
+// 文本预览走 ../../api/jobArtifactText 的有界 Range 读取（不经 barrel），
+// mock 必须打在同一模块上。
+vi.mock('../../api/jobArtifactText', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../../api/jobArtifactText')>()
   return {
     ...mod,
-    fetchJobArtifact: (...args: unknown[]) => mockFetchJobArtifact(...args),
+    fetchJobArtifactText: (...args: unknown[]) =>
+      mockFetchJobArtifactText(...args),
   }
 })
+
+/** 文本预览 mock 的统一返回形（未截断全文）。 */
+function textOf(content: string) {
+  return { content, truncated: false, total: content.length }
+}
 
 function makeDetail(artifacts: string[]): JobDetail {
   return {
@@ -49,9 +56,9 @@ describe('ArtifactPreviewPanel', () => {
   })
 
   it('渲染每个 artifact 一张卡片，含类型徽标', async () => {
-    mockFetchJobArtifact.mockResolvedValue({
-      content: JSON.stringify({ ok: true }),
-    })
+    mockFetchJobArtifactText.mockResolvedValue(
+      textOf(JSON.stringify({ ok: true }))
+    )
     renderPanel(
       <ArtifactPreviewPanel
         jobId="j1"
@@ -65,7 +72,11 @@ describe('ArtifactPreviewPanel', () => {
     expect(screen.getByText('图片')).toBeInTheDocument()
     // JSON 卡片挂载 JsonTree（解析后的树渲染键名）。
     await waitFor(() => {
-      expect(mockFetchJobArtifact).toHaveBeenCalledWith('j1', 'questions.json')
+      expect(mockFetchJobArtifactText).toHaveBeenCalledWith(
+        'j1',
+        'questions.json',
+        expect.any(Number)
+      )
     })
   })
 
@@ -117,7 +128,7 @@ describe('ArtifactPreviewPanel', () => {
   })
 
   it('json 解析失败时按原文展示', async () => {
-    mockFetchJobArtifact.mockResolvedValue({ content: 'not-json{{' })
+    mockFetchJobArtifactText.mockResolvedValue(textOf('not-json{{'))
     renderPanel(
       <ArtifactPreviewPanel jobId="j1" detail={makeDetail(['broken.json'])} />
     )
@@ -159,7 +170,12 @@ describe('ArtifactPreviewPanel', () => {
 
   it('文本超长时截断并显示提示', async () => {
     const long = 'x'.repeat(512 * 1024 + 100)
-    mockFetchJobArtifact.mockResolvedValue({ content: long })
+    // 有界读取由 api 层截断：组件拿到的是已截断文本 + 服务端总数。
+    mockFetchJobArtifactText.mockResolvedValue({
+      content: long.slice(0, 512 * 1024),
+      truncated: true,
+      total: long.length,
+    })
     renderPanel(
       <ArtifactPreviewPanel jobId="j1" detail={makeDetail(['big.log'])} />
     )

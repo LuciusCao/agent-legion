@@ -14,6 +14,7 @@
     "frontend/src/api/index.ts": 41,
     "frontend/src/api/instanceSettings.ts": 28,
     "frontend/src/api/jobApi.ts": 85,
+    "frontend/src/api/jobArtifactText.ts": 45,
     "frontend/src/api/jobBatchApi.ts": 79,
     "frontend/src/api/jobBatchPauseApi.ts": 38,
     "frontend/src/api/jobBatchUpgradeWorkflowApi.ts": 25,
