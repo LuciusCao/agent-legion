@@ -19,17 +19,30 @@ from worker.config_store import WorkerConfigStore, public_config, validate_confi
 from worker.metrics_cache import METRICS_FILENAME
 from worker.orphan_reaper import reap_orphaned_agents
 from worker.registration.token import registration_tokens
+from worker.restart_policy import (
+    _EXIT_REFUSED,
+    _KILL_WAIT,
+    _RESTART_BACKOFF_INITIAL,
+    _RESTART_BACKOFF_MAX,
+    _STABLE_AFTER,
+    _STOP_GRACE_MAX,
+    restart_delay,
+)
 from worker.status import ENV_VAR, STATUS_FILENAME, read_runtime_status
-from worker.status.aggregates import execution_counts
+from worker.status.projection import host_view, process_snapshot, status_payload
+from worker.token_status import token_status
 
 __all__ = ["WorkerConfigStore", "WorkerSupervisor", "public_config", "validate_config"]
 
-_EXIT_REFUSED = 2  # Host 拒绝注册 / Worker 被吊销 / 启动预检失败：不自动重启，进入 failed
-_RESTART_BACKOFF_INITIAL = 5.0
-_RESTART_BACKOFF_MAX = 300.0
-_STABLE_AFTER = 60.0  # 稳定运行超过该时长后重置退避
-_STOP_GRACE_MAX = 22.0  # kill 后再等 3s，总预算 25s，低于 compose 的 30s
-_KILL_WAIT = 3.0
+# 退避曲线常量从 worker/restart_policy.py 归位（#250 拆分），但按值重新绑定到
+# 本命名空间：测试锚点 monkeypatch worker.supervisor._RESTART_BACKOFF_INITIAL
+# 必须继续命中 _collect_logs 的活引用（函数体引用模块全局，而非原模块）。
+_EXIT_REFUSED = _EXIT_REFUSED
+_KILL_WAIT = _KILL_WAIT
+_RESTART_BACKOFF_INITIAL = _RESTART_BACKOFF_INITIAL
+_RESTART_BACKOFF_MAX = _RESTART_BACKOFF_MAX
+_STABLE_AFTER = _STABLE_AFTER
+_STOP_GRACE_MAX = _STOP_GRACE_MAX
 
 
 class WorkerSupervisor:
@@ -182,10 +195,7 @@ class WorkerSupervisor:
             if self._started_at is not None and time.time() - self._started_at >= _STABLE_AFTER:
                 self._restart_count = 0
             self._restart_count += 1
-            delay = min(
-                _RESTART_BACKOFF_INITIAL * (2 ** (self._restart_count - 1)),
-                _RESTART_BACKOFF_MAX,
-            )
+            delay = restart_delay(self._restart_count)
             self._next_restart_delay = delay
             self._log(f"{delay:.0f} 秒后自动重启 Worker 执行进程（第 {self._restart_count} 次）")
         if self._restart_event.wait(delay):
@@ -217,61 +227,32 @@ class WorkerSupervisor:
         config = self.store.read(require_identity=False)
         with self._lock:
             running = self._process is not None and self._process.poll() is None
-            snapshot = {
-                "worker_running": running,
-                "pid": self._process.pid if running and self._process is not None else None,
-                "started_at": self._started_at,
-                "exit_code": self._exit_code,
-                "restart_count": self._restart_count,
-                "next_restart_delay": self._next_restart_delay,
-                "failed": self._failed_reason,
-            }
+            snapshot = process_snapshot(
+                running,
+                self._process.pid if running and self._process is not None else None,
+                self._started_at,
+                self._exit_code,
+                self._restart_count,
+                self._next_restart_delay,
+                self._failed_reason,
+            )
         runtime = read_runtime_status(self.store.state_dir / STATUS_FILENAME)
         executions = runtime["executions"]
-        remote = runtime["remote"] if configured else {}
-        if configured and not remote:
-            remote = {
-                "host_reachable": False,
-                "registered": False,
-                "connected": False,
-                "host_worker": None,
-                "connection_error": (
-                    "等待 Worker 使用签发 token 同步 Host 状态"
-                    if snapshot["worker_running"]
-                    else "Worker 执行进程未运行"
-                ),
-            }
-        return {
-            "service": "running",
-            "configured": configured,
-            "claim_enabled": config["claim_enabled"],
-            "max_concurrency": config["max_concurrency"],
-            "upload_max_concurrency": config.get("upload_max_concurrency", 4),
-            **execution_counts(executions),
-            "bootstrap_error": self.store.bootstrap_error,
-            "mounted_config_diverged": self._mounted_config_diverged(),
-            **snapshot,
-            "current_executions": executions,
-            **remote,
-        }
+        remote = host_view(
+            configured, runtime["remote"] if configured else {}, snapshot["worker_running"]
+        )
+        return status_payload(
+            configured,
+            config,
+            executions,
+            self.store.bootstrap_error,
+            self._mounted_config_diverged(),
+            snapshot,
+            remote,
+        )
 
     def token_status(self) -> dict[str, str]:
-        """Per-token registration state keyed by token_id.
-
-        The Host resolves the union scope and rejects the whole registration
-        when any token is bad, so per-token granularity is limited: 'ok' once
-        a registration round succeeded (the workspaces detail in the runtime
-        file names which workspaces the tokens opened), 'rejected' when the
-        supervisor recorded a registration failure, 'pending' otherwise."""
-        runtime = read_runtime_status(self.store.state_dir / STATUS_FILENAME)
-        remote = runtime["remote"] or {}
-        workspaces = remote.get("workspaces")
-        tokens = self.store.read_registration_tokens()
-        if isinstance(workspaces, list) and workspaces:
-            # 本轮注册已成功，Host 汇报的 workspaces 即所有有效 token 的并集。
-            return {row["token_id"]: "ok" for row in tokens}
+        """Per-token registration state（投影逻辑在 worker/token_status.py）。"""
         with self._lock:
             failed = self._failed_reason is not None
-        registered = bool(remote.get("registered"))
-        state = "rejected" if failed else ("ok" if registered else "pending")
-        return {row["token_id"]: state for row in tokens}
+        return token_status(failed, self.store.state_dir, self.store.read_registration_tokens)
