@@ -4,9 +4,10 @@ import { toDagEdges, toDagNodes } from './jobNodeHelpers'
 
 export function toNodeCatalog(detail: JobDetail | null): NodeCatalog | null {
   if (!detail) return null
+  // key/label 读 workspace_id（workflow_key 已 deprecated 且 v62 起恒等，#211）。
   return {
-    key: detail.job.workflow_key,
-    label: detail.job.workflow_key,
+    key: detail.job.workspace_id,
+    label: detail.job.workspace_id,
     nodes: detail.nodes.map((n) => ({
       key: n.node_key,
       label: n.label,
@@ -24,7 +25,7 @@ export function deriveJobDetailPresentation(detail: JobDetail | null) {
     dagNodes: nodes,
     dagEdges: edges,
     nodeCatalog,
-    workflowLabel: nodeCatalog?.label ?? detail?.job.workflow_key ?? '',
+    workflowLabel: nodeCatalog?.label ?? detail?.job.workspace_id ?? '',
     outcome: detail?.job.outcome ?? '',
     workflowRevisionId: detail?.job.workflow_revision_id ?? '',
     currentWorkflowRevisionVersion:

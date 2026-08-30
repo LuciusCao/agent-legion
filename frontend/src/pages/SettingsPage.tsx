@@ -44,12 +44,13 @@ export function SettingsPage() {
   const workflowDefinition = workflowDefinitionData ?? null
 
   // P-0.5：无 Agent 路由的节点一律进入隐含 code 池，节点级并发上限只对
-  // code 节点有意义。
+  // code 节点有意义。agentRoutes 过滤键用 workspace_id（workflow_key 已
+  // deprecated 且 v62 起恒等于 workspace id，#211 Phase 2）。
   const codeNodeKeys = useMemo(() => {
     if (!workflowDefinition) return new Set<string>()
     const agentRouted = new Set(
       (settingsSnapshot?.agentRoutes ?? [])
-        .filter((r) => r.workflow_key === workflowDefinition.key)
+        .filter((r) => r.workflow_key === workspaceId)
         .map((r) => r.node_key)
     )
     return new Set(
@@ -57,7 +58,7 @@ export function SettingsPage() {
         .filter((node) => !agentRouted.has(node.key))
         .map((node) => node.key)
     )
-  }, [workflowDefinition, settingsSnapshot])
+  }, [workflowDefinition, settingsSnapshot, workspaceId])
 
   const hasCodeNodes = codeNodeKeys.size > 0
 

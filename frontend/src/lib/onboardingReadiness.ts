@@ -8,7 +8,9 @@ export interface EmptyGuideVisibilityInput {
   filtersActive: boolean
   /**
    * stats 未到时为 undefined；后端无 published workflow 时是 null（生成
-   * 类型标 string，运行时可空），两者都算已 settle。
+   * 类型标 string，运行时可空），两者都算已 settle。字段名保留
+   * workflowKey 是历史口径——调用方传的是 workspace_id（#211 Phase 2：
+   * workflow_key 已 deprecated，值恒等）。
    */
   workflowKey: string | null | undefined
   /** active revision 查询在途时为 false（data 仍为 undefined）。 */
@@ -35,6 +37,7 @@ export function shouldShowEmptyGuide(
 }
 
 export interface OnboardingStepsInput {
+  /** workspace id（workflow_key 的恒等替身，#211 Phase 2 deprecated 切换）。 */
   workflowKey: string | undefined
   workflowDefinition: WorkflowDefinitionRecord | null
   agentRoutes: WorkspaceAgentRouteEntry[]
@@ -93,15 +96,16 @@ export function buildOnboardingSteps(input: OnboardingStepsInput) {
 
 function agentNodesReady({
   workflowDefinition,
-  workflowKey,
+  workspaceId,
   agentRoutes,
 }: OnboardingStepsInput): boolean {
-  if (!workflowDefinition || !workflowKey) return false
+  if (!workflowDefinition || !workspaceId) return false
   // agent 节点 = active revision 中路由到 published Agent 的节点（快照
   // agentRoutes 按 capability 匹配物化而来，与后端 _agent_routes 同源）。
+  // 过滤键用 workspace_id（workflow_key 已 deprecated，v62 起恒等，#211）。
   const agentNodeKeys = new Set(
     agentRoutes
-      .filter((route) => route.workflow_key === workflowKey)
+      .filter((route) => route.workflow_key === workspaceId)
       .map((route) => route.node_key)
   )
   return (workflowDefinition.nodes ?? []).every((node) => {

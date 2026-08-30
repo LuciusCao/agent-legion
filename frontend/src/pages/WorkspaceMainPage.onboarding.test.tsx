@@ -293,7 +293,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
         return Promise.resolve({
           routes: [
             {
-              workflow_key: 'question_content',
+              workflow_key: 'ws1',
               node_key: 'agent_review',
               node_label: 'Agent 审核',
               capability: 'agent_review',
@@ -333,7 +333,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
         return Promise.resolve({
           routes: [
             {
-              workflow_key: 'question_content',
+              workflow_key: 'ws1',
               node_key: 'agent_review',
               node_label: 'Agent 审核',
               capability: 'agent_review',

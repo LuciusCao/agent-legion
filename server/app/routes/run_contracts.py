@@ -41,7 +41,13 @@ class RunCreateRequest(BaseModel):
 class RunRecord(BaseModel):
     id: str
     workspace_id: str
-    workflow_key: str
+    workflow_key: str = Field(
+        description=(
+            "Deprecated: read workspace_id instead. Since schema v62 the two "
+            "are always equal; removal is tracked in #211."
+        ),
+        deprecated=True,
+    )
     source_kind: str
     status: str
     created_count: int

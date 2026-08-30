@@ -80,19 +80,19 @@ const workflowJobs = () => [
     id: 'j1',
     status: 'failed',
     source_id: 'Q1',
-    workflow_key: 'question_content',
+    workspace_id: 'question_content',
   }),
   makeJob({
     id: 'j2',
     status: 'failed',
     source_id: 'Q2',
-    workflow_key: 'question_content',
+    workspace_id: 'question_content',
   }),
   makeJob({
     id: 'j3',
     status: 'failed',
     source_id: 'Q3',
-    workflow_key: 'question_content',
+    workspace_id: 'question_content',
   }),
 ]
 

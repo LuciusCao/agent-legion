@@ -126,7 +126,7 @@ function seedJobs(jobs: ReturnType<typeof makeJob>[]) {
 }
 
 const baseStats: WorkspaceStats = {
-  workspace_id: 'ws1',
+  workspace_id: 'question_content',
   name: 'WS One',
   workflow_key: 'question_content',
   workflow_label: 'Question Content',
@@ -301,7 +301,7 @@ describe('WorkspaceMainPage batch operations', () => {
       makeJob({
         id: 'j1',
         status: 'failed',
-        workflow_key: 'question_content',
+        workspace_id: 'question_content',
         node_summaries: [
           {
             node_key: 'extract',
@@ -314,7 +314,7 @@ describe('WorkspaceMainPage batch operations', () => {
       makeJob({
         id: 'j2',
         status: 'queued',
-        workflow_key: 'question_content',
+        workspace_id: 'question_content',
         node_summaries: [
           {
             node_key: 'extract',
@@ -440,7 +440,7 @@ describe('WorkspaceMainPage batch operations', () => {
       makeJob({
         id: 'j1',
         status: 'failed',
-        workflow_key: 'question_content',
+        workspace_id: 'question_content',
       }),
     ]
     useJobStore.setState({
@@ -496,13 +496,13 @@ describe('WorkspaceMainPage batch operations', () => {
       makeJob({
         id: 'j1',
         status: 'failed',
-        workflow_key: 'question_content',
+        workspace_id: 'question_content',
       }),
       makeJob({
         id: 'j2',
         status: 'failed',
         source_id: 'Q2',
-        workflow_key: 'question_content',
+        workspace_id: 'question_content',
       }),
     ]
     useJobStore.setState({
@@ -546,7 +546,7 @@ describe('WorkspaceMainPage batch operations', () => {
       makeJob({
         id: 'j1',
         status: 'failed',
-        workflow_key: 'question_content',
+        workspace_id: 'question_content',
       }),
     ]
     useJobStore.setState({

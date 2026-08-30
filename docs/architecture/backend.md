@@ -525,7 +525,7 @@ server/app/
 | WorkflowRevisionDetailResponse | BaseModel | revision: WorkflowRevisionSummary, workflow: workflow_contracts.WorkflowDefin... | app/routes/workflow_revisions_contracts.py |
 | WorkspaceRecord | BaseModel | id: str, name: str, description: str, default_workflow_key: str, default_enti... | app/routes/workspace_contracts.py |
 | NodeLimitRequest | BaseModel | workflow_key: str, node_key: str, concurrency_limit: int | app/routes/workspace_execution_contracts.py |
-| WorkspaceExecutionConfigurationResponse | BaseModel | node_limits: list[NodeLimitRequest], migration_warnings: list[str], agent_cap... | app/routes/workspace_execution_contracts.py |
+| WorkspaceExecutionConfigurationResponse | BaseModel | node_limits: list[NodeLimitEntry], migration_warnings: list[str], agent_capac... | app/routes/workspace_execution_contracts.py |
 | WorkspaceAgentRouteEntry | BaseModel | workflow_key: str, node_key: str, node_label: str, capability: str, agent_id:... | app/routes/workspace_execution_contracts.py |
 | WorkspaceAgentRoutesResponse | BaseModel | routes: list[WorkspaceAgentRouteEntry] | app/routes/workspace_execution_contracts.py |
 | WorkspaceSettingsPayload | BaseModel | entityType: str, workflowKey: str, previewHidden: list[str] | app/routes/workspace_execution_contracts.py |
