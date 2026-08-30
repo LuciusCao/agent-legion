@@ -82,9 +82,21 @@ describe('WorkflowNodeAgentEditor', () => {
     expect(mocks.fetchAgentDefinition).not.toHaveBeenCalled()
   })
 
-  it('offers 切换为 Agent 执行 for a code node and switches the draft type on save', async () => {
+  it('offers 切换为 Agent 执行 for a code node and stays open in publish mode after create', async () => {
     const onSwitchToAgent = vi.fn().mockReturnValue(true)
     mocks.createAgentDefinition.mockResolvedValue({ agent_id: 'agent-new' })
+    mocks.fetchAgentDefinition.mockResolvedValue({
+      latest: {
+        status: 'draft',
+        definition: {
+          capability: 'generate_key_info',
+          runtime: 'pi',
+          skill: 'demo/skill',
+          tools: ['read'],
+        },
+      },
+      published: null,
+    })
     renderEditor({
       agentId: null,
       capability: 'generate_key_info',
@@ -104,11 +116,20 @@ describe('WorkflowNodeAgentEditor', () => {
     const { useUiStore } = await import('../../../stores/uiStore')
     await vi.waitFor(() =>
       expect(useUiStore.getState().toast?.message).toBe(
-        '已切换为 Agent 执行，发布 workflow 后生效'
+        '已切换为 Agent 执行，发布 Agent 与 workflow 后生效'
       )
     )
     expect(mocks.createAgentDefinition).toHaveBeenCalled()
     expect(onSwitchToAgent).toHaveBeenCalledTimes(1)
+    // 面板不关：切到编辑/发布模式加载新草稿（/api/agent-catalog 只回
+    // published，直接关面板会让用户无法从该入口发布它）。
+    await vi.waitFor(() =>
+      expect(mocks.fetchAgentDefinition).toHaveBeenCalledWith(
+        'ws1',
+        'agent-new'
+      )
+    )
+    expect(await screen.findByRole('button', { name: '发布' })).toBeEnabled()
   })
 
   it('degrades to a manual-edit hint when the draft type switch fails', async () => {

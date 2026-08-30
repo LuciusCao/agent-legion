@@ -214,6 +214,22 @@ describe('WorkflowNodeExecutionSection', () => {
     ).toBeInTheDocument()
   })
 
+  it('shows the approval-gate hint and hides the agent editor for approval nodes', () => {
+    renderSection({
+      node: { ...node, node_type: 'approval', capability: '' },
+      ...editorProps,
+    })
+
+    expect(screen.getByText('审批门')).toBeInTheDocument()
+    expect(screen.getByText(/awaiting_approval/)).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '切换为 Agent 执行' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '为此 capability 新建 Agent' })
+    ).not.toBeInTheDocument()
+  })
+
   it('toggles the embedded agent editor for the bound agent', () => {
     renderSection({ node, ...editorProps })
 

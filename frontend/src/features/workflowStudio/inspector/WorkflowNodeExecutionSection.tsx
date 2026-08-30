@@ -1,6 +1,9 @@
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { WorkflowNodeRecord } from '../../../types'
-import { WorkflowNodeAgentConfigBody } from './WorkflowNodeAgentConfigBody'
+import {
+  WorkflowNodeAgentConfigBody,
+  WorkflowNodeApprovalSection,
+} from './WorkflowNodeAgentConfigBody'
 import { WorkflowNodeAgentEditor } from './WorkflowNodeAgentEditor'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
 
@@ -15,6 +18,9 @@ type Props = {
   readOnly?: boolean
 }
 export function WorkflowNodeExecutionSection(props: Props) {
+  // EXEC-APPROVAL-001：审批门不 dispatch，专属区块（无 Agent 编辑入口）。
+  if (props.node.node_type === 'approval')
+    return <WorkflowNodeApprovalSection />
   // #284：节点类型由显式 node_type 判定；agentCatalog 仅用于按 capability
   // 找 Agent 定义做展示/编辑，不再参与类型判定。
   const isAgentNode = props.node.node_type === 'agent'

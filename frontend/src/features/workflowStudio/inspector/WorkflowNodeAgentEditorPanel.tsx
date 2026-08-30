@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useUiStore } from '../../../stores/uiStore'
 import { AgentEditor } from './AgentEditor'
 
@@ -24,30 +25,38 @@ export function agentEditorButtonLabel(
   return switchToAgent ? '切换为 Agent 执行' : '为此 capability 新建 Agent'
 }
 
-// 内嵌 AgentEditor 的接线层：保存/发布/归档后刷新目录并收起。
+// 内嵌 AgentEditor 的接线层：保存/发布/归档后刷新目录并收起。「切换为
+// Agent 执行」是例外——/api/agent-catalog 只回 published，新建草稿后若直接
+// 关面板，用户无法再从这里发布它（发布门禁会挡住 workflow），所以创建后
+// 保留新 Agent ID 并留在面板里切到编辑/发布模式，让「创建草稿 → 发布 →
+// type 切换生效」在面板内闭环（codex P2 on PR #288）。
 export function WorkflowNodeAgentEditorPanel(props: Props) {
   const showToast = useUiStore((s) => s.showToast)
+  const [createdAgentId, setCreatedAgentId] = useState<string | null>(null)
+  const editingAgentId = props.agentId ?? createdAgentId
 
-  function handleSaved() {
+  function handleSaved(newAgentId: string) {
     props.onRefresh()
-    if (props.switchToAgent) {
-      const switched = props.onSwitchToAgent?.() ?? false
-      showToast(
-        switched
-          ? '已切换为 Agent 执行，发布 workflow 后生效'
-          : 'Agent 草稿已创建；请手动在 YAML 将节点 type 改为 agent 并发布',
-        switched ? 'success' : 'error'
-      )
+    if (!props.switchToAgent) {
+      props.onClose()
+      return
     }
-    props.onClose()
+    const switched = props.onSwitchToAgent?.() ?? false
+    showToast(
+      switched
+        ? '已切换为 Agent 执行，发布 Agent 与 workflow 后生效'
+        : 'Agent 草稿已创建；请手动在 YAML 将节点 type 改为 agent 并发布',
+      switched ? 'success' : 'error'
+    )
+    setCreatedAgentId(newAgentId)
   }
 
   return (
     <AgentEditor
-      key={props.agentId ?? '__new__'}
+      key={editingAgentId ?? '__new__'}
       workspaceId={props.workspaceId}
-      agentId={props.agentId}
-      initialCapability={props.agentId ? undefined : props.capability}
+      agentId={editingAgentId}
+      initialCapability={editingAgentId ? undefined : props.capability}
       onSaved={handleSaved}
       onChanged={props.onRefresh}
       onArchived={() => {

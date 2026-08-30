@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.workflows.approval_node import APPROVAL_NODE_TYPE, validate_approval_fields
+from server.app.workflows.approval_node import APPROVAL_NODE_TYPE, validate_non_start_fields
 from server.app.workflows.schema import (
     ACCEPTED_ITEM_TYPES,
     DEFAULT_ACCEPTED_ITEM_TYPES,
@@ -41,12 +41,7 @@ def load_start_fields(raw_node: dict[str, Any], node_key: str) -> tuple[str, tup
         )
     raw_types = raw_node.get("accepted_item_types")
     if node_type != START_NODE_TYPE:
-        if raw_types is not None:
-            raise WorkflowDefinitionError(
-                f"Node {node_key}.accepted_item_types is only valid on a start node"
-            )
-        if node_type == APPROVAL_NODE_TYPE:
-            validate_approval_fields(raw_node, node_key)
+        validate_non_start_fields(raw_node, node_key, node_type, raw_types)
         return node_type, DEFAULT_ACCEPTED_ITEM_TYPES
     for forbidden in _FORBIDDEN_START_FIELDS:
         if forbidden in raw_node:

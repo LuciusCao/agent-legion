@@ -35,3 +35,16 @@ export function WorkflowNodeAgentConfigBody(props: Props) {
     </>
   )
 }
+
+// EXEC-APPROVAL-001：审批门不 dispatch，ready 后停在 awaiting_approval 等待
+// 人工决策；rework_target / feedback_artifact 经 YAML 源码编辑器的 config 维护。
+export function WorkflowNodeApprovalSection() {
+  return (
+    <section className={inspectorStyles.section} aria-label="节点执行能力">
+      <div className={inspectorStyles.sectionTitle}>审批门</div>
+      <div className={inspectorStyles.empty}>
+        人工审批门：就绪后停在 awaiting_approval 等待人工决策，不派发执行。
+      </div>
+    </section>
+  )
+}

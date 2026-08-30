@@ -43,6 +43,18 @@ _FORBIDDEN_APPROVAL_FIELDS = ("capability", "execution", "shard", "reduce", "con
 _ALLOWED_CONFIG_KEYS = ("rework_target", "feedback_artifact")
 
 
+def validate_non_start_fields(
+    raw_node: dict[str, Any], node_key: str, node_type: str, raw_types: Any
+) -> None:
+    """Field rules shared by every non-start node type."""
+    if raw_types is not None:
+        raise WorkflowDefinitionError(
+            f"Node {node_key}.accepted_item_types is only valid on a start node"
+        )
+    if node_type == APPROVAL_NODE_TYPE:
+        validate_approval_fields(raw_node, node_key)
+
+
 def validate_approval_fields(raw_node: dict[str, Any], node_key: str) -> None:
     """Enforce the approval-node field rules at definition load time."""
     for forbidden in _FORBIDDEN_APPROVAL_FIELDS:

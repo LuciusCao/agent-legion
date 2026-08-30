@@ -3,6 +3,13 @@ import {
   parseWorkflowYaml,
 } from './workflowStudioYamlDraft.parse'
 
+// Inspector 头部徽标：type=agent 无徽标，approval 专属徽标，其余 code。
+export function workflowNodeKindBadge(nodeType: string | undefined): string {
+  if (nodeType === 'agent') return ''
+  if (nodeType === 'approval') return 'approval'
+  return 'code'
+}
+
 // 改写节点的显式执行类型（#284）：type=code 节点「切换为 Agent 执行」时
 // 把草稿 YAML 的 type 改为 agent。start 节点的类型不可改写。
 export function patchWorkflowNodeType(
