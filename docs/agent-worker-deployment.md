@@ -312,7 +312,7 @@ Quick Start 已含命令）：
 curl -b <登录 cookie> -H 'X-CSRF-Token: <csrf-token>' http://192.0.2.1:8000/api/agent-workers
 ```
 
-响应中应同时看到 `host-local-1` 和 `remote-worker-1`。每个 Worker 还带 `allowed_workspaces`：为空（展示为「全部」）表示该 Worker 的 scope 覆盖其可 claim 的全部 workspace；否则列出当前存活 scoped token 授权的 workspace。该字段按注册时解析的 key 绑定实时重派生——全局 token 注册已随 issue #35 退役，现存「为空」行只能来自退役前的 legacy 注册或多个 workspace token 的并集（见 §4「token 即 scope」）。提交工作流后，Job 详情会分别显示逻辑 `agent_id` 和实际承接任务的 `worker_id`。
+响应中应同时看到 `host-local-1` 和 `remote-worker-1`。每个 Worker 还带 `allowed_workspaces`：为空（展示为「全部」）表示不受 workspace 过滤的 legacy 注册（scoped token 注册的并集永远非空）；否则列出当前存活 scoped token 授权的 workspace，该字段按注册时解析的 key 绑定实时重派生——全局 token 注册已随 issue #35 退役（见 §4「token 即 scope」）。提交工作流后，Job 详情会分别显示逻辑 `agent_id` 和实际承接任务的 `worker_id`。
 
 并发只受两层约束：每个 workspace 的 Agent 并发上限，以及各 Worker 本机的 `max_concurrency`。workspace 级上限在 workspace 设置页的「Agent 并发上限」配置（随主保存按钮一起保存），对该 workspace 的全部 Agent 节点统一生效——不再按节点单独设置。例如上限 20、三个 Worker 各 10 时，该 workspace 最多并行 20 个 Agent 执行，不要求三个 Worker 都跑满。Worker 只能 claim 其 `allowed_workspaces` 范围内 workspace 的任务。控制台修改 `max_concurrency` 会热生效，无需重启；调低容量不会终止在途任务，而是在运行数降到新上限以下前停止继续 claim。关闭「任务领取」同样只阻止新 claim，不影响已经领取的任务。code 节点任务是独立的第二个池：只受 Worker 本机 `max_code_concurrency` 约束（不占 workspace 级 Agent 上限），同样热更新免重启（0→>0 需本机已装 velites，见 §5「code 节点执行池」）。
 
