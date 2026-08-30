@@ -54,17 +54,13 @@ PARTITIONS: tuple[Partition, ...] = (
         80.0,
     ),
     Partition(
-        "backend agent artifacts",
-        "backend",
-        ("server/app/agent_broker/agent_artifacts.py",),
-        70.0,
+        "backend agent artifacts", "backend", ("server/app/agent_broker/agent_artifacts.py",), 70.0
     ),
-    Partition(
-        "backend skill version fallbacks",
-        "backend",
-        ("server/app/workflows/skill_version_fallbacks.py",),
-        70.0,
-    ),
+    # "backend skill version fallbacks" removed: its only file
+    # (server/app/workflows/skill_version_fallbacks.py) was deleted with the
+    # executor retirement (P-0.5, 39f5334a) — the partition survived as a
+    # NO DATA entry that only failed once #275 put partitions under
+    # --enforce in CI (they had been report-only until then).
     # Issue #275: the worker/ execution plane (code_runner, supervisor,
     # orphan_reaper, upload/queue — 5.4k LOC, 68 modules) sat outside the
     # server-scoped 85% floor entirely: pyproject [tool.coverage.run] only
@@ -99,12 +95,7 @@ PARTITIONS: tuple[Partition, ...] = (
         ),
         80.0,
     ),
-    Partition(
-        "frontend api transport",
-        "frontend",
-        ("src/api/",),
-        80.0,
-    ),
+    Partition("frontend api transport", "frontend", ("src/api/",), 80.0),
     Partition(
         "frontend workflow upgrade",
         "frontend",
@@ -216,6 +207,26 @@ def evaluate(
     return rows, violations
 
 
+# backend prefixes are repo-root-relative, frontend ones src/-relative
+# (istanbul keys are relative to frontend/).
+_PARTITION_BASE = {"backend": ROOT_DIR, "frontend": ROOT_DIR / "frontend"}
+
+
+def validate_partition_prefixes(partitions: tuple[Partition, ...]) -> list[str]:
+    """Reject partitions whose prefixes match no file on disk.
+
+    A dead prefix (its file deleted, e.g. the retired
+    skill_version_fallbacks) would otherwise surface only when someone
+    first runs --enforce — as an opaque NO DATA instead of an actionable
+    "remove the partition" message (#275 follow-up).
+    """
+    return [
+        f"{p.name}: prefixes match no files on disk ({', '.join(p.prefixes)})"
+        for p in partitions
+        if not any((_PARTITION_BASE[p.source] / prefix).exists() for prefix in p.prefixes)
+    ]
+
+
 def _matches(path: str, partition: Partition) -> bool:
     normalized = path.replace("\\", "/")
     for prefix in partition.prefixes:
@@ -253,7 +264,8 @@ def main(argv: list[str] | None = None) -> int:
         totals_by_source["frontend"] = frontend_line_totals(args.frontend)
         provided_sources.add("frontend")
 
-    rows, violations = evaluate(PARTITIONS, totals_by_source, provided_sources)
+    rows, evaluated = evaluate(PARTITIONS, totals_by_source, provided_sources)
+    violations = validate_partition_prefixes(PARTITIONS) + list(evaluated)
     print("=== Coverage Partition Report ===")
     for row in rows:
         print(row)

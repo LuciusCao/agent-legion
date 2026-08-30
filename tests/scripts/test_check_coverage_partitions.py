@@ -162,3 +162,26 @@ def test_main_enforce_passes_when_all_partitions_meet_floor(tmp_path: Path) -> N
     exit_code = main(["--frontend", str(report), "--enforce"])
 
     assert exit_code == 0
+
+
+def test_dead_prefix_partition_is_rejected(tmp_path: Path) -> None:
+    """A partition pointing at a deleted file must fail loudly (#275 follow-up:
+    the retired skill_version_fallbacks partition survived as NO DATA until
+    CI first ran --enforce)."""
+    from scripts.check_coverage_partitions import Partition, validate_partition_prefixes
+
+    partitions = (Partition("dead", "backend", ("no/such/file.py",), 70.0),)
+    violations = validate_partition_prefixes(partitions)
+    assert any("prefixes match no files" in v for v in violations)
+
+    # The shipped PARTITIONS table itself must be prefix-healthy.
+    assert validate_partition_prefixes(PARTITIONS) == []
+
+
+def test_directory_prefix_partition_is_healthy() -> None:
+    """A directory-prefix partition (the worker/ tree) is healthy as long as
+    the directory exists on disk."""
+    from scripts.check_coverage_partitions import Partition, validate_partition_prefixes
+
+    partitions = (Partition("worker tree", "backend", ("worker/",), 85.0),)
+    assert validate_partition_prefixes(partitions) == []
