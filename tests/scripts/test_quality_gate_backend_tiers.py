@@ -101,6 +101,23 @@ def test_backend_gate_emits_junit_durations_and_rerun_report(tmp_path: Path) -> 
     assert f"rerun:{results / 'quick-reruns.json'}" in calls
 
 
+def test_backend_coverage_args_include_worker_for_partition_floor(tmp_path: Path) -> None:
+    """Issue #275: the AGENT_LEGION_COV path must also collect --cov=worker.
+    CI's backend-unit and backend-postgres shards run these tiers with
+    AGENT_LEGION_COV=1 and upload the data files; backend-coverage then
+    enforces the worker execution-plane partition floor on the combined
+    data. Losing --cov=worker here would make that partition see NO DATA
+    (a violation in enforce mode only after the shards shipped empty worker
+    data — better to pin the invocation itself)."""
+    calls = _run_backend_gate_with_fake_uv(tmp_path, {"GATE_TIER": "unit", "AGENT_LEGION_COV": "1"})
+
+    assert "--cov=server" in calls
+    assert "--cov=worker" in calls
+    assert "--cov-report=term-missing" in calls
+    # The floor stays deferred: per-shard data is partial by construction.
+    assert "--cov-fail-under=0" in calls
+
+
 def test_backend_smoke_tier_runs_the_curated_subset(tmp_path: Path) -> None:
     scripts = tmp_path / "scripts"
     fake_bin = tmp_path / "bin"
@@ -228,6 +245,7 @@ def test_backend_full_coverage_defers_floor_to_combined_report(tmp_path: Path) -
     assert result.returncode == 0, result.stdout + result.stderr
     calls = gate_log.read_text(encoding="utf-8")
     assert "--cov=server" in calls
+    assert "--cov=worker" in calls
     assert "--cov-fail-under=0" in calls
     # The full tier is the unit layer (PR #225): same marker selection as
     # GATE_TIER=unit, same unreachable offline database URL (the URL travels

@@ -98,7 +98,13 @@ run_tests() {
   fi
   cov_args=()
   if [[ "${AGENT_LEGION_COV:-0}" == "1" ]]; then
-    cov_args=(--cov=server --cov-report=term-missing)
+    # --cov=worker feeds the worker-execution-plane partition floor (issue
+    # #275): coverage shards must carry worker/ line data or the partition
+    # check on the combined report sees no matching files. Per-shard runs
+    # keep --cov-fail-under=0 below — the global 85% floor and the worker
+    # partition floor are both enforced once, on the combined data
+    # (backend-coverage in CI, scripts/check.sh locally).
+    cov_args=(--cov=server --cov=worker --cov-report=term-missing)
     if [[ "${AGENT_LEGION_COV_APPEND:-0}" == "1" ]]; then
       cov_args+=(--cov-append)
     fi

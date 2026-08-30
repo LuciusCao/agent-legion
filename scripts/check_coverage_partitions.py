@@ -65,6 +65,22 @@ PARTITIONS: tuple[Partition, ...] = (
         ("server/app/workflows/skill_version_fallbacks.py",),
         70.0,
     ),
+    # Issue #275: the worker/ execution plane (code_runner, supervisor,
+    # orphan_reaper, upload/queue — 5.4k LOC, 68 modules) sat outside the
+    # server-scoped 85% floor entirely: pyproject [tool.coverage.run] only
+    # measures server/, so CI's fail_under gate never saw it. The backend
+    # shard coverage now also collects --cov=worker (check-quick-backend.sh
+    # AGENT_LEGION_COV path), and this partition pins the whole tree to its
+    # own floor so it can no longer regress invisibly. Baseline measured on
+    # the full quick suite (unit + postgres tiers, 4052 tests, 2026-08-30):
+    # 89.15% lines (2390/2681); floor set to 85 with the same
+    # baseline-minus-margin rule as the server global floor.
+    Partition(
+        "backend worker execution plane",
+        "backend",
+        ("worker/",),
+        85.0,
+    ),
     Partition(
         "backend job log raw",
         "backend",
@@ -119,6 +135,12 @@ def backend_line_totals(data_file: Path) -> dict[str, tuple[int, int]]:
                 "coverage",
                 "json",
                 f"--data-file={data_file}",
+                # The data file may hold a single tier's partial coverage
+                # (CI shards, the unit-tier segment of check.sh); the global
+                # fail_under from pyproject would abort the conversion on
+                # that partial total before the per-partition floors — which
+                # are the actual gate here — ever run.
+                "--fail-under=0",
                 "-o",
                 str(json_path),
                 "--quiet",

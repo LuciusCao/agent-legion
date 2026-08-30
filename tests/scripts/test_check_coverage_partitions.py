@@ -80,6 +80,57 @@ def test_evaluate_passes_partitions_at_floor() -> None:
     assert violations == []
 
 
+def test_worker_execution_plane_partition_covers_worker_tree() -> None:
+    """Issue #275: the worker/ execution plane needs its own floor — the
+    server-scoped global 85% never measured it. The partition matches every
+    file under worker/ (directory prefix), and the baseline-derived floor
+    must hold against a representative coverage snapshot (89.15% measured on
+    the full quick suite, 2026-08-30)."""
+    worker_partition = next(p for p in PARTITIONS if p.prefixes == ("worker/",))
+
+    assert worker_partition.source == "backend"
+    assert worker_partition.min_lines == 85.0
+
+    totals = {
+        "backend": {
+            "worker/supervisor.py": (159, 181),
+            "worker/upload/queue.py": (168, 181),
+            "server/app/services/other.py": (0, 100),
+        },
+        "frontend": {},
+    }
+    rows, violations = evaluate((worker_partition,), totals, {"backend", "frontend"})
+
+    # Only worker/ files count toward the partition (server files excluded).
+    assert any(
+        "backend worker execution plane: 90.3% lines (327/362, floor 85%) OK" in row for row in rows
+    )
+    assert violations == []
+
+
+def test_worker_execution_plane_partition_flags_regression() -> None:
+    """A worker/ regression below the floor must be flagged — the partition
+    is what makes the execution plane unable to regress invisibly."""
+    worker_partition = next(p for p in PARTITIONS if p.prefixes == ("worker/",))
+    totals = {"backend": {"worker/supervisor.py": (100, 181)}, "frontend": {}}
+
+    _rows, violations = evaluate((worker_partition,), totals, {"backend"})
+
+    assert violations == ["backend worker execution plane: 55.2% lines below floor 85%"]
+
+
+def test_worker_partition_reports_no_data_without_worker_files() -> None:
+    """Backend data without any worker/ files (the pre-#275 shard shape)
+    is a violation in enforce mode, not a silent skip."""
+    worker_partition = next(p for p in PARTITIONS if p.prefixes == ("worker/",))
+    totals = {"backend": {"server/app/services/other.py": (90, 100)}, "frontend": {}}
+
+    rows, violations = evaluate((worker_partition,), totals, {"backend"})
+
+    assert any("NO DATA" in row for row in rows)
+    assert violations == ["backend worker execution plane: no matching files in coverage data"]
+
+
 def test_main_reports_violations_without_failing(tmp_path: Path, capsys) -> None:
     report = tmp_path / "coverage-final.json"
     _write_coverage_final(report, {"/repo/src/api/a.ts": [(1, 10, 0)]})
