@@ -3886,6 +3886,19 @@ export interface components {
       /** Total Tokens */
       total_tokens: number
     }
+    /** NodeLimitEntry */
+    NodeLimitEntry: {
+      /** Concurrency Limit */
+      concurrency_limit: number
+      /** Node Key */
+      node_key: string
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       */
+      workflow_key: string
+    }
     /** NodeLimitRequest */
     NodeLimitRequest: {
       /** Concurrency Limit */
@@ -5720,7 +5733,11 @@ export interface components {
       node_key: string
       /** Node Label */
       node_label: string
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       */
       workflow_key: string
     }
     /** WorkspaceAgentRoutesResponse */
@@ -5802,7 +5819,7 @@ export interface components {
       /** Migration Warnings */
       migration_warnings: string[]
       /** Node Limits */
-      node_limits: components['schemas']['NodeLimitRequest'][]
+      node_limits: components['schemas']['NodeLimitEntry'][]
     }
     /** WorkspacePackageDeleteResponse */
     WorkspacePackageDeleteResponse: {

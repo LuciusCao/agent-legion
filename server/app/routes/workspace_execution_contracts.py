@@ -2,17 +2,24 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from server.app.routes.workspace_contracts import WorkspaceRecord
 
-# #211 Phase 2 second batch deprecation wording (shared by the settings
-# blob's read/write faces).
+# #211 Phase 2 deprecation wordings (v62 is the binding schema).
+_DEP_READ = "Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211."
 _DEPRECATED_KEY = (
     "Deprecated: equals the workspace id since schema v62; removal is tracked in #211."
 )
 
 
 class NodeLimitRequest(BaseModel):
+    # PUT-side: workflow_key stays required (request-side migration is a
+    # later #211 batch; deprecating invites omission and 422 — #269).
     workflow_key: str = Field(min_length=1)
     node_key: str = Field(min_length=1)
     concurrency_limit: int = Field(ge=1)
+
+
+class NodeLimitEntry(NodeLimitRequest):
+    # response twin (#269)
+    workflow_key: str = Field(min_length=1, description=_DEP_READ, deprecated=True)
 
 
 class WorkspaceExecutionConfigurationResponse(BaseModel):
@@ -23,13 +30,13 @@ class WorkspaceExecutionConfigurationResponse(BaseModel):
     ``WorkspaceExecutorConfigurationResponse`` wording.
     """
 
-    node_limits: list[NodeLimitRequest]
+    node_limits: list[NodeLimitEntry]
     migration_warnings: list[str]
     agent_capacity: int | None = None
 
 
 class WorkspaceAgentRouteEntry(BaseModel):
-    workflow_key: str
+    workflow_key: str = Field(description=_DEP_READ, deprecated=True)
     node_key: str
     node_label: str
     capability: str
