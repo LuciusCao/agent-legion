@@ -14,13 +14,12 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
+from worker.config_response import public_config_response
 from worker.metrics_proxy import create_metrics_proxy_router
-from worker.registration.token import registration_token_configured
-from worker.runtime.catalog import runtime_status
 from worker.service_bind import embed_control_token
 from worker.service_models import WorkerConfigPayload
 from worker.service_tokens import create_register_token_router
-from worker.supervisor import WorkerConfigStore, WorkerSupervisor, public_config
+from worker.supervisor import WorkerConfigStore, WorkerSupervisor
 
 logger = logging.getLogger(__name__)
 
@@ -38,17 +37,6 @@ _HOT_CONFIG_FIELDS = {
     "max_code_concurrency",
     "upload_max_concurrency",
 }
-
-
-def _public_config_response(store: WorkerConfigStore, config: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **public_config(config),
-        # 生效声明是派生值（探测 − 停用），随响应附上便于观测；runtime_status
-        # 每次请求现探，供控制台渲染逐 runtime 的安装/启用状态。
-        "runtimes": config.get("runtimes", []),
-        "runtime_status": runtime_status(config.get("disabled_runtimes", [])),
-        "register_token_configured": registration_token_configured(config, store.state_dir),
-    }
 
 
 def _forget_previous_worker(config: dict[str, Any]) -> None:
@@ -119,7 +107,7 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool 
     @app.get("/api/config", dependencies=guarded)
     def get_config() -> dict[str, Any]:
         config = supervisor.store.read(require_identity=False)
-        return _public_config_response(supervisor.store, config)
+        return public_config_response(supervisor, config)
 
     @app.put("/api/config", dependencies=guarded)
     def put_config(payload: WorkerConfigPayload) -> dict[str, Any]:
@@ -138,7 +126,7 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool 
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {
-            "config": _public_config_response(supervisor.store, config),
+            "config": public_config_response(supervisor, config),
             "status": supervisor.status(),
             "restarted": restarted,
         }

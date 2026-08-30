@@ -10,7 +10,9 @@ from server.app.agent_control.registry import MODEL_RUNTIME_PROTOCOL_VERSION
 class RegisterAgentWorkerRequest(BaseModel):
     worker_id: str = Field(min_length=1, max_length=64)
     name: str = Field(default="", max_length=128)
-    runtimes: list[str] = Field(min_length=1)
+    # 空集合合法（issue #254）：code-only Worker 不声明任何 agent runtime，
+    # 只经 max_code_concurrency 承接 code 任务。
+    runtimes: list[str] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
     models: list[dict[str, str]] = Field(default_factory=list)
     max_concurrency: int = Field(gt=0, le=1024)

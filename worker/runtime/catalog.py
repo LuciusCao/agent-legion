@@ -63,29 +63,6 @@ def effective_runtimes(
     return sorted(available - {str(value) for value in disabled})
 
 
-def runtime_status(
-    disabled: Iterable[str], installed: Mapping[str, str] | None = None
-) -> list[dict[str, Any]]:
-    """控制台展示用的逐 runtime 状态（按 catalog 顺序）。"""
-    detected = dict(installed) if installed is not None else detect_installed_runtimes()
-    disabled_set = {str(value) for value in disabled}
-    rows: list[dict[str, Any]] = []
-    for runtime, meta in RUNTIME_CATALOG.items():
-        binary = detected.get(runtime)
-        rows.append(
-            {
-                "runtime": runtime,
-                "name": meta["name"],
-                "description": meta["description"],
-                "installed": binary is not None,
-                "binary": binary,
-                "enabled": binary is not None and runtime not in disabled_set,
-                "install_hint": meta["install_hint"],
-            }
-        )
-    return rows
-
-
 def resolve_config_runtimes(config: Mapping[str, Any]) -> tuple[list[str], list[str]]:
     """从原始配置解析 (disabled_runtimes, 生效 runtimes)。
 

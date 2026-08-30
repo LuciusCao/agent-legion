@@ -205,12 +205,14 @@ export function mergeDisabledRuntimes(previousDisabled, statusRows, uncheckedNow
 function renderRuntimeCard(row) {
   const { state, label } = runtimeCardState(row);
   const badgeClass = state === "enabled" ? "ok" : state === "missing" ? "missing" : "off";
+  // 探测/停用状态与 Host 登记不一致：改动要重启重注册后才生效（#254 评审）。
+  const pending = row.pending_restart ? '<span class="runtime-state pending">待重启生效</span>' : "";
   const binary = row.installed ? `<span class="runtime-binary" title="探测到的二进制">${escapeHtml(row.binary || "")}</span>` : "";
   const hint = row.installed ? "" : `<p class="runtime-hint">未检测到二进制；${escapeHtml(row.install_hint || "安装后重启 Worker 自动启用")}。</p>`;
   const switchTitle = row.installed ? "停用后不再承接该 runtime 的任务" : "未安装，无法启用";
   return `<div class="runtime-card" data-state="${state}" data-runtime="${escapeHtml(row.runtime)}">
     <div class="runtime-main">
-      <div class="runtime-title"><span class="runtime-name">${escapeHtml(row.name || row.runtime)}</span><span class="runtime-state ${badgeClass}">${label}</span></div>
+      <div class="runtime-title"><span class="runtime-name">${escapeHtml(row.name || row.runtime)}</span><span class="runtime-state ${badgeClass}">${label}</span>${pending}</div>
       <p class="runtime-desc">${escapeHtml(row.description || "")}</p>
       ${binary}${hint}
     </div>

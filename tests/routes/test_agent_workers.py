@@ -90,6 +90,36 @@ def test_agent_worker_register_rejects_unknown_runtime(tmp_path: Path) -> None:
     assert response.json()["detail"] == "runtimes must contain pi, openclaw and/or velites"
 
 
+def test_agent_worker_register_accepts_empty_runtimes_for_code_only_worker(
+    tmp_path: Path,
+) -> None:
+    """issue #254：全部 agent runtime 停用的 code-only Worker 允许空 runtimes 注册。"""
+    app = _make_app(tmp_path)
+
+    with TestClient(app) as client:
+        _authenticate_admin(client)
+        credential = _issue_scoped_token(client)
+        response = client.post(
+            "/api/agent-workers/register",
+            headers={"X-Agent-Worker-Register-Token": credential},
+            json={
+                "worker_id": "code-only-1",
+                "runtimes": [],
+                "capabilities": ["generate"],
+                "max_concurrency": 1,
+                "max_code_concurrency": 2,
+                "protocol_version": 3,
+            },
+        )
+        token = response.json()["worker_token"]
+        worker = client.get("/api/agent-workers/self", headers={"X-Agent-Worker-Token": token})
+
+    assert response.status_code == 201, response.text
+    assert worker.status_code == 200
+    assert worker.json()["runtimes"] == []
+    assert worker.json()["max_code_concurrency"] == 2
+
+
 def test_worker_can_read_only_its_own_status_with_issued_token(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
 

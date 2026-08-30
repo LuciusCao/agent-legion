@@ -384,6 +384,42 @@ def test_local_api_exposes_runtime_status_and_applies_disabled_runtimes(
     assert supervisor.restarts == 1
 
 
+def test_runtime_status_marks_pending_restart_against_host_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """探测/停用状态与 Host 登记集合不一致 → 标出待重启生效（#254 评审）。"""
+    monkeypatch.setattr(
+        catalog,
+        "resolve_binary",
+        lambda binary: f"/usr/local/bin/{binary}" if binary in {"velites", "pi"} else None,
+    )
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config({**_config(), "disabled_runtimes": ["pi"]}))
+
+    class RegisteredSupervisor(FakeSupervisor):
+        def status(self) -> dict[str, Any]:
+            # Host 仍登记着 pi 与 velites（executor 同步状态文件的内容）。
+            return {**super().status(), "host_worker": {"runtimes": ["pi", "velites"]}}
+
+    app = create_app(RegisteredSupervisor(store), tmp_path)
+
+    with TestClient(app) as client:
+        response = client.get("/api/config", headers=_auth(store))
+
+    payload = response.json()
+    assert payload["registered_runtimes"] == ["pi", "velites"]
+    rows = {row["runtime"]: row for row in payload["runtime_status"]}
+    # pi 刚被停用但 Host 还登记着 → 待重启生效；velites 启用且一致 → 无 pending。
+    assert rows["pi"]["enabled"] is False
+    assert rows["pi"]["registered"] is True
+    assert rows["pi"]["pending_restart"] is True
+    assert rows["velites"]["enabled"] is True
+    assert rows["velites"]["registered"] is True
+    assert rows["velites"]["pending_restart"] is False
+    assert rows["openclaw"]["registered"] is False
+    assert rows["openclaw"]["pending_restart"] is False
+
+
 @pytest.mark.no_db
 def test_validate_config_migrates_legacy_runtimes_and_preserves_behavior(
     monkeypatch: pytest.MonkeyPatch,

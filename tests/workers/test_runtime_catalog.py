@@ -20,8 +20,8 @@ from worker.runtime.catalog import (
     SUPPORTED_RUNTIMES,
     detect_installed_runtimes,
     effective_runtimes,
-    runtime_status,
 )
+from worker.runtime.status import runtime_status
 
 
 @pytest.fixture(autouse=True)
