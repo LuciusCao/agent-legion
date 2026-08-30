@@ -103,6 +103,42 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
 4. **边界管理（持续）**：worker 容器按不可信边界对待——只读 rootfs、独立网络
    段、最小 volume 挂载面；即使特权收敛完成，这层也保持不变。
 
+## 单副本约束
+
+> Issue #277。控制平面（FastAPI Host 进程）当前是**单副本形态**：多个运行时设施
+> 刻意放在进程内，数据库只是部分状态的持久层。误把 uvicorn/compose 的水平扩缩容
+> 直觉搬过来（`--workers N`、多容器副本、K8s Deployment replicas>1），功能不会崩溃
+> 但会**静默退化**——每个症状都长得像另一个 bug。本节固化这份现状与症状形态，
+> 并说明已内置的第二副本探测护栏。
+
+### 进程内的运行时状态
+
+| # | 状态 | 位置 | 多副本下的症状形态 |
+|---|------|------|--------------------|
+| 1 | 事件总线（SSE fan-out） | `InProcessEventBus`（`server/app/events/bus.py`） | 副本 A 写入的 job/agent 事件只广播给连在 A 上的 SSE 客户端；连在 B 上的浏览器收不到该事件，表现为「任务明明在跑但界面不动」 |
+| 2 | 登录限速 | `LoginRateLimiter`（`server/app/auth/rate_limit.py`） | 每副本各自计数，暴力破解配额被副本数稀释（N 副本 ≈ N×5 次失败窗口） |
+| 3 | Studio Chat 会话 | `StudioChatService._runtimes`（`server/app/studio_chat/service.py`） | 会话的 agent 子进程只活在创建它的副本里；请求被负载均衡到另一副本时该会话互不可见，表现为「会话时有时无 / 无法继续」 |
+| 4 | 暂停状态启动重置 | `WorkspaceWorkerControl.reset_all_to_paused`（`server/app/worker_control.py`，`main.py` 启动调用） | 副本 B 启动即把全部 workspace 重置为暂停，把副本 A 上刚由操作员恢复的调度一并打掉，两个副本的暂停语义互相打架 |
+
+### 当前正确形态与护栏
+
+- **当前部署形态（单 uvicorn 进程 × 每数据库一个副本）全部正确**：开发机
+  `make dev`、生产 `scripts/native-prod-up.sh` / `deploy/` compose 均如此。多 worktree
+  开发也天然合规——`scripts/init-worktree.sh` 给每个 worktree 派生专属数据库，
+  「两个进程、两个库」不触发本节任何症状。
+- **第二副本探测（`server/app/single_replica_probe.py`）**：lifespan 启动时在一条
+  专用池连接上取会话级 advisory lock（key 与 `current_database()` 一起哈希，跨库不
+  互撞）。后启动的副本发现锁被占即打一条 warning 日志（SSE / 限速 / 会话 / 暂停
+  各自退化的提示 + 逃生门指引），不拒绝启动——自托管单机下「两个 worktree 实例连
+  不同库」是合法形态，fail-fast 会误伤；同库多副本才是危险形态，而探测的 key 恰好
+  以库为粒度。连到 shutdown 才释放，连接归池不泄漏。
+- 逃生门与开关：
+  - `AGENT_LEGION_ALLOW_MULTI_REPLICA=1`：知情确认多副本，warning 降为 info；
+  - `AGENT_LEGION_SKIP_SINGLE_REPLICA_PROBE=1`：完全跳过探测（测试/特殊场景）。
+- 若未来确实需要多副本，正确路径不是简单横向扩缩容，而是把上表逐项外置
+  （事件总线走 pub/sub、限速与暂停状态本就以 DB 为权威、Chat 会话需要粘性路由或
+  会话外置），每项都是独立的设计工作，不在本节展开。
+
 ## API Surface / Interface
 
 <!-- AUTO-GENERATED: scripts/generate_architecture.py -->
