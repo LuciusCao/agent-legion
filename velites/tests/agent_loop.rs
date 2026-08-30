@@ -22,10 +22,7 @@ use velites::provider::{CompletionRequest, Provider, ProviderError};
 use velites::session::SessionLog;
 use velites::tools::ToolKind;
 
-/// Exit code for a run that ended without its declared `--require-output`
-/// artifacts (output contract violation); see EXIT_MISSING_OUTPUTS in
-/// src/agent.rs.
-const EXIT_MISSING_OUTPUTS: u8 = 1;
+use velites::agent::EXIT_MISSING_OUTPUTS;
 
 /// Minimal offline agent-loop config: canonical cwd (the sandbox root),
 /// no OS sandbox, no session mirror, generous budgets, a never-cancelled

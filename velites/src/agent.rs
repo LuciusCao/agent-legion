@@ -47,7 +47,7 @@ use crate::tools::{resolve_in_cwd, ToolContext, ToolKind, ToolOutput};
 /// Exit code for a run that ended without its declared `--require-output`
 /// artifacts (output contract violation). Harness faults exit 2 (see
 /// main.rs); 0 keeps Pi semantics for everything else.
-const EXIT_MISSING_OUTPUTS: u8 = 1;
+pub const EXIT_MISSING_OUTPUTS: u8 = 1;
 
 pub struct AgentConfig {
     /// Session identifier (`--name`); a pid-based fallback is generated.

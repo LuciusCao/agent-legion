@@ -68,11 +68,15 @@ def admin_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """一个真实 Host app + 它的 admin TestClient + 接到同一 app 的
     requests→TestClient 桥（Worker Client 的出站流量走它）。
 
-    admin 的 TestClient 上下文只进入一次（第二次进入会重复跑 lifespan 并在
-    退出时炸掉 shutdown hooks——见 tests/conftest.py 的共享 app 契约）；桥用
-    一个**不进入上下文**的独立 TestClient 实例转发请求：它在上下文外按请求
-    自建 portal，且 cookie jar 与 admin 会话隔离，worker 流量不会沾上 admin
-    凭证。
+    本 fixture 刻意不用 conftest 的共享 client（codex review on #310 提出，
+    评估后不采纳，理由如下）：共享 app 的 teardown invariant 要求
+    ``agent_manager.agents`` 在每个测试后为空——而 worker 注册恰恰会向它
+    写入。全部既有注册面测试（tests/routes/test_agent_worker_registration.py）
+    因此都用私有 app；本测试属于同一族。admin bootstrap 走与 conftest 相同
+    的 ``authenticate_admin`` 帮助函数（同一认证/CSRF 路径），app 级隔离用
+    per-test data_dir。桥用一个**不进入上下文**的独立 TestClient 实例转发
+    请求（admin 的上下文只进一次——重复进入会重跑 lifespan 并炸 shutdown
+    hooks），cookie jar 与 admin 会话隔离。
     """
     app = create_app(data_dir=tmp_path, start_worker=False)
     with TestClient(app) as client:
@@ -224,13 +228,23 @@ def test_re_registration_rotates_token_and_repoints_binding(admin_client) -> Non
     ]
 
 
-def test_registration_without_tokens_is_terminal_auth_error() -> None:
-    """没有任何 register token 时 Client 端直接拒绝（不发请求）：远程 Worker
+def test_registration_without_tokens_is_terminal_auth_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """没有任何 register token 时 Client 端直接拒绝（零 HTTP 调用，
+    monkeypatch 计数证明——subagent review on #310）：远程 Worker
     丢失全部 key 的 fail-fast 路径，不进入重试循环。"""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        requests.sessions.Session,
+        "request",
+        lambda session, method, url, *a, **kw: calls.append(str(url)),  # noqa: ANN002, ANN003
+    )
     client = Client(f"http://{_BRIDGE_HOST}")
     with pytest.raises(WorkerAuthError, match="no register token"):
         client.register(dict(_WORKER_CONFIG), [])
     assert client.token == ""
+    assert calls == []  # fail-fast happens before any request leaves
 
 
 def test_claim_after_registration_returns_204_when_queue_empty(admin_client) -> None:
