@@ -24,6 +24,14 @@ def create_jobs_router(
 ) -> APIRouter:
     router = APIRouter()
 
+    # #272: legacy unbounded list endpoint. The frontend already uses the
+    # paginated /jobs/snapshot endpoint; this cap is API-compat protection
+    # (select * carries KB-scale TEXT columns, so an unbounded response is a
+    # memory and latency hazard). The bound lives on JobQueries.list_jobs as a
+    # defaulted parameter (clamped to [1, 500] there), so JobQueryService
+    # callers inherit it without signature changes. A fixed constant (not a
+    # query parameter) keeps the OpenAPI contract and generated frontend
+    # types unchanged.
     @router.get("/workspaces/{workspace_id}/jobs", response_model=JobsResponse)
     def list_workspace_jobs(
         workspace_id: str,

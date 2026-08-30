@@ -42,6 +42,7 @@ from server.app.services.workspace_execution_configuration import (
     WorkspaceExecutionConfigurationService,
 )
 from server.app.settings import load_settings, validate_settings
+from server.app.single_replica_probe import SingleReplicaProbe
 from server.app.skills.seed import seed_skill_sources
 from server.app.skills.skill_root_migration import migrate_skill_source_paths
 from server.app.spa import mount_spa
@@ -138,12 +139,20 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         job_intake_queue=JobIntakeQueue(job_db, settings, job_event_buffer),
         ops_metrics=ops_metrics,
     )
+    # Single-replica guardrail (#277): the runtime state above (in-process
+    # event bus, login rate limiter, studio chat sessions, pause reset) is
+    # process-local, so a second replica against the same database degrades
+    # silently. The probe holds one session advisory lock for the process
+    # lifetime; a second starter finds it taken and logs a warning (env
+    # escape hatches documented in single_replica_probe.py).
+    replica_probe = SingleReplicaProbe(job_db)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         nonlocal workflow_worker_thread, sweeper_thread, artifact_gc_thread
         nonlocal artifact_maintenance_thread, material_ttl_thread
         job_event_manager.bus.attach_loop(asyncio.get_running_loop())
+        replica_probe.probe()
         if start_worker:
             validate_settings(settings)
             agent_manager.discover()
@@ -188,6 +197,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 yield
         finally:
             await background_tasks.stop(app)
+            # Release the replica-probe lock before the pools close so the
+            # next starter (rolling restart) does not see a stale holder.
+            replica_probe.close()
             # Reap chat sessions before closing DB pools: teardown revokes
             # scoped tokens and settles permission waiters via the DB.
             studio_chat_service.shutdown()

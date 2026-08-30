@@ -185,6 +185,10 @@ architecture-ratchet: ## 更新架构预算基线
 architecture-check: ## 检查架构契约
 	$(UV) run python -m scripts.check_architecture
 
+.PHONY: architecture-issue-states
+architecture-issue-states: ## 刷新豁免锚点 issue 状态清单（gh 联网，供豁免到期检测）
+	$(UV) run python -m scripts.refresh_issue_states
+
 # 前端 API 类型生成
 .PHONY: api-generate
 api-generate: ## 重新生成前端 API 类型

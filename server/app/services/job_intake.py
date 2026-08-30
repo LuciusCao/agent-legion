@@ -6,6 +6,7 @@ from typing import Any
 
 import psycopg
 
+from server.app.db.rowmap import wire_batch_id
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
@@ -189,7 +190,7 @@ class JobIntakeService:
             job["storage_dir"] = str(resolve_job_dir(job, self.settings.jobs_dir))
             # Wire compatibility: API/SSE consumers still read ``batch_id``
             # (route renames are a later slice); the value is the run id.
-            job["batch_id"] = str(job.get("run_id") or "")
+            job["batch_id"] = wire_batch_id(job)
 
         batch["created_count"] = len(jobs)
         if self.job_event_buffer is not None:

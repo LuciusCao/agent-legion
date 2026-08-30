@@ -477,6 +477,14 @@ jobs:
       # combined data, exactly as before. Only computed when every producer
       # succeeded — a failed shard keeps the gate red through its own check,
       # and partial data would silently drop lines from the floor.
+      #
+      # The backend shards also collect --cov=worker (check-quick-backend.sh),
+      # so the combined data carries worker/ line totals; the partition check
+      # below enforces the worker execution-plane floor (issue #275) here and
+      # only here — no single shard runs the full worker test surface, so a
+      # per-shard floor would red the gate on partial data. Enforce mode is
+      # scoped to this step via --enforce: the pre-existing partitions stay
+      # report-only everywhere else (check.sh runs report mode).
       - name: Combined coverage report
         if: needs.backend-unit.result == 'success' && needs.backend-postgres.result == 'success'
         run: |
@@ -485,6 +493,9 @@ jobs:
           done
           uv run coverage combine
           uv run coverage report
+          uv run python scripts/check_coverage_partitions.py \
+            --backend .coverage \
+            --enforce
 
       # Only aggregate counts go to the persistent job summary. Raw JUnit and
       # coverage files stay off the persistent record: the unit and shard-B

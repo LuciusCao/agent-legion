@@ -21,11 +21,6 @@
       0,
       0
     ],
-    "server/app/services/cleanup_sweep_store.py": [
-      3,
-      2,
-      0
-    ],
     "server/app/services/connection_adapter_user_login.py": [
       0,
       0,
@@ -55,11 +50,6 @@
       0,
       0,
       1
-    ],
-    "server/app/services/instance_settings_store.py": [
-      2,
-      2,
-      0
     ],
     "server/app/services/instance_vault.py": [
       3,
@@ -246,22 +236,12 @@
       0,
       0
     ],
-    "server/app/services/skill_source_store.py": [
-      2,
-      2,
-      0
-    ],
     "server/app/services/token_usage.py": [
       3,
       1,
       0
     ],
     "server/app/services/token_usage_lease.py": [
-      2,
-      2,
-      0
-    ],
-    "server/app/services/token_usage_pricing_store.py": [
       2,
       2,
       0

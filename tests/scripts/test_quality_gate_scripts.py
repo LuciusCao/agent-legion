@@ -455,6 +455,12 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
     assert calls.count("npm:run build:bundle") == 1
     assert not any("test:coverage" in call for call in calls)
     assert any("pytest -q tests/full" in call for call in calls)
+    # The full-gate evidence segment also collects worker/ coverage (issue
+    # #275): it appends to the same COVERAGE_FILE that feeds the partition
+    # report, so a missing --cov=worker here would leave worker files absent
+    # from the local combined report (the tier runs executor-worker paths
+    # nothing else in the gate touches).
+    assert any("--cov=server --cov=worker --cov-report= --cov-append" in call for call in calls)
     assert any("coverage report" in call for call in calls)
 
 

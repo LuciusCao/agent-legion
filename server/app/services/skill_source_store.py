@@ -7,15 +7,18 @@ The skill source declarations (``{repo, ref}`` per skill, retired
 and are managed through the DB (refresh via ``make skills-lock``); no yaml
 fallback exists beyond the one-time import at startup
 (``server.app.skills.seed``).
+
+SQL lives in the queries layer (``global_settings`` KV mixin, issue #281);
+this store is the domain facade doing the pydantic conversions.
 """
 
 from __future__ import annotations
 
-import json
-from typing import Any, cast
-
 from server.app.db.dialect import ConnectSource
-from server.app.db.transaction import read_connection, write_transaction
+from server.app.jobs.queries.global_settings import (
+    GlobalSettingsKVQueriesMixin,
+    global_settings_kv_from_dsn,
+)
 from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_SOURCES
 from server.app.skills.config import SkillsConfig, SkillsLock
 
@@ -30,43 +33,28 @@ class SkillSourceStore:
         # database_dsn: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187).
         self._dsn = database_dsn
 
-    def _read(self, key: str) -> dict[str, Any] | None:
-        with read_connection(self._dsn) as conn:
-            row = conn.execute(
-                "select value from global_settings where key=%s",
-                (key,),
-            ).fetchone()
-        if row is None:
-            return None
-        return cast(dict[str, Any], json.loads(str(row["value"])))
-
-    def _write(self, key: str, document: dict[str, Any]) -> None:
-        payload = json.dumps(document)
-        with write_transaction(self._dsn) as conn:
-            conn.execute(
-                """
-                insert into global_settings(key, value) values (%s, %s)
-                on conflict(key)
-                do update set value=excluded.value, updated_at=current_timestamp
-                """,
-                (key, payload),
-            )
-
     def get_sources(self) -> SkillsConfig | None:
         """Return the declared skill sources, or None when never seeded."""
-        document = self._read(SOURCES_KEY)
+        document = self._kv().get_global_settings_document(SOURCES_KEY)
         return None if document is None else SkillsConfig.model_validate(document)
 
     def put_sources(self, config: SkillsConfig) -> None:
-        self._write(SOURCES_KEY, config.model_dump())
+        self._kv().put_global_settings_document(SOURCES_KEY, config.model_dump())
 
     def get_lock(self) -> SkillsLock | None:
         """Return the resolved skill lock, or None when never seeded."""
-        document = self._read(LOCK_KEY)
+        document = self._kv().get_global_settings_document(LOCK_KEY)
         return None if document is None else SkillsLock.model_validate(document)
 
     def put_lock(self, lock: SkillsLock) -> None:
-        self._write(LOCK_KEY, lock.model_dump())
+        self._kv().put_global_settings_document(LOCK_KEY, lock.model_dump())
+
+    def _kv(self) -> GlobalSettingsKVQueriesMixin:
+        """The KV accessor: the facade itself, or an adapter for a bare DSN
+        (``ConnectSource`` contract, #187; SQL centralization #281)."""
+        if isinstance(self._dsn, str):
+            return global_settings_kv_from_dsn(self._dsn)
+        return self._dsn
 
 
 class InMemorySkillSourceStore:

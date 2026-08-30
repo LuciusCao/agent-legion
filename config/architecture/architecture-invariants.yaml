@@ -193,12 +193,20 @@ invariants:
       cannot override. Budget exemptions freeze an explicit ceiling and must
       include a tracked removal condition; affected modules must be split rather
       than indefinitely exempted. Exemptions whose removal reference is older
-      than 30 days are reported by the full gate.
+      than 30 days are reported by the full gate. Issue-anchored exemptions
+      (issues/open/github.com/...) expire when the anchor issue is closed:
+      the quick gate compares the anchor against the tracked issue-state
+      manifest (config/architecture/issue-states.json, refreshed offline via
+      make architecture-issue-states or the weekly exemption-expiry job), and
+      a closed anchor fails check_invariants with "exemption expired" (#270).
     owner: architecture
     risk: high
     evidence:
       - kind: contract
         target: scripts/check_architecture.py
+        gate: quick
+      - kind: contract
+        target: scripts/check_invariants.py
         gate: quick
       - kind: contract
         target: tests/scripts/test_check_architecture.py
@@ -211,6 +219,9 @@ invariants:
         gate: quick
       - kind: contract
         target: tests/scripts/test_architecture_exemption_age.py
+        gate: quick
+      - kind: contract
+        target: tests/scripts/test_architecture_issue_state.py
         gate: quick
 
   - id: BOUNDARY-VIDEO-001

@@ -13,13 +13,13 @@ the S3 byte source.
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from server.app.db.dialect import ConnectSource
+from server.app.db.rowmap import parse_object
 from server.app.db.transaction import read_connection
 from server.app.storage import ObjectStorage, build_s3_storage
 from shared.material_cache import MaterializeError, materialize_stream
@@ -27,21 +27,23 @@ from shared.material_cache import MaterializeError, materialize_stream
 logger = logging.getLogger(__name__)
 
 
-def _input_document(job: Mapping[str, Any]) -> dict[str, Any]:
-    """Parsed ``jobs.input_json``; anything unreadable degrades to ``{}``."""
+def input_document(job: Mapping[str, Any]) -> dict[str, Any]:
+    """Parsed ``jobs.input_json``; anything unreadable degrades to ``{}``.
+
+    Kept as a thin wrapper (not a bare alias of :func:`parse_object`) for the
+    pre-parse Mapping short-circuit: prefetched runtime rows may already
+    carry the input as a dict, and re-stringifying those via ``str()`` would
+    round-trip Python repr through json.loads (#278 dedup kept this fork).
+    """
     raw = job.get("input_json")
     if isinstance(raw, Mapping):
         return dict(raw)
-    try:
-        value = json.loads(str(raw or ""))
-    except (TypeError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
+    return parse_object(raw)
 
 
 def is_material_input(job: Mapping[str, Any]) -> bool:
     """True when the job's input document is a material item."""
-    return _input_document(job).get("type") == "material"
+    return input_document(job).get("type") == "material"
 
 
 def _fetch_material_row(
@@ -97,7 +99,7 @@ def material_runtime_block(
     instance env resolves it, and an unconfigured instance raises a clear
     node-facing error instead of failing obscurely.
     """
-    input_doc = _input_document(job)
+    input_doc = input_document(job)
     if input_doc.get("type") != "material":
         return None
     row = _ready_row(connect_source, workspace_id, input_doc)
@@ -181,7 +183,7 @@ def material_claim_block(
     credentials of its own; ``storage_key`` never crosses the wire. Bundle
     inputs get one presigned GET per member (#156).
     """
-    input_doc = _input_document(job)
+    input_doc = input_document(job)
     if input_doc.get("type") == "bundle":
         from server.app.services.material_bundle_cache import bundle_claim_block
 

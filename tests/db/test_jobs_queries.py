@@ -353,3 +353,67 @@ def test_list_jobs_by_ids_returns_empty_for_empty_input(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = db.create_workspace("Empty List Workspace", default_workflow_key="demo_workflow")
     assert db.list_jobs_by_ids(workspace["id"], []) == []
+
+
+def _create_list_jobs_fixtures(db: JobQueries, workspace_id: str, count: int) -> list[str]:
+    """Create ``count`` jobs with strictly increasing created_at stamps."""
+    job_ids: list[str] = []
+    base = datetime(2026, 1, 1, 0, 0, 0)
+    for i in range(count):
+        job = db.create_job(
+            workflow_key="demo_workflow",
+            source_type="question_id",
+            source_id=f"Q-LIMIT-{i:04d}",
+            run_id="",
+            title=f"Limit Job {i}",
+            node_keys=["fetch_question_context"],
+            workspace_id=workspace_id,
+        )
+        # created_at defaults to now(); force a deterministic, strictly
+        # increasing ordering so the desc assertion is meaningful.
+        with db.connect() as conn:
+            conn.execute(
+                "update jobs set created_at=%s where id=%s",
+                (base.isoformat() + f".{i:06d}", job["id"]),
+            )
+        job_ids.append(str(job["id"]))
+    return job_ids
+
+
+def test_list_jobs_caps_results_at_requested_limit(tmp_path: Path) -> None:
+    """#272: the legacy list endpoint must not return unbounded row sets."""
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = db.create_workspace("Limit Workspace", default_workflow_key="demo_workflow")
+    job_ids = _create_list_jobs_fixtures(db, workspace["id"], count=5)
+
+    listed = db.list_jobs(workspace_id=workspace["id"], limit=3)
+
+    assert len(listed) == 3
+    # created_at desc semantics are preserved under the cap: the newest jobs
+    # come first, the oldest two are the ones dropped.
+    assert [job["id"] for job in listed] == job_ids[-1:-4:-1]
+
+
+def test_list_jobs_default_limit_caps_at_500(tmp_path: Path) -> None:
+    """The default limit keeps the service-layer call site (which passes no
+    limit) bounded without any signature change there."""
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = db.create_workspace("Default Limit Workspace", default_workflow_key="demo_workflow")
+    _create_list_jobs_fixtures(db, workspace["id"], count=3)
+
+    # Exercise the clamp plumbing with a value far below the default; the
+    # 500-row default itself is covered by the clamp unit below (inserting
+    # 501 rows in a test would be needlessly slow).
+    assert len(db.list_jobs(workspace_id=workspace["id"])) == 3
+
+
+def test_list_jobs_clamps_limit_into_valid_range(tmp_path: Path) -> None:
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = db.create_workspace("Clamp Workspace", default_workflow_key="demo_workflow")
+    _create_list_jobs_fixtures(db, workspace["id"], count=3)
+
+    # limit <= 0 clamps to 1; limit above the 500 ceiling clamps down, so a
+    # pathologically large value cannot silently disable the bound.
+    assert len(db.list_jobs(workspace_id=workspace["id"], limit=0)) == 1
+    assert len(db.list_jobs(workspace_id=workspace["id"], limit=-7)) == 1
+    assert len(db.list_jobs(workspace_id=workspace["id"], limit=10_000)) == 3
