@@ -25,6 +25,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING
 
+import psycopg
 from botocore.exceptions import BotoCoreError, ClientError
 
 from server.app.db.dialect import ConnectSource
@@ -115,9 +116,9 @@ def seed_demo_workspace_materials(
                         storage_key,
                     ),
                 )
-        except (ClientError, BotoCoreError, OSError):
+        except (ClientError, BotoCoreError, OSError, psycopg.Error):
             # #204: the seeding loop's failure space is the boto3 data plane
-            # (object put), the DB write (connection-layer OSError), and the
+            # (object put), the DB write (psycopg.Error — DB writes raise it, not OSError, codex on #264), and the
             # read of the source markdown (OSError). All are transient
             # infrastructure failures the module docstring already frames as
             # "degrade with a warning, the next seed call completes the
