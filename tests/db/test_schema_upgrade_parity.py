@@ -54,8 +54,11 @@ from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SC
 # so the undo step leaves the table in place.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
+# v68 (jobs_workflow_key_alignment) is a pure data migration — the undo step
+# cannot restore pre-rename keys (they are gone with the v62 rename), but
+# parity only compares DDL shape, so no undo action is needed beyond none.
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "workflow_node_explicit_types"
+_NEWEST_MIGRATION_NAME = "jobs_workflow_key_alignment"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 

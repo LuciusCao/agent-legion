@@ -77,7 +77,7 @@ def _make_worker(
 
 def _prepare_job(tmp_path: Path, node: WorkflowNode, batch_payload: dict | None = None):
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
     batch_id = ""
     if batch_payload is not None:
         # The payload is only the id digest input; the pin keys persist as the

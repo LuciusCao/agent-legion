@@ -17,22 +17,25 @@ _ACTIVE_MARK_COLUMNS = (
     " target_node_key, workflow_definition_hash, created_at, updated_at"
 )
 
-# The predicate must stay in sync with the idx_jobs_active_marks partial
-# index or every rescan seq-scans the jobs table. Kept as a module constant
-# so tests can pin the exact plan of the string that production runs (same
-# pattern as agent_stock_snapshot.TIER_ROWS_SQL).
+# The predicate must stay in sync with the idx_jobs_workspace_active_marks
+# partial index or every rescan seq-scans the jobs table. Kept as a module
+# constant so tests can pin the exact plan of the string that production
+# runs (same pattern as agent_stock_snapshot.TIER_ROWS_SQL).
+# #211 Phase 3 (read-layer binding): keyed on workspace_id — workflow_key
+# equals it on every row (v62), and per-workspace scans replace the legacy
+# shared-key cross-workspace sweep.
 ACTIVE_MARKS_SQL = (
     f"select {_ACTIVE_MARK_COLUMNS} from jobs"
-    " where workflow_key=%s and status not in ('completed','failed')"
+    " where workspace_id=%s and status not in ('completed','failed')"
     " order by created_at desc"
 )
 
 
 class JobScanMarksMixin(ConnectionQueriesMixin):
-    def list_active_job_marks(self, workflow_key: str) -> list[dict[str, Any]]:
-        """Lightweight rows for every non-terminal job of a workflow."""
+    def list_active_job_marks(self, workspace_id: str) -> list[dict[str, Any]]:
+        """Lightweight rows for every non-terminal job of a workspace."""
         with self._connect_read() as conn:
-            rows = conn.execute(ACTIVE_MARKS_SQL, (workflow_key,)).fetchall()
+            rows = conn.execute(ACTIVE_MARKS_SQL, (workspace_id,)).fetchall()
         return [dict(row) for row in rows]
 
     def get_workflow_snapshot_for_hash(self, definition_hash: str) -> str:

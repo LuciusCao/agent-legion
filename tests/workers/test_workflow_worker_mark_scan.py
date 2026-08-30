@@ -77,39 +77,39 @@ def _spy(monkeypatch: pytest.MonkeyPatch, obj: object, attr: str) -> dict[str, i
 def test_delta_query_returns_terminal_rows(tmp_path: Path) -> None:
     """The delta query has no status filter: terminal transitions stay visible."""
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
+    ws = job_db.create_workspace("Mark Scan WS", default_workflow_key="test", workspace_id="test")
     (job_id,) = _make_jobs(job_db, ws["id"], 1)
     job_db.update_job_status(job_id, "completed")
 
-    marks = job_db.list_changed_job_marks("test", _EPOCH)
+    marks = job_db.list_changed_job_marks(str(ws["id"]), _EPOCH)
     assert [mark["id"] for mark in marks] == [job_id]
     assert marks[0]["status"] == "completed"
 
 
 def test_store_full_then_delta(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
+    ws = job_db.create_workspace("Mark Scan WS", default_workflow_key="test", workspace_id="test")
     _make_jobs(job_db, ws["id"], 3)
     full_calls = _spy(monkeypatch, job_db, "list_active_job_marks")
     delta_calls = _spy(monkeypatch, job_db, "list_changed_job_marks")
 
     store = MarkStore()
-    assert len(store.refresh(job_db, "test")) == 3
-    assert len(store.refresh(job_db, "test")) == 3
+    assert len(store.refresh(job_db, str(ws["id"]))) == 3
+    assert len(store.refresh(job_db, str(ws["id"]))) == 3
     assert full_calls["count"] == 1
     assert delta_calls["count"] == 1
 
 
 def test_store_delta_sees_new_and_terminal_jobs(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
+    ws = job_db.create_workspace("Mark Scan WS", default_workflow_key="test", workspace_id="test")
     first, second = _make_jobs(job_db, ws["id"], 2)
     store = MarkStore()
-    assert {mark["id"] for mark in store.refresh(job_db, "test")} == {first, second}
+    assert {mark["id"] for mark in store.refresh(job_db, str(ws["id"]))} == {first, second}
 
     job_db.update_job_status(first, "failed")
     (third,) = _make_jobs(job_db, ws["id"], 1, prefix="N")
-    marks = store.refresh(job_db, "test")
+    marks = store.refresh(job_db, str(ws["id"]))
     assert {mark["id"] for mark in marks} == {second, third}
 
 
@@ -117,10 +117,10 @@ def test_store_keeps_newest_first_order_after_delta(tmp_path: Path) -> None:
     """New jobs arriving via delta must not queue behind the cached backlog:
     claim order follows created_at desc (list_active_job_marks contract)."""
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
+    ws = job_db.create_workspace("Mark Scan WS", default_workflow_key="test", workspace_id="test")
     old_ids = _make_jobs(job_db, ws["id"], 2)
     store = MarkStore()
-    store.refresh(job_db, "test")
+    store.refresh(job_db, str(ws["id"]))
     # Backdate the cached jobs so the new one is unambiguously newest;
     # created_at is not a mark_key field, so this does not perturb the delta.
     with job_db.connect() as conn:
@@ -130,7 +130,7 @@ def test_store_keeps_newest_first_order_after_delta(tmp_path: Path) -> None:
         )
     (new_id,) = _make_jobs(job_db, ws["id"], 1, prefix="N")
 
-    marks = store.refresh(job_db, "test")
+    marks = store.refresh(job_db, str(ws["id"]))
     assert [mark["id"] for mark in marks][0] == new_id
 
 
@@ -138,39 +138,39 @@ def test_store_keeps_paused_and_recovers_on_resume(tmp_path: Path) -> None:
     """paused is not terminal: the mark stays cached (downstream is_runnable
     filters it), and a resume bumps updated_at so the delta re-admits it."""
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
+    ws = job_db.create_workspace("Mark Scan WS", default_workflow_key="test", workspace_id="test")
     (job_id,) = _make_jobs(job_db, ws["id"], 1)
     store = MarkStore()
-    assert [mark["id"] for mark in store.refresh(job_db, "test")] == [job_id]
+    assert [mark["id"] for mark in store.refresh(job_db, str(ws["id"]))] == [job_id]
 
     job_db.update_job_status(job_id, "paused")
-    marks = store.refresh(job_db, "test")
+    marks = store.refresh(job_db, str(ws["id"]))
     assert [(mark["id"], mark["status"]) for mark in marks] == [(job_id, "paused")]
 
     job_db.update_job_status(job_id, "queued")
-    marks = store.refresh(job_db, "test")
+    marks = store.refresh(job_db, str(ws["id"]))
     assert [(mark["id"], mark["status"]) for mark in marks] == [(job_id, "queued")]
 
 
 def test_store_readmits_rerun_job(tmp_path: Path) -> None:
     """failed -> queued (rerun) must bring the job back via the delta."""
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
+    ws = job_db.create_workspace("Mark Scan WS", default_workflow_key="test", workspace_id="test")
     (job_id,) = _make_jobs(job_db, ws["id"], 1)
     store = MarkStore()
-    store.refresh(job_db, "test")
+    store.refresh(job_db, str(ws["id"]))
 
     job_db.update_job_status(job_id, "failed")
-    assert store.refresh(job_db, "test") == []
+    assert store.refresh(job_db, str(ws["id"])) == []
     job_db.update_job_status(job_id, "queued")
-    assert [mark["id"] for mark in store.refresh(job_db, "test")] == [job_id]
+    assert [mark["id"] for mark in store.refresh(job_db, str(ws["id"]))] == [job_id]
 
 
 def test_store_burst_does_not_pin_delta_lower_bound(tmp_path: Path) -> None:
     """Rows sharing one bulk-insert commit timestamp must not be re-fetched
     on every pass once the overlap window has slid past the burst."""
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
+    ws = job_db.create_workspace("Mark Scan WS", default_workflow_key="test", workspace_id="test")
     _make_jobs(job_db, ws["id"], 3)
 
     seen: list[int] = []
@@ -185,36 +185,36 @@ def test_store_burst_does_not_pin_delta_lower_bound(tmp_path: Path) -> None:
 
     # Default overlap: right after the burst the window still covers it.
     store = MarkStore()
-    store.refresh(job_db, "test")
-    store.refresh(job_db, "test")
+    store.refresh(job_db, str(ws["id"]))
+    store.refresh(job_db, str(ws["id"]))
     assert seen[-1] == 3
 
     # Overlap slid past the burst (simulated via a future-shifted horizon):
     # the delta no longer returns the burst rows.
     store = MarkStore(overlap_seconds=-3600)
-    store.refresh(job_db, "test")
-    store.refresh(job_db, "test")
+    store.refresh(job_db, str(ws["id"]))
+    store.refresh(job_db, str(ws["id"]))
     assert seen[-1] == 0
 
 
 def test_store_deleted_job_pruned_by_full_rescan(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
+    ws = job_db.create_workspace("Mark Scan WS", default_workflow_key="test", workspace_id="test")
     (job_id,) = _make_jobs(job_db, ws["id"], 1)
     store = MarkStore()
-    assert len(store.refresh(job_db, "test")) == 1
+    assert len(store.refresh(job_db, str(ws["id"]))) == 1
 
     job_db.delete_job(job_id)
     # Deletion leaves no delta trace: the mark survives until the next full rescan.
-    assert len(store.refresh(job_db, "test")) == 1
-    store._states["test"].last_full_scan = 0.0
-    assert store.refresh(job_db, "test") == []
+    assert len(store.refresh(job_db, str(ws["id"]))) == 1
+    store._states[str(ws["id"])].last_full_scan = 0.0
+    assert store.refresh(job_db, str(ws["id"])) == []
 
 
 def _setup_worker(tmp_path: Path, job_count: int, capacity: int):
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
+    ws = job_db.create_workspace("Mark Scan WS", default_workflow_key="test", workspace_id="test")
     block_event = threading.Event()
     executor = BlockingExecutor("code", block_event)
     definition = make_definition([local_node("fetch")])

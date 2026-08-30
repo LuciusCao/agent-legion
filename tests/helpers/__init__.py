@@ -91,9 +91,10 @@ def publish_builtin_revision(
 
 
 def scan_entries(*definitions: WorkflowDefinition) -> list[tuple[str, str, WorkflowDefinition]]:
-    """Hand-built worker scan entries for tests (workspace id is a placeholder:
-    collect falls back to the by-key definition for unknown workspaces)."""
-    return [("test-ws", d.key, d) for d in definitions]
+    """Hand-built worker scan entries for tests. #211 Phase 3: scan state and
+    queries are keyed per workspace — the entry id IS the definition key
+    (v62 binding), and tests create their workspace in that same shape."""
+    return [(d.key, d.key, d) for d in definitions]
 
 
 def ensure_legacy_workspace_tables(db_or_conn: Any) -> None:
