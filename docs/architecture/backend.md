@@ -592,9 +592,14 @@ server/app/
   原因（不再是纯浅克隆猜测），逃生口 env
   `AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW=1`。超出预算的文件必须拆分或回退。
   ceiling 按有效行数计
-  （排除注释行与空行，实现见 `scripts/architecture/effective_lines.py`），压缩注释
+  （排除注释行与空行，实现见 `scripts/architecture/effective_lines.py`，`.sql` 的
+  `--` 注释行同样排除），压缩注释
   对预算没有帮助。此外 production 文件有
-  800 行绝对上限（`production.max_lines`，按原始行数计），豁免也不能突破；挂账超过 30 天的豁免由
+  800 行绝对上限（`production.max_lines`，按原始行数计），豁免也不能突破；#293 起
+  声明式产物 root 可覆盖绝对上限（`production.roots[].max_lines`）——`server/app/db`
+  的 `.sql`（全量 replay schema，单文件是刻意设计，1200 raw）与 `worker/ui` 的
+  `.js/.css`（原生无构建链单文件面，1000 raw）各设 root 级上限，ceiling 仍按有效行数
+  单调棘轮；挂账超过 30 天的豁免由
   `scripts/check_exemption_age.py` 在 full gate 中告警（不阻断）。
 
 ### Agent Worker 协议响应形态（response model 豁免的依据）
@@ -698,6 +703,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 - 存储路径以**相对 POSIX 路径**保存在 `settings.data_dir` 下（前缀为 `videos/`, `jobs/`, `logs/`, `packages/`），API 返回时投影为绝对路径。
 - SQL 占位符约定：**新 SQL 一律写 psycopg 的 `%s`**，不要再写 SQLite 风格的 `?`。存量 `?` 由 `server/app/db/dialect.py` 盲替换为 `%s`，该层无法区分占位符与 Postgres JSON 的 `?`/`?|`/`?&` 操作符；`scripts/check_architecture.py` 的 SQL 占位符检查（基线 `config/architecture/sql-placeholders-baseline.json`）按 ratchet 方式只降不升，新文件出现任何 SQL `?` 即失败，改写存量后同步下调基线。
 - 服务层数据边界（BOUNDARY-DATA-001）：`server/app/services/` 下的新服务**必须经 `JobQueries` 门面访问数据库**（范式见 `services/job_pause.py` 等 38+ 个 facade-only 服务）；裸 SQL 字面量、`server.app.db.transaction`/`connection` 直接 import 与 DSN 逃逸引用（`.path`/`.dsn_identity` 属性读及其 `getattr` 形式）由 `scripts/architecture/service_data_boundary.py` 检查冻结（基线 `config/architecture/service-data-boundary-baseline.json`，只降不升）。存量服务迁移到门面后手动（或重跑 ratchet）下调基线；新文件出现任一绕行即失败。门面的 DSN 属性 `.path` 已私有化为 `_path`（#187 第三步）：`dsn_identity` 是唯一公开只读访问器（字符串 DSN），合法消费者仅数据层自身与经设计豁免的数据层毗邻组件（lease 仓储、artifact store）。
+- 边界基线的 git 锚点防线（#292）：基线自身也只降不升——`service_data_boundary_monotonicity.py` 按 HEAD/HEAD^ 双锚点对比已提交基线，**新增条目**（对已跟踪的 service 文件）与**三元组计数上抬**均被拒绝（对齐 file budget 的 budget_monotonicity 机制）；全新 service 文件的首次登记不受限（由无条目即失败的常规检查治理）。存量 56 条按服务子域分批收敛：迁移到 `JobQueries` 门面后重跑 ratchet 下调，直至条目清零、基线退役。浅克隆缺锚点硬失败（同 budget 侧 env 逃生口）；非 git 目录静默跳过。
 
 ## New Subsystems
 
