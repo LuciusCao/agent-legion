@@ -108,3 +108,36 @@ def test_base_exception_is_broad() -> None:
     # needs the same audit.
     source = "try:\n    boom()\nexcept BaseException:\n    pass\n"
     assert find_unaudited_broad_excepts(source) == [3]
+
+
+def test_neighbor_arm_audit_does_not_leak() -> None:
+    # codex review round 3 on #308: two broad arms close together where
+    # only the SECOND carries the audit — the first must still fail. The
+    # near window is bounded by the handler's own end line.
+    source = (
+        "try:\n"
+        "    a()\n"
+        "except Exception:\n"  # arm 1: no audit
+        "    pass\n"
+        "try:\n"
+        "    b()\n"
+        "except Exception:\n"
+        "    # #204 broad-except audit: deliberate\n"
+        "    pass\n"
+    )
+    assert find_unaudited_broad_excepts(source) == [3]
+
+
+def test_long_method_header_audit_still_covers() -> None:
+    # codex review round 3 on #308: a catch >120 lines from its def keeps
+    # the method-head block audit — ownership is AST-based, not a line
+    # window.
+    filler = "\n".join(f"        x{i} = {i}" for i in range(130))
+    source = (
+        "def sweep():\n"
+        "    # #204 broad-except audit: the loop survives anything.\n"
+        "    try:\n" + filler + "\n"
+        "    except Exception:\n"
+        "        pass\n"
+    )
+    assert find_unaudited_broad_excepts(source) == []
