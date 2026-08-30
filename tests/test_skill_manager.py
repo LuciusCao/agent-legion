@@ -253,7 +253,7 @@ def test_tilde_local_source_can_be_managed_in_place(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake_home = tmp_path / "home"
-    base_dir = fake_home / ".agents" / "skills" / "agent-legion"
+    base_dir = fake_home / ".agents" / "skills"
     repo = base_dir / "demo_workflow" / "generate_key_info"
     commit = _make_in_place_repo(repo)
     monkeypatch.setenv("HOME", str(fake_home))
@@ -262,7 +262,7 @@ def test_tilde_local_source_can_be_managed_in_place(
         store=memory_skill_store(
             {
                 _KEY: {
-                    "repo": ("~/.agents/skills/agent-legion/demo_workflow/generate_key_info"),
+                    "repo": ("~/.agents/skills/demo_workflow/generate_key_info"),
                     "ref": "v1.0.0",
                 }
             }
@@ -284,8 +284,8 @@ def test_normalize_repo_expands_tilde_per_user(
     fake_home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(fake_home))
     manager = _make_manager(tmp_path, {})
-    assert manager._normalize_repo("~/.agents/skills/agent-legion/wf/cap") == str(
-        (fake_home / ".agents" / "skills" / "agent-legion" / "wf" / "cap").resolve()
+    assert manager._normalize_repo("~/.agents/skills/wf/cap") == str(
+        (fake_home / ".agents" / "skills" / "wf" / "cap").resolve()
     )
 
 

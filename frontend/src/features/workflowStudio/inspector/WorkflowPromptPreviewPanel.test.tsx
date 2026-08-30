@@ -174,6 +174,15 @@ describe('WorkflowPromptPreviewPanel', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('shows the failure alert without a lingering loading placeholder', async () => {
+    mockPreview.mockRejectedValue(new Error('boom'))
+    renderPanel()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('预览加载失败')
+    // 失败后不再停留「正在加载默认指令…」placeholder。
+    expect(screen.getByLabelText('节点指令')).toHaveAttribute('placeholder', '')
+  })
+
   it('collapses and re-expands the full prompt preview', async () => {
     renderPanel()
     expect(await screen.findByText(/ENVELOPE/)).toBeInTheDocument()

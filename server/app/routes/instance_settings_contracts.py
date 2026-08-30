@@ -59,7 +59,7 @@ class InstanceSettingsDocument(BaseModel):
 
 class InstanceSettingsResponse(InstanceSettingsDocument):
     # Read-only, server-injected: the on-disk skills root (single source of
-    # truth in server.app.skills.paths). Not part of the PUT document —
+    # truth in server.app.skills.skill_roots). Not part of the PUT document —
     # InstanceSettingsUpdate is extra="forbid" and rejects writes to it.
     skills_root: str = SKILLS_ROOT_DISPLAY
 

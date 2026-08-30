@@ -21,7 +21,7 @@ type Props = {
 }
 
 /** 节点详情视图：面包屑（工作流 / 节点 [/ 预览]）+ 分级返回 + inspector 内容
- * 平铺。预览状态（useNodeDetailPreview，带 nodeKey 印记）使面包屑随预览态
+ * 平铺。预览状态（useNodeDetailPreview，nodeKey 变化即清除）使面包屑随预览态
  * 加深、返回按钮分级（预览中→回节点详情，否则→回 DAG），预览面板自身不再有
  * 第二层导航。Agent 面板展开时占左半（替换 DAG），收起时占右半。 */
 export function WorkflowNodeDetailView(props: Props) {

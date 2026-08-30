@@ -164,11 +164,11 @@ describe('WorkflowNodeDetailView', () => {
       screen.getByText('Demo DAG / 生成关键信息 / Prompt')
     ).toBeInTheDocument()
 
-    rerender(
+    const viewFor = (key: string) => (
       <TestQueryProvider>
         <WorkflowNodeDetailView
           workflow={workflow}
-          nodeKey="review"
+          nodeKey={key}
           agentCatalog={agentCatalog}
           definitionYaml={definitionYaml}
           setDefinitionYaml={() => {}}
@@ -180,9 +180,20 @@ describe('WorkflowNodeDetailView', () => {
       </TestQueryProvider>
     )
 
-    // 预览状态带 nodeKey 印记：切换选中节点即回到节点详情。
+    rerender(viewFor('review'))
+
+    // nodeKey 变化即真正清除预览：切走后落在节点详情。
     expect(screen.queryByLabelText('Prompt 预览')).not.toBeInTheDocument()
     expect(screen.getByText('Demo DAG / 评审')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '返回 DAG' })).toBeInTheDocument()
+
+    // 切回原节点也不恢复预览（仍是节点详情，不是挂起态）。
+    rerender(viewFor('generate_key_info'))
+    expect(screen.queryByLabelText('Prompt 预览')).not.toBeInTheDocument()
+    expect(screen.getByText('Demo DAG / 生成关键信息')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '返回 DAG' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '查看 Prompt' })
+    ).toBeInTheDocument()
   })
 })

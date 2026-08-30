@@ -17,7 +17,7 @@ type Props = {
   setDefinitionYaml: (value: string) => void
   compareSummary?: ChangeSummaryViewModel | null
   readOnly: boolean
-  /** 预览态（WorkflowNodeDetailView 持有，带 nodeKey 印记后下发）。 */
+  /** 预览态（WorkflowNodeDetailView 持有，nodeKey 变化即清除后下发）。 */
   activeKind: NodeDetailPreviewKind | null
   onShowPreview: (kind: NodeDetailPreviewKind) => void
   onClose: () => void

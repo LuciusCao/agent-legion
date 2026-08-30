@@ -6,18 +6,20 @@ const PREVIEW_KIND_LABELS: Record<NodeDetailPreviewKind, string> = {
   skill: '技能文件',
 }
 
-/** 节点详情 panel 的预览状态（运行 Prompt / 技能文件）：带 nodeKey 印记，
- * 切换选中节点即自然失效，无需 effect 重置；面包屑后缀与分级返回都读它。 */
+/** 节点详情 panel 的预览状态（运行 Prompt / 技能文件）：nodeKey 变化时
+ * 在渲染期间清除（React 认可的 derive-state-from-props 重置，无需 effect），
+ * 切走再切回也落在节点详情而非残留预览；面包屑后缀与分级返回都读它。 */
 export function useNodeDetailPreview(nodeKey: string) {
-  const [preview, setPreview] = useState<{
-    nodeKey: string
-    kind: NodeDetailPreviewKind
-  } | null>(null)
-  const activeKind = preview?.nodeKey === nodeKey ? preview.kind : null
+  const [kind, setKind] = useState<NodeDetailPreviewKind | null>(null)
+  const [prevNodeKey, setPrevNodeKey] = useState(nodeKey)
+  if (prevNodeKey !== nodeKey) {
+    setPrevNodeKey(nodeKey)
+    setKind(null)
+  }
   return {
-    activeKind,
-    activeLabel: activeKind ? PREVIEW_KIND_LABELS[activeKind] : null,
-    showPreview: (kind: NodeDetailPreviewKind) => setPreview({ nodeKey, kind }),
-    closePreview: () => setPreview(null),
+    activeKind: kind,
+    activeLabel: kind ? PREVIEW_KIND_LABELS[kind] : null,
+    showPreview: (next: NodeDetailPreviewKind) => setKind(next),
+    closePreview: () => setKind(null),
   }
 }

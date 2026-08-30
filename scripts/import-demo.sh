@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 导入示例 workflow（education_video_problems_generation）的 4 个示例 skill：
 # 把 examples/skills/* 复制到本机 skill 源目录（默认
-# ~/.agents/skills/agent-legion/education-video-problems-generation/<skill>/），
+# ~/.agents/skills/education-video-problems-generation/<skill>/，即 skill root
+# 下的两段 key 相对路径，SkillManager 视作 in-place 源免 clone），
 # 逐目录 git init + 初始 commit + 打 tag v1.0.0。
 #
 # 幂等：目标已是 git 仓库且 tag 存在则跳过该 skill，不覆盖用户后续改动；
@@ -13,7 +14,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_DIR="$REPO_ROOT/examples/skills"
-TARGET_ROOT="${AGENT_LEGION_DEMO_SKILLS_DIR:-$HOME/.agents/skills/agent-legion/education-video-problems-generation}"
+TARGET_ROOT="${AGENT_LEGION_DEMO_SKILLS_DIR:-$HOME/.agents/skills/education-video-problems-generation}"
 TAG="v1.0.0"
 
 if [ ! -d "$SOURCE_DIR" ]; then

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { postNodePromptPreview } from '../../../api/nodePromptPreview'
@@ -46,6 +46,9 @@ export function useNodePromptPreview(props: NodePromptPreviewPanelProps): {
     queryFn: () =>
       postNodePromptPreview(workspaceId ?? '', props.node.key, debouncedYaml),
     enabled: Boolean(workspaceId),
+    // debounce 后 YAML 变更产生新 queryKey：保留上一次预览，避免请求期间
+    // 编辑区清空闪「正在加载」（点「重置为默认」时最明显）。
+    placeholderData: keepPreviousData,
   })
   const preview = query.data ?? null
 
@@ -72,7 +75,8 @@ export function useNodePromptPreview(props: NodePromptPreviewPanelProps): {
           : query.isError
             ? '加载失败'
             : '',
-      loading: !preview,
+      // 请求失败后不再停留「正在加载」placeholder（与失败 alert 并存）。
+      loading: !preview && !query.isError,
       readOnly: Boolean(props.readOnly),
       onPatch: (value) =>
         props.setDefinitionYaml(
