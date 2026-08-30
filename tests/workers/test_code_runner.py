@@ -28,10 +28,10 @@ from worker.code_runner import (
     cancel_executions,
     execute_code,
     prepare_code_execution,
-    prepare_code_result,
     register_cancellation,
     unregister_cancellation,
 )
+from worker.result_archive import prepare_code_result
 from worker.status import ExecutionStatusReporter
 from worker.upload.queue import PENDING_FILENAME, PendingUploadExists, UploadTask
 

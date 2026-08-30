@@ -3,6 +3,11 @@
 Split out of ``agent_completion.py`` for the file-size budget: extraction is
 bundle-domain code — it validates every promoted path against the job dir
 (Worker archives are untrusted) and knows the batch-2 ``node.log`` contract.
+The kind='code' result *metadata* keys — the other half of that result
+contract — are declared once in ``shared.CODE_RESULT_METADATA_KEYS`` and read
+Host-side by ``parse_result_metadata``
+(server/app/routes/agent_worker_results.py); both mirrors are guarded by
+tests/workers/test_protocol_sync.py (#282).
 """
 
 from __future__ import annotations

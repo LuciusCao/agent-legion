@@ -26,7 +26,6 @@ import os
 import pickle
 import shutil
 import subprocess
-import tarfile
 import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -384,39 +383,3 @@ def execute_code(
         if proc is not None and proc.poll() is None:
             terminate(proc, 5)
         unregister_cancellation(execution_id)
-
-
-def prepare_code_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
-    """Build (metadata, archive, output names) for a kind='code' result.
-
-    Archive contract (mirrors the Host-side reader
-    ``server/app/agent_broker/result_unpack.py`` — keep in sync): expected
-    outputs at their job-dir-relative names plus ``node.log`` at the archive
-    root; no events.jsonl/run_dir. The captured node.log ships even for
-    cancelled runs (batch 2 decision 10)."""
-    archive = task.execution_dir / "result.tar.gz"
-    job_dir = task.execution_dir / "job"
-    outcome = task.code_result or {}
-    outputs = [name for name in task.expected_outputs if (job_dir / PurePosixPath(name)).is_file()]
-    metadata: dict[str, Any] = {
-        "status": str(outcome.get("status") or "failed"),
-        "exit_code": task.exit_code,
-        "error_message": str(outcome.get("error_message") or ""),
-        "command": list(task.command),
-        "output_artifacts": {},
-    }
-    auth_failure = str(outcome.get("auth_failure_connection") or "").strip()
-    if auth_failure:
-        metadata["auth_failure_connection"] = auth_failure
-    # #160 D12：直传判定与 upload_queue._bulk_transfer 一致（#201 收敛进
-    # UploadTask.is_direct_upload）；直传时产物不内嵌归档（字节走 presigned
-    # PUT），node.log 照常携带。
-    direct = task.is_direct_upload(outputs)
-    with tarfile.open(archive, "w:gz") as tar:
-        if not direct:
-            for name in outputs:
-                tar.add(job_dir / PurePosixPath(name), arcname=name)
-        node_log = task.execution_dir / CODE_RESULT_LOG_MEMBER
-        if node_log.is_file():
-            tar.add(node_log, arcname=CODE_RESULT_LOG_MEMBER)
-    return metadata, archive, outputs
