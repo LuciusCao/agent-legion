@@ -36,6 +36,17 @@ def definition_from_job_snapshot(job: dict) -> WorkflowDefinition | None:
         payload = json.loads(str(raw))
         return workflow_definition_from_dict(payload)
     except Exception:
+        # #204 broad-except audit: 损坏快照的读路径降级（docstring 契约：
+        # None = 无快照（legacy）或损坏，调用方一律回退当前 definition）。
+        # 失败语义是「数据态而非编程错误」：json.JSONDecodeError 之外，
+        # workflow_definition_from_dict 及其全部校验链（snapshot_shape、
+        # schema、loader、start_node、intake、node_config_schema 等）只抛
+        # WorkflowDefinitionError（isinstance 校验风格，#243 P1 特意保证
+        # 不漏 AttributeError/TypeError 杀死 worker 启动）；但快照是
+        # 不可信持久化输入，未来任何链条新增异常类型都必须落进「损坏」
+        # 语义而非让读路径崩溃——这正是本臂保持宽的原因。warning +
+        # exc_info 是 docstring 所说的 tripwire：损坏快照静默回退当前
+        # definition 的行为由此对操作者可见。
         logger.warning("Corrupt workflow snapshot for job %s", job.get("id"), exc_info=True)
         return None
 

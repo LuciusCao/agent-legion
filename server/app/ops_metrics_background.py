@@ -25,5 +25,15 @@ async def run_ops_metrics_loop(ops_metrics: OpsMetricsService) -> None:
         except asyncio.CancelledError:
             raise
         except Exception:
+            # #204 broad-except audit: the metrics loop's life support —
+            # same discipline as the sweeper/intake loops. This task is the
+            # only sampler of the ops series; dying would leave permanent
+            # gaps (the catch-up comment above is exactly the anti-gap
+            # mechanism, so the loop must survive to run it). The outcome
+            # space is the DB write surface of sample_catch_up plus
+            # cleanup_expired, not a business family; CancelledError is
+            # explicitly re-raised above so shutdown still propagates.
+            # logger.exception keeps the traceback and the loop retries on
+            # the next interval.
             logger.exception("ops metrics sampling failed; retrying next interval")
         await asyncio.sleep(interval)

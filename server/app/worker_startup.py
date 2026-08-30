@@ -82,6 +82,16 @@ def start_worker_threads(
         try:
             sweeper_thread.start()
         except Exception:
+            # #204 broad-except audit: startup must not abort on a thread
+            # that failed to spawn — the docstring pins the contract
+            # (failures are logged and recorded in the status map that
+            # /api/health surfaces). thread.start()'s failure space is the
+            # runtime one (RuntimeError: can't start new thread, OSError on
+            # resource exhaustion) plus the sweeper's own synchronous
+            # startup sweep; none is a business family, and converting any
+            # of them to a crash would take the whole control plane down
+            # with a degraded component that the operator can see in the
+            # health payload. logger.exception keeps the traceback.
             logger.exception("sweeper failed to start")
             sweeper_thread = None
             worker_startup["sweeper"] = "failed"
@@ -104,6 +114,13 @@ def start_worker_threads(
     try:
         workflow_worker_thread.start()
     except Exception:
+        # #204 broad-except audit: same startup contract as the sweeper
+        # catch above — a failed spawn (runtime/OS-level thread errors, the
+        # worker's reload_scan_entries on start) degrades to a "failed"
+        # health entry instead of crashing app startup: the API plane stays
+        # up and readable (the composition root deliberately records instead
+        # of raising), and the operator sees which thread is down. The
+        # traceback is preserved via logger.exception.
         logger.exception("workflow worker failed to start")
         worker_startup["workflow_worker"] = "failed"
     else:

@@ -76,6 +76,15 @@ class WorkerMetricsCache:
             try:
                 payload = client.get_ops_metrics(granularity)
             except Exception as exc:  # noqa: BLE001 - one failed window must not block Worker status
+                # #204 broad-except audit: 按窗口的故意降级（refresh 的
+                # docstring 已钉语义）。get_ops_metrics 的逃逸族混族——传输
+                # 错误、非 200 状态的 RuntimeError（含 WorkerAuthError，其
+                # 终态语义由 sync_host_status 的 get_self 先行裁决）、解码
+                # ValueError——但三个窗口相互独立，一个失败不得拖垮其余
+                # 窗口与 Worker 状态同步。吞是对的：错误折进发布的 error
+                # 字符串，失败窗口保留上一个好快照，下个刷新周期自愈。
+                # 日志保全：异常文本随 ops_metrics.json 的 error 字段持久
+                # 化，本地 UI 可见。
                 errors.append(f"{granularity}: {exc}")
             else:
                 self._snapshots[metrics_cache_key(granularity)] = payload

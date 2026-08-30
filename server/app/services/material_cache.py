@@ -123,6 +123,16 @@ def material_runtime_block(
     except MaterializeError:
         raise
     except Exception as exc:
+        # #204 broad-except audit: convert-with-context, not a swallow — the
+        # arm re-raises as MaterializeError (chained via `from`) so the
+        # node-facing failure contract stays uniform. The width is
+        # deliberate: materialize_stream spans the S3 open_stream surface,
+        # cache IO (OSError), and the LRU/pin machinery, none of which is a
+        # business family this dispatch-layer wrapper could enumerate; each
+        # flavor must surface as "failed to materialize material <id>" with
+        # the material named instead of an opaque raw traceback at the node
+        # boundary (the sandbox path maps MaterializeError to a failed
+        # result). The __cause__ chain preserves the original type.
         raise MaterializeError(f"failed to materialize material {material_id}: {exc}") from exc
     return {
         "material_id": material_id,

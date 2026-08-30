@@ -106,6 +106,14 @@
 - 修改边界/并发/安全/持久化数据前，先读 `config/architecture/`。
 - 新增 invariant 或临时豁免要同步更新 registry。
 - spec / plan 必须包含 `Quality Impact` 小节。
+- 宽捕获纪律（#204/#298）：`server/app` 与 `worker/` 下新增 `except Exception`
+  （或裸 `except:`）必须带 `# #204 broad-except audit:` 注释——讲清为什么宽
+  （失败语义）、为什么吞是对的、结果空间、日志保全（范例见
+  `server/app/executors/leases.py`；方法头块注释可覆盖整个方法的所有捕获臂，
+  见 `executors/sweeper.py`）。或者直接收窄为具体异常族。无注释的宽捕获会被
+  `scripts/architecture/broad_except_audit.py` 拒绝（防回潮，语义钉子测试
+  `tests/services/test_services_broad_except_narrowing.py` 固定「降级族吞、
+  编程错误抛」契约）。
 - 不要手写 frontend transport types，必须从 `frontend/src/generated/api.ts` 派生。
 - 超出体积预算的文件必须拆分或回退，不能手动抬高 ceiling。ceiling 按有效行数计
   （排除注释行与空行），不要为凑预算压缩注释；`max_lines` 绝对上限按原始行数计

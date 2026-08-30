@@ -27,6 +27,14 @@ def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]
     try:
         return prepare_result(task)
     except Exception as exc:
+        # #204 broad-except audit: 归档准备的故意降级（prepare_result 的
+        # docstring 契约："may raise — caller degrades"，镜像拆分前的内联
+        # catch-all）。逃逸族混族——events 扫描/压缩、tar 构建（OSError）、
+        # code_runner 的归档路径、manifest 畸形——但结果必须永远可上报，
+        # 否则执行会卡到租约过期被 Host 重调度。吞是对的：降级产物是空
+        # result.tar.gz + failed_metadata，语义钉子即"准备失败 = run
+        # failed"。日志保全：错误文本截断 4000 字符后随 error_message 报
+        # 给 Host，随结果持久化、两侧可见。
         archive = task.execution_dir / "result.tar.gz"
         write_empty_archive(archive)
         return failed_metadata(task, f"result preparation failed: {exc}"), archive, []

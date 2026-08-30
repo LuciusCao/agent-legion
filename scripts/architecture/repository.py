@@ -8,6 +8,7 @@ from scripts.architecture.agent_catalog_contracts import (
     check_settings_store_legacy_agents,
     check_workspace_save_outside_transaction,
 )
+from scripts.architecture.broad_except_audit import check_broad_except_audit
 from scripts.architecture.budget_policy import BudgetConfigurationError, load_budget_policy
 from scripts.architecture.configuration import check_configuration_ownership
 from scripts.architecture.executor_decoupling import (
@@ -166,6 +167,7 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_sql_placeholders(root))
     errors.extend(check_service_data_boundary(root))
     errors.extend(check_test_placement(root))
+    errors.extend(check_broad_except_audit(root))
 
     try:
         policy = load_budget_policy(root / "config/architecture/architecture-budget-policy.yaml")

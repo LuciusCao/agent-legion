@@ -44,6 +44,13 @@ def heartbeat_loop(config: HeartbeatConfig) -> None:
         try:
             status, cancelled = config.client.heartbeat(execution_id, config.lease_id)
         except Exception as exc:  # transient network error: keep beating
+            # #204 broad-except audit: 心跳线程的存活语义。单次心跳的逃逸
+            # 族（requests 传输错误、畸形应答等）逐拍独立——失败只意味着这
+            # 一拍没送达，interval 后的下一拍重新证明存活，真正的死线是
+            # Host 侧租约 TTL。吞掉并 continue 是对的：让一次失败杀死这个
+            # daemon 线程反而造成租约静默过期、执行被 Host 重调度。结果空间
+            # 是这一拍的丢拍，无状态残留。日志保全：每次失败都 print
+            # （flush=True），持续性故障按 interval 反复可见，不会静默。
             print(f"heartbeat error for {execution_id}: {exc}", flush=True)
             continue
         if cancelled and config.on_cancelled is not None:

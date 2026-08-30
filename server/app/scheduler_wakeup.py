@@ -43,6 +43,16 @@ def notify_schedulable_work() -> None:
         try:
             callback()
         except Exception:
+            # #204 broad-except audit: per-callback containment on a
+            # fire-and-forget notification. The callbacks are arbitrary
+            # wake hooks registered by the worker threads — their outcome
+            # space is whatever each hook touches, not a family this module
+            # could enumerate. One failing callback must neither 500 the
+            # write path that produced schedulable work nor block the
+            # remaining callbacks (the module contract is "never raises",
+            # and the poll loop's idle backoff is the fallback latency —
+            # worst case the wake is lost and the next poll interval
+            # rediscovers the work). logger.exception keeps the traceback.
             logger.exception("scheduler wakeup callback %r failed", callback)
 
 
@@ -56,6 +66,13 @@ def reload_scan_entries_best_effort(worker: Any) -> None:
     try:
         worker.reload_scan_entries()
     except Exception:
+        # #204 broad-except audit: best-effort convergence, called inline on
+        # the workspace write routes AFTER the commit. reload_scan_entries
+        # re-reads workspace definitions (DB surface); a transient failure
+        # must not 500 a write that already succeeded, and the state
+        # self-heals — the next reload (another scan-target commit) or the
+        # process restart converges the scan list. logger.exception keeps
+        # the traceback so the divergence window is diagnosable.
         logger.exception("workflow scan-list hot reload failed")
 
 

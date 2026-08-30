@@ -96,6 +96,15 @@ class SingleReplicaProbe:
         try:
             row = conn.execute(_TRY_LOCK_SQL, (_REPLICA_LOCK_KEY,)).fetchone()
         except Exception:
+            # #204 broad-except audit (#277): the probe is an observability
+            # nicety, not a dependency — a failing checkout/try-lock (pool
+            # or psycopg surface at startup) must degrade to "pre-#277
+            # behavior" (detection disabled) instead of aborting the
+            # lifespan. Compensating conn.close() releases the checkout
+            # before returning True; exc_info at debug level because a
+            # short DB outage at boot is a known degraded mode, and
+            # _lock_acquired=None keeps lock_acquired() honest about the
+            # skipped probe.
             # Probe failure must never block startup: release the checkout
             # and leave the runtime exactly as it was pre-#277.
             conn.close()
@@ -150,11 +159,25 @@ class SingleReplicaProbe:
             if self._lock_acquired:
                 conn.execute(_UNLOCK_SQL, (_REPLICA_LOCK_KEY,))
         except Exception:  # noqa: BLE001 - shutdown is best-effort
+            # #204 broad-except audit: shutdown safety net during the lifespan
+            # finally. A failed unlock (broken connection, pool already closed
+            # by the tests' teardown) must not raise out of close() and mask
+            # the original error being unwound — and it is harmless anyway:
+            # the session-level advisory lock dies with the session when the
+            # connection drops (the docstring's server-side backstop). The
+            # finally below still returns the connection to the pool; the
+            # traceback rides the debug log.
             logger.debug("single-replica probe: unlock during shutdown failed", exc_info=True)
         finally:
             try:
                 conn.close()
             except Exception:  # noqa: BLE001 - shutdown is best-effort
+                # #204 broad-except audit: same shutdown safety-net semantics
+                # as the unlock above — the psycopg_pool close/putconn surface
+                # on an already-torn-down pool raises arbitrary errors, and
+                # close() must complete silently (the connection is discarded
+                # either way; the session lock dies server-side). Debug level:
+                # per-test teardown hits this by design, it is not an error.
                 logger.debug(
                     "single-replica probe: connection return during shutdown failed",
                     exc_info=True,
