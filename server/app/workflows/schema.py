@@ -36,6 +36,9 @@ class WorkflowNodeExecution:
     provider: str = ""
     model: str = ""
     thinking: str = ""
+    # Node-level only (the top-level block rejects it): empty means the
+    # platform auto-assembles the default node instructions; a non-empty
+    # value REPLACES that default wholesale in the run prompt.
     prompt: str = ""
 
 

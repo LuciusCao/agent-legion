@@ -75,6 +75,8 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
             {"code": "not python"},
         ),
         ("PUT", f"{base}/agent-definitions/agent-x/draft", {}),
+        ("POST", f"{base}/node-prompt", {"node_key": "node"}),
+        ("PUT", f"{base}/node-prompt", {"node_key": "node", "prompt": "x"}),
         ("GET", f"{base}/workflow/active", None),
         ("GET", f"{base}/workflows/wf/nodes/node/code", None),
         ("GET", "/api/studio-agent/tools/chat-sessions/session-x/context", None),
@@ -554,3 +556,62 @@ def test_save_node_code_draft_skeleton_without_any_revision(client, job_db) -> N
     saved = scoped.put(url, json={"code": _NODE_CODE, "expected_capability": "first_capability"})
     assert saved.status_code == 200, saved.text
     assert saved.json()["status"] == "draft"
+
+
+def test_get_node_prompt_previews_default_instructions(client, job_db) -> None:
+    workspace_id = _create_workspace(client)
+    scoped, _ = _scoped_client(client, job_db)
+
+    response = scoped.post(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/node-prompt",
+        json={"node_key": "write_script"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["is_default"] is True
+    assert payload["skill_key"] == "education-video-problems-generation/write-script"
+    assert "撰写教学视频脚本" in payload["default_instructions"]
+    assert payload["default_instructions"] in payload["effective_prompt"]
+    assert "Working directory: {job_dir}" in payload["effective_prompt"]
+
+
+def test_save_node_prompt_writes_draft_and_get_reads_it_back(client, job_db) -> None:
+    workspace_id = _create_workspace(client)
+    scoped, _ = _scoped_client(client, job_db)
+    url = f"/api/studio-agent/tools/workspaces/{workspace_id}/node-prompt"
+
+    saved = scoped.put(url, json={"node_key": "write_script", "prompt": "Follow the house style."})
+
+    assert saved.status_code == 200, saved.text
+    payload = saved.json()
+    assert payload["is_default"] is False
+    assert "prompt: Follow the house style." in payload["definition_yaml"]
+    # The human-facing draft store sees the same draft row.
+    draft = client.get(f"/api/workspaces/{workspace_id}/workflow-draft")
+    assert "Follow the house style." in draft.json()["definition_yaml"]
+
+    preview = scoped.post(url, json={"node_key": "write_script"})
+    assert preview.json()["is_default"] is True  # 预览默认读 active revision，不是 draft
+    preview_draft = scoped.post(
+        url,
+        json={"node_key": "write_script", "definition_yaml": payload["definition_yaml"]},
+    )
+    assert preview_draft.json()["is_default"] is False
+    assert preview_draft.json()["custom_instructions"] == "Follow the house style."
+
+    cleared = scoped.put(url, json={"node_key": "write_script", "prompt": ""})
+    assert cleared.status_code == 200
+    assert cleared.json()["is_default"] is True
+    assert "prompt:" not in cleared.json()["definition_yaml"]
+
+
+def test_node_prompt_tools_404_for_unknown_targets(client, job_db) -> None:
+    workspace_id = _create_workspace(client)
+    scoped, _ = _scoped_client(client, job_db)
+    url = f"/api/studio-agent/tools/workspaces/{workspace_id}/node-prompt"
+
+    assert scoped.post(url, json={"node_key": "no_such_node"}).status_code == 404
+    assert scoped.put(url, json={"node_key": "no_such_node", "prompt": "x"}).status_code == 404
+    # start 节点永不执行：无 agent prompt 可言。
+    assert scoped.post(url, json={"node_key": "_start"}).status_code == 400

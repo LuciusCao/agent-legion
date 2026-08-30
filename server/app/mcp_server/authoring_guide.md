@@ -29,6 +29,13 @@ Studio. Nothing you do takes effect in production by itself.
   reads back; otherwise origin `none`); only start nodes 404.
 - `save_agent_definition_draft(agent_id, capability, runtime, skill, tools)` —
   draft Agent definition for an agent-backed capability.
+- `get_node_prompt(workspace_id, node_key, definition_yaml?)` — the effective
+  run prompt of an agent node: fixed platform envelope + node instructions
+  (auto-assembled default, or the custom `execution.prompt` when set). Read
+  it before writing a custom prompt.
+- `save_node_prompt(workspace_id, node_key, prompt)` — write a custom
+  `execution.prompt` for one node into the workspace's unpublished draft
+  YAML; an empty string clears it back to the auto-assembled default.
 - `get_skill(skill_key, ref=None)` — a skill's configured ref, repo tags
   (latest first), and text files: the LOCKED commit's content when the lock
   pins one, else the working tree; `ref` previews one git tag without moving
@@ -92,7 +99,8 @@ nodes:                      # mapping, declaration order = presentation order
     terminal:               # optional: mark a terminal outcome
       outcome: done
     execution:              # optional, agent nodes: provider/model/thinking/prompt
-      model: gpt-5.2
+      model: gpt-5.2        # prompt: empty = auto-assembled default instructions;
+                            # non-empty = replaces the default wholesale
     config: {}              # optional per-node tunables (see section 5)
 edges:                      # schema_version 2: explicit; optional `when`
   - {from: fetch_data, to: report}
@@ -159,6 +167,13 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
   (CONFIG-RUNTIME-MUTABLE-001).
 - Agent execution (`provider`/`model`/`thinking`) resolves node
   `execution.*` overrides → workspace defaults → validation error if unset.
+- Node prompt (`execution.prompt`): the run prompt is a fixed platform
+  envelope (job/skill paths, declared inputs/outputs, output discipline)
+  plus one node-instructions section. Empty `execution.prompt` means the
+  platform auto-assembles that section from the node's label, capability,
+  bound skill, and declared IO; a non-empty value REPLACES the default
+  wholesale — it is not appended. Preview with `get_node_prompt`, edit the
+  draft with `save_node_prompt` (empty string clears back to the default).
 
 ## 6. Skill editing (read → edit → validate → tag)
 

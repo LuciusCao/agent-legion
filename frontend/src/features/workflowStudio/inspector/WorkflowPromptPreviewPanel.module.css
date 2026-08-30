@@ -3,30 +3,3 @@
   flex-direction: column;
   min-height: 100%;
 }
-.header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-bottom: 1px solid #e0e0e0;
-  flex: none;
-}
-.title {
-  font-size: 13px;
-  color: #43474e;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.prompt {
-  flex: 1 1 auto;
-  margin: 0;
-  padding: 16px 20px;
-  overflow: auto;
-  color: #1a1c1e;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-}

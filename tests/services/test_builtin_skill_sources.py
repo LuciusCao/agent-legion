@@ -45,7 +45,7 @@ def test_builtin_sources_cover_demo_skills() -> None:
 def test_demo_sources_point_at_import_demo_repos() -> None:
     for key in _demo_keys():
         source = BUILTIN_SKILL_SOURCES.skills[key]
-        assert source.repo == f"~/.agents/skills/agent-legion/{key}"
+        assert source.repo == f"~/.agents/skills/{key}"
         assert source.ref == "v1.0.0"
 
 

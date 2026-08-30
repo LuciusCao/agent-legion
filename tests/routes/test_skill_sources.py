@@ -72,10 +72,10 @@ def _make_repo(repo: Path, ref: str) -> str:
 
 def _seed_local_repos(fake_home: Path) -> None:
     """Materialize every built-in source as a real local repo under the fake HOME."""
-    base = fake_home / ".agents" / "skills" / "agent-legion"
+    base = fake_home / ".agents" / "skills"
     for key, source in BUILTIN_SKILL_SOURCES.skills.items():
-        assert source.repo.startswith("~/.agents/skills/agent-legion/")
-        relative = source.repo.removeprefix("~/.agents/skills/agent-legion/")
+        assert source.repo.startswith("~/.agents/skills/")
+        relative = source.repo.removeprefix("~/.agents/skills/")
         assert relative == key
         _make_repo(base / relative, source.ref)
 
@@ -191,7 +191,7 @@ def test_relock_resolves_local_repos(client, tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("HOME", str(fake_home))
     _seed_local_repos(fake_home)
 
-    repo = fake_home / ".agents" / "skills" / "agent-legion" / KEY
+    repo = fake_home / ".agents" / "skills" / KEY
     (repo / "SKILL.md").write_text("# updated\n")
     _git(repo, "add", ".")
     _git(repo, "commit", "-m", "update", "--no-gpg-sign")

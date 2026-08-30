@@ -36,7 +36,6 @@ def test_get_configured_skill_detail(client_factory, tmp_path, monkeypatch):
         / "home"
         / ".agents"
         / "skills"
-        / "agent-legion"
         / "education-video-problems-generation"
         / "generate-questions"
     )

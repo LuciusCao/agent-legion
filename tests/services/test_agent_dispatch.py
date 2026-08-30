@@ -152,6 +152,7 @@ def test_enqueue_builds_an_immutable_manifest_and_bundle(harness: SimpleNamespac
     assert request.workspace_id == "workspace-1"
     assert request.job_id == "job-1"
     assert request.node_key == "generate"
+    assert manifest["node_label"] == "Generate"
     assert manifest["config"] == {"page_size": 25}
     assert manifest["expected_outputs"] == ["answer.json"]
     assert manifest["skill_version"] == "skill-v1"

@@ -12,7 +12,7 @@
 - `skills/`：4 个示例 agent skill（`write-script` / `review-script` /
   `generate-questions` / `review-questions`），随仓库版本化。运行
   `make import-demo` 把它们导入本机 skill 源目录
-  `~/.agents/skills/agent-legion/education-video-problems-generation/`
+  `~/.agents/skills/education-video-problems-generation/`
   并逐个 `git init` + 打 tag `v1.0.0`，随后写入 skill lock，并在尚无
   demo workspace 时创建和 seed 一个（幂等，不覆盖已有改动）。
 

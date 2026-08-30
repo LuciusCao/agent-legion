@@ -112,6 +112,7 @@ class AgentDispatchService:
                 "job_id": job["id"],
                 "workflow_key": workflow_key,
                 "node_key": node.key,
+                "node_label": node.label or node.key,
                 "agent_id": agent_id,
                 "agent_definition_hash": definition.definition_hash(),
                 "runtime": definition.runtime,

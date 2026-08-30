@@ -168,6 +168,8 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/agent-definitions/{agent_id}/copy"): "creates a draft",
     ("POST", "/api/skills/validate"): "validate only",
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-rerun/preview"): "preview only",
+    # Node prompt preview: read-only render, persists nothing.
+    ("POST", "/api/workspaces/{workspace_id}/workflow/node-prompt-preview"): "preview only",
     # Scoped-only tool surface (require_studio_agent_scope): these endpoints
     # exist FOR the scoped token and are draft/validate/register-by-design.
     (
@@ -185,6 +187,16 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     (
         "PUT",
         "/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
+    ): "scoped-only tool surface",
+    # Node prompt read/save tools: preview persists nothing; the save edits
+    # only the workspace's unpublished draft YAML (draft-only by design).
+    (
+        "POST",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/node-prompt",
+    ): "scoped-only tool surface",
+    (
+        "PUT",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/node-prompt",
     ): "scoped-only tool surface",
     # Skill read/validate/save-version tools (issue #217): draft-only — the
     # save endpoint commits+tags a local skill repo but never touches the

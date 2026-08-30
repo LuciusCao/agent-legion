@@ -190,6 +190,8 @@ server/app/
 | POST | `/skills/validate` | `validate_skill` | routes/skills.py |
 | GET | `/skills/tags` | `list_skill_tags` | routes/skills.py |
 | GET | `/studio-agent/tools/chat-sessions/{session_id}/context` | `get_chat_session_context` | routes/studio_agent_context.py |
+| POST | `/studio-agent/tools/workspaces/{workspace_id}/node-prompt` | `get_node_prompt` | routes/studio_agent_prompt_tools.py |
+| PUT | `/studio-agent/tools/workspaces/{workspace_id}/node-prompt` | `save_node_prompt_route` | routes/studio_agent_prompt_tools.py |
 | GET | `/studio-agent/tools/skills/{skill_key:path}` | `get_skill` | routes/studio_agent_skill_tools.py |
 | POST | `/studio-agent/tools/skills/{skill_key:path}/validate` | `validate_skill` | routes/studio_agent_skill_tools.py |
 | POST | `/studio-agent/tools/skills/{skill_key:path}/versions` | `save_skill_version` | routes/studio_agent_skill_tools.py |
@@ -238,6 +240,7 @@ server/app/
 | GET | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/versions/{version}` | `get_node_code_version` | routes/workflow_node_codes.py |
 | POST | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/rollback` | `rollback_node_code` | routes/workflow_node_codes.py |
 | DELETE | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `archive_node_code` | routes/workflow_node_codes.py |
+| POST | `/workspaces/{workspace_id}/workflow/node-prompt-preview` | `preview_node_prompt_route` | routes/workflow_node_prompt_route.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions` | `list_workflow_revisions` | routes/workflow_revisions.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions/active` | `get_active_workflow_revision` | routes/workflow_revisions.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions/{revision_id}` | `get_workflow_revision_detail` | routes/workflow_revisions.py |
@@ -510,6 +513,10 @@ server/app/
 | WorkflowTerminalResponse | BaseModel | outcome: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeExecutionResponse | BaseModel | provider: str, model: str, thinking: str, prompt: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeResponse | BaseModel | key: str, label: str, capability: str, node_type: str, accepted_item_types: l... | app/routes/workflow_node_contracts.py |
+| NodePromptPreviewRequest | BaseModel | node_key: str, definition_yaml: str | None | app/routes/workflow_node_prompt_contracts.py |
+| NodePromptPreviewResponse | BaseModel | effective_prompt: str, default_instructions: str, custom_instructions: str, i... | app/routes/workflow_node_prompt_contracts.py |
+| NodePromptSaveRequest | BaseModel | node_key: str, prompt: str | app/routes/workflow_node_prompt_contracts.py |
+| NodePromptSaveResponse | BaseModel | node_key: str, is_default: bool, definition_yaml: str, updated_at: str | None | app/routes/workflow_node_prompt_contracts.py |
 | WorkflowRevisionSummary | BaseModel | id: str, workspace_id: str, workflow_key: str, version: int, status: str, def... | app/routes/workflow_revisions_contracts.py |
 | WorkflowRevisionsResponse | BaseModel | revisions: list[WorkflowRevisionSummary] | app/routes/workflow_revisions_contracts.py |
 | WorkflowDraftRequest | BaseModel | definition_yaml: str | app/routes/workflow_revisions_contracts.py |

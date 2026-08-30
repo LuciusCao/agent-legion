@@ -102,6 +102,7 @@ const instanceSettings: InstanceSettingsResponse = {
   openclaw: {
     cwd: '.',
   },
+  skills_root: '~/.agents/skills',
 }
 
 function renderPage() {

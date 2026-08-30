@@ -1,0 +1,26 @@
+.dirButton {
+  width: 100%;
+  justify-content: flex-start !important;
+  margin-bottom: 2px !important;
+  overflow: hidden;
+  text-transform: none !important;
+  color: #43474e !important;
+  font-weight: 500 !important;
+}
+.dirButton span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fileButton {
+  width: 100%;
+  justify-content: flex-start !important;
+  margin-bottom: 2px !important;
+  overflow: hidden;
+  text-transform: none !important;
+}
+.fileButton span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -80,6 +80,33 @@ chmod 600 deploy/.env
 插值该变量；velites 可在自己的 `models.json` 中把 `apiKey` 配成
 `$LLM_GATEWAY_TOKEN`。上游 LLM provider 凭证本身只存在于 gateway 进程。
 
+### Skill root 上移迁移（`agent-legion` 前缀退役）
+
+skill root 已上移为 `~/.agents/skills`（单一来源
+`server/app/skills/skill_roots.py`），compose 挂载点同步上移为
+`${AGENT_SKILLS_DIR:-../skills}:/root/.agents/skills:ro`。从旧版本升级的实例注意：
+DB `skill_sources` 里 seed 的 demo skill `repo` 仍指向旧路径
+`~/.agents/skills/agent-legion/<group>/<name>`——新布局下它不等于缓存目录
+（`~/.agents/skills/<group>/<name>`），不再是 in-place 源，且 `:ro` 挂载下容器内
+该嵌套路径悬空，lock 解析 / relock / save_skill_version 都会失败。
+
+后端启动时自动迁移（`server/app/skills/skill_root_migration.py`，幂等）：把
+`skill_sources` 里旧前缀的 `repo` 重写为新根（tilde 与展开绝对路径两种形态都
+覆盖），并整条删除这些 key 的 `skill_lock` 条目（旧 lock commit 与新位置 repo
+不匹配，删条目让下次 dispatch/relock 按 `ref` 重新解析锁定）。有变更时打
+warning 日志。operator 只需：
+
+1. 重跑 `make import-demo`（默认目标根已改为
+   `~/.agents/skills/education-video-problems-generation`），把 demo repo 建到新
+   位置（幂等，不覆盖已有改动）。
+2. relock（`POST /api/admin/skill-sources/relock` 或 `make skills-lock`），或等
+   首次 dispatch 自动按 `ref` 重新锁定。
+3. 旧位置的 repo 可保留（作为本地 clone 源仍可用）或自行清理。
+
+注意：skill 缓存目录缺失时 SkillManager 按 DB skill_lock 重新 clone 的 self-heal
+只在可写的本地开发环境可行；compose `:ro` 挂载下不可自愈，`repo` 路径必须在挂载
+树内真实存在。
+
 ## 3. 启动部署机的 stack
 
 ```bash

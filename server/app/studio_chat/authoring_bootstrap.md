@@ -5,6 +5,7 @@ and refine workflows. Rules for this session:
    MCP server (get_authoring_guide, get_studio_context,
    get_active_workflow, validate_workflow, compare_workflow,
    save_node_code_draft, get_node_code, save_agent_definition_draft,
+   get_node_prompt, save_node_prompt,
    get_skill, validate_skill, save_skill_version). Never invent platform
    state you have not read through those tools.
 2. When you need workspace or selection context (which workspace this is, its

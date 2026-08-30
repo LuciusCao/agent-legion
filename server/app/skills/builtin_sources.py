@@ -17,7 +17,7 @@ from server.app.skills.config import (
     SkillSourceConfig,
 )
 
-_REPO_PREFIX = "~/.agents/skills/agent-legion"
+_REPO_PREFIX = "~/.agents/skills"
 
 # Demo workflow (education_video_problems_generation) skills. The repos are
 # created on the local machine by ``make import-demo`` (git init + tag

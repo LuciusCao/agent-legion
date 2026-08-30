@@ -3,7 +3,6 @@ import type {
   WorkflowNodeRecord,
   WorkspaceRuntimeModelsResponse,
 } from '../../../types'
-import editorStyles from './WorkflowStructuredEditor.module.css'
 import styles from './WorkflowNodeRuntimeSettings.module.css'
 import { useRuntimeModelOptions } from './runtimeModelOptions'
 import { WorkflowNodeThinkingField } from './WorkflowNodeThinkingField'
@@ -29,10 +28,7 @@ export function WorkflowNodeRuntimeSettings(props: {
   const execution = draft
     ? (draft.execution ?? {})
     : (props.node.execution ?? {})
-  const patch = (
-    field: 'provider' | 'model' | 'thinking' | 'prompt',
-    value: string
-  ) =>
+  const patch = (field: 'provider' | 'model' | 'thinking', value: string) =>
     props.setDefinitionYaml(
       patchWorkflowNodeExecution(
         props.definitionYaml,
@@ -75,21 +71,8 @@ export function WorkflowNodeRuntimeSettings(props: {
         readOnly={props.readOnly}
         onChange={(value) => patch('thinking', value)}
       />
-      <label className={editorStyles.field}>
-        <span className={editorStyles.fieldLabel}>节点补充指令</span>
-        <textarea
-          aria-label="节点补充指令"
-          className={editorStyles.fieldInput}
-          value={execution.prompt ?? ''}
-          rows={3}
-          disabled={props.readOnly}
-          placeholder="可选"
-          onChange={(event) => patch('prompt', event.target.value)}
-        />
-        <span className={editorStyles.fieldHint}>
-          追加到系统生成的运行 Prompt 末尾
-        </span>
-      </label>
+      {/* execution.prompt（节点指令）的编辑统一在「查看 Prompt」预览面板
+          （默认组装 + 整段替代 + 重置），此处不再重复提供文本框。 */}
     </div>
   )
 }

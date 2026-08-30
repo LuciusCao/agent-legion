@@ -38,12 +38,23 @@ def test_build_prompt_contains_all_sections(tmp_path: Path) -> None:
     assert "Node: gen" in prompt
     assert "- a.txt" in prompt
     assert "- out.json" in prompt
-    assert "Additional node instructions:\nbe careful" in prompt
+    # execution.prompt 非空 → 整段替代自动组装的默认指令（不再是追加段）。
+    assert "Node instructions:\nbe careful" in prompt
+    assert "Additional node instructions" not in prompt
+    assert "Your task:" not in prompt
     assert (
         "Do not read, search, or modify anything outside the working directory "
         "and the skill directory." in prompt
     )
     assert prompt.endswith("\n")
+
+
+def test_build_prompt_empty_prompt_selects_default_instructions(tmp_path: Path) -> None:
+    manifest = {**MANIFEST, "additional_prompt": ""}
+    prompt = build_prompt(manifest, job_dir=tmp_path / "job", skill_dir=tmp_path / "skill")
+    # 空 prompt → 自动组装的默认指令（label 缺失时回落 node_key）。
+    assert "Your task: gen (capability `generate`)" in prompt
+    assert "`demo_video_workflow/gen`" in prompt
 
 
 def test_detect_model_error_finds_wrapped_message(tmp_path: Path) -> None:

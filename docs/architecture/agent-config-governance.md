@@ -241,15 +241,19 @@ Studio
 
 **方式 A：Folder Picker**
 1. 点击"选择技能目录"
-2. 打开系统 folder picker，选中 skill 目录（如 `~/.agents/skills/agent-legion/education-video-problems-generation/review-questions/`）
+2. 打开系统 folder picker，选中 skill 目录（如 `~/.agents/skills/education-video-problems-generation/review-questions/`）
 3. App 校验目录包含 `SKILL.md`
 4. 校验通过后，显示该 skill 的 tags（从 SKILL.md frontmatter 读取）
 5. 用户从 tag 下拉选择（最新 tag 置顶）
 
 **方式 B：绝对路径输入**
-1. 用户输入绝对路径（如 `/Users/xxx/.agents/skills/agent-legion/education-video-problems-generation/review-questions`）
+1. 用户输入绝对路径（如 `/Users/xxx/.agents/skills/education-video-problems-generation/review-questions`）
 2. App 实时校验路径存在且包含 `SKILL.md`
 3. 校验通过后，同样显示 tag 下拉选择
+
+skill 目录必须位于 skill root（`~/.agents/skills`）之下；skill key 就是目录相对
+skill root 的两段路径 `<group>/<name>`（上例即
+`education-video-problems-generation/review-questions`）。
 
 ### 8. API 设计
 

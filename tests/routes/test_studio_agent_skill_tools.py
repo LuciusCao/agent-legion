@@ -56,7 +56,7 @@ def _make_skill_repo(repo: Path, tag: str = "v1.0.0") -> None:
 
 @pytest.fixture
 def skill_home(tmp_path, monkeypatch):
-    base = tmp_path / "home" / ".agents" / "skills" / "agent-legion"
+    base = tmp_path / "home" / ".agents" / "skills"
     _make_skill_repo(base / _KEY)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     return base / _KEY

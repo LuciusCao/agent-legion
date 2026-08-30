@@ -32,7 +32,12 @@ const settings: InstanceSettingsResponse = {
   openclaw: {
     cwd: '.',
   },
+  skills_root: '~/.agents/skills',
 }
+
+// PUT 载荷不含只读字段 skills_root。
+const updateBase: Record<string, unknown> = { ...settings }
+delete updateBase.skills_root
 
 function renderSection() {
   return render(
@@ -68,12 +73,19 @@ describe('InstanceSettingsSection', () => {
     expect(screen.getByLabelText('启用 sweeper')).toBeChecked()
     expect(screen.getByLabelText('启用工作流')).toBeChecked()
     expect(screen.getByText(/需重启服务才能生效/)).toBeInTheDocument()
+    // 只读的 Skill 根目录行：展示响应值与工作区默认位置说明。
+    expect(screen.getByText('Skill 根目录')).toBeInTheDocument()
+    expect(screen.getByText('~/.agents/skills')).toBeInTheDocument()
+    expect(screen.getByText(/暂不支持修改/)).toHaveTextContent(
+      '暂不支持修改；workspace 技能默认位于 ~/.agents/skills/<workspace>/'
+    )
     // Clean form: save stays disabled.
     expect(screen.getByText('保存实例设置')).toBeDisabled()
   })
 
   it('saves edited values via PUT with integer rounding', async () => {
     vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
+      ...settings,
       ...payload,
     }))
 
@@ -91,7 +103,7 @@ describe('InstanceSettingsSection', () => {
 
     await waitFor(() => {
       expect(updateInstanceSettings).toHaveBeenCalledWith({
-        ...settings,
+        ...updateBase,
         cleanup: { ...settings.cleanup, log_retention_days: 46 },
         heartbeat_interval_seconds: 12.5,
         workflows: { enabled: false },
@@ -146,6 +158,7 @@ describe('InstanceSettingsSection', () => {
 
   it('renders the OpenClaw group and saves edited values', async () => {
     vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
+      ...settings,
       ...payload,
     }))
 
@@ -160,7 +173,7 @@ describe('InstanceSettingsSection', () => {
 
     await waitFor(() => {
       expect(updateInstanceSettings).toHaveBeenCalledWith({
-        ...settings,
+        ...updateBase,
         openclaw: {
           cwd: '/tmp/openclaw',
         },

@@ -26,9 +26,9 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from server.app.mcp_server import prompt_tools, skill_tools
 from server.app.mcp_server.authoring_guide import AUTHORING_GUIDE
 from server.app.mcp_server.config import McpConfigError, McpServerConfig
-from server.app.mcp_server.skill_tools import register_skill_tools
 from server.app.mcp_server.tool_client import ToolClient
 
 ConfigResolver = Callable[[], Awaitable[McpServerConfig]]
@@ -50,8 +50,7 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         # Awaiting the resolver lets the HTTP transport's per-request config
         # rebuild offload its blocking pieces (registry DB read) to a worker
         # thread instead of stalling the uvicorn loop (#158 review).
-        resolved = await resolve()
-        return resolved, ToolClient(resolved)
+        return (resolved := await resolve()), ToolClient(resolved)
 
     @mcp.tool()
     def get_authoring_guide() -> str:
@@ -168,8 +167,10 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
             },
         )
 
-    # Skill read/validate/save-version tools (issue #217), split for budget.
-    register_skill_tools(mcp, _client)
+    # Skill read/validate/save-version tools (issue #217) and node prompt
+    # preview/save tools, both split into sibling modules for the budget.
+    skill_tools.register_skill_tools(mcp, _client)
+    prompt_tools.register_prompt_tools(mcp, _client)
 
     return mcp
 

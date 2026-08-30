@@ -239,7 +239,11 @@ export function AgentEditor({
         </TextField>
       </div>
       <div className={styles.field}>
-        <SkillSelector value={skill} onChange={setSkill} />
+        <SkillSelector
+          workspaceId={workspaceId}
+          value={skill}
+          onChange={setSkill}
+        />
       </div>
       <div className={styles.field}>
         <TextField

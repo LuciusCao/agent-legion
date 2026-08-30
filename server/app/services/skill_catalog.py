@@ -8,6 +8,7 @@ from server.app.services import skill_detail, skill_repo
 from server.app.services.job_errors import NotFoundError
 from server.app.services.skill_source_store import SkillSourceStore
 from server.app.skills.config import SkillsConfig, SkillsLock
+from server.app.skills.skill_roots import default_skill_base_dir
 
 _TEXT_EXTENSIONS = skill_repo.TEXT_EXTENSIONS
 _MAX_FILE_BYTES = skill_repo.MAX_FILE_BYTES
@@ -17,7 +18,7 @@ class SkillCatalogService:
     def __init__(self, database_dsn: ConnectSource, base_dir: Path | None = None) -> None:
         # database_dsn: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187).
         self._store = SkillSourceStore(database_dsn)
-        self.base_dir = base_dir or Path.home() / ".agents" / "skills" / "agent-legion"
+        self.base_dir = base_dir or default_skill_base_dir()
 
     def metadata(self, skill_key: str) -> dict[str, str]:
         source = self._config().skills.get(skill_key)

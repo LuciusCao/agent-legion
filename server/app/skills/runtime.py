@@ -12,6 +12,7 @@ from pathlib import Path
 from server.app.db.dialect import ConnectSource
 from server.app.services.skill_source_store import SkillSourceStore
 from server.app.skills.manager import SkillManager
+from server.app.skills.skill_roots import default_skill_base_dir
 from server.app.workflows.skill_version import resolve_skill_version
 from server.app.workflows.skills import resolve_workflow_skill
 
@@ -59,6 +60,6 @@ def build_skill_manager(database_dsn: ConnectSource, runs_dir: Path | None = Non
     """
     return SkillManager(
         store=SkillSourceStore(database_dsn),
-        base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
+        base_dir=default_skill_base_dir(),
         runs_dir=runs_dir,
     )
