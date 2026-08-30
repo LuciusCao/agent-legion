@@ -11,8 +11,8 @@ exemptions:
     completion accepts mixed sha256 refs, and min_protocol_version defaults
     to 1 so pre-D12 Workers are not fenced at registration. The durable
     resolution stays deleting this router once object storage is a required
-    deployment and the retired Worker generation is fenced (re-anchored from
-    issue 160 to issue 287), not splitting deprecated code.
+    deployment and the retired Worker generation is fenced (re-anchored
+    160 then 287 then 300), not splitting deprecated code.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
   ceiling: 61
