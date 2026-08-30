@@ -1224,6 +1224,7 @@
     "server/app/skills/runs_gc.py": 47,
     "server/app/skills/runtime.py": 50,
     "server/app/skills/seed.py": 58,
+    "server/app/skills/skill_root_migration.py": 90,
     "server/app/skills/skill_roots.py": 33,
     "server/app/spa.py": 56,
     "server/app/startup_tasks.py": 62,

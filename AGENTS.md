@@ -285,7 +285,9 @@ CodeExecutor(...).execute(context)
   只读展示，暂不支持修改）；workspace 的 agent skill 默认位于
   `~/.agents/skills/<workspace_id>/`，SkillSelector 以只读前缀 + 相对目录名录入。
   skill 缓存目录缺失时 SkillManager 按 DB skill_lock 自动 re-clone 自愈
-  （仅本地开发可写环境；compose `:ro` 挂载下不可自愈）。
+  （仅本地开发可写环境；compose `:ro` 挂载下不可自愈）。DB 里旧嵌套根
+  `~/.agents/skills/agent-legion` 的 `skill_sources`/`skill_lock` 由启动迁移
+  `server/app/skills/skill_root_migration.py` 自动改写/清理（幂等）。
 - skill 源与锁已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB
   `global_settings`（key=`skill_sources` / `skill_lock`）；tracked
   `config/skills.yaml` / `config/skills.lock` 已退役，残留文件只在 DB 无记录时

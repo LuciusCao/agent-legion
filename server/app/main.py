@@ -43,6 +43,7 @@ from server.app.services.workspace_execution_configuration import (
 )
 from server.app.settings import load_settings, validate_settings
 from server.app.skills.seed import seed_skill_sources
+from server.app.skills.skill_root_migration import migrate_skill_source_paths
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
 from server.app.storage import build_s3_storage_checked
@@ -78,6 +79,11 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # import-once the legacy files when present, else seed the built-in
     # constants; with rows present this is a no-op (DB is authoritative).
     seed_skill_sources(job_db, settings.root_dir)
+    # The skill root moved up from ~/.agents/skills/agent-legion to
+    # ~/.agents/skills: rewrite persisted source repos still carrying the
+    # retired prefix and drop their stale lock entries (idempotent no-op once
+    # migrated).
+    migrate_skill_source_paths(job_db)
     WorkflowRevisionService(job_db).reconcile_active_agent_routes()
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db)
     # Resume state must not survive a restart: dispatch stays off until an
