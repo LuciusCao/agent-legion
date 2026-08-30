@@ -408,23 +408,21 @@ def test_monotonic_guard_rejects_new_entry_for_tracked_file(tmp_path: Path):
 
     errors = check_service_data_boundary(root)
 
-    assert any(
-        "baseline entry appeared for an already-tracked service file" in error for error in errors
-    )
+    assert any("baseline entry appeared without pre-change history" in error for error in errors)
 
 
-def test_monotonic_guard_accepts_first_entry_for_brand_new_file(tmp_path: Path):
-    # A genuinely new service file registering its first baseline entry is
-    # the legitimate first-time channel (the plain no-entry check still
-    # governs it); the monotonic guard must not misfire.
+def test_monotonic_guard_rejects_first_entry_for_brand_new_file(tmp_path: Path):
+    # codex review round 2 on #305: a NEW service with bypasses violates
+    # BOUNDARY-DATA-001 the same as an old one growing debt — AGENTS.md
+    # requires new services to go through JobQueries too, so the
+    # first-entry channel for a fresh file is closed as well.
     root = _boundary_git_repo(tmp_path, {})
     write(root / "server/app/services/fresh.py", 'A = "SELECT 1"\n')
     write_boundary_baseline(root, {"server/app/services/fresh.py": [1, 0, 0]})
 
     errors = check_service_data_boundary(root)
 
-    assert not any("rose above committed" in error for error in errors)
-    assert not any("appeared for an already-tracked" in error for error in errors)
+    assert any("appeared without pre-change history" in error for error in errors)
 
 
 def test_monotonic_guard_accepts_lowered_count(tmp_path):
@@ -471,15 +469,12 @@ def test_monotonic_guard_rejects_committed_new_entry(tmp_path: Path):
 
     errors = check_service_data_boundary(root)
 
-    assert any(
-        "baseline entry appeared for an already-tracked service file" in error for error in errors
-    )
+    assert any("baseline entry appeared without pre-change history" in error for error in errors)
 
 
-def test_monotonic_guard_accepts_entry_for_file_created_this_change(tmp_path: Path):
-    # The legitimate flip side: a service file created by THIS change (absent
-    # from HEAD^) registering its first baseline entry in the same commit is
-    # a new file, not new debt.
+def test_monotonic_guard_rejects_entry_for_file_created_this_change(tmp_path: Path):
+    # Same-commit file + bypasses + baseline entry is the smuggling shape
+    # the HEAD^-only historic evidence exists to catch (codex round 2).
     import subprocess
 
     root = tmp_path
@@ -497,7 +492,7 @@ def test_monotonic_guard_accepts_entry_for_file_created_this_change(tmp_path: Pa
 
     errors = check_service_data_boundary(root)
 
-    assert not any("appeared for an already-tracked service file" in error for error in errors)
+    assert any("appeared without pre-change history" in error for error in errors)
 
 
 def test_monotonic_guard_rejects_rename_count_reset(tmp_path: Path):

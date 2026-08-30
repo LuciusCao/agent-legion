@@ -63,16 +63,20 @@ def boundary_regression_errors(
     """Reject baseline growth against the committed monotonic floor.
 
     The floor per path is the entry-wise minimum across the anchor
-    revisions; a path absent from every anchor is a first-time registration
-    (legitimate only for a brand-new service file, which the plain
-    no-entry check of ``check_service_data_boundary`` already governs —
-    entries here exist because the file carries bypasses, so a new entry
-    appearing while the file itself is not new means someone grew debt).
-    Renames carry the old path's floor onto the new path (#236 semantics):
-    renaming a service file is not a boundary-count reset button.
+    revisions; a path absent from HEAD^'s baseline is a first-time
+    registration — rejected outright, because a NEW service with bypasses
+    violates BOUNDARY-DATA-001 the same as an old one growing debt (the
+    plain no-entry check would catch the file, but a same-commit file +
+    entry registration passes it; codex review round 2 on #305). Renames
+    carry the old path's floor onto the new path (#236 semantics): renaming
+    a service file is not a boundary-count reset button.
     """
     git = GitHelper(root)
     try:
+        if not git.is_repository():
+            # Non-git checkouts have no committed anchor to compare
+            # against; the guard stays quiet (mirrors the budget guard).
+            return []
         errors = _unresolvable_anchor_errors(git)
         if errors:
             return errors
@@ -80,19 +84,18 @@ def boundary_regression_errors(
 
         for path, triple in baseline_files.items():
             if path not in historic_paths:
-                # First-time entry against the pre-change baseline. A
-                # brand-new service file legitimately starts here; a service
-                # file that already existed at HEAD^ gaining its first
-                # entry is the regression this guard exists for — decided
-                # against HEAD^'s tree, so committing the debt and its
-                # entry together does not dodge it.
-                if _path_exists_in_revision(git, "HEAD^", path):
-                    errors.append(
-                        f"{path}: baseline entry appeared for an already-tracked "
-                        "service file; new bypasses must be reviewed as a "
-                        "docs/architecture change (BOUNDARY-DATA-001), not a "
-                        "silent baseline edit"
-                    )
+                # ANY first-time entry against the pre-change baseline is a
+                # new bypass surface, for a new file as much as an old one:
+                # AGENTS.md requires NEW services to reach the database
+                # through JobQueries too, so a brand-new service file with
+                # bypasses is not a legitimate first registration — it is
+                # the debt arriving in the same commit as its file (codex
+                # review round 2 on #305).
+                errors.append(
+                    f"{path}: baseline entry appeared without pre-change "
+                    "history; new services must reach the database through "
+                    "JobQueries (BOUNDARY-DATA-001), not start with bypasses"
+                )
                 continue
             floor = floors[path]
             if any(a > b for a, b in zip(triple, floor, strict=True)):
