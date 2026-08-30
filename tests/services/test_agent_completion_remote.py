@@ -11,9 +11,8 @@ tests/services/test_agent_completion_validation.py 覆盖）。
 from __future__ import annotations
 
 import hashlib
-import io
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any
 
 import pytest
 from psycopg import IntegrityError
@@ -22,7 +21,7 @@ from server.app.agent_control.completion import AgentCompletionHandler, AgentOut
 from server.app.db.schema import init_db
 from server.app.db.transaction import write_transaction
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
-from server.app.storage import ObjectHead
+from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
 PAYLOAD = b"remote-artifact-bytes"
@@ -30,40 +29,7 @@ HASH = hashlib.sha256(PAYLOAD).hexdigest()
 STAGING_KEY = "jobs-staging/ws-1/job-1/exec-1/out.json"
 AUTHORITY_KEY = "jobs/ws-1/job-1/out.json"
 
-
-class FakeStorage:
-    """In-memory ObjectStorage test double; never touches the network."""
-
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {}
-        self.put_calls = 0
-
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/upload/{storage_key}"
-
-    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/download/{storage_key}"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        return io.BytesIO(self.objects[storage_key])
-
-    def put_object(self, storage_key: str, data: bytes, content_type: str = "") -> None:
-        self.put_calls += 1
-        self.objects[storage_key] = data
-
-    def put_stream(self, storage_key: str, stream: BinaryIO, size_bytes: int) -> None:
-        self.put_calls += 1
-        self.objects[storage_key] = stream.read()
-
-    def delete_object(self, storage_key: str) -> None:
-        self.objects.pop(storage_key, None)
-
-    def copy_object(self, source_key: str, destination_key: str) -> None:
-        self.objects[destination_key] = self.objects[source_key]
+FakeStorage = FakeObjectStorage
 
 
 class _StubJobDb:

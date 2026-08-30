@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 from pathlib import Path
 
@@ -14,8 +13,8 @@ from server.app.services.material_cache import (
     material_claim_block,
     material_runtime_block,
 )
-from server.app.storage import ObjectHead
 from shared.material_cache import MaterializeError
+from tests.fakes.storage import FakeObjectStorage
 
 WORKSPACE_ID = "ws-mat-cache"
 PAYLOAD = b"host-side-material" * 50
@@ -24,31 +23,11 @@ MATERIAL_ID = "mat-1"
 STORAGE_KEY = f"{WORKSPACE_ID}/{HASH}/notes.txt"
 
 
-class FakeStorage:
-    """In-memory ObjectStorage double（含 presign_get）；不碰网络。"""
+def _fake_storage() -> FakeObjectStorage:
+    return FakeObjectStorage(objects={STORAGE_KEY: PAYLOAD})
 
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {STORAGE_KEY: PAYLOAD}
-        self.opened = 0
-        self.presigned_gets: list[str] = []
 
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/upload/{storage_key}"
-
-    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
-        self.presigned_gets.append(storage_key)
-        return f"https://s3.test/download/{storage_key}?sig=fake"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        self.opened += 1
-        return io.BytesIO(self.objects[storage_key])
-
-    def delete_object(self, storage_key: str) -> None:
-        self.objects.pop(storage_key, None)
+FakeStorage = _fake_storage
 
 
 @pytest.fixture

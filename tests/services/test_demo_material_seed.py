@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import logging
 from pathlib import Path
 
@@ -13,39 +12,9 @@ from server.app.services.demo_material_seed import (
     DEMO_MATERIALS_DIR,
     seed_demo_workspace_materials,
 )
-from server.app.storage import ObjectHead
+from tests.fakes.storage import FakeObjectStorage
 
-
-class FakeStorage:
-    """In-memory ObjectStorage test double with a put_object switch."""
-
-    def __init__(self, *, fail_put: bool = False, fail_put_with: Exception | None = None) -> None:
-        self.objects: dict[str, bytes] = {}
-        self.fail_put = fail_put
-        self.fail_put_with = fail_put_with
-
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/upload/{storage_key}"
-
-    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/download/{storage_key}"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        return io.BytesIO(self.objects[storage_key])
-
-    def put_object(self, storage_key: str, data: bytes, content_type: str = "") -> None:
-        if self.fail_put:
-            raise ConnectionError("endpoint unreachable")
-        if self.fail_put_with is not None:
-            raise self.fail_put_with
-        self.objects[storage_key] = data
-
-    def delete_object(self, storage_key: str) -> None:
-        self.objects.pop(storage_key, None)
+FakeStorage = FakeObjectStorage
 
 
 def _seeded_rows(job_db, workspace_id: str) -> list[dict]:

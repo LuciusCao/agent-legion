@@ -33,6 +33,7 @@ from server.app.services.artifact_store import ArtifactStore
 from server.app.services.vault import VaultService
 from server.app.settings import Settings
 from server.app.workflows.definition import WorkflowNode
+from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 from worker.code_runner import build_child_payload
 
@@ -461,15 +462,9 @@ def test_online_probe_caches_per_capability_within_ttl(job_db, tmp_path) -> None
     assert service.online_code_worker_available("package", "test-workspace") is False
 
 
-class _ClaimFakeStorage:
-    """Only the claim-time surface resolve_code_runtime_context needs."""
-
-    def __init__(self) -> None:
-        self.presigned_gets: list[str] = []
-
-    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
-        self.presigned_gets.append(storage_key)
-        return f"https://s3.test/download/{storage_key}?sig=fake"
+class _ClaimFakeStorage(FakeObjectStorage):
+    """Claim-time surface resolve_code_runtime_context needs（共享 fake 的
+    presigned_gets 记录与 presign_get 前缀覆盖同一断言语义）。"""
 
 
 def test_claim_runtime_context_injects_material_block(job_db, tmp_path, monkeypatch) -> None:

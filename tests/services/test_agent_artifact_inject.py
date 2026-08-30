@@ -8,56 +8,25 @@ dict 形态；S3 异常时整体降级、不注入（Worker 走旧 CAS 通道）
 from __future__ import annotations
 
 import hashlib
-import io
 from pathlib import Path
-from typing import BinaryIO
 
 from server.app.agent_broker.artifact_object_block import inject_artifact_object_block
 from server.app.agent_broker.code_manifest import resolve_code_runtime_context
 from server.app.db.schema import init_db
 from server.app.db.transaction import write_transaction
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
-from server.app.storage import ObjectHead
+from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
 PAYLOAD = b"upstream-artifact"
 HASH = hashlib.sha256(PAYLOAD).hexdigest()
 
-
-class FakeStorage:
-    """In-memory ObjectStorage test double; never touches the network."""
-
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {}
-        self.put_expiries: list[int] = []
-        self.get_expiries: list[int] = []
-
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        self.put_expiries.append(expires_seconds)
-        return f"https://s3.test/upload/{storage_key}?sig=put"
-
-    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
-        self.get_expiries.append(expires_seconds)
-        return f"https://s3.test/download/{storage_key}?sig=get"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        return io.BytesIO(self.objects[storage_key])
-
-    def put_object(self, storage_key: str, data: bytes, content_type: str = "") -> None:
-        self.objects[storage_key] = data
-
-    def put_stream(self, storage_key: str, stream: BinaryIO, size_bytes: int) -> None:
-        self.objects[storage_key] = stream.read()
-
-    def delete_object(self, storage_key: str) -> None:
-        self.objects.pop(storage_key, None)
+FakeStorage = FakeObjectStorage
 
 
 class RaisingStorage(FakeStorage):
+    """presign_put 抛错：模拟 S3 不可达（注入整体降级路径）。"""
+
     def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
         raise RuntimeError("s3 unreachable")
 
@@ -107,10 +76,15 @@ def test_inject_adds_uploads_and_upgrades_staged_inputs(tmp_path: Path) -> None:
 
     uploads = manifest["artifact_uploads"]
     assert uploads["out.json"]["storage_key"] == "jobs-staging/ws-1/job-1/exec-1/out.json"
-    assert uploads["out.json"]["url"].endswith("jobs-staging/ws-1/job-1/exec-1/out.json?sig=put")
+    assert (
+        uploads["out.json"]["url"].endswith("jobs-staging/ws-1/job-1/exec-1/out.json")
+        and "sig=" not in uploads["out.json"]["url"]
+        and uploads["out.json"]["url"].startswith("https://s3.test/upload/")
+    )
     ref = manifest["input_artifacts"]["q.json"]
     assert ref["sha256"] == HASH
-    assert ref["url"].endswith("jobs/ws-1/job-1/q.json?sig=get")
+    assert ref["url"].endswith("jobs/ws-1/job-1/q.json")
+    assert ref["url"].startswith("https://s3.test/download/")
     assert "storage_key" not in ref  # storage_key 不下发
 
 
