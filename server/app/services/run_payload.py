@@ -18,17 +18,10 @@ from typing import Any
 
 # candidate_input moved to the jobs domain (issue #195); re-exported for the
 # historical import path.
+from server.app.db.rowmap import parse_object
 from server.app.jobs.run_freeze import candidate_input as candidate_input
 
 _PIN_KEYS = ("node_code_versions", "agent_versions", "quality_replay")
-
-
-def _parse_object(raw: Any) -> dict[str, Any]:
-    try:
-        value = json.loads(str(raw or ""))
-    except (TypeError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
 
 
 def reconstruct_batch_payload(
@@ -43,12 +36,12 @@ def reconstruct_batch_payload(
     """
     payload: dict[str, Any] = {}
     if run is not None:
-        pins = _parse_object(run.get("frozen_pins_json"))
+        pins = parse_object(run.get("frozen_pins_json"))
         for key in _PIN_KEYS:
             if key in pins:
                 payload[key] = pins[key]
-    payload["node_config"] = _parse_object(job.get("frozen_config_json"))
-    input_doc = _parse_object(job.get("input_json"))
+    payload["node_config"] = parse_object(job.get("frozen_config_json"))
+    input_doc = parse_object(job.get("input_json"))
     payload["task_candidates"] = [input_doc] if input_doc else []
     return payload
 

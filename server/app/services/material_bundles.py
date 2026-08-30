@@ -12,12 +12,12 @@ and a bundle cannot be deleted while a job input references it (here).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 from typing import Any
 
 from psycopg import IntegrityError
 
 from server.app.db.dialect import ConnectSource
+from server.app.db.rowmap import iso_optional
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.job_errors import (
     ConflictError,
@@ -34,14 +34,6 @@ MAX_BUNDLE_MEMBERS = 1000
 
 class BundleInUseError(ConflictError):
     """Bundle is still referenced by a job input (routes map to 409)."""
-
-
-def _timestamp(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return str(value)
 
 
 def validate_member_path(path: str) -> str:
@@ -79,7 +71,7 @@ def _record(row: dict[str, Any], members: list[dict[str, Any]] | None = None) ->
         "total_size_bytes": int(row["total_size_bytes"]),
         "file_count": int(row["file_count"]),
         "created_by": str(row["created_by"]),
-        "created_at": _timestamp(row["created_at"]),
+        "created_at": iso_optional(row["created_at"]),
     }
     if members is not None:
         record["members"] = members

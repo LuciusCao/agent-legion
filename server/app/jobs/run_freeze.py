@@ -3,7 +3,8 @@
 ``candidate_input`` rebuilds the job input document from a task-candidate
 row; it lives here (jobs domain, importable from ``jobs/queries`` without
 reversing into ``services``) while the dispatch-facing payload rebuilders
-stay in ``services.run_payload``.
+stay in ``services.run_payload``. The v53 ``wire_batch_id`` compatibility
+alias moved to ``server.app.db.rowmap`` (projection-helper family, #279).
 """
 
 from __future__ import annotations

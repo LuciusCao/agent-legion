@@ -19,7 +19,7 @@ from typing import Any
 
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
-from server.app.services.material_cache import _input_document, _require_storage
+from server.app.services.material_cache import _require_storage, input_document
 from server.app.storage import ObjectStorage
 from shared.material_bundle import assemble_bundle_tree, bundle_address
 from shared.material_cache import MaterializeError, cache_file_path, materialize_stream
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 def is_bundle_input(job: Mapping[str, Any]) -> bool:
     """True when the job's input document is a bundle item."""
-    return _input_document(job).get("type") == "bundle"
+    return input_document(job).get("type") == "bundle"
 
 
 def _ready_bundle(
@@ -89,7 +89,7 @@ def bundle_runtime_block(
     storage: ObjectStorage | None = None,
 ) -> dict[str, Any] | None:
     """The ``runtime["materials"]`` block for a bundle-input job, else None."""
-    input_doc = _input_document(job)
+    input_doc = input_document(job)
     if input_doc.get("type") != "bundle":
         return None
     bundle, members = _ready_bundle(connect_source, workspace_id, input_doc)
@@ -163,7 +163,7 @@ def bundle_claim_block(
     download_expires_seconds: int = 3600,
 ) -> dict[str, Any] | None:
     """The Worker-facing bundle descriptor: one presigned GET per member."""
-    input_doc = _input_document(job)
+    input_doc = input_document(job)
     if input_doc.get("type") != "bundle":
         return None
     bundle, members = _ready_bundle(connect_source, workspace_id, input_doc)

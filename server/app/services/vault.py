@@ -15,13 +15,13 @@ responses carry names and metadata exclusively.
 from __future__ import annotations
 
 import os
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 
 from server.app.db.dialect import ConnectSource
+from server.app.db.rowmap import iso_optional
 from server.app.db.transaction import read_connection, write_transaction
 
 _MAX_NAME_LENGTH = 128
@@ -73,9 +73,13 @@ def _fernet(settings_config: dict[str, Any] | None) -> Fernet:
 
 
 def _timestamp(value: Any) -> str:
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return str(value)
+    # #278: vault's serialization deliberately diverged from the shared
+    # ``iso_optional`` (None → None) — these columns are ``not null`` in the
+    # schema, so a None here means a legacy/degenerate row and the API shape
+    # stays ``str``; the fallback renders it as "None" exactly like the old
+    # private helper did instead of leaking null into a str-typed field.
+    rendered = iso_optional(value)
+    return rendered if rendered is not None else str(value)
 
 
 class VaultService:
