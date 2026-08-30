@@ -4413,7 +4413,11 @@ export interface components {
       sample_size: number
       /** Seed */
       seed: string
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211.
+       */
       workflow_key: string
       /** Workspace Id */
       workspace_id: string
@@ -4430,7 +4434,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: defaults to the workspace id from the path (the two are equal since schema v62). Removal is tracked in #211.
+       * @description Deprecated: defaults to the workspace id from the path (equal since schema v62). Removal is tracked in #211.
        */
       workflow_key?: string | null
     }
@@ -4457,7 +4461,11 @@ export interface components {
       sampled_count: number
       /** Seed */
       seed: string
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211.
+       */
       workflow_key: string
       /** Workspace Id */
       workspace_id: string

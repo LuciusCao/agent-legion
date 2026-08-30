@@ -87,9 +87,10 @@ def test_list_failed_node_runs_filters_by_category(tmp_path):
 
 
 def test_list_failed_node_runs_absent_and_explicit_workflow_key_are_equivalent(tmp_path):
-    """#211 Phase 2 第二批：失败过滤的 workflow_key 缺省=从 path 推导。
+    """#211 Phase 2：缺省 workflow_key 由服务端从 path 推导（恒等值）。
 
-    显式传（值=workspace id）与缺省返回同一集合；不匹配的 key 才收窄。
+    Phase 3（#307）后读法谓词只绑 workspace_id：显式恒等值仍是 no-op；
+    不匹配 key 是 400（v62 绑定下不可能存在，不再静默收窄为空集）。
     """
     from fastapi.testclient import TestClient
 
@@ -107,7 +108,8 @@ def test_list_failed_node_runs_absent_and_explicit_workflow_key_are_equivalent(t
     assert explicit.status_code == 200
     assert {r["node_key"] for r in absent.json()["runs"]} == {"write_script"}
     assert explicit.json()["runs"] == absent.json()["runs"]
-    assert mismatched.json()["runs"] == []
+    assert mismatched.status_code == 400
+    assert "workflow_key must equal the workspace id" in mismatched.json()["detail"]
 
 
 def test_rerun_by_failure_absent_and_explicit_workflow_key_are_equivalent(tmp_path):

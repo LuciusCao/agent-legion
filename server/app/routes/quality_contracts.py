@@ -10,6 +10,9 @@ from server.app.services.quality_labels import QUALITY_REASON_CODES
 LabelTarget = Literal["run", "replay"]
 LabelVerdict = Literal["good", "bad"]
 
+# #211: shared deprecation wording for the workflow_key request/response faces.
+_DEPRECATED_EQUALS = "Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211."
+
 
 class QualitySampleFilters(BaseModel):
     node_keys: list[str] | None = None
@@ -27,8 +30,8 @@ class QualitySampleBatchCreateRequest(BaseModel):
         min_length=1,
         default=None,
         description=(
-            "Deprecated: defaults to the workspace id from the path (the two "
-            "are equal since schema v62). Removal is tracked in #211."
+            "Deprecated: defaults to the workspace id from the path (equal "
+            "since schema v62). Removal is tracked in #211."
         ),
         deprecated=True,
     )
@@ -41,7 +44,8 @@ class QualitySampleBatch(BaseModel):
     id: str
     workspace_id: str
     name: str
-    workflow_key: str
+    # #211: missed by Phase 2; column rides until the Phase 4 drop.
+    workflow_key: str = Field(description=_DEPRECATED_EQUALS, deprecated=True)
     filters: dict[str, Any] = Field(default_factory=dict, validation_alias="filters_json")
     sample_size: int
     seed: str

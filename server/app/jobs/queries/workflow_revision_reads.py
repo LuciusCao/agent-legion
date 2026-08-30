@@ -6,6 +6,13 @@ Studio API, while ``workflow_revisions.py`` keeps the transactional write
 path (publish) whose body must stay coupled to the projection writes in
 ``workflow_revision_projection.py``. ``WorkflowRevisionQueriesMixin``
 inherits this mixin so the composed JobQueries surface is unchanged.
+
+#211 Phase 3 (read-layer binding): every predicate here binds workspace_id
+instead of the workflow_key column — the publish guard
+(require_draft_workflow_key_match, DB-WORKSPACE-KEY-BINDING-001) makes the
+two equal on every row, so the column is redundant as a filter. Signature
+parameters keep the historical workflow_key name for callers; the column
+itself drops in Phase 4.
 """
 
 from __future__ import annotations
@@ -25,11 +32,11 @@ class WorkflowRevisionReadQueriesMixin(ConnectionQueriesMixin):
             row = conn.execute(
                 """
                 select * from workflow_revisions
-                where workspace_id=%s and workflow_key=%s and status='active'
+                where workspace_id=%s and status='active'
                 order by version desc
                 limit 1
                 """,
-                (workspace_id, workflow_key),
+                (workspace_id,),
             ).fetchone()
         return dict(row) if row else None
 
@@ -43,10 +50,10 @@ class WorkflowRevisionReadQueriesMixin(ConnectionQueriesMixin):
             row = conn.execute(
                 """
                 select * from workflow_revisions
-                where id=%s and workspace_id=%s and workflow_key=%s
+                where id=%s and workspace_id=%s
                 limit 1
                 """,
-                (revision_id, workspace_id, workflow_key),
+                (revision_id, workspace_id),
             ).fetchone()
         return dict(row) if row else None
 
@@ -56,9 +63,9 @@ class WorkflowRevisionReadQueriesMixin(ConnectionQueriesMixin):
                 """
                 select coalesce(max(version), 0) + 1 as next_version
                 from workflow_revisions
-                where workspace_id=%s and workflow_key=%s
+                where workspace_id=%s
                 """,
-                (workspace_id, workflow_key),
+                (workspace_id,),
             ).fetchone()
         return int(row["next_version"]) if row is not None else 1
 
@@ -67,9 +74,9 @@ class WorkflowRevisionReadQueriesMixin(ConnectionQueriesMixin):
             rows = conn.execute(
                 """
                 select * from workflow_revisions
-                where workspace_id=%s and workflow_key=%s
+                where workspace_id=%s
                 order by version desc
                 """,
-                (workspace_id, workflow_key),
+                (workspace_id,),
             ).fetchall()
         return [dict(row) for row in rows]

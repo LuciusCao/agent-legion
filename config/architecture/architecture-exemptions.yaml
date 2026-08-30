@@ -130,3 +130,30 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 192
+- check: architecture.file_budget
+  path: server/app/routes/job_http.py
+  reason: The issue-211 Phase 3 read-binding guard (reject_mismatched_workflow_key,
+    shared by five explicit-key entry points per the Codex P1 on PR 307) lives
+    here with the other route-layer HTTP helpers. The overage is the honest
+    cost of the deprecation window; dropping the deprecated workflow_key
+    request faces (Phase 3/4, tracked in issue 211) removes the guard and
+    this exemption goes stale automatically.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
+  ceiling: 56
+- check: architecture.file_budget
+  path: server/app/routes/failed_node_runs.py
+  reason: Same issue-211 Phase 3 read-binding guard as job_http.py — this
+    route adds it on the GET query face (the redundant jobs.workflow_key
+    predicate was removed in the same batch).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
+  ceiling: 87
+- check: architecture.file_budget
+  path: server/app/routes/job_batches.py
+  reason: Same issue-211 Phase 3 read-binding guard as job_http.py — this
+    route adds it because a mismatched key would flow verbatim into jobs rows
+    (Codex P1 on PR 307).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
+  ceiling: 34
