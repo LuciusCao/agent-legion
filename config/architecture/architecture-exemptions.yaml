@@ -111,3 +111,20 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/11
   ceiling: 155
+- check: architecture.file_budget
+  path: frontend/src/components/dag/dagNodeTypes.ts
+  reason: The hover-highlight rework (#276) adds the two data-level boolean
+    fields (active/dimmed) that make per-node memoization work; the interface
+    is a flat field list where each line IS a feature, so the 2-line growth
+    is the honest cost of the fix, not splittable structure.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/276
+  ceiling: 33
+- check: architecture.file_budget
+  path: frontend/src/components/dag/DagNode.module.css
+  reason: The active-state styling (box-shadow plus outline rules) moved
+    onto the node card itself with the hover-highlight rework (#276); the
+    two extra rule lines are the visual contract of that rework.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/276
+  ceiling: 121
