@@ -3129,7 +3129,11 @@ export interface components {
       node_key: string
       /** Node Run Id */
       node_run_id: number
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: filter by the workspace the rows were fetched from instead (the list endpoint is workspace-scoped; the value always equals that workspace's id since schema v61). Removal is tracked in #211.
+       */
       workflow_key: string
     }
     /** FailedNodeRunsResponse */
@@ -3572,7 +3576,11 @@ export interface components {
        * @default
        */
       workflow_definition_hash: string
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: read workspace_id instead. Since schema v61 the two are always equal; removal is tracked in #211.
+       */
       workflow_key: string
       /**
        * Workflow Revision Id
@@ -3836,7 +3844,11 @@ export interface components {
       concurrency_limit: number
       /** Node Key */
       node_key: string
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: read workspace_id instead. Since schema v61 the two are always equal; removal is tracked in #211.
+       */
       workflow_key: string
     }
     /** NodeRunResponse */
@@ -4406,7 +4418,11 @@ export interface components {
       status: string
       /** Updated At */
       updated_at: string | null
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: read workspace_id instead. Since schema v61 the two are always equal; removal is tracked in #211.
+       */
       workflow_key: string
       /** Workspace Id */
       workspace_id: string
@@ -5560,7 +5576,11 @@ export interface components {
       status: string
       /** Version */
       version: number
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: read workspace_id instead. Since schema v61 the two are always equal; removal is tracked in #211.
+       */
       workflow_key: string
       /** Workspace Id */
       workspace_id: string
@@ -5610,7 +5630,11 @@ export interface components {
       node_key: string
       /** Node Label */
       node_label: string
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: read workspace_id instead. Since schema v61 the two are always equal; removal is tracked in #211.
+       */
       workflow_key: string
     }
     /** WorkspaceAgentRoutesResponse */
@@ -5788,7 +5812,11 @@ export interface components {
       created_at: string
       /** Default Entity */
       default_entity: string
-      /** Default Workflow Key */
+      /**
+       * Default Workflow Key
+       * @deprecated
+       * @description Deprecated: read id instead. Since schema v61 the two are always equal; removal is tracked in #211.
+       */
       default_workflow_key: string
       /** Description */
       description: string
@@ -5903,7 +5931,11 @@ export interface components {
       } | null
       /** Name */
       name: string
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: read workspace_id instead. Since schema v61 the two are always equal; removal is tracked in #211.
+       */
       workflow_key: string
       /** Workflow Label */
       workflow_label: string

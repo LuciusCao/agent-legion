@@ -2,9 +2,18 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from server.app.routes.workspace_contracts import WorkspaceRecord
 
+# #211 Phase 2 read-only deprecation wording shared by the workspace-key
+# response fields in this file.
+_DEPRECATED_READ_WORKSPACE_ID = (
+    "Deprecated: read workspace_id instead. Since schema v61 the two are "
+    "always equal; removal is tracked in #211."
+)
+
 
 class NodeLimitRequest(BaseModel):
-    workflow_key: str = Field(min_length=1)
+    workflow_key: str = Field(
+        min_length=1, description=_DEPRECATED_READ_WORKSPACE_ID, deprecated=True
+    )
     node_key: str = Field(min_length=1)
     concurrency_limit: int = Field(ge=1)
 
@@ -23,7 +32,7 @@ class WorkspaceExecutionConfigurationResponse(BaseModel):
 
 
 class WorkspaceAgentRouteEntry(BaseModel):
-    workflow_key: str
+    workflow_key: str = Field(description=_DEPRECATED_READ_WORKSPACE_ID, deprecated=True)
     node_key: str
     node_label: str
     capability: str

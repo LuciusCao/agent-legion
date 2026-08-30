@@ -4,9 +4,11 @@ import { LocalNodeLimitSection } from './LocalNodeLimitSection'
 import { useSettingStore } from '../stores/settingStore'
 
 // Agent 路由（review_keywords）经 agentRoutes 快照标注；其余节点一律 code 池。
+// agentRoutes 过滤键是 store 的 workspaceId（workflow_key 已 deprecated 且
+// v61 起恒等于 workspace id，#211 Phase 2）。
 const agentRoutes = [
   {
-    workflow_key: 'sample_workflow',
+    workflow_key: 'ws1',
     node_key: 'review_keywords',
     node_label: '审核关键词',
     capability: 'review_keywords',

@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class WorkspaceRecord(BaseModel):
@@ -9,7 +9,13 @@ class WorkspaceRecord(BaseModel):
     id: str
     name: str
     description: str
-    default_workflow_key: str
+    default_workflow_key: str = Field(
+        description=(
+            "Deprecated: read id instead. Since schema v61 the two are always "
+            "equal; removal is tracked in #211."
+        ),
+        deprecated=True,
+    )
     default_entity: str
     resource_config_json: str
     node_config_json: str

@@ -57,7 +57,6 @@ export default function WorkspaceMainPage() {
   useWorkspaceEvents(workspaceId)
   useJobFilterRefetch(workspaceId)
 
-  const workflowKey = workspaceStats?.workflow_key
   const { data: workflowDefinitionData, error: workflowQueryError } =
     useWorkflowDefinitionQuery(workspaceId)
   const workflowDefinition = workflowDefinitionData ?? null
@@ -107,18 +106,19 @@ export default function WorkspaceMainPage() {
 
   // 全新 workspace（无 job 且无筛选）只显示分步引导，隐藏筛选栏与空列表；
   // workspaceStats 与 active revision 须先 settle，避免加载首帧闪现引导。
+  // settle 探针用 workspace_id（stats 响应必含），workflow_key 已 deprecated。
   const showEmptyGuide = shouldShowEmptyGuide({
     filteredJobIds,
     totalJobs,
     jobsLoading,
     filtersActive,
-    workflowKey,
+    workflowKey: workspaceStats?.workspace_id,
     workflowDefinitionLoaded: workflowDefinitionData !== undefined,
   })
 
   const emptyStateSteps = useWorkspaceOnboardingSteps(
     workspaceId,
-    workflowKey,
+    workspaceStats?.workspace_id,
     workflowDefinition,
     showEmptyGuide
   )

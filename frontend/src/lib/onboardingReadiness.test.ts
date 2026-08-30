@@ -38,7 +38,8 @@ function makeDefinition(
 
 function makeRoute(nodeKey: string): WorkspaceAgentRouteEntry {
   return {
-    workflow_key: 'wf',
+    // 过滤键是 workspace_id（workflow_key 已 deprecated 且 v61 起恒等）。
+    workflow_key: 'ws1',
     node_key: nodeKey,
     node_label: nodeKey,
     capability: 'cap',
@@ -55,7 +56,7 @@ function buildSteps(overrides: {
   return buildOnboardingSteps({
     workflowKey:
       overrides.workflowKey === undefined
-        ? 'wf'
+        ? 'ws1'
         : (overrides.workflowKey ?? undefined),
     workflowDefinition:
       overrides.definition === undefined

@@ -98,7 +98,13 @@ class CodePoolStatus(BaseModel):
 class WorkspaceStatsResponse(BaseModel):
     workspace_id: str
     name: str
-    workflow_key: str
+    workflow_key: str = Field(
+        description=(
+            "Deprecated: read workspace_id instead. Since schema v61 the two "
+            "are always equal; removal is tracked in #211."
+        ),
+        deprecated=True,
+    )
     workflow_label: str
     job_stats: dict[str, int]
     code_pool: CodePoolStatus

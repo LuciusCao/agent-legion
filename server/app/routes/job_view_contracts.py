@@ -15,7 +15,13 @@ class JobNodeSummaryResponse(BaseModel):
 class JobSummaryResponse(BaseModel):
     id: str
     workspace_id: str
-    workflow_key: str
+    workflow_key: str = Field(
+        description=(
+            "Deprecated: read workspace_id instead. Since schema v61 the two "
+            "are always equal; removal is tracked in #211."
+        ),
+        deprecated=True,
+    )
     source_type: str
     source_id: str
     batch_id: str

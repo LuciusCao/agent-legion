@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import server.app.routes.workflow_contracts as workflow_contracts
 
@@ -6,7 +6,13 @@ import server.app.routes.workflow_contracts as workflow_contracts
 class WorkflowRevisionSummary(BaseModel):
     id: str
     workspace_id: str
-    workflow_key: str
+    workflow_key: str = Field(
+        description=(
+            "Deprecated: read workspace_id instead. Since schema v61 the two "
+            "are always equal; removal is tracked in #211."
+        ),
+        deprecated=True,
+    )
     version: int
     status: str
     definition_hash: str

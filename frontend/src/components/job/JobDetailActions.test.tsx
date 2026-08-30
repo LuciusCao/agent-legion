@@ -37,7 +37,7 @@ function renderActions(
   return renderWithClient(
     <JobDetailActions
       jobs={[
-        makeJob({ id: 'j1', status: 'failed', workflow_key: workflow.key }),
+        makeJob({ id: 'j1', status: 'failed', workspace_id: workflow.key }),
       ]}
       workflowDefinition={workflow}
       onRerun={vi.fn()}
