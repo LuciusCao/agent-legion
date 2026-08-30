@@ -91,8 +91,19 @@ class SubprocessTracker:
             except subprocess.TimeoutExpired:
                 logger.warning("Subprocess %s did not exit after SIGKILL", process.pid)
         except ProcessLookupError:
+            # The child (or its group) was reaped between the poll above and
+            # the signal — the exact outcome the terminate wanted.
             pass
         except Exception:
+            # #204 broad-except audit: last-resort termination safety net.
+            # This runs on the cancellation path (worker shutdown / node
+            # cancel), where the caller's own outcome must not be replaced by
+            # a teardown error — the escalation is best-effort by design and
+            # an un-killable child is surfaced via the logged traceback (and
+            # the caller's wait deadline) rather than by masking the cancel.
+            # The narrow races (already-dead child) are handled above; what
+            # lands here is e.g. PermissionError from a recycled pgid, which
+            # has no better classification.
             logger.exception("Failed to terminate subprocess %s", process.pid)
 
     def wait_for(self, execution_id: str, timeout: float | None = None) -> bool:

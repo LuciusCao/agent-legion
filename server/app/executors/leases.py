@@ -68,6 +68,15 @@ class ExecutorLeaseRepository:
             stats = self.job_db.count_jobs_by_status(workspace_id)
             self.job_event_manager.broadcast_job_updated(workspace_id, job_id, stats)
         except Exception:
+            # #204 broad-except audit: fire-and-forget observability, called
+            # only AFTER the lease/write transaction already committed (every
+            # call site sits below the `with write_transaction` block). A SSE
+            # refresh failure must never roll back or fail a claim/finish that
+            # already succeeded — the stats are trigger-maintained
+            # (DB-JOB-STATUS-COUNTS-001), so the very next state change
+            # re-broadcasts the correct numbers and the missed one self-heals.
+            # The outcome space here is the DB read surface plus the bus, not
+            # a business family; logger.exception keeps the traceback.
             logger.exception("Failed to broadcast job update for %s", job_id)
 
     # Write paths delegate to _lease_write_paths (one connect-and-transact

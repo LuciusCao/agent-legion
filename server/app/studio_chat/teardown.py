@@ -90,4 +90,7 @@ def revoke_minted_token_quietly(db: JobQueries, token: str, session_id: str) -> 
     try:
         revoke_scoped_token(db, token)
     except Exception:
+        # #204 broad-except audit: same teardown safety-net semantics as
+        # teardown_runtime above — the startup failure that brought us here
+        # is already propagating and must stay the signal the caller sees.
         logger.warning("failed to revoke studio chat token for %s", session_id, exc_info=True)

@@ -110,6 +110,13 @@ class CodeExecutor:
             # Settings/storage misconfiguration (e.g. a missing secret file
             # surfaced by load_s3_settings) must never fail the node
             # (EXEC-ARTIFACT-STORE-001): disable mirroring instead.
+            # #204 broad-except audit: one-time lazy probe whose outcome is
+            # cached for the executor's lifetime. The failure families are
+            # deliberately not enumerated — env parsing, secret-file reads
+            # and client construction each raise their own types, and any of
+            # them means "artifact mirroring is unavailable on this host",
+            # which is a degradation the node must survive. exc_info keeps
+            # the configuration root cause visible for the operator.
             try:
                 self._artifact_objects = build_artifact_object_store(
                     self._object_store(), getattr(self.job_db, "path", None)
@@ -159,6 +166,13 @@ class CodeExecutor:
             # a targeted rerun may find declared inputs reclaimed, so restore
             # them from object storage best-effort first. Failures never change
             # node semantics — the node errors on the missing input itself.
+            # #204 broad-except audit: this wraps the restore loop's own
+            # per-file containment for the one thing it deliberately lets
+            # escape — the manifest lookup's DB read (restore_missing_inputs
+            # already catches per-file storage errors itself). A transient DB
+            # outage at restore time must degrade to "run with local files"
+            # rather than fail a node whose inputs are all present locally;
+            # the traceback is logged so the silent degradation is visible.
             try:
                 restore_missing_inputs(
                     self._artifact_object_store(),
