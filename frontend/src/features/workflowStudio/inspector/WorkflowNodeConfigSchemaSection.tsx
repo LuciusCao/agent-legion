@@ -1,22 +1,17 @@
-import type { ConfigSchemaProperty, WorkflowNodeRecord } from '../../../types'
+import type { WorkflowNodeRecord } from '../../../types'
+import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import { parseWorkflowNode } from '../shared/workflowStudioYamlDraft'
 import { patchWorkflowNodeConfigSchema } from '../shared/workflowStudioYamlDraft.configSchema'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
 import styles from './WorkflowStructuredEditor.module.css'
+import { WorkflowNodeConfigSchemaProperties } from './WorkflowNodeConfigSchemaProperties'
 
 type Props = {
   node: WorkflowNodeRecord
+  agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
-  // capability 已有 published Agent 时生效 schema 以 Agent 定义为准，
-  // 节点 YAML 的 config_schema 不参与解析（node_config.py），本区改为指引。
-  agentBacked?: boolean
-}
-
-function formatDefault(prop: ConfigSchemaProperty): string {
-  if (prop.default === undefined) return '—'
-  return String(prop.default)
 }
 
 // Revision 作用域的节点 config_schema 结构化编辑：属性列表只读展示，
@@ -24,11 +19,16 @@ function formatDefault(prop: ConfigSchemaProperty): string {
 // （新增属性、改描述/默认值）仍走 YAML 源码编辑器。
 export function WorkflowNodeConfigSchemaSection({
   node,
+  agentCatalog,
   definitionYaml,
   setDefinitionYaml,
   readOnly,
-  agentBacked,
 }: Props) {
+  // capability 已有 published Agent 时生效 schema 以 Agent 定义为准，
+  // 节点 YAML 的 config_schema 不参与解析（node_config.py），只给指引。
+  const agentBacked = agentCatalog.some(
+    (definition) => definition.capability === node.capability
+  )
   const schema = parseWorkflowNode(definitionYaml, node.key)?.config_schema
   const properties = schema?.properties ?? {}
   // YAML 编辑中间态（刚输入 `foo:` 尚未补内容）会把属性解析为 null，
@@ -64,8 +64,7 @@ export function WorkflowNodeConfigSchemaSection({
       {agentBacked ? (
         <p className={styles.fieldHint}>
           该节点由 Agent 执行，生效的配置 Schema 以 Agent 定义为准，节点 YAML
-          中的 config_schema 不参与解析；请在 Agent 定义中维护
-          config_schema（含运行开关 runtime_mutable）。
+          中的 config_schema 不参与解析；请在 Agent 定义中维护 config_schema。
         </p>
       ) : (
         <>
@@ -79,38 +78,12 @@ export function WorkflowNodeConfigSchemaSection({
               该节点未声明 config_schema；可在 YAML 源码编辑器中为节点添加。
             </div>
           ) : (
-            <div className={styles.fieldStack}>
-              {keys.map((propKey) => {
-                const prop = properties[propKey]
-                return (
-                  <div key={propKey} className={styles.fieldGroup}>
-                    <span className={styles.fieldLabel}>
-                      {propKey}（{prop.type}，默认 {formatDefault(prop)}）
-                    </span>
-                    {readOnly ? (
-                      prop.runtime_mutable ? (
-                        <span className={styles.fieldHint}>运行开关</span>
-                      ) : null
-                    ) : (
-                      <label>
-                        <input
-                          type="checkbox"
-                          aria-label={`运行开关 ${propKey}`}
-                          checked={prop.runtime_mutable === true}
-                          onChange={(event) =>
-                            handleRuntimeMutableChange(
-                              propKey,
-                              event.target.checked
-                            )
-                          }
-                        />{' '}
-                        运行开关
-                      </label>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+            <WorkflowNodeConfigSchemaProperties
+              properties={properties}
+              propKeys={keys}
+              readOnly={readOnly}
+              onRuntimeMutableChange={handleRuntimeMutableChange}
+            />
           )}
           {readOnly && (
             <p className={styles.fieldHint}>

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { WorkflowNodeRecord } from '../../../types'
+import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import { WorkflowNodeConfigSchemaSection } from './WorkflowNodeConfigSchemaSection'
 
 const node: WorkflowNodeRecord = {
@@ -34,6 +35,7 @@ function renderSection(
   return render(
     <WorkflowNodeConfigSchemaSection
       node={node}
+      agentCatalog={[]}
       definitionYaml={yaml}
       setDefinitionYaml={() => {}}
       {...overrides}
@@ -149,7 +151,13 @@ nodes:
   })
 
   it('points agent-backed nodes to the Agent definition instead of editing', () => {
-    renderSection({ agentBacked: true })
+    const agent: AgentDefinition = {
+      id: 'agent-1',
+      capability: 'generate_questions',
+      runtime: 'pi',
+      skill: 'demo/skill',
+    }
+    renderSection({ agentCatalog: [agent] })
 
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
     expect(
