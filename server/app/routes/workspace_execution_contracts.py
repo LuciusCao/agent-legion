@@ -2,30 +2,24 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from server.app.routes.workspace_contracts import WorkspaceRecord
 
-# #211 Phase 2 read-only deprecation wording. v62 (not v61) is the binding
-# schema — equality came from the v62 rename migration; v61 rows could still
-# carry two different identifiers (codex on #269).
-_DEPRECATED_READ_WORKSPACE_ID = (
-    "Deprecated: read workspace_id instead. Since schema v62 the two are "
-    "always equal; removal is tracked in #211."
+# #211 Phase 2 deprecation wordings (v62 is the binding schema).
+_DEP_READ = "Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211."
+_DEPRECATED_KEY = (
+    "Deprecated: equals the workspace id since schema v62; removal is tracked in #211."
 )
 
 
 class NodeLimitRequest(BaseModel):
-    # PUT-side entry: workflow_key stays required — the request-side
-    # migration is a later #211 batch (deprecating it here invites omission
-    # and 422; codex on #269).
+    # PUT-side: workflow_key stays required (request-side migration is a
+    # later #211 batch; deprecating invites omission and 422 — #269).
     workflow_key: str = Field(min_length=1)
     node_key: str = Field(min_length=1)
     concurrency_limit: int = Field(ge=1)
 
 
 class NodeLimitEntry(NodeLimitRequest):
-    # Response-side redeclaration of the request entry's field: the read
-    # face carries the deprecation notice (codex on #269).
-    workflow_key: str = Field(
-        min_length=1, description=_DEPRECATED_READ_WORKSPACE_ID, deprecated=True
-    )
+    # response twin (#269)
+    workflow_key: str = Field(min_length=1, description=_DEP_READ, deprecated=True)
 
 
 class WorkspaceExecutionConfigurationResponse(BaseModel):
@@ -42,7 +36,7 @@ class WorkspaceExecutionConfigurationResponse(BaseModel):
 
 
 class WorkspaceAgentRouteEntry(BaseModel):
-    workflow_key: str = Field(description=_DEPRECATED_READ_WORKSPACE_ID, deprecated=True)
+    workflow_key: str = Field(description=_DEP_READ, deprecated=True)
     node_key: str
     node_label: str
     capability: str
@@ -55,8 +49,10 @@ class WorkspaceAgentRoutesResponse(BaseModel):
 
 
 class WorkspaceSettingsPayload(BaseModel):
+    # Response-side blob: still emitted (Phase 3/4 removes the column) but
+    # optional — callers round-trip a value they cannot change.
     entityType: str
-    workflowKey: str
+    workflowKey: str | None = Field(default=None, description=_DEPRECATED_KEY, deprecated=True)
     previewHidden: list[str] = Field(default_factory=list)
 
 
@@ -64,7 +60,10 @@ class WorkspaceConfigurationSettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     entityType: str | None = None
-    workflowKey: str | None = None
+    # PUT-side: absent = keep stored (previewHidden's compatibility pattern);
+    # a matching old-snapshot value is a no-op, a different value still hits
+    # the immutable-key 400.
+    workflowKey: str | None = Field(default=None, description=_DEPRECATED_KEY, deprecated=True)
     # Workspace 级产物预览隐藏列表（job 详情左栏）。PUT 全量保存时缺省
     # 表示「未改」——沿用已存配置，避免旧客户端 PUT 抹掉勾选。
     previewHidden: list[str] | None = None

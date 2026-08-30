@@ -32,12 +32,18 @@ def create_runs_router(service: RunService, settings: Settings) -> APIRouter:
     )
     def create_run(workspace_id: str, payload: RunCreateRequest) -> RunCreateResponse:
         require_workflows_enabled(settings)
+        # exclude_unset keeps input_json verbatim (no params={} filler); the
+        # same dump feeds the deprecated workflow_key read (accessing the
+        # field attribute itself would raise the deprecation warning, which
+        # the test suite escalates to an error).
+        # #211 Phase 2: absent workflow_key defaults to the path workspace_id
+        # (equal since v62).
+        body = payload.model_dump(exclude_unset=True)
         try:
             result = service.create_run(
                 workspace_id,
-                workflow_key=payload.workflow_key,
-                # exclude_unset keeps input_json verbatim (no params={} filler).
-                items=[item.model_dump(exclude_unset=True) for item in payload.items],
+                workflow_key=body.get("workflow_key") or workspace_id,
+                items=body["items"],
             )
         except JobServiceError as exc:
             raise_job_http_error(exc)

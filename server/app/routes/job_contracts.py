@@ -4,14 +4,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from server.app.routes.workspace_contracts import WorkspaceRecord
 
+# #211 Phase 2: request-param deprecation wording (server-side default).
+_DEPRECATED_REQUEST_DEFAULT = "Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211."
+_DEPRECATED_READ = "Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211."
+
 
 class JobBatchRequest(BaseModel):
     # Intake input fields are workflow-definition-driven (mode.input_field),
     # so extra fields pass through to the intake service verbatim.
     model_config = ConfigDict(extra="allow")
 
-    # No platform default workflow: callers must choose explicitly.
-    workflow_key: str
+    # #211 Phase 2: optional — server fills the path workspace_id (equal since v62).
+    workflow_key: str | None = Field(
+        default=None, min_length=1, description=_DEPRECATED_REQUEST_DEFAULT, deprecated=True
+    )
     entity: str | None = None
     source_kind: str
     question_ids: list[str] = Field(default_factory=list)
@@ -98,13 +104,7 @@ class CodePoolStatus(BaseModel):
 class WorkspaceStatsResponse(BaseModel):
     workspace_id: str
     name: str
-    workflow_key: str = Field(
-        description=(
-            "Deprecated: read workspace_id instead. Since schema v62 the two "
-            "are always equal; removal is tracked in #211."
-        ),
-        deprecated=True,
-    )
+    workflow_key: str = Field(description=_DEPRECATED_READ, deprecated=True)
     workflow_label: str
     job_stats: dict[str, int]
     code_pool: CodePoolStatus

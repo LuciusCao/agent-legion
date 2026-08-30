@@ -86,6 +86,70 @@ def test_list_failed_node_runs_filters_by_category(tmp_path):
     assert by_detail.json()["runs"][0]["node_key"] == "publish_content"
 
 
+def test_list_failed_node_runs_absent_and_explicit_workflow_key_are_equivalent(tmp_path):
+    """#211 Phase 2 第二批：失败过滤的 workflow_key 缺省=从 path 推导。
+
+    显式传（值=workspace id）与缺省返回同一集合；不匹配的 key 才收窄。
+    """
+    from fastapi.testclient import TestClient
+
+    app = _app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job_id = _create_job(c, ws_id, "Q920")
+        _fail_node(app, job_id, "write_script", "technical", "provider_stream")
+
+        absent = c.get(f"/api/workspaces/{ws_id}/failed-node-runs")
+        explicit = c.get(f"/api/workspaces/{ws_id}/failed-node-runs?workflow_key={ws_id}")
+        mismatched = c.get(f"/api/workspaces/{ws_id}/failed-node-runs?workflow_key=other_wf")
+
+    assert absent.status_code == 200
+    assert explicit.status_code == 200
+    assert {r["node_key"] for r in absent.json()["runs"]} == {"write_script"}
+    assert explicit.json()["runs"] == absent.json()["runs"]
+    assert mismatched.json()["runs"] == []
+
+
+def test_rerun_by_failure_absent_and_explicit_workflow_key_are_equivalent(tmp_path):
+    """失败重跑 POST body 的 workflow_key：缺省=从 path 推导，显式传照旧。
+
+    两次调用各选各自的 job（job_ids 显式圈定），两条路径返回等价结果。
+    """
+    from fastapi.testclient import TestClient
+
+    app = _app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        absent_job = _create_job(c, ws_id, "Q921")
+        _fail_node(app, absent_job, "write_script", "technical", "provider_stream")
+
+        absent = c.post(
+            f"/api/workspaces/{ws_id}/jobs/rerun-by-failure",
+            json={"category": "technical", "job_ids": [absent_job]},
+        )
+
+        # 显式传：另一个失败 job，同一 workspace（key 值=id）。
+        explicit_job = _create_job(c, ws_id, "Q922")
+        _fail_node(app, explicit_job, "write_script", "technical", "provider_stream")
+        explicit = c.post(
+            f"/api/workspaces/{ws_id}/jobs/rerun-by-failure",
+            json={
+                "category": "technical",
+                "job_ids": [explicit_job],
+                "workflow_key": ws_id,
+            },
+        )
+
+    assert absent.status_code == 200
+    assert explicit.status_code == 200
+    assert [(r["job_id"], r["status"]) for r in absent.json()["results"]] == [
+        (absent_job, "succeeded")
+    ]
+    assert [(r["job_id"], r["status"]) for r in explicit.json()["results"]] == [
+        (explicit_job, "succeeded")
+    ]
+
+
 def test_rerun_by_failure_route_reruns_matching_jobs(tmp_path):
     from fastapi.testclient import TestClient
 
@@ -200,3 +264,21 @@ def test_rerun_by_failure_from_node_key_not_upstream_skips_job(tmp_path):
     assert results[0]["reason_code"] == "no_matching_failure"
     nodes = {node["node_key"]: node["status"] for node in detail["nodes"]}
     assert nodes["write_script"] == "failed"
+
+
+def test_rerun_by_failure_rejects_empty_workflow_key(tmp_path):
+    """#211 Phase 2 (review on #286): an explicitly empty workflow_key is a
+    client error, not a silent default — all five migrated request params
+    share the None-or-nonempty contract."""
+    from fastapi.testclient import TestClient
+
+    app = _app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job = _create_job(c, ws_id, "Q923")
+        _fail_node(app, job, "write_script", "technical", "provider_stream")
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/rerun-by-failure",
+            json={"category": "technical", "job_ids": [job], "workflow_key": ""},
+        )
+    assert response.status_code == 422

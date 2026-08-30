@@ -146,8 +146,8 @@ export function SettingsPage() {
 
           {/* schema v62：workflow key 与 workspace id 绑定且不可变，
               原 WorkflowSection 编辑器已移除（后端 PATCH /configuration
-              对 key 变更一律 400）。settings.workflowKey 仅作为快照字段
-              在保存时原样回传。 */}
+              对 key 变更一律 400）。settings.workflowKey 已随
+              #211 Phase 2 第二批降 optional 且保存时不再回传。 */}
 
           <section id="agent-workers" className={styles.section}>
             <h2 className={styles.sectionTitle}>Agent 与 Worker</h2>

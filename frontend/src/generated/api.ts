@@ -3367,8 +3367,12 @@ export interface components {
       question_ids?: string[]
       /** Source Kind */
       source_kind: string
-      /** Workflow Key */
-      workflow_key: string
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211.
+       */
+      workflow_key?: string | null
     } & {
       [key: string]: unknown
     }
@@ -3587,7 +3591,11 @@ export interface components {
        * @enum {string}
        */
       strategy: 'auto' | 'rerun_self' | 'rerun_upstream'
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: defaults to the workspace id from the path (the two are equal since schema v62). Removal is tracked in #211.
+       */
       workflow_key?: string | null
     }
     /** JobRerunByFailureResponse */
@@ -4258,7 +4266,11 @@ export interface components {
       sample_size: number
       /** Seed */
       seed?: string | null
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: defaults to the workspace id from the path (the two are equal since schema v62). Removal is tracked in #211.
+       */
       workflow_key?: string | null
     }
     /** QualitySampleBatchCreateResponse */
@@ -4490,8 +4502,12 @@ export interface components {
         | components['schemas']['RunItemRef']
         | components['schemas']['RunItemBundle']
       )[]
-      /** Workflow Key */
-      workflow_key: string
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: defaults to the path workspace_id; removal tracked in #211.
+       */
+      workflow_key?: string | null
     }
     /** RunCreateResponse */
     RunCreateResponse: {
@@ -5834,7 +5850,11 @@ export interface components {
       entityType?: string | null
       /** Previewhidden */
       previewHidden?: string[] | null
-      /** Workflowkey */
+      /**
+       * Workflowkey
+       * @deprecated
+       * @description Deprecated: equals the workspace id since schema v62; removal is tracked in #211.
+       */
       workflowKey?: string | null
     }
     /** WorkspaceCreateRequest */
@@ -6059,8 +6079,12 @@ export interface components {
       entityType: string
       /** Previewhidden */
       previewHidden?: string[]
-      /** Workflowkey */
-      workflowKey: string
+      /**
+       * Workflowkey
+       * @deprecated
+       * @description Deprecated: equals the workspace id since schema v62; removal is tracked in #211.
+       */
+      workflowKey?: string | null
     }
     /** WorkspaceSettingsResponse */
     WorkspaceSettingsResponse: {
@@ -9025,6 +9049,10 @@ export interface operations {
       query?: {
         category?: string | null
         detail?: string | null
+        /**
+         * @deprecated
+         * @description Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211.
+         */
         workflow_key?: string | null
         since?: string | null
       }

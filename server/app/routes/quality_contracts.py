@@ -20,7 +20,18 @@ class QualitySampleFilters(BaseModel):
 
 class QualitySampleBatchCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
-    workflow_key: str | None = None
+    # #211 Phase 2 second batch: optional with server-side default from the
+    # path workspace_id (equal since schema v62); explicit values stay
+    # accepted during the compatibility window.
+    workflow_key: str | None = Field(
+        min_length=1,
+        default=None,
+        description=(
+            "Deprecated: defaults to the workspace id from the path (the two "
+            "are equal since schema v62). Removal is tracked in #211."
+        ),
+        deprecated=True,
+    )
     filters: QualitySampleFilters = Field(default_factory=QualitySampleFilters)
     sample_size: int = Field(gt=0, le=1000)
     seed: str | None = None

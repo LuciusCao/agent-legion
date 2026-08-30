@@ -170,6 +170,39 @@ def test_run_detail_is_workspace_scoped(client, job_db) -> None:
     assert client.get(f"/api/workspaces/{workspace_id}/runs/missing").status_code == 404
 
 
+def test_create_run_without_workflow_key_defaults_to_workspace_id(client, job_db) -> None:
+    """#211 Phase 2 第二批：缺省 workflow_key 由服务端从 path 推导。"""
+    workspace_id = _create_workspace(client)
+    _insert_material(job_db, workspace_id, "mat-default")
+
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/runs",
+        json={"items": [{"type": "material", "material_id": "mat-default"}]},
+    )
+
+    assert response.status_code == 200, response.text
+    run = response.json()["run"]
+    assert run["workflow_key"] == workspace_id
+    assert response.json()["created_count"] == 1
+
+
+def test_create_run_with_explicit_workflow_key_still_accepted(client, job_db) -> None:
+    """兼容窗口：显式传 workflow_key（=workspace id）照旧工作。"""
+    workspace_id = _create_workspace(client)
+    _insert_material(job_db, workspace_id, "mat-explicit")
+
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/runs",
+        json={
+            "workflow_key": workspace_id,
+            "items": [{"type": "material", "material_id": "mat-explicit"}],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["run"]["workflow_key"] == workspace_id
+
+
 def test_material_validation_errors(client, job_db) -> None:
     workspace_id = _create_workspace(client)
     _insert_material(job_db, workspace_id, "mat-uploading", status="uploading")
