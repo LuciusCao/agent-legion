@@ -23,9 +23,10 @@ exemptions:
     baseline with the scoped-token work (#35). The routes serve the retired
     CAS transfer channel that only pre-D12 Workers still call; the durable
     resolution is deleting this router when that Worker generation is gone
-    (#160), not splitting deprecated code.
+    (originally issue 160, closed by the D12 rollout without removing this
+    router; re-anchored to issue 287), not splitting deprecated code.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/160
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/287
   ceiling: 61
 - check: architecture.file_budget
   path: server/app/worker_control.py
@@ -33,20 +34,23 @@ exemptions:
     in worker_control_state (upsert on pause/resume, uncached reads on is_paused);
     reset_all_to_paused runs once at control-plane startup because resume state
     must not survive a restart. The single cohesive class outgrows the
-    in-memory-era baseline and the budget will be re-ratcheted if the module
-    shrinks.
+    in-memory-era baseline; the original anchor (#190) closed with the
+    bootstrap extraction without touching this module, so the split-or-
+    re-assess tracking now lives in issue 287. The budget will be re-ratcheted
+    when the module shrinks.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/190
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/287
   ceiling: 70
 - check: architecture.file_budget
   path: server/app/jobs/queries/workflow_revisions.py
   reason: Task 1 of the workflow-studio-ux-refinement plan adds the get_workflow_revision
     query; Agent Legion atomically materializes Agent routes with revision publication
     (per-node capacities were replaced by workspace-level workspace_agent_capacities),
-    pruning rows absent from the new projection. Extract the projection write helper
-    after rollout.
+    pruning rows absent from the new projection. The original anchor (#195) closed
+    with the 5-domain-facade regrouping without splitting this mixin, so the
+    projection write helper extraction is now tracked in issue 287.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/195
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/287
   ceiling: 209
 - check: architecture.file_budget
   path: server/app/settings.py
@@ -59,10 +63,11 @@ exemptions:
     workflows.pi block (agent config governance phase 3, schema v27). The
     AGENT_LEGION_DATABASE_URL
     environment override lives here too (config
-    governance G4). Extract database settings into the configuration
-    package after rollout.
+    governance G4). The original anchor (#188) closed with the configuration
+    model pushdown without extracting the rejected-key and env-override
+    sections; that extraction is now tracked in issue 287.
   owner: config
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/188
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/287
   ceiling: 216
 - check: architecture.file_budget
   path: server/app/services/workflow_revisions.py
@@ -72,8 +77,10 @@ exemptions:
     when the catalog has zero enabled definitions so routes are never pruned by
     an empty-catalog regression. Publish also snapshots node_code_pins (the
     published custom code versions, EXEC-CODE-002) alongside the definition.
+    The original anchor (#195) closed without splitting this service; the
+    reconcile/publish separation is now tracked in issue 287.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/195
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/287
   ceiling: 131
 - check: architecture.file_budget
   path: server/app/agent_broker/dispatch.py
@@ -83,11 +90,12 @@ exemptions:
     v63) into the dispatch boundary; the manifest builder and the
     resolver share the runtime binary constants, so splitting now would just
     scatter one cohesive rule. The per-run Agent version pin (schema v29,
-    EXEC-QUALITY-REPLAY-001) added the pinned_agent_version passthrough. Extract
-    the resolver when the agent-broker structure-debt batch (#198) reworks the
-    dispatch boundary.
+    EXEC-QUALITY-REPLAY-001) added the pinned_agent_version passthrough. The
+    original anchor (#198) closed as a naming convergence without reworking
+    the dispatch boundary; extracting the resolver into
+    agent_broker/execution_resolution.py is now tracked in issue 287.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/198
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/287
   ceiling: 160
 - check: architecture.file_budget
   path: server/app/services/agent_service.py
@@ -95,10 +103,12 @@ exemptions:
     the short-TTL published-definition cache (hot claim-path reads) lives next
     to the lifecycle methods so publish/archive can invalidate it in one
     place. Split the cache into its own module when it gains more policy —
-    tracked with the wide-service structure batch (#196). The facade-connect
-    source aliasing (#187) adds the dsn-identity cache-key helper here.
+    the dsn-identity cache-key helper (#187) is one of the call sites the
+    ConnectSource retirement (#280) will rework, which is the natural split
+    window. The original anchor (#196) closed with the studio_chat split
+    without touching this service.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/196
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/280
   ceiling: 135
 - check: architecture.file_budget
   path: server/app/storage/s3_client.py

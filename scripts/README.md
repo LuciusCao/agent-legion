@@ -33,6 +33,7 @@
 | `generate_architecture.py` | 从代码 AST 自动生成 `docs/architecture/backend.md`、`frontend.md`、`deployment.md` 的表格章节。 |
 | `generate_architecture_frontend.py` | `generate_architecture.py` 的前端路由提取 helper。 |
 | `check_exemption_age.py` | 提醒移除条件已过期的架构豁免（非阻塞；check.sh / CI 调用）。 |
+| `refresh_issue_states.py` | 联网刷新豁免锚点 GitHub issue 状态清单 `config/architecture/issue-states.json`（`make architecture-issue-states`；nightly 调用），`check_invariants` 离线读该清单做豁免到期检测（#270）。 |
 
 ## Agent Worker 子系统
 
@@ -84,7 +85,7 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 | 目录 | 用途 |
 |------|------|
 | `architecture/` | `check_architecture.py` / `ratchet_architecture_budgets.py` 的检查实现（预算盘点、边界、路由契约、import 环等按检查域划分的模块）。 |
-| `quality/` | 架构不变量与豁免注册表的加载/校验实现（`invariants.py`、`exemptions.py`、`exemption_age.py`），供 `check_invariants.py` / `check_exemption_age.py` 与 `architecture/file_budgets.py` 使用。 |
+| `quality/` | 架构不变量与豁免注册表的加载/校验实现（`invariants.py`、`exemptions.py`、`exemption_age.py`、`issue_state.py`——后者供 `check_invariants.py` 做豁免锚点 issue 到期检测），供 `check_invariants.py` / `check_exemption_age.py` / `refresh_issue_states.py` 与 `architecture/file_budgets.py` 使用。 |
 | `git-hooks/` | 版本化的 pre-commit / pre-push 钩子 dispatcher，由 `install-git-hooks.sh` 安装到 Git common directory，再转发到 worktree 根的 `.githooks/`。 |
 | `remote/` | 远程 LLM 网关（`llm_gateway.py` 及 HTTP/SSE/stream/config 模块），见 `docs/remote-execution-runbook.md`。 |
 | `stress/` | 压力测试：`simulate_agents.py` 合成负载生成器、`run_e2e_stress.py` 端到端压测 runner。 |

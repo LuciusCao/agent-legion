@@ -198,3 +198,40 @@ jobs:
         run: >-
           uv run python scripts/check_reruns.py
           --rerun-report test-results/ci-extended-reruns.json
+
+  # Weekly exemption expiry governance (issue #270): refresh the tracked
+  # issue-state manifest from GitHub (the only networked step of the
+  # exemption lifecycle), then run the offline expiry detection that the
+  # quick gate also runs. A closed anchor issue fails here so the exemption
+  # gets fulfilled or re-anchored before the manifest lands on trunk; the
+  # manifest commit itself is manual (the job reports, it does not push).
+  exemption-expiry:
+    name: exemption-expiry
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
+      # gh ships on GitHub runners pre-authenticated with GITHUB_TOKEN;
+      # scope the token to public read of the exemption anchor issues.
+      - name: Refresh issue-state manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run python -m scripts.refresh_issue_states
+
+      - name: Detect expired exemptions
+        run: |
+          if ! git diff --exit-code config/architecture/issue-states.json; then
+            echo "::error::issue-state manifest is stale on this ref;" \
+              "commit the refreshed config/architecture/issue-states.json" \
+              "(make architecture-issue-states)"
+            exit 1
+          fi
+          uv run python -m scripts.check_invariants

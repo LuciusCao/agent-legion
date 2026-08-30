@@ -12,6 +12,7 @@ import yaml
 
 from scripts.quality.exemptions import load_exemptions, validate_exemptions
 from scripts.quality.invariants import load_registry, validate_registry
+from scripts.quality.issue_state import expired_issue_errors
 
 project_root = Path(__file__).resolve().parents[1]
 
@@ -60,6 +61,10 @@ def main(argv: list[str] | None = None) -> int:
 
     errors = validate_registry(invariants, base_path=project_root)
     errors.extend(validate_exemptions(exemptions, base_path=project_root))
+    # Expiry detection reads the tracked issue-state cache (offline and
+    # deterministic); refresh it with `make architecture-issue-states` or the
+    # nightly exemption-expiry job when anchors close.
+    errors.extend(expired_issue_errors(exemptions, base_path=project_root))
 
     if errors:
         for error in errors:
