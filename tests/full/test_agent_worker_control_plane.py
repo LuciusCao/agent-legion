@@ -130,10 +130,11 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
 def test_startup_materializes_agent_routes(client, job_db) -> None:
     """Startup wiring: the workspace's published catalog is visible, and an
     explicitly created workspace's active revision gets its Agent routes
-    materialized — the two states whose loss caused the 'Executor pi is not
-    registered' incident. No workspace is seeded at startup; the fixture
-    workspace is created and published here, then the startup reconcile is
-    replayed."""
+    materialized at publish — the two states whose loss caused the 'Executor
+    pi is not registered' incident. No workspace is seeded at startup; the
+    fixture workspace is created and published here. Explicit node types
+    (#284) retired the startup reconcile: routes materialize only at
+    publish."""
     workspace = job_db.create_workspace(
         "Route Check", default_workflow_key="education_video_problems_generation"
     )
@@ -148,7 +149,6 @@ def test_startup_materializes_agent_routes(client, job_db) -> None:
     definition = load_builtin_definition("education_video_problems_generation")
     revision_service = WorkflowRevisionService(job_db)
     revision_service.publish_workspace_revision(workspace_id, definition)
-    revision_service.reconcile_active_agent_routes()
 
     with job_db._connect_read() as conn:
         published = {
@@ -166,7 +166,7 @@ def test_startup_materializes_agent_routes(client, job_db) -> None:
         ).fetchall()
 
     assert published == expected_agents
-    assert routes, "startup reconcile must materialize routes for the active revision"
+    assert routes, "publish must materialize routes for the active revision"
     assert {row["target_id"] for row in routes} <= expected_agents
 
 

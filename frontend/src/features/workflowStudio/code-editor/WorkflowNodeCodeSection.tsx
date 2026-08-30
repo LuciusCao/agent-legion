@@ -4,7 +4,6 @@ import type { components } from '../../../generated/api'
 import { useSettingStore } from '../../../stores/settingStore'
 import { useUiStore } from '../../../stores/uiStore'
 import type { WorkflowNodeRecord } from '../../../types'
-import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import { WorkflowNodeCodeActions } from './WorkflowNodeCodeActions'
 import { WorkflowNodeCodeEditor } from './WorkflowNodeCodeEditor'
 import { WorkflowNodeCodePreview } from './WorkflowNodeCodePreview'
@@ -25,11 +24,10 @@ type LoadState = 'loading' | 'ready' | 'error'
 
 export function WorkflowNodeCodeSection(props: {
   node: WorkflowNodeRecord
-  agentCatalog: AgentDefinition[]
   readOnly?: boolean
 }) {
   const workspaceId = useSettingStore((s) => s.workspaceId)
-  const codeBound = isCodeNode(props.agentCatalog, props.node.capability)
+  const codeBound = isCodeNode(props.node)
 
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [data, setData] = useState<NodeCodeResponse | null>(null)

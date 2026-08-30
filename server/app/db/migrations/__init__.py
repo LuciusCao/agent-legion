@@ -40,6 +40,9 @@ from server.app.db.migrations.versioned_entities import migrate_versioned_entiti
 from server.app.db.migrations.workflow_catalog_retirement import (  # noqa: F401
     migrate_workflow_catalog_retirement,
 )
+from server.app.db.migrations.workflow_node_explicit_types import (  # noqa: F401
+    migrate_workflow_node_explicit_types,
+)
 from server.app.db.migrations.workspace_execution_defaults import (  # noqa: F401
     migrate_workspace_execution_defaults,
 )

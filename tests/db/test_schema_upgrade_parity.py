@@ -43,18 +43,19 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v65, approval_decisions) must leave behind
-# so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v65 is DDL-only: the approval_decisions table (plus its
-# lookup index, which drops with the table) comes from the schema-file
-# replay — rewinding drops the table so the upgrade under test recreates it.
-# v64's catalog effect (dropping the retired workspaces.default_agent_* /
-# intake_config_json columns) already holds at SCHEMA_VERSION-1, so the undo
-# step leaves it in place.
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("approval_decisions",)
+# Effects the newest migration (v66, workflow_node_explicit_types) must
+# leave behind so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. v66 is a pure data migration (backfilling explicit node
+# types into active revisions and Studio drafts from the route projection):
+# it changes rows, not the catalog, so the undo inventory is empty and the
+# upgrade under test only replays the idempotent DDL file plus the v66 data
+# migration (a no-op on this test's empty scratch schema). v65
+# (approval_decisions) is DDL-only and already holds at SCHEMA_VERSION-1,
+# so the undo step leaves the table in place.
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
-_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ("idx_approval_decisions_job_node",)
-_NEWEST_MIGRATION_NAME = "approval_decisions"
+_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
+_NEWEST_MIGRATION_NAME = "workflow_node_explicit_types"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 

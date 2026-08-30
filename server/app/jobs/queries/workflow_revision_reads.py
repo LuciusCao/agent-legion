@@ -33,18 +33,6 @@ class WorkflowRevisionReadQueriesMixin(ConnectionQueriesMixin):
             ).fetchone()
         return dict(row) if row else None
 
-    def list_active_workflow_revisions(self) -> list[dict[str, Any]]:
-        """All active revisions across workspaces (at most one per workspace/workflow)."""
-        with self._connect_read() as conn:
-            rows = conn.execute(
-                """
-                select * from workflow_revisions
-                where status='active'
-                order by workspace_id, workflow_key
-                """,
-            ).fetchall()
-        return [dict(row) for row in rows]
-
     def get_workflow_revision(
         self,
         workspace_id: str,

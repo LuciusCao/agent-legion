@@ -20,6 +20,10 @@ def normalize_labels(labels: Mapping[str, Any]) -> dict[str, str]:
 
 
 def normalize_capabilities(values: Sequence[Any]) -> list[str]:
+    """Bound the deprecated capabilities field for storage (issue #284).
+
+    Claim admission never matches capabilities anymore; this only keeps the
+    stored legacy declaration well-formed."""
     if len(values) > 128:
         raise ValueError("worker capabilities are capped at 128 entries")
     normalized = sorted({str(value).strip() for value in values})

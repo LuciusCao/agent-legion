@@ -36,13 +36,14 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         },
         "intake_knowledge_points": {
             "label": "读取知识点",
+            "type": "code",
             "capability": "intake_knowledge_points",
-            "after": [],
-            "inputs": [],
+            # after/inputs 缺省即 loader 默认的空列表（入口节点由 start 边接入）。
             "outputs": ["knowledge_point.json"],
         },
         "write_script": {
             "label": "撰写教学视频脚本",
+            "type": "agent",
             "capability": "write_script",
             "after": ["intake_knowledge_points"],
             "inputs": ["knowledge_point.json"],
@@ -50,6 +51,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         },
         "review_script": {
             "label": "评审脚本",
+            "type": "agent",
             "capability": "review_script",
             "after": ["write_script"],
             "inputs": ["knowledge_point.json", "script.md"],
@@ -57,6 +59,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         },
         "generate_questions": {
             "label": "生成练习题",
+            "type": "agent",
             "capability": "generate_questions",
             "after": ["intake_knowledge_points"],
             "inputs": ["knowledge_point.json"],
@@ -64,6 +67,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         },
         "review_questions": {
             "label": "评审练习题",
+            "type": "agent",
             "capability": "review_questions",
             "after": ["generate_questions"],
             "inputs": ["knowledge_point.json", "exercises.json"],
@@ -71,6 +75,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         },
         "publish_content": {
             "label": "汇总并模拟入库",
+            "type": "code",
             "capability": "publish_content",
             "after": ["review_script", "review_questions"],
             "inputs": [

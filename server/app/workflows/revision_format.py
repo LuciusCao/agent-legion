@@ -115,12 +115,20 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
     payload["nodes"] = {}
     payload["edges"] = []
     for key, node in definition.nodes.items():
-        # Start nodes carry the entry contract, never a capability (D1).
         raw_node: dict[str, Any] = {"label": node.label}
         if node.node_type == "start":
+            # Start nodes carry the entry contract, never a capability (D1).
             raw_node["type"] = "start"
             raw_node["accepted_item_types"] = list(node.accepted_item_types)
+        elif node.node_type == "approval":
+            # Approval gates declare no capability (EXEC-APPROVAL-001), but
+            # the type must round-trip or the echo would reload them as code.
+            raw_node["type"] = "approval"
         else:
+            # Explicit execution type (code|agent): the echo stays the draft
+            # source for Studio, so the type must round-trip — dropping it
+            # would normalize an Agent node back to code on the next load.
+            raw_node["type"] = node.node_type
             raw_node["capability"] = node.capability
         raw_node["after"] = node.after
         raw_node["inputs"] = node.inputs

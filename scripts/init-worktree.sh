@@ -176,6 +176,6 @@ cat <<EOF
   - workspace 调度: 后端每次启动把全部 workspace 重置为暂停（刻意设计），
     首次启动建表后按需执行 ./scripts/resume-workspaces.sh（或控制台手动恢复）
   - worker: claim 默认关闭（刻意设计），启动后经 worker 控制台（默认 8789）
-    或 PUT /api/config 打开 claim_enabled；capabilities/models 已在
-    config/agent-worker.yaml 种子配置中声明，首次导入后修改要走控制台/API
+    或 PUT /api/config 打开 claim_enabled；models allowlist 可按需在
+    config/agent-worker.yaml 种子配置中调整，首次导入后修改要走控制台/API
 EOF

@@ -11,7 +11,6 @@ import { api } from '../../../api'
 import { useSettingStore } from '../../../stores/settingStore'
 import { useUiStore } from '../../../stores/uiStore'
 import type { WorkflowNodeRecord } from '../../../types'
-import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 
 vi.mock('../../../api', () => ({
   api: vi.fn(),
@@ -23,13 +22,12 @@ const node: WorkflowNodeRecord = {
   key: 'fetch_items',
   label: '获取题目',
   capability: 'fetch_items',
+  // 显式 code 节点（#284）：类型判定只读 node_type。
+  node_type: 'code',
   after: [],
   inputs: [],
   outputs: [],
 }
-
-// 无 Agent 定义（capability 不匹配）即为 code 节点（P-0.5）。
-const noAgents: AgentDefinition[] = []
 
 const BASE = '/api/workspaces/default/nodes/fetch_items/code'
 
@@ -83,7 +81,6 @@ function renderSection(
   return render(
     <WorkflowNodeCodeSection
       node={node}
-      agentCatalog={noAgents}
       {...overrides}
     />
   )
@@ -98,16 +95,10 @@ describe('WorkflowNodeCodeSection', () => {
     mockApi.mockResolvedValue(builtinResponse)
   })
 
-  it('renders nothing when the capability is agent-routed', () => {
-    const agents: AgentDefinition[] = [
-      {
-        id: 'agent-v1',
-        capability: 'fetch_items',
-        runtime: 'pi',
-        skill: 'demo/skill',
-      },
-    ]
-    const { container } = renderSection({ agentCatalog: agents })
+  it('renders nothing for an agent-typed node', () => {
+    const { container } = renderSection({
+      node: { ...node, node_type: 'agent' },
+    })
     expect(container.firstChild).toBeNull()
     expect(mockApi).not.toHaveBeenCalled()
   })
@@ -366,7 +357,7 @@ describe('WorkflowNodeCodeSection', () => {
     const templateCode = 'from workspace_libs.node_sdk import NodeContext\n'
     mockApi.mockResolvedValue(noneResponse)
     render(
-      <WorkflowNodeCodeSection node={pathlessNode} agentCatalog={noAgents} />
+      <WorkflowNodeCodeSection node={pathlessNode} />
     )
 
     await screen.findByText(/无代码版本/)
@@ -407,7 +398,7 @@ describe('WorkflowNodeCodeSection', () => {
       draft_version: 1,
     })
     render(
-      <WorkflowNodeCodeSection node={pathlessNode} agentCatalog={noAgents} />
+      <WorkflowNodeCodeSection node={pathlessNode} />
     )
 
     await screen.findByText(/有未发布草稿/)
