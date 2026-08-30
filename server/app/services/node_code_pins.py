@@ -18,14 +18,21 @@ def node_code_pins_from_job_snapshot(job: dict) -> dict[str, Any]:
     ``upgrade_workflow`` rewrites the snapshot on revision upgrades but never
     the batch payload. ``{}`` = no snapshot (legacy), no pins, or a corrupt
     payload (the corrupt case is already logged by
-    ``definition_from_job_snapshot``); callers fall back to the batch pins.
+    ``definition_from_job_snapshot``); non-object snapshot tops degrade the
+    same way (codex on #264). Callers fall back to the batch pins.
     """
     raw = job.get("workflow_definition_snapshot_json") or ""
     if not raw:
         return {}
     try:
-        pins = json.loads(str(raw)).get("node_code_pins")
-    except Exception:
+        snapshot = json.loads(str(raw))
+        pins = snapshot.get("node_code_pins") if isinstance(snapshot, dict) else None
+    except (TypeError, ValueError):
+        # #204: the only declared failure is a corrupt snapshot payload —
+        # json.JSONDecodeError is a ValueError and a non-str column renders
+        # as TypeError. Both are the documented "corrupt case" the docstring
+        # already routes to {} (definition_from_job_snapshot logs it);
+        # anything else is a programming error worth a traceback.
         return {}
     return dict(pins) if isinstance(pins, dict) else {}
 

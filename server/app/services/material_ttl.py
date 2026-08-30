@@ -27,6 +27,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import psycopg
+from botocore.exceptions import BotoCoreError, ClientError
+
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.instance_settings_store import InstanceSettingsStore
@@ -143,14 +146,23 @@ def collect_expired_materials(
             # doc); the row is already gone so the next pass won't retry.
             try:
                 storage.delete_object(storage_key)
-            except Exception:
+            except (ClientError, BotoCoreError):
+                # #204: the boto3 data plane's declared failure family. An
+                # orphaned object after a committed row delete is the
+                # documented accepted residue (module docstring) — warning
+                # and moving on keeps the sweep alive for the other rows.
                 logger.warning(
                     "materials TTL sweep: orphaned object %s (bucket lifecycle will reap it)",
                     storage_key,
                     exc_info=True,
                 )
             deleted += 1
-        except Exception:
+        except (OSError, psycopg.Error):
+            # #204: per-material containment. Each material is its own small
+            # transaction (docstring), and the connection layer surfaces its
+            # failures as OSError — one failed row must not abort the pass
+            # over the remaining expired materials; the row stays 'expired'
+            # and the next sweep retries it.
             logger.warning(
                 "failed to collect expired material %s; retrying next pass",
                 material_id,

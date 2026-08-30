@@ -4,8 +4,10 @@ import logging
 import shutil
 from pathlib import Path
 
+import psycopg
+
 from server.app.db.connection import DatabaseConnection
-from server.app.storage_paths import make_data_relative
+from server.app.storage_paths import ManagedPathError, make_data_relative
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +41,13 @@ def find_extra_run_dirs(data_dir: Path, job_dir: Path, node_key: str) -> list[tu
     for old in token_dirs[1:]:
         try:
             extra.append((old, make_data_relative(old, data_dir)))
-        except Exception as exc:
-            logger.warning("Failed to remove extra run dir %s: %s", old, exc)
+        except ManagedPathError as exc:
+            # #204: the only expected failure is a run dir that cannot be
+            # mapped inside data_dir (a legacy absolute layout or a symlink
+            # escaping the data tree). Such a dir is excluded from this
+            # round; the next sweep re-examines it. remove_path itself
+            # carries its own OSError net, so nothing else escapes here.
+            logger.warning("skip unmappable extra run dir %s: %s", old, exc)
     return extra
 
 
@@ -64,6 +71,14 @@ def cleanup_extra_runs_for_node(
                 (old_rel,),
             )
             removed += 1
-        except Exception as exc:
+        except (OSError, ManagedPathError, psycopg.Error) as exc:
+            # #204: remove_path already swallows its own OSErrors internally
+            # (never raises), so the escapes here are the DB update failing
+            # (psycopg.Error — DB failures never surface as OSError, review
+            # on #264) or a relative path that cannot be canonicalized — a
+            # per-dir failure must not abort the
+            # walk over the other run dirs. The already-removed filesystem
+            # state is the accepted residue (the row still points at a
+            # missing dir, which every reader tolerates).
             logger.warning("Failed to remove extra run dir %s: %s", old, exc)
     return removed

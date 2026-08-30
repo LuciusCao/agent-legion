@@ -116,6 +116,14 @@ class JobArtifactObjectStore:
                     self.storage.put_stream(storage_key, stream, size_bytes)
                 break
             except Exception as exc:  # storage outage must not fail the node
+                # #204 broad-except audit: retry loop over the boto3 data
+                # plane. put_stream's outcome space is genuinely mixed —
+                # transport errors (ClientError/BotoCoreError), connection
+                # resets (OSError), and the injected test fakes' own exception
+                # types all take the same bounded-retry path, and the final
+                # attempt re-raises for the completion hooks to contain. A
+                # narrow family cannot enumerate the storage layer here
+                # without also changing the public seam the tests inject.
                 last_error = exc
                 logger.warning(
                     "artifact upload attempt %d/%d failed for job %s %s: %s",
@@ -297,6 +305,15 @@ class JobArtifactObjectStore:
             try:
                 self.storage.delete_object(str(row["storage_key"]))
             except Exception:
+                # #204 broad-except audit: per-object best-effort after the
+                # job row already committed — the outcome space spans the boto3
+                # data plane (ClientError/BotoCoreError), transport resets
+                # (OSError), and the test-injected fakes' exception types; no
+                # narrow business family can enumerate the storage layer. A
+                # failed delete leaves an orphan the bucket lifecycle rule
+                # reaps (deployment doc), which is strictly better than
+                # failing an already-committed deletion. The traceback is
+                # logged so the residue is diagnosable.
                 logger.warning(
                     "failed to delete artifact object %s", row["storage_key"], exc_info=True
                 )

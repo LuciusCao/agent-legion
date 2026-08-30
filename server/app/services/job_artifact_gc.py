@@ -22,6 +22,12 @@ def read_artifact_candidates(store: ArtifactStore | None, job_id: str) -> list[s
     try:
         return [ref["hash"] for ref in store.refs_for_job(job_id)]
     except Exception:
+        # #204 broad-except audit: GC is best-effort by contract (docstring)
+        # and must never block the deletion flow. refs_for_job spans the DB
+        # connection layer and the store's own read paths; a failure degrades
+        # to an empty snapshot, which only means "no hash-level GC this
+        # round" — the artifact blobs then age out via the unreferenced sweep
+        # or storage lifecycle. The traceback makes the degraded pass visible.
         logger.exception("Failed to read artifact refs for job %s", job_id)
         return []
 
@@ -45,4 +51,11 @@ def gc_deleted_job_artifacts(
         if hashes:
             store.delete_unreferenced(hashes)
     except Exception:
+        # #204 broad-except audit: same best-effort contract as the snapshot
+        # above, but post-commit: the job row is already gone, so re-raising
+        # could only fail the (already successful) deletion. The walk spans
+        # the DB layer (FK-cascade idempotency) and the artifact blob store;
+        # orphans are accepted, documented debt. Traceback logged for the
+        # operator; the next deletion of a job sharing the hash re-attempts
+        # the unreferenced sweep.
         logger.exception("Failed to clean artifact refs after deleting job %s", job_id)

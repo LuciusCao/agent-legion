@@ -2,6 +2,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from botocore.exceptions import BotoCoreError, ClientError
+
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_artifact_raw import RawArtifact, open_raw_artifact
@@ -46,9 +48,13 @@ class JobArtifactService:
         try:
             stream = store.open_stream(row)
             content = stream.read().decode("utf-8")
-        except Exception:
+        except (ClientError, BotoCoreError, OSError, UnicodeDecodeError):
             # 对象可能被 bucket lifecycle 删除（NoSuchKey）或存储暂时不可用：
-            # 按未找到处理，让 read() 落到 404 而不是冒泡 500。
+            # 按未找到处理，让 read() 落到 404 而不是冒泡 500。UnicodeDecodeError
+            # 是二进制产物走了文本端点：字节由 raw 端点负责，这里继续降级查找。
+            # #204: 这四类就是这个 try 块的完整失败空间——boto3 数据面
+            # （ClientError/BotoCoreError）、流式读的中断（OSError，含本地
+            # fake 与远端连接重置）、解码失败；其余按编程错误冒泡。
             logger.warning(
                 "failed to read artifact %s of job %s from object storage",
                 artifact_name,

@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from server.app.storage_paths import resolve_job_dir
+from server.app.storage_paths import ManagedPathError, resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.workflow_branching import downstream_nodes
 
@@ -137,7 +137,15 @@ class JobArtifactMutationService:
                             staged_path.unlink()
                     shutil.move(str(original_path), str(staged_path))
                     moves.append((staged_path, original_path))
-        except Exception:
+        except (OSError, ValueError, ManagedPathError):
+            # #204: this loop's escape routes are filesystem moves (OSError:
+            # ENOSPC/EPERM/racing eviction) and resolve()/relative_to path
+            # discipline (ManagedPathError — a ValueError subclass — from a
+            # symlinked storage_dir escaping the job dir; the explicit
+            # relative_to ValueError above is converted before it can reach
+            # here). Either way the half-staged moves must roll back and the
+            # original type propagates to the caller's conflict/failed
+            # classification (job_execution, job_rerun).
             StagedOutputs(staged_dir, moves).rollback()
             raise
 

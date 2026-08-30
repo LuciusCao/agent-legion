@@ -457,7 +457,11 @@ def compare_workflow_draft(
         if isinstance(exc.__cause__, yaml.YAMLError):
             return _invalid_compare(yaml_error_to_dict(exc.__cause__))
         return _invalid_compare({"category": "schema", "message": str(exc)})
-    except Exception as exc:
+    except json.JSONDecodeError as exc:
+        # #204: the parser's only other declared failure — a ``!include``
+        # style embedded JSON payload that does not parse. Both arms are
+        # user-authored input errors and belong in the compare report; a
+        # genuine TypeError from the loader is a programming error and 500s.
         return _invalid_compare({"category": "schema", "message": str(exc)})
 
     workspace = job_db.get_workspace(workspace_id)
@@ -501,7 +505,13 @@ def compare_workflow_draft(
     else:
         try:
             base = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
-        except Exception as exc:
+        except (json.JSONDecodeError, WorkflowDefinitionError) as exc:
+            # #204: both failure modes of parsing a stored revision are
+            # data-shape errors (a truncated definition_json blob or a
+            # definition that violates the schema — the loader's declared
+            # error space, #243 hardened it to WorkflowDefinitionError for
+            # exactly this degradation). Degrade to an invalid compare so
+            # the studio surfaces it instead of a 500.
             return _invalid_compare(
                 {"category": "schema", "message": f"Failed to parse active revision: {exc}"}
             )

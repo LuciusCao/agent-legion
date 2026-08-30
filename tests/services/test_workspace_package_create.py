@@ -2,6 +2,8 @@ import io
 import json
 import zipfile
 
+import pytest
+
 from server.app.services.workspace_package_create import create_workspace_package
 
 
@@ -200,7 +202,11 @@ def test_workspace_package_skips_missing_object_entries(tmp_path):
 
         def open_stream(self, row: dict) -> io.BytesIO:
             if row["storage_key"].endswith("bad.json"):
-                raise RuntimeError("NoSuchKey")
+                # #204 窄化后的真实故障族：botocore ClientError（对象被
+                # lifecycle 删除时生产客户端抛出的类型）。
+                from botocore.exceptions import ClientError
+
+                raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
             return io.BytesIO(b"good-bytes")
 
     jobs_dir = tmp_path / "jobs"
@@ -215,12 +221,13 @@ def test_workspace_package_skips_missing_object_entries(tmp_path):
         }
     ]
 
+    store = _FakeObjectStore()
     package_path, job_count = create_workspace_package(
         jobs,
         packages_dir,
         jobs_dir,
         artifact_names=["good.json", "bad.json"],
-        object_store=_FakeObjectStore(),
+        object_store=store,
     )
 
     assert package_path.exists()
@@ -229,6 +236,39 @@ def test_workspace_package_skips_missing_object_entries(tmp_path):
         names = set(zf.namelist())
         assert "job_1/good.json" in names
         assert "job_1/bad.json" not in names
+
+
+def test_workspace_package_propagates_programming_errors_from_store(tmp_path):
+    """#204 窄化：对象存储注入的编程错误（TypeError）不再被吞成「跳过
+    该条目」——整个打包上抛，调用方得到 500 而不是静默缺失的 zip。"""
+
+    class _BrokenStore:
+        enabled = True
+
+        def lookup(self, job_id: str, name: str) -> dict:
+            return {"storage_key": f"jobs/ws/{job_id}/{name}"}
+
+        def open_stream(self, row: dict) -> io.BytesIO:
+            raise TypeError("lookup contract violation")
+
+    jobs = [
+        {
+            "id": "job_1",
+            "source_id": "S1",
+            "workflow_key": "demo_workflow",
+            "status": "completed",
+            "storage_dir": "",
+        }
+    ]
+
+    with pytest.raises(TypeError, match="lookup contract violation"):
+        create_workspace_package(
+            jobs,
+            tmp_path / "packages",
+            tmp_path / "jobs",
+            artifact_names=["result.json"],
+            object_store=_BrokenStore(),
+        )
 
 
 def test_workspace_package_explicit_artifact_names(tmp_path):
