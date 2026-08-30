@@ -678,7 +678,7 @@ jobs:
       # backend partitions only because it never passes --frontend. Enforce
       # them here against the merged blob data; uv provides the python for
       # scripts/check_coverage_partitions.py (stdlib only for --frontend).
-      - uses: actions/setup-uv@v5
+      - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
           python-version: "3.13"
