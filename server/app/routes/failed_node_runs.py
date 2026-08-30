@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.jobs import JobQueries
@@ -21,6 +22,9 @@ from server.app.services.job_errors import JobServiceError
 from server.app.services.job_rerun import JobRerunService
 from server.app.settings import Settings
 
+# #211 Phase 2: query-param deprecation wording (server-side default).
+_DEPRECATED_QUERY = "Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211."
+
 
 def create_failed_node_runs_router(
     job_db: JobQueries,
@@ -38,7 +42,10 @@ def create_failed_node_runs_router(
         workspace_id: str,
         category: str | None = None,
         detail: str | None = None,
-        workflow_key: str | None = None,
+        workflow_key: Annotated[
+            str | None,
+            Query(deprecated=True, description=_DEPRECATED_QUERY),
+        ] = None,
         since: datetime | None = None,
     ) -> FailedNodeRunsResponse:
         require_workflows_enabled(settings)

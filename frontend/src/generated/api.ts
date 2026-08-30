@@ -8970,6 +8970,10 @@ export interface operations {
       query?: {
         category?: string | null
         detail?: string | null
+        /**
+         * @deprecated
+         * @description Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211.
+         */
         workflow_key?: string | null
         since?: string | null
       }
