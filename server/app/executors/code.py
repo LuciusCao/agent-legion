@@ -102,9 +102,14 @@ class CodeExecutor:
         if not self._storage_probed:
             # Assign before flipping the flag (same first-probe race as the
             # velites probe in _code_sandbox): concurrent readers must not
-            # see probed=True with the storage still None.
-            self._object_storage = build_s3_storage()
-            self._storage_probed = True
+            # see probed=True with the storage still None. The flag is set
+            # even when the build raises: a persistently broken storage
+            # config must not re-probe (and re-log the full exception) on
+            # every node — the caller already degrades to mirroring-disabled.
+            try:
+                self._object_storage = build_s3_storage()
+            finally:
+                self._storage_probed = True
         return self._object_storage
 
     def _artifact_object_store(self) -> JobArtifactObjectStore | None:
