@@ -59,13 +59,14 @@ def test_summary_parses_junit_and_rerun_reports(tmp_path: Path) -> None:
     )
 
     junit = parse_junit(junit_path)
-    attempts, rerun_test_count = parse_reruns([rerun_path])
+    attempts, rerun_test_count, rerun_tests = parse_reruns([rerun_path])
     rendered = render_summary(
         title="Test evidence",
         junit=[junit],
         rerun_attempts=attempts,
         rerun_test_count=rerun_test_count,
         missing=[],
+        rerun_tests=rerun_tests,
     )
 
     assert junit.tests == 3
@@ -74,6 +75,8 @@ def test_summary_parses_junit_and_rerun_reports(tmp_path: Path) -> None:
     assert junit.skipped == 1
     assert junit.duration_seconds == 0.6
     assert "Rerun attempts: **2** across **1** tests." in rendered
+    # #295: the nodeid list is the actionable half of the rerun signal.
+    assert "tests/test_one.py::test_one" in rendered
 
 
 def test_summary_cli_tolerates_malformed_optional_evidence(

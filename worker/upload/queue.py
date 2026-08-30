@@ -281,7 +281,8 @@ class UploadQueue:
             for name in outputs:
                 try:
                     if direct:
-                        ref = upload_artifact_direct(
+                        # direct refs are dicts, CAS refs are strings (union).
+                        ref: dict[str, Any] | str | None = upload_artifact_direct(
                             job_dir / PurePosixPath(name),
                             task.artifact_uploads[name],
                             stop=self._stop,

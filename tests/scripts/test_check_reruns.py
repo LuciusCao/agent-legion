@@ -200,3 +200,26 @@ def test_main_tolerates_missing_reports(tmp_path: Path) -> None:
     )
 
     assert exit_code == 0
+
+
+def test_deadline_only_mode_requires_no_report(tmp_path: Path) -> None:
+    # #295: nightly exemption-expiry runs the deadline check without any
+    # rerun evidence — the mode must stand alone.
+    registry = _write_registry(tmp_path / "registry.yaml", [_entry()])
+
+    ok = main(["--registry", str(registry), "--check-deadlines", "--today", "2026-08-03"])
+    assert ok == 0
+
+    expired = main(["--registry", str(registry), "--check-deadlines", "--today", "2026-09-02"])
+    assert expired == 1
+
+
+def test_no_report_without_deadline_flag_errors(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    registry = _write_registry(tmp_path / "registry.yaml", [_entry()])
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(["--registry", str(registry)])
+    assert excinfo.value.code == 2
+    assert "--check-deadlines" in capsys.readouterr().err

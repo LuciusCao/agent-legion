@@ -46,14 +46,14 @@ def parse_junit(path: Path) -> JUnitSummary:
     )
 
 
-def parse_reruns(paths: list[Path]) -> tuple[int, int]:
+def parse_reruns(paths: list[Path]) -> tuple[int, int, set[str]]:
     attempts = 0
     tests: set[str] = set()
     for path in paths:
         payload = json.loads(path.read_text(encoding="utf-8"))
         attempts += int(payload.get("attempts", 0))
         tests.update(str(test) for test in payload.get("tests", []))
-    return attempts, len(tests)
+    return attempts, len(tests), tests
 
 
 def _version(command: str) -> str:
@@ -78,6 +78,7 @@ def render_summary(
     rerun_attempts: int,
     rerun_test_count: int,
     missing: list[Path],
+    rerun_tests: set[str] | None = None,
 ) -> str:
     lines = [f"## {title}", "", "### Execution context", ""]
     lines.extend(
@@ -117,6 +118,12 @@ def render_summary(
             f"Rerun attempts: **{rerun_attempts}** across **{rerun_test_count}** tests.",
         ]
     )
+    # #295: the per-test list is the actionable half of the rerun signal —
+    # counts alone cannot be checked against tests/flaky_registry.yaml.
+    if rerun_tests:
+        lines.extend(["", "<details><summary>Rerun nodeids</summary>", ""])
+        lines.extend(f"- `{nodeid}`" for nodeid in sorted(rerun_tests))
+        lines.extend(["", "</details>"])
     if missing:
         lines.extend(["", f"Missing optional evidence files: **{len(missing)}**."])
     return "\n".join(lines) + "\n"
@@ -149,13 +156,14 @@ def main() -> int:
             missing.append(path)
         else:
             valid_rerun_reports.append(path)
-    rerun_attempts, rerun_test_count = parse_reruns(valid_rerun_reports)
+    rerun_attempts, rerun_test_count, rerun_tests = parse_reruns(valid_rerun_reports)
     rendered = render_summary(
         title=args.title,
         junit=junit,
         rerun_attempts=rerun_attempts,
         rerun_test_count=rerun_test_count,
         missing=missing,
+        rerun_tests=rerun_tests,
     )
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

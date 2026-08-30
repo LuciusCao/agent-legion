@@ -163,7 +163,8 @@ class Client(TransferOperations):
             raise WorkerAuthError(f"HTTP {status}: {body[:300]!r}")
         if status != 200:
             raise RuntimeError(f"Agent claim failed: HTTP {status}: {body[:300]!r}")
-        return json.loads(body)
+        claim: dict[str, Any] | None = json.loads(body)
+        return claim
 
     def get_ops_metrics(self, granularity: str) -> dict[str, Any]:
         """Fetch this Worker's metrics with its issued Worker token."""
@@ -173,7 +174,8 @@ class Client(TransferOperations):
             raise WorkerAuthError(f"HTTP {status}: {body[:300]!r}")
         if status != 200:
             raise RuntimeError(f"ops metrics failed: HTTP {status}: {body[:300]!r}")
-        return json.loads(body)
+        metrics: dict[str, Any] = json.loads(body)
+        return metrics
 
     def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
         """Beat once; returns (status, cancelled_execution_ids).

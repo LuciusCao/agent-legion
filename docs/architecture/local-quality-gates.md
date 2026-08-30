@@ -182,11 +182,19 @@ the same ref:
   guarantees every producer finished before the merge starts — the
   event-driven replacement for the old `gh api` artifact polling in
   backend-postgres-a (issue #193). It also renders the aggregate backend
-  test summary.
+  test summary, and runs the coverage-partition check in `--enforce` mode
+  for the backend partitions (agent dispatch / workflow upgrade / agent
+  artifacts / worker execution plane / job log raw, #275+#295). Local
+  `check.sh` keeps partitions report-only — its coverage file may hold a
+  partial tier, and floors on partial data produce false reds.
 - **frontend-logic / frontend-component / frontend-coverage** — frontend
   static checks and the two Vitest projects (node / jsdom) as parallel jobs;
   the coverage job merges the shard blob reports and enforces the frontend
-  coverage thresholds plus the production bundle (`npm run build:bundle`).
+  coverage thresholds plus the production bundle (`npm run build:bundle`),
+  and enforces the frontend coverage partitions (auth/bootstrap / api
+  transport / workflow upgrade / admin pages, #295) against the merged blob
+  data — previously every frontend partition reported SKIP on PR runs
+  because only the backend-coverage job ran the partition check.
 - **rust** — `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
   and `cargo test` in `velites/`.
 - **e2e-smoke** — the deterministic browser smoke suite.
@@ -200,6 +208,14 @@ In `nightly-gate.yml`:
 - **ci-extended** — `tests/ci -m ci_extended` stress scenarios, with the
   unregistered-rerun (flaky governance) check. Runs only on the weekly
   schedule and manual dispatch.
+- **exemption-expiry** — refreshes the issue-state manifest and detects
+  expired architecture exemptions; since #295 it also detects expired
+  flaky-registry deadlines (`check_reruns.py --check-deadlines`, deadline
+  evidence without needing the extended rerun report — the PR gate's
+  `--reruns 1` makes reruns invisible there, so deadline drift now surfaces
+  at the same weekly cadence as exemption expiry). The PR-side visibility
+  half of #295: backend-coverage renders every rerun nodeid in the job
+  summary, so a PR rerun can be checked against the registry by eye.
 - **nightly-e2e** — multi-browser smoke E2E (the deterministic browser suite
   re-run on Chromium, Firefox, and WebKit via `scripts/e2e/run_browser_smoke.py`;
   PR/push stays Chromium-only) plus a workspace stress run

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -26,7 +27,7 @@ class LocalClient:
         path: str,
         payload: dict[str, Any] | None = None,
         timeout: int = READ_TIMEOUT,
-    ) -> Any:
+    ) -> dict[str, Any]:
         try:
             response = self.session.request(
                 method,
@@ -44,7 +45,8 @@ class LocalClient:
             except ValueError:
                 detail = response.reason
             raise RuntimeError(f"Worker Service 返回 HTTP {response.status_code}: {detail}")
-        return response.json()
+        result: dict[str, Any] = response.json()
+        return result
 
 
 def _timeout_message(timeout: int) -> str:
@@ -54,10 +56,10 @@ def _timeout_message(timeout: int) -> str:
 def resolve_control_token(args: argparse.Namespace) -> str:
     """优先 --token，其次 AGENT_WORKER_CONTROL_TOKEN，最后读 state dir 下的 control_token。"""
     if args.token:
-        return args.token
+        return str(args.token)
     if token := os.environ.get("AGENT_WORKER_CONTROL_TOKEN"):
         return token
-    path = args.state_dir / "control_token"
+    path: Path = args.state_dir / "control_token"
     try:
         if token := path.read_text(encoding="utf-8").strip():
             return token

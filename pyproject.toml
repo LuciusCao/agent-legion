@@ -98,3 +98,15 @@ warn_unused_configs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
 exclude = ["tests/"]
+
+# 跨进程契约面模块开严格档（#294 第二步）：shared/ 的 Host↔Worker 协议与
+# workspace_libs/node_sdk.py（节点 SDK 公开面）的签名漂移是跨进程事故源，
+# 类型安全优先级高于普通业务模块；其余目录维持宽松档。
+[[tool.mypy.overrides]]
+module = [
+    "shared.*",
+    "workspace_libs.node_sdk",
+    "workspace_libs.http_client",
+    "workspace_libs.download",
+]
+disallow_untyped_defs = true

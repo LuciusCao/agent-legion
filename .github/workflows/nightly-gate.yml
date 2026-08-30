@@ -235,3 +235,11 @@ jobs:
             exit 1
           fi
           uv run python -m scripts.check_invariants
+
+      # #295: the flaky registry had no deadline-expiry equivalent of the
+      # exemption lifecycle above — an expired entry surfaced only when the
+      # nightly extended suite happened to run (or never). Same cadence,
+      # same job: the check is deadline-only here, rerun evidence stays on
+      # the ci-extended job.
+      - name: Detect expired flaky-registry deadlines
+        run: uv run python scripts/check_reruns.py --check-deadlines
