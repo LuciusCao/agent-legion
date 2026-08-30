@@ -1,3 +1,15 @@
+"""Auth dependency injection — the single authentication choke point.
+
+Two credential channels resolve here (Bearer wins over the session cookie):
+user sessions and scoped tokens (Bearer only, never ambient, CSRF-exempt —
+STUDIO-AGENT-001). Guards on ``get_current_user`` encode the scope lattice:
+``require_user`` (any identity), ``require_admin`` (role + refusal of ANY
+scoped identity — it inherits the minter's role), ``reject_studio_agent_
+scope`` (effecting endpoints; scoped identities never take effect),
+``require_studio_agent_scope``/``_workspace`` (tool surface) and
+``enforce_scoped_workspace_binding`` (bound tokens read only their own workspace).
+"""
+
 from __future__ import annotations
 
 from typing import Annotated, Any

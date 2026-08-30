@@ -163,6 +163,15 @@
   上传后一次创建冻结 `material_bundles`，删除双向守卫，物化为确定性地址的硬链接
   目录树，MATERIAL-BUNDLE-001）；DEFAULT 契约保持 `("material","ref")`，存量
   workspace 对 bundle 条目 fail-closed。
+- 另一类免 capability 的节点是 `type: approval` 人工审批门（schema v65
+  `approval_decisions` 审计表，EXEC-APPROVAL-001，#266）：不 dispatch、不占
+  lease，调度就绪即把 job_node 停在 `awaiting_approval`；只有人类会话经
+  审批 API（`approved`/`rework`/`rejected`，studio_agent scoped token 被拒）
+  能推进——approved 完成节点、rework 重置上游节点并写反馈 artifact、
+  rejected 失败节点；决策行 insert-only，每 (job_id, node_key) 最新行即当前
+  决策。节点 `inputs` 兼作评审材料清单，`config` 支持 `rework_target` 与
+  `feedback_artifact`；不得声明 execution 字段（loader 拒绝）。语义细节见
+  `server/app/workflows/approval_node.py` 模块 docstring。
 - Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.runtime` / `.contracts`。
 - code 节点：capability 不再声明 `path`（#96 已退役该绑定）；所有节点代码以
   DB 发布文本（`versioned_entities` entity_type `node_code`）为准，经发布流生效、版本不可变。
@@ -240,8 +249,9 @@
   `tool_execution_update`）。
 - Agent 执行的 provider/model/thinking 解析链：节点 `execution.*` 覆盖 →
   workflow 顶层 `execution` 默认（定义级可选块，loader 合并进节点、随
-  revision 版本化）→ 报错，无 workspace/yaml/全局兜底（workspace Settings 的
-  `default_agent_*` 三列已随 schema v63 退役）；
+  revision 版本化；schema v64 `workspace_settings_retirement` 迁移已把存量
+  非空 `default_agent_*` 回填进 active revision 顶层 execution 后退役该
+  三列）→ 报错，无 workspace/yaml/全局兜底；
   manifest 只携带解析后的 `execution.*` 块（enqueue 冻结 + claim 重解析，节点
   覆盖随 revision 升级实时生效，EXEC-RUNTIME-DISPATCH-001）。一个 capability
   在每个 workspace 只允许一个 published Agent（DB partial unique index 兜底）。

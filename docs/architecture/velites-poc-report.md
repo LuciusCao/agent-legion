@@ -2,6 +2,11 @@
 
 日期：2026-07-31 ｜ 分支：poc/pi-agent-rust（worktree `.worktrees/poc-rust-pi`）
 
+> 后续演进补注（2026-08-30）：本报告为时点快照，`path:line` 证据与部分环境
+> 前置反映当时代码。PoC 产物 `pi_agent_rust` 已演化为 `velites/` crate
+> （设计见 [velites-harness.md](velites-harness.md)）；文中涉及的全局 worker
+> register token 已随 issue #35 退役。
+
 ## 0. TL;DR
 
 **结论：事件流 wire 结构与 Agent Legion 消费端高度兼容，资源优势明显（RSS ≈ 1/6.5，启动 CPU ≈ 0），但存在 3 个需要 fork 修补的缺口：`--no-context-files` 缺失（会注入祖先目录 AGENTS.md）、错误时 exit code 语义不同（rust exit 1 / Node exit 0）、坏模型在启动期硬失败（零事件流）。建议：fork 修补后可作为 velites harness 的 executor 候选；不修补直接替换不可用（context 泄漏是硬性问题）。**
@@ -100,7 +105,7 @@
 - 所有 pi 相关测试均用 fake binary（`echo` / 手写 shell 脚本）mock，**没有任何测试真拉 pi 子进程**，因此无法用 flavor 开关直接驱动 rust 版跑测试
 - 质量门 `scripts/check-quick.sh`：backend static lane **通过**（ruff/mypy/architecture 全绿）。过程中修了两个 PoC 自身引入的问题：(a) 克隆的上游源码 `poc/src/` 被项目 ruff 误扫 → 把 `/poc/`、`/bin/` 加入 `.gitignore`（ruff 默认尊重 gitignore，PoC 产物本就不该 tracked）；(b) `pi_protocol.py` 超体积预算（146 > ceiling 134）→ 按架构纪律压缩补丁至 132 行，未抬 ceiling
 - frontend lane 未通过：`./node_modules/.bin/openapi-typescript` 不存在（新 worktree 未装前端依赖），与本次改动无关
-- 环境前置：本 worktree 需从 develop 复制 `deploy/secrets/agent_worker_register_token` 与 `vault_master_key` 才能跑测试（已复制，未打印内容）
+- 环境前置：本 worktree 需从 develop 复制 `deploy/secrets/vault_master_key` 才能跑测试（已复制，未打印内容）。当时的 `agent_worker_register_token` 前置已随 issue #35（全局 token 退役）作废，见 §7 上方状态补注
 
 ## 8. 性能（本机 load avg ≈ 40，wall time 噪声大，以 user CPU 与 RSS 为准）
 

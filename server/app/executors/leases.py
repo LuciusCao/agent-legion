@@ -1,3 +1,5 @@
+"""Executor lease repository — the capacity gate AGENTS.md §6 names (#187)."""
+
 from __future__ import annotations
 
 import logging
@@ -141,8 +143,7 @@ class ExecutorLeaseRepository:
     def active_lease_node_keys_for_jobs(
         self, job_ids: Sequence[str], now: datetime
     ) -> set[tuple[str, str]]:
-        """Bulk form of ``has_active_for_node``: (job_id, node_key) pairs with
-        an active lease, for read-only batch checks (rerun preview)."""
+        """Bulk ``has_active_for_node`` for read-only batch checks (rerun preview)."""
         ids = [str(job_id) for job_id in job_ids]
         if not ids:
             return set()
