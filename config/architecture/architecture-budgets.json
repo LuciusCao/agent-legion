@@ -124,7 +124,7 @@
     "frontend/src/components/artifact/ArtifactPreviewDialog.module.css": 25,
     "frontend/src/components/artifact/ArtifactPreviewDialog.tsx": 57,
     "frontend/src/components/canUpgradeJob.ts": 14,
-    "frontend/src/components/dag/DagEdge.tsx": 76,
+    "frontend/src/components/dag/DagEdge.tsx": 71,
     "frontend/src/components/dag/DagEdgeLabels.tsx": 54,
     "frontend/src/components/dag/DagFullscreenDialog.module.css": 53,
     "frontend/src/components/dag/DagFullscreenDialog.tsx": 117,
