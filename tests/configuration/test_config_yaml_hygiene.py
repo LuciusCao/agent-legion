@@ -4,8 +4,8 @@ All runtime split configuration files are retired (``app.yaml`` /
 ``workflow.yaml`` / ``agent_legion.yaml`` fail startup when present, with
 migration guidance), so this suite scans the remaining tracked config yaml
 files and asserts the hygiene red lines hold in the repository itself (the
-startup-side rejections are covered by tests/test_settings.py and
-tests/test_configuration_loader.py):
+startup-side rejections are covered by tests/configuration/test_settings.py and
+tests/configuration/test_configuration_loader.py):
 
 - the global ``cms:`` section stays retired — CMS defaults live in the
   capability ``config_schema``; endpoint/credentials live on the
@@ -32,7 +32,7 @@ import yaml
 
 from server.app.configuration.openclaw_defaults import DEFAULT_OPENCLAW_CONFIG
 
-CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 TRACKED_CONFIG_FILES = ("agent-worker.example.yaml",)
 ENV_ONLY_SECTIONS = ("vault", "auth")
 

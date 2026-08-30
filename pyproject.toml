@@ -79,7 +79,7 @@ ignore = ["E501"]
 source = ["server"]
 omit = [
   "*/__pycache__/*",
-  # These paths are referenced only by tests/test_export_openapi.py via
+  # These paths are referenced only by tests/app/test_export_openapi.py via
   # compile() filenames; the files do not exist and must not be measured.
   "server/app/routes/legacy.py",
   "server/app/routes/unrelated.py",

@@ -4,7 +4,7 @@ NOTE: this subclasses GZipResponder and flips its private
 ``content_type_is_excluded`` flag after super() has computed the SSE
 exemption — it relies on starlette 1.0.x internals, so re-verify against
 the new implementation whenever starlette is upgraded (the test in
-tests/test_main.py goes red if the contract breaks). Content-Type matching
+tests/app/test_main.py goes red if the contract breaks). Content-Type matching
 is case-sensitive; all current producers emit lowercase media types, and a
 miss only degrades to re-gzipping (correctness is unaffected).
 """
