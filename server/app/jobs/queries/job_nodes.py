@@ -97,8 +97,10 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
         workspace_id: str | None = None,
         source_id: str | None = None,
         status_not_in: Sequence[str] | None = None,
+        limit: int = 500,
     ) -> list[dict[str, Any]]:
-        clauses, params = [], []
+        clauses: list[str] = []
+        params: list[Any] = []
         for col, val in (
             ("workspace_id", workspace_id),
             ("workflow_key", workflow_key),
@@ -112,8 +114,14 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
             clauses.append(f"status not in ({','.join('%s' for _ in status_not_in)})")
             params.extend(status_not_in)
         where = f" where {' and '.join(clauses)}" if clauses else ""
+        # #272: the legacy unbounded list (select * including KB-scale TEXT
+        # columns) needs a hard cap. The frontend already uses the paginated
+        # /jobs/snapshot endpoint; this bound is API-compat protection only.
+        params.append(max(1, min(limit, 500)))
         with self._connect_read() as conn:
-            rows = conn.execute(f"select * from jobs{where} order by created_at desc", params)
+            rows = conn.execute(
+                f"select * from jobs{where} order by created_at desc limit %s", params
+            )
             return [dict(row) for row in rows]
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
