@@ -102,7 +102,7 @@ function agentNodesReady({
   if (!workflowDefinition || !workspaceId) return false
   // agent 节点 = active revision 中路由到 published Agent 的节点（快照
   // agentRoutes 按 capability 匹配物化而来，与后端 _agent_routes 同源）。
-  // 过滤键用 workspace_id（workflow_key 已 deprecated，v61 起恒等，#211）。
+  // 过滤键用 workspace_id（workflow_key 已 deprecated，v62 起恒等，#211）。
   const agentNodeKeys = new Set(
     agentRoutes
       .filter((route) => route.workflow_key === workspaceId)

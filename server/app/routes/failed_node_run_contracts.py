@@ -13,7 +13,7 @@ class FailedNodeRunItem(BaseModel):
         description=(
             "Deprecated: filter by the workspace the rows were fetched from "
             "instead (the list endpoint is workspace-scoped; the value always "
-            "equals that workspace's id since schema v61). Removal is tracked "
+            "equals that workspace's id since schema v62). Removal is tracked "
             "in #211."
         ),
         deprecated=True,

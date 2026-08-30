@@ -34,7 +34,7 @@ function makeDetail(nodes: JobDetail['nodes']): JobDetail {
     job: {
       id: 'job1',
       // catalog key/label 现在读 workspace_id（workflow_key 已 deprecated 且
-      // v61 起恒等，#211 Phase 2）——两者在此 fixture 中保持恒等值。
+      // v62 起恒等，#211 Phase 2）——两者在此 fixture 中保持恒等值。
       workspace_id: 'demo_workflow',
       workflow_key: 'demo_workflow',
       source_type: 'question',

@@ -38,7 +38,7 @@ function makeDefinition(
 
 function makeRoute(nodeKey: string): WorkspaceAgentRouteEntry {
   return {
-    // 过滤键是 workspace_id（workflow_key 已 deprecated 且 v61 起恒等）。
+    // 过滤键是 workspace_id（workflow_key 已 deprecated 且 v62 起恒等）。
     workflow_key: 'ws1',
     node_key: nodeKey,
     node_label: nodeKey,

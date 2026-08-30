@@ -12,7 +12,7 @@ export function nodesForJob(
   // `type: start` entry nodes never execute and never appear in job_nodes;
   // hide them from job views (rerun / run-to pickers, DAG ordering).
   // Matching key is workspace_id: job.workflow_key is deprecated (#211
-  // Phase 2) and always equals the workspace id since schema v61, and the
+  // Phase 2) and always equals the workspace id since schema v62, and the
   // catalog/definition keys are the workspace-bound workflow key.
   const executable = (nodes: DagNode[]) =>
     nodes.filter((node) => node.node_type !== 'start')

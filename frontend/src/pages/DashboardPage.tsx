@@ -18,7 +18,7 @@ function DashboardWorkspaceCard({ workspace }: { workspace: WorkspaceRecord }) {
       name={workspace.name}
       workflowLabel={
         // 兜底 label 改读 workspace id（default_workflow_key 已 deprecated 且
-        // v61 起恒等，#211 Phase 2；删除依赖列本身退役，属最后批次）。
+        // v62 起恒等，#211 Phase 2；删除依赖列本身退役，属最后批次）。
         stats?.workflow_label || workspace.id
       }
       jobStats={stats?.job_stats || {}}

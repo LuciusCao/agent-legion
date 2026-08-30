@@ -4,7 +4,7 @@ import { toDagEdges, toDagNodes } from './jobNodeHelpers'
 
 export function toNodeCatalog(detail: JobDetail | null): NodeCatalog | null {
   if (!detail) return null
-  // key/label 读 workspace_id（workflow_key 已 deprecated 且 v61 起恒等，#211）。
+  // key/label 读 workspace_id（workflow_key 已 deprecated 且 v62 起恒等，#211）。
   return {
     key: detail.job.workspace_id,
     label: detail.job.workspace_id,
