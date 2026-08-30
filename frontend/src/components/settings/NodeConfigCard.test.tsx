@@ -132,4 +132,27 @@ describe('NodeConfigCard', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('校验失败')
     )
   })
+
+  it('badges schema properties declared runtime_mutable', () => {
+    renderCard({
+      schema: {
+        type: 'object',
+        properties: {
+          dry_run: { type: 'boolean', default: false, runtime_mutable: true },
+          page_size: { type: 'integer', default: 100 },
+        },
+      },
+      initialValues: {},
+    })
+
+    expect(screen.getByText('dry_run · 运行开关')).toBeInTheDocument()
+    expect(screen.getByText(/改动即时生效/)).toBeInTheDocument()
+    expect(screen.queryByText('page_size · 运行开关')).not.toBeInTheDocument()
+  })
+
+  it('renders no runtime-mutable badge for plain schemas', () => {
+    renderCard()
+
+    expect(screen.queryByText(/运行开关/)).not.toBeInTheDocument()
+  })
 })

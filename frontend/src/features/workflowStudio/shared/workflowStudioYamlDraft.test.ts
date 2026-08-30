@@ -8,7 +8,12 @@ import {
   patchWorkflowNodeOutputs,
   patchWorkflowNodeTerminalOutcome,
 } from './workflowStudioYamlDraft'
+import { patchWorkflowNodeConfigSchema } from './workflowStudioYamlDraft.configSchema'
 import { patchWorkflowNodeExecution } from './workflowStudioYamlDraft.execution'
+import {
+  dumpWorkflowYaml,
+  parseWorkflowYaml,
+} from './workflowStudioYamlDraft.parse'
 
 const yaml = `key: demo
 label: Demo
@@ -143,6 +148,88 @@ nodes:
     expect(changed).toContain('type: start')
     expect(changed).toContain('accepted_item_types:')
     expect(changed).toContain('- material')
+  })
+})
+
+const yamlWithConfigSchema = `key: demo
+label: Demo
+schema_version: 2
+nodes:
+  generate:
+    label: Generate
+    capability: generate_questions
+    config_schema:
+      type: object
+      properties:
+        bank_version:
+          type: string
+          default: v1
+          description: 题库版本
+        dry_run:
+          type: boolean
+          default: false
+      required:
+        - bank_version
+`
+
+describe('workflowStudioYamlDraft config_schema patches', () => {
+  it('round-trips an unchanged config_schema byte-identically', () => {
+    const schema =
+      parseWorkflowYaml(yamlWithConfigSchema).nodes?.generate?.config_schema
+    const changed = patchWorkflowNodeConfigSchema(
+      yamlWithConfigSchema,
+      'generate',
+      schema
+    )
+    expect(changed).toBe(
+      dumpWorkflowYaml(parseWorkflowYaml(yamlWithConfigSchema))
+    )
+  })
+
+  it('toggles runtime_mutable without touching other schema keys', () => {
+    const schema = structuredClone(
+      parseWorkflowYaml(yamlWithConfigSchema).nodes?.generate?.config_schema
+    )
+    schema!.properties!.dry_run.runtime_mutable = true
+    const changed = patchWorkflowNodeConfigSchema(
+      yamlWithConfigSchema,
+      'generate',
+      schema
+    )
+    expect(changed).toContain('runtime_mutable: true')
+    expect(changed).toContain('bank_version:')
+    expect(changed).toContain('description: 题库版本')
+    expect(changed).toContain('- bank_version')
+    // 除新增 runtime_mutable 行外其余字节不变。
+    const baseline = dumpWorkflowYaml(parseWorkflowYaml(yamlWithConfigSchema))
+    expect(changed.replace('          runtime_mutable: true\n', '')).toBe(
+      baseline
+    )
+  })
+
+  it('adds a config_schema to a node that had none', () => {
+    const changed = patchWorkflowNodeConfigSchema(yaml, 'fetch', {
+      type: 'object',
+      properties: { dry_run: { type: 'boolean', runtime_mutable: true } },
+    })
+    expect(changed).toContain('config_schema:')
+    expect(changed).toContain('runtime_mutable: true')
+  })
+
+  it('deletes config_schema on undefined or empty object', () => {
+    const cleared = patchWorkflowNodeConfigSchema(
+      yamlWithConfigSchema,
+      'generate',
+      undefined
+    )
+    expect(cleared).not.toContain('config_schema')
+
+    const clearedEmpty = patchWorkflowNodeConfigSchema(
+      yamlWithConfigSchema,
+      'generate',
+      {}
+    )
+    expect(clearedEmpty).not.toContain('config_schema')
   })
 })
 

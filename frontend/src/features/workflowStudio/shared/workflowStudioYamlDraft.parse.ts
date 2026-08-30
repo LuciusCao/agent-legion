@@ -18,6 +18,7 @@ export type WorkflowYamlNode = {
   inputs?: string[]
   outputs?: string[]
   terminal?: { outcome?: string }
+  config_schema?: import('../../../types').ConfigSchema
   execution?: {
     provider?: string
     model?: string

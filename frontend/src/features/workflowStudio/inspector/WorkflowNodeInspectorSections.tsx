@@ -1,6 +1,7 @@
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { SelectedWorkflowNodeDetails } from '../shared/workflowStudioModel'
 import { WorkflowNodeCodeSection } from '../code-editor/WorkflowNodeCodeSection'
+import { WorkflowNodeConfigSchemaSection } from './WorkflowNodeConfigSchemaSection'
 import { WorkflowNodeConfigSection } from './WorkflowNodeConfigSection'
 import { WorkflowNodeDataContractSection } from './WorkflowNodeDataContractSection'
 import { WorkflowNodeDependencySection } from './WorkflowNodeDependencySection'
@@ -35,6 +36,11 @@ export function WorkflowNodeInspectorSections(props: InspectorSectionProps) {
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}
         readOnly={props.readOnly}
+      />
+      <WorkflowNodeConfigSchemaSection
+        key={`config-schema-${node.key}`}
+        node={node}
+        {...props}
       />
       <WorkflowNodeExecutionSection
         node={node}
