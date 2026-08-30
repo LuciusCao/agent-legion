@@ -1459,7 +1459,7 @@
     "worker/supervisor.py": 225,
     "worker/token_status.py": 35,
     "worker/transfer_controls.py": 47,
-    "worker/ui/app.js": 769,
+    "worker/ui/app.js": 768,
     "worker/ui/styles.css": 777,
     "worker/upload/__init__.py": 14,
     "worker/upload/heartbeat.py": 45,
