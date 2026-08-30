@@ -22,23 +22,36 @@ from pathlib import Path
 __test__ = False
 
 _SCAN_ROOTS = ("server/app", "worker")
-_AUDIT_MARKERS = ("#204", "broad-except audit")
+# The full marker, not its parts: a bare "#204" elsewhere in the function
+# must not bless an unrelated new broad catch (codex review on #308).
+_AUDIT_MARKER = "#204 broad-except audit"
 _NEAR_LINES = 8
 _HEADER_LINES = 12
+
+
+def _is_broad_catch(exc_type: ast.expr | None) -> bool:
+    """Bare ``except:``, ``except Exception``, or a tuple containing it."""
+    if exc_type is None:
+        return True
+    if isinstance(exc_type, ast.Name):
+        return exc_type.id == "Exception"
+    if isinstance(exc_type, ast.Tuple):
+        return any(_is_broad_catch(item) for item in exc_type.elts)
+    return False
 
 
 def _has_audit_note(source_lines: list[str], start: int) -> bool:
     """Audit marker within 8 lines after the except arm, or in the
     enclosing function's first 12 lines (block audits cover the method)."""
     near = "\n".join(source_lines[start : start + _NEAR_LINES])
-    if any(marker in near for marker in _AUDIT_MARKERS):
+    if _AUDIT_MARKER in near:
         return True
     # Walk back to the enclosing def: an audit block at the method head
     # governs every catch inside it.
     for j in range(start, max(-1, start - 120), -1):
         if re.match(r"\s*(def |class )", source_lines[j]):
             header = "\n".join(source_lines[j : j + _HEADER_LINES])
-            return any(marker in header for marker in _AUDIT_MARKERS)
+            return _AUDIT_MARKER in header
     return False
 
 
@@ -50,10 +63,7 @@ def find_unaudited_broad_excepts(source: str) -> list[int]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.ExceptHandler):
             continue
-        # Broad catch: bare `except:` or `except Exception`.
-        is_bare = node.type is None
-        is_exception = isinstance(node.type, ast.Name) and node.type.id == "Exception"
-        if not (is_bare or is_exception):
+        if not _is_broad_catch(node.type):
             continue
         if not _has_audit_note(lines, node.lineno - 1):
             unaudited.append(node.lineno)

@@ -59,3 +59,24 @@ def test_current_repo_is_fully_audited() -> None:
     # roots carries its audit note — this is the regression pin.
     root = Path(__file__).resolve().parents[2]
     assert check_broad_except_audit(root) == []
+
+
+def test_exception_in_tuple_is_broad() -> None:
+    # codex review on #308: `except (Exception, OSError)` catches every
+    # Exception and must be audited like the plain form.
+    source = "try:\n    boom()\nexcept (Exception, OSError):\n    pass\n"
+    assert find_unaudited_broad_excepts(source) == [3]
+
+
+def test_bare_204_comment_does_not_bless() -> None:
+    # codex review on #308: a bare "#204" elsewhere in the function must
+    # not satisfy the guard — only the full marker counts.
+    source = (
+        "def f():\n"
+        "    # #204: unrelated historical note\n"
+        "    try:\n"
+        "        boom()\n"
+        "    except Exception:\n"
+        "        pass\n"
+    )
+    assert find_unaudited_broad_excepts(source) == [5]
