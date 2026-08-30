@@ -446,3 +446,17 @@ def test_workflow_definition_from_dict_converts_corrupt_shapes_to_definition_err
     for payload in corrupt_payloads:
         with pytest.raises(WorkflowDefinitionError):
             workflow_definition_from_dict(payload)
+
+
+def test_workflow_definition_from_dict_rejects_non_mapping_payload():
+    """Codex round-2 on PR #251: valid JSON with a non-mapping top level
+    (list/null) must raise WorkflowDefinitionError (the scan path degrades
+    per workspace), not AttributeError escaping the workspace-scoped catch."""
+    import json
+
+    from server.app.workflows.definition import workflow_definition_from_dict
+    from server.app.workflows.schema import WorkflowDefinitionError
+
+    for raw in ("[]", "null", '"str"', "42"):
+        with pytest.raises(WorkflowDefinitionError):
+            workflow_definition_from_dict(json.loads(raw))

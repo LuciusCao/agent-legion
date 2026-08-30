@@ -58,6 +58,14 @@ def discard_staging(store: JobArtifactObjectStore, storage_key: str) -> None:
     try:
         store.storage.delete_object(storage_key)
     except Exception:
+        # #204 broad-except audit: deliberate best-effort staging cleanup.
+        # This runs in the promote success path AND in promote_all's finally
+        # after a failure — either way the caller's outcome must not change:
+        # an orphaned staging object is explicitly lifecycle's backstop
+        # (documented across this module family), so a storage error during
+        # its deletion is only worth a warning with the traceback. The
+        # storage layer is third-party surface (botocore); no business
+        # exception family could enumerate it.
         logger.warning("failed to delete staging object %s", storage_key, exc_info=True)
 
 

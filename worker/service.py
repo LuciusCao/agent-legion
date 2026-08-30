@@ -18,7 +18,8 @@ from worker.metrics_proxy import create_metrics_proxy_router
 from worker.registration.token import registration_token_configured
 from worker.runtime.catalog import runtime_status
 from worker.service_bind import embed_control_token
-from worker.service_models import RegisterTokenPayload, WorkerConfigPayload
+from worker.service_models import WorkerConfigPayload
+from worker.service_tokens import create_register_token_router
 from worker.supervisor import WorkerConfigStore, WorkerSupervisor, public_config
 
 logger = logging.getLogger(__name__)
@@ -147,43 +148,12 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool 
         supervisor.restart()
         return supervisor.status()
 
-    @app.get("/api/register-tokens", dependencies=guarded)
-    def list_register_tokens() -> dict[str, Any]:
-        """Scoped token 清单（仅 id 与验证状态，永不回显明文）。"""
-        tokens = supervisor.store.read_registration_tokens()
-        token_status = supervisor.token_status()
-        return {
-            "tokens": [
-                {
-                    "token_id": row["token_id"],
-                    "state": token_status.get(row["token_id"], "pending"),
-                }
-                for row in tokens
-            ]
-        }
-
-    @app.post("/api/register-tokens", dependencies=guarded)
-    def add_register_token(payload: RegisterTokenPayload) -> dict[str, Any]:
-        """添加一个 scoped token 并重启（重注册会验证全部 token）。"""
-        try:
-            supervisor.store.upsert_registration_token(payload.register_token)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        supervisor.restart()
-        return supervisor.status()
-
-    @app.delete("/api/register-tokens/{token_id}", status_code=200, dependencies=guarded)
-    def remove_register_token(token_id: str) -> dict[str, Any]:
-        if not supervisor.store.remove_registration_token(token_id):
-            raise HTTPException(status_code=404, detail="token not found")
-        supervisor.restart()
-        return supervisor.status()
-
     @app.get("/api/logs", dependencies=guarded)
     def logs(limit: int = Query(default=200, ge=1, le=500)) -> dict[str, list[str]]:
         return {"lines": supervisor.logs(limit)}
 
     app.include_router(create_metrics_proxy_router(supervisor), dependencies=guarded)
+    app.include_router(create_register_token_router(supervisor, guarded))
 
     return app
 

@@ -49,7 +49,9 @@ bucket 处告警暴露。起完后调用
 `scripts/ensure-s3-bucket.py` 确保 bucket 与浏览器直传 CORS 就绪
 （与 `init-worktree.sh` 共用同一脚本）。docker 缺失、启动失败或建 bucket
 失败都只告警不阻断：材料 API 降级为 503，其余功能不受影响，就绪后重跑
-`make dev-up` 即可补齐。`make dev-status` 会顺带显示 rustfs 容器状态。
+`make dev-up` 可补齐存储；若期间跳过了 demo 示例材料播种，需另跑一次
+`make import-demo`（幂等）补播种——`make dev-up` 本身不会重播材料。
+`make dev-status` 会顺带显示 rustfs 容器状态。
 
 开发环境切外部对象存储：改根 `.env` 的 `AGENT_LEGION_S3_ENDPOINT` /
 凭据 / `AGENT_LEGION_S3_BUCKET` 三样即可（AWS 默认端点写法是显式留空
@@ -165,10 +167,15 @@ EOF
   解析下沉到 jobs）。**存量 jobs 较多时迁移 UPDATE 可能耗时数分钟，
   务必先备份数据库并在低峰执行**；迁移幂等可重入，中断后重启
   会继续。
-- 当前 schema 已到 v57：v54（`job_artifacts` 产物清单表）、v55
-  （`material_bundles`）、v56（`job_node_status_counts` 触发器维护的
-  状态计数）与 v57（`studio_chat_sessions.draft_yaml`）均为 additive
-  迁移，随启动自动执行。
+- 当前 schema 版本以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准
+  （目前 v64）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
+  v55（`material_bundles`）、v56（`job_node_status_counts` 触发器维护的
+  状态计数）、v57（`studio_chat_sessions.draft_yaml`）、v58（scoped worker
+  token——撤销存量全局 register token，行为变更）、v61（Studio workflow
+  草稿表）、v62（workspace id 与 workflow key 绑定，存量 id 重命名）、
+  v63（产物预览隐藏列表）、v64（workspace 级 Agent 默认配置三列退役
+  drop）。v59（`jobs(run_id)` 索引）与 v60（register token ids 列）与本
+  部署面无直接关系。
 - bundle 条目（文件夹整体一个条目）复用同一 bucket 与材料缓存，无额外
   存储配置。
 - 上传一个文件验证闭环：`POST /api/workspaces/{id}/materials/presign`

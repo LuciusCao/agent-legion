@@ -18,7 +18,7 @@
 
 示例 DAG（`server/app/workflows/builtin_demo.py` 的
 `education_video_problems_generation`；`server/app/workflows/builtin.py`
-仅 re-export）：
+只是装配入口，把 demo 定义挂进 `BUILTIN_WORKFLOW_DEFINITIONS`）：
 intake_knowledge_points → write_script → review_script →
 generate_questions → review_questions → publish_content（模拟入库，
 不发网络请求）。

@@ -161,17 +161,20 @@
 - Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.runtime` / `.contracts`。
 - code 节点：capability 不再声明 `path`（#96 已退役该绑定）；所有节点代码以
   DB 发布文本（`versioned_entities` entity_type `node_code`）为准，经发布流生效、版本不可变。
-  #115 起普通 job 不再冻结代码版本：dispatch 解析当前 published（workspace → 全局
-  factory seed），重新发布对进行中 job 的下一次节点执行生效；intake 的
+  #115 起普通 job 不再冻结代码版本：dispatch 解析当前 published（只解析该
+  workspace 的 published 版本，没有全局兜底；legacy global 行仅作迁移输入与
+  quality replay 的历史版本回放），重新发布对进行中 job 的下一次节点执行生效；intake 的
   `node_code_versions` 与 revision 快照的 `node_code_pins` 只作审计记录与
   quality replay 的 pin 来源（只有带 `quality_replay` 标记的 batch 按 frozen pin
   执行并 fail-closed，EXEC-CODE-002/003）。Agent 定义同理：普通 job 从不 pin
   Agent 版本，dispatch 始终解析本 workspace 当前 published 定义（只有 quality
   replay 经 `agent_versions` pin）。禁止任何运行时 API 增删改 repo 文件。
   `workflow_nodes/` 只剩示例
-  workflow 的两个 git 评审种子源（启动时 seed-if-absent 发布为 global 作用域 node_code，
-  `server/app/services/demo_node_seed.py`）；示例 workflow 的出厂 Agent 模板钉在
-  `server/app/agent_catalog_builtin.py`（workspace 作用域 seed-if-absent，admin 编辑不被
+  workflow 的两个 git 评审种子源（demo workspace 初始化时 seed-if-absent 发布为
+  workspace 作用域 node_code，`server/app/services/demo_node_seed.py`；遗留的
+  global 作用域行仅作一次性迁移输入与历史回放数据，见
+  `server/app/services/demo_node_migration.py`）；示例 workflow 的出厂 Agent 模板钉在
+  `server/app/agent_catalog/builtin.py`（workspace 作用域 seed-if-absent，admin 编辑不被
   种子覆盖）。
   节点入口推荐 `def run(ctx)` + 节点 SDK 的 `@entrypoint` 装饰器（经典
   `run(job, job_dir, runtime)` 签名继续受支持）；节点内部的通用脚手架统一走节点 SDK
@@ -288,7 +291,7 @@ CodeExecutor(...).execute(context)
   （`POST /api/admin/skill-sources/relock`，或 CLI `make skills-lock` /
   `uv run python -m server.app.skills.lock`）解析并冻结 commit。
   （skill 共享资源一致性检查 `check-skills-shared.py` 已随业务 skill 源退役删除。）
-- 完整流程见 [README.md](README.md) 的 Agent Runtimes 章节。
+- 完整流程见 [examples/README.md](examples/README.md)（demo skill 的接线方式）。
 
 ## 8. Security & Data
 

@@ -111,32 +111,3 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/11
   ceiling: 155
-- check: architecture.file_budget
-  path: worker/config_store.py
-  reason: The ceiling rose past the main-side floor before the only-down
-    ratchet existed (#35-era scoped-token work, 2026-08-26); the 0.4.0 release
-    merge anchors on main and rejects the historical raise. The baseline
-    entry is pinned back at the main floor and the overage is carried here
-    as tracked debt — split the store below the floor (#250) and this
-    exemption goes stale automatically.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/250
-  ceiling: 229
-- check: architecture.file_budget
-  path: worker/service.py
-  reason: Same release-merge grandfathering as worker/config_store.py — the
-    pre-ratchet ceiling rise is legitimate develop history that main has not
-    caught up with; split the service below the main floor (#250) to retire
-    this exemption.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/250
-  ceiling: 167
-- check: architecture.file_budget
-  path: worker/supervisor.py
-  reason: Same release-merge grandfathering as worker/config_store.py — the
-    pre-ratchet ceiling rise is legitimate develop history that main has not
-    caught up with; split the supervisor below the main floor (#250) to
-    retire this exemption.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/250
-  ceiling: 254

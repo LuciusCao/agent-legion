@@ -404,7 +404,9 @@ Host 沙箱 allow-read 碰巧含 `examples/`（Worker 上根本不存在该目�
   workspace 的材料区（seed-if-absent，与 node_code 种子同一模式）——
   新用户创建 demo workspace 后零准备即可点击运行，恰好演示目标体验；
 - `tests/helpers.seed_workspace_agent_definitions` 及 demo 相关 fixture
-  同步；`agent_catalog_builtin`（Agent 模板种子）不受影响；
+  同步；`agent_catalog/builtin.py`（Agent 模板种子，实现里以
+  `from server.app.agent_catalog import builtin as agent_catalog_builtin`
+  引用）不受影响；
 - 硬化收尾：demo 不再读 `examples/` 后，评估把 `examples/` 移出
   `_REPO_READ_SUBDIRS`（`_code_sandbox.py`），收缩沙箱读面。
 

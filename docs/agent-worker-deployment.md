@@ -262,8 +262,8 @@ Quick Start 已含命令）：
    `host_url`（dev 栈后端端口，默认 `http://127.0.0.1:8001`）、
    `work_root: data/agent-worker`，并按要跑的 workflow 声明
    `capabilities` / `models`。
-2. 起后端并登录 Host Web UI，在「设置 → Worker Token」为目标 workspace 签发
-   scoped token；到 Worker 控制台（默认 `http://127.0.0.1:8789`）的
+2. 起后端并登录 Host Web UI，在 workspace「设置 → Agent 与 Worker」为目标
+   workspace 签发 scoped token；到 Worker 控制台（默认 `http://127.0.0.1:8789`）的
    「Workspace 访问（Scoped Token）」区块粘贴添加。Worker 侧 token 随时可以
    补——注册失败只影响 Worker 自身，不需要重启后端。
 3. 重跑 `make dev-up`（幂等）启动 Worker，然后在 worker 控制台打开

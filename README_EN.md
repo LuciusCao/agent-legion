@@ -44,51 +44,51 @@ repeatable, auditable production process.
 
 ### Prerequisites
 
-- Python 3.11+, Node 18+, PostgreSQL 17 (Homebrew: `brew install postgresql@17`)
-- [`uv`](https://docs.astral.sh/uv/) for Python dependencies
-- A Rust toolchain (`cargo`) to build **velites**, the sandboxed execution
-  binary all node code runs through
+- macOS with Homebrew: `make install` auto-detects and installs missing
+  prerequisites (Python 3.11+, Node 18+, PostgreSQL 17,
+  [`uv`](https://docs.astral.sh/uv/), a Rust toolchain, Docker). On other
+  platforms install those manually first; `make install` still checks each
+  one and prints guidance.
 - An LLM provider for agent nodes (any OpenAI-compatible endpoint works;
-  the demo workflow needs one)
+  the demo workflow needs one).
 
 ### 1. Clone and install
 
 ```bash
 git clone https://github.com/LuciusCao/agent-legion.git
 cd agent-legion
-uv sync                                     # Python deps
-createdb agent_legion
-cp .env.example .env                        # then edit: set AGENT_LEGION_DATABASE_URL
-cd frontend && npm install && cd ..
+make install    # install prerequisites, uv sync, create the agent_legion_dev
+                # database, generate .env (with random local-RustFS
+                # credentials), generate the vault master key, build velites,
+                # install frontend deps, seed the worker config — idempotent,
+                # safe to re-run
 ```
 
-You also need to configure `AGENT_LEGION_S3_*` object storage (locally you
-can run RustFS — see
+The development database uses the derived name `agent_legion_dev`, never the
+bare `agent_legion`: the bare name is the shared/prod database, and
+`init_db` refuses to migrate it without `AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1`
+(the shared-database schema guard).
+
+Object storage defaults to local **RustFS** (`make dev-up` starts the
+container and creates the bucket automatically; credentials are generated
+into `.env` by `make install`), so it works out of the box. To switch to a
+cloud S3 (AWS or any compatible service), change `AGENT_LEGION_S3_ENDPOINT` /
+credentials / `AGENT_LEGION_S3_BUCKET` in `.env` — the local RustFS is then
+skipped automatically (see
 [docs/materials-storage-deployment.md](docs/materials-storage-deployment.md)).
-Without it the rest of the instance works, but the materials API degrades to
-503 and demo material seeding is skipped.
 
-### 2. One-time local setup
+When Docker is unavailable (not installed or not running), `make dev-up`
+skips the local RustFS: demo material seeding is skipped, materials-related
+APIs degrade to 503, everything else keeps working. Once Docker is up,
+re-running `make dev-up` restores storage (the RustFS container + bucket);
+if demo material seeding was skipped in the meantime (you had already run
+`make import-demo`), run `make import-demo` again (idempotent) to seed the
+materials — `make dev-up` itself never re-seeds them.
 
-```bash
-# Build the velites binary used to sandbox node code
-./scripts/ensure-velites.sh --dest data/bin
-
-# Local worker config (edit host_url to http://127.0.0.1:8001 and
-# work_root to data/agent-worker — see the comments in the example file)
-cp config/agent-worker.example.yaml config/agent-worker.yaml
-```
-
-Worker registration no longer uses a global token: after startup, issue a
-scoped token per workspace in the Host Web UI (Settings → Worker Token) and
-paste it into the "Workspace access" section of the Worker console
-(`http://127.0.0.1:8789`) — tokens can be added at any time, no backend
-restart needed (see [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md)).
-
-### 3. Start everything
+### 2. Start everything
 
 ```bash
-make dev-up         # backend :8001, console :5174, worker :8789 — idempotent
+make dev-up         # local RustFS + backend :8001 + console :5174 + worker :8789 — idempotent
 make dev-status     # show component status and URLs
 make dev-down       # stop everything
 ```
@@ -97,15 +97,21 @@ Open http://127.0.0.1:5174 — the first visit redirects to `/setup` to
 create the admin user. Workers start with claiming disabled by design;
 enable it in the worker console at http://127.0.0.1:8789.
 
-### 4. Run the demo workflow
+Worker registration no longer uses a global token: after startup, issue a
+scoped token per workspace in the Host Web UI (workspace Settings →
+「Agent 与 Worker」) and paste it into the "Workspace access" section of the
+Worker console (`http://127.0.0.1:8789`) — tokens can be added at any time,
+no backend restart needed (see
+[docs/agent-worker-deployment.md](docs/agent-worker-deployment.md)).
+
+### 3. Run the demo workflow
 
 The repository ships a minimal demo workflow,
 **`education_video_problems_generation`**: ten generic K-12 math knowledge
 points under `examples/` are seeded as example materials into the demo
-workspace (requires `AGENT_LEGION_S3_*` object storage; seeding is skipped
-when it is not configured), each fanned out into one job — draft a teaching
-video script, review it, generate five exercises, review them, then a
-simulated (no-network) publish.
+workspace, each fanned out into one job — draft a teaching video script,
+review it, generate five exercises, review them, then a simulated (no-network)
+publish.
 
 ```bash
 make import-demo      # install/lock skills and create+seed a demo workspace if absent
@@ -145,6 +151,7 @@ Then in the console:
 |------------|------|
 | Get it running / run the demo | this file + `examples/README.md` |
 | Operate it (deploy, workers, remote execution) | [docs/](docs/README.md) — deployment, worker, and runbook docs |
+| Material storage (RustFS/S3) | [docs/materials-storage-deployment.md](docs/materials-storage-deployment.md) |
 | Understand how it works (architecture, config reference, runtimes) | [docs/architecture/](docs/architecture/README.md) |
 | Contribute code | [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) |
 | Track changes | [CHANGELOG.md](CHANGELOG.md) |

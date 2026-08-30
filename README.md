@@ -50,8 +50,8 @@ Agent Legion 是一个自托管控制台，把 AI agent 变成内容生产线的
 git clone https://github.com/LuciusCao/agent-legion.git
 cd agent-legion
 make install    # 装依赖、uv sync、建开发库 agent_legion_dev、生成 .env（含本地
-                # RustFS 随机凭据）、构建 velites、装前端依赖、种子 worker
-                # 配置——幂等，可重跑
+                # RustFS 随机凭据）、生成 vault 主密钥、构建 velites、装前端
+                # 依赖、种子 worker 配置——幂等，可重跑
 ```
 
 开发库用派生名 `agent_legion_dev` 而非裸名 `agent_legion`：裸名是共享/prod
@@ -65,8 +65,10 @@ make install    # 装依赖、uv sync、建开发库 agent_legion_dev、生成 .
 [docs/materials-storage-deployment.md](docs/materials-storage-deployment.md)）。
 
 docker 不可用（未安装或未启动）时 `make dev-up` 会跳过本地 RustFS：
-示例材料播种同步跳过、材料相关 API 降级返回 503，其余功能不受影响；
-docker 就绪后重跑 `make dev-up` 即可补齐。
+示例材料播种同步跳过、材料相关 API 降级返回 503，其余功能不受影响。
+docker 就绪后重跑 `make dev-up` 可补齐存储（RustFS 容器 + bucket）；若当时
+已跑过 `make import-demo`、示例材料被跳过，还需再跑一次
+`make import-demo`（幂等）补播种——`make dev-up` 本身不会重播材料。
 
 ### 2. 启动
 
@@ -81,8 +83,8 @@ worker 按设计默认关闭任务领取，到 worker 控制台 http://127.0.0.1
 打开。
 
 worker 注册不再使用全局 token：启动后在 Host Web UI 的
-「设置 → Worker Token」为 workspace 签发 scoped token，到 Worker 控制台
-（`http://127.0.0.1:8789`）的「Workspace 访问」区块粘贴添加即可——token
+workspace「设置 → Agent 与 Worker」为 workspace 签发 scoped token，到 Worker
+控制台（`http://127.0.0.1:8789`）的「Workspace 访问」区块粘贴添加即可——token
 随时可以补，无需重启后端（详见
 [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md)）。
 
