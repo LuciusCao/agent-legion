@@ -317,7 +317,7 @@
     "frontend/src/features/workflowStudio/code-editor/WorkflowNodeCodePreview.module.css": 23,
     "frontend/src/features/workflowStudio/code-editor/WorkflowNodeCodePreview.tsx": 33,
     "frontend/src/features/workflowStudio/code-editor/WorkflowNodeCodeSection.module.css": 89,
-    "frontend/src/features/workflowStudio/code-editor/WorkflowNodeCodeSection.tsx": 182,
+    "frontend/src/features/workflowStudio/code-editor/WorkflowNodeCodeSection.tsx": 180,
     "frontend/src/features/workflowStudio/code-editor/WorkflowNodeCodeVersions.tsx": 141,
     "frontend/src/features/workflowStudio/code-editor/WorkflowNodeCodeWideView.tsx": 38,
     "frontend/src/features/workflowStudio/code-editor/workflowNodeCodeLookup.ts": 21,

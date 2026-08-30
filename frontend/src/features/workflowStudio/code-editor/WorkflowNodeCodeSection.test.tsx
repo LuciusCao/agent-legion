@@ -78,12 +78,7 @@ function versionRow(version: number, status: string, note?: string) {
 function renderSection(
   overrides?: Partial<Parameters<typeof WorkflowNodeCodeSection>[0]>
 ) {
-  return render(
-    <WorkflowNodeCodeSection
-      node={node}
-      {...overrides}
-    />
-  )
+  return render(<WorkflowNodeCodeSection node={node} {...overrides} />)
 }
 
 describe('WorkflowNodeCodeSection', () => {
@@ -356,9 +351,7 @@ describe('WorkflowNodeCodeSection', () => {
     }
     const templateCode = 'from workspace_libs.node_sdk import NodeContext\n'
     mockApi.mockResolvedValue(noneResponse)
-    render(
-      <WorkflowNodeCodeSection node={pathlessNode} />
-    )
+    render(<WorkflowNodeCodeSection node={pathlessNode} />)
 
     await screen.findByText(/无代码版本/)
     expect(
@@ -397,9 +390,7 @@ describe('WorkflowNodeCodeSection', () => {
       draft_code: templateCode,
       draft_version: 1,
     })
-    render(
-      <WorkflowNodeCodeSection node={pathlessNode} />
-    )
+    render(<WorkflowNodeCodeSection node={pathlessNode} />)
 
     await screen.findByText(/有未发布草稿/)
     expect(
