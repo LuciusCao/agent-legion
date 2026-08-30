@@ -214,8 +214,10 @@ In `nightly-gate.yml`:
   evidence without needing the extended rerun report — the PR gate's
   `--reruns 1` makes reruns invisible there, so deadline drift now surfaces
   at the same weekly cadence as exemption expiry). The PR-side visibility
-  half of #295: backend-coverage renders every rerun nodeid in the job
-  summary, so a PR rerun can be checked against the registry by eye.
+  half of #295: backend-coverage renders the rerun nodeids it has evidence
+  for in the job summary (the backend-full shard emits the rerun report;
+  unit/postgres shards do not), so a PR rerun can be checked against the
+  registry by eye.
 - **nightly-e2e** — multi-browser smoke E2E (the deterministic browser suite
   re-run on Chromium, Firefox, and WebKit via `scripts/e2e/run_browser_smoke.py`;
   PR/push stays Chromium-only) plus a workspace stress run
