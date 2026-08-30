@@ -24,6 +24,7 @@ class JobRerunByFailureRequest(BaseModel):
     # workspace-scoped either way. Explicit values stay accepted during the
     # compatibility window.
     workflow_key: str | None = Field(
+        min_length=1,
         default=None,
         description=(
             "Deprecated: defaults to the workspace id from the path (the two "

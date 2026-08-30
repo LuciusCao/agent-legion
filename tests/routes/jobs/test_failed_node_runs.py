@@ -264,3 +264,21 @@ def test_rerun_by_failure_from_node_key_not_upstream_skips_job(tmp_path):
     assert results[0]["reason_code"] == "no_matching_failure"
     nodes = {node["node_key"]: node["status"] for node in detail["nodes"]}
     assert nodes["write_script"] == "failed"
+
+
+def test_rerun_by_failure_rejects_empty_workflow_key(tmp_path):
+    """#211 Phase 2 (review on #286): an explicitly empty workflow_key is a
+    client error, not a silent default — all five migrated request params
+    share the None-or-nonempty contract."""
+    from fastapi.testclient import TestClient
+
+    app = _app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job = _create_job(c, ws_id, "Q923")
+        _fail_node(app, job, "write_script", "technical", "provider_stream")
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/rerun-by-failure",
+            json={"category": "technical", "job_ids": [job], "workflow_key": ""},
+        )
+    assert response.status_code == 422
