@@ -52,8 +52,9 @@ def main() -> int:
     max_concurrency, claim_enabled = runtime_controls.load_claim_controls(args.config)
     max_code_concurrency = runtime_controls.load_code_concurrency(args.config)
     if error := prepare_runtime_models(config, code_concurrency=max_code_concurrency):
-        # 退出码 2（supervisor 不自动重启）：声明了无法解析二进制的 runtime
-        # （自带副本与 PATH 都没有）是部署缺口，重试无意义，必须人工修复后重启。
+        # 退出码 2（supervisor 不自动重启）：配置无法解析（disabled_runtimes 非法）
+        # 或 code 容量缺少 velites 沙箱二进制是部署缺口，重试无意义，必须人工
+        # 修复后重启。
         print(error, flush=True)
         return 2
     transfer = load_transfer_controls(args.config)

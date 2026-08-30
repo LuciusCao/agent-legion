@@ -81,9 +81,9 @@ class AgentWorkerRegistry(AgentRegisterTokenStore):
         if max_code_concurrency > 0 and protocol_version < CODE_PROTOCOL_VERSION:
             raise ValueError(f"code capacity requires protocol_version >= {CODE_PROTOCOL_VERSION}")
         normalized_runtimes = sorted(set(runtimes))
-        if not normalized_runtimes or any(
-            runtime not in {"pi", "openclaw", "velites"} for runtime in normalized_runtimes
-        ):
+        # 空集合合法（issue #254）：code-only Worker 不承接 agent 任务；
+        # 未知 runtime 值仍拒绝。
+        if any(runtime not in {"pi", "openclaw", "velites"} for runtime in normalized_runtimes):
             raise ValueError("runtimes must contain pi, openclaw and/or velites")
         normalized_labels = normalize_labels(labels or {})
         # None is kept as an internal compatibility mode for older direct

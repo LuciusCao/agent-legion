@@ -88,10 +88,12 @@ def test_configure_accepts_models_capabilities_and_token_file(tmp_path: Path) ->
     }
 
 
-def test_configure_accepts_velites_runtime() -> None:
-    args = build_parser().parse_args(["configure", "--runtime", "pi", "--runtime", "velites"])
+def test_configure_accepts_disable_runtime() -> None:
+    args = build_parser().parse_args(
+        ["configure", "--disable-runtime", "pi", "--disable-runtime", "openclaw"]
+    )
 
-    assert configure_payload(args) == {"runtimes": ["pi", "velites"]}
+    assert configure_payload(args) == {"disabled_runtimes": ["pi", "openclaw"]}
 
 
 def test_container_style_standalone_workerctl_can_import_companion_modules(

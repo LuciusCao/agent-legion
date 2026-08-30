@@ -157,12 +157,19 @@
                     <label>最大并发<input name="max_concurrency" type="number" min="1" max="1024" required /></label>
                     <label>代码并发 <span class="hint">code 节点沙箱执行，0 = 不领取；热更新免重启，0→&gt;0 需本机已装 velites</span><input name="max_code_concurrency" type="number" min="0" max="1024" required /></label>
                     <label>上传并发<input name="upload_max_concurrency" type="number" min="1" max="1024" required /></label>
-                    <fieldset>
-                      <legend>运行时</legend>
-                      <label class="check"><input name="runtimes" type="checkbox" value="pi" /> Pi</label>
-                      <label class="check"><input name="runtimes" type="checkbox" value="openclaw" /> OpenClaw</label>
-                      <label class="check"><input name="runtimes" type="checkbox" value="velites" /> Velites</label>
-                    </fieldset>
+                  </div>
+                </div>
+                <!-- Agent 运行时（issue #254）：自动探测本机已安装 runtime 并默认全部启用，
+                     反选停用；替代原 opt-in checkbox fieldset -->
+                <div class="form-section" id="runtime-section">
+                  <div class="form-section-heading">
+                    <div>
+                      <h3>Agent 运行时</h3>
+                      <p>Worker 自动探测本机已安装的运行时并全部启用；不需要的可在此停用。任务实际使用哪个运行时由 Workflow 节点的 Agent 定义决定，这里只控制本机承接哪些 runtime 的任务。新装运行时将在 Worker 重启后自动启用。</p>
+                    </div>
+                  </div>
+                  <div class="runtime-list" id="runtime-list" aria-live="polite">
+                    <div class="runtime-empty" id="runtime-empty" hidden>未检测到任何已安装的运行时。安装运行时二进制并重启 Worker 后会自动出现在这里并默认启用；此前本机只能承接 code 任务（需配置代码并发）。</div>
                   </div>
                 </div>
                 <!-- Scoped token 管理（issue #35）：卡片列表替代原单行 token 输入 -->

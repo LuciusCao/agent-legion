@@ -17,6 +17,7 @@ import worker.supervisor as state_module
 from tests.helpers import wait_for_predicate
 from worker.metrics_cache import WorkerMetricsCache, metrics_cache_key, metrics_cache_path
 from worker.registration.token import registration_token_configured
+from worker.runtime import catalog
 from worker.service import create_app
 from worker.service_bind import embed_control_token
 from worker.supervisor import (
@@ -126,7 +127,16 @@ def test_config_store_bootstraps_yaml_and_writes_managed_copy(tmp_path: Path) ->
     assert public_config(store.read())["max_concurrency"] == 3
 
 
-def test_malformed_bootstrap_keeps_control_service_configurable(tmp_path: Path) -> None:
+def test_malformed_bootstrap_keeps_control_service_configurable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 探测可控化：只装 velites 的机器。未配置时 disabled_runtimes 默认 []，
+    # 生效声明 = 探测结果（issue #254）。
+    monkeypatch.setattr(
+        catalog,
+        "resolve_binary",
+        lambda binary: "/usr/local/bin/velites" if binary == "velites" else None,
+    )
     bootstrap = tmp_path / "bootstrap.yaml"
     bootstrap.write_text("host_url: [", encoding="utf-8")
 
@@ -134,7 +144,9 @@ def test_malformed_bootstrap_keeps_control_service_configurable(tmp_path: Path) 
 
     assert store.configured() is False
     assert store.bootstrap_error
-    assert store.read(require_identity=False)["runtimes"] == ["velites"]
+    fallback = store.read(require_identity=False)
+    assert fallback["disabled_runtimes"] == []
+    assert fallback["runtimes"] == ["velites"]
 
 
 def test_unconfigured_worker_defaults_to_claim_disabled(tmp_path: Path) -> None:
@@ -300,7 +312,7 @@ def test_max_code_concurrency_is_hot_updated_without_restart(tmp_path: Path) -> 
     assert supervisor.restarts == 0
 
 
-def test_local_api_rejects_unknown_runtime(tmp_path: Path) -> None:
+def test_local_api_rejects_unknown_disabled_runtime(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")
     store.write(validate_config(_config()))
     app = create_app(FakeSupervisor(store), tmp_path)
@@ -308,19 +320,118 @@ def test_local_api_rejects_unknown_runtime(tmp_path: Path) -> None:
     with TestClient(app) as client:
         response = client.put(
             "/api/config",
-            json={**public_config(store.read()), "runtimes": ["shell"]},
+            json={**public_config(store.read()), "disabled_runtimes": ["shell"]},
             headers=_auth(store),
         )
 
     assert response.status_code == 422
 
 
+def test_local_api_rejects_retired_runtimes_field(tmp_path: Path) -> None:
+    """旧版 opt-in `runtimes` 字段已不可编辑（issue #254）：fail-fast 422。"""
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config(_config()))
+    app = create_app(FakeSupervisor(store), tmp_path)
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/config",
+            json={"runtimes": ["pi"]},
+            headers=_auth(store),
+        )
+
+    assert response.status_code == 422
+    assert "runtimes" in response.text
+
+
+def test_local_api_exposes_runtime_status_and_applies_disabled_runtimes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        catalog,
+        "resolve_binary",
+        lambda binary: f"/usr/local/bin/{binary}" if binary in {"velites", "pi"} else None,
+    )
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config(_config()))
+    supervisor = FakeSupervisor(store)
+    app = create_app(supervisor, tmp_path)
+
+    with TestClient(app) as client:
+        before = client.get("/api/config", headers=_auth(store))
+        response = client.put(
+            "/api/config",
+            json={"disabled_runtimes": ["pi"]},
+            headers=_auth(store),
+        )
+
+    status_rows = {row["runtime"]: row for row in before.json()["runtime_status"]}
+    # _config() 的旧 runtimes: [pi] 迁移为补集停用 disabled=[openclaw, velites]：
+    # pi 装了且启用，velites 装了但停用，openclaw 未安装。
+    assert status_rows["velites"]["installed"] is True
+    assert status_rows["velites"]["enabled"] is False
+    assert status_rows["velites"]["binary"] == "/usr/local/bin/velites"
+    assert status_rows["pi"]["installed"] is True
+    assert status_rows["pi"]["enabled"] is True
+    assert status_rows["openclaw"]["installed"] is False
+    assert status_rows["openclaw"]["install_hint"]
+    assert before.json()["runtimes"] == ["pi"]
+    assert response.status_code == 200
+    # disabled_runtimes 是进程级配置：改动触发重启重注册。
+    assert response.json()["restarted"] is True
+    assert response.json()["config"]["disabled_runtimes"] == ["pi"]
+    assert response.json()["config"]["runtimes"] == ["velites"]
+    assert supervisor.restarts == 1
+
+
+def test_runtime_status_marks_pending_restart_against_host_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """探测/停用状态与 Host 登记集合不一致 → 标出待重启生效（#254 评审）。"""
+    monkeypatch.setattr(
+        catalog,
+        "resolve_binary",
+        lambda binary: f"/usr/local/bin/{binary}" if binary in {"velites", "pi"} else None,
+    )
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config({**_config(), "disabled_runtimes": ["pi"]}))
+
+    class RegisteredSupervisor(FakeSupervisor):
+        def status(self) -> dict[str, Any]:
+            # Host 仍登记着 pi 与 velites（executor 同步状态文件的内容）。
+            return {**super().status(), "host_worker": {"runtimes": ["pi", "velites"]}}
+
+    app = create_app(RegisteredSupervisor(store), tmp_path)
+
+    with TestClient(app) as client:
+        response = client.get("/api/config", headers=_auth(store))
+
+    payload = response.json()
+    assert payload["registered_runtimes"] == ["pi", "velites"]
+    rows = {row["runtime"]: row for row in payload["runtime_status"]}
+    # pi 刚被停用但 Host 还登记着 → 待重启生效；velites 启用且一致 → 无 pending。
+    assert rows["pi"]["enabled"] is False
+    assert rows["pi"]["registered"] is True
+    assert rows["pi"]["pending_restart"] is True
+    assert rows["velites"]["enabled"] is True
+    assert rows["velites"]["registered"] is True
+    assert rows["velites"]["pending_restart"] is False
+    assert rows["openclaw"]["registered"] is False
+    assert rows["openclaw"]["pending_restart"] is False
+
+
 @pytest.mark.no_db
-def test_validate_config_accepts_pi_and_preserves_explicit_runtimes() -> None:
+def test_validate_config_migrates_legacy_runtimes_and_preserves_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 探测可控化：三个 runtime 全部已安装。旧 opt-in 勾选迁移为补集停用，
+    # 升级后 claim 行为保持不变（issue #254）。
+    monkeypatch.setattr(catalog, "resolve_binary", lambda binary: f"/usr/local/bin/{binary}")
     config = validate_config({**_config(), "runtimes": ["pi", "velites"]})
+    assert config["disabled_runtimes"] == ["openclaw"]
     assert config["runtimes"] == ["pi", "velites"]
-    # 显式声明 ["pi"] 保持原样：pi 仍是合法 runtime，只是不再是默认值
-    # （默认值见 test_malformed_bootstrap_keeps_control_service_configurable）。
+    # 旧显式声明 ["pi"] 行为保持：pi 启用，其余补集停用（迁移细节见
+    # tests/workers/test_runtime_catalog.py）。
     assert validate_config(_config())["runtimes"] == ["pi"]
 
 

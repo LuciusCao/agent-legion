@@ -224,8 +224,10 @@
   命令构建器与二进制（pi → pi argv，velites → velites argv；openclaw 未实现
   即报错），没有 flavor 之类的实现选择层。pi 作为可选 runtime 长期保留
   （不退役），新增 agent 按需要直接声明目标 runtime。Workflow 节点不感知
-  runtime/harness 实现。Worker 声明某 runtime 前必须先在 PATH 提供对应二进制
-  （启动预检缺失即拒启动）。
+  runtime/harness 实现。Worker 的 runtime 声明由本机探测推导（issue #254）：
+  读取配置时按二进制解析（自带副本 data/bin 优先、PATH 兜底）探测已安装的
+  runtime 并默认全部启用，`disabled_runtimes` 反选停用；声明不再可能与机器
+  安装状态脱节（旧的手工勾选 + 启动预检拒启动已退役）。
   事件 schema 改动必须同步 `velites/schema/events.schema.json`
   （`cargo run --bin velites-schema -- schema/events.schema.json`）并保证契约测试
   （`velites/tests/schema_current.rs`、`golden_events.rs`）通过；事件流只保留 Host

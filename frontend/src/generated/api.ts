@@ -4286,7 +4286,7 @@ export interface components {
        */
       protocol_version: number
       /** Runtimes */
-      runtimes: string[]
+      runtimes?: string[]
       /** Worker Id */
       worker_id: string
     }

@@ -120,8 +120,11 @@ class WorkerConfigStore:
 
     def write(self, config: dict[str, Any]) -> None:
         # 同目录临时文件 + fsync + os.replace，保证并发/掉电时状态文件不被写坏。
+        # runtimes 是读取时按本机探测现算的派生值，不落盘（落盘会过期，还会
+        # 被误当成旧版 opt-in 勾选）；持久化的只有 disabled_runtimes。
+        persisted = {key: value for key, value in config.items() if key != "runtimes"}
         atomic_write(
-            self.path, yaml.safe_dump(config, allow_unicode=True, sort_keys=False), mode=0o600
+            self.path, yaml.safe_dump(persisted, allow_unicode=True, sort_keys=False), mode=0o600
         )
 
     def control_token(self) -> str:

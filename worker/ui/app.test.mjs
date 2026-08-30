@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { NUMBER_DEFAULTS, bucketLabel, chartSeriesData, executionLabel, fillWindowBuckets, foldLogLines, formatElapsed, formatTokens, groupExecutions, hasChartData, labelsFromText, latestMetric, linesFromText, metricsParams, modelsFromText, numberField, phaseProgress, runOccupancy, tokenCardModel, tokensLastHour } from "./app.js";
+import { NUMBER_DEFAULTS, bucketLabel, chartSeriesData, executionLabel, fillWindowBuckets, foldLogLines, formatElapsed, formatTokens, groupExecutions, hasChartData, labelsFromText, latestMetric, linesFromText, mergeDisabledRuntimes, metricsParams, modelsFromText, numberField, phaseProgress, runOccupancy, runtimeCardState, tokenCardModel, tokensLastHour } from "./app.js";
 
 test("labelsFromText 解析多行 key=value", () => {
   assert.deepEqual(labelsFromText("host=home\nos=mac"), { host: "home", os: "mac" });
@@ -244,4 +244,30 @@ test("tokenCardModel 对没有 token_ids 关联的旧 Host 响应回退为无 wo
   assert.equal(card.workspaceId, undefined);
   assert.equal(card.workspaceName, undefined);
   assert.equal(tokenCardModel({ token_id: "tok-x" }, undefined).workspaceId, undefined);
+});
+
+test("runtimeCardState 按安装与启用状态给出卡片状态（issue #254）", () => {
+  assert.deepEqual(runtimeCardState({ installed: true, enabled: true }), { state: "enabled", label: "已启用" });
+  assert.deepEqual(runtimeCardState({ installed: true, enabled: false }), { state: "disabled", label: "已停用" });
+  // 未安装时 enabled 恒 false（后端语义），卡片状态只由 installed 决定。
+  assert.deepEqual(runtimeCardState({ installed: false, enabled: false }), { state: "missing", label: "未安装" });
+});
+
+test("mergeDisabledRuntimes 合并当前开关与未安装项的历史停用", () => {
+  const rows = [
+    { runtime: "velites", installed: true },
+    { runtime: "pi", installed: true },
+    { runtime: "openclaw", installed: false },
+  ];
+  // pi 开关被关掉 → 进入停用；openclaw 未安装但历史停用 → 保留（重装后不自动启用）。
+  assert.deepEqual(mergeDisabledRuntimes(["openclaw"], rows, ["pi"]), ["openclaw", "pi"]);
+  // 没有历史停用、全部开关打开 → 空集合（探测即默认全启用）。
+  assert.deepEqual(mergeDisabledRuntimes([], rows, []), []);
+  // 历史停用项已安装且开关被打开 → 移出停用。
+  assert.deepEqual(mergeDisabledRuntimes(["pi"], rows, []), []);
+});
+
+test("mergeDisabledRuntimes 去重并排序", () => {
+  const rows = [{ runtime: "pi", installed: false }];
+  assert.deepEqual(mergeDisabledRuntimes(["pi"], rows, ["velites", "pi"]), ["pi", "velites"]);
 });

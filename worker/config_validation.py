@@ -15,6 +15,7 @@ import urllib.parse
 from typing import Any
 
 from worker import worker_declarations
+from worker.runtime.catalog import SUPPORTED_RUNTIMES, resolve_config_runtimes
 from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY, validate_claim_controls
 
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
@@ -24,7 +25,7 @@ _EDITABLE_FIELDS = {
     "host_url",
     "worker_id",
     "name",
-    "runtimes",
+    "disabled_runtimes",
     "max_concurrency",
     "max_code_concurrency",
     "upload_max_concurrency",
@@ -40,7 +41,7 @@ _DEFAULTS: dict[str, Any] = {
     "host_url": "",
     "worker_id": "",
     "name": "",
-    "runtimes": ["velites"],
+    "disabled_runtimes": [],
     "max_concurrency": 1,
     "max_code_concurrency": 0,
     "upload_max_concurrency": 4,
@@ -67,6 +68,10 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     if not isinstance(raw, dict):
         raise ValueError("配置必须是对象")
     config = {**_DEFAULTS, **raw}
+    # 生效声明 = 本机探测到的已安装 runtime − 停用集合（issue #254：探测即
+    # 默认启用，反选停用；旧 opt-in runtimes 键由 catalog 迁移为补集停用）。
+    # 空集合合法：本机只承接 code 任务或暂不接 agent。
+    disabled, runtimes = resolve_config_runtimes(raw)
     host_url = str(config["host_url"]).strip().rstrip("/")
     parsed = urllib.parse.urlsplit(host_url)
     if require_identity and (
@@ -83,9 +88,6 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     name = str(config.get("name", "")).strip() or worker_id
     if len(name) > 128:
         raise ValueError("Worker 名称不能超过 128 个字符")
-    runtimes = sorted(set(str(value) for value in config.get("runtimes", [])))
-    if not runtimes or any(value not in {"pi", "openclaw", "velites"} for value in runtimes):
-        raise ValueError("运行时必须至少选择 pi、openclaw 或 velites 之一")
     concurrency = config.get("max_concurrency")
     claim_enabled = config.get("claim_enabled")
     validate_claim_controls(concurrency, claim_enabled)
@@ -106,7 +108,9 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
         raise ValueError(f"上传并发数必须是 1 到 {MAX_DYNAMIC_CONCURRENCY} 的整数")
     normalized_labels = worker_declarations.normalize_labels(config.get("labels", {}))
     capabilities = worker_declarations.normalize_capabilities(config.get("capabilities", []))
-    models = worker_declarations.normalize_models(config.get("models", []), runtimes)
+    # models allowlist 的 runtime 取值校验对齐支持全集而非生效集合：生效集合
+    # 随机器安装状态浮动，持久化校验不该跟着漂（发现阶段仍按生效集合取交集）。
+    models = worker_declarations.normalize_models(config.get("models", []), SUPPORTED_RUNTIMES)
     for field in (
         "poll_interval_seconds",
         "heartbeat_interval_seconds",
@@ -127,6 +131,7 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
         "host_url": host_url,
         "worker_id": worker_id,
         "name": name,
+        "disabled_runtimes": disabled,
         "runtimes": runtimes,
         "max_concurrency": concurrency,
         "max_code_concurrency": code_concurrency,

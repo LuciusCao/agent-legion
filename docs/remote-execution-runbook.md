@@ -252,12 +252,16 @@ flipping the field:
 
 - **Worker declarations first, definition migration second.** A queued request
   whose runtime no non-revoked Worker declares is failed by the unclaimable
-  sweeper with an explicit runtime reason. Declare `velites` in the Worker
-  fleet (`runtimes` in the Worker console/config) first; the Worker startup
-  preflight refuses to start (exit code 2) when a declared runtime's binary
-  is missing (neither the bundled `data/bin/<binary>` copy nor PATH), so a
-  fleet that claims velites without the binary fails loudly at boot instead
-  of stranding claimed executions.
+  sweeper with an explicit runtime reason. Worker declarations are derived
+  from binary detection (issue #254): at startup the Worker probes each
+  supported runtime's binary (bundled `data/bin/<binary>` first, then PATH)
+  and enables every detected one by default — installing the velites binary
+  and restarting is all a fleet needs to start declaring `velites`; machines
+  that must not take a runtime's jobs list it under `disabled_runtimes`
+  (Worker console 配置 → Agent 运行时, or `workerctl configure
+  --disable-runtime`). Since declaration follows detection, a fleet can no
+  longer claim a runtime whose binary is missing — the mismatch class that
+  used to strand claimed executions is gone.
 - **Runtime-owned model discovery.** After binary preflight, the Worker runs
   each selected runtime's discovery adapter. For velites this is
   `velites models list --json` backed by `~/.velites/models.json`; only the
@@ -288,10 +292,10 @@ flipping the field:
 | --- | --- | --- |
 | Worker stays up but reports registration unavailable | Host unreachable or returning 5xx | The Worker retries registration in-process; verify `host_url` and the §3 smoke test, then inspect Host logs if 5xx persists |
 | Worker becomes unhealthy with registration rejected | Registration token mismatch, or every key the Worker holds was deleted on the Host | `make stack-logs STACK=worker`; verify the configured keys still exist in the workspace settings and the Worker's registration status |
-| Worker exits with code 2 and logs `启动预检失败` / startup preflight failure | A declared runtime's binary cannot be resolved (e.g. `velites` declared but not installed), or `max_code_concurrency > 0` without `velites` | Install the binary — either on PATH (`cargo build --release` in `velites/`) or as the bundled copy (`./scripts/ensure-velites.sh --dest data/bin`, per-platform) — drop the runtime from the Worker's `runtimes`, or set `max_code_concurrency: 0`, then restart |
+| Worker exits with code 2 and logs `启动预检失败` / startup preflight failure | `max_code_concurrency > 0` without a resolvable `velites` binary (agent runtimes are auto-detected since issue #254 and can no longer fail preflight) | Install velites — either on PATH (`cargo build --release` in `velites/`) or as the bundled copy (`./scripts/ensure-velites.sh --dest data/bin`, per-platform) — or set `max_code_concurrency: 0`, then restart |
 | Registration returns 401 | A scoped token is unknown or deleted on the Host (the Host rejects the whole registration when any token fails — deletion is the only lifecycle action, there is no revoke) | Issue a new key in the admin UI (workspace 设置 → Agent 与 Worker), add it in the Worker console (配置 → Workspace 访问), and delete the stale key — deletion cascade-cuts every Worker still bound to it |
 | Registration returns 400 `unsupported Agent Worker protocol` | Worker's `protocol_version` below `agent_workers.min_protocol_version` | Rebuild the worker image from the current repo; lower the minimum only as a short emergency escape hatch |
-| Claim returns 204 forever | No queued executions compatible with the worker's runtimes/labels | Check the workflow's Agent node routing and the worker's declared `runtimes` / `labels` |
+| Claim returns 204 forever | No queued executions compatible with the worker's runtimes/labels | Check the workflow's Agent node routing and the worker's detected/enabled runtimes (配置 → Agent 运行时) plus `labels` |
 | Heartbeat/result 409 (`execution is not owned by this Worker`) | Network partition or Host restart — the execution lease expired and was reassigned/failed | Terminal for that execution; rerun the job. Persistent storms mean the tailnet is unstable |
 | Result upload 413 | Archive exceeds `agent_workers.max_archive_bytes` (default 64 MiB) | Investigate why artifacts ballooned; raise the limit only if legitimate |
 | pi "model call failed" inside the worker container | Gateway unreachable or token rejected | Re-run the §3 container smoke test; confirm `LLM_GATEWAY_TOKEN` is set in `deploy/.env` and matches the gateway |
