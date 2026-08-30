@@ -251,7 +251,8 @@
   workflow 顶层 `execution` 默认（定义级可选块，loader 合并进节点、随
   revision 版本化；schema v64 `workspace_settings_retirement` 迁移已把存量
   非空 `default_agent_*` 回填进 active revision 顶层 execution 后退役该
-  三列）→ 报错，无 workspace/yaml/全局兜底；
+  三列——仅当该 revision 未显式声明顶层 execution，显式块恒优先）→
+  报错，无 workspace/yaml/全局兜底；
   manifest 只携带解析后的 `execution.*` 块（enqueue 冻结 + claim 重解析，节点
   覆盖随 revision 升级实时生效，EXEC-RUNTIME-DISPATCH-001）。一个 capability
   在每个 workspace 只允许一个 published Agent（DB partial unique index 兜底）。

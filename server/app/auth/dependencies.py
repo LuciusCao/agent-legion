@@ -1,13 +1,13 @@
-"""Auth dependency injection — the single authentication choke point.
+"""Auth dependency injection for user-identity routes (sessions, scoped tokens).
 
-Two credential channels resolve here (Bearer wins over the session cookie):
-user sessions and scoped tokens (Bearer only, never ambient, CSRF-exempt —
-STUDIO-AGENT-001). Guards on ``get_current_user`` encode the scope lattice:
+Bearer wins over the session cookie; scoped tokens are Bearer-only, never
+ambient (CSRF-exempt — STUDIO-AGENT-001). Guards on ``get_current_user``:
 ``require_user`` (any identity), ``require_admin`` (role + refusal of ANY
 scoped identity — it inherits the minter's role), ``reject_studio_agent_
-scope`` (effecting endpoints; scoped identities never take effect),
-``require_studio_agent_scope``/``_workspace`` (tool surface) and
-``enforce_scoped_workspace_binding`` (bound tokens read only their own workspace).
+scope`` (effecting endpoints), ``require_studio_agent_scope``/``_workspace``
+(tool surface), ``enforce_scoped_workspace_binding`` (bound tokens read only
+their own workspace). Worker-token auth (routes/agent_workers.py) and the
+studio MCP mount (ASGI-level check) are not routed through here.
 """
 
 from __future__ import annotations

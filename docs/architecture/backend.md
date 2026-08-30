@@ -613,18 +613,22 @@ server/app/
 - `server.app.executors.leases.ExecutorLeaseRepository` 是 AGENTS.md §6 点名的
   容量申请门面：service 一律经它 claim/finish/expire，不得直调
   `executors.code` / `.runtime` / `.contracts`。仓库是数据层毗邻组件（#187 设计
-  豁免，可持 DSN）；写路径收在 `_lease_write_paths`（每次一连接一事务、冲突重试），
-  事件广播只在事务提交后做（SSE 刷新失败不得回滚已成功的 claim）；
-  `park_awaiting_approval` 是 EXEC-APPROVAL-001 侧门（审批门不占 lease 不写
-  node_run）。
-- `server.app.auth.dependencies` 是全部路由的鉴权注入点：两条凭证通道（Bearer
-  优先于 session cookie；scoped token 只走 Bearer，非环境态故豁免 CSRF）+
-  `get_current_user` 之上的 scope 格子——`require_user`（任意身份）、
-  `require_admin`（角色 + 拒绝一切 scoped 身份：scoped token 继承签发者角色，
-  不拒则 admin 签发的 token 可达全部 admin 端点）、`reject_studio_agent_scope`
-  （生效面：scoped 身份一律不得生效，未知 scope 类型也不放行）、
-  `require_studio_agent_scope`/`_workspace`（工具面 + 绑定 workspace 校验）、
-  `enforce_scoped_workspace_binding`（读面：绑定 token 只读自己的 workspace）。
+  豁免，可持 DSN）；写路径按域分置姊妹模块（`_lease_write_paths` 为主，
+  `_lease_approval` / `_lease_config_failure` 各管审批停泊与无 lease 失败记录，
+  均每次一连接一事务、冲突重试），事件广播只在事务提交后做（SSE 刷新失败不得
+  回滚已成功的 claim）；`park_awaiting_approval` 是 EXEC-APPROVAL-001 侧门
+  （审批门不占 lease 不写 node_run）。
+- `server.app.auth.dependencies` 是用户态身份路由（会话 / scoped token）的鉴权
+  注入点：两条凭证通道（Bearer 优先于 session cookie；scoped token 只走 Bearer，
+  非环境态故豁免 CSRF）+ `get_current_user` 之上的 scope 格子——`require_user`
+  （任意身份）、`require_admin`（角色 + 拒绝一切 scoped 身份：scoped token 继承
+  签发者角色，不拒则 admin 签发的 token 可达全部 admin 端点）、
+  `reject_studio_agent_scope`（生效面：scoped 身份一律不得生效，未知 scope 类型
+  也不放行）、`require_studio_agent_scope`/`_workspace`（工具面 + 绑定 workspace
+  校验）、`enforce_scoped_workspace_binding`（读面：绑定 token 只读自己的
+  workspace）。不经此模块的面：Worker token 鉴权（`routes/agent_workers.py` 的
+  `authorize_worker`）与 Studio MCP mount（ASGI 级 scoped-token 检查，Mount 绕过
+  路由层依赖，STUDIO-AGENT-001）。
 - `server.app.agent_broker.dispatch` 把就绪的 Agent 节点冻结为可 claim 单元：
   解析有效 `execution` 块 → 暂存输入 → 渲染命令 spec → 打包自包含 bundle。不变式：
   manifest 在 enqueue 冻结且只带白名单非敏感 config（CONFIG-MANIFEST-001）；
