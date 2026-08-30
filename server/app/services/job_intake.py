@@ -172,8 +172,13 @@ class JobIntakeService:
             # original failure.
             try:
                 self.job_db.delete_run_without_jobs(str(batch["id"]))
-            except Exception:
-                logger.warning("run %s left orphaned after job creation failed", batch["id"])
+            except OSError as exc:
+                # #204: same compensation-only catch as run_service — a DB
+                # connectivity failure must not mask the original creation
+                # error; programming errors propagate to the route's 500.
+                logger.warning(
+                    "run %s left orphaned after job creation failed: %s", batch["id"], exc
+                )
             raise
         if jobs:
             notify_schedulable_work()

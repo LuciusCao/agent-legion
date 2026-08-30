@@ -44,6 +44,16 @@ def artifact_contents(
                 finally:
                     stream.close()
             except Exception:
+                # #204 broad-except audit: per-row best-effort inline. This
+                # is the manifest-first exception noted in EXEC-ARTIFACT-
+                # STORE-001 — a missing/lifecycle-deleted object or a storage
+                # outage only drops ONE artifact from the quality detail
+                # payload, never 500s the whole item/replay view. The boto
+                # family cannot be enumerated here (the store is a Protocol
+                # with injected fakes), and unlike job_artifacts.read() there
+                # is no second fallback channel to degrade into: skip is the
+                # whole contract. The legacy refs branch below already uses
+                # its narrow family (ArtifactNotFoundError, OSError).
                 continue
             contents.append(
                 {

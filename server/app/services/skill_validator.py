@@ -114,6 +114,13 @@ class SkillValidator:
         try:
             lock = self._lock_getter()
         except Exception:
+            # #204 broad-except audit: the lock getter is an injected seam
+            # (default: parsing the DB ``skill_lock`` document in
+            # skill_source_store) whose failure family is not this module's
+            # to enumerate — a corrupt lock document, a DB blip, or a test
+            # double's error must all degrade to "no locked ref shown" in
+            # the editor rather than 500 the whole validation response.
+            # The lock stays authoritative elsewhere; this is display-only.
             return None
         if lock is None:
             return None

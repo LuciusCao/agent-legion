@@ -17,6 +17,8 @@ import re
 from datetime import datetime
 from typing import Any
 
+from psycopg import IntegrityError
+
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.connection_adapters import (
@@ -137,10 +139,15 @@ class ConnectionService:
                 )
                 for name, ciphertext in encrypted.items():
                     InstanceVaultService.set_in(conn, name, ciphertext)
-        except Exception as exc:
-            if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
-                raise ConflictError(f"connection {key!r} 已存在") from exc
-            raise
+        except IntegrityError as exc:
+            # #204: the only expected failure of this transaction is the
+            # primary-key unique violation on ``key``; the old string sniff
+            # ("unique"/"duplicate" in the message) also matched unrelated
+            # integrity errors and missed non-English driver renderings.
+            # psycopg's typed IntegrityError is the codebase convention
+            # (versioned_entities, material_bundles); everything else (vault
+            # row failures, connectivity) propagates uncaught.
+            raise ConflictError(f"connection {key!r} 已存在") from exc
         self._republish_executor_schemas()
         return self.get(key)
 

@@ -265,6 +265,16 @@ class JobExecutionService:
                 job_id, "run_to", "failed", target_node_key, "cleanup_failed", str(exc)
             ) from exc
         except Exception as exc:
+            # #204 broad-except audit: the terminal safety net of a
+            # staged filesystem + DB mutation sequence. The business arms
+            # above already peeled off the concurrency conflict
+            # (JobMutationConflict → skipped) and the staged-output
+            # contract violations (ValueError → cleanup_failed); what lands
+            # here is the genuinely unexpected (DB connectivity mid-mutation,
+            # a bug). Either way the staged files must be rolled back before
+            # normalizing to JobOperationError — leaving them staged would
+            # strand artifacts the rerun just removed from their original
+            # locations. logger.exception keeps the traceback.
             logger.exception("Failed to persist run-to target for job %s", job_id)
             if staged is not None:
                 staged.rollback()

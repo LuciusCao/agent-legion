@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from botocore.exceptions import BotoCoreError, ClientError
+
 from server.app.http_range import parse_range_header
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_artifact_raw_types import RawArtifact
@@ -47,14 +49,20 @@ def open_raw_artifact(
                     stream = store.open_range_stream(row, *byte_range)
                 else:
                     stream = store.open_stream(row)
-            except Exception:
+            except (ClientError, BotoCoreError) as exc:
+                # #204: the store's open/open_range surface is the boto3 data
+                # plane (S3StorageClient) — its declared failure family is
+                # ClientError (a missing/lifecycle-deleted object surfaces as
+                # NoSuchKey) plus BotoCoreError (endpoint unreachable). Both
+                # degrade to NotFoundError per the read() contract above;
+                # anything else is a programming error and surfaces as 500.
                 logger.warning(
                     "failed to open raw artifact %s of job %s from object storage",
                     artifact_name,
                     job_id,
                     exc_info=True,
                 )
-                raise NotFoundError("Artifact not found") from None
+                raise NotFoundError("Artifact not found") from exc
             return RawArtifact(
                 name=artifact_name,
                 stream=stream,

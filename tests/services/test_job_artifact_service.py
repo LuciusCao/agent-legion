@@ -92,7 +92,10 @@ def test_job_artifact_service_reads_from_object_store(job_db, job):
 
 def test_job_artifact_service_object_error_becomes_404(job_db, job):
     """对象被 lifecycle 删除 / 存储故障 → 按未找到处理（404），不冒泡 500。"""
-    service = JobArtifactService(job_db, _FakeObjectStore(error=RuntimeError("NoSuchKey")))
+    from botocore.exceptions import ClientError
+
+    boto_outage = ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+    service = JobArtifactService(job_db, _FakeObjectStore(error=boto_outage))
 
     with pytest.raises(NotFoundError, match="Artifact not found"):
         service.read(job["id"], "result.json")
@@ -178,10 +181,33 @@ def test_job_artifact_service_open_raw_missing(job_db, job):
 
 def test_job_artifact_service_open_raw_object_error_is_404(job_db, job):
     """对象存储故障 → 404 而非 500（对齐 read() 的降级语义）。"""
-    service = JobArtifactService(job_db, _FakeObjectStore(error=RuntimeError("NoSuchKey")))
+    from botocore.exceptions import ClientError
+
+    boto_outage = ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+    service = JobArtifactService(job_db, _FakeObjectStore(error=boto_outage))
 
     with pytest.raises(NotFoundError, match="Artifact not found"):
         service.open_raw(job["id"], "result.json")
+
+
+def test_job_artifact_service_open_raw_programming_error_propagates(job_db, job):
+    """#204 窄化：raw 端点只降级 boto 数据面故障族；注入的编程错误
+    （TypeError）原样上抛给路由层 500，不再被吞成 404。"""
+    service = JobArtifactService(
+        job_db, _FakeObjectStore(error=TypeError("store contract violation"))
+    )
+
+    with pytest.raises(TypeError, match="store contract violation"):
+        service.open_raw(job["id"], "result.json")
+
+
+def test_job_artifact_service_read_object_programming_error_propagates(job_db, job):
+    """#204 窄化：read() 的对象存储回退同样只降级声明的失败族
+    （ClientError/BotoCoreError/OSError/UnicodeDecodeError）。"""
+    service = JobArtifactService(job_db, _FakeObjectStore(error=TypeError("bad double")))
+
+    with pytest.raises(TypeError, match="bad double"):
+        service.read(job["id"], "result.json")
 
 
 def test_job_artifact_service_open_raw_rejects_traversal(artifact_service, job):

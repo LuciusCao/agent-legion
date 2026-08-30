@@ -25,7 +25,12 @@ def node_code_pins_from_job_snapshot(job: dict) -> dict[str, Any]:
         return {}
     try:
         pins = json.loads(str(raw)).get("node_code_pins")
-    except Exception:
+    except (TypeError, ValueError):
+        # #204: the only declared failure is a corrupt snapshot payload —
+        # json.JSONDecodeError is a ValueError and a non-str column renders
+        # as TypeError. Both are the documented "corrupt case" the docstring
+        # already routes to {} (definition_from_job_snapshot logs it);
+        # anything else is a programming error worth a traceback.
         return {}
     return dict(pins) if isinstance(pins, dict) else {}
 

@@ -103,6 +103,15 @@ def commit_rerun(
             job_id, "rerun", "failed", actual_node_key, "cleanup_failed", str(exc)
         ) from exc
     except Exception as exc:
+        # #204 broad-except audit: terminal safety net of the staged rerun
+        # mutation, mirroring job_execution's run_to arm. The conflict arm
+        # (JobMutationConflict → skipped) and the contract arm (ValueError →
+        # cleanup_failed) are handled above; this arm exists so the staged
+        # artifacts (already moved off their original paths by stage_outputs)
+        # are ALWAYS rolled back before the error is normalized to
+        # JobOperationError — otherwise the node's outputs would vanish from
+        # the job dir while the DB still marks them present.
+        # logger.exception keeps the unexpected kind's traceback.
         logger.exception("Failed to mark nodes for rerun for job %s", job_id)
         if staged is not None:
             staged.rollback()

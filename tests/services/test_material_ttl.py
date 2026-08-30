@@ -66,7 +66,11 @@ class FakeStorage:
 
     def delete_object(self, storage_key: str) -> None:
         if self.fail_deletes:
-            raise RuntimeError("s3 delete failed")
+            # #204 窄化后的真实故障族：botocore ClientError（生产 S3 客户端
+            # 删除失败的类型）——sweep 只降级这一族，编程错误应上抛。
+            from botocore.exceptions import ClientError
+
+            raise ClientError({"Error": {"Code": "InternalError"}}, "DeleteObject")
         self.objects.pop(storage_key, None)
 
 

@@ -488,3 +488,46 @@ def test_compare_start_contract_change_returns_breaking_change(app_with_workspac
     assert any(
         flag["code"] == "accepted_item_types_changed" for flag in result["summary"]["risk_flags"]
     )
+
+
+def test_compare_corrupt_active_revision_degrades_to_invalid_schema(app_with_workspace):
+    """#204 窄化：基线 revision 的 definition_json 损坏（截断的 JSON）→
+    invalid compare（schema 类错误），不是 500。"""
+    app, workspace_id = app_with_workspace
+    with app.state.job_db.write() as conn:
+        conn.execute(
+            "update workflow_revisions set definition_json='{truncated'"
+            " where workflow_key='education_video_problems_generation'"
+        )
+
+    definition = load_builtin_definition("education_video_problems_generation")
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, definition_to_yaml(definition))
+
+    assert result["valid"] is False
+    assert result["summary"] is None
+    error = result["errors"][0]
+    assert error["category"] == "schema"
+    assert "Failed to parse active revision" in error["message"]
+
+
+def test_compare_shape_invalid_active_revision_degrades_to_invalid_schema(app_with_workspace):
+    """#204 窄化：基线 revision 结构损坏（nodes 为 list）→ #243 加固的
+    WorkflowDefinitionError 同样落入 schema 降级分支。"""
+    app, workspace_id = app_with_workspace
+    corrupt = '{"key": "education_video_problems_generation", "label": "L", "nodes": []}'
+    with app.state.job_db.write() as conn:
+        conn.execute(
+            "update workflow_revisions set definition_json=%s"
+            " where workflow_key='education_video_problems_generation'",
+            (corrupt,),
+        )
+
+    definition = load_builtin_definition("education_video_problems_generation")
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, definition_to_yaml(definition))
+
+    assert result["valid"] is False
+    assert result["summary"] is None
+    assert result["errors"][0]["category"] == "schema"
+    assert "Failed to parse active revision" in result["errors"][0]["message"]

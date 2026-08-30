@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from botocore.exceptions import BotoCoreError, ClientError
+
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
 from server.app.workflows.workflow_manifest import workflow_manifest
 
@@ -93,8 +95,13 @@ def create_workspace_package(
                             ):
                                 shutil.copyfileobj(src, dest, 1 << 20)
                             wrote = True
-                    except Exception:
+                    except (ClientError, BotoCoreError, OSError):
                         # 对象缺失/存储故障时跳过该条目，打包继续。
+                        # #204: boto3 数据面（ClientError 含 NoSuchKey）、
+                        # 传输层（BotoCoreError）、以及 copyfileobj/zip 写
+                        # 盘的中断（OSError）就是这个 try 块的完整失败
+                        # 空间——都按「该条目缺失」降级；与本地分支的
+                        # OSError 降级语义对称。其余按编程错误冒泡。
                         logger.warning(
                             "skipping stored artifact %s for job %s",
                             name,

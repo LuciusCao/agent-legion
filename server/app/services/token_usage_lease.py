@@ -65,5 +65,11 @@ def capture_token_usage_after_lease_finish(
         # PostgreSQL DSN via the unified write_transaction helper.
         with write_transaction(conn.database_dsn) as write_conn:
             persist_node_run_usage(write_conn, summary)
-    except Exception:
+    except OSError:
+        # #204: usage capture is best-effort telemetry on the completion
+        # path — the lease's result is already committed, so a failed parse
+        # (missing/unreadable events.jsonl) or persist (DB connectivity)
+        # must not fail the completion that already succeeded. The debug
+        # traceback names the lease whose usage row is missing; the run's
+        # events stay on disk for a manual recount.
         logger.debug("Failed to capture token usage for lease %s", lease_id, exc_info=True)

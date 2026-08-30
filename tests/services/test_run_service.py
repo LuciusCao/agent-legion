@@ -442,3 +442,54 @@ def test_material_item_accepted_under_material_only_contract(service, job_db) ->
             "select node_key from job_nodes where job_id=%s order by node_key", (job["id"],)
         ).fetchall()
     assert "_start" not in [row["node_key"] for row in rows]
+
+
+def test_create_run_compensation_failure_does_not_mask_original_error(
+    service, job_db, monkeypatch, caplog
+) -> None:
+    """#204 窄化：create_jobs_bulk 失败后的 run 行补偿自身失败（DB 连接层
+    OSError）只记 warning，原始错误原样上抛（不被吞也不被换型）。"""
+    _insert_material(job_db, WORKSPACE_ID, "mat-comp-1")
+
+    def _failing_bulk(**kwargs):
+        raise ValueError("Job identity collision for mat-comp-1")
+
+    def _failing_discard(run_id: str) -> None:
+        raise OSError("db connection reset during compensation")
+
+    monkeypatch.setattr(job_db, "create_jobs_bulk", _failing_bulk)
+    monkeypatch.setattr(job_db, "delete_run_without_jobs", _failing_discard)
+
+    with (
+        caplog.at_level("WARNING", logger="server.app.services.run_service"),
+        pytest.raises(InvalidOperationError, match="Job identity collision"),
+    ):
+        service.create_run(
+            WORKSPACE_ID,
+            workflow_key=WORKFLOW_KEY,
+            items=[_material_item("mat-comp-1")],
+        )
+
+    assert "left orphaned after job creation failed" in caplog.text
+
+
+def test_create_run_compensation_programming_error_propagates(service, job_db, monkeypatch) -> None:
+    """#204 窄化：补偿路径的编程错误（TypeError）不再被吞——上抛给
+    调用方（这里表现为原始 ValueError 之后的第二个异常被链式抛出）。"""
+    _insert_material(job_db, WORKSPACE_ID, "mat-comp-2")
+
+    def _failing_bulk(**kwargs):
+        raise ValueError("Job identity collision for mat-comp-2")
+
+    def _broken_discard(run_id: str) -> None:
+        raise TypeError("discard contract violation")
+
+    monkeypatch.setattr(job_db, "create_jobs_bulk", _failing_bulk)
+    monkeypatch.setattr(job_db, "delete_run_without_jobs", _broken_discard)
+
+    with pytest.raises(TypeError, match="discard contract violation"):
+        service.create_run(
+            WORKSPACE_ID,
+            workflow_key=WORKFLOW_KEY,
+            items=[_material_item("mat-comp-2")],
+        )

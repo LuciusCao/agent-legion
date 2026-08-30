@@ -197,8 +197,12 @@ class RunService:
         # never mask the original failure.
         try:
             self.job_db.delete_run_without_jobs(run_id)
-        except Exception:
-            logger.warning("run %s left orphaned after job creation failed", run_id)
+        except OSError as exc:
+            # #204: the compensation is one guarded DELETE via the JobQueries
+            # facade — a DB connectivity failure here must not mask the
+            # original creation error. Programming errors propagate (the
+            # facade is exercised by every create_run test).
+            logger.warning("run %s left orphaned after job creation failed: %s", run_id, exc)
 
     def list_runs(self, workspace_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
         rows = self.job_db.list_runs(workspace_id, limit)

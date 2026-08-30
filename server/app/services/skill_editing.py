@@ -158,6 +158,16 @@ class SkillEditingService:
         except Exception:
             # All-or-nothing: any failure after the first write (contract
             # check, add, commit, tag) returns the repo to the recorded HEAD.
+            # #204 broad-except audit: the outcome space here is genuinely
+            # mixed and every member must trigger the same rollback — the
+            # deliberately-raised SkillEditValidationError (a JobServiceError
+            # the route renders as 422), SkillGitError from the git runner
+            # (OSError/timeout are converted inside run_edit_git), OSError
+            # from path.write_text, and programming errors. A narrow family
+            # cannot enumerate the subprocess/filesystem boundary, and the
+            # bare re-raise keeps the original type for the route's mapping;
+            # rollback_checked itself raises SkillRollbackError when it
+            # cannot restore, which correctly escapes as the loudest signal.
             rollback_checked(skill_key, repo_dir, head, written_paths, self._git)
             raise
         commit = skill_repo.head_commit(repo_dir)
