@@ -19,6 +19,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from server.app.config_schema import node_safe_settings_config
+from server.app.db.dialect import resolve_dsn
 from server.app.executors.cancellation import CancellationToken
 from server.app.executors.models import ExecutionContext
 from server.app.services.connection_tokens import ConnectionTokenService
@@ -130,11 +131,12 @@ def consume_auth_failure_marker(executor: CodeExecutor, context: ExecutionContex
             marker.unlink(missing_ok=True)
     if not key and isinstance(context.node_config, Mapping):
         key = str(context.node_config.get("connection") or "").strip()
-    # #187 step 3: the facade's `.path` is private; the DSN for the
-    # privileged token invalidation comes from `dsn_identity` (the only
-    # public accessor). Shapes without it (job_db-less tests, plain
-    # objects) degrade to a no-op exactly like the old getattr default.
-    dsn = str(getattr(executor.job_db, "dsn_identity", "") or "").strip()
+    # #280: the DSN for the privileged token invalidation comes from
+    # `resolve_dsn` (the ConnectSource normalizer, #187) instead of a
+    # getattr escape hatch on whatever shape `job_db` happens to be. A
+    # missing DSN still degrades to the same no-op (job_db-less tests,
+    # plain objects) as the retired getattr default.
+    dsn = resolve_dsn(executor.job_db).strip() if executor.job_db is not None else ""
     if not key or not dsn:
         return
     try:

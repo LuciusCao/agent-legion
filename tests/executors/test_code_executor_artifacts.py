@@ -249,3 +249,40 @@ def test_execute_restores_evicted_inputs_before_sandboxed_run(
 
     assert result.status == "completed"
     assert (context.job_dir / "out.json").read_bytes() == payload
+
+
+def test_artifact_store_dsn_resolves_both_connect_source_shapes(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#280: the artifact-store DSN goes through `resolve_dsn`, so a bare DSN
+    string passes through unchanged and a facade resolves via `dsn_identity`
+    — replacing the retired getattr escape hatch on `job_db`."""
+
+    class _FakeStorage:
+        pass
+
+    monkeypatch.setattr("server.app.executors.code.build_s3_storage", lambda: _FakeStorage())
+
+    class _FakeStore:
+        def __init__(self, storage: object, dsn: str | None) -> None:
+            self.dsn = dsn
+
+    built: list[_FakeStore] = []
+    monkeypatch.setattr(
+        "server.app.executors.code.build_artifact_object_store",
+        lambda storage, dsn: built.append(_FakeStore(storage, dsn)) or _FakeStore(storage, dsn),
+    )
+
+    executor = _executor()
+    executor.job_db = "postgresql://bare-dsn"
+    (context.job_dir / "out.json").write_text("{}", encoding="utf-8")
+    executor._check_outputs(context)
+    assert built and built[-1].dsn == "postgresql://bare-dsn"
+
+    class _FakeFacade:
+        dsn_identity = "postgresql://facade-dsn"
+
+    executor.job_db = _FakeFacade()
+    executor._artifact_objects = None
+    executor._check_outputs(context)
+    assert built[-1].dsn == "postgresql://facade-dsn"
