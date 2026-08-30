@@ -80,3 +80,31 @@ def test_bare_204_comment_does_not_bless() -> None:
         "        pass\n"
     )
     assert find_unaudited_broad_excepts(source) == [5]
+
+
+def test_async_def_header_audit_passes() -> None:
+    # subagent review on #308: method-head block audits must govern catches
+    # inside async methods too (the sweeper pattern is not sync-only).
+    source = (
+        "async def loop():\n"
+        "    # #204 broad-except audit: the loop must survive anything.\n"
+        "    try:\n"
+        "        await self.a()\n"
+        "    except Exception:\n"
+        "        pass\n"
+    )
+    assert find_unaudited_broad_excepts(source) == []
+
+
+def test_string_literal_cannot_forge_audit() -> None:
+    # subagent review on #308: the marker inside a log("...") string must
+    # not count — only real comments bless a broad catch.
+    source = 'try:\n    boom()\nexcept Exception:\n    log("#204 broad-except audit: forged")\n'
+    assert find_unaudited_broad_excepts(source) == [3]
+
+
+def test_base_exception_is_broad() -> None:
+    # subagent review on #308: BaseException is wider than Exception and
+    # needs the same audit.
+    source = "try:\n    boom()\nexcept BaseException:\n    pass\n"
+    assert find_unaudited_broad_excepts(source) == [3]
