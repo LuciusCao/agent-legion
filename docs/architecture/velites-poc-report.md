@@ -99,7 +99,7 @@
 
 ## 7. 仓库测试与质量门
 
-- `tests/workflows/test_pi_protocol.py` + `tests/test_pi_event_compression.py`：**14 passed**（含 PoC 补丁；补丁不改变默认 node flavor 行为）
+- `tests/workflows/test_pi_protocol.py` + `tests/executors/test_pi_event_compression.py`：**14 passed**（含 PoC 补丁；补丁不改变默认 node flavor 行为）
 - `tests/executors` + `tests/test_pi_runner.py`：**159 passed**（705s，高负载机器）
 - 补丁压缩重写后复跑 `test_pi_protocol.py` + `test_pi_runner.py`：**26 passed**；两种 flavor 的 argv 均 REPL 复验正确
 - 所有 pi 相关测试均用 fake binary（`echo` / 手写 shell 脚本）mock，**没有任何测试真拉 pi 子进程**，因此无法用 flavor 开关直接驱动 rust 版跑测试

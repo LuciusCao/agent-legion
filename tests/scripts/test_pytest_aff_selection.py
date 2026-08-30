@@ -104,14 +104,17 @@ def test_build_index_ignores_non_test_contexts(tmp_path):
     assert mapping == {"server/app/settings.py": ["tests/test_x.py::test_a"]}
 
 
-def test_select_affected_tests_unions_covering_tests():
+def test_select_affected_tests_unions_covering_tests(tmp_path):
+    test_file = tmp_path / "tests" / "test_settings.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("def test_a():\n    pass\n", encoding="utf-8")
     mapping = {
         "server/app/settings.py": ["tests/test_settings.py::test_a"],
         "server/app/jobs.py": ["tests/test_jobs.py::test_b"],
         "tests/test_settings.py": ["tests/test_settings.py::test_a"],
     }
 
-    selected = select_affected_tests(["server/app/settings.py"], mapping)
+    selected = select_affected_tests(["server/app/settings.py"], mapping, repo_root=tmp_path)
 
     assert selected == ["tests/test_settings.py::test_a"]
 

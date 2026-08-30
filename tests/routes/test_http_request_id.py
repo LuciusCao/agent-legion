@@ -1,7 +1,7 @@
 """X-Request-Id middleware: generation, pass-through, slow-request logging.
 
 Issue #273. The middleware itself is exercised on standalone FastAPI apps
-(same pattern as the gzip middleware tests in tests/test_main.py); one
+(same pattern as the gzip middleware tests in tests/app/test_main.py); one
 shared-client test verifies the real app wiring emits the header. No
 database is touched by the standalone tests.
 """

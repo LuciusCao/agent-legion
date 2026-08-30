@@ -44,7 +44,7 @@ def test_load_env_file_preserves_quoted_secret_values(tmp_path, monkeypatch):
 
 
 def test_env_example_lists_all_cms_variables():
-    example_path = Path(__file__).resolve().parents[1] / ".env.example"
+    example_path = Path(__file__).resolve().parents[2] / ".env.example"
     example = example_path.read_text(encoding="utf-8")
     for key in (
         "CMS_BASE_URL",
@@ -440,6 +440,6 @@ def test_load_settings_skills_runs_dir_env_override(tmp_path, monkeypatch):
 
 
 def test_env_example_documents_skills_runs_dir():
-    example_path = Path(__file__).resolve().parents[1] / ".env.example"
+    example_path = Path(__file__).resolve().parents[2] / ".env.example"
     example = example_path.read_text(encoding="utf-8")
     assert "AGENT_LEGION_SKILLS_RUNS_DIR=" in example
