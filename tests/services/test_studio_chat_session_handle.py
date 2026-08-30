@@ -109,7 +109,7 @@ def test_kill_process_swallows_the_already_dead_race() -> None:
     handle = _handle()
 
     class _DeadProcess:
-        returncode = 0  # poll says alive...
+        returncode = None  # poll says alive; dies before the signal lands
 
         def kill(self) -> None:
             raise ProcessLookupError(3)

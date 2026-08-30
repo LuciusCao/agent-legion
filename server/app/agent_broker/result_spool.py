@@ -38,21 +38,19 @@ async def spool_result_body(request: Request, bundle_dir: Path, max_bytes: int) 
                     raise HTTPException(status_code=413, detail="Agent result archive too large")
                 await concurrency.run_in_threadpool(handle.write, chunk)
     except BaseException:
-        # #204 BaseException audit (batch 5): deliberate staging-file cleanup
-        # guard, NOT a swallow — the bare `raise` below re-raises the exact
-        # original, so nothing is masked and no type is converted. The reason
-        # it must be BaseException and not Exception: this is an async route
-        # handler on the event loop, and Starlette/FastAPI task cancellation
-        # delivers CancelledError (a BaseException since Python 3.8) at ANY
-        # await point inside the stream loop. A client that aborts a large
-        # upload mid-body is the everyday case — an `except Exception` would
-        # run the unlink for ordinary failures and then SKIP it for the most
-        # common failure of all (cancellation), leaking the staging file of
-        # exactly the uploads most likely to be abandoned. SystemExit /
-        # KeyboardInterrupt are not expected on this path (the loop is not
-        # the main thread's interpreter exit), but letting them through with
-        # the file already unlinked is still correct: cleanup happens before
-        # the exception continues outward. The crash-orphaned residue this
+        # #204 BaseException audit (batch 5, corrected by review): a staging-
+        # file cleanup guard, NOT a swallow — the bare `raise` re-raises the
+        # exact original, nothing masked, no type converted. Why the family
+        # is BaseException: graceful-shutdown task cancellation (CancelledError),
+        # GeneratorExit from an early-closed stream, and post-server-swap
+        # cancellation semantics (uvicorn 0.47 does not cancel on client
+        # abort — starlette raises ClientDisconnect, an Exception, there —
+        # but hypercorn does cancel) all land here; an `except Exception`
+        # would unlink for ordinary failures yet SKIP it for exactly those
+        # abandonment shapes, leaking the staging file of the uploads most
+        # likely to be abandoned. SystemExit/KeyboardInterrupt are not
+        # expected on this loop, but passing through with the file already
+        # unlinked is still correct: cleanup happens before propagation. The crash-orphaned residue this
         # cannot catch (hard process death between mkstemp and the except)
         # is reaped by the bundle-dir GC noted in the docstring.
         Path(staging).unlink(missing_ok=True)
