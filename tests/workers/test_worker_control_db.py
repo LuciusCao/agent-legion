@@ -6,6 +6,7 @@ import pytest
 
 from server.app.db.schema import init_db
 from server.app.worker_control import WorkspaceWorkerControl
+from server.app.worker_control_memory import InMemoryWorkspaceWorkerControl
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -72,6 +73,14 @@ def test_memory_only_fallback_unchanged():
     assert control.is_paused("ws1") is False
 
 
+def test_memory_only_reset_all_to_paused():
+    # in-memory 重启重置语义与持久化分支一致：清空后未知 workspace 回到暂停。
+    control = WorkspaceWorkerControl()
+    control.resume("ws1")
+    control.reset_all_to_paused()
+    assert control.is_paused("ws1") is True
+
+
 def test_facade_connect_source_passthrough(db_path):
     # #187 getattr-escape closure: the constructor must hand the JobQueries
     # facade (or any facade-shaped source) straight through to the connection
@@ -84,17 +93,18 @@ def test_facade_connect_source_passthrough(db_path):
 
     facade = FakeFacade()
     control = WorkspaceWorkerControl(db_path=facade)  # type: ignore[arg-type]
-    assert control._db_path is facade  # 直通：不抽 DSN（BOUNDARY-DATA-001）
+    # 直通：不抽 DSN（BOUNDARY-DATA-001）——门面原样抵达持久化后端。
+    assert control._backend._db_path is facade
 
     # Bare-DSN and None branches stay unchanged.
-    assert WorkspaceWorkerControl(db_path=db_path)._db_path == db_path
-    assert WorkspaceWorkerControl()._db_path is None
+    assert WorkspaceWorkerControl(db_path=db_path)._backend._db_path == db_path
+    assert isinstance(WorkspaceWorkerControl()._backend, InMemoryWorkspaceWorkerControl)
 
 
 def test_persist_pause_retries_on_transaction_conflict(db_path, monkeypatch):
     from psycopg.errors import SerializationFailure
 
-    import server.app.worker_control as control_module
+    import server.app.worker_control_db as control_db_module
     from server.app.db.transaction import write_transaction as real_write_transaction
 
     calls = 0
@@ -106,7 +116,7 @@ def test_persist_pause_retries_on_transaction_conflict(db_path, monkeypatch):
             raise SerializationFailure("serialization failure")
         return real_write_transaction(path)
 
-    monkeypatch.setattr(control_module, "write_transaction", flaky_write_transaction)
+    monkeypatch.setattr(control_db_module, "write_transaction", flaky_write_transaction)
     control = WorkspaceWorkerControl(db_path=db_path)
     control.pause("ws1")
     assert calls == 2
