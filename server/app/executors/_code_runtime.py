@@ -87,6 +87,13 @@ def _prefetch_skill_versions(executor: CodeExecutor, context: ExecutionContext) 
     try:
         runs = job_db.list_node_runs(job_id)
     except Exception:
+        # #204 broad-except audit: deliberate degradation, per the module
+        # contract above — a transient DB error must not fail the node over
+        # an AUDIT input (skill versions), so the mapping degrades to empty
+        # and the node runs without the version hints. list_node_runs is a
+        # bare SQL read with no business exception family; exc_info keeps
+        # the DB root cause visible at debug level (this is a soft input,
+        # not worth an operator-facing error).
         logger.debug("list_node_runs failed for job %s", job_id, exc_info=True)
         return {}
     return {
@@ -129,4 +136,12 @@ def consume_auth_failure_marker(executor: CodeExecutor, context: ExecutionContex
     try:
         ConnectionTokenService(dsn).report_auth_failure(key)
     except Exception:  # reporting must never mask the node's own failure
+        # #204 broad-except audit: post-node privileged action. The node's
+        # result (completed/failed, artifacts) is already determined and this
+        # runs after the child exits, so an invalidation failure — the delete
+        # above is a bare SQL write — must not convert a finished node into
+        # a thrown error and lose the result. The consequence is bounded and
+        # self-healing: the stale cached token is rejected again on the next
+        # upstream auth failure and re-reported; logger.exception keeps the
+        # traceback. Caller is the executor's output path, not a retry loop.
         logger.exception("connection %s: failed to report auth failure", key)

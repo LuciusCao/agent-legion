@@ -38,6 +38,21 @@ async def spool_result_body(request: Request, bundle_dir: Path, max_bytes: int) 
                     raise HTTPException(status_code=413, detail="Agent result archive too large")
                 await concurrency.run_in_threadpool(handle.write, chunk)
     except BaseException:
+        # #204 BaseException audit (batch 5, corrected by review): a staging-
+        # file cleanup guard, NOT a swallow — the bare `raise` re-raises the
+        # exact original, nothing masked, no type converted. Why the family
+        # is BaseException: graceful-shutdown task cancellation (CancelledError),
+        # GeneratorExit from an early-closed stream, and post-server-swap
+        # cancellation semantics (uvicorn 0.47 does not cancel on client
+        # abort — starlette raises ClientDisconnect, an Exception, there —
+        # but hypercorn does cancel) all land here; an `except Exception`
+        # would unlink for ordinary failures yet SKIP it for exactly those
+        # abandonment shapes, leaking the staging file of the uploads most
+        # likely to be abandoned. SystemExit/KeyboardInterrupt are not
+        # expected on this loop, but passing through with the file already
+        # unlinked is still correct: cleanup happens before propagation. The crash-orphaned residue this
+        # cannot catch (hard process death between mkstemp and the except)
+        # is reaped by the bundle-dir GC noted in the docstring.
         Path(staging).unlink(missing_ok=True)
         raise
     return Path(staging)

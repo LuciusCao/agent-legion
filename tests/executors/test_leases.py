@@ -329,3 +329,42 @@ def test_claim_lease_rejects_terminal_job(lease_repo):
         ).fetchone()
     assert job_row["status"] == "failed"  # 未被认领路径复活为 running
     assert node_row["status"] == "pending"
+
+
+class _ExplodingEventManager:
+    """JobEventManager stand-in whose broadcast dies — pins the #204 audit:
+    observability failures must never fail the lease write that committed."""
+
+    def broadcast_job_updated(self, workspace_id: str, job_id: str, stats: dict) -> None:
+        raise RuntimeError("bus down")
+
+
+def test_fail_without_lease_survives_broadcast_failure(lease_repo):
+    """#204 broad-except audit: _broadcast_job_update 是 fire-and-forget——
+    事务已提交后的事件广播失败不得让 fail_without_lease 抛错（调用方
+    是配置失败路径的收尾，抛错会把一次已成功的落库变成 500）。"""
+    from server.app.executors.models import ConfigurationFailureRequest
+
+    repo, job_db, data_dir = lease_repo
+    repo.job_event_manager = _ExplodingEventManager()
+    _setup_workspace_and_job(job_db)
+
+    run_id = repo.fail_without_lease(
+        ConfigurationFailureRequest(
+            workspace_id="ws-1",
+            job_id="job-1",
+            workflow_key="demo_workflow",
+            node_key="review_keywords",
+            capability="review_keywords",
+            log_path=str(data_dir / "logs" / "run.log"),
+        ),
+        "boom",
+    )
+
+    assert run_id is not None
+    with job_db.connect() as conn:
+        node_row = conn.execute(
+            "select status from job_nodes where job_id=%s and node_key=%s",
+            ("job-1", "review_keywords"),
+        ).fetchone()
+    assert node_row["status"] == "failed"

@@ -3,16 +3,20 @@ streamed to a staging file and atomically renamed, never buffered in memory."""
 
 from __future__ import annotations
 
+import asyncio
 import gzip as gzip_module
 import hashlib
 import io
 import json
 import tarfile
 from pathlib import Path
+from typing import Any
 
+import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from server.app.agent_broker.result_spool import spool_result_body
 from tests.helpers.agent_worker_api import (
     claim as _claim,
 )
@@ -189,3 +193,60 @@ def test_result_streams_large_archive_to_disk_byte_exact(tmp_path: Path) -> None
     else:
         promoted = gzip_module.decompress((run_dir / "events.jsonl.gz").read_bytes())
     assert hashlib.sha256(promoted).hexdigest() == hashlib.sha256(events).hexdigest()
+
+
+class _CancelingRequest:
+    """Request stand-in whose body stream aborts with CancelledError — the
+    everyday case for a client dropping a large upload mid-body (#204)."""
+
+    async def stream(self):  # noqa: ANN202
+        yield b"partial-bytes"
+        raise asyncio.CancelledError()
+
+
+class _FailingRequest:
+    """Request stand-in whose body stream fails with an ordinary Exception."""
+
+    async def stream(self):  # noqa: ANN202
+        yield b"partial-bytes"
+        raise RuntimeError("transport died")
+
+
+def _spool(request: Any, tmp_path: Path) -> Path:
+    bundle_dir = tmp_path / "bundles"
+    return asyncio.run(spool_result_body(request, bundle_dir, max_bytes=1024))
+
+
+def test_spool_reclaims_staging_file_on_client_cancel(tmp_path: Path) -> None:
+    """#204 BaseException audit: CancelledError is a BaseException (not an
+    Exception) — the cleanup guard must still fire and the cancellation must
+    keep propagating (bare re-raise), because an aborted upload is the most
+    common way a staging file would otherwise leak."""
+    with pytest.raises(asyncio.CancelledError):
+        _spool(_CancelingRequest(), tmp_path)
+
+    assert list((tmp_path / "bundles").glob(".result-*")) == []
+
+
+def test_spool_reclaims_staging_file_on_ordinary_failure(tmp_path: Path) -> None:
+    """Ordinary failures take the same cleanup path with the original type
+    preserved (no conversion to a generic error)."""
+    with pytest.raises(RuntimeError, match="transport died"):
+        _spool(_FailingRequest(), tmp_path)
+
+    assert list((tmp_path / "bundles").glob(".result-*")) == []
+
+
+def test_spool_reclaims_staging_file_on_oversize(tmp_path: Path) -> None:
+    """The 413 HTTPException path also leaves nothing behind (the route-level
+    test covers the full request; this pins the helper in isolation)."""
+
+    class _OversizeRequest:
+        async def stream(self):  # noqa: ANN202
+            yield b"x" * 2048
+
+    with pytest.raises(HTTPException) as excinfo:
+        _spool(_OversizeRequest(), tmp_path)
+
+    assert excinfo.value.status_code == 413
+    assert list((tmp_path / "bundles").glob(".result-*")) == []
