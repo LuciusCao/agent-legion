@@ -26,7 +26,7 @@ import type { ExecutorKind } from '../../types/jobTypes'
 import { NodeDetailsPanel } from '../NodeDetailsPanel'
 import { filterRelevantRuns } from '../../lib/jobRuns'
 import { estimateDagNodeHeight } from '../dagNodeHeight'
-import { applyHighlight } from '../dagHighlight'
+import { applyHighlight, hoverReducer } from '../dagHighlight'
 import styles from './DagGraph.module.css'
 
 export interface DagGraphNode {
@@ -84,27 +84,6 @@ const NODE_WIDTH = 240
 const FIT_VIEW_OPTIONS = { padding: 0.18, minZoom: 0.35, maxZoom: 1.2 }
 const nodeTypes = { dagNode: DagNodeComponent }
 const edgeTypes = { dagEdge: DagEdgeComponent }
-
-interface HoverState {
-  hoveredNode: string | null
-  prevActiveNode: string | null
-}
-
-type HoverAction = { type: 'enter'; id: string } | { type: 'leave' }
-
-function hoverReducer(state: HoverState, action: HoverAction): HoverState {
-  switch (action.type) {
-    case 'enter':
-      if (action.id === state.hoveredNode) return state
-      return {
-        hoveredNode: action.id,
-        prevActiveNode: state.hoveredNode,
-      }
-    case 'leave':
-      if (state.hoveredNode === null) return state
-      return { hoveredNode: null, prevActiveNode: state.hoveredNode }
-  }
-}
 
 type NormalizedExecutorKind = NonNullable<DagNodeData['executorKind']>
 

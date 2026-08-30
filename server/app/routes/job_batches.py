@@ -13,8 +13,13 @@ def create_job_batches_router(service: JobIntakeService, settings: Settings) -> 
 
     def create(workspace_id: str, payload: JobBatchRequest) -> JobBatchResponse:
         require_workflows_enabled(settings)
+        # #211 Phase 2: absent workflow_key defaults to the path workspace_id
+        # (equal since v62); explicit values keep flowing through verbatim.
+        body = payload.model_dump()
+        if body.get("workflow_key") is None:
+            body["workflow_key"] = workspace_id
         try:
-            return JobBatchResponse(**service.create_batch(workspace_id, payload.model_dump()))
+            return JobBatchResponse(**service.create_batch(workspace_id, body))
         except JobServiceError as exc:
             raise_job_http_error(exc)
 

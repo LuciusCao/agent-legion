@@ -6,6 +6,7 @@ export type DagNodeStatus =
   | 'failed'
   | 'stale'
   | 'not_applicable'
+  | 'awaiting_approval'
 
 export const STATUS_ICON: Record<DagNodeStatus, string> = {
   completed: 'check_circle',
@@ -15,6 +16,7 @@ export const STATUS_ICON: Record<DagNodeStatus, string> = {
   pending: 'radio_button_unchecked',
   ready: 'play_circle',
   not_applicable: 'block',
+  awaiting_approval: 'pending_actions',
 }
 
 export const STATUS_LABEL: Record<DagNodeStatus, string> = {
@@ -25,6 +27,7 @@ export const STATUS_LABEL: Record<DagNodeStatus, string> = {
   failed: '失败',
   stale: '需重跑',
   not_applicable: '不适用',
+  awaiting_approval: '待审批',
 }
 export function formatDuration(
   status: DagNodeStatus,

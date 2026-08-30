@@ -692,3 +692,41 @@ def test_runtime_only_update_preserves_node_code_pins(tmp_path: Path) -> None:
     # The runtime change did land, and no new revision was created.
     assert payload["nodes"]["write_script"]["execution"]["model"] == "m2"
     assert active["version"] == 1
+
+
+def test_publish_validation_skips_approval_gates(tmp_path: Path) -> None:
+    """Approval gates never dispatch (EXEC-APPROVAL-001): the publish gate
+    must not demand Agents or node code for them."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("ws-approval", default_workflow_key="gated")
+    definition = workflow_definition_from_mapping(
+        {
+            "key": "gated",
+            "label": "Gated",
+            "schema_version": 2,
+            "nodes": {
+                "entry": {"type": "start", "label": "入口"},
+                "write": {"label": "写稿", "capability": "write_script"},
+                "gate": {
+                    "type": "approval",
+                    "label": "审批",
+                    "config": {"rework_target": "write"},
+                },
+            },
+            "edges": [
+                {"from": "entry", "to": "write"},
+                {"from": "write", "to": "gate"},
+            ],
+        }
+    )
+
+    errors = validate_workflow_for_publish(
+        definition=definition,
+        workspace_id=workspace["id"],
+        job_db=queries,
+        custom_nodes_enabled=True,
+    )
+
+    # Only the code node is reported; the gate needs neither Agents nor code.
+    assert all("gated.gate" not in error for error in errors)
+    assert any("gated.write" in error for error in errors)

@@ -43,28 +43,20 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v64, workspace_settings_retirement) must
-# leave behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v64's catalog effect is the post-chain cleanup dropping
-# the three retired workspaces.default_agent_* columns plus
-# intake_config_json — rewinding re-adds them (a v63 database still has them)
-# so the upgrade under test must drop them again to match a fresh catalog.
-# v64 also carries a data migration (backfilling default_agent_* into the
-# active revision's top-level execution); it changes rows, not the catalog,
-# and is a no-op on this test's empty scratch schema. v63
-# (workspace_preview_config) adds preview_config_json, which exists at
-# SCHEMA_VERSION-1, so the undo step leaves it in place.
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
+# Effects the newest migration (v65, approval_decisions) must leave behind
+# so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. v65 is DDL-only: the approval_decisions table (plus its
+# lookup index, which drops with the table) comes from the schema-file
+# replay — rewinding drops the table so the upgrade under test recreates it.
+# v64's catalog effect (dropping the retired workspaces.default_agent_* /
+# intake_config_json columns) already holds at SCHEMA_VERSION-1, so the undo
+# step leaves it in place.
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("approval_decisions",)
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
-_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "workspace_settings_retirement"
+_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ("idx_approval_decisions_job_node",)
+_NEWEST_MIGRATION_NAME = "approval_decisions"
 # (table, column DDL) pairs re-created by the undo step.
-_NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = (
-    ("workspaces", "default_agent_provider text not null default ''"),
-    ("workspaces", "default_agent_model text not null default ''"),
-    ("workspaces", "default_agent_thinking text not null default ''"),
-    ("workspaces", "intake_config_json text not null default '{}'"),
-)
+_NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]

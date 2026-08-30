@@ -29,6 +29,9 @@ body {
   --status-failed-border: #ef4444;
   --status-partial-bg: #fef3c7;
   --status-partial-text: #92400e;
+  --status-approval-bg: #ede9fe;
+  --status-approval-text: #6d28d9;
+  --status-approval-border: #8b5cf6;
   --log-bg: #f9fafb;
   --log-header-bg: #f3f4f6;
   --log-border: #e5e7eb;

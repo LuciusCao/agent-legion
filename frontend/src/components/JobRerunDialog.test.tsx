@@ -84,7 +84,7 @@ describe('JobRerunDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
         ]}
         workflowDefinition={workflow}
@@ -107,12 +107,12 @@ describe('JobRerunDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
           makeJob({
             id: 'j2',
             status: 'completed',
-            workflow_key: 'other_workflow',
+            workspace_id: 'other_workflow',
           }),
         ]}
         workflowDefinition={workflow}
@@ -135,13 +135,13 @@ describe('JobRerunDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
             source_id: 'Q1',
           }),
           makeJob({
             id: 'j2',
             status: 'completed',
-            workflow_key: 'unknown',
+            workspace_id: 'unknown',
             source_id: 'Q2',
           }),
         ]}
@@ -171,7 +171,7 @@ describe('JobRerunDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
         ]}
         workflowDefinition={workflow}
@@ -203,7 +203,7 @@ describe('JobRerunDialog', () => {
           makeJob({
             id: 'j1',
             status: 'completed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
             node_summaries: [
               {
                 node_key: 'generate',
@@ -216,7 +216,7 @@ describe('JobRerunDialog', () => {
           makeJob({
             id: 'j2',
             status: 'queued',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
             node_summaries: [
               {
                 node_key: 'generate',
@@ -293,12 +293,12 @@ describe('JobRerunDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
           makeJob({
             id: 'j2',
             status: 'completed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
             source_id: 'Q2',
           }),
         ]}
@@ -335,7 +335,7 @@ describe('JobRerunDialog', () => {
           makeJob({
             id: 'j1',
             status: 'completed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
         ]}
         workflowDefinition={workflow}
@@ -362,7 +362,7 @@ describe('JobRerunDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
         ]}
         workflowDefinition={workflow}
@@ -393,7 +393,7 @@ describe('JobRerunDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
         ]}
         workflowDefinition={workflow}

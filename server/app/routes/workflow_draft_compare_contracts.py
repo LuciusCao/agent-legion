@@ -48,8 +48,8 @@ class WorkflowNodeChange(BaseModel):
     label: str
     # 'start' marks the entry node (explicit or loader-injected synthetic) so
     # the canvas can synthesize its inspector details from a draft that does
-    # not declare it.
-    node_type: Literal["start", "node"] = "node"
+    # not declare it; 'approval' marks a human decision gate (EXEC-APPROVAL-001).
+    node_type: Literal["start", "node", "approval"] = "node"
     fields: list[str]
     risk: WorkflowRiskLevel
 

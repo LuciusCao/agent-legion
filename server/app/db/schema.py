@@ -10,7 +10,7 @@ from server.app.db.migrations.workspace_settings_retirement import (
 from server.app.db.schema_guard import guard_shared_db
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 64
+SCHEMA_VERSION = 65
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 

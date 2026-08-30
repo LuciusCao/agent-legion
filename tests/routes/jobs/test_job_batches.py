@@ -232,6 +232,44 @@ def test_direct_ids_batch_creates_one_job_per_value(client):
     assert all(job["workflow_key"] == "education_video_problems_generation" for job in body["jobs"])
 
 
+def test_workspace_job_batch_without_workflow_key_defaults_to_workspace_id(client):
+    """#211 Phase 2 第二批：缺省 workflow_key 由服务端从 path 推导。
+
+    契约侧 workflow_key 降 optional；缺省与显式传（值=workspace id）产生
+    完全相同的 intake 结果（同 run、同 job 集合）。
+    """
+    ws_id = _create_workspace(client)
+    absent = client.post(
+        f"/api/workspaces/{ws_id}/job-batches",
+        json={
+            "source_kind": "direct_ids",
+            "knowledge_point_ids": ["Q1"],
+        },
+    )
+
+    assert absent.status_code == 200, absent.text
+    body = absent.json()
+    assert body["created_count"] == 1
+    assert all(job["workflow_key"] == ws_id for job in body["jobs"])
+
+
+def test_workspace_job_batch_explicit_workflow_key_still_accepted(client):
+    """兼容窗口：显式传 workflow_key（=workspace id）照旧工作。"""
+    ws_id = _create_workspace(client)
+    explicit = client.post(
+        f"/api/workspaces/{ws_id}/job-batches",
+        json={
+            "workflow_key": ws_id,
+            "source_kind": "direct_ids",
+            "knowledge_point_ids": ["Q1"],
+        },
+    )
+
+    assert explicit.status_code == 200, explicit.text
+    assert explicit.json()["created_count"] == 1
+    assert all(job["workflow_key"] == ws_id for job in explicit.json()["jobs"])
+
+
 def test_async_batch_resubmit_after_job_deletion_requeues_and_rebuilds(tmp_path, monkeypatch):
     """Regression (issue #55): re-submitting identical async input after the
     batch's jobs were deleted must requeue the completed batch so the consumer

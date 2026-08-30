@@ -99,6 +99,13 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("DELETE", "/api/workspaces/{workspace_id}/members/{user_id}", None),
     ("PATCH", "/api/workspaces/{workspace_id}/settings/{section}", None),
     ("PUT", "/api/workspaces/{workspace_id}/configuration", None),
+    # Approval-gate decisions (EXEC-APPROVAL-001): human-only by definition —
+    # an in-app agent must never approve, rework or reject on a person's behalf.
+    (
+        "POST",
+        "/api/workspaces/{workspace_id}/jobs/{job_id}/nodes/{node_key}/approval",
+        {"verdict": "approved"},
+    ),
     # Quality review writes and replays.
     ("POST", "/api/workspaces/{workspace_id}/quality/sample-batches", None),
     ("POST", "/api/workspaces/{workspace_id}/quality/sample-items/{item_id}/labels", None),

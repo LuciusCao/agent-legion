@@ -24,7 +24,7 @@ const mockGetState = vi.mocked(useUiStore.getState)
 
 const defaultSettings: WorkspaceSettings = {
   entityType: 'question',
-  workflowKey: '',
+  previewHidden: [],
 }
 
 // P-0.5：执行配置只剩节点并发上限 + Agent 容量。
@@ -72,23 +72,28 @@ describe('settingStore', () => {
   })
 
   it('updates settings via setSettings', () => {
-    useSettingStore.getState().setSettings({ workflowKey: 'knowledge_content' })
-    expect(useSettingStore.getState().settings.workflowKey).toBe(
-      'knowledge_content'
-    )
+    useSettingStore.getState().setSettings({ entityType: 'knowledge' })
+    expect(useSettingStore.getState().settings.entityType).toBe('knowledge')
   })
 
-  it('clears stale node configuration when the workflow changes', () => {
+  it('setSettings no longer carries the workflowKey round-trip', () => {
+    // #211 Phase 2 第二批：workflowKey 已从 PUT 载荷停发（key 与
+    // workspace id 恒等且不可变）；setSettings 只承载 entityType/
+    // previewHidden，节点限制的清空分支随死代码一并退役。
     useSettingStore.setState({
       executionConfiguration: initialExecutionConfiguration,
       originalSettings: defaultSettings,
       originalExecutionConfiguration: initialExecutionConfiguration,
     })
 
-    useSettingStore.getState().setSettings({ workflowKey: 'legacy_workflow' })
+    useSettingStore.getState().setSettings({ entityType: 'knowledge' })
 
     const state = useSettingStore.getState()
-    expect(state.executionConfiguration.node_limits).toEqual([])
+    expect(state.settings.entityType).toBe('knowledge')
+    // 编辑 entityType 不清空节点限制（旧 workflow-change 分支已删除）。
+    expect(state.executionConfiguration.node_limits).toEqual(
+      initialExecutionConfiguration.node_limits
+    )
   })
 
   it('updates entityType via setSettings', () => {
@@ -118,7 +123,7 @@ describe('settingStore', () => {
       originalSettings: defaultSettings,
       originalExecutionConfiguration: initialExecutionConfiguration,
     })
-    useSettingStore.getState().setSettings({ workflowKey: 'knowledge_content' })
+    useSettingStore.getState().setSettings({ entityType: 'knowledge' })
     expect(useSettingStore.getState().isDirty).toBe(true)
   })
 
@@ -155,6 +160,8 @@ describe('settingStore', () => {
       workspaceDescription: 'A workspace',
       settings: {
         entityType: 'knowledge' as const,
+        // 服务端快照仍下发 workflowKey（deprecated 兼容期），但 PUT
+        // 载荷已停发——快照携带仅用于水合，不再参与保存。
         workflowKey: 'knowledge_content',
       },
       executionConfiguration: {
@@ -170,7 +177,7 @@ describe('settingStore', () => {
     expect(state.workspaceId).toBe('ws2')
     expect(state.workspaceName).toBe('Test Workspace')
     expect(state.originalWorkspaceName).toBe('Test Workspace')
-    expect(state.settings.workflowKey).toBe('knowledge_content')
+    expect(state.settings.entityType).toBe('knowledge')
     expect(state.originalSettings).toEqual(state.settings)
     expect(state.executionConfiguration.agent_capacity).toBe(7)
     expect(state.originalExecutionConfiguration).toEqual(
@@ -310,6 +317,28 @@ describe('settingStore', () => {
     expect('executor_allocations' in body).toBe(false)
     expect('node_bindings' in body).toBe(false)
     expect(mockShowToast).toHaveBeenCalledWith('设置已保存', 'success')
+  })
+
+  it('saveAll PUT payload stops carrying workflowKey (#211 Phase 2)', async () => {
+    // settings blob 的 workflowKey 已停发：即使 store 快照里仍带着
+    // 服务端下发的值（deprecated 兼容期），PUT 载荷也不得回传。
+    mockApi.mockResolvedValue({
+      workspace: { name: 'Test', description: '' },
+      settings: { ...defaultSettings, workflowKey: 'question_content' },
+      execution_configuration: emptyExecutionConfiguration,
+    })
+    useSettingStore.setState({
+      settings: { ...defaultSettings, workflowKey: 'question_content' },
+    })
+
+    await useSettingStore.getState().saveAll()
+
+    const body = JSON.parse(mockApi.mock.calls[0][1]?.body as string)
+    expect('workflowKey' in body.settings).toBe(false)
+    expect(body.settings).toEqual({
+      entityType: 'question',
+      previewHidden: [],
+    })
   })
 
   it('saveAll replaces original snapshots from the response', async () => {

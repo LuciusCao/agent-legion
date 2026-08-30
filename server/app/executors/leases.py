@@ -12,6 +12,7 @@ from server.app.db.transaction import read_connection, write_transaction
 from server.app.events import JobEventManager
 from server.app.events.aggregator import record_job_update
 from server.app.executors import _lease_write_paths
+from server.app.executors._lease_approval import park_awaiting_approval_repo
 from server.app.executors._lease_config_failure import fail_without_lease
 from server.app.executors._lease_control import active_lease_counts
 from server.app.executors._lease_transactions import database_timestamp
@@ -106,6 +107,13 @@ class ExecutorLeaseRepository:
         # Broadcast only after the commit has succeeded, never inside the tx.
         self._broadcast_job_update(job_id)
         return run_id
+
+    def park_awaiting_approval(self, job_id: str, node_key: str) -> bool:
+        """Park a ready approval node (EXEC-APPROVAL-001); no lease, no node_run."""
+        if retry_on_database_conflict(lambda: park_awaiting_approval_repo(self, job_id, node_key)):
+            self._broadcast_job_update(job_id)
+            return True
+        return False
 
     def expire_stale(self, now: datetime) -> list[str]:
         return retry_on_database_conflict(lambda: _lease_write_paths.expire_stale(self, now))

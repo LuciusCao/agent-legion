@@ -14,3 +14,15 @@
   word-break: break-word;
   overflow: auto;
 }
+
+.title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.titleName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

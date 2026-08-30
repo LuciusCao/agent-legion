@@ -1,7 +1,6 @@
-import { IconButton } from '@mui/material'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
-import { MaterialIcon } from './MaterialIcon'
+import { LabeledIconButton } from './LabeledIconButton'
 
 // Studio 全入口 admin-only（P4）：非 admin 不渲染 Workflow Studio 入口按钮，
 // 路由侧由 WorkflowStudioPage 自守卫兜底（直接输入 URL 也会被重定向）。
@@ -13,12 +12,11 @@ export function WorkflowStudioButton() {
     return null
   }
   return (
-    <IconButton
-      size="small"
-      aria-label="Workflow Studio"
+    <LabeledIconButton
+      icon="account_tree"
+      label="Studio"
+      ariaLabel="Workflow Studio"
       onClick={() => navigate(`/workspaces/${workspaceId}/workflow-studio`)}
-    >
-      <MaterialIcon name="account_tree" />
-    </IconButton>
+    />
   )
 }

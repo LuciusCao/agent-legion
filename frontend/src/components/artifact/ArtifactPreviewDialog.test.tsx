@@ -22,7 +22,22 @@ describe('ArtifactPreviewDialog', () => {
     expect(screen.getByText('metadata.json')).toBeInTheDocument()
   })
 
-  it('renders content in a pre block', () => {
+  it('renders plain text content in a pre block', () => {
+    render(
+      <ArtifactPreviewDialog
+        open={true}
+        name="report.txt"
+        content="# Report"
+        onClose={onClose}
+      />
+    )
+
+    const pre = document.querySelector('pre')
+    expect(pre).toBeInTheDocument()
+    expect(pre).toHaveTextContent('# Report')
+  })
+
+  it('renders markdown artifacts as sanitized HTML with a source toggle', () => {
     render(
       <ArtifactPreviewDialog
         open={true}
@@ -32,9 +47,30 @@ describe('ArtifactPreviewDialog', () => {
       />
     )
 
+    // Rendered by default: the heading text appears as an h1, not a pre.
+    expect(screen.getByRole('heading', { name: 'Report' })).toBeInTheDocument()
+    expect(document.querySelector('pre')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '源码' }))
     const pre = document.querySelector('pre')
     expect(pre).toBeInTheDocument()
     expect(pre).toHaveTextContent('# Report')
+  })
+
+  it('renders html artifacts in a sandboxed iframe', () => {
+    render(
+      <ArtifactPreviewDialog
+        open={true}
+        name="lesson.html"
+        content="<h1>课件</h1>"
+        onClose={onClose}
+      />
+    )
+
+    const frame = document.querySelector('iframe')
+    expect(frame).toBeInTheDocument()
+    expect(frame).toHaveAttribute('sandbox', '')
+    expect(frame).toHaveAttribute('srcdoc', '<h1>课件</h1>')
   })
 
   it('renders JSON content as an interactive tree', () => {

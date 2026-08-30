@@ -1661,6 +1661,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/jobs/{job_id}/approvals': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Approval Decisions */
+    get: operations['list_approval_decisions_api_workspaces__workspace_id__jobs__job_id__approvals_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/jobs/{job_id}/nodes/{node_key}/approval': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Decide Approval */
+    post: operations['decide_approval_api_workspaces__workspace_id__jobs__job_id__nodes__node_key__approval_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/material-bundles': {
     parameters: {
       query?: never
@@ -2911,6 +2945,51 @@ export interface components {
       /** Agents */
       agents: components['schemas']['AgentStatusResponse'][]
     }
+    /** ApprovalDecisionCreateRequest */
+    ApprovalDecisionCreateRequest: {
+      /**
+       * Note
+       * @default
+       */
+      note: string
+      /**
+       * Rework Target
+       * @default
+       */
+      rework_target: string
+      /**
+       * Verdict
+       * @enum {string}
+       */
+      verdict: 'approved' | 'rework' | 'rejected'
+    }
+    /** ApprovalDecisionListResponse */
+    ApprovalDecisionListResponse: {
+      /** Decisions */
+      decisions: components['schemas']['ApprovalDecisionResponse'][]
+    }
+    /** ApprovalDecisionResponse */
+    ApprovalDecisionResponse: {
+      /** Created At */
+      created_at?: string | null
+      /** Decided By */
+      decided_by: string
+      /** Id */
+      id: string
+      /** Job Id */
+      job_id: string
+      /** Node Key */
+      node_key: string
+      /** Note */
+      note: string
+      /** Rework Target */
+      rework_target: string
+      /**
+       * Verdict
+       * @enum {string}
+       */
+      verdict: 'approved' | 'rework' | 'rejected'
+    }
     /** ArtifactResponse */
     ArtifactResponse: {
       /** Content */
@@ -3164,7 +3243,11 @@ export interface components {
       node_key: string
       /** Node Run Id */
       node_run_id: number
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: filter by the workspace the rows were fetched from instead (the list endpoint is workspace-scoped; the value always equals that workspace's id since schema v62). Removal is tracked in #211.
+       */
       workflow_key: string
     }
     /** FailedNodeRunsResponse */
@@ -3284,8 +3367,12 @@ export interface components {
       question_ids?: string[]
       /** Source Kind */
       source_kind: string
-      /** Workflow Key */
-      workflow_key: string
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211.
+       */
+      workflow_key?: string | null
     } & {
       [key: string]: unknown
     }
@@ -3504,7 +3591,11 @@ export interface components {
        * @enum {string}
        */
       strategy: 'auto' | 'rerun_self' | 'rerun_upstream'
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: defaults to the workspace id from the path (the two are equal since schema v62). Removal is tracked in #211.
+       */
       workflow_key?: string | null
     }
     /** JobRerunByFailureResponse */
@@ -3612,7 +3703,11 @@ export interface components {
        * @default
        */
       workflow_definition_hash: string
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       */
       workflow_key: string
       /**
        * Workflow Revision Id
@@ -3869,6 +3964,19 @@ export interface components {
       queued_max: number
       /** Total Tokens */
       total_tokens: number
+    }
+    /** NodeLimitEntry */
+    NodeLimitEntry: {
+      /** Concurrency Limit */
+      concurrency_limit: number
+      /** Node Key */
+      node_key: string
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       */
+      workflow_key: string
     }
     /** NodeLimitRequest */
     NodeLimitRequest: {
@@ -4158,7 +4266,11 @@ export interface components {
       sample_size: number
       /** Seed */
       seed?: string | null
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: defaults to the workspace id from the path (the two are equal since schema v62). Removal is tracked in #211.
+       */
       workflow_key?: string | null
     }
     /** QualitySampleBatchCreateResponse */
@@ -4390,8 +4502,12 @@ export interface components {
         | components['schemas']['RunItemRef']
         | components['schemas']['RunItemBundle']
       )[]
-      /** Workflow Key */
-      workflow_key: string
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: defaults to the path workspace_id; removal tracked in #211.
+       */
+      workflow_key?: string | null
     }
     /** RunCreateResponse */
     RunCreateResponse: {
@@ -4484,7 +4600,11 @@ export interface components {
       status: string
       /** Updated At */
       updated_at: string | null
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       */
       workflow_key: string
       /** Workspace Id */
       workspace_id: string
@@ -5473,7 +5593,7 @@ export interface components {
        * @default node
        * @enum {string}
        */
-      node_type: 'start' | 'node'
+      node_type: 'start' | 'node' | 'approval'
       /**
        * Risk
        * @enum {string}
@@ -5638,7 +5758,11 @@ export interface components {
       status: string
       /** Version */
       version: number
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       */
       workflow_key: string
       /** Workspace Id */
       workspace_id: string
@@ -5688,7 +5812,11 @@ export interface components {
       node_key: string
       /** Node Label */
       node_label: string
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       */
       workflow_key: string
     }
     /** WorkspaceAgentRoutesResponse */
@@ -5722,7 +5850,11 @@ export interface components {
       entityType?: string | null
       /** Previewhidden */
       previewHidden?: string[] | null
-      /** Workflowkey */
+      /**
+       * Workflowkey
+       * @deprecated
+       * @description Deprecated: equals the workspace id since schema v62; removal is tracked in #211.
+       */
       workflowKey?: string | null
     }
     /** WorkspaceCreateRequest */
@@ -5766,7 +5898,7 @@ export interface components {
       /** Migration Warnings */
       migration_warnings: string[]
       /** Node Limits */
-      node_limits: components['schemas']['NodeLimitRequest'][]
+      node_limits: components['schemas']['NodeLimitEntry'][]
     }
     /** WorkspacePackageDeleteResponse */
     WorkspacePackageDeleteResponse: {
@@ -5866,7 +5998,11 @@ export interface components {
       created_at: string
       /** Default Entity */
       default_entity: string
-      /** Default Workflow Key */
+      /**
+       * Default Workflow Key
+       * @deprecated
+       * @description Deprecated: read id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       */
       default_workflow_key: string
       /** Description */
       description: string
@@ -5943,8 +6079,12 @@ export interface components {
       entityType: string
       /** Previewhidden */
       previewHidden?: string[]
-      /** Workflowkey */
-      workflowKey: string
+      /**
+       * Workflowkey
+       * @deprecated
+       * @description Deprecated: equals the workspace id since schema v62; removal is tracked in #211.
+       */
+      workflowKey?: string | null
     }
     /** WorkspaceSettingsResponse */
     WorkspaceSettingsResponse: {
@@ -5981,7 +6121,11 @@ export interface components {
       } | null
       /** Name */
       name: string
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       */
       workflow_key: string
       /** Workflow Label */
       workflow_label: string
@@ -8905,6 +9049,10 @@ export interface operations {
       query?: {
         category?: string | null
         detail?: string | null
+        /**
+         * @deprecated
+         * @description Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211.
+         */
         workflow_key?: string | null
         since?: string | null
       }
@@ -9422,6 +9570,75 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['JobsPageResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_approval_decisions_api_workspaces__workspace_id__jobs__job_id__approvals_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        job_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApprovalDecisionListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  decide_approval_api_workspaces__workspace_id__jobs__job_id__nodes__node_key__approval_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        job_id: string
+        node_key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ApprovalDecisionCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApprovalDecisionResponse']
         }
       }
       /** @description Validation Error */

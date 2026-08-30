@@ -138,3 +138,32 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/276
   ceiling: 121
+- check: architecture.file_budget
+  path: frontend/src/components/dagHighlight.ts
+  reason: The chained-comparison rework of hover highlighting (Codex P2
+    review on PR 285) grows this pure module by the prev-visual-state
+    parameter, the prev/active node lookup maps, and the hover state
+    machine -- the atomic prevActiveNode/hoveredNode update via a reducer
+    is what prevents a wasted full recompute round between hovers.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/276
+  ceiling: 121
+- check: architecture.file_budget
+  path: frontend/src/components/dag/DagGraph.tsx
+  reason: The same Codex P2 batch on PR 285 as dagHighlight -- the chained
+    highlight call site plus the reducer wiring grow the composition
+    component past the split-era baseline.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/276
+  ceiling: 286
+- check: architecture.file_budget
+  path: server/app/jobs/queries/groups.py
+  reason: The JobQueries facade gained two new domain mixins from both
+    sides of the PR 285 merge -- GlobalSettingsKVQueriesMixin (KV
+    centralization, issue 281 on this branch) and
+    ApprovalDecisionQueriesMixin (human-approval node, PR 266 on develop).
+    Each is a legitimate one-line composition entry; the combined file is
+    one effective line past the stale ceiling.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/287
+  ceiling: 78

@@ -32,14 +32,15 @@ def test_schema_version_pin() -> None:
     # and v64's data migration lives in
     # tests/db/test_workspace_execution_defaults_migration.py (the retired
     # default_agent_* / intake_config_json columns still drop in schema.py's
-    # post-chain sweep), so the pin stays here.
-    assert SCHEMA_VERSION == 64
+    # post-chain sweep); v65 is DDL-only (approval_decisions,
+    # EXEC-APPROVAL-001), so the pin stays here.
+    assert SCHEMA_VERSION == 65
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "workspace_settings_retirement"
+    assert row["name"] == "approval_decisions"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:

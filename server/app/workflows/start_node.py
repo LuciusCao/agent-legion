@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from server.app.workflows.approval_node import APPROVAL_NODE_TYPE, validate_approval_fields
 from server.app.workflows.schema import (
     ACCEPTED_ITEM_TYPES,
     DEFAULT_ACCEPTED_ITEM_TYPES,
@@ -28,16 +29,18 @@ _FORBIDDEN_START_FIELDS = _EXECUTION_FIELDS + _CONFIG_FIELDS
 
 
 def load_start_fields(raw_node: dict[str, Any], node_key: str) -> tuple[str, tuple[str, ...]]:
-    """Parse ``type``/``accepted_item_types`` and enforce the start-only field rules."""
+    """Parse ``type``/``accepted_item_types`` and enforce per-type field rules."""
     node_type = raw_node.get("type", "node")
-    if node_type not in ("node", START_NODE_TYPE):
-        raise WorkflowDefinitionError(f"Node {node_key} type must be 'node' or {START_NODE_TYPE!r}")
+    if node_type not in ("node", START_NODE_TYPE, APPROVAL_NODE_TYPE):
+        raise WorkflowDefinitionError(f"Node {node_key} type must be 'node', 'start' or 'approval'")
     raw_types = raw_node.get("accepted_item_types")
     if node_type != START_NODE_TYPE:
         if raw_types is not None:
             raise WorkflowDefinitionError(
                 f"Node {node_key}.accepted_item_types is only valid on a start node"
             )
+        if node_type == APPROVAL_NODE_TYPE:
+            validate_approval_fields(raw_node, node_key)
         return node_type, DEFAULT_ACCEPTED_ITEM_TYPES
     for forbidden in _FORBIDDEN_START_FIELDS:
         if forbidden in raw_node:

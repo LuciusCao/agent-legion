@@ -40,11 +40,15 @@ def create_quality_router(
         payload: QualitySampleBatchCreateRequest,
         user: Annotated[dict[str, Any], Depends(require_user)],
     ) -> QualitySampleBatchCreateResponse:
+        # #211 Phase 2: absent workflow_key defaults to the path workspace_id
+        # (equal since v62); read via model_dump because the deprecated field
+        # attribute raises the deprecation warning the suite escalates.
+        body = payload.model_dump()
         try:
             result = sampling.create_batch(
                 workspace_id,
                 name=payload.name,
-                workflow_key=payload.workflow_key or "",
+                workflow_key=body.get("workflow_key") or workspace_id,
                 node_keys=payload.filters.node_keys,
                 statuses=payload.filters.statuses,
                 since=payload.filters.since,

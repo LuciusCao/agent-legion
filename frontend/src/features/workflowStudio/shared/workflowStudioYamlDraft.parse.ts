@@ -10,7 +10,7 @@ export type WorkflowYamlObject = {
 }
 
 export type WorkflowYamlNode = {
-  type?: 'start' | 'node'
+  type?: 'start' | 'node' | 'approval'
   accepted_item_types?: string[]
   label?: string
   capability?: string
@@ -19,12 +19,9 @@ export type WorkflowYamlNode = {
   outputs?: string[]
   terminal?: { outcome?: string }
   config_schema?: import('../../../types').ConfigSchema
-  execution?: {
-    provider?: string
-    model?: string
-    thinking?: string
-    prompt?: string
-  }
+  config?: { rework_target?: string; feedback_artifact?: string }
+  // prettier-ignore
+  execution?: { provider?: string; model?: string; thinking?: string; prompt?: string }
 }
 
 export type WorkflowYamlEdge = {

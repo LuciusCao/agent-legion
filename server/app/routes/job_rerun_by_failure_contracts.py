@@ -19,7 +19,19 @@ class JobRerunByFailureRequest(BaseModel):
     job_ids: list[str] = Field(default_factory=list)
     filter: JobFilterPayload | None = None
     exclude_ids: list[str] = Field(default_factory=list)
-    workflow_key: str | None = None
+    # #211 Phase 2 second batch: optional with server-side default from the
+    # path workspace_id (equal since schema v62); the filter is
+    # workspace-scoped either way. Explicit values stay accepted during the
+    # compatibility window.
+    workflow_key: str | None = Field(
+        min_length=1,
+        default=None,
+        description=(
+            "Deprecated: defaults to the workspace id from the path (the two "
+            "are equal since schema v62). Removal is tracked in #211."
+        ),
+        deprecated=True,
+    )
 
     @model_validator(mode="after")
     def check_job_selection(self) -> Self:
