@@ -503,7 +503,7 @@
     "frontend/src/labels.ts": 65,
     "frontend/src/layouts/AppShell.module.css": 26,
     "frontend/src/layouts/AppShell.tsx": 90,
-    "frontend/src/layouts/WorkspaceLayout.tsx": 141,
+    "frontend/src/layouts/WorkspaceLayout.tsx": 140,
     "frontend/src/layouts/WorkspacePageOutlet.tsx": 33,
     "frontend/src/lib/acceptedItemTypes.ts": 21,
     "frontend/src/lib/addItems.ts": 116,
