@@ -16,19 +16,15 @@ export interface JobListItemProps {
   workspaceId?: string
 }
 
+const STATUS_CLASS: Record<string, string> = {
+  running: styles.running,
+  completed: styles.completed,
+  failed: styles.failed,
+  awaiting_approval: styles.awaitingApproval,
+}
+
 function statusClass(status: string): string {
-  switch (status) {
-    case 'running':
-      return styles.running
-    case 'completed':
-      return styles.completed
-    case 'failed':
-      return styles.failed
-    case 'pending':
-    case 'queued':
-    default:
-      return styles.pending
-  }
+  return STATUS_CLASS[status] ?? styles.pending
 }
 
 function activeLabelClass(nodeStatus: string): string {

@@ -248,3 +248,14 @@
 .tokenUsageRow {
   margin-top: 2px;
 }
+
+.statusAwaitingApproval {
+  background: var(--status-approval-bg);
+  border-color: var(--status-approval-border);
+  color: var(--status-approval-text);
+}
+
+.badgeAwaitingApproval {
+  background: var(--status-approval-bg);
+  color: var(--status-approval-text);
+}

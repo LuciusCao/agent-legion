@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from server.app.jobs.atomic_mutations import AtomicJobMutationsMixin
 from server.app.jobs.execution_control import JobExecutionControlMixin
+from server.app.jobs.queries.approval_decisions import ApprovalDecisionQueriesMixin
 from server.app.jobs.queries.auth import AuthQueriesMixin
 from server.app.jobs.queries.batch import RunQueriesMixin
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
@@ -63,10 +64,11 @@ class RunDomainQueriesMixin(
     JobStatusQueriesMixin,
     JobKeyQueriesMixin,
     QualityReplayQueriesMixin,
+    ApprovalDecisionQueriesMixin,
     AtomicJobMutationsMixin,
     JobExecutionControlMixin,
 ):
-    """Runs, jobs, nodes, scans, reruns, quality replays, and execution control."""
+    """Runs, jobs, nodes, scans, reruns, quality replays, approvals, and execution control."""
 
 
 class StudioChatDomainQueriesMixin(StudioChatQueriesMixin):

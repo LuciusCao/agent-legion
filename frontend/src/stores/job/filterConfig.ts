@@ -4,6 +4,7 @@ export type JobStatus =
   | 'completed'
   | 'failed'
   | 'paused'
+  | 'awaiting_approval'
 
 export interface JobFilterConfig {
   status: JobStatus | null

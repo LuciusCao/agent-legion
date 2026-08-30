@@ -23,7 +23,9 @@ from typing import Any
 # blocking, issue #13).
 SCAN_ROUNDS: tuple[tuple[int, int], ...] = ((8, 256), (64, 2048), (512, 16384))
 MAX_CLAIM_ATTEMPTS = 32
-RUNNABLE_JOB_STATUSES = ("queued", "running")
+# awaiting_approval is non-terminal: an approval gate blocks only its own
+# downstream (EXEC-APPROVAL-001), so parallel branches must stay claimable.
+RUNNABLE_JOB_STATUSES = ("queued", "running", "awaiting_approval")
 
 
 class ClaimRacedError(Exception):

@@ -7,6 +7,7 @@ import { useUiStore } from '../../stores/uiStore'
 import { invalidateAgentWorkers } from '../../lib/agentWorkersInvalidation'
 import { queryKeys } from '../../lib/queryKeys'
 import type { JobDetail } from '../../types/jobTypes'
+import { useApprovalAction } from './useApprovalAction'
 import { useContinueJobAction } from './useContinueJobAction'
 import { pageSubtitle } from './jobDetailTitle'
 import { POLLING_STATUSES } from './jobNodeHelpers'
@@ -97,6 +98,14 @@ export function useJobDetail(
     [jobId, refreshDetail]
   )
 
+  const handleApproval = useApprovalAction(
+    workspaceId,
+    jobId,
+    refreshDetail,
+    setActionLoading,
+    setActionError
+  )
+
   const handleContinue = useContinueJobAction(
     jobId,
     refreshDetail,
@@ -147,6 +156,7 @@ export function useJobDetail(
     refreshDetail,
     handleRerun,
     handleRunTo,
+    handleApproval,
     handleContinue,
     handleUpgradeWorkflow,
     handlePackage,

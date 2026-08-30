@@ -32,13 +32,20 @@ export function makeMutationToast(
 
 export function normalizeJobStatus(
   status: string
-): 'pending' | 'running' | 'completed' | 'failed' | 'paused' {
+):
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'paused'
+  | 'awaiting_approval' {
   switch (status) {
     case 'pending':
     case 'running':
     case 'completed':
     case 'failed':
     case 'paused':
+    case 'awaiting_approval':
       return status
     default:
       return 'pending'

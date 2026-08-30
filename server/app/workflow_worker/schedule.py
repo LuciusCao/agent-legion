@@ -28,6 +28,7 @@ from server.app.workflow_worker.dispatch_config import resolve_dispatch_node_con
 from server.app.workflow_worker.executor_claim import claim_executor_node
 from server.app.workflow_worker.routing import resolve_node_route
 from server.app.workflow_worker.shards import assemble_reduce_inputs, claim_shard_node
+from server.app.workflows.approval_node import APPROVAL_NODE_TYPE
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 
 if TYPE_CHECKING:
@@ -105,6 +106,11 @@ def try_claim_and_submit(
     workspace_id = workspace["id"]
     workflow_key = definition.key
     node_key = node.key
+    # Approval gates never dispatch: park the node at awaiting_approval and
+    # let the approval API move it on (EXEC-APPROVAL-001). Counts as work
+    # for the pass cadence; a False return (lost race) is simply skipped.
+    if node.node_type == APPROVAL_NODE_TYPE:
+        return worker.leases.park_awaiting_approval(job["id"], node_key)
     if node.shard is not None:
         return claim_shard_node(
             worker, workspace, job, node, job_dir, control_snapshot, allowed_node_keys, snapshot

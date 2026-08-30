@@ -10,6 +10,7 @@ import filterStyles from '../FilterControls.module.css'
 const STATUS_OPTIONS: JobStatus[] = [
   'pending',
   'running',
+  'awaiting_approval',
   'completed',
   'failed',
   'paused',

@@ -336,3 +336,35 @@ def test_reserved_execution_defaults_validate_seed() -> None:
         "timeout_seconds": 30,
         "sandbox_network": True,
     }
+
+
+def test_resolve_workflow_node_configs_skips_approval_gates() -> None:
+    """Approval gate config (rework_target) is platform semantics, not an
+    execution config: intake freeze must not validate it against a schema
+    (EXEC-APPROVAL-001)."""
+    from server.app.workflows.definition import workflow_definition_from_mapping
+
+    definition = workflow_definition_from_mapping(
+        {
+            "key": "gated",
+            "label": "Gated",
+            "schema_version": 2,
+            "nodes": {
+                "entry": {"type": "start", "label": "入口"},
+                "write": {"label": "写稿", "capability": "write_script"},
+                "gate": {
+                    "type": "approval",
+                    "label": "审批",
+                    "config": {"rework_target": "write"},
+                },
+            },
+            "edges": [
+                {"from": "entry", "to": "write"},
+                {"from": "write", "to": "gate"},
+            ],
+        }
+    )
+
+    resolved = resolve_workflow_node_configs(definition, {}, None)
+
+    assert "gate" not in resolved

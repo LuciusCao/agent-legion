@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
 import { useParams, useNavigate, Outlet, useLocation } from 'react-router-dom'
-import { IconButton } from '@mui/material'
 import { useCurrentWorkspace } from '../hooks/useWorkspaces'
 import { useJobStore } from '../stores/jobStore'
 import { useAgentsStore } from '../stores/agentsStore'
@@ -9,7 +8,7 @@ import { AppShell } from './AppShell'
 import { AppBar } from '../components/AppBar'
 import { AddItemsDialog } from '../components/AddItemsDialog'
 import { AgentStatusIndicator } from '../components/AgentStatusIndicator'
-import { MaterialIcon } from '../components/MaterialIcon'
+import { LabeledIconButton } from '../components/LabeledIconButton'
 import { WorkflowStudioButton } from '../components/WorkflowStudioButton'
 export default function WorkspaceLayout() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
@@ -42,18 +41,17 @@ export default function WorkspaceLayout() {
   }, [fetchWorkerStatus, workspaceId])
   const title = pageTitle || currentWorkspace?.name || workspaceId || ''
   const tokenAnalysisButton = (
-    <IconButton
-      size="small"
-      aria-label="Token 使用分析"
+    <LabeledIconButton
+      icon="analytics"
+      label="用量"
+      ariaLabel="Token 使用分析"
       onClick={() =>
         workspaceId &&
         (isDetailPage
           ? setTokenUsageDialogOpen(true)
           : navigate(`/workspaces/${workspaceId}/token-usage`))
       }
-    >
-      <MaterialIcon name="analytics" />
-    </IconButton>
+    />
   )
   return (
     <AppShell
@@ -70,57 +68,49 @@ export default function WorkspaceLayout() {
                 {workspaceId && (
                   <AgentStatusIndicator workspaceId={workspaceId} />
                 )}
-                <IconButton
-                  size="small"
-                  aria-label={selectMode ? '完成' : '多选'}
+                <LabeledIconButton
+                  icon={selectMode ? 'close' : 'checklist'}
+                  label={selectMode ? '完成' : '多选'}
+                  active={selectMode}
                   onClick={toggleSelectMode}
-                  className={selectMode ? 'active-icon' : ''}
-                >
-                  <MaterialIcon name={selectMode ? 'close' : 'checklist'} />
-                </IconButton>
-                <IconButton
-                  size="small"
-                  aria-label="添加"
+                />
+                <LabeledIconButton
+                  icon="add"
+                  label="添加"
                   onClick={() => {
                     if (workspaceId) {
                       setAddItemsDialogOpen(true)
                     }
                   }}
-                >
-                  <MaterialIcon name="add" />
-                </IconButton>
-                <IconButton
-                  size="small"
-                  aria-label="包历史"
+                />
+                <LabeledIconButton
+                  icon="inventory_2"
+                  label="打包"
+                  ariaLabel="包历史"
                   onClick={() => {
                     if (workspaceId) {
                       setWorkspacePackageDialogOpen(true)
                     }
                   }}
-                >
-                  <MaterialIcon name="inventory_2" />
-                </IconButton>
+                />
                 {tokenAnalysisButton}
-                <IconButton
-                  size="small"
-                  aria-label="质量闭环"
+                <LabeledIconButton
+                  icon="add_task"
+                  label="质量"
+                  ariaLabel="质量闭环"
                   onClick={() =>
                     workspaceId &&
                     navigate(`/workspaces/${workspaceId}/quality`)
                   }
-                >
-                  <MaterialIcon name="add_task" />
-                </IconButton>
+                />
                 <WorkflowStudioButton />
-                <IconButton
-                  size="small"
-                  aria-label="设置"
+                <LabeledIconButton
+                  icon="settings"
+                  label="设置"
                   onClick={() =>
                     navigate(`/workspaces/${workspaceId}/settings`)
                   }
-                >
-                  <MaterialIcon name="settings" />
-                </IconButton>
+                />
               </>
             ) : (
               <>

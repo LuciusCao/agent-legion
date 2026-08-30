@@ -1661,6 +1661,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/jobs/{job_id}/approvals': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Approval Decisions */
+    get: operations['list_approval_decisions_api_workspaces__workspace_id__jobs__job_id__approvals_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/jobs/{job_id}/nodes/{node_key}/approval': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Decide Approval */
+    post: operations['decide_approval_api_workspaces__workspace_id__jobs__job_id__nodes__node_key__approval_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/material-bundles': {
     parameters: {
       query?: never
@@ -2910,6 +2944,51 @@ export interface components {
     AgentsResponse: {
       /** Agents */
       agents: components['schemas']['AgentStatusResponse'][]
+    }
+    /** ApprovalDecisionCreateRequest */
+    ApprovalDecisionCreateRequest: {
+      /**
+       * Note
+       * @default
+       */
+      note: string
+      /**
+       * Rework Target
+       * @default
+       */
+      rework_target: string
+      /**
+       * Verdict
+       * @enum {string}
+       */
+      verdict: 'approved' | 'rework' | 'rejected'
+    }
+    /** ApprovalDecisionListResponse */
+    ApprovalDecisionListResponse: {
+      /** Decisions */
+      decisions: components['schemas']['ApprovalDecisionResponse'][]
+    }
+    /** ApprovalDecisionResponse */
+    ApprovalDecisionResponse: {
+      /** Created At */
+      created_at?: string | null
+      /** Decided By */
+      decided_by: string
+      /** Id */
+      id: string
+      /** Job Id */
+      job_id: string
+      /** Node Key */
+      node_key: string
+      /** Note */
+      note: string
+      /** Rework Target */
+      rework_target: string
+      /**
+       * Verdict
+       * @enum {string}
+       */
+      verdict: 'approved' | 'rework' | 'rejected'
     }
     /** ArtifactResponse */
     ArtifactResponse: {
@@ -5498,7 +5577,7 @@ export interface components {
        * @default node
        * @enum {string}
        */
-      node_type: 'start' | 'node'
+      node_type: 'start' | 'node' | 'approval'
       /**
        * Risk
        * @enum {string}
@@ -9463,6 +9542,75 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['JobsPageResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_approval_decisions_api_workspaces__workspace_id__jobs__job_id__approvals_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        job_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApprovalDecisionListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  decide_approval_api_workspaces__workspace_id__jobs__job_id__nodes__node_key__approval_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        job_id: string
+        node_key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ApprovalDecisionCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApprovalDecisionResponse']
         }
       }
       /** @description Validation Error */

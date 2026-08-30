@@ -1152,3 +1152,21 @@ invariants:
       - kind: integration
         target: tests/db/test_db.py::test_database_initialization_records_postgres_schema
         gate: quick
+
+  - id: EXEC-APPROVAL-001
+    statement: "A ``type: approval`` node never dispatches to any executor or Agent: the workflow worker parks its job_node at awaiting_approval (no lease, no node_run), downstream nodes stay blocked until the node completes, and the only transition out is an approval-API decision from a human session — studio_agent scoped tokens are rejected on the decision route, and every decision is recorded as an insert-only approval_decisions row with the uniform user:{id} actor."
+    owner: workflow-worker
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_approval_flow.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/jobs/test_job_approvals.py
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_approval_node_definition.py
+        gate: quick
+      - kind: contract
+        target: tests/routes/test_studio_agent_scope.py
+        gate: quick

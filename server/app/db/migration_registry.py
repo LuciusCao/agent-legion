@@ -46,9 +46,7 @@ from server.app.db.migrations import (
     migrate_workspace_job_node_status_counts,
     migrate_workspace_secrets,
 )
-from server.app.db.migrations.job_status_counts import (
-    migrate_workspace_job_status_counts,
-)
+from server.app.db.migrations.job_status_counts import migrate_workspace_job_status_counts
 
 MigrationFn = Callable[[Any], None]
 
@@ -123,6 +121,9 @@ MIGRATIONS: list[SchemaMigration] = [
     # because the v62 data migration still replays inserts that
     # reference them on older databases.
     SchemaMigration(64, "workspace_settings_retirement", migrate_workspace_execution_defaults),
+    # v65 is DDL-only (approval_decisions, EXEC-APPROVAL-001): the
+    # human-approval-gate audit table comes from the schema-file replay.
+    SchemaMigration(65, "approval_decisions"),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]

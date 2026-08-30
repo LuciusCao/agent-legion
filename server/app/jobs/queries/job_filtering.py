@@ -7,10 +7,10 @@ from server.app.jobs import JobQueries
 
 # Mirrors the frontend normalizeJobStatus folding: any status outside the
 # known non-pending set (queued or anything unknown) is surfaced as "pending".
-_NON_PENDING_STATUSES = ("running", "completed", "failed", "paused")
+_NON_PENDING_STATUSES = ("running", "completed", "failed", "paused", "awaiting_approval")
 
 _STATUS_BUCKET_SQL = (
-    "case when status in ('running', 'completed', 'failed', 'paused')"
+    "case when status in ('running', 'completed', 'failed', 'paused', 'awaiting_approval')"
     " then status else 'pending' end"
 )
 
@@ -52,7 +52,9 @@ def filter_clauses(f: JobListFilter) -> tuple[list[str], list[Any]]:
     params: list[Any] = []
     if f.status:
         if f.status == "pending":
-            clauses.append("status not in ('running', 'completed', 'failed', 'paused')")
+            clauses.append(
+                "status not in ('running', 'completed', 'failed', 'paused', 'awaiting_approval')"
+            )
         else:
             clauses.append("status = %s")
             params.append(f.status)
