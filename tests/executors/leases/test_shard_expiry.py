@@ -21,7 +21,7 @@ def test_expired_shard_lease_fails_shard_and_aggregates(tmp_path: Path) -> None:
         2,
         local_limit=None,
     )
-    with write_transaction(job_db.path) as conn:
+    with write_transaction(job_db.dsn_identity) as conn:
         materialize_shards(
             conn,
             job_id,
@@ -40,14 +40,14 @@ def test_expired_shard_lease_fails_shard_and_aggregates(tmp_path: Path) -> None:
     )
     assert claim is not None
     past = datetime.now(UTC) - timedelta(seconds=10)
-    with write_transaction(job_db.path) as conn:
+    with write_transaction(job_db.dsn_identity) as conn:
         conn.execute(
             "update executor_leases set expires_at=%s where id=%s",
             (past.strftime("%Y-%m-%d %H:%M:%S.%f"), claim.lease_id),
         )
 
     assert repo.expire_stale(datetime.now(UTC)) == [claim.lease_id]
-    with read_connection(job_db.path) as conn:
+    with read_connection(job_db.dsn_identity) as conn:
         shards = conn.execute(
             "select * from node_shards where job_id=%s and node_key=%s order by shard_index",
             (job_id, "review_keywords"),

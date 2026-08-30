@@ -374,7 +374,7 @@ def test_blank_workspace_first_publish_adopts_key_and_runs_job(tmp_path):
 
         # The code node needs published code before the first revision (the
         # known bootstrap constraint; node code is workspace-scoped).
-        codes = NodeCodeService(app.state.job_db.path)
+        codes = NodeCodeService(app.state.job_db.dsn_identity)
         codes.save_draft(
             workspace_id,
             "acme_flow",

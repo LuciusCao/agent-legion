@@ -93,7 +93,7 @@ def test_code_claim_secret_failure_500_then_sweeper_requeue_retries(
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
     app = _make_app(tmp_path)
     execution_id = _enqueue_code_request(app, job_db, job_id="job-1")
-    vault = VaultService(job_db.path, {})
+    vault = VaultService(job_db.dsn_identity, {})
     vault.set("test-workspace", "api-token", "s3cr3t")
     # The referenced vault entry is gone by the time the claim is served.
     vault.delete("test-workspace", "api-token")

@@ -101,7 +101,9 @@ def _job_db(job: dict[str, Any]) -> Any:
         with read_connection(TEST_DATABASE_URL) as conn:
             yield conn
 
-    return SimpleNamespace(path=TEST_DATABASE_URL, get_job=lambda job_id: dict(job), read=_read)
+    return SimpleNamespace(
+        dsn_identity=TEST_DATABASE_URL, get_job=lambda job_id: dict(job), read=_read
+    )
 
 
 def _settings(tmp_path: Path) -> Any:

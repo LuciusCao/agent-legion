@@ -62,7 +62,7 @@ def materials(job_db, storage) -> MaterialsService:
             " on conflict(id) do nothing",
             (WORKSPACE_ID, OTHER_WORKSPACE_ID),
         )
-    return MaterialsService(job_db.path, storage)
+    return MaterialsService(job_db.dsn_identity, storage)
 
 
 @pytest.fixture

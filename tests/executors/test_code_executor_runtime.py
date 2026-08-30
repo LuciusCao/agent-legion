@@ -74,7 +74,8 @@ class _FakeJobDb:
     """Minimal JobQueries stand-in for parent-side prefetch tests."""
 
     def __init__(self, *, runs_error: bool = False) -> None:
-        self.path = "postgresql://fake"
+        # #187 step 3: the facade's DSN is exposed via `dsn_identity` only.
+        self.dsn_identity = "postgresql://fake"
         self.jobs_dir = "/fake"
         self._runs_error = runs_error
 
@@ -176,7 +177,7 @@ def test_consume_auth_failure_marker_invalidates_cached_token(
     from workspace_libs.node_sdk import AUTH_FAILURE_MARKER_PATH
 
     executor = _executor()
-    executor.job_db = SimpleNamespace(path="postgresql://fake")
+    executor.job_db = SimpleNamespace(dsn_identity="postgresql://fake")
     calls = _capture_token_service(monkeypatch)
     marker = context.job_dir / AUTH_FAILURE_MARKER_PATH
     marker.parent.mkdir(parents=True, exist_ok=True)
@@ -197,7 +198,7 @@ def test_consume_auth_failure_marker_falls_back_to_node_config_connection(
     from workspace_libs.node_sdk import AUTH_FAILURE_MARKER_PATH
 
     executor = _executor()
-    executor.job_db = SimpleNamespace(path="postgresql://fake")
+    executor.job_db = SimpleNamespace(dsn_identity="postgresql://fake")
     calls = _capture_token_service(monkeypatch)
     marker = context.job_dir / AUTH_FAILURE_MARKER_PATH
     marker.parent.mkdir(parents=True, exist_ok=True)
@@ -217,7 +218,7 @@ def test_consume_auth_failure_marker_noop_without_marker(
     from server.app.executors._code_runtime import consume_auth_failure_marker
 
     executor = _executor()
-    executor.job_db = SimpleNamespace(path="postgresql://fake")
+    executor.job_db = SimpleNamespace(dsn_identity="postgresql://fake")
     calls = _capture_token_service(monkeypatch)
 
     consume_auth_failure_marker(executor, context)
@@ -234,7 +235,7 @@ def test_sandboxed_child_auth_failure_marker_reaches_parent(
 
     _sandboxed(monkeypatch)
     executor = _executor()
-    executor.job_db = SimpleNamespace(path="postgresql://fake")
+    executor.job_db = SimpleNamespace(dsn_identity="postgresql://fake")
     calls = _capture_token_service(monkeypatch)
     ctx = replace(context, node_config={"connection": "cms-internal"})
 

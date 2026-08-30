@@ -142,7 +142,7 @@ def test_worker_can_read_only_its_own_status_with_issued_token(tmp_path: Path) -
 def test_worker_metrics_require_token_and_are_forced_to_own_worker(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
     bucket = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=5)
-    with write_transaction(app.state.job_db.path) as conn:
+    with write_transaction(app.state.job_db.dsn_identity) as conn:
         for worker_id, total_tokens in (("home-mini", 16), ("other-worker", 999)):
             conn.execute(
                 """
@@ -541,7 +541,7 @@ def _seed_code_request(
     expected_outputs: list[str] | None = None,
 ) -> None:
     """Enqueue a self-contained kind='code' request straight into the broker."""
-    with write_transaction(app.state.job_db.path) as conn:
+    with write_transaction(app.state.job_db.dsn_identity) as conn:
         conn.execute(
             "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'demo_workflow')"
             " on conflict(id) do nothing"
@@ -666,7 +666,7 @@ def test_code_claim_injects_secrets_into_response_manifest(tmp_path: Path, monke
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
     app = _make_app(tmp_path)
     _seed_code_request(app, with_secret=True)
-    VaultService(app.state.job_db.path, {}).set("test-workspace", "api-token", "s3cr3t")
+    VaultService(app.state.job_db.dsn_identity, {}).set("test-workspace", "api-token", "s3cr3t")
 
     with TestClient(app) as client:
         _authenticate_admin(client)
@@ -732,7 +732,7 @@ def test_heartbeat_v2_returns_cancel_body_for_code_executions(tmp_path: Path) ->
         assert ok.status_code == 200
         assert ok.json() == {"cancelled_execution_ids": []}
 
-        with write_transaction(app.state.job_db.path) as conn:
+        with write_transaction(app.state.job_db.dsn_identity) as conn:
             conn.execute("update jobs set execution_paused=1 where id='job-code-1'")
         cancelled = client.post(url, headers=auth)
         assert cancelled.status_code == 200
@@ -742,7 +742,7 @@ def test_heartbeat_v2_returns_cancel_body_for_code_executions(tmp_path: Path) ->
 def test_result_auth_failure_invalidates_cached_connection_token(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
     _seed_code_request(app)
-    with write_transaction(app.state.job_db.path) as conn:
+    with write_transaction(app.state.job_db.dsn_identity) as conn:
         conn.execute("insert into external_connections(key, type) values ('cms-prod', 'cms')")
         conn.execute(
             "insert into connection_tokens(connection_key, token_ciphertext)"

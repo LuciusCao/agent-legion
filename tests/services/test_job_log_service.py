@@ -289,7 +289,7 @@ def test_job_log_service_redacts_vault_secrets(log_service, monkeypatch):
     job, run = _create_job_with_run(
         job_db, settings, make_data_relative(log_file, settings.data_dir)
     )
-    vault = VaultService(job_db.path, settings.config)
+    vault = VaultService(job_db.dsn_identity, settings.config)
     vault.set(str(job["workspace_id"]), "cms-token", "vault-plain-value")
 
     result = service.read(job["id"], run["id"])

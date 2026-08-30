@@ -11,7 +11,7 @@ from server.app.services.instance_settings_store import InstanceSettingsStore
 
 @pytest.fixture
 def store(job_db) -> InstanceSettingsStore:
-    store = InstanceSettingsStore(job_db.path)
+    store = InstanceSettingsStore(job_db.dsn_identity)
     with job_db.connect() as conn:
         conn.execute("delete from global_settings where key='instance'")
     return store

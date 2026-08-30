@@ -126,8 +126,15 @@ class CodeExecutor:
             # which is a degradation the node must survive. exc_info keeps
             # the configuration root cause visible for the operator.
             try:
+                # #187 step 3: the facade's `.path` is private, so the DSN
+                # comes from `dsn_identity` — the only public accessor. The
+                # bare `getattr(job_db, "path")` probe used to silently
+                # return None for non-facade shapes; the explicit None check
+                # below keeps that "no DB handle → no artifact store"
+                # degradation for job_db-less executors (tests).
                 self._artifact_objects = build_artifact_object_store(
-                    self._object_store(), getattr(self.job_db, "path", None)
+                    self._object_store(),
+                    self.job_db.dsn_identity if self.job_db is not None else None,
                 )
             except Exception:
                 logger.warning("artifact store unavailable; mirroring disabled", exc_info=True)

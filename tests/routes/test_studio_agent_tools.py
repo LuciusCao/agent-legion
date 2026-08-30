@@ -208,7 +208,7 @@ nodes:
 
     from server.app.services.node_codes import NodeCodeService
 
-    codes = NodeCodeService(job_db.path)
+    codes = NodeCodeService(job_db.dsn_identity)
     codes.save_draft(
         workspace_id,
         "studio_validate_flow",

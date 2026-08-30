@@ -68,7 +68,7 @@ def test_get_normalizes_legacy_stored_openclaw_keys(client) -> None:
     failing response validation with a 500 (Codex review, PR #183)."""
     from server.app.services.instance_settings_store import InstanceSettingsStore
 
-    store = InstanceSettingsStore(client.app.state.job_db.path)
+    store = InstanceSettingsStore(client.app.state.job_db.dsn_identity)
     store.put(
         {
             "openclaw": {

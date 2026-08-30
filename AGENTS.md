@@ -126,8 +126,13 @@
 - Workspace API 扩展顺序：contract → service → focused route。
 - 新 service 的数据库访问必须走 `JobQueries` 门面（`server/app/jobs/queries`），
   不在 service 里手写 SQL、import `server.app.db.transaction`/`connection` 或经
-  `job_db.path` 取 DSN 自建连接（BOUNDARY-DATA-001；基线 ratchet 检查见
-  `config/architecture/service-data-boundary-baseline.json`）。
+  JobQueries 取 DSN 自建连接（BOUNDARY-DATA-001；基线 ratchet 检查见
+  `config/architecture/service-data-boundary-baseline.json`）。门面的 DSN 属性
+  `.path` 已私有化为 `_path`（#187 第三步）：`dsn_identity` 是唯一公开只读
+  访问器（返回字符串 DSN），合法消费者仅限数据层自身（queries/atomic_
+  mutations 的 `_path`）与经设计豁免的数据层毗邻组件（executors lease 仓储、
+  artifact object store——经 `dsn_identity` 拿字符串）；service 里读
+  `dsn_identity` 或裸 SQL/DB 原语同样计入 ratchet。
 - 用户鉴权经 `server/app/auth/dependencies.py` 注入（`require_user` /
   `require_admin` / `require_workspace_access`），不要在路由里手写 cookie /
   token 解析；公开端点仅限 `/api/health` 与 `/api/auth/login|bootstrap`。

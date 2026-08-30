@@ -103,7 +103,7 @@ def test_resolve_code_manifest_config_injects_and_strips_secrets(job_db, monkeyp
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
     workspace = job_db.create_workspace(default_workflow_key="demo_workflow", name="test-workspace")
-    vault = VaultService(job_db.path, {})
+    vault = VaultService(job_db.dsn_identity, {})
     vault.set(workspace["id"], "api-token", "s3cr3t")
     manifest = {
         "kind": "code",
@@ -113,7 +113,7 @@ def test_resolve_code_manifest_config_injects_and_strips_secrets(job_db, monkeyp
         "secret_config": {"token": {"secret_ref": "api-token"}},
     }
 
-    resolved = resolve_code_manifest_config(manifest, job_db.path, {})
+    resolved = resolve_code_manifest_config(manifest, job_db.dsn_identity, {})
 
     assert resolved["config"] == {"mode": "fast", "token": "s3cr3t"}
     assert "secret_config" not in resolved

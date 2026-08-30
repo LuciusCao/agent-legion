@@ -42,13 +42,14 @@ class ExecutorLeaseRepository:
         # keep working). It lives BELOW the service boundary on purpose —
         # like queries/atomic_mutations, it is one of the data-layer-adjacent
         # components that legitimately hold the connection source; services
-        # must not.
+        # must not. Step 3: the facade's `.path` is private, so the DSN comes
+        # from `dsn_identity` — the facade's only public accessor.
         if isinstance(job_db, str):
             self.job_db = None
             self.path: str = job_db
         else:
             self.job_db = job_db
-            self.path = job_db.path
+            self.path = job_db.dsn_identity
         self.job_event_manager = job_event_manager
         self.data_dir = data_dir
         self.job_event_buffer = job_event_buffer
