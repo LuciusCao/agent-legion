@@ -13,6 +13,7 @@ import json
 import logging
 from pathlib import Path
 
+import psycopg
 import pytest
 
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
@@ -127,7 +128,7 @@ def test_cleanup_extra_runs_for_node_contains_per_dir_failure(tmp_path: Path, ca
     keep.mkdir(parents=True)
     extra.mkdir()
 
-    conn = _FailingConn(OSError("db connection reset"))
+    conn = _FailingConn(psycopg.OperationalError("db connection reset"))
 
     with caplog.at_level(logging.WARNING, logger="server.app.services.run_dir_cleanup"):
         removed = cleanup_extra_runs_for_node(conn, data_dir, job_dir, "node_a")

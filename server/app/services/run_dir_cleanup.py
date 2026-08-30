@@ -4,6 +4,8 @@ import logging
 import shutil
 from pathlib import Path
 
+import psycopg
+
 from server.app.db.connection import DatabaseConnection
 from server.app.storage_paths import ManagedPathError, make_data_relative
 
@@ -69,11 +71,12 @@ def cleanup_extra_runs_for_node(
                 (old_rel,),
             )
             removed += 1
-        except (OSError, ManagedPathError) as exc:
+        except (OSError, ManagedPathError, psycopg.Error) as exc:
             # #204: remove_path already swallows its own OSErrors internally
             # (never raises), so the escapes here are the DB update failing
-            # (OSError from the connection layer) or a relative path that
-            # cannot be canonicalized — a per-dir failure must not abort the
+            # (psycopg.Error — DB failures never surface as OSError, review
+            # on #264) or a relative path that cannot be canonicalized — a
+            # per-dir failure must not abort the
             # walk over the other run dirs. The already-removed filesystem
             # state is the accepted residue (the row still points at a
             # missing dir, which every reader tolerates).
