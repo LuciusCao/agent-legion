@@ -61,11 +61,15 @@ describe('DagEdge', () => {
     expect(path.style.opacity).toBe('1')
   })
 
-  it('treats missing data as not highlighted', () => {
-    const path = edgePathOf(renderEdge(undefined))
-    expect(path.style.stroke).toBe('#d1d5db')
-    expect(path.style.strokeWidth).toBe('2')
-    expect(path.style.opacity).toBe('0.4')
+  it('treats missing data as the un-highlighted baseline (no style override)', () => {
+    // 三态语义（Codex review on #285）：undefined 是「从未进入高亮模式」，
+    // 不覆盖 buildRfEdges 的原始 style——普通边不透明。旧双态语义会把
+    // 常态边强制盖成 0.4 透明度。
+    const path = edgePathOf(
+      renderEdge(undefined, { stroke: '#9ca3af', strokeWidth: 2, opacity: 0.5 })
+    )
+    expect(path.style.stroke).toBe('#9ca3af')
+    expect(path.style.opacity).toBe('0.5')
   })
 
   it('keeps conditional dashed style from edge style prop', () => {

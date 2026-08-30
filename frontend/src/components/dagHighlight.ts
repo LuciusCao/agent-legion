@@ -18,18 +18,37 @@ import {
  * 不触发 → memo(NodeWrapper) 不渲染 → 自定义组件不执行。于是 hover 的
  * 渲染面从 O(全部节点+边)（旧版全量 .map + spread 重建）收敛到
  * O(高亮态翻转的节点+边 + 祖先/后代遍历)。
+ *
+ * 链式输入（Codex review on #285）：`prev` 是上一次高亮的结果。判断
+ * 「条目是否翻转」必须对照上一次的视觉态（prev 里的 data 高亮位），而非
+ * 未高亮的基线——从节点 A hover 到 B 时，仍应置灰的节点在基线里
+ * dimmed=false 但视觉上已是 true，对照基线会把它们全部重建，hover 在
+ * 大图上退回 O(全部非同链路节点)。position 等用户态字段始终取基线
+ * （rfNodes/rfEdges 是拖拽后的最新形状），只沿用 prev 的 data 高亮位。
  */
 export function applyHighlight(
   rfNodes: Node<DagNodeData>[],
   rfEdges: Edge[],
-  activeNode: string | null
+  activeNode: string | null,
+  prev?: {
+    highlightedNodes: Node<DagNodeData>[]
+    highlightedEdges: Edge[]
+  }
 ): { highlightedNodes: Node<DagNodeData>[]; highlightedEdges: Edge[] } {
+  const prevNodeData = new Map(
+    (prev?.highlightedNodes ?? rfNodes).map((node) => [node.id, node.data])
+  )
+  const prevEdgeData = new Map(
+    (prev?.highlightedEdges ?? rfEdges).map((edge) => [edge.id, edge.data])
+  )
+
   if (!activeNode) {
-    // 全图常态：只有 data.active/dimmed 从 true 翻回 false 的条目需要
-    // 换新对象（边同时还原默认 marker 颜色）。
+    // 全图常态：只有 data.active/dimmed/highlighted 从 true 翻回 false 的
+    // 条目需要换新对象（边同时还原默认 marker 颜色）。对照 prev 判断翻转
+    // 而非基线——从「hover 中」到「移出」也只重建高亮过的条目。
     return {
       highlightedEdges: rfEdges.map((edge) =>
-        edge.data?.highlighted === true
+        prevEdgeData.get(edge.id)?.highlighted === true
           ? {
               ...edge,
               data: { ...edge.data, highlighted: false },
@@ -37,11 +56,16 @@ export function applyHighlight(
             }
           : edge
       ),
-      highlightedNodes: rfNodes.map((node) =>
-        node.data.active === true || node.data.dimmed === true
-          ? { ...node, data: { ...node.data, active: false, dimmed: false } }
-          : node
-      ),
+      highlightedNodes: rfNodes.map((node) => {
+        const prevData = prevNodeData.get(node.id)
+        if (prevData?.active === true || prevData?.dimmed === true) {
+          return {
+            ...node,
+            data: { ...node.data, active: false, dimmed: false },
+          }
+        }
+        return node
+      }),
     }
   }
 
@@ -68,7 +92,9 @@ export function applyHighlight(
       edge.target === activeNode ||
       (ancestors.has(edge.source) && edge.target === activeNode) ||
       (edge.source === activeNode && descendants.has(edge.target))
-    if ((edge.data?.highlighted === true) === isHighlighted) return edge
+    if ((prevEdgeData.get(edge.id)?.highlighted === true) === isHighlighted) {
+      return edge
+    }
     // markerEnd 颜色与描边同步翻转（视觉行为与重构前逐字段一致）；只在
     // 翻转时随 edge 一起新建，未翻转的边连 markerEnd 引用都不变。
     return {
@@ -84,9 +110,10 @@ export function applyHighlight(
   const highlightedNodes = rfNodes.map((node) => {
     const active = node.id === activeNode
     const shouldDim = !highlightedNodeIds.has(node.id)
+    const prevData = prevNodeData.get(node.id)
     if (
-      (node.data.dimmed === true) === shouldDim &&
-      (node.data.active === true) === active
+      (prevData?.dimmed === true) === shouldDim &&
+      (prevData?.active === true) === active
     ) {
       return node
     }
