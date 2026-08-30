@@ -15,16 +15,21 @@ with a ``finished_at`` below the cursor (e.g. backfilled history) are
 likewise never swept.
 
 The cursor lives in ``global_settings`` under the ``cleanup_sweep`` key,
-the established store for small host-level state documents.
+the established store for small host-level state documents. SQL lives in
+the queries layer (``global_settings`` KV mixin, issue #281); this store
+keeps the cursor-parsing domain logic.
 """
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
+from typing import Any
 
 from server.app.db.dialect import ConnectSource
-from server.app.db.transaction import read_connection, write_transaction
+from server.app.jobs.queries.global_settings import (
+    GlobalSettingsKVQueriesMixin,
+    global_settings_kv_from_dsn,
+)
 
 GLOBAL_SETTINGS_KEY = "cleanup_sweep"
 
@@ -44,14 +49,8 @@ class CleanupSweepStore:
 
     def load(self, cursor_key: str) -> tuple[datetime, int]:
         """Return the persisted ``(finished_at, id)`` mark, or the scan start."""
-        with read_connection(self._dsn) as conn:
-            row = conn.execute(
-                "select value from global_settings where key=%s",
-                (GLOBAL_SETTINGS_KEY,),
-            ).fetchone()
-        if row is None:
-            return _EMPTY_CURSOR
-        entry = json.loads(str(row["value"])).get(cursor_key) or {}
+        document = self._kv().get_global_settings_document(GLOBAL_SETTINGS_KEY)
+        entry = (document or {}).get(cursor_key) or {}
         finished_raw = entry.get("finished_at")
         if not finished_raw:
             return _EMPTY_CURSOR
@@ -62,18 +61,16 @@ class CleanupSweepStore:
 
     def save(self, cursor_key: str, finished_at: datetime, row_id: int) -> None:
         """Advance one cursor key's mark; read-modify-write keeps the other keys."""
-        with write_transaction(self._dsn) as conn:
-            row = conn.execute(
-                "select value from global_settings where key=%s",
-                (GLOBAL_SETTINGS_KEY,),
-            ).fetchone()
-            document = json.loads(str(row["value"])) if row is not None else {}
+
+        def _advance(document: dict[str, Any]) -> dict[str, Any]:
             document[cursor_key] = {"finished_at": finished_at.isoformat(), "id": row_id}
-            conn.execute(
-                """
-                insert into global_settings(key, value) values (%s, %s)
-                on conflict(key)
-                do update set value=excluded.value, updated_at=current_timestamp
-                """,
-                (GLOBAL_SETTINGS_KEY, json.dumps(document)),
-            )
+            return document
+
+        self._kv().update_global_settings_document(GLOBAL_SETTINGS_KEY, _advance)
+
+    def _kv(self) -> GlobalSettingsKVQueriesMixin:
+        """The KV accessor: the facade itself, or an adapter for a bare DSN
+        (``ConnectSource`` contract, #187; SQL centralization #281)."""
+        if isinstance(self._dsn, str):
+            return global_settings_kv_from_dsn(self._dsn)
+        return self._dsn

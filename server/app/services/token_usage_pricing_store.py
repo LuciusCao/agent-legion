@@ -4,15 +4,20 @@ Pricing is a product setting: it lives only in the ``global_settings`` table
 and is edited through the admin API; no yaml fallback exists. The stored
 document has the shape ``{currency, pricing: [...]}`` so
 ``token_usage_pricing.calculate_cost`` consumes it unchanged.
+
+SQL lives in the queries layer (``global_settings`` KV mixin, issue #281);
+this store is the domain facade over one fixed key.
 """
 
 from __future__ import annotations
 
-import json
-from typing import Any, cast
+from typing import Any
 
 from server.app.db.dialect import ConnectSource
-from server.app.db.transaction import read_connection, write_transaction
+from server.app.jobs.queries.global_settings import (
+    GlobalSettingsKVQueriesMixin,
+    global_settings_kv_from_dsn,
+)
 
 GLOBAL_SETTINGS_KEY = "token_usage"
 
@@ -26,26 +31,10 @@ class TokenUsagePricingStore:
 
     def get(self) -> dict[str, Any] | None:
         """Return the stored pricing document, or None when unset."""
-        with read_connection(self._dsn) as conn:
-            row = conn.execute(
-                "select value from global_settings where key=%s",
-                (GLOBAL_SETTINGS_KEY,),
-            ).fetchone()
-        if row is None:
-            return None
-        return cast(dict[str, Any], json.loads(str(row["value"])))
+        return self._kv().get_global_settings_document(GLOBAL_SETTINGS_KEY)
 
     def put(self, document: dict[str, Any]) -> None:
-        payload = json.dumps(document)
-        with write_transaction(self._dsn) as conn:
-            conn.execute(
-                """
-                insert into global_settings(key, value) values (%s, %s)
-                on conflict(key)
-                do update set value=excluded.value, updated_at=current_timestamp
-                """,
-                (GLOBAL_SETTINGS_KEY, payload),
-            )
+        self._kv().put_global_settings_document(GLOBAL_SETTINGS_KEY, document)
 
     def effective_config(self, base_config: dict[str, Any]) -> dict[str, Any]:
         """Return ``base_config`` with its token_usage section set from the DB.
@@ -61,3 +50,10 @@ class TokenUsagePricingStore:
         else:
             effective["token_usage"] = document
         return effective
+
+    def _kv(self) -> GlobalSettingsKVQueriesMixin:
+        """The KV accessor: the facade itself, or an adapter for a bare DSN
+        (``ConnectSource`` contract, #187; SQL centralization #281)."""
+        if isinstance(self._dsn, str):
+            return global_settings_kv_from_dsn(self._dsn)
+        return self._dsn

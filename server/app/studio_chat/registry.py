@@ -10,18 +10,22 @@ unrelated settings save. Non-admin users only ever pick an agent id from this
 list — arbitrary command lines never cross the API boundary (RCE guard).
 
 Reads go to the DB per use (like the skill-source store), so registry edits
-take effect without a restart.
+take effect without a restart. SQL lives in the queries layer
+(``global_settings`` KV mixin, issue #281); this module keeps the
+defaults-synthesis domain logic.
 """
 
 from __future__ import annotations
 
 import ipaddress
-import json
 from typing import Any, cast
 from urllib.parse import urlsplit
 
 from server.app.db.dialect import ConnectSource
-from server.app.db.transaction import read_connection, write_transaction
+from server.app.jobs.queries.global_settings import (
+    GlobalSettingsKVQueriesMixin,
+    global_settings_kv_from_dsn,
+)
 
 GLOBAL_SETTINGS_KEY = "studio_agents"
 DEFAULT_API_BASE = "http://127.0.0.1:8000"
@@ -58,15 +62,10 @@ class StudioAgentRegistryStore:
 
     def get(self) -> dict[str, Any]:
         """Return the effective document: stored values over code defaults."""
-        with read_connection(self._dsn) as conn:
-            row = conn.execute(
-                "select value from global_settings where key=%s",
-                (GLOBAL_SETTINGS_KEY,),
-            ).fetchone()
         document = default_registry_document()
-        if row is None:
+        stored = self._kv().get_global_settings_document(GLOBAL_SETTINGS_KEY)
+        if stored is None:
             return document
-        stored = cast(dict[str, Any], json.loads(str(row["value"])))
         if stored.get("api_base"):
             document["api_base"] = str(stored["api_base"])
         if isinstance(stored.get("agents"), list):
@@ -74,19 +73,17 @@ class StudioAgentRegistryStore:
         return document
 
     def put(self, document: dict[str, Any]) -> None:
-        payload = json.dumps(document)
-        with write_transaction(self._dsn) as conn:
-            conn.execute(
-                """
-                insert into global_settings(key, value) values (%s, %s)
-                on conflict(key)
-                do update set value=excluded.value, updated_at=current_timestamp
-                """,
-                (GLOBAL_SETTINGS_KEY, payload),
-            )
+        self._kv().put_global_settings_document(GLOBAL_SETTINGS_KEY, document)
 
     def find_agent(self, agent_id: str) -> dict[str, Any] | None:
         for agent in self.get()["agents"]:
             if agent.get("id") == agent_id:
                 return cast(dict[str, Any], agent)
         return None
+
+    def _kv(self) -> GlobalSettingsKVQueriesMixin:
+        """The KV accessor: the facade itself, or an adapter for a bare DSN
+        (``ConnectSource`` contract, #187; SQL centralization #281)."""
+        if isinstance(self._dsn, str):
+            return global_settings_kv_from_dsn(self._dsn)
+        return self._dsn

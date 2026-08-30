@@ -102,6 +102,7 @@
     "tests/services/test_code_dispatch.py",
     "tests/services/test_code_manifest_trim.py",
     "tests/services/test_dispatch_claim_caches.py",
+    "tests/services/test_global_settings_kv.py",
     "tests/services/test_job_artifact_maintenance.py",
     "tests/services/test_job_log_service.py",
     "tests/services/test_job_rerun_batch.py",

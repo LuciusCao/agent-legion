@@ -7,15 +7,20 @@ product settings: they live only in the ``global_settings`` table under the
 exists (config/app.yaml and the workflow.yaml runtime sections are retired).
 Most values hydrate into Settings at startup; ``materials_ttl_days`` is read
 fresh from this document at material completion/sweep time instead.
+
+SQL lives in the queries layer (``global_settings`` KV mixin, issue #281);
+this store is the domain facade over one fixed key.
 """
 
 from __future__ import annotations
 
-import json
-from typing import Any, cast
+from typing import Any
 
 from server.app.db.dialect import ConnectSource
-from server.app.db.transaction import read_connection, write_transaction
+from server.app.jobs.queries.global_settings import (
+    GlobalSettingsKVQueriesMixin,
+    global_settings_kv_from_dsn,
+)
 
 GLOBAL_SETTINGS_KEY = "instance"
 
@@ -29,23 +34,14 @@ class InstanceSettingsStore:
 
     def get(self) -> dict[str, Any] | None:
         """Return the stored instance document, or None when unset."""
-        with read_connection(self._dsn) as conn:
-            row = conn.execute(
-                "select value from global_settings where key=%s",
-                (GLOBAL_SETTINGS_KEY,),
-            ).fetchone()
-        if row is None:
-            return None
-        return cast(dict[str, Any], json.loads(str(row["value"])))
+        return self._kv().get_global_settings_document(GLOBAL_SETTINGS_KEY)
 
     def put(self, document: dict[str, Any]) -> None:
-        payload = json.dumps(document)
-        with write_transaction(self._dsn) as conn:
-            conn.execute(
-                """
-                insert into global_settings(key, value) values (%s, %s)
-                on conflict(key)
-                do update set value=excluded.value, updated_at=current_timestamp
-                """,
-                (GLOBAL_SETTINGS_KEY, payload),
-            )
+        self._kv().put_global_settings_document(GLOBAL_SETTINGS_KEY, document)
+
+    def _kv(self) -> GlobalSettingsKVQueriesMixin:
+        """The KV accessor: the facade itself, or an adapter for a bare DSN
+        (``ConnectSource`` contract, #187; SQL centralization #281)."""
+        if isinstance(self._dsn, str):
+            return global_settings_kv_from_dsn(self._dsn)
+        return self._dsn

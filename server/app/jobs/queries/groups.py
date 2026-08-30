@@ -16,6 +16,7 @@ from server.app.jobs.queries.auth import AuthQueriesMixin
 from server.app.jobs.queries.batch import RunQueriesMixin
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 from server.app.jobs.queries.failed_node_runs import FailedNodeRunQueriesMixin
+from server.app.jobs.queries.global_settings import GlobalSettingsKVQueriesMixin
 from server.app.jobs.queries.job_bulk import JobBulkQueriesMixin
 from server.app.jobs.queries.job_keys import JobKeyQueriesMixin
 from server.app.jobs.queries.job_nodes import JobNodeQueriesMixin
@@ -39,8 +40,9 @@ class IdentityQueriesMixin(
     AuthQueriesMixin,
     ScopedTokenQueriesMixin,
     ScopedTokenManagementQueriesMixin,
+    GlobalSettingsKVQueriesMixin,
 ):
-    """User auth, scoped tokens: who may call what."""
+    """Auth, scoped tokens, and global_settings KV documents (#281)."""
 
 
 class WorkspaceDomainQueriesMixin(
