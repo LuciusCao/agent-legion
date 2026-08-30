@@ -162,20 +162,21 @@ def test_save_node_code_draft_puts_code(recorded) -> None:
     server, calls = recorded
     args = {
         "workspace_id": "ws-1",
-        "workflow_key": "wf",
         "node_key": "node",
         "code": "def run(job, job_dir, runtime):\n    return {}\n",
         "change_note": "note",
     }
     _run_tool(server, "save_node_code_draft", args)
     assert calls[0]["method"] == "PUT"
-    assert calls[0]["url"].endswith("/workspaces/ws-1/workflows/wf/nodes/node/code/draft")
+    # #211 Phase 2: node-code tool URLs key on the workspace id alone
+    # (workflows/{workflow_key} segment retired; key == id since v62).
+    assert calls[0]["url"].endswith("/workspaces/ws-1/nodes/node/code/draft")
     assert calls[0]["json"] == {"code": args["code"], "change_note": "note"}
 
 
 def test_save_node_code_draft_empty_note_becomes_null(recorded) -> None:
     server, calls = recorded
-    args = {"workspace_id": "ws-1", "workflow_key": "wf", "node_key": "node", "code": "x"}
+    args = {"workspace_id": "ws-1", "node_key": "node", "code": "x"}
     _run_tool(server, "save_node_code_draft", args)
     assert calls[0]["json"]["change_note"] is None
     assert "expected_capability" not in calls[0]["json"]
@@ -185,7 +186,6 @@ def test_save_node_code_draft_forwards_expected_capability(recorded) -> None:
     server, calls = recorded
     args = {
         "workspace_id": "ws-1",
-        "workflow_key": "wf",
         "node_key": "node",
         "code": "def run(job, job_dir, runtime):\n    return {}\n",
         "expected_capability": "publish_content",
@@ -196,11 +196,9 @@ def test_save_node_code_draft_forwards_expected_capability(recorded) -> None:
 
 def test_get_node_code(recorded) -> None:
     server, calls = recorded
-    _run_tool(
-        server, "get_node_code", {"workspace_id": "ws-1", "workflow_key": "wf", "node_key": "n"}
-    )
+    _run_tool(server, "get_node_code", {"workspace_id": "ws-1", "node_key": "n"})
     assert calls[0]["method"] == "GET"
-    assert calls[0]["url"].endswith("/workspaces/ws-1/workflows/wf/nodes/n/code")
+    assert calls[0]["url"].endswith("/workspaces/ws-1/nodes/n/code")
 
 
 def test_save_agent_definition_draft_default_tools(recorded) -> None:

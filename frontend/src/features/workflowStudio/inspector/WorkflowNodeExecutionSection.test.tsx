@@ -57,7 +57,6 @@ const editorProps = {
   definitionYaml: `execution:\n  provider: deepseek\n  model: your-model-b\n  thinking: low\nnodes:\n  generate_key_info:\n    capability: generate_key_info\n`,
   setDefinitionYaml: () => {},
   agentCatalog,
-  workflowKey: 'demo-wf',
 }
 
 function renderSection(
@@ -104,7 +103,6 @@ describe('WorkflowNodeExecutionSection', () => {
       setDefinitionYaml: (value) => {
         nextYaml = value
       },
-      workflowKey: 'demo-wf',
     })
 
     fireEvent.change(screen.getByLabelText('Model'), {
@@ -133,7 +131,6 @@ describe('WorkflowNodeExecutionSection', () => {
       setDefinitionYaml: (value) => {
         nextYaml = value
       },
-      workflowKey: 'demo-wf',
     })
 
     fireEvent.change(screen.getByLabelText('Provider'), {
@@ -151,7 +148,6 @@ describe('WorkflowNodeExecutionSection', () => {
           setDefinitionYaml={(value) => {
             nextYaml = value
           }}
-          workflowKey="demo-wf"
         />
       </TestQueryProvider>
     )

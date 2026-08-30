@@ -45,7 +45,6 @@ function renderSections(
       agentCatalog={[]}
       definitionYaml={options?.definitionYaml ?? startYaml}
       setDefinitionYaml={options?.setDefinitionYaml ?? (() => {})}
-      workflowKey="demo_workflow"
       readOnly={options?.readOnly}
     />
   )

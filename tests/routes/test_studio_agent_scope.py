@@ -35,6 +35,7 @@ nodes:
 """
 
 _NODE_CODE = "/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code"
+_NODE_CODE_SEGMENT_FREE = "/api/workspaces/{workspace_id}/nodes/{node_key}/code"
 _CHAT = "/api/workspaces/{workspace_id}/studio-chat"
 
 # Effecting write routes (path templates as they appear in the app's route
@@ -56,6 +57,11 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", f"{_NODE_CODE}/publish", None),
     ("POST", f"{_NODE_CODE}/rollback", {"version": 1}),
     ("DELETE", _NODE_CODE, None),
+    # #211 Phase 2: segment-free aliases of the deprecated workflow-key paths
+    # carry the same effecting guards.
+    ("POST", f"{_NODE_CODE_SEGMENT_FREE}/publish", None),
+    ("POST", f"{_NODE_CODE_SEGMENT_FREE}/rollback", {"version": 1}),
+    ("DELETE", _NODE_CODE_SEGMENT_FREE, None),
     ("POST", "/api/agent-definitions/{agent_id}/publish?workspace_id={workspace_id}", None),
     (
         "POST",
@@ -170,6 +176,7 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/workspaces/{workspace_id}/workflow-drafts/validate"): "validate only",
     ("POST", "/api/workspaces/{workspace_id}/workflow-drafts/compare"): "read-only compare",
     ("PUT", f"{_NODE_CODE}"): "node code draft write",
+    ("PUT", f"{_NODE_CODE_SEGMENT_FREE}"): "node code draft write",
     ("POST", "/api/agent-definitions"): "creates a draft",
     ("PUT", "/api/agent-definitions/{agent_id}/draft"): "draft write",
     ("POST", "/api/agent-definitions/{agent_id}/copy"): "creates a draft",
@@ -190,6 +197,11 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     (
         "PUT",
         "/api/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft",
+    ): "scoped-only tool surface",
+    # #211 Phase 2: segment-free alias of the scoped tool draft route.
+    (
+        "PUT",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{node_key}/code/draft",
     ): "scoped-only tool surface",
     (
         "PUT",

@@ -4,7 +4,6 @@ import { WorkflowInspectorEmptyState } from './WorkflowInspectorOverviewFallback
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
 import { inspectorNodeDetails } from './workflowStudioInspectorDetails'
 import { WorkflowNodeInspectorBody } from './WorkflowNodeInspectorBody'
-import { parseWorkflowKey } from '../shared/workflowStudioYamlDraft.parse'
 
 type Props = {
   workflow: WorkflowDefinitionRecord | null
@@ -31,9 +30,6 @@ export function WorkflowNodeInspector(props: Props) {
       agentCatalog={props.agentCatalog}
       definitionYaml={props.definitionYaml}
       setDefinitionYaml={props.setDefinitionYaml}
-      workflowKey={
-        workflow?.key ?? parseWorkflowKey(props.definitionYaml) ?? ''
-      }
       readOnly={props.readOnly}
       onClose={props.onClose}
     />
