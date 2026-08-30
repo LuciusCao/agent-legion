@@ -3288,8 +3288,12 @@ export interface components {
       question_ids?: string[]
       /** Source Kind */
       source_kind: string
-      /** Workflow Key */
-      workflow_key: string
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211.
+       */
+      workflow_key?: string | null
     } & {
       [key: string]: unknown
     }
@@ -3508,7 +3512,11 @@ export interface components {
        * @enum {string}
        */
       strategy: 'auto' | 'rerun_self' | 'rerun_upstream'
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: defaults to the workspace id from the path (the two are equal since schema v62). Removal is tracked in #211.
+       */
       workflow_key?: string | null
     }
     /** JobRerunByFailureResponse */
@@ -3878,19 +3886,6 @@ export interface components {
       /** Total Tokens */
       total_tokens: number
     }
-    /** NodeLimitEntry */
-    NodeLimitEntry: {
-      /** Concurrency Limit */
-      concurrency_limit: number
-      /** Node Key */
-      node_key: string
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
-       */
-      workflow_key: string
-    }
     /** NodeLimitRequest */
     NodeLimitRequest: {
       /** Concurrency Limit */
@@ -4179,7 +4174,11 @@ export interface components {
       sample_size: number
       /** Seed */
       seed?: string | null
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: defaults to the workspace id from the path (the two are equal since schema v62). Removal is tracked in #211.
+       */
       workflow_key?: string | null
     }
     /** QualitySampleBatchCreateResponse */
@@ -4411,8 +4410,12 @@ export interface components {
         | components['schemas']['RunItemRef']
         | components['schemas']['RunItemBundle']
       )[]
-      /** Workflow Key */
-      workflow_key: string
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: defaults to the path workspace_id; removal tracked in #211.
+       */
+      workflow_key?: string | null
     }
     /** RunCreateResponse */
     RunCreateResponse: {
@@ -5717,11 +5720,7 @@ export interface components {
       node_key: string
       /** Node Label */
       node_label: string
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
-       */
+      /** Workflow Key */
       workflow_key: string
     }
     /** WorkspaceAgentRoutesResponse */
@@ -5755,7 +5754,11 @@ export interface components {
       entityType?: string | null
       /** Previewhidden */
       previewHidden?: string[] | null
-      /** Workflowkey */
+      /**
+       * Workflowkey
+       * @deprecated
+       * @description Deprecated: equals the workspace id since schema v62; removal is tracked in #211.
+       */
       workflowKey?: string | null
     }
     /** WorkspaceCreateRequest */
@@ -5799,7 +5802,7 @@ export interface components {
       /** Migration Warnings */
       migration_warnings: string[]
       /** Node Limits */
-      node_limits: components['schemas']['NodeLimitEntry'][]
+      node_limits: components['schemas']['NodeLimitRequest'][]
     }
     /** WorkspacePackageDeleteResponse */
     WorkspacePackageDeleteResponse: {
@@ -5980,8 +5983,12 @@ export interface components {
       entityType: string
       /** Previewhidden */
       previewHidden?: string[]
-      /** Workflowkey */
-      workflowKey: string
+      /**
+       * Workflowkey
+       * @deprecated
+       * @description Deprecated: equals the workspace id since schema v62; removal is tracked in #211.
+       */
+      workflowKey?: string | null
     }
     /** WorkspaceSettingsResponse */
     WorkspaceSettingsResponse: {

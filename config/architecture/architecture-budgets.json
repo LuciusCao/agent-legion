@@ -615,7 +615,7 @@
     "frontend/src/stores/setting/actions/executionConfigActions.ts": 45,
     "frontend/src/stores/setting/actions/loadActions.ts": 37,
     "frontend/src/stores/setting/actions/saveActions.ts": 76,
-    "frontend/src/stores/setting/index.ts": 72,
+    "frontend/src/stores/setting/index.ts": 62,
     "frontend/src/stores/setting/state.ts": 83,
     "frontend/src/stores/settingStore.ts": 12,
     "frontend/src/stores/uiStore.ts": 47,

@@ -23,10 +23,12 @@ def _seed_runs() -> None:
             [("completed", "node-a"), ("completed", "node-a"), ("failed", "node-b")]
         ):
             job_id = f"job-{index}"
+            # v62 invariant: workflow_key == workspace id (the batch-create
+            # default derives the filter from the path workspace_id).
             conn.execute(
                 "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-                " values (%s, %s, 'wf-a', 'test', %s)",
-                (job_id, WORKSPACE, job_id),
+                " values (%s, %s, %s, 'test', %s)",
+                (job_id, WORKSPACE, WORKSPACE, job_id),
             )
             conn.execute(
                 "insert into node_runs(id, job_id, node_key, status) values (%s, %s, %s, %s)",
@@ -124,10 +126,11 @@ def test_stats_confusion_matrix(client):
         ]
         for index, (node_key, status, failure_detail) in enumerate(runs):
             job_id = f"job-cm-{index}"
+            # v62 invariant: workflow_key == workspace id.
             conn.execute(
                 "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-                " values (%s, %s, 'wf-a', 'test', %s)",
-                (job_id, WORKSPACE, job_id),
+                " values (%s, %s, %s, 'test', %s)",
+                (job_id, WORKSPACE, WORKSPACE, job_id),
             )
             conn.execute(
                 "insert into node_runs(id, job_id, node_key, status, failure_detail)"
@@ -203,3 +206,32 @@ def test_anonymous_access_rejected(anon_client):
         json={"name": "b", "sample_size": 5},
     )
     assert response.status_code == 401
+
+
+def test_create_batch_without_workflow_key_defaults_to_workspace_id(client):
+    """#211 Phase 2 第二批：缺省 workflow_key 由服务端从 path 推导。
+
+    缺省（推导为 workspace id，即 v62 恒等值）命中 _seed_runs 的全部 3 行；
+    显式传不匹配的 key 收窄为 0 行——两路语义都得到验证。
+    """
+    _seed_runs()
+    absent = client.post(
+        f"{BASE}/sample-batches",
+        json={"name": "absent-key", "sample_size": 10, "seed": "seed-absent"},
+    )
+    assert absent.status_code == 200, absent.text
+    assert absent.json()["sampled_count"] == 3
+    assert absent.json()["workflow_key"] == WORKSPACE
+
+    explicit = client.post(
+        f"{BASE}/sample-batches",
+        json={
+            "name": "explicit-key",
+            "workflow_key": "legacy_wf_a",
+            "sample_size": 10,
+            "seed": "seed-explicit",
+        },
+    )
+    assert explicit.status_code == 200, explicit.text
+    assert explicit.json()["sampled_count"] == 0
+    assert explicit.json()["workflow_key"] == "legacy_wf_a"
