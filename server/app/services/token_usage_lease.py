@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import psycopg
+
 from server.app.db.connection import DatabaseConnection
 from server.app.db.transaction import write_transaction
 from server.app.services.token_usage import persist_node_run_usage
@@ -65,7 +67,7 @@ def capture_token_usage_after_lease_finish(
         # PostgreSQL DSN via the unified write_transaction helper.
         with write_transaction(conn.database_dsn) as write_conn:
             persist_node_run_usage(write_conn, summary)
-    except OSError:
+    except (OSError, psycopg.Error):
         # #204: usage capture is best-effort telemetry on the completion
         # path — the lease's result is already committed, so a failed parse
         # (missing/unreadable events.jsonl) or persist (DB connectivity)

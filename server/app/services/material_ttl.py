@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import psycopg
 from botocore.exceptions import BotoCoreError, ClientError
 
 from server.app.db.dialect import ConnectSource
@@ -156,7 +157,7 @@ def collect_expired_materials(
                     exc_info=True,
                 )
             deleted += 1
-        except OSError:
+        except (OSError, psycopg.Error):
             # #204: per-material containment. Each material is its own small
             # transaction (docstring), and the connection layer surfaces its
             # failures as OSError — one failed row must not abort the pass

@@ -4,6 +4,8 @@ import json
 import logging
 from typing import Any
 
+import psycopg
+
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
@@ -172,7 +174,7 @@ class JobIntakeService:
             # original failure.
             try:
                 self.job_db.delete_run_without_jobs(str(batch["id"]))
-            except OSError as exc:
+            except (OSError, psycopg.Error) as exc:
                 # #204: same compensation-only catch as run_service — a DB
                 # connectivity failure must not mask the original creation
                 # error; programming errors propagate to the route's 500.

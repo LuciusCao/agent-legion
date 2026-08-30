@@ -334,3 +334,33 @@ def test_workflow_definition_from_dict_corrupt_snapshot_is_wde() -> None:
     WorkflowDefinitionError 抛出——draft compare 的窄化正建立在该契约上。"""
     with pytest.raises(WorkflowDefinitionError):
         workflow_definition_from_dict(json.loads('{"key": "k", "label": "l", "nodes": []}'))
+
+
+def test_node_code_pins_degrades_non_object_snapshot_top():
+    """Codex on PR #264: a snapshot that parses as valid JSON but whose top
+    level is not an object (e.g. ``[]``) used to escape as AttributeError,
+    breaking candidate computation — it must degrade to {} like the rest of
+    the corrupt-payload family."""
+    from server.app.services.node_code_pins import node_code_pins_from_job_snapshot
+
+    assert node_code_pins_from_job_snapshot({"workflow_definition_snapshot_json": "[]"}) == {}
+    assert node_code_pins_from_job_snapshot({"workflow_definition_snapshot_json": '"legacy"'}) == {}
+    assert node_code_pins_from_job_snapshot({"workflow_definition_snapshot_json": "1"}) == {}
+
+
+def test_staging_catch_family_covers_explicit_valueerror():
+    """Codex P1 on PR #264: the staging loop's rollback catch must include
+    the plain ValueError the explicit escape check raises (:127) — otherwise
+    a legal output staged before an escaping one is stranded half-staged
+    (loop aborts with `moves` unrecoverable by the caller). Verified at the
+    exception-family level: the catch tuple literally contains ValueError."""
+    import inspect
+
+    from server.app.services import job_artifact_mutation as mod
+
+    source = inspect.getsource(mod)
+    assert "except (OSError, ValueError, ManagedPathError):" in source, (
+        "staging rollback catch must keep ValueError in the tuple — "
+        "the explicit escape check at the top of the loop raises plain "
+        "ValueError and the rollback must cover it (codex P1 on #264)"
+    )

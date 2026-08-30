@@ -137,7 +137,7 @@ class JobArtifactMutationService:
                             staged_path.unlink()
                     shutil.move(str(original_path), str(staged_path))
                     moves.append((staged_path, original_path))
-        except (OSError, ManagedPathError):
+        except (OSError, ValueError, ManagedPathError):
             # #204: this loop's escape routes are filesystem moves (OSError:
             # ENOSPC/EPERM/racing eviction) and resolve()/relative_to path
             # discipline (ManagedPathError — a ValueError subclass — from a
