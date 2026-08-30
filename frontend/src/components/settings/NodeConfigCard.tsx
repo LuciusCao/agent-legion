@@ -4,6 +4,7 @@ import { api } from '../../api'
 import { useSettingStore } from '../../stores/settingStore'
 import { useUiStore } from '../../stores/uiStore'
 import type { ConfigSchema, WorkspaceSettings } from '../../types'
+import { RuntimeMutableBadges } from './RuntimeMutableBadges'
 import { SchemaConfigForm } from './SchemaConfigForm'
 
 type SettingsResponse = { settings?: Partial<WorkspaceSettings> }
@@ -86,6 +87,7 @@ export function NodeConfigCard({
           {nodeKey}
         </div>
       )}
+      <RuntimeMutableBadges schema={schema} />
       <SchemaConfigForm
         schema={schema}
         values={values}
