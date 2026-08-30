@@ -100,7 +100,7 @@ class WorkspaceStatsResponse(BaseModel):
     name: str
     workflow_key: str = Field(
         description=(
-            "Deprecated: read workspace_id instead. Since schema v61 the two "
+            "Deprecated: read workspace_id instead. Since schema v62 the two "
             "are always equal; removal is tracked in #211."
         ),
         deprecated=True,

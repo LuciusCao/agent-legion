@@ -2,20 +2,30 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from server.app.routes.workspace_contracts import WorkspaceRecord
 
-# #211 Phase 2 read-only deprecation wording shared by the workspace-key
-# response fields in this file.
+# #211 Phase 2 read-only deprecation wording. v62 (not v61) is the binding
+# schema — equality came from the v62 rename migration; v61 rows could still
+# carry two different identifiers (codex on #269).
 _DEPRECATED_READ_WORKSPACE_ID = (
-    "Deprecated: read workspace_id instead. Since schema v61 the two are "
+    "Deprecated: read workspace_id instead. Since schema v62 the two are "
     "always equal; removal is tracked in #211."
 )
 
 
 class NodeLimitRequest(BaseModel):
+    # PUT-side entry: workflow_key stays required — the request-side
+    # migration is a later #211 batch (deprecating it here invites omission
+    # and 422; codex on #269).
+    workflow_key: str = Field(min_length=1)
+    node_key: str = Field(min_length=1)
+    concurrency_limit: int = Field(ge=1)
+
+
+class NodeLimitEntry(NodeLimitRequest):
+    # Response-side redeclaration of the request entry's field: the read
+    # face carries the deprecation notice (codex on #269).
     workflow_key: str = Field(
         min_length=1, description=_DEPRECATED_READ_WORKSPACE_ID, deprecated=True
     )
-    node_key: str = Field(min_length=1)
-    concurrency_limit: int = Field(ge=1)
 
 
 class WorkspaceExecutionConfigurationResponse(BaseModel):
@@ -26,7 +36,7 @@ class WorkspaceExecutionConfigurationResponse(BaseModel):
     ``WorkspaceExecutorConfigurationResponse`` wording.
     """
 
-    node_limits: list[NodeLimitRequest]
+    node_limits: list[NodeLimitEntry]
     migration_warnings: list[str]
     agent_capacity: int | None = None
 

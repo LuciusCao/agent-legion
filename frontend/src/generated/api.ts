@@ -3579,7 +3579,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v61 the two are always equal; removal is tracked in #211.
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
        */
       workflow_key: string
       /**
@@ -3838,8 +3838,8 @@ export interface components {
       /** Total Tokens */
       total_tokens: number
     }
-    /** NodeLimitRequest */
-    NodeLimitRequest: {
+    /** NodeLimitEntry */
+    NodeLimitEntry: {
       /** Concurrency Limit */
       concurrency_limit: number
       /** Node Key */
@@ -3847,8 +3847,17 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v61 the two are always equal; removal is tracked in #211.
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
        */
+      workflow_key: string
+    }
+    /** NodeLimitRequest */
+    NodeLimitRequest: {
+      /** Concurrency Limit */
+      concurrency_limit: number
+      /** Node Key */
+      node_key: string
+      /** Workflow Key */
       workflow_key: string
     }
     /** NodeRunResponse */
@@ -4421,7 +4430,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v61 the two are always equal; removal is tracked in #211.
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
        */
       workflow_key: string
       /** Workspace Id */
@@ -5579,7 +5588,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v61 the two are always equal; removal is tracked in #211.
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
        */
       workflow_key: string
       /** Workspace Id */
@@ -5633,7 +5642,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v61 the two are always equal; removal is tracked in #211.
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
        */
       workflow_key: string
     }
@@ -5712,7 +5721,7 @@ export interface components {
       /** Migration Warnings */
       migration_warnings: string[]
       /** Node Limits */
-      node_limits: components['schemas']['NodeLimitRequest'][]
+      node_limits: components['schemas']['NodeLimitEntry'][]
     }
     /** WorkspacePackageDeleteResponse */
     WorkspacePackageDeleteResponse: {
@@ -5815,7 +5824,7 @@ export interface components {
       /**
        * Default Workflow Key
        * @deprecated
-       * @description Deprecated: read id instead. Since schema v61 the two are always equal; removal is tracked in #211.
+       * @description Deprecated: read id instead. Since schema v62 the two are always equal; removal is tracked in #211.
        */
       default_workflow_key: string
       /** Description */
@@ -5934,7 +5943,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v61 the two are always equal; removal is tracked in #211.
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
        */
       workflow_key: string
       /** Workflow Label */
