@@ -10,6 +10,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.jobs.workflow_upgrade_mutation import upgrade_job_workflow
+from server.app.services.job_workflow_upgrade_config import intake_frozen_config_json
 from server.app.workflows.definition import workflow_definition_from_dict
 
 
@@ -64,7 +65,16 @@ class JobWorkflowUpgradeService:
                 "no_active_revision",
                 "Workspace has no active workflow revision",
             )
-        if str(job.get("workflow_revision_id") or "") == str(active["id"]):
+        # Skip only when the job truly matches the active revision. A job can
+        # pin the active revision id yet carry a stale definition snapshot
+        # (older upgrade paths moved the pin without swapping the snapshot);
+        # dispatch resolves node execution/config from that snapshot, so such
+        # jobs must be re-pinned to heal instead of being skipped forever.
+        # The actual snapshot content is compared, not the independently
+        # stored hash column — the two have no consistency constraint.
+        if str(job.get("workflow_revision_id") or "") == str(active["id"]) and str(
+            job.get("workflow_definition_snapshot_json") or ""
+        ) == str(active["definition_json"]):
             return self._result(job_id, "skipped", "already_current", "Job is already current")
 
         now = datetime.now(UTC)
@@ -72,6 +82,13 @@ class JobWorkflowUpgradeService:
             return self._result(job_id, "skipped", "busy", "Job has an active executor lease")
 
         definition = workflow_definition_from_dict(json.loads(active["definition_json"]))
+        try:
+            # Re-freeze node config as intake would on the active revision, so
+            # node-level config fixes reach old jobs via upgrade instead of
+            # forcing a re-intake. Validated fully before any mutation below.
+            frozen_config_json = intake_frozen_config_json(self.job_db, workspace_id, definition)
+        except ValueError as exc:
+            return self._result(job_id, "failed", "invalid_node_config", str(exc))
         try:
             # The intake batch's node_code_versions deliberately stay frozen:
             # the batch payload is shared by every job in the batch. Since
@@ -90,6 +107,7 @@ class JobWorkflowUpgradeService:
                     workflow_definition_hash=str(active["definition_hash"]),
                     workflow_definition_snapshot_json=str(active["definition_json"]),
                     node_keys=list(definition.executable_nodes),
+                    frozen_config_json=frozen_config_json,
                 )
         except JobMutationConflict as exc:
             return self._result(job_id, "skipped", exc.reason_code, str(exc))
