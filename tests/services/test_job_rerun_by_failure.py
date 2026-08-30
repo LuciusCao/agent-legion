@@ -172,16 +172,19 @@ def test_job_ids_filter_and_no_match_reporting(rerun_service, job_db, workspace)
     assert _node_statuses(job_db, other["id"])["write_script"] == "failed"
 
 
-def test_workflow_key_filter_excludes_other_workflows(rerun_service, job_db, workspace):
+def test_workflow_key_argument_is_inert_after_read_binding(rerun_service, job_db, workspace):
+    """#211 Phase 3（#307）：读法谓词只绑 workspace_id——服务层 workflow_key
+    参数不再过滤（v62 恒等，错 key 由路由层守卫 400 挡截）。缺省与恒等值等价。"""
     job = _create_job(job_db, workspace, "Q-wf")
     _fail_node(job_db, job, "write_script", "technical", "timeout")
 
-    results = rerun_service.rerun_by_failure_category(
-        workspace["id"], "technical", workflow_key="some_other_workflow"
+    absent = rerun_service.rerun_by_failure_category(workspace["id"], "technical")
+    equal = rerun_service.rerun_by_failure_category(
+        workspace["id"], "technical", workflow_key=str(workspace["id"])
     )
 
-    assert results == []
-    assert _node_statuses(job_db, job["id"])["write_script"] == "failed"
+    assert [r["job_id"] for r in absent] == [job["id"]]
+    assert [r["job_id"] for r in equal] == [job["id"]]
 
 
 def test_recovered_node_is_not_rerun_again(rerun_service, job_db, workspace):

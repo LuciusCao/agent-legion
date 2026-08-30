@@ -64,6 +64,7 @@
     "tests/routes/jobs/test_workflow_upgrade.py",
     "tests/routes/jobs/test_workspace_configuration.py",
     "tests/routes/jobs/test_workspace_crud.py",
+    "tests/routes/jobs/test_workspace_jobs_list.py",
     "tests/routes/test_agent_claim_artifact_channel.py",
     "tests/routes/test_agent_register_tokens.py",
     "tests/routes/test_agent_worker_registration.py",

@@ -440,3 +440,17 @@ def test_async_batch_chunk_failure_is_recorded_and_remaining_chunks_continue(tmp
         assert "resolver boom" in completed["error_message"]
         jobs = app.state.job_db.list_jobs(workspace_id=ws_id)
         assert sorted(job["source_id"] for job in jobs) == ["Q001", "Q003"]
+
+
+def test_create_job_batch_rejects_mismatched_workflow_key(client, job_db):
+    """Codex P1 on #307 (guard parity with runs): a mismatched explicit key
+    would flow verbatim into jobs rows — rejected before the service call."""
+    job_db.create_workspace("ws-batch-key", default_workflow_key="ws-batch-key")
+
+    response = client.post(
+        "/api/workspaces/ws-batch-key/job-batches",
+        json={"workflow_key": "other_flow", "source_kind": "test", "inputs": []},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "workflow_key must equal the workspace id" in response.json()["detail"]

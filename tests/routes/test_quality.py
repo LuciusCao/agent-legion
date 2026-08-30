@@ -212,7 +212,8 @@ def test_create_batch_without_workflow_key_defaults_to_workspace_id(client):
     """#211 Phase 2 第二批：缺省 workflow_key 由服务端从 path 推导。
 
     缺省（推导为 workspace id，即 v62 恒等值）命中 _seed_runs 的全部 3 行；
-    显式传不匹配的 key 收窄为 0 行——两路语义都得到验证。
+    显式传恒等 key 是 no-op；显式传不匹配 key 在 Phase 3 读法绑定后是 400
+    （不匹配的 key 不可能存在于该 workspace，v62 绑定——不再静默收窄为 0 行）。
     """
     _seed_runs()
     absent = client.post(
@@ -223,15 +224,27 @@ def test_create_batch_without_workflow_key_defaults_to_workspace_id(client):
     assert absent.json()["sampled_count"] == 3
     assert absent.json()["workflow_key"] == WORKSPACE
 
-    explicit = client.post(
+    equal = client.post(
         f"{BASE}/sample-batches",
         json={
             "name": "explicit-key",
-            "workflow_key": "legacy_wf_a",
+            "workflow_key": WORKSPACE,
             "sample_size": 10,
             "seed": "seed-explicit",
         },
     )
-    assert explicit.status_code == 200, explicit.text
-    assert explicit.json()["sampled_count"] == 0
-    assert explicit.json()["workflow_key"] == "legacy_wf_a"
+    assert equal.status_code == 200, equal.text
+    assert equal.json()["sampled_count"] == 3
+    assert equal.json()["workflow_key"] == WORKSPACE
+
+    mismatched = client.post(
+        f"{BASE}/sample-batches",
+        json={
+            "name": "mismatched-key",
+            "workflow_key": "legacy_wf_a",
+            "sample_size": 10,
+            "seed": "seed-mismatched",
+        },
+    )
+    assert mismatched.status_code == 400, mismatched.text
+    assert "workflow_key must equal the workspace id" in mismatched.json()["detail"]

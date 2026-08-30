@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query
 
 from server.app.routes.job_http import (
     raise_job_http_error,
+    reject_mismatched_workflow_key,
     require_workflows_enabled,
 )
 from server.app.routes.job_view_contracts import (
@@ -48,6 +49,10 @@ def create_jobs_router(
         status: str | None = None,
     ) -> JobsResponse:
         require_workflows_enabled(settings)
+        # Subagent review P3-1 on #307: guard parity with failed-node-runs —
+        # a mismatched key can no longer narrow (the column filter is the
+        # next read-binding batch); reject instead of silently widening.
+        reject_mismatched_workflow_key(workspace_id, workflow_key)
         try:
             return JobsResponse(
                 jobs=cast(
