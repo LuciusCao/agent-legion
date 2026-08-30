@@ -217,3 +217,32 @@ def test_main_allows_derived_database(tmp_path, monkeypatch):
 
     assert built  # schema was built, no refusal
     assert (tmp_path / "out.json").exists()
+
+
+def test_deprecated_workflow_key_paths_are_marked(tmp_path):
+    """#211 Phase 2: the workflows/{workflow_key} URL segment retires — every
+    legacy path stays registered as a deprecated alias of the segment-free
+    route, so clients see the removal coming in their generated types."""
+    schema = build_openapi_schema(tmp_path / "schema")
+
+    legacy_paths = [path for path in schema["paths"] if "/workflows/{workflow_key}/nodes/" in path]
+    assert legacy_paths, "expected deprecated workflow-key alias paths in the schema"
+    for path in legacy_paths:
+        for method, operation in schema["paths"][path].items():
+            if method not in {"get", "post", "put", "patch", "delete"}:
+                continue
+            assert operation.get("deprecated") is True, (path, method)
+            assert "removal is tracked in #211" in operation.get("description", "")
+
+    # The deprecated jobs list query param carries the same marker.
+    jobs_list = schema["paths"]["/api/workspaces/{workspace_id}/jobs"]["get"]
+    workflow_key_param = next(
+        param
+        for param in jobs_list["parameters"]
+        if param["name"] == "workflow_key" and param["in"] == "query"
+    )
+    assert workflow_key_param["deprecated"] is True
+
+    # Segment-free node-code routes exist and are NOT deprecated.
+    fresh = schema["paths"]["/api/workspaces/{workspace_id}/nodes/{node_key}/code"]
+    assert "deprecated" not in fresh["get"]

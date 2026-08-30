@@ -15,8 +15,10 @@ import { fetchNodeCodeTemplate, isCodeNode } from './workflowNodeCodeLookup'
 
 type NodeCodeResponse = components['schemas']['WorkflowNodeCodeResponse']
 
-function codeUrl(workspaceId: string, workflowKey: string, nodeKey: string) {
-  return `/api/workspaces/${encodeURIComponent(workspaceId)}/workflows/${encodeURIComponent(workflowKey)}/nodes/${encodeURIComponent(nodeKey)}/code`
+function codeUrl(workspaceId: string, nodeKey: string) {
+  // workflows/{workflowKey} 路径段已退役（#211）：key 与 workspace id 自
+  // schema v62 起恒等，节点代码路由改挂 workspace 下。
+  return `/api/workspaces/${encodeURIComponent(workspaceId)}/nodes/${encodeURIComponent(nodeKey)}/code`
 }
 
 type LoadState = 'loading' | 'ready' | 'error'
@@ -24,9 +26,6 @@ type LoadState = 'loading' | 'ready' | 'error'
 export function WorkflowNodeCodeSection(props: {
   node: WorkflowNodeRecord
   agentCatalog: AgentDefinition[]
-  // 与 DAG 展示同一口径：visible workflow 的 key 由 Inspector 逐层
-  // 下传，不取 settings 快照（草稿改 key 发布后两者会分叉）。
-  workflowKey: string
   readOnly?: boolean
 }) {
   const workspaceId = useSettingStore((s) => s.workspaceId)
@@ -41,10 +40,7 @@ export function WorkflowNodeCodeSection(props: {
   const [versionsToken, setVersionsToken] = useState(0)
   const [confirmingReset, setConfirmingReset] = useState(false)
 
-  const url =
-    workspaceId && props.workflowKey
-      ? codeUrl(workspaceId, props.workflowKey, props.node.key)
-      : null
+  const url = workspaceId ? codeUrl(workspaceId, props.node.key) : null
 
   // WorkflowNodeCodeSection is keyed by node in the inspector, so this effect
   // only runs on mount (and after explicit reloads via its own calls).

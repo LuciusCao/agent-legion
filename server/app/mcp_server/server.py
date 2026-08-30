@@ -111,7 +111,6 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
     @mcp.tool()
     async def save_node_code_draft(
         workspace_id: str,
-        workflow_key: str,
         node_key: str,
         code: str,
         change_note: str = "",
@@ -129,18 +128,20 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         _, client = await _client()
         return await client.call(
             "PUT",
-            f"/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft",
+            # workflows/{workflow_key} URL segment retired (#211): the
+            # workspace-scoped path keys on workspace_id alone (key == id).
+            f"/workspaces/{workspace_id}/nodes/{node_key}/code/draft",
             body,
         )
 
     @mcp.tool()
-    async def get_node_code(workspace_id: str, workflow_key: str, node_key: str) -> str:
+    async def get_node_code(workspace_id: str, node_key: str) -> str:
         """Read the current code state of a workflow code node: builtin source,
         published custom code, and any pending draft."""
         _, client = await _client()
         return await client.call(
             "GET",
-            f"/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code",
+            f"/workspaces/{workspace_id}/nodes/{node_key}/code",
         )
 
     @mcp.tool()
