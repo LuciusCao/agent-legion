@@ -31,7 +31,8 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 class FakeJobDB:
     def __init__(self):
-        self.path = TEST_DATABASE_URL
+        # #187 step 3: the facade's DSN is exposed via `dsn_identity` only.
+        self.dsn_identity = TEST_DATABASE_URL
         self._jobs = {
             "j1": {
                 "id": "j1",

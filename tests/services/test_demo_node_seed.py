@@ -19,7 +19,7 @@ def test_seed_publishes_workspace_versions_only(job_db, settings) -> None:
 
     assert seed_demo_workspace_node_codes(settings, workspace_id) == list(NODE_KEYS)
 
-    service = NodeCodeService(job_db.path)
+    service = NodeCodeService(job_db.dsn_identity)
     for node_key in NODE_KEYS:
         row = service.get_effective_code(workspace_id, DEMO_WORKFLOW_KEY, node_key)
         assert row is not None
@@ -47,7 +47,7 @@ def test_dispatch_does_not_cross_workspace_boundary(job_db, settings) -> None:
 
     assert (
         resolve_dispatch_node_code(
-            job_db.path,
+            job_db.dsn_identity,
             True,
             seeded_id,
             DEMO_WORKFLOW_KEY,
@@ -58,7 +58,7 @@ def test_dispatch_does_not_cross_workspace_boundary(job_db, settings) -> None:
     )
     assert (
         resolve_dispatch_node_code(
-            job_db.path,
+            job_db.dsn_identity,
             True,
             empty_id,
             DEMO_WORKFLOW_KEY,
@@ -81,7 +81,7 @@ def test_steady_state_startup_does_not_scan_workspaces(job_db, settings, monkeyp
 def test_migration_copies_legacy_global_then_archives_it(job_db, settings) -> None:
     first_id = _workspace(job_db, "first")
     second_id = _workspace(job_db, "second")
-    service = NodeCodeService(job_db.path)
+    service = NodeCodeService(job_db.dsn_identity)
     legacy_code = "def run(job, job_dir, runtime):\n    return 'legacy'\n"
     for node_key in NODE_KEYS:
         assert service.seed_global(DEMO_WORKFLOW_KEY, node_key, legacy_code, "legacy seed")

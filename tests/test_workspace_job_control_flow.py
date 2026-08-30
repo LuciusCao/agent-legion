@@ -195,7 +195,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         # reads the text.
         from server.app.services.node_codes import NodeCodeService
 
-        codes = NodeCodeService(app.state.job_db.path)
+        codes = NodeCodeService(app.state.job_db.dsn_identity)
         for node_key in ("prepare", "branch_a", "branch_b", "merge"):
             codes.save_draft(
                 workspace_id,
@@ -228,7 +228,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         assert job_summary["completed_nodes"] == 0
 
         leases = ExecutorLeaseRepository(
-            app.state.job_db.path, data_dir=app.state.settings.data_dir
+            app.state.job_db.dsn_identity, data_dir=app.state.settings.data_dir
         )
         worker = _make_worker(
             app.state.job_db, leases, _RecordingExecutor(), app.state.settings, definition
@@ -360,7 +360,7 @@ def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
         # reads the text.
         from server.app.services.node_codes import NodeCodeService
 
-        codes = NodeCodeService(app.state.job_db.path)
+        codes = NodeCodeService(app.state.job_db.dsn_identity)
         for node_key in ("prepare", "branch_a", "branch_b", "merge"):
             codes.save_draft(
                 workspace_id,
@@ -419,7 +419,7 @@ def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
         # reads the text.
         from server.app.services.node_codes import NodeCodeService
 
-        codes = NodeCodeService(app.state.job_db.path)
+        codes = NodeCodeService(app.state.job_db.dsn_identity)
         for node_key in ("prepare", "branch_a", "branch_b", "merge"):
             codes.save_draft(
                 workspace_id,

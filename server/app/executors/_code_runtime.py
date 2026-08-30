@@ -130,7 +130,11 @@ def consume_auth_failure_marker(executor: CodeExecutor, context: ExecutionContex
             marker.unlink(missing_ok=True)
     if not key and isinstance(context.node_config, Mapping):
         key = str(context.node_config.get("connection") or "").strip()
-    dsn = str(getattr(executor.job_db, "path", "") or "").strip()
+    # #187 step 3: the facade's `.path` is private; the DSN for the
+    # privileged token invalidation comes from `dsn_identity` (the only
+    # public accessor). Shapes without it (job_db-less tests, plain
+    # objects) degrade to a no-op exactly like the old getattr default.
+    dsn = str(getattr(executor.job_db, "dsn_identity", "") or "").strip()
     if not key or not dsn:
         return
     try:

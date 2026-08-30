@@ -336,7 +336,7 @@ def test_material_deleted_mid_creation_fails_and_compensates_run(service, job_db
         except Exception as exc:  # 线程内意外失败也要带回主线程定位
             outcome.append(f"error:{exc!r}")
 
-    holder = connect_database(job_db.path)
+    holder = connect_database(job_db.dsn_identity)
     try:
         with holder:
             # 模拟进行中的材料删除：行已删但事务未提交。

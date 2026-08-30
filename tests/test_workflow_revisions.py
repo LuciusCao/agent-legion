@@ -578,7 +578,7 @@ def test_publish_revision_records_node_code_pins(tmp_path: Path) -> None:
     workspace = queries.create_workspace(
         "ws-pins", default_workflow_key="education_video_problems_generation"
     )
-    codes = NodeCodeService(queries.path)
+    codes = NodeCodeService(queries.dsn_identity)
     codes.save_draft(
         workspace["id"],
         "education_video_problems_generation",
@@ -632,7 +632,7 @@ def test_publish_revision_skips_pins_when_gate_disabled(tmp_path: Path) -> None:
     workspace = queries.create_workspace(
         "ws-gated-pins", default_workflow_key="education_video_problems_generation"
     )
-    codes = NodeCodeService(queries.path)
+    codes = NodeCodeService(queries.dsn_identity)
     codes.save_draft(
         workspace["id"],
         "education_video_problems_generation",
@@ -660,7 +660,7 @@ def test_runtime_only_update_preserves_node_code_pins(tmp_path: Path) -> None:
     workspace = queries.create_workspace(
         "ws-pins-keep", default_workflow_key="education_video_problems_generation"
     )
-    codes = NodeCodeService(queries.path)
+    codes = NodeCodeService(queries.dsn_identity)
     codes.save_draft(
         workspace["id"],
         "education_video_problems_generation",

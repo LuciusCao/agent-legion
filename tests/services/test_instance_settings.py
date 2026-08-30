@@ -10,7 +10,7 @@ from server.app.services.instance_settings_store import InstanceSettingsStore
 
 @pytest.fixture
 def store(job_db) -> InstanceSettingsStore:
-    store = InstanceSettingsStore(job_db.path)
+    store = InstanceSettingsStore(job_db.dsn_identity)
     with job_db.connect() as conn:
         conn.execute("delete from global_settings where key='instance'")
     return store
@@ -20,7 +20,7 @@ def test_apply_is_noop_without_stored_document(settings, job_db, store) -> None:
     before_runtime = settings.executor_runtime.model_dump()
     before_cleanup = dict(settings.config["cleanup"])
 
-    apply_instance_settings(settings, job_db.path)
+    apply_instance_settings(settings, job_db.dsn_identity)
 
     assert settings.executor_runtime.model_dump() == before_runtime
     assert settings.config["cleanup"] == before_cleanup
@@ -39,7 +39,7 @@ def test_apply_overrides_executor_runtime_and_writes_back_config(settings, job_d
         }
     )
 
-    apply_instance_settings(settings, job_db.path)
+    apply_instance_settings(settings, job_db.dsn_identity)
 
     runtime = settings.executor_runtime
     assert runtime.lease_ttl_seconds == 120
@@ -67,13 +67,13 @@ def test_apply_revalidates_executor_runtime_constraints(settings, job_db, store)
     store.put({"lease_ttl_seconds": 0})
 
     with pytest.raises(ValueError):
-        apply_instance_settings(settings, job_db.path)
+        apply_instance_settings(settings, job_db.dsn_identity)
 
 
 def test_apply_overrides_openclaw_block(settings, job_db, store) -> None:
     store.put({"openclaw": {"cwd": "/tmp/openclaw-db"}})
 
-    apply_instance_settings(settings, job_db.path)
+    apply_instance_settings(settings, job_db.dsn_identity)
 
     openclaw = settings.executor_runtime.openclaw
     assert openclaw.cwd == "/tmp/openclaw-db"
@@ -84,7 +84,7 @@ def test_apply_openclaw_env_cwd_outranks_db_document(settings, job_db, store, mo
     monkeypatch.setenv("AGENT_LEGION_OPENCLAW_CWD", "/tmp/openclaw-env")
     store.put({"openclaw": {"cwd": "/tmp/openclaw-db"}})
 
-    apply_instance_settings(settings, job_db.path)
+    apply_instance_settings(settings, job_db.dsn_identity)
 
     assert settings.executor_runtime.openclaw.cwd == "/tmp/openclaw-env"
 

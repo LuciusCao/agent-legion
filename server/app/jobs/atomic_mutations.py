@@ -18,7 +18,9 @@ class JobMutationConflict(ValueError):
 
 
 class _AtomicMutationQueries(Protocol):
-    path: str
+    # #187 step 3: the backing DSN is private; atomic mutations are inside
+    # the data layer, so they read the facade's own `_path` by convention.
+    _path: str
 
 
 def _timestamp(value: datetime) -> datetime:
@@ -282,7 +284,7 @@ class AtomicJobMutationsMixin:
         reject_running_nodes: bool,
     ) -> AbstractContextManager[DatabaseConnection]:
         return lease_guarded_mutation(
-            self.path,
+            self._path,
             job_id,
             now,
             reject_running_nodes=reject_running_nodes,
@@ -297,7 +299,7 @@ class AtomicJobMutationsMixin:
         now: datetime | None = None,
     ) -> None:
         with lease_guarded_mutation(
-            self.path,
+            self._path,
             job_id,
             now or datetime.now(UTC),
             reject_running_nodes=True,

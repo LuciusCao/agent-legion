@@ -346,7 +346,7 @@ def test_recover_skips_job_when_lease_claimed_concurrently(
         conn.execute("commit")
 
     now_str = database_timestamp(datetime.now(UTC))
-    with write_transaction(queries.path) as conn1:
+    with write_transaction(queries.dsn_identity) as conn1:
         candidates = conn1.execute(
             """
             select j.id

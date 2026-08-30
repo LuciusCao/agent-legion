@@ -38,8 +38,8 @@ def vault_key(monkeypatch):
 
 @pytest.fixture
 def services(job_db, settings, vault_key):
-    connections = ConnectionService(job_db.path, settings.config)
-    tokens = ConnectionTokenService(job_db.path, settings.config)
+    connections = ConnectionService(job_db.dsn_identity, settings.config)
+    tokens = ConnectionTokenService(job_db.dsn_identity, settings.config)
     return connections, tokens
 
 
@@ -220,7 +220,7 @@ def test_report_node_auth_failure_invalidates_cached_token(services, job_db) -> 
     # Reproduce the legacy runtime shape (DB handle carried into node code).
     runtime: dict = {
         "node_config": {"connection": "c1"},
-        "job_db": JobQueries(str(job_db.path), Path(job_db.jobs_dir)),
+        "job_db": JobQueries(str(job_db.dsn_identity), Path(job_db.jobs_dir)),
     }
 
     report_node_auth_failure(runtime)
@@ -237,7 +237,7 @@ def test_report_node_auth_failure_job_db_path_fallback(services, job_db) -> None
     assert tokens.get_token("c1") == "tok-abc"
 
     report_node_auth_failure(
-        {"node_config": {"connection": "c1"}, "_job_db_path": str(job_db.path)}
+        {"node_config": {"connection": "c1"}, "_job_db_path": str(job_db.dsn_identity)}
     )
 
     assert connections.get("c1")["token"] is None
@@ -249,7 +249,7 @@ def test_report_node_auth_failure_silent_without_context(job_db) -> None:
     report_node_auth_failure({"node_config": {"connection": "c1"}})
     report_node_auth_failure({"node_config": "not-a-mapping", "_job_db_path": "x"})
     report_node_auth_failure({"node_config": {"connection": "c1"}, "job_db": object()})
-    report_node_auth_failure({"_job_db_path": str(job_db.path)})
+    report_node_auth_failure({"_job_db_path": str(job_db.dsn_identity)})
     # Reporting must never mask the original failure: an unreachable DB is
     # swallowed (logged), not raised.
     report_node_auth_failure(
@@ -271,7 +271,7 @@ def test_report_node_auth_failure_facade_passthrough_no_getattr_escape(monkeypat
     class FakeFacade:
         # The facade surface services may rely on; accessing ``path`` here
         # would prove the legacy hook still unwraps the facade.
-        dsn_identity = str(job_db.path)
+        dsn_identity = str(job_db.dsn_identity)
 
         @property
         def path(self) -> str:  # pragma: no cover - must not be touched
@@ -292,9 +292,9 @@ def test_report_node_auth_failure_facade_passthrough_no_getattr_escape(monkeypat
     # Fallback branch keeps handing the bare DSN string through.
     received.clear()
     report_node_auth_failure(
-        {"node_config": {"connection": "c1"}, "_job_db_path": str(job_db.path)}
+        {"node_config": {"connection": "c1"}, "_job_db_path": str(job_db.dsn_identity)}
     )
-    assert received == [str(job_db.path)]
+    assert received == [str(job_db.dsn_identity)]
 
 
 def test_get_token_single_flight_under_concurrency(services, monkeypatch) -> None:

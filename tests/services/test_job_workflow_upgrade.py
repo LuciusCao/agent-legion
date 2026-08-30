@@ -227,7 +227,7 @@ def test_upgrade_job_workflow_skips_active_lease(tmp_path: Path) -> None:
         workflow_definition_snapshot_json=original["definition_json"],
     )
     run = queries.start_node_run(job["id"], "fetch_items", ["pi"], "")
-    with closing(connect_database(queries.path)) as conn, conn:
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
         conn.execute(
             """
             insert into executor_leases(
@@ -555,7 +555,7 @@ def test_upgrade_job_workflow_reresolves_frozen_node_config(tmp_path: Path) -> N
         workflow_definition_snapshot_json="{}",
     )
     queries.update_job_status(job["id"], "failed")
-    with closing(connect_database(queries.path)) as conn, conn:
+    with closing(connect_database(queries.dsn_identity)) as conn, conn:
         conn.execute(
             "update jobs set frozen_config_json=%s where id=%s",
             (json.dumps({"fetch": {"connection": "cms-internal"}}), job["id"]),

@@ -67,7 +67,7 @@ def service(job_db, storage) -> MaterialsService:
             " values (%s, 'Materials', 'demo_workflow') on conflict(id) do nothing",
             (WORKSPACE_ID,),
         )
-    return MaterialsService(job_db.path, storage)
+    return MaterialsService(job_db.dsn_identity, storage)
 
 
 def _presign_ready(service: MaterialsService, storage: FakeStorage, payload: bytes) -> dict:
@@ -195,7 +195,7 @@ def test_complete_rejects_expired_material(service, job_db) -> None:
 
 
 def test_operations_require_configured_storage(job_db) -> None:
-    service = MaterialsService(job_db.path, None)
+    service = MaterialsService(job_db.dsn_identity, None)
 
     with pytest.raises(MaterialStorageUnavailableError):
         service.presign(WORKSPACE_ID, filename="x.txt", size_bytes=1)
@@ -329,7 +329,7 @@ def test_delete_blocked_by_key_share_sees_committed_reference(service, storage, 
         except Exception as exc:  # 线程内意外失败也要带回主线程定位
             outcome.append(f"error:{exc!r}")
 
-    holder = connect_database(job_db.path)
+    holder = connect_database(job_db.dsn_identity)
     try:
         with holder:
             # 模拟 run 创建侧：对材料行持 KEY SHARE（未提交）。

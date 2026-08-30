@@ -27,7 +27,7 @@ def workspace_id(job_db) -> str:
 
 @pytest.fixture
 def service(job_db, workspace_id) -> AgentService:
-    return AgentService(job_db.path, workspace_id)
+    return AgentService(job_db.dsn_identity, workspace_id)
 
 
 def test_seed_publishes_demo_agents_into_the_workspace(service, workspace_id) -> None:
@@ -50,7 +50,7 @@ def test_seed_publishes_demo_agents_into_the_workspace(service, workspace_id) ->
 def test_seed_leaves_other_workspaces_empty(job_db, workspace_id) -> None:
     other = job_db.create_workspace("Other WS", default_workflow_key="demo_workflow")["id"]
     seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id)
-    assert AgentService(job_db.path, other).list_latest() == []
+    assert AgentService(job_db.dsn_identity, other).list_latest() == []
 
 
 def test_seed_is_idempotent(service, workspace_id) -> None:

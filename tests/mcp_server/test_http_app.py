@@ -162,7 +162,9 @@ def test_loopback_api_base_follows_registry_edits(client, job_db, monkeypatch) -
         return "ok"
 
     monkeypatch.setattr(ToolClient, "call", fake_call)
-    StudioAgentRegistryStore(job_db.path).put({"api_base": "http://10.0.0.9:9000", "agents": []})
+    StudioAgentRegistryStore(job_db.dsn_identity).put(
+        {"api_base": "http://10.0.0.9:9000", "agents": []}
+    )
     response = _post(
         client,
         token,

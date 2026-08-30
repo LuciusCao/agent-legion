@@ -147,7 +147,7 @@ def test_save_skill_version_commits_tags_and_keeps_lock(client_factory, job_db, 
 
 
 def test_save_skill_version_rejects_url_source(client_factory, job_db, skill_home) -> None:
-    store = SkillSourceStore(job_db.path)
+    store = SkillSourceStore(job_db.dsn_identity)
     sources = store.get_sources() or SkillsConfig()
     sources.skills[_URL_KEY] = SkillSourceConfig(repo="https://example.com/skill.git", ref="v1")
     store.put_sources(sources)
@@ -261,7 +261,7 @@ def test_default_detail_reads_locked_commit_after_save(client_factory, job_db, s
     # keeps serving the LOCKED commit's content ("current locked version"),
     # while the new tag is readable through ?ref= (PR #224 review).
     head = _git(skill_home, "rev-parse", "HEAD")
-    store = SkillSourceStore(job_db.path)
+    store = SkillSourceStore(job_db.dsn_identity)
     sources = store.get_sources() or SkillsConfig()
     lock = store.get_lock() or SkillsLock()
     lock.skills[_KEY] = LockedSkillSource(repo=sources.skills[_KEY].repo, ref="v1.0.0", commit=head)

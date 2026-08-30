@@ -442,7 +442,7 @@ def _make_worker(
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
         config={},
-        database_url=str(queries.path),
+        database_url=str(queries.dsn_identity),
     )
     return WorkflowWorkerThread(
         job_db=queries,
@@ -512,7 +512,7 @@ def test_worker_runs_only_target_closure_in_until_node_mode(
     from tests.workers.helpers import _seed_trivial_node_code
 
     for node in definition.nodes.values():
-        _seed_trivial_node_code(str(queries.path), workspace_id, "branched", node.key)
+        _seed_trivial_node_code(str(queries.dsn_identity), workspace_id, "branched", node.key)
 
     worker = _make_worker(tmp_path, queries, [definition])
     worker.state.scan_entries = scan_entries(definition)
