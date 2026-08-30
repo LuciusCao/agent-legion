@@ -19,7 +19,7 @@ run_static_checks() {
   # business runtime code in P4.
 
   echo "=== MyPy Type Check ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app scripts/architecture scripts/quality workflow_nodes
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app worker shared workspace_libs scripts/architecture scripts/quality workflow_nodes
 
   echo "=== Architecture Contracts ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_architecture

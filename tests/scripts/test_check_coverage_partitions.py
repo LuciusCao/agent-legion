@@ -185,3 +185,11 @@ def test_directory_prefix_partition_is_healthy() -> None:
 
     partitions = (Partition("worker tree", "backend", ("worker/",), 85.0),)
     assert validate_partition_prefixes(partitions) == []
+
+
+def test_enforce_without_any_data_fails(tmp_path: Path) -> None:
+    # #295: an enforce-mode run with no coverage data at all must fail,
+    # not silently SKIP every partition into a green build.
+    from scripts.check_coverage_partitions import main
+
+    assert main(["--frontend", str(tmp_path / "missing.json"), "--enforce"]) == 1

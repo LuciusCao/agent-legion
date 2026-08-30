@@ -673,6 +673,22 @@ jobs:
         run: npm run test:coverage-inventory
         working-directory: frontend
 
+      # #295: the frontend partitions (auth/bootstrap, api transport, ...)
+      # were SKIP on every PR run — the backend-coverage job enforces the
+      # backend partitions only because it never passes --frontend. Enforce
+      # them here against the merged blob data; uv provides the python for
+      # scripts/check_coverage_partitions.py (stdlib only for --frontend).
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Enforce frontend coverage partitions
+        run: >-
+          uv run --no-sync python scripts/check_coverage_partitions.py
+          --frontend frontend/coverage/coverage-final.json
+          --enforce
+
       - name: Frontend coverage summary
         if: always()
         run: |

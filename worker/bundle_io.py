@@ -1,9 +1,7 @@
 """Shared bundle/artifact IO for Worker execution preparation.
 
-Split out of ``worker.execution.prepare`` for the file-size budget: the agent
-path (``prepare_execution``) and the batch-2 code path (``code_runner``) both
-download a tar.gz bundle and a set of content-addressed input artifacts, and
-both apply the same untrusted-archive rules.
+Split from ``worker.execution.prepare`` for the file-size budget: both the
+agent and code paths download bundles + artifacts under one rule set.
 """
 
 from __future__ import annotations
@@ -13,7 +11,7 @@ import json
 import tarfile
 import threading
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, cast
 
 from worker._retry import run_with_retry
 from worker.artifact.download import download_object_artifact
@@ -35,9 +33,9 @@ def safe_extract_tree(archive: Path, destination: Path) -> None:
 
 
 def safe_extract(archive: Path, destination: Path) -> dict[str, Any]:
-    """Agent bundles carry a manifest.json; code bundles deliberately do not."""
+    """Agent bundles carry a manifest.json; code bundles do not."""
     safe_extract_tree(archive, destination)
-    return json.loads((destination / "manifest.json").read_text(encoding="utf-8"))
+    return cast(dict[str, Any], json.loads((destination / "manifest.json").read_text()))
 
 
 def sha256_file(path: Path) -> str:
@@ -74,8 +72,11 @@ def download_input_artifacts(
                 # 与 CAS 分支对齐：信号量限流 + 退避重试；每次重试重新打开
                 # 下载流，.part 截断重写由 download_object_artifact 的
                 # temp+rename 保证。
+                def _download(url: str = url, target: Path = target) -> None:
+                    download_object_artifact(url, target)
+
                 run_with_retry(
-                    lambda url=url, target=target: download_object_artifact(url, target),
+                    _download,
                     retriable=(RuntimeError,),
                     base_seconds=_RETRY_BACKOFF_BASE_SECONDS,
                     max_attempts=_RETRY_MAX_ATTEMPTS,

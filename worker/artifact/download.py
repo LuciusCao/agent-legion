@@ -9,7 +9,7 @@ URL comes from the authenticated claim channel, so no SSRF guard applies
 from __future__ import annotations
 
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, cast
 
 import requests
 
@@ -41,7 +41,7 @@ def _open_download(url: str) -> BinaryIO:
     if response.status_code != 200:
         response.close()
         raise RuntimeError(f"artifact download failed with HTTP {response.status_code}")
-    return response.raw
+    return cast(BinaryIO, response.raw)
 
 
 def download_object_artifact(url: str, target: Path) -> None:

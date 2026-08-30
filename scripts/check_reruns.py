@@ -172,10 +172,17 @@ def main(argv: list[str] | None = None) -> int:
         metavar="YYYY-MM-DD",
         help="override the date used for deadline checks (testing)",
     )
+    parser.add_argument(
+        "--check-deadlines",
+        action="store_true",
+        help="deadline-only mode: no rerun report required (#295 — nightly "
+        "exemption-expiry job detects an expired flaky registry deadline "
+        "even when the extended rerun evidence did not run)",
+    )
     args = parser.parse_args(argv)
 
-    if not args.rerun_report:
-        parser.error("at least one --rerun-report is required")
+    if not args.rerun_report and not args.check_deadlines:
+        parser.error("at least one --rerun-report is required (or --check-deadlines)")
 
     today = args.today or date.today()
     try:

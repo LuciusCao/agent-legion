@@ -68,7 +68,7 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
             result_status, error = "completed", ""
     else:
         result_status, error = "failed", f"Agent process exited {task.exit_code}"
-    metadata: dict[str, Any] = {
+    metadata = {
         "status": result_status,
         "exit_code": task.exit_code,
         "error_message": error,
