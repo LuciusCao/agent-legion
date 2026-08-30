@@ -179,6 +179,27 @@ def test_check_outputs_survives_artifact_store_misconfiguration(
     assert result.produced_artifacts == ("out.json",)
 
 
+def test_failed_storage_probe_is_cached(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A persistently broken storage config probes once: the failure is cached
+    instead of re-running (and re-logging) the failing build on every node."""
+    calls = 0
+
+    def _raise() -> None:
+        nonlocal calls
+        calls += 1
+        raise FileNotFoundError("secret file missing")
+
+    monkeypatch.setattr("server.app.executors.code.build_s3_storage", _raise)
+    executor = _executor()
+
+    with pytest.raises(FileNotFoundError):
+        executor._object_store()
+    assert executor._object_store() is None
+    assert calls == 1
+
+
 def test_upload_failure_keeps_node_completed(context: ExecutionContext) -> None:
     """Best-effort upload (D12): a storage outage never fails the node — the
     local copy stays and the maintenance reconciler re-uploads later."""
