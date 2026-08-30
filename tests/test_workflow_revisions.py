@@ -241,11 +241,11 @@ def test_reconcile_warns_and_skips_on_ambiguous_capability(
         ),
     }
     monkeypatch.setattr(
-        "server.app.services.workflow_revisions.published_agent_definitions",
+        "server.app.services.workflow_revision_reconcile.published_agent_definitions",
         lambda _dsn, _workspace_id: ambiguous,
     )
 
-    with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
+    with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revision_reconcile"):
         service.reconcile_active_agent_routes()
 
     warnings = [
@@ -278,7 +278,7 @@ def test_reconcile_skips_and_keeps_routes_when_catalog_fully_disabled(
     # workspace archived (catalogs are workspace-scoped, schema v46).
     replace_agent_catalog(workspace["id"], {})
 
-    with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
+    with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revision_reconcile"):
         service.reconcile_active_agent_routes()
 
     assert any("no published Agent Definitions" in record.getMessage() for record in caplog.records)
