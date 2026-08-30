@@ -10,9 +10,18 @@
   transition: box-shadow 0.15s ease;
 }
 
+/* #276：hover/选中联动的 active 态（阴影 + 蓝色轮廓）。旧版由 DagGraph
+   把 selectedFlowNode 类写到 NodeWrapper 上；重构后 active 下沉到
+   data.active，由节点卡片自己渲染（wrapper 无内边距，轮廓位置不变）。 */
 .node:hover,
 .node.selected {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.node.active {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  outline: 3px solid #1d4ed8;
+  outline-offset: 4px;
 }
 
 .node.completed {
