@@ -61,16 +61,20 @@ class MarkStore:
         self._overlap = timedelta(seconds=overlap_seconds)
         self._states: dict[str, _WorkflowScanState] = {}
 
-    def refresh(self, job_db: JobQueries, workflow_key: str) -> list[dict[str, Any]]:
-        """Return the current active-job marks for a workflow, delta-refreshing."""
-        state = self._states.get(workflow_key)
+    def refresh(self, job_db: JobQueries, workspace_id: str) -> list[dict[str, Any]]:
+        """Return the current active-job marks of a workspace, delta-refreshing.
+
+        #211 Phase 3: scan state is keyed per workspace (the legacy per-key
+        dedup across workspaces shared one key — impossible since v62 binds
+        key == workspace id)."""
+        state = self._states.get(workspace_id)
         now = time.monotonic()
         if (
             state is None
             or state.watermark is None
             or now - state.last_full_scan >= self._full_rescan_seconds
         ):
-            return self._full_refresh(job_db, workflow_key, now)
+            return self._full_refresh(job_db, workspace_id, now)
         # The lower bound slides with the database clock (minus the overlap
         # window), not just with seen rows: a burst of rows sharing one commit
         # timestamp must not pin the bound at the burst forever. The horizon
@@ -81,7 +85,7 @@ class MarkStore:
         # older ``updated_at`` and be missed until the periodic full rescan
         # — the documented safety net.
         horizon = (_parse_ts(job_db.db_now()) or datetime.now(UTC)) - self._overlap
-        changed = job_db.list_changed_job_marks(workflow_key, min(state.watermark, horizon))
+        changed = job_db.list_changed_job_marks(workspace_id, min(state.watermark, horizon))
         batch_max = state.watermark
         has_new = False
         for mark in changed:
@@ -106,10 +110,10 @@ class MarkStore:
         return list(state.marks.values())
 
     def _full_refresh(
-        self, job_db: JobQueries, workflow_key: str, now: float
+        self, job_db: JobQueries, workspace_id: str, now: float
     ) -> list[dict[str, Any]]:
-        marks = job_db.list_active_job_marks(workflow_key)
-        state = self._states.setdefault(workflow_key, _WorkflowScanState())
+        marks = job_db.list_active_job_marks(workspace_id)
+        state = self._states.setdefault(workspace_id, _WorkflowScanState())
         state.marks = {mark["id"]: mark for mark in marks}
         state.watermark = max(
             (ts for ts in (_parse_ts(mark.get("updated_at")) for mark in marks) if ts),

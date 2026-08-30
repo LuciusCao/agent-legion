@@ -14,7 +14,7 @@ from server.app.jobs.queries.job_scan_marks import _ACTIVE_MARK_COLUMNS
 
 
 class JobScanDeltaMixin(ConnectionQueriesMixin):
-    def list_changed_job_marks(self, workflow_key: str, since: Any) -> list[dict[str, Any]]:
+    def list_changed_job_marks(self, workspace_id: str, since: Any) -> list[dict[str, Any]]:
         """Lightweight rows touched after ``since`` (watermark delta scan).
 
         No status filter: rows that turned terminal must stay visible so the
@@ -24,9 +24,9 @@ class JobScanDeltaMixin(ConnectionQueriesMixin):
         with self._connect_read() as conn:
             rows = conn.execute(
                 f"select {_ACTIVE_MARK_COLUMNS} from jobs"
-                " where workflow_key=%s and updated_at > %s"
+                " where workspace_id=%s and updated_at > %s"
                 " order by updated_at",
-                (workflow_key, since),
+                (workspace_id, since),
             ).fetchall()
         return [dict(row) for row in rows]
 

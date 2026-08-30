@@ -54,8 +54,13 @@ from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SC
 # so the undo step leaves the table in place.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
-_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "workflow_node_explicit_types"
+# v67 (jobs_workspace_scan_indexes) is DDL-only: two workspace-keyed indexes
+# (#211 Phase 3 read-layer binding); the undo step drops them.
+_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = (
+    "idx_jobs_workspace_active_marks",
+    "idx_jobs_workspace_updated",
+)
+_NEWEST_MIGRATION_NAME = "jobs_workspace_scan_indexes"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 

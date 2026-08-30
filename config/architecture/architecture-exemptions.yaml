@@ -157,3 +157,14 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 34
+- check: architecture.file_budget
+  path: server/app/workflow_worker/mark_scan.py
+  reason: The issue-211 Phase 3 read-binding batch rekeys the scan state
+    per workspace — the pre-v62 shape where several workspaces shared one
+    workflow key collapsed them into a single scan state, and the v62
+    binding (key equals the workspace id) makes that shape unreachable. The
+    overage is the docstring documenting the per-workspace rekey, and Phase 4
+    drops the workflow_key parameter entirely, retiring this exemption.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
+  ceiling: 97

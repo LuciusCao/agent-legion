@@ -355,24 +355,27 @@ def test_run_upsert_keeps_frozen_pins_while_run_has_jobs(tmp_path):
     assert pins["node_code_versions"]["n1"]["version"] == 1
 
 
-def test_job_dedup_keys_are_scoped_per_workflow(tmp_path):
-    """The same (source_type, source_id) under another workflow_key of the
-    same workspace is not a duplicate."""
+def test_job_dedup_keys_are_scoped_per_workspace(tmp_path):
+    """#211 Phase 3 (read-layer binding): dedup keys are scoped per
+    workspace — the workflow_key argument is inert (it equals the workspace
+    id since v62, so one workspace is one dedup domain)."""
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     workspace = queries.create_workspace(
         "default", default_workflow_key="education_video_problems_generation"
     )
-    for workflow_key in ("workflow_a", "workflow_b"):
-        queries.create_job(
-            workflow_key=workflow_key,
-            source_type="question_id",
-            source_id="Q100",
-            run_id="",
-            title="Question Q100",
-            node_keys=["fetch_question_context"],
-            workspace_id=workspace["id"],
-        )
+    queries.create_job(
+        workflow_key="workflow_a",
+        source_type="question_id",
+        source_id="Q100",
+        run_id="",
+        title="Question Q100",
+        node_keys=["fetch_question_context"],
+        workspace_id=workspace["id"],
+    )
 
+    assert queries.list_job_dedup_keys(workspace["id"], "") == {("question_id", "Q100")}
+    # Any key argument yields the same workspace-scoped domain.
     assert queries.list_job_dedup_keys(workspace["id"], "workflow_a") == {("question_id", "Q100")}
-    assert queries.list_job_dedup_keys(workspace["id"], "workflow_b") == {("question_id", "Q100")}
-    assert queries.list_job_dedup_keys(workspace["id"], "workflow_c") == set()
+    assert queries.list_job_dedup_keys(workspace["id"], "workflow_c") == {("question_id", "Q100")}
+    other = queries.create_workspace("Other", default_workflow_key="other_ws")
+    assert queries.list_job_dedup_keys(str(other["id"]), "workflow_a") == set()

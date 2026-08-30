@@ -136,6 +136,11 @@ MIGRATIONS: list[SchemaMigration] = [
     # ghost structural diff on the next save. Approval gates already carry
     # an explicit type and are skipped.
     SchemaMigration(66, "workflow_node_explicit_types", migrate_workflow_node_explicit_types),
+    # v67 is DDL-only (#211 Phase 3 read-layer binding): workspace-keyed
+    # twins of idx_jobs_active_marks / idx_jobs_workflow_updated come from
+    # the schema-file replay — the job-scan predicates now bind workspace_id
+    # (workflow_key equals it since v62).
+    SchemaMigration(67, "jobs_workspace_scan_indexes"),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]

@@ -34,15 +34,16 @@ def test_schema_version_pin() -> None:
     # default_agent_* / intake_config_json columns still drop in schema.py's
     # post-chain sweep); v65 is DDL-only (approval_decisions,
     # EXEC-APPROVAL-001), and v66's data migration lives in
-    # tests/db/test_workflow_node_explicit_types_migration.py, so the pin
-    # stays here.
-    assert SCHEMA_VERSION == 66
+    # tests/db/test_workflow_node_explicit_types_migration.py; v67 is
+    # DDL-only (jobs_workspace_scan_indexes, #211 Phase 3 read-layer
+    # binding), so the pin stays here.
+    assert SCHEMA_VERSION == 67
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "workflow_node_explicit_types"
+    assert row["name"] == "jobs_workspace_scan_indexes"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:
