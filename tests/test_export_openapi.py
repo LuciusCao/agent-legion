@@ -246,3 +246,16 @@ def test_deprecated_workflow_key_paths_are_marked(tmp_path):
     # Segment-free node-code routes exist and are NOT deprecated.
     fresh = schema["paths"]["/api/workspaces/{workspace_id}/nodes/{node_key}/code"]
     assert "deprecated" not in fresh["get"]
+
+
+def test_claim_response_workflow_key_is_deprecated(tmp_path):
+    """#211 Phase 2 (cross-process protocol): the claim body's workflow_key
+    equals workspace_id (schema v62); Workers read workspace_id. The field
+    stays until the Phase 3/4 removal window (shipped Worker images keep
+    parsing the body), but the contract marks it deprecated."""
+    schema = build_openapi_schema(tmp_path / "schema")
+
+    claim = schema["components"]["schemas"]["AgentClaimResponse"]
+    assert claim["properties"]["workflow_key"]["deprecated"] is True
+    assert "Deprecated" in claim["properties"]["workflow_key"]["description"]
+    assert "deprecated" not in claim["properties"]["workspace_id"]

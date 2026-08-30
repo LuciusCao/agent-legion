@@ -174,6 +174,9 @@ def build_child_payload(
         "expected_outputs": list(manifest.get("expected_outputs") or []),
         "capability": str(manifest.get("capability") or ""),
         "node_key": str(manifest.get("node_key") or ""),
+        # #211 Phase 2：workflow_key 已 deprecated（与 workspace_id 恒等）；
+        # runtime dict 是沙箱内节点代码的宽松契约面，本批保留双字段，
+        # 下线随 Phase 3/4 的 manifest 清理一并处理。
         "workflow_key": str(manifest.get("workflow_key") or ""),
         "execution_id": str(manifest.get("execution_id") or ""),
         "workspace_id": str(manifest.get("workspace_id") or ""),

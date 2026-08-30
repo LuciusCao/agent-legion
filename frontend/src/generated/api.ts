@@ -2794,7 +2794,11 @@ export interface components {
       }
       /** Node Key */
       node_key: string
-      /** Workflow Key */
+      /**
+       * Workflow Key
+       * @deprecated
+       * @description Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211.
+       */
       workflow_key: string
       /** Workspace Id */
       workspace_id: string

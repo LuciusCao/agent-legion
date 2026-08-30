@@ -67,7 +67,7 @@ def _task(
         "status_fields": {
             "job_id": "job-1",
             "node_key": "node_a",
-            "workflow_key": "wf",
+            "workspace_id": "ws-1",
             "agent_id": "agent",
             "run_dir": "run",
         },
