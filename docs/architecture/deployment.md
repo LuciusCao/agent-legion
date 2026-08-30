@@ -54,6 +54,55 @@ scripts/
 - 质量门分三层：本地 pre-push 默认 smoke 级（`scripts/run-local-gate.sh`，由 `.githooks/pre-push` 调用）；本地完整门 `check.sh`（`AGENT_LEGION_GATE_LEVEL=full` 触发）；CI（`.github/workflows/quality-gate.yml`）分阶段调用 `scripts/check-quick-backend.sh` / `check-quick-frontend.sh`，不调用 `check.sh`。
 - 多 worktree 开发时，每个 worktree 使用独立的后端端口和 `data/` 目录；`scripts/init-worktree.sh` 会按 worktree 名派生并创建专属 Postgres 库与 S3 bucket（`AGENT_LEGION_S3_BUCKET`）。
 
+## Worker 容器特权边界
+
+> Issue #274。worker 容器（`deploy/compose.worker.yaml`）的特权组合是一项**刻意的
+> 单点依赖**，本节固化其现状、风险定性与收敛路径；任何一项的收敛都必须先过容器内
+> 实测，不允许机械叠加。
+
+### 当前特权组合及各项的必要性
+
+| # | 特权项 | 出处 | 为什么现在必须 |
+|---|--------|------|----------------|
+| 1 | 容器以 root 运行 | `Dockerfile` worker 阶段无 `USER` 指令 | 数据卷（`/var/lib/agent-legion-worker` 等）默认属 root，非 root uid 需要先解决卷属主（见收敛路径第 2 级） |
+| 2 | `cap_add: SYS_ADMIN` | `deploy/compose.worker.yaml` | bwrap 沙箱在容器内创建 mount namespace / 执行挂载操作需要该 capability |
+| 3 | `security_opt: seccomp:unconfined` | `deploy/compose.worker.yaml` | Docker 默认 seccomp profile 拦截 `unshare`，而 bwrap 依赖它建立 namespace（CI run 30683781370 实测，详见 `velites-harness.md` §5） |
+| 4 | 镜像内 bwrap setuid（`chmod u+s /usr/bin/bwrap`） | `Dockerfile` worker 阶段 | bwrap 需要 setuid 位**或**非特权 user namespace 二者之一；宿主发行版常经 AppArmor 限制非特权 userns（`bwrap: setting up uid map: Permission denied`），setuid 是当前唯一在所有目标环境可复现的方案 |
+
+缺失任一项时沙箱 fail-closed（`EXEC-HARNESS-SANDBOX-001`）：worker 启动即 exit≠0，
+agent 全部秒退——这是可用性层面的硬依赖，不是可选配置。
+
+### 风险定性
+
+沙箱逃逸 = 宿主 root 的**单点依赖**：bwrap 一旦被绕过（或节点声明
+`sandbox_network: true` 时 wrap 模式的 `--unshare-net` 例外生效），code 子进程即
+拥有近似宿主 root 的能力。worker 侧其余安全设计——密钥 stdin 传递不落盘
+（`worker/code_runner.py`）、沙箱 env 白名单（`shared/code_sandbox.py`）、
+结果 JSON 严格校验（`workspace_libs/code_child.py`）、preflight fail-closed
+（`worker/runtime/preflight.py`）——的收益全部押在 bwrap 单点可靠性上。
+因此 worker 容器应按**不可信执行边界**对待：不要把宿主敏感路径、Docker socket
+或生产凭据挂给它。
+
+### 分级收敛路径
+
+每级独立可落地，落地顺序即风险收益排序；**任何一级都必须先在真实容器里实测
+沙箱 e2e（含 bwrap 启动、node 执行、fail-closed 行为）再合入**：
+
+1. **`no-new-privileges`（需实测验证，未落地）**：`security_opt` 追加
+   `no-new-privileges:true` 可削弱 setuid 提权面，但它会阻止 setuid 提权——而
+   bwrap 恰恰依赖 setuid 位（非 user namespace 场景），**机械叠加可能直接破坏
+   沙箱**（表现为 bwrap 起 uid map 失败 → fail-closed → worker 全部节点秒退）。
+   必须先在容器内实测两种形态：setuid bwrap + no-new-privileges 是否仍能建立
+   namespace；若不能，评估改走非特权 userns 形态后再加该 flag。
+2. **镜像非 root uid + chown 数据卷**：`Dockerfile` worker/host 阶段加专用
+   uid + `chown` 数据卷目录，消除「容器内即 root」的兜底特权。需实测：
+   数据卷首次挂载的属主、worker 控制文件的写权限、pi/velites 运行时目录。
+3. **userns-remap / 非 root + unprivileged userns（评估）**：docker daemon 侧
+   `userns-remap` 或较新 runc 对 `bwrap --unshare-user` 的支持，可让第 4 项
+   setuid 依赖退役；涉及宿主 daemon 全局配置，收益与代价需单独评估。
+4. **边界管理（持续）**：worker 容器按不可信边界对待——只读 rootfs、独立网络
+   段、最小 volume 挂载面；即使特权收敛完成，这层也保持不变。
+
 ## API Surface / Interface
 
 <!-- AUTO-GENERATED: scripts/generate_architecture.py -->

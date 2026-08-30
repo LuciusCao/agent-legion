@@ -9,6 +9,8 @@ services:
     restart: unless-stopped
     # velites 沙箱（bwrap）在容器内需要：seccomp 放行 unshare + CAP_SYS_ADMIN
     # （同 compose.host.yaml 注释）。缺失时沙箱 fail-closed，agent 全部秒退。
+    # 特权组合的风险定性与分级收敛路径（含 no-new-privileges 需实测的原因）
+    # 见 docs/architecture/deployment.md「Worker 容器特权边界」（#274）。
     security_opt:
       - seccomp:unconfined
     cap_add:
