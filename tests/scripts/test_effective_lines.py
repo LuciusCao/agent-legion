@@ -104,3 +104,19 @@ def test_rust_excludes_comments_counts_attribute_macros(tmp_path: Path) -> None:
 def test_unknown_extension_falls_back_to_raw_count(tmp_path: Path) -> None:
     path = _write(tmp_path / "example.md", "# title\n\ntext\n")
     assert count_effective_lines(path) == 3
+
+
+def test_sql_excludes_dash_dash_comment_lines(tmp_path: Path) -> None:
+    # #293: the schema file's governance counts effective lines like code
+    # files — fitting a budget must not reward deleting documentation.
+    path = _write(
+        tmp_path / "schema.sql",
+        "-- header comment\n"
+        "\n"
+        "create table jobs (\n"
+        "  id text primary key -- trailing comment still counts\n"
+        ");\n"
+        "-- retired note (schema v64)\n",
+    )
+    # code lines: create, id, ); = 3
+    assert count_effective_lines(path) == 3

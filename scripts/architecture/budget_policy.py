@@ -21,6 +21,7 @@ class BudgetConfigurationError(ValueError):
 class ProductionRoot:
     path: str
     extensions: tuple[str, ...]
+    max_lines: int | None = None
 
 
 @dataclass(frozen=True)
@@ -119,14 +120,20 @@ def _parse_production_roots(production: dict[str, Any]) -> tuple[ProductionRoot,
     result: list[ProductionRoot] = []
     for idx, root in enumerate(roots):
         context = f"production.roots[{idx}]"
-        _check_keys(root, {"path", "extensions"}, context)
+        _check_keys(root, {"path", "extensions", "max_lines"}, context)
         path = _parse_relative_path(root, "path", context)
         normalized = _normalize_path(path)
         if normalized in seen:
             raise BudgetConfigurationError(f"duplicate root path: {path}")
         seen.add(normalized)
         extensions = _parse_string_list(root, "extensions", context, non_empty=True)
-        result.append(ProductionRoot(path=normalized, extensions=extensions))
+        max_lines_raw = root.get("max_lines")
+        max_lines: int | None = None
+        if max_lines_raw is not None:
+            if type(max_lines_raw) is not int or max_lines_raw <= 0:
+                raise BudgetConfigurationError(f"{context}.max_lines must be a positive int")
+            max_lines = max_lines_raw
+        result.append(ProductionRoot(path=normalized, extensions=extensions, max_lines=max_lines))
     return tuple(result)
 
 

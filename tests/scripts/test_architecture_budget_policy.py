@@ -207,3 +207,31 @@ class TestBudgetPolicyLoader:
         policy = load_budget_policy(policy_path)
 
         assert policy.production_exclude == ("server/app/generated",)
+
+
+class TestPerRootMaxLines:
+    """#293: roots may override the global absolute limit."""
+
+    def test_override_loads(self, tmp_path: Path) -> None:
+        data = copy.deepcopy(VALID_POLICY)
+        data["production"]["roots"].append(
+            {"path": "server/app/db", "extensions": [".sql"], "max_lines": 1200}
+        )
+        policy_path = tmp_path / "policy.yaml"
+        write_policy(policy_path, data)
+
+        policy = load_budget_policy(policy_path)
+
+        assert policy.production_roots[1].max_lines == 1200
+        assert policy.production_roots[0].max_lines is None
+
+    def test_non_positive_override_rejected(self, tmp_path: Path) -> None:
+        data = copy.deepcopy(VALID_POLICY)
+        data["production"]["roots"].append(
+            {"path": "server/app/db", "extensions": [".sql"], "max_lines": 0}
+        )
+        policy_path = tmp_path / "policy.yaml"
+        write_policy(policy_path, data)
+
+        with pytest.raises(BudgetConfigurationError, match="max_lines must be a positive int"):
+            load_budget_policy(policy_path)

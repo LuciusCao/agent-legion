@@ -30,6 +30,12 @@ def count_effective_lines(path: Path) -> int:
         # multi-line raw string continuation, which counts as code — the
         # stricter metric).
         return _c_like_effective_lines(text)
+    if path.suffix == ".sql":
+        # ANSI line comments only: block comments /* */ in postgres_schema.sql
+        # are rare and inline; overcounting is the stricter metric.
+        return sum(
+            1 for line in text.splitlines() if line.strip() and not line.lstrip().startswith("--")
+        )
     return len(text.splitlines())
 
 

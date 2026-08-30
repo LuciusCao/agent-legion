@@ -108,7 +108,10 @@
 - spec / plan 必须包含 `Quality Impact` 小节。
 - 不要手写 frontend transport types，必须从 `frontend/src/generated/api.ts` 派生。
 - 超出体积预算的文件必须拆分或回退，不能手动抬高 ceiling。ceiling 按有效行数计
-  （排除注释行与空行），不要为凑预算压缩注释；`max_lines` 绝对上限按原始行数计。
+  （排除注释行与空行），不要为凑预算压缩注释；`max_lines` 绝对上限按原始行数计
+  （#293 起声明式产物 root 可覆盖绝对上限：`server/app/db` 的 `.sql` 与 `worker/ui`
+  的 `.js/.css` 有各自 root 级 `max_lines`，全仓生产文件无治理盲区；`.sql` 的
+  `--` 注释行在有效行数中同样排除）。
   ceiling 单调只降不升（#209）：ratchet 的 `--rebase` / `--bump` 上抬通道已移除，
   `check_architecture` 会按 git 锚点拒绝**已跟踪条目**的任何上抬（含手改 budgets
   JSON 与抬高豁免 ceiling）；唯一合法上抬通道是带 `remove_when` 的
@@ -127,7 +130,9 @@
 - 新 service 的数据库访问必须走 `JobQueries` 门面（`server/app/jobs/queries`），
   不在 service 里手写 SQL、import `server.app.db.transaction`/`connection` 或经
   JobQueries 取 DSN 自建连接（BOUNDARY-DATA-001；基线 ratchet 检查见
-  `config/architecture/service-data-boundary-baseline.json`）。门面的 DSN 属性
+  `config/architecture/service-data-boundary-baseline.json`，基线自身只降不升
+  （#292）：git 双锚点拒绝新增条目与计数上抬，存量按子域分批收敛至清零）。门面的
+  DSN 属性
   `.path` 已私有化为 `_path`（#187 第三步）：`dsn_identity` 是唯一公开只读
   访问器（返回字符串 DSN），合法消费者仅限数据层自身（queries/atomic_
   mutations 的 `_path`）与经设计豁免的数据层毗邻组件（executors lease 仓储、

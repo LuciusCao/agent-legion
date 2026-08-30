@@ -335,3 +335,97 @@ def test_current_repo_passes_its_own_baseline():
     errors = check_service_data_boundary(root)
 
     assert errors == []
+
+
+def _boundary_git_repo(tmp_path: Path, entries: dict[str, list[int]]) -> Path:
+    """Build a real git repo whose HEAD carries a boundary baseline.
+
+    An empty seed commit keeps HEAD^ resolvable (mirrors the budget
+    monotonicity fixtures); the baseline JSON commits on top so the working
+    tree edit plays the raise attempt.
+    """
+    import subprocess
+
+    root = tmp_path
+    write_boundary_baseline(root, entries)
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+        ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
+        ["git", "add", "-A"],
+        ["git", "commit", "-q", "-m", "init baseline"],
+    ):
+        subprocess.run(argv, cwd=root, check=True)
+    return root
+
+
+def test_monotonic_guard_rejects_raised_count(tmp_path: Path):
+    root = _boundary_git_repo(tmp_path, {"server/app/services/legacy.py": [3, 1, 0]})
+    write_boundary_baseline(root, {"server/app/services/legacy.py": [4, 1, 0]})
+
+    errors = check_service_data_boundary(root)
+
+    assert any(
+        "baseline triple [4, 1, 0] rose above committed floor [3, 1, 0]" in error
+        for error in errors
+    )
+
+
+def test_monotonic_guard_rejects_new_entry_for_tracked_file(tmp_path: Path):
+    # The add-entry-to-pass channel #292 exists to close: a service file that
+    # HEAD already tracks but the baseline did not register must not gain a
+    # first entry by a silent edit.
+    import subprocess
+
+    root = tmp_path
+    write(root / "server/app/services/veteran.py", 'A = "SELECT 1"\n')
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+        ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
+        ["git", "add", "-A"],
+        ["git", "commit", "-q", "-m", "veteran service, no baseline"],
+    ):
+        subprocess.run(argv, cwd=root, check=True)
+    write_boundary_baseline(root, {"server/app/services/veteran.py": [1, 0, 0]})
+
+    errors = check_service_data_boundary(root)
+
+    assert any(
+        "baseline entry appeared for an already-tracked service file" in error for error in errors
+    )
+
+
+def test_monotonic_guard_accepts_first_entry_for_brand_new_file(tmp_path: Path):
+    # A genuinely new service file registering its first baseline entry is
+    # the legitimate first-time channel (the plain no-entry check still
+    # governs it); the monotonic guard must not misfire.
+    root = _boundary_git_repo(tmp_path, {})
+    write(root / "server/app/services/fresh.py", 'A = "SELECT 1"\n')
+    write_boundary_baseline(root, {"server/app/services/fresh.py": [1, 0, 0]})
+
+    errors = check_service_data_boundary(root)
+
+    assert not any("rose above committed" in error for error in errors)
+    assert not any("appeared for an already-tracked" in error for error in errors)
+
+
+def test_monotonic_guard_accepts_lowered_count(tmp_path):
+    root = _boundary_git_repo(tmp_path, {"server/app/services/legacy.py": [3, 1, 0]})
+    write_boundary_baseline(root, {"server/app/services/legacy.py": [2, 1, 0]})
+
+    errors = check_service_data_boundary(root)
+
+    assert not any("rose above committed" in error for error in errors)
+
+
+def test_monotonic_guard_silent_without_git(tmp_path: Path):
+    # Non-git checkouts have no committed anchor; the guard stays quiet
+    # rather than failing (mirrors the budget guard).
+    write_boundary_baseline(tmp_path, {"server/app/services/legacy.py": [3, 1, 0]})
+
+    errors = check_service_data_boundary(tmp_path)
+
+    assert not any("boundary monotonicity" in error for error in errors)
