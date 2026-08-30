@@ -201,6 +201,15 @@ class ApprovalDecisionService:
                 local_path=resolve_job_dir(job, self.settings.jobs_dir) / name,
             )
         except Exception:
+            # #204 broad-except audit: best-effort object-storage promotion
+            # after the gate transition already committed (_approve calls
+            # this below _gate_transition). The outcome space is the boto3
+            # client surface, not a business family; a storage outage must
+            # not fail a decision whose DB state and local artifact are
+            # already correct — the local copy stays authoritative and the
+            # maintenance reconciler re-uploads later (same stance as the
+            # completion hooks, per the docstring). The warning names the
+            # job/artifact and exc_info keeps the traceback.
             logger.warning(
                 "approval artifact upload failed for job %s %s (local copy stays)",
                 job["id"],
@@ -215,4 +224,14 @@ class ApprovalDecisionService:
             elif self.rerun.job_event_manager is not None:
                 broadcast_job_update(self.job_db, self.rerun.job_event_manager, job_id)
         except Exception:
+            # #204 broad-except audit: fire-and-forget observability, same
+            # discipline as leases._broadcast_job_update / aggregator.
+            # record_job_update / broadcast_job_update run AFTER the gate
+            # write committed (every caller invokes _broadcast below its
+            # transition), so an event bookkeeping failure must never fail
+            # the decision that already succeeded. The outcome space is the
+            # DB read surface plus the buffer/bus, not a business family;
+            # the missed patch self-heals — the next state change or the
+            # aggregator's periodic stats flush re-broadcasts. The
+            # traceback is preserved via logger.exception.
             logger.exception("Failed to broadcast approval event for job %s", job_id)

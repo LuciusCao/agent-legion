@@ -66,6 +66,19 @@ def create_agent_worker_claim_router(
                     manifest, broker.database_dsn, settings.config, job_artifact_objects
                 )
             except Exception as exc:
+                # #204 broad-except audit: claim-time manifest resolution that
+                # CONVERTS to a retryable 500, never silently swallows. The
+                # outcome space is deliberately wide: secret resolution
+                # (VaultError families), connection-token injection, the DB
+                # re-fetches in resolve_code_runtime_context (its own
+                # documented strict reads), and material/bundle claim blocks —
+                # none is a business family the response layer could
+                # enumerate, and any of them means "this Worker cannot run
+                # this execution with a well-formed manifest". Raising 500
+                # after the committed claim is the pinned recovery loop: the
+                # Worker drops the attempt, the lease expires, the sweeper
+                # requeues. logger.exception keeps the traceback for the
+                # operator; HTTPException carries a non-leaking detail.
                 # The claim already committed; a 500 lets the Worker drop the
                 # attempt and the sweeper requeues after the lease expires.
                 logger.exception("code manifest resolution failed for %s", claimed.execution_id)

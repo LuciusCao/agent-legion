@@ -665,6 +665,7 @@
     "scripts/__init__.py": 11,
     "scripts/architecture/__init__.py": 11,
     "scripts/architecture/agent_catalog_contracts.py": 148,
+    "scripts/architecture/broad_except_audit.py": 78,
     "scripts/architecture/budget_floor_errors.py": 34,
     "scripts/architecture/budget_git.py": 215,
     "scripts/architecture/budget_inventory.py": 103,

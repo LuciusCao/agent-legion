@@ -133,6 +133,14 @@ def main() -> int:
                 try:
                     future.result()
                 except Exception as exc:
+                    # #204 broad-except audit: 线程池 reap 安全网。执行主体
+                    # 已在 run_execution 内被遏制（execution/run.py 的
+                    # prebuilt 降级），能到达这里的只剩 deliver_result 收尾
+                    # 路径或真正的编程错误——但 claim 轮询循环必须存活：一次
+                    # future 失败不能让 worker 停摆，该次执行由租约过期后的
+                    # Host 重调度兜底。吞是对的：这里 future.result() 是异常
+                    # 的唯一提取点，不捕获则异常已在池内丢失。日志保全：
+                    # traceback.print_exc() + print 摘要。
                     traceback.print_exc()
                     print(f"Agent execution failed: {exc}", flush=True)
             try:
@@ -219,6 +227,14 @@ def main() -> int:
                 print(f"Agent Worker rejected by server: {exc}; re-register required", flush=True)
                 return 2
             except Exception as exc:
+                # #204 broad-except audit: claim 轮询的存活语义。try 体的
+                # 逃逸族混族——client.claim 的传输错误（requests 族）、非 200
+                # 状态的 RuntimeError、应答解码的 ValueError——统一语义都是
+                # "Host 暂时不可用"，唯一正确响应是指数退避（带上限）后重试；
+                # WorkerAuthError 是终态，已在上一臂单独 return 2。吞是对的：
+                # 主循环死亡 = worker 停摆。结果空间是本轮 claim 空转一次，
+                # 已提交的 future 不受影响。日志保全：print 记录异常与退避
+                # 时长。
                 print(f"Agent claim error: {exc}; retrying in {backoff:.1f}s", flush=True)
                 stop.wait(backoff)
                 backoff = min(backoff * 2, CLAIM_BACKOFF_CAP_SECONDS)

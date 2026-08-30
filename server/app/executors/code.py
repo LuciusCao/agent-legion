@@ -197,6 +197,18 @@ class CodeExecutor:
                     inputs=context.inputs,
                 )
             except Exception:
+                # #204 broad-except audit: this wraps the restore loop's own
+                # per-file containment for the one thing it deliberately lets
+                # escape — the manifest lookup's DB read (restore_missing_inputs
+                # already catches per-file storage errors itself). A transient DB
+                # outage at restore time must degrade to "run with local files"
+                # rather than fail a node whose inputs are all present locally.
+                # Swallowing is correct because restore is strictly best-effort
+                # (EXEC-ARTIFACT-STORE-001): the outcome space is the psycopg/
+                # pool surface of that lookup, and a node whose declared inputs
+                # are all present locally never touches this failure mode at
+                # all. The traceback is logged (exc_info) so the silent
+                # degradation stays visible to the operator.
                 logger.warning(
                     "input restore failed for job %s; continuing with local files only",
                     context.job_id,

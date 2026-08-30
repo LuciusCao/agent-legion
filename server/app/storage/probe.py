@@ -52,6 +52,17 @@ def probe_settings(
     try:
         _head_bucket(settings, timeout_seconds)
     except Exception as exc:  # a probe must never propagate
+        # #204 broad-except audit: the probe's contract is "return a reason
+        # string, never raise" — both consumers (the startup self-check and
+        # the /api/health cache) treat the reason as a DEGRADED log line /
+        # reachable=false, and a boot or health endpoint must not fail
+        # because RustFS is down (module docstring: an unreachable store is
+        # a deliberate degrade, not a failure). The width is inherent to the
+        # botocore/boto3 client-construction + head_bucket surface
+        # (EndpointConnectionError, NoCredentialsError, ClientError, ...)
+        # which has no narrow enumerable family; converting to the
+        # "TypeName: message" reason string IS the preservation — the type
+        # name and text ride the log, nothing is lost.
         return f"{type(exc).__name__}: {exc}"
     return None
 

@@ -44,6 +44,16 @@ def resolve_skill_dir(
         resolve_workflow_skill(skill_manager.base_dir, skill)
         return skill_dir
     except Exception:
+        # #204 broad-except audit: cleanup-guard-then-bare-re-raise (#233
+        # pattern — clean up broad, classify never). get_skill_dir above
+        # already copytree'd the execution-private run dir; whatever made
+        # the contract validation fail (ValueError for the documented
+        # missing/escaping-skill cases, OSError from the filesystem, or a
+        # programming error), the private dir must be reclaimed before the
+        # exception propagates or every retry leaks one runs/<execution_id>
+        # copy (only the age-based sweeper would reclaim it). The bare
+        # ``raise`` preserves the original type — the callers
+        # (output_validation, the dispatch path) classify it themselves.
         skill_manager.cleanup_execution(execution_id)
         raise
 

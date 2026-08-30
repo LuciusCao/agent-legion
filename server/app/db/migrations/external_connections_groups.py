@@ -13,7 +13,7 @@ import logging
 import os
 from typing import Any
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,16 @@ def _decrypt_workspace_token(conn: Any, fernet: Fernet | None, workspace_id: str
         if row is not None:
             try:
                 return fernet.decrypt(str(row["ciphertext"]).encode("utf-8")).decode("utf-8")
-            except Exception:  # undecryptable entry
+            except (InvalidToken, UnicodeDecodeError):  # undecryptable entry
+                # #204 broad-except audit（已收窄）: 该臂只处理「密文在当前
+                # 主密钥下解不开」这一降级族——InvalidToken（密钥轮换后的
+                # 历史密文、损坏行）与解密成功但明文不是合法 UTF-8 的
+                # UnicodeDecodeError，均为数据态而非编程错误，返回 "" 让
+                # 调用方按「不可解密」归类（该 workspace 保持原 node config，
+                # 规避跨租户错绑，见 _workspace_cms_state）。此前的
+                # ``except Exception`` 会连 TypeError 一类编程错误一起吞掉，
+                # 已按 vault.py/instance_vault.py/connection_tokens.py 的同型
+                # 收窄惯例改为显式异常元组。
                 pass
     logger.warning(
         "external connections migration: cannot decrypt %s (workspace %s);"
