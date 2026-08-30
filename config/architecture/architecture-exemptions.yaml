@@ -14,7 +14,7 @@ exemptions:
     deployment and the retired Worker generation is fenced (re-anchored from
     issue 160 to issue 287), not splitting deprecated code.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/287
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
   ceiling: 61
 - check: architecture.route_response_model
   path: server/app/routes/studio_chat.py:session_events
@@ -64,7 +64,7 @@ exemptions:
     is a flat field list where each line IS a feature, so the 2-line growth
     is the honest cost of the fix, not splittable structure.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/276
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
   ceiling: 33
 - check: architecture.file_budget
   path: frontend/src/components/dag/DagNode.module.css
@@ -72,7 +72,7 @@ exemptions:
     onto the node card itself with the hover-highlight rework (#276); the
     two extra rule lines are the visual contract of that rework.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/276
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
   ceiling: 121
 - check: architecture.file_budget
   path: frontend/src/components/dagHighlight.ts
@@ -82,7 +82,7 @@ exemptions:
     machine -- the atomic prevActiveNode/hoveredNode update via a reducer
     is what prevents a wasted full recompute round between hovers.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/276
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
   ceiling: 121
 - check: architecture.file_budget
   path: frontend/src/components/dag/DagGraph.tsx
@@ -90,7 +90,7 @@ exemptions:
     highlight call site plus the reducer wiring grow the composition
     component past the split-era baseline.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/276
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
   ceiling: 286
 - check: architecture.file_budget
   path: server/app/jobs/queries/groups.py
@@ -101,5 +101,5 @@ exemptions:
     Each is a legitimate one-line composition entry; the combined file is
     one effective line past the stale ceiling.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/287
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
   ceiling: 78
