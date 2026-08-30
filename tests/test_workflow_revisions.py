@@ -241,11 +241,11 @@ def test_reconcile_warns_and_skips_on_ambiguous_capability(
         ),
     }
     monkeypatch.setattr(
-        "server.app.services.workflow_revisions.published_agent_definitions",
+        "server.app.services.workflow_revision_reconcile.published_agent_definitions",
         lambda _dsn, _workspace_id: ambiguous,
     )
 
-    with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
+    with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revision_reconcile"):
         service.reconcile_active_agent_routes()
 
     warnings = [
@@ -278,7 +278,7 @@ def test_reconcile_skips_and_keeps_routes_when_catalog_fully_disabled(
     # workspace archived (catalogs are workspace-scoped, schema v46).
     replace_agent_catalog(workspace["id"], {})
 
-    with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
+    with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revision_reconcile"):
         service.reconcile_active_agent_routes()
 
     assert any("no published Agent Definitions" in record.getMessage() for record in caplog.records)
@@ -416,6 +416,51 @@ def test_failed_publish_validation_preserves_active_revision(tmp_path: Path) -> 
     assert errors
     assert (
         queries.get_active_workflow_revision(workspace["id"], definition.key)["id"] == active["id"]
+    )
+
+
+def test_mid_publish_projection_failure_rolls_back_revision_insert(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """publish 中途失败（投影写入抛错）必须连同 revision insert 一起回滚。
+
+    #287 拆分把投影 helper 抽到 workflow_revision_projection.py，事务边界
+    契约（投影与 revision insert 同事务、绝不自行提交）此前只被「publish 前
+    validation 失败」的用例间接背书——那条路径根本不进事务。本用例在
+    create_workflow_revision 事务内部（archive/insert 之后、投影写入时）
+    注入失败，断言新 revision 行与 active 指针都不落库。
+    """
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
+    definition = load_builtin_definition("education_video_problems_generation")
+    service = WorkflowRevisionService(queries)
+    first = service.publish_workspace_revision(workspace["id"], definition)
+
+    from server.app.jobs.queries import workflow_revisions as revision_writes
+
+    def _boom(conn: object, **_kwargs: object) -> dict:
+        raise RuntimeError("projection exploded mid-transaction")
+
+    # 事务体是 projection 模块的 create_workflow_revision_with_projection
+    # （queries 侧 from-import 该名字）——patch 消费模块的绑定才拦得住
+    # publish 事务的 insert 之后、投影写入之前的窗口。
+    monkeypatch.setattr(revision_writes, "create_workflow_revision_with_projection", _boom)
+
+    with pytest.raises(RuntimeError, match="projection exploded"):
+        service.publish_workspace_revision(workspace["id"], definition)
+
+    # 新 revision 行未落库：仍只有第一次发布的 1 行。
+    with queries.connect() as conn:
+        rows = conn.execute(
+            "select count(*) as n from workflow_revisions where workspace_id = %s",
+            (workspace["id"],),
+        ).fetchone()
+    assert rows["n"] == 1
+    # active 指针未移动。
+    assert (
+        queries.get_active_workflow_revision(workspace["id"], definition.key)["id"] == first["id"]
     )
 
 

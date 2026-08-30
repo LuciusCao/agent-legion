@@ -226,6 +226,34 @@ def test_consume_auth_failure_marker_noop_without_marker(
     assert calls == []
 
 
+def test_consume_auth_failure_marker_resolves_bare_dsn(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#280: the token-invalidation DSN goes through `resolve_dsn`, so a bare
+    DSN string passes through unchanged — replacing the retired getattr
+    escape hatch on `job_db` (a job_db-less executor stays a no-op)."""
+    from server.app.executors._code_runtime import consume_auth_failure_marker
+    from workspace_libs.node_sdk import AUTH_FAILURE_MARKER_PATH
+
+    executor = _executor()
+    executor.job_db = "postgresql://bare-dsn"
+    calls = _capture_token_service(monkeypatch)
+    marker = context.job_dir / AUTH_FAILURE_MARKER_PATH
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("cms-internal", encoding="utf-8")
+
+    consume_auth_failure_marker(executor, context)
+
+    assert calls == [("postgresql://bare-dsn", "cms-internal")]
+    assert not marker.exists()
+
+    calls.clear()
+    executor.job_db = None
+    consume_auth_failure_marker(executor, context)
+
+    assert calls == []
+
+
 def test_sandboxed_child_auth_failure_marker_reaches_parent(
     context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
