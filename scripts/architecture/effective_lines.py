@@ -14,7 +14,7 @@ from pathlib import Path
 
 __test__ = False
 
-_C_LIKE_SUFFIXES = (".ts", ".tsx", ".css", ".rs")
+_C_LIKE_SUFFIXES = (".ts", ".tsx", ".css", ".rs", ".js")
 
 
 def count_effective_lines(path: Path) -> int:

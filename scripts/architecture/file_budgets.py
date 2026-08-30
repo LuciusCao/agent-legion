@@ -9,7 +9,7 @@ from typing import Any
 
 from scripts.quality.exemptions import ArchitectureExemption
 
-from .budget_inventory import build_budget_inventory
+from .budget_inventory import absolute_limit_map, build_budget_inventory
 from .budget_monotonicity import ceiling_regression_errors
 from .budget_policy import BudgetPolicy
 from .effective_lines import count_effective_lines
@@ -80,14 +80,6 @@ def load_budget_baseline(path: Path) -> BudgetBaseline:
 def count_source_lines(path: Path) -> int:
     """Raw line count, used for absolute size limits (not budget ceilings)."""
     return len(path.read_text(encoding="utf-8").splitlines())
-
-
-def _absolute_limit_map(policy: BudgetPolicy, production: tuple[str, ...]) -> dict[str, int]:
-    """Per-file absolute limits from roots overriding production.max_lines."""
-    roots = [(r.path + "/", r.max_lines) for r in policy.production_roots if r.max_lines]
-    return {
-        path: limit for path in production for prefix, limit in roots if path.startswith(prefix)
-    }
 
 
 def _positive_int(value: Any) -> int:
@@ -164,17 +156,15 @@ def check_file_budgets(
                 f"{path}: stale baseline entry targets a non-production file; ratchet the baseline"
             )
 
+    # #293: per-root max_lines overrides (declarative artifacts like the
+    # full-replay schema file) replace the global absolute limit.
+    limits = absolute_limit_map(policy, inventory.production)
     for path in inventory.production:
         if path not in baseline_files and path not in frozen_ceilings:
             errors.append(
                 f"{path}: production file has no baseline; "
                 "run scripts/ratchet_architecture_budgets.py"
             )
-
-    # Per-root max_lines overrides (#293: declarative artifacts like the
-    # full-replay schema file get their own absolute limit).
-    limits = _absolute_limit_map(policy, inventory.production)
-    for path in inventory.production:
         actual = count_source_lines(root / path)
         limit = limits.get(path, policy.production_max_lines)
         if actual > limit:

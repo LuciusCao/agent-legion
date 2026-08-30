@@ -22,42 +22,19 @@ directory stays quiet.
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
 from .budget_git import BudgetGitUnavailable, GitHelper
+from .service_data_boundary_history import (
+    boundary_floors_and_history,
+)
 
 __test__ = False
 
-BOUNDARY_BASELINE_RELATIVE_PATH = "config/architecture/service-data-boundary-baseline.json"
 
 _SHALLOW_OPT_OUT = "AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW"
 _ANCHORS = ("HEAD", "HEAD^")
-
-
-def committed_boundary_entries(text: str | None) -> dict[str, tuple[int, int, int]]:
-    """Path -> (sql, primitives, dsn) from a committed baseline JSON (lenient)."""
-    if text is None:
-        return {}
-    try:
-        raw = json.loads(text)
-    except json.JSONDecodeError:
-        return {}
-    files = raw.get("files") if isinstance(raw, dict) else None
-    if not isinstance(files, dict):
-        return {}
-    entries: dict[str, tuple[int, int, int]] = {}
-    for key, value in files.items():
-        if not isinstance(key, str):
-            continue
-        if (
-            isinstance(value, list)
-            and len(value) == 3
-            and all(isinstance(item, int) and not isinstance(item, bool) for item in value)
-        ):
-            entries[key] = (value[0], value[1], value[2])
-    return entries
 
 
 def _unresolvable_anchor_errors(git: GitHelper) -> list[str]:
@@ -91,43 +68,30 @@ def boundary_regression_errors(
     no-entry check of ``check_service_data_boundary`` already governs —
     entries here exist because the file carries bypasses, so a new entry
     appearing while the file itself is not new means someone grew debt).
-    Renames are left to the plain check: the scan keys real paths on disk,
-    so a renamed service file with bypasses surfaces as a fresh
-    no-baseline-entry error, which is the honest signal.
+    Renames carry the old path's floor onto the new path (#236 semantics):
+    renaming a service file is not a boundary-count reset button.
     """
     git = GitHelper(root)
     try:
         errors = _unresolvable_anchor_errors(git)
         if errors:
             return errors
-        floors: dict[str, tuple[int, int, int]] = {}
-        seen_paths: set[str] = set()
-        for revision in _ANCHORS:
-            committed = committed_boundary_entries(
-                git.committed_file_text(revision, BOUNDARY_BASELINE_RELATIVE_PATH)
-            )
-            seen_paths.update(committed)
-            for path, triple in committed.items():
-                if path not in floors or any(
-                    a < b for a, b in zip(triple, floors[path], strict=True)
-                ):
-                    floors[path] = triple
+        floors, historic_paths = boundary_floors_and_history(git)
 
         for path, triple in baseline_files.items():
-            if path not in seen_paths:
-                # First-time entry for a path the anchors never tracked. A
-                # brand-new service file legitimately starts here; an
-                # existing tracked service file gaining its first bypasses
-                # is the regression this guard exists for. Distinguish by
-                # whether the path exists in any anchor revision at all —
-                # checked against HEAD's tree only (cheap and sufficient:
-                # the file existing yesterday but entering the baseline
-                # today means debt was added, not a new file registered).
-                if _path_exists_in_revision(git, "HEAD", path):
+            if path not in historic_paths:
+                # First-time entry against the pre-change baseline. A
+                # brand-new service file legitimately starts here; a service
+                # file that already existed at HEAD^ gaining its first
+                # entry is the regression this guard exists for — decided
+                # against HEAD^'s tree, so committing the debt and its
+                # entry together does not dodge it.
+                if _path_exists_in_revision(git, "HEAD^", path):
                     errors.append(
                         f"{path}: baseline entry appeared for an already-tracked "
-                        "service file; new bypasses need the exemption channel "
-                        "(docs/architecture review), not a baseline edit"
+                        "service file; new bypasses must be reviewed as a "
+                        "docs/architecture change (BOUNDARY-DATA-001), not a "
+                        "silent baseline edit"
                     )
                 continue
             floor = floors[path]

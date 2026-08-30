@@ -338,16 +338,19 @@ def test_current_repo_passes_its_own_baseline():
 
 
 def _boundary_git_repo(tmp_path: Path, entries: dict[str, list[int]]) -> Path:
-    """Build a real git repo whose HEAD carries a boundary baseline.
+    """Build a real git repo whose HEAD^ carries a boundary baseline.
 
     An empty seed commit keeps HEAD^ resolvable (mirrors the budget
-    monotonicity fixtures); the baseline JSON commits on top so the working
-    tree edit plays the raise attempt.
+    monotonicity fixtures); the baseline JSON (and its service files) commit
+    into HEAD^ — the pre-change anchor — so the working-tree edit plays the
+    raise attempt against genuine history.
     """
     import subprocess
 
     root = tmp_path
     write_boundary_baseline(root, entries)
+    for path in entries:
+        write(root / path, 'A = "SELECT 1"\n')
     for argv in (
         ["git", "init", "-q"],
         ["git", "config", "user.email", "test@example.com"],
@@ -355,6 +358,9 @@ def _boundary_git_repo(tmp_path: Path, entries: dict[str, list[int]]) -> Path:
         ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
         ["git", "add", "-A"],
         ["git", "commit", "-q", "-m", "init baseline"],
+        # A trailing commit so the baseline lands in HEAD^ (the pre-change
+        # anchor), leaving HEAD as the working tree's comparison point.
+        ["git", "commit", "-q", "--allow-empty", "-m", "trailing"],
     ):
         subprocess.run(argv, cwd=root, check=True)
     return root
@@ -379,16 +385,25 @@ def test_monotonic_guard_rejects_new_entry_for_tracked_file(tmp_path: Path):
     import subprocess
 
     root = tmp_path
-    write(root / "server/app/services/veteran.py", 'A = "SELECT 1"\n')
     for argv in (
         ["git", "init", "-q"],
         ["git", "config", "user.email", "test@example.com"],
         ["git", "config", "user.name", "test"],
         ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
-        ["git", "add", "-A"],
-        ["git", "commit", "-q", "-m", "veteran service, no baseline"],
     ):
         subprocess.run(argv, cwd=root, check=True)
+    # The veteran service predates this change: it is committed into HEAD^
+    # (the pre-change anchor), so a baseline entry appearing now is new debt
+    # on a tracked file — including when the attacker commits the entry in
+    # the same change (codex review on #305).
+    write(root / "server/app/services/veteran.py", 'A = "SELECT 1"\n')
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "veteran service, no baseline"], cwd=root, check=True
+    )
+    write(root / "server/app/services/veteran2.py", 'B = "SELECT 2"\n')
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "HEAD layer"], cwd=root, check=True)
     write_boundary_baseline(root, {"server/app/services/veteran.py": [1, 0, 0]})
 
     errors = check_service_data_boundary(root)
@@ -429,3 +444,85 @@ def test_monotonic_guard_silent_without_git(tmp_path: Path):
     errors = check_service_data_boundary(tmp_path)
 
     assert not any("boundary monotonicity" in error for error in errors)
+
+
+def test_monotonic_guard_rejects_committed_new_entry(tmp_path: Path):
+    # codex review on #305: the attacker may COMMIT the new bypasses together
+    # with their baseline entry — HEAD then carries the entry, so historic
+    # evidence must come from HEAD^ only, never from HEAD itself.
+    import subprocess
+
+    root = tmp_path
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+        ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
+    ):
+        subprocess.run(argv, cwd=root, check=True)
+    write(root / "server/app/services/veteran.py", 'A = "SELECT 1"\n')
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "veteran without baseline"], cwd=root, check=True)
+    # The attack: new bypasses on the tracked file + the baseline entry,
+    # committed as one change.
+    write_boundary_baseline(root, {"server/app/services/veteran.py": [1, 0, 0]})
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add baseline entry"], cwd=root, check=True)
+
+    errors = check_service_data_boundary(root)
+
+    assert any(
+        "baseline entry appeared for an already-tracked service file" in error for error in errors
+    )
+
+
+def test_monotonic_guard_accepts_entry_for_file_created_this_change(tmp_path: Path):
+    # The legitimate flip side: a service file created by THIS change (absent
+    # from HEAD^) registering its first baseline entry in the same commit is
+    # a new file, not new debt.
+    import subprocess
+
+    root = tmp_path
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+        ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
+    ):
+        subprocess.run(argv, cwd=root, check=True)
+    write(root / "server/app/services/fresh.py", 'A = "SELECT 1"\n')
+    write_boundary_baseline(root, {"server/app/services/fresh.py": [1, 0, 0]})
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "new service with baseline"], cwd=root, check=True)
+
+    errors = check_service_data_boundary(root)
+
+    assert not any("appeared for an already-tracked service file" in error for error in errors)
+
+
+def test_monotonic_guard_rejects_rename_count_reset(tmp_path: Path):
+    # subagent review on #305: renaming a service file (and re-keying its
+    # baseline entry) must not reset the boundary counts — the old path's
+    # floor carries onto the new path (#236 semantics).
+    import subprocess
+
+    root = tmp_path
+    write(root / "server/app/services/old_name.py", 'A = "SELECT 1"\n')
+    write_boundary_baseline(root, {"server/app/services/old_name.py": [3, 1, 0]})
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+        ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
+        ["git", "add", "-A"],
+        ["git", "commit", "-q", "-m", "baseline under old name"],
+        ["git", "commit", "-q", "--allow-empty", "-m", "trailing"],
+    ):
+        subprocess.run(argv, cwd=root, check=True)
+    # The attack: rename + re-key with inflated counts.
+    (root / "server/app/services/old_name.py").rename(root / "server/app/services/new_name.py")
+    write_boundary_baseline(root, {"server/app/services/new_name.py": [9, 9, 9]})
+
+    errors = check_service_data_boundary(root)
+
+    assert any("rose above committed floor" in error for error in errors)
