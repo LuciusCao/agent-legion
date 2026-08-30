@@ -506,6 +506,35 @@ def test_upgrade_job_workflow_refreshes_stale_snapshot_on_current_revision(
     assert upgraded["status"] == "queued"
 
 
+def test_upgrade_job_workflow_compares_snapshot_content_not_hash_column(
+    tmp_path: Path,
+) -> None:
+    # The hash column and the snapshot have no consistency constraint: a row
+    # can carry the active hash with stale snapshot content. The skip check
+    # must compare the snapshot itself, or such rows stay broken forever.
+    queries, workspace, current, service = _config_setup(tmp_path)
+    job = queries.create_job(
+        workflow_key="wf",
+        source_type="question",
+        source_id="Q1",
+        run_id="batch1",
+        title="Question 1",
+        node_keys=["fetch"],
+        workspace_id=workspace["id"],
+        workflow_revision_id=current["id"],
+        workflow_version=current["version"],
+        workflow_definition_hash=current["definition_hash"],
+        workflow_definition_snapshot_json="{}",
+    )
+    queries.update_job_status(job["id"], "failed")
+
+    result = service.upgrade(workspace["id"], job["id"])
+
+    upgraded = queries.get_job(job["id"])
+    assert result["status"] == "succeeded"
+    assert upgraded["workflow_definition_snapshot_json"] == current["definition_json"]
+
+
 def test_upgrade_job_workflow_reresolves_frozen_node_config(tmp_path: Path) -> None:
     schema = {
         "type": "object",

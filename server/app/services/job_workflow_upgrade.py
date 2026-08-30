@@ -70,9 +70,11 @@ class JobWorkflowUpgradeService:
         # (older upgrade paths moved the pin without swapping the snapshot);
         # dispatch resolves node execution/config from that snapshot, so such
         # jobs must be re-pinned to heal instead of being skipped forever.
+        # The actual snapshot content is compared, not the independently
+        # stored hash column — the two have no consistency constraint.
         if str(job.get("workflow_revision_id") or "") == str(active["id"]) and str(
-            job.get("workflow_definition_hash") or ""
-        ) == str(active["definition_hash"]):
+            job.get("workflow_definition_snapshot_json") or ""
+        ) == str(active["definition_json"]):
             return self._result(job_id, "skipped", "already_current", "Job is already current")
 
         now = datetime.now(UTC)

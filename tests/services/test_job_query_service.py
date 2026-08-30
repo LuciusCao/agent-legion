@@ -121,6 +121,43 @@ def test_list_jobs_exposes_job_workflow_version_and_outdated_status(query_servic
     assert listed[0]["is_workflow_outdated"] is True
 
 
+def test_list_jobs_marks_same_revision_with_stale_hash_as_outdated(query_service, job_db):
+    # Older upgrade paths moved the revision pin without swapping the
+    # snapshot: same revision id, stale definition hash — the job is
+    # effectively outdated and the UI must offer the upgrade action.
+    workspace = job_db.create_workspace(
+        "stalehash", default_workflow_key="education_video_problems_generation"
+    )
+    definition = load_builtin_definition("education_video_problems_generation")
+    current = WorkflowRevisionService(job_db).publish_workspace_revision(
+        workspace["id"], definition
+    )
+    batch = job_db.create_run(
+        "education_video_problems_generation",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
+    )
+    job_db.create_job(
+        workflow_key="education_video_problems_generation",
+        source_type="question",
+        source_id="Q1",
+        run_id=batch["id"],
+        title="Question 1",
+        node_keys=list(definition.executable_nodes),
+        workspace_id=workspace["id"],
+        workflow_revision_id=current["id"],
+        workflow_version=current["version"],
+        workflow_definition_hash="stale-hash",
+        workflow_definition_snapshot_json="{}",
+    )
+
+    listed = query_service.list_jobs(workspace["id"])
+
+    assert listed[0]["current_workflow_revision_id"] == current["id"]
+    assert listed[0]["is_workflow_outdated"] is True
+
+
 def test_list_jobs_orders_node_summaries_by_workflow_dag(query_service, job_db):
     workspace = job_db.create_workspace(
         "default", default_workflow_key="education_video_problems_generation"
