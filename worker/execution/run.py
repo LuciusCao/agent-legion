@@ -133,7 +133,7 @@ def run_execution(
     status_fields = {
         "job_id": str(claim.get("job_id", "")),
         "node_key": node_key,
-        "workflow_key": str(claim.get("workflow_key", "")),
+        "workspace_id": str(claim.get("workspace_id", "")),
         "agent_id": str(claim.get("agent_id", "")),
         "run_dir": "" if exec_kind == "code" else str(run_dir),
     }

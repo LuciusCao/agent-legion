@@ -12,6 +12,11 @@ Version history:
   cancel acknowledgements. Workers below this never receive code claims.
 - 3 (MODEL_RUNTIME_PROTOCOL_VERSION): runtime-scoped model declarations; a v3
   worker must fail closed against an older Host that erases model runtimes.
+
+Field-level deprecations ride without a version bump while the wire shape is
+unchanged: the claim body's workflow_key is deprecated (#211 Phase 2 — equals
+workspace_id since schema v62); its removal is gated on the Phase 3/4 window
+and will carry a version bump.
 """
 
 CODE_PROTOCOL_VERSION = 2

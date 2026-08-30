@@ -128,7 +128,17 @@ class AgentClaimResponse(BaseModel):
     lease_id: str
     workspace_id: str
     job_id: str
-    workflow_key: str
+    # #211 Phase 2: the claim's workflow_key equals workspace_id (schema v62
+    # binding); Workers read workspace_id. The field stays in the response
+    # until the Phase 3/4 removal window so already-shipped Worker images
+    # keep parsing the body.
+    workflow_key: str = Field(
+        description=(
+            "Deprecated: equals workspace_id (schema v62); read workspace_id instead. "
+            "Removal is tracked in #211."
+        ),
+        deprecated=True,
+    )
     node_key: str
     agent_id: str
     # 'agent' (default) or 'code' (batch 2): code claims carry a
