@@ -123,4 +123,37 @@ nodes:
       screen.getByText(/历史版本查看模式下配置 Schema 不可编辑/)
     ).toBeInTheDocument()
   })
+
+  it('skips null properties from mid-edit YAML instead of crashing', () => {
+    renderSection({
+      definitionYaml: `key: demo
+nodes:
+  generate:
+    capability: generate_questions
+    config_schema:
+      type: object
+      properties:
+        bank_version:
+          type: string
+          default: v1
+        dry_run:
+`,
+    })
+
+    expect(
+      screen.getByText(/bank_version（string，默认 v1）/)
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('checkbox', { name: '运行开关 dry_run' })
+    ).not.toBeInTheDocument()
+  })
+
+  it('points agent-backed nodes to the Agent definition instead of editing', () => {
+    renderSection({ agentBacked: true })
+
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(
+      screen.getByText(/生效的配置 Schema 以 Agent 定义为准/)
+    ).toBeInTheDocument()
+  })
 })

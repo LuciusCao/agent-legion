@@ -9,6 +9,9 @@ type Props = {
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
+  // capability 已有 published Agent 时生效 schema 以 Agent 定义为准，
+  // 节点 YAML 的 config_schema 不参与解析（node_config.py），本区改为指引。
+  agentBacked?: boolean
 }
 
 function formatDefault(prop: ConfigSchemaProperty): string {
@@ -24,10 +27,16 @@ export function WorkflowNodeConfigSchemaSection({
   definitionYaml,
   setDefinitionYaml,
   readOnly,
+  agentBacked,
 }: Props) {
   const schema = parseWorkflowNode(definitionYaml, node.key)?.config_schema
   const properties = schema?.properties ?? {}
-  const keys = Object.keys(properties)
+  // YAML 编辑中间态（刚输入 `foo:` 尚未补内容）会把属性解析为 null，
+  // 渲染前过滤无效项，避免访问 prop.type 抛 TypeError 拖垮整个 Studio。
+  const keys = Object.keys(properties).filter(
+    (propKey) =>
+      properties[propKey] != null && typeof properties[propKey] === 'object'
+  )
 
   const handleRuntimeMutableChange = (propKey: string, checked: boolean) => {
     const current = parseWorkflowNode(definitionYaml, node.key)?.config_schema
@@ -52,53 +61,63 @@ export function WorkflowNodeConfigSchemaSection({
       aria-label={`配置 Schema ${node.key}`}
     >
       <div className={inspectorStyles.sectionTitle}>配置 Schema</div>
-      <p className={styles.fieldHint}>
-        运行开关（runtime_mutable）在 job intake 时不冻结，每次 dispatch 按
-        workspace 节点配置实时重取，适合 dry_run 这类开关。完整 schema 编辑
-        （新增属性、改描述/默认值）请用 YAML 源码编辑器。
-      </p>
-      {keys.length === 0 ? (
-        <div className={inspectorStyles.empty}>
-          该节点未声明 config_schema；可在 YAML 源码编辑器中为节点添加。
-        </div>
-      ) : (
-        <div className={styles.fieldStack}>
-          {keys.map((propKey) => {
-            const prop = properties[propKey]
-            return (
-              <div key={propKey} className={styles.fieldGroup}>
-                <span className={styles.fieldLabel}>
-                  {propKey}（{prop.type}，默认 {formatDefault(prop)}）
-                </span>
-                {readOnly ? (
-                  prop.runtime_mutable ? (
-                    <span className={styles.fieldHint}>运行开关</span>
-                  ) : null
-                ) : (
-                  <label>
-                    <input
-                      type="checkbox"
-                      aria-label={`运行开关 ${propKey}`}
-                      checked={prop.runtime_mutable === true}
-                      onChange={(event) =>
-                        handleRuntimeMutableChange(
-                          propKey,
-                          event.target.checked
-                        )
-                      }
-                    />{' '}
-                    运行开关
-                  </label>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-      {readOnly && (
+      {agentBacked ? (
         <p className={styles.fieldHint}>
-          历史版本查看模式下配置 Schema 不可编辑，请切回草稿视图修改。
+          该节点由 Agent 执行，生效的配置 Schema 以 Agent 定义为准，节点 YAML
+          中的 config_schema 不参与解析；请在 Agent 定义中维护
+          config_schema（含运行开关 runtime_mutable）。
         </p>
+      ) : (
+        <>
+          <p className={styles.fieldHint}>
+            运行开关（runtime_mutable）在 job intake 时不冻结，每次 dispatch 按
+            workspace 节点配置实时重取，适合 dry_run 这类开关。完整 schema 编辑
+            （新增属性、改描述/默认值）请用 YAML 源码编辑器。
+          </p>
+          {keys.length === 0 ? (
+            <div className={inspectorStyles.empty}>
+              该节点未声明 config_schema；可在 YAML 源码编辑器中为节点添加。
+            </div>
+          ) : (
+            <div className={styles.fieldStack}>
+              {keys.map((propKey) => {
+                const prop = properties[propKey]
+                return (
+                  <div key={propKey} className={styles.fieldGroup}>
+                    <span className={styles.fieldLabel}>
+                      {propKey}（{prop.type}，默认 {formatDefault(prop)}）
+                    </span>
+                    {readOnly ? (
+                      prop.runtime_mutable ? (
+                        <span className={styles.fieldHint}>运行开关</span>
+                      ) : null
+                    ) : (
+                      <label>
+                        <input
+                          type="checkbox"
+                          aria-label={`运行开关 ${propKey}`}
+                          checked={prop.runtime_mutable === true}
+                          onChange={(event) =>
+                            handleRuntimeMutableChange(
+                              propKey,
+                              event.target.checked
+                            )
+                          }
+                        />{' '}
+                        运行开关
+                      </label>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {readOnly && (
+            <p className={styles.fieldHint}>
+              历史版本查看模式下配置 Schema 不可编辑，请切回草稿视图修改。
+            </p>
+          )}
+        </>
       )}
     </section>
   )

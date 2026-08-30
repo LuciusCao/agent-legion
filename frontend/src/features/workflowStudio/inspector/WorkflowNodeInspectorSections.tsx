@@ -29,6 +29,11 @@ export function WorkflowNodeInspectorSections(props: InspectorSectionProps) {
   if (node.node_type === 'start') {
     return <WorkflowNodeStartSection {...props} />
   }
+  // capability 已有 published Agent 时，节点 YAML 的 config_schema 不参与
+  // 解析（生效 schema 以 Agent 定义为准），Schema 编辑区改为指引文案。
+  const agentBacked = props.agentCatalog.some(
+    (definition) => definition.capability === node.capability
+  )
   return (
     <>
       <WorkflowNodeEditorSection
@@ -40,6 +45,7 @@ export function WorkflowNodeInspectorSections(props: InspectorSectionProps) {
       <WorkflowNodeConfigSchemaSection
         key={`config-schema-${node.key}`}
         node={node}
+        agentBacked={agentBacked}
         {...props}
       />
       <WorkflowNodeExecutionSection
