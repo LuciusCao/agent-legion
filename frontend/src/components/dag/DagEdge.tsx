@@ -1,10 +1,5 @@
 import { memo } from 'react'
-import {
-  BaseEdge,
-  EdgeProps,
-  getBezierPath,
-  type Edge,
-} from '@xyflow/react'
+import { BaseEdge, EdgeProps, getBezierPath, type Edge } from '@xyflow/react'
 
 export interface DagEdgeData extends Record<string, unknown> {
   /**

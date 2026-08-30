@@ -23,7 +23,6 @@ import { estimateDagNodeHeight } from '../dagNodeHeight'
 import { applyHighlight } from '../dagHighlight'
 import styles from './DagGraph.module.css'
 
-
 export interface DagGraphNode {
   key: string
   label: string

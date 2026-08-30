@@ -1,6 +1,10 @@
 import { Edge, MarkerType, Node } from '@xyflow/react'
 import type { DagNodeData } from './dag/dagNodeTypes'
-import { buildRelationMaps, collectAncestors, collectDescendants } from './dagGraphRelations'
+import {
+  buildRelationMaps,
+  collectAncestors,
+  collectDescendants,
+} from './dagGraphRelations'
 
 /**
  * #276 的 hover/选中高亮计算（从 DagGraph.tsx 抽出，纯函数）：

@@ -165,16 +165,14 @@ describe('DagGraph', () => {
             string,
             { id: string; nodeElement: HTMLDivElement; force?: boolean }
           >()
-          document
-            .querySelectorAll<HTMLElement>('[data-id]')
-            .forEach((el) => {
-              const id = el.getAttribute('data-id')!
-              updates.set(id, {
-                id,
-                nodeElement: el as HTMLDivElement,
-                force: true,
-              })
+          document.querySelectorAll<HTMLElement>('[data-id]').forEach((el) => {
+            const id = el.getAttribute('data-id')!
+            updates.set(id, {
+              id,
+              nodeElement: el as HTMLDivElement,
+              force: true,
             })
+          })
           api.getState().updateNodeInternals(updates)
         }}
       />
@@ -251,7 +249,9 @@ describe('DagGraph', () => {
     expect(nodeD).not.toBeNull()
 
     fireEvent.mouseEnter(nodeD!)
-    const dCard = nodeD!.querySelector('[data-testid="dag-node"]') as HTMLElement
+    const dCard = nodeD!.querySelector(
+      '[data-testid="dag-node"]'
+    ) as HTMLElement
     // d 是 active 节点：自身不置灰，且渲染 active 轮廓类（旧版
     // selectedFlowNode 的等价视觉）。
     expect(dCard.style.opacity).toBe('')
