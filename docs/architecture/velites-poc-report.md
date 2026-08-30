@@ -100,8 +100,8 @@
 ## 7. 仓库测试与质量门
 
 - `tests/workflows/test_pi_protocol.py` + `tests/executors/test_pi_event_compression.py`：**14 passed**（含 PoC 补丁；补丁不改变默认 node flavor 行为）
-- `tests/executors` + `tests/test_pi_runner.py`：**159 passed**（705s，高负载机器）
-- 补丁压缩重写后复跑 `test_pi_protocol.py` + `test_pi_runner.py`：**26 passed**；两种 flavor 的 argv 均 REPL 复验正确
+- `tests/executors`：**159 passed**（705s，高负载机器）
+- 补丁压缩重写后复跑 `test_pi_protocol.py` + `test_pi_runner.py`：**26 passed**；两种 flavor 的 argv 均 REPL 复验正确（`test_pi_runner.py` 已随 #108 删除）
 - 所有 pi 相关测试均用 fake binary（`echo` / 手写 shell 脚本）mock，**没有任何测试真拉 pi 子进程**，因此无法用 flavor 开关直接驱动 rust 版跑测试
 - 质量门 `scripts/check-quick.sh`：backend static lane **通过**（ruff/mypy/architecture 全绿）。过程中修了两个 PoC 自身引入的问题：(a) 克隆的上游源码 `poc/src/` 被项目 ruff 误扫 → 把 `/poc/`、`/bin/` 加入 `.gitignore`（ruff 默认尊重 gitignore，PoC 产物本就不该 tracked）；(b) `pi_protocol.py` 超体积预算（146 > ceiling 134）→ 按架构纪律压缩补丁至 132 行，未抬 ceiling
 - frontend lane 未通过：`./node_modules/.bin/openapi-typescript` 不存在（新 worktree 未装前端依赖），与本次改动无关

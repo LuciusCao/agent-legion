@@ -157,3 +157,42 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 34
+- check: architecture.file_budget
+  path: velites/src/agent.rs
+  reason: >-
+    Issue #297 added the first inline unit tests to the agent loop module
+    (pure-function coverage: enabled_tool_names, outputs_remediation,
+    resolve_required_outputs incl. sandbox-escape rejection). Rust inline
+    #[cfg(test)] tests colocate with the implementation by convention
+    (the budget policy itself exempts velites/tests/ for this reason), and
+    the loop tests already live in velites/tests/agent_loop.rs; what
+    remains inline needs private-fn access. Ceiling 282 to 331 covers the
+    ~49 effective test lines; drop the exemption when the module shrinks
+    or the pure helpers become pub and testable from tests/.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/311
+  ceiling: 331
+- check: architecture.file_budget
+  path: velites/src/cli.rs
+  reason: >-
+    Issue #297 added inline unit tests for the clap argument surface
+    (flag parsing, defaults, trailing-command sandbox wrap, @file prompt
+    expansion). Rust inline #[cfg(test)] convention (see policy comment on
+    velites/tests/); the CLI structs are pub but the parse-behavior tests
+    assert on private helper edges. Ceiling 91 to 261 covers the test
+    module; drop when the module shrinks.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/311
+  ceiling: 261
+- check: architecture.file_budget
+  path: velites/src/session.rs
+  reason: >-
+    Issue #297 added inline unit tests for SessionLog (open creates the
+    dir, append is NDJSON with order preserved, metadata round-trips,
+    append-only never truncates). Rust inline #[cfg(test)] convention;
+    SessionLog is pub but the tests assert the append-only mirror
+    semantics next to the implementation. Ceiling 34 to 149 covers the
+    test module; drop when the module shrinks.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/311
+  ceiling: 149

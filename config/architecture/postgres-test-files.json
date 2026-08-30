@@ -57,6 +57,7 @@
     "tests/full/test_storage_path_corruption.py",
     "tests/full/test_velites_harness_e2e.py",
     "tests/full/test_workspace_sse.py",
+    "tests/remote/test_worker_registration.py",
     "tests/routes/jobs/test_failed_node_runs.py",
     "tests/routes/jobs/test_intake_modes.py",
     "tests/routes/jobs/test_job_approvals.py",
