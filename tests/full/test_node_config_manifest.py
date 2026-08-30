@@ -24,6 +24,7 @@ SCHEMA = {
 
 
 def _definition() -> WorkflowDefinition:
+    """The agent-node fixture: ``generate`` resolves against the Agent schema."""
     return WorkflowDefinition(
         key="wf",
         label="Wf",
@@ -34,6 +35,7 @@ def _definition() -> WorkflowDefinition:
                 label="Generate",
                 capability="generate",
                 config={"page_size": 20},
+                node_type="agent",
             )
         },
     )
