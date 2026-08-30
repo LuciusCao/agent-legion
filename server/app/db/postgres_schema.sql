@@ -8,7 +8,7 @@ create table if not exists workspaces (
   resource_config_json text not null default '{}',
   node_config_json text not null default '{}',
   default_entity text not null default 'question',
-  -- Retired at schema v63 (workspace_settings_retirement): still created here
+  -- Retired at schema v64 (workspace_settings_retirement): still created here
   -- so the v62 data migration can replay its insert on older databases; the
   -- post-chain cleanup in schema.py drops all four columns.
   intake_config_json text not null default '{}',
@@ -1126,7 +1126,7 @@ create table if not exists workspace_workflow_drafts (
   updated_at timestamptz not null default current_timestamp
 );
 
--- Approval decisions (schema v63): the insert-only audit of human verdicts
+-- Approval decisions (schema v65): the insert-only audit of human verdicts
 -- on ``type: approval`` gates (EXEC-APPROVAL-001). One row per decision,
 -- never updated or deleted; the newest row per (job_id, node_key) is the
 -- current decision and the full history reconstructs the review rounds

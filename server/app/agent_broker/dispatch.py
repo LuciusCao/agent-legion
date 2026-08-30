@@ -1,3 +1,15 @@
+"""Agent dispatch: freeze an immutable manifest + bundle, enqueue for claim.
+
+A ready Agent node becomes a claimable unit here (EXEC-RUNTIME-DISPATCH-001):
+resolve the effective ``execution`` block, stage inputs, render the command
+spec, pack a self-contained bundle next to the queue row. Invariants: the
+manifest is frozen at enqueue with whitelisted non-secret config only
+(CONFIG-MANIFEST-001; presigned URLs are claim-time in-memory, D12); normal
+jobs never pin the agent version (quality replay only); an active request
+per (job, node) short-circuits before staging; bundle/skill cleanup covers
+every failure path.
+"""
+
 from __future__ import annotations
 
 import uuid

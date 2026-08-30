@@ -1,3 +1,9 @@
+"""FastAPI app factory — the composition root for the Host process.
+
+``create_app`` wires settings → DB → seeds → services → routers → threads;
+``create_prod_app`` is the uvicorn factory. Ordering invariants: backend.md.
+"""
+
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path

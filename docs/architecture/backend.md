@@ -611,7 +611,44 @@ server/app/
 
 ### 后端
 
-- `server.app.main:create_app(data_dir, start_worker)` 是 FastAPI 应用工厂。
+- `server.app.main:create_app(data_dir, start_worker)` 是 FastAPI 应用工厂，也是
+  Host 进程唯一的组装根（composition root）：settings → DB 门面 → 一次性
+  migration/seed → services → routers → 线程组在此一次接线。内建的顺序不变式：
+  实例设置先于任何 service 读取从 DB hydrate；全部 workspace 启动即重置暂停；
+  回收线程（sweeper / artifact GC / materials TTL）只在 `sweeper_enabled` 下启动、
+  单副本持有（与 SingleReplicaProbe advisory lock 同规则，#277）；lifespan
+  teardown 先释放 replica 锁、收割 studio chat 会话、停线程，最后才关 DB 连接池。
+  `create_prod_app` 是 uvicorn 工厂，import 本模块保持无副作用。
+- `server.app.executors.leases.ExecutorLeaseRepository` 是 AGENTS.md §6 点名的
+  容量申请门面：service 一律经它 claim/finish/expire，不得直调
+  `executors.code` / `.runtime` / `.contracts`。仓库是数据层毗邻组件（#187 设计
+  豁免，可持 DSN）；写路径按域分置姊妹模块（`_lease_write_paths` 为主，
+  `_lease_approval` / `_lease_config_failure` 各管审批停泊与无 lease 失败记录，
+  均每次一连接一事务、冲突重试），事件广播只在事务提交后做（SSE 刷新失败不得
+  回滚已成功的 claim）；`park_awaiting_approval` 是 EXEC-APPROVAL-001 侧门
+  （审批门不占 lease 不写 node_run）。
+- `server.app.auth.dependencies` 是用户态身份路由（会话 / scoped token）的鉴权
+  注入点：两条凭证通道（Bearer 优先于 session cookie；scoped token 只走 Bearer，
+  非环境态故豁免 CSRF）+ `get_current_user` 之上的 scope 格子——`require_user`
+  （任意身份）、`require_admin`（角色 + 拒绝一切 scoped 身份：scoped token 继承
+  签发者角色，不拒则 admin 签发的 token 可达全部 admin 端点）、
+  `reject_studio_agent_scope`（生效面：scoped 身份一律不得生效，未知 scope 类型
+  也不放行）、`require_studio_agent_scope`/`_workspace`（工具面 + 绑定 workspace
+  校验）、`enforce_scoped_workspace_binding`（读面：绑定 token 只读自己的
+  workspace）。不经此模块的面：Worker token 鉴权（`routes/agent_workers.py` 的
+  `authorize_worker`）与 Studio MCP mount（ASGI 级 scoped-token 检查，Mount 绕过
+  路由层依赖，STUDIO-AGENT-001）。
+- `server.app.agent_broker.dispatch` 把就绪的 Agent 节点冻结为可 claim 单元：
+  解析有效 `execution` 块 → 暂存输入 → 渲染命令 spec → 打包自包含 bundle。不变式：
+  manifest 在 enqueue 冻结且只带白名单非敏感 config（CONFIG-MANIFEST-001）；
+  presigned URL 只在 claim 时注入内存（D12，队列积压不会搁浅过期 URL）；普通 job
+  从不 pin Agent 版本（只有 quality replay）；每 (job, node) 的活跃请求在暂存前
+  短路；`cleanup_bundle_on_error` + `finally` 覆盖全部失败路径。
+- `server.app.configuration.loader` 是 tracked split 配置文件的唯一读取方：
+  规范 SPLIT 布局（只认 `owned_keys.CONFIG_FILE_KEYS` 声明的文件名，G4）与
+  EXPLICIT 单文件布局在此解析；退役文件启动即 fail-fast（带迁移指引）；tracked
+  配置保持无 secret（明文 secret 启动被拒，secret 只进 vault/env）；
+  `owned_keys.py` 是「哪个文件拥有哪个顶层段」的权威。
 - 当 `start_worker=True` 时，生命周期内启动 `WorkflowWorkerThread`：
   - 在 DB 实例设置 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
   - 节点按 capability 分发：DB 中按 workspace 发布的 code 节点（EXEC-CODE-002/003，demo 节点在 workspace 初始化时注入）进入本地 code 池或 Worker code 池；agent 节点（pi / velites runtime）经 broker 派发给 Worker。
@@ -647,6 +684,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
   - `workspace_secrets` — vault 加密存储的 workspace 密钥（Fernet 密文，`(workspace_id, name)` 唯一，v16 新增）
   - `external_connections` / `instance_secrets` / `connection_tokens` — 实例级外部服务连接：连接只存非敏感配置，敏感字段 Fernet 加密入 `instance_secrets`（`conn:<key>:<field>` 引用），鉴权 token 加密缓存在 `connection_tokens`（v34 新增，见下文外部服务连接段）
   - `runs`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表（`job_batches` 已随 schema v53 drop，由 `runs` 取代）
+  - `approval_decisions` — `type: approval` 人工审批门的 insert-only 审计表（schema v65，EXEC-APPROVAL-001；每 (job_id, node_key) 的最新行即当前决策，历史行重建评审轮次）
   - `materials` — 材料（单文件条目）元数据；`material_bundles` / `material_bundle_members` — bundle 文件夹条目的冻结引用式清单（schema v55）
   - `job_artifacts` — Job 产物清单（权威副本在实例对象存储，schema v54）
   - `workflow_revisions` — workflow 版本修订历史
