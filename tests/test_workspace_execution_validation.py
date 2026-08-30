@@ -32,6 +32,7 @@ def _workflow() -> WorkflowDefinition:
                 key="review_keywords",
                 label="Review Keywords",
                 capability="review_keywords",
+                node_type="agent",
             ),
         },
     )
@@ -91,9 +92,27 @@ def test_agent_routed_node_cannot_have_a_limit() -> None:
         validate_workspace_node_limits(
             workflow=_workflow(),
             node_limits=[_limit("review_keywords", 1)],
-            agent_capabilities={"review_keywords"},
             code_capacity=16,
         )
+
+
+def test_code_node_may_have_a_limit_despite_matching_agent_capability() -> None:
+    """Explicit types (#284): a type=code node may share its capability with a
+    published Agent (the Agent stays idle) and still carry a node limit."""
+    from dataclasses import replace
+
+    workflow = _workflow()
+    node = workflow.nodes["review_keywords"]
+    object.__setattr__(
+        workflow,
+        "nodes",
+        {**workflow.nodes, "review_keywords": replace(node, node_type="code")},
+    )
+    validate_workspace_node_limits(
+        workflow=workflow,
+        node_limits=[_limit("review_keywords", 1)],
+        code_capacity=16,
+    )
 
 
 def test_definitionless_workflow_only_checks_generic_rules() -> None:
@@ -102,7 +121,6 @@ def test_definitionless_workflow_only_checks_generic_rules() -> None:
     validate_workspace_node_limits(
         workflow=None,
         node_limits=[_limit("anything", 1)],
-        agent_capabilities={"anything"},
         code_capacity=16,
     )
     with pytest.raises(InvalidOperationError, match="Duplicate Node limit"):

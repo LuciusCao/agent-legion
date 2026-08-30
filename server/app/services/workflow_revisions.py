@@ -2,11 +2,11 @@
 
 Why this module is small (#287): the stateless publish pipeline (pins
 freeze/embed, version allocation, route derivation) moved to
-workflow_revision_pipeline.py and the startup reconcile of Agent routes to
-workflow_revision_reconcile.py — publish and reconcile share the route
-derivation but have opposite failure contracts (fail-fast vs best-effort
-at boot). What remains here is the facade: construction, demo seeding, and
-delegation, so callers keep one entry point.
+workflow_revision_pipeline.py, with the route derivation shared from
+workflow_revision_routes.py. What remains here is the facade:
+construction, demo seeding, and delegation, so callers keep one entry
+point. The startup route reconcile retired with explicit node types
+(#284): routes change only at revision publication.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from server.app.agent_catalog.builtin import (
     seed_demo_workspace_agent_definitions,
 )
 from server.app.services.workflow_revision_pipeline import publish_workflow_revision
-from server.app.services.workflow_revision_reconcile import reconcile_active_agent_routes
 from server.app.services.workflow_revision_runtime import save_revision_runtime_or_publish
 from server.app.workflows.definition import WorkflowDefinition
 
@@ -59,7 +58,3 @@ class WorkflowRevisionService:
             # inside the workspace are never overwritten.
             seed_demo_workspace_agent_definitions(self.job_db, workspace_id)
         return self.publish_workspace_revision(workspace_id, definition)
-
-    def reconcile_active_agent_routes(self) -> None:
-        """Startup reconcile; see workflow_revision_reconcile (#287)."""
-        reconcile_active_agent_routes(self.job_db)

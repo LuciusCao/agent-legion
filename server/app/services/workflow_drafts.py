@@ -39,14 +39,16 @@ def validate_workflow_for_publish(
     job_db: JobQueries,
     custom_nodes_enabled: bool,
 ) -> list[str]:
-    """Publish validation: Agent routing uniqueness + code resolvability.
+    """Publish validation, driven by each node's explicit ``type``.
 
-    P-0.5: non-Agent-routed nodes all run on the implicit code pool, so the
-    publish gate is "resolvable published workspace node code", not executor
-    binding/allocation checks. Start nodes carry no capability and never
-    execute (EXEC-WORKFLOW-START-001), so they skip both checks; approval
-    gates likewise never dispatch — the worker parks them for a human
-    decision (EXEC-APPROVAL-001) — so they need neither Agents nor code.
+    ``type: agent`` nodes must resolve to exactly one published Agent for
+    their capability. ``type: code`` nodes (the implicit code pool, P-0.5)
+    must have resolvable published workspace node code (EXEC-CODE-002) — a
+    published Agent sharing the capability is simply unused, not an error.
+    Start nodes carry no capability and never execute
+    (EXEC-WORKFLOW-START-001), and approval gates never dispatch — the
+    worker parks them for a human decision (EXEC-APPROVAL-001) — so both
+    skip the checks.
     """
     errors: list[str] = []
     capability_counts: dict[str, int] = {}
@@ -57,9 +59,8 @@ def validate_workflow_for_publish(
     for node in definition.executable_nodes.values():
         if node.node_type == "approval":
             continue
-        count = capability_counts.get(node.capability, 0)
-        if count > 0:
-            if count != 1:
+        if node.node_type == "agent":
+            if capability_counts.get(node.capability, 0) != 1:
                 errors.append(
                     f"Agent capability {node.capability} must resolve to exactly one published Agent"
                 )

@@ -154,11 +154,22 @@
   `scripts/seed_demo.py` 提供 demo workspace）；v62 迁移把存量 workspace 的 id 改成
   已绑定的 key（key 为空的按 id 回填）。`default_workflow_key` 作为独立概念已标
   deprecated（退役评估 #211）。
-- Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
-  唯一例外是 `type: start` 的入口节点：恰好一个、豁免 capability、承载入口契约
+- Workflow Node 声明 `capability` 与显式执行类型 `type: code | agent`（#284 第二期，
+  schema v66）：`type` 驱动发布校验与路由物化——`agent` 节点的 capability 发布时必须
+  恰好解析到一个 published Agent，revision 发布只为 `agent` 节点物化
+  `workspace_node_routes` 行；`code` 节点必须有 published node_code（隐含 code 池，
+  capability 恰好也有 published Agent 时允许、Agent 闲置不报错）。Agent 发布/归档不再
+  隐式改路由（启动 reconcile 已随显式 type 退役），路由只随 revision 发布物化。遗留
+  `type: node` 与缺失一律由 loader 归一化为 `code`，v66 迁移按路由投影把存量 active
+  revision 与 Studio 草稿回写为显式值（与归一化一致，不产生幽灵 revision）。节点不
+  声明 `runner` / `agent` / `skill` / command template。
+  两个例外类型：`type: start` 的入口节点与 `type: approval` 的人工决策门
+  （EXEC-APPROVAL-001）都豁免 capability 且不 dispatch——start 恰好一个、承载入口契约
   `accepted_item_types`、永不执行（调度视为恒 completed、不进 job_nodes、不 dispatch）、
   不可删（无 start 的存量定义由 loader 自动注入合成 start），`RunService.create_run`
-  按它校验条目类型（EXEC-WORKFLOW-START-001）。条目类型三种：`material`（单文件）、
+  按它校验条目类型（EXEC-WORKFLOW-START-001）；approval 进 job_nodes，ready 时由 worker
+  停在 `awaiting_approval` 等待人工决策（approved 放行 / rework 重置上游 / rejected 失败），
+  `config` 只允许 `rework_target` 与 `feedback_artifact`。条目类型三种：`material`（单文件）、
   `ref`（外部引用）、`bundle`（文件夹整体一个条目，manifest 引用式：成员走常规材料
   上传后一次创建冻结 `material_bundles`，删除双向守卫，物化为确定性地址的硬链接
   目录树，MATERIAL-BUNDLE-001）；DEFAULT 契约保持 `("material","ref")`，存量
@@ -282,8 +293,9 @@ review_keywords:
   runner: pi
   skill: education-video-problems-generation/review-questions
 
-# Correct: Workflow declares business capability only.
+# Correct: Workflow declares execution type and business capability only.
 review_keywords:
+  type: agent
   capability: review_keywords
 ```
 

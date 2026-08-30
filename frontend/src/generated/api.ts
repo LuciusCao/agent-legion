@@ -5747,10 +5747,10 @@ export interface components {
       node_key: string
       /**
        * Node Type
-       * @default node
+       * @default code
        * @enum {string}
        */
-      node_type: 'start' | 'node' | 'approval'
+      node_type: 'start' | 'approval' | 'code' | 'agent'
       /**
        * Risk
        * @enum {string}

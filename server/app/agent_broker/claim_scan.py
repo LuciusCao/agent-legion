@@ -52,7 +52,6 @@ class WorkerView:
     """Server-side Worker declarations relevant to candidate matching."""
 
     runtimes: set[str]
-    capabilities: set[str]
     models: set[tuple[str, str, str]]
     labels: dict[str, Any]
     allowed_workspaces: set[str]

@@ -16,10 +16,15 @@ class WorkflowNodeResponse(BaseModel):
     key: str
     label: str
     capability: str
+    # Explicit node kind: ``start`` (entry contract, never executes),
+    # ``approval`` (human decision gate, EXEC-APPROVAL-001), ``code``
+    # (implicit code pool) or ``agent`` (Agent-routed). The legacy ``node``
+    # spelling only appears in pre-v66 stored payloads; API payloads
+    # always carry the normalized value.
     # default_factory (not a plain default) keeps the field out of the OpenAPI
     # ``default`` keyword so generated TS treats it as optional — same idiom
     # as ``execution`` below; response payloads always carry both fields.
-    node_type: str = Field(default_factory=lambda: "node")
+    node_type: str = Field(default_factory=lambda: "code")
     accepted_item_types: list[str] = Field(default_factory=lambda: ["material", "ref"])
     after: list[str]
     inputs: list[str]

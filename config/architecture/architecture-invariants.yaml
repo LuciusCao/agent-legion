@@ -1140,6 +1140,21 @@ invariants:
         target: tests/routes/test_runs_api.py::test_item_type_rejected_by_start_contract
         gate: quick
 
+  - id: EXEC-WORKFLOW-NODE-TYPE-001
+    statement: "Non-start workflow nodes declare an explicit execution type (type: code|agent, #284 phase 2, schema v66): the loader normalizes the legacy 'node' spelling and an omitted type to 'code', and the v66 migration backfills stored active revisions and Studio drafts from the workspace_node_routes projection with the same rule so no ghost structural revision appears. Publish validation branches on the type — type=agent requires the capability to resolve to exactly one published Agent, type=code requires resolvable published workspace node code (an idle published Agent on the same capability is allowed). Revision publication materializes workspace_node_routes rows only for type=agent nodes; Agent publish/archive never rewrites routes (the startup reconcile is retired) — routes change only at revision publication."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/workflows/test_workflow_start_node.py
+        gate: quick
+      - kind: integration
+        target: tests/test_workflow_revisions.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_workflow_node_explicit_types_migration.py
+        gate: quick
+
   - id: BOUNDARY-DATA-001
     statement: Service-layer database access is ratcheted toward the JobQueries facade — raw SQL literals, server.app.db.transaction/connection imports, and DSN escape-hatch reads under server/app/services (Name.path / Name.dsn_identity attribute access and their getattr(x, "path"/"dsn_identity", ...) call twins, #187 getattr-escape closure) are frozen by config/architecture/service-data-boundary-baseline.json (only-down ratchet per counter; new service files with any bypass are rejected).
     owner: architecture

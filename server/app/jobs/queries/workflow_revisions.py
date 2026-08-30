@@ -5,9 +5,8 @@ Why this module stays lean (#287): the ``workspace_node_routes`` /
 ``workflow_revision_projection.py``, and the revision snapshot *reads* to
 ``workflow_revision_reads.py`` — publication is the only writer, so the
 write path here is the transaction around archive-then-insert plus the
-projection rewrite (startup reconcile reuses the same projection helper).
-``WorkflowRevisionQueriesMixin`` inherits the read mixin so the composed
-JobQueries surface is unchanged.
+projection rewrite. ``WorkflowRevisionQueriesMixin`` inherits the read
+mixin so the composed JobQueries surface is unchanged.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ from typing import Any
 
 from server.app.jobs.queries.workflow_revision_projection import (
     create_workflow_revision_with_projection,
-    write_agent_route_projection,
 )
 from server.app.jobs.queries.workflow_revision_reads import (
     WorkflowRevisionReadQueriesMixin,
@@ -24,21 +22,6 @@ from server.app.jobs.queries.workflow_revision_reads import (
 
 
 class WorkflowRevisionQueriesMixin(WorkflowRevisionReadQueriesMixin):
-    def materialize_agent_routes(
-        self,
-        *,
-        workspace_id: str,
-        workflow_key: str,
-        agent_routes: dict[str, str],
-    ) -> None:
-        with self.connect() as conn:
-            write_agent_route_projection(
-                conn,
-                workspace_id=workspace_id,
-                workflow_key=workflow_key,
-                agent_routes=agent_routes,
-            )
-
     def create_workflow_revision(
         self,
         *,

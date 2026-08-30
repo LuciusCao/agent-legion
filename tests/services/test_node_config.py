@@ -46,6 +46,7 @@ def _agent(capability: str = "generate", schema: dict | None = None) -> AgentDef
 
 
 def _definition(node_config: dict | None = None) -> WorkflowDefinition:
+    """The agent-node fixture: capability ``generate`` is Agent-routed."""
     return WorkflowDefinition(
         key="wf",
         label="Wf",
@@ -56,6 +57,27 @@ def _definition(node_config: dict | None = None) -> WorkflowDefinition:
                 label="Generate",
                 capability="generate",
                 config=node_config or {},
+                node_type="agent",
+            )
+        },
+    )
+
+
+def _code_definition_sharing_agent_capability(
+    node_config: dict | None = None,
+) -> WorkflowDefinition:
+    """type=code node whose capability also has a published Agent (#284)."""
+    return WorkflowDefinition(
+        key="wf",
+        label="Wf",
+        intake=WorkflowIntake(),
+        nodes={
+            "generate": WorkflowNode(
+                key="generate",
+                label="Generate",
+                capability="generate",
+                config=node_config or {},
+                node_type="code",
             )
         },
     )
@@ -278,6 +300,23 @@ def test_resolve_workflow_node_configs_agent_nodes_skip_reserved_keys() -> None:
     # Agent-routed nodes keep their Agent Definition schema untouched.
     resolved = resolve_workflow_node_configs(_definition(), {"a": _agent("generate", SCHEMA)}, None)
     assert resolved == {"generate": {"page_size": 50}}
+
+
+def test_code_node_ignores_agent_schema_with_matching_capability() -> None:
+    """Codex P1 on PR #288: a type=code node sharing its capability with a
+    published Agent must NOT resolve against the Agent's schema — it keeps
+    the reserved-merged code schema, so intake neither drops the reserved
+    execution keys nor rejects the node's config."""
+    definition = _code_definition_sharing_agent_capability({"timeout_seconds": 30})
+    agents = {"a": _agent("generate", SCHEMA)}
+
+    schemas = workflow_node_config_schemas(definition, agents)
+    properties = schemas["generate"]["properties"]
+    assert "page_size" not in properties  # the Agent schema is not applied
+    assert properties["timeout_seconds"]["default"] == 600
+
+    resolved = resolve_workflow_node_configs(definition, agents, None)
+    assert resolved == {"generate": {"timeout_seconds": 30, "sandbox_network": False}}
 
 
 def test_resolve_workflow_node_configs_reserved_keys_overridable() -> None:

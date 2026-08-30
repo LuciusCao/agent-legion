@@ -10,6 +10,7 @@ re-exports ``validate_config`` / ``public_config`` so existing callers
 
 from __future__ import annotations
 
+import logging
 import re
 import urllib.parse
 from typing import Any
@@ -17,6 +18,8 @@ from typing import Any
 from worker import worker_declarations
 from worker.runtime.catalog import SUPPORTED_RUNTIMES, resolve_config_runtimes
 from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY, validate_claim_controls
+
+logger = logging.getLogger(__name__)
 
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _EDITABLE_FIELDS = {
@@ -107,7 +110,18 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     ):
         raise ValueError(f"上传并发数必须是 1 到 {MAX_DYNAMIC_CONCURRENCY} 的整数")
     normalized_labels = worker_declarations.normalize_labels(config.get("labels", {}))
-    capabilities = worker_declarations.normalize_capabilities(config.get("capabilities", []))
+    # capabilities 已退役（issue #284）：claim 准入不再按 capability 匹配，该键
+    # 只是 deprecated no-op——任意内容（含 "*"）都接受、不再上报 Host，非空时
+    # 打 deprecated warning；只保留形状校验防明显笔误。
+    raw_capabilities = config.get("capabilities", [])
+    if not isinstance(raw_capabilities, list):
+        raise ValueError("capabilities 必须是列表（该键已退役，建议整条删除）")
+    capabilities = sorted({str(value).strip() for value in raw_capabilities if str(value).strip()})
+    if capabilities:
+        logger.warning(
+            "config key 'capabilities' is deprecated and ignored (issue #284): "
+            "claim admission no longer matches capabilities; remove the key"
+        )
     # models allowlist 的 runtime 取值校验对齐支持全集而非生效集合：生效集合
     # 随机器安装状态浮动，持久化校验不该跟着漂（发现阶段仍按生效集合取交集）。
     models = worker_declarations.normalize_models(config.get("models", []), SUPPORTED_RUNTIMES)

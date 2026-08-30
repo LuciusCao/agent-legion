@@ -152,7 +152,7 @@ describe('MonitoringPanel', () => {
         queue_alert: {
           kind: 'blocked',
           at: new Date().toISOString(),
-          reasons: { capability_or_model_mismatch: 8 },
+          reasons: { model_mismatch: 8 },
         },
       }),
     })
@@ -162,7 +162,7 @@ describe('MonitoringPanel', () => {
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('队列堵塞')
     expect(alert).toHaveTextContent('33,412 条请求排队中')
-    expect(alert).toHaveTextContent('model/capability 不匹配 ×8')
+    expect(alert).toHaveTextContent('model 不匹配 ×8')
     // 队首最老超过 1 小时标红（18h）
     expect(screen.getByText('18.0h')).toBeInTheDocument()
     expect(screen.getByTestId('queue-sweeper-summary')).toHaveTextContent('136')

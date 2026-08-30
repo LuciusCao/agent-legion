@@ -89,7 +89,9 @@ class Client(TransferOperations):
             "worker_id": config["worker_id"],
             "name": config.get("name", config["worker_id"]),
             "runtimes": config["runtimes"],
-            "capabilities": config.get("capabilities", []),
+            # capabilities 已退役（issue #284）：契约仍接受该字段（旧版 Host 兼容），
+            # 固定上报空列表；Host 侧不再按 capability 匹配。
+            "capabilities": [],
             "models": config.get("models", []),
             "max_concurrency": config["max_concurrency"],
             # Code-execution capacity pool (batch 2); 0/absent = agent-only.

@@ -476,7 +476,8 @@ def test_compare_workflow_without_baseline_returns_full_draft_preview(client, jo
             "type": "added",
             "node_key": "publish_content",
             "label": "publish_content",
-            "node_type": "node",
+            # 草稿未声明 type：loader 归一化为 code（#284 显式节点类型）。
+            "node_type": "code",
             "fields": [],
             "risk": "info",
         },

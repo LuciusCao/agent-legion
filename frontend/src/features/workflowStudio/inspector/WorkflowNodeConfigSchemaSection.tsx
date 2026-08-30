@@ -1,5 +1,4 @@
 import type { WorkflowNodeRecord } from '../../../types'
-import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import { parseWorkflowNode } from '../shared/workflowStudioYamlDraft'
 import { patchWorkflowNodeConfigSchema } from '../shared/workflowStudioYamlDraft.configSchema'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
@@ -8,7 +7,6 @@ import { WorkflowNodeConfigSchemaProperties } from './WorkflowNodeConfigSchemaPr
 
 type Props = {
   node: WorkflowNodeRecord
-  agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
@@ -19,16 +17,14 @@ type Props = {
 // （新增属性、改描述/默认值）仍走 YAML 源码编辑器。
 export function WorkflowNodeConfigSchemaSection({
   node,
-  agentCatalog,
   definitionYaml,
   setDefinitionYaml,
   readOnly,
 }: Props) {
-  // capability 已有 published Agent 时生效 schema 以 Agent 定义为准，
-  // 节点 YAML 的 config_schema 不参与解析（node_config.py），只给指引。
-  const agentBacked = agentCatalog.some(
-    (definition) => definition.capability === node.capability
-  )
+  // #284：节点类型由显式 node_type 判定——type=agent 时生效 schema 以
+  // Agent 定义为准，节点 YAML 的 config_schema 不参与解析
+  // （node_config.py），只给指引。
+  const agentBacked = node.node_type === 'agent'
   const schema = parseWorkflowNode(definitionYaml, node.key)?.config_schema
   const properties = schema?.properties ?? {}
   // YAML 编辑中间态（刚输入 `foo:` 尚未补内容）会把属性解析为 null，

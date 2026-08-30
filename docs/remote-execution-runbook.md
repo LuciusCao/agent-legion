@@ -203,10 +203,10 @@ to Workers: the Host ships the node code text plus a sha256 `code_hash` and a
 same `velites sandbox wrap` OS sandbox used for custom nodes. To opt a Worker
 in:
 
-- declare the accepted code capabilities in the same `capabilities` list as
-  Agent capabilities (no separate field; the Host matches by capability), and
 - set `max_code_concurrency > 0` (0 = never receives code claims, the
-  default). The field is hot (#123): `PUT /api/config` changes that touch
+  default). Code claim admission is just protocol version >= v2, code-pool
+  headroom and the workspace token scope — no capability declaration is
+  needed (issue #284 retired capability matching). The field is hot (#123): `PUT /api/config` changes that touch
   only hot fields (`claim_enabled`, `max_concurrency`,
   `max_code_concurrency`, `upload_max_concurrency`) do not restart the Worker
   (`worker/service.py:34-39,133`). Hot-opening code capacity from 0 to >0

@@ -186,7 +186,7 @@ def test_empty_claim_with_blocked_queue_logs_skip_reasons(job_db, caplog) -> Non
 
     warnings = [record.getMessage() for record in caplog.records]
     assert any("blocked queue" in message for message in warnings)
-    assert any("capability_or_model_mismatch" in message for message in warnings)
+    assert any("model_mismatch" in message for message in warnings)
 
 
 def test_empty_claim_with_dry_queue_triggers_restock_without_warning(job_db, caplog) -> None:

@@ -142,7 +142,7 @@
           <section class="page-view" data-view="config" hidden>
             <section class="page-panel">
               <div class="page-heading">
-                <div><p class="eyebrow">CONFIGURATION</p><h2>连接与能力</h2><p>配置本机执行节点，并控制它向 Host 声明的能力范围。</p></div>
+                <div><p class="eyebrow">CONFIGURATION</p><h2>连接与声明</h2><p>配置本机执行节点，并控制它向 Host 登记的模型与标签。</p></div>
                 <button id="save-config" class="save-button" type="submit" form="config-form">
                   <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#save"></use></svg>保存并应用
                 </button>
@@ -192,9 +192,8 @@
                   <p id="token-error" class="error" role="alert" hidden></p>
                 </div>
                 <div class="form-section">
-                  <div class="form-section-heading"><div><h3>能力与模型</h3><p>每行一项，保存后由 Worker 重新向 Host 登记。</p></div></div>
+                  <div class="form-section-heading"><div><h3>模型与标签</h3><p>每行一项，保存后由 Worker 重新向 Host 登记。claim 准入只看 runtime、模型 allowlist、标签与 workspace 授权，不再按 capability 匹配（issue #284）。</p></div></div>
                   <div class="form-grid">
-                    <label class="wide">Worker 能力 <span class="hint">与节点 capability 完全匹配</span><textarea name="capabilities" rows="5" placeholder="generate_key_info&#10;review_key_info"></textarea></label>
                     <label>模型 allowlist <span class="hint">[runtime:]provider/model；留空允许 runtime 已发现的全部模型</span><textarea name="models" rows="5" placeholder="velites:openai/gpt-5"></textarea></label>
                     <label>标签 <span class="hint">key=value</span><textarea name="labels" rows="5" placeholder="os=linux&#10;arch=arm64"></textarea></label>
                   </div>

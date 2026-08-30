@@ -5,9 +5,8 @@ definition, freeze the node_code_pins snapshot (EXEC-CODE-002), embed it
 beside the definition, allocate the next version, derive Agent routes, and
 hand the atomic revision + projection write to the JobQueries facade. None
 of it touches service state, so it lives as a free function next to the
-route derivation it shares with the startup reconcile
-(workflow_revision_reconcile.py); ``WorkflowRevisionService`` stays the
-constructor-holding facade.
+shared route derivation (workflow_revision_routes.py);
+``WorkflowRevisionService`` stays the constructor-holding facade.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
-from server.app.services.workflow_revision_reconcile import derive_agent_routes
+from server.app.services.workflow_revision_routes import derive_agent_routes
 from server.app.services.workflow_revision_runtime import embed_node_code_pins
 from server.app.workflows.definition import WorkflowDefinition
 

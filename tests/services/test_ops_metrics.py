@@ -632,14 +632,14 @@ def test_queue_alert_blocked_from_fresh_signal() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into agent_queue_signals(id, kind, reasons_json, updated_at)"
-            " values (1, 'blocked', '{\"capability_or_model_mismatch\": 8}', current_timestamp)"
+            " values (1, 'blocked', '{\"model_mismatch\": 8}', current_timestamp)"
         )
 
     alert = _service().query_summary()["queue_alert"]
 
     assert alert is not None
     assert alert["kind"] == "blocked"
-    assert alert["reasons"] == {"capability_or_model_mismatch": 8}
+    assert alert["reasons"] == {"model_mismatch": 8}
     assert alert["at"] is not None
 
 
@@ -687,7 +687,7 @@ def test_blocked_signal_written_by_empty_claim_diagnostics() -> None:
     _seed_workspace_job()
     _insert_execution("ex-head", "queued")
     with read_connection(TEST_DATABASE_URL) as conn:
-        log_blocked_queue(TEST_DATABASE_URL, conn, {"capability_or_model_mismatch": 3})
+        log_blocked_queue(TEST_DATABASE_URL, conn, {"model_mismatch": 3})
 
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
@@ -695,7 +695,7 @@ def test_blocked_signal_written_by_empty_claim_diagnostics() -> None:
         ).fetchone()
     assert row is not None
     assert row["kind"] == "blocked"
-    assert _json.loads(row["reasons_json"]) == {"capability_or_model_mismatch": 3}
+    assert _json.loads(row["reasons_json"]) == {"model_mismatch": 3}
 
 
 def test_sample_writes_per_workspace_rows() -> None:
@@ -787,7 +787,7 @@ def test_queue_alert_blocked_requires_workspace_queue() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into agent_queue_signals(id, kind, reasons_json, updated_at)"
-            " values (1, 'blocked', '{\"capability_or_model_mismatch\": 4}', current_timestamp)"
+            " values (1, 'blocked', '{\"model_mismatch\": 4}', current_timestamp)"
         )
 
     assert _service().query_summary(workspace_id="ops-ws")["queue_alert"]["kind"] == "blocked"

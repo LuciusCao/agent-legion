@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TestQueryProvider } from '../../../testing/testQueryClient'
 import { useSettingStore } from '../../../stores/settingStore'
@@ -23,7 +23,12 @@ vi.mock('../../../api', () => ({
 }))
 
 vi.mock('../../../components/SkillSelector', () => ({
-  SkillSelector: () => <div data-testid="skill-selector-stub" />,
+  SkillSelector: ({ onChange }: { onChange: (value: string) => void }) => (
+    <button
+      data-testid="skill-selector-stub"
+      onClick={() => onChange('demo/skill')}
+    />
+  ),
 }))
 
 function renderEditor(
@@ -37,9 +42,11 @@ function renderEditor(
 }
 
 describe('WorkflowNodeAgentEditor', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
     useSettingStore.setState({ workspaceId: 'ws1' })
+    const { useUiStore } = await import('../../../stores/uiStore')
+    useUiStore.setState({ toast: null })
     mocks.fetchAgentDefinition.mockResolvedValue({
       latest: null,
       published: {
@@ -73,6 +80,83 @@ describe('WorkflowNodeAgentEditor', () => {
 
     expect(await screen.findByDisplayValue('generate_key_info'))
     expect(mocks.fetchAgentDefinition).not.toHaveBeenCalled()
+  })
+
+  it('offers 切换为 Agent 执行 for a code node and stays open in publish mode after create', async () => {
+    const onSwitchToAgent = vi.fn().mockReturnValue(true)
+    mocks.createAgentDefinition.mockResolvedValue({ agent_id: 'agent-new' })
+    mocks.fetchAgentDefinition.mockResolvedValue({
+      latest: {
+        status: 'draft',
+        definition: {
+          capability: 'generate_key_info',
+          runtime: 'pi',
+          skill: 'demo/skill',
+          tools: ['read'],
+        },
+      },
+      published: null,
+    })
+    renderEditor({
+      agentId: null,
+      capability: 'generate_key_info',
+      nodeType: 'code',
+      onSwitchToAgent,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '切换为 Agent 执行' }))
+    fireEvent.change(await screen.findByLabelText('Agent ID'), {
+      target: { value: 'agent-new' },
+    })
+    fireEvent.click(screen.getByTestId('skill-selector-stub'))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
+    })
+
+    const { useUiStore } = await import('../../../stores/uiStore')
+    await vi.waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe(
+        '已切换为 Agent 执行，发布 Agent 与 workflow 后生效'
+      )
+    )
+    expect(mocks.createAgentDefinition).toHaveBeenCalled()
+    expect(onSwitchToAgent).toHaveBeenCalledTimes(1)
+    // 面板不关：切到编辑/发布模式加载新草稿（/api/agent-catalog 只回
+    // published，直接关面板会让用户无法从该入口发布它）。
+    await vi.waitFor(() =>
+      expect(mocks.fetchAgentDefinition).toHaveBeenCalledWith(
+        'ws1',
+        'agent-new'
+      )
+    )
+    expect(await screen.findByRole('button', { name: '发布' })).toBeEnabled()
+  })
+
+  it('degrades to a manual-edit hint when the draft type switch fails', async () => {
+    const onSwitchToAgent = vi.fn().mockReturnValue(false)
+    mocks.createAgentDefinition.mockResolvedValue({ agent_id: 'agent-new' })
+    renderEditor({
+      agentId: null,
+      capability: 'generate_key_info',
+      nodeType: 'code',
+      onSwitchToAgent,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '切换为 Agent 执行' }))
+    fireEvent.change(await screen.findByLabelText('Agent ID'), {
+      target: { value: 'agent-new' },
+    })
+    fireEvent.click(screen.getByTestId('skill-selector-stub'))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
+    })
+
+    const { useUiStore } = await import('../../../stores/uiStore')
+    await vi.waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe(
+        'Agent 草稿已创建；请手动在 YAML 将节点 type 改为 agent 并发布'
+      )
+    )
   })
 
   it('renders nothing in read-only mode or without a workspace', () => {

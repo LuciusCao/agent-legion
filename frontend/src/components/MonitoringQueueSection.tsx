@@ -16,7 +16,7 @@ const QUEUE_SERIES: ChartSeries[] = [
 
 // 与后端 claim_scan 的 skip 原因计数键一一对应。
 const REASON_LABELS: Record<string, string> = {
-  capability_or_model_mismatch: 'model/capability 不匹配',
+  model_mismatch: 'model 不匹配',
   runtime_mismatch: 'runtime 不匹配',
   labels_mismatch: 'labels 不匹配',
   workspace_not_allowed: 'workspace 不在 worker 范围',

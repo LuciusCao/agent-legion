@@ -14,6 +14,8 @@ export type InspectorSectionProps = {
   agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
+  /** type=code 节点「切换为 Agent 执行」（改写草稿 YAML type；Body 注入）。 */
+  onSwitchToAgent?: () => boolean
   readOnly?: boolean
 }
 
@@ -41,17 +43,10 @@ export function WorkflowNodeInspectorSections(props: InspectorSectionProps) {
         node={node}
         {...props}
       />
-      <WorkflowNodeExecutionSection
-        node={node}
-        agentCatalog={props.agentCatalog}
-        definitionYaml={props.definitionYaml}
-        setDefinitionYaml={props.setDefinitionYaml}
-        readOnly={props.readOnly}
-      />
+      <WorkflowNodeExecutionSection node={node} {...props} />
       <WorkflowNodeCodeSection
         key={`code-${node.key}`}
         node={node}
-        agentCatalog={props.agentCatalog}
         readOnly={props.readOnly}
       />
       <WorkflowNodeConfigSection

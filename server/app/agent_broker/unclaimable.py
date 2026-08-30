@@ -1,9 +1,9 @@
 """Sweep for queued Agent requests no registered Worker can ever claim.
 
 Split out of ``sweepers.py`` for the file-size budget; mirrors
-``fail_stale_definition_requests`` but judges claimability (definition runtime,
-resolved model and capability against Worker declarations) instead of
-definition staleness.
+``fail_stale_definition_requests`` but judges claimability (definition runtime
+and resolved model against Worker declarations) instead of definition
+staleness.
 """
 
 from __future__ import annotations
@@ -42,23 +42,21 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
     failed: list[str] = []
     with write_transaction(broker.database_dsn) as conn:
         worker_rows = conn.execute(
-            "select capabilities_json, models_json, runtimes_json"
-            " from agent_workers where revoked_at is null"
+            "select models_json, runtimes_json from agent_workers where revoked_at is null"
         ).fetchall()
         if not worker_rows:
             return failed
         workers: list[WorkerDeclarations] = []
         for worker_row in worker_rows:
-            capabilities, models = agent_claim_compatibility.worker_declarations(worker_row)
+            models = agent_claim_compatibility.worker_model_declarations(worker_row)
             runtimes = set(json.loads(worker_row["runtimes_json"] or "[]"))
-            workers.append((runtimes, capabilities, models))
+            workers.append((runtimes, models))
         # Requests whose pinned definition is disabled/changed are excluded
         # by the enabled-definition join: ``fail_stale_definition_requests``
         # owns them. The revision join mirrors the claim candidate query.
         rows = conn.execute(
             """
             select r.execution_id, r.job_id, r.node_key, r.manifest_json,
-                   d.definition_json::jsonb->>'capability' as capability,
                    d.definition_json::jsonb->>'runtime' as runtime,
                    wr.definition_json as revision_definition_json
             from agent_execution_requests r

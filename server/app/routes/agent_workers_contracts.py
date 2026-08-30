@@ -13,6 +13,9 @@ class RegisterAgentWorkerRequest(BaseModel):
     # 空集合合法（issue #254）：code-only Worker 不声明任何 agent runtime，
     # 只经 max_code_concurrency 承接 code 任务。
     runtimes: list[str] = Field(default_factory=list)
+    # Deprecated (issue #284): accepted for older Workers that still report
+    # it, but ignored — claim admission never matches capabilities. Stored
+    # verbatim on the registration row; no migration of existing values.
     capabilities: list[str] = Field(default_factory=list)
     models: list[dict[str, str]] = Field(default_factory=list)
     max_concurrency: int = Field(gt=0, le=1024)
@@ -94,6 +97,8 @@ class AgentWorkerSummary(BaseModel):
     worker_id: str
     name: str
     runtimes: list[str]
+    # Legacy declared capabilities (issue #284): informational only, never
+    # used for claim matching.
     capabilities: list[str]
     models: list[dict[str, str]]
     max_concurrency: int

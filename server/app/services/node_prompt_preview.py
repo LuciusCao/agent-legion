@@ -70,7 +70,13 @@ def _locate_executable_node(definition: WorkflowDefinition, node_key: str) -> Wo
 
 
 def _skill_key_for_node(job_db: JobQueries, workspace_id: str, node: WorkflowNode) -> str | None:
-    """Skill of the workspace's published Agent bound to the node's capability."""
+    """Skill of the workspace's published Agent bound to the node's capability.
+
+    Only ``type: agent`` nodes dispatch through an Agent (#284): a code node
+    may share the capability without ever using the Agent's skill.
+    """
+    if node.node_type != "agent":
+        return None
     for definition in published_agent_definitions(job_db, workspace_id).values():
         if definition.capability == node.capability:
             return definition.skill

@@ -80,8 +80,12 @@ class WorkflowNode:
     config_schema: dict[str, Any] = field(default_factory=dict)
     shard: WorkflowShardSpec | None = None
     reduce: WorkflowReduceSpec | None = None
-    # ``start`` nodes carry the entry contract and never execute (EXEC-WORKFLOW-START-001).
-    node_type: str = "node"
+    # ``start`` nodes carry the entry contract and never execute (EXEC-WORKFLOW-START-001);
+    # ``approval`` gates park for a human decision (EXEC-APPROVAL-001); every
+    # other node explicitly runs as ``code`` (implicit code pool) or ``agent``
+    # (Agent-routed). The loader normalizes the legacy ``node`` spelling and
+    # a missing ``type`` to ``code``.
+    node_type: str = "code"
     accepted_item_types: tuple[str, ...] = DEFAULT_ACCEPTED_ITEM_TYPES
 
 

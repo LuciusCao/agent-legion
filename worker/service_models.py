@@ -14,6 +14,7 @@ class WorkerConfigPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     claim_enabled: bool | None = None
+    # 已退役（issue #284）：接受但忽略，仅兼容旧客户端/脚本。
     capabilities: list[str] | None = None
     host_url: str | None = None
     worker_id: str | None = None
