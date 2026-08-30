@@ -39,7 +39,9 @@ class RunCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     # #211 Phase 2: absent defaults to the path workspace_id (equal since v62).
-    workflow_key: str | None = Field(default=None, deprecated=True, description=_DEPRECATED_DEFAULT)
+    workflow_key: str | None = Field(
+        default=None, min_length=1, deprecated=True, description=_DEPRECATED_DEFAULT
+    )
     items: list[RunItem] = Field(min_length=1)
 
 

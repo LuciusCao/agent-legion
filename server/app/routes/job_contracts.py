@@ -16,7 +16,7 @@ class JobBatchRequest(BaseModel):
 
     # #211 Phase 2: optional — server fills the path workspace_id (equal since v62).
     workflow_key: str | None = Field(
-        default=None, description=_DEPRECATED_REQUEST_DEFAULT, deprecated=True
+        default=None, min_length=1, description=_DEPRECATED_REQUEST_DEFAULT, deprecated=True
     )
     entity: str | None = None
     source_kind: str
