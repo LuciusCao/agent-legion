@@ -1,7 +1,9 @@
 from typing import Any
 
+from server.app.db.rowmap import wire_batch_id
 from server.app.executors.models import CODE_EXECUTOR_ID
 from server.app.jobs import JobQueries
+from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_errors import NotFoundError
 from server.app.services.job_node_ordering import ordered_job_nodes
 from server.app.services.job_node_worker_projection import agent_route_map, claimed_worker_map
@@ -32,13 +34,16 @@ class JobQueryService:
         job_db: JobQueries,
         settings: Settings,
         workspace_execution_config: WorkspaceExecutionConfigurationService,
-        object_store: Any = None,
+        object_store: JobArtifactObjectStore | None = None,
     ):
         self.job_db = job_db
         self.settings = settings
         self.workspace_execution_config = workspace_execution_config
         # D12: artifact listing is the local job_dir ∪ the object-storage
-        # manifest (evicted cache entries stay listed).
+        # manifest (evicted cache entries stay listed). #279 step 1: the
+        # param is typed as the artifact object store the call surface
+        # actually reads (``enabled`` / ``names_for_job``), not Any — the
+        # composition root (main.py) passes exactly this class.
         self.object_store = object_store
 
     def _job_or_404(self, job_id: str) -> dict[str, Any]:
@@ -107,7 +112,7 @@ class JobQueryService:
             **job,
             # Wire compatibility: the API field keeps the legacy name while
             # the column is jobs.run_id (schema v53); the value is the run id.
-            "batch_id": str(job.get("run_id") or ""),
+            "batch_id": wire_batch_id(job),
             "workflow_revision_id": job.get("workflow_revision_id", ""),
             "workflow_version": job_workflow_version,
             "workflow_definition_hash": job.get("workflow_definition_hash", ""),

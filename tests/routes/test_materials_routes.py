@@ -3,38 +3,15 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 
 import pytest
 
-from server.app.storage import ObjectHead
+from tests.fakes.storage import FakeObjectStorage
 
 CSRF = {"x-agent-legion-request": "1"}
 
-
-class FakeStorage:
-    """In-memory ObjectStorage test double; never touches the network."""
-
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {}
-        self.deleted: list[str] = []
-
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/upload/{storage_key}"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        if payload is None:
-            return None
-        return ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        return io.BytesIO(self.objects[storage_key])
-
-    def delete_object(self, storage_key: str) -> None:
-        self.deleted.append(storage_key)
-        self.objects.pop(storage_key, None)
+FakeStorage = FakeObjectStorage
 
 
 def _create_workspace(client) -> str:

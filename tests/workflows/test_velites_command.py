@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from server.app.agent_broker.dispatch import resolve_execution_block
+from server.app.agent_broker.execution_resolution import resolve_execution_block
 from server.app.agent_runtime.catalog import get_adapter
 from server.app.workflows.pi_protocol import (
     PROMPT_INSTRUCTION,

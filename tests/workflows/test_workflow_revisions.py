@@ -1,5 +1,4 @@
 import json
-import logging
 from pathlib import Path
 
 import pytest
@@ -132,19 +131,21 @@ def test_runtime_only_save_updates_active_revision_without_new_version(
 
 
 def _agent_nodes_definition(*, review_as_local: bool) -> WorkflowDefinition:
-    # Agent routing is capability-driven: review_as_local gives the node a
-    # capability no enabled Agent implements, so it keeps the handler path.
-    review_capability = "local_review" if review_as_local else "review_script"
+    # Explicit node types (#284): write_script always runs as an Agent node;
+    # review_as_local flips the review node to a code node with a capability
+    # no published Agent implements.
     return workflow_definition_from_mapping(
         {
             "key": "agent_nodes_flow",
             "label": "Agent Nodes Flow",
             "nodes": {
                 "write_script": {
+                    "type": "agent",
                     "capability": "write_script",
                 },
                 "review_script": {
-                    "capability": review_capability,
+                    "type": "code" if review_as_local else "agent",
+                    "capability": "local_review" if review_as_local else "review_script",
                     "after": ["write_script"],
                 },
             },
@@ -210,9 +211,10 @@ def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -
     assert demo_rows["capacities"] == {}
 
 
-def test_reconcile_warns_and_skips_on_ambiguous_capability(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_archived_agent_does_not_rewrite_routes_until_next_publish(tmp_path: Path) -> None:
+    """Explicit types (#284): Agent publish/archive never rewrites routes —
+    they only change when a new revision is published (the startup reconcile
+    was retired with the explicit-type cutover)."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace(
         "ws1", default_workflow_key="education_video_problems_generation"
@@ -222,96 +224,57 @@ def test_reconcile_warns_and_skips_on_ambiguous_capability(
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
     )
-    # Simulate catalog/DB desync: a second published definition for the same
-    # capability. The DB partial unique index makes this unrepresentable via
-    # real rows, so stub the catalog read (the reconcile guard is defense in
-    # depth for catalogs produced before the index existed).
+
+    # Archive every published Agent: the materialized rows stay untouched.
+    replace_agent_catalog(workspace["id"], {})
+    rows = _route_and_capacity_rows(queries, workspace["id"], "agent_nodes_flow")
+    assert rows["routes"]["write_script"] == ("agent", "example-write-script-v1")
+
+    # The next publish re-derives routes from the (now empty) catalog and
+    # prunes the stale agent rows.
+    service.publish_workspace_revision(
+        workspace["id"], _agent_nodes_definition(review_as_local=False)
+    )
+    rows = _route_and_capacity_rows(queries, workspace["id"], "agent_nodes_flow")
+    assert rows["routes"] == {}
+
+
+def test_publish_rejects_ambiguous_agent_capability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An agent-typed node whose capability has >1 published Agent fails
+    publish validation. The DB partial unique index makes this
+    unrepresentable via real rows, so stub the catalog read (the guard is
+    defense in depth for catalogs produced before the index existed)."""
     from server.app.agent_catalog import AgentDefinition
 
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
     ambiguous = {
-        "example-write-script-v1": AgentDefinition(
-            capability="write_script",
-            runtime="velites",
-            skill="example/write-script",
+        "write-script-v1": AgentDefinition(
+            capability="write_script", runtime="velites", skill="example/write-script"
         ),
-        "example-write-script-v2": AgentDefinition(
-            capability="write_script",
-            runtime="velites",
-            skill="example/write-script-v2",
+        "write-script-v2": AgentDefinition(
+            capability="write_script", runtime="velites", skill="example/write-script-v2"
         ),
     }
     monkeypatch.setattr(
-        "server.app.services.workflow_revisions.published_agent_definitions",
+        "server.app.services.workflow_drafts.published_agent_definitions",
         lambda _dsn, _workspace_id: ambiguous,
     )
 
-    with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
-        service.reconcile_active_agent_routes()
-
-    warnings = [
-        record
-        for record in caplog.records
-        if "Agent route migration skipped" in record.getMessage()
-    ]
-    # The bootstrap workspace carries an active revision for the same workflow,
-    # so it warns too; what matters is that boot survives and our workspace warns.
-    assert warnings
-    assert any(workspace["id"] in record.getMessage() for record in warnings)
-    # The ambiguous revision was skipped: its previously materialized rows are untouched.
-    rows = _route_and_capacity_rows(queries, workspace["id"], "agent_nodes_flow")
-    assert rows["routes"]["write_script"] == ("agent", "example-write-script-v1")
-
-
-def test_reconcile_skips_and_keeps_routes_when_catalog_fully_disabled(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
+    errors = validate_workflow_for_publish(
+        definition=_agent_nodes_definition(review_as_local=True),
+        workspace_id=workspace["id"],
+        job_db=queries,
+        custom_nodes_enabled=True,
     )
-    seed_workspace_agent_definitions(workspace["id"])
-    service = WorkflowRevisionService(queries)
-    service.publish_workspace_revision(
-        workspace["id"], _agent_nodes_definition(review_as_local=False)
+
+    assert any(
+        "write_script must resolve to exactly one published Agent" in error for error in errors
     )
-    # Simulate the empty-catalog regression: every published definition of the
-    # workspace archived (catalogs are workspace-scoped, schema v46).
-    replace_agent_catalog(workspace["id"], {})
-
-    with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
-        service.reconcile_active_agent_routes()
-
-    assert any("no published Agent Definitions" in record.getMessage() for record in caplog.records)
-    rows = _route_and_capacity_rows(queries, workspace["id"], "agent_nodes_flow")
-    assert rows["routes"]["write_script"] == ("agent", "example-write-script-v1")
-
-
-def test_reconcile_covers_active_revisions_beyond_default_workflow(tmp_path: Path) -> None:
-    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
-    seed_workspace_agent_definitions(workspace["id"])
-    service = WorkflowRevisionService(queries)
-    service.publish_workspace_revision(
-        workspace["id"], _agent_nodes_definition(review_as_local=False)
-    )
-    # Simulate a pre-cutover active revision: no materialized routes/capacities.
-    with queries.connect() as conn:
-        conn.execute(
-            "delete from workspace_node_routes where workspace_id=%s and workflow_key=%s",
-            (workspace["id"], "agent_nodes_flow"),
-        )
-        conn.execute(
-            "delete from workspace_node_capacities where workspace_id=%s and workflow_key=%s",
-            (workspace["id"], "agent_nodes_flow"),
-        )
-
-    service.reconcile_active_agent_routes()
-
-    flow_rows = _route_and_capacity_rows(queries, workspace["id"], "agent_nodes_flow")
-    assert flow_rows["routes"]["write_script"] == ("agent", "example-write-script-v1")
-    assert flow_rows["capacities"] == {}
 
 
 def test_create_job_stores_workflow_revision_snapshot(tmp_path: Path) -> None:
@@ -378,7 +341,7 @@ edges: []
 
 
 def test_publish_validation_reports_missing_node_code(tmp_path: Path) -> None:
-    """P-0.5: a non-Agent-routed node without resolvable code fails publish."""
+    """P-0.5: a code node without resolvable code fails publish."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace(
         "ws1", default_workflow_key="education_video_problems_generation"
@@ -392,9 +355,11 @@ def test_publish_validation_reports_missing_node_code(tmp_path: Path) -> None:
         custom_nodes_enabled=True,
     )
 
-    # Bare JobQueries seed no Agent definitions: the demo agent nodes are
-    # unrunnable as code either (no published code), so validation reports.
+    # Bare JobQueries seeds no Agent definitions and no node code: the demo's
+    # agent-typed nodes miss their published Agent and its code nodes miss
+    # their published code, so both error kinds are reported.
     assert any("no published node code" in error for error in errors)
+    assert any("must resolve to exactly one published Agent" in error for error in errors)
 
 
 def test_failed_publish_validation_preserves_active_revision(tmp_path: Path) -> None:
@@ -416,6 +381,51 @@ def test_failed_publish_validation_preserves_active_revision(tmp_path: Path) -> 
     assert errors
     assert (
         queries.get_active_workflow_revision(workspace["id"], definition.key)["id"] == active["id"]
+    )
+
+
+def test_mid_publish_projection_failure_rolls_back_revision_insert(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """publish 中途失败（投影写入抛错）必须连同 revision insert 一起回滚。
+
+    #287 拆分把投影 helper 抽到 workflow_revision_projection.py，事务边界
+    契约（投影与 revision insert 同事务、绝不自行提交）此前只被「publish 前
+    validation 失败」的用例间接背书——那条路径根本不进事务。本用例在
+    create_workflow_revision 事务内部（archive/insert 之后、投影写入时）
+    注入失败，断言新 revision 行与 active 指针都不落库。
+    """
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
+    definition = load_builtin_definition("education_video_problems_generation")
+    service = WorkflowRevisionService(queries)
+    first = service.publish_workspace_revision(workspace["id"], definition)
+
+    from server.app.jobs.queries import workflow_revisions as revision_writes
+
+    def _boom(conn: object, **_kwargs: object) -> dict:
+        raise RuntimeError("projection exploded mid-transaction")
+
+    # 事务体是 projection 模块的 create_workflow_revision_with_projection
+    # （queries 侧 from-import 该名字）——patch 消费模块的绑定才拦得住
+    # publish 事务的 insert 之后、投影写入之前的窗口。
+    monkeypatch.setattr(revision_writes, "create_workflow_revision_with_projection", _boom)
+
+    with pytest.raises(RuntimeError, match="projection exploded"):
+        service.publish_workspace_revision(workspace["id"], definition)
+
+    # 新 revision 行未落库：仍只有第一次发布的 1 行。
+    with queries.connect() as conn:
+        rows = conn.execute(
+            "select count(*) as n from workflow_revisions where workspace_id = %s",
+            (workspace["id"],),
+        ).fetchone()
+    assert rows["n"] == 1
+    # active 指针未移动。
+    assert (
+        queries.get_active_workflow_revision(workspace["id"], definition.key)["id"] == first["id"]
     )
 
 

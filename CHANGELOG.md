@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 ## [Unreleased]
 
 ### Added
+- Workflow nodes declare an explicit execution type `type: code | agent`
+  (issue #284 phase 2, schema v66): the publish gate branches on it
+  (agent nodes require exactly one published Agent for the capability,
+  code nodes require published node code), revision publication
+  materializes Agent routes only for `type: agent` nodes, and the startup
+  route reconcile is retired — routes now change only at revision
+  publication. Legacy `type: node` and an omitted type normalize to
+  `code`; the v66 migration backfills stored active revisions and Studio
+  drafts from the route projection.
 - 架构盘点：workflow_key 退役 Phase 1 分类清单（`docs/architecture/workflow-key-retirement-inventory.md`，issue #211）——四类穷尽引用 + Phase 2-4 执行依据。
 - Host 侧 agent runtime catalog（`server/app/agent_runtime`，issue #75）：
   runtime 全集单一事实来源（`AGENT_RUNTIMES`）+ 每 runtime 一个 adapter

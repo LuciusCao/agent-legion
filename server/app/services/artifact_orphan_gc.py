@@ -98,6 +98,17 @@ class ArtifactOrphanGcThread:
             try:
                 reclaimed = gc_orphans(self._store)
             except Exception:
+                # #204 broad-except audit: this is the GC thread's life
+                # support (same loop discipline as SweeperThread._loop). The
+                # thread is the only orphan reaper — dying on one bad cycle
+                # (keyset scan's psycopg surface, delete_unreferenced's
+                # transactional re-check) would stop reclamation for the
+                # whole process lifetime and the orphan set would grow
+                # forever. A failed cycle is idempotent to retry: the scan
+                # re-derives zero-reference rows and the grace window is
+                # re-checked inside the DELETE, so nothing is double-freed
+                # and the next interval simply tries again.
+                # logger.exception keeps the traceback.
                 logger.exception("artifact orphan GC failed")
             else:
                 if reclaimed:

@@ -17,6 +17,19 @@ from server.app.services.skill_editing import SkillEditValidationError
 from server.app.settings import Settings
 
 
+def reject_mismatched_workflow_key(workspace_id: str, workflow_key: str | None) -> None:
+    """#211 Phase 3 read-binding guard (mirrors #299's URL-alias guard): a
+    request body's deprecated workflow_key equals the workspace id (v62
+    binding). With predicates binding workspace_id alone, a mismatched key
+    cannot narrow any lookup and must not flow into rows — reject with 400.
+    """
+    if workflow_key not in (None, workspace_id):
+        raise HTTPException(
+            status_code=400,
+            detail="workflow_key must equal the workspace id (schema v62)",
+        )
+
+
 def require_workflows_enabled(settings: Settings) -> None:
     if not settings.executor_runtime.workflows.enabled:
         raise HTTPException(status_code=404, detail="Workflows are disabled")

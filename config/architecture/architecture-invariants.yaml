@@ -26,7 +26,7 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_storage_paths.py
+        target: tests/services/test_storage_paths.py
         gate: quick
       - kind: integration
         target: tests/full/test_storage_path_corruption.py
@@ -50,7 +50,7 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_workspace_job_control_flow.py
+        target: tests/services/test_workspace_job_control_flow.py
         gate: quick
       - kind: contract
         target: scripts/check_architecture.py
@@ -62,7 +62,7 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_workspace_configuration_service.py::test_code_pool_stats_report_capacity_and_leases
+        target: tests/services/test_workspace_configuration_service.py::test_code_pool_stats_report_capacity_and_leases
         gate: quick
       - kind: integration
         target: tests/routes/jobs/test_workspace_stats.py::test_workspace_stats_code_pool_reflects_leases
@@ -83,7 +83,7 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_workflow_worker_concurrency.py::test_global_capacity_enforced_by_lease_transaction
+        target: tests/workflows/test_workflow_worker_concurrency.py::test_global_capacity_enforced_by_lease_transaction
         gate: quick
       - kind: integration
         target: tests/executors/leases/test_capacity_limits.py::test_workspace_a_can_starve_workspace_b_at_global_capacity
@@ -98,7 +98,7 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_workflow_worker_concurrency.py::test_round_robin_allows_small_workspace_to_claim
+        target: tests/workflows/test_workflow_worker_concurrency.py::test_round_robin_allows_small_workspace_to_claim
         gate: quick
       - kind: integration
         target: tests/full/test_executor_worker_fairness.py::test_shared_capacity_and_round_robin_fairness
@@ -155,13 +155,13 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_settings.py
+        target: tests/configuration/test_settings.py
         gate: quick
       - kind: integration
-        target: tests/test_startup_validation.py
+        target: tests/configuration/test_startup_validation.py
         gate: quick
       - kind: integration
-        target: tests/test_configuration_loader.py
+        target: tests/configuration/test_configuration_loader.py
         gate: quick
       - kind: integration
         target: tests/full/test_split_config_startup.py
@@ -193,12 +193,20 @@ invariants:
       cannot override. Budget exemptions freeze an explicit ceiling and must
       include a tracked removal condition; affected modules must be split rather
       than indefinitely exempted. Exemptions whose removal reference is older
-      than 30 days are reported by the full gate.
+      than 30 days are reported by the full gate. Issue-anchored exemptions
+      (issues/open/github.com/...) expire when the anchor issue is closed:
+      the quick gate compares the anchor against the tracked issue-state
+      manifest (config/architecture/issue-states.json, refreshed offline via
+      make architecture-issue-states or the weekly exemption-expiry job), and
+      a closed anchor fails check_invariants with "exemption expired" (#270).
     owner: architecture
     risk: high
     evidence:
       - kind: contract
         target: scripts/check_architecture.py
+        gate: quick
+      - kind: contract
+        target: scripts/check_invariants.py
         gate: quick
       - kind: contract
         target: tests/scripts/test_check_architecture.py
@@ -211,6 +219,9 @@ invariants:
         gate: quick
       - kind: contract
         target: tests/scripts/test_architecture_exemption_age.py
+        gate: quick
+      - kind: contract
+        target: tests/scripts/test_architecture_issue_state.py
         gate: quick
 
   - id: BOUNDARY-VIDEO-001
@@ -412,10 +423,10 @@ invariants:
         target: tests/executors/test_code_executor.py::test_config_rejects_retired_path_key
         gate: quick
       - kind: integration
-        target: tests/test_workflow_revisions.py::test_publish_revision_records_node_code_pins
+        target: tests/workflows/test_workflow_revisions.py::test_publish_revision_records_node_code_pins
         gate: quick
       - kind: integration
-        target: tests/test_workflow_revisions.py::test_runtime_only_update_preserves_node_code_pins
+        target: tests/workflows/test_workflow_revisions.py::test_runtime_only_update_preserves_node_code_pins
         gate: quick
 
   # Rust-side wrap policy (seatbelt/bwrap argv) is covered by
@@ -648,13 +659,13 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_config_schema.py
+        target: tests/configuration/test_config_schema.py
         gate: quick
       - kind: integration
         target: tests/services/test_node_config.py
         gate: quick
       - kind: integration
-        target: tests/test_workflow_definition.py
+        target: tests/workflows/test_workflow_definition.py
         gate: quick
       - kind: integration
         target: tests/full/test_node_config_manifest.py
@@ -666,7 +677,7 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_config_schema.py
+        target: tests/configuration/test_config_schema.py
         gate: quick
       - kind: integration
         target: tests/services/test_node_config.py
@@ -735,13 +746,13 @@ invariants:
     risk: high
     evidence:
       - kind: contract
-        target: tests/test_config_yaml_hygiene.py
+        target: tests/configuration/test_config_yaml_hygiene.py
         gate: quick
       - kind: integration
-        target: tests/test_settings.py
+        target: tests/configuration/test_settings.py
         gate: quick
       - kind: integration
-        target: tests/test_configuration_loader.py
+        target: tests/configuration/test_configuration_loader.py
         gate: quick
 
   - id: EXEC-EVENT-SCHEMA-001
@@ -786,10 +797,10 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_skill_manager.py::test_get_skill_dir_works_with_read_only_skills_base
+        target: tests/skills/test_skill_manager.py::test_get_skill_dir_works_with_read_only_skills_base
         gate: quick
       - kind: integration
-        target: tests/test_skill_manager.py::test_cache_lock_files_live_under_runs_dir
+        target: tests/skills/test_skill_manager.py::test_cache_lock_files_live_under_runs_dir
         gate: quick
 
   - id: EXEC-SKILL-RUNS-SCRATCH-001
@@ -819,13 +830,13 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_skill_manager.py::test_cleanliness_probes_memoized_within_ttl
+        target: tests/skills/test_skill_manager.py::test_cleanliness_probes_memoized_within_ttl
         gate: quick
       - kind: integration
-        target: tests/test_skill_manager.py::test_cleanliness_probes_rerun_after_ttl_and_repair_dirty_cache
+        target: tests/skills/test_skill_manager.py::test_cleanliness_probes_rerun_after_ttl_and_repair_dirty_cache
         gate: quick
       - kind: integration
-        target: tests/test_skill_manager.py::test_cleanliness_probes_every_call_when_ttl_zero
+        target: tests/skills/test_skill_manager.py::test_cleanliness_probes_every_call_when_ttl_zero
         gate: quick
 
   - id: EXEC-HARNESS-SANDBOX-001
@@ -920,7 +931,7 @@ invariants:
         target: tests/services/test_job_storage_layout.py
         gate: quick
       - kind: integration
-        target: tests/test_run_dir_cleanup.py
+        target: tests/services/test_run_dir_cleanup.py
         gate: quick
 
   - id: EXEC-CLAIM-RUNTIME-001
@@ -1021,7 +1032,7 @@ invariants:
         target: tests/routes/jobs/test_workspace_crud.py
         gate: quick
       - kind: contract
-        target: tests/test_workspace_settings_api.py
+        target: tests/services/test_workspace_settings_api.py
         gate: quick
 
   - id: MATERIAL-ACCESS-001
@@ -1135,13 +1146,28 @@ invariants:
         target: tests/workflows/test_workflow_start_node.py
         gate: quick
       - kind: integration
-        target: tests/test_workflow_scheduler.py::test_legacy_snapshot_without_start_keeps_readiness_behavior
+        target: tests/workflows/test_workflow_scheduler.py::test_legacy_snapshot_without_start_keeps_readiness_behavior
         gate: quick
       - kind: integration
         target: tests/services/test_run_service.py::test_ref_item_rejected_under_material_only_contract
         gate: quick
       - kind: integration
         target: tests/routes/test_runs_api.py::test_item_type_rejected_by_start_contract
+        gate: quick
+
+  - id: EXEC-WORKFLOW-NODE-TYPE-001
+    statement: "Non-start workflow nodes declare an explicit execution type (type: code|agent, #284 phase 2, schema v66): the loader normalizes the legacy 'node' spelling and an omitted type to 'code', and the v66 migration backfills stored active revisions and Studio drafts from the workspace_node_routes projection with the same rule so no ghost structural revision appears. Publish validation branches on the type — type=agent requires the capability to resolve to exactly one published Agent, type=code requires resolvable published workspace node code (an idle published Agent on the same capability is allowed). Revision publication materializes workspace_node_routes rows only for type=agent nodes; Agent publish/archive never rewrites routes (the startup reconcile is retired) — routes change only at revision publication."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/workflows/test_workflow_start_node.py
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_workflow_revisions.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_workflow_node_explicit_types_migration.py
         gate: quick
 
   - id: BOUNDARY-DATA-001

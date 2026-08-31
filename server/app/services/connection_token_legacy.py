@@ -49,4 +49,11 @@ def report_node_auth_failure(runtime: Mapping[str, Any]) -> None:
     try:
         ConnectionTokenService(connect_source).report_auth_failure(key)
     except Exception:  # reporting must never mask the original failure
+        # #204 broad-except audit: fire-and-forget invalidation invoked from
+        # INSIDE legacy node code's own error/teardown path — the swallow
+        # mirrors report_auth_failure_safe (agent_control.completion): the
+        # node's original outcome (usually the very auth failure being
+        # reported) must survive, and a failed token DELETE (vault/DB
+        # surface) self-heals on the next refresh or the next 401 report.
+        # logger.exception keeps the traceback.
         logger.exception("connection %s: failed to report auth failure", key)

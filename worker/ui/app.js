@@ -166,7 +166,7 @@ function fillForm(config) {
     } else if (key === "runtimes") {
       // 派生值（探测 − 停用），仅展示于 runtime 卡片，无表单控件
     } else if (key === "capabilities") {
-      form.elements.capabilities.value = value.join("\n");
+      // 已退役（issue #284）：配置接口仍回读该键，表单已无对应控件，忽略。
     } else if (key === "models") {
       form.elements.models.value = value.map((item) => `${item.runtime ? `${item.runtime}:` : ""}${item.provider}/${item.model}`).join("\n");
     } else if (key === "labels") {
@@ -786,7 +786,7 @@ if (hasDom) {
       const payload = {
         host_url: data.get("host_url"), worker_id: data.get("worker_id"), name: data.get("name"),
         max_concurrency: numberField(data, "max_concurrency"), max_code_concurrency: numberField(data, "max_code_concurrency"), upload_max_concurrency: numberField(data, "upload_max_concurrency"),
-        disabled_runtimes: collectDisabledRuntimes(), capabilities: linesFromText(data.get("capabilities")),
+        disabled_runtimes: collectDisabledRuntimes(),
         models: modelsFromText(data.get("models")), labels: labelsFromText(data.get("labels")),
         poll_interval_seconds: numberField(data, "poll_interval_seconds"),
         heartbeat_interval_seconds: numberField(data, "heartbeat_interval_seconds"),

@@ -13,11 +13,11 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
 from typing import Any
 
 import psycopg
 
+from server.app.db.rowmap import iso_optional, parse_object, wire_batch_id
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
@@ -39,22 +39,6 @@ logger = logging.getLogger(__name__)
 ITEMS_SOURCE_KIND = "items"
 
 
-def _parse_object(raw: Any) -> dict[str, Any]:
-    try:
-        value = json.loads(str(raw or ""))
-    except (TypeError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def _timestamp(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return str(value)
-
-
 def _run_record(row: dict[str, Any]) -> dict[str, Any]:
     """Public run record; queue_payload (async intake working state) stays internal."""
     return {
@@ -65,11 +49,11 @@ def _run_record(row: dict[str, Any]) -> dict[str, Any]:
         "status": str(row["status"]),
         "created_count": int(row["created_count"]),
         "error_message": str(row["error_message"] or ""),
-        "frozen_pins": _parse_object(row.get("frozen_pins_json")),
-        "stats": _parse_object(row.get("stats_json")),
+        "frozen_pins": parse_object(row.get("frozen_pins_json")),
+        "stats": parse_object(row.get("stats_json")),
         "created_by": str(row["created_by"] or ""),
-        "created_at": _timestamp(row["created_at"]),
-        "updated_at": _timestamp(row["updated_at"]),
+        "created_at": iso_optional(row["created_at"]),
+        "updated_at": iso_optional(row["updated_at"]),
     }
 
 
@@ -161,8 +145,19 @@ class RunService:
                 frozen_config=node_config,
             )
         except Exception as exc:
+            # #204 broad-except audit: compensate-then-re-raise after the
+            # run row committed (create_jobs_bulk runs in its own
+            # transaction, so the failure space is the bulk-insert's mixed
+            # psycopg/dedup surface). The width is required because the
+            # compensation must run on EVERY failure mode — ValueError
+            # (normalize-collision, converted to the user-facing
+            # InvalidOperationError) and unexpected errors alike — or a
+            # half-created run row would linger; nothing is masked: the
+            # non-ValueError branch is a bare re-raise preserving type and
+            # traceback, and _discard_empty_run is itself #204-audited to
+            # never mask this error.
             # A fresh item can still collide at insert time: two items can
-            # normalize to the same job id (``a/b`` vs ``a_b``), or an item
+            # normalize to the same job id (``a/b`` vs ``a_w``), or an item
             # can hit a legacy-path job with a different source_type but the
             # same source_id. The run row already committed (create_jobs_bulk
             # runs in its own transaction), so compensate instead of leaving
@@ -183,7 +178,7 @@ class RunService:
             job["storage_dir"] = str(resolve_job_dir(job, self.settings.jobs_dir))
             # Wire compatibility: API/SSE consumers still read ``batch_id``
             # (route renames are a later slice); the value is the run id.
-            job["batch_id"] = str(job.get("run_id") or "")
+            job["batch_id"] = wire_batch_id(job)
 
         if self.job_event_buffer is not None:
             self.job_event_buffer.record_jobs_created(

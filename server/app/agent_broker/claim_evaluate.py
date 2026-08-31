@@ -84,12 +84,9 @@ def evaluate_candidate(
         if view.code_active >= view.code_capacity:
             state.skip_reasons["code_capacity_full"] += 1
             return None
-        # Code Workers carry no runtime/model declarations: the code text
-        # rides the bundle, so capability matching is the whole contract.
-        capability = str(selected["capability"])
-        if capability not in view.capabilities and "*" not in view.capabilities:
-            state.skip_reasons["capability_or_model_mismatch"] += 1
-            return None
+        # Code claim admission stops here (issue #284): protocol version plus
+        # code-pool capacity plus the workspace ACL above — capabilities no
+        # longer gate anything (the code text rides the bundle).
     else:
         if view.agent_active >= view.agent_capacity:
             state.skip_reasons["capacity_full"] += 1
@@ -97,10 +94,8 @@ def evaluate_candidate(
         if selected["runtime"] not in view.runtimes:
             state.skip_reasons["runtime_mismatch"] += 1
             return None
-        if not agent_claim_compatibility.worker_can_run(
-            selected, manifest, view.capabilities, view.models
-        ):
-            state.skip_reasons["capability_or_model_mismatch"] += 1
+        if not agent_claim_compatibility.worker_can_run(selected, manifest, view.models):
+            state.skip_reasons["model_mismatch"] += 1
             return None
     if not labels_satisfy(
         view.labels, json.loads(selected["definition_json"]).get("requires_labels", {})

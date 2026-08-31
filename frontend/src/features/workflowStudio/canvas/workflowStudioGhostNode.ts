@@ -44,12 +44,22 @@ export function ghostDraftNodeDetails(
     after: parsed.after ?? [],
     inputs: parsed.inputs ?? [],
     outputs: parsed.outputs ?? [],
+    // 显式类型还原（#284 + EXEC-APPROVAL-001）：start/approval 各自还原；
+    // 其余节点还原 code|agent，遗留 `type: node` 与缺失一律按 code（与
+    // 后端 loader 归一化一致）。
     ...(parsed.type === 'start'
       ? {
           node_type: 'start',
           accepted_item_types: parsed.accepted_item_types ?? [],
         }
-      : {}),
+      : {
+          node_type:
+            parsed.type === 'agent'
+              ? 'agent'
+              : parsed.type === 'approval'
+                ? 'approval'
+                : 'code',
+        }),
   }
   return {
     node,

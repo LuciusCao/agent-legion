@@ -38,7 +38,7 @@ async def spool_result_body(request: Request, bundle_dir: Path, max_bytes: int) 
                     raise HTTPException(status_code=413, detail="Agent result archive too large")
                 await concurrency.run_in_threadpool(handle.write, chunk)
     except BaseException:
-        # #204 BaseException audit (batch 5, corrected by review): a staging-
+        # #204 broad-except audit (BaseException, batch 5, corrected by review): a staging-
         # file cleanup guard, NOT a swallow — the bare `raise` re-raises the
         # exact original, nothing masked, no type converted. Why the family
         # is BaseException: graceful-shutdown task cancellation (CancelledError),

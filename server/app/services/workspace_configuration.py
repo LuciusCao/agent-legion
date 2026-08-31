@@ -170,10 +170,6 @@ class WorkspaceConfigurationService:
         validate_workspace_node_limits(
             workflow=workflow,
             node_limits=node_limits,
-            agent_capabilities={
-                definition.capability
-                for definition in published_agent_definitions(self.job_db, workspace_id).values()
-            },
             code_capacity=self.settings.executor_runtime.code_capacity,
         )
         name_value = workspace_patch.get("name")

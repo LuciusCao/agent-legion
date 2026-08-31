@@ -10,7 +10,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from server.app.auth.dependencies import reject_studio_agent_scope
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import (
+    raise_job_http_error,
+    reject_mismatched_workflow_key,
+    require_workflows_enabled,
+)
 from server.app.routes.run_contracts import (
     RunCreateRequest,
     RunCreateResponse,
@@ -39,6 +43,10 @@ def create_runs_router(service: RunService, settings: Settings) -> APIRouter:
         # #211 Phase 2: absent workflow_key defaults to the path workspace_id
         # (equal since v62).
         body = payload.model_dump(exclude_unset=True)
+        # Codex P1 on #307: a mismatched explicit key would flow verbatim
+        # into runs/jobs rows (violating the v62 binding) — reject before
+        # the service call.
+        reject_mismatched_workflow_key(workspace_id, body.get("workflow_key"))
         try:
             result = service.create_run(
                 workspace_id,

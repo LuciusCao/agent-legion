@@ -172,7 +172,10 @@ def test_worker_metrics_require_token_and_are_forced_to_own_worker(tmp_path: Pat
     assert session_only.status_code == 401
 
 
-def test_claim_requires_matching_worker_capability_and_model(tmp_path: Path) -> None:
+def test_claim_ignores_worker_capability_mismatch(tmp_path: Path) -> None:
+    """Issue #284: capabilities no longer gate claims — a Worker that never
+    declared the node's capability still claims when runtime and the model
+    allowlist match."""
     app = _make_app(tmp_path)
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
 
@@ -186,8 +189,15 @@ def test_claim_requires_matching_worker_capability_and_model(tmp_path: Path) -> 
             headers={"X-Agent-Worker-Token": wrong_capability},
             json={"worker_id": "home-mini"},
         )
-        assert response.status_code == 204
+        assert response.status_code == 200
 
+
+def test_claim_requires_matching_worker_model(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    _seed_request(app.state.job_db, job_id="job-1", limit=2)
+
+    with TestClient(app) as client:
+        _authenticate_admin(client)
         wrong_model = _register(
             client, capabilities=["generate"], models=[{"provider": "gateway", "model": "other"}]
         )["worker_token"]

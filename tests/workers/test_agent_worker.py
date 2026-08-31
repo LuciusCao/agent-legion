@@ -578,7 +578,7 @@ def test_status_reporter_tracks_concurrent_executions(tmp_path: Path) -> None:
         "exec-1",
         job_id="job-1",
         node_key="node_a",
-        workflow_key="wf",
+        workspace_id="ws-1",
         agent_id="pi",
         run_dir="/tmp/1",
     )
@@ -586,7 +586,7 @@ def test_status_reporter_tracks_concurrent_executions(tmp_path: Path) -> None:
         "exec-2",
         job_id="job-2",
         node_key="node_b",
-        workflow_key="wf",
+        workspace_id="ws-1",
         agent_id="pi",
         run_dir="/tmp/2",
     )
@@ -610,7 +610,7 @@ def test_status_reporter_without_env_path_is_noop(
         "exec-1",
         job_id="job-1",
         node_key="node_a",
-        workflow_key="wf",
+        workspace_id="ws-1",
         agent_id="pi",
         run_dir="/tmp/1",
     )

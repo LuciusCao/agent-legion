@@ -8,11 +8,10 @@ rerun 产出新字节而上传失败时，旧 (job_id,node_key,name) 清单行�
 from __future__ import annotations
 
 import hashlib
-import io
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, BinaryIO
+from typing import Any
 
 import pytest
 
@@ -24,43 +23,13 @@ from server.app.services.job_artifact_maintenance import (
     reupload_missing,
 )
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
-from server.app.storage import ObjectHead
+from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
 OLD_PAYLOAD = b"old-bytes"
 NEW_PAYLOAD = b"new-bytes-longer"
 
-
-class FakeStorage:
-    """In-memory ObjectStorage test double; never touches the network."""
-
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {}
-
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/upload/{storage_key}"
-
-    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/download/{storage_key}"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        return io.BytesIO(self.objects[storage_key])
-
-    def put_object(self, storage_key: str, data: bytes, content_type: str = "") -> None:
-        self.objects[storage_key] = data
-
-    def put_stream(self, storage_key: str, stream: BinaryIO, size_bytes: int) -> None:
-        self.objects[storage_key] = stream.read()
-
-    def delete_object(self, storage_key: str) -> None:
-        self.objects.pop(storage_key, None)
-
-    def copy_object(self, source_key: str, destination_key: str) -> None:
-        self.objects[destination_key] = self.objects[source_key]
+FakeStorage = FakeObjectStorage
 
 
 @pytest.fixture(autouse=True)

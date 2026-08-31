@@ -562,7 +562,7 @@ describe('useWorkflowStudio', () => {
 
     await waitFor(() => expect(result.current.loadState).toBe('empty'))
     expect(result.current.definitionYaml).toBe(
-      'key: demo\nlabel: demo\nnodes:\n  _start:\n    type: start\n  intake:\n    capability: intake\n    after: [_start]\n'
+      'key: demo\nlabel: demo\nnodes:\n  _start:\n    type: start\n  intake:\n    type: code\n    capability: intake\n    after: [_start]\n'
     )
     expect(result.current.workflow).toBeNull()
     expect(result.current.dirty).toBe(false)
@@ -664,7 +664,7 @@ describe('useWorkflowStudio', () => {
     await waitFor(() =>
       expect(mocks.compareWorkflowDraft).toHaveBeenCalledWith('ws1', {
         definition_yaml:
-          'key: demo\nlabel: demo\nnodes:\n  _start:\n    type: start\n  intake:\n    capability: intake\n    after: [_start]\n',
+          'key: demo\nlabel: demo\nnodes:\n  _start:\n    type: start\n  intake:\n    type: code\n    capability: intake\n    after: [_start]\n',
         allow_missing_baseline: true,
       })
     )

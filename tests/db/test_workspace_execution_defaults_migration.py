@@ -134,7 +134,7 @@ def test_backfills_defaults_into_active_revision_top_level_execution() -> None:
 
     # 三列 drop 后 dispatch 解析链可用：顶层默认经 loader 合并进节点，
     # resolve_execution_block 读到有效值。
-    from server.app.agent_broker.dispatch import resolve_execution_block
+    from server.app.agent_broker.execution_resolution import resolve_execution_block
     from server.app.workflows.definition import workflow_definition_from_dict
 
     definition = workflow_definition_from_dict(payload)

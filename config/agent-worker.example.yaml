@@ -13,15 +13,14 @@ max_concurrency: 10
 # code 节点（code executor capability）执行池容量；0 = 只领取 agent 任务。
 # > 0 时启动预检要求 velites 二进制可解析（自带副本 data/bin/velites 优先，
 # PATH 兜底；裸机部署可执行 scripts/ensure-velites.sh --dest data/bin 按平台
-# 构建安置；code 任务统一经 velites sandbox wrap 沙箱执行）；接受的 code
-# capability 与 agent 一样声明在下方 capabilities 列表里（同一通道，Host 按
-# capability 匹配）。
+# 构建安置；code 任务统一经 velites sandbox wrap 沙箱执行）。code 任务准入
+# 只看协议版本、code 池容量与 workspace 授权，无需任何额外声明（issue #284）。
 # max_code_concurrency: 0
 # Worker 执行进程每次启动/重启都先关闭 claim；需通过控制台或 workerctl 主动开启。
 # 关闭后不再 claim 新任务，但不会中断已领取的任务。
 claim_enabled: false
-# 必须与 workflow 节点现有的 capability 完全匹配。
-capabilities: [write_script, review_script, generate_questions, review_questions]
+# capabilities 键已退役（issue #284）：claim 准入不再按 capability 匹配，
+# 写了也只是 deprecated no-op（启动 warning），请直接删除。
 # Runtime 启动时各自发现本机模型（velites: `velites models list --json`；其他
 # runtime 走各自 adapter）。这里是可选 allowlist，不是可执行能力的事实源：最终
 # 注册集合 = runtime 发现结果 ∩ 本列表；留空表示允许该 runtime 发现的全部模型。

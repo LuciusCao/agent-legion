@@ -1,3 +1,15 @@
+"""Agent dispatch: freeze an immutable manifest + bundle, enqueue for claim.
+
+A ready Agent node becomes a claimable unit here (EXEC-RUNTIME-DISPATCH-001):
+resolve the effective ``execution`` block, stage inputs, render the command
+spec, pack a self-contained bundle next to the queue row. Invariants: the
+manifest is frozen at enqueue with whitelisted non-secret config only
+(CONFIG-MANIFEST-001; presigned URLs are claim-time in-memory, D12); normal
+jobs never pin the agent version (quality replay only); an active request
+per (job, node) short-circuits before staging; bundle/skill cleanup covers
+every failure path.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -9,8 +21,8 @@ from server.app.agent_broker.agent_artifacts import stage_agent_inputs
 from server.app.agent_broker.agent_bundle import build_agent_bundle, cleanup_bundle_on_error
 from server.app.agent_broker.broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
+from server.app.agent_broker.execution_resolution import resolve_execution_block
 from server.app.agent_catalog import AgentDefinition
-from server.app.agent_runtime.execution import resolve_execution
 from server.app.config_schema import manifest_safe_config
 from server.app.executors.models import ExecutionContext
 from server.app.services.artifact_store import ArtifactStore
@@ -18,16 +30,6 @@ from server.app.settings import Settings
 from server.app.skills.runtime import build_skill_manager, get_skill_version, resolve_skill_dir
 from server.app.workflows.pi_protocol import render_command_spec
 from server.app.workflows.schema import WorkflowNode
-
-
-def resolve_execution_block(node: WorkflowNode, runtime: str) -> dict[str, Any]:
-    """Resolve the manifest ``execution`` block (strict, node-only source).
-
-    Thin wrapper kept for existing callers; the implementation lives in
-    ``server/app/agent_runtime/execution.py`` (issue #75 阶段 1) where the
-    runtime catalog pins the binary and command builder.
-    """
-    return resolve_execution(node, runtime)
 
 
 class AgentDispatchService:

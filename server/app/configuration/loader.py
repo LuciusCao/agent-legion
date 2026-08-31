@@ -1,3 +1,5 @@
+"""Configuration loading — see docs/architecture/backend.md (Configuration Reference)."""
+
 from __future__ import annotations
 
 import logging

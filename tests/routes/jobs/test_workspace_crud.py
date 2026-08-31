@@ -82,7 +82,10 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
             },
         )
         workspace_jobs = c.get(f"/api/workspaces/{workspace_id}/jobs?workflow_key=math_sprint")
-        other_jobs = c.get(f"/api/workspaces/{other_id}/jobs?workflow_key=math_sprint")
+        # #211 Phase 3（#307）：跨 workspace 的 key 在 v62 绑定下不可能存在——
+        # 守卫 400 取代旧的「静默空集」收窄；other 用自己的恒等 key 查询得空集。
+        other_jobs_mismatched = c.get(f"/api/workspaces/{other_id}/jobs?workflow_key=math_sprint")
+        other_jobs = c.get(f"/api/workspaces/{other_id}/jobs?workflow_key=other")
 
     assert workspace_response.status_code == 200
     assert workspace_id == "math_sprint"
@@ -92,7 +95,42 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
     assert body["jobs"][0]["id"] == f"{workspace_id}_math_sprint_Q001"
     assert body["jobs"][0]["source_type"] == "question"
     assert [job["id"] for job in workspace_jobs.json()["jobs"]] == [body["jobs"][0]["id"]]
+    assert other_jobs_mismatched.status_code == 400
     assert other_jobs.json()["jobs"] == []
+
+
+def test_legacy_workspace_jobs_endpoint_caps_results(tmp_path):
+    """#272: the legacy (non-snapshot) jobs list endpoint is bounded. The
+    frontend already uses the paginated /jobs/snapshot endpoint; this cap is
+    API-compat protection against unbounded select * payloads."""
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        ws = c.post(
+            "/api/workspaces",
+            json={"id": "legacy_cap", "name": "Legacy Cap"},
+        ).json()
+        ws_id = ws["workspace"]["id"]
+        publish_legacy_intake_revision(c.app.state.job_db, ws_id)
+        c.post(
+            f"/api/workspaces/{ws_id}/job-batches",
+            json={
+                "workflow_key": "legacy_cap",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q001", "Q002", "Q003"],
+            },
+        )
+        response = c.get(f"/api/workspaces/{ws_id}/jobs")
+
+    assert response.status_code == 200
+    # 3 jobs is well below the cap: the endpoint still returns the full
+    # (small) set — the bound only bites above it (covered at the query
+    # layer in tests/db/test_jobs_queries.py).
+    assert len(response.json()["jobs"]) == 3
 
 
 def test_delete_workspace_hidden_when_workflows_disabled(tmp_path):

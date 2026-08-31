@@ -7,7 +7,7 @@ pytest.importorskip("scripts.stress.run_e2e_stress")
 
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "stress"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "stress"))
 
 from _e2e_readiness import wait_for_server, wait_for_snapshot_readiness
 from run_e2e_stress import (

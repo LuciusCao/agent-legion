@@ -65,6 +65,10 @@ ACP 生态验证（哪些 agent 支持、协议成熟度）是 chunk 4 改造的
   句柄）。
 - `server/app/routes/workflow_catalog_admin.py`：注册事务**成功提交后**调
   `reload_scan_entries()` + `notify_schedulable_work()`。
+  （2026-08-30 补注：该路由文件已随 workflow catalog 整体退役（schema v50，
+  #112）；同一职责现由 `server/app/scheduler_wakeup.py` 的
+  `reload_worker_scan_entries` / `notify_schedulable_work` 承担，发布路径
+  调用点在 `routes/workflow_draft_publish.py`。）
 - `catalog_scan.py` docstring 删「需重启」表述。
 - 测试：`tests/workflow_worker/test_scan_hot_reload.py`（运行中注册新 key →
   下一 pass 即扫描，含 definitionless 与带 definition 两种；reload 与 poll 交叉

@@ -10,7 +10,10 @@ export type WorkflowYamlObject = {
 }
 
 export type WorkflowYamlNode = {
-  type?: 'start' | 'node' | 'approval'
+  // 显式类型：'start' 为入口契约节点，'approval' 为人工决策门
+  // （EXEC-APPROVAL-001），'code' | 'agent' 为显式执行类型（#284）；
+  // 'node' 是 #284 前的遗留写法（后端 loader 归一化为 'code'），仅作读取容忍。
+  type?: 'start' | 'node' | 'approval' | 'code' | 'agent'
   accepted_item_types?: string[]
   label?: string
   capability?: string
@@ -53,14 +56,6 @@ export function dumpWorkflowYaml(value: WorkflowYamlObject): string {
 export function parseWorkflowLabel(rawYaml: string): string | undefined {
   try {
     return parseWorkflowYaml(rawYaml).label
-  } catch {
-    return undefined
-  }
-}
-
-export function parseWorkflowKey(rawYaml: string): string | undefined {
-  try {
-    return parseWorkflowYaml(rawYaml).key
   } catch {
     return undefined
   }

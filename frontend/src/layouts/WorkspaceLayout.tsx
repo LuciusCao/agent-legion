@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useParams, useNavigate, Outlet, useLocation } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useCurrentWorkspace } from '../hooks/useWorkspaces'
 import { useJobStore } from '../stores/jobStore'
 import { useAgentsStore } from '../stores/agentsStore'
@@ -10,6 +10,7 @@ import { AddItemsDialog } from '../components/AddItemsDialog'
 import { AgentStatusIndicator } from '../components/AgentStatusIndicator'
 import { LabeledIconButton } from '../components/LabeledIconButton'
 import { WorkflowStudioButton } from '../components/WorkflowStudioButton'
+import { WorkspacePageOutlet } from './WorkspacePageOutlet'
 export default function WorkspaceLayout() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
@@ -123,7 +124,7 @@ export default function WorkspaceLayout() {
       )}
       mainClassName="workspace-main"
     >
-      <Outlet />
+      <WorkspacePageOutlet />
       <AddItemsDialog
         open={addItemsDialogOpen}
         onClose={() => setAddItemsDialogOpen(false)}

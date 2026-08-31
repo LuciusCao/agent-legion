@@ -1,3 +1,9 @@
+"""FastAPI app factory — the composition root for the Host process.
+
+``create_app`` wires settings → DB → seeds → services → routers → threads;
+``create_prod_app`` is the uvicorn factory. Ordering invariants: backend.md.
+"""
+
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -35,12 +41,12 @@ from server.app.services.job_packages import JobPackageService
 from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
-from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 from server.app.services.workspace_execution_configuration import (
     WorkspaceExecutionConfigurationService,
 )
 from server.app.settings import load_settings, validate_settings
+from server.app.single_replica_probe import SingleReplicaProbe
 from server.app.skills.seed import seed_skill_sources
 from server.app.skills.skill_root_migration import migrate_skill_source_paths
 from server.app.spa import mount_spa
@@ -81,7 +87,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # retired prefix and drop their stale lock entries (idempotent no-op once
     # migrated).
     migrate_skill_source_paths(job_db)
-    WorkflowRevisionService(job_db).reconcile_active_agent_routes()
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db)
     # Resume state must not survive a restart: dispatch stays off until an
     # operator explicitly resumes it in this process lifetime.
@@ -135,12 +140,20 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         job_intake_queue=JobIntakeQueue(job_db, settings, job_event_buffer),
         ops_metrics=ops_metrics,
     )
+    # Single-replica guardrail (#277): the runtime state above (in-process
+    # event bus, login rate limiter, studio chat sessions, pause reset) is
+    # process-local, so a second replica against the same database degrades
+    # silently. The probe holds one session advisory lock for the process
+    # lifetime; a second starter finds it taken and logs a warning (env
+    # escape hatches documented in single_replica_probe.py).
+    replica_probe = SingleReplicaProbe(job_db)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         nonlocal workflow_worker_thread, sweeper_thread, artifact_gc_thread
         nonlocal artifact_maintenance_thread, material_ttl_thread
         job_event_manager.bus.attach_loop(asyncio.get_running_loop())
+        replica_probe.probe()
         if start_worker:
             validate_settings(settings)
             agent_manager.discover()
@@ -185,6 +198,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 yield
         finally:
             await background_tasks.stop(app)
+            # Release the replica-probe lock before the pools close so the
+            # next starter (rolling restart) does not see a stale holder.
+            replica_probe.close()
             # Reap chat sessions before closing DB pools: teardown revokes
             # scoped tokens and settles permission waiters via the DB.
             studio_chat_service.shutdown()

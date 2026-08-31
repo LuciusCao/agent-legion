@@ -8,8 +8,13 @@
 |------|------|------|------|
 | **架构文档** | `docs/architecture/` | 人 + Agent | 描述**当前系统状态**：模块划分、数据流、关键设计决策 |
 
-> 开发过程中的设计规格（spec）与实施计划（plan）属于内部设计文档，不随本仓库公开；
-> 历史上曾入库的 `docs/plans/` 已连同提交历史一并移除。
+> 开发过程中的设计规格（spec）与实施计划（plan）默认不随本仓库公开；历史上曾入库的
+> `docs/plans/` 已连同提交历史一并移除。**例外**：对理解系统演进有长期参考价值的
+> 设计定稿、实施计划与时点报告（PoC / 风险 review / 退役盘点）归档在
+> `docs/architecture/` 的「历史设计记录」分区（见
+> [architecture/README.md](architecture/README.md)），按时点快照管理——文中的
+> `path:line` 证据反映当时代码，与现行语义冲突时以代码、现行文档与
+> `config/architecture/architecture-invariants.yaml` 为准。
 
 ## 使用指南
 
@@ -21,7 +26,11 @@
   [remote-execution-runbook.md](remote-execution-runbook.md)）
 - **Studio chat MCP 集成** → 看 [studio-agent-mcp.md](studio-agent-mcp.md)
 - **想了解 `data/` 运行时目录布局** → 看 [data-layout.md](data-layout.md)
+- **时点 review 报告**（系统性/性能质量 review 的归档）→ 看
+  `docs/reviews/`（按日期命名，`path:line` 证据反映审查时代码）
 
 ## 维护规则
 
-- `docs/architecture/` 中的文档应随代码演进同步更新。
+- `docs/architecture/` 中的文档应随代码演进同步更新：现行文档描述当前系统状态，
+  历史设计记录按各文首状态 banner 标注的演进修订（新增 `.md` 必须登记进
+  [architecture/README.md](architecture/README.md) 的两张索引表之一）。

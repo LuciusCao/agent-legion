@@ -12,7 +12,7 @@ echo "=== Ruff Format ==="
 UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run ruff format --check server tests workflow_nodes
 
 echo "=== MyPy Type Check ==="
-UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app workflow_nodes
+UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app worker shared workspace_libs workflow_nodes
 
 echo "=== Frontend Lint ==="
 cd "$ROOT_DIR/frontend"

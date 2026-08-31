@@ -1,12 +1,20 @@
 import { MarkerType, type Edge } from '@xyflow/react'
 import type { DagGraphEdge } from './DagGraph'
+import type { DagEdgeData } from './DagEdge'
 
-export function buildRfEdges(edges: DagGraphEdge[]): Edge[] {
+export type RfDagEdge = Edge<DagEdgeData>
+
+// #276：边走自定义 dagEdge 类型（渲染逻辑见 DagEdge.tsx），高亮态放
+// data.highlighted；这里的 data 是常态初始值，DagGraph 的高亮 useMemo 只在
+// highlighted 翻转时新建 data 对象，其余边引用稳定。
+export function buildRfEdges(edges: DagGraphEdge[]): RfDagEdge[] {
   return edges.map((edge, idx) => ({
     id: `e-${edge.from}-${edge.to}-${idx}`,
     source: edge.from,
     target: edge.to,
+    type: 'dagEdge',
     label: edge.label || undefined,
+    data: { highlighted: false },
     markerEnd: { type: MarkerType.ArrowClosed, color: '#9ca3af' },
     style: {
       stroke: '#9ca3af',

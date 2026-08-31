@@ -108,7 +108,7 @@ class QualityReplaySetup:
                 frozen_config={node.key: frozen} if frozen is not None else {},
             )[0]
         except Exception:
-            # #204: both business rejections (ValueError → 400 in the run
+            # #204 broad-except audit: both business rejections (ValueError → 400 in the run
             # service) and programming errors land here; either way the
             # orphaned run row must go. The bare re-raise keeps the original
             # error type for the classification in create_replay above.
@@ -132,7 +132,7 @@ class QualityReplaySetup:
                     conn, copy_job_id, completed_nodes=ancestors, skipped_nodes=downstream
                 )
         except Exception:
-            # #204: mixed outcome space (InvalidOperationError from missing
+            # #204 broad-except audit: mixed outcome space (InvalidOperationError from missing
             # frozen inputs, ValueError/JobServiceError from the shared
             # helpers, programming errors) — compensation must run for all of
             # them, so the catch stays broad; classification happens in
@@ -171,8 +171,8 @@ class QualityReplaySetup:
         self.job_db.delete_replay_if_active(replay_id)
 
     def discard_empty_run(self, run_id: str) -> None:
-        # Best-effort cleanup of the run row after copy-job creation failed;
-        # never mask the original failure. The broad catch (#204) is the
+        # #204 broad-except audit: best-effort cleanup of the run row after
+        # copy-job creation failed; never mask the original failure. This is the
         # deliberate safety net here: cleanup must not replace the original
         # error, whatever it was, and the fallback warning (run id, failure
         # of the cleanup itself) is the actionable signal — the original

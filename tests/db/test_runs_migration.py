@@ -255,7 +255,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "approval_decisions"
+    assert migration["name"] == "workflow_node_explicit_types"
 
 
 @pytest.mark.fresh_schema

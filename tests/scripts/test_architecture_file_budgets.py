@@ -918,3 +918,68 @@ def test_monotonic_diagnostics_include_real_git_failure_reason(
     assert any(
         "git failed to run" in error and "cannot spawn git binary" in error for error in errors
     )
+
+
+def test_per_root_max_lines_overrides_absolute_limit(tmp_path: Path) -> None:
+    # #293: a declarative single-file artifact (the full-replay schema) gets
+    # its own absolute limit while every other file keeps the global one.
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
+    big = root / "server/app/db" / "schema.sql"
+    big.parent.mkdir(parents=True, exist_ok=True)
+    big.write_text("\n".join(["create table t;"] * 900), encoding="utf-8")
+    policy = replace(
+        policy,
+        production_roots=(
+            ProductionRoot(path="server/app", extensions=(".py",)),
+            ProductionRoot(path="server/app/db", extensions=(".sql",), max_lines=1000),
+        ),
+    )
+    write_baseline(root, {"server/app/example.py": 110, "server/app/db/schema.sql": 910})
+
+    errors = check_file_budgets(root, policy, ())
+
+    assert not any("exceeds absolute production limit" in e for e in errors)
+
+
+def test_per_root_max_lines_still_enforced(tmp_path: Path) -> None:
+    # The override raises the bar, it does not remove it.
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
+    big = root / "server/app/db" / "schema.sql"
+    big.parent.mkdir(parents=True, exist_ok=True)
+    big.write_text("\n".join(["create table t;"] * 1100), encoding="utf-8")
+    policy = replace(
+        policy,
+        production_roots=(
+            ProductionRoot(path="server/app", extensions=(".py",)),
+            ProductionRoot(path="server/app/db", extensions=(".sql",), max_lines=1000),
+        ),
+    )
+    write_baseline(root, {"server/app/example.py": 110, "server/app/db/schema.sql": 1110})
+
+    errors = check_file_budgets(root, policy, ())
+
+    assert any(
+        "server/app/db/schema.sql: 1100 lines exceeds absolute production limit 1000" in e
+        for e in errors
+    )
+
+
+def test_global_limit_unchanged_outside_override_root(tmp_path: Path) -> None:
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=900)
+    (root / "server/app/db").mkdir(parents=True, exist_ok=True)
+    policy = replace(
+        policy,
+        production_max_lines=800,
+        production_roots=(
+            ProductionRoot(path="server/app", extensions=(".py",)),
+            ProductionRoot(path="server/app/db", extensions=(".sql",), max_lines=1200),
+        ),
+    )
+    write_baseline(root, {"server/app/example.py": 910})
+
+    errors = check_file_budgets(root, policy, ())
+
+    assert any(
+        "server/app/example.py: 900 lines exceeds absolute production limit 800" in e
+        for e in errors
+    )

@@ -54,6 +54,15 @@ def sync_host_status(
         status.set_remote(_remote_status(None, host_reachable=True, connection_error=str(exc)))
         raise
     except Exception as exc:
+        # #204 broad-except audit: best-effort 状态同步（对齐 leases.py 的
+        # fire-and-forget 观测模式）。get_self 的逃逸族混族——传输错误
+        # （requests 族）、非 200 状态的 RuntimeError、应答解码的
+        # ValueError——统一语义是"暂时无法确认 Host 状态"。吞是对的：把
+        # host_reachable=False 与 connection_error 写进本地状态文件、返回
+        # 上一次的 worker 视图，下一次同步（interval 后）自愈；
+        # WorkerAuthError 是终态，已在上一臂重新抛出给调用方裁决。日志
+        # 保全：异常文本随 connection_error 持久化进 status 文件，控制台
+        # 可见。
         status.set_remote(_remote_status(previous, host_reachable=False, connection_error=str(exc)))
         return previous
     status.set_remote(_remote_status(worker, host_reachable=True))

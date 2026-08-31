@@ -72,7 +72,8 @@ extensions_started_at=$SECONDS
 (
   cd "$ROOT_DIR"
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q tests/full \
-    -m full_gate --reruns 1 --reruns-delay 2 --cov=server --cov-report= --cov-append
+    -m full_gate --reruns 1 --reruns-delay 2 \
+    --cov=server --cov=worker --cov-report= --cov-append
 ) >"$full_log" 2>&1 &
 full_pid=$!
 (
@@ -103,10 +104,13 @@ echo "=== Combined Coverage Report ==="
 cd "$ROOT_DIR"
 UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run coverage report
 
-echo "=== Coverage Partition Report (non-blocking) ==="
+echo "=== Coverage Partition Report ==="
 # Per-partition floors keep key modules from hiding behind the global average.
-# Report mode only; flip to blocking with AGENT_LEGION_COV_PARTITIONS=enforce
-# once the floors have been stable on CI.
+# Default stays report mode (the pre-existing partitions were never validated
+# against a blocking gate); AGENT_LEGION_COV_PARTITIONS=enforce turns
+# violations into a failure — CI's backend-coverage job runs the worker
+# execution-plane floor (issue #275) in enforce mode, where the merged
+# shard data is complete.
 if ! UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check_coverage_partitions.py \
   --backend "$COVERAGE_FILE" \
   --frontend "$ROOT_DIR/frontend/coverage/coverage-final.json"; then

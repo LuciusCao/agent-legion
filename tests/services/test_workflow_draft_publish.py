@@ -126,6 +126,43 @@ def test_publish_skips_code_resolution_for_start_node(tmp_path: Path) -> None:
     assert active is not None
 
 
+_DRAFT_YAML_WITH_APPROVAL = """
+key: test_publish_flow
+label: Test Publish Flow
+nodes:
+  _start:
+    type: start
+    accepted_item_types: [material]
+  do_thing:
+    type: code
+    capability: do_thing
+    after: [_start]
+    outputs: [result.json]
+  gate:
+    type: approval
+    label: 审批
+    after: [do_thing]
+    inputs: [result.json]
+edges:
+  - {from: _start, to: do_thing}
+  - {from: do_thing, to: gate}
+"""
+
+
+def test_publish_skips_agent_and_code_resolution_for_approval_gates(
+    tmp_path: Path,
+) -> None:
+    """Approval gates never dispatch (EXEC-APPROVAL-001): publish validation
+    demands neither a published Agent nor node code for them."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _seed_node_code(workspace["id"])
+
+    ok, errors = publish_workflow_draft(queries, workspace["id"], _DRAFT_YAML_WITH_APPROVAL)
+
+    assert (ok, errors) == (True, [])
+
+
 def test_validate_reports_structural_errors_before_bindings(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = _workspace(queries)

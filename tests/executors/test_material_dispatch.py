@@ -7,7 +7,6 @@ MATERIAL-ACCESS-001：沙箱 allow-read 只含静态缓存根；物化失败映�
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import threading
 from pathlib import Path
@@ -19,8 +18,8 @@ from server.app.executors._code_sandbox import _read_roots
 from server.app.executors.cancellation import CancellationToken
 from server.app.executors.code import CodeExecutor
 from server.app.executors.models import ExecutionContext
-from server.app.storage import ObjectHead
 from shared.material_cache import MaterializeError
+from tests.fakes.storage import FakeObjectStorage
 
 WORKSPACE_ID = "ws-mat-dispatch"
 PAYLOAD = b"dispatch-material" * 40
@@ -28,26 +27,7 @@ HASH = hashlib.sha256(PAYLOAD).hexdigest()
 MATERIAL_ID = "mat-dispatch-1"
 STORAGE_KEY = f"{WORKSPACE_ID}/{HASH}/input.csv"
 
-
-class FakeStorage:
-    def __init__(self) -> None:
-        self.objects = {STORAGE_KEY: PAYLOAD}
-
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        return ""
-
-    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
-        return ""
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        return io.BytesIO(self.objects[storage_key])
-
-    def delete_object(self, storage_key: str) -> None:
-        self.objects.pop(storage_key, None)
+FakeStorage = FakeObjectStorage
 
 
 @pytest.fixture
@@ -109,7 +89,7 @@ def _runtime(executor: CodeExecutor, context: ExecutionContext) -> dict:
 
 
 def test_build_runtime_materializes_and_injects_block(job_db, material, tmp_path: Path) -> None:
-    executor = _executor(job_db, tmp_path, FakeStorage())
+    executor = _executor(job_db, tmp_path, FakeStorage(objects={STORAGE_KEY: PAYLOAD}))
     context = _context(tmp_path, {"type": "material", "material_id": material})
 
     runtime = _runtime(executor, context)
@@ -124,7 +104,7 @@ def test_build_runtime_materializes_and_injects_block(job_db, material, tmp_path
 
 
 def test_build_runtime_skips_non_material(job_db, tmp_path: Path) -> None:
-    executor = _executor(job_db, tmp_path, FakeStorage())
+    executor = _executor(job_db, tmp_path, FakeStorage(objects={STORAGE_KEY: PAYLOAD}))
     context = _context(tmp_path, {"type": "ref", "external_id": "q-1"})
 
     assert "materials" not in _runtime(executor, context)
@@ -133,7 +113,7 @@ def test_build_runtime_skips_non_material(job_db, tmp_path: Path) -> None:
 def test_build_runtime_raises_readable_error_without_storage(
     job_db, material, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    executor = _executor(job_db, tmp_path, FakeStorage())
+    executor = _executor(job_db, tmp_path, FakeStorage(objects={STORAGE_KEY: PAYLOAD}))
     executor._object_storage = None  # 实例未配置对象存储
     monkeypatch.setattr("server.app.services.material_cache.build_s3_storage", lambda: None)
     context = _context(tmp_path, {"type": "material", "material_id": material})
@@ -143,7 +123,7 @@ def test_build_runtime_raises_readable_error_without_storage(
 
 
 def test_sandbox_read_roots_include_static_cache_root(job_db, tmp_path: Path) -> None:
-    executor = _executor(job_db, tmp_path, FakeStorage())
+    executor = _executor(job_db, tmp_path, FakeStorage(objects={STORAGE_KEY: PAYLOAD}))
     cache_root = tmp_path / "materials_cache"
 
     assert str(cache_root) not in _read_roots(executor), "不存在的目录不进白名单"

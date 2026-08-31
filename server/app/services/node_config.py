@@ -56,15 +56,16 @@ def capability_config_schemas(
 def _node_config_schema(
     node: WorkflowNode,
     agent_schemas: Mapping[str, dict[str, Any]],
-    agent_capabilities: set[str],
 ) -> dict[str, Any]:
     """One node's effective schema: Agent Definition → node-declared.
 
-    Agent-routed nodes keep their Agent Definition schema untouched. Every
-    other node is code-routed (P-0.5) and gets the platform-reserved
-    execution keys merged into its declared schema.
+    ``type: agent`` nodes keep their Agent Definition schema untouched.
+    Every other node is code-routed and gets the platform-reserved
+    execution keys merged into its declared schema. The explicit node type
+    decides (#284): a code node may share its capability with a published
+    Agent without inheriting the Agent's schema.
     """
-    if node.capability in agent_capabilities:
+    if node.node_type == "agent":
         return agent_schemas.get(node.capability, {})
     return merge_reserved_execution_schema(node.config_schema)
 
@@ -75,10 +76,9 @@ def workflow_node_config_schemas(
 ) -> dict[str, dict[str, Any]]:
     """Map node key → effective config_schema (reserved keys merged for code nodes)."""
     agent_schemas = _agent_schemas(agent_definitions)
-    agent_capabilities = {d.capability for d in agent_definitions.values()}
     schemas: dict[str, dict[str, Any]] = {}
     for node in definition.executable_nodes.values():
-        schema = _node_config_schema(node, agent_schemas, agent_capabilities)
+        schema = _node_config_schema(node, agent_schemas)
         # Approval gates never dispatch (EXEC-APPROVAL-001): no config surface.
         if schema and node.node_type != "approval":
             schemas[node.key] = schema
@@ -141,11 +141,10 @@ def resolve_workflow_node_configs(
 ) -> dict[str, dict[str, Any]]:
     """Resolve the effective config of every node for an intake freeze."""
     agent_schemas = _agent_schemas(agent_definitions)
-    agent_capabilities = {d.capability for d in agent_definitions.values()}
     overrides = workspace_node_overrides(workspace, definition.key)
     resolved: dict[str, dict[str, Any]] = {}
     for node in definition.executable_nodes.values():
-        node_schema = _node_config_schema(node, agent_schemas, agent_capabilities)
+        node_schema = _node_config_schema(node, agent_schemas)
         workspace_override = overrides.get(node.key, {})
         # Approval gates never dispatch (EXEC-APPROVAL-001): their config
         # (rework_target/feedback_artifact) is platform semantics consumed by

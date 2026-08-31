@@ -31,6 +31,8 @@ const node: WorkflowNodeRecord = {
   key: 'generate_key_info',
   label: '生成关键信息',
   capability: 'generate_key_info',
+  // 显式 Agent 节点（#284）：类型判定只读 node_type，不再按 capability 反推。
+  node_type: 'agent',
   after: [],
   inputs: [],
   outputs: [],
@@ -57,7 +59,6 @@ const editorProps = {
   definitionYaml: `execution:\n  provider: deepseek\n  model: your-model-b\n  thinking: low\nnodes:\n  generate_key_info:\n    capability: generate_key_info\n`,
   setDefinitionYaml: () => {},
   agentCatalog,
-  workflowKey: 'demo-wf',
 }
 
 function renderSection(
@@ -104,7 +105,6 @@ describe('WorkflowNodeExecutionSection', () => {
       setDefinitionYaml: (value) => {
         nextYaml = value
       },
-      workflowKey: 'demo-wf',
     })
 
     fireEvent.change(screen.getByLabelText('Model'), {
@@ -133,7 +133,6 @@ describe('WorkflowNodeExecutionSection', () => {
       setDefinitionYaml: (value) => {
         nextYaml = value
       },
-      workflowKey: 'demo-wf',
     })
 
     fireEvent.change(screen.getByLabelText('Provider'), {
@@ -151,7 +150,6 @@ describe('WorkflowNodeExecutionSection', () => {
           setDefinitionYaml={(value) => {
             nextYaml = value
           }}
-          workflowKey="demo-wf"
         />
       </TestQueryProvider>
     )
@@ -192,13 +190,44 @@ describe('WorkflowNodeExecutionSection', () => {
     )
   })
 
-  it('shows the code-pool state and the create-agent entry when no agent routes the capability', () => {
-    renderSection({ node: { ...node, capability: 'missing' }, ...editorProps })
+  it('shows the code-pool state and the switch-to-agent entry for a code node', () => {
+    renderSection({
+      node: { ...node, node_type: 'code', capability: 'missing' },
+      ...editorProps,
+    })
 
     expect(screen.getByText('内置 code 池执行')).toBeInTheDocument()
     expect(
+      screen.getByRole('button', { name: '切换为 Agent 执行' })
+    ).toBeInTheDocument()
+  })
+
+  it('points an agent node without a published Agent to the create entry', () => {
+    renderSection({
+      node: { ...node, node_type: 'agent', capability: 'missing' },
+      ...editorProps,
+    })
+
+    expect(screen.getByText(/暂无 published Agent/)).toBeInTheDocument()
+    expect(
       screen.getByRole('button', { name: '为此 capability 新建 Agent' })
     ).toBeInTheDocument()
+  })
+
+  it('shows the approval-gate hint and hides the agent editor for approval nodes', () => {
+    renderSection({
+      node: { ...node, node_type: 'approval', capability: '' },
+      ...editorProps,
+    })
+
+    expect(screen.getByText('审批门')).toBeInTheDocument()
+    expect(screen.getByText(/awaiting_approval/)).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '切换为 Agent 执行' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '为此 capability 新建 Agent' })
+    ).not.toBeInTheDocument()
   })
 
   it('toggles the embedded agent editor for the bound agent', () => {

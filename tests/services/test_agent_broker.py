@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
-from server.app.agent_broker.dispatch import resolve_execution_block
+from server.app.agent_broker.execution_resolution import resolve_execution_block
 from server.app.agent_catalog import AgentDefinition
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.events.agents import AgentStatusManager

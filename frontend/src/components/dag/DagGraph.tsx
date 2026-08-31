@@ -1,8 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useState,
+} from 'react'
 import {
   Background,
   Controls,
-  MarkerType,
   MiniMap,
   Node,
   ReactFlow,
@@ -12,21 +17,17 @@ import {
 import '@xyflow/react/dist/style.css'
 import * as dagre from 'dagre'
 import { buildRfEdges, DagEdgeLabels } from './DagEdgeLabels'
+import { DagEdge as DagEdgeComponent } from './DagEdge'
 import { DagNode as DagNodeComponent } from './DagNode'
 import type { DagNodeData } from './DagNode'
+import type { DagNodeChangeType } from './dagNodeTypes'
 import type { DagNodeStatus } from '../dagNodeStatus'
 import type { ExecutorKind } from '../../types/jobTypes'
 import { NodeDetailsPanel } from '../NodeDetailsPanel'
 import { filterRelevantRuns } from '../../lib/jobRuns'
 import { estimateDagNodeHeight } from '../dagNodeHeight'
-import {
-  buildRelationMaps,
-  collectAncestors,
-  collectDescendants,
-} from '../dagGraphRelations'
+import { applyHighlight, hoverReducer } from '../dagHighlight'
 import styles from './DagGraph.module.css'
-
-export type DagNodeChangeType = 'added' | 'modified' | 'removed'
 
 export interface DagGraphNode {
   key: string
@@ -56,6 +57,7 @@ export interface DagGraphEdge {
   ghost?: boolean
 }
 
+export type { DagNodeChangeType }
 export type DagNode = DagGraphNode
 export type DagEdge = DagGraphEdge
 export interface NodeRunSummary {
@@ -81,6 +83,7 @@ interface DagGraphProps {
 const NODE_WIDTH = 240
 const FIT_VIEW_OPTIONS = { padding: 0.18, minZoom: 0.35, maxZoom: 1.2 }
 const nodeTypes = { dagNode: DagNodeComponent }
+const edgeTypes = { dagEdge: DagEdgeComponent }
 
 type NormalizedExecutorKind = NonNullable<DagNodeData['executorKind']>
 
@@ -132,6 +135,10 @@ function computeLayout(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
         outputs: node.outputs || [],
         changeType: node.changeType,
         ghost: node.ghost ?? false,
+        // #276：高亮/置灰态放 data 而非 node.style/className，让 hover 时
+        // 未受影响节点能保持 data 引用稳定（见下方 highlightMemo 的注释）。
+        active: false,
+        dimmed: false,
       },
     }
   })
@@ -157,7 +164,16 @@ export function DagGraph({
   const [internalSelectedNode, setInternalSelectedNode] = useState<
     string | null
   >(null)
-  const [hoveredNode, setHoveredNode] = useState<string | null>(null)
+  // hover 链式对照（Codex review on #285）：翻转判断的基准是「上一次的
+  // 视觉态」（上次 activeNode 的链路集合），而非未高亮基线——hover 从 A
+  // 移到 B 时仍应置灰的节点才不会被全量重建。prevActiveNode 与 hoveredNode
+  // 在同一个 reducer 里原子更新（一次 dispatch 一轮渲染；两个独立 useState
+  // 各自调度会引入一轮多余的全量重算，render 计数测试能抓到）。
+  const [hoverState, dispatchHover] = useReducer(hoverReducer, {
+    hoveredNode: null,
+    prevActiveNode: null,
+  })
+  const hoveredNode = hoverState.hoveredNode
 
   const isControlled = controlledSelectedNode !== undefined
   const selectedNode = isControlled
@@ -192,69 +208,41 @@ export function DagGraph({
 
   const onNodeMouseEnter = useCallback(
     (_event: React.MouseEvent, node: Node<DagNodeData>) => {
-      setHoveredNode(node.id)
+      dispatchHover({ type: 'enter', id: node.id })
     },
     []
   )
 
   const onNodeMouseLeave = useCallback(() => {
-    setHoveredNode(null)
+    dispatchHover({ type: 'leave' })
   }, [])
 
-  const { highlightedEdges, highlightedNodes } = useMemo(() => {
-    const activeNode = selectedNode || hoveredNode
-    if (!activeNode) {
-      return {
-        highlightedEdges: rfEdges,
-        highlightedNodes: rfNodes,
-      }
-    }
-
-    const { edgeBySource, edgeByTarget } = buildRelationMaps(rfEdges)
-    const ancestors = new Set<string>()
-    const descendants = new Set<string>()
-    collectAncestors(activeNode, edgeByTarget, ancestors)
-    collectDescendants(activeNode, edgeBySource, descendants)
-
-    const highlightedEdges = rfEdges.map((edge) => {
-      const isHighlighted =
-        edge.source === activeNode ||
-        edge.target === activeNode ||
-        (ancestors.has(edge.source) && edge.target === activeNode) ||
-        (edge.source === activeNode && descendants.has(edge.target))
-      return {
-        ...edge,
-        style: {
-          ...edge.style,
-          stroke: isHighlighted ? '#1d4ed8' : '#d1d5db',
-          strokeWidth: isHighlighted ? 3 : 2,
-          opacity: isHighlighted ? 1 : 0.4,
-        },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: isHighlighted ? '#1d4ed8' : '#d1d5db',
-        },
-      }
-    })
-
-    const highlightedNodes = rfNodes.map((node) => {
-      const active = node.id === activeNode
-      return {
-        ...node,
-        selected: active,
-        className: active ? styles.selectedFlowNode : undefined,
-        style: {
-          ...node.style,
-          opacity:
-            active || ancestors.has(node.id) || descendants.has(node.id)
-              ? 1
-              : 0.45,
-        },
-      }
-    })
-
-    return { highlightedEdges, highlightedNodes }
-  }, [rfEdges, rfNodes, selectedNode, hoveredNode])
+  // #276：hover/选中高亮经 applyHighlight（dagHighlight.ts，纯函数）计算——
+  // 高亮态下沉为 node/edge 的 data 布尔字段，只替换实际翻转的条目，其余
+  // 对象引用复用，hover 的渲染面从 O(全部节点+边) 收敛到 O(翻转条目)。
+  // 链式对照（Codex review on #285）：翻转判断的基准是「上一次的视觉态」
+  // 而未高亮基线——hover 从 A 移到 B 时仍应置灰的节点才不会被全量重建。
+  // 上次视觉态 = 上次 activeNode 在当前图形状上的高亮结果（纯函数重算，
+  // 拖拽/布局变化时集合自动跟随）；prevActiveNode 在事件回调里与 hovered
+  // 同步更新（同一次批处理，单轮渲染——经 effect 链式更新会引入一轮以旧
+  // 基准的全量重建，render 计数测试能抓到）。
+  const prevActiveNode = hoverState.prevActiveNode
+  const activeNode = selectedNode || hoveredNode
+  const { highlightedEdges, highlightedNodes } = useMemo(
+    () =>
+      applyHighlight(
+        rfNodes,
+        rfEdges,
+        activeNode,
+        // 上次视觉态 = 上次 activeNode 在当前图形状上的高亮结果（纯函数
+        // 重算，拖拽/布局变化时集合自动跟随）。prev 与本次相同（连续
+        // hover 同一节点/选中未变）时无对照需要。
+        prevActiveNode === activeNode
+          ? undefined
+          : applyHighlight(rfNodes, rfEdges, prevActiveNode)
+      ),
+    [rfEdges, rfNodes, activeNode, prevActiveNode]
+  )
 
   const relevantRuns = useMemo(
     () => filterRelevantRuns(runs, nodes),
@@ -295,6 +283,7 @@ export function DagGraph({
           nodes={highlightedNodes}
           edges={highlightedEdges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onNodeClick={onNodeClick}

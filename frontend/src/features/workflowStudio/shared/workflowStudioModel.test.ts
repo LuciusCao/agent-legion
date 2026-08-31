@@ -176,7 +176,8 @@ describe('workflowStudioModel', () => {
 
     const details = ghostDraftNodeDetails(yaml, 'intake')
 
-    expect(details?.node.node_type).toBeUndefined()
+    // 草稿未声明 type：与后端 loader 归一化一致，ghost 节点按 code 还原。
+    expect(details?.node.node_type).toBe('code')
     expect(details?.node.label).toBe('读取知识点')
     expect(details?.node.capability).toBe('intake')
     expect(details?.node.inputs).toEqual(['a.json'])

@@ -27,7 +27,6 @@ from server.app.workflows.definition import load_workflow_definition
 from tests.helpers import scan_entries
 from tests.helpers.auth import authenticate_client
 
-ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_KEY = "test_control_flow"
 
 

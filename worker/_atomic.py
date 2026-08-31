@@ -21,6 +21,10 @@ def atomic_write(path: Path, content: str, *, mode: int | None = None) -> None:
             os.chmod(temporary, mode)
         os.replace(temporary, path)
     except BaseException:
+        # #204 broad-except audit: staging-file cleanup guard, not a
+        # swallow — the bare raise re-raises the original verbatim. The
+        # width is deliberate: cancellation/GeneratorExit during a partial
+        # write must also remove the .part temp file.
         with suppress(OSError):
             os.unlink(temporary)
         raise

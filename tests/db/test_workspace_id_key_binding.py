@@ -29,18 +29,20 @@ def test_schema_version_pin() -> None:
     # test_retire_global_register_tokens_migration.py (v58) →
     # test_jobs_run_id_index.py (v59) → back to the v58 file for the DDL-only
     # v60; v62 owns its own module, v63 is DDL-only (workspace_preview_config),
-    # and v64's data migration lives in
+    # v64's data migration lives in
     # tests/db/test_workspace_execution_defaults_migration.py (the retired
     # default_agent_* / intake_config_json columns still drop in schema.py's
     # post-chain sweep); v65 is DDL-only (approval_decisions,
-    # EXEC-APPROVAL-001), so the pin stays here.
-    assert SCHEMA_VERSION == 65
+    # EXEC-APPROVAL-001), and v66's data migration lives in
+    # tests/db/test_workflow_node_explicit_types_migration.py, so the pin
+    # stays here.
+    assert SCHEMA_VERSION == 66
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "approval_decisions"
+    assert row["name"] == "workflow_node_explicit_types"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:

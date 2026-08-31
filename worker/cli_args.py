@@ -59,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     configure.add_argument("--max-concurrency", type=int)
     configure.add_argument("--upload-concurrency", type=int)
     configure.add_argument("--claim-enabled", action=argparse.BooleanOptionalAction, default=None)
-    configure.add_argument("--capability", action="append")
+    configure.add_argument("--capability", action="append", help="已退役（issue #284）：值被忽略")
     configure.add_argument("--model", action="append", default=[])
     configure.add_argument("--label", action="append", default=[])
     configure.add_argument(

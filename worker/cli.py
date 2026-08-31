@@ -47,7 +47,8 @@ def _print_value(
 
 
 def _update(client: LocalClient, payload: dict[str, Any]) -> dict[str, Any]:
-    return client.request("PUT", "/api/config", payload, timeout=MUTATE_TIMEOUT)
+    result: dict[str, Any] = client.request("PUT", "/api/config", payload, timeout=MUTATE_TIMEOUT)
+    return result
 
 
 def main() -> int:

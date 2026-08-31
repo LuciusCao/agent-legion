@@ -270,18 +270,8 @@ def test_model_declaration_is_scoped_to_agent_runtime() -> None:
     candidate = {"runtime": "velites", "capability": "review"}
     manifest = {"execution": {"provider": "sqai", "model": "kimi"}}
 
-    assert not worker_can_run(
-        candidate,
-        manifest,
-        {"review"},
-        {("pi", "sqai", "kimi")},
-    )
-    assert worker_can_run(
-        candidate,
-        manifest,
-        {"review"},
-        {("velites", "sqai", "kimi")},
-    )
+    assert not worker_can_run(candidate, manifest, {("pi", "sqai", "kimi")})
+    assert worker_can_run(candidate, manifest, {("velites", "sqai", "kimi")})
 
 
 @pytest.mark.no_db
@@ -289,8 +279,18 @@ def test_legacy_unscoped_model_declaration_remains_compatible() -> None:
     assert worker_can_run(
         {"runtime": "velites", "capability": "review"},
         {"execution": {"provider": "sqai", "model": "kimi"}},
-        {"review"},
         {("*", "sqai", "kimi")},
+    )
+
+
+@pytest.mark.no_db
+def test_capability_never_gates_worker_can_run() -> None:
+    """Issue #284: claim admission is the model allowlist only — the
+    candidate's capability is irrelevant to worker_can_run."""
+    assert worker_can_run(
+        {"runtime": "velites", "capability": "undeclared-capability"},
+        {"execution": {"provider": "sqai", "model": "kimi"}},
+        {("velites", "sqai", "kimi")},
     )
 
 

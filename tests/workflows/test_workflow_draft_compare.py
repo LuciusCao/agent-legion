@@ -343,8 +343,9 @@ def test_compare_node_changes_carry_node_type(tmp_path):
     changes = {change["node_key"]: change for change in result["summary"]["node_changes"]}
     assert changes["_start"]["type"] == "added"
     assert changes["_start"]["node_type"] == "start"
-    assert changes["fetch"]["node_type"] == "node"
-    assert changes["report"]["node_type"] == "node"
+    # 草稿未声明 type：loader 归一化为 code（#284 显式节点类型）。
+    assert changes["fetch"]["node_type"] == "code"
+    assert changes["report"]["node_type"] == "code"
 
 
 def test_compare_route_accepts_allow_missing_baseline(tmp_path):

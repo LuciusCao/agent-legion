@@ -23,7 +23,7 @@ from worker.artifact import download as artifact_download
 from worker.artifact import upload as artifact_upload
 from worker.artifact.upload import DirectUploadError, upload_artifact_direct
 from worker.bundle_io import download_input_artifacts
-from worker.code_runner import prepare_code_result
+from worker.result_archive import prepare_code_result
 from worker.status import ExecutionStatusReporter
 from worker.upload.queue import UploadQueue, UploadTask
 

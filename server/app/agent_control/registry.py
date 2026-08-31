@@ -89,6 +89,8 @@ class AgentWorkerRegistry(AgentRegisterTokenStore):
         normalized_labels = normalize_labels(labels or {})
         # None is kept as an internal compatibility mode for older direct
         # registry callers; the HTTP contract always supplies explicit lists.
+        # Capabilities are accepted for contract compatibility but are never
+        # used for claim matching (issue #284) — stored verbatim only.
         normalized_capabilities, normalized_models = normalize_worker_declarations(
             capabilities,
             models,

@@ -10,17 +10,18 @@ from tests.helpers import load_builtin_definition
 
 WF = "education_video_problems_generation"
 NODE = "intake_knowledge_points"
-BASE = f"/api/workspaces/default/workflows/{WF}/nodes/{NODE}/code"
+BASE = f"/api/workspaces/{WF}/workflows/{WF}/nodes/{NODE}/code"
 CUSTOM_V1 = "def run(job, job_dir, runtime):\n    return 'v1'\n"
 CUSTOM_V2 = "def run(job, job_dir, runtime):\n    return 'v2'\n"
 
 
 @pytest.fixture
 def workspace_with_revision(client, job_db, settings):
-    job_db.create_workspace("default", default_workflow_key=WF)
+    # v62 shape: workspace id == workflow key (id==key invariant).
+    job_db.create_workspace(WF, default_workflow_key=WF)
     definition = load_builtin_definition(WF)
-    seed_demo_workspace_node_codes(settings, "default")
-    WorkflowRevisionService(job_db).ensure_active_revision("default", definition)
+    seed_demo_workspace_node_codes(settings, WF)
+    WorkflowRevisionService(job_db).ensure_active_revision(WF, definition)
     return client
 
 
@@ -114,7 +115,7 @@ def test_invalid_code_is_400(workspace_with_revision, code) -> None:
 def test_unknown_node_reads_as_empty_state(workspace_with_revision) -> None:
     # Draft-only nodes (entering with the next publish) are readable so their
     # code can be drafted before the revision exists: nothing stored yet.
-    url = f"/api/workspaces/default/workflows/{WF}/nodes/no_such_node/code"
+    url = f"/api/workspaces/{WF}/workflows/{WF}/nodes/no_such_node/code"
     response = workspace_with_revision.get(url)
     assert response.status_code == 200
     body = response.json()
@@ -123,7 +124,7 @@ def test_unknown_node_reads_as_empty_state(workspace_with_revision) -> None:
 
 
 def test_unknown_node_accepts_draft(workspace_with_revision) -> None:
-    url = f"/api/workspaces/default/workflows/{WF}/nodes/no_such_node/code"
+    url = f"/api/workspaces/{WF}/workflows/{WF}/nodes/no_such_node/code"
     assert workspace_with_revision.put(url, json={"code": CUSTOM_V1}).status_code == 200
     body = workspace_with_revision.get(url).json()
     assert body["origin"] == "none"
@@ -134,7 +135,7 @@ def test_unknown_node_accepts_draft(workspace_with_revision) -> None:
 def test_start_node_is_404(workspace_with_revision) -> None:
     # The synthetic `_start` entry node never executes: no code to read or
     # draft (404 even though draft-only unknown nodes are allowed through).
-    url = f"/api/workspaces/default/workflows/{WF}/nodes/_start/code"
+    url = f"/api/workspaces/{WF}/workflows/{WF}/nodes/_start/code"
     assert workspace_with_revision.get(url).status_code == 404
     assert workspace_with_revision.put(url, json={"code": CUSTOM_V1}).status_code == 404
 
@@ -201,7 +202,7 @@ def test_non_admin_member_gets_403(workspace_with_revision, client, job_db) -> N
         headers={"x-agent-legion-request": "1"},
     )
     assert response.status_code == 201, response.text
-    job_db.upsert_workspace_member("default", response.json()["id"], "editor")
+    job_db.upsert_workspace_member(WF, response.json()["id"], "editor")
     viewer = client.__class__(client.app)
     viewer.post("/api/auth/login", json={"username": "viewer1", "password": "pw1"})
     viewer.headers["x-agent-legion-request"] = "1"
@@ -232,16 +233,53 @@ def test_get_code_pathless_capability_returns_none_origin(client_factory, job_db
     # P-0.5: a capability needs no executor definition at all — a node
     # without any published code simply reports origin "none".
     with client_factory(fresh=True) as client:
-        job_db.create_workspace("default", default_workflow_key="custom_wf")
+        job_db.create_workspace("custom_wf", default_workflow_key="custom_wf")
         definition = workflow_definition_from_yaml_string(
             "key: custom_wf\nlabel: Custom\nnodes:\n  do_custom:\n    capability: custom_only\n"
         )
-        WorkflowRevisionService(job_db).ensure_active_revision("default", definition)
+        WorkflowRevisionService(job_db).ensure_active_revision("custom_wf", definition)
 
-        response = client.get("/api/workspaces/default/workflows/custom_wf/nodes/do_custom/code")
+        response = client.get("/api/workspaces/custom_wf/workflows/custom_wf/nodes/do_custom/code")
 
     assert response.status_code == 200
     body = response.json()
     assert body["origin"] == "none"
     assert body["code"] == ""
     assert "path" not in body
+
+
+def test_segment_free_path_serves_the_same_resource(client, job_db, settings) -> None:
+    """#211 Phase 2: the workflows/{workflow_key} URL segment retires. On a
+    v62-shaped workspace (id == key) the segment-free path serves the same
+    resource as the deprecated alias, for reads and writes alike."""
+    job_db.create_workspace(WF, default_workflow_key=WF)
+    definition = load_builtin_definition(WF)
+    seed_demo_workspace_node_codes(settings, WF)
+    WorkflowRevisionService(job_db).ensure_active_revision(WF, definition)
+
+    legacy = client.get(f"/api/workspaces/{WF}/workflows/{WF}/nodes/{NODE}/code").json()
+    current = client.get(f"/api/workspaces/{WF}/nodes/{NODE}/code").json()
+    assert current == legacy
+
+    draft = client.put(f"/api/workspaces/{WF}/nodes/{NODE}/code", json={"code": CUSTOM_V1})
+    assert draft.status_code == 200, draft.text
+    published = client.post(f"/api/workspaces/{WF}/nodes/{NODE}/code/publish")
+    assert published.status_code == 200, published.text
+    effective = client.get(f"/api/workspaces/{WF}/nodes/{NODE}/code").json()
+    assert effective["origin"] == "custom"
+    assert effective["code"] == CUSTOM_V1
+
+
+def test_segment_free_path_rejects_mismatched_workflow_key_query(
+    workspace_with_revision,
+) -> None:
+    """Codex P2 on #299: on the segment-free path the deprecated (now
+    query-bound) workflow_key must not steer the entity key away from the
+    path workspace id — anything but the equal value is a 400, on reads and
+    writes alike (a mismatched write would create invisible versions)."""
+    mismatched = f"/api/workspaces/{WF}/nodes/{NODE}/code?workflow_key=other_flow"
+
+    assert workspace_with_revision.get(mismatched).status_code == 400
+    assert workspace_with_revision.put(mismatched, json={"code": CUSTOM_V1}).status_code == 400
+    publish = f"/api/workspaces/{WF}/nodes/{NODE}/code/publish?workflow_key=other_flow"
+    assert workspace_with_revision.post(publish).status_code == 400
