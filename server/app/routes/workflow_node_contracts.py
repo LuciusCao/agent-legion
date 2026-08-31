@@ -12,6 +12,11 @@ class WorkflowNodeExecutionResponse(BaseModel):
     prompt: str = ""
 
 
+class WorkflowNodeSkillResponse(BaseModel):
+    key: str
+    ref: str = ""
+
+
 class WorkflowNodeResponse(BaseModel):
     key: str
     label: str
@@ -25,4 +30,5 @@ class WorkflowNodeResponse(BaseModel):
     inputs: list[str]
     outputs: list[str]
     terminal: WorkflowTerminalResponse | None = None
+    skill: WorkflowNodeSkillResponse | None = None
     execution: WorkflowNodeExecutionResponse = Field(default_factory=WorkflowNodeExecutionResponse)

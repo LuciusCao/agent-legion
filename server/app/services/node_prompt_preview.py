@@ -70,10 +70,12 @@ def _locate_executable_node(definition: WorkflowDefinition, node_key: str) -> Wo
 
 
 def _skill_key_for_node(job_db: JobQueries, workspace_id: str, node: WorkflowNode) -> str | None:
-    """Skill of the workspace's published Agent bound to the node's capability."""
+    """Node skill binding wins (#76); the published Agent's skill is the legacy fallback."""
+    if node.skill is not None:
+        return node.skill.key
     for definition in published_agent_definitions(job_db, workspace_id).values():
         if definition.capability == node.capability:
-            return definition.skill
+            return definition.skill or None
     return None
 
 

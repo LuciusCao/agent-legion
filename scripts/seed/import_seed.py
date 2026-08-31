@@ -54,6 +54,7 @@ from scripts.seed.seed_common import (
     canonical_json,
     content_equal,
     load_seed,
+    lock_entry_refs,
     workflow_capabilities,
 )
 
@@ -405,8 +406,11 @@ def step5_skills(client: Client, seed: dict[str, Any], failures: list[str]) -> N
             and entry.get("repo") == source.get("repo")
             and entry.get("ref") == source.get("ref")
         ):
-            locked = desired_lock.get(key) or {}
-            if entry.get("locked_commit") == locked.get("commit") and not entry.get("stale"):
+            # Multi-ref lock (issue #76): compare against the commit the seed
+            # lock pins for this source ref (v1 seed entries upgrade).
+            locked = lock_entry_refs(desired_lock.get(key) or {}, source.get("ref"))
+            expected = locked.get(str(source.get("ref")))
+            if entry.get("locked_commit") == expected and not entry.get("stale"):
                 print(
                     f"  {key}: skip (ref {source.get('ref')} @ "
                     f"{entry.get('locked_commit', '')[:12]} locked)"
@@ -519,18 +523,19 @@ def verify(client: Client, seed: dict[str, Any], bound: dict[str, list[str]]) ->
             if entry is None:
                 check(False, f"skill {key}", "missing on target")
                 continue
-            locked = desired_lock.get(key) or {}
+            locked = lock_entry_refs(desired_lock.get(key) or {}, source.get("ref"))
+            expected = locked.get(str(source.get("ref")))
             ok = (
                 entry.get("repo") == source.get("repo")
                 and entry.get("ref") == source.get("ref")
-                and entry.get("locked_commit") == locked.get("commit")
+                and entry.get("locked_commit") == expected
                 and not entry.get("stale")
             )
             check(
                 ok,
                 f"skill {key}",
                 f"ref={entry.get('ref')} locked={str(entry.get('locked_commit'))[:12]} "
-                f"expected={str(locked.get('commit'))[:12]} stale={entry.get('stale')}",
+                f"expected={str(expected)[:12]} stale={entry.get('stale')}",
             )
     return failures
 

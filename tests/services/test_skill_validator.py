@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from server.app.services.skill_validator import SkillValidator
-from server.app.skills.config import LockedSkillSource, SkillsLock
+from server.app.skills.config import LockedSkill, SkillsConfig, SkillsLock
 
 pytestmark = pytest.mark.no_db
 
@@ -52,9 +52,7 @@ def base_dir(tmp_path):
 
 def test_validate_happy_path_with_tags(base_dir, tmp_path) -> None:
     skill_dir = _make_skill(base_dir, "wf/review", tags=["v1.0.0", "v1.10.0", "v1.2.0"])
-    lock = SkillsLock(
-        skills={"wf/review": LockedSkillSource(repo="local", ref="v1.2.0", commit="abc123")}
-    )
+    lock = SkillsLock(skills={"wf/review": LockedSkill(repo="local", refs={"v1.2.0": "abc123"})})
 
     result = SkillValidator(base_dir, lambda: lock).validate(str(skill_dir))
 
@@ -63,7 +61,28 @@ def test_validate_happy_path_with_tags(base_dir, tmp_path) -> None:
     # version:refname sort keeps semver order, latest first.
     assert result.tags == ("v1.10.0", "v1.2.0", "v1.0.0")
     assert result.latest_tag == "v1.10.0"
+    # No sources seam wired: the sole pin is the unambiguous locked ref.
     assert result.locked_ref == "v1.2.0"
+
+
+def test_locked_ref_follows_the_source_ref(base_dir, tmp_path) -> None:
+    """Multi-ref lock (issue #76): with a sources seam, "locked" means the
+    declared source ref is one of the pinned refs — a drifted source ref
+    reports no locked ref even while other pins exist."""
+    skill_dir = _make_skill(base_dir, "wf/review", tags=["v1.0.0", "v1.2.0"])
+    lock = SkillsLock(skills={"wf/review": LockedSkill(repo="local", refs={"v1.0.0": "a" * 40})})
+    sources = SkillsConfig.model_validate(
+        {"skills": {"wf/review": {"repo": "local", "ref": "v1.0.0"}}}
+    )
+
+    pinned = SkillValidator(base_dir, lambda: lock, lambda: sources).validate(str(skill_dir))
+    assert pinned.locked_ref == "v1.0.0"
+
+    drifted = SkillsConfig.model_validate(
+        {"skills": {"wf/review": {"repo": "local", "ref": "v1.2.0"}}}
+    )
+    result = SkillValidator(base_dir, lambda: lock, lambda: drifted).validate(str(skill_dir))
+    assert result.locked_ref is None
 
 
 def test_validate_expands_home(monkeypatch, base_dir, tmp_path) -> None:

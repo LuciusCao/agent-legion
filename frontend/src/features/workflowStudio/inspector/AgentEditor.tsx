@@ -9,7 +9,6 @@ import {
 } from '../../../api'
 import type { AgentDefinitionPayload, AgentRuntime } from '../../../types'
 import { useUiStore } from '../../../stores/uiStore'
-import { SkillSelector } from '../../../components/SkillSelector'
 import { AgentVersionsDialog } from './AgentVersionsDialog'
 import styles from './AgentsPanel.module.css'
 
@@ -48,7 +47,6 @@ export function AgentEditor({
   const [agentIdInput, setAgentIdInput] = useState('')
   const [capability, setCapability] = useState(initialCapability ?? '')
   const [runtime, setRuntime] = useState<AgentRuntime>('pi')
-  const [skill, setSkill] = useState('')
   const [tools, setTools] = useState<string[]>(['read', 'write', 'bash'])
   const [requiresLabels, setRequiresLabels] = useState<
     Record<string, string> | undefined
@@ -71,7 +69,6 @@ export function AgentEditor({
         const definition = (source?.definition ?? {}) as Record<string, unknown>
         setCapability(String(definition.capability ?? ''))
         setRuntime((definition.runtime as AgentRuntime) ?? 'pi')
-        setSkill(String(definition.skill ?? ''))
         setTools(
           Array.isArray(definition.tools) ? definition.tools.map(String) : []
         )
@@ -127,7 +124,9 @@ export function AgentEditor({
     return {
       capability: capability.trim(),
       runtime,
-      skill: skill.trim(),
+      // #76：skill 不再是 Agent 定义的一部分（节点级绑定）；generated 契约
+      // 里 skill 仍必填（服务端默认 ""），显式传空。
+      skill: '',
       ...(tools.length > 0 ? { tools } : {}),
       ...(requiresLabels ? { requires_labels: requiresLabels } : {}),
       ...(configSchema ? { config_schema: configSchema } : {}),
@@ -239,13 +238,6 @@ export function AgentEditor({
         </TextField>
       </div>
       <div className={styles.field}>
-        <SkillSelector
-          workspaceId={workspaceId}
-          value={skill}
-          onChange={setSkill}
-        />
-      </div>
-      <div className={styles.field}>
         <TextField
           select
           label="Tools"
@@ -284,7 +276,6 @@ export function AgentEditor({
           disabled={
             busy ||
             capability.trim() === '' ||
-            skill.trim() === '' ||
             (creating && agentIdInput.trim() === '')
           }
         >

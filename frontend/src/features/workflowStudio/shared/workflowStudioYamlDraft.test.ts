@@ -14,6 +14,10 @@ import {
   dumpWorkflowYaml,
   parseWorkflowYaml,
 } from './workflowStudioYamlDraft.parse'
+import {
+  normalizeNodeSkill,
+  patchWorkflowNodeSkill,
+} from './workflowStudioYamlDraft.skill'
 
 const yaml = `key: demo
 label: Demo
@@ -72,6 +76,70 @@ describe('workflowStudioYamlDraft node patches', () => {
 
   it('patches workflow label', () => {
     expect(patchWorkflowLabel(yaml, 'Demo v2')).toContain('label: Demo v2')
+  })
+
+  it('adds a node skill binding in mapping form when a ref is given', () => {
+    const changed = patchWorkflowNodeSkill(yaml, 'fetch', {
+      key: 'demo/review',
+      ref: 'v1.0.0',
+    })
+    const node = parseWorkflowYaml(changed).nodes?.fetch
+    expect(node?.skill).toEqual({ key: 'demo/review', ref: 'v1.0.0' })
+    expect(changed).toContain('skill:')
+    expect(changed).toContain('key: demo/review')
+    expect(changed).toContain('ref: v1.0.0')
+  })
+
+  it('writes the string form when the ref is left empty', () => {
+    const changed = patchWorkflowNodeSkill(yaml, 'fetch', {
+      key: 'demo/review',
+      ref: '',
+    })
+    expect(parseWorkflowYaml(changed).nodes?.fetch?.skill).toBe('demo/review')
+    expect(changed).toContain('skill: demo/review')
+  })
+
+  it('changes only the ref on an existing string-form binding', () => {
+    const withSkill = patchWorkflowNodeSkill(yaml, 'fetch', {
+      key: 'demo/review',
+      ref: '',
+    })
+    const changed = patchWorkflowNodeSkill(withSkill, 'fetch', {
+      key: 'demo/review',
+      ref: 'v2.0.0',
+    })
+    expect(parseWorkflowYaml(changed).nodes?.fetch?.skill).toEqual({
+      key: 'demo/review',
+      ref: 'v2.0.0',
+    })
+  })
+
+  it('removes the binding on null', () => {
+    const withSkill = patchWorkflowNodeSkill(yaml, 'fetch', {
+      key: 'demo/review',
+      ref: 'v1.0.0',
+    })
+    const cleared = patchWorkflowNodeSkill(withSkill, 'fetch', null)
+    expect(parseWorkflowYaml(cleared).nodes?.fetch?.skill).toBeUndefined()
+    expect(cleared).not.toContain('skill')
+  })
+
+  it('normalizes both yaml skill forms and rejects empty keys', () => {
+    expect(normalizeNodeSkill('demo/review')).toEqual({
+      key: 'demo/review',
+      ref: '',
+    })
+    expect(normalizeNodeSkill({ key: 'demo/review', ref: 'v1' })).toEqual({
+      key: 'demo/review',
+      ref: 'v1',
+    })
+    expect(normalizeNodeSkill({ key: 'demo/review' })).toEqual({
+      key: 'demo/review',
+      ref: '',
+    })
+    expect(normalizeNodeSkill(undefined)).toBeNull()
+    expect(normalizeNodeSkill('')).toBeNull()
+    expect(normalizeNodeSkill({ key: ' ' })).toBeNull()
   })
 
   it('patches node execution settings and removes empty inheritance values', () => {

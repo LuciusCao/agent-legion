@@ -10,6 +10,7 @@ from server.app.workflows.definition import (
     WorkflowDefinitionError,
     workflow_definition_from_mapping,
 )
+from server.app.workflows.workflow_node_skill import node_skill_publish_error
 
 
 def workflow_definition_from_yaml_string(raw_yaml: str) -> WorkflowDefinition:
@@ -47,22 +48,26 @@ def validate_workflow_for_publish(
     execute (EXEC-WORKFLOW-START-001), so they skip both checks; approval
     gates likewise never dispatch — the worker parks them for a human
     decision (EXEC-APPROVAL-001) — so they need neither Agents nor code.
+    The issue #76 skill-binding gate lives in ``node_skill_publish_error``.
     """
     errors: list[str] = []
-    capability_counts: dict[str, int] = {}
+    agents_by_capability: dict[str, list] = {}
     for agent_definition in published_agent_definitions(job_db, workspace_id).values():
-        capability_counts[agent_definition.capability] = (
-            capability_counts.get(agent_definition.capability, 0) + 1
-        )
+        agents_by_capability.setdefault(agent_definition.capability, []).append(agent_definition)
     for node in definition.executable_nodes.values():
         if node.node_type == "approval":
             continue
-        count = capability_counts.get(node.capability, 0)
-        if count > 0:
-            if count != 1:
-                errors.append(
-                    f"Agent capability {node.capability} must resolve to exactly one published Agent"
-                )
+        candidates = agents_by_capability.get(node.capability, [])
+        if len(candidates) > 1:
+            errors.append(
+                f"Agent capability {node.capability} must resolve to exactly one published Agent"
+            )
+            continue
+        agent_skill = candidates[0].skill if candidates else None
+        skill_error = node_skill_publish_error(node, agent_skill)
+        if skill_error is not None:
+            errors.append(skill_error)
+        if candidates:
             continue
         node_code = resolve_dispatch_node_code(
             job_db,

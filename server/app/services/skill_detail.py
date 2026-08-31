@@ -16,7 +16,7 @@ from typing import Any
 
 from server.app.services import skill_repo
 from server.app.services.job_errors import NotFoundError
-from server.app.skills.config import LockedSkillSource
+from server.app.skills.config import LockedSkill
 
 
 def read_files_at_commit(repo_dir: Path, commit: str) -> list[dict[str, Any]]:
@@ -73,7 +73,7 @@ def skill_detail(
     skill_key: str,
     configured_ref: str,
     repo_dir: Path,
-    locked: LockedSkillSource | None,
+    locked: LockedSkill | None,
     ref: str | None,
     working_tree_reader: Callable[[Path], list[dict[str, Any]]],
 ) -> dict[str, Any]:
@@ -88,7 +88,9 @@ def skill_detail(
     if ref is not None:
         return detail_at_ref(skill_key, ref, repo_dir)
     tags = list(skill_repo.list_tags(repo_dir)) if skill_repo.is_git_repo(repo_dir) else []
-    locked_commit = locked.commit if locked is not None else ""
+    # Multi-ref lock (issue #76): the "current locked version" is the pin for
+    # the configured (source) ref.
+    locked_commit = locked.refs.get(configured_ref, "") if locked is not None else ""
     if locked_commit and skill_repo.has_commit(repo_dir, locked_commit):
         return {
             "key": skill_key,

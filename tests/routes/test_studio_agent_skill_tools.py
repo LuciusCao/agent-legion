@@ -17,7 +17,7 @@ import pytest
 from server.app.auth import scoped_tokens
 from server.app.services.skill_source_store import SkillSourceStore
 from server.app.skills.config import (
-    LockedSkillSource,
+    LockedSkill,
     SkillsConfig,
     SkillsLock,
     SkillSourceConfig,
@@ -264,7 +264,7 @@ def test_default_detail_reads_locked_commit_after_save(client_factory, job_db, s
     store = SkillSourceStore(job_db.dsn_identity)
     sources = store.get_sources() or SkillsConfig()
     lock = store.get_lock() or SkillsLock()
-    lock.skills[_KEY] = LockedSkillSource(repo=sources.skills[_KEY].repo, ref="v1.0.0", commit=head)
+    lock.skills[_KEY] = LockedSkill(repo=sources.skills[_KEY].repo, refs={"v1.0.0": head})
     store.put_lock(lock)
     with client_factory(fresh=True) as client:
         scoped = _scoped(client, job_db)

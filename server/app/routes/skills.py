@@ -7,6 +7,7 @@ from server.app.routes.skill_contracts import (
     SkillValidateRequest,
     SkillValidateResponse,
 )
+from server.app.services.skill_source_store import SkillSourceStore
 from server.app.services.skill_validator import SkillValidator
 from server.app.settings import Settings
 from server.app.skills.runtime import build_skill_manager
@@ -15,10 +16,11 @@ from server.app.skills.runtime import build_skill_manager
 def create_skills_router(job_db: JobQueries, settings: Settings) -> APIRouter:
     """Skill path validation + tag discovery for the Studio Agent editor."""
     router = APIRouter()
+    store = SkillSourceStore(job_db)
 
     def _validator() -> SkillValidator:
         manager = build_skill_manager(job_db, settings.skills_runs_dir)
-        return SkillValidator(manager.base_dir, manager.load_lock)
+        return SkillValidator(manager.base_dir, manager.load_lock, store.get_sources)
 
     @router.post("/skills/validate", response_model=SkillValidateResponse)
     def validate_skill(request: SkillValidateRequest) -> SkillValidateResponse:

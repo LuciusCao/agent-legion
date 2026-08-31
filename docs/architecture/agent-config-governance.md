@@ -5,6 +5,13 @@
 > published `runtime: pi` 定义已翻转为 velites）；Agent 定义经 Studio
 > 管理并发布进 `versioned_entities`；manifest 执行块统一为 `execution.*`。
 > 本文档保留为设计定稿记录。
+>
+> **2026-08-31 补注（#76）**：skill 内容绑定已从 Agent 定义下沉到
+> workflow 节点——Agent 路由节点声明 `skill: {key, ref}`（随 revision
+> 版本化、随 intake 冻结），`AgentDefinition.skill` 降为可选 legacy 兜底；
+> 锁按 (skill, ref) 多值冻结 commit，manifest 增加 `skill_ref`、
+> `skill_version` 改为 `ref@commit12`（invariant EXEC-SKILL-NODE-001）。
+> 下文 §2/§5/§7 中「Agent 定义拥有 skill」的描述反映定稿时点。
 
 ## 背景与目标
 
@@ -77,7 +84,8 @@ class AgentDefinition(BaseModel):
     agent_id: str                    # 如 "demo-review-questions-v1"
     capability: str                  # 如 "review_questions"
     runtime: Literal["pi", "openclaw", "velites"]
-    skill: str                       # 如 "education-video-problems-generation/review-questions"
+    skill: str = ""                  # #76 起可选（空 = 未绑定）：仅作 legacy 兜底，
+                                     # 权威绑定在 workflow 节点（key + 可选 ref）
     tools: tuple[str, ...] = ("read", "write", "bash")
     config_schema: dict[str, Any] = {}  # 节点可调参数 schema
     enabled: bool = True
@@ -169,7 +177,8 @@ manifest = {
     "config": {...},
     "tools": ["read", "write", "bash"],
     "skill": "education-video-problems-generation/review-questions",
-    "skill_version": "abc123",
+    "skill_ref": "v1.0.0",                  # #76：lock 冻结时的有效 ref（节点声明或 source 默认）
+    "skill_version": "v1.0.0@abc123def456", # #76：格式 ref@commit12（原为裸 commit）
     "log_path": "...",
     "execution": {
         "binary": "velites",
@@ -236,6 +245,10 @@ Studio
 ```
 
 ### 7. Skill 选择交互
+
+> #76 起：Agent 定义上的 skill 只是 legacy 兜底，权威绑定在 workflow 节点
+> （节点详情里声明 `skill: {key, ref}`，ref 空 = 回落 skill_sources 默认
+> ref）；本节交互仍用于编辑 Agent 定义的兜底 skill。
 
 **两种方式**：
 

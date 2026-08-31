@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TestQueryProvider } from '../../../testing/testQueryClient'
 import { useSettingStore } from '../../../stores/settingStore'
@@ -20,10 +20,6 @@ vi.mock('../../../api', () => ({
   saveAgentDraft: (...args: unknown[]) => mocks.saveAgentDraft(...args),
   publishAgent: (...args: unknown[]) => mocks.publishAgent(...args),
   archiveAgent: (...args: unknown[]) => mocks.archiveAgent(...args),
-}))
-
-vi.mock('../../../components/SkillSelector', () => ({
-  SkillSelector: () => <div data-testid="skill-selector-stub" />,
 }))
 
 function renderEditor(
@@ -62,6 +58,27 @@ describe('WorkflowNodeAgentEditor', () => {
     expect(mocks.fetchAgentDefinition).toHaveBeenCalledWith('ws1', 'agent-a')
     expect(await screen.findByDisplayValue('generate_key_info'))
     expect(screen.getByDisplayValue('agent-a')).toBeInTheDocument()
+  })
+
+  it('saves the draft without a skill field value (#76: node-level binding)', async () => {
+    mocks.saveAgentDraft.mockResolvedValue({})
+    renderEditor({ agentId: 'agent-a', capability: 'generate_key_info' })
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Agent' }))
+    await screen.findByDisplayValue('generate_key_info')
+    // 定义加载自带 skill 的存量 Agent：编辑器不再展示/提交 skill。
+    expect(screen.queryByDisplayValue('demo/skill')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+
+    // waitFor 的轮询包在 act 里：保存 resolve 后的 busy/toast 状态更新被覆盖。
+    await waitFor(() =>
+      expect(mocks.saveAgentDraft).toHaveBeenCalledWith(
+        'ws1',
+        'agent-a',
+        expect.objectContaining({ capability: 'generate_key_info', skill: '' })
+      )
+    )
   })
 
   it('opens the create form prefilled with the node capability', async () => {

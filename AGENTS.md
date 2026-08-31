@@ -154,7 +154,7 @@
   `scripts/seed_demo.py` 提供 demo workspace）；v62 迁移把存量 workspace 的 id 改成
   已绑定的 key（key 为空的按 id 回填）。`default_workflow_key` 作为独立概念已标
   deprecated（退役评估 #211）。
-- Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
+- Workflow Node 只声明 `capability` 与可选的 `skill` 内容绑定（#76：`key` + 可选 `ref`，随 revision 版本化；仅对 Agent 路由节点有意义——code 节点声明即 publish 拒绝，start/approval 节点 loader 禁止；`ref` 为空时回落 skill_sources 默认 ref），不声明 `runner` / `agent` / command template。dispatch 从节点取 skill（`effective_node_skill`：节点绑定优先，`AgentDefinition.skill` 降为可选 legacy 兜底，两者皆空即节点失败），manifest 记录 `skill` / `skill_ref`（lock 冻结的有效 ref）/ `skill_version`（`ref@commit12`），Worker 结果 Host 侧 output 校验按 manifest 的 `(skill, skill_ref)` 重解析同一版本。
   唯一例外是 `type: start` 的入口节点：恰好一个、豁免 capability、承载入口契约
   `accepted_item_types`、永不执行（调度视为恒 completed、不进 job_nodes、不 dispatch）、
   不可删（无 start 的存量定义由 loader 自动注入合成 start），`RunService.create_run`
@@ -269,7 +269,6 @@
 # Wrong: Workflow leaks implementation details.
 review_keywords:
   runner: pi
-  skill: education-video-problems-generation/review-questions
 
 # Correct: Workflow declares business capability only.
 review_keywords:
@@ -287,7 +286,7 @@ CodeExecutor(...).execute(context)
 ## 7. Pi / External Skills
 
 - Skill 只在外部仓库修改，不要复制或 symlink 到项目根。外部 skill 仓库的位置自便，
-  但被 agent 定义引用的 skill 目录必须位于 skill root（`~/.agents/skills`）之下，
+  但被节点绑定或 agent 定义引用的 skill 目录必须位于 skill root（`~/.agents/skills`）之下，
   skill key 为其下的两段相对路径 `<group>/<name>`（如
   `~/.agents/skills/education-video-problems-generation/review-questions` 的 key 是
   `education-video-problems-generation/review-questions`）。
@@ -299,13 +298,18 @@ CodeExecutor(...).execute(context)
   `~/.agents/skills/agent-legion` 的 `skill_sources`/`skill_lock` 由启动迁移
   `server/app/skills/skill_root_migration.py` 自动改写/清理（幂等）。
 - skill 源与锁已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB
-  `global_settings`（key=`skill_sources` / `skill_lock`）；tracked
+  `global_settings`（key=`skill_sources` / `skill_lock`）；锁按 (skill, ref)
+  多值冻结（v2：per-skill `{repo, refs: {ref → commit}}`，#76，EXEC-SKILL-NODE-001），
+  skill_sources 的 ref 只作节点未声明 ref 时的默认兜底。tracked
   `config/skills.yaml` / `config/skills.lock` 已退役，残留文件只在 DB 无记录时
   启动 import-once（warning）作一次性迁移通道，此后不再读取。
-- 变更流程：外部仓库改 skill 并打 tag → admin UI（/admin/settings「Skill 源管理」）
-  或 admin API（`PUT /api/admin/skill-sources/{skill_key}`）更新 ref → relock
-  （`POST /api/admin/skill-sources/relock`，或 CLI `make skills-lock` /
-  `uv run python -m server.app.skills.lock`）解析并冻结 commit。
+- 变更流程：外部仓库改 skill 并打 tag → 把节点 `skill.ref` 指向新 tag（Studio
+  草稿发布，随 revision 版本化）→ 首次 dispatch 自动解析该 ref 并把 commit
+  冻结进锁（ref 漂移不是错误）。改默认 ref（admin UI /admin/settings「Skill 源管理」
+  或 admin API `PUT /api/admin/skill-sources/{skill_key}`）或换仓库（repo 漂移仍
+  触发 relock 闸门）才需要 relock（`POST /api/admin/skill-sources/relock`，或 CLI
+  `make skills-lock` / `uv run python -m server.app.skills.lock`——刷新 source
+  ref ∪ 已锁 refs）。
   （skill 共享资源一致性检查 `check-skills-shared.py` 已随业务 skill 源退役删除。）
 - 完整流程见 [examples/README.md](examples/README.md)（demo skill 的接线方式）。
 

@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,6 +19,17 @@ label: Test Publish Flow
 nodes:
   do_thing:
     capability: do_thing
+"""
+
+_DRAFT_YAML_WITH_SKILL = """
+key: test_publish_flow
+label: Test Publish Flow
+nodes:
+  do_thing:
+    capability: do_thing
+    skill:
+      key: education-video-problems-generation/review-questions
+      ref: v1.1.0
 """
 
 _DRAFT_YAML_WITH_START = """
@@ -48,6 +60,21 @@ def _seed_node_code(workspace_id: str) -> None:
         "test seed",
     )
     codes.publish(workspace_id, "test_publish_flow", "do_thing")
+
+
+def _patch_agent_catalog(
+    monkeypatch: pytest.MonkeyPatch, agents: dict[str, SimpleNamespace]
+) -> None:
+    """Stage a published Agent catalog without versioned_entities rows.
+
+    The publish gate only reads ``capability``/``skill`` off each definition,
+    and a skill-less Agent cannot be staged through AgentDefinition (skill is
+    min_length=1 there) — exactly the legacy shape the gate must still reject.
+    """
+    monkeypatch.setattr(
+        "server.app.services.workflow_drafts.published_agent_definitions",
+        lambda job_db, workspace_id: agents,
+    )
 
 
 def test_publish_rejects_invalid_definition(tmp_path: Path) -> None:
@@ -165,3 +192,71 @@ def test_key_match_guard_unknown_workspace_raises_not_found(tmp_path: Path) -> N
 
     with pytest.raises(NotFoundError):
         require_draft_workflow_key_match(queries, "no_such_workspace", _DRAFT_YAML)
+
+
+def test_publish_rejects_agent_node_without_any_skill_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #76: an Agent-routed node with no node skill whose published
+    Agent also names none cannot publish (neither side binds the content)."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _patch_agent_catalog(monkeypatch, {"agent-1": SimpleNamespace(capability="do_thing", skill="")})
+
+    errors = validate_workflow_draft_for_publish(queries, workspace["id"], _DRAFT_YAML, True)
+
+    assert any("declares no skill" in error for error in errors)
+    assert any("do_thing" in error for error in errors)
+
+
+def test_publish_accepts_agent_node_with_node_skill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A node-level skill binding satisfies the gate even when the published
+    Agent definition names no skill."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _patch_agent_catalog(monkeypatch, {"agent-1": SimpleNamespace(capability="do_thing", skill="")})
+
+    assert (
+        validate_workflow_draft_for_publish(queries, workspace["id"], _DRAFT_YAML_WITH_SKILL, True)
+        == []
+    )
+
+
+def test_publish_accepts_agent_node_without_skill_when_agent_binds_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Legacy fallback: existing revisions declare no node skill; the Agent
+    definition's skill keeps them publishable."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _patch_agent_catalog(
+        monkeypatch,
+        {
+            "agent-1": SimpleNamespace(
+                capability="do_thing",
+                skill="education-video-problems-generation/review-questions",
+            )
+        },
+    )
+
+    assert validate_workflow_draft_for_publish(queries, workspace["id"], _DRAFT_YAML, True) == []
+
+
+def test_publish_rejects_skill_on_code_routed_node(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A skill declaration is meaningless when the capability resolves to no
+    published Agent (the node runs on the code pool)."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _seed_node_code(workspace["id"])
+    _patch_agent_catalog(monkeypatch, {})
+
+    errors = validate_workflow_draft_for_publish(
+        queries, workspace["id"], _DRAFT_YAML_WITH_SKILL, True
+    )
+
+    assert errors
+    assert any("only applies to Agent-routed nodes" in error for error in errors)

@@ -67,6 +67,12 @@ class WorkflowReduceSpec:
 
 
 @dataclass(frozen=True)
+class WorkflowNodeSkill:
+    key: str
+    ref: str = ""
+
+
+@dataclass(frozen=True)
 class WorkflowNode:
     key: str
     label: str
@@ -78,6 +84,10 @@ class WorkflowNode:
     execution: WorkflowNodeExecution = field(default_factory=WorkflowNodeExecution)
     config: dict[str, Any] = field(default_factory=dict)
     config_schema: dict[str, Any] = field(default_factory=dict)
+    # Agent-routed nodes may bind the skill content they run (issue #76);
+    # the binding versions with the revision snapshot. An empty ref falls
+    # back to the skill_sources default ref at resolution time.
+    skill: WorkflowNodeSkill | None = None
     shard: WorkflowShardSpec | None = None
     reduce: WorkflowReduceSpec | None = None
     # ``start`` nodes carry the entry contract and never execute (EXEC-WORKFLOW-START-001).

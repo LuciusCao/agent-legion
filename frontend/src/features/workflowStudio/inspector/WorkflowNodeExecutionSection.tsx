@@ -1,7 +1,6 @@
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { WorkflowNodeRecord } from '../../../types'
-import { WorkflowAgentDefinitionCard } from './WorkflowAgentDefinitionCard'
-import { WorkflowAgentExecutionDetails } from './WorkflowAgentExecutionDetails'
+import { WorkflowNodeAgentDetails } from './WorkflowNodeAgentDetails'
 import { WorkflowNodeAgentEditor } from './WorkflowNodeAgentEditor'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
 
@@ -23,16 +22,13 @@ export function WorkflowNodeExecutionSection(props: Props) {
         {agent ? 'Agent 配置' : '代码节点'}
       </div>
       {agent ? (
-        <>
-          <WorkflowAgentDefinitionCard definition={agent} />
-          <WorkflowAgentExecutionDetails
-            node={props.node}
-            runtime={agent.runtime}
-            definitionYaml={props.definitionYaml}
-            setDefinitionYaml={props.setDefinitionYaml}
-            readOnly={props.readOnly}
-          />
-        </>
+        <WorkflowNodeAgentDetails
+          node={props.node}
+          definition={agent}
+          definitionYaml={props.definitionYaml}
+          setDefinitionYaml={props.setDefinitionYaml}
+          readOnly={props.readOnly}
+        />
       ) : (
         // P-0.5：无 Agent 路由的节点一律进入内置 code 池，无绑定可配。
         <div className={inspectorStyles.empty}>内置 code 池执行</div>

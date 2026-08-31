@@ -13,6 +13,9 @@ EXEC-CODE-001/002/003 为准。**P-0.5（2026-08-17，schema v47）**：executor
 进隐含 code 池，节点 `config_schema:` 块成为 code 节点唯一的参数声明层
 （executor 兜底已删）；本文 §2 解析优先级与绑定链中经 executor 定义的表述
 均为历史记录，现行语义以 EXEC-CODE-POOL-001 / CONFIG-MANIFEST-001 为准。
+**#76（2026-08-31）**：code 节点不得声明 `skill`（publish 门禁拒绝）——
+skill 内容绑定（`key` + 可选 `ref`，随 revision 版本化）只对 Agent 路由
+节点有意义，现行语义以 EXEC-SKILL-NODE-001 为准。
 日期：2026-08-04
 关联：EXEC-CODE-001、CONFIG-MANIFEST-001、VAULT-SECRET-001
 

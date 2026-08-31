@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from server.app.skills.runtime import resolve_skill_dir
+from server.app.skills.checkout import resolve_skill_checkout
 
 if TYPE_CHECKING:
     from server.app.skills.manager import SkillManager
@@ -66,12 +66,16 @@ def validate_worker_outputs(
     skill = str(manifest.get("skill", ""))
     if not skill:
         return None
+    # Re-resolve at the manifest's frozen ref (#76) so the validator matches
+    # the executed skill content; legacy manifests without skill_ref fall
+    # back to the source default ref, exactly as before.
+    ref = str(manifest.get("skill_ref", ""))
     validation_id = f"validate-{uuid.uuid4().hex}"
     try:
-        skill_dir = resolve_skill_dir(skill_manager, skill, validation_id)
+        checkout = resolve_skill_checkout(skill_manager, skill, validation_id, ref)
     except Exception as exc:
         return f"Validator error: {exc}"
     try:
-        return run_output_validator(skill_dir, job_dir)
+        return run_output_validator(checkout.run_dir, job_dir)
     finally:
         skill_manager.cleanup_execution(validation_id)

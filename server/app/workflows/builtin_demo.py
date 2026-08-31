@@ -17,6 +17,11 @@ from typing import Any
 
 DEMO_WORKFLOW_KEY = "education_video_problems_generation"
 
+# Skill group under the skill root (``make import-demo`` repos); the demo DAG
+# pins each Agent-routed node's skill at the import tag (issue #76), matching
+# ``server.app.skills.builtin_sources``.
+_DEMO_SKILL_GROUP = "education-video-problems-generation"
+
 DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
     "key": DEMO_WORKFLOW_KEY,
     "label": "教学视频脚本与题目生成（示例）",
@@ -29,11 +34,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         # Entry contract (EXEC-WORKFLOW-START-001): the demo runs on uploaded
         # knowledge-point materials only — ref items are rejected at run
         # creation and the AddItemsDialog "粘贴 ID" tab is disabled.
-        "_start": {
-            "label": "入口",
-            "type": "start",
-            "accepted_item_types": ["material"],
-        },
+        "_start": {"label": "入口", "type": "start", "accepted_item_types": ["material"]},
         "intake_knowledge_points": {
             "label": "读取知识点",
             "capability": "intake_knowledge_points",
@@ -44,6 +45,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         "write_script": {
             "label": "撰写教学视频脚本",
             "capability": "write_script",
+            "skill": {"key": f"{_DEMO_SKILL_GROUP}/write-script", "ref": "v1.0.0"},
             "after": ["intake_knowledge_points"],
             "inputs": ["knowledge_point.json"],
             "outputs": ["script.md"],
@@ -51,6 +53,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         "review_script": {
             "label": "评审脚本",
             "capability": "review_script",
+            "skill": {"key": f"{_DEMO_SKILL_GROUP}/review-script", "ref": "v1.0.0"},
             "after": ["write_script"],
             "inputs": ["knowledge_point.json", "script.md"],
             "outputs": ["script_review.json"],
@@ -58,6 +61,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         "generate_questions": {
             "label": "生成练习题",
             "capability": "generate_questions",
+            "skill": {"key": f"{_DEMO_SKILL_GROUP}/generate-questions", "ref": "v1.0.0"},
             "after": ["intake_knowledge_points"],
             "inputs": ["knowledge_point.json"],
             "outputs": ["exercises.json"],
@@ -65,6 +69,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         "review_questions": {
             "label": "评审练习题",
             "capability": "review_questions",
+            "skill": {"key": f"{_DEMO_SKILL_GROUP}/review-questions", "ref": "v1.0.0"},
             "after": ["generate_questions"],
             "inputs": ["knowledge_point.json", "exercises.json"],
             "outputs": ["exercises_review.json"],

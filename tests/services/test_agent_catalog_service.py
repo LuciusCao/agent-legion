@@ -31,7 +31,11 @@ def test_catalog_exposes_published_agent_definitions(
     agent = agents_by_id["example-review-questions-v1"]
     assert agent["runtime"] == "velites"
     assert agent["capability"] == "review_questions"
-    assert agent["skill"] == "education-video-problems-generation/review-questions"
+    # #76：skill 绑定下放到 workflow 节点，内置 demo Agent 定义不再携带 skill
+    # （空串=未绑定），catalog 也不再注入 skill_ref/skill_commit 元数据。
+    assert agent["skill"] == ""
+    assert "skill_ref" not in agent
+    assert "skill_commit" not in agent
     assert agent["tools"] == ["read", "write", "bash"]
     # 全局 provider/model/thinking 投影已退役：执行默认走 workflow 顶层
     # execution 块（workspace agentDefaults 已随 schema v64 退役）。

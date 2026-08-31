@@ -9,6 +9,7 @@ from typing import Any, cast
 import yaml
 
 from server.app.workflows.definition import WorkflowDefinition, workflow_definition_from_dict
+from server.app.workflows.workflow_node_skill import apply_skill_echo
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
                 "inputs": node.inputs,
                 "outputs": node.outputs,
                 "execution": asdict(node.execution),
+                "skill": asdict(node.skill) if node.skill is not None else None,
                 "config": node.config,
                 "terminal": (
                     {"outcome": node.terminal.outcome} if node.terminal is not None else None
@@ -142,6 +144,7 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
             raw_node["config"] = node.config
         if node.config_schema:
             raw_node["config_schema"] = node.config_schema
+        apply_skill_echo(raw_node, node)
         payload["nodes"][key] = raw_node
     for edge in definition.edges:
         raw_edge: dict[str, Any] = {"from": edge.source, "to": edge.target}

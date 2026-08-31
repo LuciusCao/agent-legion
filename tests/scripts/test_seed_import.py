@@ -300,6 +300,18 @@ def test_first_import_writes_and_verifies():
     assert client.skills["acme/summarize"]["locked_commit"] == SKILL_COMMIT
 
 
+def test_first_import_accepts_v2_lock_shape():
+    """Multi-ref lock entries ({repo, refs}) are compared per source ref."""
+    seed = make_seed()
+    seed["skills"]["lock"]["skills"]["acme/summarize"] = {
+        "repo": "/opt/acme/skills",
+        "refs": {"v1.0.0": SKILL_COMMIT},
+    }
+    client = FakeClient()
+    assert run_all(client, seed, []) == []
+    assert client.skills["acme/summarize"]["locked_commit"] == SKILL_COMMIT
+
+
 def test_second_run_is_fully_idempotent():
     client = FakeClient()
     assert run_all(client, make_seed(), []) == []

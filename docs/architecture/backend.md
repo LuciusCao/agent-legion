@@ -517,6 +517,7 @@ server/app/
 | WorkflowNodeCodeArchiveResponse | BaseModel | archived: int | app/routes/workflow_node_code_contracts.py |
 | WorkflowTerminalResponse | BaseModel | outcome: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeExecutionResponse | BaseModel | provider: str, model: str, thinking: str, prompt: str | app/routes/workflow_node_contracts.py |
+| WorkflowNodeSkillResponse | BaseModel | key: str, ref: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeResponse | BaseModel | key: str, label: str, capability: str, node_type: str, accepted_item_types: l... | app/routes/workflow_node_contracts.py |
 | NodePromptPreviewRequest | BaseModel | node_key: str, definition_yaml: str | None | app/routes/workflow_node_prompt_contracts.py |
 | NodePromptPreviewResponse | BaseModel | effective_prompt: str, default_instructions: str, custom_instructions: str, i... | app/routes/workflow_node_prompt_contracts.py |
@@ -551,8 +552,8 @@ server/app/
 | JobPackageResult | TypedDict | results: list[JobPackageItemResult], succeeded_count: int, failed_count: int,... | app/services/workspace_package_contracts.py |
 | SkillSourceConfig | BaseModel | repo: str, ref: str | app/skills/config.py |
 | SkillsConfig | BaseModel | skills: dict[str, SkillSourceConfig] | app/skills/config.py |
-| LockedSkillSource | BaseModel | repo: str, ref: str, commit: str | app/skills/config.py |
-| SkillsLock | BaseModel | version: str, resolved_at: str | None, skills: dict[str, LockedSkillSource] | app/skills/config.py |
+| LockedSkill | BaseModel | repo: str, refs: dict[str, str] | app/skills/config.py |
+| SkillsLock | BaseModel | version: str, resolved_at: str | None, skills: dict[str, LockedSkill] | app/skills/config.py |
 
 <!-- END AUTO-GENERATED -->
 
@@ -726,8 +727,8 @@ Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 sc
 
 其他配置文件：
 
-- 外部 Pi skill 仓库源与固定 commit 已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB `global_settings`（`skill_sources` / `skill_lock` 文档），lock 是 skill ref 的唯一权威（G3）；经 admin API（`GET/PUT /api/admin/skill-sources`、`POST /api/admin/skill-sources/relock`）与 /admin/settings「Skill 源管理」维护，CLI `make skills-lock`（`uv run python -m server.app.skills.lock`）刷新锁。tracked `config/skills.yaml` / `config/skills.lock` 已退役：DB 无记录且文件存在时启动一次性导入并 warning，否则用内置常量（`server/app/skills/builtin_sources.py`）seed，此后文件不再读取。
-- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；schema v62 起创建 workspace 不再种子模板，demo workspace 由 `make import-demo`（`scripts/seed_demo.py`）提供，其 id 与 key 同为 `education_video_problems_generation`。workflow 没有全局注册表（schema v40 的 `workflow_catalog` 表已于 schema v50 退役，DB-WORKFLOW-CATALOG-001）：workflow 就是 workspace 内部的一份 DAG，权威定义是该 workspace 的 active revision（schema v50 起节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部改读它）。schema v62（DB-WORKSPACE-KEY-BINDING-001）起 workspace id 与 `workspaces.default_workflow_key` 是同一个标识：创建时显式填写、终身不可变（PATCH / PUT configuration 改 key 一律 400，发布草稿 key 不匹配 422）；v62 迁移把存量 workspace 的 id 改成已绑定的 key（key 为空的按 id 回填），`default_workflow_key` 作为独立概念已标 deprecated（退役评估 issue 待开）。
+- 外部 Pi skill 仓库源与固定 commit 已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB `global_settings`（`skill_sources` / `skill_lock` 文档），lock 是 skill ref 的唯一权威（G3）；锁按 (skill, ref) 多值冻结（v2：per-skill `{repo, refs: {ref → commit}}`，#76，EXEC-SKILL-NODE-001）——Agent 路由节点的 `skill: {key, ref}` 是逐节点 pin 通道（随 revision 版本化、随 intake 冻结），未锁 ref 首次 dispatch 自动冻结、repo 漂移仍触发 relock 闸门，source ref 只作节点未声明 ref 时的默认兜底；经 admin API（`GET/PUT /api/admin/skill-sources`、`POST /api/admin/skill-sources/relock`）与 /admin/settings「Skill 源管理」维护，CLI `make skills-lock`（`uv run python -m server.app.skills.lock`）刷新锁（source ref ∪ 已锁 refs）。tracked `config/skills.yaml` / `config/skills.lock` 已退役：DB 无记录且文件存在时启动一次性导入并 warning，否则用内置常量（`server/app/skills/builtin_sources.py`）seed，此后文件不再读取。
+- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability` 与可选的 `skill` 内容绑定（#76：`key` + 可选 `ref`；code 节点声明 skill 即 publish 拒绝），不声明 `runner`/`agent`/command template；schema v62 起创建 workspace 不再种子模板，demo workspace 由 `make import-demo`（`scripts/seed_demo.py`）提供，其 id 与 key 同为 `education_video_problems_generation`。workflow 没有全局注册表（schema v40 的 `workflow_catalog` 表已于 schema v50 退役，DB-WORKFLOW-CATALOG-001）：workflow 就是 workspace 内部的一份 DAG，权威定义是该 workspace 的 active revision（schema v50 起节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部改读它）。schema v62（DB-WORKSPACE-KEY-BINDING-001）起 workspace id 与 `workspaces.default_workflow_key` 是同一个标识：创建时显式填写、终身不可变（PATCH / PUT configuration 改 key 一律 400，发布草稿 key 不匹配 422）；v62 迁移把存量 workspace 的 id 改成已绑定的 key（key 为空的按 id 回填），`default_workflow_key` 作为独立概念已标 deprecated（退役评估 issue 待开）。
 - `config/agent-worker.example.yaml`：Worker Service 引导配置样例（`host_url` / `worker_id` / `disabled_runtimes` / `capabilities` / `max_concurrency` 等），Worker 侧独立加载，不经 server 的 owned-key 校验。
 - `config/architecture/*`：架构不变量、豁免、源文件体积预算。
 

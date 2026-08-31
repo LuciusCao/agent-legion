@@ -15,7 +15,9 @@ def memory_skill_store(
     """Build an in-memory store from raw dicts (retired yaml shapes).
 
     ``skills`` maps skill keys to ``{repo, ref}``; ``lock`` is a full lock
-    document (``{version, resolved_at?, skills: {key: {repo, ref, commit}}}``).
+    document (``{version, resolved_at?, skills: {key: {repo, refs}}}`` — the
+    legacy v1 ``{repo, ref, commit}`` entry shape upgrades on validation,
+    issue #76).
     """
     sources = SkillsConfig.model_validate({"skills": skills or {}})
     lock_model = SkillsLock.model_validate(lock) if lock is not None else None

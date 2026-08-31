@@ -22,7 +22,7 @@ from server.app.workflows.schema import (
 )
 
 START_NODE_TYPE = "start"
-_EXECUTION_FIELDS = ("capability", "execution", "shard", "reduce", "terminal")
+_EXECUTION_FIELDS = ("capability", "execution", "shard", "reduce", "terminal", "skill")
 # Never executed: config tunables would be silently inert too.
 _CONFIG_FIELDS = ("config", "config_schema")
 _FORBIDDEN_START_FIELDS = _EXECUTION_FIELDS + _CONFIG_FIELDS
