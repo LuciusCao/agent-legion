@@ -27,7 +27,7 @@ from server.app.services.job_rerun import JobRerunService
 from server.app.settings import Settings
 
 # #211 Phase 2: query-param deprecation wording (server-side default).
-_DEPRECATED_QUERY = "Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211."
+_DEPRECATED_QUERY = "Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211 (deprecated field drops by 2026-10-31)."
 
 
 def create_failed_node_runs_router(

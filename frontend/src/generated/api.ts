@@ -1191,7 +1191,7 @@ export interface paths {
     /**
      * Get Node Code State
      * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /studio-agent/tools/workspaces/{id}/nodes/... — removal is tracked in #211.
+     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /studio-agent/tools/workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
      */
     get: operations['get_node_code_state_api_studio_agent_tools_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_get']
     put?: never
@@ -1213,7 +1213,7 @@ export interface paths {
     /**
      * Save Node Code Draft
      * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /studio-agent/tools/workspaces/{id}/nodes/... — removal is tracked in #211.
+     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /studio-agent/tools/workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
      */
     put: operations['save_node_code_draft_api_studio_agent_tools_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_draft_put']
     post?: never
@@ -2638,20 +2638,20 @@ export interface paths {
     /**
      * Get Node Code
      * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211.
+     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
      */
     get: operations['get_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_get']
     /**
      * Save Node Code Draft
      * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211.
+     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
      */
     put: operations['save_node_code_draft_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_put']
     post?: never
     /**
      * Archive Node Code
      * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211.
+     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
      */
     delete: operations['archive_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_delete']
     options?: never
@@ -2671,7 +2671,7 @@ export interface paths {
     /**
      * Publish Node Code
      * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211.
+     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
      */
     post: operations['publish_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_publish_post']
     delete?: never
@@ -2692,7 +2692,7 @@ export interface paths {
     /**
      * Rollback Node Code
      * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211.
+     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
      */
     post: operations['rollback_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_rollback_post']
     delete?: never
@@ -2711,7 +2711,7 @@ export interface paths {
     /**
      * List Node Code Versions
      * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211.
+     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
      */
     get: operations['list_node_code_versions_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_versions_get']
     put?: never
@@ -2732,7 +2732,7 @@ export interface paths {
     /**
      * Get Node Code Version
      * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211.
+     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
      */
     get: operations['get_node_code_version_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_versions__version__get']
     put?: never
@@ -2797,7 +2797,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211.
+       * @description Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211 (deprecated field drops by 2026-10-31).
        */
       workflow_key: string
       /** Workspace Id */
@@ -3530,7 +3530,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211.
+       * @description Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211 (deprecated field drops by 2026-10-31).
        */
       workflow_key?: string | null
     } & {
@@ -3754,7 +3754,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: defaults to the workspace id from the path (the two are equal since schema v62). Removal is tracked in #211.
+       * @description Deprecated: defaults to the workspace id from the path (the two are equal since schema v62). Removal is tracked in #211 (deprecated field drops by 2026-10-31).
        */
       workflow_key?: string | null
     }
@@ -3866,7 +3866,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31).
        */
       workflow_key: string
       /**
@@ -4134,7 +4134,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31).
        */
       workflow_key: string
     }
@@ -4415,7 +4415,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211.
+       * @description Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211 (deprecated field drops by 2026-10-31).
        */
       workflow_key: string
       /** Workspace Id */
@@ -4433,7 +4433,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: defaults to the workspace id from the path (equal since schema v62). Removal is tracked in #211.
+       * @description Deprecated: defaults to the workspace id from the path (equal since schema v62). Removal is tracked in #211 (deprecated field drops by 2026-10-31).
        */
       workflow_key?: string | null
     }
@@ -4463,7 +4463,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211.
+       * @description Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211 (deprecated field drops by 2026-10-31).
        */
       workflow_key: string
       /** Workspace Id */
@@ -4673,7 +4673,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: defaults to the path workspace_id; removal tracked in #211.
+       * @description Deprecated: defaults to the path workspace_id; removal tracked in #211 (drops by 2026-10-31).
        */
       workflow_key?: string | null
     }
@@ -4771,7 +4771,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are equal; removal tracked in #211 (drops by 2026-10-31).
        */
       workflow_key: string
       /** Workspace Id */
@@ -5940,7 +5940,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31).
        */
       workflow_key: string
       /** Workspace Id */
@@ -5994,7 +5994,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31).
        */
       workflow_key: string
     }
@@ -6032,7 +6032,7 @@ export interface components {
       /**
        * Workflowkey
        * @deprecated
-       * @description Deprecated: equals the workspace id since schema v62; removal is tracked in #211.
+       * @description Deprecated: equals the workspace id since schema v62; removal is tracked in #211 (deprecated field drops by 2026-10-31).
        */
       workflowKey?: string | null
     }
@@ -6180,7 +6180,7 @@ export interface components {
       /**
        * Default Workflow Key
        * @deprecated
-       * @description Deprecated: read id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       * @description Deprecated: read id instead. Since schema v62 the two are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31).
        */
       default_workflow_key: string
       /** Description */
@@ -6261,7 +6261,7 @@ export interface components {
       /**
        * Workflowkey
        * @deprecated
-       * @description Deprecated: equals the workspace id since schema v62; removal is tracked in #211.
+       * @description Deprecated: equals the workspace id since schema v62; removal is tracked in #211 (deprecated field drops by 2026-10-31).
        */
       workflowKey?: string | null
     }
@@ -6303,7 +6303,7 @@ export interface components {
       /**
        * Workflow Key
        * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211.
+       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31).
        */
       workflow_key: string
       /** Workflow Label */
@@ -9302,7 +9302,7 @@ export interface operations {
         detail?: string | null
         /**
          * @deprecated
-         * @description Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211.
+         * @description Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211 (deprecated field drops by 2026-10-31).
          */
         workflow_key?: string | null
         since?: string | null
@@ -9375,7 +9375,7 @@ export interface operations {
       query?: {
         /**
          * @deprecated
-         * @description Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211.
+         * @description Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211 (deprecated field drops by 2026-10-31).
          */
         workflow_key?: string | null
         status?: string | null

@@ -9,11 +9,16 @@ def get_local_node_limit(
     workflow_key: str,
     node_key: str,
 ) -> int | None:
+    """#211 Phase 3 (read-layer binding): the predicate keys on
+    (workspace_id, node_key) — workflow_key equals the workspace id on every
+    row (v62 binding, aligned by v68), so the column filter was redundant.
+    The signature parameter stays for callers until Phase 4 drops the column.
+    """
     row = conn.execute(
         """
         select concurrency_limit from workspace_node_limits
-        where workspace_id=%s and workflow_key=%s and node_key=%s
+        where workspace_id=%s and node_key=%s
         """,
-        (workspace_id, workflow_key, node_key),
+        (workspace_id, node_key),
     ).fetchone()
     return int(row["concurrency_limit"]) if row else None

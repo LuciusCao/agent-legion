@@ -29,7 +29,7 @@ from server.app.workflows.start_node import START_NODE_TYPE
 # path workspace_id when the segment is absent.
 _DEPRECATED_PATH = (
     "Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); "
-    "use /workspaces/{id}/nodes/... — removal is tracked in #211."
+    "use /workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31)."
 )
 _EDIT_GUARD = [Depends(reject_studio_agent_scope)]
 

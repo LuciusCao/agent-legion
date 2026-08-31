@@ -140,7 +140,7 @@ class AgentClaimResponse(BaseModel):
     workflow_key: str = Field(
         description=(
             "Deprecated: equals workspace_id (schema v62); read workspace_id instead. "
-            "Removal is tracked in #211."
+            "Removal is tracked in #211 (deprecated field drops by 2026-10-31)."
         ),
         deprecated=True,
     )

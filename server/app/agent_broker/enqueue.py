@@ -46,7 +46,9 @@ def enqueue_request(broker: AgentExecutionBroker, request: AgentExecutionRequest
                     execution_id,
                     request.workspace_id,
                     request.job_id,
-                    request.workflow_key,
+                    # #211 M1: normalize on write — pre-v62 frozen snapshots
+                    # may still carry the old key; new rows record the identity.
+                    request.workspace_id,
                     request.node_key,
                     request.kind,
                     request.agent_id,
@@ -70,12 +72,15 @@ def enqueue_request(broker: AgentExecutionBroker, request: AgentExecutionRequest
 
 def _validate_agent_route(conn: Any, request: AgentExecutionRequest) -> int:
     """Re-validate the Agent route and definition pin; return the audit limit."""
+    # #211 Phase 3 (read-layer binding): the route predicate keys on
+    # (workspace_id, node_key) — workflow_key equals the workspace id on
+    # every row (v62 binding, aligned by v68).
     route = conn.execute(
         """
         select target_kind, target_id from workspace_node_routes
-        where workspace_id=%s and workflow_key=%s and node_key=%s
+        where workspace_id=%s and node_key=%s
         """,
-        (request.workspace_id, request.workflow_key, request.node_key),
+        (request.workspace_id, request.node_key),
     ).fetchone()
     if route is None or route["target_kind"] != "agent":
         raise ValueError("workspace node is not routed to an Agent")

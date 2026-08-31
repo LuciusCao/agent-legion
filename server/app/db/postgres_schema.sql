@@ -660,6 +660,12 @@ create trigger jobs_node_status_counts_rekey
 create index if not exists idx_executor_leases_global_active on executor_leases(executor_id, status, expires_at);
 create index if not exists idx_executor_leases_workspace_active on executor_leases(workspace_id, executor_id, status, expires_at);
 create index if not exists idx_executor_leases_workflow_node_active on executor_leases(workspace_id, workflow_key, node_key, status, expires_at);
+-- #211 Phase 3 M1: workspace-keyed twin — the claim-path count predicate
+-- binds (workspace_id, node_key, status, expires_at); skipping the middle
+-- workflow_key column defeats the index above (Codex P2 on #321). The
+-- twin replaces it when M2 drops the column.
+create index if not exists idx_executor_leases_workspace_node_active
+  on executor_leases(workspace_id, node_key, status, expires_at);
 create index if not exists idx_executor_leases_status_expires_at on executor_leases(status, expires_at);
 create index if not exists idx_executor_leases_job_status on executor_leases(job_id, status);
 

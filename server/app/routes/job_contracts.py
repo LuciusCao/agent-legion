@@ -5,8 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from server.app.routes.workspace_contracts import WorkspaceRecord
 
 # #211 Phase 2: request-param deprecation wording (server-side default).
-_DEPRECATED_REQUEST_DEFAULT = "Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211."
-_DEPRECATED_READ = "Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211."
+_DEPRECATED_REQUEST_DEFAULT = "Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211 (deprecated field drops by 2026-10-31)."
+_DEPRECATED_READ = "Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31)."
 
 
 class JobBatchRequest(BaseModel):

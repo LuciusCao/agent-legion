@@ -28,7 +28,7 @@ class JobRerunByFailureRequest(BaseModel):
         default=None,
         description=(
             "Deprecated: defaults to the workspace id from the path (the two "
-            "are equal since schema v62). Removal is tracked in #211."
+            "are equal since schema v62). Removal is tracked in #211 (deprecated field drops by 2026-10-31)."
         ),
         deprecated=True,
     )

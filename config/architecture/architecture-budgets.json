@@ -950,7 +950,7 @@
     "server/app/jobs/queries/studio_chat_resume.py": 31,
     "server/app/jobs/queries/studio_chat_transcript.py": 33,
     "server/app/jobs/queries/workflow_drafts.py": 47,
-    "server/app/jobs/queries/workflow_revision_projection.py": 158,
+    "server/app/jobs/queries/workflow_revision_projection.py": 157,
     "server/app/jobs/queries/workflow_revision_reads.py": 75,
     "server/app/jobs/queries/workflow_revisions.py": 55,
     "server/app/jobs/queries/workspace.py": 301,

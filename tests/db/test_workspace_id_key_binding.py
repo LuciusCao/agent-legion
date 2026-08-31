@@ -38,13 +38,13 @@ def test_schema_version_pin() -> None:
     # DDL-only (jobs_workspace_scan_indexes) and v68 is the jobs key
     # alignment data migration (#211 Phase 3 read-layer binding), so the
     # pin stays here.
-    assert SCHEMA_VERSION == 68
+    assert SCHEMA_VERSION == 69
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "jobs_workflow_key_alignment"
+    assert row["name"] == "executor_leases_workspace_index"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:
