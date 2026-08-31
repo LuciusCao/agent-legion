@@ -157,11 +157,15 @@ unaffected. Passing evidence is shared through the same Git common directory.
 merge is already covered by its PR gate, so push runs there were dropped to
 save Actions minutes), plus manual dispatch. Docs-only changes (`docs/**`,
 `**/*.md`, `LICENSE`) still trigger the workflow but every lane evaluates
-to false in the `changes` job, so only that detection job runs and all
-gated jobs skip (a skipped required check satisfies branch protection; a
-`paths-ignore` trigger would keep the workflow from starting at all and
-leave required checks pending forever — the docs-only PR deadlock first
-hit on #316).
+to false in the `changes` job: single jobs skip outright (a skipped
+required check satisfies branch protection), while the `backend-postgres`
+matrix carries its lane condition on the steps instead of the job — a
+job-level skip would report one check with the literal name
+`backend-postgres-${{ matrix.shard }}` and the required per-shard contexts
+would never appear — so each shard boots as a seconds-long no-op and
+reports success. A `paths-ignore` trigger would keep the workflow from
+starting at all and leave required checks pending forever — the docs-only
+PR deadlock first hit on #316 (single jobs) and #319 (matrix shards).
 The weekly schedule lives in `.github/workflows/nightly-gate.yml` (issue
 #193), which runs only `ci-extended` and `nightly-e2e` — the stress jobs
 never run on PR/push, and a scheduled trunk run in the quality-gate file
