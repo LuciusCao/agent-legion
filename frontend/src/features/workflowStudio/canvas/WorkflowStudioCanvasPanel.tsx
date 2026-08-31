@@ -1,4 +1,5 @@
 import { WorkflowStudioCanvasBody } from './WorkflowStudioCanvasBody'
+import { WorkflowStudioCanvasSourceBadge } from './WorkflowStudioCanvasSourceBadge'
 import { WorkflowStudioCanvasToolbar } from './WorkflowStudioCanvasToolbar'
 import { useStudioView } from '../shared/studioStateContext'
 import canvasStyles from '../../../pages/WorkflowStudioPageCanvas.module.css'
@@ -34,6 +35,7 @@ export function WorkflowStudioCanvasPanel({
   return (
     <main className={className} data-mobile-panel="graph">
       <div data-canvas-toolbar className={canvasToolbarStyles.canvasToolbar}>
+        <WorkflowStudioCanvasSourceBadge />
         <WorkflowStudioCanvasToolbar
           agentOpen={agentOpen}
           onToggleAgent={onToggleAgent}

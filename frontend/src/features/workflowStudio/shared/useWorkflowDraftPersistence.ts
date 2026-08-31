@@ -1,115 +1,117 @@
-import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { fetchWorkflowDraft, putWorkflowDraft } from '../../../api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { putWorkflowDraft } from '../../../api'
 import type { WorkflowDraftStoreResponse } from '../../../api/workflowDraft'
-import { extraQueryKeys } from '../../../lib/queryKeysExtra'
+import { DraftSaveController, IDLE_DRAFT_SAVE } from './draftSaveController'
+import type { DraftSaveState } from './draftSaveController'
+import { useDraftUnloadGuard } from './useDraftUnloadGuard'
 
-export type DraftSaveStatus = 'idle' | 'saving' | 'saved' | 'error'
-export type DraftSaveState = { status: DraftSaveStatus; savedAt: string | null }
+export type { DraftSaveState, DraftSaveStatus } from './draftSaveController'
+export { draftSaveText } from './draftSaveController'
 
-const DEBOUNCE_MS = 800
-
-const IDLE: DraftSaveState = { status: 'idle', savedAt: null }
-
-/** 保存状态的一句话提示（顶栏 tooltip）：保存中/失败优先，否则带最近保存
- * 时间（HH:MM，本地时区）。 */
-export function draftSaveText(save: DraftSaveState | undefined): string | null {
-  if (!save) return null
-  if (save.status === 'saving') return '草稿保存中…'
-  if (save.status === 'error') return '草稿自动保存失败（编辑尚未持久化）'
-  if (!save.savedAt) return null
-  const at = new Date(save.savedAt)
-  const hh = String(at.getHours()).padStart(2, '0')
-  const mm = String(at.getMinutes()).padStart(2, '0')
-  return `草稿已保存 ${hh}:${mm}`
+export type DraftSaveControls = {
+  state: DraftSaveState
+  /** 取消 pending 的 debounce 立即 PUT；keepalive 仅用于 pagehide。 */
+  flushNow: (keepalive?: boolean) => void
+  hasUnsavedChanges: () => boolean
 }
 
-/** 服务端草稿查询（GET workflow-draft）：definition_yaml 为 null 表示该
- * workspace 还没有持久化草稿；查询失败时 data 停留 undefined，草稿退回
- * 纯内存行为（与持久化上线前一致）。 */
-export function useWorkflowDraftQuery(workspaceId: string | undefined) {
-  return useQuery({
-    queryKey: extraQueryKeys.workflowStudioDraft(workspaceId ?? ''),
-    queryFn: () => fetchWorkflowDraft(workspaceId ?? ''),
-    enabled: !!workspaceId,
-  })
-}
-
-/** 草稿自动持久化：draftYaml 变化 debounce 后 PUT workflow-draft。
- * 首次装载竞态规则（与 useWorkflowStudioDraft 的服务端草稿应用配套）：
+/** 草稿自动持久化：draftYaml 变化由 DraftSaveController debounce 后 PUT
+ * workflow-draft；保存机制（requestId 在途作废、失败退避重试、pagehide
+ * keepalive）集中在 draftSaveController.ts，本 hook 只做 React 接线并暴露
+ * flushNow/hasUnsavedChanges 供保存按钮与页面离开防丢（useDraftUnloadGuard）
+ * 使用。首次装载竞态规则（与 useWorkflowStudioDraft 的服务端草稿应用配套）：
  * 草稿查询到达（serverDraft !== undefined）且基线已知（originalYaml 非空）
  * 才视为 hydrated；hydrated 时把「已持久化基线」记为服务端草稿值（无草稿
  * 时记为基线 YAML），此前不发起任何 PUT —— 避免用初始基线覆盖服务端草稿。
- * hydrated 之后 draftYaml 偏离已持久化值即自动保存（含 publish 后草稿回到
- * 新基线、重置草稿等路径），并发/连打退化为 last-write-wins。
  * hydrated 用 state 而不是 ref：GET 在途期间用户已编辑时，保存 effect 因
  * 未 hydrated 提前退出、之后 draftYaml 不再变化就不会重跑；hydrated 翻转
  * 作为依赖会触发一次「当前 draftYaml 与已持久化值」的差异评估，此时
- * lastPersisted 已是服务端草稿值，不会把基线误存上去。 */
+ * lastPersisted 已是服务端草稿值，不会把基线误存上去。
+ * serverDraftLoadError（GET 失败）不阻塞编辑，只合并进 state.loadError 做
+ * 可见警示；未 hydrated 期间 hasUnsavedChanges 以「相对基线有改动」兜底，
+ * 让 beforeunload 仍能拦截纯内存编辑的丢失。 */
 export function useWorkflowDraftPersistence(
   workspaceId: string | undefined,
   draftYaml: string,
   originalYaml: string,
-  serverDraft: WorkflowDraftStoreResponse | undefined
-): DraftSaveState {
-  const [saveState, setSaveState] = useState<DraftSaveState>(IDLE)
+  serverDraft: WorkflowDraftStoreResponse | undefined,
+  serverDraftLoadError = false
+): DraftSaveControls {
+  const [state, setState] = useState<DraftSaveState>(IDLE_DRAFT_SAVE)
   const [hydrated, setHydrated] = useState(false)
-  const lastPersistedRef = useRef<string | null>(null)
-  const requestCounter = useRef(0)
-  // 最新一次已发起 PUT 的 requestId（0 = 无在途写入）：回退到已持久化值时
-  // 据此判断是否需要作废在途写入并补存当前值。
-  const inFlightRef = useRef(0)
+  const controllerRef = useRef<DraftSaveController | null>(null)
+  const hydratedRef = useRef(false)
+  const draftYamlRef = useRef(draftYaml)
+  const originalYamlRef = useRef(originalYaml)
 
   useEffect(() => {
-    lastPersistedRef.current = null
-    inFlightRef.current = 0
+    draftYamlRef.current = draftYaml
+    originalYamlRef.current = originalYaml
+  })
+
+  // controller 生命周期与 workspace 切换重置；cleanup 清理计时器（pending
+  // 的尾部编辑随 debounce 窗口丢弃，与旧行为一致；页面级离开由
+  // useDraftUnloadGuard 的 flush 覆盖）。
+  useEffect(() => {
+    hydratedRef.current = false
     // eslint-disable-next-line react-hooks/set-state-in-effect -- workspace 切换时重置保存状态
-    setSaveState(IDLE)
+    setState(IDLE_DRAFT_SAVE)
     setHydrated(false)
+    if (!workspaceId) return
+    const controller = new DraftSaveController((yaml, keepalive) =>
+      keepalive
+        ? putWorkflowDraft(workspaceId, yaml, { keepalive: true })
+        : putWorkflowDraft(workspaceId, yaml)
+    )
+    controllerRef.current = controller
+    const unsubscribe = controller.subscribe(setState)
+    return () => {
+      unsubscribe()
+      controller.dispose()
+      controllerRef.current = null
+    }
   }, [workspaceId])
 
   useEffect(() => {
-    if (hydrated || serverDraft === undefined || !originalYaml) {
-      return
-    }
-    lastPersistedRef.current = serverDraft.definition_yaml ?? originalYaml
-    if (serverDraft.updated_at) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- 记录服务端草稿的保存时间用于 tooltip
-      setSaveState({ status: 'idle', savedAt: serverDraft.updated_at })
-    }
+    if (hydrated || serverDraft === undefined || !originalYaml) return
+    controllerRef.current?.hydrate(
+      serverDraft.definition_yaml ?? originalYaml,
+      serverDraft.updated_at
+    )
+    hydratedRef.current = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrated 翻转须触发一次保存差异评估（见 hook docstring）
     setHydrated(true)
   }, [hydrated, serverDraft, originalYaml])
 
   useEffect(() => {
     if (!workspaceId || !hydrated) return
-    if (!draftYaml.trim()) return
-    const revertedToPersisted = draftYaml === lastPersistedRef.current
-    if (revertedToPersisted && inFlightRef.current === 0) return
-    // 回退到已持久化值但仍有在途写入：新 requestId 作废纸上的响应（否则它
-    // 会把 lastPersisted 更新成已撤销的值），并照常补存当前值，把服务端
-    // 可能已收到的撤销值改回来。
-    const requestId = (requestCounter.current += 1)
-    const timer = setTimeout(() => {
-      inFlightRef.current = requestId
-      setSaveState((current) => ({ ...current, status: 'saving' }))
-      putWorkflowDraft(workspaceId, draftYaml)
-        .then((response) => {
-          if (inFlightRef.current === requestId) inFlightRef.current = 0
-          if (requestCounter.current !== requestId) return
-          lastPersistedRef.current = draftYaml
-          setSaveState({
-            status: 'saved',
-            savedAt: response.updated_at ?? null,
-          })
-        })
-        .catch(() => {
-          if (inFlightRef.current === requestId) inFlightRef.current = 0
-          if (requestCounter.current !== requestId) return
-          setSaveState((current) => ({ ...current, status: 'error' }))
-        })
-    }, DEBOUNCE_MS)
-    return () => clearTimeout(timer)
+    controllerRef.current?.schedule(draftYaml)
   }, [workspaceId, draftYaml, hydrated])
 
-  return saveState
+  const flushNow = useCallback((keepalive = false) => {
+    const controller = controllerRef.current
+    if (!controller || !hydratedRef.current) return
+    // error 态无 pending（重试已耗尽）：重新调度当前草稿让 flush 有内容可发。
+    controller.schedule(draftYamlRef.current)
+    controller.flushNow({ keepalive })
+  }, [])
+
+  const hasUnsavedChanges = useCallback(() => {
+    const controller = controllerRef.current
+    if (!controller) return false
+    if (!hydratedRef.current) {
+      // GET 在途/失败（未 hydrated）：编辑仅在本页内存，相对基线有改动即未保存。
+      const yaml = draftYamlRef.current
+      return !!yaml.trim() && yaml !== originalYamlRef.current
+    }
+    return controller.hasUnsaved()
+  }, [])
+
+  useDraftUnloadGuard({ flush: flushNow, hasUnsavedChanges })
+
+  return {
+    state: serverDraftLoadError ? { ...state, loadError: true } : state,
+    flushNow,
+    hasUnsavedChanges,
+  }
 }
