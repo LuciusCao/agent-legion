@@ -31,6 +31,17 @@ describe('WorkflowStudioCanvasSourceBadge', () => {
     ).toBeInTheDocument()
   })
 
+  it('warns when the draft YAML is syntactically valid but structurally malformed', () => {
+    // `nodes:\n  review:`（值为 null）：形状残缺同样走回退提示，不 crash。
+    mockStudio('draft', 'key: demo\nnodes:\n  review:\n')
+
+    render(<WorkflowStudioCanvasSourceBadge />)
+
+    expect(
+      screen.getByText('草稿 YAML 未完成解析，画布暂显示已发布版本')
+    ).toBeInTheDocument()
+  })
+
   it('renders nothing in revision mode (the 只读 vN chip already covers it)', () => {
     mockStudio('revision', 'key: wf\nlabel: Old\n')
 

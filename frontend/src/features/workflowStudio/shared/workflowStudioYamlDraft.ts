@@ -111,9 +111,9 @@ export function patchWorkflowEdgeCondition(
   const edge = draft.edges?.[index]
   if (!edge) throw new Error(`Edge at index ${index} not found`)
   if (!condition) {
-    delete edge.condition
+    delete edge.when
   } else {
-    edge.condition = condition
+    edge.when = condition
   }
   return dumpWorkflowYaml(draft)
 }

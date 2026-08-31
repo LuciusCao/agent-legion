@@ -25,15 +25,15 @@ export function ghostDraftNodeDetails(
   const edges: WorkflowEdgeResponse[] = parseWorkflowEdgeConditions(
     definitionYaml
   )
-    .filter((edge) => edge.source && edge.target)
+    .filter((edge) => edge.from && edge.to)
     .map((edge) => ({
-      source: edge.source as string,
-      target: edge.target as string,
-      condition: edge.condition?.path
+      source: edge.from as string,
+      target: edge.to as string,
+      condition: edge.when?.path
         ? {
-            artifact: edge.condition.artifact ?? '',
-            path: edge.condition.path,
-            equals: edge.condition.equals,
+            artifact: edge.when.artifact ?? '',
+            path: edge.when.path,
+            equals: edge.when.equals,
           }
         : null,
     }))

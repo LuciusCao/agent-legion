@@ -314,14 +314,14 @@ nodes:
     inputs: []
     outputs: []
 edges:
-  - source: branch
-    target: left
-    condition:
+  - from: branch
+    to: left
+    when:
       artifact: result.json
       path: $.eligible
       equals: true
-  - source: branch
-    target: right
+  - from: branch
+    to: right
 `
 
 describe('workflowStudioYamlDraft edge condition patches', () => {
@@ -336,22 +336,22 @@ describe('workflowStudioYamlDraft edge condition patches', () => {
 
   it('clears an edge condition by index', () => {
     const changed = patchWorkflowEdgeCondition(yamlWithEdges, 0, null)
-    expect(changed).not.toContain('condition:')
+    expect(changed).not.toContain('when:')
   })
 
   it('patches the second edge when source and target repeat', () => {
     const yamlWithDuplicateEdges = `key: demo
 label: Demo
 edges:
-  - source: branch
-    target: left
-    condition:
+  - from: branch
+    to: left
+    when:
       artifact: result.json
       path: $.eligible
       equals: true
-  - source: branch
-    target: left
-    condition:
+  - from: branch
+    to: left
+    when:
       artifact: result.json
       path: $.eligible
       equals: true

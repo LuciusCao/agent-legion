@@ -23,27 +23,38 @@ export function workflowYamlToDefinitionRecord(
   } catch {
     return null
   }
+  // 形状校验：语法合法但形状残缺的草稿（如 `nodes:\n  review:` 值为 null、
+  // nodes 是数组、edges 不是数组/边为 null）不得在渲染期抛异常，一律返回
+  // null 走「回退 published + 警示 chip」路径。
+  if (!isPlainObject(parsed.nodes ?? {})) return null
+  if (!Array.isArray(parsed.edges ?? [])) return null
+  const rawNodes = Object.entries(parsed.nodes ?? {})
+  if (rawNodes.some(([, node]) => !isPlainObject(node))) return null
+  const rawEdges = parsed.edges ?? []
+  if (rawEdges.some((edge) => !isPlainObject(edge))) return null
   return {
     key: parsed.key ?? '',
     label: parsed.label ?? parsed.key ?? '',
     intake: mapIntake(parsed.intake),
-    nodes: Object.entries(parsed.nodes ?? {}).map(([key, node]) =>
-      mapNode(key, node)
-    ),
-    edges: (parsed.edges ?? [])
-      .filter((edge) => edge.source && edge.target)
+    nodes: rawNodes.map(([key, node]) => mapNode(key, node)),
+    edges: rawEdges
+      .filter((edge) => edge.from && edge.to)
       .map((edge) => ({
-        source: edge.source as string,
-        target: edge.target as string,
-        condition: edge.condition?.path
+        source: edge.from as string,
+        target: edge.to as string,
+        condition: edge.when?.path
           ? {
-              artifact: edge.condition.artifact ?? '',
-              path: edge.condition.path,
-              equals: edge.condition.equals,
+              artifact: edge.when.artifact ?? '',
+              path: edge.when.path,
+              equals: edge.when.equals,
             }
           : null,
       })),
   }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function mapNode(key: string, node: WorkflowYamlNode): WorkflowNodeRecord {

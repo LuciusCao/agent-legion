@@ -450,16 +450,23 @@ describe('useWorkflowStudio draft & revision', () => {
 
     act(() => {
       result.current.setDefinitionYaml(
-        'key: demo\nlabel: Draft\nnodes:\n  a:\n    capability: cap_a\n  b:\n    capability: cap_b\n    after: [a]\n'
+        'key: demo\nlabel: Draft\nnodes:\n  a:\n    capability: cap_a\n  b:\n    capability: cap_b\n    after: [a]\nedges:\n  - from: a\n    to: b\n'
       )
     })
 
-    // 已发布 workflow 只有节点 a；画布数据源立即跟随草稿（含新增的 b）。
+    // 已发布 workflow 只有节点 a；画布数据源立即跟随草稿（含新增的 b），
+    // 边按持久化格式 from/to 映射（source/target/condition 是错误字段名）。
     expect(result.current.workflow?.nodes.map((node) => node.key)).toEqual([
       'a',
       'b',
     ])
     expect(result.current.nodes.map((node) => node.key)).toContain('b')
+    expect(result.current.edges).toContainEqual({
+      from: 'a',
+      to: 'b',
+      label: '',
+      conditional: false,
+    })
   })
 
   it('falls back to the published workflow while the draft YAML is invalid mid-edit', async () => {
@@ -487,6 +494,25 @@ describe('useWorkflowStudio draft & revision', () => {
     expect(result.current.workflow?.nodes.map((node) => node.key)).toEqual([
       'a',
       'b',
+    ])
+  })
+
+  it('falls back to the published workflow for structurally malformed draft YAML', async () => {
+    mocks.compareWorkflowDraft.mockResolvedValue(emptyCompareSummary)
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+
+    // `nodes:\n  review:`（值为 null）：语法合法但形状残缺，不得在渲染期
+    // 抛异常 crash Studio，回退 published 画布（警示 chip 由组件层覆盖）。
+    act(() => {
+      result.current.setDefinitionYaml('key: demo\nnodes:\n  review:\n')
+    })
+
+    expect(result.current.workflow?.label).toBe('Demo Workflow')
+    expect(result.current.workflow?.nodes.map((node) => node.key)).toEqual([
+      'a',
     ])
   })
 

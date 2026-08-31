@@ -42,14 +42,14 @@ nodes:
     terminal:
       outcome: uploadable
 edges:
-  - source: fetch
-    target: review
-    condition:
+  - from: fetch
+    to: review
+    when:
       artifact: result.json
-      path: ok
+      path: $.ok
       equals: true
-  - source: review
-    target: done
+  - from: review
+    to: done
 `
 
 describe('workflowYamlToDefinitionRecord', () => {
@@ -102,7 +102,7 @@ describe('workflowYamlToDefinitionRecord', () => {
       {
         source: 'fetch',
         target: 'review',
-        condition: { artifact: 'result.json', path: 'ok', equals: true },
+        condition: { artifact: 'result.json', path: '$.ok', equals: true },
       },
       { source: 'review', target: 'done', condition: null },
     ])
@@ -119,9 +119,9 @@ describe('workflowYamlToDefinitionRecord', () => {
     })
   })
 
-  it('drops edges missing source or target', () => {
+  it('drops edges missing from or to', () => {
     const record = workflowYamlToDefinitionRecord(
-      'key: demo\nedges:\n  - source: a\n  - target: b\n'
+      'key: demo\nedges:\n  - from: a\n  - to: b\n'
     )
     expect(record?.edges).toEqual([])
   })
@@ -135,5 +135,31 @@ describe('workflowYamlToDefinitionRecord', () => {
   it('returns null for non-mapping YAML', () => {
     expect(workflowYamlToDefinitionRecord('- just\n- a\n- list\n')).toBeNull()
     expect(workflowYamlToDefinitionRecord('')).toBeNull()
+  })
+
+  it('returns null instead of throwing for malformed node shapes', () => {
+    // `nodes:\n  review:`（值为 null）、字符串节点、数组节点：语法合法但
+    // 形状残缺，必须回退而不是在渲染期抛异常。
+    expect(
+      workflowYamlToDefinitionRecord('key: demo\nnodes:\n  review:\n')
+    ).toBeNull()
+    expect(
+      workflowYamlToDefinitionRecord('key: demo\nnodes:\n  review: oops\n')
+    ).toBeNull()
+    expect(
+      workflowYamlToDefinitionRecord('key: demo\nnodes:\n  - review\n')
+    ).toBeNull()
+  })
+
+  it('returns null instead of throwing for malformed edge shapes', () => {
+    expect(
+      workflowYamlToDefinitionRecord('key: demo\nedges:\n  notalist: true\n')
+    ).toBeNull()
+    expect(
+      workflowYamlToDefinitionRecord('key: demo\nedges:\n  -\n')
+    ).toBeNull()
+    expect(
+      workflowYamlToDefinitionRecord('key: demo\nedges:\n  - oops\n')
+    ).toBeNull()
   })
 })

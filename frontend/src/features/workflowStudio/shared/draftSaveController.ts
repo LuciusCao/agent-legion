@@ -13,9 +13,16 @@ export const IDLE_DRAFT_SAVE: DraftSaveState = { status: 'idle', savedAt: null }
 const DEBOUNCE_MS = 800
 const MAX_PUT_RETRIES = 2
 const RETRY_BASE_MS = 2000
-// fetch keepalive 请求体上限约 64KB，留余量；超出退化为普通 PUT（pagehide
-// 下尽力而为，不再享受 keepalive 的存活保证）。
-const KEEPALIVE_MAX_BODY_CHARS = 60_000
+// fetch keepalive 请求体上限约 64KiB（按 UTF-8 字节计），留安全余量；超出
+// 退化为普通 PUT（pagehide 下尽力而为，不再享受 keepalive 的存活保证）。
+const KEEPALIVE_MAX_BODY_BYTES = 60_000
+
+// yaml.length 是 UTF-16 码元数，中文草稿会严重低估体积；必须对完整 JSON
+// 请求体按 UTF-8 字节数判断。
+function withinKeepaliveLimit(yaml: string): boolean {
+  const body = JSON.stringify({ definition_yaml: yaml })
+  return new TextEncoder().encode(body).byteLength <= KEEPALIVE_MAX_BODY_BYTES
+}
 
 export type PutWorkflowDraftFn = (
   yaml: string,
@@ -112,8 +119,7 @@ export class DraftSaveController {
     this.clearTimer()
     this.pendingSave = null
     const keepalive =
-      options?.keepalive === true &&
-      pending.yaml.length <= KEEPALIVE_MAX_BODY_CHARS
+      options?.keepalive === true && withinKeepaliveLimit(pending.yaml)
     this.save(
       pending.yaml,
       pending.requestId,

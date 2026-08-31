@@ -654,6 +654,30 @@ describe('useWorkflowDraftPersistence unload guard', () => {
     expect(mocks.putWorkflowDraft).not.toHaveBeenCalled()
   })
 
+  it('falls back to a plain PUT on pagehide when the UTF-8 body exceeds the keepalive limit', async () => {
+    // 中文按 UTF-8 三字节计：2.5 万字符的草稿 body 超 60KiB 安全阈值，但
+    // UTF-16 码元数远低于它——按码元数判断会误用 keepalive 导致发送失败。
+    const hugeDraft = `key: demo\nlabel: ${'题'.repeat(25_000)}\n`
+    const rendered = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: NO_DRAFT,
+    })
+    rendered.rerender({
+      workspaceId: 'ws1',
+      draftYaml: hugeDraft,
+      originalYaml: BASE,
+      serverDraft: NO_DRAFT,
+    })
+
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'))
+    })
+
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', hugeDraft)
+  })
+
   it('blocks page unload while edits are unsaved and stays quiet once saved', async () => {
     renderEdited()
 

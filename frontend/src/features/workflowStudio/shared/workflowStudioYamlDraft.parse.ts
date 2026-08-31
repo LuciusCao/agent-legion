@@ -30,10 +30,15 @@ export type WorkflowYamlNode = {
   execution?: { provider?: string; model?: string; thinking?: string; prompt?: string }
 }
 
+/** 持久化 schema-v2 YAML 的边格式（loader._load_edges / revision_format
+ * 序列化）：`edges: [{from, to, when}]`，`when` 内部为
+ * {artifact, path, equals}（loader._load_condition）。注意与 API response
+ * 的 WorkflowEdgeResponse（source/target/condition）区分：前者是 YAML 文本
+ * 格式，后者是传输格式，映射在 workflowYamlDraftRecord / ghostNode 完成。 */
 export type WorkflowYamlEdge = {
-  source?: string
-  target?: string
-  condition?: {
+  from?: string
+  to?: string
+  when?: {
     artifact?: string
     path?: string
     equals?: string | number | boolean | null
