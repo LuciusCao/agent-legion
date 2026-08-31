@@ -357,12 +357,17 @@ def test_material_deleted_mid_creation_fails_and_compensates_run(service, job_db
     assert job_db.list_job_dedup_keys(WORKSPACE_ID, WORKFLOW_KEY) == set()
 
 
-def test_missing_workspace_and_revision_are_rejected(service) -> None:
+def test_missing_workspace_and_revision_are_rejected(service, job_db) -> None:
     with pytest.raises(NotFoundError, match="Workspace not found"):
         service.create_run("missing", workflow_key=WORKFLOW_KEY, items=[_material_item("m")])
+    # v62（#211）：每 workspace 只有一个 workflow 概念，revision 按 workspace
+    # 解析——no-revision 场景用「创建但从未发布」的独立 workspace 构造。
+    job_db.create_workspace("ws-never-published", default_workflow_key="ws-never-published")
     with pytest.raises(InvalidOperationError, match="no active workflow revision"):
         service.create_run(
-            WORKSPACE_ID, workflow_key="unknown_workflow", items=[_material_item("m")]
+            "ws-never-published",
+            workflow_key="ws-never-published",
+            items=[_material_item("m")],
         )
 
 

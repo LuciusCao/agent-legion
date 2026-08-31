@@ -29,6 +29,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from server.app.db.dialect import resolve_dsn
 from server.app.executors._code_sandbox import execute_custom_sandboxed
 from server.app.executors.artifact_mirror import (
     build_artifact_object_store,
@@ -126,15 +127,15 @@ class CodeExecutor:
             # which is a degradation the node must survive. exc_info keeps
             # the configuration root cause visible for the operator.
             try:
-                # #187 step 3: the facade's `.path` is private, so the DSN
-                # comes from `dsn_identity` — the only public accessor. The
-                # bare `getattr(job_db, "path")` probe used to silently
-                # return None for non-facade shapes; the explicit None check
-                # below keeps that "no DB handle → no artifact store"
-                # degradation for job_db-less executors (tests).
+                # #280: the DSN for the artifact store comes from
+                # `resolve_dsn` (the ConnectSource normalizer, #187)
+                # instead of a getattr escape hatch on `job_db`. The
+                # explicit None check keeps the "no DB handle → no
+                # artifact store" degradation for job_db-less executors
+                # (tests).
                 self._artifact_objects = build_artifact_object_store(
                     self._object_store(),
-                    self.job_db.dsn_identity if self.job_db is not None else None,
+                    resolve_dsn(self.job_db) if self.job_db is not None else None,
                 )
             except Exception:
                 logger.warning("artifact store unavailable; mirroring disabled", exc_info=True)
@@ -196,6 +197,18 @@ class CodeExecutor:
                     inputs=context.inputs,
                 )
             except Exception:
+                # #204 broad-except audit: this wraps the restore loop's own
+                # per-file containment for the one thing it deliberately lets
+                # escape — the manifest lookup's DB read (restore_missing_inputs
+                # already catches per-file storage errors itself). A transient DB
+                # outage at restore time must degrade to "run with local files"
+                # rather than fail a node whose inputs are all present locally.
+                # Swallowing is correct because restore is strictly best-effort
+                # (EXEC-ARTIFACT-STORE-001): the outcome space is the psycopg/
+                # pool surface of that lookup, and a node whose declared inputs
+                # are all present locally never touches this failure mode at
+                # all. The traceback is logged (exc_info) so the silent
+                # degradation stays visible to the operator.
                 logger.warning(
                     "input restore failed for job %s; continuing with local files only",
                     context.job_id,

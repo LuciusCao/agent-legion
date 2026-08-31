@@ -432,3 +432,64 @@ def test_run_execution_publishes_status_and_clears_it(
     assert snapshot["executions"]["exec-1"]["node_key"] == "node_a"
     assert snapshot["executions"]["exec-1"]["started_at"]
     assert json.loads(status_path.read_text(encoding="utf-8"))["executions"] == {}
+
+
+class _StatusCapture:
+    """Capture the status.start kwargs run_execution hands the reporter."""
+
+    def __init__(self) -> None:
+        self.fields: dict | None = None
+
+    def start(self, execution_id: str, **fields: object) -> None:
+        self.fields = dict(fields)
+
+    def set_phase(self, execution_id: str, phase: str) -> None:
+        pass
+
+    def upsert_phase(self, execution_id: str, phase: str, **fields: object) -> None:
+        pass
+
+    def finish(self, execution_id: str) -> None:
+        pass
+
+
+def test_claim_status_fields_key_on_workspace_id(tmp_path: Path) -> None:
+    """#211 Phase 2: the local status record keys on workspace_id — the
+    claim's workflow_key is deprecated (equal since v62) and is no longer
+    mirrored into the observation file."""
+    script = _write_executable(
+        tmp_path / "fake_pi", '#!/usr/bin/env python3\nopen("output.json","w").write("{}")\n'
+    )
+    capture = _StatusCapture()
+    client = FakeClient(_make_bundle(tmp_path, _manifest([script])))
+    uploads = UploadQueue(
+        client, capture, max_concurrency=2, heartbeat_interval=0.05, stop=threading.Event()
+    )
+    claim = {
+        "execution_id": "exec-1",
+        "lease_id": "lease-1",
+        "workspace_id": "ws-1",
+        "workflow_key": "ws-1",
+        "job_id": "job-1",
+        "node_key": "node_a",
+        "agent_id": "agent-1",
+        "bundle_url": "/api/agent-executions/exec-1/bundle",
+    }
+    agent_worker.run_execution(
+        client,
+        claim,
+        tmp_path / "work",
+        {},
+        0.05,
+        threading.Event(),
+        1,
+        capture,
+        uploads,
+        threading.Semaphore(4),
+    )
+    uploads.shutdown()
+
+    assert capture.fields is not None
+    assert capture.fields["workspace_id"] == "ws-1"
+    assert "workflow_key" not in capture.fields
+    assert capture.fields["job_id"] == "job-1"

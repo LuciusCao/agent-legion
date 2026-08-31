@@ -85,11 +85,15 @@ def _contract_skill_tree(base_dir: Path, key: str) -> None:
 
 
 def _mock_manager(tmp_path: Path, key: str, ref: str) -> MagicMock:
+    """Manager stub: the run dir uses the real <root>/<exec>/<group>/<name>
+    layout and carries the contract tree; the shared cache dir deliberately
+    lacks it so tests prove validation reads the run dir (codex P1, PR 317)."""
     manager = MagicMock()
     manager.base_dir = tmp_path / "skills"
-    _contract_skill_tree(manager.base_dir, key)
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
+    (manager.base_dir / key).mkdir(parents=True)  # cache without SKILL.md etc.
+    run_root = tmp_path / "runs" / "exec"
+    _contract_skill_tree(run_root, key)
+    run_dir = run_root / key
     manager.checkout_skill.return_value = (run_dir, "c" * 40, f"{ref}@{'c' * 12}")
     return manager
 
@@ -111,10 +115,35 @@ def test_checkout_node_skill_prefers_the_node_binding(tmp_path: Path) -> None:
     assert checkout == SkillCheckout(
         key="group/node-skill",
         ref="v2",
-        run_dir=tmp_path / "run",
+        run_dir=tmp_path / "runs" / "exec" / "group" / "node-skill",
         commit="c" * 40,
         version=f"v2@{'c' * 12}",
     )
+
+
+def test_validation_reads_the_run_dir_not_the_shared_cache(tmp_path: Path) -> None:
+    """契约校验作用于执行私有 run_dir（实际打包的内容），不是共享 cache——
+    checkout 返回后另一个 dispatch 可能已把 cache 切到别的 ref（codex P1，
+    PR 317）。_mock_manager 的 cache 故意缺契约文件，校验通过即证明读的是
+    run_dir。"""
+    manager = _mock_manager(tmp_path, "group/node-skill", "v2")
+
+    checkout = checkout_node_skill(
+        manager, _node_with_skill("group/node-skill", "v2"), "", "exec-1"
+    )
+
+    assert (checkout.run_dir / "SKILL.md").is_file()
+
+
+def test_invalid_run_dir_cleans_up_and_raises(tmp_path: Path) -> None:
+    """run_dir 缺契约文件时校验失败并回收执行目录（不泄漏 runs/<exec> 副本）。"""
+    manager = _mock_manager(tmp_path, "group/node-skill", "v2")
+    (tmp_path / "runs" / "exec" / "group" / "node-skill" / "SKILL.md").unlink()
+
+    with pytest.raises(ValueError, match="missing SKILL.md"):
+        checkout_node_skill(manager, _node_with_skill("group/node-skill", "v2"), "", "exec-9")
+
+    manager.cleanup_execution.assert_called_once_with("exec-9")
 
 
 def test_checkout_node_skill_falls_back_to_the_agent_definition(tmp_path: Path) -> None:

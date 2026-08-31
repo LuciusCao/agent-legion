@@ -1,8 +1,11 @@
-"""Manifest ``execution`` block resolution (split from dispatch.py, #287).
+"""Strict resolution of the manifest ``execution`` block.
 
-Strict, node-only source; the runtime pins the command builder. Kept separate
-from the dispatch boundary so the manifest builder stays within its size
-budget (the split the dispatch.py exemption tracked under issue #287).
+Split out of ``dispatch.py`` (issue 287): the resolver is the runtime-pinning
+rule (which binary, which timeout constant) that both the manifest builder
+and the validation surface depend on, while ``dispatch.py`` keeps only the
+enqueue pipeline (bundle staging, pool, broker handoff). The rule is strict
+by design — every source of provider/model is the node-level execution block
+merged by the loader, and unknown runtimes fail before anything is frozen.
 """
 
 from __future__ import annotations

@@ -20,4 +20,5 @@ _KILL_WAIT = 3.0
 
 def restart_delay(restart_count: int, *, initial: float, cap: float) -> float:
     """Exponential backoff for the Nth automatic restart (1-based), capped."""
-    return min(initial * (2 ** (restart_count - 1)), cap)
+    exponential: float = initial * (2 ** (restart_count - 1))
+    return min(exponential, cap)

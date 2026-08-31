@@ -21,9 +21,9 @@ Studio. Nothing you do takes effect in production by itself.
   (everything reported as added, `base_revision: null`, and the returned
   `draft_workflow.version` is the synthetic placeholder `0`, not a real
   revision number).
-- `save_node_code_draft(workspace_id, workflow_key, node_key, code, ...)` —
+- `save_node_code_draft(workspace_id, node_key, code, ...)` —
   draft Python source for a code node.
-- `get_node_code(workspace_id, workflow_key, node_key)` — effective code plus
+- `get_node_code(workspace_id, node_key)` — effective code plus
   any pending draft (origin: builtin | custom | none). Nodes that only exist
   in your not-yet-published draft are readable too (a skeleton draft you saved
   reads back; otherwise origin `none`); only start nodes 404.

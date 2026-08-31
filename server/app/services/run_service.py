@@ -145,8 +145,19 @@ class RunService:
                 frozen_config=node_config,
             )
         except Exception as exc:
+            # #204 broad-except audit: compensate-then-re-raise after the
+            # run row committed (create_jobs_bulk runs in its own
+            # transaction, so the failure space is the bulk-insert's mixed
+            # psycopg/dedup surface). The width is required because the
+            # compensation must run on EVERY failure mode — ValueError
+            # (normalize-collision, converted to the user-facing
+            # InvalidOperationError) and unexpected errors alike — or a
+            # half-created run row would linger; nothing is masked: the
+            # non-ValueError branch is a bare re-raise preserving type and
+            # traceback, and _discard_empty_run is itself #204-audited to
+            # never mask this error.
             # A fresh item can still collide at insert time: two items can
-            # normalize to the same job id (``a/b`` vs ``a_b``), or an item
+            # normalize to the same job id (``a/b`` vs ``a_w``), or an item
             # can hit a legacy-path job with a different source_type but the
             # same source_id. The run row already committed (create_jobs_bulk
             # runs in its own transaction), so compensate instead of leaving

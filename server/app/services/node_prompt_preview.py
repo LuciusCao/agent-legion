@@ -70,7 +70,13 @@ def _locate_executable_node(definition: WorkflowDefinition, node_key: str) -> Wo
 
 
 def _skill_key_for_node(job_db: JobQueries, workspace_id: str, node: WorkflowNode) -> str | None:
-    """Node skill binding wins (#76); the published Agent's skill is the legacy fallback."""
+    """Node skill binding wins (#76); the published Agent's skill is the legacy fallback.
+
+    Only ``type: agent`` nodes dispatch through an Agent (#284): a code node
+    never runs skill content, so even a declared binding is ignored here.
+    """
+    if node.node_type != "agent":
+        return None
     if node.skill is not None:
         return node.skill.key
     for definition in published_agent_definitions(job_db, workspace_id).values():

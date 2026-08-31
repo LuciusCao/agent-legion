@@ -24,6 +24,7 @@ label: Draft Flow
 nodes:
   write_script:
     label: 撰写脚本
+    type: agent
     capability: write_script
     skill: education-video-problems-generation/write-script
     inputs: [knowledge_point.json]
@@ -51,6 +52,7 @@ label: Draft Flow
 nodes:
   custom_node:
     label: Custom
+    type: agent
     capability: custom_cap
     outputs: [out.json]
 """
@@ -61,6 +63,7 @@ label: Draft Flow
 nodes:
   custom_node:
     label: Custom
+    type: agent
     capability: custom_cap
     skill: node-bound/skill
     outputs: [out.json]
@@ -144,6 +147,19 @@ def test_preview_unbound_capability_has_no_skill_key(job_db) -> None:
     del workspace  # 只需 workspace 行存在；definition_yaml 显式给出定义。
 
     payload = preview_node_prompt(job_db, "ws-prompt-unbound", "write_script", _DRAFT_YAML_NO_SKILL)
+
+    assert payload["skill_key"] is None
+    assert "loaded node skill" in payload["default_instructions"]
+
+
+def test_preview_code_node_ignores_matching_agent_skill(job_db) -> None:
+    """Codex P1 sweep on PR #288: a type=code node sharing its capability
+    with a published Agent never previews against the Agent's skill."""
+    workspace_id = _workspace(job_db, "ws-prompt-code-node")
+
+    payload = preview_node_prompt(
+        job_db, workspace_id, "write_script", _DRAFT_YAML.replace("type: agent", "type: code")
+    )
 
     assert payload["skill_key"] is None
     assert "loaded node skill" in payload["default_instructions"]

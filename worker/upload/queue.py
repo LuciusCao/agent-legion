@@ -210,6 +210,13 @@ class UploadQueue:
                     json.loads(marker.read_text(encoding="utf-8")), work_root
                 )
             except Exception as exc:
+                # #204 broad-except audit: 逐目录遏制。marker 的逃逸族混族
+                # ——解码 ValueError、from_json 的 KeyError/TypeError（字段
+                # 畸形）、read_text 的 OSError——统一语义是"marker 已损坏"。
+                # 吞是对的：一个坏 marker 不得阻断其余待恢复结果重新入队；
+                # marker 经 atomic_write 落盘（tmp+fsync+replace），读不出
+                # 即真损坏而非半截写，rmtree 丢弃该目录是设计选择。日志
+                # 保全：print 记录 marker 路径与异常。
                 print(f"discarding unreadable upload marker {marker}: {exc}", flush=True)
                 shutil.rmtree(child, ignore_errors=True)
                 continue
@@ -236,6 +243,15 @@ class UploadQueue:
         try:
             ready = self._bulk_transfer(task)
         except Exception as exc:
+            # #204 broad-except audit: bulk 车道任务的存活安全网。
+            # _bulk_transfer 的已知失败族（DirectUploadError 回落、
+            # HostRequestError 终态、传输重试）都在内部处理，逃到这里的是
+            # 意外路径——但车道函数跑在 LaneScheduler 的池线程里，未捕获
+            # 异常会落进无人读取的 Future 而完全静默，这里既是安全网也是
+            # 唯一日志点。吞是对的：ready=False 走 _finalize（心跳 quiesce、
+            # 深度记账），pending marker 原样保留，下次启动 restore 重新
+            # 投递。日志保全：print 记录 execution_id 与异常（仅消息、无
+            # 堆栈，见 #298 审计报告的观察项）。
             print(f"upload task crashed for {task.execution_id}: {exc}", flush=True)
             ready = False
         if ready:
@@ -254,6 +270,14 @@ class UploadQueue:
         try:
             self._report(task)
         except Exception as exc:
+            # #204 broad-except audit: report 车道任务的存活安全网（同
+            # _deliver_bulk：逃逸异常会落进无人读取的 Future，这里是唯一
+            # 日志点）。_report 内部已处理重试族（RuntimeError 退避重试）
+            # 与非 204 终态，逃到这里的是意外路径（如 marker.unlink 的
+            # OSError）。吞是对的：finally 的 _finalize 必须执行——心跳
+            # quiesce 与队列深度记账——marker 未删则下次启动 restore 重新
+            # 投递（重复 report 由 Host 侧租约 409 幂等拒绝）。日志保全：
+            # print 记录 execution_id 与异常（仅消息、无堆栈）。
             print(f"upload report crashed for {task.execution_id}: {exc}", flush=True)
         finally:
             self._finalize(task)
@@ -281,7 +305,8 @@ class UploadQueue:
             for name in outputs:
                 try:
                     if direct:
-                        ref = upload_artifact_direct(
+                        # direct refs are dicts, CAS refs are strings (union).
+                        ref: dict[str, Any] | str | None = upload_artifact_direct(
                             job_dir / PurePosixPath(name),
                             task.artifact_uploads[name],
                             stop=self._stop,

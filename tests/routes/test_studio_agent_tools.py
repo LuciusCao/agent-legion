@@ -476,7 +476,8 @@ def test_compare_workflow_without_baseline_returns_full_draft_preview(client, jo
             "type": "added",
             "node_key": "publish_content",
             "label": "publish_content",
-            "node_type": "node",
+            # 草稿未声明 type：loader 归一化为 code（#284 显式节点类型）。
+            "node_type": "code",
             "fields": [],
             "risk": "info",
         },
@@ -543,7 +544,9 @@ def test_save_node_code_draft_skeleton_without_any_revision(client, job_db) -> N
     """From-scratch flow: no active revision at all. expected_capability gates
     the skeleton draft; without it the historic 404 stands."""
     scoped, _ = _scoped_client(client, job_db)
-    workspace = job_db.create_workspace("ws-skeleton", default_workflow_key="studio_skeleton_flow")
+    workspace = job_db.create_workspace(
+        "Skeleton", default_workflow_key="studio_skeleton_flow", workspace_id="studio_skeleton_flow"
+    )
     workspace_id = str(workspace["id"])
     url = (
         f"/api/studio-agent/tools/workspaces/{workspace_id}"
@@ -615,3 +618,55 @@ def test_node_prompt_tools_404_for_unknown_targets(client, job_db) -> None:
     assert scoped.put(url, json={"node_key": "no_such_node", "prompt": "x"}).status_code == 404
     # start 节点永不执行：无 agent prompt 可言。
     assert scoped.post(url, json={"node_key": "_start"}).status_code == 400
+
+
+def test_segment_free_node_code_paths_serve_the_same_resource(client, job_db) -> None:
+    """#211 Phase 2: the studio-agent tool routes drop the deprecated
+    workflows/{workflow_key} segment — on a v62-shaped workspace (id == key)
+    the segment-free path serves the same resource as the legacy alias."""
+    workspace_id = _create_workspace(client)
+    scoped, _ = _scoped_client(client, job_db)
+
+    legacy = scoped.get(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}"
+        f"/workflows/{_WORKFLOW_KEY}/nodes/{_NODE_KEY}/code"
+    )
+    current = scoped.get(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code"
+    )
+
+    assert legacy.status_code == 200, legacy.text
+    assert current.status_code == 200, current.text
+    assert current.json() == legacy.json()
+
+    # Drafts round-trip through the segment-free path too.
+    saved = scoped.put(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft",
+        json={"code": "def run(job, job_dir, runtime):\n    return {}\n"},
+    )
+    assert saved.status_code == 200, saved.text
+    state = scoped.get(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code"
+    ).json()
+    assert state["has_draft"] is True
+
+
+def test_segment_free_node_code_paths_reject_mismatched_workflow_key(client, job_db) -> None:
+    """Codex P2 on #299 (guard parity with the Studio routes): the deprecated
+    segment, query-bound on the segment-free path, must equal the workspace
+    id — anything else is a 400, not a silent key steer."""
+    workspace_id = _create_workspace(client)
+    scoped, _ = _scoped_client(client, job_db)
+
+    read = scoped.get(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}"
+        f"/nodes/{_NODE_KEY}/code?workflow_key=other_flow"
+    )
+    write = scoped.put(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}"
+        f"/nodes/{_NODE_KEY}/code/draft?workflow_key=other_flow",
+        json={"code": "def run(job, job_dir, runtime):\n    return {}\n"},
+    )
+
+    assert read.status_code == 400, read.text
+    assert write.status_code == 400, write.text

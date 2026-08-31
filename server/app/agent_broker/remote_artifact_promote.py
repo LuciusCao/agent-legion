@@ -96,12 +96,16 @@ def promote_all(
             try:
                 storage.copy_object(rollback_key, authority_keys[name])
             except Exception:
-                # Best-effort restore of one overwritten authority key: the
-                # warning names the key that still holds new bytes while its
-                # manifest row points at old bytes (the mismatch the backup
-                # exists to prevent); the orphan-GC/lifecycle pass is the
-                # backstop for the leftovers. The original promote error
-                # keeps propagating regardless.
+                # #204 broad-except audit: best-effort per-key restore inside
+                # the compensation loop of the audited batch catch above —
+                # same mixed outcome space (botocore storage surface), and
+                # per-key containment is the point: the warning names the key
+                # that still holds new bytes while its manifest row points at
+                # old bytes (the mismatch the backup exists to prevent), the
+                # remaining keys are still attempted, and the orphan-GC/
+                # lifecycle pass is the backstop for the leftovers. The
+                # original promote error keeps propagating regardless; the
+                # traceback rides the warning (exc_info).
                 logger.warning(
                     "failed to roll back artifact object %s", authority_keys[name], exc_info=True
                 )

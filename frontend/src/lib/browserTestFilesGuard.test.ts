@@ -6,7 +6,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 // (issue #205): a .test.ts that needs DOM but was never registered there
 // silently lands in the node `logic` project and fails (or worse, passes
 // misleadingly) without any pointer to the real fix. The pytest equivalent
-// on the backend is tests/test_pytest_postgres_boundaries.py.
+// on the backend is tests/app/test_pytest_postgres_boundaries.py.
 //
 // This file is pure fs + regex logic and must stay runnable in the node
 // `logic` project itself — it must never import DOM-dependent modules.

@@ -394,15 +394,15 @@ def _register_probe_worker(
     )
 
 
-def test_online_code_worker_probe_matches_capability(job_db) -> None:
+def test_online_code_worker_probe_ignores_capability(job_db) -> None:
+    """Issue #284: the probe mirrors claim admission — protocol version, code
+    capacity and workspace ACL only; capabilities no longer filter anything."""
     assert has_online_code_worker(TEST_DATABASE_URL, "package", "test-workspace") is False
     _register_probe_worker("worker-a", capabilities=["package"])
 
     assert has_online_code_worker(TEST_DATABASE_URL, "package", "test-workspace") is True
-    # Code capacity but no matching declaration: the request would rot in
-    # queued (no timeout fallback), so the probe says no and the scheduler
-    # falls back to local execution.
-    assert has_online_code_worker(TEST_DATABASE_URL, "transcribe", "test-workspace") is False
+    # Any capability resolves against the same code pool now.
+    assert has_online_code_worker(TEST_DATABASE_URL, "transcribe", "test-workspace") is True
 
 
 def test_online_code_worker_probe_wildcard_zero_capacity_and_revoked(job_db) -> None:
@@ -454,7 +454,8 @@ def test_online_probe_caches_per_capability_within_ttl(job_db, tmp_path) -> None
     _register_probe_worker("worker-a", capabilities=["package"])
 
     assert service.online_code_worker_available("package", "test-workspace") is True
-    assert service.online_code_worker_available("transcribe", "test-workspace") is False
+    # Capabilities no longer filter the probe (issue #284).
+    assert service.online_code_worker_available("transcribe", "test-workspace") is True
     # Within the TTL the cached answer is served even after the Worker leaves.
     _revoke("worker-a")
     assert service.online_code_worker_available("package", "test-workspace") is True

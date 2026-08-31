@@ -128,7 +128,7 @@ def pytest_configure() -> None:
 # Files that connect to PostgreSQL directly instead of through a root fixture.
 # Keep this inventory explicit so new direct consumers are visible in review;
 # fixture-based consumers are classified by _POSTGRES_FIXTURES below. Both
-# directions are enforced by tests/test_pytest_postgres_boundaries.py: a file
+# directions are enforced by tests/app/test_pytest_postgres_boundaries.py: a file
 # importing tests.postgres_support (or calling psycopg.connect) must be listed
 # in the manifest, and every listed path must still exist. The manifest lives
 # in config/architecture/postgres-test-files.json (#192).
@@ -418,7 +418,7 @@ def _assert_shared_app_invariants():
     conftest declares ``_assert_shared_app_invariants`` as its first
     parameter. That makes the ordering an explicit dependency chain instead
     of alphabetical fixture-name sorting; the structure is enforced by
-    tests/test_pytest_postgres_boundaries.py. fresh=True apps are private
+    tests/app/test_pytest_postgres_boundaries.py. fresh=True apps are private
     and never tracked.
     """
     _SHARED_APP_USAGE.clear()

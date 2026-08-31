@@ -71,3 +71,7 @@ banner 标注了后续演进对其中结论的修订。
 | [velites-m2-validation.md](velites-m2-validation.md) | 时点报告（2026-07-31）：velites 与 Node pi 真 gateway 对照验证 |
 | [risk-review-2026-06-13.md](risk-review-2026-06-13.md) | 2026-06-13 时点架构风险快照 |
 | [risk-review-2026-07-18.md](risk-review-2026-07-18.md) | 2026-07-18 架构 Review：扩展性、可维护性与分布式演进路线 |
+| [workflow-key-retirement-inventory.md](workflow-key-retirement-inventory.md) | `workflow_key` 退役盘点（issue #211 Phase 1 产出，退役执行的输入清单） |
+
+索引完整性约定：本目录新增 `.md` 文件必须同时登记进「现行文档」或
+「历史设计记录」其中一张表（PR 检查项）；未登记的文件视为索引债。

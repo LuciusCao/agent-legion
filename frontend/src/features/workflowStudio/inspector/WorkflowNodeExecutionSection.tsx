@@ -1,6 +1,9 @@
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { WorkflowNodeRecord } from '../../../types'
-import { WorkflowNodeAgentDetails } from './WorkflowNodeAgentDetails'
+import {
+  WorkflowNodeAgentConfigBody,
+  WorkflowNodeApprovalSection,
+} from './WorkflowNodeAgentConfigBody'
 import { WorkflowNodeAgentEditor } from './WorkflowNodeAgentEditor'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
 
@@ -9,33 +12,43 @@ type Props = {
   agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
-  workflowKey: string
+  /** type=code 节点「切换为 Agent 执行」：把草稿 YAML 的节点 type 改为
+   * agent（返回是否改写成功）。 */
+  onSwitchToAgent?: () => boolean
   readOnly?: boolean
 }
 export function WorkflowNodeExecutionSection(props: Props) {
+  // EXEC-APPROVAL-001：审批门不 dispatch，专属区块（无 Agent 编辑入口）。
+  if (props.node.node_type === 'approval')
+    return <WorkflowNodeApprovalSection />
+  // #284：节点类型由显式 node_type 判定；agentCatalog 仅用于按 capability
+  // 找 Agent 定义做展示/编辑，不再参与类型判定。
+  const isAgentNode = props.node.node_type === 'agent'
   const agent = props.agentCatalog.find(
     (definition) => definition.capability === props.node.capability
   )
   return (
     <section className={inspectorStyles.section} aria-label="节点执行能力">
       <div className={inspectorStyles.sectionTitle}>
-        {agent ? 'Agent 配置' : '代码节点'}
+        {isAgentNode ? 'Agent 配置' : '代码节点'}
       </div>
-      {agent ? (
-        <WorkflowNodeAgentDetails
+      {isAgentNode ? (
+        <WorkflowNodeAgentConfigBody
           node={props.node}
-          definition={agent}
+          agentDefinition={agent}
           definitionYaml={props.definitionYaml}
           setDefinitionYaml={props.setDefinitionYaml}
           readOnly={props.readOnly}
         />
       ) : (
-        // P-0.5：无 Agent 路由的节点一律进入内置 code 池，无绑定可配。
+        // type=code：内置 code 池执行，无绑定可配。
         <div className={inspectorStyles.empty}>内置 code 池执行</div>
       )}
       <WorkflowNodeAgentEditor
         agentId={agent?.id ?? null}
         capability={props.node.capability}
+        nodeType={isAgentNode ? 'agent' : 'code'}
+        onSwitchToAgent={props.onSwitchToAgent}
         readOnly={props.readOnly}
       />
     </section>

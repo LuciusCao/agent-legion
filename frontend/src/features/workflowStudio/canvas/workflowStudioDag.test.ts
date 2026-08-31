@@ -18,6 +18,7 @@ const workflow = {
       key: 'branch',
       label: 'Branch',
       capability: 'classify',
+      node_type: 'agent',
       after: [],
       inputs: ['input.json'],
       outputs: ['decision.json'],
@@ -93,6 +94,43 @@ describe('buildDagNodes', () => {
       agentId: null,
       executorId: 'code',
       executorUnbound: false,
+    })
+  })
+
+  it('keeps a code node on the code pool even when its capability matches an Agent', () => {
+    // #284：类型判定只读 node_type；capability 恰好命中 Agent 目录的
+    // type=code 节点仍显示为 code 池节点（Agent 闲置）。
+    const nodes = buildDagNodes(
+      {
+        ...workflow,
+        nodes: workflow.nodes.map((node) =>
+          node.key === 'branch' ? { ...node, node_type: 'code' } : node
+        ),
+      },
+      {
+        agents: [
+          {
+            id: 'classifier-v1',
+            runtime: 'pi',
+            capability: 'classify',
+            skill: 'ns/classify',
+            tools: [],
+            requires_labels: {},
+            provider: 'deepseek',
+            model: 'm',
+            thinking: 'low',
+            skill_ref: null,
+            skill_commit: null,
+          },
+        ],
+      }
+    )
+
+    expect(nodes[1]).toMatchObject({
+      key: 'branch',
+      agentId: null,
+      executorId: 'code',
+      executorKind: 'code',
     })
   })
 })

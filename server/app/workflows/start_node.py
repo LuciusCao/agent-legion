@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.workflows.approval_node import APPROVAL_NODE_TYPE, validate_approval_fields
+from server.app.workflows.approval_node import APPROVAL_NODE_TYPE, validate_non_start_fields
 from server.app.workflows.schema import (
     ACCEPTED_ITEM_TYPES,
     DEFAULT_ACCEPTED_ITEM_TYPES,
@@ -30,17 +30,18 @@ _FORBIDDEN_START_FIELDS = _EXECUTION_FIELDS + _CONFIG_FIELDS
 
 def load_start_fields(raw_node: dict[str, Any], node_key: str) -> tuple[str, tuple[str, ...]]:
     """Parse ``type``/``accepted_item_types`` and enforce per-type field rules."""
-    node_type = raw_node.get("type", "node")
-    if node_type not in ("node", START_NODE_TYPE, APPROVAL_NODE_TYPE):
-        raise WorkflowDefinitionError(f"Node {node_key} type must be 'node', 'start' or 'approval'")
+    # ``code``/``agent`` are the explicit execution kinds (#284); ``node`` is
+    # the legacy alias (also for an omitted type) and normalizes to ``code``.
+    node_type = raw_node.get("type", "code")
+    if node_type == "node":
+        node_type = "code"
+    if node_type not in ("code", "agent", START_NODE_TYPE, APPROVAL_NODE_TYPE):
+        raise WorkflowDefinitionError(
+            f"Node {node_key} type must be 'code', 'agent', 'start' or 'approval'"
+        )
     raw_types = raw_node.get("accepted_item_types")
     if node_type != START_NODE_TYPE:
-        if raw_types is not None:
-            raise WorkflowDefinitionError(
-                f"Node {node_key}.accepted_item_types is only valid on a start node"
-            )
-        if node_type == APPROVAL_NODE_TYPE:
-            validate_approval_fields(raw_node, node_key)
+        validate_non_start_fields(raw_node, node_key, node_type, raw_types)
         return node_type, DEFAULT_ACCEPTED_ITEM_TYPES
     for forbidden in _FORBIDDEN_START_FIELDS:
         if forbidden in raw_node:
@@ -92,8 +93,7 @@ def _inject_start_node(
     nodes: dict[str, WorkflowNode], edges: list[WorkflowEdge]
 ) -> tuple[dict[str, WorkflowNode], list[WorkflowEdge]]:
     """Synthetic start: accepts every item type and points at all implicit roots."""
-    key = "_start"
-    suffix = 0
+    key, suffix = "_start", 0
     while key in nodes:
         suffix += 1
         key = f"_start_{suffix}"

@@ -39,7 +39,7 @@ function makeNodeChange(overrides: Partial<NodeChange> = {}): NodeChange {
     type: 'modified',
     node_key: 'node_a',
     label: '节点 A',
-    node_type: 'node',
+    node_type: 'code',
     fields: ['label'],
     risk: 'info',
     ...overrides,
@@ -135,7 +135,7 @@ describe('workflowStudioChanges', () => {
 
     expect(summary.nodeChanges.map((change) => change.nodeType)).toEqual([
       'start',
-      'node',
+      'code',
     ])
   })
 
@@ -213,7 +213,7 @@ describe('workflowStudioChanges', () => {
       type: 'added',
       node_key: 'new_node',
       label: '新节点',
-      node_type: 'node',
+      node_type: 'code',
       fields: [],
       risk: 'info',
     }
@@ -221,7 +221,7 @@ describe('workflowStudioChanges', () => {
       type: 'modified',
       node_key: 'changed_node',
       label: '变更节点',
-      node_type: 'node',
+      node_type: 'code',
       fields: ['capability', 'outputs'],
       risk: 'breaking',
     }

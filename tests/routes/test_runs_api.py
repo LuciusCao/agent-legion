@@ -272,3 +272,27 @@ def test_item_type_rejected_by_start_contract(client, job_db) -> None:
     assert response.status_code == 400
     assert "not accepted by this workflow" in response.json()["detail"]
     assert client.get(f"/api/workspaces/{workspace_id}/runs").json()["runs"] == []
+
+
+def test_create_run_rejects_mismatched_workflow_key(client, job_db, settings):
+    """Codex P1 on #307: a mismatched explicit key would otherwise flow
+    verbatim into runs/jobs rows (violating the v62 binding) — the route
+    rejects it before the service call."""
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+    from tests.helpers import load_builtin_definition
+
+    job_db.create_workspace("ws-run-key", default_workflow_key="ws-run-key")
+    WorkflowRevisionService(job_db).ensure_active_revision(
+        "ws-run-key", load_builtin_definition("education_video_problems_generation")
+    )
+
+    response = client.post(
+        "/api/workspaces/ws-run-key/runs",
+        json={
+            "workflow_key": "other_flow",
+            "items": [{"type": "ref", "connection_key": "c", "external_id": "e1"}],
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    assert "workflow_key must equal the workspace id" in response.json()["detail"]

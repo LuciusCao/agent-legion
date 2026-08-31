@@ -202,9 +202,11 @@ server/app/
 | DELETE | `/studio-agent-tokens/{token_id}` | `revoke_token` | routes/studio_agent_tokens.py |
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/workflow/validate` | `validate_workflow` | routes/studio_agent_tools.py |
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/workflow/compare` | `compare_workflow` | routes/studio_agent_tools.py |
+| PUT | `/studio-agent/tools/workspaces/{workspace_id}/nodes/{node_key}/code/draft` | `save_node_code_draft` | routes/studio_agent_tools.py |
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft` | `save_node_code_draft` | routes/studio_agent_tools.py |
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft` | `save_agent_definition_draft` | routes/studio_agent_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/workflow/active` | `get_active_revision` | routes/studio_agent_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/nodes/{node_key}/code` | `get_node_code_state` | routes/studio_agent_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `get_node_code_state` | routes/studio_agent_tools.py |
 | GET | `/admin/studio-agents` | `get_studio_agents` | routes/studio_agents_admin.py |
 | PUT | `/admin/studio-agents` | `put_studio_agents` | routes/studio_agents_admin.py |
@@ -234,14 +236,21 @@ server/app/
 | POST | `/workspaces/{workspace_id}/workflow-drafts/publish` | `publish_draft` | routes/workflow_draft_publish.py |
 | GET | `/workspaces/{workspace_id}/workflow-draft` | `get_draft` | routes/workflow_draft_store.py |
 | PUT | `/workspaces/{workspace_id}/workflow-draft` | `put_draft` | routes/workflow_draft_store.py |
-| GET | `/workflow-node-code-template` | `get_node_code_template` | routes/workflow_node_codes.py |
+| GET | `/workspaces/{workspace_id}/nodes/{node_key}/code` | `get_node_code` | routes/workflow_node_codes.py |
 | GET | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `get_node_code` | routes/workflow_node_codes.py |
+| PUT | `/workspaces/{workspace_id}/nodes/{node_key}/code` | `save_node_code_draft` | routes/workflow_node_codes.py |
 | PUT | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `save_node_code_draft` | routes/workflow_node_codes.py |
+| POST | `/workspaces/{workspace_id}/nodes/{node_key}/code/publish` | `publish_node_code` | routes/workflow_node_codes.py |
 | POST | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/publish` | `publish_node_code` | routes/workflow_node_codes.py |
+| GET | `/workspaces/{workspace_id}/nodes/{node_key}/code/versions` | `list_node_code_versions` | routes/workflow_node_codes.py |
 | GET | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/versions` | `list_node_code_versions` | routes/workflow_node_codes.py |
+| GET | `/workspaces/{workspace_id}/nodes/{node_key}/code/versions/{version}` | `get_node_code_version` | routes/workflow_node_codes.py |
 | GET | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/versions/{version}` | `get_node_code_version` | routes/workflow_node_codes.py |
+| POST | `/workspaces/{workspace_id}/nodes/{node_key}/code/rollback` | `rollback_node_code` | routes/workflow_node_codes.py |
 | POST | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/rollback` | `rollback_node_code` | routes/workflow_node_codes.py |
+| DELETE | `/workspaces/{workspace_id}/nodes/{node_key}/code` | `archive_node_code` | routes/workflow_node_codes.py |
 | DELETE | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `archive_node_code` | routes/workflow_node_codes.py |
+| GET | `/workflow-node-code-template` | `get_node_code_template` | routes/workflow_node_codes.py |
 | POST | `/workspaces/{workspace_id}/workflow/node-prompt-preview` | `preview_node_prompt_route` | routes/workflow_node_prompt_route.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions` | `list_workflow_revisions` | routes/workflow_revisions.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions/active` | `get_active_workflow_revision` | routes/workflow_revisions.py |
@@ -584,9 +593,14 @@ server/app/
   原因（不再是纯浅克隆猜测），逃生口 env
   `AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW=1`。超出预算的文件必须拆分或回退。
   ceiling 按有效行数计
-  （排除注释行与空行，实现见 `scripts/architecture/effective_lines.py`），压缩注释
+  （排除注释行与空行，实现见 `scripts/architecture/effective_lines.py`，`.sql` 的
+  `--` 注释行同样排除），压缩注释
   对预算没有帮助。此外 production 文件有
-  800 行绝对上限（`production.max_lines`，按原始行数计），豁免也不能突破；挂账超过 30 天的豁免由
+  800 行绝对上限（`production.max_lines`，按原始行数计），豁免也不能突破；#293 起
+  声明式产物 root 可覆盖绝对上限（`production.roots[].max_lines`）——`server/app/db`
+  的 `.sql`（全量 replay schema，单文件是刻意设计，1200 raw）与 `worker/ui` 的
+  `.js/.css`（原生无构建链单文件面，1000 raw）各设 root 级上限，ceiling 仍按有效行数
+  单调棘轮；挂账超过 30 天的豁免由
   `scripts/check_exemption_age.py` 在 full gate 中告警（不阻断）。
 
 ### Agent Worker 协议响应形态（response model 豁免的依据）
@@ -603,7 +617,44 @@ server/app/
 
 ### 后端
 
-- `server.app.main:create_app(data_dir, start_worker)` 是 FastAPI 应用工厂。
+- `server.app.main:create_app(data_dir, start_worker)` 是 FastAPI 应用工厂，也是
+  Host 进程唯一的组装根（composition root）：settings → DB 门面 → 一次性
+  migration/seed → services → routers → 线程组在此一次接线。内建的顺序不变式：
+  实例设置先于任何 service 读取从 DB hydrate；全部 workspace 启动即重置暂停；
+  回收线程（sweeper / artifact GC / materials TTL）只在 `sweeper_enabled` 下启动、
+  单副本持有（与 SingleReplicaProbe advisory lock 同规则，#277）；lifespan
+  teardown 先释放 replica 锁、收割 studio chat 会话、停线程，最后才关 DB 连接池。
+  `create_prod_app` 是 uvicorn 工厂，import 本模块保持无副作用。
+- `server.app.executors.leases.ExecutorLeaseRepository` 是 AGENTS.md §6 点名的
+  容量申请门面：service 一律经它 claim/finish/expire，不得直调
+  `executors.code` / `.runtime` / `.contracts`。仓库是数据层毗邻组件（#187 设计
+  豁免，可持 DSN）；写路径按域分置姊妹模块（`_lease_write_paths` 为主，
+  `_lease_approval` / `_lease_config_failure` 各管审批停泊与无 lease 失败记录，
+  均每次一连接一事务、冲突重试），事件广播只在事务提交后做（SSE 刷新失败不得
+  回滚已成功的 claim）；`park_awaiting_approval` 是 EXEC-APPROVAL-001 侧门
+  （审批门不占 lease 不写 node_run）。
+- `server.app.auth.dependencies` 是用户态身份路由（会话 / scoped token）的鉴权
+  注入点：两条凭证通道（Bearer 优先于 session cookie；scoped token 只走 Bearer，
+  非环境态故豁免 CSRF）+ `get_current_user` 之上的 scope 格子——`require_user`
+  （任意身份）、`require_admin`（角色 + 拒绝一切 scoped 身份：scoped token 继承
+  签发者角色，不拒则 admin 签发的 token 可达全部 admin 端点）、
+  `reject_studio_agent_scope`（生效面：scoped 身份一律不得生效，未知 scope 类型
+  也不放行）、`require_studio_agent_scope`/`_workspace`（工具面 + 绑定 workspace
+  校验）、`enforce_scoped_workspace_binding`（读面：绑定 token 只读自己的
+  workspace）。不经此模块的面：Worker token 鉴权（`routes/agent_workers.py` 的
+  `authorize_worker`）与 Studio MCP mount（ASGI 级 scoped-token 检查，Mount 绕过
+  路由层依赖，STUDIO-AGENT-001）。
+- `server.app.agent_broker.dispatch` 把就绪的 Agent 节点冻结为可 claim 单元：
+  解析有效 `execution` 块 → 暂存输入 → 渲染命令 spec → 打包自包含 bundle。不变式：
+  manifest 在 enqueue 冻结且只带白名单非敏感 config（CONFIG-MANIFEST-001）；
+  presigned URL 只在 claim 时注入内存（D12，队列积压不会搁浅过期 URL）；普通 job
+  从不 pin Agent 版本（只有 quality replay）；每 (job, node) 的活跃请求在暂存前
+  短路；`cleanup_bundle_on_error` + `finally` 覆盖全部失败路径。
+- `server.app.configuration.loader` 是 tracked split 配置文件的唯一读取方：
+  规范 SPLIT 布局（只认 `owned_keys.CONFIG_FILE_KEYS` 声明的文件名，G4）与
+  EXPLICIT 单文件布局在此解析；退役文件启动即 fail-fast（带迁移指引）；tracked
+  配置保持无 secret（明文 secret 启动被拒，secret 只进 vault/env）；
+  `owned_keys.py` 是「哪个文件拥有哪个顶层段」的权威。
 - 当 `start_worker=True` 时，生命周期内启动 `WorkflowWorkerThread`：
   - 在 DB 实例设置 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
   - 节点按 capability 分发：DB 中按 workspace 发布的 code 节点（EXEC-CODE-002/003，demo 节点在 workspace 初始化时注入）进入本地 code 池或 Worker code 池；agent 节点（pi / velites runtime）经 broker 派发给 Worker。
@@ -639,6 +690,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
   - `workspace_secrets` — vault 加密存储的 workspace 密钥（Fernet 密文，`(workspace_id, name)` 唯一，v16 新增）
   - `external_connections` / `instance_secrets` / `connection_tokens` — 实例级外部服务连接：连接只存非敏感配置，敏感字段 Fernet 加密入 `instance_secrets`（`conn:<key>:<field>` 引用），鉴权 token 加密缓存在 `connection_tokens`（v34 新增，见下文外部服务连接段）
   - `runs`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表（`job_batches` 已随 schema v53 drop，由 `runs` 取代）
+  - `approval_decisions` — `type: approval` 人工审批门的 insert-only 审计表（schema v65，EXEC-APPROVAL-001；每 (job_id, node_key) 的最新行即当前决策，历史行重建评审轮次）
   - `materials` — 材料（单文件条目）元数据；`material_bundles` / `material_bundle_members` — bundle 文件夹条目的冻结引用式清单（schema v55）
   - `job_artifacts` — Job 产物清单（权威副本在实例对象存储，schema v54）
   - `workflow_revisions` — workflow 版本修订历史
@@ -652,6 +704,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 - 存储路径以**相对 POSIX 路径**保存在 `settings.data_dir` 下（前缀为 `videos/`, `jobs/`, `logs/`, `packages/`），API 返回时投影为绝对路径。
 - SQL 占位符约定：**新 SQL 一律写 psycopg 的 `%s`**，不要再写 SQLite 风格的 `?`。存量 `?` 由 `server/app/db/dialect.py` 盲替换为 `%s`，该层无法区分占位符与 Postgres JSON 的 `?`/`?|`/`?&` 操作符；`scripts/check_architecture.py` 的 SQL 占位符检查（基线 `config/architecture/sql-placeholders-baseline.json`）按 ratchet 方式只降不升，新文件出现任何 SQL `?` 即失败，改写存量后同步下调基线。
 - 服务层数据边界（BOUNDARY-DATA-001）：`server/app/services/` 下的新服务**必须经 `JobQueries` 门面访问数据库**（范式见 `services/job_pause.py` 等 38+ 个 facade-only 服务）；裸 SQL 字面量、`server.app.db.transaction`/`connection` 直接 import 与 DSN 逃逸引用（`.path`/`.dsn_identity` 属性读及其 `getattr` 形式）由 `scripts/architecture/service_data_boundary.py` 检查冻结（基线 `config/architecture/service-data-boundary-baseline.json`，只降不升）。存量服务迁移到门面后手动（或重跑 ratchet）下调基线；新文件出现任一绕行即失败。门面的 DSN 属性 `.path` 已私有化为 `_path`（#187 第三步）：`dsn_identity` 是唯一公开只读访问器（字符串 DSN），合法消费者仅数据层自身与经设计豁免的数据层毗邻组件（lease 仓储、artifact store）。
+- 边界基线的 git 锚点防线（#292）：基线自身也只降不升——`service_data_boundary_monotonicity.py` 按 HEAD/HEAD^ 双锚点对比已提交基线，**新增条目**（对已跟踪的 service 文件）与**三元组计数上抬**均被拒绝（对齐 file budget 的 budget_monotonicity 机制）；全新 service 文件的首次登记不受限（由无条目即失败的常规检查治理）。存量 56 条按服务子域分批收敛：迁移到 `JobQueries` 门面后重跑 ratchet 下调，直至条目清零、基线退役。浅克隆缺锚点硬失败（同 budget 侧 env 逃生口）；非 git 目录静默跳过。
 
 ## New Subsystems
 
@@ -727,9 +780,9 @@ Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 sc
 
 其他配置文件：
 
-- 外部 Pi skill 仓库源与固定 commit 已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB `global_settings`（`skill_sources` / `skill_lock` 文档），lock 是 skill ref 的唯一权威（G3）；锁按 (skill, ref) 多值冻结（v2：per-skill `{repo, refs: {ref → commit}}`，#76，EXEC-SKILL-NODE-001）——Agent 路由节点的 `skill: {key, ref}` 是逐节点 pin 通道（随 revision 版本化、随 intake 冻结），未锁 ref 首次 dispatch 自动冻结、repo 漂移仍触发 relock 闸门，source ref 只作节点未声明 ref 时的默认兜底；经 admin API（`GET/PUT /api/admin/skill-sources`、`POST /api/admin/skill-sources/relock`）与 /admin/settings「Skill 源管理」维护，CLI `make skills-lock`（`uv run python -m server.app.skills.lock`）刷新锁（source ref ∪ 已锁 refs）。tracked `config/skills.yaml` / `config/skills.lock` 已退役：DB 无记录且文件存在时启动一次性导入并 warning，否则用内置常量（`server/app/skills/builtin_sources.py`）seed，此后文件不再读取。
-- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability` 与可选的 `skill` 内容绑定（#76：`key` + 可选 `ref`；code 节点声明 skill 即 publish 拒绝），不声明 `runner`/`agent`/command template；schema v62 起创建 workspace 不再种子模板，demo workspace 由 `make import-demo`（`scripts/seed_demo.py`）提供，其 id 与 key 同为 `education_video_problems_generation`。workflow 没有全局注册表（schema v40 的 `workflow_catalog` 表已于 schema v50 退役，DB-WORKFLOW-CATALOG-001）：workflow 就是 workspace 内部的一份 DAG，权威定义是该 workspace 的 active revision（schema v50 起节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部改读它）。schema v62（DB-WORKSPACE-KEY-BINDING-001）起 workspace id 与 `workspaces.default_workflow_key` 是同一个标识：创建时显式填写、终身不可变（PATCH / PUT configuration 改 key 一律 400，发布草稿 key 不匹配 422）；v62 迁移把存量 workspace 的 id 改成已绑定的 key（key 为空的按 id 回填），`default_workflow_key` 作为独立概念已标 deprecated（退役评估 issue 待开）。
-- `config/agent-worker.example.yaml`：Worker Service 引导配置样例（`host_url` / `worker_id` / `disabled_runtimes` / `capabilities` / `max_concurrency` 等），Worker 侧独立加载，不经 server 的 owned-key 校验。
+- 外部 Pi skill 仓库源与固定 commit 已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB `global_settings`（`skill_sources` / `skill_lock` 文档），lock 是 skill ref 的唯一权威（G3）；经 admin API（`GET/PUT /api/admin/skill-sources`、`POST /api/admin/skill-sources/relock`）与 /admin/settings「Skill 源管理」维护，CLI `make skills-lock`（`uv run python -m server.app.skills.lock`）刷新锁。tracked `config/skills.yaml` / `config/skills.lock` 已退役：DB 无记录且文件存在时启动一次性导入并 warning，否则用内置常量（`server/app/skills/builtin_sources.py`）seed，此后文件不再读取。
+- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；schema v62 起创建 workspace 不再种子模板，demo workspace 由 `make import-demo`（`scripts/seed_demo.py`）提供，其 id 与 key 同为 `education_video_problems_generation`。workflow 没有全局注册表（schema v40 的 `workflow_catalog` 表已于 schema v50 退役，DB-WORKFLOW-CATALOG-001）：workflow 就是 workspace 内部的一份 DAG，权威定义是该 workspace 的 active revision（schema v50 起节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部改读它）。schema v62（DB-WORKSPACE-KEY-BINDING-001）起 workspace id 与 `workspaces.default_workflow_key` 是同一个标识：创建时显式填写、终身不可变（PATCH / PUT configuration 改 key 一律 400，发布草稿 key 不匹配 422）；v62 迁移把存量 workspace 的 id 改成已绑定的 key（key 为空的按 id 回填），`default_workflow_key` 作为独立概念已标 deprecated（退役评估 issue 待开）。
+- `config/agent-worker.example.yaml`：Worker Service 引导配置样例（`host_url` / `worker_id` / `disabled_runtimes` / `max_concurrency` 等），Worker 侧独立加载，不经 server 的 owned-key 校验。
 - `config/architecture/*`：架构不变量、豁免、源文件体积预算。
 
 ## Testing

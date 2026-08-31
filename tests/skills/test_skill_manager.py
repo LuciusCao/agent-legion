@@ -3,7 +3,6 @@ from __future__ import annotations
 import concurrent.futures
 import stat
 import subprocess
-import time
 import uuid
 from pathlib import Path
 
@@ -382,10 +381,9 @@ def test_lock_refresh_command_writes_lock(tmp_path: Path) -> None:
 
 
 def test_corrupted_cache_is_repaired_to_clean_copy(tmp_path: Path) -> None:
-    # ttl=0 pins the legacy immediate-repair path; with the default TTL a
-    # dirtied cache is repaired on the first probe after expiry instead (see
-    # test_cleanliness_probes_rerun_after_ttl_and_repair_dirty_cache).
-    manager = _make_ttl_manager(tmp_path, 0.0)
+    # 无 memo（PR 317 codex P1）：每次 checkout 都在锁内重探测，脏 cache 下一次
+    # 即修复（见 test_dirty_cache_repaired_on_next_checkout）。
+    manager = _make_manager(tmp_path, _single_skill(_make_bare_repo(tmp_path)))
 
     first_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
     assert (first_dir / "SKILL.md").is_file()
@@ -644,58 +642,60 @@ def _probe_counts(manager: SkillManager) -> dict[str, int]:
     return counts
 
 
-def _make_ttl_manager(tmp_path: Path, ttl_seconds: float) -> SkillManager:
-    return SkillManager(
-        store=memory_skill_store(_single_skill(_make_bare_repo(tmp_path))),
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-        doc_cache_ttl_seconds=ttl_seconds,
-    )
-
-
-def test_cleanliness_probes_memoized_within_ttl(tmp_path: Path) -> None:
-    """After the first verification, dispatches skip the rev-parse/status git
-    forks until the TTL expires (the hot-path win: ~56ms per dispatch). The
-    tradeoff is explicit: a dirtied cache is served as-is within the TTL."""
-    manager = _make_ttl_manager(tmp_path, 60.0)
+def test_cleanliness_probes_run_on_every_checkout(tmp_path: Path) -> None:
+    """无 memo（PR 317 codex P1，退役 #42 的 TTL 快速通道）：每次 dispatch 都在
+    cache 锁内重跑 rev-parse/status 探测——两个 SkillManager 实例交替 checkout
+    同一 skill 的不同 ref 时，实例私有 memo 会让后者把错版本的 cache 复制进
+    run 目录。正确性优先，每次两次 git 探测是可接受成本。"""
+    manager = _make_manager(tmp_path, _single_skill(_make_bare_repo(tmp_path)))
     manager.get_skill_dir(_KEY, str(uuid.uuid4()))  # clone + first probes
-    counts = _probe_counts(manager)
-    cache_dir = tmp_path / "skills" / "demo_workflow" / "generate_key_info"
-    (cache_dir / "stray.txt").write_text("junk")
-
-    served = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
-    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
-
-    assert counts == {"status": 0, "rev-parse": 0}
-    assert (served / "stray.txt").is_file()  # memoized: dirt served as-is
-
-
-def test_cleanliness_probes_rerun_after_ttl_and_repair_dirty_cache(tmp_path: Path) -> None:
-    """Once the memo expires, the probes rerun and a dirtied cache is repaired
-    by checkout+clean — dirty detection is TTL-bounded, never lost."""
-    manager = _make_ttl_manager(tmp_path, 0.1)
-    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
-    cache_dir = tmp_path / "skills" / "demo_workflow" / "generate_key_info"
-    time.sleep(0.15)  # expire the memo before the cache is dirtied
-    stray = cache_dir / "stray.txt"
-    stray.write_text("junk")
-
-    counts = _probe_counts(manager)
-    repaired = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
-
-    assert counts["status"] > 0  # probes reran after expiry
-    assert not stray.exists()
-    assert not (repaired / "stray.txt").exists()
-
-
-def test_cleanliness_probes_every_call_when_ttl_zero(tmp_path: Path) -> None:
-    """ttl=0 restores the legacy per-call probing (used by tests that pin
-    cross-instance immediacy)."""
-    manager = _make_ttl_manager(tmp_path, 0.0)
-    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
     counts = _probe_counts(manager)
 
     manager.get_skill_dir(_KEY, str(uuid.uuid4()))
 
     assert counts["status"] > 0
     assert counts["rev-parse"] > 0
+
+
+def test_dirty_cache_repaired_on_next_checkout(tmp_path: Path) -> None:
+    """脏 cache（stray 文件）在下一次 checkout 即被 checkout+clean 修复。"""
+    manager = _make_manager(tmp_path, _single_skill(_make_bare_repo(tmp_path)))
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+    cache_dir = tmp_path / "skills" / "demo_workflow" / "generate_key_info"
+    stray = cache_dir / "stray.txt"
+    stray.write_text("junk")
+
+    served = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+
+    assert not stray.exists()
+    assert not (served / "stray.txt").exists()
+
+
+def _tag_and_push(work: Path, tag: str) -> None:
+    env = _git_env()
+    subprocess.run(["git", "-C", str(work), "tag", tag, "HEAD"], check=True, env=env)
+    subprocess.run(["git", "-C", str(work), "push", "origin", tag], check=True, env=env)
+
+
+def test_checkout_reprobes_cache_after_another_instance_switch(tmp_path: Path) -> None:
+    """回归（PR 317 codex P1）：manager A checkout v1 后，实例 B 把共享 cache
+    切到 v2；A 再 checkout v1 必须重新探测并拿到 v1 的内容——已退役的实例
+    私有 memo 会在 TTL 内跳过探测，把 v2 内容复制进 run 目录却记录 v1@commit。"""
+    repo_uri = _make_bare_repo(tmp_path)
+    work = tmp_path / "work" / "clone"
+    _tag_and_push(work, "v1")
+    v1_content = (work / "SKILL.md").read_text()
+    _push_new_commit(repo_uri, tmp_path, "# skill v2\n")
+    _tag_and_push(work, "v2")
+
+    store = memory_skill_store(_single_skill(repo_uri, "v1"))
+    manager_a = SkillManager(store=store, base_dir=tmp_path / "skills", runs_dir=tmp_path / "runs")
+    manager_b = SkillManager(store=store, base_dir=tmp_path / "skills", runs_dir=tmp_path / "runs")
+
+    manager_a.get_skill_dir(_KEY, str(uuid.uuid4()), ref="v1")
+    # 另一个实例（共享 base_dir/runs_dir 与 FileLock 域）把 cache 切到 v2。
+    manager_b.get_skill_dir(_KEY, str(uuid.uuid4()), ref="v2")
+
+    served = manager_a.get_skill_dir(_KEY, str(uuid.uuid4()), ref="v1")
+
+    assert (served / "SKILL.md").read_text() == v1_content

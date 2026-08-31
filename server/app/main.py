@@ -1,3 +1,9 @@
+"""FastAPI app factory — the composition root for the Host process.
+
+``create_app`` wires settings → DB → seeds → services → routers → threads;
+``create_prod_app`` is the uvicorn factory. Ordering invariants: backend.md.
+"""
+
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -36,7 +42,6 @@ from server.app.services.job_packages import JobPackageService
 from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
-from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 from server.app.services.workspace_execution_configuration import (
     WorkspaceExecutionConfigurationService,
@@ -85,7 +90,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # retired prefix and drop their stale lock entries (idempotent no-op once
     # migrated).
     migrate_skill_source_paths(job_db)
-    WorkflowRevisionService(job_db).reconcile_active_agent_routes()
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db)
     # Resume state must not survive a restart: dispatch stays off until an
     # operator explicitly resumes it in this process lifetime.

@@ -7,7 +7,7 @@ pytest.importorskip("scripts.stress.simulate_agents")
 
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "stress"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "stress"))
 
 from simulate_agents import (
     StressMetrics,

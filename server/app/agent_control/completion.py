@@ -53,6 +53,14 @@ def report_auth_failure_safe(database_dsn: ConnectSource, connection_key: str) -
     try:
         ConnectionTokenService(database_dsn).report_auth_failure(connection_key)
     except Exception:
+        # #204 broad-except audit: fire-and-forget invalidation after the
+        # result already committed (agent_result_commit calls this below its
+        # own success path). A failure to delete the cached token must never
+        # mask or fail the committed report — the stale token stays cached,
+        # and the next refresh cycle (or a retrying Worker's next 401
+        # report) re-runs the invalidation, so the outcome space (vault/DB
+        # surface) self-heals. logger.exception keeps the traceback; the
+        # docstring pins the "reporting must never mask" contract.
         logger.exception("connection %s: failed to report auth failure", connection_key)
 
 
@@ -115,6 +123,16 @@ class AgentCompletionHandler:
                     log_target,
                 )
             except Exception as exc:
+                # #204 broad-except audit: per-result containment that
+                # CONVERTS, not masks — the Worker's untrusted archive
+                # surface (gzip/tar corruption, unsafe member paths raising
+                # AgentBundleError, disk errors) has no enumerable business
+                # family, and every flavor must fail THIS node's lease with
+                # a failed result instead of crashing the completion path
+                # (the lease would otherwise time out and requeue into the
+                # same poison archive). The converted message rides
+                # ExecutionResult.error_message; the Worker-side traceback
+                # stays in the Worker's own log.
                 return self.leases.finish(
                     lease_id,
                     ExecutionResult(

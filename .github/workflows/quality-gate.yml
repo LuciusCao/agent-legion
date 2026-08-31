@@ -3,12 +3,10 @@ name: Quality Gate
 on:
   pull_request:
     branches: [develop, main, master]
-    paths-ignore: ['docs/**', '**/*.md', 'LICENSE']
   push:
     # develop merges are already covered by the PR gate; keep push triggers
     # on the trunk branches only so a merge does not burn a second full gate.
     branches: [main, master]
-    paths-ignore: ['docs/**', '**/*.md', 'LICENSE']
   workflow_dispatch:
   # The weekly schedule moved to nightly-gate.yml (issue #193): the stress
   # jobs never run on PR/push anyway, and a scheduled run on a trunk ref
@@ -38,7 +36,10 @@ jobs:
   # gate by changed paths, mirroring the local pre-push lane policy —
   # frontend-only changes skip the backend pytest shards (api-check still
   # runs), velites-only changes run just the rust job, docs-only changes
-  # skip the gate entirely. Shared files (config, scripts, tests,
+  # skip every lane (only this detection job runs — triggers carry no
+  # paths-ignore, because a workflow that never starts leaves required
+  # checks pending forever and blocks docs-only PRs, first hit on #316).
+  # Shared files (config, scripts, tests,
   # workflows, anything outside frontend//velites//docs/) run the full
   # backend+frontend gate; dispatch runs always get every lane.
   changes:
@@ -246,10 +247,17 @@ jobs:
   # merges them after the needs-DAG guarantees all shards finished — no
   # artifact polling. fail-fast stays off so a failing shard does not
   # cancel its peers' evidence.
+  #
+  # The lane condition lives on the STEPS, not the job: a matrix job skipped
+  # at job level reports a single check with the literal name
+  # "backend-postgres-${{ matrix.shard }}", so the required per-shard
+  # contexts (backend-postgres-a/b/c) never appear and docs-only PRs stay
+  # blocked (first hit on #319). With the condition on steps, a docs-only
+  # run boots each shard as a seconds-long no-op and every shard reports
+  # success, satisfying branch protection.
   backend-postgres:
     name: backend-postgres-${{ matrix.shard }}
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -278,13 +286,16 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.backend == 'true'
 
       - uses: astral-sh/setup-uv@v5
+        if: needs.changes.outputs.backend == 'true'
         with:
           enable-cache: true
           python-version: "3.13"
 
       - run: uv sync
+        if: needs.changes.outputs.backend == 'true'
 
       # velites' Linux filesystem sandbox (EXEC-HARNESS-SANDBOX-001) is
       # fail-closed: the postgres tier's velites sandbox tests need a real
@@ -292,6 +303,7 @@ jobs:
       # userns via AppArmor; current bubblewrap no longer supports the legacy
       # setuid mode, so the disposable CI VM must explicitly enable userns.
       - name: Install bubblewrap (velites sandbox backend)
+        if: needs.changes.outputs.backend == 'true'
         run: |
           sudo apt-get update && sudo apt-get install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -301,7 +313,7 @@ jobs:
       # self-skips so it is not repeated after hundreds of
       # coverage-instrumented tests.
       - name: Velites sandbox integration
-        if: matrix.shard == 'b'
+        if: needs.changes.outputs.backend == 'true' && matrix.shard == 'b'
         run: >-
           uv run pytest -q
           tests/workers/test_workflow_worker_thread_local.py::test_make_workflow_worker_runs_demo_intake_local_node
@@ -309,6 +321,7 @@ jobs:
           TMPDIR: /var/tmp
 
       - name: Backend PostgreSQL tests (shard ${{ matrix.gate_shard }})
+        if: needs.changes.outputs.backend == 'true'
         run: |
           mkdir -p coverage-data
           BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
@@ -325,7 +338,7 @@ jobs:
       # (--cov-fail-under=0); the combined report in backend-coverage
       # enforces it once.
       - name: Full gate evidence (tests/full)
-        if: matrix.shard == 'b'
+        if: needs.changes.outputs.backend == 'true' && matrix.shard == 'b'
         run: |
           mkdir -p coverage-data test-results
           uv run pytest -q tests/full -m full_gate \
@@ -344,7 +357,7 @@ jobs:
       # coverage floor and the aggregate summary; a missing upload fails the
       # corresponding download step there, keeping the gate red.
       - name: Upload shard coverage data
-        if: always()
+        if: always() && needs.changes.outputs.backend == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: backend-postgres-${{ matrix.shard }}-coverage
@@ -352,7 +365,7 @@ jobs:
           retention-days: 1
 
       - name: Upload full-gate coverage data
-        if: always() && matrix.shard == 'b'
+        if: always() && needs.changes.outputs.backend == 'true' && matrix.shard == 'b'
         uses: actions/upload-artifact@v4
         with:
           name: backend-full-coverage
@@ -360,7 +373,7 @@ jobs:
           retention-days: 1
 
       - name: Upload shard test telemetry
-        if: always()
+        if: always() && needs.changes.outputs.backend == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: backend-postgres-${{ matrix.shard }}-telemetry
@@ -370,7 +383,7 @@ jobs:
           retention-days: 1
 
       - name: Upload full-gate test telemetry
-        if: always() && matrix.shard == 'b'
+        if: always() && needs.changes.outputs.backend == 'true' && matrix.shard == 'b'
         uses: actions/upload-artifact@v4
         with:
           name: backend-full-telemetry
@@ -672,6 +685,22 @@ jobs:
       - name: Coverage inventory
         run: npm run test:coverage-inventory
         working-directory: frontend
+
+      # #295: the frontend partitions (auth/bootstrap, api transport, ...)
+      # were SKIP on every PR run — the backend-coverage job enforces the
+      # backend partitions only because it never passes --frontend. Enforce
+      # them here against the merged blob data; uv provides the python for
+      # scripts/check_coverage_partitions.py (stdlib only for --frontend).
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Enforce frontend coverage partitions
+        run: >-
+          uv run --no-sync python scripts/check_coverage_partitions.py
+          --frontend frontend/coverage/coverage-final.json
+          --enforce
 
       - name: Frontend coverage summary
         if: always()

@@ -95,7 +95,11 @@ PARTITIONS: tuple[Partition, ...] = (
         ),
         80.0,
     ),
-    Partition("frontend api transport", "frontend", ("src/api/",), 80.0),
+    # Baseline 74.8% measured on the full vitest suite (2026-08-30, #295
+    # first enforced run); floor 70 = baseline minus margin, the same rule
+    # as the worker execution-plane floor. The other frontend partitions
+    # measured 100% and keep the 80 floor.
+    Partition("frontend api transport", "frontend", ("src/api/",), 70.0),
     Partition(
         "frontend workflow upgrade",
         "frontend",
@@ -263,6 +267,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.frontend.is_file():
         totals_by_source["frontend"] = frontend_line_totals(args.frontend)
         provided_sources.add("frontend")
+
+    if args.enforce and not provided_sources:
+        # A gate with no data at all must not pass silently (#295): every
+        # partition would SKIP into a green build that verified nothing.
+        print("coverage partitions: no data; refusing to enforce", file=sys.stderr)
+        return 1
 
     rows, evaluated = evaluate(PARTITIONS, totals_by_source, provided_sources)
     violations = validate_partition_prefixes(PARTITIONS) + list(evaluated)

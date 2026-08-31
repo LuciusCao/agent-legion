@@ -9,7 +9,7 @@ import pytest
 from tests import conftest as test_config
 from tests import postgres_support
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DIRECT_POSTGRES_IMPORTS = (
     "from tests.postgres_support",
     "from server.app.main import create_app",

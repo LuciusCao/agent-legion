@@ -100,15 +100,34 @@ describe('WorkflowNodeSkillEditor', () => {
     expect(screen.getByPlaceholderText('留空用源默认 ref')).toBeInTheDocument()
   })
 
-  it('falls back to the published node skill when the draft has none', () => {
+  it('echoes the published node skill when the draft has no such node', () => {
     renderEditor({
       node: { ...node, skill: { key: 'demo/other', ref: 'v2.0.0' } },
+      definitionYaml: 'nodes:\n  other_node:\n    capability: cap\n',
     })
 
     expect(skillSelectorProps).toHaveBeenLastCalledWith(
       expect.objectContaining({ value: 'demo/other' })
     )
     expect(screen.getByLabelText('Skill ref')).toHaveValue('v2.0.0')
+  })
+
+  it('stays unbound after the binding is cleared from the draft (no published echo)', () => {
+    // codex P2 on PR 317：草稿节点存在但无 skill key = 显式清除；回显
+    // published 绑定会让「清除 skill 绑定」立刻被旧值覆盖。
+    renderEditor({
+      node: { ...node, skill: { key: 'demo/other', ref: 'v2.0.0' } },
+      definitionYaml: baseYaml, // 草稿节点 n1 存在、无 skill key
+    })
+
+    expect(skillSelectorProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({ value: '' })
+    )
+    expect(screen.getByLabelText('Skill ref')).toHaveValue('')
+    expect(screen.getByLabelText('Skill ref')).toBeDisabled()
+    expect(
+      screen.queryByRole('button', { name: '清除 skill 绑定' })
+    ).not.toBeInTheDocument()
   })
 
   it('disables the ref input until a skill is bound', () => {

@@ -47,6 +47,9 @@ export function AgentEditor({
   const [agentIdInput, setAgentIdInput] = useState('')
   const [capability, setCapability] = useState(initialCapability ?? '')
   const [runtime, setRuntime] = useState<AgentRuntime>('pi')
+  // #76：skill 不是表单字段（绑定在节点级）；这里只缓存已加载定义的现值，
+  // 保存草稿时原样保留（legacy 兜底），新建 Agent 才传空。
+  const [skill, setSkill] = useState('')
   const [tools, setTools] = useState<string[]>(['read', 'write', 'bash'])
   const [requiresLabels, setRequiresLabels] = useState<
     Record<string, string> | undefined
@@ -69,6 +72,7 @@ export function AgentEditor({
         const definition = (source?.definition ?? {}) as Record<string, unknown>
         setCapability(String(definition.capability ?? ''))
         setRuntime((definition.runtime as AgentRuntime) ?? 'pi')
+        setSkill(String(definition.skill ?? ''))
         setTools(
           Array.isArray(definition.tools) ? definition.tools.map(String) : []
         )
@@ -124,9 +128,10 @@ export function AgentEditor({
     return {
       capability: capability.trim(),
       runtime,
-      // #76：skill 不再是 Agent 定义的一部分（节点级绑定）；generated 契约
-      // 里 skill 仍必填（服务端默认 ""），显式传空。
-      skill: '',
+      // #76：skill 不再是 Agent 表单字段（节点级绑定）；generated 契约里
+      // skill 仍必填（服务端默认 ""）——编辑存量 Agent 原样保留已加载值
+      // （节点未绑 skill 的 workflow 靠它兜底），新建才传空。
+      skill: creating ? '' : skill,
       ...(tools.length > 0 ? { tools } : {}),
       ...(requiresLabels ? { requires_labels: requiresLabels } : {}),
       ...(configSchema ? { config_schema: configSchema } : {}),

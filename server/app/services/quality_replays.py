@@ -112,6 +112,17 @@ class QualityReplayService:
                 workspace_id, item, job, definition, node, replay_id, pin
             )
         except Exception as exc:
+            # #204 broad-except audit: compensate-then-CLASSIFY (#233
+            # variant). The catch is wide because build_copy_job spans the
+            # copy job's whole construction (DB writes, artifact copies,
+            # snapshot parsing) whose failure space is mixed; but nothing is
+            # masked — compensate_failed_setup records business failures as
+            # a failed replay row and deletes the row for unexpected ones,
+            # JobServiceError re-raises as-is, and everything else converts
+            # to InvalidOperationError WITH the original chained (`from`),
+            # so programming errors stay visible (traceback + cause) while
+            # the half-created replay never blocks retries at the
+            # one-active-replay guard.
             # Business failures (expected, user-relevant) are recorded as a
             # failed replay; programming errors are NOT masked as replay
             # business failures — they leave no row behind and propagate.

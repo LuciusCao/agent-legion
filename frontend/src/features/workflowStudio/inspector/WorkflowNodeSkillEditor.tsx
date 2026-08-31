@@ -22,13 +22,15 @@ type Props = {
  * debounce PUT raw yaml 流（字段无关）。 */
 export function WorkflowNodeSkillEditor(props: Props) {
   const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined
-  const draftSkill = normalizeNodeSkill(
-    parseWorkflowNode(props.definitionYaml, props.node.key)?.skill
-  )
+  // 区分「草稿里没有这个节点」（回显 published 绑定）与「草稿节点存在但无
+  // skill key」（用户显式清除，不回显——否则清除立刻被 published 覆盖，
+  // codex P2 on PR 317）。
+  const draftNode = parseWorkflowNode(props.definitionYaml, props.node.key)
+  const draftSkill = normalizeNodeSkill(draftNode?.skill)
   const published = props.node.skill
     ? { key: props.node.skill.key, ref: props.node.skill.ref }
     : null
-  const bound = draftSkill ?? published
+  const bound = draftNode === undefined ? published : draftSkill
 
   function patch(skill: { key: string; ref: string } | null) {
     props.setDefinitionYaml(

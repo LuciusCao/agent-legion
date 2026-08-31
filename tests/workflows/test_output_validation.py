@@ -23,16 +23,14 @@ _REF = "v1.2.3"
 def _manager(tmp_path: Path, validator_body: str) -> MagicMock:
     manager = MagicMock()
     manager.base_dir = tmp_path / "skills"
-    # The contract check (resolve_workflow_skill) reads the shared cache dir;
-    # the validator itself runs from the execution-private run dir.
-    cache_dir = manager.base_dir / _KEY
-    (cache_dir / "references").mkdir(parents=True)
-    (cache_dir / "scripts").mkdir()
-    (cache_dir / "SKILL.md").write_text("# skill\n")
-    (cache_dir / "references" / "output-contract.md").write_text("contract\n")
-    (cache_dir / "scripts" / "validate_output.py").write_text("print('ok')\n")
-    run_dir = tmp_path / "run"
-    (run_dir / "scripts").mkdir(parents=True)
+    # The contract check reads the execution-private run dir (codex P1 on
+    # PR 317) — laid out as <root>/<execution_id>/<group>/<name> — and the
+    # validator itself runs from the same copy.
+    run_dir = tmp_path / "runs" / "exec" / _KEY
+    (run_dir / "references").mkdir(parents=True)
+    (run_dir / "scripts").mkdir()
+    (run_dir / "SKILL.md").write_text("# skill\n")
+    (run_dir / "references" / "output-contract.md").write_text("contract\n")
     (run_dir / "scripts" / "validate_output.py").write_text(validator_body)
     manager.checkout_skill.return_value = (run_dir, "c" * 40, f"{_REF}@{'c' * 12}")
     return manager

@@ -79,12 +79,16 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
         config={},
     )
     router = create_studio_agent_tools_router(None, settings)  # 枚举路由不触 DB
+    # #211 Phase 2：workflows/{workflow_key} 路径段已退役为 deprecated 别名，
+    # MCP 工具只打无段路径——比对时把别名从路由表里滤掉。
+    _RETIRED_ALIAS = "/workflows/{workflow_key}/nodes/"
     table = {
         # `{param:path}` 转换器归一化为 `{param}`：工具侧占位不含转换器后缀。
         (method, re.sub(r"\{(\w+):\w+\}", r"{\1}", route.path))
         for router_ in (router, create_studio_agent_context_router(None))
         for route in router_.routes
         for method in (route.methods or set()) & _ROUTE_METHODS
+        if _RETIRED_ALIAS not in route.path
     }
 
     recorded = {

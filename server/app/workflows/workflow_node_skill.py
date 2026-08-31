@@ -92,11 +92,11 @@ def effective_node_skill(node: WorkflowNode, agent_skill: str) -> tuple[str, str
 def node_skill_publish_error(node: WorkflowNode, agent_skill: str | None) -> str | None:
     """Publish-gate check for a node's skill binding.
 
-    ``agent_skill`` is the resolved published Agent's skill for the node's
-    capability (``None`` when the node is code-routed). Agent-routed: the
-    binding may live on the node or (legacy) on the Agent definition — at
-    least one side must name a skill. Code-routed: a declared skill is
-    meaningless, only Agent-routed nodes run skill content.
+    ``agent_skill``: the resolved published Agent's skill for the node's
+    capability; ``None`` for code-routed nodes and agent nodes without a
+    single published Agent. Agent-routed: the binding may live on the node
+    or (legacy) on the Agent definition — at least one side must name one.
+    Code-routed: a declared skill is meaningless (never runs skill content).
     """
     if agent_skill is None:
         if node.skill is not None:

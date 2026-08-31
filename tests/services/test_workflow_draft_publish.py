@@ -32,6 +32,28 @@ nodes:
       ref: v1.1.0
 """
 
+# Agent 路由形态（#284 显式 type）：skill 门禁的三个用例使用。
+_DRAFT_YAML_AGENT = """
+key: test_publish_flow
+label: Test Publish Flow
+nodes:
+  do_thing:
+    type: agent
+    capability: do_thing
+"""
+
+_DRAFT_YAML_AGENT_WITH_SKILL = """
+key: test_publish_flow
+label: Test Publish Flow
+nodes:
+  do_thing:
+    type: agent
+    capability: do_thing
+    skill:
+      key: education-video-problems-generation/review-questions
+      ref: v1.1.0
+"""
+
 _DRAFT_YAML_WITH_START = """
 key: test_publish_flow
 label: Test Publish Flow
@@ -153,6 +175,43 @@ def test_publish_skips_code_resolution_for_start_node(tmp_path: Path) -> None:
     assert active is not None
 
 
+_DRAFT_YAML_WITH_APPROVAL = """
+key: test_publish_flow
+label: Test Publish Flow
+nodes:
+  _start:
+    type: start
+    accepted_item_types: [material]
+  do_thing:
+    type: code
+    capability: do_thing
+    after: [_start]
+    outputs: [result.json]
+  gate:
+    type: approval
+    label: 审批
+    after: [do_thing]
+    inputs: [result.json]
+edges:
+  - {from: _start, to: do_thing}
+  - {from: do_thing, to: gate}
+"""
+
+
+def test_publish_skips_agent_and_code_resolution_for_approval_gates(
+    tmp_path: Path,
+) -> None:
+    """Approval gates never dispatch (EXEC-APPROVAL-001): publish validation
+    demands neither a published Agent nor node code for them."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _seed_node_code(workspace["id"])
+
+    ok, errors = publish_workflow_draft(queries, workspace["id"], _DRAFT_YAML_WITH_APPROVAL)
+
+    assert (ok, errors) == (True, [])
+
+
 def test_validate_reports_structural_errors_before_bindings(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = _workspace(queries)
@@ -203,7 +262,7 @@ def test_publish_rejects_agent_node_without_any_skill_binding(
     workspace = _workspace(queries)
     _patch_agent_catalog(monkeypatch, {"agent-1": SimpleNamespace(capability="do_thing", skill="")})
 
-    errors = validate_workflow_draft_for_publish(queries, workspace["id"], _DRAFT_YAML, True)
+    errors = validate_workflow_draft_for_publish(queries, workspace["id"], _DRAFT_YAML_AGENT, True)
 
     assert any("declares no skill" in error for error in errors)
     assert any("do_thing" in error for error in errors)
@@ -219,7 +278,9 @@ def test_publish_accepts_agent_node_with_node_skill(
     _patch_agent_catalog(monkeypatch, {"agent-1": SimpleNamespace(capability="do_thing", skill="")})
 
     assert (
-        validate_workflow_draft_for_publish(queries, workspace["id"], _DRAFT_YAML_WITH_SKILL, True)
+        validate_workflow_draft_for_publish(
+            queries, workspace["id"], _DRAFT_YAML_AGENT_WITH_SKILL, True
+        )
         == []
     )
 
@@ -241,7 +302,9 @@ def test_publish_accepts_agent_node_without_skill_when_agent_binds_one(
         },
     )
 
-    assert validate_workflow_draft_for_publish(queries, workspace["id"], _DRAFT_YAML, True) == []
+    assert (
+        validate_workflow_draft_for_publish(queries, workspace["id"], _DRAFT_YAML_AGENT, True) == []
+    )
 
 
 def test_publish_rejects_skill_on_code_routed_node(

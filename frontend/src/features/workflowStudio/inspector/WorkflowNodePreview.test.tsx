@@ -16,6 +16,7 @@ const node: WorkflowNodeRecord = {
   key: 'n1',
   label: '节点一',
   capability: 'cap',
+  node_type: 'agent',
   after: [],
   inputs: [],
   outputs: [],
@@ -77,28 +78,40 @@ describe('WorkflowNodePreview skill key resolution', () => {
     )
   })
 
-  it('reads the key from the mapping form with an explicit ref', async () => {
+  it('passes the mapping-form ref to the skill detail query (#76 preview pin)', async () => {
     renderPreview({
       definitionYaml:
         'nodes:\n  n1:\n    capability: cap\n    skill:\n      key: demo/node-skill\n      ref: v9\n',
     })
 
     expect(await screen.findByText('demo/node-skill')).toBeInTheDocument()
-    expect(mockGetSkillDetail).toHaveBeenCalledWith(
-      'demo/node-skill',
-      undefined
-    )
+    expect(mockGetSkillDetail).toHaveBeenCalledWith('demo/node-skill', 'v9')
   })
 
-  it('falls back to the published node skill when the draft has none', async () => {
+  it('echoes the published node skill when the draft has no such node', async () => {
     renderPreview({
-      node: { ...node, skill: { key: 'demo/published-skill', ref: '' } },
+      node: { ...node, skill: { key: 'demo/published-skill', ref: 'v7' } },
+      definitionYaml: 'nodes:\n  other_node:\n    capability: cap\n',
     })
 
     expect(await screen.findByText('demo/published-skill')).toBeInTheDocument()
     expect(mockGetSkillDetail).toHaveBeenCalledWith(
       'demo/published-skill',
-      undefined
+      'v7'
+    )
+  })
+
+  it('treats a draft node without a skill key as cleared (no published echo)', async () => {
+    renderPreview({
+      node: { ...node, skill: { key: 'demo/published-skill', ref: 'v7' } },
+      // 默认草稿含 n1 但无 skill key：显式清除，回落 Agent 兜底而非
+      // published 绑定（codex P2 on PR 317）。
+    })
+
+    expect(await screen.findByText('demo/agent-skill')).toBeInTheDocument()
+    expect(mockGetSkillDetail).not.toHaveBeenCalledWith(
+      'demo/published-skill',
+      expect.anything()
     )
   })
 

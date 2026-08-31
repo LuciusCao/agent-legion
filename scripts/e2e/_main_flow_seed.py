@@ -68,6 +68,7 @@ WORKFLOW_DEFINITION: dict[str, Any] = {
         },
         "intake": {
             "label": "读取条目",
+            "type": "code",
             "capability": "e2e_intake",
             "after": [],
             "inputs": [],
@@ -75,6 +76,10 @@ WORKFLOW_DEFINITION: dict[str, Any] = {
         },
         "draft": {
             "label": "生成草稿",
+            # Explicit type (#284): without it the node normalizes to code,
+            # no Agent route materializes, and dispatch falls to the code
+            # pool where no node code exists.
+            "type": "agent",
             "capability": AGENT_CAPABILITY,
             # Node-level skill binding (issue #76); the Agent definition
             # carries no skill anymore.
@@ -86,6 +91,7 @@ WORKFLOW_DEFINITION: dict[str, Any] = {
         },
         "publish": {
             "label": "汇总",
+            "type": "code",
             "capability": "e2e_publish",
             "after": ["draft"],
             "inputs": [INTAKE_OUTPUT, DRAFT_OUTPUT],

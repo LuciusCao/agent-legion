@@ -19,15 +19,6 @@ def normalize_labels(labels: Any) -> dict[str, str]:
     return normalized
 
 
-def normalize_capabilities(values: Any) -> list[str]:
-    if not isinstance(values, list) or len(values) > 128:
-        raise ValueError("Worker 能力必须是最多 128 项的列表")
-    capabilities = sorted({str(value).strip() for value in values})
-    if any(not value or value == "*" or len(value) > 128 for value in capabilities):
-        raise ValueError("Worker 能力必须是 1 到 128 个字符")
-    return capabilities
-
-
 def normalize_models(values: Any, runtimes: Iterable[str]) -> list[dict[str, str]]:
     if not isinstance(values, list) or len(values) > 256:
         raise ValueError("模型声明必须是最多 256 项的列表")

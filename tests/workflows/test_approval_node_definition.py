@@ -131,3 +131,24 @@ def test_summarize_job_status_surfaces_awaiting_approval():
     # Running parallel branches outrank the gate; failures too.
     assert summarize_job_status(["running", "awaiting_approval"]) == "running"
     assert summarize_job_status(["failed", "awaiting_approval"]) == "failed"
+
+
+def test_definition_to_yaml_preserves_approval_type_without_capability():
+    """The Studio echo must round-trip approval gates: dropping ``type``
+    would reload them as code nodes and publish validation would demand
+    node code (#284 explicit types + EXEC-APPROVAL-001)."""
+    import yaml
+
+    from server.app.services.workflow_revision_format import definition_to_yaml
+
+    definition = workflow_definition_from_mapping(_approval_dag())
+
+    echoed = definition_to_yaml(definition)
+    gate_yaml = yaml.safe_load(echoed)["nodes"]["gate"]
+    assert gate_yaml["type"] == "approval"
+    assert "capability" not in gate_yaml
+
+    reloaded = workflow_definition_from_mapping(yaml.safe_load(echoed))
+    assert reloaded.nodes["gate"].node_type == "approval"
+    assert reloaded.nodes["gate"].config == {"rework_target": "write"}
+    assert reloaded.nodes["write"].node_type == "code"

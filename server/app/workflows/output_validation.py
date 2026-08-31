@@ -46,6 +46,16 @@ def run_output_validator(
             timeout=timeout_seconds,
         )
     except Exception as exc:
+        # #204 broad-except audit: convert-to-contract, not a swallow — the
+        # function's return value IS the verdict channel (None = valid,
+        # string = failure message recorded on the run). The width is the
+        # subprocess surface (OSError when the interpreter/script path is
+        # broken, TimeoutExpired past timeout_seconds, spawn failures), none
+        # of which is a business family; each must surface as "Validator
+        # error: ..." so the node FAILS closed — an unrunnable validator
+        # must never be treated as validated output (the untrusted-output
+        # contract in the module docstring). The exception text rides the
+        # returned message; the run row records it.
         return f"Validator error: {exc}"
     if proc.returncode != 0:
         return f"Output validation failed: {proc.stderr.strip()}"
@@ -74,6 +84,16 @@ def validate_worker_outputs(
     try:
         checkout = resolve_skill_checkout(skill_manager, skill, validation_id, ref)
     except Exception as exc:
+        # #204 broad-except audit: convert-to-contract, same channel as
+        # run_output_validator's catch above — the string verdict is the
+        # only failure channel. resolve_skill_checkout spans the skill
+        # materialization surface (cache copytree, the DB-backed source
+        # store, the contract validation's ValueError family) plus its own
+        # cleanup-guard re-raise; a Worker-pinned skill name that cannot be
+        # materialized is an untrusted-input outcome, not a host bug, and
+        # must fail THIS node ("Validator error: ...") rather than crash
+        # the completion path — the lease would otherwise expire into the
+        # same poison manifest. The exception text rides the message.
         return f"Validator error: {exc}"
     try:
         return run_output_validator(checkout.run_dir, job_dir)

@@ -54,7 +54,7 @@ def claim_in_transaction(
     max_concurrency, max_code_concurrency = sync_declared_capacity(
         conn, worker, declared_max_concurrency, declared_max_code_concurrency
     )
-    capabilities, models = agent_claim_compatibility.worker_declarations(worker)
+    models = agent_claim_compatibility.worker_model_declarations(worker)
     active_rows = conn.execute(
         "select kind, count(*) as cnt from agent_execution_requests"
         " where worker_id=%s and state='claimed' group by kind",
@@ -65,7 +65,6 @@ def claim_in_transaction(
     code_active = active_by_kind.get("code", 0)
     view = WorkerView(
         runtimes=set(json.loads(worker["runtimes_json"])),
-        capabilities=capabilities,
         models=models,
         labels=json.loads(worker["labels_json"]),
         allowed_workspaces=set(json.loads(worker["allowed_workspaces_json"] or "[]")),

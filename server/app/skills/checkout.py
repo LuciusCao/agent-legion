@@ -35,8 +35,24 @@ def resolve_skill_checkout(
     """Checkout ``key`` at ``ref`` (the source default when empty), validated."""
     run_dir, commit, version = skill_manager.checkout_skill(key, execution_id, ref or None)
     try:
-        resolve_workflow_skill(skill_manager.base_dir, key)
+        # Validate the execution-private copy, not the shared cache: another
+        # dispatch may switch the cache to a different ref right after this
+        # checkout returns, while the run dir is the content actually
+        # packaged/executed (codex P1 on PR 317). The run dir layout is
+        # <runs_dir>/<execution_id>/<group>/<name>, so parents[1] is the root
+        # under which resolve_workflow_skill joins the key.
+        resolve_workflow_skill(run_dir.parents[1], key)
     except Exception:
+        # #204 broad-except audit: cleanup-guard-then-bare-re-raise (#233
+        # pattern — clean up broad, classify never). checkout_skill above
+        # already copytree'd the execution-private run dir; whatever made the
+        # contract validation fail (ValueError for the documented
+        # missing/escaping-skill cases, OSError from the filesystem, or a
+        # programming error), the private dir must be reclaimed before the
+        # exception propagates or every retry leaks one runs/<execution_id>
+        # copy (only the age-based sweeper would reclaim it). The bare
+        # ``raise`` preserves the original type — the callers
+        # (output_validation, the dispatch path) classify it themselves.
         skill_manager.cleanup_execution(execution_id)
         raise
     # version is "ref@commit12"; its ref prefix is the effective pin

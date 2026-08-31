@@ -168,10 +168,15 @@ class JobIntakeService:
                 frozen_config=node_config,
             )
         except Exception:
-            # create_run committed before create_jobs_bulk ran; without
-            # compensation the orphaned run row would make an identical
-            # resubmission hit the deterministic-id upsert and return the
-            # empty run. Best-effort (guarded by not-exists): never mask the
+            # #204 broad-except audit: compensate-then-bare-re-raise (#233
+            # pattern). create_run committed before create_jobs_bulk ran;
+            # without compensation the orphaned run row would make an
+            # identical resubmission hit the deterministic-id upsert and
+            # return the empty run. The width is deliberate: ANY creation
+            # failure (DB constraint, serialization, programming error)
+            # must trigger the cleanup, then the bare raise preserves the
+            # original error verbatim — nothing is swallowed.
+            # Best-effort (guarded by not-exists): never mask the
             # original failure.
             try:
                 self.job_db.delete_run_without_jobs(str(batch["id"]))

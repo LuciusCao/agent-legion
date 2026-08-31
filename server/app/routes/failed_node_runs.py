@@ -11,7 +11,11 @@ from server.app.routes.failed_node_run_contracts import (
     FailedNodeRunItem,
     FailedNodeRunsResponse,
 )
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import (
+    raise_job_http_error,
+    reject_mismatched_workflow_key,
+    require_workflows_enabled,
+)
 from server.app.routes.job_rerun_by_failure_contracts import (
     JobRerunByFailureRequest,
     JobRerunByFailureResponse,
@@ -49,16 +53,15 @@ def create_failed_node_runs_router(
         since: datetime | None = None,
     ) -> FailedNodeRunsResponse:
         require_workflows_enabled(settings)
+        # Codex P1 on #307 (guard parity): with the read-layer predicate gone,
+        # a mismatched explicit key can no longer narrow the list — reject it
+        # instead of silently widening the result.
+        reject_mismatched_workflow_key(workspace_id, workflow_key)
         try:
             rows = queries.list_failed_node_runs(
                 workspace_id,
                 category=category,
                 detail=detail,
-                # #211 Phase 2: absent workflow_key defaults to the path
-                # workspace_id (equal since v62) — same rows as the explicit
-                # filter, so old clients sending it change nothing. Read via
-                # the raw query param, not the deprecated field attribute.
-                workflow_key=workflow_key or workspace_id,
                 since=since,
             )
             return FailedNodeRunsResponse(runs=[FailedNodeRunItem(**row) for row in rows])
@@ -79,6 +82,9 @@ def create_failed_node_runs_router(
         # (equal since v62); read via model_dump because the deprecated field
         # attribute raises the deprecation warning the suite escalates.
         body = payload.model_dump()
+        # Codex P1 on #307 (guard parity): reject a mismatched explicit key —
+        # the eligibility filter no longer narrows by it.
+        reject_mismatched_workflow_key(workspace_id, body.get("workflow_key"))
         results = job_rerun.rerun_by_failure_category(
             workspace_id,
             payload.category,

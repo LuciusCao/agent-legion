@@ -37,13 +37,14 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         "_start": {"label": "入口", "type": "start", "accepted_item_types": ["material"]},
         "intake_knowledge_points": {
             "label": "读取知识点",
+            "type": "code",
             "capability": "intake_knowledge_points",
-            "after": [],
-            "inputs": [],
+            # after/inputs 缺省即 loader 默认的空列表（入口节点由 start 边接入）。
             "outputs": ["knowledge_point.json"],
         },
         "write_script": {
             "label": "撰写教学视频脚本",
+            "type": "agent",
             "capability": "write_script",
             "skill": {"key": f"{_DEMO_SKILL_GROUP}/write-script", "ref": "v1.0.0"},
             "after": ["intake_knowledge_points"],
@@ -52,6 +53,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         },
         "review_script": {
             "label": "评审脚本",
+            "type": "agent",
             "capability": "review_script",
             "skill": {"key": f"{_DEMO_SKILL_GROUP}/review-script", "ref": "v1.0.0"},
             "after": ["write_script"],
@@ -60,6 +62,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         },
         "generate_questions": {
             "label": "生成练习题",
+            "type": "agent",
             "capability": "generate_questions",
             "skill": {"key": f"{_DEMO_SKILL_GROUP}/generate-questions", "ref": "v1.0.0"},
             "after": ["intake_knowledge_points"],
@@ -68,6 +71,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         },
         "review_questions": {
             "label": "评审练习题",
+            "type": "agent",
             "capability": "review_questions",
             "skill": {"key": f"{_DEMO_SKILL_GROUP}/review-questions", "ref": "v1.0.0"},
             "after": ["generate_questions"],
@@ -76,6 +80,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         },
         "publish_content": {
             "label": "汇总并模拟入库",
+            "type": "code",
             "capability": "publish_content",
             "after": ["review_script", "review_questions"],
             "inputs": [
