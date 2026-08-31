@@ -589,7 +589,10 @@ server/app/
   （actual + buffer）不受约束（删旧建新的正常重构不会误判，因为只有 git 判定
   内容相似才配对）；深克隆缺锚点时硬失败，git 超时/仓库损坏会在错误中携带真实
   原因（不再是纯浅克隆猜测），逃生口 env
-  `AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW=1`。超出预算的文件必须拆分或回退。
+  `AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW=1`。本地要跑和 CI merge ref
+  完全一致的判定时设 `AGENT_LEGION_BUDGET_BASE`（如 `origin/develop`）：
+  锚点由 HEAD/HEAD^ 变为 HEAD + 该 base ref，release-train opt-out 优先于
+  该覆盖，base ref 无法解析硬失败（错误带 fetch 指引）。超出预算的文件必须拆分或回退。
   ceiling 按有效行数计
   （排除注释行与空行，实现见 `scripts/architecture/effective_lines.py`，`.sql` 的
   `--` 注释行同样排除），压缩注释
@@ -702,7 +705,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 - 存储路径以**相对 POSIX 路径**保存在 `settings.data_dir` 下（前缀为 `videos/`, `jobs/`, `logs/`, `packages/`），API 返回时投影为绝对路径。
 - SQL 占位符约定：**新 SQL 一律写 psycopg 的 `%s`**，不要再写 SQLite 风格的 `?`。存量 `?` 由 `server/app/db/dialect.py` 盲替换为 `%s`，该层无法区分占位符与 Postgres JSON 的 `?`/`?|`/`?&` 操作符；`scripts/check_architecture.py` 的 SQL 占位符检查（基线 `config/architecture/sql-placeholders-baseline.json`）按 ratchet 方式只降不升，新文件出现任何 SQL `?` 即失败，改写存量后同步下调基线。
 - 服务层数据边界（BOUNDARY-DATA-001）：`server/app/services/` 下的新服务**必须经 `JobQueries` 门面访问数据库**（范式见 `services/job_pause.py` 等 38+ 个 facade-only 服务）；裸 SQL 字面量、`server.app.db.transaction`/`connection` 直接 import 与 DSN 逃逸引用（`.path`/`.dsn_identity` 属性读及其 `getattr` 形式）由 `scripts/architecture/service_data_boundary.py` 检查冻结（基线 `config/architecture/service-data-boundary-baseline.json`，只降不升）。存量服务迁移到门面后手动（或重跑 ratchet）下调基线；新文件出现任一绕行即失败。门面的 DSN 属性 `.path` 已私有化为 `_path`（#187 第三步）：`dsn_identity` 是唯一公开只读访问器（字符串 DSN），合法消费者仅数据层自身与经设计豁免的数据层毗邻组件（lease 仓储、artifact store）。
-- 边界基线的 git 锚点防线（#292）：基线自身也只降不升——`service_data_boundary_monotonicity.py` 按 HEAD/HEAD^ 双锚点对比已提交基线，**新增条目**（对已跟踪的 service 文件）与**三元组计数上抬**均被拒绝（对齐 file budget 的 budget_monotonicity 机制）；全新 service 文件的首次登记不受限（由无条目即失败的常规检查治理）。存量 56 条按服务子域分批收敛：迁移到 `JobQueries` 门面后重跑 ratchet 下调，直至条目清零、基线退役。浅克隆缺锚点硬失败（同 budget 侧 env 逃生口）；非 git 目录静默跳过。
+- 边界基线的 git 锚点防线（#292）：基线自身也只降不升——`service_data_boundary_monotonicity.py` 按 HEAD/HEAD^ 双锚点对比已提交基线，**新增条目**（对已跟踪的 service 文件）与**三元组计数上抬**均被拒绝（对齐 file budget 的 budget_monotonicity 机制）；全新 service 文件的首次登记不受限（由无条目即失败的常规检查治理）。存量 56 条按服务子域分批收敛：迁移到 `JobQueries` 门面后重跑 ratchet 下调，直至条目清零、基线退役。浅克隆缺锚点硬失败（同 budget 侧 env 逃生口）；非 git 目录静默跳过。锚点覆盖与 budget 侧共用 `AGENT_LEGION_BUDGET_BASE`（HEAD^ 替换为该 base ref，本地复现 CI merge ref 判定）。
 
 ## New Subsystems
 
