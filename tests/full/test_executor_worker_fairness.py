@@ -74,9 +74,13 @@ def test_shared_capacity_and_round_robin_fairness(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
 
-    ws_a = job_db.create_workspace("Workspace A", default_workflow_key="demo_workflow")
-    ws_b = job_db.create_workspace("Workspace B", default_workflow_key="demo_workflow")
-    ws_c = job_db.create_workspace("Workspace C", default_workflow_key="demo_workflow")
+    ws_a = job_db.create_workspace("Workspace A", default_workflow_key="test", workspace_id="test")
+    ws_b = job_db.create_workspace(
+        "Workspace B", default_workflow_key="test_b", workspace_id="test_b"
+    )
+    ws_c = job_db.create_workspace(
+        "Workspace C", default_workflow_key="test_c", workspace_id="test_c"
+    )
 
     events = {
         ws_a["id"]: threading.Event(),
@@ -84,12 +88,11 @@ def test_shared_capacity_and_round_robin_fairness(tmp_path: Path) -> None:
         ws_c["id"]: threading.Event(),
     }
     executor = PerWorkspaceBlockingExecutor("code", events=events)
-    definition = make_definition([local_node("fetch")])
 
     def _add_jobs(ws: dict, count: int, prefix: str) -> None:
         for i in range(count):
             job_db.create_job(
-                workflow_key="test",
+                workflow_key=str(ws["id"]),
                 source_type="question",
                 source_id=f"{prefix}{i}",
                 run_id="",
@@ -99,7 +102,10 @@ def test_shared_capacity_and_round_robin_fairness(tmp_path: Path) -> None:
             )
 
     _add_jobs(ws_a, 8, "A")
-    worker = make_worker(tmp_path, db_path, executor, [definition], code_capacity=10)
+    definitions = [
+        make_definition([local_node("fetch")], key=str(ws["id"])) for ws in (ws_a, ws_b, ws_c)
+    ]
+    worker = make_worker(tmp_path, db_path, executor, definitions, code_capacity=10)
 
     # 只有 A 在 backlog：单池下 A 吃满自己的 8 个 job（无 workspace 上限）。
     counts = _poll_counts_until(worker, lambda c: c.get(ws_a["id"], 0) == 8)

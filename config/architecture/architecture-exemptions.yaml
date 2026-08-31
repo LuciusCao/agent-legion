@@ -244,3 +244,30 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
   ceiling: 225
+- check: architecture.file_budget
+  path: server/app/workflow_worker/mark_scan.py
+  reason: The issue-211 Phase 3 read-binding batch rekeys the scan state
+    per workspace — the pre-v62 shape where several workspaces shared one
+    workflow key collapsed them into a single scan state, and the v62
+    binding (key equals the workspace id) makes that shape unreachable. The
+    overage is the docstring documenting the per-workspace rekey, and Phase 4
+    drops the workflow_key parameter entirely, retiring this exemption.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
+  ceiling: 97
+- check: architecture.file_budget
+  path: server/app/db/migrations/jobs_workflow_key_alignment.py
+  reason: The issue-211 Phase 3 v68 data migration aligns every stored
+    workflow_key with the v62 binding across the live tables plus the
+    node_code entity-key prefix. Each composite-unique surface carries its
+    collision rule — status-count merge (upsert plus delete), state-table
+    twin drop, revision active-archive plus uniform version-shift, and the
+    entity-key published-wins twin rules (twin pass precedes the demotion so
+    frozen-pin hashes survive; both-published twins resolve to the
+    window-era row), state-table multi-generation dedupe, and the re-prefix
+    separator guard. The overage is that single transaction's honest cost;
+    Phase 4 drops the workflow_key columns and this exemption goes stale
+    with them.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
+  ceiling: 242
