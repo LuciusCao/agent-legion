@@ -28,6 +28,10 @@ class SkillCheckout(NamedTuple):
     commit: str
     version: str  # "ref@commit12"
 
+    def manifest_pins(self) -> dict[str, str]:
+        """The manifest triple recording this pin (skill/skill_version/skill_ref)."""
+        return {"skill": self.key, "skill_version": self.version, "skill_ref": self.ref}
+
 
 def resolve_skill_checkout(
     skill_manager: SkillManager, key: str, execution_id: str, ref: str = ""

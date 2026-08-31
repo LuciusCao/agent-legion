@@ -92,9 +92,7 @@ class AgentDispatchService:
                 # CONFIG-MANIFEST-001: only schema-whitelisted, non-secret keys.
                 "config": manifest_safe_config(definition.config_schema, node_config or {}),
                 "tools": list(definition.tools),
-                "skill": skill.key,
-                "skill_version": skill.version,
-                "skill_ref": skill.ref,
+                **skill.manifest_pins(),
                 "log_path": str(log_path),
                 "execution": execution,
             }
