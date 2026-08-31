@@ -6,6 +6,7 @@ the host PATH or spawn real processes.
 
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 
@@ -20,6 +21,7 @@ from server.app.studio_chat.agent_catalog import (
     merge_detected_into_document,
     merge_manual_edit,
     redetect_and_merge,
+    spawn_startup_detection,
 )
 
 pytestmark = pytest.mark.no_db
@@ -251,3 +253,57 @@ def test_redetect_and_merge_forces_fresh_detection_and_returns_document() -> Non
     document = redetect_and_merge(store, detector)
     assert [agent["id"] for agent in document["agents"]] == ["kimi"]
     assert document["agents"][0]["source"] == "detected"
+
+
+class _CapturedThread:
+    """Stand-in for threading.Thread: captures kwargs, runs target on demand."""
+
+    def __init__(self) -> None:
+        self.kwargs: dict = {}
+        self.started = False
+
+
+def _patch_thread(monkeypatch) -> _CapturedThread:
+    captured = _CapturedThread()
+
+    class _FakeThread:
+        def __init__(self, **kwargs) -> None:
+            captured.kwargs = kwargs
+
+        def start(self) -> None:
+            captured.started = True
+
+    monkeypatch.setattr("server.app.studio_chat.agent_catalog.threading.Thread", _FakeThread)
+    return captured
+
+
+def test_spawn_startup_detection_runs_merge_on_daemon_thread(monkeypatch) -> None:
+    captured = _patch_thread(monkeypatch)
+    store = _FakeStore({"api_base": "http://127.0.0.1:8000", "agents": []})
+    detector = _detector({"kimi": "/usr/bin/kimi"})
+    monkeypatch.setattr(
+        "server.app.studio_chat.agent_catalog.AgentCatalogDetector", lambda: detector
+    )
+    spawn_startup_detection(store)
+    assert captured.started and captured.kwargs["daemon"] is True
+    captured.kwargs["target"]()  # run the thread body synchronously
+    agents = store.get()["agents"]
+    assert [(agent["id"], agent["source"]) for agent in agents] == [("kimi", "detected")]
+
+
+def test_startup_detection_failure_is_logged_and_swallowed(monkeypatch, caplog) -> None:
+    captured = _patch_thread(monkeypatch)
+
+    class _BoomDetector:
+        def detect(self, *, force: bool = False):
+            raise RuntimeError("probe blew up")
+
+    monkeypatch.setattr(
+        "server.app.studio_chat.agent_catalog.AgentCatalogDetector", lambda: _BoomDetector()
+    )
+    store = _FakeStore({"api_base": "http://127.0.0.1:8000", "agents": []})
+    spawn_startup_detection(store)
+    with caplog.at_level(logging.ERROR):
+        captured.kwargs["target"]()  # must not raise
+    assert any("startup detection failed" in record.message for record in caplog.records)
+    assert store.get()["agents"] == []

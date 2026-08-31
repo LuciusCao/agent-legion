@@ -19,6 +19,7 @@ of a detected entry flips it to manual so later detections leave it alone.
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
@@ -29,6 +30,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from server.app.studio_chat.registry import StudioAgentRegistryStore
+
+logger = logging.getLogger(__name__)
 
 SOURCE_MANUAL = "manual"
 SOURCE_DETECTED = "detected"
@@ -176,6 +179,20 @@ def redetect_and_merge(
     statuses = detector.detect(force=True)
     store.update(lambda stored: merge_detected_into_document(stored, statuses))
     return store.get()
+
+
+def spawn_startup_detection(store: StudioAgentRegistryStore) -> None:
+    """Startup auto-detection (#332) on a daemon thread: never blocks startup."""
+
+    def _run() -> None:
+        try:
+            redetect_and_merge(store, AgentCatalogDetector())
+        except Exception:
+            # #204 broad-except audit: detection is best-effort — any probe or
+            # DB failure degrades to "registry unchanged" and stays logged.
+            logger.exception("studio agent startup detection failed")
+
+    threading.Thread(target=_run, daemon=True, name="studio-agent-detection").start()
 
 
 def merge_detected_into_document(
