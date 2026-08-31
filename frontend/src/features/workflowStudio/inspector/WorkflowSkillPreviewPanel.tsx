@@ -10,14 +10,22 @@ import styles from './WorkflowSkillPreviewPanel.module.css'
  * 顶部轻量工具行（技能 key + 版本下拉，导航在 DetailView 面包屑），
  * 左侧目录树 + 右侧内容。Studio 对话 turn_end 会按 'studioSkillDetail'
  * 前缀失效本查询（useStudioChat），agent 修改技能文件后 panel 自动刷新。 */
-export function WorkflowSkillPreviewPanel(props: { skillKey: string }) {
-  // 版本选择带 skillKey 印记：切换节点/技能绑定即回落锁定版本（组件通常随
-  // 节点切换卸载重建，印记兜底复用场景）。
+export function WorkflowSkillPreviewPanel(props: {
+  skillKey: string
+  /** 节点绑定 pin 的初始查询版本（#76）；不传/空 = 源默认 ref。 */
+  initialRef?: string
+}) {
+  // 版本选择带 skillKey 印记：切换节点/技能绑定即回落初始版本（组件通常随
+  // 节点切换卸载重建，印记兜底复用场景）。用户显式选择（含「当前锁定版本」
+  // 的 null）优先于 initialRef。
   const [selection, setSelection] = useState<{
     key: string
-    ref: string
+    ref: string | null
   } | null>(null)
-  const ref = selection?.key === props.skillKey ? selection.ref : null
+  const ref =
+    selection?.key === props.skillKey
+      ? selection.ref
+      : (props.initialRef ?? null)
   const [selectedPath, setSelectedPath] = useState('SKILL.md')
   const query = useQuery({
     queryKey: extraQueryKeys.studioSkillDetail(props.skillKey, ref),
@@ -41,9 +49,7 @@ export function WorkflowSkillPreviewPanel(props: { skillKey: string }) {
           skillKey={props.skillKey}
           viewingRef={ref}
           detail={detail}
-          onSelect={(next) =>
-            setSelection(next ? { key: props.skillKey, ref: next } : null)
-          }
+          onSelect={(next) => setSelection({ key: props.skillKey, ref: next })}
         />
       </div>
       <div className={styles.content}>

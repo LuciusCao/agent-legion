@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TestQueryProvider } from '../../../testing/testQueryClient'
 import { useSettingStore } from '../../../stores/settingStore'
@@ -20,15 +20,6 @@ vi.mock('../../../api', () => ({
   saveAgentDraft: (...args: unknown[]) => mocks.saveAgentDraft(...args),
   publishAgent: (...args: unknown[]) => mocks.publishAgent(...args),
   archiveAgent: (...args: unknown[]) => mocks.archiveAgent(...args),
-}))
-
-vi.mock('../../../components/SkillSelector', () => ({
-  SkillSelector: ({ onChange }: { onChange: (value: string) => void }) => (
-    <button
-      data-testid="skill-selector-stub"
-      onClick={() => onChange('demo/skill')}
-    />
-  ),
 }))
 
 function renderEditor(
@@ -71,6 +62,51 @@ describe('WorkflowNodeAgentEditor', () => {
     expect(screen.getByDisplayValue('agent-a')).toBeInTheDocument()
   })
 
+  it('keeps the loaded skill when editing an existing agent (#76: legacy fallback)', async () => {
+    mocks.saveAgentDraft.mockResolvedValue({})
+    renderEditor({ agentId: 'agent-a', capability: 'generate_key_info' })
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Agent' }))
+    await screen.findByDisplayValue('generate_key_info')
+    // 定义加载自带 skill 的存量 Agent：编辑器不展示 skill，但保存时原样保留
+    // （节点未绑 skill 的 workflow 仍靠 AgentDefinition.skill 兜底）。
+    expect(screen.queryByDisplayValue('demo/skill')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+
+    // waitFor 的轮询包在 act 里：保存 resolve 后的 busy/toast 状态更新被覆盖。
+    await waitFor(() =>
+      expect(mocks.saveAgentDraft).toHaveBeenCalledWith(
+        'ws1',
+        'agent-a',
+        expect.objectContaining({
+          capability: 'generate_key_info',
+          skill: 'demo/skill',
+        })
+      )
+    )
+  })
+
+  it('creates a new agent with an empty skill (node-level binding)', async () => {
+    mocks.createAgentDefinition.mockResolvedValue({ agent_id: 'agent-new' })
+    renderEditor({ agentId: null, capability: 'generate_key_info' })
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '为此 capability 新建 Agent' })
+    )
+    fireEvent.change(await screen.findByLabelText('Agent ID'), {
+      target: { value: 'agent-new' },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
+    })
+
+    expect(mocks.createAgentDefinition).toHaveBeenCalledWith(
+      'ws1',
+      expect.objectContaining({ agent_id: 'agent-new', skill: '' })
+    )
+  })
+
   it('opens the create form prefilled with the node capability', async () => {
     renderEditor({ agentId: null, capability: 'generate_key_info' })
 
@@ -108,7 +144,6 @@ describe('WorkflowNodeAgentEditor', () => {
     fireEvent.change(await screen.findByLabelText('Agent ID'), {
       target: { value: 'agent-new' },
     })
-    fireEvent.click(screen.getByTestId('skill-selector-stub'))
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
     })
@@ -146,7 +181,6 @@ describe('WorkflowNodeAgentEditor', () => {
     fireEvent.change(await screen.findByLabelText('Agent ID'), {
       target: { value: 'agent-new' },
     })
-    fireEvent.click(screen.getByTestId('skill-selector-stub'))
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
     })

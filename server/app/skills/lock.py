@@ -18,9 +18,9 @@ from pathlib import Path
 
 from server.app.services.skill_source_store import SkillSourceStore
 from server.app.settings import load_settings
-from server.app.skills.config import SkillsLock
+from server.app.skills.config import LockedSkill, SkillsLock
 from server.app.skills.manager import SkillManager, SkillStore
-from server.app.skills.refresh import refresh_source
+from server.app.skills.refresh import refresh_source, resolve_ref_commit
 from server.app.skills.skill_roots import default_skill_base_dir
 
 
@@ -28,14 +28,23 @@ def refresh_lock(store: SkillStore, base_dir: Path, runs_dir: Path | None = None
     """Resolve every declared skill to its current commit and write the DB lock."""
     manager = SkillManager(store=store, base_dir=base_dir, runs_dir=runs_dir)
     config = manager._load_config()
+    existing = store.get_lock() or SkillsLock()
     refreshed = {}
     for skill_key in config.skills:
+        source = config.skills[skill_key]
         workflow, capability = manager._parse_skill_key(skill_key)
         cache_dir = manager._resolve_cache_dir(workflow, capability)
         with manager._cache_lock_for(cache_dir):
-            refreshed[skill_key] = refresh_source(
-                manager, skill_key, config.skills[skill_key], cache_dir
-            )
+            pinned = refresh_source(manager, skill_key, source, cache_dir)
+            # Multi-ref lock (issue #76): relock refreshes the source ref plus
+            # every ref already pinned for this skill, each resolved once.
+            refs = dict(pinned.refs)
+            locked = existing.skills.get(skill_key)
+            if locked is not None and locked.repo == source.repo:
+                for ref in sorted(locked.refs):
+                    if ref not in refs:
+                        refs[ref] = resolve_ref_commit(manager, source, cache_dir, ref)
+            refreshed[skill_key] = LockedSkill(repo=source.repo, refs=refs)
     with manager._lock_write_lock:
         manager._write_lock_unlocked(SkillsLock(skills=refreshed))
 

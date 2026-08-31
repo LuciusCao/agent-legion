@@ -28,13 +28,16 @@ def _merged_view(store: SkillSourceStore) -> SkillSourcesResponse:
     for key in sorted(sources.skills):
         source = sources.skills[key]
         entry = locked.get(key)
-        stale = entry is None or entry.repo != source.repo or entry.ref != source.ref
+        # Multi-ref lock (issue #76): the entry is fresh when the declared
+        # repo matches and the source ref is one of the pinned refs.
+        locked_commit = entry.refs.get(source.ref) if entry is not None else None
+        stale = entry is None or entry.repo != source.repo or locked_commit is None
         entries.append(
             SkillSourceEntry(
                 key=key,
                 repo=source.repo,
                 ref=source.ref,
-                locked_commit=None if entry is None else entry.commit,
+                locked_commit=locked_commit,
                 resolved_at=resolved_at,
                 stale=stale,
             )

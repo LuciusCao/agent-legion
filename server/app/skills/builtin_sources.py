@@ -40,7 +40,7 @@ BUILTIN_SKILL_SOURCES = SkillsConfig(skills={**_DEMO_SKILL_SOURCES})
 # commit can be pinned at authoring time; the lock starts empty and the first
 # relock fills it.
 BUILTIN_SKILL_LOCK = SkillsLock(
-    version="1",
+    version="2",
     resolved_at="2026-08-07T01:44:10Z",
     skills={},
 )

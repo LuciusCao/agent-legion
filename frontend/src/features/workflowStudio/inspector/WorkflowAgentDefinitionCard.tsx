@@ -15,7 +15,11 @@ export function WorkflowAgentDefinitionCard(props: {
       </div>
       <dl className={styles.bindingFields}>
         <BindingField label="Runtime" value={definition.runtime} />
-        <BindingField label="Skill" value={definition.skill} />
+        {/* #76：skill 降为可选 legacy 兜底——空串时后端不再注入 ref/commit，
+            卡片同样不渲染该行。 */}
+        {definition.skill && (
+          <BindingField label="Skill" value={definition.skill} />
+        )}
         {tools.length > 0 && (
           <BindingField label="Tools" value={tools.join(', ')} />
         )}

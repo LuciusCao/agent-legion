@@ -9,7 +9,8 @@ class AgentDefinitionPayload(BaseModel):
 
     capability: str = Field(min_length=1)
     runtime: Literal["pi", "velites"]
-    skill: str = Field(min_length=1)
+    # Optional legacy fallback for the node's skill binding (issue #76).
+    skill: str = ""
     tools: list[str] = Field(default_factory=lambda: ["read", "write", "bash"])
     requires_labels: dict[str, str] = Field(default_factory=dict)
     config_schema: dict[str, Any] = Field(default_factory=dict)

@@ -66,3 +66,27 @@ def test_catalog_has_no_executors_half(tmp_path: Path) -> None:
     catalog = agent_catalog(_settings(tmp_path), _StubSkills(), "ws-test", _AGENTS)
 
     assert set(catalog) == {"agents"}
+
+
+class _RecordingSkills:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def metadata(self, skill: str) -> dict[str, Any]:
+        self.calls.append(skill)
+        return {"skill_ref": "r", "skill_commit": "c"}
+
+
+@pytest.mark.no_db
+def test_catalog_skips_metadata_for_skill_less_definitions(tmp_path: Path) -> None:
+    """#76: a definition without a skill binds no lock metadata."""
+    skills = _RecordingSkills()
+    agents = {"agent-bare": AgentDefinition(capability="cap-bare", runtime="pi")}
+
+    catalog = agent_catalog(_settings(tmp_path), skills, "ws-test", agents)
+
+    entry = catalog["agents"][0]
+    assert entry["skill"] == ""
+    assert "skill_ref" not in entry
+    assert "skill_commit" not in entry
+    assert skills.calls == []

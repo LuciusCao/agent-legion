@@ -57,7 +57,7 @@ def test_seed_demo_creates_complete_workspace_once(settings, job_db, tmp_path: P
     for name in ("write-script", "review-script", "generate-questions", "review-questions"):
         key = f"education-video-problems-generation/{name}"
         assert sources.skills[key].repo == str((skills / name).resolve())
-        assert lock.skills[key].commit
+        assert lock.skills[key].refs["v1.0.0"]
     assert second.sources_added == 0
     assert second.locks_updated == 0
     assert second.node_codes_added == 0

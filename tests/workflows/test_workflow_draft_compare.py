@@ -8,7 +8,7 @@ from server.app.services.workflow_draft_compare import compare_workflow_draft
 from server.app.services.workflow_revision_format import definition_to_yaml
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import WorkflowCondition
-from server.app.workflows.schema import WorkflowNodeExecution
+from server.app.workflows.schema import WorkflowNodeExecution, WorkflowNodeSkill
 from tests.helpers import load_builtin_definition
 from tests.helpers.auth import authenticate_client
 
@@ -97,6 +97,29 @@ def test_compare_execution_only_change_does_not_create_revision(app_with_workspa
     assert result["creates_revision"] is False
     change = next(c for c in result["summary"]["node_changes"] if c["node_key"] == "write_script")
     assert change["fields"] == ["execution"]
+
+
+def test_compare_skill_change_creates_revision(app_with_workspace):
+    """Issue #76: rebinding a node's skill content is a structural change
+    (unlike execution-only overrides) and surfaces as a warning-risk field."""
+    app, workspace_id = app_with_workspace
+    definition = load_builtin_definition("education_video_problems_generation")
+    node = definition.nodes["write_script"]
+    definition.nodes["write_script"] = replace(
+        node,
+        skill=WorkflowNodeSkill(
+            key="education-video-problems-generation/write-script", ref="v1.1.0"
+        ),
+    )
+
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, definition_to_yaml(definition))
+
+    assert result["valid"] is True
+    assert result["creates_revision"] is True
+    change = next(c for c in result["summary"]["node_changes"] if c["node_key"] == "write_script")
+    assert change["fields"] == ["skill"]
+    assert change["risk"] == "warning"
 
 
 def test_compare_node_removed_returns_breaking_change(app_with_workspace):

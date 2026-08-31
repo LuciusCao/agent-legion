@@ -313,7 +313,7 @@ invariants:
         gate: full
 
   - id: EXEC-AGENTDEF-001
-    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared by the workspace-scoped Agent Catalog (versioned_entities with workspace_id set, published via AgentService; schema v46 — exactly one published Agent per capability per workspace, no global fallback at resolution); the Host exposes that published catalog so Workflow Studio resolves Agent nodes by capability within the current workspace and edits provider/model overrides against workspace-level defaults without treating Agents as legacy executors. Workers separately declare node capabilities and runtime/provider/model triples derived from each selected runtime's local discovery intersected with its operator allowlist, alongside labels, protocol version, and machine-wide max_concurrency."
+    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared by the workspace-scoped Agent Catalog (versioned_entities with workspace_id set, published via AgentService; schema v46 — exactly one published Agent per capability per workspace, no global fallback at resolution); the Host exposes that published catalog so Workflow Studio resolves Agent nodes by capability within the current workspace and edits provider/model overrides against workspace-level defaults without treating Agents as legacy executors. Since #76 the definition's skill field is optional and serves only as the legacy fallback at dispatch — the workflow node's own skill binding (EXEC-SKILL-NODE-001) takes precedence and owns the version pin. Workers separately declare node capabilities and runtime/provider/model triples derived from each selected runtime's local discovery intersected with its operator allowlist, alongside labels, protocol version, and machine-wide max_concurrency."
     owner: workspace-executor
     risk: critical
     evidence:
@@ -825,18 +825,42 @@ invariants:
         gate: quick
 
   - id: EXEC-SKILL-CLEAN-TTL-001
-    statement: "Skill cache cleanliness verification (rev-parse + status probes) is memoized per cache dir for the doc-cache TTL (SkillManager._verified_clean, deriving from doc_cache_ttl_seconds): within the TTL a dirtied or externally switched cache is served as-is, and the first probe after expiry repairs it via checkout -f + clean -fd — dirty detection is TTL-bounded, never lost. A commit change always misses the memo and re-probes, so relocks never serve a stale commit beyond the doc-cache TTL they already tolerate; doc_cache_ttl_seconds=0 restores per-call probing."
+    statement: "Skill cache cleanliness verification (rev-parse + status probes) runs on every checkout while holding the cache FileLock: a dirtied or externally switched cache is repaired immediately via checkout -f + clean -fd, and the run dir always receives the content of the (skill, ref)-locked commit being recorded. The per-instance TTL memo introduced in #42 is retired (codex P1 on PR 317): with multi-ref pinning (#76) two SkillManager instances routinely alternate the shared cache between refs, and a memoized (commit, t) entry would skip the probe and copy the other ref's content into the run dir while recording this ref@commit — correctness beats the two git probes per dispatch."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: integration
-        target: tests/skills/test_skill_manager.py::test_cleanliness_probes_memoized_within_ttl
+        target: tests/skills/test_skill_manager.py::test_cleanliness_probes_run_on_every_checkout
         gate: quick
       - kind: integration
-        target: tests/skills/test_skill_manager.py::test_cleanliness_probes_rerun_after_ttl_and_repair_dirty_cache
+        target: tests/skills/test_skill_manager.py::test_dirty_cache_repaired_on_next_checkout
         gate: quick
       - kind: integration
-        target: tests/skills/test_skill_manager.py::test_cleanliness_probes_every_call_when_ttl_zero
+        target: tests/skills/test_skill_manager.py::test_checkout_reprobes_cache_after_another_instance_switch
+        gate: quick
+
+  - id: EXEC-SKILL-NODE-001
+    statement: "An Agent-routed workflow node binds its skill content at the node level (issue #76): the optional node `skill` block (`key` + optional `ref`; the string form is key-only, an empty ref falls back to the skill_sources default ref at resolution time) is parsed by the loader (rejected on start/approval nodes), versions with the workflow revision snapshot, and rides the intake freeze into the job snapshot. The publish gate requires every Agent-routed node to name a skill on the node or on its published Agent definition, and rejects a skill declared on a code-routed node. Dispatch resolves the effective skill node-first (AgentDefinition.skill is the optional legacy fallback; both empty fails the node) and checks out through the multi-valued lock (skill_lock v2: per-skill {repo, refs: {ref -> commit}}, v1 documents self-upgrade on read): a locked (skill, ref) pair executes exactly its frozen commit, an unlocked ref resolves and auto-locks its own entry, a repo drift still trips the relock gate (SkillConfigError) while a ref drift is no longer an error; relock refreshes the union of the source ref and every already-locked ref. The Agent manifest records `skill`, `skill_ref` (the effective ref the lock froze) and `skill_version` (`ref@commit12`), and the Host-side Worker-result output validation re-resolves exactly that (skill, skill_ref) version. The skill_sources document itself (repo + default ref registry) is unchanged; the demo workflow's Agent nodes pin `ref: v1.0.0` instead of relying on the builtin Agent definitions (which no longer carry a skill)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/workflows/test_workflow_node_skill.py
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_checkout.py::test_checkout_node_skill_prefers_the_node_binding
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager_lock.py::test_ref_drift_locks_each_ref_independently
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager_lock.py::test_concurrent_refs_auto_lock_retains_both_pins
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation.py::test_validates_against_the_manifests_frozen_ref
+        gate: quick
+      - kind: integration
+        target: tests/services/test_workflow_draft_publish.py
         gate: quick
 
   - id: EXEC-HARNESS-SANDBOX-001

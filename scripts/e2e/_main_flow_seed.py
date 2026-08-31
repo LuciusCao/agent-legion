@@ -7,9 +7,9 @@ needs a real LLM for four Agent nodes):
 
 Everything is seeded through the same production services the demo seed
 uses — workspace-scoped node_code (DB published text), a workspace-scoped
-Agent definition (runtime=velites, skill locked to a local git repo created
-under the e2e data dir) and an active workflow revision (which materializes
-the Agent route). Seeding runs BEFORE the backend boots (seed-before-serve):
+Agent definition (runtime=velites; the skill binding lives on the DAG node,
+locked to a local git repo created under the e2e data dir) and an active
+workflow revision (which materializes the Agent route). Seeding runs BEFORE the backend boots (seed-before-serve):
 the backend's WorkflowWorkerThread builds its scan_entries snapshot at
 startup and direct-DB seeding triggers no reload, so the workspace must
 already exist by then (PR #240). The dispatch resume is a separate step
@@ -34,7 +34,7 @@ from server.app.services.node_code_seeding import seed_workspace_node_code
 from server.app.services.node_codes import NodeCodeService
 from server.app.services.skill_source_store import SkillSourceStore
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from server.app.skills.config import LockedSkillSource, SkillsConfig, SkillsLock, SkillSourceConfig
+from server.app.skills.config import LockedSkill, SkillsConfig, SkillsLock, SkillSourceConfig
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.workflows.loader import workflow_definition_from_dict
 
@@ -81,6 +81,9 @@ WORKFLOW_DEFINITION: dict[str, Any] = {
             # pool where no node code exists.
             "type": "agent",
             "capability": AGENT_CAPABILITY,
+            # Node-level skill binding (issue #76); the Agent definition
+            # carries no skill anymore.
+            "skill": {"key": SKILL_KEY, "ref": SKILL_REF},
             "after": ["intake"],
             "inputs": [INTAKE_OUTPUT],
             "outputs": [DRAFT_OUTPUT],
@@ -200,9 +203,14 @@ def _lock_skill(dsn: str, repo: Path, commit: str) -> None:
         config.skills[SKILL_KEY] = source
         store.put_sources(config)
     lock = store.get_lock() or SkillsLock()
-    locked = LockedSkillSource(repo=str(repo), ref=SKILL_REF, commit=commit)
-    if lock.skills.get(SKILL_KEY) != locked:
-        lock.skills[SKILL_KEY] = locked
+    # Multi-ref lock (issue #76): re-pin SKILL_REF in place, keeping other
+    # frozen refs; a repo drift replaces the entry wholesale.
+    entry = lock.skills.get(SKILL_KEY)
+    if entry is None or entry.repo != str(repo) or entry.refs.get(SKILL_REF) != commit:
+        if entry is None or entry.repo != str(repo):
+            entry = LockedSkill(repo=str(repo))
+        entry.refs[SKILL_REF] = commit
+        lock.skills[SKILL_KEY] = entry
         now = datetime.datetime.now(datetime.UTC)
         lock.resolved_at = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
         store.put_lock(lock)
@@ -221,9 +229,7 @@ def seed_main_flow_workspace(dsn: str, data_dir: Path) -> str:
     workspaces = [w for w in job_db.list_workspaces() if w.get("id") == WORKSPACE_ID]
     if not workspaces:
         job_db.create_workspace(
-            WORKSPACE_NAME,
-            default_workflow_key=WORKSPACE_ID,
-            workspace_id=WORKSPACE_ID,
+            WORKSPACE_NAME, default_workflow_key=WORKSPACE_ID, workspace_id=WORKSPACE_ID
         )
 
     commit = _ensure_skill_repo(data_dir / "e2e-skill-repo")
@@ -241,7 +247,8 @@ def seed_main_flow_workspace(dsn: str, data_dir: Path) -> str:
     if not agents.list_versions(AGENT_ID):
         agents.save_draft(
             AGENT_ID,
-            AgentDefinition(capability=AGENT_CAPABILITY, runtime="velites", skill=SKILL_KEY),
+            # The skill binding lives on the DAG node (issue #76), not here.
+            AgentDefinition(capability=AGENT_CAPABILITY, runtime="velites"),
             created_by="system",
         )
         agents.publish(AGENT_ID)

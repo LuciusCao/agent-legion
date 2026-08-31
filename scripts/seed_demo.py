@@ -20,7 +20,7 @@ from server.app.services.skill_source_store import SkillSourceStore
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.settings import Settings, load_settings
 from server.app.skills.builtin_sources import BUILTIN_SKILL_SOURCES
-from server.app.skills.config import LockedSkillSource, SkillsConfig, SkillsLock, SkillSourceConfig
+from server.app.skills.config import LockedSkill, SkillsConfig, SkillsLock, SkillSourceConfig
 from server.app.skills.seed import seed_skill_sources
 from server.app.workflows.builtin import load_builtin_workflow
 
@@ -125,13 +125,16 @@ def _lock_local_demo_sources(store: SkillSourceStore, config: SkillsConfig) -> i
         if repo is None:
             # Remote/custom sources are owned by the admin relock flow.
             continue
-        desired = LockedSkillSource(
-            repo=source.repo,
-            ref=source.ref,
-            commit=_resolve_commit(repo, source.ref),
-        )
-        if lock.skills.get(key) != desired:
-            lock.skills[key] = desired
+        # Multi-ref lock (issue #76): re-pin the source ref in place, keeping
+        # any other refs already frozen for this skill; a repo drift replaces
+        # the entry wholesale (its pins belong to the old location).
+        commit = _resolve_commit(repo, source.ref)
+        entry = lock.skills.get(key)
+        if entry is None or entry.repo != source.repo or entry.refs.get(source.ref) != commit:
+            if entry is None or entry.repo != source.repo:
+                entry = LockedSkill(repo=source.repo)
+            entry.refs[source.ref] = commit
+            lock.skills[key] = entry
             updated += 1
     if updated:
         lock.resolved_at = (

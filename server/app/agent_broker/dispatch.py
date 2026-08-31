@@ -27,7 +27,8 @@ from server.app.config_schema import manifest_safe_config
 from server.app.executors.models import ExecutionContext
 from server.app.services.artifact_store import ArtifactStore
 from server.app.settings import Settings
-from server.app.skills.runtime import build_skill_manager, get_skill_version, resolve_skill_dir
+from server.app.skills.checkout import checkout_node_skill
+from server.app.skills.runtime import build_skill_manager
 from server.app.workflows.pi_protocol import render_command_spec
 from server.app.workflows.schema import WorkflowNode
 
@@ -72,7 +73,7 @@ class AgentDispatchService:
             return False
         execution = resolve_execution_block(node, definition.runtime)
         execution_id = str(uuid.uuid4())
-        skill_dir = resolve_skill_dir(self.skill_manager, definition.skill, execution_id)
+        skill = checkout_node_skill(self.skill_manager, node, definition.skill, execution_id)
         try:
             manifest: dict[str, Any] = {
                 "execution_id": execution_id,
@@ -91,8 +92,7 @@ class AgentDispatchService:
                 # CONFIG-MANIFEST-001: only schema-whitelisted, non-secret keys.
                 "config": manifest_safe_config(definition.config_schema, node_config or {}),
                 "tools": list(definition.tools),
-                "skill": definition.skill,
-                "skill_version": get_skill_version(self.skill_manager, definition.skill),
+                **skill.manifest_pins(),
                 "log_path": str(log_path),
                 "execution": execution,
             }
@@ -128,7 +128,7 @@ class AgentDispatchService:
                 raise RuntimeError("Agent bundle directory is not configured")
             bundle_path = self.broker.bundle_dir / f"{execution_id}.tar.gz"
             with cleanup_bundle_on_error(bundle_path):
-                build_agent_bundle(bundle_path, skill_dir=skill_dir, manifest=manifest)
+                build_agent_bundle(bundle_path, skill_dir=skill.run_dir, manifest=manifest)
                 manifest["bundle_name"] = bundle_path.name
                 queued = self.broker.enqueue(
                     AgentExecutionRequest(

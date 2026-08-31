@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from server.app.skills.config import SkillsLock
+from server.app.skills.config import SkillsConfig, SkillsLock
 
 _GIT_TAG_TIMEOUT_SECONDS = 5
 
@@ -44,9 +44,11 @@ class SkillValidator:
         self,
         base_dir: Path,
         lock_getter: Callable[[], SkillsLock | None] | None = None,
+        sources_getter: Callable[[], SkillsConfig | None] | None = None,
     ) -> None:
         self._base_dir = base_dir.expanduser()
         self._lock_getter = lock_getter
+        self._sources_getter = sources_getter
 
     def validate(self, raw_path: str) -> SkillValidation:
         path, error = self._resolve_inside_base(raw_path)
@@ -113,6 +115,7 @@ class SkillValidator:
             return None
         try:
             lock = self._lock_getter()
+            sources = self._sources_getter() if self._sources_getter is not None else None
         except Exception:
             # #204 broad-except audit: the lock getter is an injected seam
             # (default: parsing the DB ``skill_lock`` document in
@@ -125,6 +128,12 @@ class SkillValidator:
         if lock is None:
             return None
         entry = lock.skills.get(skill_key)
-        if entry is None:
+        if entry is None or not entry.refs:
             return None
-        return entry.ref or None
+        # Multi-ref lock (issue #76): "locked" means the declared source ref
+        # is one of the pinned refs. Without a sources seam (tests), fall
+        # back to the sole pin — the only unambiguous answer.
+        source = sources.skills.get(skill_key) if sources is not None else None
+        if source is not None:
+            return source.ref if source.ref in entry.refs else None
+        return next(iter(entry.refs)) if len(entry.refs) == 1 else None

@@ -152,8 +152,11 @@ class _LocalSkillManager:
     def __init__(self, base_dir: Path) -> None:
         self.base_dir = base_dir
 
-    def get_skill_dir(self, skill: str, execution_id: str) -> Path:
-        return self.base_dir / skill
+    def checkout_skill(
+        self, skill: str, execution_id: str, ref: str | None = None
+    ) -> tuple[Path, str, str]:
+        effective_ref = ref or "local"
+        return self.base_dir / skill, "0" * 40, f"{effective_ref}@{'0' * 12}"
 
     def cleanup_execution(self, execution_id: str) -> None:
         return None

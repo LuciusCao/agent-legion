@@ -191,3 +191,20 @@ def test_invalid_definition_rejected(client, ws) -> None:
         json={"agent_id": "agent-a", **PAYLOAD_V1, "config_schema": {"type": "nope"}},
     )
     assert bad_schema.status_code == 422
+
+
+def test_skill_is_optional(client, ws) -> None:
+    """#76: skill 降为可选 legacy 兜底——缺省/空串合法，定义 skill 为 ""。"""
+    omitted = {k: v for k, v in PAYLOAD_V1.items() if k != "skill"}
+    created = client.post(BASE, params=ws, json={"agent_id": "agent-bare", **omitted})
+    assert created.status_code == 200
+    assert created.json()["definition"]["skill"] == ""
+
+    empty = client.post(
+        BASE, params=ws, json={"agent_id": "agent-empty", **PAYLOAD_V1, "skill": ""}
+    )
+    assert empty.status_code == 200
+    assert empty.json()["definition"]["skill"] == ""
+
+    listed = client.get(BASE, params=ws).json()["agents"]
+    assert next(a for a in listed if a["agent_id"] == "agent-bare")["skill"] == ""

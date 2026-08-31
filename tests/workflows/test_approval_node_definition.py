@@ -63,6 +63,7 @@ def test_approval_node_parses_without_capability():
         ("shard", {"count": 2}),
         ("reduce", {"from": "write"}),
         ("config_schema", {"foo": {"type": "string"}}),
+        ("skill", "group/name"),
     ],
 )
 def test_approval_node_rejects_execution_fields(field, value):

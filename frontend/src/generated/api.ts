@@ -2827,7 +2827,10 @@ export interface components {
        * @enum {string}
        */
       runtime: 'pi' | 'velites'
-      /** Skill */
+      /**
+       * Skill
+       * @default
+       */
       skill: string
       /** Tools */
       tools?: string[]
@@ -2852,7 +2855,10 @@ export interface components {
        * @enum {string}
        */
       runtime: 'pi' | 'velites'
-      /** Skill */
+      /**
+       * Skill
+       * @default
+       */
       skill: string
       /** Tools */
       tools?: string[]
@@ -5897,7 +5903,18 @@ export interface components {
       node_type?: string
       /** Outputs */
       outputs: string[]
+      skill?: components['schemas']['WorkflowNodeSkillResponse'] | null
       terminal?: components['schemas']['WorkflowTerminalResponse'] | null
+    }
+    /** WorkflowNodeSkillResponse */
+    WorkflowNodeSkillResponse: {
+      /** Key */
+      key: string
+      /**
+       * Ref
+       * @default
+       */
+      ref: string
     }
     /** WorkflowRevisionDetailResponse */
     WorkflowRevisionDetailResponse: {

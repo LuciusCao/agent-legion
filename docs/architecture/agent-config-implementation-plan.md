@@ -4,6 +4,10 @@
 > 现行语义以 [agent-config-governance.md](agent-config-governance.md) 文首
 > 状态注记、`config/architecture/architecture-invariants.yaml` 与代码为准；
 > 文中「扩展性预留」等未实施小节不代表当前路线图承诺。
+> **2026-08-31 补注（#76）**：skill 内容绑定已下沉到 workflow 节点
+> （`EXEC-SKILL-NODE-001`），`AgentDefinition.skill` 降为可选 legacy 兜底；
+> 文中 AgentDefinition 携带 skill、manifest `skill_version` 为裸 commit 的
+> 描述均为历史方案，未逐段改写。
 
 ## 总览
 

@@ -197,6 +197,54 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/311
   ceiling: 149
 - check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/inspector/WorkflowNodeAgentConfigBody.tsx
+  reason: >-
+    The PR 317 merge combines both sides of the agent-node inspector:
+    develop's type-gated WorkflowNodeAgentConfigBody (#284, with the
+    approval-gate section) and the node-level skill binding editor (#76,
+    WorkflowNodeSkillEditor between the definition card and the execution
+    details). Each side fit its own ceiling; the honest union is ~7
+    effective lines past develop's fresh 43-line registration. Same
+    merge-growth class as the groups.py exemption; the body shrinks back
+    when the approval section or the skill editor moves to its own module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
+  ceiling: 55
+- check: architecture.file_budget
+  path: server/app/workflows/approval_node.py
+  reason: >-
+    Both sides of the PR 317 merge extended the approval-node module:
+    develop extracted validate_non_start_fields (#284 type integration)
+    and #76 added skill to the forbidden-field and snapshot-placeholder
+    lists. The union is ~8 effective lines past the 118 ceiling each side
+    satisfied alone; compressing the module docstring to fit would trade
+    the EXEC-APPROVAL-001 contract documentation for budget bookkeeping.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
+  ceiling: 131
+- check: architecture.file_budget
+  path: server/app/workflows/builtin_demo.py
+  reason: >-
+    The PR 317 merge adds develop's explicit per-node type fields (#284)
+    and the #76 per-node skill pins to the demo DAG — one effective line
+    past the 87 ceiling. The DAG literal is flat data where each line is a
+    field; splitting data across modules would hurt readability for no
+    structural gain.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
+  ceiling: 93
+- check: architecture.file_budget
+  path: scripts/e2e/_main_flow_seed.py
+  reason: >-
+    The PR 317 merge combines develop's explicit node types (#284) with
+    the #76 multi-ref lock update (LockedSkill refs re-pin) — two
+    effective lines past the 218 ceiling. Seed scripts are linear config
+    code; the overage is the honest cost of both features landing in one
+    merge.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
+  ceiling: 225
+- check: architecture.file_budget
   path: server/app/workflow_worker/mark_scan.py
   reason: The issue-211 Phase 3 read-binding batch rekeys the scan state
     per workspace — the pre-v62 shape where several workspaces shared one

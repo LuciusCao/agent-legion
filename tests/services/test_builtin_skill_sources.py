@@ -53,10 +53,10 @@ def test_builtin_lock_is_consistent_with_sources() -> None:
     for key, locked in BUILTIN_SKILL_LOCK.skills.items():
         source = BUILTIN_SKILL_SOURCES.skills[key]
         assert locked.repo == source.repo
-        assert locked.ref == source.ref
-        assert _COMMIT_RE.match(locked.commit), f"{key} commit must be a full git sha"
+        assert source.ref in locked.refs
+        assert _COMMIT_RE.match(locked.refs[source.ref]), f"{key} commit must be a full git sha"
 
 
 def test_builtin_lock_metadata_matches_retired_file() -> None:
-    assert BUILTIN_SKILL_LOCK.version == "1"
+    assert BUILTIN_SKILL_LOCK.version == "2"
     assert BUILTIN_SKILL_LOCK.resolved_at == "2026-08-07T01:44:10Z"

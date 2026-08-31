@@ -38,7 +38,14 @@ DEFAULT_FEEDBACK_ARTIFACT = "review_feedback.json"
 
 # Execution fields are meaningless on a node that never dispatches; reject
 # them at load time instead of letting them sit silently inert.
-_FORBIDDEN_APPROVAL_FIELDS = ("capability", "execution", "shard", "reduce", "config_schema")
+_FORBIDDEN_APPROVAL_FIELDS = (
+    "capability",
+    "execution",
+    "shard",
+    "reduce",
+    "config_schema",
+    "skill",
+)
 
 _ALLOWED_CONFIG_KEYS = ("rework_target", "feedback_artifact")
 
@@ -126,13 +133,14 @@ def strip_snapshot_placeholders(raw_node: dict[str, Any]) -> None:
             "terminal",
             "config",
             "config_schema",
+            "skill",
         ):
             raw_node.pop(placeholder, None)
         return
     raw_node.pop("accepted_item_types", None)
     if node_type != APPROVAL_NODE_TYPE:
         return
-    for placeholder in ("capability", "execution", "shard", "reduce", "config_schema"):
+    for placeholder in ("capability", "execution", "shard", "reduce", "config_schema", "skill"):
         value = raw_node.get(placeholder)
         if (isinstance(value, dict) and not any(value.values())) or not value:
             raw_node.pop(placeholder, None)
