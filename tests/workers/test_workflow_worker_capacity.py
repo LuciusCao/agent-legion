@@ -45,7 +45,7 @@ def _setup(
 ):
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="demo_workflow")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
     block_event = threading.Event()
     executor = BlockingExecutor("code", block_event)
     definition = make_definition([local_node("fetch")])
