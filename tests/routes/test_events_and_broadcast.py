@@ -1,6 +1,4 @@
 import asyncio
-import json
-import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -28,17 +26,10 @@ _FAKE_WS_ATTRS = {
 
 
 def test_agents_websocket_sends_initial_list(client, monkeypatch):
-    def fake_run(cmd, **kwargs):
-        return subprocess.CompletedProcess(
-            cmd,
-            0,
-            stdout=json.dumps([{"id": "main", "identityName": "Main"}]),
-            stderr="",
-        )
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    # Rows come from broker upserts (ensure_workspace_agent); the openclaw
+    # discovery adapter retired with the openclaw runtime (#75).
     agent_manager = client.app.state.agent_manager
-    agent_manager.discover()
+    agent_manager.ensure_workspace_agent("main", "", name="Main")
 
     with client.websocket_connect("/api/agents") as ws:
         data = ws.receive_json()
@@ -50,17 +41,8 @@ def test_agents_websocket_sends_initial_list(client, monkeypatch):
 
 
 def test_agents_websocket_broadcasts_busy_idle_updates(client, monkeypatch):
-    def fake_run(cmd, **kwargs):
-        return subprocess.CompletedProcess(
-            cmd,
-            0,
-            stdout=json.dumps([{"id": "main"}]),
-            stderr="",
-        )
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
     agent_manager = client.app.state.agent_manager
-    agent_manager.discover()
+    agent_manager.ensure_workspace_agent("main", "")
 
     with client.websocket_connect("/api/agents") as ws:
         snapshot = ws.receive_json()

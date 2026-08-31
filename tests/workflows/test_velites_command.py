@@ -211,7 +211,5 @@ def test_resolve_execution_error_points_at_studio_and_top_level_defaults() -> No
 
 @pytest.mark.no_db
 def test_resolve_execution_fails_fast_on_unknown_runtime() -> None:
-    # openclaw 自阶段 3 接入可正常解析；真正未知的 runtime 仍 fail-fast。
-    assert resolve_execution_block(_node("p", "m"), "openclaw")["binary"] == "openclaw"
-    with pytest.raises(ValueError, match=r"unknown agent runtime 'rust'.*pi, openclaw, velites"):
+    with pytest.raises(ValueError, match=r"unknown agent runtime 'rust'.*pi, velites"):
         resolve_execution_block(_node("p", "m"), "rust")

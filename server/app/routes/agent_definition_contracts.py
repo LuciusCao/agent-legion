@@ -8,7 +8,7 @@ class AgentDefinitionPayload(BaseModel):
     """Editable Agent definition fields (pure: no provider/model/thinking)."""
 
     capability: str = Field(min_length=1)
-    runtime: Literal["pi", "openclaw", "velites"]
+    runtime: Literal["pi", "velites"]
     skill: str = Field(min_length=1)
     tools: list[str] = Field(default_factory=lambda: ["read", "write", "bash"])
     requires_labels: dict[str, str] = Field(default_factory=dict)

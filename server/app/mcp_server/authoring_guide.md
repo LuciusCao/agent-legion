@@ -148,7 +148,7 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
 ## 5. Agent definitions and tunables
 
 `save_agent_definition_draft` binds a capability to an implementation:
-- `runtime`: one of `pi`, `openclaw`, `velites` (anything else is rejected).
+- `runtime`: one of `pi`, `velites` (anything else is rejected).
 - `skill`: relative skill path (`group/skill-name`); absolute paths and `..`
   are rejected.
 - `tools`: allowlist, default `["read", "write", "bash"]`.

@@ -67,7 +67,7 @@ def test_retired_agent_legion_yaml_is_rejected_with_migration_guidance(tmp_path:
     message = str(exc_info.value)
     assert "agent_legion.yaml" in message
     assert "node configuration in Studio" in message
-    assert "instance-settings" in message
+    assert "retired with the openclaw runtime" in message
 
 
 @pytest.mark.parametrize("text", ["", "[]\n", "value\n"])

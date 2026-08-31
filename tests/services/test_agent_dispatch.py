@@ -135,15 +135,6 @@ def test_enqueue_skips_an_existing_active_request(harness: SimpleNamespace) -> N
     harness.broker.enqueue.assert_not_called()
 
 
-def test_enqueue_supports_openclaw_runtime(harness: SimpleNamespace) -> None:
-    # 阶段 3 起 openclaw 已接入：dispatch 正常冻结 manifest（binary 钉死）。
-    assert _enqueue(harness, definition=_definition(runtime="openclaw")) is True
-
-    request = harness.broker.enqueue.call_args.args[0]
-    assert request.manifest["runtime"] == "openclaw"
-    assert request.manifest["execution"]["binary"] == "openclaw"
-
-
 def test_enqueue_builds_an_immutable_manifest_and_bundle(harness: SimpleNamespace) -> None:
     assert _enqueue(harness) is True
 

@@ -2,8 +2,8 @@
 
 This test proves that the generic Workspace UI can list, run-to, continue, rerun,
 package, and delete jobs using only the API and persisted Node state.  It uses a
-branched test workflow and fake Executors so it does not require real ASR,
-openclaw, or Pi binaries.
+branched test workflow and fake Executors so it does not require real ASR or Pi
+binaries.
 """
 
 from __future__ import annotations

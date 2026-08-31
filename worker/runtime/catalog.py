@@ -32,12 +32,6 @@ RUNTIME_CATALOG: dict[str, dict[str, Any]] = {
         "binaries": ("pi",),
         "install_hint": "安装 pi 到 PATH（或 data/bin/）后重启 Worker",
     },
-    "openclaw": {
-        "name": "OpenClaw",
-        "description": "外部 OpenClaw runtime；一次性 --json 结果由 Worker 合成 pi 子集事件。",
-        "binaries": ("openclaw",),
-        "install_hint": "安装 openclaw 到 PATH（或 data/bin/）后重启 Worker",
-    },
 }
 
 SUPPORTED_RUNTIMES: tuple[str, ...] = tuple(RUNTIME_CATALOG)

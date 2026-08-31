@@ -2,7 +2,7 @@
 
 Split out of ``worker.executor`` for the file-size budget: the executor module
 keeps the claim supervisor loop, this module owns the per-execution lifecycle
-for both kinds — ``agent`` (Pi/OpenClaw/velites runtime subprocess) and ``code``
+for both kinds — ``agent`` (Pi/velites runtime subprocess) and ``code``
 (node code through the velites sandbox via ``worker.code_runner``).
 """
 
@@ -23,7 +23,6 @@ from worker.event_filter import spawn_event_pump
 from worker.execution.heartbeat import ExecutionHeartbeat, start_lease_heartbeat
 from worker.execution.prepare import prepare_execution
 from worker.host.client import Client
-from worker.openclaw_events import synthesize_openclaw_events
 from worker.process_lifecycle import AGENT_PGID_FILENAME, terminate, wait_for_exit
 from worker.status import ExecutionStatusReporter
 from worker.upload.queue import (
@@ -207,11 +206,6 @@ def run_execution(
                     proc, timeout, shutdown, shutdown_grace, ownership_lost
                 )
                 pump.join(timeout=10)
-            if str(manifest.get("runtime") or "") == "openclaw":
-                # openclaw --json 是一次性结果 envelope（非流式事件）：进程
-                # 退出后把 envelope 合成为 pi 子集事件追加进 events.jsonl
-                # （worker/openclaw_events.py 单文件翻译层）。
-                synthesize_openclaw_events(events, session_id=execution_id, exit_code=exit_code)
             if report_result:
                 task = UploadTask(
                     execution_id=execution_id,

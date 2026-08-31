@@ -1,8 +1,6 @@
 import json
-import subprocess
 import threading
 
-from server.app.agent_control.openclaw_discovery import list_openclaw_agents
 from server.app.events.agents import AgentStatus, AgentStatusManager
 
 
@@ -90,28 +88,16 @@ def test_discover_without_injection_returns_empty():
     assert AgentStatusManager().discover() == []
 
 
-def test_discover_parses_openclaw_agents(monkeypatch):
-    def fake_run(command, capture_output, text, timeout):
-        assert command == ["openclaw", "agents", "list", "--json"]
-        assert capture_output is True
-        assert text is True
-        assert timeout == 10
-        return subprocess.CompletedProcess(
-            command,
-            0,
-            stdout=json.dumps(
-                [
-                    {"id": "main", "identityName": "Main Agent"},
-                    {"id": "fallback"},
-                    {"identityName": "missing id"},
-                    "invalid",
-                ]
-            ),
-            stderr="",
-        )
+def test_discover_parses_agent_records(monkeypatch):
+    # The discovery callable owns record validation (the retired openclaw
+    # adapter filtered to dicts with an id); the registry maps what it gets.
+    def fake_discover():
+        return [
+            {"id": "main", "identityName": "Main Agent"},
+            {"id": "fallback"},
+        ]
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    manager = AgentStatusManager(discover_agents=lambda: list_openclaw_agents(timeout=10))
+    manager = AgentStatusManager(discover_agents=fake_discover)
 
     agents = manager.discover()
 
@@ -125,24 +111,11 @@ def test_discover_parses_openclaw_agents(monkeypatch):
     ]
 
 
-def test_discover_clears_stale_agents_when_openclaw_fails(monkeypatch):
-    def fake_run(command, capture_output, text, timeout):
-        return subprocess.CompletedProcess(command, 1, stdout="", stderr="openclaw unavailable")
+def test_discover_clears_stale_agents_when_discovery_fails(monkeypatch):
+    def fake_discover():
+        raise OSError("discovery backend unavailable")
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    manager = AgentStatusManager(discover_agents=lambda: list_openclaw_agents(timeout=10))
-    manager.agents = [AgentStatus(id="stale", name="Stale", busy=False)]
-
-    assert manager.discover() == []
-    assert manager.get_all() == []
-
-
-def test_discover_clears_stale_agents_when_json_is_invalid(monkeypatch):
-    def fake_run(command, capture_output, text, timeout):
-        return subprocess.CompletedProcess(command, 0, stdout="{bad json", stderr="")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    manager = AgentStatusManager(discover_agents=lambda: list_openclaw_agents(timeout=10))
+    manager = AgentStatusManager(discover_agents=fake_discover)
     manager.agents = [AgentStatus(id="stale", name="Stale", busy=False)]
 
     assert manager.discover() == []
@@ -254,38 +227,3 @@ def test_set_busy_and_idle_are_thread_safe():
     assert len(agents) == 1
     assert agents[0]["task_count"] == 0
     assert agents[0]["busy"] is False
-
-
-def test_list_openclaw_agents_success(monkeypatch):
-    def fake_run(cmd, **kwargs):
-        return subprocess.CompletedProcess(
-            cmd, 0, stdout=json.dumps([{"id": "main"}, {"id": "aux"}]), stderr=""
-        )
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    agents = list_openclaw_agents()
-    assert agents == [{"id": "main"}, {"id": "aux"}]
-
-
-def test_list_openclaw_agents_failure(monkeypatch):
-    def fake_run(cmd, **kwargs):
-        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="err")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    assert list_openclaw_agents() == []
-
-
-def test_list_openclaw_agents_invalid_json(monkeypatch):
-    def fake_run(cmd, **kwargs):
-        return subprocess.CompletedProcess(cmd, 0, stdout="not json", stderr="")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    assert list_openclaw_agents() == []
-
-
-def test_list_openclaw_agents_exception(monkeypatch):
-    def fake_run(cmd, **kwargs):
-        raise OSError("no openclaw")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    assert list_openclaw_agents() == []

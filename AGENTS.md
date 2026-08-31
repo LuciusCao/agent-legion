@@ -217,8 +217,10 @@
   路径取 enqueue 时 manifest 的 config）。manifest 仅携带白名单
   非敏感键（CONFIG-MANIFEST-001），敏感参数标记 `secret`——manifest 白名单管敏感键
   不下发，runtime_mutable 只管解析时机，两者正交。
-- velites（`velites/` crate，自研 Rust harness）：pi、openclaw、velites 是平级
-  runtime，由 `AgentDefinition.runtime` 声明。Agent 定义存 DB
+- velites（`velites/` crate，自研 Rust harness）：pi、velites 是平级
+  runtime，由 `AgentDefinition.runtime` 声明（openclaw 曾短暂接入，因
+  无流式事件与 token 计量已随 #75 整体退役；新 runtime 按 adapter 机制
+  接入，步骤见 `docs/architecture/velites-harness.md` 接入指南）。Agent 定义存 DB
   （`versioned_entities` 表，workspace 作用域（schema v46，解析严格限定本
   workspace、零全局兜底），经 Studio 节点详情内嵌编辑 / chat 草稿 /
   `/api/agent-definitions`
@@ -227,9 +229,8 @@
   `workflows.pi` 块已退役，
   出现在任何 split yaml 启动即报错（fail-fast 带迁移指引）。runtime 经
   `server/app/agent_runtime` catalog 的 adapter 钉死命令构建器与二进制
-  （pi → pi argv，velites → velites argv，openclaw → openclaw argv——一次性
-  `--json` 结果 envelope，Worker 侧 `worker/openclaw_events.py` 合成 pi
-  子集事件），runtime 全集的单一事实来源是 catalog 的 `AGENT_RUNTIMES`（三处
+  （pi → pi argv，velites → velites argv），
+  runtime 全集的单一事实来源是 catalog 的 `AGENT_RUNTIMES`（三处
   `AgentDefinition.runtime` Literal、Worker 注册白名单、Worker 侧 runtime
   集合由 `tests/agent_runtime/test_runtime_catalog.py` 钉住全等），没有
   flavor 之类的实现选择层。pi 作为可选 runtime 长期保留
@@ -328,16 +329,15 @@ CodeExecutor(...).execute(context)
   只引用连接 key；env `CMS_*` / `AGENT_LEGION_CMS_TOKEN` 通道已退役（启动迁移收编进
   连接后硬切）；全局 `cms:` 段已从 split yaml 退役（出厂默认值在 capability
   config_schema），split yaml 写 `cms:` 撞 owned-key 校验报错；explicit 单文件配置出现
-  `cms.token` / `cms.token_gen` 启动即报错（G2）；`openclaw` 段已从 split yaml 退役进实例设置（DB
-  `global_settings` 的 `instance` 文档，`/api/admin/instance-settings` 维护），
-  split yaml 写 `openclaw:` 撞 owned-key 校验报错；`openclaw.skill_safety`
-  写 `ref` 在启动校验与实例设置 API（422）都会被拒（G3，ref 以 DB
-  `skill_lock` 文档为唯一权威）。`asr` 段已随 `config/agent_legion.yaml`
+  `cms.token` / `cms.token_gen` 启动即报错（G2）；`openclaw` 段已随 openclaw
+  runtime 整体退役（#75，实例设置文档读取时整块剥离、写入 422，
+  `AGENT_LEGION_OPENCLAW_CWD` env 同步退役；skill_safety ref 问题随之消失——
+  ref 仍以 DB `skill_lock` 文档为唯一权威）。`asr` 段已随 `config/agent_legion.yaml`
   整体退役（文件存在即启动报错，带迁移指引）：业务参数与机器路径
   随业务转录节点一并迁出，平台不再有 ASR 配置通道。
   `vault` / `auth` 段为 env-only，写进任何 split yaml 会触发 owned-key 校验失败
   （CONFIG-YAML-001）。
-- OpenClaw / Pi 命令模板来自本地配置，不要把 API key 写进命令行或日志。
+- Pi 命令模板来自本地配置，不要把 API key 写进命令行或日志。
 - 开源卫生：tracked 文档、commit message、PR body 不得携带任一部署实例的
   生产数据规模与内部运维事实（具体 job 数、DB/产物体积、节点执行量、成功率、
   停机窗口安排等）；设计依据与运维指引一律用通用量级表述（如「存量较多时」

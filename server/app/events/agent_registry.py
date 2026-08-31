@@ -1,7 +1,8 @@
 """Agent status rows: the registry owns the row set, nothing else.
 
-Split from ``events.agents`` (issue #2 phase 2): discovery (openclaw-backed
-``discover_agents`` callable) and broker upserts write rows here; workload
+Split from ``events.agents`` (issue #2 phase 2): discovery (optional
+``discover_agents`` callable; the openclaw-backed adapter retired with the
+openclaw runtime, #75) and broker upserts write rows here; workload
 transitions and WS broadcasting live in the sibling modules. The registry
 holds no broadcasting knowledge — consumers read state, they don't get
 pushed. All access shares one ``threading.Lock`` with the workload module
@@ -66,8 +67,8 @@ class AgentRegistry:
             ]
         except Exception:
             # #204 broad-except audit: deliberate discovery containment. The
-            # callable is the openclaw discovery adapter — an external
-            # process/HTTP surface whose failure space (subprocess errors,
+            # callable is an external process/HTTP surface (the retired
+            # openclaw discovery adapter was one) whose failure space (subprocess errors,
             # malformed agent records, timeouts) is not a business family
             # this panel state layer could enumerate. The panel is a
             # status view: an empty row set on failure is strictly better

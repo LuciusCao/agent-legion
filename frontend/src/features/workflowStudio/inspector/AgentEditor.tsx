@@ -13,7 +13,7 @@ import { SkillSelector } from '../../../components/SkillSelector'
 import { AgentVersionsDialog } from './AgentVersionsDialog'
 import styles from './AgentsPanel.module.css'
 
-const runtimes: AgentRuntime[] = ['pi', 'openclaw', 'velites']
+const runtimes: AgentRuntime[] = ['pi', 'velites']
 const toolOptions = ['read', 'write', 'bash']
 
 type Props = {

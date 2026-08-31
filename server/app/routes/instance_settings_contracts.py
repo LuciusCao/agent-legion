@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from server.app.routes.instance_openclaw_contracts import InstanceOpenClawSettings
 from server.app.skills.skill_roots import SKILLS_ROOT_DISPLAY
 
 
@@ -54,7 +53,6 @@ class InstanceSettingsDocument(BaseModel):
     materials_ttl_days: int = Field(ge=0, le=36500)
     workflows: InstanceWorkflowsSettings
     agent_workers: InstanceAgentWorkersSettings
-    openclaw: InstanceOpenClawSettings
 
 
 class InstanceSettingsResponse(InstanceSettingsDocument):

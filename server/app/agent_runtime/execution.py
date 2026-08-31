@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
-from server.app.agent_runtime.catalog import get_adapter, not_implemented_message
+from server.app.agent_runtime.catalog import get_adapter
 
 if TYPE_CHECKING:
     from server.app.workflows.schema import WorkflowNode
@@ -36,10 +36,7 @@ def validate_execution_contract(
     *, node_key: str, runtime: str, values: Mapping[str, Any]
 ) -> dict[str, str]:
     """校验并归一化 execution 值（空 = 未配置）；契约外键非空 / 必填缺失 → fail-fast。"""
-    adapter = get_adapter(runtime)
-    if not adapter.implemented:
-        raise ValueError(not_implemented_message(runtime))
-    contract = adapter.execution
+    contract = get_adapter(runtime).execution
     resolved = {key: str(values.get(key) or "") for key in EXECUTION_KEYS}
     for key in EXECUTION_KEYS:
         if key not in contract.keys and resolved[key]:

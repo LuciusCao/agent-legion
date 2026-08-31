@@ -46,7 +46,7 @@ def test_agent_definition_catalog_snapshot_lifecycle(job_db) -> None:
     )
     workspace_id = str(workspace["id"])
     first = AgentDefinition(capability="generate", runtime="pi", skill="question/generate")
-    second = AgentDefinition(capability="review", runtime="openclaw", skill="question/review")
+    second = AgentDefinition(capability="review", runtime="velites", skill="question/review")
     replace_agent_catalog(workspace_id, {"generator-v1": first, "reviewer-v1": second})
 
     catalog = published_agent_definitions(TEST_DATABASE_URL, workspace_id)

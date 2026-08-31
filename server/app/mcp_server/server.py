@@ -153,7 +153,7 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         tools: list[str] | None = None,
     ) -> str:
         """Save a draft Agent definition (workspace-scoped) binding a capability
-        to a runtime and skill. runtime is one of: pi, openclaw, velites.
+        to a runtime and skill. runtime is one of: pi, velites.
         Draft only — a human publishes it in Studio before any job can use it."""
         _, client = await _client()
         return await client.call(

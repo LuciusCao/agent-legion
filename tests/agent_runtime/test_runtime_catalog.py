@@ -42,7 +42,7 @@ def _disable_runtime_choices() -> set[str]:
 
 
 def test_catalog_matches_runtime_literals() -> None:
-    assert set(AGENT_RUNTIMES) == {"pi", "openclaw", "velites"}
+    assert set(AGENT_RUNTIMES) == {"pi", "velites"}
     assert _literal_values(AgentDefinition, "runtime") == set(AGENT_RUNTIMES)
     assert _literal_values(AgentDefinitionPayload, "runtime") == set(AGENT_RUNTIMES)
     assert _literal_values(AgentDefinitionResponse, "runtime") == set(AGENT_RUNTIMES)
@@ -59,20 +59,5 @@ def test_catalog_matches_worker_side_runtime_sets() -> None:
 
 
 def test_get_adapter_unknown_runtime_lists_full_catalog() -> None:
-    with pytest.raises(ValueError, match=r"unknown agent runtime 'rust'.*pi, openclaw, velites"):
+    with pytest.raises(ValueError, match=r"unknown agent runtime 'rust'.*pi, velites"):
         get_adapter("rust")
-
-
-def test_openclaw_registered_and_implemented() -> None:
-    # 阶段 3 起 openclaw 已接入：adapter implemented，build_command 产出 argv。
-    adapter = get_adapter("openclaw")
-    assert adapter.implemented is True
-    cmd = adapter.build_command(
-        {"execution": {"model": "m"}},
-        skill_dir="/s",
-        session_dir="/sd",
-        session_name="sess",
-        prompt_file="/p.md",
-        prompt_instruction="x",
-    )
-    assert cmd[:2] == ["openclaw", "agent"]

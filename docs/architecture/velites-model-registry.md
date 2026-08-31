@@ -74,8 +74,7 @@ velites models list --json
 ## Runtime adapters
 
 - velites：`velites models list --json`；
-- Pi：`pi --list-models`，其文本方言只在 Pi discovery adapter 内解析；
-- OpenClaw：`openclaw models list --json`，只广播 `available != false` 且非 missing 的模型。
+- Pi：`pi --list-models`，其文本方言只在 Pi discovery adapter 内解析。
 
 一个 runtime 探测失败只降级该 runtime；其他 runtime 和 code 执行池继续工作。运行态
 effective models 不回写持久化 YAML。Worker 重启或 runtime/allowlist 配置变更会重新探测。

@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from server.app.settings import load_env_file, load_settings
 
@@ -23,7 +22,6 @@ def _clear_agent_legion_env(monkeypatch):
         "BASECMS_SECRET",
         "BASECMS_TOKEN_URL",
         "AGENT_LEGION_CMS_TOKEN",
-        "AGENT_LEGION_OPENCLAW_CWD",
         "AGENT_LEGION_SKIP_DOTENV",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -174,13 +172,13 @@ def test_split_layout_rejects_retired_agent_legion_yaml(tmp_path, monkeypatch):
 
     message = str(exc_info.value)
     assert "node configuration in Studio" in message
-    assert "instance-settings" in message
+    assert "retired with the openclaw runtime" in message
 
 
 def test_load_settings_reads_project_dotenv_by_default(tmp_path, monkeypatch):
     # The split layout carries zero files (agent_legion.yaml is retired); the
     # config dict is built from code defaults plus env overrides.
-    (tmp_path / ".env").write_text("AGENT_LEGION_OPENCLAW_CWD=dotenv-cwd\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("AGENT_LEGION_SKILLS_RUNS_DIR=dotenv-runs\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
     monkeypatch.delenv("AGENT_LEGION_SKIP_DOTENV", raising=False)
 
@@ -189,20 +187,20 @@ def test_load_settings_reads_project_dotenv_by_default(tmp_path, monkeypatch):
     finally:
         # load_env_file writes os.environ directly (bypassing monkeypatch);
         # keep the shared worker process clean for later tests.
-        os.environ.pop("AGENT_LEGION_OPENCLAW_CWD", None)
+        os.environ.pop("AGENT_LEGION_SKILLS_RUNS_DIR", None)
 
-    assert settings.config["openclaw"]["cwd"] == "dotenv-cwd"
+    assert settings.config["skills"]["runs_dir"] == "dotenv-runs"
 
 
 def test_load_settings_can_skip_project_dotenv(tmp_path, monkeypatch):
-    (tmp_path / ".env").write_text("AGENT_LEGION_OPENCLAW_CWD=dotenv-cwd\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("AGENT_LEGION_SKILLS_RUNS_DIR=dotenv-runs\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
     monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
 
     settings = load_settings()
 
     # With the dotenv skipped, the env override never lands.
-    assert settings.config.get("openclaw", {}).get("cwd") != "dotenv-cwd"
+    assert settings.config.get("skills", {}).get("runs_dir") != "dotenv-runs"
 
 
 def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
@@ -290,48 +288,25 @@ def test_load_settings_rejects_retired_workflows_pi_yaml(tmp_path, monkeypatch):
 def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
-        "data_dir: data\nworkflows:\n  enabled: true\nopenclaw:\n  cwd: .\n",
+        "data_dir: data\nworkflows:\n  enabled: true\n",
         encoding="utf-8",
     )
 
     settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
     assert settings.executor_runtime.workflows.enabled is True
-    assert settings.executor_runtime.openclaw.cwd == "."
-    # 退役的 openclaw 旋钮（command_template/timeout_seconds/skill_safety）随
-    # 配置面清理移除：extra="ignore" 使 yaml 里的残留键被静默丢弃。
 
 
-def test_load_settings_ignores_retired_openclaw_knobs(tmp_path, monkeypatch):
-    """Retired openclaw keys are ignored, not validated."""
+def test_load_settings_ignores_retired_openclaw_block(tmp_path, monkeypatch):
+    """The openclaw block retired with the openclaw runtime (#75): leftover
+    yaml content is ignored, not validated (ExecutorRuntimeConfig has no
+    openclaw field anymore)."""
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
         "data_dir: data\n"
         "openclaw:\n"
         "  cwd: .\n"
-        "  timeout_seconds: 600\n"
         "  command_template: []\n"
-        "  skill_safety:\n"
-        "    enabled: true\n"
-        "    repos:\n"
-        "      - path: ~/.openclaw/workspace/skills/s1\n",
-        encoding="utf-8",
-    )
-
-    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
-
-    assert settings.executor_runtime.openclaw.cwd == "."
-
-
-def test_load_settings_rejects_skill_safety_ref(tmp_path, monkeypatch):
-    """skill_safety refs stay rejected at startup (config governance G3): the
-    DB skill_lock document is the single source of truth for refs, so the
-    retired-key ignore rule must not swallow a ref silently."""
-    config_path = tmp_path / "workflow.yaml"
-    config_path.write_text(
-        "data_dir: data\n"
-        "openclaw:\n"
-        "  cwd: .\n"
         "  skill_safety:\n"
         "    enabled: true\n"
         "    repos:\n"
@@ -340,15 +315,22 @@ def test_load_settings_rejects_skill_safety_ref(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    with pytest.raises(ValidationError, match="ref"):
-        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.executor_runtime.workflows.enabled is True
 
 
 @pytest.mark.parametrize(
     ("layout", "env_var", "config_path", "env_value", "expected"),
     [
-        ("legacy", "AGENT_LEGION_OPENCLAW_CWD", ["openclaw", "cwd"], "/tmp/cwd", "/tmp/cwd"),
-        ("split", "AGENT_LEGION_OPENCLAW_CWD", ["openclaw", "cwd"], "/tmp/cwd", "/tmp/cwd"),
+        (
+            "legacy",
+            "AGENT_LEGION_SKILLS_RUNS_DIR",
+            ["skills", "runs_dir"],
+            "/tmp/runs",
+            "/tmp/runs",
+        ),
+        ("split", "AGENT_LEGION_SKILLS_RUNS_DIR", ["skills", "runs_dir"], "/tmp/runs", "/tmp/runs"),
     ],
 )
 def test_env_override_precedes_yaml(
@@ -360,7 +342,7 @@ def test_env_override_precedes_yaml(
     if layout == "legacy":
         config_path_file = tmp_path / "workflow.yaml"
         config_path_file.write_text(
-            "data_dir: data\nworkflows:\n  enabled: false\nopenclaw:\n  cwd: yaml-cwd\n",
+            "data_dir: data\nworkflows:\n  enabled: false\nskills:\n  runs_dir: yaml-runs\n",
             encoding="utf-8",
         )
     else:

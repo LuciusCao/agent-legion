@@ -11,7 +11,6 @@ from server.app.configuration import load_application_config
 from server.app.configuration.cors import CorsSettings, load_cors_settings
 from server.app.configuration.executor_runtime import (
     ExecutorRuntimeConfig,
-    OpenClawRuntimeConfig,
     WorkflowsRuntimeConfig,
     validate_runtime,
 )
@@ -41,7 +40,6 @@ class Settings:
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
             workflows=WorkflowsRuntimeConfig(),
-            openclaw=OpenClawRuntimeConfig(),
         )
     )
 
@@ -85,7 +83,6 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
         ("workflows", "custom_nodes_enabled"),
         _bool_parser,
     ),
-    "AGENT_LEGION_OPENCLAW_CWD": (("openclaw", "cwd"), _path_parser),
     # AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE) removed with the global token
     # retirement (issue #35): registration is scoped-token-only now. A leftover
     # variable must fail loudly at load time instead of silently ignoring a

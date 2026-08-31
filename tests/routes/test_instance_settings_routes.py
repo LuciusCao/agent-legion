@@ -37,9 +37,6 @@ def _payload() -> dict:
         "materials_ttl_days": 0,
         "workflows": {"enabled": True},
         "agent_workers": {"max_archive_bytes": 64 * 1024 * 1024, "min_protocol_version": 1},
-        "openclaw": {
-            "cwd": ".",
-        },
     }
 
 
@@ -70,11 +67,10 @@ def test_get_includes_readonly_skills_root(client) -> None:
     assert response.json()["skills_root"] == SKILLS_ROOT_DISPLAY
 
 
-def test_get_normalizes_legacy_stored_openclaw_keys(client) -> None:
-    """A stored document saved before the openclaw-knob retirement still
-    carries command_template/timeout_seconds/isolated_workspace_root/
-    skill_safety; GET must normalize to the cwd-only shape instead of
-    failing response validation with a 500 (Codex review, PR #183)."""
+def test_get_strips_legacy_stored_openclaw_block(client) -> None:
+    """A stored document saved before the openclaw retirement (#75) still
+    carries an openclaw block; GET must drop it wholesale instead of failing
+    response validation with a 500."""
     from server.app.services.instance_settings_store import InstanceSettingsStore
 
     store = InstanceSettingsStore(client.app.state.job_db.dsn_identity)
@@ -83,8 +79,6 @@ def test_get_normalizes_legacy_stored_openclaw_keys(client) -> None:
             "openclaw": {
                 "cwd": "/tmp/openclaw-legacy",
                 "command_template": ["openclaw", "agent"],
-                "timeout_seconds": 600,
-                "isolated_workspace_root": "",
                 "skill_safety": {"enabled": True, "repos": [{"path": "~/.skills/s1"}]},
             }
         }
@@ -93,7 +87,7 @@ def test_get_normalizes_legacy_stored_openclaw_keys(client) -> None:
     response = client.get(INSTANCE_SETTINGS_URL)
 
     assert response.status_code == 200, response.text
-    assert response.json()["openclaw"] == {"cwd": "/tmp/openclaw-legacy"}
+    assert "openclaw" not in response.json()
 
 
 def test_put_roundtrip(client) -> None:
@@ -167,22 +161,9 @@ def test_put_materials_ttl_roundtrip(client) -> None:
     assert response.json()["materials_ttl_days"] == 30
 
 
-def test_put_rejects_retired_openclaw_keys(client) -> None:
-    """Retired openclaw knobs are unknown fields now: they 422 (extra=forbid)."""
+def test_put_rejects_retired_openclaw_block(client) -> None:
+    """The openclaw block retired with the openclaw runtime (#75): writing it
+    422s like any other unknown key (InstanceSettingsUpdate is extra=forbid)."""
     payload = _payload()
-    payload["openclaw"]["skill_safety"] = {"enabled": True, "repos": []}
+    payload["openclaw"] = {"cwd": "/tmp/openclaw"}
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
-    payload = _payload()
-    payload["openclaw"]["command_template"] = ["openclaw"]
-    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
-
-
-def test_put_openclaw_roundtrip(client) -> None:
-    payload = _payload()
-    payload["openclaw"]["cwd"] = "/tmp/openclaw"
-    response = client.put(INSTANCE_SETTINGS_URL, json=payload)
-    assert response.status_code == 200, response.text
-    assert response.json() == {**payload, "skills_root": SKILLS_ROOT_DISPLAY}
-
-    response = client.get(INSTANCE_SETTINGS_URL)
-    assert response.json() == {**payload, "skills_root": SKILLS_ROOT_DISPLAY}

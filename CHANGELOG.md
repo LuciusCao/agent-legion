@@ -8,14 +8,10 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ### Added
 - 架构盘点：workflow_key 退役 Phase 1 分类清单（`docs/architecture/workflow-key-retirement-inventory.md`，issue #211）——四类穷尽引用 + Phase 2-4 执行依据。
-- openclaw 作为第三个 agent runtime 接入（issue #75 阶段 3）：Host 侧
-  runtime catalog 的 openclaw adapter 构建 `openclaw agent --local --json`
-  argv（provider 拼成 `provider/model` 组合串，execution 契约 model 必填、
-  provider/thinking 可选）；其 stdout 为一次性结果 envelope，Worker 侧
-  `worker/openclaw_events.py` 在进程退出后合成 pi 兼容子集事件，日志预览
-  与失败检测保持 runtime 中立（token 计量为空——envelope 不携带 usage）。
-  Worker 经二进制探测自动声明 openclaw；模型发现走
-  `openclaw models list --json`。
+- Host 侧 agent runtime catalog（`server/app/agent_runtime`，issue #75）：
+  runtime 全集单一事实来源（`AGENT_RUNTIMES`）+ 每 runtime 一个 adapter
+  （argv 构建 + `ExecutionContract`）；「新增 agent runtime 接入指南」见
+  `docs/architecture/velites-harness.md`。
 
 ### Changed
 - Agent execution 契约 runtime 化（issue #75）：Host 侧 runtime catalog
@@ -26,6 +22,16 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   后若节点引入了 runtime 不支持的 execution 键（或必填键不再可解析），
   claim 从静默下发变为可行动报错（claim 扫描跳过该候选，unclaimable
   sweeper 将请求判失败并给出指向节点 execution 覆盖的错误信息）。
+
+### Removed
+- openclaw runtime 整体退役（issue #75）：曾短暂经 catalog adapter 接入
+  （`openclaw agent --local --json`），因其 stdout 只有一次性结果
+  envelope——无流式事件、无 token 计量——按用户决策移除；agent runtime
+  回到 pi / velites 两个。连带退役：实例设置 `openclaw` 块（存量 DB 文档
+  读取时整块剥离、写入返回 422）、`AGENT_LEGION_OPENCLAW_CWD` env、
+  `openclaw.cwd` 启动校验、Host 侧 openclaw agents 发现、Worker 侧
+  openclaw 条目与模型发现 adapter。未来需要时按 adapter 机制重新接入
+  （指南见 `docs/architecture/velites-harness.md`）。
 
 ## [0.4.0-alpha] - 2026-08-29
 

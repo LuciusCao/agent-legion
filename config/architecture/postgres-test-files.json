@@ -47,7 +47,6 @@
     "tests/full/test_agent_worker_control_plane.py",
     "tests/full/test_executor_cancellation_recovery.py",
     "tests/full/test_executor_worker_fairness.py",
-    "tests/full/test_openclaw_harness_e2e.py",
     "tests/full/test_split_config_startup.py",
     "tests/full/test_storage_path_corruption.py",
     "tests/full/test_velites_harness_e2e.py",

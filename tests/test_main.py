@@ -18,7 +18,7 @@ def test_lifespan_with_start_worker_initializes_only_workflow_worker(tmp_path, m
 
     monkeypatch.setattr(WorkflowWorkerThread, "start", patched_workflow_start)
 
-    # Keep lifespan wiring independent of real openclaw discovery.
+    # Keep lifespan wiring independent of real agent discovery.
     monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
     # Startup validation is about real runtime dependencies, not lifespan wiring.
     monkeypatch.setattr(main, "validate_settings", lambda settings: None)

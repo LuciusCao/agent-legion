@@ -1,22 +1,16 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
-from server.app.agent_broker.dispatch import (
-    AgentDispatchService,
-    resolve_execution_block,
-)
+from server.app.agent_broker.dispatch import resolve_execution_block
 from server.app.agent_catalog import AgentDefinition
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.events.agents import AgentStatusManager
-from server.app.services.artifact_store import ArtifactStore
-from server.app.settings import Settings
 from server.app.workflows.schema import WorkflowNode, WorkflowNodeExecution
 from tests.helpers import replace_agent_catalog
 from tests.helpers.agent_worker_api import (
@@ -25,21 +19,7 @@ from tests.helpers.agent_worker_api import (
     insert_job_rows,
     seed_request,
 )
-from tests.helpers.executor_worker import make_pi_skill
 from tests.postgres_support import TEST_DATABASE_URL
-
-
-class _LocalSkillManager:
-    """Test double for SkillManager: serves a pre-built skill tree from base_dir."""
-
-    def __init__(self, base_dir) -> None:
-        self.base_dir = base_dir
-
-    def get_skill_dir(self, skill: str, execution_id: str):
-        return self.base_dir / skill
-
-    def cleanup_execution(self, execution_id: str) -> None:
-        return None
 
 
 def _broker(data_dir, **kwargs) -> AgentExecutionBroker:
@@ -165,7 +145,7 @@ def test_incompatible_worker_does_not_claim_or_start_node(job_db) -> None:
     registry.issue_token(
         worker_id="worker-1",
         name="worker",
-        runtimes=["openclaw"],
+        runtimes=["velites"],
         max_concurrency=10,
         labels={"arch": "amd64"},
     )
@@ -853,38 +833,11 @@ def test_stale_pi_and_fresh_velites_requests_coexist_during_migration(job_db) ->
     assert claimed.job_id == "job-new"
 
 
-def test_dispatch_openclaw_manifest_and_unknown_runtime_fails_fast(job_db, tmp_path) -> None:
-    """EXEC-RUNTIME-DISPATCH-001: openclaw 自阶段 3 接入——dispatch 正常冻结
-    manifest（adapter 钉死 binary 与 argv）；未知 runtime 仍 fail-fast。"""
-    settings = Settings(
-        root_dir=tmp_path,
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={},
-    )
-    broker = _broker(tmp_path, bundle_dir=tmp_path / "bundles")
-    store = ArtifactStore(tmp_path / "artifacts", TEST_DATABASE_URL)
-    service = AgentDispatchService(settings, broker, store)
-    skill_root = tmp_path / "skills"
-    make_pi_skill(skill_root, "question/generate")
-    service.skill_manager = _LocalSkillManager(skill_root)
-    definition = AgentDefinition(
-        capability="generate",
-        runtime="openclaw",
-        skill="question/generate",
-    )
-    replace_agent_catalog("test-workspace", {"generator-v1": definition})
-    _insert_job_rows(
-        job_db,
-        job_id="job-openclaw",
-        node_key="generate",
-        limit=5,
-        workspace_id="test-workspace",
-        agent_id="generator-v1",
-    )
+@pytest.mark.no_db
+def test_dispatch_fails_fast_on_unregistered_runtime() -> None:
+    """EXEC-RUNTIME-DISPATCH-001: catalog 外的 runtime（含已退役的 openclaw）
+    在 dispatch 前 fail-fast，报错列出受支持集合；不会有 manifest 带着不可
+    构建的 command spec 被冻结。"""
     node = WorkflowNode(
         key="generate",
         label="generate",
@@ -892,38 +845,10 @@ def test_dispatch_openclaw_manifest_and_unknown_runtime_fails_fast(job_db, tmp_p
         outputs=["o.json"],
         execution=WorkflowNodeExecution(provider="kimi", model="kimi-code"),
     )
-    job_dir = tmp_path / "job"
-    job_dir.mkdir()
 
-    assert (
-        service.enqueue(
-            agent_id="generator-v1",
-            definition=definition,
-            workspace={"id": "test-workspace"},
-            job={"id": "job-openclaw"},
-            workflow_key="questions",
-            node=node,
-            job_dir=job_dir,
-            log_path=tmp_path / "job.log",
-            inputs=(),
-        )
-        is True
-    )
-
-    with job_db.connect() as conn:
-        row = conn.execute(
-            "select manifest_json from agent_execution_requests where job_id='job-openclaw'"
-        ).fetchone()
-    manifest = json.loads(row["manifest_json"])
-    assert manifest["runtime"] == "openclaw"
-    assert manifest["execution"]["binary"] == "openclaw"
-    command = manifest["command_spec"]["command"]
-    assert command[:2] == ["openclaw", "agent"]
-    assert "--local" in command and "--json" in command
-    assert command[command.index("--model") + 1] == "kimi/kimi-code"
-    assert command[command.index("--message-file") + 1] == "{prompt_file}"
-
-    with pytest.raises(ValueError, match=r"unknown agent runtime 'rust'"):
+    with pytest.raises(ValueError, match=r"unknown agent runtime 'openclaw'.*pi, velites"):
+        resolve_execution_block(node, "openclaw")
+    with pytest.raises(ValueError, match=r"unknown agent runtime 'rust'.*pi, velites"):
         resolve_execution_block(node, "rust")
 
 
