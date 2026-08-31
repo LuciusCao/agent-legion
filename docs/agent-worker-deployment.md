@@ -124,7 +124,7 @@ curl http://192.0.2.1:8000/api/health
 mkdir -p deploy/secrets
 ```
 
-无需先复制或编辑 Worker YAML：首次启动会导入仓库内的引导配置，随后在本机控制台填写 Host 地址、Worker ID 和能力。已有引导 YAML（如复制自 `deploy/worker.remote.example.yaml`）的机器可继续使用；启动前设置 `AGENT_WORKER_CONFIG=./<your-worker>.yaml`，Worker Service 会在首次启动时导入它。
+无需先复制或编辑 Worker YAML：Worker 首次启动为未配置状态，直接在本机控制台填写 Host 地址、Worker ID 等即可生效（issue #323 后 `--config` 仅作可选 bootstrap）。已有引导 YAML（如复制自 `deploy/worker.remote.example.yaml`）的机器可继续使用；启动时经 `--config ./<your-worker>.yaml` 传入（compose 部署设置 `AGENT_WORKER_CONFIG=./<your-worker>.yaml`），Worker Service 会在首次启动时导入它。
 
 Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope**，`worker.yaml` 不需要也不允许声明 workspace（issue #35 后全局 token 已退役，只保留 scoped token 一种）：
 
@@ -289,13 +289,14 @@ Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程�
 ### 全新克隆的本地 Worker（无 init-worktree.sh）
 
 外部用户从干净克隆起步时没有 init-worktree.sh 的种子自动化，`make dev-up`
-只在 `config/agent-worker.yaml` 存在时才会启动 Worker。手工步骤（README
-Quick Start 已含命令）：
+只在 worker 状态副本 `data/agent-worker-service/worker.yaml` 存在时才会启动
+Worker（issue #323 后 dev 侧不再有 `config/agent-worker.yaml` 种子）。
+`make install`（install-deps.sh）已自动写入最小 dev 配置；未跑过时的手工步骤：
 
-1. `cp config/agent-worker.example.yaml config/agent-worker.yaml`，按本机改
-   `host_url`（dev 栈后端端口，默认 `http://127.0.0.1:8001`）、
-   `work_root: data/agent-worker`，并按需要配置 `models` allowlist（留空表示
-   允许 runtime 发现的全部模型）。
+1. 写入最小状态副本 `data/agent-worker-service/worker.yaml`（0600），含
+   `host_url`（dev 栈后端端口，默认 `http://127.0.0.1:8001`）、`worker_id`、
+   `name`、`work_root: data/agent-worker`；其余字段（如 `models` allowlist，
+   留空表示允许 runtime 发现的全部模型）之后走 Worker 控制台/API 配置。
 2. 起后端并登录 Host Web UI，在 workspace「设置 → Agent 与 Worker」为目标
    workspace 签发 scoped token；到 Worker 控制台（默认 `http://127.0.0.1:8789`）的
    「Workspace 访问（Scoped Token）」区块粘贴添加。Worker 侧 token 随时可以

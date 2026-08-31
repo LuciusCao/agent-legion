@@ -36,6 +36,14 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   sweeper 将请求判失败并给出指向节点 execution 覆盖的错误信息）。
 
 ### Removed
+- dev 侧 worker 配置种子 `config/agent-worker.yaml` 与模板
+  `config/agent-worker.example.yaml` 整体退役（issue #323）：worker 唯一
+  生效配置收敛为状态副本 `data/agent-worker-service/worker.yaml`（控制台/
+  API 驱动），消除「改了种子文件不生效」的双层配置漂移。`init-worktree.sh`
+  / `install-deps.sh` 的种子逻辑改为直写状态副本，`worker.service --config`
+  变为纯可选 bootstrap（仅 docker/远程 headless 部署使用，模板见
+  `deploy/worker.*.example.yaml`），`make dev-up` 的 worker 启动闸门改判
+  状态副本是否存在。
 - openclaw runtime 整体退役（issue #75）：曾短暂经 catalog adapter 接入
   （`openclaw agent --local --json`），因其 stdout 只有一次性结果
   envelope——无流式事件、无 token 计量——按用户决策移除；agent runtime

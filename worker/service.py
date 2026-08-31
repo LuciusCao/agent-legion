@@ -148,13 +148,20 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the Agent Legion Worker Service")
-    parser.add_argument("--config", type=Path, default=Path("config/agent-worker.yaml"))
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="可选 bootstrap：仅状态副本缺失时导入一次的种子配置（docker/远程部署用）",
+    )
     parser.add_argument("--state-dir", type=Path, default=Path("data/agent-worker-service"))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
     args = parser.parse_args()
     worker_dir = Path(__file__).resolve().parent  # worker/ 包根（executor.py 与 ui/ 同级）
-    store = WorkerConfigStore(args.state_dir.resolve(), args.config.resolve())
+    store = WorkerConfigStore(
+        args.state_dir.resolve(), args.config.resolve() if args.config is not None else None
+    )
     supervisor = WorkerSupervisor(store, worker_dir / "executor.py")
     app = create_app(supervisor, worker_dir / "ui", embed_token=embed_control_token(args.host))
     uvicorn.run(app, host=args.host, port=args.port)

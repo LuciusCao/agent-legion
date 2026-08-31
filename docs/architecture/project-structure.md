@@ -14,7 +14,6 @@ agent-legion/
 ├── .env.example                # 运行时密钥与覆盖项模板
 ├── Makefile                    # 常用命令快捷方式
 ├── config/                     # 按领域拆分的配置
-│   ├── agent-worker.example.yaml # Agent Worker 配置模板
 │   └── architecture/           # 架构治理配置
 │       ├── architecture-invariants.yaml
 │       ├── architecture-exemptions.yaml
