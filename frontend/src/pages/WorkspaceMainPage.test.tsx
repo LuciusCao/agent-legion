@@ -303,7 +303,8 @@ describe('WorkspaceMainPage', () => {
         level: 2,
       })
     ).toBeInTheDocument()
-    expect(screen.getByText('去配置')).toBeInTheDocument()
+    // 2 步引导（#333）：步骤为「进入 Studio」与「添加条目」。
+    expect(screen.getByText('添加条目')).toBeInTheDocument()
   })
 
   it('shows skeleton while loading jobs', async () => {

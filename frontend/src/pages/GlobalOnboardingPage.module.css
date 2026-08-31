@@ -1,0 +1,117 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #f5f6f8;
+}
+
+.card {
+  width: 100%;
+  max-width: 640px;
+  background: #fff;
+  border: 1px solid #e0e2e8;
+  border-radius: 12px;
+  padding: 32px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.title {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.hint {
+  font-size: 13px;
+  color: #74777f;
+  margin: 0 0 12px;
+}
+
+.error {
+  font-size: 13px;
+  color: #c62828;
+  margin: 8px 0;
+}
+
+.item {
+  border: 1px solid #e0e2e8;
+  border-radius: 10px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.itemHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.itemTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.statusReady,
+.statusPending {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.statusReady {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.statusPending {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.agentList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agentRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.agentLabel {
+  font-weight: 500;
+}
+
+.agentCommand {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #43474e;
+}
+
+.sourceChip {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}

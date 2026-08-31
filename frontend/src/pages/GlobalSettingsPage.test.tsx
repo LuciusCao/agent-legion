@@ -7,6 +7,7 @@ import {
   within,
 } from '@testing-library/react'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
+import { Routes, Route } from 'react-router-dom'
 import GlobalSettingsPage from './GlobalSettingsPage'
 import { useAuthStore } from '../stores/authStore'
 import type { UserResponse } from '../api/authApi'
@@ -128,26 +129,53 @@ describe('GlobalSettingsPage', () => {
     ).toBeInTheDocument()
   })
 
-  it('renders the sidebar nav with entries for each section', async () => {
+  it('renders the sidebar nav grouped by layering with entries for each section', async () => {
     vi.mocked(getTokenUsagePricing).mockResolvedValue(pricingConfig)
 
     renderPage()
 
     const nav = await screen.findByRole('navigation')
+    // #333 两层心智：全局（实例级）分组 + workspace 级指引 + 清单回补入口。
+    expect(within(nav).getByText('全局（实例级）')).toBeInTheDocument()
+    expect(within(nav).getByText('Workspace 级')).toBeInTheDocument()
+    expect(
+      within(nav).getByRole('button', { name: '全局初始化清单' })
+    ).toBeInTheDocument()
     for (const label of [
-      '模型定价',
-      '实例设置',
-      '外部服务连接',
       'Studio Agent 管理',
+      '外部服务连接',
+      '实例设置',
+      '模型定价',
     ]) {
       expect(
         within(nav).getByRole('button', { name: label })
       ).toBeInTheDocument()
     }
-    // 默认高亮第一节
+    // 默认高亮第一节（Studio Agent 管理，与全局 onboarding 清单同序）
     expect(
-      within(nav).getByRole('button', { name: '模型定价' })
+      within(nav).getByRole('button', { name: 'Studio Agent 管理' })
     ).toHaveAttribute('aria-current', 'true')
+  })
+
+  it('navigates to the global onboarding checklist from the sidebar', async () => {
+    vi.mocked(getTokenUsagePricing).mockResolvedValue(pricingConfig)
+
+    render(
+      <MemoryRouter initialEntries={['/admin/settings']}>
+        <Routes>
+          <Route path="/admin/settings" element={<GlobalSettingsPage />} />
+          <Route
+            path="/admin/onboarding"
+            element={<div>全局初始化清单页</div>}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+
+    const nav = await screen.findByRole('navigation')
+    fireEvent.click(within(nav).getByRole('button', { name: '全局初始化清单' }))
+
+    expect(await screen.findByText('全局初始化清单页')).toBeInTheDocument()
   })
 
   it('moves the active nav item on click', async () => {

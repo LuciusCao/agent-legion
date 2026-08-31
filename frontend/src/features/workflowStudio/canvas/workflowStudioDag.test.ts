@@ -133,4 +133,40 @@ describe('buildDagNodes', () => {
       executorKind: 'code',
     })
   })
+
+  it('injects execution warnings only for agent nodes missing provider/model (#333)', () => {
+    // 记录侧节点 execution 是有效值（草稿已经 workflowYamlToDefinitionRecord
+    // 合并顶层默认，published 快照经后端 loader 合并）；这里只读节点值。
+    const nodes = buildDagNodes(workflow)
+
+    // branch 是 agent 节点且未配置 execution → 警告；start/code 节点不警告。
+    expect(nodes[1].executionWarning).toBe(
+      '缺 provider / model，该节点跑不起来'
+    )
+    expect(nodes[0].executionWarning).toBeUndefined()
+    expect(nodes[2].executionWarning).toBeUndefined()
+  })
+
+  it('injects no warning when the agent node execution is complete', () => {
+    const nodes = buildDagNodes({
+      ...workflow,
+      nodes: workflow.nodes.map((node) =>
+        node.key === 'branch'
+          ? {
+              ...node,
+              execution: {
+                provider: 'openai',
+                model: 'gpt-5',
+                thinking: '',
+                prompt: '',
+              },
+            }
+          : node
+      ),
+    })
+
+    expect(nodes.every((node) => node.executionWarning === undefined)).toBe(
+      true
+    )
+  })
 })

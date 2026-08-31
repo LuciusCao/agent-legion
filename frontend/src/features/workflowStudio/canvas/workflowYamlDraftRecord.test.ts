@@ -163,4 +163,40 @@ describe('workflowYamlToDefinitionRecord', () => {
       workflowYamlToDefinitionRecord('key: demo\nedges:\n  - oops\n')
     ).toBeNull()
   })
+
+  it('merges top-level execution defaults into non-start nodes (#333)', () => {
+    // 对齐后端 loader：顶层 execution 默认合并进每个非 start 节点（节点值
+    // 优先），草稿记录的节点 execution 即有效值，与 published 快照同形。
+    const record = workflowYamlToDefinitionRecord(`key: demo
+execution:
+  provider: openai
+  model: gpt-5
+nodes:
+  _start:
+    type: start
+  review:
+    type: agent
+    capability: review
+  fetch:
+    capability: fetch
+    execution:
+      provider: pi
+`)
+    const nodes = Object.fromEntries(
+      (record?.nodes ?? []).map((node) => [node.key, node])
+    )
+    expect(nodes.review?.execution).toEqual({
+      provider: 'openai',
+      model: 'gpt-5',
+      thinking: '',
+      prompt: '',
+    })
+    expect(nodes.fetch?.execution).toEqual({
+      provider: 'pi',
+      model: 'gpt-5',
+      thinking: '',
+      prompt: '',
+    })
+    expect(nodes._start?.execution).toBeUndefined()
+  })
 })

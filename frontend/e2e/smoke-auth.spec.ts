@@ -16,6 +16,13 @@ test('bootstrap 首个管理员后可登出并重新登录', async ({ page }) =>
   await page.getByLabel('确认密码').fill(ADMIN.password)
   await page.getByRole('button', { name: '创建并登录' }).click()
 
+  // #333：bootstrap 后先进入全局初始化清单，确认/跳过后才进入产品。
+  await expect(page).toHaveURL('/admin/onboarding')
+  await expect(
+    page.getByRole('heading', { name: '全局初始化清单' })
+  ).toBeVisible()
+  await page.getByRole('button', { name: '进入产品' }).click()
+
   await expect(page).toHaveURL('/')
   await expect(
     page.getByRole('heading', { name: 'Agent Legion' })

@@ -118,9 +118,7 @@ export default function WorkspaceMainPage() {
 
   const emptyStateSteps = useWorkspaceOnboardingSteps(
     workspaceId,
-    workspaceStats?.workspace_id,
-    workflowDefinition,
-    showEmptyGuide
+    workflowDefinition
   )
 
   return (

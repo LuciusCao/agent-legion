@@ -41,6 +41,8 @@ export interface DagGraphNode {
   workerId?: string | null
   capability?: string
   executorUnbound?: boolean
+  /** Studio 注入的 execution 缺口警告文案（#333）；见 dagNodeTypes。 */
+  executionWarning?: string
   topologyBadges?: Array<'start' | 'entry' | 'branch' | 'terminal'>
   terminalOutcome?: string
   inputs?: string[]
@@ -129,6 +131,7 @@ function computeLayout(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
         nodeKey: node.capability ? node.key : undefined,
         capability: node.capability,
         executorUnbound: node.executorUnbound ?? false,
+        executionWarning: node.executionWarning,
         topologyBadges: node.topologyBadges,
         terminalOutcome: node.terminalOutcome,
         inputs: node.inputs || [],
