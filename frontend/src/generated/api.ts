@@ -873,6 +873,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/skills/directories': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Skill Directories */
+    get: operations['list_skill_directories_api_skills_directories_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/skills/tags': {
     parameters: {
       query?: never
@@ -4799,6 +4816,19 @@ export interface components {
       /** Tags */
       tags?: string[]
     }
+    /**
+     * SkillDirectoriesResponse
+     * @description Candidate skill directory names under ``<skills_root>/<workspace_id>/``
+     *     (#327). Names only — content validation stays with the validate endpoint.
+     *     The ``workspace_id`` query-param name is load-bearing: it is what
+     *     require_workspace_access reads to reject non-members.
+     */
+    SkillDirectoriesResponse: {
+      /** Directories */
+      directories?: string[]
+      /** Workspace Id */
+      workspace_id: string
+    }
     /** SkillFileResponse */
     SkillFileResponse: {
       /** Content */
@@ -7989,6 +8019,37 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['OpsMetricsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_skill_directories_api_skills_directories_get: {
+    parameters: {
+      query: {
+        workspace_id: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillDirectoriesResponse']
         }
       }
       /** @description Validation Error */
