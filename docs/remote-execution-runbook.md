@@ -239,12 +239,17 @@ they never touch the Worker filesystem or logs.
 
 ## 6. Migrating an Agent between runtimes (pi ↔ velites)
 
-`pi`, `openclaw` and `velites` are peer runtimes declared per Agent definition.
+`pi` and `velites` are peer runtimes declared per Agent definition.
 Definitions live in the `versioned_entities` table and are managed in Studio
 (「Agent 管理」) or via `/api/agent-definitions` — the yaml `agents:` section
 and the `workflows.pi` block are retired (their presence in yaml fails Host
 startup), and `workflows.pi.flavor` no longer exists: `AgentDefinition.runtime`
-pins the command builder directly (pi → pi argv, velites → velites argv).
+selects the adapter in the Host-side runtime catalog
+(`server/app/agent_runtime/`), which pins the command builder (pi → pi argv,
+velites → velites argv). openclaw was briefly a third runtime and retired
+with #75 (no streaming events / token metering); new runtimes onboard via
+the same adapter mechanism — see the onboarding guide in
+`docs/architecture/velites-harness.md`.
 Migrating one agent to velites — or rolling it back — is a single-field edit
 plus publish; no Host restart is required (the published-catalog cache has a
 ~5s TTL, and the claim path re-resolves per request). Facts to know before
@@ -281,7 +286,10 @@ flipping the field:
   a sandbox incident currently requires a code change, not a config flip.
 - **Execution defaults:** provider/model/thinking come from the workflow-level
   `execution:` default or per-node Studio overrides (strict chain, no
-  workspace/global fallback) — runtime migration never touches them.
+  workspace/global fallback) — runtime migration never touches them. Resolved
+  values are validated against the runtime adapter's execution contract:
+  a missing required key or a configured unsupported key fails fast at
+  dispatch and at claim re-resolution.
 
   > **Status note:** the runtime migration described above is complete; the
   > canary playbook is kept as operational context for future runtime changes.

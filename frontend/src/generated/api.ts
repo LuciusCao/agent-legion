@@ -2826,7 +2826,7 @@ export interface components {
        * Runtime
        * @enum {string}
        */
-      runtime: 'pi' | 'openclaw' | 'velites'
+      runtime: 'pi' | 'velites'
       /** Skill */
       skill: string
       /** Tools */
@@ -2851,7 +2851,7 @@ export interface components {
        * Runtime
        * @enum {string}
        */
-      runtime: 'pi' | 'openclaw' | 'velites'
+      runtime: 'pi' | 'velites'
       /** Skill */
       skill: string
       /** Tools */
@@ -2875,7 +2875,7 @@ export interface components {
        * Runtime
        * @enum {string}
        */
-      runtime: 'pi' | 'openclaw' | 'velites'
+      runtime: 'pi' | 'velites'
       /** Skill */
       skill: string
       /** Skill Commit */
@@ -3454,11 +3454,6 @@ export interface components {
       /** Sample Interval Seconds */
       sample_interval_seconds: number
     }
-    /** InstanceOpenClawSettings */
-    InstanceOpenClawSettings: {
-      /** Cwd */
-      cwd: string
-    }
     /** InstanceSettingsResponse */
     InstanceSettingsResponse: {
       agent_workers: components['schemas']['InstanceAgentWorkersSettings']
@@ -3474,7 +3469,6 @@ export interface components {
       /** Materials Ttl Days */
       materials_ttl_days: number
       monitoring: components['schemas']['InstanceMonitoringSettings']
-      openclaw: components['schemas']['InstanceOpenClawSettings']
       /**
        * Skills Root
        * @default ~/.agents/skills
@@ -3501,7 +3495,6 @@ export interface components {
       /** Materials Ttl Days */
       materials_ttl_days: number
       monitoring: components['schemas']['InstanceMonitoringSettings']
-      openclaw: components['schemas']['InstanceOpenClawSettings']
       /** Sweeper Enabled */
       sweeper_enabled: boolean
       /** Sweeper Interval Seconds */

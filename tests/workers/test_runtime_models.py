@@ -22,29 +22,22 @@ def test_discovers_each_selected_runtime_and_applies_scoped_allowlist(
                 ]
             )
         else:
-            output = json.dumps(
-                {
-                    "models": [
-                        {"key": "anthropic/claude", "available": True},
-                        {"key": "openai/missing", "available": False},
-                    ]
-                }
-            )
+            output = "Provider Model Context\nanthropic claude-sonnet 200k\n"
         return subprocess.CompletedProcess(command, 0, output, "")
 
     monkeypatch.setattr(runtime_models.subprocess, "run", fake_run)
     models, errors = runtime_models.discover_effective_models(
         {
-            "runtimes": ["velites", "openclaw"],
+            "runtimes": ["velites", "pi"],
             "models": [
                 {"runtime": "velites", "provider": "sqai", "model": "kimi"},
-                {"runtime": "openclaw", "provider": "anthropic", "model": "claude"},
+                {"runtime": "pi", "provider": "anthropic", "model": "claude-sonnet"},
             ],
         }
     )
     assert errors == {}
     assert models == [
-        {"runtime": "openclaw", "provider": "anthropic", "model": "claude"},
+        {"runtime": "pi", "provider": "anthropic", "model": "claude-sonnet"},
         {"runtime": "velites", "provider": "sqai", "model": "kimi"},
     ]
 
@@ -58,15 +51,15 @@ def test_one_runtime_discovery_failure_is_isolated(monkeypatch: pytest.MonkeyPat
         return subprocess.CompletedProcess(
             command,
             0,
-            json.dumps({"models": [{"key": "anthropic/claude", "available": True}]}),
+            "Provider Model Context\nanthropic claude-sonnet 200k\n",
             "",
         )
 
     monkeypatch.setattr(runtime_models.subprocess, "run", fake_run)
     models, errors = runtime_models.discover_effective_models(
-        {"runtimes": ["velites", "openclaw"], "models": []}
+        {"runtimes": ["velites", "pi"], "models": []}
     )
-    assert models == [{"runtime": "openclaw", "provider": "anthropic", "model": "claude"}]
+    assert models == [{"runtime": "pi", "provider": "anthropic", "model": "claude-sonnet"}]
     assert "velites" in errors
 
 

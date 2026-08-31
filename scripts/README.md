@@ -75,7 +75,6 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 
 | 脚本 | 用途 | 退役条件 |
 |------|------|----------|
-| `view-session.py` | 将 OpenClaw session JSONL 渲染为人类可读的对话日志。 | OpenClaw runner 退役或控制台内置 session 查看能力。 |
 | `trim_terminal_code_manifests.py` | 收缩已终态节点的膨胀 code manifest 行（issue #142 止血）。 | 生产库存量膨胀行排空（新代码路径不再膨胀）。 |
 
 一次性脚本（`diagnose_cms.py`、`cleanup-agent-pollution.py`、`backfill-node-run-dirs.py`、`archive/backfill_source_uuid.py`）已于 2026-07-22 退役删除；一次性迁移脚本（`import-sqlite-to-postgres.py` + `sqlite_import_support.py`、`migrate-config-layout.py`）已于 2026-07-23 随 SQLite→PostgreSQL 迁移与配置布局拆分完成退役删除；`backfill_failure_classification.py`、`backfill_worker_output_validation.py`、`migrate_job_dirs_to_shards.py`（存量行迁移完毕）、`backfill_workflow_revision_resources.py`（loader 已硬拒绝 `resources` 字段）、`velites_replay.py`（灰度完成、基线归档）、`velites_diff_events.py`（阶段 C 取消、条件不再适用）、`bench_gzip_exemption.py`（一次性基准，决策已落地）已于 2026-08-26 退役删除；历史用法见 git 历史。

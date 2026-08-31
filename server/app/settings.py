@@ -11,7 +11,6 @@ from server.app.configuration.cors import CorsSettings, load_cors_settings
 from server.app.configuration.env_overrides import apply_database_url_env, apply_env_overrides
 from server.app.configuration.executor_runtime import (
     ExecutorRuntimeConfig,
-    OpenClawRuntimeConfig,
     WorkflowsRuntimeConfig,
     validate_runtime,
 )
@@ -42,7 +41,6 @@ class Settings:
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
             workflows=WorkflowsRuntimeConfig(),
-            openclaw=OpenClawRuntimeConfig(),
         )
     )
 

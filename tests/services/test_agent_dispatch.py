@@ -135,14 +135,6 @@ def test_enqueue_skips_an_existing_active_request(harness: SimpleNamespace) -> N
     harness.broker.enqueue.assert_not_called()
 
 
-def test_enqueue_rejects_an_unsupported_runtime(harness: SimpleNamespace) -> None:
-    with pytest.raises(ValueError, match="runtime 'openclaw' is not implemented"):
-        _enqueue(harness, definition=_definition(runtime="openclaw"))
-
-    harness.resolve_skill_dir.assert_not_called()
-    harness.manager.cleanup_execution.assert_not_called()
-
-
 def test_enqueue_builds_an_immutable_manifest_and_bundle(harness: SimpleNamespace) -> None:
     assert _enqueue(harness) is True
 

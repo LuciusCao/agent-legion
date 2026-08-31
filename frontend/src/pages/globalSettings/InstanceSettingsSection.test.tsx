@@ -29,9 +29,6 @@ const settings: InstanceSettingsResponse = {
   materials_ttl_days: 0,
   workflows: { enabled: true },
   agent_workers: { max_archive_bytes: 104857600, min_protocol_version: 2 },
-  openclaw: {
-    cwd: '.',
-  },
   skills_root: '~/.agents/skills',
 }
 
@@ -154,30 +151,5 @@ describe('InstanceSettingsSection', () => {
     renderSection()
 
     expect(await screen.findByRole('alert')).toHaveTextContent('HTTP 403')
-  })
-
-  it('renders the OpenClaw group and saves edited values', async () => {
-    vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
-      ...settings,
-      ...payload,
-    }))
-
-    renderSection()
-
-    expect(await screen.findByLabelText('OpenClaw 工作目录')).toHaveValue('.')
-
-    fireEvent.change(screen.getByLabelText('OpenClaw 工作目录'), {
-      target: { value: '/tmp/openclaw' },
-    })
-    fireEvent.click(screen.getByText('保存实例设置'))
-
-    await waitFor(() => {
-      expect(updateInstanceSettings).toHaveBeenCalledWith({
-        ...updateBase,
-        openclaw: {
-          cwd: '/tmp/openclaw',
-        },
-      })
-    })
   })
 })

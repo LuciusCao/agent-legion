@@ -46,7 +46,6 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
         ("workflows", "custom_nodes_enabled"),
         _bool_parser,
     ),
-    "AGENT_LEGION_OPENCLAW_CWD": (("openclaw", "cwd"), _path_parser),
     # AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE) removed with the global token
     # retirement (issue #35): registration is scoped-token-only now. A leftover
     # variable must fail loudly at load time instead of silently ignoring a

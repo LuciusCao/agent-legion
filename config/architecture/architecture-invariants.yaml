@@ -126,7 +126,7 @@ invariants:
         gate: full
 
   - id: EXEC-CANCEL-001
-    statement: "Adapter-specific cancellation terminates active Pi/OpenClaw subprocess groups and isolated code node subprocesses within a bounded grace period; worker shutdown waits only the grace period and releases capacity after child exit."
+    statement: "Adapter-specific cancellation terminates active Pi/velites subprocess groups and isolated code node subprocesses within a bounded grace period; worker shutdown waits only the grace period and releases capacity after child exit."
     owner: workspace-executor
     risk: critical
     evidence:
@@ -741,7 +741,7 @@ invariants:
         gate: quick
 
   - id: CONFIG-YAML-001
-    statement: "Tracked split config yaml files carry no secret values: the global `cms:` section is retired from split yaml (CMS selector defaults live in the capability config_schema; endpoint URLs and credentials live on the instance-level external connection, schema v34), so a `cms` key in any split file fails the owned-key check, while single-file explicit configs still reject the retired `cms.token` / `cms.token_gen` keys at startup (G2); the `openclaw` section is retired from split yaml into the DB instance settings document (a split-file `openclaw` key fails the owned-key check; the admin API contract rejects extra keys), and `openclaw.skill_safety` refs (G3, pinned by the DB `skill_lock` document in `global_settings`) are rejected at startup validation and by the instance-settings admin API (422), and the env-only sections `vault` / `auth` are rejected by the owned-key check when written into any split file. Secrets reach the runtime only via env overrides or the vault."
+    statement: "Tracked split config yaml files carry no secret values: the global `cms:` section is retired from split yaml (CMS selector defaults live in the capability config_schema; endpoint URLs and credentials live on the instance-level external connection, schema v34), so a `cms` key in any split file fails the owned-key check, while single-file explicit configs still reject the retired `cms.token` / `cms.token_gen` keys at startup (G2); the `openclaw` section is retired with the openclaw runtime itself (#75 — stored instance documents are stripped at read time and writes are rejected with 422), and the env-only sections `vault` / `auth` are rejected by the owned-key check when written into any split file. Secrets reach the runtime only via env overrides or the vault."
     owner: config
     risk: high
     evidence:
@@ -867,19 +867,34 @@ invariants:
         gate: quick
 
   - id: EXEC-RUNTIME-DISPATCH-001
-    statement: "Agent command construction is pinned by AgentDefinition.runtime: pi builds the pi argv, velites builds the velites argv (the retired workflows.pi.flavor selection layer is gone); provider/model/thinking resolve strictly from the node execution override, then the workflow top-level execution default (merged into the node's effective execution at definition load — the workspace-level default retired at schema v63), else dispatch fails fast before any manifest is frozen; the provider identity is passed unchanged to the selected runtime, and unknown runtimes fail fast."
+    statement: "Agent command construction is pinned by AgentDefinition.runtime through the Host-side runtime catalog (server/app/agent_runtime): each runtime's adapter owns its argv builder and declares an ExecutionContract over the manifest execution keys (provider/model/thinking); provider/model/thinking resolve strictly from the node execution override, then the workflow top-level execution default (merged into the node's effective execution at definition load — the workspace-level default retired at schema v63), and a required key missing or a configured non-empty key the adapter does not support fails fast at dispatch before any manifest is frozen; claim re-resolution re-fetches the contract key set from the live revision and re-validates it, so an in-flight job upgraded to a revision that introduces an unsupported key or loses a required key gets an actionable failure instead of a silent ship (the claim scan skips the poisoned candidate and the unclaimable sweeper fails the request); the provider identity is passed unchanged to the selected runtime, and runtimes outside the catalog fail fast."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: contract
         target: tests/workflows/test_velites_command.py
         gate: quick
+      - kind: contract
+        target: tests/agent_runtime/test_execution_contracts.py
+        gate: quick
       - kind: integration
-        target: tests/services/test_agent_broker.py::test_dispatch_fails_fast_on_unsupported_runtime
+        target: tests/services/test_agent_claim_compatibility.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_broker.py::test_dispatch_fails_fast_on_unregistered_runtime
         gate: quick
       - kind: integration
         target: tests/full/test_velites_harness_e2e.py::test_velites_runtime_agent_worker_chain_end_to_end
         gate: full
+
+  - id: EXEC-RUNTIME-CATALOG-001
+    statement: "The Host-side agent runtime set has a single source of truth: server/app/agent_runtime/catalog.AGENT_RUNTIMES. The three AgentDefinition.runtime Literal declarations (agent_catalog/definition.py, routes/agent_definition_contracts.py, routes/agent_catalog_contracts.py — kept literal to preserve the OpenAPI/frontend type surface), the Worker registration runtime whitelist (agent_control/registry.py), and the Worker-side runtime sets (worker/runtime/catalog.py SUPPORTED_RUNTIMES, worker/cli_args.py --disable-runtime choices) are pinned equal to the catalog by a static consistency test."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/agent_runtime/test_runtime_catalog.py
+        gate: quick
 
   # Rust-side registry parsing, credential resolution and CLI output are
   # covered by velites/tests/models_cli.rs; registry targets allow only tests//scripts/.

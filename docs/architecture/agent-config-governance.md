@@ -68,6 +68,13 @@ if not model:
 > （`default_agent_provider/model/thinking` 三列），已随 schema v64 退役——
 > 执行配置只存在于 versioned 的 workflow 定义里。
 
+**runtime 级契约校验（issue #75 阶段 2）**：Host 侧 runtime catalog
+（`server/app/agent_runtime`）的每个 adapter 用 `ExecutionContract` 声明
+自己支持哪些 execution 键、哪些必填（pi/velites：provider+model 必填、
+thinking 可选）。dispatch 冻结 manifest 前与 Worker claim 重解析时统一
+按契约校验：必填键缺失、或节点配置了 runtime 不支持的键（非空值），
+fail-fast 且报错含节点 key / runtime / 键名。契约表外的键一律视为不支持。
+
 ### 2. AgentDefinition（纯净版）
 
 ```python
@@ -76,7 +83,7 @@ class AgentDefinition(BaseModel):
 
     agent_id: str                    # 如 "demo-review-questions-v1"
     capability: str                  # 如 "review_questions"
-    runtime: Literal["pi", "openclaw", "velites"]
+    runtime: Literal["pi", "velites"]
     skill: str                       # 如 "education-video-problems-generation/review-questions"
     tools: tuple[str, ...] = ("read", "write", "bash")
     config_schema: dict[str, Any] = {}  # 节点可调参数 schema

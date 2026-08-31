@@ -118,8 +118,8 @@ def test_workspace_package_includes_only_whitelisted_artifacts(tmp_path):
     (job_dir / "extra.log").write_text("log", encoding="utf-8")
     (job_dir / "AGENTS.md").write_text("agent", encoding="utf-8")
     (job_dir / "BOOTSTRAP.md").write_text("bootstrap", encoding="utf-8")
-    (job_dir / ".openclaw").mkdir()
-    (job_dir / ".openclaw" / "state.json").write_text("{}", encoding="utf-8")
+    (job_dir / ".hidden").mkdir()
+    (job_dir / ".hidden" / "state.json").write_text("{}", encoding="utf-8")
     (job_dir / "runs").mkdir()
     (job_dir / "runs" / "node_a").mkdir()
     (job_dir / "runs" / "node_a" / "run.json").write_text("{}", encoding="utf-8")
@@ -145,7 +145,7 @@ def test_workspace_package_includes_only_whitelisted_artifacts(tmp_path):
         assert "job_1/extra.log" not in names
         assert "job_1/AGENTS.md" not in names
         assert "job_1/BOOTSTRAP.md" not in names
-        assert not any(name.startswith("job_1/.openclaw/") for name in names)
+        assert not any(name.startswith("job_1/.hidden/") for name in names)
         assert not any(name.startswith("job_1/runs/") for name in names)
         manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
         assert manifest["jobs"][0]["id"] == "job_1"

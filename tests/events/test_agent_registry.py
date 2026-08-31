@@ -27,7 +27,7 @@ def test_discover_replaces_rows_with_injected_records():
 
 def test_discover_failure_clears_rows_and_returns_empty():
     def _boom():
-        raise RuntimeError("openclaw down")
+        raise RuntimeError("discovery down")
 
     registry = _registry(discover_agents=_boom)
     registry.agents = [AgentStatus(id="stale", name="Stale", busy=False)]

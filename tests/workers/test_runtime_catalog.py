@@ -40,7 +40,7 @@ def _none(_binary: str) -> None:
 
 @pytest.mark.no_db
 def test_supported_runtimes_match_catalog() -> None:
-    assert SUPPORTED_RUNTIMES == ("velites", "pi", "openclaw")
+    assert SUPPORTED_RUNTIMES == ("velites", "pi")
     assert set(RUNTIME_CATALOG) == set(SUPPORTED_RUNTIMES)
 
 
@@ -135,7 +135,7 @@ def test_legacy_runtimes_key_migrates_to_disabled_complement(
     assert "runtimes:" not in persisted.replace("disabled_runtimes:", "")
 
     config = store.read(require_identity=False)
-    assert config["disabled_runtimes"] == ["openclaw", "pi"]
+    assert config["disabled_runtimes"] == ["pi"]
     assert config["runtimes"] == ["velites"]
 
 

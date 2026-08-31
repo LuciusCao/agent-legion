@@ -10,7 +10,6 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from server.app.agent_control.openclaw_discovery import list_openclaw_agents
 from server.app.auth.service import build_auth_service
 from server.app.bootstrap import build_agent_plane
 from server.app.db.connection import close_database_pools
@@ -63,9 +62,7 @@ from server.app.workflow_worker.thread import WorkflowWorkerThread
 def create_app(data_dir: Path | None = None, start_worker: bool = False) -> FastAPI:
     settings = load_settings(data_dir=data_dir)
     event_bus = InProcessEventBus()
-    agent_manager = AgentStatusManager(
-        event_bus=event_bus, discover_agents=lambda: list_openclaw_agents(timeout=10)
-    )
+    agent_manager = AgentStatusManager(event_bus=event_bus)
     job_event_manager = JobEventManager(event_bus)
     job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
     # Hydrate instance-level settings from the DB before any service reads

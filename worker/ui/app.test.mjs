@@ -256,15 +256,14 @@ test("runtimeCardState 按安装与启用状态给出卡片状态（issue #254�
 test("mergeDisabledRuntimes 合并当前开关与未安装项的历史停用", () => {
   const rows = [
     { runtime: "velites", installed: true },
-    { runtime: "pi", installed: true },
-    { runtime: "openclaw", installed: false },
+    { runtime: "pi", installed: false },
   ];
-  // pi 开关被关掉 → 进入停用；openclaw 未安装但历史停用 → 保留（重装后不自动启用）。
-  assert.deepEqual(mergeDisabledRuntimes(["openclaw"], rows, ["pi"]), ["openclaw", "pi"]);
+  // velites 开关被关掉 → 进入停用；pi 未安装但历史停用 → 保留（重装后不自动启用）。
+  assert.deepEqual(mergeDisabledRuntimes(["pi"], rows, ["velites"]), ["pi", "velites"]);
   // 没有历史停用、全部开关打开 → 空集合（探测即默认全启用）。
   assert.deepEqual(mergeDisabledRuntimes([], rows, []), []);
   // 历史停用项已安装且开关被打开 → 移出停用。
-  assert.deepEqual(mergeDisabledRuntimes(["pi"], rows, []), []);
+  assert.deepEqual(mergeDisabledRuntimes(["velites"], rows, []), []);
 });
 
 test("mergeDisabledRuntimes 去重并排序", () => {
