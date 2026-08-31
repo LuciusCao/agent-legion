@@ -13,6 +13,7 @@ from server.app.skills.manager import SkillManager
 from tests.helpers.skill_git import (
     _KEY,
     _commit_skill_update,
+    _git,
     _head_commit,
     _make_manager,
     _make_skill_repo,
@@ -322,9 +323,10 @@ def test_lock_repo_field_is_audit_only(tmp_path: Path) -> None:
     assert (skill_dir / "SKILL.md").is_file()
 
 
-def test_corrupted_cache_is_repaired_to_clean_copy(tmp_path: Path) -> None:
-    # 无 memo（PR 317 codex P1）：每次 checkout 都在锁内重探测，脏 cache 下一次
-    # 即修复（见 test_dirty_cache_repaired_on_next_checkout）。
+def test_untracked_files_stay_out_of_the_run_dir(tmp_path: Path) -> None:
+    """#330: archive materialization exports the commit's tree only — an
+    untracked file in the repo never lands in the run dir (and is NOT
+    deleted from the authoritative working tree either)."""
     _make_skill_repo(tmp_path / "skills")
     manager = _make_manager(tmp_path)
 
@@ -338,6 +340,8 @@ def test_corrupted_cache_is_repaired_to_clean_copy(tmp_path: Path) -> None:
     assert second_dir.is_dir()
     assert not (second_dir / "garbage.txt").exists()
     assert (second_dir / "SKILL.md").is_file()
+    # The untracked file is ignored, not cleaned away.
+    assert (cache_dir / "garbage.txt").read_text() == "trash"
 
 
 def test_concurrent_get_skill_dir_serializes_git_operations(tmp_path: Path) -> None:
@@ -548,56 +552,66 @@ def test_has_commit_memoizes_positive_results(tmp_path: Path) -> None:
     assert len(calls) == 2
 
 
-def _probe_counts(manager: SkillManager) -> dict[str, int]:
-    """Count rev-parse/status probes issued through manager._run_git."""
-    counts = {"status": 0, "rev-parse": 0}
-    real_run_git = manager._run_git
-
-    def spy(args: list[str], check: bool = True):  # noqa: ANN202
-        for probe in counts:
-            if probe in args:
-                counts[probe] += 1
-        return real_run_git(args, check=check)
-
-    manager._run_git = spy  # type: ignore[method-assign]
-    return counts
-
-
-def test_cleanliness_probes_run_on_every_checkout(tmp_path: Path) -> None:
-    """无 memo（PR 317 codex P1，退役 #42 的 TTL 快速通道）：每次 dispatch 都在
-    cache 锁内重跑 rev-parse/status 探测——两个 SkillManager 实例交替 checkout
-    同一 skill 的不同 ref 时，实例私有 memo 会让后者把错版本的 cache 复制进
-    run 目录。正确性优先，每次两次 git 探测是可接受成本。"""
-    _make_skill_repo(tmp_path / "skills")
+def test_pinned_dispatch_does_not_detach_latest(tmp_path: Path) -> None:
+    """#330: nobody checks out into the repo anymore, so a pinned dispatch
+    cannot leave HEAD detached — a following ``latest`` dispatch still
+    resolves the branch's NEWEST commit."""
+    repo = _make_skill_repo(tmp_path / "skills")
+    _tag(repo, "v1.0.0")
     manager = _make_manager(tmp_path)
-    manager.get_skill_dir(_KEY, str(uuid.uuid4()))  # first probes
-    counts = _probe_counts(manager)
 
-    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()), ref="v1.0.0")
+    new_commit = _commit_skill_update(repo, "# skill v2\n")
 
-    assert counts["status"] > 0
-    assert counts["rev-parse"] > 0
+    _, commit, version = manager.checkout_skill(_KEY, str(uuid.uuid4()))
+
+    assert commit == new_commit
+    assert version == f"latest@{new_commit[:12]}"
 
 
-def test_dirty_cache_repaired_on_next_checkout(tmp_path: Path) -> None:
-    """脏 cache（stray 文件）在下一次 checkout 即被 checkout+clean 修复。"""
-    _make_skill_repo(tmp_path / "skills")
+def test_latest_dispatch_warns_on_a_dirty_working_tree(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#330 semantics: uncommitted changes are ignored (not deleted) — the
+    dispatch runs the commit's tree and logs a warning when the tree is dirty."""
+    import logging
+
+    repo = _make_skill_repo(tmp_path / "skills")
     manager = _make_manager(tmp_path)
-    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
-    cache_dir = tmp_path / "skills" / "demo_workflow" / "generate_key_info"
-    stray = cache_dir / "stray.txt"
-    stray.write_text("junk")
+    (repo / "SKILL.md").write_text("# uncommitted edit\n")
 
-    served = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+    with caplog.at_level(logging.WARNING, logger="server.app.skills.manager"):
+        run_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
 
-    assert not stray.exists()
-    assert not (served / "stray.txt").exists()
+    assert any("ignores uncommitted changes" in record.getMessage() for record in caplog.records)
+    # The run dir is the commit's tree, not the dirty working tree.
+    assert (run_dir / "SKILL.md").read_text() == "# skill\n"
+
+
+def test_dispatch_preserves_the_authoritative_working_tree(tmp_path: Path) -> None:
+    """#330: dispatch must not touch the in-place repo — branch, HEAD, and
+    uncommitted work (modified tracked files, untracked files) all survive a
+    pinned checkout (the retired checkout -f / clean -fd chain destroyed them)."""
+    repo = _make_skill_repo(tmp_path / "skills")
+    _tag(repo, "v1.0.0")
+    manager = _make_manager(tmp_path)
+    head_before = _head_commit(repo)
+    (repo / "SKILL.md").write_text("# uncommitted edit\n")
+    (repo / "draft-notes.txt").write_text("keep me\n")
+
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()), ref="v1.0.0")
+
+    assert _head_commit(repo) == head_before
+    assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    assert (repo / "SKILL.md").read_text() == "# uncommitted edit\n"
+    assert (repo / "draft-notes.txt").read_text() == "keep me\n"
 
 
 def test_checkout_reprobes_cache_after_another_instance_switch(tmp_path: Path) -> None:
     """回归（PR 317 codex P1）：manager A checkout v1 后，实例 B 把共享 cache
     切到 v2；A 再 checkout v1 必须重新探测并拿到 v1 的内容——已退役的实例
-    私有 memo 会在 TTL 内跳过探测，把 v2 内容复制进 run 目录却记录 v1@commit。"""
+    私有 memo 会在 TTL 内跳过探测，把 v2 内容复制进 run 目录却记录 v1@commit。
+    #330 起每个 dispatch 都按各自 commit 直接 archive 物化，语义天然成立。"""
     repo = _make_skill_repo(tmp_path / "skills")
     _tag(repo, "v1")
     v1_content = (repo / "SKILL.md").read_text()
@@ -609,7 +623,7 @@ def test_checkout_reprobes_cache_after_another_instance_switch(tmp_path: Path) -
     manager_b = SkillManager(store=store, base_dir=tmp_path / "skills", runs_dir=tmp_path / "runs")
 
     manager_a.get_skill_dir(_KEY, str(uuid.uuid4()), ref="v1")
-    # 另一个实例（共享 base_dir/runs_dir 与 FileLock 域）把 cache 切到 v2。
+    # 另一个实例（共享 base_dir/runs_dir 与 FileLock 域）dispatch v2。
     manager_b.get_skill_dir(_KEY, str(uuid.uuid4()), ref="v2")
 
     served = manager_a.get_skill_dir(_KEY, str(uuid.uuid4()), ref="v1")

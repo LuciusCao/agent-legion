@@ -106,7 +106,7 @@ def test_symlink_run_dir_escape_rejected(tmp_path: Path, monkeypatch: pytest.Mon
     cache_dir = manager.base_dir / "demo_workflow" / "generate_key_info"
     cache_dir.mkdir(parents=True)
     (cache_dir / "SKILL.md").write_text("# cached\n", encoding="utf-8")
-    monkeypatch.setattr(manager, "_ensure_latest", lambda *_args, **_kwargs: "c" * 40)
+    monkeypatch.setattr(manager, "_resolve_latest", lambda *_args, **_kwargs: "c" * 40)
 
     outside = tmp_path / "outside_runs"
     capability = outside / "demo_workflow" / "generate_key_info"

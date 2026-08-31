@@ -44,11 +44,13 @@ def test_checkout_defaults_to_latest(tmp_path: Path) -> None:
     assert checkout.ref == "latest"
     assert checkout.version == f"latest@{commit[:12]}"
     assert (checkout.run_dir / "SKILL.md").is_file()
-    # The manifest triple records the normalized latest ref (#322 contract).
+    # The manifest pin quad records the normalized latest ref + the exact
+    # full commit (#330: Host-side validation re-materializes by commit).
     assert checkout.manifest_pins() == {
         "skill": _KEY,
         "skill_ref": "latest",
         "skill_version": f"latest@{commit[:12]}",
+        "skill_commit": commit,
     }
     # latest never enters the lock.
     assert manager.load_lock().skills == {}
