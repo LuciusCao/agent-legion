@@ -90,8 +90,12 @@ def make_seed() -> dict:
             }
         ],
         "skills": {
-            "sources": {"acme/summarize": {"repo": "/opt/acme/skills", "ref": "v1.0.0"}},
-            "lock": {"skills": {"acme/summarize": {"commit": SKILL_COMMIT}}},
+            # #322: lock only (the source registry is retired); step 5 is advisory.
+            "lock": {
+                "skills": {
+                    "acme/summarize": {"repo": "/opt/acme/skills", "refs": {"v1.0.0": SKILL_COMMIT}}
+                }
+            },
         },
     }
 
@@ -133,7 +137,6 @@ class FakeClient:
         self.revisions: dict[str, dict] = {WORKSPACE_ID: make_definition()} if with_revision else {}
         self.agents: dict[tuple[str, str], dict] = {}
         self.node_codes: dict[tuple[str, str, str], dict] = {}
-        self.skills: dict[str, dict] = {}
 
     # -- reads -------------------------------------------------------------
 
@@ -178,8 +181,6 @@ class FakeClient:
                 "version": published["version"],
                 "has_draft": False,
             }
-        if path == "/api/admin/skill-sources":
-            return {"skills": [{"key": key, **value} for key, value in sorted(self.skills.items())]}
         raise AssertionError(f"unexpected GET {path}")
 
     # -- writes ------------------------------------------------------------
@@ -257,21 +258,6 @@ class FakeClient:
             version = ((state.get("published") or {}).get("version") or 0) + 1
             state["published"] = {"version": version, "code": state["draft"]}
             return {"version": version}
-        if method == "PUT" and path.startswith("/api/admin/skill-sources/"):
-            skill_key = path[len("/api/admin/skill-sources/") :]
-            self.skills[skill_key] = {
-                "repo": body["repo"],
-                "ref": body["ref"],
-                "locked_commit": None,
-                "resolved_at": None,
-                "stale": True,
-            }
-            return {"skills": []}
-        if method == "POST" and path == "/api/admin/skill-sources/relock":
-            for value in self.skills.values():
-                value["locked_commit"] = SKILL_COMMIT
-                value["stale"] = False
-            return {"skills": []}
         raise AssertionError(f"unexpected {method} {path}")
 
 
@@ -297,19 +283,21 @@ def test_first_import_writes_and_verifies():
     assert failures == []
     assert client.agents[(WORKSPACE_ID, "invoice-summarizer-v1")]["published"]["version"] == 1
     assert client.node_codes[(WORKSPACE_ID, WORKFLOW_KEY, "fetch")]["published"]["code"] == CODE
-    assert client.skills["acme/summarize"]["locked_commit"] == SKILL_COMMIT
 
 
-def test_first_import_accepts_v2_lock_shape():
-    """Multi-ref lock entries ({repo, refs}) are compared per source ref."""
+def test_import_tolerates_v1_lock_shape(capsys):
+    """#322: step 5 is advisory only — a legacy v1 lock entry ({repo, ref,
+    commit}) is reported through the same lock_entry_refs upgrade, never
+    written back over deleted admin endpoints."""
     seed = make_seed()
     seed["skills"]["lock"]["skills"]["acme/summarize"] = {
         "repo": "/opt/acme/skills",
-        "refs": {"v1.0.0": SKILL_COMMIT},
+        "ref": "v1.0.0",
+        "commit": SKILL_COMMIT,
     }
     client = FakeClient()
     assert run_all(client, seed, []) == []
-    assert client.skills["acme/summarize"]["locked_commit"] == SKILL_COMMIT
+    assert "acme/summarize" in capsys.readouterr().out
 
 
 def test_second_run_is_fully_idempotent():
@@ -358,7 +346,6 @@ def test_dry_run_writes_nothing():
     run_all(client, make_seed(), [])
     assert client.agents == {}
     assert client.node_codes == {}
-    assert client.skills == {}
     assert client.actions
     assert all(action.startswith("WOULD") for action in client.actions)
 

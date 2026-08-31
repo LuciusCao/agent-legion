@@ -18,7 +18,7 @@ export type WorkflowYamlNode = {
   label?: string
   capability?: string
   // #76：节点级 skill 内容绑定。字符串形态（`skill: <key>`）与 mapping 形态
-  // （`skill: {key, ref}`）都合法；ref 空 = 回落 skill_sources 默认 ref。
+  // （`skill: {key, ref}`）都合法；ref 空 = latest（跟随仓库 HEAD，#322）。
   skill?: string | { key?: string; ref?: string }
   after?: string[]
   inputs?: string[]

@@ -35,8 +35,10 @@ export function WorkflowNodePreview(props: Props) {
   const echoSkill = draftNode === undefined ? props.node.skill : null
   const skillKey = draftSkill?.key || echoSkill?.key || agent?.skill || ''
   // 节点绑定 pin 的 ref 作为预览初始查询版本（#76）：草稿节点的绑定优先
-  // （草稿 ref 清空即回落源默认），草稿没有该节点才回显 published 值。
-  const skillRef = (draftSkill ?? echoSkill)?.ref || undefined
+  // （草稿 ref 归一后恒非空），草稿没有该节点才回显 published 值。#322：
+  // latest = 跟随 HEAD = 不带 ref 的默认详情，不要把它当 tag 传 ?ref=。
+  const boundRef = (draftSkill ?? echoSkill)?.ref
+  const skillRef = boundRef && boundRef !== 'latest' ? boundRef : undefined
   if (props.kind === 'prompt') {
     return (
       <WorkflowPromptPreviewPanel

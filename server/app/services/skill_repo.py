@@ -1,10 +1,10 @@
 """Read-only git primitives for skill repositories (issue #217).
 
 A skill repository is the git repo backing one skill key: the in-place
-local source under the managed skills base dir, a non-in-place local
-source path, or the cache clone of a URL source. All functions here are
-read-only; detail builders live in ``services/skill_detail.py`` and the
-editing flow in ``services/skill_editing.py``.
+directory under the managed skills base dir (#322: the only mode). All
+functions here are read-only; detail builders live in
+``services/skill_detail.py`` and the editing flow in
+``services/skill_editing.py``.
 
 Error taxonomy: absence semantics (unknown skill/tag) raise
 ``NotFoundError`` (404); operational git failures raise
@@ -57,13 +57,6 @@ def run_git(
 
 def is_git_repo(repo_dir: Path) -> bool:
     return repo_dir.is_dir() and (repo_dir / ".git").is_dir()
-
-
-def local_repo_path(repo: str) -> Path | None:
-    """The resolved local path of a skill source repo, or None for URL sources."""
-    if repo.startswith("~/") or Path(repo).is_absolute():
-        return Path(repo).expanduser().resolve()
-    return None
 
 
 def list_tags(repo_dir: Path) -> tuple[str, ...]:

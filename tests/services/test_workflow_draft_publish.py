@@ -13,6 +13,17 @@ from server.app.services.workflow_draft_publish import (
 )
 from tests.postgres_support import TEST_DATABASE_URL
 
+
+def _make_skill_repo(repo_dir: Path) -> None:
+    """Minimal in-place skill repo (the publish gate only requires .git)."""
+    import os
+    import subprocess
+
+    repo_dir.mkdir(parents=True)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(["git", "-C", str(repo_dir), "init", "-q"], check=True, env=env)
+
+
 _DRAFT_YAML = """
 key: test_publish_flow
 label: Test Publish Flow
@@ -272,17 +283,65 @@ def test_publish_accepts_agent_node_with_node_skill(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A node-level skill binding satisfies the gate even when the published
-    Agent definition names no skill."""
+    Agent definition names no skill. #322: the in-place repo must exist."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _patch_agent_catalog(monkeypatch, {"agent-1": SimpleNamespace(capability="do_thing", skill="")})
+    skill_base = tmp_path / "skills"
+    _make_skill_repo(skill_base / "education-video-problems-generation" / "review-questions")
+
+    assert (
+        validate_workflow_draft_for_publish(
+            queries,
+            workspace["id"],
+            _DRAFT_YAML_AGENT_WITH_SKILL,
+            True,
+            skill_base_dir=skill_base,
+        )
+        == []
+    )
+
+
+def test_publish_rejects_agent_node_whose_skill_repo_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#322 publish gate: a mistyped/unimported skill key fails at publish
+    time instead of at first dispatch."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = _workspace(queries)
     _patch_agent_catalog(monkeypatch, {"agent-1": SimpleNamespace(capability="do_thing", skill="")})
 
-    assert (
-        validate_workflow_draft_for_publish(
-            queries, workspace["id"], _DRAFT_YAML_AGENT_WITH_SKILL, True
-        )
-        == []
+    errors = validate_workflow_draft_for_publish(
+        queries,
+        workspace["id"],
+        _DRAFT_YAML_AGENT_WITH_SKILL,
+        True,
+        skill_base_dir=tmp_path / "skills",
     )
+
+    assert any("no in-place git repository" in error for error in errors)
+    assert any("review-questions" in error for error in errors)
+
+
+def test_publish_rejects_agent_node_whose_skill_dir_is_not_a_git_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A directory at the right path but without .git is not a skill repo."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _patch_agent_catalog(monkeypatch, {"agent-1": SimpleNamespace(capability="do_thing", skill="")})
+    skill_base = tmp_path / "skills"
+    (skill_base / "education-video-problems-generation" / "review-questions").mkdir(parents=True)
+
+    errors = validate_workflow_draft_for_publish(
+        queries,
+        workspace["id"],
+        _DRAFT_YAML_AGENT_WITH_SKILL,
+        True,
+        skill_base_dir=skill_base,
+    )
+
+    assert any("no in-place git repository" in error for error in errors)
 
 
 def test_publish_accepts_agent_node_without_skill_when_agent_binds_one(
@@ -301,9 +360,14 @@ def test_publish_accepts_agent_node_without_skill_when_agent_binds_one(
             )
         },
     )
+    skill_base = tmp_path / "skills"
+    _make_skill_repo(skill_base / "education-video-problems-generation" / "review-questions")
 
     assert (
-        validate_workflow_draft_for_publish(queries, workspace["id"], _DRAFT_YAML_AGENT, True) == []
+        validate_workflow_draft_for_publish(
+            queries, workspace["id"], _DRAFT_YAML_AGENT, True, skill_base_dir=skill_base
+        )
+        == []
     )
 
 

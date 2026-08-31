@@ -25,9 +25,7 @@ from server.app.db.schema import init_db
 from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.services.agent_service import reset_published_agent_cache
-from server.app.services.skill_source_store import SkillSourceStore
 from server.app.settings import load_settings
-from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_SOURCES
 
 # Test Agent catalog: Agent definitions are workspace-scoped (schema v46), so
 # there is no global seed here — workspaces do not exist at schema-reset time.
@@ -44,14 +42,9 @@ from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_
 # revision nodes, and the runtime registry is the single implicit code pool.
 
 
-# Test skill sources: the built-in constants (retired config/skills.yaml +
-# skills.lock transcription) re-seeded into global_settings after every
-# TRUNCATE, mirroring the app startup seed so DB-driven skill resolution
-# (SkillManager, skill catalog) sees the pinned skills.
-def _seed_skill_sources() -> None:
-    store = SkillSourceStore(TEST_DATABASE_URL)
-    store.put_sources(BUILTIN_SKILL_SOURCES.model_copy(deep=True))
-    store.put_lock(BUILTIN_SKILL_LOCK.model_copy(deep=True))
+# Test skill lock: none. The skill_sources registry is retired (#322) and the
+# lock starts empty — pinned refs auto-lock on first dispatch; tests that
+# need a frozen pin seed global_settings themselves.
 
 
 # Deterministic pricing seeded into global_settings after every TRUNCATE (see
@@ -388,14 +381,12 @@ def _isolate_postgres_database(_assert_shared_app_invariants, request):
     if fresh:
         _rebuild_schema()
         reset_published_agent_cache()
-        _seed_skill_sources()
         _capture_seed_snapshot()
     else:
         close_database_pools()
         replayed = _reset_schema_data()
         reset_published_agent_cache()
         if not replayed:
-            _seed_skill_sources()
             _capture_seed_snapshot()
     yield
     if fresh:

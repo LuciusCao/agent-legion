@@ -1,12 +1,4 @@
-"""Ref-aware skill checkout for Agent dispatch and Host-side validation (#76).
-
-``resolve_skill_checkout`` wraps ``SkillManager.checkout_skill`` with the
-``resolve_workflow_skill`` contract check, and exposes the effective ref (the
-declared source ref when the caller passed none) so manifests record the
-exact pin the lock froze. ``checkout_node_skill`` adds the dispatch-time
-source priority (node binding wins, Agent definition skill is the legacy
-fallback). Kept out of ``skills/runtime.py`` for budget headroom.
-"""
+"""Ref-aware skill checkout for Agent dispatch and Host-side validation (#76, #330)."""
 
 from __future__ import annotations
 
@@ -20,8 +12,6 @@ from server.app.workflows.workflow_node_skill import effective_node_skill
 
 
 class SkillCheckout(NamedTuple):
-    """Execution-private checkout plus the exact pin the lock froze."""
-
     key: str
     ref: str
     run_dir: Path
@@ -29,38 +19,43 @@ class SkillCheckout(NamedTuple):
     version: str  # "ref@commit12"
 
     def manifest_pins(self) -> dict[str, str]:
-        """The manifest triple recording this pin (skill/skill_version/skill_ref)."""
-        return {"skill": self.key, "skill_version": self.version, "skill_ref": self.ref}
+        """The manifest pin quad (skill/skill_version/skill_ref/skill_commit)."""
+        return {
+            "skill": self.key,
+            "skill_version": self.version,
+            "skill_ref": self.ref,
+            "skill_commit": self.commit,
+        }
+
+
+def validate_run_dir(manager: SkillManager, key: str, execution_id: str, run_dir: Path) -> None:
+    """Contract-check the materialized run dir; reclaim it on failure."""
+    try:
+        # Validate the execution-private copy: the run dir is the content
+        # actually packaged/executed. Layout <runs_dir>/<exec>/<group>/<name>,
+        # so parents[1] is the root resolve_workflow_skill joins the key under.
+        resolve_workflow_skill(run_dir.parents[1], key)
+    except Exception:
+        # #204 broad-except audit: cleanup-guard-then-bare-re-raise (#233
+        # pattern — clean up broad, classify never). The materialized run dir
+        # must be reclaimed whatever made the contract validation fail
+        # (ValueError for the documented missing/escaping-skill cases, OSError
+        # from the filesystem, or a programming error), or every retry leaks
+        # one runs/<execution_id> copy (only the age-based sweeper would
+        # reclaim it). The bare ``raise`` preserves the original type — the
+        # callers (output_validation, the dispatch path) classify it.
+        manager.cleanup_execution(execution_id)
+        raise
 
 
 def resolve_skill_checkout(
     skill_manager: SkillManager, key: str, execution_id: str, ref: str = ""
 ) -> SkillCheckout:
-    """Checkout ``key`` at ``ref`` (the source default when empty), validated."""
+    """Checkout ``key`` at ``ref`` (empty/``latest`` = live HEAD), validated."""
     run_dir, commit, version = skill_manager.checkout_skill(key, execution_id, ref or None)
-    try:
-        # Validate the execution-private copy, not the shared cache: another
-        # dispatch may switch the cache to a different ref right after this
-        # checkout returns, while the run dir is the content actually
-        # packaged/executed (codex P1 on PR 317). The run dir layout is
-        # <runs_dir>/<execution_id>/<group>/<name>, so parents[1] is the root
-        # under which resolve_workflow_skill joins the key.
-        resolve_workflow_skill(run_dir.parents[1], key)
-    except Exception:
-        # #204 broad-except audit: cleanup-guard-then-bare-re-raise (#233
-        # pattern — clean up broad, classify never). checkout_skill above
-        # already copytree'd the execution-private run dir; whatever made the
-        # contract validation fail (ValueError for the documented
-        # missing/escaping-skill cases, OSError from the filesystem, or a
-        # programming error), the private dir must be reclaimed before the
-        # exception propagates or every retry leaks one runs/<execution_id>
-        # copy (only the age-based sweeper would reclaim it). The bare
-        # ``raise`` preserves the original type — the callers
-        # (output_validation, the dispatch path) classify it themselves.
-        skill_manager.cleanup_execution(execution_id)
-        raise
+    validate_run_dir(skill_manager, key, execution_id, run_dir)
     # version is "ref@commit12"; its ref prefix is the effective pin
-    # (checkout_skill already fell back to the declared source ref).
+    # (checkout_skill already normalized an empty ref to "latest").
     return SkillCheckout(key, version[:-13], run_dir, commit, version)
 
 

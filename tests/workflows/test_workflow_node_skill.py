@@ -38,10 +38,11 @@ def _definition(node_extra: dict[str, Any]):
     )
 
 
-def test_skill_string_form_loads_with_empty_ref() -> None:
+def test_skill_string_form_loads_with_latest_ref() -> None:
+    """#322: an empty ref normalizes to ``latest`` (follow the repo's HEAD)."""
     node = _definition({"skill": _SKILL_KEY}).nodes["do"]
 
-    assert node.skill == WorkflowNodeSkill(key=_SKILL_KEY, ref="")
+    assert node.skill == WorkflowNodeSkill(key=_SKILL_KEY, ref="latest")
 
 
 def test_skill_mapping_form_loads_key_and_ref() -> None:
@@ -50,10 +51,10 @@ def test_skill_mapping_form_loads_key_and_ref() -> None:
     assert node.skill == WorkflowNodeSkill(key=_SKILL_KEY, ref="v1.1.0")
 
 
-def test_skill_mapping_form_ref_defaults_to_empty() -> None:
+def test_skill_mapping_form_ref_defaults_to_latest() -> None:
     node = _definition({"skill": {"key": _SKILL_KEY}}).nodes["do"]
 
-    assert node.skill == WorkflowNodeSkill(key=_SKILL_KEY, ref="")
+    assert node.skill == WorkflowNodeSkill(key=_SKILL_KEY, ref="latest")
 
 
 def test_no_skill_defaults_to_none() -> None:
@@ -81,12 +82,14 @@ def test_skill_invalid_forms_are_rejected(raw_skill: Any) -> None:
 
 
 def test_skill_echo_roundtrip_string_form() -> None:
+    """#322: the loader normalized the ref, so the echo is the mapping form
+    carrying ``ref: latest`` (no hidden fallback left in the yaml)."""
     definition = _definition({"skill": _SKILL_KEY})
 
     echo = yaml.safe_load(definition_to_yaml(definition))
-    assert echo["nodes"]["do"]["skill"] == _SKILL_KEY
+    assert echo["nodes"]["do"]["skill"] == {"key": _SKILL_KEY, "ref": "latest"}
     reloaded = workflow_definition_from_mapping(echo)
-    assert reloaded.nodes["do"].skill == WorkflowNodeSkill(key=_SKILL_KEY, ref="")
+    assert reloaded.nodes["do"].skill == WorkflowNodeSkill(key=_SKILL_KEY, ref="latest")
 
 
 def test_skill_echo_roundtrip_mapping_form() -> None:
@@ -147,9 +150,10 @@ def test_effective_node_skill_prefers_the_node_binding() -> None:
 
 
 def test_effective_node_skill_falls_back_to_the_agent_definition() -> None:
+    """Legacy ref-less fallback normalizes to ``latest`` (#322)."""
     node = _definition({}).nodes["do"]
 
-    assert effective_node_skill(node, "other/agent-skill") == ("other/agent-skill", "")
+    assert effective_node_skill(node, "other/agent-skill") == ("other/agent-skill", "latest")
 
 
 def test_effective_node_skill_raises_when_neither_side_binds() -> None:

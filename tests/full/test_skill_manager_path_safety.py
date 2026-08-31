@@ -19,22 +19,15 @@ from server.app.skills.errors import SkillPathError, SkillRepoError
 from server.app.skills.manager import SkillManager
 from tests.helpers.skill_store import memory_skill_store
 
+_KEY = "demo_workflow/generate_key_info"
 
-def _make_manager(
-    tmp_path: Path,
-    declared_key: str | None = "demo_workflow/generate_key_info",
-) -> SkillManager:
-    skills = (
-        {declared_key: {"repo": "file:///nonexistent/repo.git", "ref": "main"}}
-        if declared_key
-        else {}
-    )
 
+def _make_manager(tmp_path: Path) -> SkillManager:
     base_dir = tmp_path / "skills"
     base_dir.mkdir(parents=True, exist_ok=True)
 
     return SkillManager(
-        store=memory_skill_store(skills),
+        store=memory_skill_store(),
         base_dir=base_dir,
         runs_dir=tmp_path / "runs",
     )
@@ -54,9 +47,9 @@ def test_symlink_cache_dir_escape_rejected(tmp_path: Path) -> None:
     symlink.symlink_to(outside)
 
     with pytest.raises(SkillPathError):
-        manager.get_skill_dir("demo_workflow/generate_key_info", str(uuid.uuid4()))
+        manager.get_skill_dir(_KEY, str(uuid.uuid4()))
 
-    # The outside target must remain untouched (no git clone/checkout happened).
+    # The outside target must remain untouched (no git checkout happened).
     assert sentinel.read_text(encoding="utf-8") == "outside"
 
 
@@ -83,12 +76,12 @@ def test_existing_nongit_cache_dir_raises(tmp_path: Path) -> None:
     """A pre-existing cache directory that is not a git repo must raise."""
     manager = _make_manager(tmp_path)
 
-    cache_dir = manager.base_dir / "demo_workflow" / "extract_keywords"
+    cache_dir = manager.base_dir / "demo_workflow" / "generate_key_info"
     cache_dir.mkdir(parents=True)
     (cache_dir / "SKILL.md").write_text("not a repo\n", encoding="utf-8")
 
     with pytest.raises(SkillRepoError):
-        manager.get_skill_dir("demo_workflow/generate_key_info", str(uuid.uuid4()))
+        manager.get_skill_dir(_KEY, str(uuid.uuid4()))
 
 
 @pytest.mark.full_gate
@@ -110,13 +103,13 @@ def test_symlink_run_dir_escape_rejected(tmp_path: Path, monkeypatch: pytest.Mon
     """An intermediate symlink in runs_dir must not redirect rmtree outside."""
     manager = _make_manager(tmp_path)
     execution_id = str(uuid.uuid4())
-    cache_dir = manager.base_dir / "demo_workflow" / "extract_keywords"
+    cache_dir = manager.base_dir / "demo_workflow" / "generate_key_info"
     cache_dir.mkdir(parents=True)
     (cache_dir / "SKILL.md").write_text("# cached\n", encoding="utf-8")
-    monkeypatch.setattr(manager, "_ensure_cached", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(manager, "_resolve_latest", lambda *_args, **_kwargs: "c" * 40)
 
     outside = tmp_path / "outside_runs"
-    capability = outside / "demo_workflow" / "extract_keywords"
+    capability = outside / "demo_workflow" / "generate_key_info"
     capability.mkdir(parents=True)
     sentinel = capability / "sentinel.txt"
     sentinel.write_text("outside", encoding="utf-8")
@@ -124,6 +117,6 @@ def test_symlink_run_dir_escape_rejected(tmp_path: Path, monkeypatch: pytest.Mon
     (manager.runs_dir / execution_id).symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(SkillPathError):
-        manager.get_skill_dir("demo_workflow/generate_key_info", execution_id)
+        manager.get_skill_dir(_KEY, execution_id)
 
     assert sentinel.read_text(encoding="utf-8") == "outside"

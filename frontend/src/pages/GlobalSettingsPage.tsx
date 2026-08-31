@@ -18,7 +18,6 @@ import type {
   TokenUsagePricingRate,
 } from '../api/tokenUsagePricing'
 import { InstanceSettingsSection } from './globalSettings/InstanceSettingsSection'
-import { SkillSourcesSection } from './globalSettings/SkillSourcesSection'
 import { ConnectionsSection } from './globalSettings/ConnectionsSection'
 import { StudioAgentsSection } from './globalSettings/StudioAgentsSection'
 import {
@@ -132,7 +131,6 @@ function GlobalSettingsEditor({
       { id: 'model-pricing', label: '模型定价' },
       { id: 'instance-settings', label: '实例设置' },
       { id: 'connections', label: '外部服务连接' },
-      { id: 'skill-sources', label: 'Skill 源管理' },
       { id: 'studio-agents', label: 'Studio Agent 管理' },
     ],
     []
@@ -205,9 +203,6 @@ function GlobalSettingsEditor({
           </section>
           <section id="connections">
             <ConnectionsSection />
-          </section>
-          <section id="skill-sources">
-            <SkillSourcesSection />
           </section>
           <section id="studio-agents">
             <StudioAgentsSection />

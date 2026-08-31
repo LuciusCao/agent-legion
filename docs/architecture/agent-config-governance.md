@@ -254,8 +254,8 @@ Studio
 ### 7. Skill 选择交互
 
 > #76 起：Agent 定义上的 skill 只是 legacy 兜底，权威绑定在 workflow 节点
-> （节点详情里声明 `skill: {key, ref}`，ref 空 = 回落 skill_sources 默认
-> ref）；本节交互仍用于编辑 Agent 定义的兜底 skill。
+> （节点详情里声明 `skill: {key, ref}`，ref 空 = 归一为 `latest`，跟随仓库
+> HEAD）；本节交互仍用于编辑 Agent 定义的兜底 skill。
 
 **两种方式**：
 

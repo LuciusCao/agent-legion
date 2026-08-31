@@ -8,8 +8,9 @@ needs a real LLM for four Agent nodes):
 Everything is seeded through the same production services the demo seed
 uses — workspace-scoped node_code (DB published text), a workspace-scoped
 Agent definition (runtime=velites; the skill binding lives on the DAG node,
-locked to a local git repo created under the e2e data dir) and an active
-workflow revision (which materializes the Agent route). Seeding runs BEFORE the backend boots (seed-before-serve):
+at ``latest`` against an in-place git repo created under the skills root)
+and an active workflow revision (which materializes the Agent route).
+Seeding runs BEFORE the backend boots (seed-before-serve):
 the backend's WorkflowWorkerThread builds its scan_entries snapshot at
 startup and direct-DB seeding triggers no reload, so the workspace must
 already exist by then (PR #240). The dispatch resume is a separate step
@@ -21,7 +22,6 @@ The demo seed is untouched; this module only ADDS one workspace.
 
 from __future__ import annotations
 
-import datetime
 import logging
 import subprocess
 from pathlib import Path
@@ -32,9 +32,8 @@ from server.app.jobs import JobQueries
 from server.app.services.agent_service import AgentService
 from server.app.services.node_code_seeding import seed_workspace_node_code
 from server.app.services.node_codes import NodeCodeService
-from server.app.services.skill_source_store import SkillSourceStore
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from server.app.skills.config import LockedSkill, SkillsConfig, SkillsLock, SkillSourceConfig
+from server.app.skills.skill_roots import skills_root
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.workflows.loader import workflow_definition_from_dict
 
@@ -45,7 +44,10 @@ WORKSPACE_NAME = "E2E 主流程"
 AGENT_ID = "e2e-stub-agent-v1"
 AGENT_CAPABILITY = "e2e_draft"
 SKILL_KEY = "e2e-main-flow/stub-agent"
-SKILL_REF = "main"
+# ``latest`` (#322): the node follows the seeded repo's live HEAD, so no lock
+# entry is needed at all — first dispatch rev-parses HEAD in place.
+SKILL_REF = "latest"
+SKILL_BRANCH = "main"
 
 INTAKE_OUTPUT = "intake_result.json"
 DRAFT_OUTPUT = "draft.json"
@@ -167,11 +169,11 @@ def _git(repo: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def _ensure_skill_repo(repo: Path) -> str:
-    """Create the skill git repo (seed-if-absent) and return its HEAD commit."""
+def _ensure_skill_repo(repo: Path) -> None:
+    """Create the skill git repo in place (seed-if-absent)."""
     if not (repo / ".git").is_dir():
         repo.mkdir(parents=True, exist_ok=True)
-        _git(repo, "init", "-b", SKILL_REF)
+        _git(repo, "init", "-b", SKILL_BRANCH)
     for relpath, content in _SKILL_FILES.items():
         path = repo / relpath
         if path.exists():
@@ -191,29 +193,6 @@ def _ensure_skill_repo(repo: Path) -> str:
         "-m",
         "e2e stub agent skill",
     )
-    return _git(repo, "rev-parse", f"{SKILL_REF}^{{commit}}")
-
-
-def _lock_skill(dsn: str, repo: Path, commit: str) -> None:
-    """Merge the e2e skill source + lock into the DB documents (seed-if-absent)."""
-    store = SkillSourceStore(dsn)
-    config = store.get_sources() or SkillsConfig()
-    source = SkillSourceConfig(repo=str(repo), ref=SKILL_REF)
-    if config.skills.get(SKILL_KEY) != source:
-        config.skills[SKILL_KEY] = source
-        store.put_sources(config)
-    lock = store.get_lock() or SkillsLock()
-    # Multi-ref lock (issue #76): re-pin SKILL_REF in place, keeping other
-    # frozen refs; a repo drift replaces the entry wholesale.
-    entry = lock.skills.get(SKILL_KEY)
-    if entry is None or entry.repo != str(repo) or entry.refs.get(SKILL_REF) != commit:
-        if entry is None or entry.repo != str(repo):
-            entry = LockedSkill(repo=str(repo))
-        entry.refs[SKILL_REF] = commit
-        lock.skills[SKILL_KEY] = entry
-        now = datetime.datetime.now(datetime.UTC)
-        lock.resolved_at = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        store.put_lock(lock)
 
 
 def seed_main_flow_workspace(dsn: str, data_dir: Path) -> str:
@@ -232,8 +211,10 @@ def seed_main_flow_workspace(dsn: str, data_dir: Path) -> str:
             WORKSPACE_NAME, default_workflow_key=WORKSPACE_ID, workspace_id=WORKSPACE_ID
         )
 
-    commit = _ensure_skill_repo(data_dir / "e2e-skill-repo")
-    _lock_skill(dsn, data_dir / "e2e-skill-repo", commit)
+    # #322: the skill repo must be the in-place directory at
+    # <skills root>/<key> — there is no clone channel anymore. The node binds
+    # ``latest``, so no lock entry is seeded either.
+    _ensure_skill_repo(skills_root() / SKILL_KEY)
 
     codes = NodeCodeService(dsn)
     seed_workspace_node_code(

@@ -1,7 +1,7 @@
 # scripts/seed — workflow 种子包导出/导入工具
 
 平台级项目工具：把一套 workflow 定义（DAG、Agent 定义、自定义节点代码、
-skill 源锁定）从任意实例导出为可移植的 **种子包**（`seed.json`），再幂等
+skill 版本锁定）从任意实例导出为可移植的 **种子包**（`seed.json`），再幂等
 导入另一个实例。典型场景：把生产实例的 workflow 定义搬到 develop 实例
 做开发测试；开源后任何公司都可以用它迁移自己的 workflow 定义。
 
@@ -19,7 +19,7 @@ workflow key、workspace 名、capability 清单）；种子包是数据，业�
   "agents":     [{"agent_id", "capability", "definition", ...provenance}],
   "node_codes": [{"workflow_key", "node_key", "capability", "code",
                   "code_sha256", "change_note", ...provenance}],
-  "skills":     {"sources": {key: {"repo", "ref"}}, "lock": {...}}
+  "skills":     {"lock": {"skills": {key: {"repo", "refs": {ref → commit}}}}}
 }
 ```
 
@@ -27,6 +27,9 @@ workflow key、workspace 名、capability 清单）；种子包是数据，业�
   （Agent 目录自 schema v46 起按 workspace 作用域，导出取自源 workspace）。
 - `node_codes[]` 按节点解析：`--node-code` 文件覆盖 > 源 workspace 的
   published 版本（多 workspace 不一致会告警跳过）> global 出厂种子版本。
+- `skills.lock` 是源实例 `skill_lock` 文档的如实拷贝（#322 起全局
+  skill_sources 注册表已退役，种子包不再携带 skill 源声明）：记录每个
+  skill 已 pin 的 ref → commit，`repo` 字段仅审计。
 - 历史遗留的 `executors` 顶层键被容忍并忽略：executor 概念已随
   schema v47（P-0.5）退役，非 Agent 路由节点一律跑隐含 code 池。
 
@@ -66,8 +69,14 @@ uv run python -m scripts.seed.import_seed \
 六步：workspace 绑定（已绑定的自动纳入；`--workspace` 仅在无绑定时创建，
 blank 模式——schema v50 后 workflow 无注册概念，种子定义经发布流落地）
 → Agent 发布（按 workspace 作用域，内容一致跳过）→ 首版 revision 发布
-（仅缺失时）→ 节点代码发布（文本一致跳过）→ skill 源 upsert + relock
-（ref 与 lock commit 一致跳过）→ 校验报告（有 FAIL 非零退出）。
+（仅缺失时）→ 节点代码发布（文本一致跳过）→ skill pin 报告（advisory）
+→ 校验报告（有 FAIL 非零退出）。
+
+step 5 自 #322 起降级为 advisory：skill_sources 注册表与 admin 端点已退役，
+种子包不再能经 API 安装/锁定 skill。operator 需在目标实例的 skill root
+（`~/.agents/skills`）下放置各 skill 的 in-place 仓库；pin 在首次 dispatch
+或 `make skills-lock` 时按目标实例的仓库现场冻结，本步只报告种子包携带
+的 pinned refs 供对照。
 
 幂等语义：每步先内容比较（canonical JSON / 代码文本逐字节 / ref+commit），
 一致即 skip，**不产生新版本**；对同一实例连跑两次，第二次 0 个写动作。
@@ -79,8 +88,8 @@ blank 模式——schema v50 后 workflow 无注册概念，种子定义经发�
   token/password/secret/api_key/credential 且值为非空字符串即判失败）。
   凭据本身永远不落 seed.json。
 - 导出对源库只读；导入经 HTTP API 走 admin 会话，不直连目标库。
-- skill 源里的 `repo` 可以是本地路径——种子包会如实记录源实例的路径，
-  跨机器导入时注意路径在目标机器上的含义。
+- skill lock 里的 `repo` 是源实例的本地路径（仅审计）——跨机器导入时它
+  在目标机器上无意义，pin 按目标实例 skill root 下的仓库现场解析。
 
 ## 已知平台缺口（全新部署引导）
 
@@ -95,7 +104,7 @@ develop 迁移场景）不受影响；全新部署可先在 Studio 手工首发�
 
 - 目标实例 backend 已启动、存在 admin 用户（新实例先
   `POST /api/auth/bootstrap`）。
-- skill relock 需要目标机器本地能解析 skill 源（本地路径 repo 需要有
-  checkout；git URL 需要网络与凭据）。
+- skill pin 的冻结需要目标机器的 skill root 下已放置各 skill 的
+  in-place 仓库（首次 dispatch 或 `make skills-lock` 现场解析）。
 - 运行中的 job 不受影响：intake 冻结 workflow revision 与节点代码版本，
   种子升级只影响新 intake 的 job。

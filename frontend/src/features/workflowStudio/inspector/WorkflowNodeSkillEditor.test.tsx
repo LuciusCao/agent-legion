@@ -58,14 +58,17 @@ describe('WorkflowNodeSkillEditor', () => {
     useSettingStore.setState({ workspaceId: 'ws1' })
   })
 
-  it('writes the validated skill key into the draft yaml', () => {
+  it('writes the validated skill key into the draft yaml with ref defaulting to latest', () => {
     const setDefinitionYaml = vi.fn()
     renderEditor({ setDefinitionYaml })
 
     fireEvent.click(screen.getByTestId('skill-selector-stub'))
 
     const nextYaml = setDefinitionYaml.mock.calls[0][0] as string
-    expect(parseWorkflowNode(nextYaml, 'n1')?.skill).toBe('demo/review')
+    expect(parseWorkflowNode(nextYaml, 'n1')?.skill).toEqual({
+      key: 'demo/review',
+      ref: 'latest',
+    })
   })
 
   it('patches the ref as a mapping form onto the bound key', () => {
@@ -87,7 +90,7 @@ describe('WorkflowNodeSkillEditor', () => {
     })
   })
 
-  it('echoes the bound skill from the draft yaml and the ref placeholder', () => {
+  it('echoes the bound skill from the draft yaml and the latest helper text', () => {
     renderEditor({
       definitionYaml:
         'nodes:\n  n1:\n    capability: cap\n    skill:\n      key: demo/review\n      ref: v1.0.0\n',
@@ -97,7 +100,18 @@ describe('WorkflowNodeSkillEditor', () => {
       expect.objectContaining({ value: 'demo/review' })
     )
     expect(screen.getByLabelText('Skill ref')).toHaveValue('v1.0.0')
-    expect(screen.getByPlaceholderText('留空用源默认 ref')).toBeInTheDocument()
+    expect(
+      screen.getByText('latest = 跟随仓库最新提交；填 tag 锁定版本')
+    ).toBeInTheDocument()
+  })
+
+  it('normalizes a string-form draft binding to ref latest (#322)', () => {
+    renderEditor({
+      definitionYaml:
+        'nodes:\n  n1:\n    capability: cap\n    skill: demo/review\n',
+    })
+
+    expect(screen.getByLabelText('Skill ref')).toHaveValue('latest')
   })
 
   it('echoes the published node skill when the draft has no such node', () => {

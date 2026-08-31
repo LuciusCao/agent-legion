@@ -6,8 +6,8 @@ import pytest
 
 from server.app.services.job_errors import NotFoundError
 from server.app.services.skill_catalog import SkillCatalogService
-from server.app.services.skill_source_store import SkillSourceStore
-from server.app.skills.config import SkillsConfig, SkillsLock
+from server.app.services.skill_lock_store import SkillLockStore
+from server.app.skills.config import SkillsLock
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -34,31 +34,28 @@ def _make_git_repo(repo: Path, tag: str = "v1.0.0") -> str:
     return _git(repo, "rev-parse", "HEAD")
 
 
-def _put_document(sources: dict, lock: dict | None = None) -> None:
-    store = SkillSourceStore(TEST_DATABASE_URL)
-    store.put_sources(SkillsConfig.model_validate({"skills": sources}))
-    store.put_lock(SkillsLock.model_validate(lock or {}))
+def _put_lock(lock: dict) -> None:
+    store = SkillLockStore(TEST_DATABASE_URL)
+    store.put_lock(SkillsLock.model_validate(lock))
 
 
-def test_skill_detail_lists_safe_text_files_and_locked_version(tmp_path: Path) -> None:
-    _put_document(
-        {"demo/review": {"repo": "local", "ref": "v1.2.0"}},
-        {"skills": {"demo/review": {"repo": "local", "ref": "v1.2.0", "commit": "abc123"}}},
-    )
+def test_skill_detail_lists_safe_text_files_and_follows_head(tmp_path: Path) -> None:
+    """#322: the default detail is the in-place repo at HEAD (``latest``)."""
     base = tmp_path / "skills"
     skill = base / "demo" / "review"
-    (skill / "references").mkdir(parents=True)
+    commit = _make_git_repo(skill)
+    (skill / "references").mkdir()
     (skill / "scripts").mkdir()
-    (skill / "SKILL.md").write_text("# Review\n")
     (skill / "references" / "rules.md").write_text("rules\n")
     (skill / "scripts" / "validate.py").write_text("print('ok')\n")
     (skill / "scripts" / "ignored.bin").write_bytes(b"binary")
 
     detail = SkillCatalogService(TEST_DATABASE_URL, base).detail("demo/review")
 
-    assert detail["ref"] == "v1.2.0"
-    assert detail["commit"] == "abc123"
-    assert detail["tags"] == []  # not a git repo: no tags to list
+    assert detail["ref"] == "latest"
+    assert detail["commit"] == commit
+    assert detail["available"] is True
+    assert detail["tags"] == ["v1.0.0"]
     assert [item["path"] for item in detail["files"]] == [
         "SKILL.md",
         "references/rules.md",
@@ -66,50 +63,59 @@ def test_skill_detail_lists_safe_text_files_and_locked_version(tmp_path: Path) -
     ]
 
 
-def test_skill_detail_rejects_unconfigured_keys(tmp_path: Path) -> None:
-    _put_document({})
-
+def test_skill_detail_rejects_invalid_keys(tmp_path: Path) -> None:
     with pytest.raises(NotFoundError):
-        SkillCatalogService(TEST_DATABASE_URL).detail("../secret")
+        SkillCatalogService(TEST_DATABASE_URL, tmp_path / "skills").detail("../secret")
 
 
-def test_locked_detail_reads_locked_commit_from_local_source_repo(tmp_path: Path) -> None:
-    """Non-in-place local source (PR #224 review): the declared repo lives
-    outside the managed base dir, so ref/tags/locked reads must resolve to it,
-    not to the (absent) cache dir. The default detail serves the LOCKED
-    commit's content even when the working tree moved on."""
-    repo_dir = tmp_path / "src" / "demo" / "review"
-    commit = _make_git_repo(repo_dir)
-    _put_document(
-        {"demo/review": {"repo": str(repo_dir), "ref": "v1.0.0"}},
-        {"skills": {"demo/review": {"repo": str(repo_dir), "ref": "v1.0.0", "commit": commit}}},
-    )
-    (repo_dir / "SKILL.md").write_text("# DIRTY working tree\n", encoding="utf-8")
+def test_default_detail_reads_head_while_ref_preview_reads_the_tag(tmp_path: Path) -> None:
+    """latest semantics: after a new commit the default detail serves the new
+    HEAD content; the tag preview keeps the old commit addressable."""
+    base = tmp_path / "skills"
+    repo = base / "demo" / "review"
+    old_commit = _make_git_repo(repo)
+    (repo / "SKILL.md").write_text("# Review v2\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "v2", "--no-gpg-sign")
+    head = _git(repo, "rev-parse", "HEAD")
 
-    service = SkillCatalogService(TEST_DATABASE_URL, tmp_path / "cache")
+    service = SkillCatalogService(TEST_DATABASE_URL, base)
     detail = service.detail("demo/review")
 
-    assert detail["commit"] == commit
-    assert detail["available"] is True
-    assert detail["tags"] == ["v1.0.0"]
+    assert detail["ref"] == "latest"
+    assert detail["commit"] == head
     skill_md = next(f for f in detail["files"] if f["path"] == "SKILL.md")
-    assert skill_md["content"] == "# Review\n"
+    assert skill_md["content"] == "# Review v2\n"
 
     preview = service.detail("demo/review", ref="v1.0.0")
-    assert preview["commit"] == commit
+    assert preview["commit"] == old_commit
     assert preview["tags"] == ["v1.0.0"]
+    preview_md = next(f for f in preview["files"] if f["path"] == "SKILL.md")
+    assert preview_md["content"] == "# Review\n"
 
 
-def test_default_detail_falls_back_to_working_tree_without_lock(tmp_path: Path) -> None:
-    """Seed scenario (no lock entry): the working tree is the content source."""
-    repo_dir = tmp_path / "src" / "demo" / "review"
-    _make_git_repo(repo_dir)
-    _put_document({"demo/review": {"repo": str(repo_dir), "ref": "v1.0.0"}})
+def test_default_detail_marks_missing_repo_unavailable(tmp_path: Path) -> None:
+    detail = SkillCatalogService(TEST_DATABASE_URL, tmp_path / "skills").detail("demo/review")
 
-    detail = SkillCatalogService(TEST_DATABASE_URL, tmp_path / "cache").detail("demo/review")
-
+    assert detail["ref"] == "latest"
     assert detail["commit"] == ""
-    assert detail["available"] is True
-    assert detail["tags"] == ["v1.0.0"]
-    skill_md = next(f for f in detail["files"] if f["path"] == "SKILL.md")
-    assert skill_md["content"] == "# Review\n"
+    assert detail["available"] is False
+    assert detail["tags"] == []
+    assert detail["files"] == []
+
+
+def test_metadata_reports_a_sole_pin(tmp_path: Path) -> None:
+    _put_lock({"skills": {"demo/review": {"repo": "r", "refs": {"v1.2.0": "a" * 40}}}})
+
+    metadata = SkillCatalogService(TEST_DATABASE_URL, tmp_path / "skills").metadata("demo/review")
+
+    assert metadata == {"skill_ref": "v1.2.0", "skill_commit": "a" * 40}
+
+
+def test_metadata_is_empty_without_a_lock_entry_or_with_ambiguous_pins(tmp_path: Path) -> None:
+    service = SkillCatalogService(TEST_DATABASE_URL, tmp_path / "skills")
+    assert service.metadata("demo/review") == {}
+
+    # #322: no declared default ref — multiple pins have no unambiguous answer.
+    _put_lock({"skills": {"demo/review": {"repo": "r", "refs": {"v1": "a" * 40, "v2": "b" * 40}}}})
+    assert service.metadata("demo/review") == {}

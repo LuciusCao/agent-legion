@@ -1,7 +1,7 @@
 """KV access for the ``global_settings`` table (issue #281).
 
-Five services (skill sources, instance settings, cleanup sweep, token-usage
-pricing, studio agent registry) each hand-wrote the same
+Several services (instance settings, cleanup sweep, token-usage pricing,
+studio agent registry, skill lock) each hand-wrote the same
 ``select value from global_settings where key=%s`` /
 ``insert ... on conflict(key) do update`` pair. The pair lives here once,
 behind the JobQueries facade, and the stores keep only their domain
@@ -50,6 +50,12 @@ class GlobalSettingsKVQueriesMixin(ConnectionQueriesMixin):
         """Replace the stored document (upsert; whole-document semantics)."""
         with self.write() as conn:
             conn.execute(_UPSERT_SQL, (key, json.dumps(document)))
+
+    def delete_global_settings_document(self, key: str) -> bool:
+        """Delete the key's row; True when a row was actually removed."""
+        with self.write() as conn:
+            cursor = conn.execute("delete from global_settings where key=%s", (key,))
+        return cursor.rowcount > 0
 
     def update_global_settings_document(
         self,

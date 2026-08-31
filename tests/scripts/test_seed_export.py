@@ -157,10 +157,6 @@ def test_build_seed_assembles_generic_package():
         node_code_rows=[node_code_row("acme", f"{WORKFLOW_KEY}:fetch", CODE)],
         settings_rows=[
             {
-                "key": "skill_sources",
-                "value": json.dumps({"skills": {"acme/summarize": {"repo": "/r", "ref": "v1"}}}),
-            },
-            {
                 "key": "skill_lock",
                 "value": json.dumps({"skills": {"acme/summarize": {"commit": "a" * 40}}}),
             },
@@ -172,7 +168,9 @@ def test_build_seed_assembles_generic_package():
     assert [a["agent_id"] for a in seed["agents"]] == ["invoice-summarizer-v1"]
     assert seed["agents"][0]["source_workspace"] == "acme"
     assert [n["node_key"] for n in seed["node_codes"]] == ["fetch"]
-    assert seed["skills"]["sources"]["acme/summarize"]["ref"] == "v1"
+    # #322: only the lock is exported (the source registry is retired).
+    assert seed["skills"]["lock"]["skills"]["acme/summarize"]["commit"] == "a" * 40
+    assert "sources" not in seed["skills"]
     assert validate_seed(seed) == []
 
 

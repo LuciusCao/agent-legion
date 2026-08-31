@@ -1,7 +1,3 @@
-class SkillConfigError(ValueError):
-    """Raised when skill configuration is missing or invalid."""
-
-
 class SkillRepoError(RuntimeError):
     """Raised when git clone/fetch/checkout fails."""
 

@@ -177,29 +177,31 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
 
 ## 6. Skill editing (read → edit → validate → tag)
 
-Skills live in git repos; the runtime pins each skill to a locked commit.
-You may read any tag, validate the working tree, and save a new version —
-you may NEVER relock or publish: a human reviews the git diff and relocks.
+Skills live in git repos under the skills root (`<skills root>/<group>/<name>`,
+in-place is the only mode). A node either follows the repo's live HEAD
+(`latest`) or pins a tag frozen in the skill lock. You may read any tag,
+validate the working tree, and save a new version — you may NEVER relock or
+publish: a human reviews the git diff and re-pins.
 
-1. `get_skill(skill_key)` — the locked commit's content (working tree when
-   no lock exists), or `ref=<tag>` to preview one tag, e.g. one another
-   agent just created; an unknown tag is a structured 404 and changes
+1. `get_skill(skill_key)` — the working tree at HEAD (`latest`), or
+   `ref=<tag>` to preview one tag, e.g. one another agent just created; an
+   unknown tag is a structured 404 and changes
    nothing.
 2. Edit the file contents in your draft, then `validate_skill(skill_key)` —
    the runtime contract: non-empty SKILL.md + references/output-contract.md +
    scripts/validate_output.py. Fix every reported error.
-3. `save_skill_version(skill_key, files, new_tag, message)` — local-path
-   sources only (URL sources refused). Every path is validated before any
+3. `save_skill_version(skill_key, files, new_tag, message)` — writes into the
+   skill's in-place repo. Every path is validated before any
    write (inside the skill dir, no `..`/absolute paths, no `.git`, no
    overwriting untracked files); after writing, the contract check re-runs
    and a failure rolls the repo back to its original commit. On success it
    commits (author agent-legion-studio) and tags `new_tag` (an existing tag
-   is a conflict). The skill lock is untouched: running jobs keep the
-   locked commit.
+   is a conflict). The skill lock is untouched: tag-pinned nodes keep the
+   locked commit, `latest` nodes pick the new HEAD up on their next dispatch.
 4. Show the human the git diff of the new tag and ask them to release it:
-   change the skill source ref + relock in the admin skill-sources UI (or
-   `make skills-lock`). NEVER ask for a relock before the human has seen
-   the diff.
+   re-pin the node's skill ref to the new tag in Studio and relock
+   (`make skills-lock`, or let the first dispatch auto-lock). NEVER ask for
+   a relock before the human has seen the diff.
 
 ## 7. Common errors and what to do
 

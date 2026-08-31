@@ -792,7 +792,7 @@ invariants:
         gate: quick
 
   - id: EXEC-SKILL-HERMETIC-001
-    statement: "The skills base dir is a read-only runtime input: cache lock files live under runs_dir (never next to the skill cache), and resolving a skill whose cache already sits clean at the pinned commit performs no writes (no checkout/clean) — a read-only skills mount (container deployment) works for every steady-state execution and validation. Writes (clone/fetch/checkout/clean) happen only on cache misses or version changes."
+    statement: "The skills base dir is a strictly read-only runtime input: skill execution content is materialized by exporting the resolved commit's tree via `git archive` into the runs dir — pure object-database reads with ZERO working-tree writes against the user's authoritative in-place repo (#330 retired the checkout -f/clean -fd chain, which destroyed uncommitted work and left detached HEADs behind; a dirty working tree is now ignored with a warning, never deleted). Cache lock files live under runs_dir (never next to the skill repo), and a read-only skills mount (container deployment) works for every execution and validation. Skills are local in-place git repositories under the skill root: in-place is the only mode (#322 retired the global skill_sources registry and the remote clone channel, including the missing-cache re-clone self-heal), and a missing repo directory fails with guidance instead of being re-cloned."
     owner: workspace-executor
     risk: high
     evidence:
@@ -801,6 +801,15 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/skills/test_skill_manager.py::test_cache_lock_files_live_under_runs_dir
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager.py::test_missing_skill_repo_raises_with_guidance
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager.py::test_dispatch_preserves_the_authoritative_working_tree
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager.py::test_untracked_files_stay_out_of_the_run_dir
         gate: quick
 
   - id: EXEC-SKILL-RUNS-SCRATCH-001
@@ -825,22 +834,22 @@ invariants:
         gate: quick
 
   - id: EXEC-SKILL-CLEAN-TTL-001
-    statement: "Skill cache cleanliness verification (rev-parse + status probes) runs on every checkout while holding the cache FileLock: a dirtied or externally switched cache is repaired immediately via checkout -f + clean -fd, and the run dir always receives the content of the (skill, ref)-locked commit being recorded. The per-instance TTL memo introduced in #42 is retired (codex P1 on PR 317): with multi-ref pinning (#76) two SkillManager instances routinely alternate the shared cache between refs, and a memoized (commit, t) entry would skip the probe and copy the other ref's content into the run dir while recording this ref@commit — correctness beats the two git probes per dispatch."
+    statement: "Every dispatch runs exactly the commit its (skill, ref) resolution recorded: materialization exports that commit's tree via `git archive` — there is no shared mutable checkout, so a concurrent or subsequent dispatch of another ref cannot leak its content into this run dir (the failure mode the retired per-instance TTL memo and the checkout/clean repair chain defended against is gone by construction, #330). Alternating pinned dispatches of different refs each receive their own frozen commit, a pinned dispatch never moves HEAD, so `latest` keeps following the branch tip, and uncommitted working-tree changes are ignored with a warning rather than deleted."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: integration
-        target: tests/skills/test_skill_manager.py::test_cleanliness_probes_run_on_every_checkout
-        gate: quick
-      - kind: integration
-        target: tests/skills/test_skill_manager.py::test_dirty_cache_repaired_on_next_checkout
-        gate: quick
-      - kind: integration
         target: tests/skills/test_skill_manager.py::test_checkout_reprobes_cache_after_another_instance_switch
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager.py::test_pinned_dispatch_does_not_detach_latest
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager.py::test_latest_dispatch_warns_on_a_dirty_working_tree
         gate: quick
 
   - id: EXEC-SKILL-NODE-001
-    statement: "An Agent-routed workflow node binds its skill content at the node level (issue #76): the optional node `skill` block (`key` + optional `ref`; the string form is key-only, an empty ref falls back to the skill_sources default ref at resolution time) is parsed by the loader (rejected on start/approval nodes), versions with the workflow revision snapshot, and rides the intake freeze into the job snapshot. The publish gate requires every Agent-routed node to name a skill on the node or on its published Agent definition, and rejects a skill declared on a code-routed node. Dispatch resolves the effective skill node-first (AgentDefinition.skill is the optional legacy fallback; both empty fails the node) and checks out through the multi-valued lock (skill_lock v2: per-skill {repo, refs: {ref -> commit}}, v1 documents self-upgrade on read): a locked (skill, ref) pair executes exactly its frozen commit, an unlocked ref resolves and auto-locks its own entry, a repo drift still trips the relock gate (SkillConfigError) while a ref drift is no longer an error; relock refreshes the union of the source ref and every already-locked ref. The Agent manifest records `skill`, `skill_ref` (the effective ref the lock froze) and `skill_version` (`ref@commit12`), and the Host-side Worker-result output validation re-resolves exactly that (skill, skill_ref) version. The skill_sources document itself (repo + default ref registry) is unchanged; the demo workflow's Agent nodes pin `ref: v1.0.0` instead of relying on the builtin Agent definitions (which no longer carry a skill)."
+    statement: "An Agent-routed workflow node binds its skill content at the node level (issue #76): the optional node `skill` block (`key` + optional `ref`; the string form is key-only, and an empty ref normalizes to `latest` at load time) is parsed by the loader (rejected on start/approval nodes), versions with the workflow revision snapshot, and rides the intake freeze into the job snapshot. The publish gate requires every Agent-routed node to name a skill on the node or on its published Agent definition, and rejects a skill declared on a code-routed node. Dispatch resolves the effective skill node-first (AgentDefinition.skill is the optional legacy fallback; both empty fails the node) and checks out the in-place repository under the skill root — the global skill_sources registry is retired (#322) and lock.repo is written for audit only. Ref semantics: `latest` (including a normalized empty ref) follows the repository HEAD, re-resolved on every dispatch and never entering the lock; a pinned tag goes through the multi-valued lock (skill_lock v2: per-skill {repo, refs: {ref -> commit}}, v1 documents self-upgrade on read) — a locked (skill, ref) pair executes exactly its frozen commit, an unlocked pinned ref resolves and auto-locks its own entry on first dispatch, and relock (CLI `make skills-lock`) walks the lock's existing entries and re-resolves every pinned ref. The Agent manifest records `skill`, `skill_ref` (`latest` for head-following nodes), `skill_version` (`ref@commit12`) and `skill_commit` (the full resolved sha), and the Host-side Worker-result output validation re-materializes exactly that `skill_commit` — immune to HEAD moves and retagging (#330); legacy manifests without `skill_commit` fall back to re-resolving (skill, skill_ref). The demo workflow's Agent nodes pin `ref: v1.0.0` instead of relying on the builtin Agent definitions (which no longer carry a skill)."
     owner: workspace-executor
     risk: high
     evidence:
@@ -851,6 +860,12 @@ invariants:
         target: tests/skills/test_skill_checkout.py::test_checkout_node_skill_prefers_the_node_binding
         gate: quick
       - kind: integration
+        target: tests/skills/test_skill_manager.py::test_empty_ref_normalizes_to_latest_and_follows_head
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager.py::test_pinned_tag_locks_on_first_dispatch
+        gate: quick
+      - kind: integration
         target: tests/skills/test_skill_manager_lock.py::test_ref_drift_locks_each_ref_independently
         gate: quick
       - kind: integration
@@ -858,6 +873,9 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/workflows/test_output_validation.py::test_validates_against_the_manifests_frozen_ref
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation.py::test_exact_commit_validation_is_immune_to_head_moves
         gate: quick
       - kind: integration
         target: tests/services/test_workflow_draft_publish.py

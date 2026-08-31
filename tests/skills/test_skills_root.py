@@ -18,7 +18,6 @@ from server.app.services.skill_editing import SkillEditingService
 from server.app.skills import lock as lock_cli
 from server.app.skills import skill_roots as paths
 from server.app.skills.runtime import build_skill_manager
-from tests.helpers.skill_store import memory_skill_store
 
 pytestmark = pytest.mark.no_db
 
@@ -69,7 +68,7 @@ def test_skill_catalog_defaults_to_skills_root(fake_home: Path) -> None:
 
 
 def test_skill_editing_defaults_to_skills_root(fake_home: Path) -> None:
-    service = SkillEditingService(store=memory_skill_store({}))
+    service = SkillEditingService()
     assert service.base_dir == paths.skills_root()
 
 
@@ -79,7 +78,7 @@ def test_relock_cli_defaults_to_skills_root(
     captured: dict[str, Path] = {}
     settings = SimpleNamespace(database_url="postgresql://unused", skills_runs_dir=None)
     monkeypatch.setattr(lock_cli, "load_settings", lambda: settings)
-    monkeypatch.setattr(lock_cli, "SkillSourceStore", lambda dsn: object())
+    monkeypatch.setattr(lock_cli, "SkillLockStore", lambda dsn: object())
     monkeypatch.setattr(
         lock_cli,
         "refresh_lock",

@@ -51,7 +51,7 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 
 | 脚本 | 用途 |
 |------|------|
-| `import-demo.sh` / `seed_demo.py` | `make import-demo` 的两阶段实现：前者把 4 个示例 skill 复制成本机 Git 仓库并打 `v1.0.0` tag；后者先创建或复用绑定 demo workflow 的 workspace，再写入 demo skill source/lock，并把节点代码、Agent 和 DAG revision 注入该 workspace。两阶段均幂等；测试可用 `AGENT_LEGION_DEMO_SKILLS_DIR` 覆盖 skill 目标根目录。 |
+| `import-demo.sh` / `seed_demo.py` | `make import-demo` 的两阶段实现：前者把 4 个示例 skill 复制成本机 Git 仓库并打 `v1.0.0` tag；后者先创建或复用绑定 demo workflow 的 workspace，再把该 tag 解析的 commit 写入 demo skill 的版本锁（skill_lock），并把节点代码、Agent 和 DAG revision 注入该 workspace。两阶段均幂等；测试可用 `AGENT_LEGION_DEMO_SKILLS_DIR` 覆盖 skill 目标根目录。 |
 
 ## 迁移与工具
 
@@ -89,7 +89,7 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 | `remote/` | 远程 LLM 网关（`llm_gateway.py` 及 HTTP/SSE/stream/config 模块），见 `docs/remote-execution-runbook.md`。 |
 | `stress/` | 压力测试：`simulate_agents.py` 合成负载生成器、`run_e2e_stress.py` 端到端压测 runner。 |
 | `e2e/` | 浏览器 smoke E2E：`run_browser_smoke.py`（确定性冒烟，真后端 + worker 线程 + 独立 Worker 进程 + 进程内 CMS/LLM stub，CI e2e-smoke / nightly-e2e job 调用）、数据库 helper `_database.py`、demo 种子 `_demo_seed.py`、主流程种子 `_main_flow_seed.py`、LLM stub `_llm_stub.py`、Worker 启动 `_worker.py`、backend factory `_backend_factory.py`。 |
-| `seed/` | workflow 种子包导出/导入工具（`export_seed.py` / `import_seed.py` / `seed_common.py`）：把 workflow 定义（DAG、Agent、节点代码、skill 源锁定）在实例间迁移，幂等；平台级通用工具，业务种子包留在私有侧。详见 `scripts/seed/README.md`。 |
+| `seed/` | workflow 种子包导出/导入工具（`export_seed.py` / `import_seed.py` / `seed_common.py`）：把 workflow 定义（DAG、Agent、节点代码、skill 版本锁定）在实例间迁移，幂等；平台级通用工具，业务种子包留在私有侧。详见 `scripts/seed/README.md`。 |
 
 ## 约定
 

@@ -12,11 +12,11 @@ import styles from './WorkflowSkillPreviewPanel.module.css'
  * 前缀失效本查询（useStudioChat），agent 修改技能文件后 panel 自动刷新。 */
 export function WorkflowSkillPreviewPanel(props: {
   skillKey: string
-  /** 节点绑定 pin 的初始查询版本（#76）；不传/空 = 源默认 ref。 */
+  /** 节点绑定 pin 的初始查询版本（#76）；不传/空 = latest（跟随仓库 HEAD，#322）。 */
   initialRef?: string
 }) {
   // 版本选择带 skillKey 印记：切换节点/技能绑定即回落初始版本（组件通常随
-  // 节点切换卸载重建，印记兜底复用场景）。用户显式选择（含「当前锁定版本」
+  // 节点切换卸载重建，印记兜底复用场景）。用户显式选择（含「跟随最新提交」
   // 的 null）优先于 initialRef。
   const [selection, setSelection] = useState<{
     key: string
