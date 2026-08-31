@@ -27,8 +27,10 @@ from typing import Any
 
 import yaml
 
-CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
-TRACKED_CONFIG_FILES = ("agent-worker.example.yaml",)
+CONFIG_DIR = Path(__file__).resolve().parents[2]
+# config/agent-worker.example.yaml 已随 #323 退役；剩余 tracked 的 worker
+# 配置 yaml 是 deploy/ 下的部署模板，同样适用本节红线。
+TRACKED_CONFIG_FILES = ("deploy/worker.host.example.yaml", "deploy/worker.remote.example.yaml")
 ENV_ONLY_SECTIONS = ("vault", "auth")
 
 

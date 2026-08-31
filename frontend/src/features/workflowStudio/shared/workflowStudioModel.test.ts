@@ -141,8 +141,8 @@ describe('workflowStudioModel', () => {
       '    capability: intake',
       '    after: [_start]',
       'edges:',
-      '  - source: _start',
-      '    target: intake',
+      '  - from: _start',
+      '    to: intake',
       '',
     ].join('\n')
 
@@ -169,8 +169,8 @@ describe('workflowStudioModel', () => {
       '    inputs: [a.json]',
       '    outputs: [b.json]',
       'edges:',
-      '  - source: _start',
-      '    target: intake',
+      '  - from: _start',
+      '    to: intake',
       '',
     ].join('\n')
 

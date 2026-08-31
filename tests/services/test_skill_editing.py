@@ -10,7 +10,6 @@ import pytest
 
 from server.app.services.job_errors import (
     ConflictError,
-    InvalidOperationError,
     NotFoundError,
 )
 from server.app.services.skill_detail import detail_at_ref
@@ -21,8 +20,6 @@ from server.app.services.skill_editing import (
 )
 from server.app.services.skill_repo import SkillGitError, run_git
 from server.app.services.skill_repo_edit import SkillRollbackError, edit_lock_for
-from server.app.services.skill_source_store import InMemorySkillSourceStore
-from server.app.skills.config import SkillsConfig, SkillsLock, SkillSourceConfig
 
 pytestmark = pytest.mark.no_db
 
@@ -68,16 +65,8 @@ def _make_skill_repo(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def store(repo: Path) -> InMemorySkillSourceStore:
-    return InMemorySkillSourceStore(
-        sources=SkillsConfig(skills={_KEY: SkillSourceConfig(repo=str(repo), ref="v1.0.0")}),
-        lock=SkillsLock(),
-    )
-
-
-@pytest.fixture
-def service(store: InMemorySkillSourceStore, repo: Path, tmp_path: Path) -> SkillEditingService:
-    return SkillEditingService(store, base_dir=repo.parents[1], runs_dir=tmp_path / "runs")
+def service(repo: Path, tmp_path: Path) -> SkillEditingService:
+    return SkillEditingService(base_dir=repo.parents[1], runs_dir=tmp_path / "runs")
 
 
 def test_validate_happy_path(service: SkillEditingService) -> None:
@@ -98,9 +87,12 @@ def test_validate_reports_every_missing_contract_file(
     }
 
 
-def test_validate_unknown_skill_404(service: SkillEditingService) -> None:
-    with pytest.raises(NotFoundError):
-        service.validate("wf/missing")
+def test_validate_unknown_skill_reports_missing_directory(service: SkillEditingService) -> None:
+    """#322: no registry to 404 against — an absent in-place directory is a
+    structured contract error, not a 404."""
+    result = service.validate("wf/missing")
+    assert result["valid"] is False
+    assert result["errors"] == [{"path": ".", "error": "skill directory does not exist"}]
 
 
 def test_save_version_commits_and_tags(service: SkillEditingService, repo: Path) -> None:
@@ -134,23 +126,12 @@ def test_detail_at_ref_lists_tags_latest_version_first(repo: Path) -> None:
     assert preview["tags"] == ["v1.10.0", "v1.2.0", "v1.0.0", "v0.9"]
 
 
-def test_save_version_never_touches_the_lock(
-    service: SkillEditingService, store: InMemorySkillSourceStore
-) -> None:
-    service.save_version(_KEY, [SkillFileWrite(path="SKILL.md", content="# V2\n")], "v9.9.9", "m")
-    assert store.get_lock() == SkillsLock()
-    assert store.get_sources().skills[_KEY].ref == "v1.0.0"
-
-
-def test_save_version_rejects_url_source(service: SkillEditingService) -> None:
-    store = InMemorySkillSourceStore(
-        sources=SkillsConfig(
-            skills={"wf/remote": SkillSourceConfig(repo="https://example.com/x.git", ref="v1")}
+def test_save_version_missing_repo_is_404(service: SkillEditingService) -> None:
+    """#322: no registry — the in-place repo itself must exist to save into."""
+    with pytest.raises(NotFoundError, match="in-place git repository"):
+        service.save_version(
+            "wf/missing", [SkillFileWrite(path="SKILL.md", content="x")], "v2.0.0", "m"
         )
-    )
-    service = SkillEditingService(store)
-    with pytest.raises(InvalidOperationError, match="local path"):
-        service.save_version("wf/remote", [SkillFileWrite(path="SKILL.md", content="x")], "v2", "m")
 
 
 def test_save_version_tag_conflict(service: SkillEditingService) -> None:

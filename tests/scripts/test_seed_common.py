@@ -90,7 +90,7 @@ def make_seed() -> dict:
             }
         ],
         "skills": {
-            "sources": {"acme/summarize": {"repo": "/opt/acme/skills", "ref": "v1.0.0"}},
+            # #322: lock only (the source registry is retired).
             "lock": {
                 "skills": {
                     "acme/summarize": {
@@ -165,11 +165,12 @@ class TestValidateSeed:
         problems = code_violations(code)
         assert any("size limit" in problem for problem in problems)
 
-    def test_rejects_skill_lock_source_mismatch(self):
+    def test_extra_lock_keys_are_accepted(self):
+        """#322: no source registry to cross-check against — lock entries are
+        validated on shape (40-hex commits) only."""
         seed = make_seed()
         seed["skills"]["lock"]["skills"]["acme/other"] = {"commit": "b" * 40}
-        problems = validate_seed(seed)
-        assert any("sources keys differ" in problem for problem in problems)
+        assert validate_seed(seed) == []
 
     def test_rejects_bad_lock_commit(self):
         seed = make_seed()

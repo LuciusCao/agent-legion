@@ -153,8 +153,6 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("PUT", "/api/workspaces/{workspace_id}/members"): "require_admin",
     ("PUT", "/api/admin/token-usage-pricing"): "require_admin",
     ("PUT", "/api/admin/instance-settings"): "require_admin",
-    ("PUT", "/api/admin/skill-sources/{skill_key:path}"): "require_admin",
-    ("POST", "/api/admin/skill-sources/relock"): "require_admin",
     ("POST", "/api/admin/connections"): "require_admin",
     ("PUT", "/api/admin/connections/{key}"): "require_admin",
     ("DELETE", "/api/admin/connections/{key}"): "require_admin",
@@ -355,8 +353,6 @@ _ADMIN_ENDPOINTS: list[tuple[str, str, dict | None]] = [
     ("GET", "/api/admin/connections", None),
     ("GET", "/api/admin/instance-settings", None),
     ("GET", "/api/admin/token-usage-pricing", None),
-    ("PUT", "/api/admin/skill-sources/some/skill", {"ref": "main"}),
-    ("POST", "/api/admin/skill-sources/relock", None),
     ("DELETE", "/api/admin/connections/conn-x", None),
 ]
 

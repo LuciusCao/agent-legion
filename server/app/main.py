@@ -47,8 +47,7 @@ from server.app.services.workspace_execution_configuration import (
 )
 from server.app.settings import load_settings, validate_settings
 from server.app.single_replica_probe import SingleReplicaProbe
-from server.app.skills.seed import seed_skill_sources
-from server.app.skills.skill_root_migration import migrate_skill_source_paths
+from server.app.skills.skill_sources_retirement import retire_skill_sources_document
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
 from server.app.storage import build_s3_storage_checked
@@ -78,15 +77,11 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # (WorkflowRevisionService.ensure_active_revision). The workflow catalog
     # is retired (schema v50, #112): a workflow is the DAG inside one
     # workspace, keyed by workspaces.default_workflow_key as plain text.
-    # Skill sources/lock retired from tracked yaml into global_settings:
-    # import-once the legacy files when present, else seed the built-in
-    # constants; with rows present this is a no-op (DB is authoritative).
-    seed_skill_sources(job_db, settings.root_dir)
-    # The skill root moved up from ~/.agents/skills/agent-legion to
-    # ~/.agents/skills: rewrite persisted source repos still carrying the
-    # retired prefix and drop their stale lock entries (idempotent no-op once
-    # migrated).
-    migrate_skill_source_paths(job_db)
+    # The global skill source registry is retired (#322): skill locations
+    # derive from the skills root + key, unpinned node refs follow the repo's
+    # live HEAD. Delete the persisted skill_sources document (idempotent
+    # no-op once migrated); the skill_lock document stays.
+    retire_skill_sources_document(job_db)
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db)
     # Resume state must not survive a restart: dispatch stays off until an
     # operator explicitly resumes it in this process lifetime.

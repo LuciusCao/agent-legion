@@ -1,18 +1,20 @@
-"""Node-level skill binding (issue #76, definition layer).
+"""Node-level skill binding (issue #76, definition layer; #322 ref model).
 
 An Agent-routed node may pin the skill content it runs against: ``key`` is
 the two-segment skill key (``<group>/<name>`` under the skill root) and
-``ref`` the git ref to lock. An empty ref falls back to the skill_sources
-default ref for that skill at resolution time. The binding versions with the
-workflow revision snapshot (asdict), like ``config_schema``. Dispatch resolves
-the effective skill through ``effective_node_skill`` (node binding wins, the
-Agent definition's skill is the legacy fallback).
+``ref`` the git ref to run. An empty ref normalizes to ``latest`` (#322):
+follow the skill repo's live HEAD, never frozen into the lock; any other
+ref (a tag) freezes into the lock on first dispatch. The binding versions
+with the workflow revision snapshot (asdict), like ``config_schema``.
+Dispatch resolves the effective skill through ``effective_node_skill``
+(node binding wins, the Agent definition's skill is the legacy fallback).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from server.app.skills.config import LATEST_REF
 from server.app.workflows.schema import (
     WorkflowDefinitionError,
     WorkflowNode,
@@ -45,7 +47,8 @@ def load_node_skill(raw_node: dict[str, Any], node_key: str) -> WorkflowNodeSkil
     if not isinstance(key, str) or not key:
         raise WorkflowDefinitionError(f"Node {node_key}.skill.key must be a non-empty string")
     _validate_skill_key(key, node_key)
-    return WorkflowNodeSkill(key=key, ref=ref)
+    # #322: an empty ref is "follow the repo's live HEAD", spelled ``latest``.
+    return WorkflowNodeSkill(key=key, ref=ref or LATEST_REF)
 
 
 def _validate_skill_key(skill_key: str, node_key: str) -> None:
@@ -67,25 +70,22 @@ def _validate_skill_key(skill_key: str, node_key: str) -> None:
 def apply_skill_echo(raw_node: dict[str, Any], node: WorkflowNode) -> None:
     """Echo the node's skill binding in yaml form; omitted when unset.
 
-    Start/approval nodes never carry a binding (the loader forbids it), so no
-    per-type guard is needed. The mapping form only appears when a ref is
-    pinned; a bare key echoes as the string form.
+    The loader normalized the ref (never empty), so the echo is always the
+    mapping form. Start/approval nodes never carry a binding (loader-forbidden).
     """
     if node.skill is None:
         return
-    if node.skill.ref:
-        raw_node["skill"] = {"key": node.skill.key, "ref": node.skill.ref}
-    else:
-        raw_node["skill"] = node.skill.key
+    raw_node["skill"] = {"key": node.skill.key, "ref": node.skill.ref or LATEST_REF}
 
 
 def effective_node_skill(node: WorkflowNode, agent_skill: str) -> tuple[str, str]:
     """Dispatch-time (key, ref): the node binding wins; the Agent definition's
-    skill is the legacy fallback. Raises ValueError when neither names one."""
+    skill is the legacy fallback (ref-less, hence ``latest``). Raises
+    ValueError when neither names one."""
     if node.skill is not None:
-        return node.skill.key, node.skill.ref
+        return node.skill.key, node.skill.ref or LATEST_REF
     if agent_skill:
-        return agent_skill, ""
+        return agent_skill, LATEST_REF
     raise ValueError(f"Agent node {node.key} has no skill on node or Agent definition")
 
 
@@ -97,6 +97,7 @@ def node_skill_publish_error(node: WorkflowNode, agent_skill: str | None) -> str
     single published Agent. Agent-routed: the binding may live on the node
     or (legacy) on the Agent definition — at least one side must name one.
     Code-routed: a declared skill is meaningless (never runs skill content).
+    The #322 repo-existence check lives in ``workflows/skill_repo_gate``.
     """
     if agent_skill is None:
         if node.skill is not None:

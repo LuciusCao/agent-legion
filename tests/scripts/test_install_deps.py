@@ -28,12 +28,6 @@ AGENT_LEGION_S3_ACCESS_KEY=
 AGENT_LEGION_S3_SECRET_KEY=
 """
 
-_WORKER_EXAMPLE = """\
-host_url: http://agent-legion-host:8000
-worker_id: worker-1
-work_root: /var/lib/agent-legion-worker
-"""
-
 _UNAME_STUB = """#!/usr/bin/env bash
 echo "${STUB_UNAME:-Darwin}"
 """
@@ -88,12 +82,10 @@ def _setup(tmp_path: Path) -> tuple[Path, Path]:
     """Lay out a synthetic repo root with the script + seeded inputs; stub bin."""
     main = tmp_path / "main"
     (main / "scripts").mkdir(parents=True)
-    (main / "config").mkdir()
     (main / "frontend").mkdir()
     shutil.copy(SCRIPT, main / "scripts" / SCRIPT.name)
     _write_stub(main / "scripts" / "ensure-velites.sh", _ENSURE_VELITES_STUB)
     (main / ".env.example").write_text(_ENV_EXAMPLE)
-    (main / "config" / "agent-worker.example.yaml").write_text(_WORKER_EXAMPLE)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_stub(bin_dir / "uname", _UNAME_STUB)
@@ -170,7 +162,7 @@ def test_macos_all_tools_present_initializes(tmp_path: Path) -> None:
     assert (main / "deploy/secrets/vault_master_key").read_text().strip() == (
         "stub-vault-master-key"
     )
-    config = (main / "config/agent-worker.yaml").read_text()
+    config = (main / "data/agent-worker-service/worker.yaml").read_text()
     assert "host_url: http://127.0.0.1:8001" in config
     assert "work_root: data/agent-worker" in config
     assert "make dev-up" in result.stdout
@@ -203,7 +195,7 @@ def test_rerun_is_idempotent_and_keeps_existing_env(tmp_path: Path) -> None:
 
     assert second.returncode == 0, second.stderr
     assert ".env 已存在" in second.stdout
-    assert "config/agent-worker.yaml 已存在" in second.stdout
+    assert "data/agent-worker-service/worker.yaml 已存在" in second.stdout
     assert (main / ".env").read_text() == env_before
     assert (main / "deploy/secrets/vault_master_key").read_text() == key_before
 

@@ -23,7 +23,6 @@ export const extraQueryKeys = {
     ['workspaceRuntimeModels', workspaceId] as const,
   tokenUsagePricing: () => ['tokenUsagePricing'] as const,
   instanceSettings: () => ['instanceSettings'] as const,
-  skillSources: () => ['skillSources'] as const,
   studioAgents: () => ['studioAgents'] as const,
   connections: () => ['connections'] as const,
   connectionTypes: () => ['connectionTypes'] as const,

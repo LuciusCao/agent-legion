@@ -26,6 +26,7 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   `docs/architecture/velites-harness.md`。
 
 ### Changed
+- 节点 `skill.ref` 语义显式化（issue #322）：`latest`（空 ref 已归一为它）= 跟随 skill 仓库 HEAD，每次 dispatch 现场解析、永不入锁；具体 tag = 首次 dispatch 把解析的 commit 冻结进 `skill_lock`（v2 多值 `{repo, refs}`），唯一 relock 通道为 CLI `make skills-lock`（遍历锁内已有条目重解析 pinned refs）。**行为变化**：存量 published revision 中 ref 为空的节点原先冻结在 skill source 默认 ref 的 commit 上，升级后改为跟随仓库 HEAD；需要复现的节点应在 Studio 草稿中显式 pin tag 并重新发布。
 - Agent execution 契约 runtime 化（issue #75）：Host 侧 runtime catalog
   （`server/app/agent_runtime`）的每个 adapter 声明自己支持的 manifest
   execution 键（provider/model/thinking）与必填性；dispatch 与 Worker claim
@@ -36,6 +37,15 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   sweeper 将请求判失败并给出指向节点 execution 覆盖的错误信息）。
 
 ### Removed
+- 全局 skill_sources 注册表整体退役（issue #322 决策项 1）：skill 收敛为 `~/.agents/skills/<group>/<name>` 下的本地 in-place git 仓库（唯一模式），删除远程 clone 通道、repo 漂移闸门与缓存缺失 re-clone 自愈（缓存缺失改为报错并指引在 skill root 下创建）；admin `/api/admin/skill-sources*` 端点与「Skill 源管理」设置面板一并删除，`skill_lock` 的 `repo` 字段退化为仅审计。启动一次性迁移幂等删除 DB `global_settings` 里残留的 `skill_sources` 文档（保留 `skill_lock`）。
+- dev 侧 worker 配置种子 `config/agent-worker.yaml` 与模板
+  `config/agent-worker.example.yaml` 整体退役（issue #323）：worker 唯一
+  生效配置收敛为状态副本 `data/agent-worker-service/worker.yaml`（控制台/
+  API 驱动），消除「改了种子文件不生效」的双层配置漂移。`init-worktree.sh`
+  / `install-deps.sh` 的种子逻辑改为直写状态副本，`worker.service --config`
+  变为纯可选 bootstrap（仅 docker/远程 headless 部署使用，模板见
+  `deploy/worker.*.example.yaml`），`make dev-up` 的 worker 启动闸门改判
+  状态副本是否存在。
 - openclaw runtime 整体退役（issue #75）：曾短暂经 catalog adapter 接入
   （`openclaw agent --local --json`），因其 stdout 只有一次性结果
   envelope——无流式事件、无 token 计量——按用户决策移除；agent runtime

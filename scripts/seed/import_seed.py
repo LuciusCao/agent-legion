@@ -389,60 +389,24 @@ def step4_node_codes(
 
 
 def step5_skills(client: Client, seed: dict[str, Any], failures: list[str]) -> None:
-    print("== step 5: skill sources + relock ==")
+    print("== step 5: skill pins (advisory) ==")
     skills = seed.get("skills") or {}
-    desired_sources = skills.get("sources") or {}
-    if not desired_sources:
+    desired_lock = (skills.get("lock") or {}).get("skills") or {}
+    if not desired_lock:
         print("  (seed has no skills section, skip)")
         return
-    desired_lock = (skills.get("lock") or {}).get("skills") or {}
-    view = client.get("/api/admin/skill-sources") or {}
-    entries = {str(s.get("key")): s for s in (view.get("skills") or [])}
-    need_relock = False
-    for key, source in sorted(desired_sources.items()):
-        entry = entries.get(key)
-        if (
-            entry is not None
-            and entry.get("repo") == source.get("repo")
-            and entry.get("ref") == source.get("ref")
-        ):
-            # Multi-ref lock (issue #76): compare against the commit the seed
-            # lock pins for this source ref (v1 seed entries upgrade).
-            locked = lock_entry_refs(desired_lock.get(key) or {}, source.get("ref"))
-            expected = locked.get(str(source.get("ref")))
-            if entry.get("locked_commit") == expected and not entry.get("stale"):
-                print(
-                    f"  {key}: skip (ref {source.get('ref')} @ "
-                    f"{entry.get('locked_commit', '')[:12]} locked)"
-                )
-                continue
-            need_relock = True
-            print(
-                f"  {key}: ref matches but lock drifted "
-                f"(locked={entry.get('locked_commit')} stale={entry.get('stale')})"
-            )
-            continue
-        client.mutate(
-            "PUT",
-            f"/api/admin/skill-sources/{key}",
-            {"repo": source["repo"], "ref": source["ref"]},
-            dry_note=(
-                f"upsert skill source (was {entry.get('ref') if entry else 'absent'}) "
-                f"-> {source.get('ref')}"
-            ),
-        )
-        need_relock = True
-        print(f"  {key}: upsert ref -> {source.get('ref')}")
-    if need_relock:
-        client.mutate(
-            "POST",
-            "/api/admin/skill-sources/relock",
-            timeout=180,
-            dry_note="resolve refs to commits",
-        )
-        print("  relock: triggered" if not client.dry_run else "  relock: WOULD trigger")
-    else:
-        print("  relock: skip (lock already matches the seed)")
+    # #322 retired the skill source registry and its admin endpoints: a seed
+    # can no longer install skill repos over the API. The operator must place
+    # each skill's in-place repo at <skills root>/<key> on the target; the
+    # first dispatch of a pinned node auto-locks the ref (or relock via
+    # `make skills-lock`). This step only reports the pins the seed carries.
+    for key in sorted(desired_lock):
+        refs = sorted(lock_entry_refs(desired_lock[key] or {}))
+        print(f"  {key}: pinned refs {', '.join(refs) or '(none)'}")
+    print(
+        "  ensure these skill repos exist under the target's skills root; "
+        "pins freeze on first dispatch or via `make skills-lock`"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -513,30 +477,14 @@ def verify(client: Client, seed: dict[str, Any], bound: dict[str, list[str]]) ->
             )
 
     skills = seed.get("skills") or {}
-    desired_sources = skills.get("sources") or {}
-    if desired_sources:
-        view = client.get("/api/admin/skill-sources") or {}
-        entries = {str(s.get("key")): s for s in (view.get("skills") or [])}
-        desired_lock = (skills.get("lock") or {}).get("skills") or {}
-        for key, source in sorted(desired_sources.items()):
-            entry = entries.get(key)
-            if entry is None:
-                check(False, f"skill {key}", "missing on target")
-                continue
-            locked = lock_entry_refs(desired_lock.get(key) or {}, source.get("ref"))
-            expected = locked.get(str(source.get("ref")))
-            ok = (
-                entry.get("repo") == source.get("repo")
-                and entry.get("ref") == source.get("ref")
-                and entry.get("locked_commit") == expected
-                and not entry.get("stale")
-            )
-            check(
-                ok,
-                f"skill {key}",
-                f"ref={entry.get('ref')} locked={str(entry.get('locked_commit'))[:12]} "
-                f"expected={str(expected)[:12]} stale={entry.get('stale')}",
-            )
+    desired_lock = (skills.get("lock") or {}).get("skills") or {}
+    if desired_lock:
+        # Advisory only (#322): there is no admin endpoint left to compare
+        # against — the operator places the repos under the skills root and
+        # the pins freeze on first dispatch / `make skills-lock`.
+        for key in sorted(desired_lock):
+            refs = sorted(lock_entry_refs(desired_lock[key] or {}))
+            print(f"  [INFO] skill {key}: seed pins refs {', '.join(refs) or '(none)'}")
     return failures
 
 

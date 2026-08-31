@@ -41,7 +41,9 @@ CLAIM_BACKOFF_CAP_SECONDS = 60.0
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run an Agent Legion Worker")
-    parser.add_argument("--config", type=Path, default=Path("config/agent-worker.yaml"))
+    parser.add_argument(
+        "--config", type=Path, default=Path("data/agent-worker-service/worker.yaml")
+    )
     args = parser.parse_args()
     try:
         soft, hard = raise_fd_limit()

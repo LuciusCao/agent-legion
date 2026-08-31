@@ -13,8 +13,8 @@ defaults into every non-start node (code nodes simply never read them) and
 node ``execution.*`` overrides win; workspace-level defaults were retired at
 schema v64. The demo expects the operator to configure execution in Studio.
 Skill bindings live on the demo DAG nodes (issue #76), not on these
-definitions; the referenced skills resolve to the local source roots
-imported by ``make import-demo`` (see ``server.app.skills.builtin_sources``).
+definitions; the referenced skills resolve to the in-place repos imported by
+``make import-demo`` under the skills root.
 """
 
 from __future__ import annotations

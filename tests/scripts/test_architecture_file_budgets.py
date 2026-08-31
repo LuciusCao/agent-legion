@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -18,92 +17,17 @@ from scripts.architecture.file_budgets import (
     load_budget_baseline,
 )
 from scripts.quality.exemptions import ArchitectureExemption
+from tests.architecture_budget_helpers import (
+    commit_all,
+    git_repo,
+    governed_repo,
+    write_baseline,
+)
+from tests.architecture_budget_helpers import (
+    rewrite_exemption_ceiling as _rewrite_exemption_ceiling,
+)
 
 pytestmark = pytest.mark.no_db
-
-
-def governed_repo(tmp_path: Path, rel_path: str, *, lines: int) -> tuple[Path, BudgetPolicy]:
-    root = tmp_path / "repo"
-    file_path = root / rel_path
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    file_path.write_text("\n".join(["line"] * lines), encoding="utf-8")
-
-    config = root / "config" / "architecture"
-    config.mkdir(parents=True, exist_ok=True)
-    (root / "tests").mkdir(exist_ok=True)
-    (config / "architecture-budget-policy.yaml").write_text(
-        "version: 1\n"
-        "production:\n"
-        "  roots:\n"
-        "    - path: server/app\n"
-        "      extensions: [.py]\n"
-        "  exclude: []\n"
-        "  buffer_lines: 10\n"
-        "  max_lines: 800\n"
-        "tests:\n"
-        "  roots:\n"
-        "    - path: tests\n"
-        "      patterns: ['**/*.py']\n"
-        "  max_lines: 1000\n",
-        encoding="utf-8",
-    )
-
-    policy = BudgetPolicy(
-        production_roots=(ProductionRoot(path="server/app", extensions=(".py",)),),
-        production_exclude=(),
-        buffer_lines=10,
-        production_max_lines=1000,
-        test_roots=(TestRoot(path="tests", patterns=("**/*.py",)),),
-        test_max_lines=1000,
-    )
-
-    return root, policy
-
-
-def write_baseline(root: Path, files_dict: dict[str, int]) -> None:
-    path = root / "config" / "architecture" / "architecture-budgets.json"
-    path.write_text(
-        json.dumps({"version": 3, "files": files_dict}, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
-
-
-def git_repo(
-    tmp_path: Path,
-    files: dict[str, int] | None = None,
-    exemption_ceiling: int | None = None,
-) -> tuple[Path, BudgetPolicy]:
-    """Build a governed repo inside a real git repository.
-
-    The monotonic ceiling check compares against committed revisions, so its
-    tests need an actual git history; ``init`` + ``commit`` of the initial
-    state provides the HEAD anchor, and a second commit (or an uncommitted
-    working-tree edit) plays the role of the raise attempt. The leading
-    empty commit keeps HEAD^ resolvable in every fixture — an unresolvable
-    anchor is itself an error since the codex review on PR #231 (shallow
-    clones must not silently gut the check), and only the dedicated
-    unresolvable-anchor tests build that shape deliberately.
-    """
-    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
-    write_baseline(root, files if files is not None else {"server/app/example.py": 110})
-    if exemption_ceiling is not None:
-        _rewrite_exemption_ceiling(root, ceiling=exemption_ceiling)
-    for argv in (
-        ["git", "init", "-q"],
-        ["git", "config", "user.email", "test@example.com"],
-        ["git", "config", "user.name", "test"],
-        # Empty seed commit: HEAD^ must resolve in the fixture repos.
-        ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
-        ["git", "add", "-A"],
-        ["git", "commit", "-q", "-m", "init"],
-    ):
-        subprocess.run(argv, cwd=root, check=True)
-    return root, policy
-
-
-def commit_all(root: Path, message: str) -> None:
-    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", message], cwd=root, check=True)
 
 
 def write_exempted_repo(
@@ -533,27 +457,6 @@ def test_accepts_new_entry_absent_from_committed_baseline(tmp_path: Path) -> Non
     (root / "server" / "app" / "new.py").write_text("\n".join(["line"] * 20), encoding="utf-8")
     write_baseline(root, {"server/app/example.py": 110, "server/app/new.py": 30})
     assert check_file_budgets(root, policy, ()) == []
-
-
-def _rewrite_exemption_ceiling(root: Path, ceiling: int) -> None:
-    registry = root / "config" / "architecture" / "architecture-exemptions.yaml"
-    registry.write_text(
-        yaml.safe_dump(
-            {
-                "exemptions": [
-                    {
-                        "check": "architecture.file_budget",
-                        "path": "server/app/example.py",
-                        "ceiling": ceiling,
-                        "reason": "Oversized module needs staged split.",
-                        "owner": "agent-legion",
-                        "remove_when": "issues/open/001.md",
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
 
 
 def test_rejects_exempt_ceiling_raise_over_committed_registry(tmp_path: Path) -> None:

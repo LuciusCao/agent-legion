@@ -15,16 +15,10 @@ from pathlib import Path
 import pytest
 
 from server.app.auth import scoped_tokens
-from server.app.services.skill_source_store import SkillSourceStore
-from server.app.skills.config import (
-    LockedSkill,
-    SkillsConfig,
-    SkillsLock,
-    SkillSourceConfig,
-)
+from server.app.services.skill_lock_store import SkillLockStore
+from server.app.skills.config import LockedSkill, SkillsLock
 
 _KEY = "education-video-problems-generation/write-script"
-_URL_KEY = "education-video-problems-generation/review-script"
 _TOOLS = "/api/studio-agent/tools/skills"
 
 
@@ -73,12 +67,14 @@ def _scoped(client, job_db):
 def test_get_skill_and_ref_preview(client_factory, job_db, skill_home) -> None:
     with client_factory(fresh=True) as client:
         scoped = _scoped(client, job_db)
-        locked = scoped.get(f"{_TOOLS}/{_KEY}")
-        assert locked.status_code == 200, locked.text
-        assert locked.json()["ref"] == "v1.0.0"
-        assert locked.json()["available"] is True
-        assert locked.json()["tags"] == ["v1.0.0"]
-        assert any(f["path"] == "SKILL.md" for f in locked.json()["files"])
+        latest = scoped.get(f"{_TOOLS}/{_KEY}")
+        assert latest.status_code == 200, latest.text
+        # #322: the default detail is the working tree at HEAD (``latest``).
+        assert latest.json()["ref"] == "latest"
+        assert latest.json()["commit"] == _git(skill_home, "rev-parse", "HEAD")
+        assert latest.json()["available"] is True
+        assert latest.json()["tags"] == ["v1.0.0"]
+        assert any(f["path"] == "SKILL.md" for f in latest.json()["files"])
 
         tagged = scoped.get(f"{_TOOLS}/{_KEY}", params={"ref": "v1.0.0"})
         assert tagged.status_code == 200, tagged.text
@@ -138,31 +134,15 @@ def test_save_skill_version_commits_tags_and_keeps_lock(client_factory, job_db, 
         assert _git(skill_home, "log", "-1", "--format=%an <%ae>") == (
             "agent-legion-studio <studio@local>"
         )
-        # The configured ref and the lock are untouched: no relock happened.
+        # The lock is untouched (no relock happened); the default detail now
+        # follows HEAD (``latest``), and the new tag previews via ?ref=.
+        store = SkillLockStore(job_db.dsn_identity)
+        assert (store.get_lock() or SkillsLock()).skills == {}
         detail = scoped.get(f"{_TOOLS}/{_KEY}")
-        assert detail.json()["ref"] == "v1.0.0"
+        assert detail.json()["ref"] == "latest"
         preview = scoped.get(f"{_TOOLS}/{_KEY}", params={"ref": "v1.1.0"})
         skill_md = next(f for f in preview.json()["files"] if f["path"] == "SKILL.md")
         assert skill_md["content"] == "# Write Script v2\n"
-
-
-def test_save_skill_version_rejects_url_source(client_factory, job_db, skill_home) -> None:
-    store = SkillSourceStore(job_db.dsn_identity)
-    sources = store.get_sources() or SkillsConfig()
-    sources.skills[_URL_KEY] = SkillSourceConfig(repo="https://example.com/skill.git", ref="v1")
-    store.put_sources(sources)
-    with client_factory(fresh=True) as client:
-        scoped = _scoped(client, job_db)
-        response = scoped.post(
-            f"{_TOOLS}/{_URL_KEY}/versions",
-            json={
-                "files": [{"path": "SKILL.md", "content": "x"}],
-                "new_tag": "v2.0.0",
-                "message": "m",
-            },
-        )
-        assert response.status_code == 400
-        assert "local path" in response.json()["detail"]
 
 
 def test_save_skill_version_path_escape_is_422(client_factory, job_db, skill_home) -> None:
@@ -256,15 +236,14 @@ def test_save_skill_version_payload_bounds(client_factory, job_db, skill_home) -
         assert too_many.status_code == 422
 
 
-def test_default_detail_reads_locked_commit_after_save(client_factory, job_db, skill_home) -> None:
-    # Lock pins the current HEAD; after save_skill_version the default detail
-    # keeps serving the LOCKED commit's content ("current locked version"),
-    # while the new tag is readable through ?ref= (PR #224 review).
-    head = _git(skill_home, "rev-parse", "HEAD")
-    store = SkillSourceStore(job_db.dsn_identity)
-    sources = store.get_sources() or SkillsConfig()
+def test_default_detail_follows_head_after_save(client_factory, job_db, skill_home) -> None:
+    # #322 latest semantics: after save_skill_version the default detail
+    # serves the NEW HEAD's content, the old tag stays readable through
+    # ?ref=, and a seeded v1.0.0 lock pin is never touched by the save.
+    old_head = _git(skill_home, "rev-parse", "HEAD")
+    store = SkillLockStore(job_db.dsn_identity)
     lock = store.get_lock() or SkillsLock()
-    lock.skills[_KEY] = LockedSkill(repo=sources.skills[_KEY].repo, refs={"v1.0.0": head})
+    lock.skills[_KEY] = LockedSkill(repo=str(skill_home), refs={"v1.0.0": old_head})
     store.put_lock(lock)
     with client_factory(fresh=True) as client:
         scoped = _scoped(client, job_db)
@@ -280,10 +259,15 @@ def test_default_detail_reads_locked_commit_after_save(client_factory, job_db, s
 
         default = scoped.get(f"{_TOOLS}/{_KEY}")
         assert default.status_code == 200, default.text
-        assert default.json()["commit"] == head
-        locked_md = next(f for f in default.json()["files"] if f["path"] == "SKILL.md")
-        assert locked_md["content"] == "# Write Script\n"
+        assert default.json()["ref"] == "latest"
+        assert default.json()["commit"] == _git(skill_home, "rev-parse", "HEAD")
+        head_md = next(f for f in default.json()["files"] if f["path"] == "SKILL.md")
+        assert head_md["content"] == "# Write Script v2\n"
 
-        tagged = scoped.get(f"{_TOOLS}/{_KEY}", params={"ref": "v1.1.0"})
+        tagged = scoped.get(f"{_TOOLS}/{_KEY}", params={"ref": "v1.0.0"})
+        assert tagged.json()["commit"] == old_head
         tagged_md = next(f for f in tagged.json()["files"] if f["path"] == "SKILL.md")
-        assert tagged_md["content"] == "# Write Script v2\n"
+        assert tagged_md["content"] == "# Write Script\n"
+
+        # The seeded pin is untouched by the save.
+        assert (store.get_lock() or SkillsLock()).skills[_KEY].refs == {"v1.0.0": old_head}

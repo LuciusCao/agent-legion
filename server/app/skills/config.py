@@ -2,14 +2,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, model_validator
 
-
-class SkillSourceConfig(BaseModel):
-    repo: str
-    ref: str
-
-
-class SkillsConfig(BaseModel):
-    skills: dict[str, SkillSourceConfig] = Field(default_factory=dict)
+#: Sentinel node-ref meaning "follow the skill repo's current HEAD": every
+#: dispatch rev-parses HEAD live and never touches the lock (issue #322; the
+#: loader normalizes an empty node ref to this value).
+LATEST_REF = "latest"
 
 
 class LockedSkill(BaseModel):

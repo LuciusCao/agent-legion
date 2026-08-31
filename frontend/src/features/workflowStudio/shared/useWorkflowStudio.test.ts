@@ -12,7 +12,6 @@ function queryClientWrapper({ children }: { children: ReactNode }) {
 }
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { useWorkflowStudio } from './useWorkflowStudio'
-import { useWorkflowStudioDraft } from './useWorkflowStudioDraft'
 
 const activeRevisionPayload = {
   revision: {
@@ -41,7 +40,8 @@ const activeRevisionPayload = {
     ],
     edges: [],
   },
-  definition_yaml: 'key: demo\nlabel: Demo Workflow\n',
+  definition_yaml:
+    'key: demo\nlabel: Demo Workflow\nnodes:\n  a:\n    capability: cap_a\n',
 }
 
 const mocks = {
@@ -79,6 +79,8 @@ vi.mock('../../../api/agentCatalogApi', () => ({
   getAgentCatalog: (...args: unknown[]) => mocks.getAgentCatalog(...args),
 }))
 
+// compare/DAG/空态/选择相关用例；草稿应用/revision 切换/持久化用例在姊妹
+// 文件 useWorkflowStudio.draft.test.ts（测试文件体积纪律拆分）。
 describe('useWorkflowStudio', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
@@ -182,8 +184,6 @@ describe('useWorkflowStudio', () => {
   })
 
   it('merges compare node changes into the DAG as badges and ghost nodes', async () => {
-    // 画布展示 active 基线（只有节点 a）：modified 打在基线节点上，
-    // added 以幽灵节点 + 幽灵边补入。
     mocks.compareWorkflowDraft.mockResolvedValue({
       valid: true,
       creates_revision: true,
@@ -228,8 +228,12 @@ describe('useWorkflowStudio', () => {
     })
     await waitFor(() => expect(result.current.loadState).toBe('ready'))
 
+    // 画布数据源是草稿：编辑后的草稿含节点 a（modified 角标落在它上面）；
+    // added 的 b 不在草稿里，仍以幽灵节点 + 幽灵边补入。
     act(() => {
-      result.current.setDefinitionYaml('key: demo\nlabel: Changed\n')
+      result.current.setDefinitionYaml(
+        'key: demo\nlabel: Changed\nnodes:\n  a:\n    capability: cap_a\n'
+      )
     })
     await act(async () => {
       vi.advanceTimersByTime(450)
@@ -331,224 +335,6 @@ describe('useWorkflowStudio', () => {
     expect(result.current.compareSummary?.nodeChanges[0]?.nodeKey).toBe('b')
   })
 
-  it('loads a historical revision without replacing a dirty draft', async () => {
-    mocks.fetchWorkflowRevisionDetail.mockResolvedValue({
-      revision: {
-        id: 'rev-old',
-        workspace_id: 'ws1',
-        workflow_key: 'wf',
-        version: 1,
-        status: 'archived',
-        definition_hash: 'oldhash',
-        created_at: '2026-07-05T10:00:00Z',
-        published_at: '2026-07-05T10:05:00Z',
-      },
-      workflow: {
-        ...activeRevisionPayload.workflow,
-        label: 'Old Workflow',
-      },
-      definition_yaml:
-        'key: wf\nlabel: Old Workflow\nschema_version: 2\nnodes: {}\nedges: []\n',
-    })
-    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
-      wrapper: queryClientWrapper,
-    })
-    await waitFor(() => expect(result.current.loadState).toBe('ready'))
-
-    act(() =>
-      result.current.setDefinitionYaml(
-        `${result.current.definitionYaml}\n# draft`
-      )
-    )
-    await act(async () => {
-      await result.current.selectRevision('rev-old')
-    })
-
-    expect(result.current.viewMode).toBe('revision')
-    expect(result.current.readOnly).toBe(true)
-    expect(result.current.hasPreservedDraft).toBe(true)
-    expect(result.current.definitionYaml).toContain('Old Workflow')
-    expect(result.current.canPublish).toBe(false)
-
-    act(() => result.current.backToDraft())
-
-    expect(result.current.viewMode).toBe('draft')
-    expect(result.current.definitionYaml).toContain('# draft')
-  })
-
-  it('uses a historical revision as a new draft', async () => {
-    mocks.fetchWorkflowRevisionDetail.mockResolvedValue({
-      revision: {
-        id: 'rev-old',
-        workspace_id: 'ws1',
-        workflow_key: 'wf',
-        version: 1,
-        status: 'archived',
-        definition_hash: 'oldhash',
-        created_at: '2026-07-05T10:00:00Z',
-        published_at: '2026-07-05T10:05:00Z',
-      },
-      workflow: activeRevisionPayload.workflow,
-      definition_yaml:
-        'key: wf\nlabel: Restored\nschema_version: 2\nnodes: {}\nedges: []\n',
-    })
-    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
-      wrapper: queryClientWrapper,
-    })
-    await waitFor(() => expect(result.current.loadState).toBe('ready'))
-
-    await act(async () => {
-      await result.current.selectRevision('rev-old')
-    })
-    act(() => result.current.useViewedRevisionAsDraft())
-
-    expect(result.current.viewMode).toBe('draft')
-    expect(result.current.readOnly).toBe(false)
-    expect(result.current.definitionYaml).toContain('Restored')
-    expect(result.current.dirty).toBe(true)
-  })
-
-  it('keeps an adopted historical revision when the server draft arrives late', async () => {
-    // 服务端草稿 GET 在途时采用历史版本：采用算「用户碰过」，迟到的服务端
-    // 草稿不得覆盖刚采用的内容。
-    mocks.fetchWorkflowRevisionDetail.mockResolvedValue({
-      revision: {
-        id: 'rev-old',
-        workspace_id: 'ws1',
-        workflow_key: 'wf',
-        version: 1,
-        status: 'archived',
-        definition_hash: 'oldhash',
-        created_at: '2026-07-05T10:00:00Z',
-        published_at: '2026-07-05T10:05:00Z',
-      },
-      workflow: activeRevisionPayload.workflow,
-      definition_yaml:
-        'key: wf\nlabel: Restored\nschema_version: 2\nnodes: {}\nedges: []\n',
-    })
-    let resolveDraftQuery: (value: {
-      definition_yaml: string | null
-      updated_at: string | null
-    }) => void = () => {}
-    mocks.fetchWorkflowDraft.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveDraftQuery = resolve
-        })
-    )
-    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
-      wrapper: queryClientWrapper,
-    })
-    await waitFor(() => expect(result.current.loadState).toBe('ready'))
-
-    await act(async () => {
-      await result.current.selectRevision('rev-old')
-    })
-    act(() => result.current.useViewedRevisionAsDraft())
-    expect(result.current.definitionYaml).toContain('Restored')
-
-    await act(async () => {
-      resolveDraftQuery({
-        definition_yaml: 'key: demo\nlabel: Late Server Draft\n',
-        updated_at: '2026-08-27T01:02:03+00:00',
-      })
-      await Promise.resolve()
-    })
-
-    // 先确认迟到的服务端草稿真的送达（hydration 记录其 savedAt），再断言
-    // 已采用的历史版本未被它覆盖。
-    await waitFor(() =>
-      expect(result.current.draftSave.savedAt).toBe('2026-08-27T01:02:03+00:00')
-    )
-    expect(result.current.definitionYaml).toContain('Restored')
-    expect(result.current.dirty).toBe(true)
-  })
-
-  it('ignores stale revision detail when a newer revision is requested', async () => {
-    const slowPayload = {
-      revision: {
-        id: 'rev-slow',
-        workspace_id: 'ws1',
-        workflow_key: 'wf',
-        version: 1,
-        status: 'archived',
-        definition_hash: 'slowhash',
-        created_at: '2026-07-05T10:00:00Z',
-        published_at: '2026-07-05T10:05:00Z',
-      },
-      workflow: activeRevisionPayload.workflow,
-      definition_yaml: 'key: wf\nlabel: Slow\n',
-    }
-    const fastPayload = {
-      revision: {
-        id: 'rev-fast',
-        workspace_id: 'ws1',
-        workflow_key: 'wf',
-        version: 2,
-        status: 'archived',
-        definition_hash: 'fasthash',
-        created_at: '2026-07-05T11:00:00Z',
-        published_at: '2026-07-05T11:05:00Z',
-      },
-      workflow: activeRevisionPayload.workflow,
-      definition_yaml: 'key: wf\nlabel: Fast\n',
-    }
-
-    let resolveSlow: (value: typeof slowPayload) => void = () => {}
-    let resolveFast: (value: typeof fastPayload) => void = () => {}
-
-    mocks.fetchWorkflowRevisionDetail.mockImplementation(
-      (revisionId: string) => {
-        if (revisionId === 'rev-slow') {
-          return new Promise<typeof slowPayload>((resolve) => {
-            resolveSlow = resolve
-          })
-        }
-        return new Promise<typeof fastPayload>((resolve) => {
-          resolveFast = resolve
-        })
-      }
-    )
-
-    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
-      wrapper: queryClientWrapper,
-    })
-    await waitFor(() => expect(result.current.loadState).toBe('ready'))
-
-    act(() => {
-      result.current.selectRevision('rev-slow')
-      result.current.selectRevision('rev-fast')
-    })
-
-    act(() => resolveFast(fastPayload))
-    await waitFor(() => expect(result.current.definitionYaml).toContain('Fast'))
-    expect(result.current.selectedRevisionId).toBe('rev-fast')
-
-    act(() => resolveSlow(slowPayload))
-    await waitFor(() => expect(result.current.definitionYaml).toContain('Fast'))
-    expect(result.current.selectedRevisionId).toBe('rev-fast')
-  })
-
-  it('exposes revision load error and keeps previous view on failure', async () => {
-    mocks.fetchWorkflowRevisionDetail.mockRejectedValue(
-      new Error('network error')
-    )
-    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
-      wrapper: queryClientWrapper,
-    })
-    await waitFor(() => expect(result.current.loadState).toBe('ready'))
-    const previousDefinitionYaml = result.current.definitionYaml
-
-    await act(async () => {
-      await result.current.selectRevision('rev-old')
-    })
-
-    expect(result.current.isLoadingRevision).toBe(false)
-    expect(result.current.revisionLoadError).toBe('network error')
-    expect(result.current.viewMode).toBe('draft')
-    expect(result.current.definitionYaml).toBe(previousDefinitionYaml)
-  })
-
   const notFoundError = () =>
     Object.assign(new Error('No active workflow revision'), { status: 404 })
 
@@ -564,7 +350,11 @@ describe('useWorkflowStudio', () => {
     expect(result.current.definitionYaml).toBe(
       'key: demo\nlabel: demo\nnodes:\n  _start:\n    type: start\n  intake:\n    type: code\n    capability: intake\n    after: [_start]\n'
     )
-    expect(result.current.workflow).toBeNull()
+    // 空态模板草稿同样驱动画布：workflow 来自模板 YAML 解析（含 _start/intake）。
+    expect(result.current.workflow?.nodes.map((node) => node.key)).toEqual([
+      '_start',
+      'intake',
+    ])
     expect(result.current.dirty).toBe(false)
     expect(result.current.canSubmit).toBe(false)
   })
@@ -655,8 +445,8 @@ describe('useWorkflowStudio', () => {
     })
     await waitFor(() => expect(result.current.loadState).toBe('empty'))
 
-    // 未做任何编辑：空基线下 compare 也要自动跑一次，把模板草稿（含
-    // _start）以 ghost 节点呈现在画布上。
+    // 未做任何编辑：空基线下 compare 也要自动跑一次；模板节点来自草稿
+    // 记录本身，compare 的 added 角标 + 幽灵样式标注它们未在基线中。
     await act(async () => {
       vi.advanceTimersByTime(450)
     })
@@ -750,111 +540,6 @@ describe('useWorkflowStudio', () => {
     mocks.fetchActiveWorkflowRevision.mockRejectedValue(notFoundError())
     mocks.fetchWorkflowRevisions.mockResolvedValue({ revisions: [] })
     mocks.fetchWorkspaces.mockResolvedValue({ workspaces: [] })
-
-    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
-      wrapper: queryClientWrapper,
-    })
-
-    await waitFor(() => expect(result.current.loadState).toBe('error'))
-  })
-
-  it('applies the server-persisted draft over the baseline on first load', async () => {
-    mocks.fetchWorkflowDraft.mockResolvedValue({
-      definition_yaml: 'key: demo\nlabel: Server Draft\n',
-      updated_at: '2026-08-27T01:02:03+00:00',
-    })
-    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
-      wrapper: queryClientWrapper,
-    })
-
-    await waitFor(() =>
-      expect(result.current.definitionYaml).toBe(
-        'key: demo\nlabel: Server Draft\n'
-      )
-    )
-
-    // 服务端草稿 ≠ 基线即 dirty；且装载本身不触发任何 PUT。
-    expect(result.current.dirty).toBe(true)
-    expect(result.current.draftSave).toEqual({
-      status: 'idle',
-      savedAt: '2026-08-27T01:02:03+00:00',
-    })
-    // async act 冲刷 react-query 的异步通知，避免 act 外交互告警。
-    await act(async () => {
-      vi.advanceTimersByTime(2000)
-    })
-    expect(mocks.putWorkflowDraft).not.toHaveBeenCalled()
-  })
-
-  it('autosaves draft edits to the server after the debounce', async () => {
-    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
-      wrapper: queryClientWrapper,
-    })
-    await waitFor(() => expect(result.current.loadState).toBe('ready'))
-    await waitFor(() =>
-      expect(result.current.definitionYaml).toBe(
-        activeRevisionPayload.definition_yaml
-      )
-    )
-
-    act(() => {
-      result.current.setDefinitionYaml('key: demo\nlabel: Autosaved\n')
-    })
-    await act(async () => {
-      vi.advanceTimersByTime(850)
-    })
-
-    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
-      'ws1',
-      'key: demo\nlabel: Autosaved\n'
-    )
-    await waitFor(() => expect(result.current.draftSave.status).toBe('saved'))
-  })
-
-  it('preserves a dirty draft when the baseline changes externally', () => {
-    const fetchDetail = vi.fn()
-    const { result, rerender } = renderHook(
-      ({ originalYaml }: { originalYaml: string }) =>
-        useWorkflowStudioDraft('ws1', originalYaml, null, null, fetchDetail),
-      { initialProps: { originalYaml: 'key: demo\nlabel: v1\n' } }
-    )
-
-    // 初始装载：草稿跟随基线。
-    expect(result.current.draftYaml).toBe('key: demo\nlabel: v1\n')
-    act(() => result.current.setDraftYaml('key: demo\nlabel: my edits\n'))
-    expect(result.current.dirty).toBe(true)
-
-    // 外部（他人/他 tab）发布使基线前进：用户草稿保留，打 preserved 标记。
-    rerender({ originalYaml: 'key: demo\nlabel: v2\n' })
-
-    expect(result.current.draftYaml).toBe('key: demo\nlabel: my edits\n')
-    expect(result.current.hasPreservedDraft).toBe(true)
-  })
-
-  it('resets to the new baseline when the draft is clean or matches it', () => {
-    const fetchDetail = vi.fn()
-    const { result, rerender } = renderHook(
-      ({ originalYaml }: { originalYaml: string }) =>
-        useWorkflowStudioDraft('ws1', originalYaml, null, null, fetchDetail),
-      { initialProps: { originalYaml: 'key: demo\nlabel: v1\n' } }
-    )
-
-    // 干净草稿：跟随新基线。
-    rerender({ originalYaml: 'key: demo\nlabel: v2\n' })
-    expect(result.current.draftYaml).toBe('key: demo\nlabel: v2\n')
-    expect(result.current.hasPreservedDraft).toBe(false)
-
-    // 自己 publish 成功：草稿与新基线一致，常规 reset 不误标 preserved。
-    rerender({ originalYaml: 'key: demo\nlabel: v3\n' })
-    act(() => result.current.setDraftYaml('key: demo\nlabel: v3\n'))
-    rerender({ originalYaml: 'key: demo\nlabel: v3\n' })
-    expect(result.current.hasPreservedDraft).toBe(false)
-  })
-
-  it('stays in error state for non-404 active revision failures', async () => {
-    mocks.fetchActiveWorkflowRevision.mockRejectedValue(
-      Object.assign(new Error('boom'), { status: 500 })
-    )
 
     const { result } = renderHook(() => useWorkflowStudio('ws1'), {
       wrapper: queryClientWrapper,

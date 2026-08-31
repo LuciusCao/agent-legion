@@ -9,7 +9,11 @@ from scripts.architecture.service_data_boundary import (
     count_service_data_bypasses,
 )
 from scripts.check_architecture import check_repository
-from tests.architecture_budget_helpers import write_neutral_budget_governance
+from tests.architecture_budget_helpers import (
+    boundary_git_repo,
+    write_boundary_baseline,
+    write_neutral_budget_governance,
+)
 
 pytestmark = pytest.mark.no_db
 
@@ -17,14 +21,6 @@ pytestmark = pytest.mark.no_db
 def write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
-
-
-def write_boundary_baseline(root: Path, files: dict[str, list[int]]) -> None:
-    baseline_path = root / "config/architecture/service-data-boundary-baseline.json"
-    baseline_path.parent.mkdir(parents=True, exist_ok=True)
-    baseline_path.write_text(
-        json.dumps({"version": 1, "files": files}, indent=2) + "\n", encoding="utf-8"
-    )
 
 
 def test_counts_sql_literals_by_keyword_family():
@@ -337,37 +333,8 @@ def test_current_repo_passes_its_own_baseline():
     assert errors == []
 
 
-def _boundary_git_repo(tmp_path: Path, entries: dict[str, list[int]]) -> Path:
-    """Build a real git repo whose HEAD^ carries a boundary baseline.
-
-    An empty seed commit keeps HEAD^ resolvable (mirrors the budget
-    monotonicity fixtures); the baseline JSON (and its service files) commit
-    into HEAD^ — the pre-change anchor — so the working-tree edit plays the
-    raise attempt against genuine history.
-    """
-    import subprocess
-
-    root = tmp_path
-    write_boundary_baseline(root, entries)
-    for path in entries:
-        write(root / path, 'A = "SELECT 1"\n')
-    for argv in (
-        ["git", "init", "-q"],
-        ["git", "config", "user.email", "test@example.com"],
-        ["git", "config", "user.name", "test"],
-        ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
-        ["git", "add", "-A"],
-        ["git", "commit", "-q", "-m", "init baseline"],
-        # A trailing commit so the baseline lands in HEAD^ (the pre-change
-        # anchor), leaving HEAD as the working tree's comparison point.
-        ["git", "commit", "-q", "--allow-empty", "-m", "trailing"],
-    ):
-        subprocess.run(argv, cwd=root, check=True)
-    return root
-
-
 def test_monotonic_guard_rejects_raised_count(tmp_path: Path):
-    root = _boundary_git_repo(tmp_path, {"server/app/services/legacy.py": [3, 1, 0]})
+    root = boundary_git_repo(tmp_path, {"server/app/services/legacy.py": [3, 1, 0]})
     write_boundary_baseline(root, {"server/app/services/legacy.py": [4, 1, 0]})
 
     errors = check_service_data_boundary(root)
@@ -416,7 +383,7 @@ def test_monotonic_guard_rejects_first_entry_for_brand_new_file(tmp_path: Path):
     # BOUNDARY-DATA-001 the same as an old one growing debt — AGENTS.md
     # requires new services to go through JobQueries too, so the
     # first-entry channel for a fresh file is closed as well.
-    root = _boundary_git_repo(tmp_path, {})
+    root = boundary_git_repo(tmp_path, {})
     write(root / "server/app/services/fresh.py", 'A = "SELECT 1"\n')
     write_boundary_baseline(root, {"server/app/services/fresh.py": [1, 0, 0]})
 
@@ -426,7 +393,7 @@ def test_monotonic_guard_rejects_first_entry_for_brand_new_file(tmp_path: Path):
 
 
 def test_monotonic_guard_accepts_lowered_count(tmp_path):
-    root = _boundary_git_repo(tmp_path, {"server/app/services/legacy.py": [3, 1, 0]})
+    root = boundary_git_repo(tmp_path, {"server/app/services/legacy.py": [3, 1, 0]})
     write_boundary_baseline(root, {"server/app/services/legacy.py": [2, 1, 0]})
 
     errors = check_service_data_boundary(root)

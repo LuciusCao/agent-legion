@@ -18,7 +18,6 @@ from .metrics import create_metrics_router
 from .packages import create_packages_router
 from .quality import create_quality_router
 from .quality_replays import create_quality_replays_router
-from .skill_sources import create_skill_sources_router
 from .skills import create_skills_router
 from .studio_agent_context import create_studio_agent_context_router
 from .studio_agent_tokens import create_studio_agent_tokens_router
@@ -60,7 +59,6 @@ def create_router(deps: RouterDeps) -> APIRouter:
     # Global admin endpoints (not workspace-scoped): the sub-routers enforce
     # require_admin themselves, so they must not go through secured().
     router.include_router(create_instance_settings_router(deps.job_db, deps.settings))
-    router.include_router(create_skill_sources_router(deps.job_db, deps.settings))
     router.include_router(create_connections_router(deps.job_db, deps.settings))
     secured(create_packages_router(deps.job_db, deps.settings, deps.job_packages))
     secured(create_worker_router(deps.workspace_worker_control))

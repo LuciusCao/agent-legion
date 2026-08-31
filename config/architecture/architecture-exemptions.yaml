@@ -234,17 +234,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
   ceiling: 93
 - check: architecture.file_budget
-  path: scripts/e2e/_main_flow_seed.py
-  reason: >-
-    The PR 317 merge combines develop's explicit node types (#284) with
-    the #76 multi-ref lock update (LockedSkill refs re-pin) — two
-    effective lines past the 218 ceiling. Seed scripts are linear config
-    code; the overage is the honest cost of both features landing in one
-    merge.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
-  ceiling: 225
-- check: architecture.file_budget
   path: server/app/workflow_worker/mark_scan.py
   reason: The issue-211 Phase 3 read-binding batch rekeys the scan state
     per workspace — the pre-v62 shape where several workspaces shared one

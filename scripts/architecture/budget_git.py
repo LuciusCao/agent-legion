@@ -1,10 +1,12 @@
 """Git plumbing for the budget checks: anchors, renames, diagnostics.
 
 Thin wrappers around the ``git`` CLI for the monotonic ceiling check: anchor
-resolution (``HEAD`` / ``HEAD^``), committed file content, and rename
-detection between a revision and the current worktree. Execution failures
-(OSError, timeout) are remembered with their real reason so callers can
-report the actual cause instead of guessing "shallow clone" (#236).
+resolution (``HEAD`` / ``HEAD^`` by default; ``budget_anchors`` selects the
+revisions, including the ``AGENT_LEGION_BUDGET_BASE`` override), committed
+file content at any revision, and rename detection between a revision and
+the current worktree. Execution failures (OSError, timeout) are remembered
+with their real reason so callers can report the actual cause instead of
+guessing "shallow clone" (#236).
 """
 
 from __future__ import annotations

@@ -2,6 +2,12 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioCommandBar } from './WorkflowStudioCommandBar'
 
+// 草稿保存状态/按钮已迁到 WorkflowStudioDraftSaveControl（自带测试），这里
+// 打桩掉它的 context 接线，保持 CommandBar 纯 props 渲染。
+vi.mock('./WorkflowStudioDraftSaveControl', () => ({
+  WorkflowStudioDraftSaveControlContainer: () => null,
+}))
+
 const baseProps = {
   revision: null,
   revisions: [],
@@ -49,37 +55,5 @@ describe('WorkflowStudioCommandBar', () => {
     fireEvent.click(screen.getByText('有未发布变更'))
 
     expect(onShowChanges).toHaveBeenCalledTimes(1)
-  })
-
-  it('exposes the draft autosave state as a quiet meta tooltip', () => {
-    render(
-      <WorkflowStudioCommandBar
-        {...baseProps}
-        draftSave={{ status: 'error', savedAt: null }}
-      />
-    )
-
-    expect(screen.getByText('基于 v- 的草稿')).toHaveAttribute(
-      'title',
-      '草稿自动保存失败（编辑尚未持久化）'
-    )
-  })
-
-  it('shows the saved-at time in the meta tooltip', () => {
-    const savedAt = '2026-08-27T09:05:00+00:00'
-    render(
-      <WorkflowStudioCommandBar
-        {...baseProps}
-        draftSave={{ status: 'saved', savedAt }}
-      />
-    )
-
-    const at = new Date(savedAt)
-    const hh = String(at.getHours()).padStart(2, '0')
-    const mm = String(at.getMinutes()).padStart(2, '0')
-    expect(screen.getByText('基于 v- 的草稿')).toHaveAttribute(
-      'title',
-      `草稿已保存 ${hh}:${mm}`
-    )
   })
 })

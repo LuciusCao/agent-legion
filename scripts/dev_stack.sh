@@ -154,17 +154,21 @@ cmd_up() {
 
     start_component "后端" "$BACKEND_PORT" dev-backend "$LOG_DIR/dev-backend.log"
     start_component "前端" "$FRONTEND_PORT" dev-frontend "$LOG_DIR/dev-frontend.log"
+    # worker 唯一生效配置是状态副本（issue #323）；无状态副本的 worktree 跳过 Worker
     if [[ -f config/agent-worker.yaml ]]; then
+        echo "提示: config/agent-worker.yaml 已退役（#323），不再被读取，可删除；生效配置是 data/agent-worker-service/worker.yaml" >&2
+    fi
+    if [[ -f data/agent-worker-service/worker.yaml ]]; then
         start_component "Worker" "$WORKER_PORT" dev-worker "$LOG_DIR/dev-worker.log"
     else
-        echo "缺少 config/agent-worker.yaml（先跑 scripts/init-worktree.sh 种子），跳过 Worker" >&2
+        echo "缺少 data/agent-worker-service/worker.yaml（先跑 scripts/init-worktree.sh 种子），跳过 Worker" >&2
     fi
 
     for _ in $(seq 1 45); do
         local ok=true
         http_ok "$BACKEND_PORT" /api/health || ok=false
         http_ok "$FRONTEND_PORT" / || ok=false
-        if [[ -f config/agent-worker.yaml ]]; then
+        if [[ -f data/agent-worker-service/worker.yaml ]]; then
             http_ok "$WORKER_PORT" /api/health || ok=false
         fi
         if $ok; then

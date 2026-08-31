@@ -60,7 +60,7 @@ describe('SkillSelector', () => {
     expect(mockValidate).toHaveBeenCalledWith(
       '~/.agents/skills/ws-1/write-script'
     )
-    expect(screen.getByText('当前锁定 ref：abc123')).toBeInTheDocument()
+    expect(screen.getByText('已锁定版本：abc123')).toBeInTheDocument()
     expect(screen.getByLabelText('可用 tag（参考）')).toBeInTheDocument()
   })
 
@@ -167,7 +167,7 @@ describe('SkillSelector', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('notes that tag changes go through the skills sync flow', async () => {
+  it('notes that tag selection is reference-only (pin via the node Skill ref)', async () => {
     mockValidate.mockResolvedValue({
       valid: true,
       path: '/abs/skill',
@@ -187,8 +187,6 @@ describe('SkillSelector', () => {
     fireEvent.mouseDown(tagSelect)
     fireEvent.click(await screen.findByRole('option', { name: 'v1.1.0' }))
 
-    expect(
-      await screen.findByText(/tag 变更需通过 skills 同步流程生效/)
-    ).toBeInTheDocument()
+    expect(await screen.findByText(/此处选择仅作参考/)).toBeInTheDocument()
   })
 })

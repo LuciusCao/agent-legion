@@ -186,9 +186,6 @@ server/app/
 | GET | `/workspaces/{workspace_id}/runs` | `list_runs` | routes/runs.py |
 | GET | `/workspaces/{workspace_id}/runs/{run_id}` | `get_run` | routes/runs.py |
 | GET | `/agent-catalog/skills/{skill_key:path}` | `get_skill` | routes/skill_catalog_route.py |
-| GET | `/admin/skill-sources` | `get_skill_sources` | routes/skill_sources.py |
-| PUT | `/admin/skill-sources/{skill_key:path}` | `put_skill_source` | routes/skill_sources.py |
-| POST | `/admin/skill-sources/relock` | `relock_skill_sources` | routes/skill_sources.py |
 | POST | `/skills/validate` | `validate_skill` | routes/skills.py |
 | GET | `/skills/tags` | `list_skill_tags` | routes/skills.py |
 | GET | `/studio-agent/tools/chat-sessions/{session_id}/context` | `get_chat_session_context` | routes/studio_agent_context.py |
@@ -448,9 +445,6 @@ server/app/
 | SkillValidateRequest | BaseModel | path: str | app/routes/skill_contracts.py |
 | SkillValidateResponse | BaseModel | valid: bool, path: str, skill_key: str | None, error: str | None, tags: list[... | app/routes/skill_contracts.py |
 | SkillTagsResponse | BaseModel | path: str, tags: list[str], latest_tag: str | None | app/routes/skill_contracts.py |
-| SkillSourceEntry | BaseModel | key: str, repo: str, ref: str, locked_commit: str | None, resolved_at: str | ... | app/routes/skill_source_contracts.py |
-| SkillSourcesResponse | BaseModel | skills: list[SkillSourceEntry] | app/routes/skill_source_contracts.py |
-| SkillSourceUpdate | BaseModel | repo: str, ref: str | app/routes/skill_source_contracts.py |
 | StudioContextNode | BaseModel | key: str, capability: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextEdge | BaseModel | source: str, target: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextWorkflow | BaseModel | workflow_key: str, version: int, nodes: list[StudioContextNode], edges: list[... | app/routes/studio_agent_context_contracts.py |
@@ -557,8 +551,6 @@ server/app/
 | CostBreakdown | BaseModel | currency: str, input: float, output: float, cache_read: float, total: float, ... | app/services/token_usage_pricing.py |
 | JobPackageItemResult | TypedDict | job_id: str, status: str, reason_code: str | None, message: str | None | app/services/workspace_package_contracts.py |
 | JobPackageResult | TypedDict | results: list[JobPackageItemResult], succeeded_count: int, failed_count: int,... | app/services/workspace_package_contracts.py |
-| SkillSourceConfig | BaseModel | repo: str, ref: str | app/skills/config.py |
-| SkillsConfig | BaseModel | skills: dict[str, SkillSourceConfig] | app/skills/config.py |
 | LockedSkill | BaseModel | repo: str, refs: dict[str, str] | app/skills/config.py |
 | SkillsLock | BaseModel | version: str, resolved_at: str | None, skills: dict[str, LockedSkill] | app/skills/config.py |
 
@@ -589,7 +581,10 @@ server/app/
   （actual + buffer）不受约束（删旧建新的正常重构不会误判，因为只有 git 判定
   内容相似才配对）；深克隆缺锚点时硬失败，git 超时/仓库损坏会在错误中携带真实
   原因（不再是纯浅克隆猜测），逃生口 env
-  `AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW=1`。超出预算的文件必须拆分或回退。
+  `AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW=1`。本地要跑和 CI merge ref
+  完全一致的判定时设 `AGENT_LEGION_BUDGET_BASE`（如 `origin/develop`）：
+  锚点由 HEAD/HEAD^ 变为 HEAD + 该 base ref，release-train opt-out 优先于
+  该覆盖，base ref 无法解析硬失败（错误带 fetch 指引）。超出预算的文件必须拆分或回退。
   ceiling 按有效行数计
   （排除注释行与空行，实现见 `scripts/architecture/effective_lines.py`，`.sql` 的
   `--` 注释行同样排除），压缩注释
@@ -702,7 +697,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 - 存储路径以**相对 POSIX 路径**保存在 `settings.data_dir` 下（前缀为 `videos/`, `jobs/`, `logs/`, `packages/`），API 返回时投影为绝对路径。
 - SQL 占位符约定：**新 SQL 一律写 psycopg 的 `%s`**，不要再写 SQLite 风格的 `?`。存量 `?` 由 `server/app/db/dialect.py` 盲替换为 `%s`，该层无法区分占位符与 Postgres JSON 的 `?`/`?|`/`?&` 操作符；`scripts/check_architecture.py` 的 SQL 占位符检查（基线 `config/architecture/sql-placeholders-baseline.json`）按 ratchet 方式只降不升，新文件出现任何 SQL `?` 即失败，改写存量后同步下调基线。
 - 服务层数据边界（BOUNDARY-DATA-001）：`server/app/services/` 下的新服务**必须经 `JobQueries` 门面访问数据库**（范式见 `services/job_pause.py` 等 38+ 个 facade-only 服务）；裸 SQL 字面量、`server.app.db.transaction`/`connection` 直接 import 与 DSN 逃逸引用（`.path`/`.dsn_identity` 属性读及其 `getattr` 形式）由 `scripts/architecture/service_data_boundary.py` 检查冻结（基线 `config/architecture/service-data-boundary-baseline.json`，只降不升）。存量服务迁移到门面后手动（或重跑 ratchet）下调基线；新文件出现任一绕行即失败。门面的 DSN 属性 `.path` 已私有化为 `_path`（#187 第三步）：`dsn_identity` 是唯一公开只读访问器（字符串 DSN），合法消费者仅数据层自身与经设计豁免的数据层毗邻组件（lease 仓储、artifact store）。
-- 边界基线的 git 锚点防线（#292）：基线自身也只降不升——`service_data_boundary_monotonicity.py` 按 HEAD/HEAD^ 双锚点对比已提交基线，**新增条目**（对已跟踪的 service 文件）与**三元组计数上抬**均被拒绝（对齐 file budget 的 budget_monotonicity 机制）；全新 service 文件的首次登记不受限（由无条目即失败的常规检查治理）。存量 56 条按服务子域分批收敛：迁移到 `JobQueries` 门面后重跑 ratchet 下调，直至条目清零、基线退役。浅克隆缺锚点硬失败（同 budget 侧 env 逃生口）；非 git 目录静默跳过。
+- 边界基线的 git 锚点防线（#292）：基线自身也只降不升——`service_data_boundary_monotonicity.py` 按 HEAD/HEAD^ 双锚点对比已提交基线，**新增条目**（对已跟踪的 service 文件）与**三元组计数上抬**均被拒绝（对齐 file budget 的 budget_monotonicity 机制）；全新 service 文件的首次登记不受限（由无条目即失败的常规检查治理）。存量 56 条按服务子域分批收敛：迁移到 `JobQueries` 门面后重跑 ratchet 下调，直至条目清零、基线退役。浅克隆缺锚点硬失败（同 budget 侧 env 逃生口）；非 git 目录静默跳过。锚点覆盖与 budget 侧共用 `AGENT_LEGION_BUDGET_BASE`（HEAD^ 替换为该 base ref，本地复现 CI merge ref 判定）。
 
 ## New Subsystems
 
@@ -778,9 +773,9 @@ Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 sc
 
 其他配置文件：
 
-- 外部 Pi skill 仓库源与固定 commit 已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB `global_settings`（`skill_sources` / `skill_lock` 文档），lock 是 skill ref 的唯一权威（G3）；经 admin API（`GET/PUT /api/admin/skill-sources`、`POST /api/admin/skill-sources/relock`）与 /admin/settings「Skill 源管理」维护，CLI `make skills-lock`（`uv run python -m server.app.skills.lock`）刷新锁。tracked `config/skills.yaml` / `config/skills.lock` 已退役：DB 无记录且文件存在时启动一次性导入并 warning，否则用内置常量（`server/app/skills/builtin_sources.py`）seed，此后文件不再读取。
+- Agent skill 是 skill root（`~/.agents/skills`，单一来源 `server/app/skills/skill_roots.py`）下的本地 in-place git 仓库（唯一模式，#322 起全局 skill_sources 注册表、远程 clone 通道与缓存缺失 re-clone 自愈均已退役；缓存缺失即报错并指引在 skill root 下创建）。节点 `skill.ref`：`latest`（空 ref 归一为它）= 跟随仓库 HEAD，每次 dispatch 现场解析、永不入锁；具体 tag = 首次 dispatch 把解析的 commit 冻结进 DB `global_settings` 的 `skill_lock` 文档（v2 多值：per-skill `{repo, refs: {ref → commit}}`，`repo` 仅审计），CLI `make skills-lock`（`uv run python -m server.app.skills.lock`）遍历锁内已有条目重解析 pinned refs。启动一次性迁移 `server/app/skills/skill_sources_retirement.py` 幂等删除残留的 `skill_sources` 文档（保留 `skill_lock`）；tracked `config/skills.yaml` / `config/skills.lock` 早已退役。
 - 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；schema v62 起创建 workspace 不再种子模板，demo workspace 由 `make import-demo`（`scripts/seed_demo.py`）提供，其 id 与 key 同为 `education_video_problems_generation`。workflow 没有全局注册表（schema v40 的 `workflow_catalog` 表已于 schema v50 退役，DB-WORKFLOW-CATALOG-001）：workflow 就是 workspace 内部的一份 DAG，权威定义是该 workspace 的 active revision（schema v50 起节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部改读它）。schema v62（DB-WORKSPACE-KEY-BINDING-001）起 workspace id 与 `workspaces.default_workflow_key` 是同一个标识：创建时显式填写、终身不可变（PATCH / PUT configuration 改 key 一律 400，发布草稿 key 不匹配 422）；v62 迁移把存量 workspace 的 id 改成已绑定的 key（key 为空的按 id 回填），`default_workflow_key` 作为独立概念已标 deprecated（退役评估 issue 待开）。
-- `config/agent-worker.example.yaml`：Worker Service 引导配置样例（`host_url` / `worker_id` / `disabled_runtimes` / `max_concurrency` 等），Worker 侧独立加载，不经 server 的 owned-key 校验。
+- worker 配置：`config/agent-worker.example.yaml` 已随 #323 退役；worker 唯一生效配置是状态副本 `data/agent-worker-service/worker.yaml`（控制台/API 驱动，Worker 侧独立加载，不经 server 的 owned-key 校验），docker/远程部署的可选 bootstrap 模板见 `deploy/worker.host.example.yaml` / `deploy/worker.remote.example.yaml`。
 - `config/architecture/*`：架构不变量、豁免、源文件体积预算。
 
 ## Testing

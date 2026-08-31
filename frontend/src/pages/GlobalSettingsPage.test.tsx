@@ -28,12 +28,6 @@ vi.mock('../api/instanceSettings', () => ({
   updateInstanceSettings: vi.fn(),
 }))
 
-vi.mock('../api/skillSources', () => ({
-  getSkillSources: vi.fn().mockResolvedValue({ skills: [] }),
-  updateSkillSource: vi.fn(),
-  relockSkillSources: vi.fn(),
-}))
-
 vi.mock('../api/studioAgents', () => ({
   getStudioAgents: vi.fn().mockResolvedValue({
     api_base: 'http://127.0.0.1:8000',
@@ -144,7 +138,6 @@ describe('GlobalSettingsPage', () => {
       '模型定价',
       '实例设置',
       '外部服务连接',
-      'Skill 源管理',
       'Studio Agent 管理',
     ]) {
       expect(
