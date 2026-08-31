@@ -6,6 +6,8 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from server.app.agent_runtime.catalog import get_adapter
+from server.app.agent_runtime.execution import resolve_execution_chain, validate_execution_contract
 from server.app.workflows.pi_protocol import render_command_spec
 
 
@@ -44,14 +46,20 @@ def live_claim_manifest(row: Mapping[str, Any]) -> dict[str, Any]:
     # manifests only) -> the fully resolved execution frozen at enqueue.
     # Removing a node override therefore falls back to the workflow top-level
     # default (merged into the revision) or, when neither exists, to the
-    # frozen enqueue-time value.
-    manifest["execution"] = {
-        **frozen,
-        **{
-            key: node_execution.get(key) or defaults.get(key) or frozen.get(key) or ""
-            for key in ("provider", "model", "thinking")
-        },
-    }
+    # frozen enqueue-time value. The re-fetched key set is the runtime
+    # adapter's execution contract (EXEC-RUNTIME-DISPATCH-001), not a
+    # hardcoded list.
+    runtime = str(manifest.get("runtime") or row.get("runtime") or "")
+    contract_keys = tuple(get_adapter(runtime).execution.keys)
+    # Resolve every contract-governed key through the chain so validation
+    # also sees keys the runtime does NOT support: a revision upgrade that
+    # configures one (or loses the last source of a required key) fails fast
+    # here instead of silently shipping.
+    resolved = resolve_execution_chain(node_execution, defaults, frozen)
+    validate_execution_contract(node_key=str(row["node_key"]), runtime=runtime, values=resolved)
+    # Only contract keys are re-fetched into the shipped execution block;
+    # unsupported keys can only reach here empty (validation raised otherwise).
+    manifest["execution"] = {**frozen, **{key: resolved[key] for key in contract_keys}}
     manifest["additional_prompt"] = str(node_execution.get("prompt") or "")
     if all(key in manifest for key in ("tools", "inputs", "expected_outputs")):
         manifest["command_spec"] = render_command_spec(manifest)

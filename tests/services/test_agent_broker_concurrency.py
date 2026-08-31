@@ -456,6 +456,40 @@ def test_unclaimable_sweeper_fails_on_capability_mismatch(job_db) -> None:
     assert node["failure_detail"] == "unclaimable_model"
 
 
+def test_unclaimable_sweeper_fails_execution_contract_violation(job_db) -> None:
+    """EXEC-RUNTIME-DISPATCH-001：claim 契约重校验 fail-fast（必填键在
+    revision/defaults/冻结值三层都无来源）的请求由 sweeper 判失败，
+    错误信息给出契约违例原因，而不是静默挂在队列里。"""
+    execution_id = _seed_request(job_db, job_id="contract-violation-job")
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select manifest_json from agent_execution_requests where execution_id=%s",
+            (execution_id,),
+        ).fetchone()
+        manifest = json.loads(row["manifest_json"])
+        manifest["execution"]["provider"] = ""
+        conn.execute(
+            "update agent_execution_requests set manifest_json=%s where execution_id=%s",
+            (json.dumps(manifest), execution_id),
+        )
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_with_declarations(
+        registry,
+        "worker-1",
+        capabilities=["generate"],
+        models=[{"provider": "gateway", "model": "test-model"}],
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
+    assert fail_unclaimable_model_requests(broker) == [execution_id]
+
+    node = job_db.get_job_node("contract-violation-job", "generate")
+    assert node["status"] == "failed"
+    assert "execution contract violation" in node["error_message"]
+    assert "requires a provider" in node["error_message"]
+    assert _request_state(job_db, execution_id) == "done"
+
+
 def test_unclaimable_sweeper_without_workers_is_a_noop(job_db) -> None:
     """Zero registered Workers is a deployment gap, not a definition problem."""
     execution_id = _seed_request(job_db, job_id="no-worker-job")

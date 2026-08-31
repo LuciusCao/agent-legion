@@ -39,12 +39,7 @@ def evaluate_candidate(
     view: WorkerView,
     state: ScanState,
 ) -> AgentClaim | None:
-    """Try to claim one candidate; record the skip reason when it loses.
-
-    Returns the claim on success. On a skip, ``state.skip_reasons`` gains
-    exactly one entry naming the cause; skips past the compatibility filters
-    (row lock and beyond) also consume one bounded claim attempt.
-    """
+    """Try to claim one candidate; on a skip, record the cause in state.skip_reasons."""
     selected_workspace = str(selected["workspace_id"])
     if selected_workspace not in state.pause_cache:
         check = broker.is_workspace_paused
@@ -58,11 +53,18 @@ def evaluate_candidate(
     kind = str(selected["kind"])
     # Code manifests are fully frozen at enqueue: no revision-time execution
     # re-resolution (the payload carries no provider/model).
-    manifest = (
-        json.loads(str(selected["manifest_json"]))
-        if kind == "code"
-        else agent_claim_compatibility.live_claim_manifest(selected)
-    )
+    if kind == "code":
+        manifest = json.loads(str(selected["manifest_json"]))
+    else:
+        try:
+            manifest = agent_claim_compatibility.live_claim_manifest(selected)
+        except ValueError:
+            # Execution contract violation (EXEC-RUNTIME-DISPATCH-001): skip
+            # here and keep the request queued — the unclaimable sweeper
+            # fails it with the actionable message. Raising would 500 every
+            # claim poll and head-of-line block the agent queue.
+            state.skip_reasons["execution_contract_invalid"] += 1
+            return None
     # Workspace admission scope from the server-side registration snapshot
     # (EXEC-WORKERACL-001): [] means all workspaces; a non-empty list
     # restricts this Worker to those workspaces. Never trust Worker-

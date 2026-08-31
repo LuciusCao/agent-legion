@@ -856,19 +856,43 @@ invariants:
         gate: quick
 
   - id: EXEC-RUNTIME-DISPATCH-001
-    statement: "Agent command construction is pinned by AgentDefinition.runtime: pi builds the pi argv, velites builds the velites argv (the retired workflows.pi.flavor selection layer is gone); provider/model/thinking resolve strictly from the node execution override, then the workflow top-level execution default (merged into the node's effective execution at definition load — the workspace-level default retired at schema v63), else dispatch fails fast before any manifest is frozen; the provider identity is passed unchanged to the selected runtime, and unknown runtimes fail fast."
+    statement: "Agent command construction is pinned by AgentDefinition.runtime through the Host-side runtime catalog (server/app/agent_runtime): each runtime's adapter owns its argv builder and declares an ExecutionContract over the manifest execution keys (provider/model/thinking); provider/model/thinking resolve strictly from the node execution override, then the workflow top-level execution default (merged into the node's effective execution at definition load — the workspace-level default retired at schema v63), and a required key missing or a configured non-empty key the adapter does not support fails fast at dispatch before any manifest is frozen; claim re-resolution re-fetches the contract key set from the live revision and re-validates it, so an in-flight job upgraded to a revision that introduces an unsupported key or loses a required key gets an actionable failure instead of a silent ship (the claim scan skips the poisoned candidate and the unclaimable sweeper fails the request); the provider identity is passed unchanged to the selected runtime (openclaw folds it into the provider/model string its CLI expects), unknown or registered-but-unimplemented runtimes fail fast, and openclaw's one-shot --json result envelope is synthesized into the pi-compatible event subset worker-side (worker/openclaw_events.py) so log preview and failure detection stay runtime-neutral."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: contract
         target: tests/workflows/test_velites_command.py
         gate: quick
+      - kind: contract
+        target: tests/agent_runtime/test_execution_contracts.py
+        gate: quick
+      - kind: contract
+        target: tests/agent_runtime/test_openclaw_command.py
+        gate: quick
+      - kind: contract
+        target: tests/workers/test_openclaw_events.py
+        gate: quick
       - kind: integration
-        target: tests/services/test_agent_broker.py::test_dispatch_fails_fast_on_unsupported_runtime
+        target: tests/services/test_agent_claim_compatibility.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_broker.py::test_dispatch_openclaw_manifest_and_unknown_runtime_fails_fast
         gate: quick
       - kind: integration
         target: tests/full/test_velites_harness_e2e.py::test_velites_runtime_agent_worker_chain_end_to_end
         gate: full
+      - kind: integration
+        target: tests/full/test_openclaw_harness_e2e.py::test_openclaw_runtime_agent_worker_chain_end_to_end
+        gate: full
+
+  - id: EXEC-RUNTIME-CATALOG-001
+    statement: "The Host-side agent runtime set has a single source of truth: server/app/agent_runtime/catalog.AGENT_RUNTIMES. The three AgentDefinition.runtime Literal declarations (agent_catalog/definition.py, routes/agent_definition_contracts.py, routes/agent_catalog_contracts.py — kept literal to preserve the OpenAPI/frontend type surface), the Worker registration runtime whitelist (agent_control/registry.py), and the Worker-side runtime sets (worker/runtime/catalog.py SUPPORTED_RUNTIMES, worker/cli_args.py --disable-runtime choices) are pinned equal to the catalog by a static consistency test."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/agent_runtime/test_runtime_catalog.py
+        gate: quick
 
   # Rust-side registry parsing, credential resolution and CLI output are
   # covered by velites/tests/models_cli.rs; registry targets allow only tests//scripts/.

@@ -225,9 +225,14 @@
   （`workspace_id` 查询参数）管理，draft → published → archived 生命周期，
   版本不可变，灰度/回退走 publish/rollback），不再走 yaml——`agents:` 段与
   `workflows.pi` 块已退役，
-  出现在任何 split yaml 启动即报错（fail-fast 带迁移指引）。runtime 直接钉死
-  命令构建器与二进制（pi → pi argv，velites → velites argv；openclaw 未实现
-  即报错），没有 flavor 之类的实现选择层。pi 作为可选 runtime 长期保留
+  出现在任何 split yaml 启动即报错（fail-fast 带迁移指引）。runtime 经
+  `server/app/agent_runtime` catalog 的 adapter 钉死命令构建器与二进制
+  （pi → pi argv，velites → velites argv，openclaw → openclaw argv——一次性
+  `--json` 结果 envelope，Worker 侧 `worker/openclaw_events.py` 合成 pi
+  子集事件），runtime 全集的单一事实来源是 catalog 的 `AGENT_RUNTIMES`（三处
+  `AgentDefinition.runtime` Literal、Worker 注册白名单、Worker 侧 runtime
+  集合由 `tests/agent_runtime/test_runtime_catalog.py` 钉住全等），没有
+  flavor 之类的实现选择层。pi 作为可选 runtime 长期保留
   （不退役），新增 agent 按需要直接声明目标 runtime。Workflow 节点不感知
   runtime/harness 实现。Worker 的 runtime 声明由本机探测推导（issue #254）：
   读取配置时按二进制解析（自带副本 data/bin 优先、PATH 兜底）探测已安装的
@@ -243,7 +248,9 @@
   revision 版本化）→ 报错，无 workspace/yaml/全局兜底（workspace Settings 的
   `default_agent_*` 三列已随 schema v63 退役）；
   manifest 只携带解析后的 `execution.*` 块（enqueue 冻结 + claim 重解析，节点
-  覆盖随 revision 升级实时生效，EXEC-RUNTIME-DISPATCH-001）。一个 capability
+  覆盖随 revision 升级实时生效，EXEC-RUNTIME-DISPATCH-001）；解析结果按
+  runtime catalog adapter 声明的 `ExecutionContract` 校验（必填缺失或配置了
+  runtime 不支持的键 → dispatch/claim fail-fast）。一个 capability
   在每个 workspace 只允许一个 published Agent（DB partial unique index 兜底）。
   测试的 Agent 目录由 `tests/helpers.seed_workspace_agent_definitions` 按测试所属
   workspace 播种（API 创建并绑定 demo workflow 的 workspace 由

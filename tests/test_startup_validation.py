@@ -50,7 +50,7 @@ def test_enabled_workflows_accept_pi_command_from_path(tmp_path, monkeypatch):
     """kind:pi 本地 executor（死路径保留）要求 pi 二进制在 PATH 上。
 
     workflows.pi yaml 块已退役（agent 配置治理 phase 3；PiRuntimeConfig
-    已随死代码清理删除，pi 二进制由 dispatch 的 _RUNTIME_BINARIES 钉死）。
+    已随死代码清理删除，pi 二进制由 agent_runtime catalog 的 adapter 钉死）。
     """
     _make_executable(tmp_path / "pi")
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")

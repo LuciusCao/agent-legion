@@ -748,7 +748,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 ## Security Considerations
 
 - 节点代码执行统一在 `velites sandbox wrap` OS 沙箱（seatbelt / bubblewrap）内进行，网络默认拒绝，文件系统默认只放行 job_dir、`/tmp` 与显式 allow-list；沙箱后端不可用时执行 fail-closed（EXEC-CODE-003）。
-- OpenClaw runtime 当前未实现；如未来启用，其命令模板应来自 DB 实例设置文档（`/api/admin/instance-settings`，仅管理员可写），替换前经 null 字节剔除与 `shlex.quote` 清洗。
+- OpenClaw runtime 经 runtime catalog 的 adapter 接入（`server/app/agent_runtime/openclaw.py`，issue #75 阶段 3）：argv 由 Host 构建（`openclaw agent --local --json`），不含任何凭据；provider 凭据由 Worker 机器上的 openclaw 自身配置（auth profile / env）持有，不进 command_spec、不进日志。
 - PostgreSQL 与文件存储部署在受信网络内；业务 API 均需登录（cookie session 或 Bearer token，见 README 的「快速开始 / 登录」章节），uvicorn 默认绑定 127.0.0.1，启动脚本与 Makefile 均显式固定 `--host 127.0.0.1`。不要用 `--host 0.0.0.0` 把开发服务器暴露到局域网或任何不可信网络——暴露后任何通过鉴权的用户都可删除 job、下载产物、触发执行。
 - Workspace 凭证经 vault 加密落库（`workspace_secrets`，Fernet），API 永不返回明文，配置与 intake 快照只存 `secret_ref`；实例级外部服务连接凭据与鉴权 token 同样 Fernet 加密落 `instance_secrets` / `connection_tokens`（实例 vault），只在 dispatch 注入与连接探测时于内存解析；master key 走 env / 文件注入，不进 DB、不进日志（VAULT-SECRET-001）。
 - `data/` 已加入 `.gitignore`，禁止提交运行时数据或密钥。

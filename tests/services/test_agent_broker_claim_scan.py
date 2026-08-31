@@ -9,6 +9,7 @@ Regression tests for the 2026-08-01 queue deadlock (issue #13):
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -187,6 +188,40 @@ def test_empty_claim_with_blocked_queue_logs_skip_reasons(job_db, caplog) -> Non
     warnings = [record.getMessage() for record in caplog.records]
     assert any("blocked queue" in message for message in warnings)
     assert any("capability_or_model_mismatch" in message for message in warnings)
+
+
+def test_claim_skips_execution_contract_violation_and_keeps_queued(job_db, caplog) -> None:
+    """契约重校验 fail-fast（EXEC-RUNTIME-DISPATCH-001）：必填键不再可解析的
+    候选被跳过——claim 不 500、不头阻整个队列；请求保持 queued，由
+    unclaimable sweeper 判失败（见 test_agent_broker_concurrency.py）。"""
+    definition = _seed_definition()
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+    _insert_job_rows(job_db, job_id="job-contract")
+    assert _enqueue(broker, definition, job_id="job-contract", model=_GOOD_MODEL) is not None
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select manifest_json from agent_execution_requests where job_id=%s",
+            ("job-contract",),
+        ).fetchone()
+        manifest = json.loads(row["manifest_json"])
+        manifest["execution"]["provider"] = ""
+        conn.execute(
+            "update agent_execution_requests set manifest_json=%s where job_id=%s",
+            (json.dumps(manifest), "job-contract"),
+        )
+    _register_worker(models=[{"provider": "gateway", "model": _GOOD_MODEL}])
+
+    with caplog.at_level(logging.WARNING, logger="server.app.agent_broker.empty_diagnostics"):
+        assert broker.claim("worker-1") is None
+
+    warnings = [record.getMessage() for record in caplog.records]
+    assert any("execution_contract_invalid" in message for message in warnings)
+    with job_db._connect_read() as conn:
+        row = conn.execute(
+            "select state from agent_execution_requests where job_id=%s",
+            ("job-contract",),
+        ).fetchone()
+    assert row["state"] == "queued"
 
 
 def test_empty_claim_with_dry_queue_triggers_restock_without_warning(job_db, caplog) -> None:

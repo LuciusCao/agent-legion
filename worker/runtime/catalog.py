@@ -34,7 +34,7 @@ RUNTIME_CATALOG: dict[str, dict[str, Any]] = {
     },
     "openclaw": {
         "name": "OpenClaw",
-        "description": "外部 OpenClaw runtime（当前版本尚未开放任务派发）。",
+        "description": "外部 OpenClaw runtime；一次性 --json 结果由 Worker 合成 pi 子集事件。",
         "binaries": ("openclaw",),
         "install_hint": "安装 openclaw 到 PATH（或 data/bin/）后重启 Worker",
     },

@@ -237,14 +237,16 @@ bundles are stored secret-free. The Worker holds them in memory only, passes
 them to the sandboxed child via stdin, and scrubs them before any persistence;
 they never touch the Worker filesystem or logs.
 
-## 6. Migrating an Agent between runtimes (pi ↔ velites)
+## 6. Migrating an Agent between runtimes (pi ↔ velites ↔ openclaw)
 
 `pi`, `openclaw` and `velites` are peer runtimes declared per Agent definition.
 Definitions live in the `versioned_entities` table and are managed in Studio
 (「Agent 管理」) or via `/api/agent-definitions` — the yaml `agents:` section
 and the `workflows.pi` block are retired (their presence in yaml fails Host
 startup), and `workflows.pi.flavor` no longer exists: `AgentDefinition.runtime`
-pins the command builder directly (pi → pi argv, velites → velites argv).
+selects the adapter in the Host-side runtime catalog
+(`server/app/agent_runtime/`), which pins the command builder (pi → pi argv,
+velites → velites argv, openclaw → openclaw argv).
 Migrating one agent to velites — or rolling it back — is a single-field edit
 plus publish; no Host restart is required (the published-catalog cache has a
 ~5s TTL, and the claim path re-resolves per request). Facts to know before
@@ -281,10 +283,41 @@ flipping the field:
   a sandbox incident currently requires a code change, not a config flip.
 - **Execution defaults:** provider/model/thinking come from the workflow-level
   `execution:` default or per-node Studio overrides (strict chain, no
-  workspace/global fallback) — runtime migration never touches them.
+  workspace/global fallback) — runtime migration never touches them. Resolved
+  values are validated against the runtime adapter's execution contract:
+  a missing required key or a configured unsupported key fails fast at
+  dispatch and at claim re-resolution.
 
   > **Status note:** the runtime migration described above is complete; the
   > canary playbook is kept as operational context for future runtime changes.
+
+### 6.1 openclaw dispatch notes (issue #75 阶段 3)
+
+- **argv**: `openclaw agent --local --json --model <provider/model>
+  [--thinking <level>] --session-id <session> --timeout <s>
+  --message-file <prompt>`. `--local` runs the embedded one-shot agent — a
+  Worker has no Gateway dependency. `provider` folds into the model string
+  when present (openclaw model keys are `provider/model`); `thinking` and
+  `timeout` map to the same-named CLI flags.
+- **Event stream is synthesized, not native**: `--json` prints a one-shot
+  result envelope on stdout (no streaming events). After process exit the
+  Worker translates the envelope into the pi-compatible event subset
+  (`worker/openclaw_events.py`) so log preview and failure detection keep
+  working — token usage stays empty (the envelope carries none).
+- **Credentials live on the Worker machine**: openclaw resolves provider auth
+  from its own config/auth profiles (or shell env API keys in `--local`
+  mode). Nothing provider-secret ever enters the command spec or the bundle.
+- **Model discovery** uses `openclaw models list --json`; the registered
+  triples use the openclaw key form (`provider/model`), matching how the
+  adapter folds `provider/model` at dispatch.
+- **`openclaw.cwd` instance setting is unrelated to dispatch**: it is a
+  startup-validation-only remnant (the Host only checks the directory
+  exists). Agent runs always execute with `cwd=job_dir` on the Worker; the
+  setting schema is intentionally unchanged.
+- **Skill/tools/expected_outputs are not force-mapped**: the full prompt is
+  delivered via `--message-file` (paths inside are Worker-local after
+  placeholder substitution); declared outputs are enforced by the Host-side
+  artifact validation, not by a CLI flag.
 
 ## 7. Troubleshooting
 

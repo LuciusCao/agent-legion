@@ -8,6 +8,24 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ### Added
 - 架构盘点：workflow_key 退役 Phase 1 分类清单（`docs/architecture/workflow-key-retirement-inventory.md`，issue #211）——四类穷尽引用 + Phase 2-4 执行依据。
+- openclaw 作为第三个 agent runtime 接入（issue #75 阶段 3）：Host 侧
+  runtime catalog 的 openclaw adapter 构建 `openclaw agent --local --json`
+  argv（provider 拼成 `provider/model` 组合串，execution 契约 model 必填、
+  provider/thinking 可选）；其 stdout 为一次性结果 envelope，Worker 侧
+  `worker/openclaw_events.py` 在进程退出后合成 pi 兼容子集事件，日志预览
+  与失败检测保持 runtime 中立（token 计量为空——envelope 不携带 usage）。
+  Worker 经二进制探测自动声明 openclaw；模型发现走
+  `openclaw models list --json`。
+
+### Changed
+- Agent execution 契约 runtime 化（issue #75）：Host 侧 runtime catalog
+  （`server/app/agent_runtime`）的每个 adapter 声明自己支持的 manifest
+  execution 键（provider/model/thinking）与必填性；dispatch 与 Worker claim
+  重解析统一按契约校验——配置了 runtime 不支持的键（非空值）或必填键在
+  解析链上不再有来源时 fail-fast。**行为变化**：在飞 job 跨 revision 升级
+  后若节点引入了 runtime 不支持的 execution 键（或必填键不再可解析），
+  claim 从静默下发变为可行动报错（claim 扫描跳过该候选，unclaimable
+  sweeper 将请求判失败并给出指向节点 execution 覆盖的错误信息）。
 
 ## [0.4.0-alpha] - 2026-08-29
 

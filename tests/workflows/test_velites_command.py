@@ -7,13 +7,12 @@ from pathlib import Path
 import pytest
 
 from server.app.agent_broker.dispatch import resolve_execution_block
+from server.app.agent_runtime.catalog import get_adapter
 from server.app.workflows.pi_protocol import (
     PROMPT_INSTRUCTION,
-    build_command,
     render_command_spec,
 )
 from server.app.workflows.schema import WorkflowNode
-from server.app.workflows.velites_command import build_command_for_flavor
 
 MANIFEST = {
     "job_id": "job-1",
@@ -51,10 +50,10 @@ PI_ONLY_FLAGS = (
 
 
 def _dispatch(manifest: dict) -> list[str]:
-    return build_command_for_flavor(
+    runtime = str(manifest.get("runtime") or "").strip()
+    return get_adapter(runtime).build_command(
         manifest,
         prompt_instruction=PROMPT_INSTRUCTION,
-        pi_fallback=build_command,
         **KW,
     )
 
@@ -212,5 +211,7 @@ def test_resolve_execution_error_points_at_studio_and_top_level_defaults() -> No
 
 @pytest.mark.no_db
 def test_resolve_execution_fails_fast_on_unknown_runtime() -> None:
-    with pytest.raises(ValueError, match=r"supported runtimes: pi, velites"):
-        resolve_execution_block(_node(), "openclaw")
+    # openclaw 自阶段 3 接入可正常解析；真正未知的 runtime 仍 fail-fast。
+    assert resolve_execution_block(_node("p", "m"), "openclaw")["binary"] == "openclaw"
+    with pytest.raises(ValueError, match=r"unknown agent runtime 'rust'.*pi, openclaw, velites"):
+        resolve_execution_block(_node("p", "m"), "rust")
