@@ -11,7 +11,7 @@ LabelTarget = Literal["run", "replay"]
 LabelVerdict = Literal["good", "bad"]
 
 # #211: shared deprecation wording for the workflow_key request/response faces.
-_DEPRECATED_EQUALS = "Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211."
+_DEPRECATED_EQUALS = "Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211 (deprecated field drops by 2026-10-31)."
 
 
 class QualitySampleFilters(BaseModel):
@@ -31,7 +31,7 @@ class QualitySampleBatchCreateRequest(BaseModel):
         default=None,
         description=(
             "Deprecated: defaults to the workspace id from the path (equal "
-            "since schema v62). Removal is tracked in #211."
+            "since schema v62). Removal is tracked in #211 (deprecated field drops by 2026-10-31)."
         ),
         deprecated=True,
     )

@@ -106,7 +106,7 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
     # the path workspace_id when it is absent.
     _deprecated_path = (
         "Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema "
-        "v62); use /studio-agent/tools/workspaces/{id}/nodes/... — removal is tracked in #211."
+        "v62); use /studio-agent/tools/workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31)."
     )
 
     def _resolve_key(workspace_id: str, workflow_key: str | None) -> str:

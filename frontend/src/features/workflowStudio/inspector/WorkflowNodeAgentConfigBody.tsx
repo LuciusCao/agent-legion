@@ -2,6 +2,7 @@ import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { WorkflowNodeRecord } from '../../../types'
 import { WorkflowAgentDefinitionCard } from './WorkflowAgentDefinitionCard'
 import { WorkflowAgentExecutionDetails } from './WorkflowAgentExecutionDetails'
+import { WorkflowNodeSkillEditor } from './WorkflowNodeSkillEditor'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
 
 type Props = {
@@ -12,8 +13,9 @@ type Props = {
   readOnly?: boolean
 }
 
-// type=agent 节点的执行能力主体：有 published Agent 时给配置卡 + 执行细节；
-// 缺失时给指引（发布门禁要求恰好一个 published Agent，会显式报错）。
+// type=agent 节点的执行能力主体：有 published Agent 时给配置卡 + skill 绑定
+// （#76，节点级绑定优先于 Agent 定义兜底）+ 执行细节；缺失时给指引（发布门禁
+// 要求恰好一个 published Agent，会显式报错）。
 export function WorkflowNodeAgentConfigBody(props: Props) {
   if (!props.agentDefinition) {
     return (
@@ -25,6 +27,12 @@ export function WorkflowNodeAgentConfigBody(props: Props) {
   return (
     <>
       <WorkflowAgentDefinitionCard definition={props.agentDefinition} />
+      <WorkflowNodeSkillEditor
+        node={props.node}
+        definitionYaml={props.definitionYaml}
+        setDefinitionYaml={props.setDefinitionYaml}
+        readOnly={props.readOnly}
+      />
       <WorkflowAgentExecutionDetails
         node={props.node}
         runtime={props.agentDefinition.runtime}

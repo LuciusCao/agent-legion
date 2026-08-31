@@ -68,6 +68,8 @@ def _node_change_fields(base: WorkflowNode, draft: WorkflowNode) -> list[str]:
         fields.append("outputs")
     if base.execution != draft.execution:
         fields.append("execution")
+    if base.skill != draft.skill:
+        fields.append("skill")
     base_terminal = base.terminal.outcome if base.terminal else None
     draft_terminal = draft.terminal.outcome if draft.terminal else None
     if base_terminal != draft_terminal:
@@ -101,6 +103,11 @@ def _node_field_risks(base: WorkflowNode, draft: WorkflowNode) -> dict[str, str]
             risks["outputs"] = "info"
     if base.execution != draft.execution:
         risks["execution"] = "warning"
+    # Rebinding the skill content changes what the Agent runs (issue #76):
+    # structural like the DAG, but not a routing break — same tier as
+    # execution overrides.
+    if base.skill != draft.skill:
+        risks["skill"] = "warning"
 
     base_terminal = base.terminal.outcome if base.terminal else None
     draft_terminal = draft.terminal.outcome if draft.terminal else None

@@ -148,6 +148,10 @@ MIGRATIONS: list[SchemaMigration] = [
     # binding) — v62's rename left old keys on upgraded rows; the scan
     # predicates now key on workspace_id, so stored values must match.
     SchemaMigration(68, "jobs_workflow_key_alignment", migrate_jobs_workflow_key_alignment),
+    # v69 is DDL-only (#211 Phase 3 M1): the workspace-keyed lease-count
+    # index (claim path predicate binds workspace_id — Codex P2 on #321)
+    # comes from the schema-file replay.
+    SchemaMigration(69, "executor_leases_workspace_index"),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]

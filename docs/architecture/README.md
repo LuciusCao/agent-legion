@@ -29,7 +29,8 @@ data/  (videos, logs, packages, jobs, run traces)
 关键设计规则（由架构检查强制，见仓库根 [AGENTS.md](../../AGENTS.md) 与
 [workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md)）：
 
-- Workflow 节点只声明 `capability` —— agent/skill 接线在 Agent 定义里，code
+- Workflow 节点声明 `capability`（agent 路由节点另可声明 `skill` 内容绑定，
+  `key` + 可选 `ref`，#76）—— agent 接线在 Agent 定义里，code
   节点解析到已发布的 `node_code`。
 - Route 是薄 HTTP 适配层；业务逻辑在 service；executor 一律经 lease 申请容量。
 - 前端 transport 类型从后端 OpenAPI schema 生成

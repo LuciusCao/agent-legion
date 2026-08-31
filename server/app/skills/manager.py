@@ -7,14 +7,13 @@ import re
 import shutil
 import subprocess
 import threading
-import time
 from pathlib import Path
 from typing import Protocol
 
 from filelock import FileLock
 
 from server.app.skills.cache_state import cache_at_commit
-from server.app.skills.config import LockedSkillSource, SkillsConfig, SkillsLock, SkillSourceConfig
+from server.app.skills.config import LockedSkill, SkillsConfig, SkillsLock, SkillSourceConfig
 from server.app.skills.doc_cache import SkillDocCache
 from server.app.skills.errors import SkillConfigError, SkillPathError, SkillRepoError
 from server.app.skills.paths import default_skills_runs_dir, ensure_secure_runs_dir
@@ -67,24 +66,27 @@ class SkillManager:
         # object stores are append-only under this manager (clone/fetch add
         # objects, nothing prunes), so only positive results are memoized.
         self._known_commits: set[tuple[str, str]] = set()
-        # cache_dir -> (commit, monotonic time) of the last successful
-        # cleanliness probe (rev-parse + status). The probes are re-run once
-        # the entry ages past the doc-cache TTL: relocks already become
-        # visible within that TTL, and an outside dirtying is caught on the
-        # first probe after expiry — the same staleness class.
-        self._verified_clean: dict[str, tuple[str, float]] = {}
-        self._repo_state_ttl = doc_cache_ttl_seconds
 
-    def get_skill_dir(self, skill_key: str, execution_id: str) -> Path:
+    def get_skill_dir(self, skill_key: str, execution_id: str, ref: str | None = None) -> Path:
+        return self.checkout_skill(skill_key, execution_id, ref=ref)[0]
+
+    def checkout_skill(
+        self, skill_key: str, execution_id: str, ref: str | None = None
+    ) -> tuple[Path, str, str]:
+        # ``ref`` defaults to the declared source ref. Returns (run_dir,
+        # commit, version) where version is "ref@commit12" — formatted from
+        # the pinned (ref, commit) pair, not probed from the shared cache
+        # checkout, which oscillates between refs under multi-ref pinning.
         self._validate_execution_id(execution_id)
         workflow, capability = self._parse_skill_key(skill_key)
         cache_dir = self._resolve_cache_dir(workflow, capability)
         run_dir = self._resolve_run_dir(execution_id, workflow, capability)
         source = self._source_for(skill_key)
+        effective_ref = ref or source.ref
 
         cache_lock = self._cache_lock_for(cache_dir)
         with cache_lock:
-            self._ensure_cached(source, skill_key, cache_dir)
+            commit = self._ensure_cached(source, skill_key, cache_dir, effective_ref)
 
             if run_dir.exists():
                 shutil.rmtree(run_dir)
@@ -92,7 +94,7 @@ class SkillManager:
             # symlinked runs dir on a shared temp filesystem.
             ensure_secure_runs_dir(self.runs_dir)
             shutil.copytree(cache_dir, run_dir, ignore=shutil.ignore_patterns(".git"))
-        return run_dir
+        return run_dir, commit, f"{effective_ref}@{commit[:12]}"
 
     def cleanup_execution(self, execution_id: str) -> None:
         self._validate_execution_id(execution_id)
@@ -170,7 +172,8 @@ class SkillManager:
         source: SkillSourceConfig,
         skill_key: str,
         cache_dir: Path,
-    ) -> None:
+        ref: str,
+    ) -> str:
         repo = self._normalize_repo(source.repo)
         in_place = self._is_in_place_source(repo, cache_dir)
         if not cache_dir.exists():
@@ -182,7 +185,6 @@ class SkillManager:
             # commits detached from any ref), so drop the memoized presence
             # checks for this cache dir.
             self._known_commits = {k for k in self._known_commits if k[0] != str(cache_dir)}
-            self._verified_clean.pop(str(cache_dir), None)
         elif not (cache_dir / ".git").is_dir():
             raise SkillRepoError(f"cache dir exists but is not a git repo: {cache_dir}")
 
@@ -190,13 +192,16 @@ class SkillManager:
             lock = self._load_lock()
             locked = lock.skills.get(skill_key)
 
-        if locked is not None and locked.commit:
-            if locked.repo != source.repo or locked.ref != source.ref:
-                raise SkillConfigError(
-                    f"skill {skill_key!r} config differs from the published skill lock; "
-                    "refresh the lock"
-                )
-            commit = locked.commit
+        # The repo gate survives multi-ref pinning (issue #76): a repo move
+        # still invalidates every pinned ref, while a ref drift simply means
+        # the new ref is not frozen yet — it auto-locks below.
+        if locked is not None and locked.repo != source.repo:
+            raise SkillConfigError(
+                f"skill {skill_key!r} config differs from the published skill lock; "
+                "refresh the lock"
+            )
+        commit = locked.refs.get(ref) if locked is not None else None
+        if commit:
             if not self._has_commit(cache_dir, commit):
                 if in_place:
                     raise SkillRepoError(
@@ -206,7 +211,7 @@ class SkillManager:
                 fetched_commit = self._rev_parse(cache_dir, "FETCH_HEAD")
                 commit = fetched_commit
         else:
-            commit = self._resolve_source_ref(cache_dir, source.ref, in_place=in_place)
+            commit = self._resolve_source_ref(cache_dir, ref, in_place=in_place)
             with self._lock_write_lock:
                 # Read-modify-write must build on a fresh read, not the cached
                 # doc: a stale base could drop entries written by the admin
@@ -214,26 +219,23 @@ class SkillManager:
                 lock = self._store.get_lock() or SkillsLock()
                 current = lock.skills.get(skill_key)
                 if current is None:
-                    lock.skills[skill_key] = LockedSkillSource(
-                        repo=source.repo,
-                        ref=source.ref,
-                        commit=commit,
-                    )
+                    current = LockedSkill(repo=source.repo)
+                    lock.skills[skill_key] = current
+                if current.repo == source.repo and ref not in current.refs:
+                    current.refs[ref] = commit
                     self._write_lock_unlocked(lock)
 
-        # Read-only fast path (issue #42). The rev-parse/status probes are
-        # memoized per cache dir for the doc-cache TTL (see __init__); a
-        # commit change always misses the memo and re-probes. Within the TTL
-        # window a relock+checkout by another process is invisible here, so
-        # the cache content may briefly diverge from the commit this process
-        # believes is checked out; the expiry re-probe self-heals.
-        verified = self._verified_clean.get(str(cache_dir), ("", 0.0))
-        now = time.monotonic()
-        if verified[0] != commit or now - verified[1] >= self._repo_state_ttl:
-            if not cache_at_commit(self._run_git, cache_dir, commit):
-                self._run_git(["-C", str(cache_dir), "checkout", commit, "-f"])
-                self._run_git(["-C", str(cache_dir), "clean", "-fd"])
-            self._verified_clean[str(cache_dir)] = (commit, now)
+        # Always re-probe under the cache lock (correctness over the old
+        # per-instance memo, retired after codex P1 on PR 317): a memoized
+        # (commit, t) entry could skip this probe while another manager
+        # instance had already switched the shared cache to a different ref —
+        # the run dir would then silently get the other ref's content while
+        # being recorded as this ref@commit. Two git probes per dispatch are
+        # the accepted cost; cache_at_commit short-circuits on a clean match.
+        if not cache_at_commit(self._run_git, cache_dir, commit):
+            self._run_git(["-C", str(cache_dir), "checkout", commit, "-f"])
+            self._run_git(["-C", str(cache_dir), "clean", "-fd"])
+        return commit
 
     def _resolve_source_ref(self, cache_dir: Path, ref: str, *, in_place: bool) -> str:
         if in_place:

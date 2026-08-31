@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from server.app.skills.config import LockedSkillSource
+from server.app.skills.config import LockedSkill, SkillSourceConfig
 from server.app.skills.lock import main, refresh_lock
 from tests.helpers.skill_store import memory_skill_store
 
@@ -12,10 +12,9 @@ def test_refresh_lock_passes_resolved_sources_to_write(tmp_path: Path) -> None:
     base_dir = tmp_path / "skills"
     store = memory_skill_store({"wf/cap": {"repo": "https://example.com/skill.git", "ref": "main"}})
 
-    mock_source = LockedSkillSource(
+    mock_source = LockedSkill(
         repo="https://example.com/skill.git",
-        ref="main",
-        commit="abc123",
+        refs={"main": "abc123"},
     )
 
     with (
@@ -23,7 +22,9 @@ def test_refresh_lock_passes_resolved_sources_to_write(tmp_path: Path) -> None:
         patch("server.app.skills.lock.refresh_source", return_value=mock_source),
     ):
         manager = MagicMock()
-        manager._load_config.return_value.skills = {"wf/cap": MagicMock()}
+        manager._load_config.return_value.skills = {
+            "wf/cap": SkillSourceConfig(repo="https://example.com/skill.git", ref="main")
+        }
         manager._parse_skill_key.return_value = ("wf", "cap")
         manager._resolve_cache_dir.return_value = tmp_path / "cache"
         mock_manager_cls.return_value = manager
@@ -32,7 +33,7 @@ def test_refresh_lock_passes_resolved_sources_to_write(tmp_path: Path) -> None:
 
     manager._write_lock_unlocked.assert_called_once()
     written_lock = manager._write_lock_unlocked.call_args[0][0]
-    assert written_lock.skills["wf/cap"].commit == "abc123"
+    assert written_lock.skills["wf/cap"].refs == {"main": "abc123"}
 
 
 def test_main_invokes_refresh_lock(tmp_path: Path, monkeypatch) -> None:

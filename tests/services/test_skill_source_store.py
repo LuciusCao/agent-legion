@@ -80,7 +80,7 @@ def test_seed_imports_legacy_files_once(tmp_path: Path, caplog) -> None:
     assert sources.skills["wf/cap"].ref == "v9"
     lock = store.get_lock()
     assert lock is not None
-    assert lock.skills["wf/cap"].commit == "deadbeef"
+    assert lock.skills["wf/cap"].refs == {"v9": "deadbeef"}
     assert "never read again" in caplog.text
 
 
@@ -183,7 +183,7 @@ def test_migration_mixed_old_and_new_only_rewrites_legacy() -> None:
     lock = store.get_lock()
     assert lock is not None
     assert set(lock.skills) == {"wf/new"}
-    assert lock.skills["wf/new"].commit == "def456"
+    assert lock.skills["wf/new"].refs == {"v2": "def456"}
 
 
 def test_migration_noop_without_legacy_prefix(caplog) -> None:

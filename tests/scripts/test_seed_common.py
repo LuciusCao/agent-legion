@@ -91,7 +91,14 @@ def make_seed() -> dict:
         ],
         "skills": {
             "sources": {"acme/summarize": {"repo": "/opt/acme/skills", "ref": "v1.0.0"}},
-            "lock": {"skills": {"acme/summarize": {"commit": "a" * 40}}},
+            "lock": {
+                "skills": {
+                    "acme/summarize": {
+                        "repo": "/opt/acme/skills",
+                        "refs": {"v1.0.0": "a" * 40},
+                    }
+                }
+            },
         },
     }
 
@@ -167,6 +174,22 @@ class TestValidateSeed:
     def test_rejects_bad_lock_commit(self):
         seed = make_seed()
         seed["skills"]["lock"]["skills"]["acme/summarize"] = {"commit": "notasha"}
+        problems = validate_seed(seed)
+        assert any("40-hex sha" in problem for problem in problems)
+
+    def test_accepts_legacy_v1_lock_shape(self):
+        """v1 lock entries ({repo, ref, commit}) upgrade on read (issue #76)."""
+        seed = make_seed()
+        seed["skills"]["lock"]["skills"]["acme/summarize"] = {
+            "repo": "/opt/acme/skills",
+            "ref": "v1.0.0",
+            "commit": "a" * 40,
+        }
+        assert validate_seed(seed) == []
+
+    def test_rejects_bad_lock_commit_in_refs(self):
+        seed = make_seed()
+        seed["skills"]["lock"]["skills"]["acme/summarize"]["refs"]["v2.0.0"] = "notasha"
         problems = validate_seed(seed)
         assert any("40-hex sha" in problem for problem in problems)
 

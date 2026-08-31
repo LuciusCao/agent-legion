@@ -38,7 +38,8 @@ def test_agent_routes_returns_materialized_routes(client: TestClient) -> None:
     assert entry["workflow_key"] == "education_video_problems_generation"
     assert entry["agent_id"] == "example-write-script-v1"
     assert entry["capability"] == "write_script"
-    assert entry["agent_skill"] == "education-video-problems-generation/write-script"
+    # issue #76: skill 绑定迁到 DAG 节点，Agent 定义的 legacy 兜底为空。
+    assert entry["agent_skill"] == ""
     assert entry["node_label"]
 
 

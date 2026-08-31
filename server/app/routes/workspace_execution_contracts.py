@@ -3,10 +3,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from server.app.routes.workspace_contracts import WorkspaceRecord
 
 # #211 Phase 2 deprecation wordings (v62 is the binding schema).
-_DEP_READ = "Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211."
-_DEPRECATED_KEY = (
-    "Deprecated: equals the workspace id since schema v62; removal is tracked in #211."
-)
+_DEP_READ = "Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31)."
+_DEPRECATED_KEY = "Deprecated: equals the workspace id since schema v62; removal is tracked in #211 (deprecated field drops by 2026-10-31)."
 
 
 class NodeLimitRequest(BaseModel):

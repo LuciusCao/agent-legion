@@ -114,7 +114,7 @@ def test_start_with_conditional_outgoing_edge_is_rejected() -> None:
 
 @pytest.mark.parametrize(
     "field",
-    ["capability", "execution", "shard", "reduce", "terminal", "config", "config_schema"],
+    ["capability", "execution", "shard", "reduce", "terminal", "config", "config_schema", "skill"],
 )
 def test_start_must_not_declare_execution_fields(field: str) -> None:
     value: Any = (

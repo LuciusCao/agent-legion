@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from server.app.skills.config import LockedSkillSource, SkillSourceConfig
+from server.app.skills.config import LockedSkill, SkillSourceConfig
 from server.app.skills.errors import SkillRepoError
 from server.app.skills.manager import SkillManager
 
@@ -21,7 +21,7 @@ def refresh_source(
     skill_key: str,
     source: SkillSourceConfig,
     cache_dir: Path,
-) -> LockedSkillSource:
+) -> LockedSkill:
     """Fetch and check out the source ref in ``cache_dir``; return the pin."""
     repo = manager._normalize_repo(source.repo)
     in_place = manager._is_in_place_source(repo, cache_dir)
@@ -45,4 +45,14 @@ def refresh_source(
     manager._run_git(["-C", str(cache_dir), "checkout", commit, "-f"])
     manager._run_git(["-C", str(cache_dir), "clean", "-fd"])
     logger.info("Refreshed Pi skill %s to %s", skill_key, commit)
-    return LockedSkillSource(repo=source.repo, ref=source.ref, commit=commit)
+    return LockedSkill(repo=source.repo, refs={source.ref: commit})
+
+
+def resolve_ref_commit(
+    manager: SkillManager, source: SkillSourceConfig, cache_dir: Path, ref: str
+) -> str:
+    # Relock merge (issue #76): resolve one already-pinned ref without moving
+    # the checkout off the source ref.
+    repo = manager._normalize_repo(source.repo)
+    in_place = manager._is_in_place_source(repo, cache_dir)
+    return manager._resolve_source_ref(cache_dir, ref, in_place=in_place)

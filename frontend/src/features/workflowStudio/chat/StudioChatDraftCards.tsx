@@ -96,10 +96,7 @@ export function AgentDefinitionDraftCard({
   draft: AgentDefinitionDraftView
 }) {
   const nav = useStudioNav()
-  const meta = [
-    draft.skill ? `skill: ${draft.skill}` : null,
-    draft.runtime ? `runtime: ${draft.runtime}` : null,
-  ]
+  const meta = [draft.runtime ? `runtime: ${draft.runtime}` : null]
     .filter(Boolean)
     .join(' · ')
   return (

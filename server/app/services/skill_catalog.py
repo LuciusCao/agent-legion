@@ -25,9 +25,12 @@ class SkillCatalogService:
         if source is None:
             return {}
         locked = self._lock().skills.get(skill_key)
+        # Multi-ref lock (issue #76): the metadata commit is the pin for the
+        # declared source ref ("" when that ref is not frozen).
+        commit = locked.refs.get(source.ref, "") if locked is not None else ""
         return {
             "skill_ref": source.ref,
-            "skill_commit": locked.commit if locked is not None else "",
+            "skill_commit": commit,
         }
 
     def detail(self, skill_key: str, ref: str | None = None) -> dict[str, Any]:

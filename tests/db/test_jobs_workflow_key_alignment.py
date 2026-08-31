@@ -181,13 +181,17 @@ def test_migration_is_idempotent(fresh_db) -> None:
 
 
 def test_upgrade_path_applies_alignment(tmp_path: Path) -> None:
-    """An upgraded database records v68 in schema_migrations."""
+    """Upgraded databases record every alignment-era version (v68 data
+    migration, v69 lease index); the pin anchors the registry tail."""
     with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute(
+        row = conn.execute("select name from schema_migrations where version=68").fetchone()
+        tail = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
     assert str(row["name"]) == "jobs_workflow_key_alignment"
+    assert tail is not None
+    assert str(tail["name"]) == "executor_leases_workspace_index"
 
 
 def test_aligned_entity_history_is_preserved(fresh_db) -> None:

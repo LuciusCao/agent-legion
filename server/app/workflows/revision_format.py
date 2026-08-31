@@ -9,6 +9,7 @@ from typing import Any, cast
 import yaml
 
 from server.app.workflows.definition import WorkflowDefinition, workflow_definition_from_dict
+from server.app.workflows.workflow_node_skill import apply_skill_echo
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
                 "inputs": node.inputs,
                 "outputs": node.outputs,
                 "execution": asdict(node.execution),
+                "skill": asdict(node.skill) if node.skill is not None else None,
                 "config": node.config,
                 "terminal": (
                     {"outcome": node.terminal.outcome} if node.terminal is not None else None
@@ -127,19 +129,13 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
     payload["edges"] = []
     for key, node in definition.nodes.items():
         raw_node: dict[str, Any] = {"label": node.label}
+        # The explicit type must round-trip — dropping it would normalize an
+        # Agent node back to code on the next load. start/approval declare no
+        # capability; start carries the entry contract instead (D1).
+        raw_node["type"] = node.node_type
         if node.node_type == "start":
-            # Start nodes carry the entry contract, never a capability (D1).
-            raw_node["type"] = "start"
             raw_node["accepted_item_types"] = list(node.accepted_item_types)
-        elif node.node_type == "approval":
-            # Approval gates declare no capability (EXEC-APPROVAL-001), but
-            # the type must round-trip or the echo would reload them as code.
-            raw_node["type"] = "approval"
-        else:
-            # Explicit execution type (code|agent): the echo stays the draft
-            # source for Studio, so the type must round-trip — dropping it
-            # would normalize an Agent node back to code on the next load.
-            raw_node["type"] = node.node_type
+        if node.node_type not in ("start", "approval"):
             raw_node["capability"] = node.capability
         raw_node["after"] = node.after
         raw_node["inputs"] = node.inputs
@@ -161,6 +157,7 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
             raw_node["config"] = node.config
         if node.config_schema:
             raw_node["config_schema"] = node.config_schema
+        apply_skill_echo(raw_node, node)
         payload["nodes"][key] = raw_node
     for edge in definition.edges:
         raw_edge: dict[str, Any] = {"from": edge.source, "to": edge.target}

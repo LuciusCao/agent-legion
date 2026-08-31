@@ -26,6 +26,7 @@ from server.app.workflows.validator import _validate_acyclic
 from server.app.workflows.workflow_execution_defaults import apply_workflow_execution
 from server.app.workflows.workflow_intake import load_intake
 from server.app.workflows.workflow_node_execution import load_node_execution
+from server.app.workflows.workflow_node_skill import load_node_skill
 
 
 def _string_list(value: Any, field_name: str, node_key: str) -> list[str]:
@@ -217,6 +218,7 @@ def _load_nodes(
             execution=load_node_execution(raw_node, node_key),
             config=dict(raw_config),
             config_schema=load_node_config_schema(raw_node, node_key),
+            skill=load_node_skill(raw_node, node_key),
             shard=_load_shard(raw_node, node_key, inputs),
             reduce=_load_reduce(raw_node, node_key),
             node_type=node_type,

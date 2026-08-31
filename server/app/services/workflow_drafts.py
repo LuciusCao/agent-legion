@@ -10,6 +10,7 @@ from server.app.workflows.definition import (
     WorkflowDefinitionError,
     workflow_definition_from_mapping,
 )
+from server.app.workflows.workflow_node_skill import node_skill_publish_error
 
 
 def workflow_definition_from_yaml_string(raw_yaml: str) -> WorkflowDefinition:
@@ -48,22 +49,28 @@ def validate_workflow_for_publish(
     Start nodes carry no capability and never execute
     (EXEC-WORKFLOW-START-001), and approval gates never dispatch — the
     worker parks them for a human decision (EXEC-APPROVAL-001) — so both
-    skip the checks.
+    skip the checks; the #76 skill gate lives in ``node_skill_publish_error``.
     """
     errors: list[str] = []
-    capability_counts: dict[str, int] = {}
+    agents_by_capability: dict[str, list] = {}
     for agent_definition in published_agent_definitions(job_db, workspace_id).values():
-        capability_counts[agent_definition.capability] = (
-            capability_counts.get(agent_definition.capability, 0) + 1
-        )
+        agents_by_capability.setdefault(agent_definition.capability, []).append(agent_definition)
     for node in definition.executable_nodes.values():
         if node.node_type == "approval":
             continue
-        if node.node_type == "agent":
-            if capability_counts.get(node.capability, 0) != 1:
-                errors.append(
-                    f"Agent capability {node.capability} must resolve to exactly one published Agent"
-                )
+        is_agent = node.node_type == "agent"
+        candidates = agents_by_capability.get(node.capability, [])
+        if is_agent and len(candidates) != 1:
+            errors.append(
+                f"Agent capability {node.capability} must resolve to exactly one published Agent"
+            )
+        # code 节点传 None：skill 绑定无意义，声明即拒绝；agent 节点的兜底取
+        # 恰好一个 published Agent 的 skill（节点绑定优先）。
+        agent_skill = candidates[0].skill if is_agent and len(candidates) == 1 else None
+        skill_error = node_skill_publish_error(node, agent_skill)
+        if skill_error is not None:
+            errors.append(skill_error)
+        if is_agent:
             continue
         node_code = resolve_dispatch_node_code(
             job_db,

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pytest
 
+from server.app.agent_catalog import AgentDefinition
+from server.app.services.agent_service import AgentService
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.node_prompt_preview import preview_node_prompt, save_node_prompt
 from tests.helpers import publish_builtin_revision
@@ -24,10 +26,47 @@ nodes:
     label: 撰写脚本
     type: agent
     capability: write_script
+    skill: education-video-problems-generation/write-script
     inputs: [knowledge_point.json]
     outputs: [script.md]
     execution:
       prompt: Follow the house style.
+"""
+
+_DRAFT_YAML_NO_SKILL = """
+key: draft_flow
+label: Draft Flow
+nodes:
+  write_script:
+    label: 撰写脚本
+    capability: write_script
+    inputs: [knowledge_point.json]
+    outputs: [script.md]
+    execution:
+      prompt: Follow the house style.
+"""
+
+_CUSTOM_NODE_YAML = """
+key: draft_flow
+label: Draft Flow
+nodes:
+  custom_node:
+    label: Custom
+    type: agent
+    capability: custom_cap
+    outputs: [out.json]
+"""
+
+_CUSTOM_NODE_SKILL_YAML = """
+key: draft_flow
+label: Draft Flow
+nodes:
+  custom_node:
+    label: Custom
+    type: agent
+    capability: custom_cap
+    skill: node-bound/skill
+    outputs: [out.json]
 """
 
 
@@ -37,6 +76,20 @@ def _workspace(job_db, name: str) -> str:
     return str(workspace["id"])
 
 
+def _workspace_with_agent_skill(job_db, name: str) -> str:
+    """Workspace whose published Agent for ``custom_cap`` carries a legacy skill."""
+    workspace = job_db.create_workspace(name, default_workflow_key="wf")
+    workspace_id = str(workspace["id"])
+    service = AgentService(job_db.dsn_identity, workspace_id)
+    service.save_draft(
+        "custom-agent-v1",
+        AgentDefinition(capability="custom_cap", runtime="velites", skill="agent/legacy-skill"),
+        created_by="test",
+    )
+    service.publish("custom-agent-v1")
+    return workspace_id
+
+
 def test_preview_active_revision_defaults(job_db) -> None:
     workspace_id = _workspace(job_db, "ws-prompt-default")
 
@@ -44,7 +97,8 @@ def test_preview_active_revision_defaults(job_db) -> None:
 
     assert payload["is_default"] is True
     assert payload["custom_instructions"] == ""
-    # publish_builtin_revision 种子 demo Agent：capability → skill 解析成功。
+    # publish_builtin_revision 种子 demo Agent 与 demo DAG：write_script 节点
+    # 自带 skill 绑定（#76，节点优先于 Agent 定义）。
     assert payload["skill_key"] == _DEMO_SKILL
     assert "撰写教学视频脚本" in payload["default_instructions"]
     assert f"`{_DEMO_SKILL}`" in payload["default_instructions"]
@@ -68,15 +122,31 @@ def test_preview_definition_yaml_override_with_custom_prompt(job_db) -> None:
     assert "Node instructions:\nFollow the house style." in payload["effective_prompt"]
     assert payload["default_instructions"] not in payload["effective_prompt"]
     assert "Job ID: <job_id>" in payload["effective_prompt"]
-    # skill 仍按 workspace 的 published Agent 解析（与 definition_yaml 无关）。
+    # 草稿节点自带 skill 绑定时优先于 Agent 定义（与 definition_yaml 同行）。
     assert payload["skill_key"] == _DEMO_SKILL
+
+
+def test_preview_prefers_the_node_skill_binding(job_db) -> None:
+    workspace_id = _workspace_with_agent_skill(job_db, "ws-prompt-node-skill")
+
+    payload = preview_node_prompt(job_db, workspace_id, "custom_node", _CUSTOM_NODE_SKILL_YAML)
+
+    assert payload["skill_key"] == "node-bound/skill"
+
+
+def test_preview_falls_back_to_the_agent_definition_skill(job_db) -> None:
+    workspace_id = _workspace_with_agent_skill(job_db, "ws-prompt-agent-skill")
+
+    payload = preview_node_prompt(job_db, workspace_id, "custom_node", _CUSTOM_NODE_YAML)
+
+    assert payload["skill_key"] == "agent/legacy-skill"
 
 
 def test_preview_unbound_capability_has_no_skill_key(job_db) -> None:
     workspace = job_db.create_workspace("ws-prompt-unbound", default_workflow_key="wf")
     del workspace  # 只需 workspace 行存在；definition_yaml 显式给出定义。
 
-    payload = preview_node_prompt(job_db, "ws-prompt-unbound", "write_script", _DRAFT_YAML)
+    payload = preview_node_prompt(job_db, "ws-prompt-unbound", "write_script", _DRAFT_YAML_NO_SKILL)
 
     assert payload["skill_key"] is None
     assert "loaded node skill" in payload["default_instructions"]

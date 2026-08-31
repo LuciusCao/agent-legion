@@ -215,3 +215,47 @@ def test_relock_resolves_local_repos(client, tmp_path, monkeypatch) -> None:
     assert entry["ref"] == "v9.9.9"
     assert entry["locked_commit"] == new_commit
     assert entry["resolved_at"]
+
+
+def test_switching_back_to_a_still_pinned_ref_is_not_stale(client, tmp_path, monkeypatch) -> None:
+    """Multi-ref lock (issue #76): relock keeps every pinned ref, so moving
+    the source ref back and forth between already-locked refs never goes
+    stale — only a never-frozen ref (or a repo change) does."""
+    fake_home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(fake_home))
+    _seed_local_repos(fake_home)
+    source = BUILTIN_SKILL_SOURCES.skills[KEY]
+    original_commit = _git(
+        fake_home / ".agents" / "skills" / KEY, "rev-parse", f"{source.ref}^{{commit}}"
+    )
+
+    response = client.post(RELOCK_URL)
+    assert response.status_code == 200, response.text
+    entry = next(item for item in response.json()["skills"] if item["key"] == KEY)
+    assert entry["stale"] is False
+    assert entry["locked_commit"] == original_commit
+
+    repo = fake_home / ".agents" / "skills" / KEY
+    (repo / "SKILL.md").write_text("# updated\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "update", "--no-gpg-sign")
+    _git(repo, "tag", "v9.9.9")
+    new_commit = _git(repo, "rev-parse", "v9.9.9^{}")
+
+    response = client.put(f"{SKILL_SOURCES_URL}/{KEY}", json={"repo": source.repo, "ref": "v9.9.9"})
+    assert next(item for item in response.json()["skills"] if item["key"] == KEY)["stale"] is True
+
+    response = client.post(RELOCK_URL)
+    assert response.status_code == 200, response.text
+    entry = next(item for item in response.json()["skills"] if item["key"] == KEY)
+    assert entry["stale"] is False
+    assert entry["locked_commit"] == new_commit
+
+    # The original ref is still pinned from the first relock: switching back
+    # is immediately fresh, without another relock.
+    response = client.put(
+        f"{SKILL_SOURCES_URL}/{KEY}", json={"repo": source.repo, "ref": source.ref}
+    )
+    entry = next(item for item in response.json()["skills"] if item["key"] == KEY)
+    assert entry["stale"] is False
+    assert entry["locked_commit"] == original_commit

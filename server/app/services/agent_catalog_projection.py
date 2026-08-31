@@ -34,7 +34,8 @@ def agent_catalog(
             {
                 "id": agent_id,
                 **definition.model_dump(mode="json"),
-                **skills.metadata(definition.skill),
+                # skill-less definitions (#76) get no lock metadata injection.
+                **(skills.metadata(definition.skill) if definition.skill else {}),
             }
             for agent_id, definition in sorted(agent_definitions.items())
         ],

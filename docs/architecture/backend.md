@@ -524,6 +524,7 @@ server/app/
 | WorkflowNodeCodeArchiveResponse | BaseModel | archived: int | app/routes/workflow_node_code_contracts.py |
 | WorkflowTerminalResponse | BaseModel | outcome: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeExecutionResponse | BaseModel | provider: str, model: str, thinking: str, prompt: str | app/routes/workflow_node_contracts.py |
+| WorkflowNodeSkillResponse | BaseModel | key: str, ref: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeResponse | BaseModel | key: str, label: str, capability: str, node_type: str, accepted_item_types: l... | app/routes/workflow_node_contracts.py |
 | NodePromptPreviewRequest | BaseModel | node_key: str, definition_yaml: str | None | app/routes/workflow_node_prompt_contracts.py |
 | NodePromptPreviewResponse | BaseModel | effective_prompt: str, default_instructions: str, custom_instructions: str, i... | app/routes/workflow_node_prompt_contracts.py |
@@ -558,8 +559,8 @@ server/app/
 | JobPackageResult | TypedDict | results: list[JobPackageItemResult], succeeded_count: int, failed_count: int,... | app/services/workspace_package_contracts.py |
 | SkillSourceConfig | BaseModel | repo: str, ref: str | app/skills/config.py |
 | SkillsConfig | BaseModel | skills: dict[str, SkillSourceConfig] | app/skills/config.py |
-| LockedSkillSource | BaseModel | repo: str, ref: str, commit: str | app/skills/config.py |
-| SkillsLock | BaseModel | version: str, resolved_at: str | None, skills: dict[str, LockedSkillSource] | app/skills/config.py |
+| LockedSkill | BaseModel | repo: str, refs: dict[str, str] | app/skills/config.py |
+| SkillsLock | BaseModel | version: str, resolved_at: str | None, skills: dict[str, LockedSkill] | app/skills/config.py |
 
 <!-- END AUTO-GENERATED -->
 
