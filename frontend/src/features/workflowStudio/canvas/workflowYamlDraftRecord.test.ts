@@ -81,7 +81,7 @@ describe('workflowYamlToDefinitionRecord', () => {
       after: ['_start'],
       inputs: ['question'],
       outputs: ['questions.json'],
-      skill: { key: 'group/fetcher', ref: '' },
+      skill: { key: 'group/fetcher', ref: 'latest' },
       execution: { provider: 'pi', model: 'gpt-5', thinking: '', prompt: '' },
     })
     expect(nodes.review).toMatchObject({
