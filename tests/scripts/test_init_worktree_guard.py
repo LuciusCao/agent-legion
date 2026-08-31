@@ -141,17 +141,18 @@ def test_main_repo_root_exits_without_side_effects(tmp_path: Path) -> None:
 
 
 def test_worker_config_seeded_from_base_with_rewritten_identity(tmp_path: Path) -> None:
-    """缺失的 config/agent-worker.yaml 从基准复制并改写本实例字段。"""
+    """缺失的 worker 状态副本从基准的状态副本复制并改写本实例字段（#323）。"""
     main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
     develop = main / ".worktrees/develop"
     develop.mkdir(parents=True)
     (develop / ".env").write_text("# stub env\n")
-    (develop / "config").mkdir()
-    (develop / "config" / "agent-worker.yaml").write_text(
+    base_state = develop / "data/agent-worker-service"
+    base_state.mkdir(parents=True)
+    (base_state / "worker.yaml").write_text(
         "host_url: http://127.0.0.1:8000\n"
         "worker_id: base-worker\n"
         "name: Base Worker\n"
-        "runtimes: [velites]\n"
+        "disabled_runtimes: [pi]\n"
         "register_token_file: /run/secrets/agent_worker_register_token\n",
         encoding="utf-8",
     )
@@ -159,15 +160,16 @@ def test_worker_config_seeded_from_base_with_rewritten_identity(tmp_path: Path) 
     result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
 
     assert result.returncode == 0, result.stderr
-    worktree = main / ".worktrees/flat"
-    config = (worktree / "config/agent-worker.yaml").read_text()
+    state_copy = main / ".worktrees/flat/data/agent-worker-service/worker.yaml"
+    config = state_copy.read_text()
     assert "host_url: http://127.0.0.1:8001" in config
     assert "worker_id: flat" in config
     assert "name: flat (worktree)" in config
-    assert "runtimes: [velites]" in config
-    # issue #35：token 不再经配置文件注入（原容器路径行保留原样，注册走
-    # worker 控制台粘贴 scoped token）。
-    assert "register_token_file: /run/secrets/agent_worker_register_token" in config
+    assert "disabled_runtimes: [pi]" in config
+    # register_token_file 是指向基准绝对路径的实例私有字段，不随种子复制；
+    # token 经 worker 控制台粘贴 scoped token 添加（issue #35）。
+    assert "register_token_file" not in config
+    assert stat.S_IMODE(state_copy.stat().st_mode) == 0o600
 
 
 def test_worker_config_host_url_uses_dev_backend_port(tmp_path: Path) -> None:
@@ -176,8 +178,9 @@ def test_worker_config_host_url_uses_dev_backend_port(tmp_path: Path) -> None:
     develop = main / ".worktrees/develop"
     develop.mkdir(parents=True)
     (develop / ".env").write_text("# stub env\n")
-    (develop / "config").mkdir()
-    (develop / "config" / "agent-worker.yaml").write_text(
+    base_state = develop / "data/agent-worker-service"
+    base_state.mkdir(parents=True)
+    (base_state / "worker.yaml").write_text(
         "host_url: http://127.0.0.1:8000\n",
         encoding="utf-8",
     )
@@ -189,7 +192,7 @@ def test_worker_config_host_url_uses_dev_backend_port(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    config = (main / ".worktrees/flat/config/agent-worker.yaml").read_text()
+    config = (main / ".worktrees/flat/data/agent-worker-service/worker.yaml").read_text()
     assert "host_url: http://127.0.0.1:8010" in config
 
 

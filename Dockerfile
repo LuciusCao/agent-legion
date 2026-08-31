@@ -65,7 +65,6 @@ COPY worker /app/worker
 # compression / model-error detection); worker code must not import
 # ``server`` — guarded by tests/workers/test_worker_import_isolation.py.
 COPY shared /app/shared
-COPY config/agent-worker.example.yaml /app/config/agent-worker.example.yaml
 COPY worker/client.py /usr/local/bin/agent_worker_client.py
 COPY worker/cli_args.py /usr/local/bin/agent_worker_cli_args.py
 COPY --chmod=755 worker/cli.py /usr/local/bin/workerctl

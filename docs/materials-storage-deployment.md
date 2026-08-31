@@ -34,7 +34,7 @@ tracked yaml、DB、API 或日志（MATERIAL-SECRET-001）。
 `.env.example` 生成 `.env` 并填入随机 `AGENT_LEGION_S3_ACCESS_KEY/SECRET_KEY`
 （同时作为 rustfs 容器的 root 凭据；`.env` 已存在但凭据为空时会幂等补填）、
 生成 `deploy/secrets/vault_master_key`、构建 velites 二进制、装前端依赖、
-种子 `config/agent-worker.yaml`。
+种子 worker 状态副本 `data/agent-worker-service/worker.yaml`。
 
 `make dev-up`（`scripts/dev_stack.sh`）启动开发进程前先经
 `scripts/local-s3-decide.sh .env` 决策本地 RustFS（与 prod 入口同一套

@@ -143,23 +143,24 @@ if [[ ! -s deploy/secrets/vault_master_key ]]; then
 fi
 chmod 600 deploy/secrets/vault_master_key
 
-# 4. config/agent-worker.yaml：缺失时从基准 worktree 复制并改写本实例字段
-#    （host_url 指向开发后端、worker_id 按 worktree 派生）。注意生效配置是
-#    状态副本 data/agent-worker-service/worker.yaml——首次启动后改 config
-#    文件不会自动生效，要走 worker 控制台或 PUT /api/config。
-if [[ ! -f config/agent-worker.yaml ]]; then
-    if [[ -n "$BASE" && -f "$BASE/config/agent-worker.yaml" ]]; then
-        mkdir -p config
-        cp "$BASE/config/agent-worker.yaml" config/agent-worker.yaml
-        # host_url 指向本实例的开发后端端口（与 make dev-backend 的 DEV_BACKEND_PORT 一致）。
-        # 注册 token 不再经配置文件注入（issue #35）：启动 worker 控制台后在
-        # 「Workspace 访问（Scoped Token）」区块粘贴 Host 管理员签发的 scoped token。
-        replace_in_place "s|^host_url:.*|host_url: http://127.0.0.1:${DEV_BACKEND_PORT:-8001}|" config/agent-worker.yaml
-        replace_in_place "s|^worker_id:.*|worker_id: ${NAME}|" config/agent-worker.yaml
-        replace_in_place "s|^name:.*|name: ${NAME} (worktree)|" config/agent-worker.yaml
-        echo "已生成 config/agent-worker.yaml <- ${BASE}（host_url/worker_id/name 已改写）"
+# 4. worker 状态副本 data/agent-worker-service/worker.yaml：worker 唯一生效
+#    配置（issue #323，dev 侧不再有 config/agent-worker.yaml 种子）。缺失时
+#    从基准 worktree 的状态副本复制并改写本实例字段（host_url 指向开发后端、
+#    worker_id 按 worktree 派生）；后续修改走 worker 控制台或 PUT /api/config。
+STATE_COPY=data/agent-worker-service/worker.yaml
+if [[ ! -f "$STATE_COPY" ]]; then
+    if [[ -n "$BASE" && -f "$BASE/$STATE_COPY" ]]; then
+        mkdir -p data/agent-worker-service
+        # register_token_file 是指向基准 worktree 绝对路径的实例私有字段，
+        # 不能复制；scoped token 经 worker 控制台添加（issue #35）。
+        grep -v '^register_token_file:' "$BASE/$STATE_COPY" > "$STATE_COPY"
+        chmod 600 "$STATE_COPY"
+        replace_in_place "s|^host_url:.*|host_url: http://127.0.0.1:${DEV_BACKEND_PORT:-8001}|" "$STATE_COPY"
+        replace_in_place "s|^worker_id:.*|worker_id: ${NAME}|" "$STATE_COPY"
+        replace_in_place "s|^name:.*|name: ${NAME} (worktree)|" "$STATE_COPY"
+        echo "已生成 $STATE_COPY <- ${BASE}（host_url/worker_id/name 已改写）"
     else
-        echo "提示: 基准 worktree 无 config/agent-worker.yaml，跳过 worker 配置种子" >&2
+        echo "提示: 基准 worktree 无 worker 状态副本，跳过 worker 配置种子（首启后经 worker 控制台配置）" >&2
     fi
 fi
 
@@ -176,6 +177,6 @@ cat <<EOF
   - workspace 调度: 后端每次启动把全部 workspace 重置为暂停（刻意设计），
     首次启动建表后按需执行 ./scripts/resume-workspaces.sh（或控制台手动恢复）
   - worker: claim 默认关闭（刻意设计），启动后经 worker 控制台（默认 8789）
-    或 PUT /api/config 打开 claim_enabled；models allowlist 可按需在
-    config/agent-worker.yaml 种子配置中调整，首次导入后修改要走控制台/API
+    或 PUT /api/config 打开 claim_enabled；models allowlist 等配置修改
+    一律走控制台/API（生效配置即状态副本 data/agent-worker-service/worker.yaml）
 EOF

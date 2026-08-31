@@ -8,8 +8,11 @@ Agent Legion 使用 PostgreSQL 作为唯一控制面数据库；开发机和生�
 
 ```
 config/
-├── agent-worker.example.yaml # Agent Worker 配置模板
 └── architecture/             # 架构治理配置（不变量、豁免、体积预算）
+
+# worker 配置模板 config/agent-worker.example.yaml 已随 #323 退役：worker
+# 唯一生效配置是状态副本 data/agent-worker-service/worker.yaml（控制台/API
+# 驱动）；docker/远程部署的可选 bootstrap 模板见 deploy/worker.*.example.yaml。
 
 # 运行时 split 配置（app.yaml / workflow.yaml / agent_legion.yaml）已整体退役：
 # 代码默认值 + env 覆盖 + DB 实例设置文档，文件存在即启动报错（带迁移指引）。
