@@ -124,3 +124,17 @@ def test_boundary_guard_honors_base_anchor_override(
         "baseline triple [4, 1, 0] rose above committed floor [3, 1, 0]" in error
         for error in errors
     )
+
+
+def test_boundary_guard_honors_release_train_over_base_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Same priority as the budget guard (codex review on PR 325): with the
+    # release-train opt-out set, the boundary guard collapses to HEAD only
+    # and the configured base — even an unresolvable one — stays unread.
+    root = boundary_git_repo(tmp_path, {"server/app/services/legacy.py": [3, 1, 0]})
+    write_boundary_baseline(root, {"server/app/services/legacy.py": [4, 1, 0]})
+    commit_all(root, "raise boundary count by hand")
+    monkeypatch.setenv(_BASE_ENV, "origin/does-not-exist")
+    monkeypatch.setenv(_RELEASE_TRAIN_ENV, "1")
+    assert check_service_data_boundary(root) == []

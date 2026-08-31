@@ -17,7 +17,6 @@ parsing and the rename-floor carry live in ``budget_registry_history``.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from .budget_anchors import (
@@ -25,6 +24,7 @@ from .budget_anchors import (
     anchor_revisions,
     base_anchor_override,
     base_floor_anchor,
+    release_train_opt_out,
     shallow_opt_out,
     unresolvable_anchor_error,
     unresolvable_base_anchor_error,
@@ -34,8 +34,6 @@ from .budget_git import BudgetGitUnavailable, GitHelper
 from .budget_registry_history import effective_floor
 
 __test__ = False
-
-_RELEASE_TRAIN_OPT_OUT = "AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN"
 
 
 def _anchors() -> tuple[str, ...]:
@@ -52,7 +50,7 @@ def _anchors() -> tuple[str, ...]:
     floor is the release train's whole point). Every other context keeps
     the HEAD^ anchor, or the base override when configured.
     """
-    return anchor_revisions(release_train=os.environ.get(_RELEASE_TRAIN_OPT_OUT) == "1")
+    return anchor_revisions(release_train=release_train_opt_out())
 
 
 def _unresolvable_anchor_errors(git: GitHelper) -> list[str]:

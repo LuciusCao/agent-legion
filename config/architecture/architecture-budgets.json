@@ -672,7 +672,7 @@
     "scripts/architecture/budget_floor_errors.py": 34,
     "scripts/architecture/budget_git.py": 215,
     "scripts/architecture/budget_inventory.py": 103,
-    "scripts/architecture/budget_monotonicity.py": 124,
+    "scripts/architecture/budget_monotonicity.py": 123,
     "scripts/architecture/budget_policy.py": 153,
     "scripts/architecture/budget_registry_history.py": 105,
     "scripts/architecture/configuration.py": 43,

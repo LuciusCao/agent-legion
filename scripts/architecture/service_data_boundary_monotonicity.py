@@ -17,10 +17,11 @@ compares against HEAD, an edit already staged/committed into the pending
 commit compares against HEAD^; on CI merge refs HEAD^ is the PR base), and
 ``AGENT_LEGION_BUDGET_BASE`` replaces HEAD^ with an explicit PR base so a
 local run reproduces CI's merge-ref judgement (shared plumbing in
-``budget_anchors``). Shallow clones and non-git checkouts follow the budget
-guard's rules: unresolvable anchors hard-fail (with the same opt-out env,
-which never excuses an explicitly configured base ref), a non-git
-directory stays quiet.
+``budget_anchors``); the release-train opt-out collapses the anchors to
+HEAD and takes precedence over the base override. Shallow clones and
+non-git checkouts follow the budget guard's rules: unresolvable anchors
+hard-fail (with the same opt-out env, which never excuses an explicitly
+configured base ref), a non-git directory stays quiet.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from pathlib import Path
 from .budget_anchors import (
     anchor_revisions,
     base_anchor_override,
+    release_train_opt_out,
     shallow_opt_out,
     unresolvable_anchor_error,
     unresolvable_base_anchor_error,
@@ -43,8 +45,8 @@ __test__ = False
 
 
 def _anchors() -> tuple[str, ...]:
-    """HEAD / HEAD^, or HEAD + the AGENT_LEGION_BUDGET_BASE override."""
-    return anchor_revisions(release_train=False)
+    """HEAD / HEAD^, or HEAD + the base override (release train: HEAD only)."""
+    return anchor_revisions(release_train=release_train_opt_out())
 
 
 def _unresolvable_anchor_errors(git: GitHelper) -> list[str]:

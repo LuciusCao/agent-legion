@@ -35,6 +35,7 @@ __test__ = False
 
 BASE_ANCHOR_OVERRIDE_ENV = "AGENT_LEGION_BUDGET_BASE"
 SHALLOW_OPT_OUT_ENV = "AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW"
+RELEASE_TRAIN_OPT_OUT_ENV = "AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN"
 DEFAULT_ANCHORS = ("HEAD", "HEAD^")
 
 
@@ -55,6 +56,11 @@ def anchor_revisions(*, release_train: bool) -> tuple[str, ...]:
 def shallow_opt_out() -> bool:
     """Explicit opt-out for depth-1 checkouts that cannot fetch history."""
     return os.environ.get(SHALLOW_OPT_OUT_ENV) == "1"
+
+
+def release_train_opt_out() -> bool:
+    """Release-train opt-out shared by both guards (precedence: see docstring)."""
+    return os.environ.get(RELEASE_TRAIN_OPT_OUT_ENV) == "1"
 
 
 def unresolvable_anchor_error(check: str, revision: str, details: str) -> str:
