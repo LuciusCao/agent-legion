@@ -8,9 +8,11 @@ constraint into bookkeeping. Floor semantics live on
 ``ceiling_regression_errors``: new entries at actual + buffer_lines and
 first-time dated exemptions stay unrestricted, except that a rename detected
 by git carries the old path's floor onto the new path (#236) — renaming a
-file is not a ceiling reset button. Wording / git plumbing / registry
-parsing live in ``budget_floor_errors`` / ``budget_git`` /
-``budget_registry_history``.
+file is not a ceiling reset button. Anchors default to ``HEAD`` / ``HEAD^``;
+``AGENT_LEGION_BUDGET_BASE`` replaces ``HEAD^`` with an explicit PR base so
+a local run reproduces CI's merge-ref judgement (see ``budget_anchors``,
+which also owns anchor wording and the per-anchor floor merge). Registry
+parsing and the rename-floor carry live in ``budget_registry_history``.
 """
 
 from __future__ import annotations
@@ -18,21 +20,22 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from .budget_anchors import (
+    anchor_budget_floors,
+    anchor_revisions,
+    base_anchor_override,
+    base_floor_anchor,
+    shallow_opt_out,
+    unresolvable_anchor_error,
+    unresolvable_base_anchor_error,
+)
 from .budget_floor_errors import baseline_raise_error, exemption_raise_error
 from .budget_git import BudgetGitUnavailable, GitHelper
-from .budget_registry_history import (
-    BUDGETS_RELATIVE_PATH,
-    EXEMPTIONS_RELATIVE_PATH,
-    committed_budget_ceilings,
-    committed_exemption_ceilings,
-    effective_floor,
-)
+from .budget_registry_history import effective_floor
 
 __test__ = False
 
-_SHALLOW_OPT_OUT = "AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW"
 _RELEASE_TRAIN_OPT_OUT = "AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN"
-_ANCHORS = ("HEAD", "HEAD^")
 
 
 def _anchors() -> tuple[str, ...]:
@@ -44,65 +47,36 @@ def _anchors() -> tuple[str, ...]:
     lagging floors reject already-reviewed history (0.4.0, PR #249 and its
     post-merge push run — the merge's first parent is the old, stale main).
     The CI workflow sets the opt-out for base=main && head=develop and for
-    push runs on main/master; every other context keeps the HEAD^ anchor.
+    push runs on main/master; the opt-out takes precedence over the
+    ``AGENT_LEGION_BUDGET_BASE`` override (ignoring the base's lagging
+    floor is the release train's whole point). Every other context keeps
+    the HEAD^ anchor, or the base override when configured.
     """
-    return ("HEAD",) if os.environ.get(_RELEASE_TRAIN_OPT_OUT) == "1" else _ANCHORS
+    return anchor_revisions(release_train=os.environ.get(_RELEASE_TRAIN_OPT_OUT) == "1")
 
 
 def _unresolvable_anchor_errors(git: GitHelper) -> list[str]:
     """Hard-fail on git checkouts whose anchors do not resolve: a shallow
     clone missing HEAD^ silently guts the committed-raise check exactly
     where CI gates PRs (codex review on PR #231). The env opt-out covers
-    depth-1 checkouts that cannot fetch history; non-git checkouts stay
-    quiet (nothing to compare against). Git execution failures (missing
-    binary, timeout, repository error) surface with their real reason
-    instead of posing as shallow clones (#236)."""
+    depth-1 checkouts that cannot fetch history — but never excuses an
+    explicitly configured base ref, which must resolve or be fixed. Non-git
+    checkouts stay quiet (nothing to compare against). Git execution
+    failures (missing binary, timeout, repository error) surface with their
+    real reason instead of posing as shallow clones (#236)."""
     if not git.is_repository():
         if git.has_git_failures():
             return [f"budget monotonicity: git failed to run; cause: {git.diagnostics()}"]
         return []
     errors: list[str] = []
     for revision in _anchors():
-        if git.revision_resolvable(revision) or os.environ.get(_SHALLOW_OPT_OUT) == "1":
+        if git.revision_resolvable(revision):
             continue
-        details = git.diagnostics()
-        errors.append(
-            f"budget monotonicity: git anchor {revision} does not resolve in this "
-            "checkout (shallow clone / git error?); fetch history (CI: "
-            f"fetch-depth: 0) or set {_SHALLOW_OPT_OUT}=1 to skip the check"
-            + (f"; git failure: {details}" if details else "")
-        )
+        if revision == base_anchor_override():
+            errors.append(unresolvable_base_anchor_error("budget", revision))
+        elif not shallow_opt_out():
+            errors.append(unresolvable_anchor_error("budget", revision, git.diagnostics()))
     return errors
-
-
-def _anchor_floors(git: GitHelper) -> tuple[dict[str, int], dict[str, int]]:
-    """Effective-ceiling floors per path, minimum across committed anchors.
-
-    Each anchor contributes max(baseline entry, exemption ceiling) per path —
-    the effective ceiling a raise must not exceed. Taking the min across
-    anchors catches a raise introduced at any layer (uncommitted edit vs
-    HEAD, smuggled-into-pending-commit vs HEAD^; on CI merge refs the first
-    parent is the PR base, so the PR's own change is in view), while a
-    working-tree revert of a committed raise passes.
-    """
-    budget_floors: dict[str, int] = {}
-    exemption_floors: dict[str, int] = {}
-    for revision in _anchors():
-        previous_budgets = committed_budget_ceilings(
-            git.committed_file_text(revision, BUDGETS_RELATIVE_PATH)
-        )
-        previous_exemptions = committed_exemption_ceilings(
-            git.committed_file_text(revision, EXEMPTIONS_RELATIVE_PATH)
-        )
-        for path, committed in previous_budgets.items():
-            exempt = previous_exemptions.get(path)
-            effective = committed if exempt is None else max(committed, exempt)
-            if path not in budget_floors or effective < budget_floors[path]:
-                budget_floors[path] = effective
-        for path, committed in previous_exemptions.items():
-            if path not in exemption_floors or committed < exemption_floors[path]:
-                exemption_floors[path] = committed
-    return budget_floors, exemption_floors
 
 
 def ceiling_regression_errors(
@@ -112,10 +86,11 @@ def ceiling_regression_errors(
 ) -> list[str]:
     """Reject ceiling increases against the committed monotonic floor.
 
-    The floor is the minimum effective ceiling across the HEAD / HEAD^
-    anchors, with renames carrying the old path's floor onto the new path
-    (#236) — a rename is not a ceiling reset. New entries stay
-    unrestricted unless a detected rename supplies their floor.
+    The floor is the minimum effective ceiling across the anchor revisions
+    (HEAD / HEAD^ by default, HEAD / base with the override), with renames
+    carrying the old path's floor onto the new path (#236) — a rename is
+    not a ceiling reset. New entries stay unrestricted unless a detected
+    rename supplies their floor.
     """
     git = GitHelper(root)
     try:
@@ -126,21 +101,32 @@ def ceiling_regression_errors(
             # the anchor error is the actionable one — do not mask it with
             # a rename-detection complaint.
             return errors
-        budget_floors, exemption_floors = _anchor_floors(git)
+        anchors = _anchors()
+        budget_floors, exemption_floors, budget_sources, exemption_sources = anchor_budget_floors(
+            git, anchors
+        )
 
         for path, ceiling in baseline_files.items():
             floor, origin = effective_floor(
-                git, path, budget_floors, budget_floors, exemption_floors
+                git, path, budget_floors, budget_floors, exemption_floors, anchors
             )
             if floor is not None and ceiling > floor:
-                errors.append(baseline_raise_error(path, ceiling, floor, origin))
+                errors.append(
+                    baseline_raise_error(
+                        path, ceiling, floor, origin, base_floor_anchor(budget_sources.get(path))
+                    )
+                )
 
         for path, ceiling in frozen_ceilings.items():
             floor, _origin = effective_floor(
-                git, path, exemption_floors, budget_floors, exemption_floors
+                git, path, exemption_floors, budget_floors, exemption_floors, anchors
             )
             if floor is not None and ceiling > floor:
-                errors.append(exemption_raise_error(path, ceiling, floor))
+                errors.append(
+                    exemption_raise_error(
+                        path, ceiling, floor, base_floor_anchor(exemption_sources.get(path))
+                    )
+                )
         return errors
     except BudgetGitUnavailable as exc:
         # Fail closed: the snapshot path is the only way to see untracked

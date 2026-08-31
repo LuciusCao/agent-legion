@@ -1,9 +1,10 @@
 """Floor computation and rename carry for the boundary baseline (#292).
 
 Split from ``service_data_boundary_monotonicity.py`` for the file-size
-budget: the anchor parsing (HEAD / HEAD^), entry-wise-min floor merge and
-the #236-style rename floor carry live here; the guard itself (which
-errors to raise) stays in the parent module.
+budget: the anchor parsing (HEAD / HEAD^ by default, or HEAD + the
+``AGENT_LEGION_BUDGET_BASE`` override), entry-wise-min floor merge and the
+#236-style rename floor carry live here; the guard itself (which errors to
+raise) stays in the parent module.
 """
 
 from __future__ import annotations
@@ -42,15 +43,16 @@ def committed_boundary_entries(text: str | None) -> dict[str, tuple[int, int, in
 
 
 def boundary_floors_and_history(
-    git: GitHelper,
+    git: GitHelper, anchors: tuple[str, ...]
 ) -> tuple[dict[str, tuple[int, int, int]], set[str]]:
-    """Return (floors, historic_paths) from the HEAD / HEAD^ anchors.
+    """Return (floors, historic_paths) from the anchor revisions.
 
     floors: per path the entry-wise minimum across anchors. historic_paths:
-    paths already registered in HEAD^ — the pre-change evidence for the
-    new-entry test, which deliberately EXCLUDES HEAD so a committed attack
-    (new bypasses + new baseline entry in one commit) cannot smuggle its
-    own entry in as pre-existing (codex review on #305). Rename floor
+    paths already registered in the last (pre-change) anchor — HEAD^ by
+    default, the base override when configured — the pre-change evidence
+    for the new-entry test, which deliberately EXCLUDES HEAD so a committed
+    attack (new bypasses + new baseline entry in one commit) cannot smuggle
+    its own entry in as pre-existing (codex review on #305). Rename floor
     carry (#236 semantics, subagent review on #305): the old path's floor
     follows the file onto its new path, so a rename does not reset counts.
     """
@@ -58,7 +60,7 @@ def boundary_floors_and_history(
         revision: committed_boundary_entries(
             git.committed_file_text(revision, BOUNDARY_BASELINE_RELATIVE_PATH)
         )
-        for revision in ("HEAD", "HEAD^")
+        for revision in anchors
     }
     floors: dict[str, tuple[int, int, int]] = {}
     for committed in committed_by_revision.values():
@@ -73,16 +75,16 @@ def boundary_floors_and_history(
             else:
                 floors[path] = triple
 
-    head_map = git.rename_map("HEAD")
-    parent_map = git.rename_map("HEAD^")
-    if head_map is None or parent_map is None:
+    rename_maps = [git.rename_map(revision) for revision in anchors]
+    if any(rename_map is None for rename_map in rename_maps):
         raise BudgetGitUnavailable(
             "boundary monotonicity: rename detection could not run (worktree "
             "has untracked files and the snapshot index could not be built); "
             "failing closed rather than missing an unstaged rename"
         )
-    historic_paths = set(committed_by_revision["HEAD^"])
-    for new_path, old_path in {**parent_map, **head_map}.items():
+    historic_paths = set(committed_by_revision[anchors[-1]])
+    renames = {n: o for m in reversed(rename_maps) if m is not None for n, o in m.items()}
+    for new_path, old_path in renames.items():
         if old_path in floors:
             carried = floors[old_path]
             if new_path in floors:

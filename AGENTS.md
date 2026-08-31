@@ -63,7 +63,7 @@
 - 宽捕获纪律（#204/#298）：`server/app` 与 `worker/` 下新增 `except Exception`（或裸 `except:`）必须带 `# #204 broad-except audit:` 注释（讲清失败语义、为什么吞、结果空间、日志保全），或收窄为具体异常族；无注释的宽捕获会被 `scripts/architecture/broad_except_audit.py` 拒绝。
 - 不要手写 frontend transport types，必须从 `frontend/src/generated/api.ts` 派生。
 - 超出体积预算的文件必须拆分或回退，不能手动抬高 ceiling。ceiling 按有效行数计（排除注释行与空行），不要为凑预算压缩注释；`max_lines` 绝对上限按原始行数计（#293 起声明式产物 root 可覆盖：`server/app/db` 的 `.sql` 与 `worker/ui` 的 `.js/.css` 各有 root 级 `max_lines`）。
-- ceiling 单调只降不升（#209）：`check_architecture` 按 git 锚点拒绝**已跟踪条目**的任何上抬；唯一合法上抬通道是带 `remove_when` 的 `architecture.file_budget` 豁免。改名不重置 ceiling（git rename 检测沿用旧路径地板，#236）；真正的全新文件首次登记（actual + buffer）不受约束。release train（develop→main）例外：CI 在 `base=main && head=develop` 的 PR 与 main/master 合并后 push 重跑时设 `AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN=1` 让锚点只看 HEAD（#249）；feature→develop 的 PR 与本地门禁保持 HEAD^ 基线锚点严格性。
+- ceiling 单调只降不升（#209）：`check_architecture` 按 git 锚点拒绝**已跟踪条目**的任何上抬；唯一合法上抬通道是带 `remove_when` 的 `architecture.file_budget` 豁免。改名不重置 ceiling（git rename 检测沿用旧路径地板，#236）；真正的全新文件首次登记（actual + buffer）不受约束。release train（develop→main）例外：CI 在 `base=main && head=develop` 的 PR 与 main/master 合并后 push 重跑时设 `AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN=1` 让锚点只看 HEAD（#249）；feature→develop 的 PR 与本地门禁保持 HEAD^ 基线锚点严格性。本地模拟 CI 的 PR 锚点判定：设 `AGENT_LEGION_BUDGET_BASE=origin/develop` 后锚点变为 HEAD + 该 base ref（release-train opt-out 优先；base ref 无法解析硬失败，按指引 fetch；边界基线守卫共用该覆盖）。
 
 ## 6. Boundary Rules（禁止模式摘要）
 

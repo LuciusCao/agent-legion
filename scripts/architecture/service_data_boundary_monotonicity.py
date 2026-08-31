@@ -14,17 +14,26 @@ one week). This module ports the budget-monotonicity design
 
 Anchors are HEAD / HEAD^ (same rationale as budgets: an uncommitted edit
 compares against HEAD, an edit already staged/committed into the pending
-commit compares against HEAD^; on CI merge refs HEAD^ is the PR base).
-Shallow clones and non-git checkouts follow the budget guard's rules:
-unresolvable anchors hard-fail (with the same opt-out env), a non-git
+commit compares against HEAD^; on CI merge refs HEAD^ is the PR base), and
+``AGENT_LEGION_BUDGET_BASE`` replaces HEAD^ with an explicit PR base so a
+local run reproduces CI's merge-ref judgement (shared plumbing in
+``budget_anchors``). Shallow clones and non-git checkouts follow the budget
+guard's rules: unresolvable anchors hard-fail (with the same opt-out env,
+which never excuses an explicitly configured base ref), a non-git
 directory stays quiet.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
+from .budget_anchors import (
+    anchor_revisions,
+    base_anchor_override,
+    shallow_opt_out,
+    unresolvable_anchor_error,
+    unresolvable_base_anchor_error,
+)
 from .budget_git import BudgetGitUnavailable, GitHelper
 from .service_data_boundary_history import (
     boundary_floors_and_history,
@@ -33,8 +42,9 @@ from .service_data_boundary_history import (
 __test__ = False
 
 
-_SHALLOW_OPT_OUT = "AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW"
-_ANCHORS = ("HEAD", "HEAD^")
+def _anchors() -> tuple[str, ...]:
+    """HEAD / HEAD^, or HEAD + the AGENT_LEGION_BUDGET_BASE override."""
+    return anchor_revisions(release_train=False)
 
 
 def _unresolvable_anchor_errors(git: GitHelper) -> list[str]:
@@ -44,16 +54,13 @@ def _unresolvable_anchor_errors(git: GitHelper) -> list[str]:
             return [f"boundary monotonicity: git failed to run; cause: {git.diagnostics()}"]
         return []
     errors: list[str] = []
-    for revision in _ANCHORS:
-        if git.revision_resolvable(revision) or os.environ.get(_SHALLOW_OPT_OUT) == "1":
+    for revision in _anchors():
+        if git.revision_resolvable(revision):
             continue
-        details = git.diagnostics()
-        errors.append(
-            f"boundary monotonicity: git anchor {revision} does not resolve in this "
-            "checkout (shallow clone / git error?); fetch history (CI: "
-            f"fetch-depth: 0) or set {_SHALLOW_OPT_OUT}=1 to skip the check"
-            + (f"; git failure: {details}" if details else "")
-        )
+        if revision == base_anchor_override():
+            errors.append(unresolvable_base_anchor_error("boundary", revision))
+        elif not shallow_opt_out():
+            errors.append(unresolvable_anchor_error("boundary", revision, git.diagnostics()))
     return errors
 
 
@@ -63,13 +70,13 @@ def boundary_regression_errors(
     """Reject baseline growth against the committed monotonic floor.
 
     The floor per path is the entry-wise minimum across the anchor
-    revisions; a path absent from HEAD^'s baseline is a first-time
-    registration — rejected outright, because a NEW service with bypasses
-    violates BOUNDARY-DATA-001 the same as an old one growing debt (the
-    plain no-entry check would catch the file, but a same-commit file +
-    entry registration passes it; codex review round 2 on #305). Renames
-    carry the old path's floor onto the new path (#236 semantics): renaming
-    a service file is not a boundary-count reset button.
+    revisions; a path absent from the pre-change anchor's baseline is a
+    first-time registration — rejected outright, because a NEW service with
+    bypasses violates BOUNDARY-DATA-001 the same as an old one growing debt
+    (the plain no-entry check would catch the file, but a same-commit
+    file + entry registration passes it; codex review round 2 on #305).
+    Renames carry the old path's floor onto the new path (#236 semantics):
+    renaming a service file is not a boundary-count reset button.
     """
     git = GitHelper(root)
     try:
@@ -80,7 +87,7 @@ def boundary_regression_errors(
         errors = _unresolvable_anchor_errors(git)
         if errors:
             return errors
-        floors, historic_paths = boundary_floors_and_history(git)
+        floors, historic_paths = boundary_floors_and_history(git, _anchors())
 
         for path, triple in baseline_files.items():
             if path not in historic_paths:
