@@ -2,21 +2,46 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from '../../testing/TestMemoryRouter'
 import { StudioAgentsSection } from './StudioAgentsSection'
-import { getStudioAgents, updateStudioAgents } from '../../api/studioAgents'
+import {
+  getStudioAgents,
+  redetectStudioAgents,
+  updateStudioAgents,
+} from '../../api/studioAgents'
 import type { StudioAgentRegistryResponse } from '../../api/studioAgents'
 
 vi.mock('../../api/studioAgents', () => ({
   getStudioAgents: vi.fn(),
   updateStudioAgents: vi.fn(),
+  redetectStudioAgents: vi.fn(),
 }))
 
 const registry: StudioAgentRegistryResponse = {
   api_base: 'http://127.0.0.1:8000',
   agents: [
-    { id: 'kimi', label: 'Kimi Code', command: 'kimi', args: ['acp'] },
-    { id: 'claude', label: 'Claude Code', command: 'claude', args: [] },
+    {
+      id: 'kimi',
+      label: 'Kimi Code',
+      command: 'kimi',
+      args: ['acp'],
+      source: 'manual',
+    },
+    {
+      id: 'claude',
+      label: 'Claude Code',
+      command: 'claude',
+      args: [],
+      source: 'manual',
+    },
   ],
   availability: { kimi: true, claude: false },
+  detection: {
+    kimi: {
+      detected: true,
+      path: '/usr/local/bin/kimi',
+      version: 'kimi 0.55.0',
+    },
+    claude: { detected: false, path: null, version: null },
+  },
 }
 
 function renderSection() {
@@ -50,6 +75,37 @@ describe('StudioAgentsSection', () => {
     expect(screen.getByText('保存')).toBeDisabled()
   })
 
+  it('renders source and detection status per row', async () => {
+    renderSection()
+    await screen.findByLabelText('agent-id-0')
+
+    // kimi：目录内且探测到 → 手工（默认）· 已检测到（版本）
+    expect(
+      screen.getByText(/手工 · 已检测到（kimi 0.55.0）/)
+    ).toBeInTheDocument()
+    // claude：目录内但未探测到
+    expect(screen.getByText('未检测到')).toBeInTheDocument()
+  })
+
+  it('marks detected entries with the 自动检测 badge', async () => {
+    vi.mocked(getStudioAgents).mockResolvedValue({
+      ...registry,
+      agents: [
+        {
+          id: 'kimi',
+          label: 'Kimi Code',
+          command: 'kimi',
+          args: ['acp'],
+          source: 'detected',
+        },
+      ],
+    })
+    renderSection()
+    await screen.findByLabelText('agent-id-0')
+
+    expect(screen.getByText(/自动检测 · 已检测到/)).toBeInTheDocument()
+  })
+
   it('edits a row and saves the whole document via PUT', async () => {
     vi.mocked(updateStudioAgents).mockImplementation(async (payload) => ({
       ...payload,
@@ -79,8 +135,15 @@ describe('StudioAgentsSection', () => {
             label: 'Kimi CLI',
             command: 'kimi',
             args: ['acp', '--verbose'],
+            source: 'manual',
           },
-          { id: 'claude', label: 'Claude Code', command: 'claude', args: [] },
+          {
+            id: 'claude',
+            label: 'Claude Code',
+            command: 'claude',
+            args: [],
+            source: 'manual',
+          },
         ],
       })
     })
@@ -88,6 +151,63 @@ describe('StudioAgentsSection', () => {
     await waitFor(() => {
       expect(screen.getByText('保存')).toBeDisabled()
     })
+  })
+
+  it('redetects and refreshes rows from the server result', async () => {
+    vi.mocked(redetectStudioAgents).mockResolvedValue({
+      ...registry,
+      agents: [
+        ...(registry.agents ?? []),
+        {
+          id: 'goose',
+          label: 'Goose',
+          command: 'goose',
+          args: ['acp'],
+          source: 'detected',
+        },
+      ],
+      detection: {
+        ...registry.detection,
+        goose: { detected: false, path: null, version: null },
+      },
+    })
+
+    renderSection()
+    await screen.findByLabelText('agent-id-0')
+
+    fireEvent.click(screen.getByText('重新检测'))
+
+    await waitFor(() => {
+      expect(redetectStudioAgents).toHaveBeenCalledTimes(1)
+    })
+    // 新检测到的 agent 进入编辑行
+    expect(await screen.findByLabelText('agent-id-2')).toHaveValue('goose')
+    expect(screen.getByTestId('studio-agent-row-2')).toHaveTextContent(
+      '自动检测 · 未检测到'
+    )
+  })
+
+  it('disables redetect while there are unsaved edits', async () => {
+    renderSection()
+    await screen.findByLabelText('agent-id-0')
+
+    expect(screen.getByText('重新检测')).toBeEnabled()
+    fireEvent.change(screen.getByLabelText('agent-label-0'), {
+      target: { value: 'Kimi CLI' },
+    })
+    expect(screen.getByText('重新检测')).toBeDisabled()
+    fireEvent.click(screen.getByText('重新检测'))
+    expect(redetectStudioAgents).not.toHaveBeenCalled()
+  })
+
+  it('shows the server error when redetect fails', async () => {
+    vi.mocked(redetectStudioAgents).mockRejectedValue(new Error('HTTP 500'))
+    renderSection()
+    await screen.findByLabelText('agent-id-0')
+
+    fireEvent.click(screen.getByText('重新检测'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('HTTP 500')
   })
 
   it('adds and deletes rows', async () => {

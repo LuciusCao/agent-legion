@@ -81,6 +81,29 @@ def test_picker_hides_agents_missing_from_path(chat) -> None:
     assert service.list_available_agents() == [{"id": "probe-agent", "label": "Probe"}]
 
 
+def test_picker_exposes_only_id_and_label_for_detected_entries(chat) -> None:
+    """RCE guard regression (#332): source: detected rows are still only
+    id/label for non-admin users — command/args never cross the picker API."""
+    service, _workspace_id, _user_id = chat
+    StudioAgentRegistryStore(TEST_DATABASE_URL).put(
+        {
+            "api_base": "http://127.0.0.1:8000",
+            "agents": [
+                {
+                    "id": "probe-agent",
+                    "label": "Probe",
+                    "command": sys.executable,
+                    "args": ["acp"],
+                    "source": "detected",
+                }
+            ],
+        }
+    )
+    agents = service.list_available_agents()
+    assert agents == [{"id": "probe-agent", "label": "Probe"}]
+    assert all(set(agent) == {"id", "label"} for agent in agents)
+
+
 def test_create_session_with_unavailable_agent_fails_before_spawn(chat) -> None:
     service, workspace_id, user_id = chat
     _register("/nonexistent/acp-agent-binary")
