@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Button, InputAdornment, TextField } from '@mui/material'
+import { TextField } from '@mui/material'
 import { validateSkillPath } from '../api'
 import type { SkillValidateResponse } from '../types'
+import { SkillDirectoryInput } from './SkillDirectoryInput'
 import { SkillValidationResult } from './SkillValidationResult'
 import {
   FALLBACK_SKILLS_ROOT,
@@ -17,27 +18,29 @@ type Props = {
 }
 
 /**
- * Skill picker for the Agent editor: validates a skill directory under the
- * workspace-scoped skills root (<skills_root>/<workspaceId>/) via
- * POST /api/skills/validate, fills the skill key on success, and shows the
- * repo tags as reference info. The skills root comes from the read-only
- * `skills_root` field of GET /api/admin/instance-settings (single source:
- * backend skill_roots.py); while it loads the input stays disabled, and on
- * load failure it falls back to the default root with a hint. Tag selection
- * never writes back — the DB skill lock (global_settings skill_lock) stays
- * the single source of truth for the locked ref. The validator expands `~`
- * server-side, so the composed path is sent with the tilde prefix as-is.
+ * Skill picker for the Agent editor: the directory-name row
+ * (SkillDirectoryInput) offers the workspace's existing skill directories as
+ * datalist candidates (#327) — picking one (or typing its exact name) runs the
+ * validation immediately, anything else is validated via the 校验 button.
+ * Validation posts the composed path to POST /api/skills/validate, fills the
+ * skill key on success, and shows the repo tags as reference info. The skills
+ * root comes from the read-only `skills_root` field of GET
+ * /api/admin/instance-settings (single source: backend skill_roots.py); while
+ * it loads the input stays disabled, and on load failure it falls back to the
+ * default root with a hint. Tag selection never writes back — the DB skill
+ * lock (global_settings skill_lock) stays the single source of truth for the
+ * locked ref. The validator expands `~` server-side, so the composed path is
+ * sent with the tilde prefix as-is.
  */
 export function SkillSelector({ workspaceId, value, onChange }: Props) {
   const { prefix, rootReady, rootLoadFailed } = useSkillsRootPrefix(workspaceId)
-  const [name, setName] = useState('')
   const [validating, setValidating] = useState(false)
   const [result, setResult] = useState<SkillValidateResponse | null>(null)
   const [selectedTag, setSelectedTag] = useState('')
   const [tagTouched, setTagTouched] = useState(false)
 
-  async function handleValidate() {
-    const relative = name.trim().replace(/^\/+/, '')
+  async function handleValidate(rawName: string) {
+    const relative = rawName.trim().replace(/^\/+/, '')
     if (!relative) return
     const fullPath = `${prefix}${relative}`
     setValidating(true)
@@ -68,34 +71,13 @@ export function SkillSelector({ workspaceId, value, onChange }: Props) {
         slotProps={{ input: { readOnly: true } }}
         helperText="通过下方目录名校验自动填入"
       />
-      <div
-        style={{ display: 'flex', gap: 12, marginTop: 12, alignItems: 'start' }}
-      >
-        <TextField
-          label="Skill 目录名"
-          variant="outlined"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          fullWidth
-          placeholder="write-script"
-          disabled={!rootReady}
-          slotProps={{
-            input: {
-              startAdornment: (
-                <InputAdornment position="start">{prefix}</InputAdornment>
-              ),
-            },
-          }}
-        />
-        <Button
-          variant="outlined"
-          onClick={() => void handleValidate()}
-          disabled={!rootReady || validating || name.trim() === ''}
-          sx={{ flexShrink: 0, mt: 1 }}
-        >
-          {validating ? '校验中...' : '校验'}
-        </Button>
-      </div>
+      <SkillDirectoryInput
+        prefix={prefix}
+        workspaceId={workspaceId}
+        rootReady={rootReady}
+        validating={validating}
+        onValidate={(name) => void handleValidate(name)}
+      />
       {rootLoadFailed && (
         <p style={{ color: '#ed6c02', fontSize: 12 }}>
           实例设置加载失败，技能根目录回退为默认 {FALLBACK_SKILLS_ROOT}。

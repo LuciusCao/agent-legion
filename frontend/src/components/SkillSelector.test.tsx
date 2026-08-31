@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { validateSkillPath } from '../api'
+import { fetchSkillDirectories, validateSkillPath } from '../api'
 import { getInstanceSettings } from '../api/instanceSettings'
 import type { InstanceSettingsResponse } from '../api/instanceSettings'
 import { TestQueryProvider } from '../testing/testQueryClient'
@@ -8,6 +8,7 @@ import { SkillSelector } from './SkillSelector'
 
 vi.mock('../api', () => ({
   validateSkillPath: vi.fn(),
+  fetchSkillDirectories: vi.fn(),
 }))
 
 vi.mock('../api/instanceSettings', () => ({
@@ -15,6 +16,7 @@ vi.mock('../api/instanceSettings', () => ({
 }))
 
 const mockValidate = vi.mocked(validateSkillPath)
+const mockFetchDirectories = vi.mocked(fetchSkillDirectories)
 const mockGetSettings = vi.mocked(getInstanceSettings)
 
 function settingsWithRoot(skillsRoot: string): InstanceSettingsResponse {
@@ -34,6 +36,7 @@ describe('SkillSelector', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockGetSettings.mockResolvedValue(settingsWithRoot('~/.agents/skills'))
+    mockFetchDirectories.mockResolvedValue({ scope: 'ws-1', directories: [] })
   })
 
   it('fills the skill key and shows tags after a successful validation', async () => {
@@ -188,5 +191,86 @@ describe('SkillSelector', () => {
     fireEvent.click(await screen.findByRole('option', { name: 'v1.1.0' }))
 
     expect(await screen.findByText(/此处选择仅作参考/)).toBeInTheDocument()
+  })
+
+  it('offers the workspace skill directories as datalist candidates', async () => {
+    mockFetchDirectories.mockResolvedValue({
+      scope: 'ws-1',
+      directories: ['review-questions', 'write-script'],
+    })
+    const { container } = renderSelector()
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(
+          'datalist#skill-directory-options option[value="write-script"]'
+        )
+      ).not.toBeNull()
+    )
+    expect(
+      container.querySelector(
+        'datalist#skill-directory-options option[value="review-questions"]'
+      )
+    ).not.toBeNull()
+  })
+
+  it('validates immediately when a datalist candidate is picked', async () => {
+    mockFetchDirectories.mockResolvedValue({
+      scope: 'ws-1',
+      directories: ['write-script'],
+    })
+    mockValidate.mockResolvedValue({
+      valid: true,
+      path: '/abs/skill',
+      skill_key: 'ns/write-script',
+      tags: [],
+      latest_tag: null,
+      locked_ref: null,
+    })
+    const onChange = vi.fn()
+    const { container } = renderSelector(onChange)
+
+    const input = screen.getByLabelText('Skill 目录名')
+    await waitFor(() => expect(input).toBeEnabled())
+    // 等候选加载完成（datalist option 出现即组件已拿到 directories）。
+    await waitFor(() =>
+      expect(
+        container.querySelector(
+          'datalist#skill-directory-options option[value="write-script"]'
+        )
+      ).not.toBeNull()
+    )
+    fireEvent.change(input, { target: { value: 'write-script' } })
+
+    // 选中候选即触发校验回填，无需点「校验」按钮。
+    await waitFor(() =>
+      expect(mockValidate).toHaveBeenCalledWith(
+        '~/.agents/skills/ws-1/write-script'
+      )
+    )
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith('ns/write-script')
+    )
+  })
+
+  it('does not auto-validate typed text that matches no candidate', async () => {
+    mockFetchDirectories.mockResolvedValue({
+      scope: 'ws-1',
+      directories: ['write-script'],
+    })
+    const { container } = renderSelector()
+
+    const input = screen.getByLabelText('Skill 目录名')
+    await waitFor(() => expect(input).toBeEnabled())
+    await waitFor(() =>
+      expect(
+        container.querySelector(
+          'datalist#skill-directory-options option[value="write-script"]'
+        )
+      ).not.toBeNull()
+    )
+    fireEvent.change(input, { target: { value: 'write' } })
+
+    expect(mockValidate).not.toHaveBeenCalled()
   })
 })

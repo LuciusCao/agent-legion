@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchSkillTags, validateSkillPath } from './skills'
+import {
+  fetchSkillDirectories,
+  fetchSkillTags,
+  validateSkillPath,
+} from './skills'
 
 const originalFetch = global.fetch
 
@@ -53,6 +57,20 @@ describe('skills api', () => {
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/skills/tags?path=%2Fabs%2Fskill%20a',
+      expect.anything()
+    )
+  })
+
+  it('fetches skill directories with an encoded scope', async () => {
+    const payload = { scope: 'ws 1', directories: ['write-script'] }
+    const fetchMock = mockFetchJson(payload)
+    global.fetch = fetchMock
+
+    const result = await fetchSkillDirectories('ws 1')
+
+    expect(result).toEqual(payload)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/skills/directories?scope=ws%201',
       expect.anything()
     )
   })
