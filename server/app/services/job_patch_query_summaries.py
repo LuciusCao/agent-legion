@@ -20,13 +20,13 @@ def summarize_paginated_jobs(
     active_revisions: dict[tuple[str, str], dict[str, Any] | None] = {}
 
     def _active(job: dict[str, Any]) -> dict[str, Any] | None:
-        key = (str(job["workspace_id"]), str(job["workflow_key"]))
+        key = (str(job["workspace_id"]), str(job["workspace_id"]))
         if key not in active_revisions:
             active_revisions[key] = job_db.get_active_workflow_revision(*key)
         return active_revisions[key]
 
     def _definition(job: dict[str, Any]) -> WorkflowDefinition:
-        key = (str(job["workflow_key"]), str(job.get("workflow_definition_hash") or ""))
+        key = (str(job["workspace_id"]), str(job.get("workflow_definition_hash") or ""))
         if key not in definitions:
             if key[1]:
                 # Snapshotted job: parse from the frozen snapshot (no query).

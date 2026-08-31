@@ -544,11 +544,7 @@ def test_rerun_node_rejects_active_lease(tmp_path):
         with job_db.connect() as conn:
             conn.execute(
                 """
-                insert into executor_leases(
-                    id, execution_id, executor_id, workspace_id, job_id, workflow_key,
-                    node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-                )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
+                insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) values (%s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
                 """,
                 (
                     "lease-1",
@@ -556,7 +552,6 @@ def test_rerun_node_rejects_active_lease(tmp_path):
                     "code-default",
                     "test",
                     job_id,
-                    "education_video_problems_generation",
                     "publish_content",
                     run["id"],
                     database_timestamp(now),
@@ -602,11 +597,7 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
         with job_db.connect() as conn:
             conn.execute(
                 """
-                insert into executor_leases(
-                    id, execution_id, executor_id, workspace_id, job_id, workflow_key,
-                    node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-                )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
+                insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) values (%s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
                 """,
                 (
                     "lease-1",
@@ -614,7 +605,6 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
                     "code-default",
                     "test",
                     job_id,
-                    "education_video_problems_generation",
                     "publish_content",
                     run["id"],
                     database_timestamp(now),

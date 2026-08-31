@@ -5,25 +5,19 @@ stored data; the Phase 3 read-layer binding drops their predicates, so stale
 pre-rename values would break lookups (job scan resurrecting old rows under
 the current revision's DAG — Codex P1 #313; replay routing and node-code
 resolution missing old-key rows — Codex P1 #315). This migration rewrites
-every live table's workflow_key to the workspace id:
+every live table's workflow_key to the workspace id; each surface's
+collision rule lives as the inline comment where it executes:
 
-- Plain column tables: runs, jobs, executor_leases, agent_execution_requests.
-  jobs' rekey trigger moves the per-node counts along.
-- State tables (workspace_node_limits/_routes/_capacities): window-era rows
-  already under the workspace id are the live truth — their old-key twins
-  drop before the rewrite (a plain UPDATE would collide on the composite PK).
-- workflow_revisions: old-key active rows archive first (a window-era
-  republish left one active per key; the identity-key active is
-  authoritative), then the old history shifts past the workspace's overall
-  version maximum and rewrites (the uniform offset cannot collide mid-update
-  because Postgres checks uniqueness per row).
-- workspace_job_node_status_counts: merged into workspace-id rows and the
-  old-key rows deleted (same composite-PK collision reasoning).
-- versioned_entities.entity_key: node_code rows ("<key>:<node>") re-prefix
-  with the workspace id. Collisions resolve by published-wins (dispatch
-  resolves published code; frozen pins reference published rows), else the
-  window-era row wins; superseded old-key published rows downgrade to
-  archived so the history stays. Agent rows key on agent_id — untouched.
+- Plain column tables (runs, jobs, executor_leases, agent_execution_requests):
+  plain UPDATE; jobs' rekey trigger moves the per-node counts along.
+- Composite-key surfaces (the three state tables, status counts,
+  workflow_revisions): the window-era workspace-id row is the live truth, so
+  old-key twins drop or merge BEFORE the rewrite (a plain UPDATE would
+  collide mid-flight); revision history shifts past the workspace's version
+  maximum.
+- versioned_entities.entity_key: node_code rows re-prefix with the workspace
+  id, published-wins on collisions (dispatch resolves published code; frozen
+  pins reference published rows). Agent rows key on agent_id — untouched.
 
 NOT rewritten: composite ids (run_id/job_id/revision_id) and storage_dir
 paths embed the old key as opaque text (v62 decisions); archaeology tables
@@ -35,6 +29,8 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+
+from server.app.db.migrations.retire_workflow_key_columns import has_column
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +54,10 @@ _STATE_TABLES = (
 def _rewrite_column_tables(conn: Any) -> int:
     total = 0
     for table in _COLUMN_TABLES:
+        # #211 M2: fresh databases already run the post-v70 shape (column
+        # gone); each pass skips those tables instead of failing the replay.
+        if not has_column(conn, table, "workflow_key"):
+            continue
         result = conn.execute(
             f"update {table} set workflow_key = workspace_id"
             " where workflow_key is distinct from workspace_id"
@@ -69,6 +69,8 @@ def _rewrite_column_tables(conn: Any) -> int:
 def _drop_state_table_twins(conn: Any) -> int:
     total = 0
     for table in _STATE_TABLES:
+        if not has_column(conn, table, "workflow_key"):
+            continue
         # Window-era twin first (the live truth), then any further old-key
         # duplicates of one node (multi-generation keys): keep the newest
         # row per (workspace_id, node_key) so the rewrite cannot collide on
@@ -109,6 +111,8 @@ def _drop_state_table_twins(conn: Any) -> int:
 def _align_revisions(conn: Any) -> int:
     """Archive old-key actives, shift the old history past the workspace's
     overall version maximum, rewrite the key."""
+    if not has_column(conn, "workflow_revisions", "workflow_key"):
+        return 0
     # Archive an old-key active only when an identity-key active already
     # exists (the window-era republish); otherwise it is the workspace's
     # ONLY active and survives the rewrite (Codex P1 on #315).
@@ -147,6 +151,8 @@ def _align_revisions(conn: Any) -> int:
 
 def _align_status_counts(conn: Any) -> int:
     """Merge old-key count rows into workspace-id rows, then drop them."""
+    if not has_column(conn, "workspace_job_node_status_counts", "workflow_key"):
+        return 0
     merged = conn.execute(
         """
         insert into workspace_job_node_status_counts(workspace_id, workflow_key, node_key, status, cnt)

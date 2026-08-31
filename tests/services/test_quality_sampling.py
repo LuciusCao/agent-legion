@@ -43,9 +43,9 @@ def _seed_run(
     failure_detail: str = "",
 ) -> None:
     conn.execute(
-        "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-        "values (%s, %s, %s, %s, %s) on conflict (id) do nothing",
-        (job_id, workspace_id, workflow_key, "test", job_id),
+        "insert into jobs(id, workspace_id, source_type, source_id) "
+        "values (%s, %s, %s, %s) on conflict (id) do nothing",
+        (job_id, workspace_id, "test", job_id),
     )
     conn.execute(
         "insert into node_runs("
@@ -175,10 +175,10 @@ def test_snapshot_fields_come_from_usage_request_and_entities():
         )
         conn.execute(
             "insert into agent_execution_requests("
-            "execution_id, workspace_id, job_id, workflow_key, node_key, agent_id,"
+            "execution_id, workspace_id, job_id, node_key, agent_id,"
             " agent_definition_hash, node_concurrency_limit, state, node_run_id,"
             " queued_at, manifest_json)"
-            " values ('exec-1', %s, 'job-1', 'wf-a', 'node-a', 'agent-1', 'hash-1', 1,"
+            " values ('exec-1', %s, 'job-1', 'node-a', 'agent-1', 'hash-1', 1,"
             " 'done', 1, current_timestamp, %s)",
             (WORKSPACE, json.dumps({"capability": "review_keywords"})),
         )

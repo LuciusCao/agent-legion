@@ -26,8 +26,8 @@ def _seed_item(item_id: str = "item-1", batch_id: str = "batch-1") -> None:
             (WORKSPACE, WORKSPACE),
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values ('job-1', %s, 'wf-a', 'test', 'job-1') on conflict (id) do nothing",
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values ('job-1', %s, 'test', 'job-1') on conflict (id) do nothing",
             (WORKSPACE,),
         )
         conn.execute(

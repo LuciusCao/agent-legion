@@ -88,14 +88,17 @@ def _set_node_limit(
     node_key: str,
     concurrency_limit: int,
 ) -> None:
+    # workflow_key is inert post-v70: the limits table keys on
+    # (workspace_id, node_key). Kept in the signature for call-site stability.
+    del workflow_key
     with job_db.connect() as conn:
         conn.execute(
             """
-            insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit)
-            values (%s, %s, %s, %s)
-            on conflict(workspace_id, workflow_key, node_key) do update set concurrency_limit=excluded.concurrency_limit
+            insert into workspace_node_limits (workspace_id, node_key, concurrency_limit)
+            values (%s, %s, %s)
+            on conflict(workspace_id, node_key) do update set concurrency_limit=excluded.concurrency_limit
             """,
-            (workspace_id, workflow_key, node_key, concurrency_limit),
+            (workspace_id, node_key, concurrency_limit),
         )
 
 

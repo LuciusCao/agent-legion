@@ -99,7 +99,9 @@ def create_agent_worker_claim_router(
             lease_id=claimed.lease_id,
             workspace_id=claimed.workspace_id,
             job_id=claimed.job_id,
-            workflow_key=claimed.workflow_key,
+            # #211 M2: the column is gone — the deprecated response field
+            # keeps returning the identity value until the M3 contract drop.
+            workflow_key=claimed.workspace_id,
             node_key=claimed.node_key,
             agent_id=claimed.agent_id,
             kind=claimed.kind,

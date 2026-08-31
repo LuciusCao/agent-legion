@@ -29,8 +29,7 @@ _SCANNABLE_WORKSPACES = (
     " where default_workflow_key <> '' order by created_at, id"
 )
 _ACTIVE_REVISIONS = (
-    "select workspace_id, workflow_key, definition_json from workflow_revisions"
-    " where status='active'"
+    "select workspace_id, definition_json from workflow_revisions where status='active'"
 )
 
 
@@ -43,14 +42,14 @@ def load_workflow_scan_entries(connect_source: Any) -> list[ScanEntry]:
     with read_connection(connect_source) as conn:
         workspaces = conn.execute(_SCANNABLE_WORKSPACES).fetchall()
         revisions = {
-            (str(row["workspace_id"]), str(row["workflow_key"])): row["definition_json"]
+            str(row["workspace_id"]): row["definition_json"]
             for row in conn.execute(_ACTIVE_REVISIONS).fetchall()
         }
     entries: list[ScanEntry] = []
     for workspace in workspaces:
         workspace_id = str(workspace["id"])
         workflow_key = str(workspace["default_workflow_key"])
-        raw = revisions.get((workspace_id, workflow_key))
+        raw = revisions.get(workspace_id)
         definition: WorkflowDefinition | None = None
         if raw:
             try:

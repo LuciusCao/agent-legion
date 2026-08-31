@@ -50,7 +50,6 @@ def test_publish_and_get_active_revision(tmp_path: Path) -> None:
 
     assert active["id"] == revision["id"]
     assert active["workspace_id"] == workspace["id"]
-    assert active["workflow_key"] == "education_video_problems_generation"
     assert active["version"] == 1
     assert active["status"] == "active"
     assert active["definition_hash"]
@@ -58,13 +57,13 @@ def test_publish_and_get_active_revision(tmp_path: Path) -> None:
     with queries._connect_read() as conn:
         route = conn.execute(
             "select target_kind, target_id from workspace_node_routes"
-            " where workspace_id=%s and workflow_key=%s and node_key='write_script'",
-            (workspace["id"], definition.key),
+            " where workspace_id=%s and node_key='write_script'",
+            (workspace["id"],),
         ).fetchone()
         capacity = conn.execute(
             "select max_concurrency, source_revision_id from workspace_node_capacities"
-            " where workspace_id=%s and workflow_key=%s and node_key='write_script'",
-            (workspace["id"], definition.key),
+            " where workspace_id=%s and node_key='write_script'",
+            (workspace["id"],),
         ).fetchone()
     assert route is not None
     assert dict(route) == {"target_kind": "agent", "target_id": "example-write-script-v1"}
@@ -186,8 +185,8 @@ def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -
     # next publish even though publish no longer writes such rows.
     with queries.connect() as conn:
         conn.execute(
-            "insert into workspace_node_capacities(workspace_id, workflow_key, node_key, max_concurrency)"
-            " values (%s, 'agent_nodes_flow', 'write_script', 20)",
+            "insert into workspace_node_capacities(workspace_id, node_key, max_concurrency)"
+            " values (%s, 'write_script', 20)",
             (workspace["id"],),
         )
 

@@ -57,15 +57,14 @@ def _add_active_lease(job_db, job: dict[str, Any], node_key: str, lease_id: str)
     with job_db.connect() as conn:
         conn.execute(
             "insert into executor_leases("
-            "id, execution_id, executor_id, workspace_id, job_id, workflow_key,"
+            "id, execution_id, executor_id, workspace_id, job_id,"
             " node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at)"
-            " values (%s, %s, 'code-default', %s, %s, %s, %s, %s, 'active', %s, %s, %s)",
+            " values (%s, %s, 'code-default', %s, %s, %s, %s, 'active', %s, %s, %s)",
             (
                 lease_id,
                 f"exec-{lease_id}",
                 job["workspace_id"],
                 job["id"],
-                job["workflow_key"],
                 node_key,
                 run["id"],
                 database_timestamp(now),

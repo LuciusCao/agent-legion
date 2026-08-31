@@ -77,4 +77,8 @@ def test_replace_node_limits_rollback(queries: JobQueries) -> None:
         )
         raise RuntimeError("caller aborts after the delete")
 
-    assert queries.get_workspace_node_limits(workspace["id"]) == original_node_limits
+    # #211 M2: the stored rows key on (workspace_id, node_key) only — the
+    # request-side workflow_key field is accepted but not persisted.
+    assert queries.get_workspace_node_limits(workspace["id"]) == [
+        {"node_key": "fetch_items", "concurrency_limit": 2}
+    ]

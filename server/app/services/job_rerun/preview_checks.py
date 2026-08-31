@@ -42,7 +42,7 @@ class PreviewDefinitions:
             snapshot = self._snapshots[raw]
             if snapshot is not None:
                 return snapshot
-        key = (str(job["workspace_id"]), str(job["workflow_key"]))
+        key = (str(job["workspace_id"]), str(job["workspace_id"]))
         if key not in self._cache:
             self._cache[key] = require_workspace_active_definition(
                 self._service.job_db, key[0], key[1]

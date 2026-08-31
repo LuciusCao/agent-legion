@@ -37,7 +37,6 @@ class AgentClaim:
     execution_id: str
     workspace_id: str
     job_id: str
-    workflow_key: str
     node_key: str
     agent_id: str
     lease_id: str

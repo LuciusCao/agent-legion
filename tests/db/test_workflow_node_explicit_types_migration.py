@@ -14,16 +14,43 @@ from __future__ import annotations
 import hashlib
 import json
 
+import pytest
 import yaml
 
 from server.app.db.migrations.workflow_node_explicit_types import (
     migrate_workflow_node_explicit_types,
 )
+from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.workflows.definition import workflow_definition_from_dict
+from tests.helpers.legacy_workflow_key_shape import (
+    narrow_back_to_v70,
+    restore_pre_v70_shape,
+)
 from tests.postgres_support import TEST_DATABASE_URL
 
 _WORKSPACE = "v65-node-types-ws"
+
+
+# #211 M2 (schema v70): the revision-backfill half of the v66 migration is
+# shape-guarded and returns early on the current schema (workflow_revisions
+# lost its workflow_key column, which the projection join keyed on). The
+# revision tests below seeded pre-v66 payloads to exercise that half, so they
+# cannot run against a fresh v70 database — the draft-YAML tests still cover
+# the surviving backfill path (drafts never keyed on workflow_key).
+@pytest.fixture
+def legacy_shape_db() -> str:
+    """v69 shape restored (workflow_key back on revisions/routes) so the v66
+    revision backfill runs exactly as it does on real pre-v66→v70 upgrades
+    (subagent review #334: shape-guarded no-ops still ship live on upgrades);
+    torn back down to the terminal shape afterwards for later tests."""
+    init_db(TEST_DATABASE_URL)
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        restore_pre_v70_shape(conn)
+    yield TEST_DATABASE_URL
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        narrow_back_to_v70(conn)
+
 
 # Pre-v65 asdict snapshot: non-start nodes carry the legacy "node" type.
 _DEFINITION = {
@@ -117,12 +144,11 @@ def _seed_active_revision(conn, workspace_id: str, definition: dict) -> str:
     pure_json = json.dumps(definition, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     revision_id = f"rev-{workspace_id}"
     conn.execute(
-        "insert into workflow_revisions(id, workspace_id, workflow_key, version, status,"
+        "insert into workflow_revisions(id, workspace_id, version, status,"
         " definition_json, definition_hash)"
-        " values (%s, %s, %s, 1, 'active', %s, %s)",
+        " values (%s, %s, 1, 'active', %s, %s)",
         (
             revision_id,
-            workspace_id,
             workspace_id,
             definition_json,
             hashlib.sha256(pure_json.encode("utf-8")).hexdigest(),
@@ -133,9 +159,9 @@ def _seed_active_revision(conn, workspace_id: str, definition: dict) -> str:
 
 def _seed_agent_route(conn, workspace_id: str, node_key: str) -> None:
     conn.execute(
-        "insert into workspace_node_routes(workspace_id, workflow_key, node_key,"
-        " target_kind, target_id) values (%s, %s, %s, 'agent', 'agent-1')",
-        (workspace_id, workspace_id, node_key),
+        "insert into workspace_node_routes(workspace_id, node_key, "
+        " target_kind, target_id) values (%s, %s, 'agent', 'agent-1')",
+        (workspace_id, node_key),
     )
 
 
@@ -166,7 +192,7 @@ def _draft_yaml(workspace_id: str) -> str:
     return str(row["definition_yaml"])
 
 
-def test_backfills_revision_node_types_from_route_projection() -> None:
+def test_backfills_revision_node_types_from_route_projection(legacy_shape_db) -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         _seed_workspace(conn)
         revision_id = _seed_active_revision(conn, _WORKSPACE, _DEFINITION)
@@ -185,7 +211,7 @@ def test_backfills_revision_node_types_from_route_projection() -> None:
     assert row["definition_hash"] == hashlib.sha256(pure_json.encode("utf-8")).hexdigest()
 
 
-def test_backfilled_revision_matches_loader_normalization() -> None:
+def test_backfilled_revision_matches_loader_normalization(legacy_shape_db) -> None:
     """The backfill must equal what the loader produces from the pre-v66
     payload — otherwise the next save spawns a ghost structural revision."""
     pre_v66 = json.loads(json.dumps(_DEFINITION))
@@ -207,7 +233,7 @@ def test_backfilled_revision_matches_loader_normalization() -> None:
     assert legacy.nodes["gen"].node_type == "code"
 
 
-def test_approval_nodes_keep_their_explicit_type() -> None:
+def test_approval_nodes_keep_their_explicit_type(legacy_shape_db) -> None:
     """Approval gates (EXEC-APPROVAL-001) are already explicit: the backfill
     must not rewrite them to code."""
     definition = json.loads(json.dumps(_DEFINITION))
@@ -229,7 +255,7 @@ def test_approval_nodes_keep_their_explicit_type() -> None:
     assert draft_payload["nodes"]["gen"]["type"] == "agent"
 
 
-def test_replay_is_idempotent() -> None:
+def test_replay_is_idempotent(legacy_shape_db) -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         _seed_workspace(conn)
         revision_id = _seed_active_revision(conn, _WORKSPACE, _DEFINITION)

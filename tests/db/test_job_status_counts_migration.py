@@ -19,8 +19,8 @@ def _seed_workspace(conn, workspace_id: str) -> None:
 
 def _insert_job(conn, job_id: str, workspace_id: str, status: str) -> None:
     conn.execute(
-        "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, status)"
-        " values (%s, %s, 'video_knowledge', 'test', %s, %s)",
+        "insert into jobs(id, workspace_id, source_type, source_id, status)"
+        " values (%s, %s, 'test', %s, %s)",
         (job_id, workspace_id, job_id, status),
     )
 

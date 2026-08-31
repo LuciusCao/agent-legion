@@ -221,9 +221,9 @@ def _insert_job_referencing(job_db, material_id: str, *, status: str = "queued")
     job_id = f"job-{material_id[:8]}-{status}"
     with job_db.connect() as conn:
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type,"
+            "insert into jobs(id, workspace_id, source_type,"
             " source_id, status, input_json)"
-            " values (%s, %s, 'demo_workflow', 'material', %s, %s, %s)",
+            " values (%s, %s, 'material', %s, %s, %s)",
             (
                 job_id,
                 WORKSPACE_ID,
@@ -270,9 +270,9 @@ def test_delete_ignores_unrelated_job_inputs(service, storage, job_db) -> None:
     _insert_job_referencing(job_db, "other-material")
     with job_db.connect() as conn:
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type,"
+            "insert into jobs(id, workspace_id, source_type,"
             " source_id, input_json)"
-            " values ('job-ref-item', %s, 'demo_workflow', 'ref', 'conn:ext', %s)",
+            " values ('job-ref-item', %s, 'ref', 'conn:ext', %s)",
             (WORKSPACE_ID, json.dumps({"type": "ref", "connection_key": "c"})),
         )
 

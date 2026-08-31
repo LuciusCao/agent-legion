@@ -106,8 +106,7 @@ def _insert_workspace_job(conn):
     )
     conn.execute(
         """
-        insert into jobs(id, workspace_id, workflow_key, source_type, source_id)
-        values ('j1', 'ws1', 'p1', 'test', 's1')
+        insert into jobs(id, workspace_id, source_type, source_id) values ('j1', 'ws1', 'test', 's1')
         on conflict(id) do nothing
         """
     )
@@ -129,10 +128,7 @@ def _insert_lease(conn, lease_id, expires_at, status="active"):
     node_run_id = cursor.fetchone()["id"]
     conn.execute(
         """
-        insert into executor_leases(
-            id, execution_id, executor_id, workspace_id, job_id, workflow_key,
-            node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-        ) values (%s, %s, 'e1', 'ws1', 'j1', 'p1', 'n1', %s, %s, %s, %s, %s)
+        insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) values (%s, %s, 'e1', 'ws1', 'j1', 'n1', %s, %s, %s, %s, %s)
         """,
         (
             lease_id,
@@ -486,11 +482,7 @@ def test_run_to_broadcasts_job_updated(manager, tmp_path):
         )
         conn.execute(
             """
-            insert into jobs(
-                id, workspace_id, workflow_key, source_type, source_id,
-                run_id, title, storage_dir
-            )
-            values ('j1', 'ws1', 'p1', 'test', 's1', 'b1', 'J1', %s)
+            insert into jobs(id, workspace_id, source_type, source_id, run_id, title, storage_dir) values ('j1', 'ws1', 'test', 's1', 'b1', 'J1', %s)
             """,
             (str(jobs_dir / "ws1" / "j1"),),
         )

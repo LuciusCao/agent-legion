@@ -35,6 +35,8 @@ from typing import Any
 
 import yaml
 
+from server.app.db.migrations.retire_workflow_key_columns import has_column
+
 logger = logging.getLogger(__name__)
 
 _ACTIVE_REVISIONS = (
@@ -83,6 +85,10 @@ def _backfill_revision_payload(payload: dict[str, Any], agent_nodes: set[str]) -
 
 
 def _migrate_revisions(conn: Any) -> None:
+    # #211 M2: fresh databases run the post-v70 schema shape — the key column
+    # is gone and the (empty) backfill is a no-op either way.
+    if not has_column(conn, "workflow_revisions", "workflow_key"):
+        return
     for revision in conn.execute(_ACTIVE_REVISIONS).fetchall():
         try:
             payload = json.loads(str(revision["definition_json"]))

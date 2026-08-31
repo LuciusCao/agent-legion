@@ -50,15 +50,15 @@ def _seed_request(
             (workspace_id, workspace_id),
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (%s, %s, 'questions', 'question', %s)",
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values (%s, %s, 'question', %s)",
             (job_id, workspace_id, job_id),
         )
         conn.execute("insert into job_nodes(job_id, node_key) values (%s, %s)", (job_id, node_key))
         conn.execute(
-            "insert into workspace_node_routes(workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values (%s, 'questions', %s, 'agent', 'generator-v1')"
-            " on conflict(workspace_id, workflow_key, node_key) do nothing",
+            "insert into workspace_node_routes(workspace_id, node_key, target_kind, target_id)"
+            " values (%s, %s, 'agent', 'generator-v1')"
+            " on conflict(workspace_id, node_key) do nothing",
             (workspace_id, node_key),
         )
         if workspace_cap is not None:
@@ -625,8 +625,8 @@ def test_unclaimable_sweeper_resolves_revision_execution_overrides(job_db) -> No
     with job_db.connect() as conn:
         conn.execute(
             "insert into workflow_revisions("
-            " id, workspace_id, workflow_key, version, status, definition_json, definition_hash)"
-            " values ('rev-1', 'test-workspace', 'questions', 1, 'active', %s, 'hash-1')",
+            " id, workspace_id, version, status, definition_json, definition_hash)"
+            " values ('rev-1', 'test-workspace', 1, 'active', %s, 'hash-1')",
             (
                 json.dumps(
                     {

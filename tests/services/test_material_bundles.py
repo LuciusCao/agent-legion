@@ -223,9 +223,9 @@ def _insert_job_referencing_bundle(job_db, bundle_id: str) -> str:
     job_id = f"job-bundle-{bundle_id[:8]}"
     with job_db.connect() as conn:
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type,"
+            "insert into jobs(id, workspace_id, source_type,"
             " source_id, status, input_json)"
-            " values (%s, %s, 'demo_workflow', 'bundle', %s, 'queued', %s)",
+            " values (%s, %s, 'bundle', %s, 'queued', %s)",
             (
                 job_id,
                 WORKSPACE_ID,

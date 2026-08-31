@@ -50,16 +50,16 @@ def _insert_job_rows(job_db, job_id: str) -> None:
             " on conflict(id) do nothing"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (%s, 'test-workspace', 'questions', 'question', %s)",
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values (%s, 'test-workspace', 'question', %s)",
             (job_id, job_id),
         )
         conn.execute("insert into job_nodes(job_id, node_key) values (%s, 'generate')", (job_id,))
         conn.execute(
             "insert into workspace_node_routes("
-            "workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values ('test-workspace', 'questions', 'generate', 'agent', %s)"
-            " on conflict(workspace_id, workflow_key, node_key) do nothing",
+            "workspace_id, node_key, target_kind, target_id)"
+            " values ('test-workspace', 'generate', 'agent', %s)"
+            " on conflict(workspace_id, node_key) do nothing",
             (_AGENT,),
         )
         conn.execute(

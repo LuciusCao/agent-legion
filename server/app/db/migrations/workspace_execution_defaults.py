@@ -26,6 +26,8 @@ import json
 import logging
 from typing import Any
 
+from server.app.db.migrations.retire_workflow_key_columns import has_column
+
 logger = logging.getLogger(__name__)
 
 _WORKSPACES_WITH_DEFAULTS = (
@@ -38,10 +40,10 @@ _ACTIVE_REVISION = (
     "select id, definition_json from workflow_revisions"
     " where workspace_id=%s and workflow_key=%s and status='active'"
 )
-_DEFAULT_COLUMNS_PRESENT = (
-    "select count(*) as n from information_schema.columns"
-    " where table_schema=current_schema() and table_name='workspaces'"
-    " and column_name='default_agent_provider'"
+# #211 M2: post-v70 databases have no workflow_key on workflow_revisions; the
+# workspace-keyed twin keeps the backfill working on the upgraded shape.
+_ACTIVE_REVISION_V70 = (
+    "select id, definition_json from workflow_revisions where workspace_id=%s and status='active'"
 )
 
 
@@ -60,18 +62,25 @@ def _has_top_level_execution(payload: dict[str, Any]) -> bool:
 
 def migrate_workspace_execution_defaults(conn: Any) -> None:
     """Copy retired workspace Agent defaults into the active revision."""
-    if int(conn.execute(_DEFAULT_COLUMNS_PRESENT).fetchone()["n"]) == 0:
+    if not has_column(conn, "workspaces", "default_agent_provider"):
         return  # Post-chain cleanup already dropped the source columns.
+    # #211 M2: pre-v70 revisions keyed the lookup on workflow_key; on the
+    # current shape the workspace id alone identifies the active revision.
+    has_key = has_column(conn, "workflow_revisions", "workflow_key")
+    active_revision_sql = _ACTIVE_REVISION if has_key else _ACTIVE_REVISION_V70
     for workspace in conn.execute(_WORKSPACES_WITH_DEFAULTS).fetchall():
         defaults = {
             "provider": str(workspace["default_agent_provider"] or ""),
             "model": str(workspace["default_agent_model"] or ""),
             "thinking": str(workspace["default_agent_thinking"] or ""),
         }
-        revision = conn.execute(
-            _ACTIVE_REVISION,
-            (str(workspace["id"]), str(workspace["default_workflow_key"] or "")),
-        ).fetchone()
+        if has_key:
+            revision = conn.execute(
+                active_revision_sql,
+                (str(workspace["id"]), str(workspace["default_workflow_key"] or "")),
+            ).fetchone()
+        else:
+            revision = conn.execute(active_revision_sql, (str(workspace["id"]),)).fetchone()
         if revision is None:
             logger.warning(
                 "workspace %s carries Agent defaults but has no active revision;"

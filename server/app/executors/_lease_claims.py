@@ -144,10 +144,10 @@ def claim_lease(
     conn.execute(
         """
         insert into executor_leases(
-            id, execution_id, executor_id, workspace_id, job_id, workflow_key,
+            id, execution_id, executor_id, workspace_id, job_id,
             node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
         )
-        values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
+        values (%s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
         """,
         (
             lease_id,
@@ -155,9 +155,6 @@ def claim_lease(
             request.executor_id,
             request.workspace_id,
             request.job_id,
-            # #211 M1: normalize on write — pre-v62 frozen snapshots may still
-            # carry the old key; new rows always record the identity value.
-            request.workspace_id,
             request.node_key,
             node_run_id,
             now_str,

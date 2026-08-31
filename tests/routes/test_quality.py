@@ -26,9 +26,9 @@ def _seed_runs() -> None:
             # v62 invariant: workflow_key == workspace id (the batch-create
             # default derives the filter from the path workspace_id).
             conn.execute(
-                "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-                " values (%s, %s, %s, 'test', %s)",
-                (job_id, WORKSPACE, WORKSPACE, job_id),
+                "insert into jobs(id, workspace_id, source_type, source_id)"
+                " values (%s, %s, 'test', %s)",
+                (job_id, WORKSPACE, job_id),
             )
             conn.execute(
                 "insert into node_runs(id, job_id, node_key, status) values (%s, %s, %s, %s)",
@@ -128,9 +128,9 @@ def test_stats_confusion_matrix(client):
             job_id = f"job-cm-{index}"
             # v62 invariant: workflow_key == workspace id.
             conn.execute(
-                "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-                " values (%s, %s, %s, 'test', %s)",
-                (job_id, WORKSPACE, WORKSPACE, job_id),
+                "insert into jobs(id, workspace_id, source_type, source_id)"
+                " values (%s, %s, 'test', %s)",
+                (job_id, WORKSPACE, job_id),
             )
             conn.execute(
                 "insert into node_runs(id, job_id, node_key, status, failure_detail)"

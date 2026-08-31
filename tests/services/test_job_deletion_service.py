@@ -84,11 +84,7 @@ def _insert_active_lease(
         node_run_id = cursor.fetchone()["id"]
         conn.execute(
             """
-            insert into executor_leases(
-                id, execution_id, executor_id, workspace_id, job_id, workflow_key,
-                node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-            )
-            values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
+            insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) values (%s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
             """,
             (
                 f"lease-{job_id}",
@@ -96,7 +92,6 @@ def _insert_active_lease(
                 "local",
                 workspace_id,
                 job_id,
-                "demo_workflow",
                 node_key,
                 node_run_id,
                 database_timestamp(now),

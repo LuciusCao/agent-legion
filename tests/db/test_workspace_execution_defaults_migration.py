@@ -89,12 +89,11 @@ def _seed_workspace(conn, workspace_id: str, provider: str, model: str, thinking
 def _seed_active_revision(conn, workspace_id: str, definition: dict) -> None:
     definition_json = json.dumps(definition, ensure_ascii=False, sort_keys=True)
     conn.execute(
-        "insert into workflow_revisions(id, workspace_id, workflow_key, version, status,"
+        "insert into workflow_revisions(id, workspace_id, version, status,"
         " definition_json, definition_hash)"
-        " values (%s, %s, %s, 1, 'active', %s, %s)",
+        " values (%s, %s, 1, 'active', %s, %s)",
         (
             f"rev-{workspace_id}",
-            workspace_id,
             workspace_id,
             definition_json,
             hashlib.sha256(definition_json.encode("utf-8")).hexdigest(),

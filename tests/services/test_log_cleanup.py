@@ -29,8 +29,7 @@ def _seed_workspace(conn, workspace_id="ws1"):
 def _insert_job(conn, job_id, workspace_id="ws1"):
     conn.execute(
         """
-        insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)
-        values (%s, %s, 'wf', 'question', %s, %s)
+        insert into jobs(id, workspace_id, source_type, source_id, storage_dir) values (%s, %s, 'question', %s, %s)
         """,
         (job_id, workspace_id, job_id, job_storage_ref(workspace_id, job_id)),
     )

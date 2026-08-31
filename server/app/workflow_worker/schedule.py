@@ -159,7 +159,7 @@ def try_claim_and_submit(
     # succeed (claim_executor_node re-checks authoritatively), so skip the
     # per-pop batch lookup and config resolution for the thousands of doomed
     # candidates that pile up behind a saturated pool.
-    if not snapshot.has_capacity(workspace_id, workflow_key, node_key):
+    if not snapshot.has_capacity(workspace_id, node_key):
         return False
 
     try:

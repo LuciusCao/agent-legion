@@ -100,7 +100,9 @@ class JobPackageService(WorkspacePackageClearPackedMixin, WorkspacePackageLifecy
         artifact_names = workspace_artifact_names(
             self.job_db,
             workspace_id,
-            {str(job.get("workflow_key", "")) for job in eligible_jobs},
+            # #211 M2: jobs lost workflow_key (v70); the active revision is
+            # resolved per workspace (the identity value since v62).
+            {str(job.get("workflow_key", "") or workspace_id) for job in eligible_jobs},
             set(WORKSPACE_PACKAGE_FILES),
         )
         package_path, count = create_workspace_package(

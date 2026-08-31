@@ -70,7 +70,7 @@ class JobExecutionControlMixin(JobExecutionPauseMixin):
             raise ValueError("target_node_key is required")
         with self.connect() as conn:
             job = conn.execute(
-                "select workflow_key from jobs where id=%s",
+                "select workspace_id from jobs where id=%s",
                 (job_id,),
             ).fetchone()
             if job is None:

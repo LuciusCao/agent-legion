@@ -55,6 +55,9 @@ from server.app.db.migrations.job_status_counts import (
 from server.app.db.migrations.jobs_workflow_key_alignment import (
     migrate_jobs_workflow_key_alignment,
 )
+from server.app.db.migrations.retire_workflow_key_columns import (
+    migrate_retire_workflow_key_columns,
+)
 
 MigrationFn = Callable[[Any], None]
 
@@ -152,6 +155,12 @@ MIGRATIONS: list[SchemaMigration] = [
     # index (claim path predicate binds workspace_id — Codex P2 on #321)
     # comes from the schema-file replay.
     SchemaMigration(69, "executor_leases_workspace_index"),
+    # v70 (#211 Phase 3 M2): retire the workflow_key columns — composite-PK
+    # state tables rebuild without the key, jobs/runs/leases/requests/
+    # revisions drop the column, six key-leading indexes swap for
+    # workspace-keyed twins. Requires v68 alignment (values all equal the
+    # workspace id) and M1's predicate/write normalization.
+    SchemaMigration(70, "retire_workflow_key_columns", migrate_retire_workflow_key_columns),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]

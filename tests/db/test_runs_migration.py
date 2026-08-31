@@ -47,7 +47,6 @@ def test_runs_baseline_shape() -> None:
     assert {
         "id",
         "workspace_id",
-        "workflow_key",
         "source_kind",
         "status",
         "frozen_pins_json",
@@ -59,6 +58,8 @@ def test_runs_baseline_shape() -> None:
         "created_at",
         "updated_at",
     } <= run_columns
+    # #211 M2 (v70): the workflow_key column is gone from runs.
+    assert "workflow_key" not in run_columns
     assert "run_id" in job_columns
     assert "batch_id" not in job_columns
     assert {"input_json", "frozen_config_json"} <= job_columns
@@ -92,6 +93,8 @@ def _rebuild_v52_shape(conn) -> None:
 
 
 def _seed_batch(conn, batch_id: str, payload: dict | str, status: str = "completed") -> None:
+    # job_batches is the historical v52 shape rebuilt by _rebuild_v52_shape —
+    # it keeps its workflow_key column (only the live v70 tables dropped it).
     conn.execute(
         """
         insert into job_batches(
@@ -106,8 +109,7 @@ def _seed_batch(conn, batch_id: str, payload: dict | str, status: str = "complet
 def _seed_job(conn, job_id: str, batch_id: str, source_id: str) -> None:
     conn.execute(
         """
-        insert into jobs(id, workspace_id, workflow_key, source_type, source_id, batch_id)
-        values (%s, 'ws-run', 'wf_demo', 'question', %s, %s)
+        insert into jobs(id, workspace_id, source_type, source_id, batch_id) values (%s, 'ws-run', 'question', %s, %s)
         """,
         (job_id, source_id, batch_id),
     )
@@ -255,7 +257,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "executor_leases_workspace_index"
+    assert migration["name"] == "retire_workflow_key_columns"
 
 
 @pytest.mark.fresh_schema

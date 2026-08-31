@@ -7,6 +7,15 @@ from server.app.jobs.queries.batch_queue_sql import RUN_REQUEUE_DEPLETED
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
+def backfill_deprecated_workflow_key(run: dict[str, Any]) -> dict[str, Any]:
+    """#211 M2: runs lost its workflow_key column (v70); the deprecated wire
+    field keeps the identity value (workflow_key == workspace_id since v62).
+    Lives on this leaf module so both run mixins share one backfill.
+    Removal window: 2026-10-31 (M3)."""
+    run.setdefault("workflow_key", str(run["workspace_id"]))
+    return run
+
+
 class RunQueueQueriesMixin(ConnectionQueriesMixin):
     def count_jobs_in_run(self, run_id: str) -> int:
         with self._connect_read() as conn:
@@ -39,7 +48,7 @@ class RunQueueQueriesMixin(ConnectionQueriesMixin):
                 (row["id"],),
             )
             claimed = conn.execute("select * from runs where id=%s", (row["id"],)).fetchone()
-        return dict(claimed) if claimed else None
+        return backfill_deprecated_workflow_key(dict(claimed)) if claimed else None
 
     # Requeue a completed run whose jobs were (partially) deleted; None when
     # the run is intact or no longer completed (the UPDATE's guard clause
@@ -52,7 +61,7 @@ class RunQueueQueriesMixin(ConnectionQueriesMixin):
             row = conn.execute(
                 RUN_REQUEUE_DEPLETED, (payload_json, run_id, run_id, run_id, recorded_count)
             ).fetchone()
-        return dict(row) if row else None
+        return backfill_deprecated_workflow_key(dict(row)) if row else None
 
     def update_intake_run(
         self,
@@ -82,4 +91,4 @@ class RunQueueQueriesMixin(ConnectionQueriesMixin):
             row = conn.execute("select * from runs where id=%s", (run_id,)).fetchone()
         if row is None:
             raise RuntimeError("run update did not return a row")
-        return dict(row)
+        return backfill_deprecated_workflow_key(dict(row))

@@ -83,7 +83,7 @@ class QualityReplayService:
                     f"node {node_key!r} is not part of the job's frozen workflow snapshot"
                 )
             agent_id, pin = self._resolve_agent_pin(
-                conn, workspace_id, str(job["workflow_key"]), node, agent_version
+                conn, workspace_id, str(job["workspace_id"]), node, agent_version
             )
             self._reconcile_item_rows(conn, item_id, node_key)
             active = conn.execute(
@@ -229,9 +229,9 @@ class QualityReplayService:
         route = conn.execute(
             """
             select target_kind, target_id from workspace_node_routes
-            where workspace_id = %s and workflow_key = %s and node_key = %s
+            where workspace_id = %s and node_key = %s
             """,
-            (workspace_id, workflow_key, node.key),
+            (workspace_id, node.key),
         ).fetchone()
         if route is None:
             raise InvalidOperationError(f"node {node.key!r} has no workspace route; cannot replay")
