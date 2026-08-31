@@ -3,12 +3,10 @@ name: Quality Gate
 on:
   pull_request:
     branches: [develop, main, master]
-    paths-ignore: ['docs/**', '**/*.md', 'LICENSE']
   push:
     # develop merges are already covered by the PR gate; keep push triggers
     # on the trunk branches only so a merge does not burn a second full gate.
     branches: [main, master]
-    paths-ignore: ['docs/**', '**/*.md', 'LICENSE']
   workflow_dispatch:
   # The weekly schedule moved to nightly-gate.yml (issue #193): the stress
   # jobs never run on PR/push anyway, and a scheduled run on a trunk ref
@@ -38,7 +36,10 @@ jobs:
   # gate by changed paths, mirroring the local pre-push lane policy —
   # frontend-only changes skip the backend pytest shards (api-check still
   # runs), velites-only changes run just the rust job, docs-only changes
-  # skip the gate entirely. Shared files (config, scripts, tests,
+  # skip every lane (only this detection job runs — triggers carry no
+  # paths-ignore, because a workflow that never starts leaves required
+  # checks pending forever and blocks docs-only PRs, first hit on #316).
+  # Shared files (config, scripts, tests,
   # workflows, anything outside frontend//velites//docs/) run the full
   # backend+frontend gate; dispatch runs always get every lane.
   changes:
