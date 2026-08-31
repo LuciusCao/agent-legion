@@ -16,10 +16,11 @@ type Props = {
 }
 
 /** #76：节点级 skill 内容绑定编辑（仅 Agent 路由节点渲染，由调用方判定）。
- * 编辑真相源是草稿 YAML——key 经 SkillSelector 校验填入，ref 为普通文本
- * （留空回落 skill_sources 默认 ref）；response 的 node.skill 只作已发布
- * 状态的回显兜底。回写经 patchWorkflowNodeSkill，草稿持久化走既有的
- * debounce PUT raw yaml 流（字段无关）。 */
+ * 编辑真相源是草稿 YAML——key 经 SkillSelector 校验填入；ref #322 起显式化：
+ * 新绑定默认填 latest（跟随仓库 HEAD，不冻结），填具体 tag 即首次 dispatch
+ * 冻结进 skill_lock；response 的 node.skill 只作已发布状态的回显兜底。回写经
+ * patchWorkflowNodeSkill（恒 mapping 形态，对齐后端 echo），草稿持久化走既有
+ * 的 debounce PUT raw yaml 流（字段无关）。 */
 export function WorkflowNodeSkillEditor(props: Props) {
   const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined
   // 区分「草稿里没有这个节点」（回显 published 绑定）与「草稿节点存在但无
@@ -56,7 +57,7 @@ export function WorkflowNodeSkillEditor(props: Props) {
         <SkillSelector
           workspaceId={workspaceId}
           value={bound?.key ?? ''}
-          onChange={(key) => patch({ key, ref: bound?.ref ?? '' })}
+          onChange={(key) => patch({ key, ref: bound?.ref ?? 'latest' })}
         />
       )}
       <TextField
@@ -69,8 +70,12 @@ export function WorkflowNodeSkillEditor(props: Props) {
         }}
         fullWidth
         disabled={!bound}
-        placeholder="留空用源默认 ref"
-        helperText={bound ? undefined : '先经上方校验选择 skill'}
+        placeholder="latest"
+        helperText={
+          bound
+            ? 'latest = 跟随仓库最新提交；填 tag 锁定版本'
+            : '先经上方校验选择 skill'
+        }
         sx={{ mt: 1.5 }}
       />
       {bound && (

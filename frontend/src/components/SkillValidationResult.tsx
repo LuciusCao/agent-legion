@@ -9,8 +9,8 @@ type Props = {
   onSelectTag: (tag: string) => void
 }
 
-/** Skill 校验成功后的参考信息区：可用 tag 下拉（纯参考，选择不回写——DB
- * skill_lock 仍是锁定 ref 的唯一权威）+ 当前锁定 ref + 同步流程提示。 */
+/** Skill 校验成功后的参考信息区：可用 tag 下拉（纯参考，选择不回写——节点
+ * ref 才是版本选择的落点）+ 已锁定版本展示（lock 中唯一 pin tag 时给出）。 */
 export function SkillValidationResult(props: Props) {
   const tags = props.result.tags ?? []
   return (
@@ -34,12 +34,13 @@ export function SkillValidationResult(props: Props) {
       )}
       {props.result.locked_ref && (
         <p style={{ fontSize: 12, color: '#616161' }}>
-          当前锁定 ref：{props.result.locked_ref}
+          已锁定版本：{props.result.locked_ref}
         </p>
       )}
       {props.tagTouched && (
         <p style={{ fontSize: 12, color: '#ed6c02' }}>
-          tag 变更需通过 skills 同步流程生效，此处选择不会修改锁定 ref。
+          此处选择仅作参考：要锁定版本，请在节点 Skill ref 填入该 tag；默认
+          latest 跟随仓库最新提交。
         </p>
       )}
     </div>

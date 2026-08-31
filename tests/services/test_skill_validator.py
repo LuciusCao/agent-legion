@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from server.app.services.skill_validator import SkillValidator
-from server.app.skills.config import LockedSkill, SkillsConfig, SkillsLock
+from server.app.skills.config import LockedSkill, SkillsLock
 
 pytestmark = pytest.mark.no_db
 
@@ -65,23 +65,26 @@ def test_validate_happy_path_with_tags(base_dir, tmp_path) -> None:
     assert result.locked_ref == "v1.2.0"
 
 
-def test_locked_ref_follows_the_source_ref(base_dir, tmp_path) -> None:
-    """Multi-ref lock (issue #76): with a sources seam, "locked" means the
-    declared source ref is one of the pinned refs — a drifted source ref
-    reports no locked ref even while other pins exist."""
+def test_locked_ref_reports_the_sole_pin(base_dir, tmp_path) -> None:
+    """#322: without the retired source registry there is no declared default
+    ref — a sole pin is the unambiguous locked-ref display answer."""
     skill_dir = _make_skill(base_dir, "wf/review", tags=["v1.0.0", "v1.2.0"])
     lock = SkillsLock(skills={"wf/review": LockedSkill(repo="local", refs={"v1.0.0": "a" * 40})})
-    sources = SkillsConfig.model_validate(
-        {"skills": {"wf/review": {"repo": "local", "ref": "v1.0.0"}}}
+
+    result = SkillValidator(base_dir, lambda: lock).validate(str(skill_dir))
+    assert result.locked_ref == "v1.0.0"
+
+
+def test_locked_ref_is_none_with_ambiguous_pins(base_dir, tmp_path) -> None:
+    """Multiple pinned refs have no unambiguous "locked" answer anymore."""
+    skill_dir = _make_skill(base_dir, "wf/review", tags=["v1.0.0", "v1.2.0"])
+    lock = SkillsLock(
+        skills={
+            "wf/review": LockedSkill(repo="local", refs={"v1.0.0": "a" * 40, "v1.2.0": "b" * 40})
+        }
     )
 
-    pinned = SkillValidator(base_dir, lambda: lock, lambda: sources).validate(str(skill_dir))
-    assert pinned.locked_ref == "v1.0.0"
-
-    drifted = SkillsConfig.model_validate(
-        {"skills": {"wf/review": {"repo": "local", "ref": "v1.2.0"}}}
-    )
-    result = SkillValidator(base_dir, lambda: lock, lambda: drifted).validate(str(skill_dir))
+    result = SkillValidator(base_dir, lambda: lock).validate(str(skill_dir))
     assert result.locked_ref is None
 
 

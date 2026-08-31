@@ -77,8 +77,9 @@ def validate_worker_outputs(
     if not skill:
         return None
     # Re-resolve at the manifest's frozen ref (#76) so the validator matches
-    # the executed skill content; legacy manifests without skill_ref fall
-    # back to the source default ref, exactly as before.
+    # the executed skill content; legacy manifests without skill_ref resolve
+    # to ``latest`` (the repo's live HEAD), matching the #322 dispatch
+    # semantics for an unpinned node ref.
     ref = str(manifest.get("skill_ref", ""))
     validation_id = f"validate-{uuid.uuid4().hex}"
     try:

@@ -18,8 +18,7 @@ from typing import Any
 DEMO_WORKFLOW_KEY = "education_video_problems_generation"
 
 # Skill group under the skill root (``make import-demo`` repos); the demo DAG
-# pins each Agent-routed node's skill at the import tag (issue #76), matching
-# ``server.app.skills.builtin_sources``.
+# pins each Agent-routed node's skill at the import tag (issue #76).
 _DEMO_SKILL_GROUP = "education-video-problems-generation"
 
 DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {

@@ -1,13 +1,12 @@
-"""TTL memoization for the DB-backed skill source/lock documents.
+"""TTL memoization for the DB-backed skill lock document.
 
 Agent dispatch calls ``SkillManager.get_skill_dir`` several times per second;
-reading the ``skill_sources`` / ``skill_lock`` documents from Postgres on every
-call is wasted work because they change only through admin operations
-(skill-sources PUT, relock, CLI ``skills-lock``). Those writes go through other
+reading the ``skill_lock`` document from Postgres on every call is wasted
+work because it changes only through admin/CLI operations (relock, auto-lock
+on first dispatch of a pinned ref). Those writes go through other
 SkillManager instances or processes, so invalidation here is time-based only:
-a stale read delays visibility of an admin change by at most the TTL — the
-same class of race that already exists between the separate source-update and
-relock calls.
+a stale read delays visibility of a lock change by at most the TTL — the
+same class of race that already exists between separate relock calls.
 """
 
 from __future__ import annotations

@@ -29,14 +29,13 @@ def _skill_path(skill_key: str) -> str:
 def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
     @mcp.tool()
     async def get_skill(skill_key: str, ref: str | None = None) -> str:
-        """Read a skill: key, configured ref, the repo's git tags (latest
-        version first), and text files (SKILL.md + references/ + scripts/).
-        Without ref the content is the LOCKED commit when the skill lock pins
-        one (the "current locked version"), else the working tree. Pass ref
-        (a git tag of the skill repo) to preview that tag's content — e.g. a
-        tag another agent just created — without changing the lock; an
-        unknown tag comes back as a structured HTTP 404 error, nothing
-        changes."""
+        """Read a skill: key, the repo's git tags (latest version first),
+        and text files (SKILL.md + references/ + scripts/). Without ref the
+        content is the working tree at HEAD — the ``latest`` semantics an
+        unpinned node ref dispatches against. Pass ref (a git tag of the
+        skill repo) to preview that tag's content — e.g. a tag another
+        agent just created — without changing the lock; an unknown tag
+        comes back as a structured HTTP 404 error, nothing changes."""
         _, client = await client_factory()
         path = f"/skills/{_skill_path(skill_key)}"
         if ref is not None:
@@ -60,14 +59,15 @@ def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         new_tag: str,
         message: str,
     ) -> str:
-        """Write a new version of a skill into its LOCAL source repo:
-        validate every path (inside the skill dir, no '..' or absolute paths),
-        write the files, re-run the contract check (failure rolls the repo
-        back to its original commit), then git commit (author
-        agent-legion-studio) and git tag new_tag. Local-path sources only —
-        URL sources are refused. An existing tag is a conflict. The skill
-        lock is never touched: running jobs keep the locked commit until a
-        human reviews the diff, changes the ref, and relocks."""
+        """Write a new version of a skill into its LOCAL in-place repo
+        (<skills root>/<key>): validate every path (inside the skill dir, no
+        '..' or absolute paths), write the files, re-run the contract check
+        (failure rolls the repo back to its original commit), then git commit
+        (author agent-legion-studio) and git tag new_tag. An existing tag is
+        a conflict. The skill lock is never touched: nodes pinned to a tag
+        keep the locked commit until a human reviews the diff, re-pins the
+        node, and relocks; ``latest`` nodes pick the new HEAD up on their
+        next dispatch."""
         _, client = await client_factory()
         body: dict[str, Any] = {"files": files, "new_tag": new_tag, "message": message}
         return await client.call("POST", f"/skills/{_skill_path(skill_key)}/versions", body)

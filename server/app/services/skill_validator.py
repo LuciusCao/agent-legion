@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from server.app.skills.config import SkillsConfig, SkillsLock
+from server.app.skills.config import SkillsLock
 
 _GIT_TAG_TIMEOUT_SECONDS = 5
 
@@ -44,11 +44,9 @@ class SkillValidator:
         self,
         base_dir: Path,
         lock_getter: Callable[[], SkillsLock | None] | None = None,
-        sources_getter: Callable[[], SkillsConfig | None] | None = None,
     ) -> None:
         self._base_dir = base_dir.expanduser()
         self._lock_getter = lock_getter
-        self._sources_getter = sources_getter
 
     def validate(self, raw_path: str) -> SkillValidation:
         path, error = self._resolve_inside_base(raw_path)
@@ -115,11 +113,10 @@ class SkillValidator:
             return None
         try:
             lock = self._lock_getter()
-            sources = self._sources_getter() if self._sources_getter is not None else None
         except Exception:
             # #204 broad-except audit: the lock getter is an injected seam
             # (default: parsing the DB ``skill_lock`` document in
-            # skill_source_store) whose failure family is not this module's
+            # skill_lock_store) whose failure family is not this module's
             # to enumerate — a corrupt lock document, a DB blip, or a test
             # double's error must all degrade to "no locked ref shown" in
             # the editor rather than 500 the whole validation response.
@@ -130,10 +127,6 @@ class SkillValidator:
         entry = lock.skills.get(skill_key)
         if entry is None or not entry.refs:
             return None
-        # Multi-ref lock (issue #76): "locked" means the declared source ref
-        # is one of the pinned refs. Without a sources seam (tests), fall
-        # back to the sole pin — the only unambiguous answer.
-        source = sources.skills.get(skill_key) if sources is not None else None
-        if source is not None:
-            return source.ref if source.ref in entry.refs else None
+        # Without the retired source registry there is no declared default
+        # ref: only a sole pin is an unambiguous "locked ref" display answer.
         return next(iter(entry.refs)) if len(entry.refs) == 1 else None

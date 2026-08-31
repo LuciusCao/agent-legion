@@ -17,20 +17,19 @@ def seed_demo_workspace(dsn: str, vault_key: str, data_dir: Path, project_root: 
     Schema v62 removed the create-path sample-template seed, so the demo DAG,
     factory Agents, node codes and materials the smoke specs drive are seeded
     up front via the same seeder `make import-demo` uses. The skill lock step
-    resolves refs via git, so the repo-shipped demo skills are first imported
-    into data_dir (scripts/import-demo.sh via AGENT_LEGION_DEMO_SKILLS_DIR)
-    and passed as skill_root. load_settings reads AGENT_LEGION_* from
-    os.environ, so the e2e overrides wrap the seed call.
+    resolves the pinned tag via git against the in-place repos, so the
+    repo-shipped demo skills are first imported under the real skills root
+    (scripts/import-demo.sh; #322 retired the clone channel — dispatch reads
+    the in-place repo at <skills root>/<key>). load_settings reads
+    AGENT_LEGION_* from os.environ, so the e2e overrides wrap the seed call.
     """
     from scripts.seed_demo import seed_demo
     from server.app.settings import load_settings
 
-    skills_root = data_dir / "demo-skills"
-    skills_root.mkdir(parents=True, exist_ok=True)
     imported = subprocess.run(
         [str(project_root / "scripts" / "import-demo.sh")],
         cwd=project_root,
-        env={**os.environ, "AGENT_LEGION_DEMO_SKILLS_DIR": str(skills_root)},
+        env=dict(os.environ),
         capture_output=True,
         text=True,
     )
@@ -46,7 +45,7 @@ def seed_demo_workspace(dsn: str, vault_key: str, data_dir: Path, project_root: 
     previous = {key: os.environ.get(key) for key in overrides}
     os.environ.update(overrides)
     try:
-        seed_demo(load_settings(), skill_root=skills_root)
+        seed_demo(load_settings())
     finally:
         for key, value in previous.items():
             if value is None:

@@ -1,14 +1,14 @@
-"""Ref-aware skill checkout wrapper (issue #76, dispatch phase).
+"""Ref-aware skill checkout wrapper (issue #76, dispatch phase; #322 refs).
 
 ``resolve_skill_checkout`` pins the effective ref into the returned
-``SkillCheckout`` (source default when the caller passes none, explicit ref
-otherwise); ``checkout_node_skill`` applies the dispatch-time source priority
-(node binding wins, Agent definition skill is the legacy fallback).
+``SkillCheckout`` (``latest`` — the repo's live HEAD — when the caller
+passes none, an explicit tag otherwise); ``checkout_node_skill`` applies the
+dispatch-time source priority (node binding wins, Agent definition skill is
+the legacy fallback).
 """
 
 from __future__ import annotations
 
-import subprocess
 import uuid
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -21,58 +21,63 @@ from server.app.skills.checkout import (
     resolve_skill_checkout,
 )
 from server.app.workflows.schema import WorkflowNode, WorkflowNodeSkill
-from tests.helpers.skill_git import _KEY, _git_env, _make_bare_repo, _make_manager
+from tests.helpers.skill_git import (
+    _KEY,
+    _head_commit,
+    _make_manager,
+    _make_skill_repo,
+    _tag,
+)
 
 pytestmark = pytest.mark.no_db
 
 
-def _tag_repo(tmp_path: Path, tag: str = "v1.0.0") -> None:
-    env = _git_env()
-    clone = tmp_path / "work" / "clone"
-    subprocess.run(["git", "-C", str(clone), "tag", tag], check=True, env=env)
-    subprocess.run(["git", "-C", str(clone), "push", "origin", tag], check=True, env=env)
-
-
-def _head_commit(tmp_path: Path) -> str:
-    env = _git_env()
-    clone = tmp_path / "work" / "clone"
-    result = subprocess.run(
-        ["git", "-C", str(clone), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    return result.stdout.strip()
-
-
-def test_checkout_defaults_to_the_declared_source_ref(tmp_path: Path) -> None:
-    repo_uri = _make_bare_repo(tmp_path)
-    _tag_repo(tmp_path)
-    manager = _make_manager(tmp_path, {_KEY: {"repo": repo_uri, "ref": "v1.0.0"}})
+def test_checkout_defaults_to_latest(tmp_path: Path) -> None:
+    """#322: no ref is ``latest`` — the live HEAD, recorded as latest@commit12."""
+    repo = _make_skill_repo(tmp_path / "skills")
+    manager = _make_manager(tmp_path)
 
     checkout = resolve_skill_checkout(manager, _KEY, str(uuid.uuid4()))
 
-    commit = _head_commit(tmp_path)
+    commit = _head_commit(repo)
     assert checkout.commit == commit
-    assert checkout.ref == "v1.0.0"
-    assert checkout.version == f"v1.0.0@{commit[:12]}"
+    assert checkout.ref == "latest"
+    assert checkout.version == f"latest@{commit[:12]}"
     assert (checkout.run_dir / "SKILL.md").is_file()
+    # The manifest triple records the normalized latest ref (#322 contract).
+    assert checkout.manifest_pins() == {
+        "skill": _KEY,
+        "skill_ref": "latest",
+        "skill_version": f"latest@{commit[:12]}",
+    }
+    # latest never enters the lock.
+    assert manager.load_lock().skills == {}
 
 
 def test_checkout_honors_an_explicit_ref_and_freezes_it(tmp_path: Path) -> None:
-    repo_uri = _make_bare_repo(tmp_path)
-    _tag_repo(tmp_path)
-    manager = _make_manager(tmp_path, {_KEY: {"repo": repo_uri, "ref": "main"}})
+    repo = _make_skill_repo(tmp_path / "skills")
+    _tag(repo, "v1.0.0")
+    manager = _make_manager(tmp_path)
 
     checkout = resolve_skill_checkout(manager, _KEY, str(uuid.uuid4()), "v1.0.0")
 
-    commit = _head_commit(tmp_path)
+    commit = _head_commit(repo)
     assert checkout.ref == "v1.0.0"
     assert checkout.version == f"v1.0.0@{commit[:12]}"
-    # The explicit ref auto-locks alongside the declared default ref.
+    # The explicit tag auto-locks on first dispatch.
     locked = manager.load_lock().skills[_KEY]
     assert locked.refs["v1.0.0"] == commit
+
+
+def test_checkout_explicit_latest_skips_the_lock(tmp_path: Path) -> None:
+    repo = _make_skill_repo(tmp_path / "skills")
+    _tag(repo, "v1.0.0")
+    manager = _make_manager(tmp_path)
+
+    checkout = resolve_skill_checkout(manager, _KEY, str(uuid.uuid4()), "latest")
+
+    assert checkout.ref == "latest"
+    assert manager.load_lock().skills == {}
 
 
 def _contract_skill_tree(base_dir: Path, key: str) -> None:
@@ -147,12 +152,14 @@ def test_invalid_run_dir_cleans_up_and_raises(tmp_path: Path) -> None:
 
 
 def test_checkout_node_skill_falls_back_to_the_agent_definition(tmp_path: Path) -> None:
-    manager = _mock_manager(tmp_path, "group/agent-skill", "v1")
+    """Legacy fallback: the Agent definition's skill dispatches at ``latest``
+    (#322 normalization of the ref-less legacy shape)."""
+    manager = _mock_manager(tmp_path, "group/agent-skill", "latest")
     node = WorkflowNode(key="do", label="Do", capability="cap")
 
     checkout_node_skill(manager, node, "group/agent-skill", "exec-2")
 
-    manager.checkout_skill.assert_called_once_with("group/agent-skill", "exec-2", None)
+    manager.checkout_skill.assert_called_once_with("group/agent-skill", "exec-2", "latest")
 
 
 def test_checkout_node_skill_raises_when_neither_side_binds(tmp_path: Path) -> None:

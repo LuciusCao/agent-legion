@@ -1,11 +1,12 @@
 """Ref-aware skill checkout for Agent dispatch and Host-side validation (#76).
 
 ``resolve_skill_checkout`` wraps ``SkillManager.checkout_skill`` with the
-``resolve_workflow_skill`` contract check, and exposes the effective ref (the
-declared source ref when the caller passed none) so manifests record the
-exact pin the lock froze. ``checkout_node_skill`` adds the dispatch-time
-source priority (node binding wins, Agent definition skill is the legacy
-fallback). Kept out of ``skills/runtime.py`` for budget headroom.
+``resolve_workflow_skill`` contract check, and exposes the effective ref
+(``latest`` — the repo's live HEAD, never locked — when the caller passed
+none or an explicit ``latest``) so manifests record the exact pin the lock
+froze. ``checkout_node_skill`` adds the dispatch-time source priority (node
+binding wins, Agent definition skill is the legacy fallback). Kept out of
+``skills/runtime.py`` for budget headroom.
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ class SkillCheckout(NamedTuple):
 def resolve_skill_checkout(
     skill_manager: SkillManager, key: str, execution_id: str, ref: str = ""
 ) -> SkillCheckout:
-    """Checkout ``key`` at ``ref`` (the source default when empty), validated."""
+    """Checkout ``key`` at ``ref`` (empty/``latest`` = live HEAD), validated."""
     run_dir, commit, version = skill_manager.checkout_skill(key, execution_id, ref or None)
     try:
         # Validate the execution-private copy, not the shared cache: another
@@ -60,7 +61,7 @@ def resolve_skill_checkout(
         skill_manager.cleanup_execution(execution_id)
         raise
     # version is "ref@commit12"; its ref prefix is the effective pin
-    # (checkout_skill already fell back to the declared source ref).
+    # (checkout_skill already normalized an empty ref to "latest").
     return SkillCheckout(key, version[:-13], run_dir, commit, version)
 
 

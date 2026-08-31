@@ -1,8 +1,8 @@
 """Host-side worker output validation resolves the manifest's frozen skill (#76).
 
 The validator script must come from the same (key, ref) pin the execution
-used; legacy manifests without ``skill_ref`` fall back to the source default
-ref, exactly as before.
+used; legacy manifests without ``skill_ref`` resolve to ``latest`` (the
+repo's live HEAD), matching the #322 dispatch semantics.
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def test_failing_validator_fails_the_node(tmp_path: Path) -> None:
     assert "bad output" in error
 
 
-def test_legacy_manifest_without_skill_ref_uses_the_source_default(tmp_path: Path) -> None:
+def test_legacy_manifest_without_skill_ref_resolves_latest(tmp_path: Path) -> None:
     manager = _manager(tmp_path, "import sys; sys.exit(0)\n")
 
     assert validate_worker_outputs(manager, {"skill": _KEY}, tmp_path / "job") is None

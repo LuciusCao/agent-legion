@@ -3,28 +3,21 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from server.app.skills.config import LockedSkill, SkillSourceConfig
 from server.app.skills.lock import main, refresh_lock
 from tests.helpers.skill_store import memory_skill_store
 
 
-def test_refresh_lock_passes_resolved_sources_to_write(tmp_path: Path) -> None:
+def test_refresh_lock_passes_resolved_pins_to_write(tmp_path: Path) -> None:
     base_dir = tmp_path / "skills"
-    store = memory_skill_store({"wf/cap": {"repo": "https://example.com/skill.git", "ref": "main"}})
-
-    mock_source = LockedSkill(
-        repo="https://example.com/skill.git",
-        refs={"main": "abc123"},
+    store = memory_skill_store(
+        lock={"skills": {"wf/cap": {"repo": "stale", "refs": {"v1": "0" * 40}}}}
     )
 
     with (
         patch("server.app.skills.lock.SkillManager") as mock_manager_cls,
-        patch("server.app.skills.lock.refresh_source", return_value=mock_source),
+        patch("server.app.skills.lock.refresh_pinned_refs", return_value={"v1": "abc123"}),
     ):
         manager = MagicMock()
-        manager._load_config.return_value.skills = {
-            "wf/cap": SkillSourceConfig(repo="https://example.com/skill.git", ref="main")
-        }
         manager._parse_skill_key.return_value = ("wf", "cap")
         manager._resolve_cache_dir.return_value = tmp_path / "cache"
         mock_manager_cls.return_value = manager
@@ -33,7 +26,20 @@ def test_refresh_lock_passes_resolved_sources_to_write(tmp_path: Path) -> None:
 
     manager._write_lock_unlocked.assert_called_once()
     written_lock = manager._write_lock_unlocked.call_args[0][0]
-    assert written_lock.skills["wf/cap"].refs == {"main": "abc123"}
+    assert written_lock.skills["wf/cap"].refs == {"v1": "abc123"}
+    assert written_lock.skills["wf/cap"].repo == str(tmp_path / "cache")
+
+
+def test_refresh_lock_without_entries_writes_an_empty_lock(tmp_path: Path) -> None:
+    """#322: with no source registry, an empty lock refreshes to an empty
+    lock (there is nothing to iterate)."""
+    store = memory_skill_store(lock={})
+
+    refresh_lock(store, tmp_path / "skills")
+
+    lock = store.get_lock()
+    assert lock is not None
+    assert lock.skills == {}
 
 
 def test_main_invokes_refresh_lock(tmp_path: Path, monkeypatch) -> None:

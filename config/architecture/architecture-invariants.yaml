@@ -792,7 +792,7 @@ invariants:
         gate: quick
 
   - id: EXEC-SKILL-HERMETIC-001
-    statement: "The skills base dir is a read-only runtime input: cache lock files live under runs_dir (never next to the skill cache), and resolving a skill whose cache already sits clean at the pinned commit performs no writes (no checkout/clean) — a read-only skills mount (container deployment) works for every steady-state execution and validation. Writes (clone/fetch/checkout/clean) happen only on cache misses or version changes."
+    statement: "The skills base dir is a read-only runtime input: cache lock files live under runs_dir (never next to the skill cache), and resolving a skill whose cache already sits clean at the pinned commit performs no writes (no checkout/clean) — a read-only skills mount (container deployment) works for every steady-state execution and validation. Skills are local in-place git repositories under the skill root: in-place is the only mode (#322 retired the global skill_sources registry and the remote clone channel, including the missing-cache re-clone self-heal), a missing cache directory fails with guidance instead of being re-cloned, and writes (checkout/clean repair) happen only on version changes or a dirtied cache."
     owner: workspace-executor
     risk: high
     evidence:
@@ -801,6 +801,9 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/skills/test_skill_manager.py::test_cache_lock_files_live_under_runs_dir
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager.py::test_missing_skill_repo_raises_with_guidance
         gate: quick
 
   - id: EXEC-SKILL-RUNS-SCRATCH-001
@@ -840,7 +843,7 @@ invariants:
         gate: quick
 
   - id: EXEC-SKILL-NODE-001
-    statement: "An Agent-routed workflow node binds its skill content at the node level (issue #76): the optional node `skill` block (`key` + optional `ref`; the string form is key-only, an empty ref falls back to the skill_sources default ref at resolution time) is parsed by the loader (rejected on start/approval nodes), versions with the workflow revision snapshot, and rides the intake freeze into the job snapshot. The publish gate requires every Agent-routed node to name a skill on the node or on its published Agent definition, and rejects a skill declared on a code-routed node. Dispatch resolves the effective skill node-first (AgentDefinition.skill is the optional legacy fallback; both empty fails the node) and checks out through the multi-valued lock (skill_lock v2: per-skill {repo, refs: {ref -> commit}}, v1 documents self-upgrade on read): a locked (skill, ref) pair executes exactly its frozen commit, an unlocked ref resolves and auto-locks its own entry, a repo drift still trips the relock gate (SkillConfigError) while a ref drift is no longer an error; relock refreshes the union of the source ref and every already-locked ref. The Agent manifest records `skill`, `skill_ref` (the effective ref the lock froze) and `skill_version` (`ref@commit12`), and the Host-side Worker-result output validation re-resolves exactly that (skill, skill_ref) version. The skill_sources document itself (repo + default ref registry) is unchanged; the demo workflow's Agent nodes pin `ref: v1.0.0` instead of relying on the builtin Agent definitions (which no longer carry a skill)."
+    statement: "An Agent-routed workflow node binds its skill content at the node level (issue #76): the optional node `skill` block (`key` + optional `ref`; the string form is key-only, and an empty ref normalizes to `latest` at load time) is parsed by the loader (rejected on start/approval nodes), versions with the workflow revision snapshot, and rides the intake freeze into the job snapshot. The publish gate requires every Agent-routed node to name a skill on the node or on its published Agent definition, and rejects a skill declared on a code-routed node. Dispatch resolves the effective skill node-first (AgentDefinition.skill is the optional legacy fallback; both empty fails the node) and checks out the in-place repository under the skill root — the global skill_sources registry is retired (#322) and lock.repo is written for audit only. Ref semantics: `latest` (including a normalized empty ref) follows the repository HEAD, re-resolved on every dispatch and never entering the lock; a pinned tag goes through the multi-valued lock (skill_lock v2: per-skill {repo, refs: {ref -> commit}}, v1 documents self-upgrade on read) — a locked (skill, ref) pair executes exactly its frozen commit, an unlocked pinned ref resolves and auto-locks its own entry on first dispatch, and relock (CLI `make skills-lock`) walks the lock's existing entries and re-resolves every pinned ref. The Agent manifest records `skill`, `skill_ref` (`latest` for head-following nodes) and `skill_version` (`ref@commit12`), and the Host-side Worker-result output validation re-resolves exactly that (skill, skill_ref) version. The demo workflow's Agent nodes pin `ref: v1.0.0` instead of relying on the builtin Agent definitions (which no longer carry a skill)."
     owner: workspace-executor
     risk: high
     evidence:
@@ -849,6 +852,12 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/skills/test_skill_checkout.py::test_checkout_node_skill_prefers_the_node_binding
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager.py::test_empty_ref_normalizes_to_latest_and_follows_head
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager.py::test_pinned_tag_locks_on_first_dispatch
         gate: quick
       - kind: integration
         target: tests/skills/test_skill_manager_lock.py::test_ref_drift_locks_each_ref_independently

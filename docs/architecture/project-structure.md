@@ -23,9 +23,10 @@ agent-legion/
 │       └── sql-placeholders-baseline.json
 │   # 运行时 split 配置（app.yaml / workflow.yaml / agent_legion.yaml）已退役：
 │   # 代码默认值 + env 覆盖 + DB 实例设置文档，文件存在即启动报错。
-│   # skill 源与锁（skills.yaml / skills.lock）亦已退役：存 DB global_settings
-│   # （skill_sources / skill_lock），经 admin API 与 make skills-lock 管理；
-│   # 残留文件启动时一次性导入 DB（warning），此后不再读取。
+│   # skill 侧：skills.yaml / skills.lock 与全局 skill_sources 注册表均已退役
+│   # （#322）——skill 是 ~/.agents/skills/<group>/<name> 下的本地 in-place
+│   # git 仓库；pinned ref 的 commit 锁存 DB global_settings（skill_lock），
+│   # 经 make skills-lock 遍历锁内条目重解析。
 ├── server/
 │   └── app/
 │       ├── main.py             # FastAPI app factory + lifespan worker
@@ -41,7 +42,7 @@ agent-legion/
 │       ├── workflows/          # Agent Legion DAG 定义与执行
 │       ├── configuration/      # 配置加载与 owned-keys 校验
 │       ├── quality/            # 架构不变量与豁免运行时检查
-│       ├── skills/             # 外部 skill 源与锁管理
+│       ├── skills/             # skill 检出/执行副本与版本锁（skill_lock）管理
 │       ├── events/             # 事件子系统：sse.py SSE 广播、bus.py 进程内总线、
 │       │                       # buffer.py DB 持久化缓冲、aggregator.py 聚合器、
 │       │                       # agents.py Agent 发现与状态跟踪

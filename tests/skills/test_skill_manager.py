@@ -2,49 +2,25 @@ from __future__ import annotations
 
 import concurrent.futures
 import stat
-import subprocess
 import uuid
 from pathlib import Path
 
 import pytest
 
-from server.app.services.skill_source_store import InMemorySkillSourceStore
-from server.app.skills.config import LockedSkill, SkillsConfig, SkillsLock
-from server.app.skills.errors import SkillConfigError, SkillPathError, SkillRepoError
+from server.app.skills.config import LATEST_REF, LockedSkill, SkillsLock
+from server.app.skills.errors import SkillPathError, SkillRepoError
 from server.app.skills.manager import SkillManager
 from tests.helpers.skill_git import (
     _KEY,
-    _git_env,
-    _make_bare_repo,
+    _commit_skill_update,
+    _head_commit,
     _make_manager,
-    _push_new_commit,
-    _single_skill,
+    _make_skill_repo,
+    _tag,
 )
 from tests.helpers.skill_store import memory_skill_store
 
-
-def test_skills_config_parses_minimal() -> None:
-    data = {"skills": {"demo_workflow": {"repo": "https://example.com/skills.git", "ref": "main"}}}
-    config = SkillsConfig.model_validate(data)
-    assert config.skills["demo_workflow"].repo == "https://example.com/skills.git"
-    assert config.skills["demo_workflow"].ref == "main"
-
-
-def test_skills_config_parses_workflow_capability_key() -> None:
-    data = {
-        "skills": {
-            "demo_workflow/generate_key_info": {
-                "repo": "https://example.com/skills.git",
-                "ref": "v1.2.3",
-            }
-        }
-    }
-    config = SkillsConfig.model_validate(data)
-    key = "demo_workflow/generate_key_info"
-    assert key in config.skills
-    assert config.skills[key].repo == "https://example.com/skills.git"
-    assert config.skills[key].ref == "v1.2.3"
-    assert config.model_dump() == data
+pytestmark = pytest.mark.no_db
 
 
 def test_skills_lock_parses_and_serializes() -> None:
@@ -109,11 +85,6 @@ def test_locked_skill_round_trip() -> None:
     }
 
 
-def test_skill_config_error_is_value_error() -> None:
-    with pytest.raises(ValueError):
-        raise SkillConfigError("bad config")
-
-
 def test_skill_repo_error_is_runtime_error() -> None:
     with pytest.raises(RuntimeError):
         raise SkillRepoError("git failed")
@@ -124,34 +95,9 @@ def test_skill_path_error_is_value_error() -> None:
         raise SkillPathError("path escape")
 
 
-def _make_in_place_repo(repo: Path) -> str:
-    env = _git_env()
-    repo.mkdir(parents=True)
-    subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
-    (repo / "SKILL.md").write_text("# local skill\n")
-    (repo / "references").mkdir()
-    (repo / "references" / "output-contract.md").write_text("contract\n")
-    (repo / "scripts").mkdir()
-    (repo / "scripts" / "validate_output.py").write_text("print('ok')\n")
-    subprocess.run(["git", "-C", str(repo), "add", "."], check=True, env=env)
-    subprocess.run(
-        ["git", "-C", str(repo), "commit", "-m", "init", "--no-gpg-sign"],
-        check=True,
-        env=env,
-    )
-    subprocess.run(["git", "-C", str(repo), "tag", "v1.0.0"], check=True, env=env)
-    return subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=env,
-    ).stdout.strip()
-
-
-def test_get_skill_dir_clones_and_returns_isolated_copy(tmp_path: Path) -> None:
-    repo_uri = _make_bare_repo(tmp_path)
-    manager = _make_manager(tmp_path, _single_skill(repo_uri))
+def test_get_skill_dir_returns_isolated_copy(tmp_path: Path) -> None:
+    _make_skill_repo(tmp_path / "skills")
+    manager = _make_manager(tmp_path)
 
     execution_id = str(uuid.uuid4())
     skill_dir = manager.get_skill_dir(_KEY, execution_id)
@@ -163,8 +109,8 @@ def test_get_skill_dir_clones_and_returns_isolated_copy(tmp_path: Path) -> None:
 
 
 def _make_manager_with_cache(tmp_path: Path) -> SkillManager:
-    repo_uri = _make_bare_repo(tmp_path)
-    manager = _make_manager(tmp_path, _single_skill(repo_uri))
+    _make_skill_repo(tmp_path / "skills")
+    manager = _make_manager(tmp_path)
     manager.get_skill_dir(_KEY, str(uuid.uuid4()))
     return manager
 
@@ -185,10 +131,10 @@ def test_cache_lock_files_live_under_runs_dir(tmp_path: Path) -> None:
 
 
 def test_get_skill_dir_works_with_read_only_skills_base(tmp_path: Path) -> None:
-    """Docker :ro skills mount regression (issue #42): once the cache is
-    cloned and pinned, resolving a skill must not write the skills base at
-    all — locks live under runs_dir and a clean cache at the locked commit
-    skips checkout/clean entirely."""
+    """Docker :ro skills mount regression (issue #42): with the in-place repo
+    already at the dispatch commit, resolving a skill must not write the
+    skills base at all — locks live under runs_dir and a clean cache at the
+    resolved commit skips checkout/clean entirely."""
     manager = _make_manager_with_cache(tmp_path)
     base_dir = tmp_path / "skills"
 
@@ -204,108 +150,80 @@ def test_get_skill_dir_works_with_read_only_skills_base(tmp_path: Path) -> None:
         _chmod(0o755, 0o644)
 
 
-def test_tilde_local_source_can_be_managed_in_place(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_home = tmp_path / "home"
-    base_dir = fake_home / ".agents" / "skills"
-    repo = base_dir / "demo_workflow" / "generate_key_info"
-    commit = _make_in_place_repo(repo)
-    monkeypatch.setenv("HOME", str(fake_home))
+def test_empty_ref_normalizes_to_latest_and_follows_head(tmp_path: Path) -> None:
+    """#322: an empty ref is ``latest`` — every dispatch rev-parses the repo's
+    live HEAD, so an updated skill is picked up WITHOUT any relock, and the
+    version string records latest@commit12."""
+    repo = _make_skill_repo(tmp_path / "skills")
+    manager = _make_manager(tmp_path)
 
-    manager = SkillManager(
-        store=memory_skill_store(
-            {
-                _KEY: {
-                    "repo": ("~/.agents/skills/demo_workflow/generate_key_info"),
-                    "ref": "v1.0.0",
-                }
-            }
-        ),
-        base_dir=base_dir,
-        runs_dir=tmp_path / "runs",
+    _, first_commit, first_version = manager.checkout_skill(_KEY, str(uuid.uuid4()))
+    assert first_version == f"{LATEST_REF}@{first_commit[:12]}"
+
+    new_commit = _commit_skill_update(repo, "# updated skill\n")
+    run_dir, commit, version = manager.checkout_skill(_KEY, str(uuid.uuid4()))
+
+    assert commit == new_commit
+    assert version == f"{LATEST_REF}@{new_commit[:12]}"
+    assert (run_dir / "SKILL.md").read_text() == "# updated skill\n"
+
+
+def test_explicit_latest_matches_empty_ref_and_never_locks(tmp_path: Path) -> None:
+    """Explicit ``latest`` is the same live-HEAD semantics as an empty ref,
+    and neither ever reads or writes the lock (#322)."""
+    repo = _make_skill_repo(tmp_path / "skills")
+    manager = _make_manager(tmp_path)
+    head = _head_commit(repo)
+
+    _, empty_commit, empty_version = manager.checkout_skill(_KEY, str(uuid.uuid4()))
+    _, latest_commit, latest_version = manager.checkout_skill(
+        _KEY, str(uuid.uuid4()), ref=LATEST_REF
     )
 
-    skill_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
-
-    assert (skill_dir / "SKILL.md").read_text() == "# local skill\n"
-    assert manager._load_lock().skills[_KEY].refs == {"v1.0.0": commit}
-    assert (repo / ".git").is_dir()
-
-
-def test_normalize_repo_expands_tilde_per_user(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_home = tmp_path / "home"
-    monkeypatch.setenv("HOME", str(fake_home))
-    manager = _make_manager(tmp_path, {})
-    assert manager._normalize_repo("~/.agents/skills/wf/cap") == str(
-        (fake_home / ".agents" / "skills" / "wf" / "cap").resolve()
-    )
+    assert empty_commit == latest_commit == head
+    assert empty_version == latest_version == f"{LATEST_REF}@{head[:12]}"
+    # The lock is never touched by latest: no entry, no "latest" pin.
+    assert manager.load_lock().skills == {}
 
 
-@pytest.mark.parametrize(
-    "repo",
-    [
-        "file:///nonexistent/repo.git",
-        "https://example.com/skills.git",
-        "git@example.com:skills.git",
-    ],
-)
-def test_normalize_repo_leaves_urls_untouched(tmp_path: Path, repo: str) -> None:
-    manager = _make_manager(tmp_path, {})
-    assert manager._normalize_repo(repo) == repo
+def test_pinned_tag_locks_on_first_dispatch(tmp_path: Path) -> None:
+    """An explicit tag ref auto-locks its commit on first dispatch (#76),
+    recording the in-place repo path as the audit-only repo field (#322)."""
+    repo = _make_skill_repo(tmp_path / "skills")
+    commit = _tag(repo, "v1.0.0")
+    manager = _make_manager(tmp_path)
+
+    skill_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()), ref="v1.0.0")
+
+    assert (skill_dir / "SKILL.md").read_text() == "# skill\n"
+    locked = manager.load_lock().skills[_KEY]
+    assert locked.refs == {"v1.0.0": commit}
+    assert locked.repo == str(repo.resolve())
 
 
-def test_normalize_repo_resolves_absolute_path(tmp_path: Path) -> None:
-    manager = _make_manager(tmp_path, {})
-    assert manager._normalize_repo(str(tmp_path / "repo")) == str((tmp_path / "repo").resolve())
+def test_pinned_tag_survives_retag(tmp_path: Path) -> None:
+    """A frozen tag pin does not drift: re-pointing the tag at a newer commit
+    keeps dispatches on the locked commit until a relock."""
+    repo = _make_skill_repo(tmp_path / "skills")
+    manager = _make_manager(tmp_path)
 
+    locked_commit = _tag(repo, "v1.0.0")
+    first_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()), ref="v1.0.0")
+    assert (first_dir / "SKILL.md").read_text() == "# skill\n"
 
-def test_lock_commit_used_even_when_ref_drifts(tmp_path: Path) -> None:
-    repo_uri = _make_bare_repo(tmp_path)
-    manager = _make_manager(tmp_path, _single_skill(repo_uri))
+    _commit_skill_update(repo, "# updated skill\n")
+    _tag(repo, "v1.0.0", force=True)
 
-    first_execution = str(uuid.uuid4())
-    first_dir = manager.get_skill_dir(_KEY, first_execution)
-    locked_content = (first_dir / "SKILL.md").read_text()
-
-    _push_new_commit(repo_uri, tmp_path, "# updated skill\n")
-
-    second_execution = str(uuid.uuid4())
-    second_dir = manager.get_skill_dir(_KEY, second_execution)
-
-    assert (second_dir / "SKILL.md").read_text() == locked_content
-
-
-def test_lock_repo_drift_is_rejected(tmp_path: Path) -> None:
-    repo_uri = _make_bare_repo(tmp_path)
-    store = memory_skill_store(_single_skill(repo_uri))
-    manager = SkillManager(
-        store=store,
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-        # No doc cache: this test pins the drift-rejection logic on immediate
-        # visibility of external writes (production instances see them within
-        # the cache TTL instead).
-        doc_cache_ttl_seconds=0,
-    )
-    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
-    store.put_sources(
-        SkillsConfig.model_validate(
-            {"skills": {_KEY: {"repo": "https://example.com/other.git", "ref": "main"}}}
-        )
-    )
-
-    with pytest.raises(SkillConfigError, match="refresh"):
-        manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+    second_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()), ref="v1.0.0")
+    assert (second_dir / "SKILL.md").read_text() == "# skill\n"
+    assert manager.load_lock().skills[_KEY].refs["v1.0.0"] == locked_commit
 
 
 def test_refresh_lock_replaces_existing_pin(tmp_path: Path) -> None:
     from server.app.skills.lock import refresh_lock
 
-    repo_uri = _make_bare_repo(tmp_path)
-    store = memory_skill_store(_single_skill(repo_uri))
+    repo = _make_skill_repo(tmp_path / "skills")
+    store = memory_skill_store()
     base_dir = tmp_path / "skills"
     manager = SkillManager(
         store=store,
@@ -315,26 +233,30 @@ def test_refresh_lock_replaces_existing_pin(tmp_path: Path) -> None:
         # this test asserts the new pin is read back immediately.
         doc_cache_ttl_seconds=0,
     )
-    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
-    first_commit = manager._load_lock().skills[_KEY].refs["main"]
+    _tag(repo, "v1.0.0")
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()), ref="v1.0.0")
+    first_commit = manager.load_lock().skills[_KEY].refs["v1.0.0"]
 
-    _push_new_commit(repo_uri, tmp_path, "# updated skill\n")
+    _commit_skill_update(repo, "# updated skill\n")
+    _tag(repo, "v1.0.0", force=True)
     refresh_lock(store, base_dir)
 
-    refreshed = manager._load_lock().skills[_KEY]
-    assert refreshed.refs["main"] != first_commit
-    assert refreshed.repo == repo_uri
+    refreshed = manager.load_lock().skills[_KEY]
+    assert refreshed.refs["v1.0.0"] != first_commit
+    assert refreshed.repo == str(repo.resolve())
 
 
-def test_undeclared_skill_key_raises_config_error(tmp_path: Path) -> None:
-    manager = _make_manager(tmp_path, {})
-    with pytest.raises(SkillConfigError):
+def test_missing_skill_repo_raises_with_guidance(tmp_path: Path) -> None:
+    """#322: no re-clone self-heal — a missing in-place repo fails with
+    guidance pointing at the skills root layout."""
+    manager = _make_manager(tmp_path)
+    with pytest.raises(SkillRepoError, match="in-place git repository"):
         manager.get_skill_dir("not/declared", str(uuid.uuid4()))
 
 
 def test_isolated_copies_do_not_interfere(tmp_path: Path) -> None:
-    repo_uri = _make_bare_repo(tmp_path)
-    manager = _make_manager(tmp_path, _single_skill(repo_uri))
+    _make_skill_repo(tmp_path / "skills")
+    manager = _make_manager(tmp_path)
 
     first_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
     second_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
@@ -360,30 +282,51 @@ def test_isolated_copies_do_not_interfere(tmp_path: Path) -> None:
     ],
 )
 def test_malicious_or_absolute_or_empty_skill_key_rejected(skill_key: str, tmp_path: Path) -> None:
-    manager = _make_manager(tmp_path, {})
-    with pytest.raises((SkillPathError, SkillConfigError)):
+    manager = _make_manager(tmp_path)
+    with pytest.raises(SkillPathError):
         manager.get_skill_dir(skill_key, str(uuid.uuid4()))
 
 
 def test_lock_refresh_command_writes_lock(tmp_path: Path) -> None:
     from server.app.skills.lock import refresh_lock
 
-    repo_uri = _make_bare_repo(tmp_path)
-    store = memory_skill_store(_single_skill(repo_uri, "HEAD"))
+    repo = _make_skill_repo(tmp_path / "skills")
+    commit = _tag(repo, "v1.0.0")
+    store = memory_skill_store(
+        lock={"skills": {_KEY: {"repo": "stale", "refs": {"v1.0.0": "0" * 40}}}}
+    )
 
     refresh_lock(store, tmp_path / "skills")
 
     lock = store.get_lock()
     assert lock is not None
     entry = lock.skills[_KEY]
-    assert entry.repo == repo_uri
-    assert entry.refs["HEAD"]
+    assert entry.refs["v1.0.0"] == commit
+    assert entry.repo == str(repo.resolve())
+
+
+def test_lock_repo_field_is_audit_only(tmp_path: Path) -> None:
+    """#322: the retired repo-drift gate is gone — a lock entry whose repo
+    string does not match the in-place location still resolves its pin."""
+    repo = _make_skill_repo(tmp_path / "skills")
+    commit = _tag(repo, "v1.0.0")
+    manager = _make_manager(
+        tmp_path,
+        lock={
+            "skills": {_KEY: {"repo": "https://old.example.com/x.git", "refs": {"v1.0.0": commit}}}
+        },
+    )
+
+    skill_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()), ref="v1.0.0")
+
+    assert (skill_dir / "SKILL.md").is_file()
 
 
 def test_corrupted_cache_is_repaired_to_clean_copy(tmp_path: Path) -> None:
     # 无 memo（PR 317 codex P1）：每次 checkout 都在锁内重探测，脏 cache 下一次
     # 即修复（见 test_dirty_cache_repaired_on_next_checkout）。
-    manager = _make_manager(tmp_path, _single_skill(_make_bare_repo(tmp_path)))
+    _make_skill_repo(tmp_path / "skills")
+    manager = _make_manager(tmp_path)
 
     first_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
     assert (first_dir / "SKILL.md").is_file()
@@ -398,8 +341,8 @@ def test_corrupted_cache_is_repaired_to_clean_copy(tmp_path: Path) -> None:
 
 
 def test_concurrent_get_skill_dir_serializes_git_operations(tmp_path: Path) -> None:
-    repo_uri = _make_bare_repo(tmp_path)
-    manager = _make_manager(tmp_path, _single_skill(repo_uri))
+    _make_skill_repo(tmp_path / "skills")
+    manager = _make_manager(tmp_path)
 
     def fetch_copy(_index: int) -> Path:
         return manager.get_skill_dir(_KEY, str(uuid.uuid4()))
@@ -416,8 +359,7 @@ def test_concurrent_get_skill_dir_serializes_git_operations(tmp_path: Path) -> N
 
 
 def test_broken_cache_directory_raises_skill_repo_error(tmp_path: Path) -> None:
-    repo_uri = _make_bare_repo(tmp_path)
-    manager = _make_manager(tmp_path, _single_skill(repo_uri))
+    manager = _make_manager(tmp_path)
 
     cache_dir = tmp_path / "skills" / "demo_workflow" / "generate_key_info"
     cache_dir.mkdir(parents=True)
@@ -427,17 +369,18 @@ def test_broken_cache_directory_raises_skill_repo_error(tmp_path: Path) -> None:
 
 
 def test_lock_content_stays_stable_across_calls(tmp_path: Path) -> None:
-    repo_uri = _make_bare_repo(tmp_path)
-    manager = _make_manager(tmp_path, _single_skill(repo_uri))
+    repo = _make_skill_repo(tmp_path / "skills")
+    _tag(repo, "v1.0.0")
+    manager = _make_manager(tmp_path)
 
-    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
-    first_lock = manager._load_lock()
-    first_commit = first_lock.skills[_KEY].refs["main"]
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()), ref="v1.0.0")
+    first_lock = manager.load_lock()
+    first_commit = first_lock.skills[_KEY].refs["v1.0.0"]
 
-    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
-    second_lock = manager._load_lock()
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()), ref="v1.0.0")
+    second_lock = manager.load_lock()
 
-    assert second_lock.skills[_KEY].refs["main"] == first_commit
+    assert second_lock.skills[_KEY].refs["v1.0.0"] == first_commit
     assert second_lock.resolved_at == first_lock.resolved_at
 
 
@@ -456,30 +399,20 @@ def test_lock_content_stays_stable_across_calls(tmp_path: Path) -> None:
     ],
 )
 def test_invalid_execution_id_rejected(execution_id: str, tmp_path: Path) -> None:
-    manager = _make_manager(tmp_path, {})
+    manager = _make_manager(tmp_path)
     with pytest.raises(SkillPathError):
         manager.get_skill_dir(_KEY, execution_id)
 
 
 def test_concurrent_two_skills_lock_retains_both_commits(tmp_path: Path) -> None:
-    dir_a = tmp_path / "a"
-    dir_a.mkdir()
-    dir_b = tmp_path / "b"
-    dir_b.mkdir()
-    repo_a = _make_bare_repo(dir_a)
-    repo_b = _make_bare_repo(dir_b)
-    _push_new_commit(repo_a, dir_a, "# skill a\n")
-    _push_new_commit(repo_b, dir_b, "# skill b\n")
-    manager = _make_manager(
-        tmp_path,
-        {
-            _KEY: {"repo": repo_a, "ref": "main"},
-            "summarization/summarize": {"repo": repo_b, "ref": "main"},
-        },
-    )
+    repo_a = _make_skill_repo(tmp_path / "skills", _KEY, content="# skill a\n")
+    repo_b = _make_skill_repo(tmp_path / "skills", "summarization/summarize", content="# skill b\n")
+    _tag(repo_a, "v1.0.0")
+    _tag(repo_b, "v1.0.0")
+    manager = _make_manager(tmp_path)
 
     def fetch(key: str) -> Path:
-        return manager.get_skill_dir(key, str(uuid.uuid4()))
+        return manager.get_skill_dir(key, str(uuid.uuid4()), ref="v1.0.0")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         futures = [
@@ -488,14 +421,14 @@ def test_concurrent_two_skills_lock_retains_both_commits(tmp_path: Path) -> None
         ]
         dirs = [f.result() for f in concurrent.futures.as_completed(futures)]
 
-    lock = manager._load_lock()
+    lock = manager.load_lock()
     assert "demo_workflow/generate_key_info" in lock.skills
     assert "summarization/summarize" in lock.skills
-    assert lock.skills["demo_workflow/generate_key_info"].refs["main"]
-    assert lock.skills["summarization/summarize"].refs["main"]
+    assert lock.skills["demo_workflow/generate_key_info"].refs["v1.0.0"]
+    assert lock.skills["summarization/summarize"].refs["v1.0.0"]
     assert (
-        lock.skills["demo_workflow/generate_key_info"].refs["main"]
-        != lock.skills["summarization/summarize"].refs["main"]
+        lock.skills["demo_workflow/generate_key_info"].refs["v1.0.0"]
+        != lock.skills["summarization/summarize"].refs["v1.0.0"]
     )
     assert len({str(d) for d in dirs}) == 2
     for skill_dir in dirs:
@@ -503,36 +436,27 @@ def test_concurrent_two_skills_lock_retains_both_commits(tmp_path: Path) -> None
         assert not (skill_dir / ".git").exists()
 
 
-def test_invalid_repo_uri_raises_skill_repo_error(tmp_path: Path) -> None:
-    manager = _make_manager(tmp_path, _single_skill("file:///nonexistent/repo.git"))
-    with pytest.raises(SkillRepoError):
-        manager.get_skill_dir(_KEY, str(uuid.uuid4()))
-
-
-def test_missing_sources_document_behaves_as_empty(tmp_path: Path) -> None:
-    """An unseeded store (None document) is an empty config, not an error."""
+def test_missing_lock_document_behaves_as_empty(tmp_path: Path) -> None:
+    """An unseeded store (None document) is an empty lock, not an error."""
+    _make_skill_repo(tmp_path / "skills")
+    store = memory_skill_store()
     manager = SkillManager(
-        store=InMemorySkillSourceStore(),
+        store=store,
         base_dir=tmp_path / "skills",
         runs_dir=tmp_path / "runs",
     )
-    assert manager._load_config().skills == {}
     assert manager.load_lock().skills == {}
-    with pytest.raises(SkillConfigError, match="DB skill sources"):
-        manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+    # latest never materializes a lock document.
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+    assert store.get_lock() is None
 
 
 class _CountingSkillStore:
-    """SkillStore wrapper that counts document reads/writes."""
+    """SkillStore wrapper that counts lock document reads/writes."""
 
-    def __init__(self, inner: InMemorySkillSourceStore) -> None:
+    def __init__(self, inner) -> None:
         self._inner = inner
-        self.get_sources_calls = 0
         self.get_lock_calls = 0
-
-    def get_sources(self) -> SkillsConfig | None:
-        self.get_sources_calls += 1
-        return self._inner.get_sources()
 
     def get_lock(self) -> SkillsLock | None:
         self.get_lock_calls += 1
@@ -542,27 +466,24 @@ class _CountingSkillStore:
         self._inner.put_lock(lock)
 
 
-def test_source_and_lock_docs_are_cached_within_ttl(tmp_path: Path) -> None:
-    store = _CountingSkillStore(memory_skill_store(_single_skill("https://example.com/s.git")))
+def test_lock_doc_is_cached_within_ttl(tmp_path: Path) -> None:
+    store = _CountingSkillStore(memory_skill_store())
     manager = SkillManager(
         store=store,
         base_dir=tmp_path / "skills",
         runs_dir=tmp_path / "runs",
     )
 
-    manager._load_config()
-    manager._load_config()
     manager._load_lock()
     manager._load_lock()
 
-    assert store.get_sources_calls == 1
     assert store.get_lock_calls == 1
 
 
 def test_doc_cache_expires_after_ttl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     clock = [1_000.0]
     monkeypatch.setattr("server.app.skills.doc_cache.time.monotonic", lambda: clock[0])
-    store = _CountingSkillStore(memory_skill_store(_single_skill("https://example.com/s.git")))
+    store = _CountingSkillStore(memory_skill_store())
     manager = SkillManager(
         store=store,
         base_dir=tmp_path / "skills",
@@ -570,18 +491,18 @@ def test_doc_cache_expires_after_ttl(tmp_path: Path, monkeypatch: pytest.MonkeyP
         doc_cache_ttl_seconds=5.0,
     )
 
-    manager._load_config()
+    manager._load_lock()
     clock[0] += 4.9
-    manager._load_config()
-    assert store.get_sources_calls == 1
+    manager._load_lock()
+    assert store.get_lock_calls == 1
 
     clock[0] += 0.2  # now 5.1s past the cached read
-    manager._load_config()
-    assert store.get_sources_calls == 2
+    manager._load_lock()
+    assert store.get_lock_calls == 2
 
 
 def test_own_lock_write_refreshes_cached_doc(tmp_path: Path) -> None:
-    store = _CountingSkillStore(memory_skill_store(_single_skill("https://example.com/s.git")))
+    store = _CountingSkillStore(memory_skill_store())
     manager = SkillManager(
         store=store,
         base_dir=tmp_path / "skills",
@@ -604,7 +525,7 @@ def test_own_lock_write_refreshes_cached_doc(tmp_path: Path) -> None:
 
 def test_has_commit_memoizes_positive_results(tmp_path: Path) -> None:
     manager = _make_manager_with_cache(tmp_path)
-    commit = manager._load_lock().skills[_KEY].refs["main"]
+    commit = _head_commit(tmp_path / "skills" / "demo_workflow" / "generate_key_info")
     cache_dir = tmp_path / "skills" / "demo_workflow" / "generate_key_info"
 
     calls: list[list[str]] = []
@@ -619,7 +540,7 @@ def test_has_commit_memoizes_positive_results(tmp_path: Path) -> None:
     assert manager._has_commit(cache_dir, commit) is True
     assert len(calls) == 1  # second call served from the in-process memo
 
-    # Negative results are never memoized: a later fetch may add the commit.
+    # Negative results are never memoized: a later commit may add the object.
     missing = "0" * 40
     calls.clear()
     assert manager._has_commit(cache_dir, missing) is False
@@ -647,8 +568,9 @@ def test_cleanliness_probes_run_on_every_checkout(tmp_path: Path) -> None:
     cache 锁内重跑 rev-parse/status 探测——两个 SkillManager 实例交替 checkout
     同一 skill 的不同 ref 时，实例私有 memo 会让后者把错版本的 cache 复制进
     run 目录。正确性优先，每次两次 git 探测是可接受成本。"""
-    manager = _make_manager(tmp_path, _single_skill(_make_bare_repo(tmp_path)))
-    manager.get_skill_dir(_KEY, str(uuid.uuid4()))  # clone + first probes
+    _make_skill_repo(tmp_path / "skills")
+    manager = _make_manager(tmp_path)
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()))  # first probes
     counts = _probe_counts(manager)
 
     manager.get_skill_dir(_KEY, str(uuid.uuid4()))
@@ -659,7 +581,8 @@ def test_cleanliness_probes_run_on_every_checkout(tmp_path: Path) -> None:
 
 def test_dirty_cache_repaired_on_next_checkout(tmp_path: Path) -> None:
     """脏 cache（stray 文件）在下一次 checkout 即被 checkout+clean 修复。"""
-    manager = _make_manager(tmp_path, _single_skill(_make_bare_repo(tmp_path)))
+    _make_skill_repo(tmp_path / "skills")
+    manager = _make_manager(tmp_path)
     manager.get_skill_dir(_KEY, str(uuid.uuid4()))
     cache_dir = tmp_path / "skills" / "demo_workflow" / "generate_key_info"
     stray = cache_dir / "stray.txt"
@@ -671,24 +594,17 @@ def test_dirty_cache_repaired_on_next_checkout(tmp_path: Path) -> None:
     assert not (served / "stray.txt").exists()
 
 
-def _tag_and_push(work: Path, tag: str) -> None:
-    env = _git_env()
-    subprocess.run(["git", "-C", str(work), "tag", tag, "HEAD"], check=True, env=env)
-    subprocess.run(["git", "-C", str(work), "push", "origin", tag], check=True, env=env)
-
-
 def test_checkout_reprobes_cache_after_another_instance_switch(tmp_path: Path) -> None:
     """回归（PR 317 codex P1）：manager A checkout v1 后，实例 B 把共享 cache
     切到 v2；A 再 checkout v1 必须重新探测并拿到 v1 的内容——已退役的实例
     私有 memo 会在 TTL 内跳过探测，把 v2 内容复制进 run 目录却记录 v1@commit。"""
-    repo_uri = _make_bare_repo(tmp_path)
-    work = tmp_path / "work" / "clone"
-    _tag_and_push(work, "v1")
-    v1_content = (work / "SKILL.md").read_text()
-    _push_new_commit(repo_uri, tmp_path, "# skill v2\n")
-    _tag_and_push(work, "v2")
+    repo = _make_skill_repo(tmp_path / "skills")
+    _tag(repo, "v1")
+    v1_content = (repo / "SKILL.md").read_text()
+    _commit_skill_update(repo, "# skill v2\n")
+    _tag(repo, "v2")
 
-    store = memory_skill_store(_single_skill(repo_uri, "v1"))
+    store = memory_skill_store()
     manager_a = SkillManager(store=store, base_dir=tmp_path / "skills", runs_dir=tmp_path / "runs")
     manager_b = SkillManager(store=store, base_dir=tmp_path / "skills", runs_dir=tmp_path / "runs")
 

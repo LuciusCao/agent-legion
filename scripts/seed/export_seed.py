@@ -16,7 +16,8 @@ with everything those workflows need to run on another instance:
   read-only compatibility fallback for legacy global rows);
   ``--node-code capability=path``
   overrides any node's code text with a local file instead
-- skills{}: the instance's skill_sources / skill_lock documents
+- skills{}: the instance's skill_lock document (#322 retired skill_sources —
+  pinned tag refs and their frozen commits only)
 
 Secrets are never exported: definitions carry vault *references* only, and
 the final seed is scanned for secret-looking literal values (see
@@ -306,16 +307,13 @@ def export_node_codes(
 def export_skills(conn: Any) -> tuple[dict, list[str]]:
     warnings: list[str] = []
     rows = conn.execute(
-        "select key, value from global_settings where key in ('skill_sources', 'skill_lock')"
+        "select key, value from global_settings where key = 'skill_lock'"
     ).fetchall()
     documents = {row["key"]: json.loads(row["value"]) for row in rows}
-    sources = documents.get("skill_sources")
     lock = documents.get("skill_lock")
-    if sources is None:
-        warnings.append("global_settings has no skill_sources document")
     if lock is None:
         warnings.append("global_settings has no skill_lock document")
-    return {"sources": (sources or {}).get("skills") or {}, "lock": lock or {}}, warnings
+    return {"lock": lock or {}}, warnings
 
 
 def parse_node_code_override(spec: str) -> tuple[str, str]:

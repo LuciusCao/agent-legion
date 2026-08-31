@@ -90,16 +90,19 @@ describe('workflowStudioYamlDraft node patches', () => {
     expect(changed).toContain('ref: v1.0.0')
   })
 
-  it('writes the string form when the ref is left empty', () => {
+  it('normalizes an empty ref to latest in the mapping form (#322)', () => {
     const changed = patchWorkflowNodeSkill(yaml, 'fetch', {
       key: 'demo/review',
       ref: '',
     })
-    expect(parseWorkflowYaml(changed).nodes?.fetch?.skill).toBe('demo/review')
-    expect(changed).toContain('skill: demo/review')
+    expect(parseWorkflowYaml(changed).nodes?.fetch?.skill).toEqual({
+      key: 'demo/review',
+      ref: 'latest',
+    })
+    expect(changed).toContain('ref: latest')
   })
 
-  it('changes only the ref on an existing string-form binding', () => {
+  it('changes only the ref on an existing latest binding', () => {
     const withSkill = patchWorkflowNodeSkill(yaml, 'fetch', {
       key: 'demo/review',
       ref: '',
@@ -127,7 +130,7 @@ describe('workflowStudioYamlDraft node patches', () => {
   it('normalizes both yaml skill forms and rejects empty keys', () => {
     expect(normalizeNodeSkill('demo/review')).toEqual({
       key: 'demo/review',
-      ref: '',
+      ref: 'latest',
     })
     expect(normalizeNodeSkill({ key: 'demo/review', ref: 'v1' })).toEqual({
       key: 'demo/review',
@@ -135,7 +138,7 @@ describe('workflowStudioYamlDraft node patches', () => {
     })
     expect(normalizeNodeSkill({ key: 'demo/review' })).toEqual({
       key: 'demo/review',
-      ref: '',
+      ref: 'latest',
     })
     expect(normalizeNodeSkill(undefined)).toBeNull()
     expect(normalizeNodeSkill('')).toBeNull()
