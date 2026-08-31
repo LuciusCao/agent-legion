@@ -54,11 +54,10 @@ from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SC
 # so the undo step leaves the table in place.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
-# v68 (jobs_workflow_key_alignment) is a pure data migration — the undo step
-# cannot restore pre-rename keys (they are gone with the v62 rename), but
-# parity only compares DDL shape, so no undo action is needed beyond none.
-_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "jobs_workflow_key_alignment"
+# v69 (executor_leases_workspace_index) is DDL-only: one workspace-keyed
+# lease-count index (Codex P2 on #321); the undo step drops it.
+_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ("idx_executor_leases_workspace_node_active",)
+_NEWEST_MIGRATION_NAME = "executor_leases_workspace_index"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 

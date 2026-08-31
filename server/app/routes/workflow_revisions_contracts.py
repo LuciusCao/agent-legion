@@ -9,7 +9,7 @@ class WorkflowRevisionSummary(BaseModel):
     workflow_key: str = Field(
         description=(
             "Deprecated: read workspace_id instead. Since schema v62 the two "
-            "are always equal; removal is tracked in #211."
+            "are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31)."
         ),
         deprecated=True,
     )

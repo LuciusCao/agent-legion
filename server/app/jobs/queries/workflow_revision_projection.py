@@ -54,32 +54,34 @@ def _delete_stale_projection_rows(
     ``target_kind='agent'`` routes are pruned; handler routes are owned by a
     different write path.
     """
+    # #211 Phase 3 (read-layer binding): prune predicates key on workspace_id
+    # alone — workflow_key equals it on every row (v62 binding, aligned by
+    # v68), so the column filter was redundant.
     if keep_route_nodes:
         placeholders = ", ".join("%s" for _ in keep_route_nodes)
         conn.execute(
             "delete from workspace_node_routes"
-            " where workspace_id=%s and workflow_key=%s and target_kind='agent'"
+            " where workspace_id=%s and target_kind='agent'"
             f" and node_key not in ({placeholders})",
-            (workspace_id, workflow_key, *sorted(keep_route_nodes)),
+            (workspace_id, *sorted(keep_route_nodes)),
         )
     else:
         conn.execute(
-            "delete from workspace_node_routes"
-            " where workspace_id=%s and workflow_key=%s and target_kind='agent'",
-            (workspace_id, workflow_key),
+            "delete from workspace_node_routes where workspace_id=%s and target_kind='agent'",
+            (workspace_id,),
         )
     if keep_capacity_nodes:
         placeholders = ", ".join("%s" for _ in keep_capacity_nodes)
         conn.execute(
             "delete from workspace_node_capacities"
-            " where workspace_id=%s and workflow_key=%s"
+            " where workspace_id=%s"
             f" and node_key not in ({placeholders})",
-            (workspace_id, workflow_key, *sorted(keep_capacity_nodes)),
+            (workspace_id, *sorted(keep_capacity_nodes)),
         )
     else:
         conn.execute(
-            "delete from workspace_node_capacities where workspace_id=%s and workflow_key=%s",
-            (workspace_id, workflow_key),
+            "delete from workspace_node_capacities where workspace_id=%s",
+            (workspace_id,),
         )
 
 
@@ -128,13 +130,15 @@ def create_workflow_revision_with_projection(
     turns into an error).
     """
     if status == "active":
+        # #211 Phase 3 (read-layer binding): the archive predicate keys on
+        # workspace_id — one active revision per workspace (v62 binding).
         conn.execute(
             """
             update workflow_revisions
             set status='archived'
-            where workspace_id=%s and workflow_key=%s and status='active'
+            where workspace_id=%s and status='active'
             """,
-            (workspace_id, workflow_key),
+            (workspace_id,),
         )
     conn.execute(
         """

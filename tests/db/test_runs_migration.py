@@ -255,7 +255,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "jobs_workflow_key_alignment"
+    assert migration["name"] == "executor_leases_workspace_index"
 
 
 @pytest.mark.fresh_schema

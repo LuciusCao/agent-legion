@@ -216,6 +216,13 @@ Host 的 `min_protocol_version` 仍为 1。升级必须遵循 **Host first, Work
 也视为旧 Host）会以退出码 2 fail-closed，不进入 claim，避免旧 Host 把 runtime-scoped
 模型降成二元 provider/model 后误投到另一个 runtime。确认 Host 健康后再逐台重启 Worker。
 
+**workflow_key 兼容窗口期（issue #211，截止 2026-10-31）**：claim 响应中的
+`workflow_key` 字段已 deprecated（与 `workspace_id` 恒等，schema v62 绑定）。字段
+与列将于 2026-10-31 的终态批移除——所有 Host 实例须在窗口期内升级至 ≥ schema v68
+（存量 workflow_key 已对齐），Worker 镜像须改为读取 `workspace_id`；仍解析旧字段
+的 Worker 在字段移除后将解析失败。升级顺序沿用 **Host first, Worker second**：
+v68 及以上的 Host 仍下发 `workflow_key`（兼容窗口内），Worker 可在其后任意时间切换。
+
 节点的 provider、model、thinking 和 prompt 可以继续在 workflow 编辑器中修改。只修改这些运行配置会更新当前 revision，而不会创建新版本；已创建但尚未领取的 Job 会在领取时使用其 revision 的最新运行配置。任务一旦领取，就固定使用领取时下发的配置。
 
 ### 控制面鉴权

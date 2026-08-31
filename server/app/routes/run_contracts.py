@@ -5,8 +5,10 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 # #211 Phase 2: request-param deprecation wording (server-side default).
-_DEPRECATED_DEFAULT = "Deprecated: defaults to the path workspace_id; removal tracked in #211."
-_DEPRECATED_READ = "Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211."
+_DEPRECATED_DEFAULT = (
+    "Deprecated: defaults to the path workspace_id; removal tracked in #211 (drops by 2026-10-31)."
+)
+_DEPRECATED_READ = "Deprecated: read workspace_id instead. Since schema v62 the two are equal; removal tracked in #211 (drops by 2026-10-31)."
 
 
 class RunItemMaterial(BaseModel):

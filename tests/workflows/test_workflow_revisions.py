@@ -153,17 +153,16 @@ def _agent_nodes_definition(*, review_as_local: bool) -> WorkflowDefinition:
     )
 
 
-def _route_and_capacity_rows(queries: JobQueries, workspace_id: str, workflow_key: str) -> dict:
+def _route_and_capacity_rows(queries: JobQueries, workspace_id: str) -> dict:
     with queries._connect_read() as conn:
         routes = conn.execute(
             "select node_key, target_kind, target_id from workspace_node_routes"
-            " where workspace_id=%s and workflow_key=%s",
-            (workspace_id, workflow_key),
+            " where workspace_id=%s",
+            (workspace_id,),
         ).fetchall()
         capacities = conn.execute(
-            "select node_key, max_concurrency from workspace_node_capacities"
-            " where workspace_id=%s and workflow_key=%s",
-            (workspace_id, workflow_key),
+            "select node_key, max_concurrency from workspace_node_capacities where workspace_id=%s",
+            (workspace_id,),
         ).fetchall()
     return {
         "routes": {row["node_key"]: (row["target_kind"], row["target_id"]) for row in routes},
@@ -196,19 +195,15 @@ def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -
         workspace["id"], _agent_nodes_definition(review_as_local=True)
     )
 
-    flow_rows = _route_and_capacity_rows(queries, workspace["id"], "agent_nodes_flow")
-    assert flow_rows["routes"] == {"write_script": ("agent", "example-write-script-v1")}
+    # #211 Phase 3 (M1): the projection is per-WORKSPACE now (v62 binding —
+    # one workspace, one workflow). The last publish (review_as_local=True)
+    # owns the projection: write_script stays Agent-routed, review_script is
+    # a code node (no route), and every earlier row — the demo workflow's and
+    # the first publish's — was pruned by that same publish.
+    flow_rows = _route_and_capacity_rows(queries, workspace["id"])
+    assert set(flow_rows["routes"]) == {"write_script"}
+    assert flow_rows["routes"]["write_script"] == ("agent", "example-write-script-v1")
     assert flow_rows["capacities"] == {}
-    demo_rows = _route_and_capacity_rows(
-        queries, workspace["id"], "education_video_problems_generation"
-    )
-    assert set(demo_rows["routes"]) == {
-        "write_script",
-        "review_script",
-        "generate_questions",
-        "review_questions",
-    }
-    assert demo_rows["capacities"] == {}
 
 
 def test_archived_agent_does_not_rewrite_routes_until_next_publish(tmp_path: Path) -> None:
@@ -227,7 +222,7 @@ def test_archived_agent_does_not_rewrite_routes_until_next_publish(tmp_path: Pat
 
     # Archive every published Agent: the materialized rows stay untouched.
     replace_agent_catalog(workspace["id"], {})
-    rows = _route_and_capacity_rows(queries, workspace["id"], "agent_nodes_flow")
+    rows = _route_and_capacity_rows(queries, workspace["id"])
     assert rows["routes"]["write_script"] == ("agent", "example-write-script-v1")
 
     # The next publish re-derives routes from the (now empty) catalog and
@@ -235,7 +230,7 @@ def test_archived_agent_does_not_rewrite_routes_until_next_publish(tmp_path: Pat
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
     )
-    rows = _route_and_capacity_rows(queries, workspace["id"], "agent_nodes_flow")
+    rows = _route_and_capacity_rows(queries, workspace["id"])
     assert rows["routes"] == {}
 
 
