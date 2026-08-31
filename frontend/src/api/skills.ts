@@ -19,7 +19,8 @@ export async function fetchSkillTags(path: string): Promise<SkillTagsResponse> {
 }
 
 export async function fetchSkillDirectories(
-  scope: string
+  workspaceId: string
 ): Promise<SkillDirectoriesResponse> {
-  return api(`/api/skills/directories?scope=${encodeURIComponent(scope)}`)
+  const query = encodeURIComponent(workspaceId)
+  return api(`/api/skills/directories?workspace_id=${query}`)
 }

@@ -61,8 +61,8 @@ describe('skills api', () => {
     )
   })
 
-  it('fetches skill directories with an encoded scope', async () => {
-    const payload = { scope: 'ws 1', directories: ['write-script'] }
+  it('fetches skill directories with an encoded workspace id', async () => {
+    const payload = { workspace_id: 'ws 1', directories: ['write-script'] }
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 
@@ -70,7 +70,7 @@ describe('skills api', () => {
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/skills/directories?scope=ws%201',
+      '/api/skills/directories?workspace_id=ws%201',
       expect.anything()
     )
   })

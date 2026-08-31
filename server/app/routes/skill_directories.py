@@ -17,9 +17,12 @@ def create_skill_directories_router(job_db: JobQueries, settings: Settings) -> A
         return SkillBrowser(manager.base_dir)
 
     @router.get("/skills/directories", response_model=SkillDirectoriesResponse)
-    def list_skill_directories(scope: str) -> SkillDirectoriesResponse:
+    def list_skill_directories(workspace_id: str) -> SkillDirectoriesResponse:
+        # The ``workspace_id`` query-param name is load-bearing:
+        # require_workspace_access reads it and rejects non-members (404)
+        # before this handler runs.
         require_workflows_enabled(settings)
-        directories = _browser().list_directories(scope)
-        return SkillDirectoriesResponse(scope=scope, directories=list(directories))
+        directories = _browser().list_directories(workspace_id)
+        return SkillDirectoriesResponse(workspace_id=workspace_id, directories=list(directories))
 
     return router

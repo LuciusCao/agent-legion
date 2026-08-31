@@ -36,7 +36,10 @@ describe('SkillSelector', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockGetSettings.mockResolvedValue(settingsWithRoot('~/.agents/skills'))
-    mockFetchDirectories.mockResolvedValue({ scope: 'ws-1', directories: [] })
+    mockFetchDirectories.mockResolvedValue({
+      workspace_id: 'ws-1',
+      directories: [],
+    })
   })
 
   it('fills the skill key and shows tags after a successful validation', async () => {
@@ -195,7 +198,7 @@ describe('SkillSelector', () => {
 
   it('offers the workspace skill directories as datalist candidates', async () => {
     mockFetchDirectories.mockResolvedValue({
-      scope: 'ws-1',
+      workspace_id: 'ws-1',
       directories: ['review-questions', 'write-script'],
     })
     const { container } = renderSelector()
@@ -216,7 +219,7 @@ describe('SkillSelector', () => {
 
   it('validates immediately when a datalist candidate is picked', async () => {
     mockFetchDirectories.mockResolvedValue({
-      scope: 'ws-1',
+      workspace_id: 'ws-1',
       directories: ['write-script'],
     })
     mockValidate.mockResolvedValue({
@@ -255,7 +258,7 @@ describe('SkillSelector', () => {
 
   it('does not auto-validate typed text that matches no candidate', async () => {
     mockFetchDirectories.mockResolvedValue({
-      scope: 'ws-1',
+      workspace_id: 'ws-1',
       directories: ['write-script'],
     })
     const { container } = renderSelector()

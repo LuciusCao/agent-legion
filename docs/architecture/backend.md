@@ -446,7 +446,7 @@ server/app/
 | SkillValidateRequest | BaseModel | path: str | app/routes/skill_contracts.py |
 | SkillValidateResponse | BaseModel | valid: bool, path: str, skill_key: str | None, error: str | None, tags: list[... | app/routes/skill_contracts.py |
 | SkillTagsResponse | BaseModel | path: str, tags: list[str], latest_tag: str | None | app/routes/skill_contracts.py |
-| SkillDirectoriesResponse | BaseModel | scope: str, directories: list[str] | app/routes/skill_directories_contracts.py |
+| SkillDirectoriesResponse | BaseModel | workspace_id: str, directories: list[str] | app/routes/skill_directories_contracts.py |
 | StudioContextNode | BaseModel | key: str, capability: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextEdge | BaseModel | source: str, target: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextWorkflow | BaseModel | workflow_key: str, version: int, nodes: list[StudioContextNode], edges: list[... | app/routes/studio_agent_context_contracts.py |

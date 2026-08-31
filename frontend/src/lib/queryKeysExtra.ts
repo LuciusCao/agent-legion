@@ -23,8 +23,8 @@ export const extraQueryKeys = {
     ['workspaceRuntimeModels', workspaceId] as const,
   tokenUsagePricing: () => ['tokenUsagePricing'] as const,
   instanceSettings: () => ['instanceSettings'] as const,
-  // SkillSelector datalist 的候选目录（<skills_root>/<scope>/ 下目录名，#327）。
-  skillDirectories: (scope: string) => k('skillDirectories', scope),
+  // SkillSelector datalist 的候选目录（<skills_root>/<workspaceId>/ 下目录名，#327）。
+  skillDirectories: (workspaceId: string) => k('skillDirectories', workspaceId),
   studioAgents: () => ['studioAgents'] as const,
   connections: () => ['connections'] as const,
   connectionTypes: () => ['connectionTypes'] as const,
