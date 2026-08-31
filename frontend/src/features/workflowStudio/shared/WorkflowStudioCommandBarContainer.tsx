@@ -16,7 +16,6 @@ export function WorkflowStudioCommandBarContainer() {
       hasPreservedDraft={studio.hasPreservedDraft}
       compareSummary={studio.compareSummary}
       compareState={studio.compareState}
-      draftSave={studio.draftSave}
       actionState={studio.actionState}
       canSubmit={studio.canSubmit}
       canPublish={studio.canPublish}

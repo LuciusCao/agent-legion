@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type {
   WorkflowDefinitionRecord,
   WorkflowRevisionDetailResponse,
   WorkflowRevisionSummary,
 } from '../../../types'
+import { workflowYamlToDefinitionRecord } from '../canvas/workflowYamlDraftRecord'
 import { isDefinitionDirty } from './workflowStudioModel'
 import { useDraftBaselineSync } from './useDraftBaselineSync'
 import { useWorkflowStudioRevisionSelection } from './useWorkflowStudioRevisionSelection'
@@ -73,17 +74,23 @@ export function useWorkflowStudioDraft(
     viewState.mode === 'revision'
       ? (viewState.viewedRevision?.definitionYaml ?? '')
       : draftYaml
+  // 草稿模式画布渲染草稿：解析成功即用草稿记录；编辑中途 YAML 非法时回退
+  // 已发布 workflow（画布另有低噪提示），revision 模式渲染被查看版本不变。
+  const draftWorkflow = useMemo(
+    () => workflowYamlToDefinitionRecord(draftYaml),
+    [draftYaml]
+  )
   const visibleWorkflow =
     viewState.mode === 'revision'
       ? (viewState.viewedRevision?.workflow ?? activeWorkflow)
-      : activeWorkflow
+      : (draftWorkflow ?? activeWorkflow)
   const visibleRevision =
     viewState.mode === 'revision'
       ? (viewState.viewedRevision?.revision ?? activeRevision)
       : activeRevision
 
-  const dirty =
-    viewState.mode === 'draft' && isDefinitionDirty(originalYaml, draftYaml)
+  const draftDirty = isDefinitionDirty(originalYaml, draftYaml)
+  const dirty = viewState.mode === 'draft' && draftDirty
   const canSubmit = Boolean(
     workspaceId && draftYaml.trim() && dirty && !readOnly
   )

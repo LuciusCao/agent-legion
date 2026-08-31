@@ -1,7 +1,7 @@
-import { draftSaveText } from './useWorkflowDraftPersistence'
 import { WorkflowRevisionSelect } from './WorkflowRevisionSelect'
 import { WorkflowStudioCommandBarActions } from './WorkflowStudioCommandBarActions'
 import type { WorkflowStudioCommandBarProps as Props } from './WorkflowStudioCommandBar.types'
+import { WorkflowStudioDraftSaveControlContainer } from './WorkflowStudioDraftSaveControl'
 import { WorkflowStudioStatusChip } from './WorkflowStudioStatusChip'
 import styles from './WorkflowStudioCommandBar.module.css'
 
@@ -15,7 +15,6 @@ export function WorkflowStudioCommandBar({
   hasPreservedDraft,
   compareSummary,
   compareState,
-  draftSave,
   actionState,
   canSubmit,
   canPublish,
@@ -35,15 +34,11 @@ export function WorkflowStudioCommandBar({
     viewMode === 'revision'
       ? `查看 v${revision?.version ?? '-'} · ${hash} · 只读`
       : `基于 v${activeRevision?.version ?? '-'} 的草稿`
-  // 草稿自动保存状态低噪暴露：不进 chip（StatusChip 体积预算已满），只挂
-  // 顶栏 meta 文本的 tooltip。
-  const saveText = draftSaveText(draftSave)
 
   return (
     <div className={styles.commandBar} aria-label="Workflow command bar">
-      <span className={styles.meta} title={saveText ?? undefined}>
-        {modeText}
-      </span>
+      <span className={styles.meta}>{modeText}</span>
+      <WorkflowStudioDraftSaveControlContainer />
       <div className={styles.status}>
         <WorkflowStudioStatusChip
           readOnly={readOnly}

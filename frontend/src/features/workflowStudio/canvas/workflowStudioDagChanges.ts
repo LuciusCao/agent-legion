@@ -27,10 +27,12 @@ export function countNodeChanges(
 }
 
 /**
- * 把 compare diff（draft vs active 基线）合并进 DAG 视图。画布展示的是基线
- * （active revision）图：modified/removed 节点本就在画布上，打角标（removed
- * 额外置灰虚线表示将被删除）；added 节点不在基线图里，以幽灵节点（虚线）
- * 补入画布，并补画 added 幽灵边保持布局位置上下文。无变更时原样返回。
+ * 把 compare diff（draft vs active 基线）合并进 DAG 视图（仅草稿模式调用）。
+ * 画布数据源是草稿记录（解析失败时回退基线）：modified 打角标；added 相对
+ * 已发布基线是「新」节点，统一幽灵（虚线）样式——已在画布上的打 added
+ * 角标 + 幽灵样式，不在画布上的（如基线回退/摘要超前）补幽灵节点，并补画
+ * added 幽灵边保持布局位置上下文；removed 在草稿里已删除即消失，基线回退
+ * 时置灰虚线表示将被删除。无变更时原样返回。
  */
 export function applyCompareChanges(
   nodes: DagTypes.DagGraphNode[],

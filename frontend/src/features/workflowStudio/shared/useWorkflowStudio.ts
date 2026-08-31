@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { useAgentCatalog } from '../inspector/useAgentCatalog'
 import { useStudioDag } from '../canvas/useStudioDag'
 import {
@@ -9,7 +8,7 @@ import { useWorkflowDraftCompare } from './useWorkflowDraftCompare'
 import { useWorkflowStudioActions } from './useWorkflowStudioActions'
 import { useWorkflowStudioData } from './useWorkflowStudioData'
 import { useWorkflowStudioDraftStore } from './useWorkflowStudioDraftStore'
-import { applyCompareChanges } from '../canvas/workflowStudioDagChanges'
+import { isDefinitionDirty } from './workflowStudioModel'
 
 export function useWorkflowStudio(workspaceId: string | undefined) {
   const {
@@ -29,19 +28,19 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     revision,
     fetchRevisionDetail
   )
+  // 不按 viewMode 门控的 dirty：revision 模式下 compare 继续运行，顶栏
+  // 「草稿有未发布更改」才持续可见；画布 overlay 按 viewMode 另行门控。
   const compare = useWorkflowDraftCompare(
     workspaceId,
     draft.draftYaml,
-    draft.dirty,
+    isDefinitionDirty(originalYaml, draft.draftYaml),
     loadState === 'empty'
   )
   const actions = useWorkflowStudioActions(workspaceId, draft, reload, compare)
-  const dag = useStudioDag(draft.visibleWorkflow, catalog.agents)
-  // 草稿对比 diff 合并进 DAG：modified/removed 角标打在基线节点上，
-  // added 以幽灵节点 + 幽灵边补入画布。
-  const { nodes, edges } = useMemo(
-    () => applyCompareChanges(dag.nodes, dag.edges, compare.compareSummary),
-    [dag.nodes, dag.edges, compare.compareSummary]
+  const { nodes, edges } = useStudioDag(
+    draft.visibleWorkflow,
+    catalog.agents,
+    draft.viewMode === 'draft' ? compare.compareSummary : null
   )
   const { selectedNodeKey, setSelectedNodeKey } = useStudioNodeSelection(
     workspaceId,
@@ -67,6 +66,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     dirty: draft.dirty,
     canSubmit: draft.canSubmit,
     draftSave: draft.draftSave,
+    flushDraftSave: draft.flushDraftSave,
     canPublish: actions.canPublish,
     createsRevision: compare.compareSummary?.createsRevision ?? true,
     validateDraft: actions.validateDraft,
