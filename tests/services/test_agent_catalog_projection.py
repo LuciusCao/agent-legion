@@ -39,7 +39,7 @@ def _settings(tmp_path: Path) -> Settings:
 _AGENTS = {
     "agent-pi": AgentDefinition(capability="cap-pi", runtime="pi", skill="q/a"),
     "agent-velites": AgentDefinition(capability="cap-v", runtime="velites", skill="q/b"),
-    "agent-openclaw": AgentDefinition(capability="cap-o", runtime="openclaw", skill="q/c"),
+    "agent-pi-2": AgentDefinition(capability="cap-o", runtime="pi", skill="q/c"),
 }
 
 

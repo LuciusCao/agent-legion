@@ -255,7 +255,7 @@ docker compose -f deploy/compose.worker.yaml exec worker workerctl configure \
   --host-url http://192.0.2.1:8000 \
   --worker-id remote-worker-1 \
   --name 'Remote Worker' \
-  --disable-runtime openclaw \
+  --disable-runtime velites \
   --max-concurrency 10 \
   --model openai/gpt-5.2 \
   --register-token-file ./marketing.token \

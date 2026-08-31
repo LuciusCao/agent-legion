@@ -279,18 +279,17 @@ server/app/
 
 | 模型 | 类型 | 字段 | 文件 |
 |------|------|------|------|
-| AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/agent_catalog/definition.py |
+| AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'velites'], skill: str, tools: tuple[... | app/agent_catalog/definition.py |
 | AgentEnqueueConfig | BaseModel | workers: int, max_pending: int | app/configuration/executor_knobs.py |
 | AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/configuration/executor_knobs.py |
 | CodeStockConfig | BaseModel | enabled: bool, factor: float, min_stock: int, max_stock: int, refresh_seconds... | app/configuration/executor_knobs.py |
-| OpenClawRuntimeConfig | BaseModel | cwd: str | app/configuration/executor_runtime.py |
 | WorkflowsRuntimeConfig | BaseModel | enabled: bool, custom_nodes_enabled: bool | app/configuration/executor_runtime.py |
 | AgentWorkersRuntimeConfig | BaseModel | max_archive_bytes: int, min_protocol_version: int | app/configuration/executor_runtime.py |
 | ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/configuration/executor_runtime.py |
 | CodeCapabilityConfig | BaseModel | timeout_seconds: int, sandbox_network: bool, config_schema: dict[str, Any] | app/executors/contracts.py |
-| AgentDefinitionResponse | BaseModel | id: str, runtime: Literal['pi', 'openclaw', 'velites'], capability: str, skil... | app/routes/agent_catalog_contracts.py |
+| AgentDefinitionResponse | BaseModel | id: str, runtime: Literal['pi', 'velites'], capability: str, skill: str, tool... | app/routes/agent_catalog_contracts.py |
 | AgentCatalogResponse | BaseModel | agents: list[AgentDefinitionResponse] | app/routes/agent_catalog_contracts.py |
-| AgentDefinitionPayload | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/routes/agent_definition_contracts.py |
+| AgentDefinitionPayload | BaseModel | capability: str, runtime: Literal['pi', 'velites'], skill: str, tools: list[s... | app/routes/agent_definition_contracts.py |
 | AgentCopyRequest | BaseModel | new_agent_id: str | app/routes/agent_definition_contracts.py |
 | AgentRollbackRequest | BaseModel | version: int | app/routes/agent_definition_contracts.py |
 | AgentVersionResponse | BaseModel | id: str, agent_id: str, version: int, status: Literal['draft', 'published', '... | app/routes/agent_definition_contracts.py |
@@ -341,7 +340,6 @@ server/app/
 | ConnectionTestResponse | BaseModel | ok: bool, message: str | app/routes/connections_contracts.py |
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
-| InstanceOpenClawSettings | BaseModel | cwd: str | app/routes/instance_openclaw_contracts.py |
 | InstanceCleanupSettings | BaseModel | log_retention_days: int, run_dir_retention_days: int, interval_seconds: int | app/routes/instance_settings_contracts.py |
 | InstanceMonitoringSettings | BaseModel | sample_interval_seconds: float, retention_days: int | app/routes/instance_settings_contracts.py |
 | InstanceWorkflowsSettings | BaseModel | enabled: bool | app/routes/instance_settings_contracts.py |
@@ -764,7 +762,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 `config/app.yaml` 已整体退役：bootstrap/安全类键转 env-only，实例级可调配置迁入 DB：
 
 - env-only：`database.url` → `AGENT_LEGION_DATABASE_URL`（唯一权威变量，G4；缺省 `postgresql://127.0.0.1:5432/agent_legion`）；`data_dir` → `AGENT_LEGION_DATA_DIR`（缺省 `data`）；`server.cors` → `AGENT_LEGION_CORS_ALLOW_ORIGINS`（逗号分隔）/ `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`；`agent_workers` 的全局 register token 已随 issue #35 退役（遗留的 `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]` 或 yaml `register_token[_file]` 会让启动直接报错）。
-- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`workflows.enabled`（是否启用 Agent Legion DAG workflow worker）、`agent_workers.max_archive_bytes` / `min_protocol_version`、`openclaw.cwd`（唯一保留键；退役键 `command_template` / `timeout_seconds` / `isolated_workspace_root` / `skill_safety` 随业务工作流管线一并退役——存量 DB 文档读取时剥离、写入返回 422，explicit 单文件配置里的残留键被忽略，但 `skill_safety.repos[].ref` 仍按 config 治理 G3 启动即报错：ref 以 DB `skill_lock` 文档为唯一权威）。代码默认值 `cwd="."`；`AGENT_LEGION_OPENCLAW_CWD` 作为 env 覆盖优先级高于 DB 文档。
+- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`workflows.enabled`（是否启用 Agent Legion DAG workflow worker）、`agent_workers.max_archive_bytes` / `min_protocol_version`。`openclaw` 块已随 openclaw runtime 一并退役（#75）：存量 DB 文档读取时整块剥离、写入返回 422，explicit 单文件配置里的残留块被忽略。
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 
@@ -802,7 +800,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 ## Security Considerations
 
 - 节点代码执行统一在 `velites sandbox wrap` OS 沙箱（seatbelt / bubblewrap）内进行，网络默认拒绝，文件系统默认只放行 job_dir、`/tmp` 与显式 allow-list；沙箱后端不可用时执行 fail-closed（EXEC-CODE-003）。
-- OpenClaw runtime 当前未实现；如未来启用，其命令模板应来自 DB 实例设置文档（`/api/admin/instance-settings`，仅管理员可写），替换前经 null 字节剔除与 `shlex.quote` 清洗。
+- OpenClaw runtime 已退役（#75）：曾短暂经 runtime catalog adapter 接入（`openclaw agent --local --json`），因其 stdout 无流式事件与 token 计量整体移除；新 runtime 按同一 adapter 机制接入（见 `docs/architecture/velites-harness.md` 的接入指南）。
 - PostgreSQL 与文件存储部署在受信网络内；业务 API 均需登录（cookie session 或 Bearer token，见 README 的「快速开始 / 登录」章节），uvicorn 默认绑定 127.0.0.1，启动脚本与 Makefile 均显式固定 `--host 127.0.0.1`。不要用 `--host 0.0.0.0` 把开发服务器暴露到局域网或任何不可信网络——暴露后任何通过鉴权的用户都可删除 job、下载产物、触发执行。
 - Workspace 凭证经 vault 加密落库（`workspace_secrets`，Fernet），API 永不返回明文，配置与 intake 快照只存 `secret_ref`；实例级外部服务连接凭据与鉴权 token 同样 Fernet 加密落 `instance_secrets` / `connection_tokens`（实例 vault），只在 dispatch 注入与连接探测时于内存解析；master key 走 env / 文件注入，不进 DB、不进日志（VAULT-SECRET-001）。
 - `data/` 已加入 `.gitignore`，禁止提交运行时数据或密钥。

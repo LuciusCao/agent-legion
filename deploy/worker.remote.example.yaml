@@ -1,7 +1,7 @@
 host_url: http://192.0.2.1:8000
 worker_id: remote-worker-1
 name: Remote Worker
-# 可选值：pi / openclaw / velites。Agent runtime 声明 = 启动时自动探测本机
+# 可选值：pi / velites。Agent runtime 声明 = 启动时自动探测本机
 # 已安装的运行时二进制（data/bin/ 优先、PATH 兜底），探测到即默认启用；
 # 这里只列「装了但刻意不接」的反选停用项（issue #254）。
 disabled_runtimes: []

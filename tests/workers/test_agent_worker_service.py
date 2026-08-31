@@ -366,15 +366,13 @@ def test_local_api_exposes_runtime_status_and_applies_disabled_runtimes(
         )
 
     status_rows = {row["runtime"]: row for row in before.json()["runtime_status"]}
-    # _config() 的旧 runtimes: [pi] 迁移为补集停用 disabled=[openclaw, velites]：
-    # pi 装了且启用，velites 装了但停用，openclaw 未安装。
+    # _config() 的旧 runtimes: [pi] 迁移为补集停用 disabled=[velites]：
+    # pi 装了且启用，velites 装了但停用。
     assert status_rows["velites"]["installed"] is True
     assert status_rows["velites"]["enabled"] is False
     assert status_rows["velites"]["binary"] == "/usr/local/bin/velites"
     assert status_rows["pi"]["installed"] is True
     assert status_rows["pi"]["enabled"] is True
-    assert status_rows["openclaw"]["installed"] is False
-    assert status_rows["openclaw"]["install_hint"]
     assert before.json()["runtimes"] == ["pi"]
     assert response.status_code == 200
     # disabled_runtimes 是进程级配置：改动触发重启重注册。
@@ -416,19 +414,17 @@ def test_runtime_status_marks_pending_restart_against_host_registration(
     assert rows["velites"]["enabled"] is True
     assert rows["velites"]["registered"] is True
     assert rows["velites"]["pending_restart"] is False
-    assert rows["openclaw"]["registered"] is False
-    assert rows["openclaw"]["pending_restart"] is False
 
 
 @pytest.mark.no_db
 def test_validate_config_migrates_legacy_runtimes_and_preserves_behavior(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # 探测可控化：三个 runtime 全部已安装。旧 opt-in 勾选迁移为补集停用，
+    # 探测可控化：两个 runtime 全部已安装。旧 opt-in 勾选迁移为补集停用，
     # 升级后 claim 行为保持不变（issue #254）。
     monkeypatch.setattr(catalog, "resolve_binary", lambda binary: f"/usr/local/bin/{binary}")
     config = validate_config({**_config(), "runtimes": ["pi", "velites"]})
-    assert config["disabled_runtimes"] == ["openclaw"]
+    assert config["disabled_runtimes"] == []
     assert config["runtimes"] == ["pi", "velites"]
     # 旧显式声明 ["pi"] 行为保持：pi 启用，其余补集停用（迁移细节见
     # tests/workers/test_runtime_catalog.py）。

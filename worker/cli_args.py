@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     configure.add_argument(
         "--disable-runtime",
         action="append",
-        choices=["pi", "openclaw", "velites"],
+        choices=["pi", "velites"],
         help="停用某个已安装的 agent runtime（反选；默认全部探测到的都启用）",
     )
     configure.add_argument("--max-concurrency", type=int)

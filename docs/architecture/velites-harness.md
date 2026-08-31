@@ -79,10 +79,10 @@ agent 框架；依赖清单评审纳入 PR。
 
 worker 侧进程模型不变：`worker/executor.py` 每个 claim 起一个 velites 子进程
 （`subprocess.Popen(cwd=job_dir, start_new_session=True)`），stdout 即事件流。
-二进制经 Dockerfile 新增 rust build stage 打进 worker 镜像；命令构建由
-`AgentDefinition.runtime` 钉死分派（`server/app/agent_broker/dispatch.py`，
-EXEC-RUNTIME-DISPATCH-001）——pi → pi argv、velites → velites argv、
-openclaw 未实现即 fail-fast；pi 不退役、长期保留，
+二进制经 Dockerfile 新增 rust build stage 打进 worker 镜像；命令构建经
+Host 侧 runtime catalog（`server/app/agent_runtime/`，`AgentDefinition.runtime`
+分发到各 adapter，EXEC-RUNTIME-DISPATCH-001）——pi → pi argv、
+velites → velites argv；pi 不退役、长期保留，
 灰度/回退均为单 agent 定义的单字段配置改动（详见 §9）。
 
 ## 4. 事件 Schema v1：pi 兼容子集（velites/json1）
@@ -362,14 +362,21 @@ fail-closed 报错，内置节点不受影响。
 
 ## 9. 与 Agent Legion 的集成与切换
 
-**当前模型（2026-08-05 起，agent 配置治理 phase 3 落地）**：pi、openclaw、
-velites 是平级 runtime，由 `AgentDefinition.runtime` 声明（定义存
+**当前模型（2026-08-05 起，agent 配置治理 phase 3 落地）**：pi、velites
+是平级 runtime，由 `AgentDefinition.runtime` 声明（定义存
 `versioned_entities` 表，Studio「Agent 管理」维护；yaml `agents:` 段与
-`workflows.pi` 块已退役，出现在 yaml 中启动即报错）。命令构建按 runtime
-钉死分派（EXEC-RUNTIME-DISPATCH-001）：`runtime: velites` → velites argv、
-`runtime: pi` → pi argv；openclaw 未实现，dispatch fail-fast。执行配置
-（provider/model/thinking）按严格链解析：节点 `execution.*` 覆盖 →
-workspace `default_agent_*` → 报错，无全局兜底。manifest 的执行块统一为
+`workflows.pi` 块已退役，出现在 yaml 中启动即报错；openclaw 曾短暂接入，
+因无流式事件与 token 计量已于 #75 整体退役）。命令构建经 Host 侧
+runtime catalog（`server/app/agent_runtime/`，runtime 全集的单一事实来源
+是其 `AGENT_RUNTIMES`）按 runtime 分发到各 adapter
+（EXEC-RUNTIME-DISPATCH-001）：`runtime: velites` → velites argv、
+`runtime: pi` → pi argv。执行配置（provider/model/thinking）按严格链解析：节点
+`execution.*` 覆盖 → workflow 顶层 `execution` 默认（loader 合并进节点）→
+报错，无 workspace/全局兜底（workspace `default_agent_*` 已随 schema v63
+退役）；解析结果按 adapter 声明的 `ExecutionContract` 校验——必填键缺失
+或配置了 runtime 不支持的键（非空值）时 dispatch 与 claim 重解析都
+fail-fast（issue #75 阶段 2）。
+manifest 的执行块统一为
 `execution.*`（`binary/provider/model/thinking/timeout_seconds/no_sandbox`），
 不再有 `pi.*` 键。灰度/回退粒度是单个 agent 定义的单字段改动，操作手册见
 `docs/remote-execution-runbook.md` §6。
@@ -418,6 +425,37 @@ pi                      # 交互式完成认证
 ```
 
 之后在 Studio「Agent 管理」把对应 agent 定义的 `runtime` 设为 `pi` 即可。
+
+### 新增 agent runtime 接入指南
+
+新 runtime（如某个新的 coding-agent CLI）按 adapter 机制接入，改动面：
+
+1. **Host adapter**：新建 `server/app/agent_runtime/<name>.py`——实现
+   `build_command(manifest, *, skill_dir, session_dir, session_name, prompt_file, prompt_instruction)`
+   与 `ADAPTER = RuntimeAdapter(name, binary, build_command, execution=ExecutionContract(...))`
+   （execution 契约声明 provider/model/thinking 哪些支持、哪些必填；
+   `pi.py` / `velites.py` 是模板）。
+2. **catalog 注册**：`server/app/agent_runtime/catalog.py` 的 `_ADAPTERS`
+   加入该 adapter——`AGENT_RUNTIMES` 自动成为新全集。
+3. **三处 Literal**：`agent_catalog/definition.py`、
+   `routes/agent_definition_contracts.py`、`routes/agent_catalog_contracts.py`
+   的 `runtime: Literal[...]` 加新值，随后跑
+   `scripts/generate-api-types.sh` 重生成 `frontend/src/generated/api.ts`。
+4. **Worker 侧**：`worker/runtime/catalog.py`（RUNTIME_CATALOG 条目：名称/
+   描述/二进制/install_hint）、`worker/runtime/models.py`（模型发现
+   adapter）、`worker/cli_args.py`（`--disable-runtime` choices）。
+5. **测试**：`tests/agent_runtime/test_runtime_catalog.py` 自动把上述
+   集合钉住全等（改 EXPECTED 即可）；argv golden 镜像
+   `tests/agent_runtime/test_execution_contracts.py` /
+   `tests/workflows/test_velites_command.py` 结构；端到端参照
+   `tests/full/test_velites_harness_e2e.py`（fake 二进制模式）。
+6. **硬要求**：runtime 必须在 stdout 产出 pi 兼容 JSONL 事件子集
+   （`velites/schema/events.schema.json`）——UI 预览、失败检测与 token
+   计量都消费它；产不出流式事件的 runtime 不接（openclaw 即因此退役，
+   其一次性 envelope 无中间事件、无 token usage）。
+
+历史参考：openclaw 曾按上述步骤完整接入（adapter、Worker 事件合成层、
+e2e），后按用户决策整体退役——实现与拆除过程见 git 历史（#75）。
 
 ## 10. Quality Impact
 

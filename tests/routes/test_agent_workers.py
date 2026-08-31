@@ -87,7 +87,7 @@ def test_agent_worker_register_rejects_unknown_runtime(tmp_path: Path) -> None:
         )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "runtimes must contain pi, openclaw and/or velites"
+    assert response.json()["detail"] == "runtimes must contain pi and/or velites"
 
 
 def test_agent_worker_register_accepts_empty_runtimes_for_code_only_worker(

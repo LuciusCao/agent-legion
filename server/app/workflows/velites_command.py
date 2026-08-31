@@ -1,6 +1,6 @@
-"""velites flavor 的 headless 命令构建（docs/architecture/velites-harness.md §6/§9）。
+"""velites runtime 的 headless 命令构建（docs/architecture/velites-harness.md §6/§9）。
 
-与 pi flavor 的 argv 差异（velites CLI 见 ``velites/src/cli.rs``，未知 flag 硬报错）：
+与 pi runtime 的 argv 差异（velites CLI 见 ``velites/src/cli.rs``，未知 flag 硬报错）：
 
 - 去掉 pi 专属 flag（``--no-context-files`` / ``--no-extensions`` /
   ``--no-prompt-templates`` / ``--no-skills`` / ``--approve``）：velites 零自动发现，
@@ -18,46 +18,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-
-FLAVOR_PI = "pi"
-FLAVOR_VELITES = "velites"
 
 # 节点 config 中 velites 预算的保留键名（capability config_schema 声明后才可能出现在
 # manifest["config"] 里；未声明的键在解析链上就被拒绝）。
 MAX_TURNS_KEY = "max_turns"
 MAX_TOKENS_KEY = "max_tokens"
-
-
-def build_command_for_flavor(
-    manifest: dict[str, Any],
-    *,
-    skill_dir: Path,
-    session_dir: Path,
-    session_name: str,
-    prompt_file: Path,
-    prompt_instruction: str,
-    pi_fallback: Callable[..., list[str]],
-) -> list[str]:
-    """按 ``manifest["runtime"]`` 分发命令构建；未知 runtime fail-fast。
-
-    ``prompt_instruction`` / ``pi_fallback`` 由调用方（pi_protocol 侧）注入：
-    本模块不得反向 import pi_protocol（架构契约禁 import 环，函数级也算）。
-    """
-    kwargs: dict[str, Any] = {
-        "skill_dir": skill_dir,
-        "session_dir": session_dir,
-        "session_name": session_name,
-        "prompt_file": prompt_file,
-    }
-    runtime = str(manifest.get("runtime") or "").strip()
-    if runtime == FLAVOR_VELITES:
-        return build_velites_command(manifest, prompt_instruction=prompt_instruction, **kwargs)
-    if runtime == FLAVOR_PI:
-        return pi_fallback(manifest, **kwargs)
-    raise ValueError(f"unknown agent runtime {runtime!r} (expected 'pi' or 'velites')")
 
 
 def build_velites_command(
@@ -72,7 +39,7 @@ def build_velites_command(
     """Build the velites CLI argv for one workflow node run."""
     execution = manifest["execution"]
     cmd: list[str] = [
-        str(execution.get("binary") or FLAVOR_VELITES),
+        str(execution.get("binary") or "velites"),
         "--mode",
         "json",
         "--session-dir",

@@ -31,7 +31,7 @@ WHITELIST: set[str] = {
     # Pipeline definition loader intentionally rejects removed 'runner'/'agent' fields.
     str(ROOT / "server" / "app" / "workflows" / "definition.py"),
     str(ROOT / "server" / "app" / "workflows" / "loader.py"),
-    # Video pipeline runner uses openclaw command template strings.
+    # Legacy video pipeline runner (retired command templates).
     str(ROOT / "server" / "app" / "pipeline" / "runners.py"),
     # AgentStatusManager payloads key incremental WS envelopes by "agent" (Decision 8
     # of the phase4 agent-collaboration plan); the literal is its own status domain.

@@ -1,10 +1,9 @@
 """One claimed execution's run: prepare, spawn, wait, and hand off the result.
 
-Split out of ``worker.executor`` for the file-size budget (mirrors the
-Host-side ``_code_sandbox.py`` split pattern): the executor module keeps the
-claim supervisor loop, this module owns the per-execution lifecycle for both
-kinds — ``agent`` (Pi/OpenClaw/velites runtime subprocess) and, since batch 2,
-``code`` (node code through the velites sandbox via ``worker.code_runner``).
+Split out of ``worker.executor`` for the file-size budget: the executor module
+keeps the claim supervisor loop, this module owns the per-execution lifecycle
+for both kinds — ``agent`` (Pi/velites runtime subprocess) and ``code``
+(node code through the velites sandbox via ``worker.code_runner``).
 """
 
 from __future__ import annotations
@@ -128,11 +127,8 @@ def run_execution(
     download_slots: threading.Semaphore,
 ) -> None:
     """Run one claimed execution and hand its result to the upload queue.
-
-    The execution slot (this thread) is occupied only by work that needs the
-    Agent itself: download inputs, run the process. Everything after process
-    exit — compression, archive, upload, report — belongs to the UploadQueue,
-    and the Host-side slot is released via release-slot right at exit."""
+    Post-exit work (compression, archive, upload, report) belongs to the
+    UploadQueue; the Host-side slot is released via release-slot right at exit."""
     execution_id = str(claim["execution_id"])
     lease_id = str(claim["lease_id"])
     node_key = str(claim["node_key"])
@@ -216,8 +212,8 @@ def run_execution(
                 # Drop token-delta spam as it streams by; deltas are discarded at upload time anyway.
                 pump = spawn_event_pump(proc, output, f"pi-events-{execution_id[:8]}")
                 # Fallback aligns with the Host product constant
-                # (dispatch.EXECUTION_TIMEOUT_SECONDS = 1800); manifests
-                # always carry timeout_seconds, so this only covers
+                # (agent_runtime.execution.EXECUTION_TIMEOUT_SECONDS = 1800);
+                # manifests always carry timeout_seconds, so this only covers
                 # hand-built/legacy manifests.
                 timeout = float(manifest.get("execution", {}).get("timeout_seconds", 1800))
                 exit_code, report_result = wait_for_exit(

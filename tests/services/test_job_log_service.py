@@ -82,8 +82,8 @@ def log_service_with_secret_config(
                 "token": "cms-token-123",
                 "password": "cms-password",
             },
-            "openclaw": {
-                "api_key": "openclaw-key",
+            "gateway": {
+                "api_key": "gateway-key",
             },
         },
     )
@@ -262,7 +262,7 @@ def test_job_log_service_redacts_config_secrets(log_service_with_secret_config):
     logs_root.mkdir(parents=True, exist_ok=True)
     log_file = logs_root / "run.log"
     log_file.write_text(
-        "cms-token-123 cms-password openclaw-key keep-visible",
+        "cms-token-123 cms-password gateway-key keep-visible",
         encoding="utf-8",
     )
 
@@ -273,7 +273,7 @@ def test_job_log_service_redacts_config_secrets(log_service_with_secret_config):
 
     assert "cms-token-123" not in result["log"]
     assert "cms-password" not in result["log"]
-    assert "openclaw-key" not in result["log"]
+    assert "gateway-key" not in result["log"]
     assert "keep-visible" in result["log"]
     assert "<redacted>" in result["log"]
 

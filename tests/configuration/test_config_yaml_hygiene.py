@@ -14,11 +14,8 @@ tests/configuration/test_configuration_loader.py):
 - the ``asr:`` section stays retired — business parameters live in the
   transcribe_media capability ``config_schema``; machine paths arrive via the
   ``AGENT_LEGION_ASR_*`` env overrides only;
-- the ``openclaw:`` section is cwd-only — the retired knobs
-  (command_template / timeout_seconds / isolated_workspace_root /
-  skill_safety) were configurable but never consumed and have been removed;
-  the code defaults in ``configuration/openclaw_defaults.py`` are the
-  tracked source;
+- the ``openclaw:`` section stays retired with the openclaw runtime (#75) —
+  no tracked yaml may carry it;
 - env-only sections (``vault``, ``auth``) stay out of every yaml file — they
   are injected via environment variables only.
 """
@@ -29,8 +26,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-
-from server.app.configuration.openclaw_defaults import DEFAULT_OPENCLAW_CONFIG
 
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 TRACKED_CONFIG_FILES = ("agent-worker.example.yaml",)
@@ -63,11 +58,13 @@ def test_tracked_config_files_have_no_asr_section():
         )
 
 
-def test_openclaw_defaults_are_cwd_only():
-    assert set(DEFAULT_OPENCLAW_CONFIG) == {"cwd"}, (
-        "openclaw code defaults must stay cwd-only; retired knobs "
-        "(command_template/skill_safety/...) were never consumed"
-    )
+def test_tracked_config_files_have_no_openclaw_section():
+    for name in TRACKED_CONFIG_FILES:
+        mapping = _load(name)
+        assert "openclaw" not in mapping, (
+            f"{name} carries the retired openclaw: section; "
+            "the openclaw runtime retired with issue #75"
+        )
 
 
 def test_tracked_config_files_have_no_env_only_sections():

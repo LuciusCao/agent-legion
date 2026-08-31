@@ -99,9 +99,6 @@ const instanceSettings: InstanceSettingsResponse = {
   materials_ttl_days: 0,
   workflows: { enabled: true },
   agent_workers: { max_archive_bytes: 104857600, min_protocol_version: 2 },
-  openclaw: {
-    cwd: '.',
-  },
   skills_root: '~/.agents/skills',
 }
 
