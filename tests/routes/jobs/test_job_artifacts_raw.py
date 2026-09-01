@@ -168,6 +168,34 @@ async def _collect(iterator):
     return chunks
 
 
+def test_raw_response_gzip_passthrough_sets_content_encoding():
+    """#338：.gz 对象透传——Content-Encoding: gzip、Content-Length 是压缩
+    字节数、不声明 Accept-Ranges（gzip 流不支持分段解码，Range 已在上游
+    被忽略）。"""
+    import asyncio
+    import gzip
+    import io
+
+    from server.app.routes.job_artifact_raw import raw_response
+    from server.app.services.job_artifact_raw import RawArtifact
+
+    compressed = gzip.compress(b'{"ok": true}')
+    raw = RawArtifact(
+        name="result.json",
+        stream=io.BytesIO(compressed),
+        size_bytes=len(compressed),
+        content_encoding="gzip",
+    )
+    response = raw_response(raw)
+
+    assert response.status_code == 200
+    assert response.headers["content-encoding"] == "gzip"
+    assert response.headers["content-length"] == str(len(compressed))
+    assert "accept-ranges" not in response.headers
+    body = b"".join(asyncio.run(_collect(response.body_iterator)))
+    assert body == compressed  # body 是存储字节，客户端/浏览器自行解压
+
+
 def test_parse_range_header_matrix():
     from server.app.http_range import parse_range_header
 

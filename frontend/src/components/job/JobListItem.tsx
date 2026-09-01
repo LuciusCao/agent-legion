@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { JOB_STATUS_LABELS } from '../../labels'
 import type { JobSummary, JobNodeSummary } from '../../types/jobTypes'
 import { JobListItemDescription } from './JobListItemDescription'
+import { JobListItemDiagnosis } from './JobListItemDiagnosis'
 import { JobNodeStepper } from './JobNodeStepper'
 import styles from './JobListItem.module.css'
 
@@ -139,6 +140,7 @@ export const JobListItem = memo(function JobListItem({
       </div>
       <div className={styles.statusEnd}>
         <div className={styles.statusEndRow}>
+          <JobListItemDiagnosis job={job} workspaceId={workspaceId} />
           {currentSummary && (
             <span
               className={`${styles.activeLabel} ${activeLabelClass(currentSummary.status)}`}

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
+import { Route, Routes } from 'react-router-dom'
 import { TestQueryProvider } from '../../testing/testQueryClient'
+import { MemoryRouter } from '../../testing/TestMemoryRouter'
 import { JobProgressPanel } from './JobProgressPanel'
 import * as jobApi from '../../api/jobApi'
 import type { JobNode, NodeRun } from '../../types/jobTypes'
@@ -9,6 +11,20 @@ import type { JobNode, NodeRun } from '../../types/jobTypes'
 vi.mock('../../api/jobApi', () => ({
   fetchJobLog: vi.fn(),
   fetchRunTokenUsage: vi.fn(),
+}))
+
+// 排查入口（#329）会挂载诊断面板；无可用 agent 时面板停在空态，无需真实后端。
+vi.mock('../../features/workflowStudio/chat/studioChatApi', () => ({
+  fetchStudioChatAgents: vi.fn().mockResolvedValue([]),
+  fetchStudioChatSessions: vi.fn().mockResolvedValue([]),
+  fetchStudioChatMessages: vi.fn().mockResolvedValue([]),
+  fetchStudioChatSession: vi.fn(),
+  createStudioChatSession: vi.fn(),
+  sendStudioChatMessage: vi.fn(),
+  cancelStudioChatTurn: vi.fn(),
+  setStudioChatAllowAll: vi.fn(),
+  answerStudioChatPermission: vi.fn(),
+  updateStudioChatContext: vi.fn(),
 }))
 
 const mockFetchJobLog = vi.mocked(jobApi.fetchJobLog)
@@ -409,5 +425,42 @@ describe('JobProgressPanel', () => {
     await waitFor(() => {
       expect(screen.getByText('log content')).toBeInTheDocument()
     })
+  })
+
+  it('renders 排查 on failed nodes only when the route carries a workspace', () => {
+    const failedNodes: JobNode[] = [
+      { ...mockNodes[0], status: 'completed' },
+      { ...mockNodes[1], status: 'failed', error_message: 'boom' },
+    ]
+    renderWithClient(
+      <JobProgressPanel jobId="j1" nodes={failedNodes} runs={mockRuns} />
+    )
+    // 无路由上下文（无 workspaceId）→ 不渲染排查入口。
+    expect(screen.queryByText('排查')).not.toBeInTheDocument()
+  })
+
+  it('opens the diagnosis dialog from a failed node', async () => {
+    const failedNodes: JobNode[] = [
+      { ...mockNodes[1], status: 'failed', error_message: 'boom' },
+    ]
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1/jobs/j1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/jobs/:jobId"
+            element={
+              <JobProgressPanel jobId="j1" nodes={failedNodes} runs={[]} />
+            }
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByText('排查'))
+
+    // 面板挂载（无可用 agent → 空态），绑定入口带的节点名。
+    const dialog = await screen.findByRole('dialog', { name: '排查：生成' })
+    expect(dialog).toBeInTheDocument()
+    await screen.findByText(/未检测到可用的 ACP agent/)
   })
 })

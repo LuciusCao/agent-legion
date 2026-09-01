@@ -229,7 +229,7 @@ describe('chunk 失败整页 reload 一次（带退出条件）', () => {
     expect(screen.getByText('降级错误页')).toBeInTheDocument()
   })
 
-  it('未开启 reloadOnChunkError 时不 reload（页面级边界只做局部隔离）', () => {
+  it('未开启 reloadOnChunkError 时不 reload（纯局部隔离）', () => {
     renderCrash(
       <ErrorBoundary fallback={<div>局部错误页</div>}>
         <ChunkBoom />
@@ -256,11 +256,14 @@ describe('chunk 失败整页 reload 一次（带退出条件）', () => {
 })
 
 describe('WorkspaceLayout 页面级隔离', () => {
+  let reload: ReturnType<typeof vi.fn>
+
   beforeAll(() => {
-    mockLocationReload()
+    reload = mockLocationReload()
   })
 
   beforeEach(() => {
+    reload.mockClear()
     fetchWorkerStatusMock.mockClear()
     fetchWorkerStatusMock.mockResolvedValue(undefined)
     window.sessionStorage.clear()
@@ -308,6 +311,31 @@ describe('WorkspaceLayout 页面级隔离', () => {
     expect(retryButton).toBeInTheDocument()
     fireEvent.click(retryButton)
     expect(screen.getByRole('alert')).toBeInTheDocument()
+  })
+
+  it('chunk 加载失败透传 reloadOnChunkError：整页 reload 一次', () => {
+    // 页面级边界必须先尝试整页 reload 拿新 chunk（React.lazy 缓存 rejected
+    // promise，局部 remount 重试只会重抛同一错误）；sessionStorage 标记与
+    // App 层边界共享，全局最多 reload 一次。
+    expectConsoleError(/Failed to fetch dynamically imported module/)
+
+    renderCrash(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          >
+            <Route index element={<ChunkBoom />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    )
+
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(window.sessionStorage.getItem('agent-legion:chunk-reloaded')).toBe(
+      '1'
+    )
   })
 
   function WorkspaceCrashPage(): JSX.Element {

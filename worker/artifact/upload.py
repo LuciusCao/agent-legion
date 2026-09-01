@@ -11,6 +11,10 @@ The URL arrives over the authenticated claim channel, so no SSRF guard
 applies (same rule as the material download in ``worker.material_fetch``).
 Retry semantics mirror ``worker.host.transfer``: transient network errors
 and 5xx get exponential backoff, 4xx is a terminal verdict.
+
+#338: a ``.gz``-suffixed spec asks for gzip-compressed PUT bytes (helpers in
+``worker.artifact.gzip``); the reported ``content_hash`` stays the sha256 of
+the uncompressed bytes.
 """
 
 from __future__ import annotations
@@ -24,7 +28,8 @@ import requests
 
 from worker._retry import run_with_retry
 from worker.artifact.download import describe_transfer_error
-from worker.bundle_io import sha256_file
+from worker.artifact.gzip import open_payload, prepare_upload
+from worker.artifact.inputs import sha256_file
 
 _PUT_TIMEOUT_SECONDS = 120
 _RETRY_BASE_SECONDS = 1.0
@@ -60,7 +65,8 @@ def upload_artifact_direct(
     (``storage_key`` + ``url``). The returned dict is the new-form
     ``output_artifacts`` value. None = stopped mid-retry (the pending marker
     stays and the next startup falls back to the legacy channel, since the
-    presigned spec is never persisted).
+    presigned spec is never persisted). A ``.gz`` spec (#338) PUTs compressed
+    bytes and reports the compressed ``size_bytes``.
     """
     if not isinstance(spec, Mapping):
         # Host bug / 协议错配：spec.get 会抛 AttributeError 逃逸出调用方的
@@ -72,12 +78,12 @@ def upload_artifact_direct(
     storage_key = str(spec.get("storage_key") or "")
     if not url or not storage_key:
         raise DirectUploadError(f"artifact upload spec is incomplete for {path.name!r}")
-    size_bytes = path.stat().st_size
     content_hash = sha256_file(path)
+    payload, size_bytes = prepare_upload(path, storage_key)
 
     def attempt() -> bool:
         try:
-            with path.open("rb") as stream:
+            with open_payload(path, payload) as stream:
                 status = _put_stream(url, stream, size_bytes)
         except _TRANSIENT_ERRORS as exc:
             # str(exc) 含完整签名 URL；只保留类型名，防止经 error_message 落库泄漏。

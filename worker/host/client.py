@@ -126,7 +126,7 @@ class Client(TransferOperations):
         document = json.loads(body)
         if int(document.get("host_protocol_version", 0)) < PROTOCOL_VERSION:
             raise WorkerAuthError(
-                "Host protocol does not support runtime-scoped models; upgrade Host before Worker"
+                "Host protocol version is too old for this Worker; upgrade Host before Worker"
             )
         self.token = str(document["worker_token"])
         return dict(document)

@@ -13,6 +13,8 @@ type Props = {
   rootReady: boolean
   validating: boolean
   onValidate: (name: string) => void
+  /** 每次输入变化都会回调（早于精确匹配判定），宿主借此作废在飞的校验。 */
+  onEdit: () => void
 }
 
 /** Skill 目录名输入行（自 SkillSelector 拆出，文件预算）。候选目录经
@@ -24,6 +26,9 @@ export function SkillDirectoryInput(props: Props) {
 
   function handleChange(next: string) {
     setName(next)
+    // 任何编辑都先作废旧校验：否则继续输入到非候选值时在飞响应仍被视为
+    // 最新，会把上一个候选的 skill key 回填到当前输入之上（codex P1 on #341）。
+    props.onEdit()
     if (directories.includes(next.trim())) props.onValidate(next)
   }
 

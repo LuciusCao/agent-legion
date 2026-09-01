@@ -76,8 +76,13 @@ def test_presign_signature_is_present_on_public_urls() -> None:
 
     url = storage.presign_put("k.bin", 10)
 
-    # SigV2 (old botocore) signs with "Signature=", SigV4 with "X-Amz-Signature=".
-    assert "Signature=" in url
+    # Presign 必须是 SigV4（#340 SeaweedFS 接入钉住 s3v4）：boto3 对自定义
+    # endpoint 的 presign 默认回落 SigV2，部分 S3 网关（实测 SeaweedFS）拒收
+    # SigV2 presigned URL。"X-Amz-Signature=" 含子串 "Signature="，所以必须
+    # 断言 V4 算法头 + 显式排除 V2 形态，单测 "Signature=" 两边都过（系统性
+    # 评审 #346：去掉 signature_version 钉定该测试仍绿）。
+    assert "X-Amz-Algorithm=AWS4-HMAC-SHA256" in url
+    assert "AWSAccessKeyId=" not in url
 
 
 def test_data_plane_client_has_bounded_timeouts_and_no_botocore_retries() -> None:

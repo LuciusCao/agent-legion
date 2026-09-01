@@ -8,7 +8,9 @@ and refine workflows. Rules for this session:
    get_node_prompt, save_node_prompt,
    get_skill, validate_skill, save_skill_version,
    get_preview_guide, get_preview_context, get_preview_panel,
-   save_preview_panel_draft). Never invent platform
+   save_preview_panel_draft,
+   get_job_context, get_job_detail, get_node_logs, read_artifact,
+   list_jobs, compare_jobs). Never invent platform
    state you have not read through those tools.
 2. When you need workspace or selection context (which workspace this is, its
    workflow structure, the node the human has selected), call
@@ -17,6 +19,10 @@ and refine workflows. Rules for this session:
 3. Produce drafts only: workflow YAML drafts, node code drafts, agent
    definition drafts, skill version tags (the skill lock never moves), and
    preview panel drafts (publishing a panel is always the human's click).
+   The job observation tools (get_job_context, get_job_detail, get_node_logs,
+   read_artifact, list_jobs, compare_jobs) are read-only: when diagnosing a
+   job, present the suggested_actions payload for the human to confirm — you
+   never execute retries or mutations yourself.
    Nothing you do takes effect in production — a human reviews and
    publishes every change in Studio.
 4. For from-scratch workflow creation or large-scale restructures, outline

@@ -231,7 +231,7 @@ def test_client_claim_declares_code_capacity() -> None:
     assert seen == [{"worker_id": "w1", "max_concurrency": 70, "max_code_concurrency": 4}]
 
 
-def test_client_registration_declares_protocol_v3_and_code_capacity() -> None:
+def test_client_registration_declares_latest_protocol_and_code_capacity() -> None:
     client = agent_worker.Client("http://unused")
     seen: list[dict] = []
     headers: dict[str, str] = {}
@@ -241,7 +241,7 @@ def test_client_registration_declares_protocol_v3_and_code_capacity() -> None:
         headers.update(kwargs["headers"])
         return (
             201,
-            b'{"worker_token": "tok", "host_protocol_version": 3, "allowed_workspaces": []}',
+            b'{"worker_token": "tok", "host_protocol_version": 4, "allowed_workspaces": []}',
         )
 
     client.request = stub  # type: ignore[method-assign]
@@ -256,10 +256,25 @@ def test_client_registration_declares_protocol_v3_and_code_capacity() -> None:
         ["token-a", "token-b"],
     )
 
-    assert seen[0]["protocol_version"] == 3
+    assert seen[0]["protocol_version"] == 4
     assert seen[0]["max_code_concurrency"] == 3
     # issue #35：全部 scoped token 逗号拼进同一个注册请求。
     assert headers["X-Agent-Worker-Register-Tokens"] == "token-a,token-b"
+
+
+def test_client_registration_fails_closed_against_v3_host() -> None:
+    """#338：v4 worker 对只懂 v3 的旧 Host 拒绝注册（升级顺序：先 Host 后 Worker）。"""
+    client = agent_worker.Client("http://unused")
+    client.request = lambda *a, **k: (  # type: ignore[method-assign]
+        201,
+        b'{"worker_token": "tok", "host_protocol_version": 3, "allowed_workspaces": []}',
+    )
+
+    with pytest.raises(agent_worker.WorkerAuthError, match="upgrade Host before Worker"):
+        client.register(
+            {"worker_id": "w1", "runtimes": ["pi"], "max_concurrency": 1},
+            ["token-a"],
+        )
 
 
 def test_client_registration_rejects_empty_token_list() -> None:
@@ -330,7 +345,7 @@ def test_registration_retries_transient_http_status_errors(
         del args, kwargs
         status = statuses.pop(0)
         if status == 201:
-            return (status, b'{"worker_token": "tok", "host_protocol_version": 3}')
+            return (status, b'{"worker_token": "tok", "host_protocol_version": 4}')
         return (status, b"temporarily unavailable")
 
     client.request = flaky_request  # type: ignore[method-assign]
