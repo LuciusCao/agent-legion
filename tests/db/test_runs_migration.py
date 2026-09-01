@@ -257,7 +257,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "retire_workflow_key_columns"
+    assert migration["name"] == "preview_panels"
 
 
 @pytest.mark.fresh_schema

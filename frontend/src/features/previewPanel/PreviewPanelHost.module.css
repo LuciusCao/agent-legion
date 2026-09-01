@@ -1,0 +1,22 @@
+.wrapper {
+  position: relative;
+}
+
+.frame {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  transition: height 0.15s ease;
+}
+
+.loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary, #43474e);
+  font-size: 13px;
+  pointer-events: none;
+}

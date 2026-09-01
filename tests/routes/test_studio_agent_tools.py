@@ -89,6 +89,10 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
             "/api/studio-agent/tools/skills/wf/review/versions",
             {"files": [{"path": "SKILL.md", "content": "x"}], "new_tag": "v2", "message": "m"},
         ),
+        # Preview panel tools (issue #328): context/panel reads + draft write.
+        ("GET", f"{base}/preview/context", None),
+        ("GET", f"{base}/preview/panel", None),
+        ("PUT", f"{base}/preview/panel/draft", {"html": "not html"}),
     ]
 
 

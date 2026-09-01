@@ -2,7 +2,8 @@
 
 One table (``versioned_entities``) backs the draft → published → archived
 lifecycle of every versioned definition: custom node codes (``node_code``),
-Agent definitions (``agent``), and retired executor definitions
+Agent definitions (``agent``), workspace preview panel bundles
+(``preview_panel``, schema v71, #328), and retired executor definitions
 (``executor``). New entities are workspace-scoped; ``workspace_id`` is NULL
 only for historical global rows retained for migration/replay compatibility.
 Versions are immutable:
@@ -11,8 +12,8 @@ guarantees at most one published row per entity), and rollback re-publishes
 an old definition as a new version.
 
 ``VersionedEntityStore`` is the shared lifecycle engine; per-type services
-(``NodeCodeService``, ``AgentService``) compose it and own their definition
-payload shape and validation.
+(``NodeCodeService``, ``AgentService``, ``PreviewPanelService``) compose it
+and own their definition payload shape and validation.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.job_errors import ConflictError, NotFoundError
 
-EntityType = Literal["node_code", "agent", "executor"]
+EntityType = Literal["node_code", "agent", "executor", "preview_panel"]
 EntityStatus = Literal["draft", "published", "archived"]
 
 _COLUMNS = (
