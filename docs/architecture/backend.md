@@ -208,6 +208,7 @@ server/app/
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `get_node_code_state` | routes/studio_agent_tools.py |
 | GET | `/admin/studio-agents` | `get_studio_agents` | routes/studio_agents_admin.py |
 | PUT | `/admin/studio-agents` | `put_studio_agents` | routes/studio_agents_admin.py |
+| POST | `/admin/studio-agents/redetect` | `redetect_studio_agents` | routes/studio_agents_admin.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/agents` | `list_agents` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions` | `create_session` | routes/studio_chat.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions` | `list_sessions` | routes/studio_chat.py |
@@ -462,8 +463,9 @@ server/app/
 | StudioAgentTokensResponse | BaseModel | tokens: list[StudioAgentTokenEntry] | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenRevokeResponse | BaseModel | id: str, revoked: bool | app/routes/studio_agent_token_contracts.py |
 | StudioAgentActiveWorkflowResponse | BaseModel | state: Literal['active', 'empty'], workflow_key: str | None, revision: Workfl... | app/routes/studio_agent_tool_contracts.py |
-| StudioAgentRegistryEntry | BaseModel | id: str, label: str, command: str, args: list[str] | app/routes/studio_agents_admin_contracts.py |
+| StudioAgentRegistryEntry | BaseModel | id: str, label: str, command: str, args: list[str], source: Literal['manual',... | app/routes/studio_agents_admin_contracts.py |
 | StudioAgentRegistryDocument | BaseModel | api_base: str, agents: list[StudioAgentRegistryEntry] | app/routes/studio_agents_admin_contracts.py |
+| StudioAgentDetection | BaseModel | detected: bool, path: str | None, version: str | None | app/routes/studio_agents_admin_contracts.py |
 | StudioChatAgentOption | BaseModel | id: str, label: str | app/routes/studio_chat_contracts.py |
 | StudioChatAgentsResponse | BaseModel | agents: list[StudioChatAgentOption] | app/routes/studio_chat_contracts.py |
 | StudioChatSessionCreateRequest | BaseModel | agent_id: str, title: str | app/routes/studio_chat_contracts.py |

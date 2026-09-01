@@ -11,6 +11,7 @@ http(s) URL at the write side (#158).
 
 from __future__ import annotations
 
+from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -23,6 +24,9 @@ class StudioAgentRegistryEntry(BaseModel):
     label: str = Field(min_length=1)
     command: str = Field(min_length=1)
     args: list[str] = Field(default_factory=list)
+    # Provenance (#332): auto-detected catalog entries are "detected". The PUT
+    # handler re-derives it server-side, so client-sent values are advisory.
+    source: Literal["manual", "detected"] = "manual"
 
 
 class StudioAgentRegistryDocument(BaseModel):
@@ -55,15 +59,25 @@ class StudioAgentRegistryDocument(BaseModel):
         return self
 
 
-class StudioAgentRegistryResponse(StudioAgentRegistryDocument):
-    """Stored document plus a PATH-probe result per agent id.
+class StudioAgentDetection(BaseModel):
+    """Response-only probe status for one catalog agent (#332)."""
 
-    ``availability`` is response-only (admins see which entries can actually
-    launch on this host); it is never persisted and never accepted on PUT,
-    so it lives here rather than on the shared document model.
+    detected: bool
+    path: str | None = None
+    version: str | None = None
+
+
+class StudioAgentRegistryResponse(StudioAgentRegistryDocument):
+    """Stored document plus host probe results.
+
+    ``availability`` and ``detection`` are response-only (admins see which
+    entries can launch and which catalog agents this host has); both are
+    never persisted and never accepted on PUT, so they live here rather than
+    on the shared document model.
     """
 
     availability: dict[str, bool] = Field(default_factory=dict)
+    detection: dict[str, StudioAgentDetection] = Field(default_factory=dict)
 
 
 class StudioAgentRegistryUpdate(StudioAgentRegistryDocument):

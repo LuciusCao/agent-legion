@@ -158,6 +158,7 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("DELETE", "/api/admin/connections/{key}"): "require_admin",
     ("POST", "/api/admin/connections/{key}/test"): "require_admin",
     ("PUT", "/api/admin/studio-agents"): "require_admin",
+    ("POST", "/api/admin/studio-agents/redetect"): "require_admin",
     ("POST", "/api/agent-register-tokens"): "require_admin",
     ("DELETE", "/api/agent-register-tokens/{token_id}"): "require_admin",
     ("DELETE", "/api/agent-workers/{worker_id}"): "require_admin",

@@ -10,6 +10,8 @@ whole documents, and update runs its read-modify-write in one transaction.
 from __future__ import annotations
 
 import json
+import threading
+import time
 from typing import Any
 
 import pytest
@@ -121,3 +123,37 @@ def test_facade_exposes_mixin_methods(job_db) -> None:
     assert job_db.get_global_settings_document(TEST_KEY) == {"via": "facade"}
     job_db.update_global_settings_document(TEST_KEY, lambda doc: {**doc, "ok": True})
     assert job_db.get_global_settings_document(TEST_KEY) == {"via": "facade", "ok": True}
+
+
+def test_update_serializes_concurrent_rmws(kv) -> None:
+    """codex P1 (#332): two concurrent RMWs on the same key must both land.
+
+    The updater sleeps to widen the read-write window: with a plain SELECT
+    (READ COMMITTED) both transactions would read the same snapshot and the
+    later UPSERT would silently drop the earlier edit; the FOR UPDATE read
+    makes the second transaction queue and observe the first commit.
+    """
+    kv.put_global_settings_document(TEST_KEY, {"edits": []})
+
+    def _updater(mark: str):
+        def _apply(document: dict[str, Any]) -> dict[str, Any]:
+            time.sleep(0.15)
+            return {"edits": [*document.get("edits", []), mark]}
+
+        return _apply
+
+    errors: list[Exception] = []
+
+    def _run(mark: str) -> None:
+        try:
+            kv.update_global_settings_document(TEST_KEY, _updater(mark))
+        except Exception as exc:  # noqa: BLE001 - surfaced by the assert below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_run, args=(mark,)) for mark in ("a", "b")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+    assert not errors
+    assert sorted(kv.get_global_settings_document(TEST_KEY)["edits"]) == ["a", "b"]

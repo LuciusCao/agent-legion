@@ -8,34 +8,19 @@ import type {
   StudioAgentRegistryResponse,
   StudioAgentRegistryUpdate,
 } from '../../api/studioAgents'
+import {
+  availabilityBadge,
+  DetectionCell,
+  errorMessage,
+  RedetectButton,
+  serialize,
+  toRows,
+} from './StudioAgentsSectionParts'
+import type { AgentRow } from './StudioAgentsSectionParts'
 import styles from '../GlobalSettingsPage.module.css'
 
 // 对齐后端契约 StudioAgentRegistryEntry.id 的 pattern。
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/
-
-interface AgentRow {
-  id: string
-  label: string
-  command: string
-  argsText: string
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
-function toRows(document: StudioAgentRegistryResponse): AgentRow[] {
-  return (document.agents ?? []).map((agent) => ({
-    id: agent.id,
-    label: agent.label,
-    command: agent.command,
-    argsText: (agent.args ?? []).join(' '),
-  }))
-}
-
-function serialize(apiBase: string, rows: AgentRow[]): string {
-  return JSON.stringify({ apiBase: apiBase.trim(), rows })
-}
 
 function buildPayload(
   apiBase: string,
@@ -69,15 +54,12 @@ function buildPayload(
       label,
       command,
       args: row.argsText.split(/\s+/).filter(Boolean),
+      // source 按契约随 payload 提交；服务端 PUT 时仍会重导（#332：未改动行
+      // 保留原 source、编辑归 manual），这里带上当前值仅为满足类型。
+      source: row.source ?? 'manual',
     }
   })
   return { api_base: apiBase.trim(), agents }
-}
-
-function availabilityBadge(availability: Record<string, boolean>, id: string) {
-  const value = availability[id.trim()]
-  if (value === undefined) return '—'
-  return value ? '可用' : <span className={styles.staleBadge}>不可用</span>
 }
 
 function StudioAgentsEditor({
@@ -91,6 +73,7 @@ function StudioAgentsEditor({
   const [availability, setAvailability] = useState<Record<string, boolean>>(
     initial.availability ?? {}
   )
+  const [detection, setDetection] = useState(initial.detection ?? {})
   const [baseline, setBaseline] = useState(() =>
     serialize(initial.api_base, toRows(initial))
   )
@@ -105,6 +88,15 @@ function StudioAgentsEditor({
     )
   }
 
+  function applyResult(result: StudioAgentRegistryResponse) {
+    queryClient.setQueryData(extraQueryKeys.studioAgents(), result)
+    const nextRows = toRows(result)
+    setRows(nextRows)
+    setBaseline(serialize(result.api_base, nextRows))
+    setAvailability(result.availability ?? {})
+    setDetection(result.detection ?? {})
+  }
+
   async function handleSave() {
     setError('')
     let payload: StudioAgentRegistryUpdate
@@ -117,9 +109,7 @@ function StudioAgentsEditor({
     setSaving(true)
     try {
       const result = await updateStudioAgents(payload)
-      queryClient.setQueryData(extraQueryKeys.studioAgents(), result)
-      setBaseline(serialize(result.api_base, toRows(result)))
-      setAvailability(result.availability ?? {})
+      applyResult(result)
       useUiStore.getState().showToast('Studio Agent 注册表已保存', 'success')
     } catch (err) {
       setError(errorMessage(err))
@@ -155,6 +145,7 @@ function StudioAgentsEditor({
             <th>command</th>
             <th>args</th>
             <th>PATH 探测</th>
+            <th>来源 / 检测</th>
             <th />
           </tr>
         </thead>
@@ -197,6 +188,12 @@ function StudioAgentsEditor({
               </td>
               <td>{availabilityBadge(availability, row.id)}</td>
               <td>
+                <DetectionCell
+                  source={row.source}
+                  status={detection[row.id.trim()]}
+                />
+              </td>
+              <td>
                 <button
                   type="button"
                   className={styles.dangerButton}
@@ -233,6 +230,11 @@ function StudioAgentsEditor({
         >
           {saving ? '保存中…' : '保存'}
         </button>
+        <RedetectButton
+          disabled={isDirty || saving}
+          onDone={applyResult}
+          onError={setError}
+        />
       </div>
     </>
   )
@@ -249,8 +251,8 @@ export function StudioAgentsSection() {
     <div className={styles.card}>
       <h3 className={styles.heading}>Studio Agent 管理</h3>
       <p className={styles.hint}>
-        Studio chat 的 ACP agent 注册表，整文档保存；可用性以后端 PATH
-        探测为准（约 1 分钟缓存）。args 以空格分隔。
+        Studio chat 的 ACP agent 注册表，整文档保存；「重新检测」自动补入
+        内置目录中已安装的 agent（标记「自动检测」），手工条目永远优先。
       </p>
       {loadError && (
         <p className={styles.error} role="alert">
