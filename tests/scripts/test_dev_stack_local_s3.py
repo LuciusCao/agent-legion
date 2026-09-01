@@ -35,20 +35,21 @@ def test_dev_stack_up_wires_local_s3_decision() -> None:
 
 
 def test_dev_stack_dispatches_backend_service_and_port() -> None:
-    """起本地后端走 compose.host.yaml 单服务（profile 自动启用），服务名与
-    就绪端口按 BACKEND 分派（默认 seaweedfs/8333；rustfs/9000）；凭据从根
-    .env 显式 export——dev 形态没有 deploy/.env，不能让 compose 插值落空。"""
-    # 分派表：backend → (service, port)，默认分支落 seaweedfs。
-    assert "rustfs) service=rustfs; port=9000" in DEV_STACK
-    assert "*) service=seaweedfs; port=8333" in DEV_STACK
+    """起本地后端走 compose.host.yaml 单服务（profile 自动启用）。服务名
+    统一经 decide 的 --service-name 分派（分派表只在 decide 一处维护），
+    输出非法时回落默认后端；就绪端口按服务分流；凭据从根 .env 显式
+    export——dev 形态没有 deploy/.env，不能让 compose 插值落空。"""
+    assert "local-s3-decide.sh --service-name .env" in DEV_STACK
     assert 'up -d "$service"' in DEV_STACK
+    # 服务名白名单守卫：垃圾值不得传给 up -d。
+    assert "seaweedfs | rustfs) ;;" in DEV_STACK
+    assert "*) service=seaweedfs ;;" in DEV_STACK
     # 就绪探测按后端分派：seaweedfs 的 /healthz 与 rustfs 的 MinIO 兼容端点。
     assert "http_ok 8333 /healthz" in DEV_STACK
     assert "http_ok 9000 /minio/health/live" in DEV_STACK
     assert "deploy/compose.host.yaml" in DEV_STACK
     assert "read_env_value AGENT_LEGION_S3_ACCESS_KEY" in DEV_STACK
     assert "read_env_value AGENT_LEGION_S3_SECRET_KEY" in DEV_STACK
-    assert "read_env_value AGENT_LEGION_LOCAL_S3_BACKEND" in DEV_STACK
 
 
 def test_dev_stack_ensures_bucket_after_start() -> None:
@@ -79,9 +80,14 @@ def test_makefile_wires_install_target() -> None:
 
 DEV_STACK_SCRIPT = ROOT / "scripts" / "dev_stack.sh"
 
-# 决策脚本桩：STUB_DECIDE_RC 非 0 时按该码退出（stdout 无决策词），
+# 决策脚本桩：--service-name 输出 STUB_BACKEND（默认 seaweedfs，模拟真
+# 脚本的分派）；STUB_DECIDE_RC 非 0 时按该码退出（stdout 无决策词），
 # 否则输出 STUB_DECISION（默认 start）。
 _DECIDE_STUB = """#!/usr/bin/env bash
+if [[ "$1" == "--service-name" ]]; then
+  echo "${STUB_BACKEND:-seaweedfs}"
+  exit 0
+fi
 echo "本地对象存储: stub 决策原因" >&2
 if [[ "${STUB_DECIDE_RC:-0}" != "0" ]]; then exit "${STUB_DECIDE_RC}"; fi
 echo "${STUB_DECISION:-start}"
@@ -254,7 +260,8 @@ def test_stopped_service_is_started_via_compose(tmp_path: Path) -> None:
 
 
 def test_rustfs_backend_dispatches_service(tmp_path: Path) -> None:
-    """BACKEND=rustfs：起的是 rustfs 服务而非默认 seaweedfs（逃生舱分派）。"""
+    """BACKEND=rustfs：起的是 rustfs 服务而非默认 seaweedfs（逃生舱分派）。
+    桩经 STUB_BACKEND 模拟 decide 的 --service-name 分派。"""
     main, bin_dir = _setup(tmp_path)
     stub_log = tmp_path / "stub.log"
 
@@ -262,7 +269,7 @@ def test_rustfs_backend_dispatches_service(tmp_path: Path) -> None:
         main,
         bin_dir,
         stub_log,
-        {"AGENT_LEGION_LOCAL_S3_BACKEND": "rustfs", "STUB_SERVICE_RUNNING": ""},
+        {"STUB_BACKEND": "rustfs", "STUB_SERVICE_RUNNING": ""},
     )
 
     assert result.returncode == 0, result.stderr

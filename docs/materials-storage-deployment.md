@@ -10,7 +10,8 @@ Amazon S3 / MinIO / Garage。设计背景见
 默认后端切换的依据（#340 调研）：MinIO 血统的 RustFS 把对象存为「一目录 +
 一 xl.meta」，后台 scanner 的用量巡检要遍历全命名空间并读取每个对象的
 xl.meta——小对象（≤128KiB）数据内联其中，「巡检」字面等于重读全部数据，
-闲置 CPU/IO 随对象数线性增长（曾观察到百万对象零流量空转多日）。SeaweedFS
+闲置 CPU/IO 随对象数线性增长（百万对象级的命名空间下可出现零流量空转多日的
+现象）。SeaweedFS
 的元数据在 filer 数据库里、数据在 volume 大文件中仅存指针，结构性不存在
 该问题（实测对象数 ×4 闲置开销持平，全量列举约 2.5 倍速）。详见 issue
 #340 的调研评论。
@@ -42,7 +43,7 @@ tracked yaml、DB、API 或日志（MATERIAL-SECRET-001）。
 开发路径与生产部署分开：全新 clone 后 `make install`（`scripts/install-deps.sh`，
 幂等）一键装齐前置依赖并初始化项目——uv sync、建 `agent_legion_dev` 库、从
 `.env.example` 生成 `.env` 并填入随机 `AGENT_LEGION_S3_ACCESS_KEY/SECRET_KEY`
-（同时作为 rustfs 容器的 root 凭据；`.env` 已存在但凭据为空时会幂等补填）、
+（同时作为本地后端容器的 root 凭据；`.env` 已存在但凭据为空时会幂等补填）、
 生成 `deploy/secrets/vault_master_key`、构建 velites 二进制、装前端依赖、
 种子 worker 状态副本 `data/agent-worker-service/worker.yaml`。
 
@@ -67,13 +68,13 @@ bucket 处告警暴露。起完后调用
 
 开发环境切外部对象存储：改根 `.env` 的 `AGENT_LEGION_S3_ENDPOINT` /
 凭据 / `AGENT_LEGION_S3_BUCKET` 三样即可（AWS 默认端点写法是显式留空
-endpoint），`auto` 决策会自动跳过本地 rustfs；细节同 §3.1.1。
+endpoint），`auto` 决策会自动跳过本地后端；细节同 §3.1.1。
 
 ## 3. 首次部署 / 升级启用步骤
 
 ### 3.1 准备凭据与配置
 
-compose 对 host 与 rustfs 都是 `${AGENT_LEGION_S3_ACCESS_KEY}` 字面插值，
+compose 对 host 与两个本地后端都是 `${AGENT_LEGION_S3_ACCESS_KEY}` 字面插值，
 **不支持 `_FILE` 变体**（写了会把路径字符串当 access key 注入）。凭据
 直接以字面值写进 `deploy/.env`（该文件已被 git/docker 忽略，与
 `LLM_GATEWAY_TOKEN` 同一通道）：
@@ -90,20 +91,22 @@ chmod 600 deploy/.env
 ```
 
 浏览器 / remote worker 从宿主机外访问时，再把 presigned URL 的签发地址
-覆盖为可达地址（默认 `http://127.0.0.1:9000`，匹配 rustfs 端口映射）：
+覆盖为可达地址（默认 `http://127.0.0.1:8333`，匹配 seaweedfs 端口映射）：
 
 ```bash
-echo 'AGENT_LEGION_S3_PUBLIC_ENDPOINT=http://<宿主机地址>:9000' >> deploy/.env
+echo 'AGENT_LEGION_S3_PUBLIC_ENDPOINT=http://<宿主机地址>:8333' >> deploy/.env
 ```
 
 （原生形态 `make prod-up` 的后端/worker 是本机进程，不经 compose：把同名
 变量写进 prod worktree 根的 `.env`——原生加载支持 `_FILE` 变体；注意
-compose 插值只读 `deploy/.env`，rustfs 容器的 root 凭据以 `deploy/.env`
-为准，两处要写同一组值。RustFS 容器不用手工起：`native-prod-up.sh` 经
-`scripts/local-s3-decide.sh` 决策后自动
-`docker compose -f deploy/compose.host.yaml up -d rustfs`（幂等；docker
-不可用或启动失败仅告警，材料 API 降级为 503，其余功能不受影响）。
-原生形态的 `AGENT_LEGION_S3_ENDPOINT` 指向 `http://127.0.0.1:9000`，
+compose 插值只读 `deploy/.env`，本地后端容器的 root 凭据以 `deploy/.env`
+为准，两处要写同一组值。本地后端容器不用手工起：`native-prod-up.sh` 经
+`scripts/local-s3-decide.sh` 决策后自动按
+`AGENT_LEGION_LOCAL_S3_BACKEND`（默认 seaweedfs）执行
+`docker compose -f deploy/compose.host.yaml up -d <seaweedfs|rustfs>`
+（幂等；docker 不可用或启动失败仅告警，材料 API 降级为 503，其余功能
+不受影响）。原生形态的 `AGENT_LEGION_S3_ENDPOINT` 默认指向
+`http://127.0.0.1:8333`（rustfs 逃生舱为 `:9000`），
 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向浏览器 / remote worker 可达的地址。）
 
 ### 3.1.1 使用外部对象存储（AWS S3 / MinIO / Garage）
@@ -132,7 +135,7 @@ git pull
 make prod-up            # 或 make prod-up docker
 ```
 
-首次启动 rustfs 后创建 bucket（一次性；dev 环境由 `init-worktree.sh`
+首次启动本地后端后创建 bucket（一次性；dev 环境由 `init-worktree.sh`
 自动完成）：
 
 ```bash
@@ -171,7 +174,7 @@ print("已配置 bucket CORS")
 EOF
 ```
 
-（等价地也可用 `aws s3 mb s3://<bucket> --endpoint-url <rustfs地址>`。）
+（等价地也可用 `aws s3 mb s3://<bucket> --endpoint-url <本地后端地址>`。）
 
 ### 3.3 启动后检查
 
@@ -214,7 +217,8 @@ EOF
   分开配规则——材料侧按你们对上传内容的数据分级策略设保留期（务必
   显著长于 `materials_ttl_days`，让 DB 侧先完成引用检查），`jobs/`
   前缀按产物保留策略另设，`jobs-staging/` 配短保留（如 1 天，孤儿
-  暂存对象只是失败残留）。手工清理可用 console（`:9001`）。
+  暂存对象只是失败残留）。手工清理可用 console（rustfs `:9001`；seaweedfs
+  为 master UI `:9333`）。
 - **缓存**：`data/materials_cache/` 是可淘汰缓存，可随时清空（下次
   dispatch 重新下载）；worker 侧在 `{work_root}/materials_cache`。
 - **本地后端选择与切换**（#340）：`AGENT_LEGION_LOCAL_S3_BACKEND=

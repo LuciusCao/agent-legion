@@ -150,34 +150,61 @@ endpoint_is_local() {
 }
 
 # backend/endpoint 指向不一致时给明确指引（不阻断：老配置里 endpoint 指向
-# rustfs 而 BACKEND 默认已是 seaweedfs 的存量用户，正是要被这行提示引导）。
+# rustfs/:9000 而 BACKEND 默认已是 seaweedfs 的存量用户，正是要被提示引导）。
+# host 提取与 endpoint_is_local 同款（去 scheme/path/userinfo/IPv6 括号），
+# 端口参与判断——127.0.0.1:9000 与 rustfs:9000 都指向 rustfs 形态的端口。
 warn_backend_mismatch() {
-    local host="$1"
-    host="${host#*://}"; host="${host%%/*}"; host="${host%%:*}"
+    local hostport="$1" host port
+    hostport="${hostport#*://}"; hostport="${hostport%%/*}"
+    hostport="${hostport##*@}"
+    if [[ "$hostport" == \[* ]]; then
+        host="${hostport#\[}"; host="${host%%]*}"
+        port="${hostport##*:}"
+    else
+        host="${hostport%%:*}"
+        port="${hostport##*:}"
+        [[ "$port" == "$hostport" ]] && port=""
+    fi
     host="$(printf '%s' "$host" | tr 'A-Z' 'a-z')"
-    if [[ "$host" == "rustfs" && "$BACKEND" == "seaweedfs" ]]; then
-        echo "提示: AGENT_LEGION_S3_ENDPOINT 指向 rustfs 但 BACKEND=seaweedfs——" >&2
-        echo "      存量 rustfs 用户请显式配 AGENT_LEGION_LOCAL_S3_BACKEND=rustfs" >&2
-        echo "      （或迁移到 seaweedfs，见 docs/materials-storage-deployment.md）" >&2
-    elif [[ "$host" == "seaweedfs" && "$BACKEND" == "rustfs" ]]; then
-        echo "提示: AGENT_LEGION_S3_ENDPOINT 指向 seaweedfs 但 BACKEND=rustfs——" >&2
+    local points_at=""
+    case "$host" in
+        rustfs) points_at=rustfs ;;
+        seaweedfs) points_at=seaweedfs ;;
+        127.0.0.1 | localhost | ::1)
+            case "$port" in
+                9000) points_at=rustfs ;;
+                8333) points_at=seaweedfs ;;
+            esac
+            ;;
+    esac
+    if [[ "$points_at" == "rustfs" && "$BACKEND" == "seaweedfs" ]]; then
+        echo "提示: AGENT_LEGION_S3_ENDPOINT 指向 rustfs 形态地址（${hostport}）但 BACKEND=seaweedfs——" >&2
+        echo "      存量 rustfs 用户请显式配 AGENT_LEGION_LOCAL_S3_BACKEND=rustfs（endpoint 保持 :9000）" >&2
+        echo "      （或迁移到 seaweedfs 并把 endpoint 改为 :8333，见 docs/materials-storage-deployment.md）" >&2
+    elif [[ "$points_at" == "seaweedfs" && "$BACKEND" == "rustfs" ]]; then
+        echo "提示: AGENT_LEGION_S3_ENDPOINT 指向 seaweedfs 形态地址（${hostport}）但 BACKEND=rustfs——" >&2
         echo "      请修正 AGENT_LEGION_LOCAL_S3_BACKEND 或 endpoint 之一" >&2
     fi
 }
 
-# 解析并校验后端选择（默认 seaweedfs）。LOCAL_S3=never 时无需校验——
-# 外部对象存储形态下本地后端不启动，backend 值无意义。
+# 解析后端选择（默认 seaweedfs）。LOCAL_S3=never 时无需校验——外部对象
+# 存储形态下本地后端不启动，backend 值无意义（非法值也不该 fail-fast 一个
+# 与用户无关的开关，系统性评审 #346）。--service-name 始终校验：它的唯一
+# 使命就是输出合法服务名。
 BACKEND="$(lookup AGENT_LEGION_LOCAL_S3_BACKEND)"
 BACKEND="${BACKEND:-seaweedfs}"
-case "$BACKEND" in
-    seaweedfs) PROFILE="$PROFILE_SEAWEEDFS" ;;
-    rustfs) PROFILE="$PROFILE_RUSTFS" ;;
-    *)
-        echo "错误: AGENT_LEGION_LOCAL_S3_BACKEND=${BACKEND} 非法，只支持 seaweedfs|rustfs" >&2
-        exit 2
-        ;;
-esac
+validate_backend() {
+    case "$BACKEND" in
+        seaweedfs) PROFILE="$PROFILE_SEAWEEDFS" ;;
+        rustfs) PROFILE="$PROFILE_RUSTFS" ;;
+        *)
+            echo "错误: AGENT_LEGION_LOCAL_S3_BACKEND=${BACKEND} 非法，只支持 seaweedfs|rustfs" >&2
+            exit 2
+            ;;
+    esac
+}
 if $SERVICE_NAME_ONLY; then
+    validate_backend
     printf '%s\n' "$BACKEND"
     exit 0
 fi
@@ -214,13 +241,17 @@ MODE="$(lookup AGENT_LEGION_LOCAL_S3)"
 MODE="${MODE:-auto}"
 case "$MODE" in
     always)
+        validate_backend
         require_keys
         emit start "AGENT_LEGION_LOCAL_S3=always"
         ;;
     never)
+        # 不校验 backend（见上）；skip 输出也无 profile。
+        PROFILE=""
         emit skip "AGENT_LEGION_LOCAL_S3=never（使用外部对象存储）"
         ;;
     auto)
+        validate_backend
         endpoint_present=false
         if endpoint="$(lookup_first AGENT_LEGION_S3_ENDPOINT)"; then
             endpoint_present=true

@@ -355,6 +355,21 @@ def test_compose_rustfs_is_escape_hatch_backend() -> None:
     assert env.get("RUSTFS_HEAL_ENABLED") == "false"
 
 
+def test_compose_healthchecks_probe_real_liveness_endpoints() -> None:
+    """健康探针不得退回根路径（#340 原始事故：S3 API 对匿名请求返回
+    403，探 / 会让容器永远 unhealthy）。seaweedfs 探 weed 的 /healthz，
+    rustfs 探 MinIO 兼容 /minio/health/live——revert 回根路径时此测试
+    必须红（系统性评审 #346：此前无任何测试钉住探针端点）。"""
+    services = _services()
+    seaweedfs_test = str(services["seaweedfs"]["healthcheck"]["test"])
+    rustfs_test = str(services["rustfs"]["healthcheck"]["test"])
+    assert "/healthz" in seaweedfs_test
+    assert "/minio/health/live" in rustfs_test
+    # 根路径探针形态（URL 端口后紧跟路径终点）两种后端都不允许出现。
+    assert "8333/ " not in seaweedfs_test and "8333/'" not in seaweedfs_test
+    assert "9000/ " not in rustfs_test and "9000/'" not in rustfs_test
+
+
 def test_compose_host_has_no_hard_dependency_on_local_backends() -> None:
     """depends_on 指向未启用 profile 的服务会让 compose 直接报
     "depends on undefined service"，host 不得硬依赖任一本地后端。"""

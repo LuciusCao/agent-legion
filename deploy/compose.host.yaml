@@ -44,7 +44,13 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        chown -R seaweed:seaweed /data 2>/dev/null || true
+        # 属主不匹配才递归 chown（对齐原生 entrypoint 的 stat 守卫——grown
+        # filer leveldb 上每次启动全量 chown 会拖慢重启）；s3.config 收紧
+        # 到 0600（凭据文件，容器内仅 root/seaweed 两用户，纵深防御）。
+        if [ "$(stat -c %u /data 2>/dev/null)" != "1000" ]; then
+          chown -R seaweed:seaweed /data 2>/dev/null || true
+        fi
+        umask 077
         printf '%s\n' '{"identities":[{"name":"agent-legion","credentials":[{"accessKey":"'"$AGENT_LEGION_S3_ACCESS_KEY"'","secretKey":"'"$AGENT_LEGION_S3_SECRET_KEY"'"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' > /tmp/s3.json
         exec su-exec seaweed weed server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json -master.volumeSizeLimitMB=2048 -volume.max=0
     environment:

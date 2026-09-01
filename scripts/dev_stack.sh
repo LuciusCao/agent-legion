@@ -2,9 +2,9 @@
 # 开发环境一键启停：backend (uvicorn --reload) + frontend (vite) + worker service，
 # 由 make dev-up / dev-down / dev-status 调用；启动命令复用 Makefile 的
 # dev-backend / dev-frontend / dev-worker target（端口变量经环境透传）。
-# up 开头会按 scripts/local-s3-decide.sh 的决策带起本地 RustFS（材料对象
-# 存储，docker compose 托管）并确保 bucket 存在——dev 默认本地 RustFS，
-# 切外部 S3（.env 配远程 endpoint）后自动跳过。
+# up 开头会按 scripts/local-s3-decide.sh 的决策带起本地对象存储（默认
+# seaweedfs，BACKEND=rustfs 切逃生舱；docker compose 托管）并确保 bucket
+# 存在——切外部 S3（.env 配远程 endpoint）后自动跳过。
 # 幂等：端口已被监听视为该组件在运行，up 跳过启动、down 只停监听中的组件。
 # 进程经 nohup 脱离终端，日志在 data/logs/dev-{backend,frontend,worker}.log。
 # 多 worktree 隔离靠 DEV_BACKEND_PORT / DEV_FRONTEND_PORT / AGENT_WORKER_UI_PORT。
@@ -74,22 +74,23 @@ read_env_value() {
     printf '%s' "$value"
 }
 
-# 本地 RustFS（材料对象存储）：决策逻辑与 prod 入口共用
+# 本地对象存储（材料存储后端）：决策逻辑与 prod 入口共用
 # scripts/local-s3-decide.sh（AGENT_LEGION_LOCAL_S3=auto|always|never，
 # 默认 auto：endpoint 指向本机或未配置 S3 → start；远程 → skip 并打原因）。
 # 决策/启动/bucket 任何一步失败都只告警不阻断——材料 API 降级为 503，
 # 其余功能不受影响（与 native-prod-up.sh 同一策略）。
-# 本地后端分派（#340）：BACKEND=seaweedfs（默认）→ seaweedfs 服务/S3 口
-# 8333；BACKEND=rustfs → rustfs 服务/S3 口 9000。两者都在 compose 里挂
-# 各自 profile，显式 up -d <服务名> 时 profile 自动启用。
+# 本地后端分派（#340）：BACKEND=seaweedfs（默认）→ seaweedfs 服务；rustfs
+# → rustfs 服务。服务名统一经 local-s3-decide.sh --service-name 解析（分派
+# 表只在 decide 一处维护，本脚本不重写第三份）；就绪端口按服务分流。
 ensure_local_object_store() {
-    local decision rc=0
+    local decision rc=0 service
     decision="$(scripts/local-s3-decide.sh .env)" || rc=$?
-    local backend service port
-    backend="$(read_env_value AGENT_LEGION_LOCAL_S3_BACKEND || true)"
-    case "${backend:-seaweedfs}" in
-        rustfs) service=rustfs; port=9000 ;;
-        *) service=seaweedfs; port=8333 ;;
+    # 服务名经 decide 统一分派；输出非法（脚本异常/旧版无 --service-name）
+    # 时回落默认后端而不是把垃圾值传给 up -d。
+    service="$(scripts/local-s3-decide.sh --service-name .env 2>/dev/null || true)"
+    case "$service" in
+        seaweedfs | rustfs) ;;
+        *) service=seaweedfs ;;
     esac
     if [[ "$rc" -eq 2 ]]; then
         # 开关值非法：prod 入口 fail-fast，dev 降级为告警（不阻断开发启动）。
@@ -247,27 +248,34 @@ cmd_status() {
     status_line "后端 API      " "$BACKEND_PORT" "http://127.0.0.1:$BACKEND_PORT"
     status_line "前端控制台    " "$FRONTEND_PORT" "http://127.0.0.1:$FRONTEND_PORT"
     status_line "Worker 控制台 " "$WORKER_PORT" "http://127.0.0.1:$WORKER_PORT"
-    # RustFS 由 docker compose 托管（dev-up 按 local-s3-decide.sh 决策带起）；
+    # 本地对象存储由 docker compose 托管（dev-up 按 local-s3-decide.sh 决策带起）；
     # docker 缺失时跳过该行。compose 文件与 up 保持一致（含 compose.local.yaml
     # 覆盖），URL 尊重端口映射的绑定地址 AGENT_LEGION_S3_BIND（默认 127.0.0.1）。
     if command -v docker >/dev/null 2>&1; then
         local compose_files=(-f deploy/compose.host.yaml)
         [[ -f deploy/compose.local.yaml ]] && compose_files+=(-f deploy/compose.local.yaml)
-        local bind backend running label url
+        local bind configured running label url state
         bind="$(read_env_value AGENT_LEGION_S3_BIND || true)"
         bind="${bind:-127.0.0.1}"
-        backend="$(read_env_value AGENT_LEGION_LOCAL_S3_BACKEND || true)"
-        case "${backend:-seaweedfs}" in
+        configured="$(scripts/local-s3-decide.sh --service-name .env 2>/dev/null || echo seaweedfs)"
+        case "$configured" in
             rustfs) label="RustFS"; url="http://${bind}:9000（console :9001）" ;;
             *) label="SeaweedFS"; url="http://${bind}:8333（master UI :9333）" ;;
         esac
+        # 按实际运行的容器报告（系统性评审 #346：配置 rustfs 但 seaweedfs
+        # 在跑时，不能打印一个不存在的「运行中 rustfs」）。
         running="$(docker compose "${compose_files[@]}" ps --status running --services 2>/dev/null \
             | grep -xE 'rustfs|seaweedfs' || true)"
         if [[ -n "$running" ]]; then
-            echo "  [运行中] ${label}        ${url}"
+            state="运行中"
+            # 配置与实际不一致（另一后端在跑）时如实点名。
+            if ! grep -qx "$configured" <<<"$running"; then
+                state="运行中(注意: 实际为 ${running//$'\n'/,}，与配置 ${configured} 不一致)"
+            fi
         else
-            echo "  [未运行] ${label}        ${url}"
+            state="未运行"
         fi
+        echo "  [${state}] ${label}        ${url}"
     fi
     echo "  日志：$LOG_DIR/dev-{backend,frontend,worker}.log"
 }
