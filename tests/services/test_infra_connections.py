@@ -43,6 +43,26 @@ def test_describe_database_with_user_but_no_password() -> None:
     assert info.masked_url == "postgresql://legion@db.internal/mydb"
 
 
+def test_describe_database_rewraps_ipv6_host() -> None:
+    """urlsplit's .hostname strips the IPv6 brackets; the masked URL must
+    re-wrap them or it would not round-trip as a recognizable DSN."""
+    info = describe_database("postgresql://legion:secretpass@[2001:db8::10]:5433/mydb")
+
+    assert info.host == "2001:db8::10"
+    assert info.port == 5433
+    assert info.masked_url == "postgresql://legion:***@[2001:db8::10]:5433/mydb"
+    assert "secretpass" not in info.masked_url
+
+
+def test_describe_database_ipv6_without_port_or_user() -> None:
+    info = describe_database("postgresql://[::1]/mydb")
+
+    assert info.host == "::1"
+    assert info.port is None
+    assert info.password_set is False
+    assert info.masked_url == "postgresql://[::1]/mydb"
+
+
 def test_describe_database_degrades_on_garbage_dsn() -> None:
     for garbage in ("not-a-dsn", "", "postgresql://u:p@h:notaport/db"):
         info = describe_database(garbage)

@@ -40,7 +40,12 @@ def _probe_database(job_db) -> str | None:
         # raised (OperationalError, InterfaceError, pool timeouts, ... — no
         # narrow enumerable family). The "TypeName: message" conversion IS
         # the preservation: type and text ride the admin-facing response.
-        return f"{type(exc).__name__}: {exc}"
+        # Only the FIRST line relays (#335 review): driver messages put
+        # conninfo fragments (host/user/dbname, in the worst case a DSN with
+        # credentials) on continuation lines — the first line carries the
+        # actionable cause without the connection-string echo.
+        first_line = (str(exc).splitlines() or [""])[0]
+        return f"{type(exc).__name__}: {first_line}"
     return None
 
 
@@ -56,6 +61,12 @@ def create_infra_connections_router(job_db) -> APIRouter:
         request: Request,
         _admin: Annotated[dict[str, Any], Depends(require_admin)],
     ) -> InfraConnectionsResponse:
+        # First route-layer consumer of ``dsn_identity`` — a tower-ratified
+        # precedent (#335 review round 1): this admin surface genuinely needs
+        # the connection identity, and the DSN never leaves the process
+        # (only the masked describe_database summary crosses the API). The
+        # BOUNDARY-DATA-001 ratchet scans services only; this read is the
+        # sanctioned exception for this feature, not a pattern to copy.
         database = describe_database(job_db.dsn_identity)
         # Display reachability rides the shared health cache (5s TTL), so
         # this endpoint adds no probe traffic beyond what /api/health pays.

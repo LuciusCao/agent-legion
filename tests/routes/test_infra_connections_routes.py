@@ -176,6 +176,28 @@ def test_post_database_probe_failure_relays_reason(client_factory, monkeypatch) 
     }
 
 
+def test_post_database_probe_failure_relays_first_line_only(client_factory, monkeypatch) -> None:
+    """Driver messages put conninfo fragments on continuation lines; only the
+    first line may ride the admin response (#335 review)."""
+    dsn_with_password = "postgresql://legion:sup3rsecret@db.internal:5432/mydb"
+
+    def _boom(self):
+        raise RuntimeError(f"connection refused\nconninfo: {dsn_with_password}")
+
+    with client_factory(fresh=True, configure=_mount_infra_connections) as client:
+        monkeypatch.setattr(JobQueries, "read", _boom)
+        response = client.post(TEST_URL, json={"target": "database"})
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "target": "database",
+        "ok": False,
+        "reason": "RuntimeError: connection refused",
+    }
+    assert "sup3rsecret" not in response.text
+    assert dsn_with_password not in response.text
+
+
 def test_post_storage_probe_failure_relays_reason(client_factory, monkeypatch) -> None:
     _inject_s3_env(monkeypatch)
     monkeypatch.setattr(
