@@ -338,4 +338,48 @@ describe('SkillSelector', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '校验' })).toBeInTheDocument()
   })
+
+  it('invalidates an in-flight validation when the input keeps being edited', async () => {
+    // 选中候选 review（校验在飞）后继续手打到非候选值 review-custom：
+    // 迟到响应不得把 review 的 key 回填到当前输入之上（codex P1 on #341）。
+    mockFetchDirectories.mockResolvedValue({
+      workspace_id: 'ws-1',
+      directories: ['review'],
+    })
+    let resolveA!: (value: SkillValidateResponse) => void
+    mockValidate.mockImplementationOnce(
+      () =>
+        new Promise<SkillValidateResponse>((resolve) => {
+          resolveA = resolve
+        })
+    )
+    const onChange = vi.fn()
+    const { container } = renderSelector(onChange)
+
+    const input = screen.getByLabelText('Skill 目录名')
+    await waitFor(() => expect(input).toBeEnabled())
+    await waitFor(() =>
+      expect(
+        container.querySelector(
+          'datalist#skill-directory-options option[value="review"]'
+        )
+      ).not.toBeNull()
+    )
+    fireEvent.change(input, { target: { value: 'review' } })
+    await waitFor(() => expect(mockValidate).toHaveBeenCalledTimes(1))
+    fireEvent.change(input, { target: { value: 'review-custom' } })
+    expect(mockValidate).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      resolveA({
+        valid: true,
+        path: '/abs/review',
+        skill_key: 'ws-1/review',
+        tags: [],
+        latest_tag: null,
+        locked_ref: null,
+      })
+    })
+    expect(onChange).not.toHaveBeenCalled()
+  })
 })
