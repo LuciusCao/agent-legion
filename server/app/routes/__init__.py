@@ -18,6 +18,7 @@ from .metrics import create_metrics_router
 from .packages import create_packages_router
 from .quality import create_quality_router
 from .quality_replays import create_quality_replays_router
+from .skill_directories import create_skill_directories_router
 from .skills import create_skills_router
 from .studio_agent_context import create_studio_agent_context_router
 from .studio_agent_tokens import create_studio_agent_tokens_router
@@ -111,6 +112,7 @@ def create_router(deps: RouterDeps) -> APIRouter:
     studio_secured(create_workflow_node_codes_router(deps.job_db, deps.settings))
     studio_secured(create_agent_definitions_router(deps.job_db, deps.settings))
     secured(create_skills_router(deps.job_db, deps.settings))
+    secured(create_skill_directories_router(deps.job_db, deps.settings))
     secured(create_workspace_configuration_router(deps.workspace_configuration, deps.settings))
     agent_catalog_router = create_workspace_agent_catalog_router(
         deps.agent_catalog, deps.workspace_execution_configuration, deps.settings, deps.job_db
