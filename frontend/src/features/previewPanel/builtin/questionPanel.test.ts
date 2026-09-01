@@ -247,6 +247,39 @@ describe('官方内置 question 面板 bundle', () => {
     expect(imgs[0].getAttribute('onerror')).toBeNull()
   })
 
+  it('纯文本提取走 inert DOMParser：onerror 载荷不执行、元素不进活动文档', async () => {
+    const { doc, win } = bootPanel({
+      detail: makeDetail(ALL_TERMINAL_NODES),
+      artifacts: {
+        'questions.json': JSON.stringify({
+          questions: [{ normalized: QUESTION }],
+        }),
+        'comprehension_info.json': JSON.stringify({
+          comprehension_data: {
+            key_info_list: [
+              {
+                ...KEY_INFO,
+                content: {
+                  text: '每箱<img src="https://evil.test/x" onerror="window.__pwned=1">10盒',
+                  position: { start: 0, end: 1 },
+                },
+              },
+            ],
+            possible_error_list: [],
+          },
+        }),
+      },
+    })
+
+    await waitForText(doc, '审题信息')
+    // stripTags（richInline 与题干高亮提取共用）经 inert DOMParser 解析：
+    // 事件属性不触发，载荷元素也从不进入活动文档。详情卡展示完整文本。
+    doc.querySelector<HTMLButtonElement>('#app .chip')!.click()
+    await waitForText(doc, '每箱10盒')
+    expect((win as unknown as Record<string, unknown>).__pwned).toBeUndefined()
+    expect(doc.querySelector('#app img')).toBeNull()
+  })
+
   it('选中审题信息 chip 时题干按匹配文本高亮', async () => {
     const keyInfo = {
       ...KEY_INFO,

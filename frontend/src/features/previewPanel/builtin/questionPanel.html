@@ -386,9 +386,15 @@
         var SAFE_URI = /^https?:\/\//i
 
         function stripTags(html) {
-          var tmp = document.createElement('div')
-          tmp.innerHTML = String(html == null ? '' : html)
-          return tmp.textContent || ''
+          // 与 richBlock 同款 inert DOMParser 提取：DOMParser 不加载资源、
+          // 不触发 onerror/onload 事件属性——innerHTML 解析未信内容会在
+          // bundle 上下文执行事件载荷并外发请求（评审 r3 P2）。
+          return (
+            new DOMParser().parseFromString(
+              String(html == null ? '' : html),
+              'text/html'
+            ).body.textContent || ''
+          )
         }
 
         // 行内富文本（对齐宿主 RichText inline 模式：剥标签 + LaTeX 分段）。
