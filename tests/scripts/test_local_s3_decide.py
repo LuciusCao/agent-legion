@@ -22,6 +22,7 @@ SCRIPT = ROOT / "scripts" / "local-s3-decide.sh"
 COMPOSE = ROOT / "deploy" / "compose.host.yaml"
 
 _RUSTFS_ENDPOINT = "http://rustfs:9000"
+_SEAWEEDFS_ENDPOINT = "http://seaweedfs:8333"
 
 
 def _run(
@@ -60,6 +61,7 @@ def test_no_config_starts_local_rustfs(tmp_path: Path) -> None:
         "http://localhost:9000",
         "http://[::1]:9000",
         _RUSTFS_ENDPOINT,
+        _SEAWEEDFS_ENDPOINT,
         "https://LOCALHOST:9000",
     ],
 )
@@ -271,37 +273,102 @@ def test_compose_flags_output(tmp_path: Path) -> None:
         tmp_path,
         "AGENT_LEGION_S3_ACCESS_KEY=a\nAGENT_LEGION_S3_SECRET_KEY=b\n",
     )
-    start = _run("--compose-flags", "--default-endpoint", _RUSTFS_ENDPOINT, str(keys))
+    # 默认后端 seaweedfs：占既有 profile 名 materials-local。
+    start = _run("--compose-flags", "--default-endpoint", _SEAWEEDFS_ENDPOINT, str(keys))
     assert start.returncode == 0, start.stderr
     assert start.stdout.strip() == "--profile materials-local"
+
+    # 显式 rustfs：分派到逃生舱 profile。
+    start_rustfs = _run(
+        "--compose-flags",
+        "--default-endpoint",
+        _SEAWEEDFS_ENDPOINT,
+        str(keys),
+        env_extra={"AGENT_LEGION_LOCAL_S3_BACKEND": "rustfs"},
+    )
+    assert start_rustfs.returncode == 0, start_rustfs.stderr
+    assert start_rustfs.stdout.strip() == "--profile materials-local-rustfs"
 
     skip = _run("--compose-flags", env_extra={"AGENT_LEGION_LOCAL_S3": "never"})
     assert skip.returncode == 0
     assert skip.stdout.strip() == ""
 
 
-# --- 静态接线检查：compose profile 与各 prod-up 入口 ---
+def test_invalid_backend_fails_fast(tmp_path: Path) -> None:
+    env_file = _write_env(tmp_path, "AGENT_LEGION_LOCAL_S3_BACKEND=minio\n")
+    result = _run(str(env_file))
+    assert result.returncode == 2
+    assert "seaweedfs|rustfs" in result.stderr
 
 
-def test_compose_rustfs_behind_profile() -> None:
-    model = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
-    rustfs = model["services"]["rustfs"]
-    assert "materials-local" in rustfs["profiles"]
+def test_service_name_dispatches_backend(tmp_path: Path) -> None:
+    """--service-name：输出所选后端的 compose 服务名，供 up -d <服务名>。"""
+    default = _run("--service-name")
+    assert default.returncode == 0, default.stderr
+    assert default.stdout.strip() == "seaweedfs"
+
+    rustfs = _run("--service-name", env_extra={"AGENT_LEGION_LOCAL_S3_BACKEND": "rustfs"})
+    assert rustfs.returncode == 0, rustfs.stderr
+    assert rustfs.stdout.strip() == "rustfs"
 
 
-def test_compose_host_has_no_hard_dependency_on_rustfs() -> None:
+def test_backend_mismatch_with_rustfs_endpoint_warns(tmp_path: Path) -> None:
+    """存量用户 endpoint 指向 rustfs 而默认 backend 已是 seaweedfs：给迁移
+    指引提示（不阻断决策）。"""
+    env_file = _write_env(
+        tmp_path,
+        f"AGENT_LEGION_S3_ENDPOINT={_RUSTFS_ENDPOINT}\n"
+        "AGENT_LEGION_S3_ACCESS_KEY=a\n"
+        "AGENT_LEGION_S3_SECRET_KEY=b\n",
+    )
+    result = _run(str(env_file))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "start"
+    assert "AGENT_LEGION_LOCAL_S3_BACKEND=rustfs" in result.stderr
+
+
+# --- 静态接线检查：compose 双后端与各 prod-up 入口 ---
+
+
+def _services() -> dict:
+    return yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]
+
+
+def test_compose_seaweedfs_is_default_backend() -> None:
+    """seaweedfs 占既有 profile 名 materials-local（默认后端，#340）；
+    镜像 pin 明确版本而非 latest（行为漂移防护，同 rustfs 逃生舱的 pin
+    理由）。"""
+    seaweedfs = _services()["seaweedfs"]
+    assert seaweedfs["profiles"] == ["materials-local"]
+    assert seaweedfs["image"].startswith("chrislusf/seaweedfs:")
+    assert seaweedfs["image"] != "chrislusf/seaweedfs:latest"
+
+
+def test_compose_rustfs_is_escape_hatch_backend() -> None:
+    """rustfs 挪到独立 profile（AGENT_LEGION_LOCAL_S3_BACKEND=rustfs 的
+    逃生舱）；#340 的修复必须在位：镜像 pin、scanner/heal 显式关闭。"""
+    rustfs = _services()["rustfs"]
+    assert rustfs["profiles"] == ["materials-local-rustfs"]
+    assert rustfs["image"] == "rustfs/rustfs:1.0.0-beta.12"
+    env = rustfs["environment"]
+    assert env.get("RUSTFS_SCANNER_ENABLED") == "false"
+    assert env.get("RUSTFS_HEAL_ENABLED") == "false"
+
+
+def test_compose_host_has_no_hard_dependency_on_local_backends() -> None:
     """depends_on 指向未启用 profile 的服务会让 compose 直接报
-    "depends on undefined service"，host 不得再硬依赖 rustfs。"""
-    model = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
-    depends_on = model["services"]["host"].get("depends_on", {})
+    "depends on undefined service"，host 不得硬依赖任一本地后端。"""
+    depends_on = _services()["host"].get("depends_on", {})
     assert "rustfs" not in depends_on
+    assert "seaweedfs" not in depends_on
 
 
 def test_compose_host_endpoint_is_overridable() -> None:
     """host 的 endpoint 必须经 deploy/.env 插值（外部 S3 的配置通道），
-    且留空可盖掉默认值（AWS 默认端点写法）。"""
+    且留空可盖掉默认值（AWS 默认端点写法）；默认值与默认后端
+    seaweedfs 的 compose 内部地址一致。"""
     text = COMPOSE.read_text(encoding="utf-8")
-    assert "${AGENT_LEGION_S3_ENDPOINT-http://rustfs:9000}" in text
+    assert "${AGENT_LEGION_S3_ENDPOINT-http://seaweedfs:8333}" in text
 
 
 def test_prod_up_entries_wire_the_decision_script() -> None:
@@ -310,6 +377,11 @@ def test_prod_up_entries_wire_the_decision_script() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     for name, text in (("native-prod-up.sh", native), ("stack-prod-up.sh", stack)):
         assert "local-s3-decide.sh" in text, name
-    assert "--profile materials-local" in stack
+    # native 入口经 --service-name 取所选后端的服务名（双后端分派）。
+    assert "local-s3-decide.sh --service-name" in native
+    # stack 入口的 profile 由 decide 脚本 --compose-flags 分派（不再写死）。
+    assert "--compose-flags" in stack
+    assert "default-endpoint http://seaweedfs:8333" in stack
     # Makefile 的 stack-host-up 经 --compose-flags 内联同一决策。
     assert "local-s3-decide.sh --compose-flags" in makefile
+    assert "default-endpoint http://seaweedfs:8333" in makefile

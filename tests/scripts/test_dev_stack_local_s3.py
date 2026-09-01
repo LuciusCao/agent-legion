@@ -1,11 +1,11 @@
-"""Static wiring checks for the dev-stack local RustFS integration.
+"""Static wiring checks for the dev-stack local object-storage integration.
 
 cmd_up 的功能路径（起 docker、建 bucket）由 tests/scripts/test_local_s3_decide.py
 （决策逻辑）与 tests/scripts/test_ensure_s3_bucket.py（建 bucket）覆盖；
 上半部分钉住 dev_stack.sh / init-worktree.sh / Makefile 的接线，防止后续改动
 悄悄断开（与 test_local_s3_decide.py 的 prod 入口接线检查同一风格）。
 
-下半部分是 ensure_local_rustfs 的行为级桩测试：与 test_install_deps.py 同一
+下半部分是 ensure_local_object_store 的行为级桩测试：与 test_install_deps.py 同一
 手法——把 dev_stack.sh 复制进合成仓库布局，scripts/local-s3-decide.sh 与
 docker/uv/lsof/curl 全部走 PATH 桩，用 STUB_* env 驱动行为并记录调用。
 """
@@ -30,26 +30,35 @@ MAKEFILE = (ROOT / "Makefile").read_text(encoding="utf-8")
 
 
 def test_dev_stack_up_wires_local_s3_decision() -> None:
-    """dev-up 经 local-s3-decide.sh 决策本地 RustFS（与 prod 入口同一开关）。"""
+    """dev-up 经 local-s3-decide.sh 决策本地对象存储（与 prod 入口同一开关）。"""
     assert "local-s3-decide.sh .env" in DEV_STACK
 
 
-def test_dev_stack_starts_rustfs_via_compose_with_root_env_credentials() -> None:
-    """起 rustfs 走 compose.host.yaml 单服务（profile 自动启用），凭据从根
+def test_dev_stack_dispatches_backend_service_and_port() -> None:
+    """起本地后端走 compose.host.yaml 单服务（profile 自动启用），服务名与
+    就绪端口按 BACKEND 分派（默认 seaweedfs/8333；rustfs/9000）；凭据从根
     .env 显式 export——dev 形态没有 deploy/.env，不能让 compose 插值落空。"""
-    assert "up -d rustfs" in DEV_STACK
+    # 分派表：backend → (service, port)，默认分支落 seaweedfs。
+    assert "rustfs) service=rustfs; port=9000" in DEV_STACK
+    assert "*) service=seaweedfs; port=8333" in DEV_STACK
+    assert 'up -d "$service"' in DEV_STACK
+    # 就绪探测按后端分派：seaweedfs 的 /healthz 与 rustfs 的 MinIO 兼容端点。
+    assert "http_ok 8333 /healthz" in DEV_STACK
+    assert "http_ok 9000 /minio/health/live" in DEV_STACK
     assert "deploy/compose.host.yaml" in DEV_STACK
     assert "read_env_value AGENT_LEGION_S3_ACCESS_KEY" in DEV_STACK
     assert "read_env_value AGENT_LEGION_S3_SECRET_KEY" in DEV_STACK
+    assert "read_env_value AGENT_LEGION_LOCAL_S3_BACKEND" in DEV_STACK
 
 
 def test_dev_stack_ensures_bucket_after_start() -> None:
     assert "ensure-s3-bucket.py" in DEV_STACK
 
 
-def test_dev_stack_status_shows_rustfs() -> None:
-    """cmd_status 显示 rustfs 容器状态（docker 缺失时跳过）。"""
+def test_dev_stack_status_dispatches_backend() -> None:
+    """cmd_status 按 BACKEND 显示所选后端与端口（docker 缺失时跳过）。"""
     status = DEV_STACK.split("cmd_status() {", 1)[1]
+    assert "seaweedfs" in status
     assert "rustfs" in status
     assert "command -v docker" in status
 
@@ -66,27 +75,28 @@ def test_makefile_wires_install_target() -> None:
     assert "scripts/install-deps.sh" in MAKEFILE
 
 
-# --- ensure_local_rustfs 行为级桩测试（合成仓库 + PATH 桩） ---
+# --- ensure_local_object_store 行为级桩测试（合成仓库 + PATH 桩） ---
 
 DEV_STACK_SCRIPT = ROOT / "scripts" / "dev_stack.sh"
 
 # 决策脚本桩：STUB_DECIDE_RC 非 0 时按该码退出（stdout 无决策词），
 # 否则输出 STUB_DECISION（默认 start）。
 _DECIDE_STUB = """#!/usr/bin/env bash
-echo "本地 RustFS: stub 决策原因" >&2
+echo "本地对象存储: stub 决策原因" >&2
 if [[ "${STUB_DECIDE_RC:-0}" != "0" ]]; then exit "${STUB_DECIDE_RC}"; fi
 echo "${STUB_DECISION:-start}"
 """
 
-# docker 桩：记录全部调用；ps 按 STUB_RUSTFS_RUNNING 报告 rustfs，
-# up -d 按 STUB_UP_RC 失败/成功。
+# docker 桩：记录全部调用；ps 按 STUB_SERVICE_RUNNING 报告对应服务
+# （seaweedfs/rustfs），up -d 按 STUB_UP_RC 失败/成功。
 _DOCKER_STUB = """#!/usr/bin/env bash
 echo "docker $*" >> "${STUB_LOG}"
 if [[ "$*" == *"ps --status running --services"* ]]; then
-  if [[ "${STUB_RUSTFS_RUNNING:-}" == "1" ]]; then echo "rustfs"; fi
+  if [[ "${STUB_SERVICE_RUNNING:-}" == "seaweedfs" ]]; then echo "seaweedfs"; fi
+  if [[ "${STUB_SERVICE_RUNNING:-}" == "rustfs" ]]; then echo "rustfs"; fi
   exit 0
 fi
-if [[ "$*" == *"up -d rustfs"* ]]; then
+if [[ "$*" == *"up -d seaweedfs"* ]] || [[ "$*" == *"up -d rustfs"* ]]; then
   exit "${STUB_UP_RC:-0}"
 fi
 exit 0
@@ -98,7 +108,7 @@ exit 0
 """
 
 # 端口全部视为已监听（组件跳过启动）、HTTP 全部视为就绪（curl 成功），
-# 让 cmd_up 在 rustfs 段之后直接走到 print_summary。
+# 让 cmd_up 在本地存储段之后直接走到 print_summary。
 _EXIT_OK_STUB = """#!/usr/bin/env bash
 exit 0
 """
@@ -173,7 +183,7 @@ def test_missing_credentials_rc3_warns_and_skips(tmp_path: Path) -> None:
     result = _run_up(main, bin_dir, stub_log, {"STUB_DECIDE_RC": "3"})
 
     assert result.returncode == 0, result.stderr
-    assert "跳过本地 RustFS 启动" in result.stderr
+    assert "跳过本地 seaweedfs 启动" in result.stderr
     assert not stub_log.exists() or "docker" not in stub_log.read_text()
 
 
@@ -211,25 +221,26 @@ def test_no_docker_degrades_gracefully(tmp_path: Path) -> None:
     assert "未检测到 docker" in result.stderr
 
 
-def test_running_rustfs_skips_recreate(tmp_path: Path) -> None:
-    """rustfs 容器已在运行（可能与 prod/其他 worktree 共享）：跳过 up -d
-    防 recreate 打断共享方（PR #232），仍照常确保 bucket。"""
+def test_running_service_skips_recreate(tmp_path: Path) -> None:
+    """本地对象存储容器已在运行（可能与 prod/其他 worktree 共享）：跳过
+    up -d 防 recreate 打断共享方（PR #232），仍照常确保 bucket。默认后端
+    seaweedfs。"""
     main, bin_dir = _setup(tmp_path)
     stub_log = tmp_path / "stub.log"
 
-    result = _run_up(main, bin_dir, stub_log, {"STUB_RUSTFS_RUNNING": "1"})
+    result = _run_up(main, bin_dir, stub_log, {"STUB_SERVICE_RUNNING": "seaweedfs"})
 
     assert result.returncode == 0, result.stderr
     assert "跳过 recreate" in result.stdout
     log = stub_log.read_text()
     assert "ps --status running --services" in log
-    assert "up -d rustfs" not in log
+    assert "up -d seaweedfs" not in log
     assert "ensure-s3-bucket.py" in log  # bucket 确认不受影响
 
 
-def test_stopped_rustfs_is_started_via_compose(tmp_path: Path) -> None:
-    """rustfs 未运行：经 compose up -d 启动并确保 bucket（对照组，钉住
-    skip-recreate 只作用于「已在运行」分支）。"""
+def test_stopped_service_is_started_via_compose(tmp_path: Path) -> None:
+    """本地后端未运行：经 compose up -d 启动并确保 bucket（对照组，钉住
+    skip-recreate 只作用于「已在运行」分支）。默认后端 seaweedfs。"""
     main, bin_dir = _setup(tmp_path)
     stub_log = tmp_path / "stub.log"
 
@@ -237,6 +248,25 @@ def test_stopped_rustfs_is_started_via_compose(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     log = stub_log.read_text()
-    assert "up -d rustfs" in log
+    assert "up -d seaweedfs" in log
     assert "ensure-s3-bucket.py" in log
     assert "已就绪" in result.stdout
+
+
+def test_rustfs_backend_dispatches_service(tmp_path: Path) -> None:
+    """BACKEND=rustfs：起的是 rustfs 服务而非默认 seaweedfs（逃生舱分派）。"""
+    main, bin_dir = _setup(tmp_path)
+    stub_log = tmp_path / "stub.log"
+
+    result = _run_up(
+        main,
+        bin_dir,
+        stub_log,
+        {"AGENT_LEGION_LOCAL_S3_BACKEND": "rustfs", "STUB_SERVICE_RUNNING": ""},
+    )
+
+    assert result.returncode == 0, result.stderr
+    log = stub_log.read_text()
+    assert "up -d rustfs" in log
+    assert "up -d seaweedfs" not in log
+    assert "ensure-s3-bucket.py" in log
