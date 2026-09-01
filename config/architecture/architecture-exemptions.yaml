@@ -320,6 +320,40 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 82
 - check: architecture.file_budget
+  path: server/app/services/s3_jobs_gc.py
+  reason: >-
+    Re-filed (systematic review round, PR #344): the S3 jobs GC service
+    (#340) is a single scan-decide-delete pipeline. It grew past its first
+    exemption (167) on two correctness rounds that both belong with the
+    pipeline they protect: the TOCTOU fix (per-batch fresh DB
+    revalidation before deletes — a concurrent promote can recreate a
+    scanned orphan key between scan and delete, and deleting it would
+    leave the manifest pointing at missing content) and the
+    materials-collision fix (material keys of a workspace literally named
+    jobs / jobs-staging fall inside both GC prefixes; the staging pass
+    originally had no DB check at all, so both passes now go through the
+    key-existence seam and staging gained its own orphan filter).
+    Splitting either fix out would separate the batch-boundary discipline
+    from the delete batching it guards; revisit if a second consumer of
+    the revalidate seam appears.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/340
+  ceiling: 200
+- check: architecture.file_budget
+  path: server/app/jobs/queries/job_artifact_keys.py
+  reason: >-
+    Re-filed (systematic review round, PR #344): the GC storage-key query
+    surface for job_artifacts and materials lives in one mixin (#340) —
+    the systematic review found that material keys of a workspace
+    literally named jobs / jobs-staging land inside the GC prefixes, so
+    both the scan-time loader and the delete-time revalidation lookup had
+    to union materials.storage_key; splitting the two tables across
+    mixins would separate one reference set into two call sites that must
+    stay in lockstep.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/340
+  ceiling: 47
+- check: architecture.file_budget
   path: server/app/mcp_server/server.py
   reason: Issue 329 adds the job observation tool group registration
     (job_tools.register_job_tools) to the shared MCP assembly, one effective
