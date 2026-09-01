@@ -68,6 +68,8 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 | `stack-prod-up.sh` | 一键启动本地 Docker 生产 stack（PostgreSQL + Host + Worker）：secrets 预检、postgres 健康断言、全 stack 健康等待（仅 prod worktree 使用）。由 `make prod-up docker` 调用，停止用 `make prod-down docker`。 |
 | `seed_from_prod.py` | 从本地 prod Docker stack 的 Postgres 只读导出并种子 develop 库（目标库名为 prod 名或 host 非 loopback 时拒绝执行）。无 make target，直接 `uv run python scripts/seed_from_prod.py` 调用。 |
 | `gc_artifacts.py` | 报告/回收 content-addressed artifact store 中零引用且超过在途宽限期的孤儿 blob（默认 dry-run，`--apply` 回收）。 |
+| `gc-s3-jobs.py` | 报告/回收对象存储 `jobs/`、`jobs-staging/` 前缀的孤儿对象（job 删除失败残留、promote 中途失败、staging 滞留；对照 `job_artifacts` 清单行 + 宽限窗判定，#340；默认 dry-run，`--apply` 回收）。 |
+| `report-orphan-s3-buckets.py` | 报告孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已不存在；只报不删，逐个给出 `clean-worktree.sh` 收尾命令，#340）。 |
 
 ## 一次性与运维脚本
 
