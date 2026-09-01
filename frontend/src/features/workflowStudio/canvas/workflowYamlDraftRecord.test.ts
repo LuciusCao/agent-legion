@@ -199,4 +199,26 @@ nodes:
     })
     expect(nodes._start?.execution).toBeUndefined()
   })
+
+  it('normalizes non-string execution values instead of crashing the canvas (codex P1)', () => {
+    // `provider: 1`、`model: true`：合法 YAML、非法契约值。草稿持久化后
+    // 重开会反复走到这里——不得抛异常，非字符串按未配置归一（后续由
+    // 节点警告徽标提示缺失）。
+    const record = workflowYamlToDefinitionRecord(`key: demo
+nodes:
+  review:
+    type: agent
+    capability: review
+    execution:
+      provider: 1
+      model: true
+`)
+    expect(record).not.toBeNull()
+    expect(record?.nodes[0]?.execution).toEqual({
+      provider: '',
+      model: '',
+      thinking: '',
+      prompt: '',
+    })
+  })
 })

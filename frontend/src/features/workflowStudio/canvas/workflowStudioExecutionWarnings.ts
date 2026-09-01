@@ -17,6 +17,14 @@ import type { WorkflowYamlExecutionDefaults } from '../shared/workflowStudioYaml
 
 type NodeExecution = NonNullable<WorkflowNodeRecord['execution']>
 
+/** 草稿 YAML 只承诺形状不承诺类型：`provider: 1`、`model: true` 这类合法
+ * YAML 非法契约值会原样流到这里。execution 值非字符串一律按未配置（空串）
+ * 处理——画布渲染期不得因 .trim() 等字符串调用抛异常（非法值持久化进草稿
+ * 后重开会持续崩溃，codex P1）。 */
+function asConfigValue(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
 /**
  * 草稿节点 execution 还原 + 顶层默认合并（节点值优先；start 节点豁免，
  * prompt 仅节点级——对齐后端 loader.merge_execution_defaults）。节点未
@@ -27,24 +35,23 @@ export function mergeNodeExecution(
   defaults: WorkflowYamlExecutionDefaults
 ): NodeExecution | undefined {
   const declared = node.execution
+  const values = {
+    provider: asConfigValue(declared?.provider),
+    model: asConfigValue(declared?.model),
+    thinking: asConfigValue(declared?.thinking),
+    prompt: asConfigValue(declared?.prompt),
+  }
   if (
     node.type === 'start' ||
     (!defaults.provider && !defaults.model && !defaults.thinking)
   ) {
-    return declared
-      ? {
-          provider: declared.provider ?? '',
-          model: declared.model ?? '',
-          thinking: declared.thinking ?? '',
-          prompt: declared.prompt ?? '',
-        }
-      : undefined
+    return declared ? values : undefined
   }
   return {
-    provider: declared?.provider || defaults.provider || '',
-    model: declared?.model || defaults.model || '',
-    thinking: declared?.thinking || defaults.thinking || '',
-    prompt: declared?.prompt ?? '',
+    provider: values.provider || asConfigValue(defaults.provider),
+    model: values.model || asConfigValue(defaults.model),
+    thinking: values.thinking || asConfigValue(defaults.thinking),
+    prompt: values.prompt,
   }
 }
 
@@ -61,7 +68,7 @@ export function nodeExecutionWarning(
 ): string | undefined {
   if (node.node_type !== 'agent') return undefined
   const missing = REQUIRED_KEYS.filter(
-    (key) => !(node.execution?.[key] ?? '').trim()
+    (key) => !asConfigValue(node.execution?.[key]).trim()
   )
   return missing.length
     ? `缺 ${missing.join(' / ')}，该节点跑不起来`
@@ -80,5 +87,9 @@ export function topLevelExecutionMissing(
   const hasAgentNode = (workflow?.nodes ?? []).some(
     (node) => node.node_type === 'agent'
   )
-  return hasAgentNode && !defaults.provider?.trim() && !defaults.model?.trim()
+  return (
+    hasAgentNode &&
+    !asConfigValue(defaults.provider).trim() &&
+    !asConfigValue(defaults.model).trim()
+  )
 }

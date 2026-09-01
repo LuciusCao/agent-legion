@@ -86,7 +86,7 @@ export default function GlobalOnboardingPage() {
         )}
         <section className={styles.item}>
           <div className={styles.itemHeader}>
-            <h2 className={styles.itemTitle}>确认 ACP agent</h2>
+            <h2 className={styles.itemTitle}>确认 ACP agent（Studio 对话）</h2>
             {data && (
               <span
                 className={
@@ -98,8 +98,9 @@ export default function GlobalOnboardingPage() {
             )}
           </div>
           <p className={styles.hint}>
-            Studio 对话与 agent 节点执行依赖 ACP agent；探测结果以 PATH
-            可用性为准，可稍后在全局设置的「Studio Agent 管理」调整。
+            ACP agent 注册表仅供 Studio 对话 spawn 使用；节点执行的运行时由
+            workspace 的 Agent 定义与 worker 决定。可用性以后端 PATH 探测为
+            准，可稍后在全局设置的「Studio Agent 管理」调整。
           </p>
           {loadError && (
             <p className={styles.error} role="alert">
@@ -109,7 +110,7 @@ export default function GlobalOnboardingPage() {
           {!data && !loadError && <p className={styles.hint}>加载中…</p>}
           {data && agents.length === 0 && (
             <p className={styles.hint}>
-              尚未探测到可用的 ACP agent，可在全局设置中注册。
+              尚未探测到可用的 ACP agent；不影响节点执行，可在全局设置中注册。
             </p>
           )}
           {agents.length > 0 && (

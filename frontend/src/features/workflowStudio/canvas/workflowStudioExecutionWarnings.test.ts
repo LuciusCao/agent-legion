@@ -82,6 +82,29 @@ describe('mergeNodeExecution', () => {
       prompt: '',
     })
   })
+
+  it('treats non-string execution values as missing instead of throwing (codex P1)', () => {
+    // 合法 YAML 非法契约值（`provider: 1`、`model: true`）不得让画布渲染
+    // 抛异常：非字符串一律按未配置处理——回落顶层默认，或归为空值。
+    const junk = { provider: 1, model: true } as unknown as {
+      provider?: string
+      model?: string
+    }
+    expect(
+      mergeNodeExecution({ type: 'agent', execution: junk }, defaults)
+    ).toEqual({
+      provider: 'openai',
+      model: 'gpt-5',
+      thinking: 'low',
+      prompt: '',
+    })
+    expect(mergeNodeExecution({ type: 'agent', execution: junk }, {})).toEqual({
+      provider: '',
+      model: '',
+      thinking: '',
+      prompt: '',
+    })
+  })
 })
 
 describe('nodeExecutionWarning', () => {
@@ -110,6 +133,18 @@ describe('nodeExecutionWarning', () => {
     expect(nodeExecutionWarning(makeNode('s', 'start'))).toBeUndefined()
     expect(nodeExecutionWarning(makeNode('g', 'approval'))).toBeUndefined()
   })
+
+  it('warns instead of throwing when record execution holds non-string values', () => {
+    const junk = {
+      provider: 1,
+      model: true,
+      thinking: '',
+      prompt: '',
+    } as unknown as NonNullable<WorkflowNodeRecord['execution']>
+    expect(
+      nodeExecutionWarning({ ...makeNode('a', 'agent'), execution: junk })
+    ).toBe('缺 provider / model，该节点跑不起来')
+  })
 })
 
 describe('topLevelExecutionMissing', () => {
@@ -132,5 +167,15 @@ describe('topLevelExecutionMissing', () => {
       topLevelExecutionMissing(makeWorkflow([makeNode('c', 'code')]), {})
     ).toBe(false)
     expect(topLevelExecutionMissing(null, {})).toBe(false)
+  })
+
+  it('treats non-string top-level defaults as missing (codex P1)', () => {
+    const junkDefaults = { provider: 1 } as unknown as { provider?: string }
+    expect(
+      topLevelExecutionMissing(
+        makeWorkflow([makeNode('a', 'agent')]),
+        junkDefaults
+      )
+    ).toBe(true)
   })
 })

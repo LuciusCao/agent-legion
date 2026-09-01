@@ -174,8 +174,6 @@ function GlobalSettingsEditor({
               </li>
             ))}
           </ul>
-          <p className={styles.navGroupTitle}>Workspace 级</p>
-          <p className={styles.navHint}>各 workspace 的设置在其「设置」页。</p>
           <button
             type="button"
             className={styles.navItem}
@@ -183,6 +181,8 @@ function GlobalSettingsEditor({
           >
             全局初始化清单
           </button>
+          <p className={styles.navGroupTitle}>Workspace 级</p>
+          <p className={styles.navHint}>各 workspace 的设置在其「设置」页。</p>
         </nav>
 
         <div className={styles.contentArea} ref={contentRef}>
