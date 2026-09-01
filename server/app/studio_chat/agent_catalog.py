@@ -173,8 +173,8 @@ def redetect_and_merge(
 ) -> dict[str, Any]:
     """Force a fresh detection pass and merge it into the registry document.
 
-    The merge rides the store's transactional RMW so a concurrent admin PUT
-    cannot be clobbered. Returns the merged document.
+    Best-effort: READ COMMITTED resolves concurrent writers last-wins (read-skew);
+    a lost edit is visible and redetect retries. Returns the merged document.
     """
     statuses = detector.detect(force=True)
     store.update(lambda stored: merge_detected_into_document(stored, statuses))

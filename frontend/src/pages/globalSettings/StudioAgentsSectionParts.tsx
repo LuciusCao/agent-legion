@@ -5,21 +5,20 @@ import { useUiStore } from '../../stores/uiStore'
 import { redetectStudioAgents } from '../../api/studioAgents'
 import type {
   StudioAgentDetection,
+  StudioAgentRegistryEntry,
   StudioAgentRegistryResponse,
 } from '../../api/studioAgents'
 import styles from '../GlobalSettingsPage.module.css'
 
 // StudioAgentsSection 的展示与序列化助手（主文件体积预算拆出）：行模型、
 // 可用性/来源徽标、目录探测状态单元格与「重新检测」按钮（#332）。
-// source 对齐后端契约 Literal["manual", "detected"]（generated/api.ts 再生
-// 成后可从 StudioAgentRegistryEntry['source'] 派生）。
 
 export interface AgentRow {
   id: string
   label: string
   command: string
   argsText: string
-  source?: 'manual' | 'detected'
+  source?: StudioAgentRegistryEntry['source']
 }
 
 export function errorMessage(error: unknown): string {
@@ -27,8 +26,7 @@ export function errorMessage(error: unknown): string {
 }
 
 export function toRows(document: StudioAgentRegistryResponse): AgentRow[] {
-  // 展开一次让元素类型落到桥接交集上（generated entry & { source? }）。
-  return [...(document.agents ?? [])].map((agent) => ({
+  return (document.agents ?? []).map((agent) => ({
     id: agent.id,
     label: agent.label,
     command: agent.command,
@@ -54,7 +52,7 @@ export function DetectionCell({
   source,
   status,
 }: {
-  source?: 'manual' | 'detected'
+  source?: StudioAgentRegistryEntry['source']
   status?: StudioAgentDetection
 }) {
   const badge = source === 'detected' ? '自动检测' : '手工'

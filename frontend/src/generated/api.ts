@@ -110,6 +110,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/admin/studio-agents/redetect': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Redetect Studio Agents */
+    post: operations['redetect_studio_agents_api_admin_studio_agents_redetect_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/admin/token-usage-pricing': {
     parameters: {
       query?: never
@@ -4942,6 +4959,18 @@ export interface components {
       workflow_key?: string | null
     }
     /**
+     * StudioAgentDetection
+     * @description Response-only probe status for one catalog agent (#332).
+     */
+    StudioAgentDetection: {
+      /** Detected */
+      detected: boolean
+      /** Path */
+      path?: string | null
+      /** Version */
+      version?: string | null
+    }
+    /**
      * StudioAgentNodeCodeDraftRequest
      * @description ``expected_capability``: validated for existing nodes (mismatch -> 400);
      *     its presence authorizes a skeleton draft for a not-yet-published node.
@@ -4965,14 +4994,21 @@ export interface components {
       id: string
       /** Label */
       label: string
+      /**
+       * Source
+       * @default manual
+       * @enum {string}
+       */
+      source: 'manual' | 'detected'
     }
     /**
      * StudioAgentRegistryResponse
-     * @description Stored document plus a PATH-probe result per agent id.
+     * @description Stored document plus host probe results.
      *
-     *     ``availability`` is response-only (admins see which entries can actually
-     *     launch on this host); it is never persisted and never accepted on PUT,
-     *     so it lives here rather than on the shared document model.
+     *     ``availability`` and ``detection`` are response-only (admins see which
+     *     entries can launch and which catalog agents this host has); both are
+     *     never persisted and never accepted on PUT, so they live here rather than
+     *     on the shared document model.
      */
     StudioAgentRegistryResponse: {
       /** Agents */
@@ -4982,6 +5018,10 @@ export interface components {
       /** Availability */
       availability?: {
         [key: string]: boolean
+      }
+      /** Detection */
+      detection?: {
+        [key: string]: components['schemas']['StudioAgentDetection']
       }
     }
     /** StudioAgentRegistryUpdate */
@@ -6565,6 +6605,26 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  redetect_studio_agents_api_admin_studio_agents_redetect_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentRegistryResponse']
         }
       }
     }

@@ -54,13 +54,12 @@ function buildPayload(
       label,
       command,
       args: row.argsText.split(/\s+/).filter(Boolean),
-      // source 在 PUT 会被服务端重导（#332），但契约再生成后 entry 类型要求
-      // 必填 source，这里随 payload round-trip 以兼容两个世界的类型。
+      // source 按契约随 payload 提交；服务端 PUT 时仍会重导（#332：未改动行
+      // 保留原 source、编辑归 manual），这里带上当前值仅为满足类型。
       source: row.source ?? 'manual',
     }
   })
-  // as：generated/api.ts 再生成前 entry 类型尚无 source 字段（会报多余属性）。
-  return { api_base: apiBase.trim(), agents } as StudioAgentRegistryUpdate
+  return { api_base: apiBase.trim(), agents }
 }
 
 function StudioAgentsEditor({
