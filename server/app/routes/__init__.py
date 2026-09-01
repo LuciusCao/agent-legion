@@ -11,6 +11,7 @@ from .artifacts import create_artifacts_router
 from .common import create_common_router
 from .connections import create_connections_router
 from .deps import RouterDeps
+from .infra_connections import create_infra_connections_router
 from .instance_settings import create_instance_settings_router
 from .job_route_group import include_job_routes
 from .materials import create_materials_router
@@ -61,6 +62,7 @@ def create_router(deps: RouterDeps) -> APIRouter:
     # require_admin themselves, so they must not go through secured().
     router.include_router(create_instance_settings_router(deps.job_db, deps.settings))
     router.include_router(create_connections_router(deps.job_db, deps.settings))
+    router.include_router(create_infra_connections_router(deps.job_db))
     secured(create_packages_router(deps.job_db, deps.settings, deps.job_packages))
     secured(create_worker_router(deps.workspace_worker_control))
     # The worker control plane is one surface (broker + registry + completion)

@@ -74,6 +74,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/admin/infra-connections': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Infra Connections */
+    get: operations['get_infra_connections_api_admin_infra_connections_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/admin/infra-connections/test': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Test Infra Connection */
+    post: operations['test_infra_connection_api_admin_infra_connections_test_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/admin/instance-settings': {
     parameters: {
       query?: never
@@ -3346,6 +3380,26 @@ export interface components {
       /** Workspace Id */
       workspace_id: string
     }
+    /**
+     * DatabaseConnectionView
+     * @description Display-safe database summary: password masked, query string dropped.
+     */
+    DatabaseConnectionView: {
+      /** Engine */
+      engine: string
+      /** Host */
+      host: string
+      /** Masked Url */
+      masked_url: string
+      /** Name */
+      name: string
+      /** Password Set */
+      password_set: boolean
+      /** Port */
+      port: number | null
+      /** User */
+      user: string
+    }
     /** DeleteJobResponse */
     DeleteJobResponse: {
       /** Deleted */
@@ -3419,6 +3473,34 @@ export interface components {
       workers?: {
         [key: string]: string
       } | null
+    }
+    /** InfraConnectionTestRequest */
+    InfraConnectionTestRequest: {
+      /**
+       * Target
+       * @enum {string}
+       */
+      target: 'database' | 'storage'
+    }
+    /**
+     * InfraConnectionTestResponse
+     * @description Connectivity probe verdict; ``reason`` is ``TypeName: message`` on failure.
+     */
+    InfraConnectionTestResponse: {
+      /** Ok */
+      ok: boolean
+      /** Reason */
+      reason?: string | null
+      /**
+       * Target
+       * @enum {string}
+       */
+      target: 'database' | 'storage'
+    }
+    /** InfraConnectionsResponse */
+    InfraConnectionsResponse: {
+      database: components['schemas']['DatabaseConnectionView']
+      storage: components['schemas']['StorageConnectionView']
     }
     /** InstanceAgentWorkersSettings */
     InstanceAgentWorkersSettings: {
@@ -4933,6 +5015,29 @@ export interface components {
       content: string
       /** Path */
       path: string
+    }
+    /**
+     * StorageConnectionView
+     * @description Object-store summary; credentials reduce to a derivation kind.
+     */
+    StorageConnectionView: {
+      /** Bucket */
+      bucket: string
+      /** Configured */
+      configured: boolean
+      /**
+       * Credentials
+       * @enum {string}
+       */
+      credentials: 'static' | 'default-chain' | 'unconfigured'
+      /** Endpoint Url */
+      endpoint_url: string
+      /** Public Endpoint Url */
+      public_endpoint_url: string
+      /** Reachable */
+      reachable: boolean
+      /** Region */
+      region: string
     }
     /** StorageStatus */
     StorageStatus: {
@@ -6490,6 +6595,59 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ConnectionTestResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_infra_connections_api_admin_infra_connections_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['InfraConnectionsResponse']
+        }
+      }
+    }
+  }
+  test_infra_connection_api_admin_infra_connections_test_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['InfraConnectionTestRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['InfraConnectionTestResponse']
         }
       }
       /** @description Validation Error */

@@ -14,10 +14,8 @@ import {
   getTokenUsagePricing,
   updateTokenUsagePricing,
 } from '../api/tokenUsagePricing'
-import type {
-  TokenUsagePricingConfigResponse,
-  TokenUsagePricingRate,
-} from '../api/tokenUsagePricing'
+import type { TokenUsagePricingConfigResponse } from '../api/tokenUsagePricing'
+import { InfraConnectionsSection } from './globalSettings/InfraConnectionsSection'
 import { InstanceSettingsSection } from './globalSettings/InstanceSettingsSection'
 import { ConnectionsSection } from './globalSettings/ConnectionsSection'
 import { StudioAgentsSection } from './globalSettings/StudioAgentsSection'
@@ -26,31 +24,9 @@ import {
   ModelPricingSection,
 } from './globalSettings/ModelPricingSection'
 import type { RateRow } from './globalSettings/ModelPricingSection'
+import { serialize, toRows } from './globalSettings/pricingRows'
 import { GLOBAL_ONBOARDING_PATH } from './GlobalOnboardingPage.storage'
 import styles from './GlobalSettingsPage.module.css'
-
-function toRows(pricing: TokenUsagePricingRate[]): RateRow[] {
-  return pricing.map((rate) => ({
-    provider: rate.provider,
-    model: rate.model,
-    input_per_1m: String(rate.input_per_1m),
-    output_per_1m: String(rate.output_per_1m),
-    cache_read_per_1m: String(rate.cache_read_per_1m),
-  }))
-}
-
-function serialize(currency: string, rows: RateRow[]): string {
-  return JSON.stringify({
-    currency: currency.trim(),
-    pricing: rows.map((row) => ({
-      provider: row.provider.trim(),
-      model: row.model.trim(),
-      input_per_1m: Number(row.input_per_1m),
-      output_per_1m: Number(row.output_per_1m),
-      cache_read_per_1m: Number(row.cache_read_per_1m),
-    })),
-  })
-}
 
 function GlobalSettingsEditor({
   initial,
@@ -131,6 +107,7 @@ function GlobalSettingsEditor({
     () => [
       { id: 'studio-agents', label: 'Studio Agent 管理' },
       { id: 'connections', label: '外部服务连接' },
+      { id: 'infra-connections', label: '基础设施连接' },
       { id: 'instance-settings', label: '实例设置' },
       { id: 'model-pricing', label: '模型定价' },
     ],
@@ -196,6 +173,9 @@ function GlobalSettingsEditor({
           </section>
           <section id="connections">
             <ConnectionsSection />
+          </section>
+          <section id="infra-connections">
+            <InfraConnectionsSection />
           </section>
           <section id="instance-settings">
             <InstanceSettingsSection />

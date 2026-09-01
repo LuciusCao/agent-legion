@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import { toErrorMessage } from '../../lib/queryError'
 import { useUiStore } from '../../stores/uiStore'
 import {
@@ -12,9 +13,6 @@ import type {
 } from '../../api/infraConnections'
 import styles from '../GlobalSettingsPage.module.css'
 import localStyles from './InfraConnectionsSection.module.css'
-
-// queryKeysExtra.ts 归挂载方（M4/tower 集成时）维护，接线前 key 先本地内联。
-const INFRA_CONNECTIONS_QUERY_KEY = ['infraConnections'] as const
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -175,7 +173,7 @@ function StorageBlock({
 
 export function InfraConnectionsSection() {
   const { data, error: loadQueryError } = useQuery({
-    queryKey: INFRA_CONNECTIONS_QUERY_KEY,
+    queryKey: extraQueryKeys.infraConnections(),
     queryFn: getInfraConnections,
   })
   const loadError = toErrorMessage(loadQueryError)

@@ -47,6 +47,30 @@ vi.mock('../api/connections', () => ({
   testConnection: vi.fn(),
 }))
 
+vi.mock('../api/infraConnections', () => ({
+  getInfraConnections: vi.fn().mockResolvedValue({
+    database: {
+      engine: 'postgresql',
+      host: 'db',
+      masked_url: 'postgresql://***@db/agent_legion',
+      name: 'agent_legion',
+      password_set: true,
+      port: 5432,
+      user: 'legion',
+    },
+    storage: {
+      bucket: 'agent-legion',
+      configured: true,
+      credentials: 'static',
+      endpoint_url: 'http://rustfs:9000',
+      public_endpoint_url: 'http://127.0.0.1:9000',
+      reachable: true,
+      region: 'us-east-1',
+    },
+  }),
+  testInfraConnection: vi.fn(),
+}))
+
 const adminUser: UserResponse = {
   id: 'u1',
   username: 'admin',
