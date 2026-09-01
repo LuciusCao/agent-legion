@@ -17,6 +17,7 @@ claims behind concurrent agent claims. These tests pin:
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -24,9 +25,10 @@ import psycopg
 
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.claim_evaluate import evaluate_candidate
-from server.app.agent_broker.claim_scan import ScanState, WorkerView, fetch_candidates
+from server.app.agent_broker.claim_scan import SCAN_ROUNDS, ScanState, WorkerView, fetch_candidates
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.db.transaction import write_transaction
+from shared.protocol import CODE_PROTOCOL_VERSION
 from tests.helpers.agent_worker_api import (
     enqueue_code as _enqueue_code,
 )
@@ -37,6 +39,13 @@ from tests.helpers.agent_worker_api import (
     seed_request as _seed_request,
 )
 from tests.postgres_support import TEST_DATABASE_URL
+
+# Regression guard rails: the first claim window round the per-kind scan
+# uses (claim_scan.SCAN_ROUNDS[0]) and the wire protocol the seeded worker
+# declares — imported so a constant bump re-prices these tests instead of
+# silently passing against stale magic numbers.
+_FIRST_SCAN_WINDOW = SCAN_ROUNDS[0]
+_WORKER_PROTOCOL_VERSION = CODE_PROTOCOL_VERSION
 
 
 def _broker(data_dir) -> AgentExecutionBroker:
@@ -52,7 +61,7 @@ def _register_worker(worker_id: str) -> None:
         max_concurrency=10,
         max_code_concurrency=5,
         labels={"arch": "arm64"},
-        protocol_version=2,
+        protocol_version=_WORKER_PROTOCOL_VERSION,
     )
 
 
@@ -67,7 +76,7 @@ def _view(kind: str) -> WorkerView:
         agent_active=0,
         code_capacity=5 if kind == "code" else 0,
         code_active=0,
-        protocol_version=2,
+        protocol_version=_WORKER_PROTOCOL_VERSION,
     )
 
 
@@ -101,7 +110,9 @@ def _lock_key(conn: Any, domain: str) -> int:
 
 def _claim_candidates(conn: Any, kind: str) -> list[Any]:
     """One bounded scan round exactly as claim_in_transaction runs it."""
-    return fetch_candidates(conn, per_workspace=8, window=256, kind=kind)
+    return fetch_candidates(
+        conn, per_workspace=_FIRST_SCAN_WINDOW[0], window=_FIRST_SCAN_WINDOW[1], kind=kind
+    )
 
 
 def _patched_execute(conn: Any, on_advisory: Callable[[str, set[int]], None]) -> Callable[..., Any]:
@@ -221,11 +232,26 @@ def test_code_claim_completes_while_agent_ws_lock_held(job_db) -> None:
 
     holder = psycopg.connect(TEST_DATABASE_URL)
     try:
-        holder.execute("begin")
         holder.execute("select pg_advisory_xact_lock(hashtext(%s))", ("agent-ws:test-workspace",))
         assert _lock_key(holder, "agent-ws:test-workspace") in _advisory_lock_keys_held(holder)
 
-        claimed = broker.claim("worker-code")
+        # Run the claim in a thread with a hard join timeout: if a regression
+        # reintroduces the ws lock for code claims, broker.claim() would block
+        # on the holder's advisory lock forever (no pytest-timeout in this
+        # repo) — the join timeout turns that hang into a fast, diagnosable
+        # failure instead of a wedged postgres gate.
+        claim_result: dict[str, object] = {}
+
+        def run_claim() -> None:
+            claim_result["claim"] = broker.claim("worker-code")
+
+        claim_thread = threading.Thread(target=run_claim)
+        claim_thread.start()
+        claim_thread.join(timeout=30)
+        assert not claim_thread.is_alive(), (
+            "code claim blocked behind the agent-ws advisory lock — the #351 fix regressed"
+        )
+        claimed = claim_result["claim"]
 
         assert claimed is not None
         assert claimed.kind == "code"
