@@ -1359,7 +1359,7 @@
     "server/app/workflows/revision_format.py": 131,
     "server/app/workflows/scheduler.py": 65,
     "server/app/workflows/schema.py": 101,
-    "server/app/workflows/sharding.py": 163,
+    "server/app/workflows/sharding.py": 161,
     "server/app/workflows/sharding_batch.py": 32,
     "server/app/workflows/sharding_finish.py": 90,
     "server/app/workflows/skill_repo_gate.py": 60,

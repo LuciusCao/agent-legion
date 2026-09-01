@@ -13,8 +13,16 @@ updating, so concurrent finishers serialize: the second one's aggregate read
 observes the first one's committed status. The tests below force the losing
 interleaving deterministically — the first finisher holds its transaction
 open (locks held, own update visible to itself only) while the second
-finisher enters, so the second one's aggregate is decided by whether it
-waits for the peer's commit. They fail without the locks and pass with them.
+finisher enters, and the harness only lets the first one commit once the
+second one has either finished its aggregate read or verifiably parked on
+the first one's row locks (see ``_run_first_then_second``).
+
+Detection split, verified by removing the locks: the ``completed``-pair
+tests are the lost-update detectors (they fail without the row locks); the
+mixed ``completed``/``failed`` tests are aggregate-semantics invariants only
+— a failed finisher's own UPDATE puts ``failed`` into the aggregate under
+any interleaving, so they pass either way and pin the precedence order
+(``failed`` wins over ``running``), they do not detect the race.
 """
 
 from __future__ import annotations
@@ -37,8 +45,12 @@ from tests.postgres_support import TEST_DATABASE_URL
 pytestmark = pytest.mark.postgres
 
 # Postgres lock waits are unbounded by default; the joins below only need to
-# catch a hang, so they get generous slack over the barrier timeouts.
+# catch a hang, so they get generous slack over the event timeouts.
 _JOIN_TIMEOUT = 30.0
+# Fallback for the handshake poll: with the fix the second finisher parks on
+# the first one's row locks almost immediately, so this only fires when lock
+# detection itself fails; correctness never depends on it.
+_HANDSHAKE_TIMEOUT = 10.0
 
 
 def _make_db(tmp_path: Path) -> Path:
@@ -81,51 +93,88 @@ def _node_status(db_path: Path) -> str:
     return str(row["status"])
 
 
-def _run_first_then_second(
-    first: Callable[[threading.Event], None],
-    second: Callable[[], Any],
-) -> Any:
-    """Run ``first`` in a thread that signals when its transaction is open.
+def _is_blocked_on_locks(backend_pid: int) -> bool:
+    """True when ``backend_pid`` waits on a lock held by another session.
 
-    ``first`` signals ``entered`` once its write transaction holds the shard
-    locks, then waits for ``release`` to commit. ``second`` is launched as its
-    own thread while ``first`` is still open: under the fix its first shard
-    statement parks on the row locks held by ``first``; without the locks it
-    runs to completion against the pre-peer snapshot and records the stale
-    aggregate. ``release`` is then set so ``first`` commits, unblocking
-    ``second``; the harness asserts both threads terminate and re-raises any
-    thread error.
+    Scoped to the second finisher's own backend, so concurrent xdist workers
+    blocking each other elsewhere cannot produce a false positive.
+    """
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute("select pg_blocking_pids(%s) as blockers", (backend_pid,)).fetchone()
+    return bool(row and row["blockers"])
+
+
+def _run_first_then_second(
+    first: Callable[[Any], Any],
+    second: Callable[[Any], Any],
+) -> Any:
+    """Run two finishers with the lost-update interleaving forced, verifiably.
+
+    ``first(conn)`` runs in a thread that signals ``entered`` once its write
+    transaction has done its shard work (holding the row locks under the
+    fix), then waits for ``release`` to commit. ``second(conn)`` runs in its
+    own transaction and is observed by the harness until one of two provable
+    states holds:
+
+    * ``second_done`` — the second finisher completed its aggregate read.
+      Without the row locks this happens while ``first`` is still open (the
+      peer's update is uncommitted), so the stale non-terminal aggregate is
+      captured and the assertions fail — the regression is detected, not
+      slept past.
+    * the second finisher's backend is blocked on ``first``'s locks
+      (``pg_blocking_pids``) — the fix working: its read will resume only
+      after ``first`` commits, so it observes the terminal state.
+
+    Only then is ``release`` set, letting ``first`` commit and unblocking
+    ``second``. A fixed sleep cannot prove either state on a loaded CI host
+    (the second thread may not have been scheduled yet), which is why the
+    handshake polls for evidence instead.
     """
     entered = threading.Event()
     release = threading.Event()
+    second_entered = threading.Event()
+    second_done = threading.Event()
     errors: list[BaseException] = []
+    second_result: list[Any] = []
+    second_pid: list[int] = []
 
-    def runner() -> None:
+    def first_runner() -> None:
         try:
-            first(entered, release)
+            with write_transaction(TEST_DATABASE_URL) as conn:
+                first(conn)
+                entered.set()
+                assert release.wait(timeout=10), "first finisher never released"
         except BaseException as exc:  # noqa: BLE001 - re-raised below
             errors.append(exc)
-
-    first_thread = threading.Thread(target=runner)
-    first_thread.start()
-    assert entered.wait(timeout=10), "first finisher never opened its transaction"
-
-    second_result: list[Any] = []
 
     def second_runner() -> None:
         try:
-            second_result.append(second())
+            with write_transaction(TEST_DATABASE_URL) as conn:
+                pid = conn.execute("select pg_backend_pid() as pid").fetchone()
+                second_pid.append(int(pid["pid"]))
+                second_entered.set()
+                second_result.append(second(conn))
+                second_done.set()
         except BaseException as exc:  # noqa: BLE001 - re-raised below
             errors.append(exc)
 
+    first_thread = threading.Thread(target=first_runner)
+    first_thread.start()
+    assert entered.wait(timeout=10), "first finisher never opened its transaction"
+
     second_thread = threading.Thread(target=second_runner)
     second_thread.start()
-    # Let `second` reach its shard statements while `first` is still open.
-    # With the fix it parks on `first`'s row locks; without them it completes
-    # against the pre-peer snapshot — which is exactly the regression these
-    # tests must catch, so the window must be wide enough to be deterministic.
-    time.sleep(0.5)
+    assert second_entered.wait(timeout=10), "second finisher never opened its transaction"
+
+    deadline = time.monotonic() + _HANDSHAKE_TIMEOUT
+    while not second_done.is_set():
+        if _is_blocked_on_locks(second_pid[0]):
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.02)
     release.set()
+
     second_thread.join(timeout=_JOIN_TIMEOUT)
     first_thread.join(timeout=_JOIN_TIMEOUT)
     assert not second_thread.is_alive(), "second finisher hung on shard locks"
@@ -133,16 +182,6 @@ def _run_first_then_second(
     if errors:
         raise errors[0]
     return second_result[0] if second_result else None
-
-
-def _hold_open(on_shard: Callable[[], Any]) -> Callable[[threading.Event, threading.Event], None]:
-    def body(entered: threading.Event, release: threading.Event) -> None:
-        with write_transaction(TEST_DATABASE_URL) as conn:
-            on_shard(conn)
-            entered.set()
-            assert release.wait(timeout=10), "first finisher never released"
-
-    return body
 
 
 def test_second_finisher_observes_peer_commit(tmp_path):
@@ -154,12 +193,11 @@ def test_second_finisher_observes_peer_commit(tmp_path):
     """
     db_path = _make_db(tmp_path)
 
-    def second() -> str:
-        with write_transaction(TEST_DATABASE_URL) as conn:
-            return on_shard_finished(conn, "j1", "review", 3, "completed")
+    def second(conn: Any) -> str:
+        return on_shard_finished(conn, "j1", "review", 3, "completed")
 
     aggregate = _run_first_then_second(
-        _hold_open(lambda conn: on_shard_finished(conn, "j1", "review", 2, "completed")),
+        lambda conn: on_shard_finished(conn, "j1", "review", 2, "completed"),
         second,
     )
     assert aggregate == "completed"
@@ -167,22 +205,20 @@ def test_second_finisher_observes_peer_commit(tmp_path):
 
 
 def test_second_finisher_mixed_terminal_statuses(tmp_path):
-    """A completion racing a lease-expiry failure aggregates to 'failed'.
+    """Aggregate-semantics invariant (NOT a lost-update detector; see module docstring).
 
-    ``finish_shard_execution`` (normal completion) and ``expire_stale_leases``
-    (lease expired → shard failed) share ``on_shard_finished``; the loser of
-    their race must still resolve the node, not leave it wedged.
+    A completion racing a lease-expiry failure aggregates to 'failed' under
+    any interleaving — the failed finisher's own UPDATE decides it — so this
+    pins the precedence order (failed beats running) and the shared-path
+    behavior, but passes even without the row locks.
     """
     db_path = _make_db(tmp_path)
 
-    def second() -> str:
-        with write_transaction(TEST_DATABASE_URL) as conn:
-            return on_shard_finished(
-                conn, "j1", "review", 3, "failed", error_message="lease expired"
-            )
+    def second(conn: Any) -> str:
+        return on_shard_finished(conn, "j1", "review", 3, "failed", error_message="lease expired")
 
     aggregate = _run_first_then_second(
-        _hold_open(lambda conn: on_shard_finished(conn, "j1", "review", 2, "completed")),
+        lambda conn: on_shard_finished(conn, "j1", "review", 2, "completed"),
         second,
     )
     assert aggregate == "failed"
@@ -198,19 +234,13 @@ def test_finish_shard_execution_concurrent_pair_advances_node(tmp_path):
     """
     db_path = _make_db(tmp_path)
 
-    def first(entered: threading.Event, release: threading.Event) -> None:
-        with write_transaction(TEST_DATABASE_URL) as conn:
-            _bind_execution(conn, 2)
-            finish_shard_execution(conn, _lease(2), _completed_result(), "2026-09-01T00:00:00Z")
-            entered.set()
-            assert release.wait(timeout=10), "first finisher never released"
+    def first(conn: Any) -> None:
+        _bind_execution(conn, 2)
+        finish_shard_execution(conn, _lease(2), _completed_result(), "2026-09-01T00:00:00Z")
 
-    def second() -> bool:
-        with write_transaction(TEST_DATABASE_URL) as conn:
-            _bind_execution(conn, 3)
-            return finish_shard_execution(
-                conn, _lease(3), _completed_result(), "2026-09-01T00:00:00Z"
-            )
+    def second(conn: Any) -> bool:
+        _bind_execution(conn, 3)
+        return finish_shard_execution(conn, _lease(3), _completed_result(), "2026-09-01T00:00:00Z")
 
     assert _run_first_then_second(first, second) is True
     assert _shard_statuses(db_path) == ["completed"] * 4
@@ -218,20 +248,16 @@ def test_finish_shard_execution_concurrent_pair_advances_node(tmp_path):
 
 
 def test_finish_shard_execution_concurrent_mixed_terminal_states(tmp_path):
-    """End-to-end: completion racing a failure resolves the node to 'failed'."""
+    """End-to-end mixed-state invariant (NOT a lost-update detector; see module docstring)."""
     db_path = _make_db(tmp_path)
 
-    def first(entered: threading.Event, release: threading.Event) -> None:
-        with write_transaction(TEST_DATABASE_URL) as conn:
-            _bind_execution(conn, 2)
-            finish_shard_execution(conn, _lease(2), _completed_result(), "2026-09-01T00:00:00Z")
-            entered.set()
-            assert release.wait(timeout=10), "first finisher never released"
+    def first(conn: Any) -> None:
+        _bind_execution(conn, 2)
+        finish_shard_execution(conn, _lease(2), _completed_result(), "2026-09-01T00:00:00Z")
 
-    def second() -> bool:
-        with write_transaction(TEST_DATABASE_URL) as conn:
-            _bind_execution(conn, 3)
-            return finish_shard_execution(conn, _lease(3), _failed_result(), "2026-09-01T00:00:00Z")
+    def second(conn: Any) -> bool:
+        _bind_execution(conn, 3)
+        return finish_shard_execution(conn, _lease(3), _failed_result(), "2026-09-01T00:00:00Z")
 
     assert _run_first_then_second(first, second) is True
     assert _shard_statuses(db_path) == ["completed", "completed", "completed", "failed"]

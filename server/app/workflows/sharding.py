@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import datetime
 
 from server.app.db.connection import DatabaseConnection
 from server.app.workflows.sharding_finish import (
@@ -49,10 +49,6 @@ _RUNNABLE_NODE_STATUSES = ("pending", "ready", "stale", "running")
 
 class ShardLimitExceeded(Exception):
     """Raised when a shard fan-out exceeds the node's ``max_shards`` limit."""
-
-
-def _now() -> datetime:
-    return datetime.now(UTC)
 
 
 def materialize_shards(
