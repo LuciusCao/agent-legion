@@ -20,8 +20,12 @@ services:
   rustfs:
     # 材料对象存储（materials-and-runs 设计 §6.1）：S3 兼容，代码只对 S3 API
     # 编程，可平替 MinIO/Garage/AWS S3。RustFS 尚无 GA tag（1.0.0-alpha/beta），
-    # 用 latest 跟随官方文档；凭据从 deploy/.env 注入（勿用官方示例的
-    # rustfsadmin 默认值），host 经同一组 AGENT_LEGION_S3_* 访问。
+    # 凭据从 deploy/.env 注入（勿用官方示例的 rustfsadmin 默认值），host 经
+    # 同一组 AGENT_LEGION_S3_* 访问。
+    #
+    # 镜像 pin 到明确版本而非 latest（#340）：磁盘格式是 MinIO xl 兼容格式
+    # 且存量卷由既有版本写入，latest 漂移即行为漂移（alpha 项目的 scanner
+    # 行为曾在版本间反复变化）；升级 = 有意改这一行 + 验证存量卷可挂载。
     #
     # 挂在 materials-local profile 下：默认 docker compose up 不拉起，由
     # scripts/local-s3-decide.sh（AGENT_LEGION_LOCAL_S3=auto|always|never）
@@ -31,7 +35,7 @@ services:
     # 在 start 决策时 fail-fast（直接绕开 prod-up 入口徒手 compose 且启用
     # profile 时，留空凭据会回落镜像默认的公开凭据，不要这么做）。
     profiles: ["materials-local"]
-    image: rustfs/rustfs:latest
+    image: rustfs/rustfs:1.0.0-beta.12
     restart: unless-stopped
     command: ["/data"]
     environment:
@@ -40,6 +44,14 @@ services:
       RUSTFS_CONSOLE_ENABLE: "true"
       RUSTFS_ACCESS_KEY: ${AGENT_LEGION_S3_ACCESS_KEY:-}
       RUSTFS_SECRET_KEY: ${AGENT_LEGION_S3_SECRET_KEY:-}
+      # 关闭后台 scanner/heal（#340）：单盘本地形态下巡检无意义，而它的
+      # 命名空间全量遍历会读每个对象的 xl.meta——小对象（≤128KiB）数据
+      # 内联其中，「元数据巡检」= 重读全部数据。实测 2 万对象闲置 CPU 从
+      # 线性外推的 ~2% 降到 ~0%（默认配置下曾观察到百万对象空转 4 天烧
+      # 1.1TB 读 + 满核 CPU，rustfs/rustfs#6219 同类案例）。升级镜像时若
+      # 想恢复巡检，删掉这两行即可。
+      RUSTFS_SCANNER_ENABLED: "false"
+      RUSTFS_HEAL_ENABLED: "false"
     volumes:
       - rustfs-data:/data
     ports:

@@ -959,7 +959,7 @@
     "server/app/jobs/queries/failed_node_runs.py": 88,
     "server/app/jobs/queries/global_settings.py": 79,
     "server/app/jobs/queries/groups.py": 67,
-    "server/app/jobs/queries/job_artifact_keys.py": 26,
+    "server/app/jobs/queries/job_artifact_keys.py": 23,
     "server/app/jobs/queries/job_bulk.py": 145,
     "server/app/jobs/queries/job_filtering.py": 133,
     "server/app/jobs/queries/job_keys.py": 26,

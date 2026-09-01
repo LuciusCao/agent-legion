@@ -289,6 +289,24 @@ def test_compose_rustfs_behind_profile() -> None:
     assert "materials-local" in rustfs["profiles"]
 
 
+def test_compose_rustfs_image_is_pinned() -> None:
+    """镜像必须 pin 明确版本而非 latest（#340）：存量卷的 xl 磁盘格式与
+    scanner 行为随版本漂移，latest 会让「升级」隐式发生。升级 = 有意改
+    compose + 验证存量卷可挂载。"""
+    rustfs = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]["rustfs"]
+    assert rustfs["image"] != "rustfs/rustfs:latest"
+    assert rustfs["image"].startswith("rustfs/rustfs:")
+
+
+def test_compose_rustfs_scanner_disabled() -> None:
+    """scanner/heal 必须显式关闭（#340）：命名空间全量巡检对本地单盘无
+    意义，且小对象数据内联在 xl.meta 里，巡检=重读全部数据（曾观察到
+    百万对象闲置空转 4 天）。要恢复须有意删掉这两行，而非默认漂移。"""
+    env = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]["rustfs"]["environment"]
+    assert env.get("RUSTFS_SCANNER_ENABLED") == "false"
+    assert env.get("RUSTFS_HEAL_ENABLED") == "false"
+
+
 def test_compose_host_has_no_hard_dependency_on_rustfs() -> None:
     """depends_on 指向未启用 profile 的服务会让 compose 直接报
     "depends on undefined service"，host 不得再硬依赖 rustfs。"""
