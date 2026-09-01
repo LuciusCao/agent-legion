@@ -36,16 +36,19 @@ def test_schema_version_pin() -> None:
     # EXEC-APPROVAL-001), and v66's data migration lives in
     # tests/db/test_workflow_node_explicit_types_migration.py; v67 is
     # DDL-only (jobs_workspace_scan_indexes) and v68 is the jobs key
-    # alignment data migration (#211 Phase 3 read-layer binding); v70
-    # (retire_workflow_key_columns) is DDL-only (#211 Phase 3 M2), so the
-    # pin stays here.
-    assert SCHEMA_VERSION == 70
+    # alignment data migration (#211 Phase 3 read-layer binding); v69 is
+    # DDL-only (executor_leases_workspace_index); v70 retires the
+    # workflow_key columns (#211 Phase 3 M2); v71 widens the
+    # versioned_entities entity_type CHECK for preview panels (#328) and owns
+    # tests/db/test_preview_panels_migration.py, so the pin moves there —
+    # this copy stays as a backstop that the chain tail stays in sync.
+    assert SCHEMA_VERSION == 71
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "retire_workflow_key_columns"
+    assert row["name"] == "preview_panels"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:

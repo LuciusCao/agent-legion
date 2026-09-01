@@ -17,6 +17,7 @@ from .job_route_group import include_job_routes
 from .materials import create_materials_router
 from .metrics import create_metrics_router
 from .packages import create_packages_router
+from .preview_panels import create_preview_panels_router
 from .quality import create_quality_router
 from .quality_replays import create_quality_replays_router
 from .skill_directories import create_skill_directories_router
@@ -121,6 +122,10 @@ def create_router(deps: RouterDeps) -> APIRouter:
     )
     secured(agent_catalog_router)
     secured(create_workspace_agent_routes_router(deps.job_db, deps.settings))
+    # Preview panels (#328): the published-bundle read is member-level (job
+    # detail iframe host); state/publish/archive carry their own Studio
+    # authoring + reject_studio_agent_scope guards inside the router.
+    secured(create_preview_panels_router(deps.job_db, deps.settings))
     secured(create_studio_agent_tools_router(deps.job_db, deps.settings))
     secured(create_studio_agent_context_router(deps.job_db))
     secured(create_studio_agent_tokens_router(deps.job_db))

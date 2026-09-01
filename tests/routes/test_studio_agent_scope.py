@@ -57,6 +57,10 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", f"{_NODE_CODE}/publish", None),
     ("POST", f"{_NODE_CODE}/rollback", {"version": 1}),
     ("DELETE", _NODE_CODE, None),
+    # Preview panel publish/archive (schema v71, #328): the studio agent only
+    # drafts via the tool surface; taking effect stays human-only.
+    ("POST", "/api/workspaces/{workspace_id}/preview-panel/publish", None),
+    ("POST", "/api/workspaces/{workspace_id}/preview-panel/archive", None),
     # #211 Phase 2: segment-free aliases of the deprecated workflow-key paths
     # carry the same effecting guards.
     ("POST", f"{_NODE_CODE_SEGMENT_FREE}/publish", None),
@@ -159,6 +163,9 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/admin/connections/{key}/test"): "require_admin",
     ("PUT", "/api/admin/studio-agents"): "require_admin",
     ("POST", "/api/admin/studio-agents/redetect"): "require_admin",
+    # Infra connections admin endpoints (#335): admin-only like the other
+    # /api/admin/* write routes.
+    ("POST", "/api/admin/infra-connections/test"): "require_admin",
     ("POST", "/api/agent-register-tokens"): "require_admin",
     ("DELETE", "/api/agent-register-tokens/{token_id}"): "require_admin",
     ("DELETE", "/api/agent-workers/{worker_id}"): "require_admin",
@@ -215,6 +222,11 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     (
         "PUT",
         "/api/studio-agent/tools/workspaces/{workspace_id}/node-prompt",
+    ): "scoped-only tool surface",
+    # Preview panel draft tool (issue #328): draft-only write.
+    (
+        "PUT",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/preview/panel/draft",
     ): "scoped-only tool surface",
     # Skill read/validate/save-version tools (issue #217): draft-only — the
     # save endpoint commits+tags a local skill repo but never touches the
