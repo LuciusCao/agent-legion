@@ -11,20 +11,47 @@ from server.app.db.migrations.jobs_workflow_key_alignment import (
 )
 from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
+from tests.helpers.legacy_workflow_key_shape import (
+    narrow_back_to_v70,
+    restore_pre_v70_shape,
+)
 from tests.postgres_support import TEST_DATABASE_URL
 
 
+# #211 M2 (schema v70): the workflow_key columns are gone from the live
+# tables, so the "pre-v62 shape" fixtures below (key != id rows used to
+# exercise the v68 rewrite passes) cannot be seeded on a fresh database
+# directly. The row-surgery migrations still run with full effect on real
+# pre-v68→v70 upgrades (old installs keep their columns through the schema
+# replay), so these tests rebuild the pre-v70 shape first — add the columns
+# back with their old PKs/uniques — seed the stale rows, run the migration,
+# and assert the rewrite semantics exactly as before (subagent review #334:
+# skipping them left the revision version-shift / state-table twin /
+# counts-merge SQL with zero coverage while it still ships).
 @pytest.fixture
 def fresh_db(tmp_path: Path) -> str:
     init_db(TEST_DATABASE_URL)
     return TEST_DATABASE_URL
 
 
-def test_migration_aligns_stale_keys(fresh_db) -> None:
+@pytest.fixture
+def legacy_shape_db(fresh_db) -> str:
+    """fresh_db with the v69 (pre-v70) column/PK shape restored, so the v68
+    rewrite passes run against the shape real upgrades present them; torn
+    back down to the terminal shape afterwards so later tests on the shared
+    database see the v70 catalog."""
+    with write_transaction(fresh_db) as conn:
+        restore_pre_v70_shape(conn)
+    yield fresh_db
+    with write_transaction(fresh_db) as conn:
+        narrow_back_to_v70(conn)
+
+
+def test_migration_aligns_stale_keys(legacy_shape_db) -> None:
     """Pre-v62 rows (workspace_id renamed, workflow_key left behind) are
     rewritten to the workspace id across every live table (Codex P1 on
     #313/#315)."""
-    with write_transaction(fresh_db) as conn:
+    with write_transaction(legacy_shape_db) as conn:
         conn.execute(
             "insert into workspaces(id, name, default_workflow_key)"
             " values ('ws-aligned', 'WS', 'ws-aligned')"
@@ -41,20 +68,20 @@ def test_migration_aligns_stale_keys(fresh_db) -> None:
             " on conflict do nothing"
         )
         conn.execute(
-            "insert into workspace_node_routes(workspace_id, workflow_key, node_key,"
-            " target_kind, target_id) values ('ws-aligned', 'old_key', 'n1', 'agent', 'a1')"
+            "insert into workspace_node_routes(workspace_id, node_key, "
+            " target_kind, target_id) values ('ws-aligned', 'n1', 'agent', 'a1')"
             " on conflict do nothing"
         )
         conn.execute(
-            "insert into workspace_node_limits(workspace_id, workflow_key, node_key,"
-            " concurrency_limit) values ('ws-aligned', 'old_key', 'n1', 2)"
+            "insert into workspace_node_limits(workspace_id, node_key, "
+            " concurrency_limit) values ('ws-aligned', 'n1', 2)"
             " on conflict do nothing"
         )
 
-    with write_transaction(fresh_db) as conn:
+    with write_transaction(legacy_shape_db) as conn:
         migrate_jobs_workflow_key_alignment(conn)
 
-    with read_connection(fresh_db) as conn:
+    with read_connection(legacy_shape_db) as conn:
         jobs = {
             str(row["id"]): str(row["workflow_key"])
             for row in conn.execute("select id, workflow_key from jobs").fetchall()
@@ -125,11 +152,11 @@ def test_migration_aligns_node_code_entity_keys(fresh_db) -> None:
     assert rows == {"ws-entity:fetch", "ws-entity:parse", "agent_x"}
 
 
-def test_migration_moves_node_status_counts(fresh_db) -> None:
+def test_migration_moves_node_status_counts(legacy_shape_db) -> None:
     """Counts follow the jobs rewrite: the rekey trigger moves live counts and
     the merge pass folds any remaining old-key rows into workspace-id rows
     (P3-1 on PR #313)."""
-    with write_transaction(fresh_db) as conn:
+    with write_transaction(legacy_shape_db) as conn:
         conn.execute(
             "insert into workspaces(id, name, default_workflow_key)"
             " values ('ws-counts', 'WS', 'ws-counts')"
@@ -144,10 +171,10 @@ def test_migration_moves_node_status_counts(fresh_db) -> None:
             " values ('j-counts', 'fetch', 'pending')"
         )
 
-    with write_transaction(fresh_db) as conn:
+    with write_transaction(legacy_shape_db) as conn:
         migrate_jobs_workflow_key_alignment(conn)
 
-    with read_connection(fresh_db) as conn:
+    with read_connection(legacy_shape_db) as conn:
         rows = {
             (str(row["workflow_key"]), str(row["node_key"])): int(row["cnt"])
             for row in conn.execute(
@@ -158,9 +185,9 @@ def test_migration_moves_node_status_counts(fresh_db) -> None:
     assert rows == {("ws-counts", "fetch"): 1}
 
 
-def test_migration_is_idempotent(fresh_db) -> None:
+def test_migration_is_idempotent(legacy_shape_db) -> None:
     """A second run finds no divergent rows and is a no-op."""
-    with write_transaction(fresh_db) as conn:
+    with write_transaction(legacy_shape_db) as conn:
         conn.execute(
             "insert into workspaces(id, name, default_workflow_key)"
             " values ('ws-idem', 'WS', 'ws-idem')"
@@ -171,11 +198,11 @@ def test_migration_is_idempotent(fresh_db) -> None:
             " values ('j-idem', 'ws-idem', 'old', 'test', 's1', 't', 'pending', 'd')"
         )
 
-    with write_transaction(fresh_db) as conn:
+    with write_transaction(legacy_shape_db) as conn:
         migrate_jobs_workflow_key_alignment(conn)
         migrate_jobs_workflow_key_alignment(conn)
 
-    with read_connection(fresh_db) as conn:
+    with read_connection(legacy_shape_db) as conn:
         row = conn.execute("select workflow_key from jobs where id='j-idem'").fetchone()
     assert str(row["workflow_key"]) == "ws-idem"
 
@@ -191,7 +218,7 @@ def test_upgrade_path_applies_alignment(tmp_path: Path) -> None:
     assert row is not None
     assert str(row["name"]) == "jobs_workflow_key_alignment"
     assert tail is not None
-    assert str(tail["name"]) == "executor_leases_workspace_index"
+    assert str(tail["name"]) == "retire_workflow_key_columns"
 
 
 def test_aligned_entity_history_is_preserved(fresh_db) -> None:
@@ -231,10 +258,10 @@ def test_aligned_entity_history_is_preserved(fresh_db) -> None:
     assert rows == [("ws-hist:fetch", 1), ("ws-hist:fetch", 2), ("ws-hist:fetch", 3)]
 
 
-def test_state_table_twins_drop_old_key_row(fresh_db) -> None:
+def test_state_table_twins_drop_old_key_row(legacy_shape_db) -> None:
     """Window-era routes/limits rows under the workspace id win; the old-key
     twin drops instead of colliding on the composite PK (Codex P1 on #315)."""
-    with write_transaction(fresh_db) as conn:
+    with write_transaction(legacy_shape_db) as conn:
         conn.execute(
             "insert into workspaces(id, name, default_workflow_key)"
             " values ('ws-twins', 'WS', 'ws-twins')"
@@ -252,10 +279,10 @@ def test_state_table_twins_drop_old_key_row(fresh_db) -> None:
             " values ('ws-twins', 'old_key', 'n2', 'agent', 'a2') on conflict do nothing"
         )
 
-    with write_transaction(fresh_db) as conn:
+    with write_transaction(legacy_shape_db) as conn:
         migrate_jobs_workflow_key_alignment(conn)
 
-    with read_connection(fresh_db) as conn:
+    with read_connection(legacy_shape_db) as conn:
         rows = {
             str(row["node_key"]): str(row["workflow_key"])
             for row in conn.execute(
@@ -266,11 +293,11 @@ def test_state_table_twins_drop_old_key_row(fresh_db) -> None:
     assert rows == {"n1": "ws-twins", "n2": "ws-twins"}
 
 
-def test_revisions_shift_past_window_era_versions(fresh_db) -> None:
+def test_revisions_shift_past_window_era_versions(legacy_shape_db) -> None:
     """Window-era publishes numbered from 1 (the counter could not see the
     old-key rows); the old history shifts above the window-era maximum
     instead of colliding on unique(workspace_id, workflow_key, version)."""
-    with write_transaction(fresh_db) as conn:
+    with write_transaction(legacy_shape_db) as conn:
         conn.execute(
             "insert into workspaces(id, name, default_workflow_key)"
             " values ('ws-rev', 'WS', 'ws-rev')"
@@ -291,10 +318,10 @@ def test_revisions_shift_past_window_era_versions(fresh_db) -> None:
             " on conflict do nothing"
         )
 
-    with write_transaction(fresh_db) as conn:
+    with write_transaction(legacy_shape_db) as conn:
         migrate_jobs_workflow_key_alignment(conn)
 
-    with read_connection(fresh_db) as conn:
+    with read_connection(legacy_shape_db) as conn:
         rows = sorted(
             (str(row["workflow_key"]), int(row["version"]), str(row["status"]))
             for row in conn.execute(
@@ -311,12 +338,12 @@ def test_revisions_shift_past_window_era_versions(fresh_db) -> None:
     ]
 
 
-def test_old_key_active_revision_archived(fresh_db) -> None:
+def test_old_key_active_revision_archived(legacy_shape_db) -> None:
     """Codex P1 on #315: a workspace republished during the v62→v68 window
     carries one active revision per key. The identity-key active stays
     authoritative; the shifted old-key active must be archived, or the
     elevated old DAG would outrank the window-era publish."""
-    with write_transaction(fresh_db) as conn:
+    with write_transaction(legacy_shape_db) as conn:
         conn.execute(
             "insert into workspaces(id, name, default_workflow_key)"
             " values ('ws-dual', 'WS', 'ws-dual')"
@@ -334,10 +361,10 @@ def test_old_key_active_revision_archived(fresh_db) -> None:
             " on conflict do nothing"
         )
 
-    with write_transaction(fresh_db) as conn:
+    with write_transaction(legacy_shape_db) as conn:
         migrate_jobs_workflow_key_alignment(conn)
 
-    with read_connection(fresh_db) as conn:
+    with read_connection(legacy_shape_db) as conn:
         rows = sorted(
             (int(row["version"]), str(row["status"]))
             for row in conn.execute(
@@ -393,11 +420,11 @@ def test_entity_history_survives_draft_only_collision(fresh_db) -> None:
     assert rows == [("ws-draft:fetch", 1, "published")]
 
 
-def test_sole_old_key_active_survives(fresh_db) -> None:
+def test_sole_old_key_active_survives(legacy_shape_db) -> None:
     """Codex P1 on #315: a workspace never republished during the window has
     its ONLY active revision under the old key — it must stay active through
     the rewrite (intake/Studio/worker all resolve the active definition)."""
-    with write_transaction(fresh_db) as conn:
+    with write_transaction(legacy_shape_db) as conn:
         conn.execute(
             "insert into workspaces(id, name, default_workflow_key)"
             " values ('ws-sole', 'WS', 'ws-sole')"
@@ -409,10 +436,10 @@ def test_sole_old_key_active_survives(fresh_db) -> None:
             " on conflict do nothing"
         )
 
-    with write_transaction(fresh_db) as conn:
+    with write_transaction(legacy_shape_db) as conn:
         migrate_jobs_workflow_key_alignment(conn)
 
-    with read_connection(fresh_db) as conn:
+    with read_connection(legacy_shape_db) as conn:
         rows = [
             (str(row["workflow_key"]), str(row["status"]))
             for row in conn.execute(

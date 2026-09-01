@@ -39,9 +39,8 @@ def _setup_workspace_and_job(job_db: JobQueries) -> None:
             ("ws-1", "Test"),
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-            "values (%s, %s, %s, %s, %s)",
-            ("job-1", "ws-1", "demo_workflow", "question", "q-1"),
+            "insert into jobs(id, workspace_id, source_type, source_id) values (%s, %s, %s, %s)",
+            ("job-1", "ws-1", "question", "q-1"),
         )
         conn.execute(
             "insert into job_nodes(job_id, node_key, status) values (%s, %s, %s)",

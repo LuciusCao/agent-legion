@@ -48,7 +48,7 @@ def create_workspace_package(
             {
                 "id": job["id"],
                 "source_id": job.get("source_id", ""),
-                "workflow_key": job.get("workflow_key", ""),
+                "workflow_key": job.get("workflow_key") or job.get("workspace_id", ""),
                 "workflow": workflow_manifest(job),
                 "status": job.get("status", ""),
             }

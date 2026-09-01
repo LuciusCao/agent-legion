@@ -51,7 +51,7 @@ def test_compare_no_op_draft_returns_none_risk(app_with_workspace):
     assert result["summary"]["edge_changes"] == []
     assert result["summary"]["intake_changes"] == []
     assert result["summary"]["risk_flags"] == []
-    assert result["base_revision"]["workflow_key"] == "education_video_problems_generation"
+    assert result["base_revision"]["workspace_id"] == workspace_id
     assert result["draft_workflow"]["key"] == "education_video_problems_generation"
 
 
@@ -520,8 +520,8 @@ def test_compare_corrupt_active_revision_degrades_to_invalid_schema(app_with_wor
     app, workspace_id = app_with_workspace
     with app.state.job_db.write() as conn:
         conn.execute(
-            "update workflow_revisions set definition_json='{truncated'"
-            " where workflow_key='education_video_problems_generation'"
+            "update workflow_revisions set definition_json='{truncated' where workspace_id=%s",
+            (workspace_id,),
         )
 
     definition = load_builtin_definition("education_video_problems_generation")
@@ -542,9 +542,8 @@ def test_compare_shape_invalid_active_revision_degrades_to_invalid_schema(app_wi
     corrupt = '{"key": "education_video_problems_generation", "label": "L", "nodes": []}'
     with app.state.job_db.write() as conn:
         conn.execute(
-            "update workflow_revisions set definition_json=%s"
-            " where workflow_key='education_video_problems_generation'",
-            (corrupt,),
+            "update workflow_revisions set definition_json=%s where workspace_id=%s",
+            (corrupt, workspace_id),
         )
 
     definition = load_builtin_definition("education_video_problems_generation")

@@ -499,7 +499,7 @@ server/app/
 | WorkflowResponse | BaseModel | workflow: WorkflowDefinitionResponse | app/routes/workflow_contracts.py |
 | WorkflowDraftCompareRequest | BaseModel | definition_yaml: str, allow_missing_baseline: bool | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowDraftCompareError | BaseModel | category: str, message: str, line: int | None, column: int | None, node_key: ... | app/routes/workflow_draft_compare_contracts.py |
-| WorkflowRevisionSummaryItem | BaseModel | id: str, version: int, workflow_key: str, definition_hash: str | app/routes/workflow_draft_compare_contracts.py |
+| WorkflowRevisionSummaryItem | BaseModel | id: str, version: int, workspace_id: str, workflow_key: str, definition_hash:... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowDraftSummaryItem | BaseModel | key: str, label: str, version: int | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowNodeChange | BaseModel | type: WorkflowChangeType, node_key: str, label: str, node_type: Literal['star... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowEdgeChange | BaseModel | type: WorkflowEdgeChangeType, source: str, target: str, before_condition: str... | app/routes/workflow_draft_compare_contracts.py |

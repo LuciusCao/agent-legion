@@ -74,7 +74,7 @@ class JobExecutionService:
         # Jobs without an intake-frozen snapshot fall back to their own
         # workspace's active revision (schema v50), never a global template.
         return definition_from_job_snapshot(job) or require_workspace_active_definition(
-            self.job_db, str(job["workspace_id"]), str(job["workflow_key"])
+            self.job_db, str(job["workspace_id"]), str(job["workspace_id"])
         )
 
     def run_to(

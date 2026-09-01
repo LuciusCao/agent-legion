@@ -81,7 +81,8 @@ describe('workflowYamlToDefinitionRecord', () => {
       after: ['_start'],
       inputs: ['question'],
       outputs: ['questions.json'],
-      skill: { key: 'group/fetcher', ref: '' },
+      // 裸 skill 字符串无 ref：#322 归一化后 ref 恒非空（空即 latest，跟随仓库 HEAD）
+      skill: { key: 'group/fetcher', ref: 'latest' },
       execution: { provider: 'pi', model: 'gpt-5', thinking: '', prompt: '' },
     })
     expect(nodes.review).toMatchObject({

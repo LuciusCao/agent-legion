@@ -92,9 +92,9 @@ def _set_expires_at(material_id: str, sql_interval: str) -> None:
 def _reference_job(material_id: str) -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
+            "insert into jobs(id, workspace_id, source_type, source_id,"
             " title, status, storage_dir, input_json)"
-            " values ('job-ref-1', %s, 'wf', 'material', %s, 't', 'pending', 'd', %s)",
+            " values ('job-ref-1', %s, 'material', %s, 't', 'pending', 'd', %s)",
             (
                 WORKSPACE_ID,
                 material_id,

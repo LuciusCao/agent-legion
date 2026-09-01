@@ -53,6 +53,8 @@ import logging
 import re
 from typing import Any
 
+from server.app.db.migrations.retire_workflow_key_columns import has_column
+
 logger = logging.getLogger(__name__)
 
 # v62 id contract (mirrors WorkspaceCreateRequest.id's pattern).
@@ -136,6 +138,11 @@ def _rewrite_worker_scopes(conn: Any, old_id: str, target: str) -> None:
 
 def migrate_workspace_id_key_binding(conn: Any) -> None:
     """Bind workspace id and workflow key: rename ids to their keys (v62)."""
+    # #211 M2: fresh databases run the post-v70 schema shape — workspaces
+    # carries no default_workflow_key, so the binding is structurally true
+    # and every rewrite below is a no-op.
+    if not has_column(conn, "workspaces", "default_workflow_key"):
+        return
     rows = conn.execute("select id, default_workflow_key from workspaces").fetchall()
     renames: dict[str, str] = {}
     for row in rows:

@@ -444,7 +444,10 @@ def _base_revision_summary(revision: dict[str, Any] | None) -> dict[str, Any] | 
     return {
         "id": revision["id"],
         "version": revision["version"],
-        "workflow_key": revision["workflow_key"],
+        "workspace_id": revision["workspace_id"],
+        # #211 M2: the column is gone — the deprecated response field keeps
+        # returning the identity value until the M3 contract drop.
+        "workflow_key": revision["workspace_id"],
         "definition_hash": revision["definition_hash"],
     }
 

@@ -61,12 +61,11 @@ def _seed_revision(conn, workspace_id: str, workflow_key: str, capabilities: lis
     }
     conn.execute(
         "insert into workflow_revisions("
-        "id, workspace_id, workflow_key, version, status, definition_json, definition_hash)"
-        " values (%s, %s, %s, 1, 'active', %s, 'h')",
+        "id, workspace_id, version, status, definition_json, definition_hash)"
+        " values (%s, %s, 1, 'active', %s, 'h')",
         (
             f"{workspace_id}:{workflow_key}:v1",
             workspace_id,
-            workflow_key,
             json.dumps(definition),
         ),
     )
@@ -107,8 +106,8 @@ def test_migration_copies_referenced_agents_into_each_workspace() -> None:
         _seed_global_agent(conn, "router-only", "route_only_capability")
         conn.execute(
             "insert into workspace_node_routes("
-            "workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values ('ws-b', 'flow-b', 'extra', 'agent', 'router-only')"
+            "workspace_id, node_key, target_kind, target_id)"
+            " values ('ws-b', 'extra', 'agent', 'router-only')"
         )
 
         migrate_agent_workspace_scope(conn)
@@ -244,4 +243,4 @@ def test_upgrade_from_v45_with_legacy_global_index() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "executor_leases_workspace_index"
+    assert migration["name"] == "retire_workflow_key_columns"

@@ -30,12 +30,12 @@ def _upsert_agent_route(
     conn.execute(
         """
         insert into workspace_node_routes(
-          workspace_id, workflow_key, node_key, target_kind, target_id
-        ) values (%s, %s, %s, 'agent', %s)
-        on conflict(workspace_id, workflow_key, node_key) do update set
+          workspace_id, node_key, target_kind, target_id
+        ) values (%s, %s, 'agent', %s)
+        on conflict(workspace_id, node_key) do update set
           target_kind='agent', target_id=excluded.target_id
         """,
-        (workspace_id, workflow_key, node_key, agent_id),
+        (workspace_id, node_key, agent_id),
     )
 
 
@@ -143,14 +143,13 @@ def create_workflow_revision_with_projection(
     conn.execute(
         """
         insert into workflow_revisions(
-          id, workspace_id, workflow_key, version, status, definition_json, definition_hash, published_at
+          id, workspace_id, version, status, definition_json, definition_hash, published_at
         )
-        values (%s, %s, %s, %s, %s, %s, %s, case when %s='active' then current_timestamp else null end)
+        values (%s, %s, %s, %s, %s, %s, case when %s='active' then current_timestamp else null end)
         """,
         (
             revision_id,
             workspace_id,
-            workflow_key,
             version,
             status,
             definition_json,

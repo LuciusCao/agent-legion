@@ -17,8 +17,8 @@ def _setup(conn):
         "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'demo_workflow') on conflict (id) do nothing"
     )
     conn.execute(
-        "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)"
-        " values ('job-1', 'ws1', 'wf', 'question', 'q1', %s)",
+        "insert into jobs(id, workspace_id, source_type, source_id, storage_dir)"
+        " values ('job-1', 'ws1', 'question', 'q1', %s)",
         (job_storage_ref("ws1", "job-1"),),
     )
 
@@ -37,8 +37,7 @@ def _seed_job(conn, job_id, workspace_id="ws1"):
     )
     conn.execute(
         """
-        insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)
-        values (%s, %s, 'wf', 'question', %s, %s)
+        insert into jobs(id, workspace_id, source_type, source_id, storage_dir) values (%s, %s, 'question', %s, %s)
         """,
         (job_id, workspace_id, job_id, job_storage_ref(workspace_id, job_id)),
     )

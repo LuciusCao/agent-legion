@@ -121,7 +121,7 @@ def reupload_missing(
             continue
         try:
             definition = definition_from_job_snapshot(job) or require_workspace_active_definition(
-                job_db, str(job["workspace_id"]), str(job["workflow_key"])
+                job_db, str(job["workspace_id"]), str(job["workspace_id"])
             )
         except _DEFINITION_FAILURES as exc:
             # #204: per-job definition failures only — corrupt revision JSON

@@ -95,11 +95,7 @@ def _create_lease(
     with job_db.connect() as conn:
         conn.execute(
             """
-            insert into executor_leases(
-                id, execution_id, executor_id, workspace_id, job_id, workflow_key,
-                node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-            )
-            values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
+            insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) values (%s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
             """,
             (
                 "lease-1",
@@ -107,7 +103,6 @@ def _create_lease(
                 "code-default",
                 job["workspace_id"],
                 job["id"],
-                job["workflow_key"],
                 node_key,
                 run["id"],
                 database_timestamp(now),
@@ -140,12 +135,12 @@ def test_rerun_cancels_queued_agent_requests(rerun_service, job, job_db):
     with job_db.connect() as conn:
         conn.execute(
             "insert into agent_execution_requests("
-            " execution_id, workspace_id, job_id, workflow_key, node_key,"
+            " execution_id, workspace_id, job_id, node_key,"
             " agent_id, agent_definition_hash, node_concurrency_limit,"
             " state, queued_at, manifest_json)"
-            " values ('exec-queued', %s, %s, %s, 'review_script',"
+            " values ('exec-queued', %s, %s, 'review_script',"
             " 'generator-v1', 'sha256:whatever', 1, 'queued', current_timestamp, '{}')",
-            (job["workspace_id"], job["id"], job["workflow_key"]),
+            (job["workspace_id"], job["id"]),
         )
 
     result = rerun_service.rerun(job["workspace_id"], job["id"], "write_script")

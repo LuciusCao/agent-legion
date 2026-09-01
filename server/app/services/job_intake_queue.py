@@ -56,7 +56,9 @@ class JobIntakeQueue:
         end = min(start + INTAKE_QUEUE_CHUNK_SIZE, len(input_values))
         revision = self.job_db.get_workflow_revision(
             str(batch["workspace_id"]),
-            str(batch["workflow_key"]),
+            # #211 M2: runs no longer carry workflow_key (v70); the signature
+            # keeps the argument but the column is gone from the read.
+            str(batch["workspace_id"]),
             str(queue_state["workflow_revision_id"]),
         )
         if revision is None:
@@ -128,8 +130,11 @@ class JobIntakeQueue:
         revision: dict[str, Any],
         values: list[str],
     ) -> None:
+        # #211 M2: runs rows no longer carry workflow_key (v70); the service
+        # signatures keep the argument, but the identity value (workspace_id)
+        # is what every write/read path uses now.
         existing_keys = self.job_db.list_job_dedup_keys(
-            str(batch["workspace_id"]), str(batch["workflow_key"])
+            str(batch["workspace_id"]), str(batch["workspace_id"])
         )
         candidates, _ = resolve_fresh_candidates(
             spec,
@@ -144,7 +149,7 @@ class JobIntakeQueue:
         )
         jobs = self.job_db.create_jobs_bulk(
             candidates=candidates,
-            workflow_key=str(batch["workflow_key"]),
+            workflow_key=str(batch["workspace_id"]),
             run_id=str(batch["id"]),
             node_keys=list(definition.executable_nodes),
             workspace_id=str(batch["workspace_id"]),

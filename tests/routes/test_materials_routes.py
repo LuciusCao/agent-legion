@@ -169,9 +169,9 @@ def test_delete_referenced_material_returns_409(client, storage, job_db) -> None
     storage.objects[storage_key] = b"12345"
     with job_db.connect() as conn:
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type,"
+            "insert into jobs(id, workspace_id, source_type,"
             " source_id, input_json)"
-            " values ('job-refs-material', %s, 'demo_workflow', 'material', %s, %s)",
+            " values ('job-refs-material', %s, 'material', %s, %s)",
             (
                 workspace_id,
                 material_id,

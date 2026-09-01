@@ -90,9 +90,9 @@ def workspace_usage(client):
             (workspace_id, "pricing_ws", "demo_workflow"),
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-            "values (%s, %s, %s, %s, %s) on conflict (id) do nothing",
-            (job_id, workspace_id, "demo_workflow", "batch_by_ids", "Q001"),
+            "insert into jobs(id, workspace_id, source_type, source_id) "
+            "values (%s, %s, %s, %s) on conflict (id) do nothing",
+            (job_id, workspace_id, "batch_by_ids", "Q001"),
         )
         conn.execute(
             "insert into node_runs(id, job_id, node_key, status) values (%s, %s, %s, %s)",

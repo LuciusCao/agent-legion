@@ -44,7 +44,7 @@ def claim_executor_node(
     # Single implicit code pool (P-0.5): the capacity comes from the instance
     # settings code_capacity, never from a caller-chosen executor definition.
     global_capacity = worker.settings.executor_runtime.code_capacity
-    if not snapshot.has_capacity(workspace_id, workflow_key, node.key):
+    if not snapshot.has_capacity(workspace_id, node.key):
         return False
 
     worker.state.pending_claims.append(
@@ -80,5 +80,5 @@ def claim_executor_node(
             node_code=node_code,
         )
     )
-    snapshot.record_claim(workspace_id, workflow_key, node.key)
+    snapshot.record_claim(workspace_id, node.key)
     return True

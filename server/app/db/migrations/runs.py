@@ -31,9 +31,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from server.app.db.migrations.retire_workflow_key_columns import has_column
 from server.app.db.migrations.runs_sql import (
     _DECODE_FN_DDL,
     _INSERT_RUNS_SQL,
+    _INSERT_RUNS_SQL_V70,
     _SINK_FROZEN_CONFIG_SQL,
     _SINK_INPUTS_SQL,
 )
@@ -80,8 +82,20 @@ def migrate_runs(conn: Any) -> None:
     )
     if not conn.execute("select to_regclass('job_batches')").fetchone()["to_regclass"]:
         return
+    runs_keyed = has_column(conn, "runs", "workflow_key")
+    has_rows = conn.execute("select 1 from job_batches limit 1").fetchone() is not None
+    if not runs_keyed and not has_rows:
+        # #211 M2: fresh databases already run the post-v70 schema shape (no
+        # workflow_key on runs) and never populated job_batches — nothing to
+        # carry over, only the archaeology table goes away.
+        conn.execute("drop table if exists job_batches")
+        return
     conn.execute(_DECODE_FN_DDL)
-    inserted = conn.execute(_INSERT_RUNS_SQL).rowcount
+    # A pre-v53 database upgraded to v70+: init_db replays the schema file
+    # first, so runs already lost its workflow_key column before this v53
+    # migration executes — the column-less insert carries the same rows.
+    insert_sql = _INSERT_RUNS_SQL if runs_keyed else _INSERT_RUNS_SQL_V70
+    inserted = conn.execute(insert_sql).rowcount
     conn.execute(_SINK_FROZEN_CONFIG_SQL)
     conn.execute(_SINK_INPUTS_SQL)
     conn.execute("drop table if exists job_batches")

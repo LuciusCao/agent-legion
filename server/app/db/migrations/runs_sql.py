@@ -31,6 +31,9 @@ $$
 
 # Every batch becomes one run row; the payload's pin keys make up
 # frozen_pins_json, and queued async intake runs keep their whole payload.
+# #211 M2: on fresh databases the schema file already dropped runs.workflow_key;
+# the legacy column list only exists on pre-v70 upgrades, so the statement
+# carries both shapes (the probe in runs.py picks at runtime).
 _INSERT_RUNS_SQL = """
 insert into runs(
   id, workspace_id, workflow_key, source_kind, status, frozen_pins_json,
@@ -40,6 +43,41 @@ select
   b.id,
   b.workspace_id,
   b.workflow_key,
+  b.source_kind,
+  b.status,
+  coalesce(
+    (select jsonb_object_agg(pin.key, pin.value)
+     from jsonb_each(p.doc) as pin(key, value)
+     where pin.key in ('node_code_versions', 'agent_versions', 'quality_replay')),
+    '{}'::jsonb
+  )::text,
+  case
+    when jsonb_typeof(p.doc -> '_intake_queue') = 'object' then b.source_payload_json
+    else ''
+  end,
+  b.created_count,
+  b.error_message,
+  b.created_at,
+  b.updated_at
+from job_batches b
+cross join lateral (select pg_temp._runs_payload(b.source_payload_json) as doc) p
+on conflict(id) do nothing
+"""
+
+# #211 M2 (v70): same cutover against the current runs shape (no workflow_key
+# column). init_db replays postgres_schema.sql before any migration runs, so a
+# pre-v53 database being upgraded to v70+ already has the column-less runs
+# table when migrate_runs executes — the legacy statement above cannot insert
+# into it. Dropping the rows instead would silently lose every historical
+# batch, so the v70 upgrade path carries this column-less twin.
+_INSERT_RUNS_SQL_V70 = """
+insert into runs(
+  id, workspace_id, source_kind, status, frozen_pins_json,
+  queue_payload_json, created_count, error_message, created_at, updated_at
+)
+select
+  b.id,
+  b.workspace_id,
   b.source_kind,
   b.status,
   coalesce(

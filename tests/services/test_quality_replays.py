@@ -94,8 +94,8 @@ class _Env:
         with write_transaction(TEST_DATABASE_URL) as conn:
             conn.execute(
                 "insert into workspace_node_routes("
-                "workspace_id, workflow_key, node_key, target_kind, target_id)"
-                " values (%s, 'test', 'generate', %s, %s)",
+                "workspace_id, node_key, target_kind, target_id)"
+                " values (%s, 'generate', %s, %s)",
                 (self.workspace_id, route_kind, target_id),
             )
             conn.execute(

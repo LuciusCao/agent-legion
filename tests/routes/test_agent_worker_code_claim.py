@@ -37,8 +37,8 @@ def _enqueue_code_request(app, job_db, *, job_id: str) -> str:
             " on conflict(id) do nothing"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (%s, 'test-workspace', 'questions', 'question', %s)",
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values (%s, 'test-workspace', 'question', %s)",
             (job_id, job_id),
         )
         conn.execute("insert into job_nodes(job_id, node_key) values (%s, 'package')", (job_id,))

@@ -53,7 +53,7 @@ class QualityReplaySetup:
         pin: dict[str, Any] | None,
     ) -> str:
         """Create the isolated copy job and set its node states atomically."""
-        workflow_key = str(job["workflow_key"])
+        workflow_key = str(job["workspace_id"])
         revision = {
             "id": str(job["workflow_revision_id"] or ""),
             "version": int(job["workflow_version"] or 0),

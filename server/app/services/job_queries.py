@@ -56,7 +56,7 @@ class JobQueryService:
         # Snapshot-less jobs fall back to their own workspace's active
         # revision (schema v50), never a global template.
         return definition_from_job_snapshot(job) or require_workspace_active_definition(
-            self.job_db, str(job["workspace_id"]), str(job["workflow_key"])
+            self.job_db, str(job["workspace_id"]), str(job["workspace_id"])
         )
 
     def _artifact_names(self, job: dict[str, Any]) -> list[str]:
@@ -100,7 +100,7 @@ class JobQueryService:
 
         if active_revision is _UNSET:
             active = self.job_db.get_active_workflow_revision(
-                str(job["workspace_id"]), str(job["workflow_key"])
+                str(job["workspace_id"]), str(job["workspace_id"])
             )
         else:
             active = active_revision
@@ -110,6 +110,9 @@ class JobQueryService:
         job = resolve_record_paths(job, self.settings.data_dir, {"storage_dir"})
         return {
             **job,
+            # #211 M2: the jobs column is gone (v70); the deprecated API field
+            # keeps the identity value until the M3 removal window closes.
+            "workflow_key": job.get("workflow_key", job["workspace_id"]),
             # Wire compatibility: the API field keeps the legacy name while
             # the column is jobs.run_id (schema v53); the value is the run id.
             "batch_id": wire_batch_id(job),
@@ -152,7 +155,7 @@ class JobQueryService:
         nodes = self.job_db.list_job_nodes(job_id)
         nodes_with_definition = job_nodes_with_definition(nodes, definition)
         worker_map = claimed_worker_map(self.job_db, job_id)
-        agent_map = agent_route_map(self.job_db, str(job["workspace_id"]), str(job["workflow_key"]))
+        agent_map = agent_route_map(self.job_db, str(job["workspace_id"]), str(job["workspace_id"]))
         for node in nodes_with_definition:
             # P-0.5: non-Agent-routed nodes always run on the implicit code
             # pool; the projection is a constant, no configuration lookup.
