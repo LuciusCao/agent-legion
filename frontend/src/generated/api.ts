@@ -4939,7 +4939,7 @@ export interface components {
       allowed_workspaces: string[]
       /**
        * Host Protocol Version
-       * @default 3
+       * @default 4
        */
       host_protocol_version: number
       /** Worker Token */
