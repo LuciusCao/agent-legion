@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from server.app.agent_control.registry import MODEL_RUNTIME_PROTOCOL_VERSION
+from shared.protocol import PROTOCOL_VERSION
 
 
 class RegisterAgentWorkerRequest(BaseModel):
@@ -37,7 +37,9 @@ class AgentWorkerWorkspace(BaseModel):
 
 class RegisterAgentWorkerResponse(BaseModel):
     worker_token: str
-    host_protocol_version: int = MODEL_RUNTIME_PROTOCOL_VERSION
+    # 本 Host 的最新协议版本（shared/protocol.py 单一事实来源）：Worker 拿
+    # 它与本机声明比对，对本机不支持的新 Host fail-closed。
+    host_protocol_version: int = PROTOCOL_VERSION
     # Server-resolved workspace admission scope; [] means all workspaces.
     allowed_workspaces: list[str]
     # Same scope enriched with workspace names (one row per presented token's

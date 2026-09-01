@@ -13,6 +13,12 @@ digest-verify the bytes), and only then applies: server-side copy onto the
 authority key, atomic promote into the job dir, manifest rows in ONE
 transaction, staging cleanup. Any earlier failure applies nothing — no
 half-applied outputs.
+
+#338: refs are dual-form — a ``.gz``-suffixed staging key holds gzip bytes
+(HEAD verifies the compressed size the Worker reports; downloads decode
+transparently, so the job-dir copy and every digest stay uncompressed), a
+bare key holds raw bytes (older Workers). The authority key keeps the
+staging ref's suffix.
 """
 
 from __future__ import annotations
@@ -109,12 +115,14 @@ def apply_remote_artifact_refs(
                 for name, ref in remote.items():
                     if name in expected:
                         staged[name], content_hashes[name] = download_remote_artifact(
-                            object_store, Path(stage), name, ref
+                            object_store, Path(stage), name, ref, max_size_bytes
                         )
                     else:
                         # Undeclared names never land in the job dir but are
                         # still digest-verified Host-side for the manifest row.
-                        content_hashes[name] = verify_remote_digest(object_store, name, ref)
+                        content_hashes[name] = verify_remote_digest(
+                            object_store, name, ref, max_size_bytes
+                        )
                 # Phase 3: all verified — promote copies, files, and rows.
                 promote_all(
                     object_store,
@@ -132,7 +140,7 @@ def apply_remote_artifact_refs(
         # digest-verified Host-side (stream, never persisted) — a reported
         # hash must match and an empty one registers the computed value.
         for name, ref in remote.items():
-            content_hashes[name] = verify_remote_digest(object_store, name, ref)
+            content_hashes[name] = verify_remote_digest(object_store, name, ref, max_size_bytes)
         promote_all(
             object_store,
             workspace_id,
