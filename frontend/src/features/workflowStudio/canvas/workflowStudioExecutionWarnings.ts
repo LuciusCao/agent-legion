@@ -4,6 +4,7 @@ import type {
 } from '../../../types'
 import type { WorkflowYamlNode } from '../shared/workflowStudioYamlDraft.parse'
 import type { WorkflowYamlExecutionDefaults } from '../shared/workflowStudioYamlDraft.executionDefaults'
+import { asConfigValue } from '../shared/workflowStudioYamlDraft.execution'
 
 /**
  * #333：agent 节点 execution 解析链的前端轻量求值——节点 execution.* →
@@ -13,17 +14,12 @@ import type { WorkflowYamlExecutionDefaults } from '../shared/workflowStudioYaml
  * 非 start 节点（mergeNodeExecution，对齐 loader：published/revision
  * 快照里的节点 execution 即有效值），求值随后只读节点有效值。
  * 纯 code workflow 没有 agent 节点，警报集恒为空。
+ * 草稿 YAML 的 execution 值只承诺形状不承诺类型（`provider: 1` 这类合法
+ * YAML 非法契约值），一律经 asConfigValue 归一（非字符串按未配置处理，
+ * codex P1），画布渲染期不得因字符串调用抛异常。
  */
 
 type NodeExecution = NonNullable<WorkflowNodeRecord['execution']>
-
-/** 草稿 YAML 只承诺形状不承诺类型：`provider: 1`、`model: true` 这类合法
- * YAML 非法契约值会原样流到这里。execution 值非字符串一律按未配置（空串）
- * 处理——画布渲染期不得因 .trim() 等字符串调用抛异常（非法值持久化进草稿
- * 后重开会持续崩溃，codex P1）。 */
-function asConfigValue(value: unknown): string {
-  return typeof value === 'string' ? value : ''
-}
 
 /**
  * 草稿节点 execution 还原 + 顶层默认合并（节点值优先；start 节点豁免，
@@ -41,10 +37,12 @@ export function mergeNodeExecution(
     thinking: asConfigValue(declared?.thinking),
     prompt: asConfigValue(declared?.prompt),
   }
-  if (
-    node.type === 'start' ||
-    (!defaults.provider && !defaults.model && !defaults.thinking)
-  ) {
+  // 存在性判断同样走归一值：junk defaults（如 `{provider: 1}`）视为无默认。
+  const hasDefaults =
+    asConfigValue(defaults.provider) ||
+    asConfigValue(defaults.model) ||
+    asConfigValue(defaults.thinking)
+  if (node.type === 'start' || !hasDefaults) {
     return declared ? values : undefined
   }
   return {
