@@ -10,6 +10,15 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 - workflow_key 兼容窗口期公告（issue #211）：全部 deprecated 契约面的迁移文案统一标注移除时间 **2026-10-31**——27 个请求/响应字段、10 条 URL 别名、claim 协议字段将在终态批移除。显式发送恒等值（=workspace id）继续放行至该日期；不匹配值已由守卫拒绝（400）。所有部署实例须在窗口期内升级至 ≥ schema v68（存量 workflow_key 已对齐）。
 
 ### Added
+- 预览面板安全与正确性修复（PR #345 codex 评审 P1/P2）：宿主在 srcDoc 的
+  `<head>` 注入 CSP（`default-src 'none'` + 平台资源白名单 + `connect-src` 限
+  平台 origin），堵死沙箱 bundle 的出站网络通道（`sandbox="allow-scripts"` 不
+  阻 `fetch`/`sendBeacon`/`<img>` 外传——恶意草稿可先经桥读任务数据再外发）；
+  `PreviewPanelSection` 的 remount key 加入 bundle 内容指纹，草稿轮询更新时
+  整树重挂 iframe，旧文档在途桥请求的响应不再可能错误应答新文档的同编号请求；
+  authoring context 的 `recent_jobs` 产物清单统一走本地目录 ∪ 对象存储
+  manifest（此前仅 selected job 合并，worker 执行任务的 recent 清单会报空）。
+  preview_guide.md 运行时契约同步（出站网络由宿主强制而非编写约定）。
 - 发版解耦纪律 + 版本清单一致性检查（`scripts/check_versions.py`，挂 backend
   静态轮）：velites（`velites/Cargo.toml`）与 frontend（`frontend/package.json`）
   持有独立版本线，禁止随仓库版本（`pyproject.toml`）锁步 bump——无谓的版本前进

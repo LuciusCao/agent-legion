@@ -24,7 +24,10 @@ describe('QuestionContentPanel（内置 bundle 宿主）', () => {
     expect(host).not.toBeNull()
     const iframe = container.querySelector('iframe')
     expect(iframe).not.toBeNull()
-    expect(iframe!.getAttribute('srcdoc')).toBe(QUESTION_PANEL_BUNDLE)
+    // srcdoc = bundle 原文 + 宿主注入的 CSP meta（出站网络红线），断言包含。
+    const srcdoc = iframe!.getAttribute('srcdoc') ?? ''
+    expect(srcdoc).toContain('Content-Security-Policy')
+    expect(srcdoc).toContain(QUESTION_PANEL_BUNDLE.slice(0, 200))
     expect(iframe!.getAttribute('title')).toBe('题目内容')
     // 冲刷宿主内部的异步更新（detail 查询、iframe load）进 act。
     await act(async () => {

@@ -29,17 +29,25 @@ the host page, and `allow-same-origin` is NEVER granted (a same-origin script
 bundle would be able to call every platform API with the viewer's session —
 that is the security red line this design exists to avoid).
 
+The host also injects a Content-Security-Policy into your document before it
+parses: `default-src 'none'`, inline `script-src`/`style-src` plus the
+platform origin, `img-src data:`, `connect-src` limited to the platform
+origin, `form-action 'none'`. Outbound network is therefore blocked by the
+host, not by convention: `fetch()`/`sendBeacon()`/`<img src>` to any external
+address will not fire. You cannot remove or loosen this policy — do not
+design a bundle that depends on external network access.
+
 Consequences for your markup:
 
 - Everything must be inline in the single HTML file: `<style>` and `<script>`
-  blocks, no external origins. CDN references may be unreachable on
-  self-hosted deployments — do not rely on them.
+  blocks, no external origins. CDN references are blocked by the host CSP
+  (and may be unreachable on self-hosted deployments) — do not rely on them.
 - Platform build assets the host explicitly offers (currently
   `assets.katexCssUrl` / `assets.katexJsUrl` for LaTeX) MAY be loaded; always
   degrade gracefully when absent.
-- Network access from the bundle is untrusted output by definition: never
-  `fetch()` the platform API directly (it fails — no credentials on an opaque
-  origin — and is not the contract). Use the bridge.
+- Never `fetch()` the platform API directly: it fails (no credentials on an
+  opaque origin, and the CSP only permits asset URLs) and is not the
+  contract. Use the bridge.
 
 ## 3. Bridge API (postMessage, read-only)
 

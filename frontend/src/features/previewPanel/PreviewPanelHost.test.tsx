@@ -79,7 +79,44 @@ describe('PreviewPanelHost 沙箱红线', () => {
 
     expect(iframe.getAttribute('sandbox')).toBe('allow-scripts')
     expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin')
-    expect(iframe.getAttribute('srcdoc')).toBe(BUNDLE)
+    await flush()
+  })
+
+  it('srcDoc 注入宿主 CSP：出站网络限平台 origin，外部地址被钉死（codex P1）', async () => {
+    const { container } = renderHost()
+    const srcdoc = getIframe(container).getAttribute('srcdoc') ?? ''
+
+    // 注入发生在 <head> 顶部（解析前生效，bundle 脚本无法移除）。
+    const metaMatch = srcdoc.match(
+      /<meta http-equiv="Content-Security-Policy" content="([^"]*)">/
+    )
+    expect(metaMatch).not.toBeNull()
+    const policy = metaMatch![1]
+    expect(policy).toContain("default-src 'none'")
+    expect(policy).toContain(`connect-src ${window.location.origin}`)
+    expect(policy).toContain("form-action 'none'")
+    // 平台资源（katex 等）可加载，inline 脚本/样式可跑。
+    expect(policy).toContain("script-src 'unsafe-inline' 'self'")
+    expect(policy).toContain("style-src 'unsafe-inline' 'self'")
+    // bundle 原文完整保留在注入结果里。
+    expect(srcdoc).toContain('<body>panel</body>')
+    await flush()
+  })
+
+  it('无 <head> 的 bundle 也能注入 CSP（隐式 head 场景兜底）', async () => {
+    const { container } = render(
+      <PreviewPanelHost
+        jobId="job-1"
+        html="<!doctype html><html><body>headless</body></html>"
+      />,
+      { wrapper: TestQueryProvider }
+    )
+    const srcdoc = getIframe(container).getAttribute('srcdoc') ?? ''
+
+    expect(srcdoc).toMatch(
+      /<html><head><meta http-equiv="Content-Security-Policy"/
+    )
+    expect(srcdoc).toContain('<body>headless</body>')
     await flush()
   })
 })
