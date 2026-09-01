@@ -107,10 +107,16 @@ def make_db_key_existence(database_dsn):
     return exists
 
 
-def apply_gc(client, bucket, report):
+class ApplyResult:
+    def __init__(self, deleted, skipped_revalidated=0):
+        self.deleted = deleted
+        self.skipped_revalidated = skipped_revalidated
+
+
+def apply_gc(client, bucket, report, revalidate=None):
     with open(os.environ["STUB_LOG"], "a") as fh:
-        fh.write("apply_gc\\n")
-    return len(report.authority_orphans) + len(report.staging_orphans)
+        fh.write(f"apply_gc revalidate={revalidate is not None}\\n")
+    return ApplyResult(len(report.authority_orphans) + len(report.staging_orphans))
 """
 
 
@@ -155,6 +161,14 @@ class JobQueries:
     def __init__(self, path, jobs_dir=None):
         self.path = path
         self.jobs_dir = jobs_dir
+
+    def existing_object_storage_keys(self, storage_keys):
+        # CLI 的删除前新鲜反查（TOCTOU 防护）：桩语义 = 全部「已有行」，
+        # 使 revalidate 过滤后无删除——断言只验证调用链形状。
+        import os
+        with open(os.environ["STUB_LOG"], "a") as fh:
+            fh.write(f"revalidate n={len(storage_keys)}\\n")
+        return set(storage_keys)
 """
 
 
@@ -217,12 +231,15 @@ def test_unconfigured_store_is_a_clean_skip(tmp_path: Path) -> None:
 
 
 def test_dry_run_reports_without_deleting(tmp_path: Path) -> None:
-    """dry-run：打印桩报告的孤儿计数，不调用 apply/delete_objects。"""
+    """dry-run：打印桩报告的孤儿计数，不调用 apply/delete_objects；dotenv
+    必须显式加载 ROOT/.env（回归到裸 load_dotenv() 会在 stdin/子进程场景
+    崩溃——桩记录路径供断言）。"""
     pystub = _make_pystub(tmp_path, _STORAGE_PROBE_CONFIGURED)
 
     result, log = _run(tmp_path, pystub)
 
     assert result.returncode == 0, result.stderr
+    assert f"load_dotenv {ROOT}/.env" in log
     assert "dry-run" in result.stdout
     assert "jobs/ 孤儿 1 个" in result.stdout
     assert "jobs-staging/ 孤儿 1 个" in result.stdout
@@ -231,14 +248,16 @@ def test_dry_run_reports_without_deleting(tmp_path: Path) -> None:
 
 
 def test_apply_deletes_reported_orphans(tmp_path: Path):
-    """--apply：调用 apply_gc 并打印删除数。"""
+    """--apply：调用 apply_gc 并打印删除数。列举前缀的正确性由
+    tests/services/test_s3_jobs_gc.py 的 exact-prefix 单测钉住（CLI 桩
+    的 scan_orphans 不消费真实 lister,boto3 桩记录不到列举）。"""
     pystub = _make_pystub(tmp_path, _STORAGE_PROBE_CONFIGURED)
 
     result, log = _run(tmp_path, pystub, "--apply")
 
     assert result.returncode == 0, result.stderr
     assert "已删除 2 个" in result.stdout
-    assert "apply_gc" in log
+    assert "apply_gc revalidate=True" in log
 
 
 def test_grace_args_reach_scan(tmp_path: Path):

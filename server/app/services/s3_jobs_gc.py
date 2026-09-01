@@ -92,19 +92,28 @@ def scan_orphans(
 ) -> OrphanReport:
     """全前缀扫描并返回孤儿对象（纯判定，不删除）。
 
-    两遍列举的原因是判定语义不同：staging 只看宽限窗，authority 还要
-    DB 对照。两个前缀在 ListObjectsV2 上本就互不重叠（``jobs/`` 与
-    ``jobs-staging/`` 第 6 个字符一个 ``/`` 一个 ``-``）；authority 侧
-    按页攒批只是有界化每次传给 ``key_exists`` 的 key 列表。
+    两个前缀都经 ``key_exists`` 对照（系统性评审 P1，#344）：materials
+    的 key 是 ``{workspace_id}/{hash}/{filename}``，workspace id 允许叫
+    ``jobs`` / ``jobs-staging``（无保留名约束），那样的材料 key 会落进
+    这两个前缀——staging 不能只看宽限窗无条件回收，否则撞名 workspace
+    的材料会被整批误删。authority 侧按页攒批只是有界化每次传给
+    ``key_exists`` 的 key 列表；两个前缀在 ListObjectsV2 上互不重叠
+    （第 6 个字符 ``/`` vs ``-``）。
     """
     now = now or datetime.now(UTC)
     report = OrphanReport([], [])
     authority_cutoff = now - timedelta(hours=grace_hours)
+    staging_cutoff = now - timedelta(hours=staging_grace_hours)
 
     pending: list[ObjectEntry] = []
     for entry in lister(STAGING_PREFIX):
-        if _past_grace(entry, now - timedelta(hours=staging_grace_hours)):
-            report.staging_orphans.append(entry)
+        pending.append(entry)
+        if len(pending) >= KEY_PAGE_SIZE:
+            report.staging_orphans.extend(_staging_orphans_in(pending, key_exists, staging_cutoff))
+            pending = []
+    if pending:
+        report.staging_orphans.extend(_staging_orphans_in(pending, key_exists, staging_cutoff))
+    pending = []
     for entry in lister(JOBS_PREFIX):
         pending.append(entry)
         if len(pending) >= KEY_PAGE_SIZE:
@@ -127,18 +136,27 @@ def _authority_orphans_in(
     return [e for e in entries if e.key not in known and _past_grace(e, cutoff)]
 
 
+def _staging_orphans_in(
+    entries: list[ObjectEntry], key_exists: KeyExistence, cutoff: datetime
+) -> list[ObjectEntry]:
+    """超宽限窗且 DB 无行：staging 的 DB 对照救的是撞名 workspace 的
+    materials（正常 staging 对象本就无行，宽限窗是它们的唯一防线）。"""
+    known = key_exists([e.key for e in entries])
+    return [e for e in entries if e.key not in known and _past_grace(e, cutoff)]
+
+
 def make_db_key_existence(queries: JobQueries) -> KeyExistence:
-    """DB 侧存在性判定：首次调用时单遍全量载入 storage_key 集合
-    （BOUNDARY-DATA-001：service 层不落 SQL 字面量）。该列无索引，
-    按 key 反查会退化为每页一次全表扫描；单遍顺序扫描 + 内存 set 是
-    运维 CLI 的有意取舍（百万 key 量级约百 MB）。"""
+    """DB 侧存在性判定：首次调用时单遍全量载入对象存储 key 集合
+    （job_artifacts ∪ materials，BOUNDARY-DATA-001：service 层不落 SQL
+    字面量）。两列都无索引，按 key 反查会退化为每页一次全表扫描；
+    单遍顺序扫描 + 内存 set 是运维 CLI 的有意取舍。"""
 
     all_keys: set[str] | None = None
 
     def exists(keys: list[str]) -> set[str]:
         nonlocal all_keys
         if all_keys is None:
-            all_keys = queries.all_artifact_storage_keys()
+            all_keys = queries.all_object_storage_keys()
         return {key for key in keys if key in all_keys}
 
     return exists
@@ -182,12 +200,52 @@ def _delete_batch(client: BatchDeleter, bucket: str, batch: list[ObjectEntry]) -
     return len(batch) - len(errors)
 
 
+@dataclass
+class ApplyResult:
+    """``apply_gc`` 的结果：删除数 + 被 revalidate 救下的对象数。"""
+
+    deleted: int
+    skipped_revalidated: int = 0
+
+
 def apply_gc(
     client: BatchDeleter,
     bucket: str,
     report: OrphanReport,
-) -> int:
-    """执行 dry-run 报告的删除；返回成功删除数。幂等：重跑只删剩余孤儿。"""
-    return delete_entries(client, bucket, report.authority_orphans) + delete_entries(
-        client, bucket, report.staging_orphans
-    )
+    revalidate: KeyExistence | None = None,
+) -> ApplyResult:
+    """执行 dry-run 报告的删除；返回删除数与被反查救下的对象数。
+    幂等：重跑只删剩余孤儿。
+
+    TOCTOU 防护（#344 评审 P1）：``revalidate`` 提供时，每个删除批
+    （authority 与 staging 都校验——staging 校验救的是撞名 workspace 的
+    materials，P1 修复的一部分）在删除前用**新鲜** DB 反查过滤——扫描与
+    删除之间并发 promote 可能重建同名 key 并建行，按扫描阶段缓存的孤儿
+    判定删会把新权威对象删掉，DB 清单从此指向缺失内容。被过滤掉的 key
+    计入 ``skipped_revalidated``，CLI 会如实报告，运维才能区分「删完了」
+    与「跳过了仍被引用的对象」。
+    """
+    deleted = 0
+    skipped = 0
+    if revalidate is not None:
+        for batch in _batches(report.authority_orphans):
+            known = revalidate([e.key for e in batch])
+            still_orphans = [e for e in batch if e.key not in known]
+            skipped += len(batch) - len(still_orphans)
+            if still_orphans:
+                deleted += _delete_batch(client, bucket, still_orphans)
+        for batch in _batches(report.staging_orphans):
+            known = revalidate([e.key for e in batch])
+            still_orphans = [e for e in batch if e.key not in known]
+            skipped += len(batch) - len(still_orphans)
+            if still_orphans:
+                deleted += _delete_batch(client, bucket, still_orphans)
+    else:
+        deleted += delete_entries(client, bucket, report.authority_orphans)
+        deleted += delete_entries(client, bucket, report.staging_orphans)
+    return ApplyResult(deleted=deleted, skipped_revalidated=skipped)
+
+
+def _batches(entries: list[ObjectEntry]) -> Iterator[list[ObjectEntry]]:
+    for i in range(0, len(entries), DELETE_BATCH):
+        yield entries[i : i + DELETE_BATCH]

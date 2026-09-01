@@ -46,10 +46,9 @@ services:
       RUSTFS_SECRET_KEY: ${AGENT_LEGION_S3_SECRET_KEY:-}
       # 关闭后台 scanner/heal（#340）：单盘本地形态下巡检无意义，而它的
       # 命名空间全量遍历会读每个对象的 xl.meta——小对象（≤128KiB）数据
-      # 内联其中，「元数据巡检」= 重读全部数据。实测 2 万对象闲置 CPU 从
-      # 线性外推的 ~2% 降到 ~0%（默认配置下曾观察到百万对象空转 4 天烧
-      # 1.1TB 读 + 满核 CPU，rustfs/rustfs#6219 同类案例）。升级镜像时若
-      # 想恢复巡检，删掉这两行即可。
+      # 内联其中，「元数据巡检」= 重读全部数据，闲置 CPU/IO 随对象数线性
+      # 增长（机理与同类案例见 rustfs/rustfs#6219；受控实测同规模闲置
+      # CPU 从 ~2% 降至 ~0%）。升级镜像时若想恢复巡检，删掉这两行即可。
       RUSTFS_SCANNER_ENABLED: "false"
       RUSTFS_HEAL_ENABLED: "false"
     volumes:

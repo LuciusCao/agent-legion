@@ -300,8 +300,9 @@ def test_compose_rustfs_image_is_pinned() -> None:
 
 def test_compose_rustfs_scanner_disabled() -> None:
     """scanner/heal 必须显式关闭（#340）：命名空间全量巡检对本地单盘无
-    意义，且小对象数据内联在 xl.meta 里，巡检=重读全部数据（曾观察到
-    百万对象闲置空转 4 天）。要恢复须有意删掉这两行，而非默认漂移。"""
+    意义，且小对象数据内联在 xl.meta 里，巡检=重读全部数据（机理与同类
+    案例见 rustfs/rustfs#6219,受控实测见 issue #340 调研评论）。要恢复
+    须有意删掉这两行，而非默认漂移。"""
     env = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]["rustfs"]["environment"]
     assert env.get("RUSTFS_SCANNER_ENABLED") == "false"
     assert env.get("RUSTFS_HEAL_ENABLED") == "false"

@@ -114,8 +114,18 @@ def main() -> int:
             print("加 --apply 执行删除（幂等可重跑）。")
         return 0
 
-    deleted = apply_gc(client, settings.bucket, report)
-    print(f"已删除 {deleted} 个孤儿对象（失败的对象下一轮扫描会重试）")
+    # 删除前逐批新鲜反查（TOCTOU，#344 评审 P1）：不用扫描阶段的缓存
+    # key 集合——扫描与删除之间并发 promote 重建同名 key 并建行时，
+    # 缓存判定会误删新权威对象；反查同时对照 materials（撞名 workspace
+    # 的材料 key 在删除前最后一道被救下）。
+    def fresh_revalidate(keys: list[str]) -> set[str]:
+        return job_db.existing_object_storage_keys(keys)
+
+    result = apply_gc(client, settings.bucket, report, revalidate=fresh_revalidate)
+    print(f"已删除 {result.deleted} 个孤儿对象")
+    if result.skipped_revalidated:
+        print(f"反查救下 {result.skipped_revalidated} 个对象（扫描后被重新引用，未删除）")
+    print("（删除失败的对象下一轮扫描会重试）")
     return 0
 
 
