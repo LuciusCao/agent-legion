@@ -266,7 +266,7 @@
     "frontend/src/features/previewPanel/PreviewPanelSection.tsx": 58,
     "frontend/src/features/previewPanel/bridge.ts": 94,
     "frontend/src/features/previewPanel/builtin/questionPanelBundle.ts": 12,
-    "frontend/src/features/previewPanel/previewPanelApi.ts": 54,
+    "frontend/src/features/previewPanel/previewPanelApi.ts": 46,
     "frontend/src/features/previewPanel/rawAssets.d.ts": 31,
     "frontend/src/features/previewPanel/usePreviewPanel.ts": 61,
     "frontend/src/features/workflowStudio/canvas/WorkflowDagFullscreenButton.tsx": 29,
