@@ -1147,6 +1147,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/preview/context': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Preview Context */
+    get: operations['preview_context_api_studio_agent_tools_workspaces__workspace_id__preview_context_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/preview/panel': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Preview Panel */
+    get: operations['get_preview_panel_api_studio_agent_tools_workspaces__workspace_id__preview_panel_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/preview/panel/draft': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Save Preview Panel Draft */
+    put: operations['save_preview_panel_draft_api_studio_agent_tools_workspaces__workspace_id__preview_panel_draft_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active': {
     parameters: {
       query?: never
@@ -2048,6 +2099,80 @@ export interface paths {
     head?: never
     /** Update Workspace Package Route */
     patch: operations['update_workspace_package_route_api_workspaces__workspace_id__packages__package_id__patch']
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/preview-panel': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get State */
+    get: operations['get_state_api_workspaces__workspace_id__preview_panel_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/preview-panel/archive': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Archive
+     * @description Human "reset to the built-in fallback": archive every version.
+     */
+    post: operations['archive_api_workspaces__workspace_id__preview_panel_archive_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/preview-panel/publish': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Publish */
+    post: operations['publish_api_workspaces__workspace_id__preview_panel_publish_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/preview-panel/published': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Get Published
+     * @description Published bundle for the job detail iframe host; null = fallback.
+     */
+    get: operations['get_published_api_workspaces__workspace_id__preview_panel_published_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
     trace?: never
   }
   '/api/workspaces/{workspace_id}/quality/replays/{replay_id}': {
@@ -4303,6 +4428,101 @@ export interface components {
       queue_alert: components['schemas']['QueueAlert'] | null
       recent_hour_runs: components['schemas']['RecentHourRunSummary']
       recent_hour_tokens: components['schemas']['RecentHourTokenSummary']
+    }
+    /** PreviewContextJobSummary */
+    PreviewContextJobSummary: {
+      /**
+       * Artifacts
+       * @default []
+       */
+      artifacts: string[]
+      /** Created At */
+      created_at?: string | null
+      /** Id */
+      id: string
+      /** Source Id */
+      source_id?: string | null
+      /** Source Type */
+      source_type?: string | null
+      /** Status */
+      status?: string | null
+      /** Updated At */
+      updated_at?: string | null
+    }
+    /**
+     * PreviewContextResponse
+     * @description Recent jobs + artifact inventory + bounded content samples.
+     */
+    PreviewContextResponse: {
+      /** Recent Jobs */
+      recent_jobs: components['schemas']['PreviewContextJobSummary'][]
+      /** Sample Max Chars */
+      sample_max_chars: number
+      /** Samples */
+      samples: {
+        [key: string]: string
+      }
+      selected_job?: components['schemas']['PreviewContextJobSummary'] | null
+      /** Truncated */
+      truncated: string[]
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** PreviewPanelDraftRequest */
+    PreviewPanelDraftRequest: {
+      /** Change Note */
+      change_note?: string | null
+      /** Html */
+      html: string
+    }
+    /**
+     * PreviewPanelPublishedResponse
+     * @description Job detail iframe host read: the published bundle, null = fallback.
+     */
+    PreviewPanelPublishedResponse: {
+      published?: components['schemas']['PreviewPanelVersionResponse'] | null
+    }
+    /**
+     * PreviewPanelStateResponse
+     * @description Published bundle plus pending draft; both null = built-in fallback.
+     */
+    PreviewPanelStateResponse: {
+      draft?: components['schemas']['PreviewPanelVersionResponse'] | null
+      published?: components['schemas']['PreviewPanelVersionResponse'] | null
+    }
+    /**
+     * PreviewPanelVersionResponse
+     * @description One immutable version row of a workspace preview panel bundle.
+     */
+    PreviewPanelVersionResponse: {
+      /** Change Note */
+      change_note?: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Created By */
+      created_by: string
+      /** Entity Key */
+      entity_key: string
+      /** Html */
+      html: string
+      /** Html Hash */
+      html_hash: string
+      /** Id */
+      id: string
+      /** Published At */
+      published_at?: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'draft' | 'published' | 'archived'
+      /** Version */
+      version: number
+      /** Workspace Id */
+      workspace_id: string | null
     }
     /** QualityArtifactContent */
     QualityArtifactContent: {
@@ -8743,6 +8963,105 @@ export interface operations {
       }
     }
   }
+  preview_context_api_studio_agent_tools_workspaces__workspace_id__preview_context_get: {
+    parameters: {
+      query?: {
+        job_id?: string | null
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewContextResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_preview_panel_api_studio_agent_tools_workspaces__workspace_id__preview_panel_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewPanelStateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_preview_panel_draft_api_studio_agent_tools_workspaces__workspace_id__preview_panel_draft_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PreviewPanelDraftRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewPanelVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_active_revision_api_studio_agent_tools_workspaces__workspace_id__workflow_active_get: {
     parameters: {
       query?: never
@@ -10833,6 +11152,130 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspacePackageUpdateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_state_api_workspaces__workspace_id__preview_panel_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewPanelStateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  archive_api_workspaces__workspace_id__preview_panel_archive_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewPanelStateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  publish_api_workspaces__workspace_id__preview_panel_publish_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewPanelVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_published_api_workspaces__workspace_id__preview_panel_published_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewPanelPublishedResponse']
         }
       }
       /** @description Validation Error */

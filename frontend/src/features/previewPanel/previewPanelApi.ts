@@ -3,31 +3,15 @@
  * （草稿状态 / 发布 / 归档）。发布与归档永远是人工动作——后端在
  * reject_studio_agent_scope 上钉死（STUDIO-AGENT-001）。
  *
- * 类型说明：PreviewPanelVersion 等接口手写镜像后端 pydantic 契约
- * （server/app/routes/studio_agent_preview_contracts.py）——#328 合并时
- * frontend/src/generated/api.ts 尚未再生（生成物由集成方统一更新），
- * api.ts 再生后这里应切换为 components['schemas'] 派生。
+ * 类型全部从 frontend/src/generated/api.ts 派生（#328 集成时再生成后切换）。
  */
+import type { components } from '../../generated/api'
 import { api } from '../../api/core'
 
-export interface PreviewPanelVersion {
-  id: string
-  workspace_id: string | null
-  entity_key: string
-  version: number
-  status: 'draft' | 'published' | 'archived'
-  html: string
-  html_hash: string
-  created_by: string
-  change_note: string | null
-  created_at: string
-  published_at: string | null
-}
-
-export interface PreviewPanelState {
-  published: PreviewPanelVersion | null
-  draft: PreviewPanelVersion | null
-}
+export type PreviewPanelVersion =
+  components['schemas']['PreviewPanelVersionResponse']
+export type PreviewPanelState =
+  components['schemas']['PreviewPanelStateResponse']
 
 function panelUrl(workspaceId: string, suffix: string): string {
   return `/api/workspaces/${encodeURIComponent(workspaceId)}/preview-panel${suffix}`
@@ -37,7 +21,7 @@ function panelUrl(workspaceId: string, suffix: string): string {
 export async function fetchPublishedPreviewPanel(
   workspaceId: string
 ): Promise<PreviewPanelVersion | null> {
-  const payload = await api<{ published: PreviewPanelVersion | null }>(
+  const payload = await api<{ published?: PreviewPanelVersion | null }>(
     panelUrl(workspaceId, '/published')
   )
   // 防御：异常代理/旧后端可能回空对象——按「未发布」回落，不让 undefined
