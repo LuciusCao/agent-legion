@@ -23,6 +23,7 @@ from .quality_replays import create_quality_replays_router
 from .skill_directories import create_skill_directories_router
 from .skills import create_skills_router
 from .studio_agent_context import create_studio_agent_context_router
+from .studio_agent_job_tools import create_studio_agent_job_tools_router
 from .studio_agent_tokens import create_studio_agent_tokens_router
 from .studio_agent_tools import create_studio_agent_tools_router
 from .studio_agents_admin import create_studio_agents_admin_router
@@ -127,6 +128,13 @@ def create_router(deps: RouterDeps) -> APIRouter:
     # authoring + reject_studio_agent_scope guards inside the router.
     secured(create_preview_panels_router(deps.job_db, deps.settings))
     secured(create_studio_agent_tools_router(deps.job_db, deps.settings))
+    # Job diagnosis tools (#329): read-only observation endpoints; the router
+    # carries require_studio_agent_scope + workspace binding guards itself.
+    secured(
+        create_studio_agent_job_tools_router(
+            deps.job_db, deps.settings, object_store=deps.job_artifact_objects
+        )
+    )
     secured(create_studio_agent_context_router(deps.job_db))
     secured(create_studio_agent_tokens_router(deps.job_db))
     if deps.studio_chat_service is not None:

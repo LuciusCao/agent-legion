@@ -1027,6 +1027,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent/tools/chat-sessions/{session_id}/job-context': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Job Context */
+    get: operations['get_job_context_api_studio_agent_tools_chat_sessions__session_id__job_context_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/skills/{skill_key}': {
     parameters: {
       query?: never
@@ -1088,6 +1105,91 @@ export interface paths {
     get?: never
     /** Save Agent Definition Draft */
     put: operations['save_agent_definition_draft_api_studio_agent_tools_workspaces__workspace_id__agent_definitions__agent_id__draft_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/jobs': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Jobs */
+    get: operations['list_jobs_api_studio_agent_tools_workspaces__workspace_id__jobs_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/jobs/compare': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Compare Jobs */
+    get: operations['compare_jobs_api_studio_agent_tools_workspaces__workspace_id__jobs_compare_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/jobs/{job_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Job Detail */
+    get: operations['get_job_detail_api_studio_agent_tools_workspaces__workspace_id__jobs__job_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Artifact */
+    get: operations['read_artifact_api_studio_agent_tools_workspaces__workspace_id__jobs__job_id__artifacts__artifact_name__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/jobs/{job_id}/logs': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Node Logs */
+    get: operations['get_node_logs_api_studio_agent_tools_workspaces__workspace_id__jobs__job_id__logs_get']
+    put?: never
     post?: never
     delete?: never
     options?: never
@@ -5283,6 +5385,15 @@ export interface components {
       /** Workflow Key */
       workflow_key?: string | null
     }
+    /** StudioAgentArtifactResponse */
+    StudioAgentArtifactResponse: {
+      /** Content */
+      content: string
+      /** Name */
+      name: string
+      /** Truncated */
+      truncated: boolean
+    }
     /**
      * StudioAgentDetection
      * @description Response-only probe status for one catalog agent (#332).
@@ -5294,6 +5405,173 @@ export interface components {
       path?: string | null
       /** Version */
       version?: string | null
+    }
+    /** StudioAgentJobCompareNode */
+    StudioAgentJobCompareNode: {
+      /** Changed */
+      changed: boolean
+      /** Error A */
+      error_a: string
+      /** Error B */
+      error_b: string
+      /** Node Key */
+      node_key: string
+      /** Status A */
+      status_a: string
+      /** Status B */
+      status_b: string
+    }
+    /** StudioAgentJobCompareResponse */
+    StudioAgentJobCompareResponse: {
+      job_a: components['schemas']['StudioAgentJobView']
+      job_b: components['schemas']['StudioAgentJobView']
+      /** Nodes */
+      nodes: components['schemas']['StudioAgentJobCompareNode'][]
+      summary: components['schemas']['StudioAgentJobCompareSummary']
+    }
+    /** StudioAgentJobCompareSummary */
+    StudioAgentJobCompareSummary: {
+      /** Newly Failed */
+      newly_failed: string[]
+      /** Nodes Changed */
+      nodes_changed: number
+      /** Recovered */
+      recovered: string[]
+    }
+    /**
+     * StudioAgentJobContextResponse
+     * @description The session-bound context payload: which workspace/job the diagnosis
+     *     conversation operates on, the focus node (explicit or the job's active
+     *     one), the full job detail, and other jobs' recent failures on the focus
+     *     node (the flaky-or-new signal).
+     */
+    StudioAgentJobContextResponse: {
+      /** Focus Node Key */
+      focus_node_key: string | null
+      job: components['schemas']['StudioAgentJobDetail']
+      /** Recent Failures */
+      recent_failures: components['schemas']['StudioAgentRecentFailure'][]
+      /** Session Id */
+      session_id: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** StudioAgentJobDetail */
+    StudioAgentJobDetail: {
+      /** Artifacts */
+      artifacts: string[]
+      job: components['schemas']['StudioAgentJobView']
+      /** Nodes */
+      nodes: components['schemas']['StudioAgentJobNode'][]
+      /** Runs */
+      runs: components['schemas']['StudioAgentJobRun'][]
+      /** Suggested Actions */
+      suggested_actions: components['schemas']['StudioAgentSuggestedAction'][]
+    }
+    /** StudioAgentJobListResponse */
+    StudioAgentJobListResponse: {
+      /** Jobs */
+      jobs: components['schemas']['StudioAgentJobView'][]
+      /** Limit */
+      limit: number
+      /** Returned */
+      returned: number
+    }
+    /** StudioAgentJobLogsResponse */
+    StudioAgentJobLogsResponse: {
+      /** Error Message */
+      error_message: string
+      /** Job Id */
+      job_id: string
+      /** Log */
+      log: string
+      /** Node Key */
+      node_key: string
+      /** Run Id */
+      run_id: number
+      /** Status */
+      status: string
+      /** Truncated */
+      truncated: boolean
+    }
+    /** StudioAgentJobNode */
+    StudioAgentJobNode: {
+      /** Agent Id */
+      agent_id: string | null
+      /** Capability */
+      capability: string
+      /** Error Message */
+      error_message: string
+      /** Executor Kind */
+      executor_kind: string | null
+      /** Inputs */
+      inputs: string[]
+      /** Label */
+      label: string
+      /** Node Key */
+      node_key: string
+      /** Outputs */
+      outputs: string[]
+      /** Status */
+      status: string
+    }
+    /** StudioAgentJobRun */
+    StudioAgentJobRun: {
+      /** Error Message */
+      error_message: string
+      /** Finished At */
+      finished_at: string | null
+      /** Has Log */
+      has_log: boolean
+      /** Id */
+      id: number
+      /** Node Key */
+      node_key: string
+      /** Started At */
+      started_at: string | null
+      /** Status */
+      status: string
+    }
+    /** StudioAgentJobSummaryNode */
+    StudioAgentJobSummaryNode: {
+      /** Error Message */
+      error_message: string
+      /** Label */
+      label: string
+      /** Node Key */
+      node_key: string
+      /** Status */
+      status: string
+    }
+    /**
+     * StudioAgentJobView
+     * @description Per-job summary used by list/detail/compare/context responses.
+     */
+    StudioAgentJobView: {
+      /** Active Node Key */
+      active_node_key: string | null
+      /** Completed Nodes */
+      completed_nodes: number
+      /** Created At */
+      created_at: string | null
+      /** Error Summary */
+      error_summary: string
+      /** Id */
+      id: string
+      /** Is Workflow Outdated */
+      is_workflow_outdated: boolean
+      /** Node Summaries */
+      node_summaries: components['schemas']['StudioAgentJobSummaryNode'][]
+      /** Outcome */
+      outcome: string
+      /** Status */
+      status: string
+      /** Title */
+      title: string
+      /** Total Nodes */
+      total_nodes: number
+      /** Updated At */
+      updated_at: string | null
     }
     /**
      * StudioAgentNodeCodeDraftRequest
@@ -5308,6 +5586,19 @@ export interface components {
       code: string
       /** Expected Capability */
       expected_capability?: string | null
+    }
+    /** StudioAgentRecentFailure */
+    StudioAgentRecentFailure: {
+      /** Error Message */
+      error_message: string
+      /** Failure Category */
+      failure_category: string
+      /** Finished At */
+      finished_at: string | null
+      /** Job Id */
+      job_id: string
+      /** Node Key */
+      node_key: string
     }
     /** StudioAgentRegistryEntry */
     StudioAgentRegistryEntry: {
@@ -5355,6 +5646,23 @@ export interface components {
       agents?: components['schemas']['StudioAgentRegistryEntry'][]
       /** Api Base */
       api_base: string
+    }
+    /**
+     * StudioAgentSuggestedAction
+     * @description A suggestion payload the UI turns into a human-confirmation card; the
+     *     mutation itself always runs through the host session (STUDIO-AGENT-001).
+     */
+    StudioAgentSuggestedAction: {
+      /** Action */
+      action: string
+      /** Job Id */
+      job_id: string
+      /** Label */
+      label: string
+      /** Node Key */
+      node_key: string
+      /** Requires Confirmation */
+      requires_confirmation: boolean
     }
     /**
      * StudioAgentTokenEntry
@@ -8686,6 +8994,40 @@ export interface operations {
       }
     }
   }
+  get_job_context_api_studio_agent_tools_chat_sessions__session_id__job_context_get: {
+    parameters: {
+      query: {
+        job_id: string
+        node_key?: string | null
+      }
+      header?: never
+      path: {
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentJobContextResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_skill_api_studio_agent_tools_skills__skill_key__get: {
     parameters: {
       query?: {
@@ -8808,6 +9150,174 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['AgentVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_jobs_api_studio_agent_tools_workspaces__workspace_id__jobs_get: {
+    parameters: {
+      query?: {
+        status?: string | null
+        limit?: number
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentJobListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  compare_jobs_api_studio_agent_tools_workspaces__workspace_id__jobs_compare_get: {
+    parameters: {
+      query: {
+        job_id_a: string
+        job_id_b: string
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentJobCompareResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_job_detail_api_studio_agent_tools_workspaces__workspace_id__jobs__job_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        job_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentJobDetail']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_artifact_api_studio_agent_tools_workspaces__workspace_id__jobs__job_id__artifacts__artifact_name__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        job_id: string
+        artifact_name: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentArtifactResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_node_logs_api_studio_agent_tools_workspaces__workspace_id__jobs__job_id__logs_get: {
+    parameters: {
+      query?: {
+        node_key?: string | null
+        run_id?: number | null
+      }
+      header?: never
+      path: {
+        workspace_id: string
+        job_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentJobLogsResponse']
         }
       }
       /** @description Validation Error */

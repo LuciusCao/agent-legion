@@ -329,3 +329,13 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/329
   ceiling: 156
+- check: architecture.file_budget
+  path: server/app/routes/__init__.py
+  reason: Issue 329 mounts the job diagnosis observation router in the route
+    assembly (one import + one secured() call, three effective lines past the
+    baseline ceiling 137). The file is the single mount point for every
+    feature router; the durable fix is splitting the assembly per domain, at
+    which point this exemption goes stale.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/329
+  ceiling: 140
