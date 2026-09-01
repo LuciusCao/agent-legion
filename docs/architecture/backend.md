@@ -108,7 +108,7 @@ server/app/
 | GET | `/agent-register-tokens` | `list_register_tokens` | routes/agent_register_tokens.py |
 | DELETE | `/agent-register-tokens/{token_id}` | `delete_register_token` | routes/agent_register_tokens.py |
 | POST | `/agent-executions/claim` | `claim` | routes/agent_worker_claims.py |
-| POST | `/agent-executions/{execution_id}/heartbeat` | `heartbeat` | routes/agent_worker_claims.py |
+| POST | `/agent-executions/{execution_id}/heartbeat` | `heartbeat` | routes/agent_worker_heartbeat.py |
 | GET | `/agent-workers/self/metrics` | `get_worker_metrics` | routes/agent_worker_metrics.py |
 | POST | `/agent-workers/register` | `register` | routes/agent_workers.py |
 | GET | `/agent-workers/self` | `get_worker_self` | routes/agent_workers.py |
