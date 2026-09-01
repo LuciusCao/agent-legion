@@ -67,6 +67,7 @@ target-version = "py311"
 exclude = [
   ".uv-cache",
   ".venv",
+  ".tower",
   "frontend/dist",
   "frontend/node_modules",
 ]

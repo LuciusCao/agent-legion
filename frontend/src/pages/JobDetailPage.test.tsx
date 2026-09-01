@@ -343,9 +343,11 @@ describe('JobDetailPage', () => {
     }
   )
 
-  it('reloads questions.json when its producer node completes', async () => {
+  it('re-inits the builtin question bundle when its producer node completes', async () => {
+    // #328 后产物刷新契约：面板在沙箱 iframe 内运行，节点状态翻转时宿主重发
+    // init 消息，bundle 重取数据（bundle 内的重取行为由 questionPanel.test.ts
+    // 覆盖；jsdom 不执行 srcDoc 脚本）。
     let detailRequests = 0
-    let artifactRequests = 0
     const fetchMock = vi.fn().mockImplementation((url: string) => {
       if (url === '/api/jobs/j1') {
         detailRequests += 1
@@ -372,42 +374,42 @@ describe('JobDetailPage', () => {
           }),
         })
       }
-      if (url === '/api/jobs/j1/artifacts/questions.json') {
-        artifactRequests += 1
-        if (artifactRequests === 1) {
-          return Promise.resolve({
-            ok: false,
-            status: 404,
-            text: async () => JSON.stringify({ detail: 'Artifact not found' }),
-          })
-        }
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            content: JSON.stringify({
-              questions: [
-                {
-                  question_id: 'Q100',
-                  normalized: { stem: '<p>Generated later</p>' },
-                },
-              ],
-            }),
-          }),
-        })
-      }
       return Promise.resolve({ ok: true, json: async () => ({}) })
     })
     vi.stubGlobal('fetch', fetchMock)
 
     renderPage()
-    expect(await screen.findByText('Artifact not found')).toBeInTheDocument()
+    const host = await screen.findByTestId('preview-panel-host')
+    const iframe = host.querySelector('iframe')
+    expect(iframe).not.toBeNull()
+    const postSpy = vi.spyOn(iframe!.contentWindow!, 'postMessage')
 
+    // 面板 ready → 宿主下发首个 init。
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { source: 'agent-legion-preview-panel', type: 'ready' },
+          source: iframe!.contentWindow,
+        })
+      )
+    })
+    expect(
+      postSpy.mock.calls.filter(
+        ([data]) => (data as { type?: string }).type === 'init'
+      )
+    ).toHaveLength(1)
+
+    // 轮询把产出节点翻成 completed → 宿主重发 init 让 bundle 刷新。
     await act(async () => {
       vi.advanceTimersByTime(5000)
     })
 
-    expect(await screen.findByText('Generated later')).toBeInTheDocument()
-    expect(artifactRequests).toBe(2)
+    await waitFor(() => {
+      const inits = postSpy.mock.calls.filter(
+        ([data]) => (data as { type?: string }).type === 'init'
+      )
+      expect(inits).toHaveLength(2)
+    })
   })
 
   it('does not poll detail when job is completed', async () => {
@@ -696,33 +698,20 @@ describe('JobDetailPage', () => {
             }),
           })
         }
-        if (url === '/api/jobs/j1/artifacts/questions.json') {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              content: JSON.stringify({
-                questions: [
-                  {
-                    question_id: 'Q1',
-                    normalized: { stem: '<p>Question stem</p>' },
-                  },
-                ],
-              }),
-            }),
-          })
-        }
-        if (url === '/api/jobs/j1/artifacts/comprehension_info.json') {
-          return Promise.reject(new Error('not found'))
-        }
         return Promise.resolve({ ok: true, json: async () => ({}) })
       })
     )
 
     renderPage()
-    await waitFor(() => {
-      expect(screen.getByText('Question stem')).toBeInTheDocument()
-    })
-    // issue #11：question 任务的结构化面板在上，通用产物预览在下。
+    // #328：question 任务的结构化面板是沙箱 iframe 里的官方内置 bundle
+    //（jsdom 不执行 srcDoc 脚本，bundle 行为由 questionPanel.test.ts 覆盖）。
+    const host = await screen.findByTestId('preview-panel-host')
+    const iframe = host.querySelector('iframe')
+    expect(iframe?.getAttribute('sandbox')).toBe('allow-scripts')
+    expect(iframe?.getAttribute('srcdoc')).toContain(
+      'agent-legion-preview-panel'
+    )
+    // issue #11：结构化面板在上，通用产物预览在下。
     expect(screen.getByTestId('artifact-preview-panel')).toBeInTheDocument()
     expect(screen.getByText('question.json')).toBeInTheDocument()
   })

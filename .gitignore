@@ -40,3 +40,6 @@ htmlcov_backend/
 .quick-gate.lock/
 .pytest-aff-index.json
 .pytest-aff-coverage*
+
+# Tower multi-agent workspace (comms state + nested mission worktrees)
+.tower/

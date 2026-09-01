@@ -1,13 +1,15 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { validateSkillPath } from '../api'
+import { fetchSkillDirectories, validateSkillPath } from '../api'
 import { getInstanceSettings } from '../api/instanceSettings'
 import type { InstanceSettingsResponse } from '../api/instanceSettings'
 import { TestQueryProvider } from '../testing/testQueryClient'
+import type { SkillValidateResponse } from '../types'
 import { SkillSelector } from './SkillSelector'
 
 vi.mock('../api', () => ({
   validateSkillPath: vi.fn(),
+  fetchSkillDirectories: vi.fn(),
 }))
 
 vi.mock('../api/instanceSettings', () => ({
@@ -15,6 +17,7 @@ vi.mock('../api/instanceSettings', () => ({
 }))
 
 const mockValidate = vi.mocked(validateSkillPath)
+const mockFetchDirectories = vi.mocked(fetchSkillDirectories)
 const mockGetSettings = vi.mocked(getInstanceSettings)
 
 function settingsWithRoot(skillsRoot: string): InstanceSettingsResponse {
@@ -34,6 +37,10 @@ describe('SkillSelector', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockGetSettings.mockResolvedValue(settingsWithRoot('~/.agents/skills'))
+    mockFetchDirectories.mockResolvedValue({
+      workspace_id: 'ws-1',
+      directories: [],
+    })
   })
 
   it('fills the skill key and shows tags after a successful validation', async () => {
@@ -188,5 +195,191 @@ describe('SkillSelector', () => {
     fireEvent.click(await screen.findByRole('option', { name: 'v1.1.0' }))
 
     expect(await screen.findByText(/此处选择仅作参考/)).toBeInTheDocument()
+  })
+
+  it('offers the workspace skill directories as datalist candidates', async () => {
+    mockFetchDirectories.mockResolvedValue({
+      workspace_id: 'ws-1',
+      directories: ['review-questions', 'write-script'],
+    })
+    const { container } = renderSelector()
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(
+          'datalist#skill-directory-options option[value="write-script"]'
+        )
+      ).not.toBeNull()
+    )
+    expect(
+      container.querySelector(
+        'datalist#skill-directory-options option[value="review-questions"]'
+      )
+    ).not.toBeNull()
+  })
+
+  it('validates immediately when a datalist candidate is picked', async () => {
+    mockFetchDirectories.mockResolvedValue({
+      workspace_id: 'ws-1',
+      directories: ['write-script'],
+    })
+    mockValidate.mockResolvedValue({
+      valid: true,
+      path: '/abs/skill',
+      skill_key: 'ns/write-script',
+      tags: [],
+      latest_tag: null,
+      locked_ref: null,
+    })
+    const onChange = vi.fn()
+    const { container } = renderSelector(onChange)
+
+    const input = screen.getByLabelText('Skill 目录名')
+    await waitFor(() => expect(input).toBeEnabled())
+    // 等候选加载完成（datalist option 出现即组件已拿到 directories）。
+    await waitFor(() =>
+      expect(
+        container.querySelector(
+          'datalist#skill-directory-options option[value="write-script"]'
+        )
+      ).not.toBeNull()
+    )
+    fireEvent.change(input, { target: { value: 'write-script' } })
+
+    // 选中候选即触发校验回填，无需点「校验」按钮。
+    await waitFor(() =>
+      expect(mockValidate).toHaveBeenCalledWith(
+        '~/.agents/skills/ws-1/write-script'
+      )
+    )
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith('ns/write-script')
+    )
+  })
+
+  it('does not auto-validate typed text that matches no candidate', async () => {
+    mockFetchDirectories.mockResolvedValue({
+      workspace_id: 'ws-1',
+      directories: ['write-script'],
+    })
+    const { container } = renderSelector()
+
+    const input = screen.getByLabelText('Skill 目录名')
+    await waitFor(() => expect(input).toBeEnabled())
+    await waitFor(() =>
+      expect(
+        container.querySelector(
+          'datalist#skill-directory-options option[value="write-script"]'
+        )
+      ).not.toBeNull()
+    )
+    fireEvent.change(input, { target: { value: 'write' } })
+
+    expect(mockValidate).not.toHaveBeenCalled()
+  })
+
+  it('ignores a stale validation response when a newer pick is in flight', async () => {
+    // 前缀关联候选（review / review-questions）快速连选：A 先发、B 后发，
+    // B 先返回、A 晚返回——A 是过期响应，不得覆盖 B 的回填（codex P1 on #336）。
+    mockFetchDirectories.mockResolvedValue({
+      workspace_id: 'ws-1',
+      directories: ['review', 'review-questions'],
+    })
+    let resolveA!: (value: SkillValidateResponse) => void
+    let resolveB!: (value: SkillValidateResponse) => void
+    mockValidate
+      .mockImplementationOnce(
+        () =>
+          new Promise<SkillValidateResponse>((resolve) => {
+            resolveA = resolve
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<SkillValidateResponse>((resolve) => {
+            resolveB = resolve
+          })
+      )
+    const onChange = vi.fn()
+    const { container } = renderSelector(onChange)
+
+    const input = screen.getByLabelText('Skill 目录名')
+    await waitFor(() => expect(input).toBeEnabled())
+    await waitFor(() =>
+      expect(
+        container.querySelector(
+          'datalist#skill-directory-options option[value="review-questions"]'
+        )
+      ).not.toBeNull()
+    )
+    fireEvent.change(input, { target: { value: 'review' } })
+    fireEvent.change(input, { target: { value: 'review-questions' } })
+    await waitFor(() => expect(mockValidate).toHaveBeenCalledTimes(2))
+
+    // 后选的 B 先返回：正常回填。
+    resolveB({
+      valid: true,
+      path: '/abs/review-questions',
+      skill_key: 'ws-1/review-questions',
+      tags: [],
+      latest_tag: null,
+      locked_ref: null,
+    })
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith('ws-1/review-questions')
+    )
+
+    // 先选的 A 晚返回（且为失败）：过期响应不得二次回填、不得弹错误、
+    // 也不得把按钮卡回「校验中」。
+    await act(async () => {
+      resolveA({ valid: false, path: '/abs/review', error: 'stale failure' })
+    })
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '校验' })).toBeInTheDocument()
+  })
+
+  it('invalidates an in-flight validation when the input keeps being edited', async () => {
+    // 选中候选 review（校验在飞）后继续手打到非候选值 review-custom：
+    // 迟到响应不得把 review 的 key 回填到当前输入之上（codex P1 on #341）。
+    mockFetchDirectories.mockResolvedValue({
+      workspace_id: 'ws-1',
+      directories: ['review'],
+    })
+    let resolveA!: (value: SkillValidateResponse) => void
+    mockValidate.mockImplementationOnce(
+      () =>
+        new Promise<SkillValidateResponse>((resolve) => {
+          resolveA = resolve
+        })
+    )
+    const onChange = vi.fn()
+    const { container } = renderSelector(onChange)
+
+    const input = screen.getByLabelText('Skill 目录名')
+    await waitFor(() => expect(input).toBeEnabled())
+    await waitFor(() =>
+      expect(
+        container.querySelector(
+          'datalist#skill-directory-options option[value="review"]'
+        )
+      ).not.toBeNull()
+    )
+    fireEvent.change(input, { target: { value: 'review' } })
+    await waitFor(() => expect(mockValidate).toHaveBeenCalledTimes(1))
+    fireEvent.change(input, { target: { value: 'review-custom' } })
+    expect(mockValidate).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      resolveA({
+        valid: true,
+        path: '/abs/review',
+        skill_key: 'ws-1/review',
+        tags: [],
+        latest_tag: null,
+        locked_ref: null,
+      })
+    })
+    expect(onChange).not.toHaveBeenCalled()
   })
 })

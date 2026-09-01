@@ -23,8 +23,12 @@ export const extraQueryKeys = {
     ['workspaceRuntimeModels', workspaceId] as const,
   tokenUsagePricing: () => ['tokenUsagePricing'] as const,
   instanceSettings: () => ['instanceSettings'] as const,
+  // SkillSelector datalist 的候选目录（<skills_root>/<workspaceId>/ 下目录名，#327）。
+  skillDirectories: (workspaceId: string) => k('skillDirectories', workspaceId),
   studioAgents: () => ['studioAgents'] as const,
   connections: () => ['connections'] as const,
+  // 全局设置「基础设施连接」只读展示（#335）。
+  infraConnections: () => ['infraConnections'] as const,
   connectionTypes: () => ['connectionTypes'] as const,
   // SettingsPage 与 WorkspaceMainPage 经同一 key 共享工作流定义缓存。
   workflowDefinition: (key: string) => k('workflowDefinition', key),

@@ -7,13 +7,21 @@ import {
   type WorkflowYamlNode,
   type WorkflowYamlObject,
 } from '../shared/workflowStudioYamlDraft.parse'
+import {
+  parseWorkflowExecutionDefaults,
+  type WorkflowYamlExecutionDefaults,
+} from '../shared/workflowStudioYamlDraft.executionDefaults'
 import { normalizeNodeSkill } from '../shared/workflowStudioYamlDraft.skill'
+import { mergeNodeExecution } from './workflowStudioExecutionWarnings'
 
 /** 草稿 YAML → WorkflowDefinitionRecord：让画布/inspector 直接以草稿为数据
  * 源（近实时随 draftYaml 重算）。解析失败（编辑中途的非法 YAML）返回 null，
  * 由调用方回退已发布 workflow 并给出低噪提示，不得报错卡死或清空画布。
  * 字段归一化与 ghostDraftNodeDetails 一致：显式类型 start/agent/approval
- * 各自还原，遗留 `type: node` 与缺失一律按 code（同后端 loader）。 */
+ * 各自还原，遗留 `type: node` 与缺失一律按 code（同后端 loader）。
+ * 节点 execution 还原为有效值：顶层 execution 默认合并进非 start 节点
+ * （节点值优先，#333——对齐后端 loader，published 快照同形），使画布的
+ * 执行配置警报（workflowStudioExecutionWarnings）直接读节点值即可。 */
 export function workflowYamlToDefinitionRecord(
   rawYaml: string
 ): WorkflowDefinitionRecord | null {
@@ -32,11 +40,12 @@ export function workflowYamlToDefinitionRecord(
   if (rawNodes.some(([, node]) => !isPlainObject(node))) return null
   const rawEdges = parsed.edges ?? []
   if (rawEdges.some((edge) => !isPlainObject(edge))) return null
+  const defaults = parseWorkflowExecutionDefaults(rawYaml)
   return {
     key: parsed.key ?? '',
     label: parsed.label ?? parsed.key ?? '',
     intake: mapIntake(parsed.intake),
-    nodes: rawNodes.map(([key, node]) => mapNode(key, node)),
+    nodes: rawNodes.map(([key, node]) => mapNode(key, node, defaults)),
     edges: rawEdges
       .filter((edge) => edge.from && edge.to)
       .map((edge) => ({
@@ -57,8 +66,13 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function mapNode(key: string, node: WorkflowYamlNode): WorkflowNodeRecord {
+function mapNode(
+  key: string,
+  node: WorkflowYamlNode,
+  defaults: WorkflowYamlExecutionDefaults
+): WorkflowNodeRecord {
   const skill = normalizeNodeSkill(node.skill)
+  const execution = mergeNodeExecution(node, defaults)
   return {
     key,
     label: node.label ?? key,
@@ -69,16 +83,7 @@ function mapNode(key: string, node: WorkflowYamlNode): WorkflowNodeRecord {
     ...(node.terminal?.outcome
       ? { terminal: { outcome: node.terminal.outcome } }
       : {}),
-    ...(node.execution
-      ? {
-          execution: {
-            provider: node.execution.provider ?? '',
-            model: node.execution.model ?? '',
-            thinking: node.execution.thinking ?? '',
-            prompt: node.execution.prompt ?? '',
-          },
-        }
-      : {}),
+    ...(execution ? { execution } : {}),
     ...(skill ? { skill } : {}),
     ...(node.type === 'start'
       ? {

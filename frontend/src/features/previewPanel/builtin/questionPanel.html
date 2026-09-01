@@ -1,0 +1,1279 @@
+<!doctype html>
+<!--
+  官方内置预览面板示例（issue #328）：question 类 workspace 的默认左栏体验，
+  同时是用户二开的参考模板。单文件 HTML+CSS+JS，运行于
+  <iframe sandbox="allow-scripts">（opaque origin，无 cookie/存储/宿主 DOM），
+  只经只读桥（listArtifacts/readArtifact/getJobDetail）取数。
+  数据源与 React 版 QuestionContentPanel 相同：questions.json +
+  comprehension_info.json（回落 key_info/possible_errors 的 reviewed→raw 链）
+  + 两个 review report，gating 取 getJobDetail().nodes 的节点状态。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        --pp-bg: #fafafa;
+        --pp-surface: #ffffff;
+        --pp-text: #1a1c1e;
+        --pp-text-secondary: #43474e;
+        --pp-accent: #000000;
+        --pp-on-accent: #ffffff;
+        --pp-error: #ba1a1a;
+        --pp-border: #c3c6cf;
+        --pp-radius: 4px;
+        --pp-font-family: Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 4px;
+        background: var(--pp-bg);
+        color: var(--pp-text);
+        font-family: var(--pp-font-family);
+        font-size: 14px;
+        line-height: 1.6;
+      }
+      .card {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: var(--pp-radius);
+        padding: 12px 16px;
+        margin-bottom: 12px;
+      }
+      h2.section-title {
+        margin: 0 0 8px;
+        font-size: 15px;
+        font-weight: 500;
+      }
+      .empty {
+        color: var(--pp-text-secondary);
+      }
+      .chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        border: 1px solid var(--pp-border);
+        border-radius: 999px;
+        background: var(--pp-surface);
+        color: var(--pp-text);
+        padding: 2px 10px;
+        font-size: 13px;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .chip.selected {
+        border-color: var(--pp-accent);
+        background: var(--pp-bg);
+      }
+      .chip-index {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--pp-accent);
+        color: var(--pp-on-accent);
+        font-size: 11px;
+      }
+      .chips-count {
+        color: var(--pp-text-secondary);
+        font-size: 12px;
+        margin-left: 8px;
+      }
+      .detail-panel {
+        margin-top: 10px;
+        display: grid;
+        gap: 8px;
+      }
+      .detail-card {
+        border: 1px solid var(--pp-border);
+        border-radius: var(--pp-radius);
+        padding: 10px 12px;
+      }
+      .detail-card-header {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 4px;
+      }
+      .detail-id {
+        color: var(--pp-text-secondary);
+        font-size: 12px;
+      }
+      .badge {
+        display: inline-block;
+        border-radius: 3px;
+        padding: 0 6px;
+        font-size: 12px;
+        margin-right: 4px;
+      }
+      .badge-given {
+        background: var(--pp-accent);
+        color: var(--pp-on-accent);
+      }
+      .badge-hidden {
+        background: var(--pp-text-secondary);
+        color: var(--pp-on-accent);
+      }
+      .badge-answer {
+        border: 1px solid var(--pp-accent);
+        color: var(--pp-accent);
+        margin: 2px 4px 2px 0;
+      }
+      .badge-error-answer {
+        border-color: var(--pp-error);
+        color: var(--pp-error);
+      }
+      .detail-section {
+        margin-top: 6px;
+        font-size: 13px;
+      }
+      .detail-section strong {
+        font-weight: 500;
+        margin-right: 6px;
+      }
+      .tag {
+        display: inline-block;
+        border: 1px solid var(--pp-border);
+        border-radius: 3px;
+        padding: 0 6px;
+        margin: 2px 4px 2px 0;
+        font-size: 12px;
+      }
+      .option-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      .option-item {
+        padding: 4px 0;
+      }
+      .option-item.correct {
+        font-weight: 500;
+      }
+      .option-item.correct .option-label {
+        color: var(--pp-accent);
+      }
+      .option-label {
+        margin-right: 6px;
+      }
+      .blank-row {
+        margin: 4px 0;
+      }
+      .review-mark {
+        font-size: 12px;
+        margin-left: 4px;
+      }
+      .review-approved {
+        color: #146c2e;
+      }
+      .review-rejected {
+        color: var(--pp-error);
+      }
+      .review-needs_revision {
+        color: #8a5a00;
+      }
+      .review-reason {
+        font-size: 12px;
+        color: var(--pp-text-secondary);
+        margin-top: 4px;
+      }
+      .analysis-group {
+        margin-bottom: 8px;
+      }
+      .step-title {
+        margin: 8px 0 4px;
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .socratic {
+        margin-top: 6px;
+        border-left: 3px solid var(--pp-border);
+        padding-left: 8px;
+        font-size: 13px;
+        color: var(--pp-text-secondary);
+      }
+      .latex-fallback {
+        font-family: 'Times New Roman', serif;
+        font-style: italic;
+      }
+      /* 题干高亮（对齐旧面板的下划渐变样式） */
+      .highlight {
+        background: linear-gradient(
+          180deg,
+          transparent 60%,
+          rgba(255, 235, 59, 0.85) 60%
+        );
+        color: var(--pp-text);
+        border-radius: 2px;
+        padding: 0 2px;
+      }
+      .highlight-corrected {
+        background: linear-gradient(
+          180deg,
+          transparent 60%,
+          rgba(239, 68, 68, 0.45) 60%
+        );
+        color: var(--pp-text);
+        border-radius: 2px;
+        padding: 0 2px;
+      }
+      .rich-text img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre.raw {
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"><p class="empty">加载题目中...</p></div>
+    <script>
+      ;(function () {
+        'use strict'
+
+        // ---- 只读桥客户端（preview_guide.md 的参考实现，逐字段对应契约） ----
+        var PANEL_SOURCE = 'agent-legion-preview-panel'
+        var HOST_SOURCE = 'agent-legion-preview-host'
+        var seq = 0
+        var pending = {}
+
+        function callBridge(method, params) {
+          return new Promise(function (resolve, reject) {
+            var id = ++seq
+            pending[id] = { resolve: resolve, reject: reject }
+            window.parent.postMessage(
+              {
+                source: PANEL_SOURCE,
+                type: 'request',
+                id: id,
+                method: method,
+                params: params,
+              },
+              '*'
+            )
+          })
+        }
+
+        function postResize() {
+          var height = document.body ? document.body.scrollHeight : 0
+          if (height > 0) {
+            window.parent.postMessage(
+              { source: PANEL_SOURCE, type: 'resize', height: height },
+              '*'
+            )
+          }
+        }
+
+        // ---- 小工具 ----
+        function escapeHtml(text) {
+          return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+        }
+
+        // LaTeX：宿主在 init.assets 里提供 katexCssUrl/katexJsUrl 时懒加载渲染，
+        // 缺失或失败降级为等宽原文（沙箱面板必须能离线自解释）。
+        var katexState = { loading: null }
+
+        function loadKatex(assets) {
+          if (katexState.loading) return katexState.loading
+          katexState.loading = new Promise(function (resolve) {
+            if (!assets || !assets.katexJsUrl || !assets.katexCssUrl) {
+              resolve(null)
+              return
+            }
+            var link = document.createElement('link')
+            link.rel = 'stylesheet'
+            link.href = assets.katexCssUrl
+            document.head.appendChild(link)
+            var script = document.createElement('script')
+            script.src = assets.katexJsUrl
+            script.onload = function () {
+              resolve(window.katex || null)
+            }
+            script.onerror = function () {
+              resolve(null)
+            }
+            document.head.appendChild(script)
+          })
+          return katexState.loading
+        }
+
+        function splitLatex(text) {
+          // 与宿主 lib/latex 的分段约定一致：$$…$$ / \[…\] / \(…\) / $…$。
+          var parts = []
+          var pattern =
+            /(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$[^$\n]+?\$)/g
+          var last = 0
+          var match
+          while ((match = pattern.exec(text)) !== null) {
+            if (match.index > last)
+              parts.push({
+                type: 'text',
+                content: text.slice(last, match.index),
+              })
+            var raw = match[0]
+            var display = raw.indexOf('$$') === 0 || raw.indexOf('\\[') === 0
+            var strip = display ? 2 : raw.indexOf('\\(') === 0 ? 2 : 1
+            parts.push({
+              type: 'latex',
+              content: raw.slice(strip, raw.length - strip),
+              display: display,
+            })
+            last = match.index + raw.length
+          }
+          if (last < text.length)
+            parts.push({ type: 'text', content: text.slice(last) })
+          return parts
+        }
+
+        // 富文本：先 HTML 转义，再把 LaTeX 段交给 katex（或降级原文）。
+        function renderLatexParts(parts, displayMode) {
+          return parts
+            .map(function (part) {
+              if (part.type === 'text') return escapeHtml(part.content)
+              if (window.katex) {
+                try {
+                  return window.katex.renderToString(part.content, {
+                    throwOnError: true,
+                    displayMode: displayMode || part.display,
+                  })
+                } catch (err) {
+                  /* 落入下方降级 */
+                }
+              }
+              return (
+                '<span class="latex-fallback">' +
+                escapeHtml(part.content) +
+                '</span>'
+              )
+            })
+            .join('')
+        }
+
+        // ---- 白名单 HTML 消毒（对齐宿主 lib/sanitizeHtml 的 RichText
+        // profile：p/br/strong/em/ul/ol/li/span/div/img 标签集，属性仅
+        // src/alt/referrerpolicy 且 img src 限 http(s)，其余标签 unwrap
+        // 保留子节点——事件属性随属性白名单一律剥除。无外部依赖：bundle 是
+        // 单文件沙箱 HTML，DOMPurify 不可用，这里用 DOMParser 手写等价物。） ----
+        var ALLOWED_TAGS = {
+          p: 1,
+          br: 1,
+          strong: 1,
+          em: 1,
+          ul: 1,
+          ol: 1,
+          li: 1,
+          span: 1,
+          div: 1,
+          img: 1,
+        }
+        var SAFE_URI = /^https?:\/\//i
+
+        function stripTags(html) {
+          // 与 richBlock 同款 inert DOMParser 提取：DOMParser 不加载资源、
+          // 不触发 onerror/onload 事件属性——innerHTML 解析未信内容会在
+          // bundle 上下文执行事件载荷并外发请求（评审 r3 P2）。
+          return (
+            new DOMParser().parseFromString(
+              String(html == null ? '' : html),
+              'text/html'
+            ).body.textContent || ''
+          )
+        }
+
+        // 行内富文本（对齐宿主 RichText inline 模式：剥标签 + LaTeX 分段）。
+        function richInline(text) {
+          return renderLatexParts(splitLatex(stripTags(text)), false)
+        }
+
+        function serializeBlockChildren(node) {
+          var out = ''
+          Array.prototype.forEach.call(node.childNodes, function (child) {
+            if (child.nodeType === 3) {
+              out += renderLatexParts(splitLatex(child.textContent || ''), true)
+              return
+            }
+            if (child.nodeType !== 1) return
+            var tag = child.tagName.toLowerCase()
+            // 不在白名单的标签 unwrap 保留子节点（KEEP_CONTENT 语义）。
+            if (!ALLOWED_TAGS[tag]) {
+              out += serializeBlockChildren(child)
+              return
+            }
+            if (tag === 'br') {
+              out += '<br>'
+              return
+            }
+            if (tag === 'img') {
+              var src = child.getAttribute('src') || ''
+              if (SAFE_URI.test(src)) {
+                out +=
+                  '<img src="' +
+                  escapeHtml(src) +
+                  '" alt="' +
+                  escapeHtml(child.getAttribute('alt') || '') +
+                  '" referrerpolicy="no-referrer">'
+              }
+              return
+            }
+            out +=
+              '<' + tag + '>' + serializeBlockChildren(child) + '</' + tag + '>'
+          })
+          return out
+        }
+
+        // 块级富文本（对齐宿主 sanitizeHtml + renderLatexInHtml：白名单消毒
+        // 后的 HTML 结构保留，文本节点内做 LaTeX 渲染）。
+        function richBlock(html) {
+          var doc = new DOMParser().parseFromString(
+            String(html == null ? '' : html),
+            'text/html'
+          )
+          return serializeBlockChildren(doc.body)
+        }
+
+        // ---- 题干高亮（对齐宿主 lib/questionHighlight 的匹配语义） ----
+        function findLatexRanges(text) {
+          var ranges = []
+          var pattern =
+            /(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$[^$\n]+?\$)/g
+          var match
+          while ((match = pattern.exec(text)) !== null) {
+            ranges.push({
+              start: match.index,
+              end: match.index + match[0].length,
+            })
+          }
+          return ranges
+        }
+
+        function adjustHighlightBoundaries(text, start, end) {
+          // 高亮边界不得切断 LaTeX 段：落入段内时外扩到段边界。
+          var ranges = findLatexRanges(text)
+          var newStart = start
+          var newEnd = end
+          ranges.forEach(function (range) {
+            if (newStart > range.start && newStart < range.end)
+              newStart = Math.min(newStart, range.start)
+            if (newEnd > range.start && newEnd < range.end)
+              newEnd = Math.max(newEnd, range.end)
+          })
+          return { start: newStart, end: newEnd }
+        }
+
+        function findNearestOccurrence(plain, target, nearStart) {
+          var idx = plain.indexOf(target)
+          if (idx === -1) return -1
+          var best = idx
+          var bestDist = Math.abs(idx - nearStart)
+          while ((idx = plain.indexOf(target, idx + 1)) !== -1) {
+            var dist = Math.abs(idx - nearStart)
+            if (dist < bestDist) {
+              bestDist = dist
+              best = idx
+            }
+          }
+          return best
+        }
+
+        function resolveHighlightBounds(plain, item) {
+          var pos = item.content && item.content.position
+          if (
+            !pos ||
+            typeof pos.start !== 'number' ||
+            typeof pos.end !== 'number' ||
+            pos.start < 0 ||
+            pos.end > plain.length ||
+            pos.end <= pos.start
+          ) {
+            return null
+          }
+          var start = pos.start
+          var end = pos.end
+          var corrected = false
+          var target = item.content.text || item.content.derived_text
+          if (target && plain.slice(start, end) !== target) {
+            var found = findNearestOccurrence(plain, target, start)
+            if (found !== -1) {
+              start = found
+              end = found + target.length
+              corrected = true
+            }
+          }
+          var bounds = adjustHighlightBoundaries(plain, start, end)
+          bounds.id = item.key_info_id
+          bounds.corrected = corrected
+          return bounds
+        }
+
+        function buildHighlightedStemParts(stem, items) {
+          var plain = stripTags(stem)
+          if (!plain || items.length === 0) return null
+          var ranges = items
+            .map(function (item) {
+              return resolveHighlightBounds(plain, item)
+            })
+            .filter(Boolean)
+            .sort(function (a, b) {
+              return a.start - b.start
+            })
+          if (ranges.length === 0) return null
+          var merged = []
+          ranges.forEach(function (range) {
+            var last = merged[merged.length - 1]
+            if (last && range.start <= last.end) {
+              last.end = Math.max(last.end, range.end)
+              last.corrected = last.corrected || range.corrected
+              last.ids.push(range.id)
+            } else {
+              merged.push({
+                start: range.start,
+                end: range.end,
+                ids: [range.id],
+                corrected: range.corrected,
+              })
+            }
+          })
+          var parts = []
+          var cursor = 0
+          merged.forEach(function (range) {
+            if (range.start > cursor) {
+              parts.push({
+                type: 'plain',
+                text: plain.slice(cursor, range.start),
+              })
+            }
+            parts.push({
+              type: 'highlight',
+              text: plain.slice(range.start, range.end),
+              ids: range.ids,
+              corrected: range.corrected,
+            })
+            cursor = range.end
+          })
+          if (cursor < plain.length) {
+            parts.push({ type: 'plain', text: plain.slice(cursor) })
+          }
+          return parts
+        }
+
+        // ---- 数据形状适配（镜像宿主 hooks 的提取逻辑） ----
+        function extractFirstQuestion(data) {
+          if (
+            !data ||
+            !Array.isArray(data.questions) ||
+            data.questions.length === 0
+          )
+            return null
+          var first = data.questions[0]
+          return first && typeof first === 'object' && first.normalized
+            ? first.normalized
+            : null
+        }
+
+        function readJsonArtifact(name) {
+          return callBridge('readArtifact', { name: name }).then(
+            function (artifact) {
+              return JSON.parse(artifact.content)
+            }
+          )
+        }
+
+        function readJsonArtifactOrNull(name) {
+          return readJsonArtifact(name).catch(function () {
+            return null
+          })
+        }
+
+        function firstNonNull(names) {
+          var chain = Promise.resolve(null)
+          names.forEach(function (name) {
+            chain = chain.then(function (found) {
+              return found !== null ? found : readJsonArtifactOrNull(name)
+            })
+          })
+          return chain
+        }
+
+        function loadComprehension() {
+          return readJsonArtifactOrNull('comprehension_info.json').then(
+            function (data) {
+              var cd = data && data.comprehension_data
+              if (
+                cd &&
+                Array.isArray(cd.key_info_list) &&
+                cd.key_info_list.length > 0
+              ) {
+                return {
+                  keyInfoList: cd.key_info_list,
+                  possibleErrorList: Array.isArray(cd.possible_error_list)
+                    ? cd.possible_error_list
+                    : [],
+                }
+              }
+              return Promise.all([
+                firstNonNull(['key_info_reviewed.json', 'key_info_raw.json']),
+                firstNonNull([
+                  'possible_errors_reviewed.json',
+                  'possible_errors_raw.json',
+                ]),
+              ]).then(function (results) {
+                var keyInfo = results[0]
+                var possibleErrors = results[1]
+                return {
+                  keyInfoList:
+                    keyInfo && Array.isArray(keyInfo.key_info_list)
+                      ? keyInfo.key_info_list
+                      : [],
+                  possibleErrorList:
+                    possibleErrors &&
+                    Array.isArray(possibleErrors.possible_error_list)
+                      ? possibleErrors.possible_error_list
+                      : [],
+                }
+              })
+            }
+          )
+        }
+
+        function parseReviewDecisions(report, idKey) {
+          var map = {}
+          if (!report || !Array.isArray(report.decisions)) return map
+          report.decisions.forEach(function (item) {
+            if (!item || typeof item !== 'object') return
+            var id = String(item[idKey] || '')
+            if (!id) return
+            var decision = String(item.decision || 'unknown')
+            map[id] = {
+              decision:
+                ['approved', 'rejected', 'needs_revision'].indexOf(decision) >=
+                0
+                  ? decision
+                  : 'unknown',
+              reason: item.reason ? String(item.reason) : '',
+            }
+          })
+          return map
+        }
+
+        // gating：与 pages/jobDetail/questionPreviewManifest.ts 同一声明。
+        var GATES = {
+          keyInfo: { nodeKey: 'generate_key_info', terminal: false },
+          possibleErrors: {
+            nodeKey: 'generate_possible_errors',
+            terminal: false,
+          },
+        }
+        var REVIEW_GATES = {
+          keyInfo: 'review_key_info',
+          possibleErrors: 'review_possible_errors',
+        }
+        var TERMINAL = { completed: true, failed: true }
+
+        function nodeState(detail, nodeKey) {
+          var nodes = (detail && detail.nodes) || []
+          for (var i = 0; i < nodes.length; i++) {
+            if (nodes[i].node_key === nodeKey) return nodes[i].status
+          }
+          return null
+        }
+
+        function gateVisible(detail, gate) {
+          var status = nodeState(detail, gate.nodeKey)
+          if (status === null) return false
+          return gate.terminal ? !!TERMINAL[status] : status === 'completed'
+        }
+
+        // ---- 渲染 ----
+        var state = {
+          selectedKeyInfoId: null,
+          selectedErrorId: null,
+          context: null,
+        }
+
+        function el(tag, className, html) {
+          var node = document.createElement(tag)
+          if (className) node.className = className
+          if (html != null) node.innerHTML = html
+          return node
+        }
+
+        function reviewMark(decision) {
+          if (!decision || decision.decision === 'unknown') return ''
+          var label =
+            decision.decision === 'approved'
+              ? '✓ 已通过'
+              : decision.decision === 'rejected'
+                ? '✗ 已驳回'
+                : '⚠ 待修订'
+          return (
+            '<span class="review-mark review-' +
+            decision.decision +
+            '">' +
+            label +
+            '</span>'
+          )
+        }
+
+        function reviewReason(decision) {
+          if (!decision || !decision.reason) return ''
+          return (
+            '<div class="review-reason">' +
+            escapeHtml(decision.reason) +
+            '</div>'
+          )
+        }
+
+        function truncateLabel(text, max) {
+          text = String(text || '')
+          return text.length > max ? text.slice(0, max) + '…' : text
+        }
+
+        function extractAnswerItems(answer) {
+          if (answer == null) return null
+          if (typeof answer === 'string') return [answer]
+          if (
+            Array.isArray(answer) &&
+            answer.every(function (a) {
+              return typeof a === 'string'
+            })
+          ) {
+            return answer
+          }
+          if (typeof answer === 'object') {
+            if (typeof answer.value === 'string') return [answer.value]
+            if (typeof answer.answer === 'string') return [answer.answer]
+            if (Array.isArray(answer.value)) return answer.value
+            if (Array.isArray(answer.answer)) return answer.answer
+          }
+          return null
+        }
+
+        function render() {
+          var ctx = state.context
+          var root = document.getElementById('app')
+          root.innerHTML = ''
+          if (!ctx || !ctx.question) {
+            root.appendChild(el('p', 'empty', '题目数据尚未生成'))
+            postResize()
+            return
+          }
+          var question = ctx.question
+          var keyInfoList = ctx.comprehension.keyInfoList
+          var possibleErrorList = ctx.comprehension.possibleErrorList
+
+          // 题干：选中信息点/易错点时按旧面板语义高亮匹配文本（无选中则
+          // 走白名单消毒的富文本渲染）。
+          var highlightedKeyInfos = []
+          if (state.selectedKeyInfoId) {
+            var selectedInfo = keyInfoList.find(function (k) {
+              return k.key_info_id === state.selectedKeyInfoId
+            })
+            if (selectedInfo) highlightedKeyInfos.push(selectedInfo)
+          }
+          if (state.selectedErrorId) {
+            var selectedErr = possibleErrorList.find(function (e) {
+              return e.error_id === state.selectedErrorId
+            })
+            if (selectedErr) {
+              ;(selectedErr.related_key_info_ids || []).forEach(function (id) {
+                var related = keyInfoList.find(function (item) {
+                  return item.key_info_id === id
+                })
+                if (related && highlightedKeyInfos.indexOf(related) === -1) {
+                  highlightedKeyInfos.push(related)
+                }
+              })
+            }
+          }
+          var stemParts = buildHighlightedStemParts(
+            question.stem || '',
+            highlightedKeyInfos
+          )
+          var stemHtml
+          if (stemParts) {
+            stemHtml = stemParts
+              .map(function (part) {
+                if (part.type === 'highlight') {
+                  return (
+                    '<span class="' +
+                    (part.corrected ? 'highlight-corrected' : 'highlight') +
+                    '" data-ids="' +
+                    escapeHtml(part.ids.join(',')) +
+                    '">' +
+                    renderLatexParts(splitLatex(part.text), false) +
+                    '</span>'
+                  )
+                }
+                return renderLatexParts(splitLatex(part.text), true)
+              })
+              .join('')
+          } else if (question.stem) {
+            stemHtml = richBlock(question.stem)
+          } else {
+            stemHtml = '<p class="empty">无题干</p>'
+          }
+
+          var stemCard = el('section', 'card')
+          stemCard.appendChild(el('h2', 'section-title', '题干'))
+          stemCard.appendChild(el('div', 'rich-text', stemHtml))
+          root.appendChild(stemCard)
+
+          // 审题信息（gate：generate_key_info completed）
+          if (ctx.gates.keyInfo && keyInfoList.length > 0) {
+            root.appendChild(
+              renderChipsSection({
+                title: '审题信息',
+                countLabel: keyInfoList.length + ' 个信息点',
+                items: keyInfoList,
+                idOf: function (k) {
+                  return k.key_info_id
+                },
+                labelOf: function (k, idx) {
+                  return truncateLabel(
+                    (k.content && (k.content.text || k.content.derived_text)) ||
+                      '信息点 ' + (idx + 1),
+                    12
+                  )
+                },
+                selectedId: state.selectedKeyInfoId,
+                decisions: ctx.keyInfoDecisions,
+                onSelect: function (id) {
+                  state.selectedKeyInfoId =
+                    state.selectedKeyInfoId === id ? null : id
+                  state.selectedErrorId = null
+                  render()
+                },
+                detailOf: renderKeyInfoDetail,
+              })
+            )
+          }
+
+          // 选项
+          if (Array.isArray(question.options) && question.options.length > 0) {
+            var answerItems = extractAnswerItems(question.answer)
+            var optionsCard = el('section', 'card')
+            optionsCard.appendChild(el('h2', 'section-title', '选项'))
+            var list = el('ul', 'option-list')
+            question.options.forEach(function (opt, idx) {
+              var label = String(
+                (opt && opt.label) || String.fromCharCode(65 + idx)
+              )
+              var content = String((opt && opt.content) || '')
+              var isCorrect =
+                answerItems != null && answerItems.indexOf(label) >= 0
+              var item = el('li', 'option-item' + (isCorrect ? ' correct' : ''))
+              item.appendChild(
+                el('span', 'option-label', escapeHtml(label) + '.')
+              )
+              if (isCorrect) item.appendChild(el('span', null, '✓ '))
+              item.appendChild(el('span', null, richInline(content)))
+              list.appendChild(item)
+            })
+            optionsCard.appendChild(list)
+            root.appendChild(optionsCard)
+          }
+
+          // 答案
+          var answerItems2 = extractAnswerItems(question.answer)
+          var blanks = Array.isArray(question.answer_blanks)
+            ? question.answer_blanks
+            : null
+          if (
+            (blanks && blanks.length > 0) ||
+            (answerItems2 && answerItems2.length > 0) ||
+            question.answer != null
+          ) {
+            var answerCard = el('section', 'card')
+            answerCard.appendChild(el('h2', 'section-title', '答案'))
+            if (blanks && blanks.length > 0) {
+              blanks.forEach(function (blank, idx) {
+                var row = el('div', 'blank-row')
+                row.appendChild(el('span', null, '第' + (idx + 1) + '空：'))
+                ;((blank && blank.alternatives) || []).forEach(function (alt) {
+                  row.appendChild(
+                    el('span', 'badge badge-answer', richInline(alt))
+                  )
+                })
+                answerCard.appendChild(row)
+              })
+            } else if (answerItems2 && answerItems2.length > 0) {
+              answerItems2.forEach(function (item) {
+                answerCard.appendChild(
+                  el('span', 'badge badge-answer', richInline(item))
+                )
+              })
+            } else {
+              answerCard.appendChild(el('p', 'empty', '无答案'))
+            }
+            root.appendChild(answerCard)
+          }
+
+          // 常见审题错误（gate：generate_possible_errors completed）
+          if (ctx.gates.possibleErrors && possibleErrorList.length > 0) {
+            root.appendChild(
+              renderChipsSection({
+                title: '常见审题错误',
+                countLabel: possibleErrorList.length + ' 个易错点',
+                items: possibleErrorList,
+                idOf: function (e) {
+                  return e.error_id
+                },
+                labelOf: function (e, idx) {
+                  var prefix =
+                    e.position != null ? '第' + e.position + '空：' : ''
+                  return truncateLabel(
+                    prefix + (e.error_description || '易错点 ' + (idx + 1)),
+                    12
+                  )
+                },
+                selectedId: state.selectedErrorId,
+                decisions: ctx.possibleErrorDecisions,
+                onSelect: function (id) {
+                  state.selectedErrorId =
+                    state.selectedErrorId === id ? null : id
+                  state.selectedKeyInfoId = null
+                  render()
+                },
+                detailOf: renderErrorDetail,
+              })
+            )
+          }
+
+          // 解析
+          var steps = Array.isArray(question.analysis_steps)
+            ? question.analysis_steps
+            : null
+          if (question.analysis != null || (steps && steps.length > 0)) {
+            var analysisCard = el('section', 'card')
+            analysisCard.appendChild(el('h2', 'section-title', '解析'))
+            if (steps && steps.length > 0) {
+              steps.forEach(function (group) {
+                var groupEl = el('div', 'analysis-group')
+                ;(group || []).forEach(function (step) {
+                  if (step.title)
+                    groupEl.appendChild(
+                      el('h4', 'step-title', richBlock(step.title))
+                    )
+                  groupEl.appendChild(
+                    el('div', null, richBlock(step.content || ''))
+                  )
+                })
+                analysisCard.appendChild(groupEl)
+              })
+            } else if (typeof question.analysis === 'string') {
+              analysisCard.appendChild(
+                el('div', null, richBlock(question.analysis))
+              )
+            } else {
+              analysisCard.appendChild(
+                el(
+                  'pre',
+                  'raw',
+                  escapeHtml(JSON.stringify(question.analysis, null, 2))
+                )
+              )
+            }
+            root.appendChild(analysisCard)
+          }
+
+          postResize()
+        }
+
+        function renderChipsSection(options) {
+          var card = el('section', 'card')
+          var header = el(
+            'h2',
+            'section-title',
+            escapeHtml(options.title) +
+              '<span class="chips-count">' +
+              escapeHtml(options.countLabel) +
+              '</span>'
+          )
+          card.appendChild(header)
+          var row = el('div', 'chip-row')
+          options.items.forEach(function (item, idx) {
+            var id = options.idOf(item)
+            var chip = el(
+              'button',
+              'chip' + (options.selectedId === id ? ' selected' : ''),
+              null
+            )
+            chip.appendChild(el('span', 'chip-index', String(idx + 1)))
+            chip.appendChild(
+              el('span', null, richInline(options.labelOf(item, idx)))
+            )
+            var decision = options.decisions[id]
+            chip.insertAdjacentHTML('beforeend', reviewMark(decision))
+            chip.addEventListener('click', function () {
+              options.onSelect(id)
+            })
+            row.appendChild(chip)
+          })
+          card.appendChild(row)
+
+          options.items.forEach(function (item) {
+            var id = options.idOf(item)
+            if (options.selectedId !== id) return
+            var panel = el('div', 'detail-panel')
+            panel.appendChild(options.detailOf(item))
+            card.appendChild(panel)
+          })
+          return card
+        }
+
+        function renderKeyInfoDetail(info) {
+          var ctx = state.context
+          var card = el('div', 'detail-card')
+          var typeLabel = info.type === 'given' ? '题干信息' : '隐含信息'
+          card.appendChild(
+            el(
+              'div',
+              'detail-card-header',
+              '<span class="badge ' +
+                (info.type === 'given' ? 'badge-given' : 'badge-hidden') +
+                '">' +
+                typeLabel +
+                '</span><span class="detail-id">' +
+                escapeHtml(info.key_info_id) +
+                '</span>'
+            )
+          )
+          var text =
+            info.type === 'hidden'
+              ? (info.content && info.content.derivation) || ''
+              : (info.content &&
+                  (info.content.text || info.content.derived_text)) ||
+                ''
+          card.appendChild(el('div', null, richInline(text)))
+
+          if (info.question_comprehension_ability) {
+            card.appendChild(
+              el(
+                'div',
+                'detail-section',
+                '<strong>关联能力</strong>' +
+                  '<span class="tag">' +
+                  escapeHtml(info.question_comprehension_ability) +
+                  '</span>'
+              )
+            )
+          }
+
+          var related = ctx.comprehension.possibleErrorList.filter(
+            function (err) {
+              return (
+                (err.related_key_info_ids || []).indexOf(info.key_info_id) >= 0
+              )
+            }
+          )
+          if (related.length > 0) {
+            var html = '<strong>关联常见错误</strong><ul>'
+            related.forEach(function (err) {
+              html += '<li>' + richInline(err.error_description || '') + '</li>'
+            })
+            html += '</ul>'
+            card.appendChild(el('div', 'detail-section', html))
+          }
+
+          if (info.question && info.question.text) {
+            var socratic = el('div', 'socratic')
+            socratic.appendChild(
+              el('div', null, richInline(info.question.text))
+            )
+            ;(info.question.options || []).forEach(function (opt) {
+              var mark = opt && opt.is_correct ? '✓ ' : ''
+              socratic.appendChild(
+                el(
+                  'div',
+                  null,
+                  mark +
+                    escapeHtml((opt && opt.label) || '') +
+                    '. ' +
+                    richInline((opt && opt.text) || '')
+                )
+              )
+            })
+            card.appendChild(socratic)
+          }
+
+          var decision = ctx.keyInfoDecisions[info.key_info_id]
+          if (decision) {
+            card.insertAdjacentHTML(
+              'beforeend',
+              reviewMark(decision) + reviewReason(decision)
+            )
+          }
+          return card
+        }
+
+        function renderErrorDetail(err) {
+          var ctx = state.context
+          var card = el('div', 'detail-card')
+          var answers = Array.isArray(err.error_answer)
+            ? err.error_answer
+            : [err.error_answer]
+          var headerHtml = '<span>' + '错误答案：' + '</span>'
+          var cardHeader = el('div', 'detail-card-header')
+          var left = el('span', null)
+          left.appendChild(el('span', null, '错误答案：'))
+          answers.forEach(function (answer) {
+            if (answer == null) return
+            left.appendChild(
+              el(
+                'span',
+                'badge badge-answer badge-error-answer',
+                richInline(answer)
+              )
+            )
+          })
+          cardHeader.appendChild(left)
+          cardHeader.appendChild(
+            el('span', 'detail-id', escapeHtml(err.error_id))
+          )
+          card.appendChild(cardHeader)
+          card.appendChild(
+            el('div', null, richInline(err.error_description || ''))
+          )
+
+          var related = (err.related_key_info_ids || [])
+            .map(function (id) {
+              return ctx.comprehension.keyInfoList.find(function (k) {
+                return k.key_info_id === id
+              })
+            })
+            .filter(Boolean)
+          var tagsHtml = '<strong>关联关键信息</strong>'
+          if (related.length === 0) {
+            tagsHtml += '<span class="tag">无</span>'
+          } else {
+            related.forEach(function (k) {
+              tagsHtml +=
+                '<span class="tag">' +
+                richInline(
+                  (k.content && (k.content.text || k.content.derived_text)) ||
+                    k.key_info_id
+                ) +
+                '</span>'
+            })
+          }
+          card.appendChild(el('div', 'detail-section', tagsHtml))
+
+          var decision = ctx.possibleErrorDecisions[err.error_id]
+          if (decision) {
+            card.insertAdjacentHTML(
+              'beforeend',
+              reviewMark(decision) + reviewReason(decision)
+            )
+          }
+          return card
+        }
+
+        // ---- 启动 ----
+        function applyTheme(theme) {
+          if (!theme) return
+          Object.keys(theme).forEach(function (key) {
+            document.documentElement.style.setProperty(key, theme[key])
+          })
+        }
+
+        function boot(init) {
+          applyTheme(init.theme)
+          loadKatex(init.assets).then(function () {
+            var detailPromise = callBridge('getJobDetail').catch(function () {
+              return null
+            })
+            var questionPromise =
+              readJsonArtifactOrNull('questions.json').then(
+                extractFirstQuestion
+              )
+            var comprehensionPromise = loadComprehension()
+
+            detailPromise.then(function (detail) {
+              var gates = {
+                keyInfo: gateVisible(detail, GATES.keyInfo),
+                possibleErrors: gateVisible(detail, GATES.possibleErrors),
+              }
+              // 评审报告只在评审节点到达终态后拉取（镜像 useJobReviewReports 的 gating）。
+              var keyInfoReviewPromise =
+                nodeState(detail, REVIEW_GATES.keyInfo) &&
+                TERMINAL[nodeState(detail, REVIEW_GATES.keyInfo)]
+                  ? readJsonArtifactOrNull('key_info_review_report.json')
+                  : Promise.resolve(null)
+              var possibleErrorsReviewPromise =
+                nodeState(detail, REVIEW_GATES.possibleErrors) &&
+                TERMINAL[nodeState(detail, REVIEW_GATES.possibleErrors)]
+                  ? readJsonArtifactOrNull('possible_errors_review_report.json')
+                  : Promise.resolve(null)
+
+              return Promise.all([
+                questionPromise,
+                comprehensionPromise,
+                keyInfoReviewPromise,
+                possibleErrorsReviewPromise,
+              ]).then(function (results) {
+                state.context = {
+                  question: results[0],
+                  comprehension: results[1] || {
+                    keyInfoList: [],
+                    possibleErrorList: [],
+                  },
+                  keyInfoDecisions: parseReviewDecisions(
+                    results[2],
+                    'key_info_id'
+                  ),
+                  possibleErrorDecisions: parseReviewDecisions(
+                    results[3],
+                    'error_id'
+                  ),
+                  gates: gates,
+                }
+                render()
+              })
+            })
+          })
+        }
+
+        window.addEventListener('message', function (event) {
+          var data = event.data
+          if (!data || data.source !== HOST_SOURCE) return
+          if (data.type === 'init') {
+            boot(data)
+            return
+          }
+          if (data.type === 'response') {
+            var entry = pending[data.id]
+            if (!entry) return
+            delete pending[data.id]
+            if (data.ok) entry.resolve(data.payload)
+            else entry.reject(new Error(data.error || 'bridge call failed'))
+          }
+        })
+
+        if (typeof ResizeObserver !== 'undefined') {
+          new ResizeObserver(function () {
+            postResize()
+          }).observe(document.documentElement)
+        }
+
+        window.parent.postMessage({ source: PANEL_SOURCE, type: 'ready' }, '*')
+      })()
+    </script>
+  </body>
+</html>

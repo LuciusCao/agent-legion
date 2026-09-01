@@ -157,6 +157,23 @@ describe('WorkflowPromptPreviewPanel', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('treats a non-string prompt value as unset instead of crashing (codex P1 family)', async () => {
+    // `prompt: 123`：合法 YAML 非法契约值——按未配置归一，编辑区回落
+    // 默认指令，打开「查看 Prompt」不再渲染抛错（reviewer-m4 r2）。
+    const yamlWithJunkPrompt = [
+      'nodes:',
+      '  n1:',
+      '    capability: cap',
+      '    execution:',
+      '      prompt: 123',
+      '',
+    ].join('\n')
+    renderPanel({ definitionYaml: yamlWithJunkPrompt })
+
+    expect(await screen.findByDisplayValue('默认指令文本')).toBeInTheDocument()
+    expect(screen.getByText('默认（按节点信息自动组装）')).toBeInTheDocument()
+  })
+
   it('disables editing in readOnly mode', async () => {
     const yamlWithPrompt = [
       'nodes:',

@@ -11,15 +11,19 @@ from .artifacts import create_artifacts_router
 from .common import create_common_router
 from .connections import create_connections_router
 from .deps import RouterDeps
+from .infra_connections import create_infra_connections_router
 from .instance_settings import create_instance_settings_router
 from .job_route_group import include_job_routes
 from .materials import create_materials_router
 from .metrics import create_metrics_router
 from .packages import create_packages_router
+from .preview_panels import create_preview_panels_router
 from .quality import create_quality_router
 from .quality_replays import create_quality_replays_router
+from .skill_directories import create_skill_directories_router
 from .skills import create_skills_router
 from .studio_agent_context import create_studio_agent_context_router
+from .studio_agent_job_tools import create_studio_agent_job_tools_router
 from .studio_agent_tokens import create_studio_agent_tokens_router
 from .studio_agent_tools import create_studio_agent_tools_router
 from .studio_agents_admin import create_studio_agents_admin_router
@@ -60,6 +64,7 @@ def create_router(deps: RouterDeps) -> APIRouter:
     # require_admin themselves, so they must not go through secured().
     router.include_router(create_instance_settings_router(deps.job_db, deps.settings))
     router.include_router(create_connections_router(deps.job_db, deps.settings))
+    router.include_router(create_infra_connections_router(deps.job_db))
     secured(create_packages_router(deps.job_db, deps.settings, deps.job_packages))
     secured(create_worker_router(deps.workspace_worker_control))
     # The worker control plane is one surface (broker + registry + completion)
@@ -111,13 +116,25 @@ def create_router(deps: RouterDeps) -> APIRouter:
     studio_secured(create_workflow_node_codes_router(deps.job_db, deps.settings))
     studio_secured(create_agent_definitions_router(deps.job_db, deps.settings))
     secured(create_skills_router(deps.job_db, deps.settings))
+    secured(create_skill_directories_router(deps.job_db, deps.settings))
     secured(create_workspace_configuration_router(deps.workspace_configuration, deps.settings))
     agent_catalog_router = create_workspace_agent_catalog_router(
         deps.agent_catalog, deps.workspace_execution_configuration, deps.settings, deps.job_db
     )
     secured(agent_catalog_router)
     secured(create_workspace_agent_routes_router(deps.job_db, deps.settings))
+    # Preview panels (#328): the published-bundle read is member-level (job
+    # detail iframe host); state/publish/archive carry their own Studio
+    # authoring + reject_studio_agent_scope guards inside the router.
+    secured(create_preview_panels_router(deps.job_db, deps.settings))
     secured(create_studio_agent_tools_router(deps.job_db, deps.settings))
+    # Job diagnosis tools (#329): read-only observation endpoints; the router
+    # carries require_studio_agent_scope + workspace binding guards itself.
+    secured(
+        create_studio_agent_job_tools_router(
+            deps.job_db, deps.settings, object_store=deps.job_artifact_objects
+        )
+    )
     secured(create_studio_agent_context_router(deps.job_db))
     secured(create_studio_agent_tokens_router(deps.job_db))
     if deps.studio_chat_service is not None:

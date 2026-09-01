@@ -113,6 +113,7 @@ frontend/src/
 |------|----------|
 | `/login` | LoginPage |
 | `/setup` | SetupPage |
+| `/admin/onboarding` | GlobalOnboardingPage |
 | `/admin/*` | AdminRoutes |
 | `/` | DashboardPage |
 | `/monitoring` | MonitoringPage |

@@ -31,6 +31,12 @@ _UPSERT_SQL = """
     do update set value=excluded.value, updated_at=current_timestamp
 """
 
+_SELECT_SQL = "select value from global_settings where key=%s"
+_SELECT_FOR_UPDATE_SQL = "select value from global_settings where key=%s for update"
+_RMW_ENSURE_SQL = """
+    insert into global_settings(key, value) values (%s, %s) on conflict(key) do nothing
+"""
+
 
 class GlobalSettingsKVQueriesMixin(ConnectionQueriesMixin):
     """Read/write one JSON document per key in ``global_settings``."""
@@ -38,10 +44,7 @@ class GlobalSettingsKVQueriesMixin(ConnectionQueriesMixin):
     def get_global_settings_document(self, key: str) -> dict[str, Any] | None:
         """The stored document, or None when the key has no row yet."""
         with self._connect_read() as conn:
-            row = conn.execute(
-                "select value from global_settings where key=%s",
-                (key,),
-            ).fetchone()
+            row = conn.execute(_SELECT_SQL, (key,)).fetchone()
         if row is None:
             return None
         return cast(dict[str, Any], json.loads(str(row["value"])))
@@ -64,17 +67,15 @@ class GlobalSettingsKVQueriesMixin(ConnectionQueriesMixin):
     ) -> None:
         """Read-modify-write one document inside a single transaction.
 
-        The cleanup sweep cursor co-lives with sibling keys in one document,
-        so its update must not lose concurrent writes to other keys: read
-        and write share one transaction (``connect``, which commits on
-        success) rather than two separate connections like the inlined
-        store code did.
+        The read runs SELECT ... FOR UPDATE after an insert-if-absent, so
+        concurrent RMWs on the same key queue on the row lock (and on the
+        unique index for first creators) instead of last-wins overwriting
+        each other (#281, codex P1 on #332). Read semantics, return value,
+        and exception shapes are unchanged.
         """
         with self.connect() as conn:
-            row = conn.execute(
-                "select value from global_settings where key=%s",
-                (key,),
-            ).fetchone()
+            conn.execute(_RMW_ENSURE_SQL, (key, "{}"))
+            row = conn.execute(_SELECT_FOR_UPDATE_SQL, (key,)).fetchone()
             document = cast(
                 dict[str, Any], json.loads(str(row["value"])) if row is not None else {}
             )

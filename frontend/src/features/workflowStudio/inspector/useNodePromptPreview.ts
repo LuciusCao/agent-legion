@@ -6,7 +6,10 @@ import { useDebouncedCallback } from '../../../hooks/useDebouncedCallback'
 import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import type { WorkflowNodeRecord } from '../../../types'
 import type { NodePromptEditorProps } from './WorkflowNodePromptEditor'
-import { patchWorkflowNodeExecution } from '../shared/workflowStudioYamlDraft.execution'
+import {
+  asConfigValue,
+  patchWorkflowNodeExecution,
+} from '../shared/workflowStudioYamlDraft.execution'
 import { parseWorkflowNode } from '../shared/workflowStudioYamlDraft.parse'
 
 const PREVIEW_DEBOUNCE_MS = 300
@@ -53,9 +56,11 @@ export function useNodePromptPreview(props: NodePromptPreviewPanelProps): {
   const preview = query.data ?? null
 
   const draft = parseWorkflowNode(props.definitionYaml, props.node.key)
-  const customPrompt = draft
-    ? (draft.execution?.prompt ?? '')
-    : (props.node.execution?.prompt ?? '')
+  // 草稿 prompt 可能是手写非字符串 junk（`prompt: 123`，合法 YAML 非法
+  // 契约值）：按未配置归一，不得让 .trim() 抛异常（codex P1 缺陷族）。
+  const customPrompt = asConfigValue(
+    draft ? draft.execution?.prompt : props.node.execution?.prompt
+  )
   const isDefault = customPrompt.trim() === ''
   // skill_key 以后端预览响应为准（显式 null = 未绑定）；响应未返回前用
   // agentCatalog 绑定兜底。

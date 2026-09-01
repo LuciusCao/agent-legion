@@ -46,6 +46,8 @@ class JobArtifactService:
         if row is None:
             return None
         try:
+            # #338: open_stream 对 .gz 对象透明解压，这里拿到的始终是未压缩
+            # 内容字节（content_hash 的语义），两种存储形态同一读法。
             stream = store.open_stream(row)
             content = stream.read().decode("utf-8")
         except (ClientError, BotoCoreError, OSError, UnicodeDecodeError):

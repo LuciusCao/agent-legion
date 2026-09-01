@@ -40,6 +40,7 @@ export function dagNodePropsEqual(
     prevData.workerId === nextData.workerId &&
     prevData.capability === nextData.capability &&
     prevData.executorUnbound === nextData.executorUnbound &&
+    prevData.executionWarning === nextData.executionWarning &&
     prevData.topologyBadges === nextData.topologyBadges &&
     prevData.terminalOutcome === nextData.terminalOutcome &&
     prevData.changeType === nextData.changeType &&

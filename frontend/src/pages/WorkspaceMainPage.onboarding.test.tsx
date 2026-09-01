@@ -18,9 +18,8 @@ import {
 import { EventSourceMock } from '../testing/eventSourceMock'
 import type { WorkspaceStats } from '../types/workspaceTypes'
 
-// 新 workspace 空态分步引导（EmptyStateGuide）的集成测试：步骤解锁链
-// （resolve_execution_block 同链）、设置快照请求门控、引导导航。就绪判定的
-// 分支细节在 lib/onboardingReadiness.test.ts。
+// 新 workspace 空态分步引导（EmptyStateGuide）的集成测试：2 步形态（#333）
+// 与引导导航。就绪判定与展示判定的分支细节在 lib/onboardingReadiness.test.ts。
 
 const mockApi = vi.fn()
 const mockFetchJobsSnapshot = vi.fn()
@@ -272,80 +271,14 @@ describe('WorkspaceMainPage onboarding guide', () => {
     expect(
       await screen.findByRole('button', { name: '进入 Studio' })
     ).toBeInTheDocument()
-    // 默认 mock 下无 agent 路由（无待配 agent 节点），步骤 1、2 均完成。
-    expect(screen.getAllByText('已完成')).toHaveLength(2)
+    // 2 步形态（#333）：仅步骤 1 有完成态；发布后「添加条目」直接解锁。
+    expect(screen.getAllByText('已完成')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: '添加条目' })).toBeEnabled()
   })
 
-  it('unlocks step 3 when agent nodes carry effective execution', async () => {
-    // agent 节点 execution.* 已配齐（active revision 快照的节点值已被
-    // loader 合并顶层默认）：解析链就绪，步骤 2/3 解锁。
-    mockApi.mockImplementation((path: string) => {
-      if (path === '/api/workspaces/ws1/stats') {
-        return Promise.resolve(baseStats)
-      }
-      if (path === '/api/workspaces/ws1/settings') {
-        return Promise.resolve({
-          entityType: 'question',
-          workflowKey: 'question_content',
-        })
-      }
-      if (path === '/api/workspaces/ws1/agent-routes') {
-        return Promise.resolve({
-          routes: [
-            {
-              workflow_key: 'ws1',
-              node_key: 'agent_review',
-              node_label: 'Agent 审核',
-              capability: 'agent_review',
-              agent_id: 'agent-1',
-              agent_skill: 'review',
-            },
-          ],
-        })
-      }
-      return Promise.resolve({})
-    })
-
-    renderPage()
-    await loadJobsViaSSE()
-
-    expect(
-      await screen.findByRole('button', { name: '添加条目' })
-    ).toBeEnabled()
-    // 解析链就绪 → 步骤 1、2 均完成。
-    expect(screen.getAllByText('已完成')).toHaveLength(2)
-  })
-
-  it('keeps step 3 locked when an agent node lacks provider/model resolution', async () => {
-    // agent 节点存在（agentRoutes 命中）但 execution 未配 provider/model：
-    // 步骤 2/3 保持锁定。
-    mockApi.mockImplementation((path: string) => {
-      if (path === '/api/workspaces/ws1/stats') {
-        return Promise.resolve(baseStats)
-      }
-      if (path === '/api/workspaces/ws1/settings') {
-        return Promise.resolve({
-          entityType: 'question',
-          workflowKey: 'question_content',
-        })
-      }
-      if (path === '/api/workspaces/ws1/agent-routes') {
-        return Promise.resolve({
-          routes: [
-            {
-              workflow_key: 'ws1',
-              node_key: 'agent_review',
-              node_label: 'Agent 审核',
-              capability: 'agent_review',
-              agent_id: 'agent-1',
-              agent_skill: 'review',
-            },
-          ],
-        })
-      }
-      return Promise.resolve({})
-    })
-    // 覆盖 revision：去掉 agent 节点的 execution 覆盖。
+  it('unlocks the add-item step even when an agent node lacks provider/model', async () => {
+    // #333：agent 节点 execution 缺口不再阻塞引导（原步骤 2 已移除），
+    // 真实缺口由 Studio 画布实时警报承载；agent 路由快照也不再被请求。
     mockFetchWorkflowDefinition.mockResolvedValue({
       workflow: {
         ...workflowDefinition,
@@ -361,31 +294,15 @@ describe('WorkspaceMainPage onboarding guide', () => {
 
     expect(
       await screen.findByRole('button', { name: '添加条目' })
-    ).toBeDisabled()
-    expect(screen.getByText('已完成')).toBeInTheDocument()
+    ).toBeEnabled()
+    expect(
+      screen.queryByRole('button', { name: '去配置' })
+    ).not.toBeInTheDocument()
   })
 
-  it('does not fetch the settings snapshot when jobs exist and the guide is hidden', async () => {
-    // 引导隐藏（有任务）：settings 快照的四个请求（workspace / settings /
-    // execution-configuration / agent-routes）都不应发出。
-    mockFetchJobsSnapshot.mockImplementation(() =>
-      Promise.resolve({
-        workspace_id: 'ws1',
-        revision: 1,
-        stats: baseStats.job_stats,
-        jobs: [
-          {
-            id: 'j1',
-            workspace_id: 'ws1',
-            source_id: 'Q1',
-            title: 'Job',
-            status: 'pending',
-          },
-        ],
-        total: 1,
-        next_cursor: null,
-      })
-    )
+  it('never fetches the settings snapshot for the onboarding guide', async () => {
+    // #333：引导不再消费 agent 路由/设置快照——无论引导展示（无任务）还是
+    // 隐藏（有任务），这些请求都不应发出。
     const settingsPaths = [
       '/api/workspaces/ws1',
       '/api/workspaces/ws1/settings',
@@ -405,10 +322,39 @@ describe('WorkspaceMainPage onboarding guide', () => {
     renderPage()
     await loadJobsViaSSE()
 
+    // 引导展示态（默认 mock 无任务）。
+    expect(
+      await screen.findByRole('heading', { name: '开始使用 Workspace' })
+    ).toBeInTheDocument()
+    expect(settingsCalls).toEqual([])
+    expect(mockGetWorkspaceExecutionConfiguration).not.toHaveBeenCalled()
+  })
+
+  it('hides the guide when jobs exist', async () => {
+    mockFetchJobsSnapshot.mockImplementation(() =>
+      Promise.resolve({
+        workspace_id: 'ws1',
+        revision: 1,
+        stats: baseStats.job_stats,
+        jobs: [
+          {
+            id: 'j1',
+            workspace_id: 'ws1',
+            source_id: 'Q1',
+            title: 'Job',
+            status: 'pending',
+          },
+        ],
+        total: 1,
+        next_cursor: null,
+      })
+    )
+
+    renderPage()
+    await loadJobsViaSSE()
+
     expect(
       screen.queryByRole('heading', { name: '开始使用 Workspace' })
     ).not.toBeInTheDocument()
-    expect(settingsCalls).toEqual([])
-    expect(mockGetWorkspaceExecutionConfiguration).not.toHaveBeenCalled()
   })
 })

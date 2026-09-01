@@ -91,7 +91,8 @@
 
 .executorTag,
 .terminalTag,
-.workerTag {
+.workerTag,
+.executionWarningTag {
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 10px;
@@ -120,6 +121,13 @@
   border-radius: 10px;
   background: #fee2e2;
   color: #b91c1c;
+}
+
+/* #333：agent 节点 execution 缺口警告（区别于未绑定的红色，用 amber 表
+ * 「可发布但 dispatch 将失败」的配置缺口）。 */
+.executionWarningTag {
+  background: #fef3c7;
+  color: #b45309;
 }
 
 .duration,

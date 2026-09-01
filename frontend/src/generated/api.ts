@@ -74,6 +74,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/admin/infra-connections': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Infra Connections */
+    get: operations['get_infra_connections_api_admin_infra_connections_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/admin/infra-connections/test': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Test Infra Connection */
+    post: operations['test_infra_connection_api_admin_infra_connections_test_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/admin/instance-settings': {
     parameters: {
       query?: never
@@ -104,6 +138,23 @@ export interface paths {
     /** Put Studio Agents */
     put: operations['put_studio_agents_api_admin_studio_agents_put']
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/admin/studio-agents/redetect': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Redetect Studio Agents */
+    post: operations['redetect_studio_agents_api_admin_studio_agents_redetect_post']
     delete?: never
     options?: never
     head?: never
@@ -873,6 +924,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/skills/directories': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Skill Directories */
+    get: operations['list_skill_directories_api_skills_directories_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/skills/tags': {
     parameters: {
       query?: never
@@ -959,6 +1027,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent/tools/chat-sessions/{session_id}/job-context': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Job Context */
+    get: operations['get_job_context_api_studio_agent_tools_chat_sessions__session_id__job_context_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/skills/{skill_key}': {
     parameters: {
       query?: never
@@ -1027,6 +1112,91 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/jobs': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Jobs */
+    get: operations['list_jobs_api_studio_agent_tools_workspaces__workspace_id__jobs_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/jobs/compare': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Compare Jobs */
+    get: operations['compare_jobs_api_studio_agent_tools_workspaces__workspace_id__jobs_compare_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/jobs/{job_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Job Detail */
+    get: operations['get_job_detail_api_studio_agent_tools_workspaces__workspace_id__jobs__job_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Read Artifact */
+    get: operations['read_artifact_api_studio_agent_tools_workspaces__workspace_id__jobs__job_id__artifacts__artifact_name__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/jobs/{job_id}/logs': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Node Logs */
+    get: operations['get_node_logs_api_studio_agent_tools_workspaces__workspace_id__jobs__job_id__logs_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/workspaces/{workspace_id}/node-prompt': {
     parameters: {
       query?: never
@@ -1072,6 +1242,57 @@ export interface paths {
     get?: never
     /** Save Node Code Draft */
     put: operations['save_node_code_draft_api_studio_agent_tools_workspaces__workspace_id__nodes__node_key__code_draft_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/preview/context': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Preview Context */
+    get: operations['preview_context_api_studio_agent_tools_workspaces__workspace_id__preview_context_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/preview/panel': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Preview Panel */
+    get: operations['get_preview_panel_api_studio_agent_tools_workspaces__workspace_id__preview_panel_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/preview/panel/draft': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Save Preview Panel Draft */
+    put: operations['save_preview_panel_draft_api_studio_agent_tools_workspaces__workspace_id__preview_panel_draft_put']
     post?: never
     delete?: never
     options?: never
@@ -1980,6 +2201,80 @@ export interface paths {
     head?: never
     /** Update Workspace Package Route */
     patch: operations['update_workspace_package_route_api_workspaces__workspace_id__packages__package_id__patch']
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/preview-panel': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get State */
+    get: operations['get_state_api_workspaces__workspace_id__preview_panel_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/preview-panel/archive': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Archive
+     * @description Human "reset to the built-in fallback": archive every version.
+     */
+    post: operations['archive_api_workspaces__workspace_id__preview_panel_archive_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/preview-panel/publish': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Publish */
+    post: operations['publish_api_workspaces__workspace_id__preview_panel_publish_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/preview-panel/published': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Get Published
+     * @description Published bundle for the job detail iframe host; null = fallback.
+     */
+    get: operations['get_published_api_workspaces__workspace_id__preview_panel_published_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
     trace?: never
   }
   '/api/workspaces/{workspace_id}/quality/replays/{replay_id}': {
@@ -3312,6 +3607,26 @@ export interface components {
       /** Workspace Id */
       workspace_id: string
     }
+    /**
+     * DatabaseConnectionView
+     * @description Display-safe database summary: password masked, query string dropped.
+     */
+    DatabaseConnectionView: {
+      /** Engine */
+      engine: string
+      /** Host */
+      host: string
+      /** Masked Url */
+      masked_url: string
+      /** Name */
+      name: string
+      /** Password Set */
+      password_set: boolean
+      /** Port */
+      port: number | null
+      /** User */
+      user: string
+    }
     /** DeleteJobResponse */
     DeleteJobResponse: {
       /** Deleted */
@@ -3385,6 +3700,34 @@ export interface components {
       workers?: {
         [key: string]: string
       } | null
+    }
+    /** InfraConnectionTestRequest */
+    InfraConnectionTestRequest: {
+      /**
+       * Target
+       * @enum {string}
+       */
+      target: 'database' | 'storage'
+    }
+    /**
+     * InfraConnectionTestResponse
+     * @description Connectivity probe verdict; ``reason`` is ``TypeName: message`` on failure.
+     */
+    InfraConnectionTestResponse: {
+      /** Ok */
+      ok: boolean
+      /** Reason */
+      reason?: string | null
+      /**
+       * Target
+       * @enum {string}
+       */
+      target: 'database' | 'storage'
+    }
+    /** InfraConnectionsResponse */
+    InfraConnectionsResponse: {
+      database: components['schemas']['DatabaseConnectionView']
+      storage: components['schemas']['StorageConnectionView']
     }
     /** InstanceAgentWorkersSettings */
     InstanceAgentWorkersSettings: {
@@ -4188,6 +4531,101 @@ export interface components {
       recent_hour_runs: components['schemas']['RecentHourRunSummary']
       recent_hour_tokens: components['schemas']['RecentHourTokenSummary']
     }
+    /** PreviewContextJobSummary */
+    PreviewContextJobSummary: {
+      /**
+       * Artifacts
+       * @default []
+       */
+      artifacts: string[]
+      /** Created At */
+      created_at?: string | null
+      /** Id */
+      id: string
+      /** Source Id */
+      source_id?: string | null
+      /** Source Type */
+      source_type?: string | null
+      /** Status */
+      status?: string | null
+      /** Updated At */
+      updated_at?: string | null
+    }
+    /**
+     * PreviewContextResponse
+     * @description Recent jobs + artifact inventory + bounded content samples.
+     */
+    PreviewContextResponse: {
+      /** Recent Jobs */
+      recent_jobs: components['schemas']['PreviewContextJobSummary'][]
+      /** Sample Max Chars */
+      sample_max_chars: number
+      /** Samples */
+      samples: {
+        [key: string]: string
+      }
+      selected_job?: components['schemas']['PreviewContextJobSummary'] | null
+      /** Truncated */
+      truncated: string[]
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** PreviewPanelDraftRequest */
+    PreviewPanelDraftRequest: {
+      /** Change Note */
+      change_note?: string | null
+      /** Html */
+      html: string
+    }
+    /**
+     * PreviewPanelPublishedResponse
+     * @description Job detail iframe host read: the published bundle, null = fallback.
+     */
+    PreviewPanelPublishedResponse: {
+      published?: components['schemas']['PreviewPanelVersionResponse'] | null
+    }
+    /**
+     * PreviewPanelStateResponse
+     * @description Published bundle plus pending draft; both null = built-in fallback.
+     */
+    PreviewPanelStateResponse: {
+      draft?: components['schemas']['PreviewPanelVersionResponse'] | null
+      published?: components['schemas']['PreviewPanelVersionResponse'] | null
+    }
+    /**
+     * PreviewPanelVersionResponse
+     * @description One immutable version row of a workspace preview panel bundle.
+     */
+    PreviewPanelVersionResponse: {
+      /** Change Note */
+      change_note?: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Created By */
+      created_by: string
+      /** Entity Key */
+      entity_key: string
+      /** Html */
+      html: string
+      /** Html Hash */
+      html_hash: string
+      /** Id */
+      id: string
+      /** Published At */
+      published_at?: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'draft' | 'published' | 'archived'
+      /** Version */
+      version: number
+      /** Workspace Id */
+      workspace_id: string | null
+    }
     /** QualityArtifactContent */
     QualityArtifactContent: {
       /** Content */
@@ -4603,7 +5041,7 @@ export interface components {
       allowed_workspaces: string[]
       /**
        * Host Protocol Version
-       * @default 3
+       * @default 4
        */
       host_protocol_version: number
       /** Worker Token */
@@ -4799,6 +5237,19 @@ export interface components {
       /** Tags */
       tags?: string[]
     }
+    /**
+     * SkillDirectoriesResponse
+     * @description Candidate skill directory names under ``<skills_root>/<workspace_id>/``
+     *     (#327). Names only — content validation stays with the validate endpoint.
+     *     The ``workspace_id`` query-param name is load-bearing: it is what
+     *     require_workspace_access reads to reject non-members.
+     */
+    SkillDirectoriesResponse: {
+      /** Directories */
+      directories?: string[]
+      /** Workspace Id */
+      workspace_id: string
+    }
     /** SkillFileResponse */
     SkillFileResponse: {
       /** Content */
@@ -4887,6 +5338,29 @@ export interface components {
       /** Path */
       path: string
     }
+    /**
+     * StorageConnectionView
+     * @description Object-store summary; credentials reduce to a derivation kind.
+     */
+    StorageConnectionView: {
+      /** Bucket */
+      bucket: string
+      /** Configured */
+      configured: boolean
+      /**
+       * Credentials
+       * @enum {string}
+       */
+      credentials: 'static' | 'default-chain' | 'unconfigured'
+      /** Endpoint Url */
+      endpoint_url: string
+      /** Public Endpoint Url */
+      public_endpoint_url: string
+      /** Reachable */
+      reachable: boolean
+      /** Region */
+      region: string
+    }
     /** StorageStatus */
     StorageStatus: {
       /** Configured */
@@ -4911,6 +5385,194 @@ export interface components {
       /** Workflow Key */
       workflow_key?: string | null
     }
+    /** StudioAgentArtifactResponse */
+    StudioAgentArtifactResponse: {
+      /** Content */
+      content: string
+      /** Name */
+      name: string
+      /** Truncated */
+      truncated: boolean
+    }
+    /**
+     * StudioAgentDetection
+     * @description Response-only probe status for one catalog agent (#332).
+     */
+    StudioAgentDetection: {
+      /** Detected */
+      detected: boolean
+      /** Path */
+      path?: string | null
+      /** Version */
+      version?: string | null
+    }
+    /** StudioAgentJobCompareNode */
+    StudioAgentJobCompareNode: {
+      /** Changed */
+      changed: boolean
+      /** Error A */
+      error_a: string
+      /** Error B */
+      error_b: string
+      /** Node Key */
+      node_key: string
+      /** Status A */
+      status_a: string
+      /** Status B */
+      status_b: string
+    }
+    /** StudioAgentJobCompareResponse */
+    StudioAgentJobCompareResponse: {
+      job_a: components['schemas']['StudioAgentJobView']
+      job_b: components['schemas']['StudioAgentJobView']
+      /** Nodes */
+      nodes: components['schemas']['StudioAgentJobCompareNode'][]
+      summary: components['schemas']['StudioAgentJobCompareSummary']
+    }
+    /** StudioAgentJobCompareSummary */
+    StudioAgentJobCompareSummary: {
+      /** Newly Failed */
+      newly_failed: string[]
+      /** Nodes Changed */
+      nodes_changed: number
+      /** Recovered */
+      recovered: string[]
+    }
+    /**
+     * StudioAgentJobContextResponse
+     * @description The session-bound context payload: which workspace/job the diagnosis
+     *     conversation operates on, the focus node (explicit or the job's active
+     *     one), the full job detail, and other jobs' recent failures on the focus
+     *     node (the flaky-or-new signal).
+     */
+    StudioAgentJobContextResponse: {
+      /** Focus Node Key */
+      focus_node_key: string | null
+      job: components['schemas']['StudioAgentJobDetail']
+      /** Recent Failures */
+      recent_failures: components['schemas']['StudioAgentRecentFailure'][]
+      /** Session Id */
+      session_id: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** StudioAgentJobDetail */
+    StudioAgentJobDetail: {
+      /** Artifacts */
+      artifacts: string[]
+      job: components['schemas']['StudioAgentJobView']
+      /** Nodes */
+      nodes: components['schemas']['StudioAgentJobNode'][]
+      /** Runs */
+      runs: components['schemas']['StudioAgentJobRun'][]
+      /** Suggested Actions */
+      suggested_actions: components['schemas']['StudioAgentSuggestedAction'][]
+    }
+    /** StudioAgentJobListResponse */
+    StudioAgentJobListResponse: {
+      /** Jobs */
+      jobs: components['schemas']['StudioAgentJobView'][]
+      /** Limit */
+      limit: number
+      /** Returned */
+      returned: number
+    }
+    /** StudioAgentJobLogsResponse */
+    StudioAgentJobLogsResponse: {
+      /** Error Message */
+      error_message: string
+      /** Job Id */
+      job_id: string
+      /** Log */
+      log: string
+      /** Node Key */
+      node_key: string
+      /** Run Id */
+      run_id: number
+      /** Status */
+      status: string
+      /** Truncated */
+      truncated: boolean
+    }
+    /** StudioAgentJobNode */
+    StudioAgentJobNode: {
+      /** Agent Id */
+      agent_id: string | null
+      /** Capability */
+      capability: string
+      /** Error Message */
+      error_message: string
+      /** Executor Kind */
+      executor_kind: string | null
+      /** Inputs */
+      inputs: string[]
+      /** Label */
+      label: string
+      /** Node Key */
+      node_key: string
+      /** Outputs */
+      outputs: string[]
+      /** Status */
+      status: string
+    }
+    /** StudioAgentJobRun */
+    StudioAgentJobRun: {
+      /** Error Message */
+      error_message: string
+      /** Finished At */
+      finished_at: string | null
+      /** Has Log */
+      has_log: boolean
+      /** Id */
+      id: number
+      /** Node Key */
+      node_key: string
+      /** Started At */
+      started_at: string | null
+      /** Status */
+      status: string
+    }
+    /** StudioAgentJobSummaryNode */
+    StudioAgentJobSummaryNode: {
+      /** Error Message */
+      error_message: string
+      /** Label */
+      label: string
+      /** Node Key */
+      node_key: string
+      /** Status */
+      status: string
+    }
+    /**
+     * StudioAgentJobView
+     * @description Per-job summary used by list/detail/compare/context responses.
+     */
+    StudioAgentJobView: {
+      /** Active Node Key */
+      active_node_key: string | null
+      /** Completed Nodes */
+      completed_nodes: number
+      /** Created At */
+      created_at: string | null
+      /** Error Summary */
+      error_summary: string
+      /** Id */
+      id: string
+      /** Is Workflow Outdated */
+      is_workflow_outdated: boolean
+      /** Node Summaries */
+      node_summaries: components['schemas']['StudioAgentJobSummaryNode'][]
+      /** Outcome */
+      outcome: string
+      /** Status */
+      status: string
+      /** Title */
+      title: string
+      /** Total Nodes */
+      total_nodes: number
+      /** Updated At */
+      updated_at: string | null
+    }
     /**
      * StudioAgentNodeCodeDraftRequest
      * @description ``expected_capability``: validated for existing nodes (mismatch -> 400);
@@ -4925,6 +5587,19 @@ export interface components {
       /** Expected Capability */
       expected_capability?: string | null
     }
+    /** StudioAgentRecentFailure */
+    StudioAgentRecentFailure: {
+      /** Error Message */
+      error_message: string
+      /** Failure Category */
+      failure_category: string
+      /** Finished At */
+      finished_at: string | null
+      /** Job Id */
+      job_id: string
+      /** Node Key */
+      node_key: string
+    }
     /** StudioAgentRegistryEntry */
     StudioAgentRegistryEntry: {
       /** Args */
@@ -4935,14 +5610,21 @@ export interface components {
       id: string
       /** Label */
       label: string
+      /**
+       * Source
+       * @default manual
+       * @enum {string}
+       */
+      source: 'manual' | 'detected'
     }
     /**
      * StudioAgentRegistryResponse
-     * @description Stored document plus a PATH-probe result per agent id.
+     * @description Stored document plus host probe results.
      *
-     *     ``availability`` is response-only (admins see which entries can actually
-     *     launch on this host); it is never persisted and never accepted on PUT,
-     *     so it lives here rather than on the shared document model.
+     *     ``availability`` and ``detection`` are response-only (admins see which
+     *     entries can launch and which catalog agents this host has); both are
+     *     never persisted and never accepted on PUT, so they live here rather than
+     *     on the shared document model.
      */
     StudioAgentRegistryResponse: {
       /** Agents */
@@ -4953,6 +5635,10 @@ export interface components {
       availability?: {
         [key: string]: boolean
       }
+      /** Detection */
+      detection?: {
+        [key: string]: components['schemas']['StudioAgentDetection']
+      }
     }
     /** StudioAgentRegistryUpdate */
     StudioAgentRegistryUpdate: {
@@ -4960,6 +5646,23 @@ export interface components {
       agents?: components['schemas']['StudioAgentRegistryEntry'][]
       /** Api Base */
       api_base: string
+    }
+    /**
+     * StudioAgentSuggestedAction
+     * @description A suggestion payload the UI turns into a human-confirmation card; the
+     *     mutation itself always runs through the host session (STUDIO-AGENT-001).
+     */
+    StudioAgentSuggestedAction: {
+      /** Action */
+      action: string
+      /** Job Id */
+      job_id: string
+      /** Label */
+      label: string
+      /** Node Key */
+      node_key: string
+      /** Requires Confirmation */
+      requires_confirmation: boolean
     }
     /**
      * StudioAgentTokenEntry
@@ -6433,6 +7136,59 @@ export interface operations {
       }
     }
   }
+  get_infra_connections_api_admin_infra_connections_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['InfraConnectionsResponse']
+        }
+      }
+    }
+  }
+  test_infra_connection_api_admin_infra_connections_test_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['InfraConnectionTestRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['InfraConnectionTestResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_instance_settings_api_admin_instance_settings_get: {
     parameters: {
       query?: never
@@ -6535,6 +7291,26 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  redetect_studio_agents_api_admin_studio_agents_redetect_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentRegistryResponse']
         }
       }
     }
@@ -8008,6 +8784,37 @@ export interface operations {
       }
     }
   }
+  list_skill_directories_api_skills_directories_get: {
+    parameters: {
+      query: {
+        workspace_id: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillDirectoriesResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   list_skill_tags_api_skills_tags_get: {
     parameters: {
       query: {
@@ -8187,6 +8994,40 @@ export interface operations {
       }
     }
   }
+  get_job_context_api_studio_agent_tools_chat_sessions__session_id__job_context_get: {
+    parameters: {
+      query: {
+        job_id: string
+        node_key?: string | null
+      }
+      header?: never
+      path: {
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentJobContextResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_skill_api_studio_agent_tools_skills__skill_key__get: {
     parameters: {
       query?: {
@@ -8309,6 +9150,174 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['AgentVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_jobs_api_studio_agent_tools_workspaces__workspace_id__jobs_get: {
+    parameters: {
+      query?: {
+        status?: string | null
+        limit?: number
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentJobListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  compare_jobs_api_studio_agent_tools_workspaces__workspace_id__jobs_compare_get: {
+    parameters: {
+      query: {
+        job_id_a: string
+        job_id_b: string
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentJobCompareResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_job_detail_api_studio_agent_tools_workspaces__workspace_id__jobs__job_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        job_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentJobDetail']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  read_artifact_api_studio_agent_tools_workspaces__workspace_id__jobs__job_id__artifacts__artifact_name__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        job_id: string
+        artifact_name: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentArtifactResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_node_logs_api_studio_agent_tools_workspaces__workspace_id__jobs__job_id__logs_get: {
+    parameters: {
+      query?: {
+        node_key?: string | null
+        run_id?: number | null
+      }
+      header?: never
+      path: {
+        workspace_id: string
+        job_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentJobLogsResponse']
         }
       }
       /** @description Validation Error */
@@ -8451,6 +9460,105 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowNodeCodeVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_context_api_studio_agent_tools_workspaces__workspace_id__preview_context_get: {
+    parameters: {
+      query?: {
+        job_id?: string | null
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewContextResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_preview_panel_api_studio_agent_tools_workspaces__workspace_id__preview_panel_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewPanelStateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_preview_panel_draft_api_studio_agent_tools_workspaces__workspace_id__preview_panel_draft_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PreviewPanelDraftRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewPanelVersionResponse']
         }
       }
       /** @description Validation Error */
@@ -10554,6 +11662,130 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspacePackageUpdateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_state_api_workspaces__workspace_id__preview_panel_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewPanelStateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  archive_api_workspaces__workspace_id__preview_panel_archive_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewPanelStateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  publish_api_workspaces__workspace_id__preview_panel_publish_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewPanelVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_published_api_workspaces__workspace_id__preview_panel_published_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewPanelPublishedResponse']
         }
       }
       /** @description Validation Error */

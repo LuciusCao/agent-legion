@@ -100,6 +100,8 @@ def resolve_code_runtime_context(
     database_dsn: Any,
     settings_config: dict[str, Any] | None,
     object_store: JobArtifactObjectStore | None = None,
+    *,
+    worker_protocol_version: int = 1,
 ) -> dict[str, Any]:
     """Rebuild the full runtime_context at claim time (memory only).
 
@@ -111,6 +113,8 @@ def resolve_code_runtime_context(
     workspace rows are essential (node code reads ctx.job/ctx.workspace), so
     read failures propagate — the claim fails with 500 and the sweeper
     requeues, the same loop as secret-resolution failure.
+    ``worker_protocol_version`` (#338) is forwarded to the artifact
+    object-block injection (v4+ Workers get ``.gz`` specs).
     """
     job_id = str(manifest.get("job_id") or "")
     workspace_id = str(manifest.get("workspace_id") or "")
@@ -171,8 +175,11 @@ def resolve_code_runtime_context(
     # D12 (#160): claim-time object-storage artifact channel (presigned PUT
     # for outputs, presigned GET for staged inputs) — memory-only like the
     # secret injection above; a storage error degrades to the legacy CAS
-    # channel instead of failing the claim.
-    inject_artifact_object_block(object_store, resolved)
+    # channel instead of failing the claim. #338: the claiming Worker's
+    # protocol version selects the stored form (``.gz`` for v4+).
+    inject_artifact_object_block(
+        object_store, resolved, worker_protocol_version=worker_protocol_version
+    )
     return resolved
 
 

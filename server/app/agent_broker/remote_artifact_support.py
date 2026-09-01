@@ -1,13 +1,9 @@
 """Mechanics helpers for the Worker-direct S3 artifact channel (#160 D12).
 
-Split for the file-size budget: ``artifact_object_block`` (claim path) and
-``remote_artifacts`` (result-commit path) stay the orchestrators, this module
-owns the per-artifact mechanics both share — presign TTL policy, the presign
-loop bodies, and the staging-object stream download/digest helpers.
-
-Presign TTL derives from the node's resolved ``timeout_seconds``
-(``max(3600, timeout + 900)``): a fixed 3600s TTL would strand expired PUT
-URLs (403 on upload) for long-timeout nodes.
+``artifact_object_block`` (claim path) and ``remote_artifacts`` (result-commit
+path) stay the orchestrators; this module owns the shared per-artifact
+mechanics — presign TTL policy (``max(3600, timeout + 900)`` so long-timeout
+nodes never hit an expired URL), presign loops, staging download/digest.
 """
 
 from __future__ import annotations
@@ -17,6 +13,7 @@ import logging
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from server.app.services.job_artifact_gzip import GZIP_SUFFIX, is_gzip_key, read_bounded
 from server.app.services.job_artifact_objects import (
     DEFAULT_PRESIGN_EXPIRY_SECONDS,
     JobArtifactObjectStore,
@@ -40,13 +37,13 @@ def promote_remote(
     name: str,
     storage_key: str,
 ) -> str:
-    """Copy a verified staging object onto the authority key (server-side).
-
-    Returns the authority key. Callers register the row and then delete
-    the staging object best-effort (orphans are lifecycle's backstop).
+    """Copy a verified staging object onto the authority key (server-side);
+    returns the authority key. The ``.gz`` form marker (#338) carries over:
+    server-side copy preserves bytes, so the key keeps the staging suffix.
     """
     assert store.storage is not None
     authority_key = artifact_storage_key(workspace_id, job_id, name)
+    authority_key += GZIP_SUFFIX if is_gzip_key(storage_key) else ""
     store.storage.copy_object(storage_key, authority_key)
     return authority_key
 
@@ -70,11 +67,8 @@ def discard_staging(store: JobArtifactObjectStore, storage_key: str) -> None:
 
 
 def presign_expiry_seconds(manifest: dict[str, Any]) -> int:
-    """Presign TTL derived from the node's resolved ``timeout_seconds``.
-
-    kind='code' manifests carry it top-level, agent manifests nest it under
-    ``execution``; missing/unparseable values fall back to the 600s default.
-    """
+    """Presign TTL from the node's resolved ``timeout_seconds`` (top-level for
+    code manifests, nested under ``execution`` for agent; default 600s)."""
     timeout: Any = manifest.get("timeout_seconds")
     if timeout is None:
         timeout = (manifest.get("execution") or {}).get("timeout_seconds")
@@ -86,12 +80,11 @@ def presign_expiry_seconds(manifest: dict[str, Any]) -> int:
 
 
 def build_artifact_uploads(
-    store: JobArtifactObjectStore, manifest: dict[str, Any]
+    store: JobArtifactObjectStore, manifest: dict[str, Any], *, gzip_uploads: bool = False
 ) -> dict[str, dict[str, str]]:
-    """``name → {storage_key, presigned PUT url}`` on per-execution staging keys.
-
-    The Host promotes onto the authority key server-side after verification,
-    so a stale Worker's late PUT can never overwrite the authority copy.
+    """``name → {storage_key, presigned PUT url}`` on per-execution staging keys
+    (the Host promotes server-side after verification). ``gzip_uploads`` (#338,
+    v4+ Workers): the staging key carries the ``.gz`` form marker.
     """
     assert store.storage is not None
     expires = presign_expiry_seconds(manifest)
@@ -103,19 +96,19 @@ def build_artifact_uploads(
             str(manifest.get("execution_id") or ""),
             str(name),
         )
+        storage_key += GZIP_SUFFIX if gzip_uploads else ""
         url = store.storage.presign_put(storage_key, 0, expires)
         uploads[str(name)] = {"storage_key": storage_key, "url": url}
     return uploads
 
 
 def upgrade_input_artifacts(
-    store: JobArtifactObjectStore, manifest: dict[str, Any]
+    store: JobArtifactObjectStore, manifest: dict[str, Any], *, gzip_capable: bool = False
 ) -> dict[str, Any]:
-    """Upgrade staged inputs with a ``job_artifacts`` row to presigned GETs.
-
-    Value shape ``{"url": presigned_get, "sha256": content_hash}``;
-    ``storage_key`` never crosses the wire. Inputs without a row (never
-    uploaded, legacy jobs) keep the legacy ``sha256:<hash>`` CAS form.
+    """Upgrade staged inputs with a ``job_artifacts`` row to presigned GETs
+    (value ``{"url", "sha256"}``; no row keeps the legacy CAS form). #338: a
+    ``.gz`` row adds ``content_encoding: "gzip"`` for v4+ Workers; for older
+    Workers it stays CAS, so a mixed fleet never mismatches the stored form.
     """
     assert store.storage is not None
     expires = presign_expiry_seconds(manifest)
@@ -124,25 +117,33 @@ def upgrade_input_artifacts(
     for name, ref in dict(manifest.get("input_artifacts") or {}).items():
         row = store.lookup(job_id, str(name))
         if row is not None:
-            inputs[str(name)] = {
-                "url": store.storage.presign_get(str(row["storage_key"]), expires),
+            storage_key = str(row["storage_key"])
+            if is_gzip_key(storage_key) and not gzip_capable:
+                # 旧协议 worker：.gz 对象不升级为 presigned GET，保留 CAS
+                # 通道（dispatch 时从本地未压缩副本 staging，双形态读不受影响）。
+                inputs[str(name)] = ref
+                continue
+            upgraded = {
+                "url": store.storage.presign_get(storage_key, expires),
                 "sha256": str(row.get("content_hash") or ""),
             }
+            if is_gzip_key(storage_key):
+                upgraded["content_encoding"] = "gzip"
+            inputs[str(name)] = upgraded
         else:
             inputs[str(name)] = ref
     return inputs
 
 
 def download_remote_artifact(
-    store: JobArtifactObjectStore, staging_dir: Path, name: str, ref: Any
+    store: JobArtifactObjectStore,
+    staging_dir: Path,
+    name: str,
+    ref: Any,
+    max_size_bytes: int | None = None,
 ) -> tuple[Path, str]:
-    """Stream one verified staging object into the staging dir (hash-checked).
-
-    Returns the staged path and the hash to register: a Worker-reported hash
-    must match the computed digest (mismatch fails the whole batch); an empty
-    report registers the computed value — the same semantics as
-    ``verify_remote_digest``, so the registered hash always comes from
-    Host-verified content.
+    """Stream one verified staging object into the staging dir (hash-checked,
+    ``max_size_bytes``-capped on decompressed bytes, #338); returns (path, hash).
     """
     relative = PurePosixPath(name)
     if relative.is_absolute() or ".." in relative.parts:
@@ -154,7 +155,7 @@ def download_remote_artifact(
         store.open_stream({"storage_key": str(ref["storage_key"])}) as stream,
         target.open("wb") as handle,
     ):
-        while chunk := stream.read(1 << 20):
+        for chunk in read_bounded(stream, max_size_bytes, name=name):
             digest.update(chunk)
             handle.write(chunk)
     declared = str(ref.get("content_hash") or "")
@@ -163,17 +164,15 @@ def download_remote_artifact(
     return target, declared or digest.hexdigest()
 
 
-def verify_remote_digest(store: JobArtifactObjectStore, name: str, ref: Any) -> str:
-    """Digest-only stream of a verified staging object (cancelled runs).
-
-    Nothing is written to disk. A Worker-reported hash must match the
-    computed digest (mismatch fails the whole batch); an empty report
-    registers the computed value, so the registered hash always comes from
-    Host-verified content.
-    """
+def verify_remote_digest(
+    store: JobArtifactObjectStore, name: str, ref: Any, max_size_bytes: int | None = None
+) -> str:
+    """Digest-only stream of a verified staging object (cancelled runs); a
+    Worker-reported hash must match, an empty one registers the computed value.
+    ``max_size_bytes`` caps decompressed bytes mid-stream (#338)."""
     digest = hashlib.sha256()
     with store.open_stream({"storage_key": str(ref["storage_key"])}) as stream:
-        while chunk := stream.read(1 << 20):
+        for chunk in read_bounded(stream, max_size_bytes, name=name):
             digest.update(chunk)
     declared = str(ref.get("content_hash") or "")
     if declared and digest.hexdigest() != declared:

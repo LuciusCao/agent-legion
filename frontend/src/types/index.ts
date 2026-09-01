@@ -93,6 +93,7 @@ export type AgentRuntime = AgentDefinitionPayload['runtime']
 
 export type SkillValidateResponse = ApiSchemas['SkillValidateResponse']
 export type SkillTagsResponse = ApiSchemas['SkillTagsResponse']
+export type SkillDirectoriesResponse = ApiSchemas['SkillDirectoriesResponse']
 
 export type WorkflowNodeRecord = ApiSchemas['WorkflowNodeResponse']
 export type WorkflowDefinitionRecord = ApiSchemas['WorkflowDefinitionResponse']

@@ -1,12 +1,15 @@
 /**
- * 左栏实体面板的统一入口（issue #11）：
- * - question：结构化业务面板在上 + 通用产物预览在下；
- * - 其余 source_type：通用产物预览兜底（替代旧的 return null / video 空态）。
- * 结构化面板的 gating 由 questionPreviewManifest 声明并在面板内部求值。
+ * 左栏实体面板的统一入口（issue #11 + #328）：
+ * - workspace 有已发布预览面板 bundle → PreviewPanelSection 用沙箱 bundle
+ *   host 接管整栏（定制面板经只读桥自取产物）；
+ * - 无定制 → 回落现有结构：question 走内置 bundle（QuestionContentPanel），
+ *   其余 source_type 由通用产物预览兜底（扩展名分发不变）。
+ * 「定制预览」按钮在 PreviewPanelSection 头部。
  */
 import type { JobDetail } from '../../types/jobTypes'
 import { QuestionContentPanel } from '../../components/question/QuestionContentPanel'
 import { ArtifactPreviewPanel } from '../../components/preview/ArtifactPreviewPanel'
+import { PreviewPanelSection } from '../../features/previewPanel/PreviewPanelSection'
 
 export interface EntityPanelProps {
   detail: JobDetail | null | undefined
@@ -17,7 +20,7 @@ export interface EntityPanelProps {
 export function EntityPanel({ detail, jobId, workspaceId }: EntityPanelProps) {
   const isQuestion = detail?.job.source_type === 'question'
 
-  return (
+  const fallback = (
     <>
       {isQuestion && <QuestionContentPanel key={jobId} jobId={jobId} />}
       <ArtifactPreviewPanel
@@ -27,5 +30,13 @@ export function EntityPanel({ detail, jobId, workspaceId }: EntityPanelProps) {
         workspaceId={workspaceId}
       />
     </>
+  )
+
+  return (
+    <PreviewPanelSection
+      jobId={jobId}
+      workspaceId={workspaceId}
+      fallback={fallback}
+    />
   )
 }
