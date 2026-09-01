@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime
 from typing import Any
 
 from server.app.db.dialect import ConnectSource
+from server.app.db.rowmap import iso_optional
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.job_errors import (
     ConflictError,
@@ -43,14 +43,6 @@ class MaterialInUseError(JobServiceError):
     """Material is still referenced by a job input (routes map to 409)."""
 
 
-def _timestamp(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return str(value)
-
-
 def _record(row: dict[str, Any]) -> dict[str, Any]:
     """Public material record; the internal storage_key never leaves the service."""
     return {
@@ -62,8 +54,8 @@ def _record(row: dict[str, Any]) -> dict[str, Any]:
         "size_bytes": int(row["size_bytes"]),
         "status": str(row["status"]),
         "created_by": str(row["created_by"]),
-        "created_at": _timestamp(row["created_at"]),
-        "expires_at": _timestamp(row["expires_at"]),
+        "created_at": iso_optional(row["created_at"]),
+        "expires_at": iso_optional(row["expires_at"]),
     }
 
 

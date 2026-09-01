@@ -1,0 +1,109 @@
+/* 排查对话面板（#329）：布局类复用 Studio 对话面板的视觉语言，动作卡片
+ * 是新增的确认面（agent 建议 → 人确认执行）。 */
+
+.chatPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 320px;
+}
+
+.emptyState {
+  color: var(--text-secondary, #666);
+  text-align: center;
+  padding: 24px 0;
+}
+
+.statusWarning {
+  color: var(--warning-text, #b26a00);
+  background: var(--warning-bg, #fff7e6);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dialogTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 4px;
+}
+
+.dialogContent {
+  /* 消息列表自身滚动（StudioChatMessageList 的 messages 区域）。 */
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
+}
+
+.actionArea {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.actionCard {
+  border: 1px solid var(--warning-border, #ffe0b2);
+  background: var(--warning-bg, #fffaf0);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.actionTitle {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.actionBadge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #b26a00;
+  background: #ffe0b2;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.actionReason {
+  color: var(--text-secondary, #666);
+  margin-top: 4px;
+  white-space: pre-wrap;
+}
+
+.actionButtons {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.actionConfirm {
+  background: var(--primary, #1976d2);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 14px;
+  cursor: pointer;
+}
+
+.actionDismiss {
+  background: transparent;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 6px;
+  padding: 4px 14px;
+  cursor: pointer;
+}
+
+.actionResolved {
+  margin-top: 6px;
+  color: var(--text-secondary, #666);
+}
+
+.actionFailed {
+  margin-top: 6px;
+  color: var(--error-text, #c62828);
+}

@@ -40,7 +40,6 @@ dev-backend: ## 启动后端开发服务器 (127.0.0.1:$(DEV_BACKEND_PORT))
 dev-frontend: ## 启动前端开发服务器（代理 /api 到 $(DEV_BACKEND_PORT)）
 	cd $(FRONTEND_DIR) && VITE_API_TARGET="http://127.0.0.1:$(DEV_BACKEND_PORT)" $(NPM) run dev -- --port $(DEV_FRONTEND_PORT)
 
-AGENT_WORKER_CONFIG ?= config/agent-worker.yaml
 AGENT_WORKER_STATE_DIR ?= data/agent-worker-service
 AGENT_WORKER_UI_HOST ?= 127.0.0.1
 AGENT_WORKER_UI_PORT ?= 8789
@@ -49,7 +48,7 @@ CAFFEINATE := $(shell command -v caffeinate 2>/dev/null)
 .PHONY: dev-worker
 dev-worker: ## 启动本机 Worker Service 与控制台（macOS 下经 caffeinate 防睡眠）
 	ulimit -n $(DEV_NOFILE_LIMIT); $(if $(CAFFEINATE),$(CAFFEINATE) -is ,)$(UV) run python -m worker.service \
-		--config "$(AGENT_WORKER_CONFIG)" --state-dir "$(AGENT_WORKER_STATE_DIR)" \
+		--state-dir "$(AGENT_WORKER_STATE_DIR)" \
 		--host "$(AGENT_WORKER_UI_HOST)" --port "$(AGENT_WORKER_UI_PORT)"
 
 # dev-up/down/status：上面三个 dev-* target 的后台编排（日志 data/logs/dev-*.log）。
@@ -184,6 +183,10 @@ architecture-ratchet: ## 更新架构预算基线
 .PHONY: architecture-check
 architecture-check: ## 检查架构契约
 	$(UV) run python -m scripts.check_architecture
+
+.PHONY: architecture-issue-states
+architecture-issue-states: ## 刷新豁免锚点 issue 状态清单（gh 联网，供豁免到期检测）
+	$(UV) run python -m scripts.refresh_issue_states
 
 # 前端 API 类型生成
 .PHONY: api-generate

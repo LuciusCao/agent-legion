@@ -43,20 +43,13 @@ export const useSettingStore = create<SettingState>((set, get) => ({
 
   setSettings(s) {
     set((state) => {
+      // workflowKey 已从快照 blob 退役（#211 Phase 2 第二批）：key 与
+      // workspace id 绑定且不可变，settings 编辑面只剩 entityType/
+      // previewHidden，不再存在「换 workflow 清空节点限制」的分支。
       const nextSettings = { ...state.settings, ...s }
-      const workflowChanged =
-        s.workflowKey !== undefined &&
-        s.workflowKey !== state.settings.workflowKey
-      const nextExecutionConfiguration = workflowChanged
-        ? {
-            ...state.executionConfiguration,
-            node_limits: [],
-          }
-        : state.executionConfiguration
       const nextState = {
         ...state,
         settings: nextSettings,
-        executionConfiguration: nextExecutionConfiguration,
       }
       return { ...nextState, isDirty: computeDirty(nextState) }
     })

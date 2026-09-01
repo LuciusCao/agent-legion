@@ -16,8 +16,10 @@ class AgentDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     capability: str = Field(min_length=1)
-    runtime: Literal["pi", "openclaw", "velites"]
-    skill: str = Field(min_length=1)
+    runtime: Literal["pi", "velites"]
+    # Legacy fallback for the node's skill binding (issue #76): "" means the
+    # definition binds no skill and the workflow node must declare one.
+    skill: str = ""
     tools: tuple[str, ...] = ("read", "write", "bash")
     requires_labels: dict[str, str] = Field(default_factory=dict)
     config_schema: dict[str, Any] = Field(default_factory=dict)
@@ -31,6 +33,8 @@ class AgentDefinition(BaseModel):
     @field_validator("skill", mode="after")
     @classmethod
     def _reject_unsafe_skill_path(cls, value: str) -> str:
+        if not value:
+            return value
         path = Path(value)
         if path.is_absolute() or ".." in path.parts:
             raise ValueError("skill path must be relative and must not contain '..'")

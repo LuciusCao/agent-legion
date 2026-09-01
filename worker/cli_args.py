@@ -50,11 +50,16 @@ def build_parser() -> argparse.ArgumentParser:
     configure.add_argument("--host-url")
     configure.add_argument("--worker-id")
     configure.add_argument("--name")
-    configure.add_argument("--runtime", action="append", choices=["pi", "openclaw", "velites"])
+    configure.add_argument(
+        "--disable-runtime",
+        action="append",
+        choices=["pi", "velites"],
+        help="停用某个已安装的 agent runtime（反选；默认全部探测到的都启用）",
+    )
     configure.add_argument("--max-concurrency", type=int)
     configure.add_argument("--upload-concurrency", type=int)
     configure.add_argument("--claim-enabled", action=argparse.BooleanOptionalAction, default=None)
-    configure.add_argument("--capability", action="append")
+    configure.add_argument("--capability", action="append", help="已退役（issue #284）：值被忽略")
     configure.add_argument("--model", action="append", default=[])
     configure.add_argument("--label", action="append", default=[])
     configure.add_argument(
@@ -71,7 +76,7 @@ def configure_payload(args: argparse.Namespace) -> dict[str, Any]:
         ("host_url", "host_url"),
         ("worker_id", "worker_id"),
         ("name", "name"),
-        ("runtime", "runtimes"),
+        ("disable_runtime", "disabled_runtimes"),
         ("max_concurrency", "max_concurrency"),
         ("upload_concurrency", "upload_max_concurrency"),
         ("claim_enabled", "claim_enabled"),

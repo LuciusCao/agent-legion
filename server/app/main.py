@@ -1,10 +1,15 @@
+"""FastAPI app factory — the composition root for the Host process.
+
+``create_app`` wires settings → DB → seeds → services → routers → threads;
+``create_prod_app`` is the uvicorn factory. Ordering invariants: backend.md.
+"""
+
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 
-from server.app.agent_control.openclaw_discovery import list_openclaw_agents
 from server.app.auth.service import build_auth_service
 from server.app.bootstrap import build_agent_plane
 from server.app.db.connection import close_database_pools
@@ -36,16 +41,17 @@ from server.app.services.job_packages import JobPackageService
 from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
-from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 from server.app.services.workspace_execution_configuration import (
     WorkspaceExecutionConfigurationService,
 )
 from server.app.settings import load_settings, validate_settings
-from server.app.skills.seed import seed_skill_sources
+from server.app.single_replica_probe import SingleReplicaProbe
+from server.app.skills.skill_sources_retirement import retire_skill_sources_document
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
 from server.app.storage import build_s3_storage_checked
+from server.app.studio_chat.agent_catalog import spawn_startup_detection
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.service import StudioChatService
 from server.app.worker_control import WorkspaceWorkerControl
@@ -56,9 +62,7 @@ from server.app.workflow_worker.thread import WorkflowWorkerThread
 def create_app(data_dir: Path | None = None, start_worker: bool = False) -> FastAPI:
     settings = load_settings(data_dir=data_dir)
     event_bus = InProcessEventBus()
-    agent_manager = AgentStatusManager(
-        event_bus=event_bus, discover_agents=lambda: list_openclaw_agents(timeout=10)
-    )
+    agent_manager = AgentStatusManager(event_bus=event_bus)
     job_event_manager = JobEventManager(event_bus)
     job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
     # Hydrate instance-level settings from the DB before any service reads
@@ -74,11 +78,11 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # (WorkflowRevisionService.ensure_active_revision). The workflow catalog
     # is retired (schema v50, #112): a workflow is the DAG inside one
     # workspace, keyed by workspaces.default_workflow_key as plain text.
-    # Skill sources/lock retired from tracked yaml into global_settings:
-    # import-once the legacy files when present, else seed the built-in
-    # constants; with rows present this is a no-op (DB is authoritative).
-    seed_skill_sources(job_db, settings.root_dir)
-    WorkflowRevisionService(job_db).reconcile_active_agent_routes()
+    # The global skill source registry is retired (#322): skill locations
+    # derive from the skills root + key, unpinned node refs follow the repo's
+    # live HEAD. Delete the persisted skill_sources document (idempotent
+    # no-op once migrated); the skill_lock document stays.
+    retire_skill_sources_document(job_db)
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db)
     # Resume state must not survive a restart: dispatch stays off until an
     # operator explicitly resumes it in this process lifetime.
@@ -116,9 +120,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # PATH-level availability of every registered chat agent: warms the probe
     # cache and logs the entries the picker will hide on this host.
     studio_chat_service.warm_availability_probe()
-    agent_broker = agent_plane.broker
-    agent_dispatch = agent_plane.dispatch
-    agent_completion = agent_plane.completion
     executor_leases = agent_plane.executor_leases
     agent_worker_registry = agent_plane.worker_registry
     workflow_worker_thread: WorkflowWorkerThread | None = None
@@ -132,12 +133,20 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         job_intake_queue=JobIntakeQueue(job_db, settings, job_event_buffer),
         ops_metrics=ops_metrics,
     )
+    # Single-replica guardrail (#277): the runtime state above (in-process
+    # event bus, login rate limiter, studio chat sessions, pause reset) is
+    # process-local, so a second replica against the same database degrades
+    # silently. The probe holds one session advisory lock for the process
+    # lifetime; a second starter finds it taken and logs a warning (env
+    # escape hatches documented in single_replica_probe.py).
+    replica_probe = SingleReplicaProbe(job_db)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         nonlocal workflow_worker_thread, sweeper_thread, artifact_gc_thread
         nonlocal artifact_maintenance_thread, material_ttl_thread
         job_event_manager.bus.attach_loop(asyncio.get_running_loop())
+        replica_probe.probe()
         if start_worker:
             validate_settings(settings)
             agent_manager.discover()
@@ -145,10 +154,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 settings,
                 job_db=job_db,
                 executor_leases=executor_leases,
-                agent_broker=agent_broker,
+                agent_broker=agent_plane.broker,
                 workspace_worker_control=workspace_worker_control,
                 agent_manager=agent_manager,
-                agent_dispatch=agent_dispatch,
+                agent_dispatch=agent_plane.dispatch,
             )
             app.state.worker_startup = worker_status
             # Routes pick the thread up here to trigger scan-list reloads
@@ -171,6 +180,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         background_tasks.start(app)
         studio_chat_service.reap_zombie_sessions()
         studio_registry = StudioAgentRegistryStore(job_db)
+        # Startup auto-detection (#332): daemon thread, best-effort; gated on
+        # start_worker so test/export apps never spawn probe subprocesses.
+        if start_worker:
+            spawn_startup_detection(studio_registry)
         studio_mcp, studio_mcp_app = create_studio_mcp_http_app(
             job_db, lambda: str(studio_registry.get()["api_base"])
         )
@@ -182,6 +195,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 yield
         finally:
             await background_tasks.stop(app)
+            # Release the replica-probe lock before the pools close so the
+            # next starter (rolling restart) does not see a stale holder.
+            replica_probe.close()
             # Reap chat sessions before closing DB pools: teardown revokes
             # scoped tokens and settles permission waiters via the DB.
             studio_chat_service.shutdown()
@@ -203,10 +219,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.settings = settings
     app.state.job_db = job_db
     app.state.auth_service = build_auth_service(job_db, settings.config)
-    app.state.agent_broker = agent_broker
-    app.state.agent_dispatch = agent_dispatch
+    app.state.agent_broker = agent_plane.broker
+    app.state.agent_dispatch = agent_plane.dispatch
     app.state.agent_worker_registry = agent_worker_registry
-    app.state.agent_completion = agent_completion
+    app.state.agent_completion = agent_plane.completion
     app.state.executor_leases = executor_leases
     app.state.artifact_store = artifact_store
     app.state.agent_manager = agent_manager
@@ -238,9 +254,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 job_event_manager=job_event_manager,
                 job_event_buffer=job_event_buffer,
                 artifact_store=artifact_store,
-                agent_broker=agent_broker,
+                agent_broker=agent_plane.broker,
                 agent_worker_registry=agent_worker_registry,
-                agent_completion=agent_completion,
+                agent_completion=agent_plane.completion,
                 ops_metrics=ops_metrics,
                 quality_sampling=quality.quality_sampling,
                 quality_labels=quality.quality_labels,

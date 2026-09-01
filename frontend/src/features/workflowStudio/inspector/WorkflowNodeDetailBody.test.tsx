@@ -9,6 +9,7 @@ import type {
   SkillDetail,
 } from '../../../types/agentCatalogTypes'
 import { WorkflowNodeDetailBody } from './WorkflowNodeDetailBody'
+import type { NodeDetailPreviewKind } from './nodeDetailPreviewContext'
 import { WorkflowSkillPreviewPanel } from './WorkflowSkillPreviewPanel'
 
 // inspector 各 section（code/config/agent 执行详情）统一走 '../../api' 的 api。
@@ -28,10 +29,11 @@ const mockApi = vi.mocked(api)
 const mockGetSkillDetail = vi.mocked(getSkillDetail)
 
 // 默认响应不带 tags 字段：版本下拉降级为纯文本。带 tags 的场景各用例自行覆盖。
+// #322：不带 ref 的默认详情 ref 恒为 latest（工作区 HEAD）。
 function skillDetail(overrides?: Partial<SkillDetail>): SkillDetail {
   return {
     key: 'demo/review',
-    ref: 'v1.2.0',
+    ref: 'latest',
     commit: 'abc1234567890',
     available: true,
     tags: ['v1.3.0', 'v1.2.0'],
@@ -51,6 +53,7 @@ const workflow: WorkflowDefinitionRecord = {
       key: 'generate_key_info',
       label: '生成关键信息',
       capability: 'generate_key_info',
+      node_type: 'agent',
       after: [],
       inputs: ['questions.json'],
       outputs: ['key_info.json'],
@@ -59,6 +62,7 @@ const workflow: WorkflowDefinitionRecord = {
       key: 'review',
       label: '评审',
       capability: 'review',
+      node_type: 'agent',
       after: ['generate_key_info'],
       inputs: ['key_info.json'],
       outputs: ['review.json'],
@@ -100,22 +104,30 @@ const definitionYaml = [
   'key: demo_workflow',
   'nodes:',
   '  generate_key_info:',
+  '    type: agent',
   '    capability: generate_key_info',
   '  review:',
+  '    type: agent',
   '    capability: review',
   '',
 ].join('\n')
 
-function renderBody(nodeKey: string) {
+function renderBody(options?: {
+  nodeKey?: string
+  activeKind?: NodeDetailPreviewKind | null
+  onShowPreview?: (kind: NodeDetailPreviewKind) => void
+}) {
   return render(
     <TestQueryProvider>
       <WorkflowNodeDetailBody
         workflow={workflow}
-        nodeKey={nodeKey}
+        nodeKey={options?.nodeKey ?? 'generate_key_info'}
         agentCatalog={agentCatalog}
         definitionYaml={definitionYaml}
         setDefinitionYaml={() => {}}
         readOnly={false}
+        activeKind={options?.activeKind ?? null}
+        onShowPreview={options?.onShowPreview ?? (() => {})}
         onClose={() => {}}
       />
     </TestQueryProvider>
@@ -128,7 +140,7 @@ describe('WorkflowNodeDetailBody', () => {
     mockApi.mockResolvedValue({})
     mockGetSkillDetail.mockResolvedValue({
       key: 'demo/review',
-      ref: 'v1.2.0',
+      ref: 'latest',
       commit: 'abc1234567890',
       available: true,
       files: [
@@ -143,10 +155,22 @@ describe('WorkflowNodeDetailBody', () => {
     })
   })
 
-  it('switches the panel to the in-place skill preview instead of a dialog', async () => {
-    renderBody('generate_key_info')
+  it('forwards preview button clicks through the preview context', () => {
+    const onShowPreview = vi.fn()
+    renderBody({ onShowPreview })
 
     fireEvent.click(screen.getByRole('button', { name: '浏览技能文件' }))
+    expect(onShowPreview).toHaveBeenCalledWith('skill')
+    fireEvent.click(screen.getByRole('button', { name: '查看 Prompt' }))
+    expect(onShowPreview).toHaveBeenCalledWith('prompt')
+    // 受控组件：activeKind 不变时内容区仍是 inspector。
+    expect(
+      screen.getByRole('button', { name: '浏览技能文件' })
+    ).toBeInTheDocument()
+  })
+
+  it('switches the panel to the in-place skill preview instead of a dialog', async () => {
+    renderBody({ activeKind: 'skill' })
 
     // panel 原位替换：不出 dialog，inspector 内容让位给预览视图。
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
@@ -154,70 +178,26 @@ describe('WorkflowNodeDetailBody', () => {
     expect(
       screen.queryByRole('button', { name: '查看 Prompt' })
     ).not.toBeInTheDocument()
-    // 版本展示：lock 的当前版本（ref · commit 短 sha）。
-    expect(screen.getByText('v1.2.0 · abc1234')).toBeInTheDocument()
+    // 版本展示：默认详情（latest = 工作区 HEAD）的 ref · commit 短 sha。
+    expect(screen.getByText('latest · abc1234')).toBeInTheDocument()
     expect(mockGetSkillDetail).toHaveBeenCalledWith('demo/review', undefined)
 
-    fireEvent.click(
-      screen.getByRole('button', { name: /references\/rules.md/ })
-    )
+    // 目录树：references/rules.md 显示为目录下的 rules.md。
+    fireEvent.click(screen.getByRole('button', { name: 'rules.md' }))
     expect(screen.getByText('# Rules')).toBeInTheDocument()
   })
 
-  it('returns to the node details from the skill preview', async () => {
-    renderBody('generate_key_info')
-
-    fireEvent.click(screen.getByRole('button', { name: '浏览技能文件' }))
-    expect(await screen.findByText('# Skill')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '返回节点详情' }))
-
-    expect(
-      screen.getByRole('button', { name: '查看 Prompt' })
-    ).toBeInTheDocument()
-    expect(screen.queryByLabelText('技能文件预览')).not.toBeInTheDocument()
-  })
-
-  it('shows the prompt preview in place and returns', async () => {
-    renderBody('generate_key_info')
-
-    fireEvent.click(screen.getByRole('button', { name: '查看 Prompt' }))
+  it('switches the panel to the prompt preview for kind=prompt', () => {
+    renderBody({ activeKind: 'prompt' })
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Prompt 预览')).toBeInTheDocument()
-    expect(screen.getByText('生成关键信息 · 运行 Prompt')).toBeInTheDocument()
     expect(
-      screen.getByText(/Node: generate_key_info/, { exact: false })
-    ).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '返回节点详情' }))
+      screen.queryByRole('button', { name: '浏览技能文件' })
+    ).not.toBeInTheDocument()
+    // 预览响应未返回前，技能芯片回落 agentCatalog 绑定。
     expect(
-      screen.getByRole('button', { name: '浏览技能文件' })
-    ).toBeInTheDocument()
-  })
-
-  it('resets the preview when the selected node changes', async () => {
-    const { rerender } = renderBody('generate_key_info')
-    fireEvent.click(screen.getByRole('button', { name: '查看 Prompt' }))
-    expect(screen.getByLabelText('Prompt 预览')).toBeInTheDocument()
-
-    rerender(
-      <TestQueryProvider>
-        <WorkflowNodeDetailBody
-          workflow={workflow}
-          nodeKey="review"
-          agentCatalog={agentCatalog}
-          definitionYaml={definitionYaml}
-          setDefinitionYaml={() => {}}
-          readOnly={false}
-          onClose={() => {}}
-        />
-      </TestQueryProvider>
-    )
-
-    // 预览状态带 nodeKey 印记：切换选中节点即回到节点详情。
-    expect(screen.queryByLabelText('Prompt 预览')).not.toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: '查看 Prompt' })
+      screen.getByRole('button', { name: 'demo/review' })
     ).toBeInTheDocument()
   })
 
@@ -240,30 +220,28 @@ describe('WorkflowNodeDetailBody', () => {
           : skillDetail()
       )
     )
-    renderBody('generate_key_info')
-    fireEvent.click(screen.getByRole('button', { name: '浏览技能文件' }))
+    renderBody({ activeKind: 'skill' })
 
-    // 锁定版本为首项（标签带锁定 ref），tags 按响应倒序列出。
+    // latest 为首项（标签带默认详情的 ref），tags 按响应倒序列出。
     fireEvent.mouseDown(await screen.findByLabelText('版本'))
     expect(
-      await screen.findByRole('option', { name: '当前锁定版本（v1.2.0）' })
+      await screen.findByRole('option', { name: '跟随最新提交（latest）' })
     ).toBeInTheDocument()
     fireEvent.click(screen.getByRole('option', { name: 'v1.3.0' }))
 
     expect(mockGetSkillDetail).toHaveBeenCalledWith('demo/review', 'v1.3.0')
     expect(await screen.findByText('# Skill v1.3')).toBeInTheDocument()
-    // 查看中的 tag 与锁定版本标识清楚：下拉显示当前选中的 tag。
+    // 查看中的 tag 与 latest 首项标识清楚：下拉显示当前选中的 tag。
     expect(screen.getByRole('combobox')).toHaveTextContent('v1.3.0')
   })
 
   it('degrades the version select to plain text when the skill has no tags', async () => {
     mockGetSkillDetail.mockResolvedValue(skillDetail({ tags: [] }))
-    renderBody('generate_key_info')
-    fireEvent.click(screen.getByRole('button', { name: '浏览技能文件' }))
+    renderBody({ activeKind: 'skill' })
 
     expect(await screen.findByText('# Skill')).toBeInTheDocument()
     expect(screen.queryByLabelText('版本')).not.toBeInTheDocument()
-    expect(screen.getByText('v1.2.0 · abc1234')).toBeInTheDocument()
+    expect(screen.getByText('latest · abc1234')).toBeInTheDocument()
   })
 
   it('resets the selected tag when the skill key changes', async () => {
@@ -287,7 +265,7 @@ describe('WorkflowNodeDetailBody', () => {
     )
     const { rerender } = render(
       <TestQueryProvider>
-        <WorkflowSkillPreviewPanel skillKey="demo/review" onBack={() => {}} />
+        <WorkflowSkillPreviewPanel skillKey="demo/review" />
       </TestQueryProvider>
     )
     fireEvent.mouseDown(await screen.findByLabelText('版本'))
@@ -296,11 +274,11 @@ describe('WorkflowNodeDetailBody', () => {
 
     rerender(
       <TestQueryProvider>
-        <WorkflowSkillPreviewPanel skillKey="demo/other" onBack={() => {}} />
+        <WorkflowSkillPreviewPanel skillKey="demo/other" />
       </TestQueryProvider>
     )
 
-    // ref 选择带 skillKey 印记：切换技能即回落锁定版本（不带 ref 拉取）。
+    // ref 选择带 skillKey 印记：切换技能即回落默认 latest（不带 ref 拉取）。
     expect(mockGetSkillDetail).toHaveBeenLastCalledWith('demo/other', undefined)
   })
 })

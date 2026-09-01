@@ -122,3 +122,15 @@ def _matches_glob(rel_path: str, pattern: str, *, allow_dir_prefix: bool = False
         if rel_path == prefix or rel_path.startswith(prefix + "/"):
             return True
     return False
+
+
+def absolute_limit_map(policy: BudgetPolicy, production: tuple[str, ...]) -> dict[str, int]:
+    """Root max_lines overrides, only for files that root governs (prefix
+    AND extension; sibling extensions keep the global limit)."""
+    return {
+        path: root.max_lines
+        for root in policy.production_roots
+        if root.max_lines is not None
+        for path in production
+        if path.startswith(root.path.rstrip("/") + "/") and path.endswith(tuple(root.extensions))
+    }

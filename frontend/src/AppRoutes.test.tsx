@@ -47,6 +47,8 @@ vi.mock('./routes/pages', () => {
     TokenUsagePage: stub('token-usage'),
     MonitoringPage: stub('monitoring'),
     QualityPage: stub('quality'),
+    GlobalSettingsPage: stub('global-settings'),
+    GlobalOnboardingPage: stub('全局初始化清单'),
   }
 })
 
@@ -92,6 +94,24 @@ describe('AppRoutes auth guard', () => {
 
     expect(
       await screen.findByText('初始化管理员', undefined, { timeout: 5000 })
+    ).toBeInTheDocument()
+  })
+
+  it('serves the global onboarding page to the admin (#333)', async () => {
+    authState.status = 'authenticated'
+    authState.user = {
+      id: 'u1',
+      username: 'admin',
+      display_name: 'Admin',
+      role: 'admin',
+      disabled_at: null,
+      created_at: '2026-01-01T00:00:00Z',
+    }
+
+    renderRoutes('/admin/onboarding')
+
+    expect(
+      await screen.findByText('全局初始化清单', undefined, { timeout: 5000 })
     ).toBeInTheDocument()
   })
 })

@@ -58,9 +58,9 @@ def _make_db(tmp_path: Path) -> Path:
             "insert into workspaces(id, name, default_workflow_key) values ('w1', 'ws', 'demo_workflow')"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
+            "insert into jobs(id, workspace_id, source_type, source_id,"
             " title, status, storage_dir)"
-            " values ('j1','w1','wf','s','s1','t','pending','d')"
+            " values ('j1','w1','s','s1','t','pending','d')"
         )
         conn.execute(
             "insert into job_nodes(job_id, node_key, status) values ('j1','review','pending')"

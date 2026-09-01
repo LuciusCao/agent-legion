@@ -64,7 +64,7 @@ describe('JobRunToDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
         ]}
         workflowDefinition={workflow}
@@ -93,7 +93,7 @@ describe('JobRunToDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
         ]}
         workflowDefinition={workflow}
@@ -125,7 +125,7 @@ describe('JobRunToDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
         ]}
         workflowDefinition={workflow}
@@ -152,7 +152,7 @@ describe('JobRunToDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
         ]}
         workflowDefinition={workflow}
@@ -190,7 +190,7 @@ describe('JobRunToDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
         ]}
         workflowDefinition={workflow}
@@ -214,7 +214,7 @@ describe('JobRunToDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
         ]}
         workflowDefinition={workflow}

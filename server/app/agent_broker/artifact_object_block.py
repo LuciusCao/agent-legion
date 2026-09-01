@@ -5,6 +5,11 @@ owns the legacy CAS staging, this one owns the presigned-URL overlay both
 dispatch paths (agent enqueue, code claim rebuild) apply on top of it. The
 per-artifact mechanics (presign TTL policy, presign loops, staging streams)
 live in ``remote_artifact_support.py``; this module stays the orchestrator.
+
+#338: the claiming Worker's protocol version gates the gzip object form —
+v4+ Workers get ``.gz``-suffixed upload specs and ``content_encoding:
+"gzip"`` input refs; older Workers get bare staging keys and never see a
+``.gz`` input upgrade.
 """
 
 from __future__ import annotations
@@ -17,12 +22,16 @@ from server.app.agent_broker.remote_artifact_support import (
     upgrade_input_artifacts,
 )
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from shared.protocol import ARTIFACT_GZIP_PROTOCOL_VERSION
 
 logger = logging.getLogger(__name__)
 
 
 def inject_artifact_object_block(
-    object_store: JobArtifactObjectStore | None, manifest: dict[str, Any]
+    object_store: JobArtifactObjectStore | None,
+    manifest: dict[str, Any],
+    *,
+    worker_protocol_version: int = 1,
 ) -> None:
     """Add the object-storage artifact channel to a claim manifest (#160 D12).
 
@@ -33,7 +42,8 @@ def inject_artifact_object_block(
     content_hash}``). Workers that see no ``artifact_uploads`` fall back to
     the legacy per-file POST channel. Presign TTLs derive from the node's
     resolved ``timeout_seconds`` so long-timeout nodes never hit an expired
-    URL mid-run.
+    URL mid-run. ``worker_protocol_version`` (#338) selects the stored form:
+    v4+ Workers compress (``.gz`` keys), older Workers stay raw.
 
     Degradation: any storage error leaves the manifest on the legacy channel
     (all-or-nothing — the new keys are built in locals and assigned once), so
@@ -45,10 +55,21 @@ def inject_artifact_object_block(
         # Staging keys are per-execution; a manifest without one cannot use
         # the object channel (the Host would reject the reported keys).
         return
+    gzip_capable = worker_protocol_version >= ARTIFACT_GZIP_PROTOCOL_VERSION
     try:
-        uploads = build_artifact_uploads(object_store, manifest)
-        inputs = upgrade_input_artifacts(object_store, manifest)
+        uploads = build_artifact_uploads(object_store, manifest, gzip_uploads=gzip_capable)
+        inputs = upgrade_input_artifacts(object_store, manifest, gzip_capable=gzip_capable)
     except Exception:
+        # #204 broad-except audit: deliberate degradation, verified against
+        # the channel contract. The try covers two presign loops whose
+        # outcome space is the storage driver surface (botocore ClientError
+        # et al., not a business family) plus DB reads of manifest rows.
+        # All-or-nothing assignment means either the whole object channel is
+        # injected or none of it — a partial manifest key set is impossible
+        # by construction. The Worker seeing no ``artifact_uploads`` uses the
+        # legacy per-file POST channel, so an outage degrades throughput,
+        # never correctness. The traceback is logged so the outage is
+        # diagnosable.
         logger.warning(
             "artifact object-block injection failed for job %s; "
             "the Worker falls back to the legacy artifact channel",

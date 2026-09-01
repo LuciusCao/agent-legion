@@ -23,9 +23,12 @@ export const extraQueryKeys = {
     ['workspaceRuntimeModels', workspaceId] as const,
   tokenUsagePricing: () => ['tokenUsagePricing'] as const,
   instanceSettings: () => ['instanceSettings'] as const,
-  skillSources: () => ['skillSources'] as const,
+  // SkillSelector datalist 的候选目录（<skills_root>/<workspaceId>/ 下目录名，#327）。
+  skillDirectories: (workspaceId: string) => k('skillDirectories', workspaceId),
   studioAgents: () => ['studioAgents'] as const,
   connections: () => ['connections'] as const,
+  // 全局设置「基础设施连接」只读展示（#335）。
+  infraConnections: () => ['infraConnections'] as const,
   connectionTypes: () => ['connectionTypes'] as const,
   // SettingsPage 与 WorkspaceMainPage 经同一 key 共享工作流定义缓存。
   workflowDefinition: (key: string) => k('workflowDefinition', key),
@@ -61,6 +64,9 @@ export const extraQueryKeys = {
   // turn_end 按首段 'studioSkillDetail' 前缀整体失效（useStudioChat）。
   studioSkillDetail: (skillKey: string, ref: string | null) =>
     ['studioSkillDetail', skillKey, ref] as const,
+  // Studio 节点运行 Prompt 预览；草稿 YAML 进 key（编辑 debounce 后重取）。
+  studioNodePromptPreview: (ws: string, nodeKey: string, yaml: string) =>
+    ['studioNodePromptPreview', ws, nodeKey, yaml] as const,
   agentVersions: (workspaceId: string, agentId: string) =>
     ['agentVersions', workspaceId, agentId] as const,
   qualityBatches: (workspaceId: string) =>

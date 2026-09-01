@@ -1,3 +1,5 @@
+"""Executor lease repository — the capacity gate AGENTS.md §6 names (#187)."""
+
 from __future__ import annotations
 
 import logging
@@ -12,6 +14,7 @@ from server.app.db.transaction import read_connection, write_transaction
 from server.app.events import JobEventManager
 from server.app.events.aggregator import record_job_update
 from server.app.executors import _lease_write_paths
+from server.app.executors._lease_approval import park_awaiting_approval_repo
 from server.app.executors._lease_config_failure import fail_without_lease
 from server.app.executors._lease_control import active_lease_counts
 from server.app.executors._lease_transactions import database_timestamp
@@ -42,13 +45,14 @@ class ExecutorLeaseRepository:
         # keep working). It lives BELOW the service boundary on purpose —
         # like queries/atomic_mutations, it is one of the data-layer-adjacent
         # components that legitimately hold the connection source; services
-        # must not.
+        # must not. Step 3: the facade's `.path` is private, so the DSN comes
+        # from `dsn_identity` — the facade's only public accessor.
         if isinstance(job_db, str):
             self.job_db = None
             self.path: str = job_db
         else:
             self.job_db = job_db
-            self.path = job_db.path
+            self.path = job_db.dsn_identity
         self.job_event_manager = job_event_manager
         self.data_dir = data_dir
         self.job_event_buffer = job_event_buffer
@@ -68,6 +72,15 @@ class ExecutorLeaseRepository:
             stats = self.job_db.count_jobs_by_status(workspace_id)
             self.job_event_manager.broadcast_job_updated(workspace_id, job_id, stats)
         except Exception:
+            # #204 broad-except audit: fire-and-forget observability, called
+            # only AFTER the lease/write transaction already committed (every
+            # call site sits below the `with write_transaction` block). A SSE
+            # refresh failure must never roll back or fail a claim/finish that
+            # already succeeded — the stats are trigger-maintained
+            # (DB-JOB-STATUS-COUNTS-001), so the very next state change
+            # re-broadcasts the correct numbers and the missed one self-heals.
+            # The outcome space here is the DB read surface plus the bus, not
+            # a business family; logger.exception keeps the traceback.
             logger.exception("Failed to broadcast job update for %s", job_id)
 
     # Write paths delegate to _lease_write_paths (one connect-and-transact
@@ -97,6 +110,13 @@ class ExecutorLeaseRepository:
         self._broadcast_job_update(job_id)
         return run_id
 
+    def park_awaiting_approval(self, job_id: str, node_key: str) -> bool:
+        """Park a ready approval node (EXEC-APPROVAL-001); no lease, no node_run."""
+        if retry_on_database_conflict(lambda: park_awaiting_approval_repo(self, job_id, node_key)):
+            self._broadcast_job_update(job_id)
+            return True
+        return False
+
     def expire_stale(self, now: datetime) -> list[str]:
         return retry_on_database_conflict(lambda: _lease_write_paths.expire_stale(self, now))
 
@@ -123,8 +143,7 @@ class ExecutorLeaseRepository:
     def active_lease_node_keys_for_jobs(
         self, job_ids: Sequence[str], now: datetime
     ) -> set[tuple[str, str]]:
-        """Bulk form of ``has_active_for_node``: (job_id, node_key) pairs with
-        an active lease, for read-only batch checks (rerun preview)."""
+        """Bulk ``has_active_for_node`` for read-only batch checks (rerun preview)."""
         ids = [str(job_id) for job_id in job_ids]
         if not ids:
             return set()

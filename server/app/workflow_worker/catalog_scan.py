@@ -29,8 +29,7 @@ _SCANNABLE_WORKSPACES = (
     " where default_workflow_key <> '' order by created_at, id"
 )
 _ACTIVE_REVISIONS = (
-    "select workspace_id, workflow_key, definition_json from workflow_revisions"
-    " where status='active'"
+    "select workspace_id, definition_json from workflow_revisions where status='active'"
 )
 
 
@@ -43,14 +42,14 @@ def load_workflow_scan_entries(connect_source: Any) -> list[ScanEntry]:
     with read_connection(connect_source) as conn:
         workspaces = conn.execute(_SCANNABLE_WORKSPACES).fetchall()
         revisions = {
-            (str(row["workspace_id"]), str(row["workflow_key"])): row["definition_json"]
+            str(row["workspace_id"]): row["definition_json"]
             for row in conn.execute(_ACTIVE_REVISIONS).fetchall()
         }
     entries: list[ScanEntry] = []
     for workspace in workspaces:
         workspace_id = str(workspace["id"])
         workflow_key = str(workspace["default_workflow_key"])
-        raw = revisions.get((workspace_id, workflow_key))
+        raw = revisions.get(workspace_id)
         definition: WorkflowDefinition | None = None
         if raw:
             try:
@@ -93,19 +92,16 @@ def collect_runnable_workspace_jobs(
     # swaps the list mid-iteration.
     entries = worker.state.scan_entries
     definitions_by_workspace = {workspace_id: d for workspace_id, _key, d in entries}
-    # Refresh marks once per distinct workflow key (legacy databases may share
-    # a key across workspaces); each job pairs with its OWN workspace's
-    # fallback definition. The by-key fallback only covers hand-built scan
-    # lists (tests): in production every job's workspace has its own entry.
+    # #211 Phase 3: one scan per workspace entry — the legacy per-key dedup
+    # (databases sharing a key across workspaces) is impossible since v62
+    # binds key == workspace id. Each job pairs with its OWN workspace's
+    # definition; the by-key fallback only covers hand-built scan lists
+    # (tests): in production every job's workspace has its own entry.
     definitions_by_key: dict[str, WorkflowDefinition | None] = {}
     for _ws, workflow_key, definition in entries:
         definitions_by_key.setdefault(workflow_key, definition)
-    seen_keys: set[str] = set()
-    for _workspace_id, workflow_key, _definition in entries:
-        if workflow_key in seen_keys:
-            continue
-        seen_keys.add(workflow_key)
-        for job in worker.state.mark_store.refresh(worker.job_db, workflow_key):
+    for entry_ws, workflow_key, _definition in entries:
+        for job in worker.state.mark_store.refresh(worker.job_db, entry_ws):
             if not (workspace_id := job.get("workspace_id")):
                 continue
             workspace_id = str(workspace_id)

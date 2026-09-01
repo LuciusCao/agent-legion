@@ -82,8 +82,8 @@ def log_service_with_secret_config(
                 "token": "cms-token-123",
                 "password": "cms-password",
             },
-            "openclaw": {
-                "api_key": "openclaw-key",
+            "gateway": {
+                "api_key": "gateway-key",
             },
         },
     )
@@ -262,7 +262,7 @@ def test_job_log_service_redacts_config_secrets(log_service_with_secret_config):
     logs_root.mkdir(parents=True, exist_ok=True)
     log_file = logs_root / "run.log"
     log_file.write_text(
-        "cms-token-123 cms-password openclaw-key keep-visible",
+        "cms-token-123 cms-password gateway-key keep-visible",
         encoding="utf-8",
     )
 
@@ -273,7 +273,7 @@ def test_job_log_service_redacts_config_secrets(log_service_with_secret_config):
 
     assert "cms-token-123" not in result["log"]
     assert "cms-password" not in result["log"]
-    assert "openclaw-key" not in result["log"]
+    assert "gateway-key" not in result["log"]
     assert "keep-visible" in result["log"]
     assert "<redacted>" in result["log"]
 
@@ -289,7 +289,7 @@ def test_job_log_service_redacts_vault_secrets(log_service, monkeypatch):
     job, run = _create_job_with_run(
         job_db, settings, make_data_relative(log_file, settings.data_dir)
     )
-    vault = VaultService(job_db.path, settings.config)
+    vault = VaultService(job_db.dsn_identity, settings.config)
     vault.set(str(job["workspace_id"]), "cms-token", "vault-plain-value")
 
     result = service.read(job["id"], run["id"])

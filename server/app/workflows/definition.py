@@ -11,6 +11,7 @@ from server.app.workflows.schema import (
     WorkflowIntake,
     WorkflowIntakeMode,
     WorkflowNode,
+    WorkflowNodeSkill,
     WorkflowTerminal,
 )
 from server.app.workflows.validator import _validate_acyclic
@@ -23,6 +24,7 @@ __all__ = [
     "WorkflowIntake",
     "WorkflowIntakeMode",
     "WorkflowNode",
+    "WorkflowNodeSkill",
     "WorkflowTerminal",
     "_validate_acyclic",
     "load_workflow_definition",

@@ -100,6 +100,8 @@ def resolve_code_runtime_context(
     database_dsn: Any,
     settings_config: dict[str, Any] | None,
     object_store: JobArtifactObjectStore | None = None,
+    *,
+    worker_protocol_version: int = 1,
 ) -> dict[str, Any]:
     """Rebuild the full runtime_context at claim time (memory only).
 
@@ -111,6 +113,8 @@ def resolve_code_runtime_context(
     workspace rows are essential (node code reads ctx.job/ctx.workspace), so
     read failures propagate — the claim fails with 500 and the sweeper
     requeues, the same loop as secret-resolution failure.
+    ``worker_protocol_version`` (#338) is forwarded to the artifact
+    object-block injection (v4+ Workers get ``.gz`` specs).
     """
     job_id = str(manifest.get("job_id") or "")
     workspace_id = str(manifest.get("workspace_id") or "")
@@ -125,6 +129,15 @@ def resolve_code_runtime_context(
         try:
             run = _fetch_row(database_dsn, "select * from runs where id=%s", batch_id)
         except Exception:
+            # #204 broad-except audit: deliberate degradation, mirrored from
+            # the enqueue-time prefetch (code_dispatch._prefetch_job_batch).
+            # The batch row is a nice-to-have for node SDK ctx.batch; a
+            # missing row and a transient DB error degrade to None with a
+            # debug log (the claim still succeeds), while the job/workspace
+            # reads above stay strict because node code cannot run without
+            # them. The failure space is the DB driver surface — psycopg
+            # OperationalError et al. — not a business-exception family;
+            # debug level because the enqueue-side twin logs the same.
             logger.debug("claim-time get_run failed for run %s", batch_id, exc_info=True)
             run = None
         # The SDK-facing batch row: run columns plus the payload rebuilt from
@@ -162,8 +175,11 @@ def resolve_code_runtime_context(
     # D12 (#160): claim-time object-storage artifact channel (presigned PUT
     # for outputs, presigned GET for staged inputs) — memory-only like the
     # secret injection above; a storage error degrades to the legacy CAS
-    # channel instead of failing the claim.
-    inject_artifact_object_block(object_store, resolved)
+    # channel instead of failing the claim. #338: the claiming Worker's
+    # protocol version selects the stored form (``.gz`` for v4+).
+    inject_artifact_object_block(
+        object_store, resolved, worker_protocol_version=worker_protocol_version
+    )
     return resolved
 
 
@@ -189,6 +205,10 @@ def _claim_time_skill_versions(database_dsn: Any, job_id: str) -> dict[str, str]
                 (job_id,),
             ).fetchall()
     except Exception:
+        # #204 broad-except audit: same deliberate degradation as the batch
+        # fetch above — the skill_versions map is an audit nice-to-have, an
+        # empty mapping keeps the claim succeeding on a transient DB error.
+        # Debug level matches the enqueue-time twin's log contract.
         logger.debug("claim-time list_node_runs failed for job %s", job_id, exc_info=True)
         return {}
     return {

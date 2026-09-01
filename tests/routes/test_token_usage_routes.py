@@ -18,9 +18,9 @@ def workspace_and_job(client):
             (workspace_id, "token_ws", "demo_workflow"),
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-            "values (%s, %s, %s, %s, %s) on conflict (id) do nothing",
-            (job_id, workspace_id, "demo_workflow", "batch_by_ids", "Q001"),
+            "insert into jobs(id, workspace_id, source_type, source_id) "
+            "values (%s, %s, %s, %s) on conflict (id) do nothing",
+            (job_id, workspace_id, "batch_by_ids", "Q001"),
         )
     return workspace_id, job_id
 

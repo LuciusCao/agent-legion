@@ -9,29 +9,34 @@ import pytest
 from scripts.seed_demo import DEMO_WORKFLOW_KEY, seed_demo
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.node_codes import NodeCodeService
-from server.app.services.skill_source_store import SkillSourceStore
+from server.app.services.skill_lock_store import SkillLockStore
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 IMPORT_SKILLS = REPO_ROOT / "scripts" / "import-demo.sh"
 
 
-def _import_skills(target: Path) -> None:
+@pytest.fixture
+def demo_skills_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Import the demo skills in place under a fake HOME's skills root (#322:
+    dispatch and the seed resolve repos at <skills root>/<key> only)."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
     result = subprocess.run(
         ["bash", str(IMPORT_SKILLS)],
         capture_output=True,
         text=True,
-        env={**os.environ, "AGENT_LEGION_DEMO_SKILLS_DIR": str(target)},
+        env={**os.environ, "HOME": str(home)},
         timeout=60,
     )
     assert result.returncode == 0, result.stderr
+    return home / ".agents" / "skills" / "education-video-problems-generation"
 
 
-def test_seed_demo_creates_complete_workspace_once(settings, job_db, tmp_path: Path) -> None:
-    skills = tmp_path / "skills"
-    _import_skills(skills)
-
-    first = seed_demo(settings, skill_root=skills)
-    second = seed_demo(settings, skill_root=skills)
+def test_seed_demo_creates_complete_workspace_once(
+    settings, job_db, tmp_path: Path, demo_skills_home: Path
+) -> None:
+    first = seed_demo(settings)
+    second = seed_demo(settings)
 
     assert first.workspace_created is True
     assert second.workspace_created is False
@@ -49,30 +54,34 @@ def test_seed_demo_creates_complete_workspace_once(settings, job_db, tmp_path: P
         assert codes.get_effective_code(first.workspace_id, DEMO_WORKFLOW_KEY, node_key) is not None
         assert codes.get_global_published(DEMO_WORKFLOW_KEY, node_key) is None
 
-    store = SkillSourceStore(settings.database_url)
-    sources = store.get_sources()
+    store = SkillLockStore(settings.database_url)
     lock = store.get_lock()
-    assert sources is not None
     assert lock is not None
     for name in ("write-script", "review-script", "generate-questions", "review-questions"):
         key = f"education-video-problems-generation/{name}"
-        assert sources.skills[key].repo == str((skills / name).resolve())
-        assert lock.skills[key].commit
-    assert second.sources_added == 0
+        repo = demo_skills_home / name
+        commit = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "v1.0.0^{commit}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert lock.skills[key].refs["v1.0.0"] == commit
+    assert first.locks_updated == 4
     assert second.locks_updated == 0
     assert second.node_codes_added == 0
     assert second.agents_added == 0
 
 
-def test_seed_demo_reuses_existing_bound_workspace(settings, job_db, tmp_path: Path) -> None:
-    skills = tmp_path / "skills"
-    _import_skills(skills)
+def test_seed_demo_reuses_existing_bound_workspace(
+    settings, job_db, tmp_path: Path, demo_skills_home: Path
+) -> None:
     existing = job_db.create_workspace(
         "Existing Demo",
         default_workflow_key=DEMO_WORKFLOW_KEY,
     )
 
-    result = seed_demo(settings, skill_root=skills)
+    result = seed_demo(settings)
 
     assert result.workspace_created is False
     assert result.workspace_id == existing["id"]
@@ -80,12 +89,14 @@ def test_seed_demo_reuses_existing_bound_workspace(settings, job_db, tmp_path: P
 
 
 def test_seed_demo_establishes_workspace_before_injecting_assets(
-    settings, job_db, tmp_path: Path
+    settings, job_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    missing_skills = tmp_path / "missing-skills"
+    # No skills imported under this HOME: the lock step fails loudly, after
+    # the workspace already exists (asset injection never half-applies).
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
     with pytest.raises(RuntimeError, match="demo skill repo is missing"):
-        seed_demo(settings, skill_root=missing_skills)
+        seed_demo(settings)
 
     matching = [
         workspace

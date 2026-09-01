@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, TextField } from '@mui/material'
 import { useAuthStore } from '../stores/authStore'
+import { GLOBAL_ONBOARDING_PATH } from './GlobalOnboardingPage.storage'
 import styles from './AuthPage.module.css'
 
 export default function SetupPage() {
@@ -25,7 +26,8 @@ export default function SetupPage() {
     setSubmitting(true)
     try {
       await bootstrap(username.trim(), password, displayName.trim())
-      navigate('/', { replace: true })
+      // #333：bootstrap 后先进入全局初始化清单（可跳过，之后可从全局设置回补）。
+      navigate(GLOBAL_ONBOARDING_PATH, { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {

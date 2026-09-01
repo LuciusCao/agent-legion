@@ -33,6 +33,7 @@ from server.app.services.artifact_store import ArtifactStore
 from server.app.services.vault import VaultService
 from server.app.settings import Settings
 from server.app.workflows.definition import WorkflowNode
+from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 from worker.code_runner import build_child_payload
 
@@ -103,7 +104,7 @@ def test_resolve_code_manifest_config_injects_and_strips_secrets(job_db, monkeyp
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
     workspace = job_db.create_workspace(default_workflow_key="demo_workflow", name="test-workspace")
-    vault = VaultService(job_db.path, {})
+    vault = VaultService(job_db.dsn_identity, {})
     vault.set(workspace["id"], "api-token", "s3cr3t")
     manifest = {
         "kind": "code",
@@ -113,7 +114,7 @@ def test_resolve_code_manifest_config_injects_and_strips_secrets(job_db, monkeyp
         "secret_config": {"token": {"secret_ref": "api-token"}},
     }
 
-    resolved = resolve_code_manifest_config(manifest, job_db.path, {})
+    resolved = resolve_code_manifest_config(manifest, job_db.dsn_identity, {})
 
     assert resolved["config"] == {"mode": "fast", "token": "s3cr3t"}
     assert "secret_config" not in resolved
@@ -160,8 +161,8 @@ def _insert_job(job_db, job_id: str = "job-1") -> None:
             " on conflict(id) do nothing"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (%s, 'test-workspace', 'questions', 'question', %s)",
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values (%s, 'test-workspace', 'question', %s)",
             (job_id, job_id),
         )
         conn.execute("insert into job_nodes(job_id, node_key) values (%s, 'package')", (job_id,))
@@ -310,8 +311,8 @@ def test_enqueue_persists_lightweight_reference_and_claim_rebuilds_full_context(
     _insert_job(job_db)
     with job_db.connect() as conn:
         conn.execute(
-            "insert into runs(id, workspace_id, workflow_key, source_kind, frozen_pins_json)"
-            " values ('batch-1', 'test-workspace', 'questions', 'question',"
+            "insert into runs(id, workspace_id, source_kind, frozen_pins_json)"
+            " values ('batch-1', 'test-workspace', 'question',"
             ' \'{"node_code_versions": {"package": {"version": 3, "marker_142": true}}}\')'
         )
         conn.execute(
@@ -393,15 +394,15 @@ def _register_probe_worker(
     )
 
 
-def test_online_code_worker_probe_matches_capability(job_db) -> None:
+def test_online_code_worker_probe_ignores_capability(job_db) -> None:
+    """Issue #284: the probe mirrors claim admission — protocol version, code
+    capacity and workspace ACL only; capabilities no longer filter anything."""
     assert has_online_code_worker(TEST_DATABASE_URL, "package", "test-workspace") is False
     _register_probe_worker("worker-a", capabilities=["package"])
 
     assert has_online_code_worker(TEST_DATABASE_URL, "package", "test-workspace") is True
-    # Code capacity but no matching declaration: the request would rot in
-    # queued (no timeout fallback), so the probe says no and the scheduler
-    # falls back to local execution.
-    assert has_online_code_worker(TEST_DATABASE_URL, "transcribe", "test-workspace") is False
+    # Any capability resolves against the same code pool now.
+    assert has_online_code_worker(TEST_DATABASE_URL, "transcribe", "test-workspace") is True
 
 
 def test_online_code_worker_probe_wildcard_zero_capacity_and_revoked(job_db) -> None:
@@ -453,7 +454,8 @@ def test_online_probe_caches_per_capability_within_ttl(job_db, tmp_path) -> None
     _register_probe_worker("worker-a", capabilities=["package"])
 
     assert service.online_code_worker_available("package", "test-workspace") is True
-    assert service.online_code_worker_available("transcribe", "test-workspace") is False
+    # Capabilities no longer filter the probe (issue #284).
+    assert service.online_code_worker_available("transcribe", "test-workspace") is True
     # Within the TTL the cached answer is served even after the Worker leaves.
     _revoke("worker-a")
     assert service.online_code_worker_available("package", "test-workspace") is True
@@ -461,15 +463,9 @@ def test_online_probe_caches_per_capability_within_ttl(job_db, tmp_path) -> None
     assert service.online_code_worker_available("package", "test-workspace") is False
 
 
-class _ClaimFakeStorage:
-    """Only the claim-time surface resolve_code_runtime_context needs."""
-
-    def __init__(self) -> None:
-        self.presigned_gets: list[str] = []
-
-    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
-        self.presigned_gets.append(storage_key)
-        return f"https://s3.test/download/{storage_key}?sig=fake"
+class _ClaimFakeStorage(FakeObjectStorage):
+    """Claim-time surface resolve_code_runtime_context needs（共享 fake 的
+    presigned_gets 记录与 presign_get 前缀覆盖同一断言语义）。"""
 
 
 def test_claim_runtime_context_injects_material_block(job_db, tmp_path, monkeypatch) -> None:

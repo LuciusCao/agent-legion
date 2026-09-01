@@ -11,7 +11,6 @@ import { api } from '../../../api'
 import { useSettingStore } from '../../../stores/settingStore'
 import { useUiStore } from '../../../stores/uiStore'
 import type { WorkflowNodeRecord } from '../../../types'
-import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 
 vi.mock('../../../api', () => ({
   api: vi.fn(),
@@ -23,16 +22,14 @@ const node: WorkflowNodeRecord = {
   key: 'fetch_items',
   label: '获取题目',
   capability: 'fetch_items',
+  // 显式 code 节点（#284）：类型判定只读 node_type。
+  node_type: 'code',
   after: [],
   inputs: [],
   outputs: [],
 }
 
-// 无 Agent 定义（capability 不匹配）即为 code 节点（P-0.5）。
-const noAgents: AgentDefinition[] = []
-
-const BASE =
-  '/api/workspaces/default/workflows/demo_workflow/nodes/fetch_items/code'
+const BASE = '/api/workspaces/default/nodes/fetch_items/code'
 
 const BUILTIN_CODE = 'def run(job, job_dir, runtime):\n    return None\n'
 const CUSTOM_CODE = "def run(job, job_dir, runtime):\n    return 'custom'\n"
@@ -81,50 +78,35 @@ function versionRow(version: number, status: string, note?: string) {
 function renderSection(
   overrides?: Partial<Parameters<typeof WorkflowNodeCodeSection>[0]>
 ) {
-  return render(
-    <WorkflowNodeCodeSection
-      node={node}
-      agentCatalog={noAgents}
-      workflowKey="demo_workflow"
-      {...overrides}
-    />
-  )
+  return render(<WorkflowNodeCodeSection node={node} {...overrides} />)
 }
 
 describe('WorkflowNodeCodeSection', () => {
   beforeEach(() => {
     mockApi.mockReset()
     useSettingStore.setState({ workspaceId: 'default' })
-    useSettingStore.getState().setSettings({
-      workflowKey: 'demo_workflow',
-    })
+    useSettingStore.getState().setSettings({})
     useUiStore.setState({ toast: null })
     mockApi.mockResolvedValue(builtinResponse)
   })
 
-  it('renders nothing when the capability is agent-routed', () => {
-    const agents: AgentDefinition[] = [
-      {
-        id: 'agent-v1',
-        capability: 'fetch_items',
-        runtime: 'pi',
-        skill: 'demo/skill',
-      },
-    ]
-    const { container } = renderSection({ agentCatalog: agents })
+  it('renders nothing for an agent-typed node', () => {
+    const { container } = renderSection({
+      node: { ...node, node_type: 'agent' },
+    })
     expect(container.firstChild).toBeNull()
     expect(mockApi).not.toHaveBeenCalled()
   })
 
-  it('uses the visible workflow key prop over the settings snapshot', async () => {
-    // 草稿改 key 发布后 settings 快照与 visible workflow 分叉；代码区必须
-    // 跟 binding editor 一样用 Inspector 下传的 key。
+  it('keys the code URL on the workspace id only', async () => {
+    // workflows/{workflowKey} 路径段已退役（#211）：key 与 workspace id
+    // 恒等，节点代码路由改挂 workspace 下。
     useSettingStore.getState().setSettings({ workflowKey: 'stale_snapshot' })
-    renderSection({ workflowKey: 'visible_wf' })
+    renderSection()
 
     await screen.findByText(/出厂版本/)
     expect(mockApi).toHaveBeenCalledWith(
-      '/api/workspaces/default/workflows/visible_wf/nodes/fetch_items/code'
+      '/api/workspaces/default/nodes/fetch_items/code'
     )
   })
 
@@ -369,13 +351,7 @@ describe('WorkflowNodeCodeSection', () => {
     }
     const templateCode = 'from workspace_libs.node_sdk import NodeContext\n'
     mockApi.mockResolvedValue(noneResponse)
-    render(
-      <WorkflowNodeCodeSection
-        node={pathlessNode}
-        agentCatalog={noAgents}
-        workflowKey="demo_workflow"
-      />
-    )
+    render(<WorkflowNodeCodeSection node={pathlessNode} />)
 
     await screen.findByText(/无代码版本/)
     expect(
@@ -389,8 +365,7 @@ describe('WorkflowNodeCodeSection', () => {
     await waitFor(() =>
       expect(useUiStore.getState().toast?.message).toBe('已从模板创建草稿')
     )
-    const customBase =
-      '/api/workspaces/default/workflows/demo_workflow/nodes/do_custom/code'
+    const customBase = '/api/workspaces/default/nodes/do_custom/code'
     expect(mockApi.mock.calls[1][0]).toBe('/api/workflow-node-code-template')
     expect(mockApi.mock.calls[2][0]).toBe(customBase)
     expect(mockApi.mock.calls[2][1]?.method).toBe('PUT')
@@ -415,13 +390,7 @@ describe('WorkflowNodeCodeSection', () => {
       draft_code: templateCode,
       draft_version: 1,
     })
-    render(
-      <WorkflowNodeCodeSection
-        node={pathlessNode}
-        agentCatalog={noAgents}
-        workflowKey="demo_workflow"
-      />
-    )
+    render(<WorkflowNodeCodeSection node={pathlessNode} />)
 
     await screen.findByText(/有未发布草稿/)
     expect(

@@ -53,7 +53,6 @@ def _discover(runtime: str, environment: dict[str, str]) -> list[tuple[str, str]
     adapters: dict[str, Callable[[str, dict[str, str]], list[tuple[str, str]]]] = {
         "velites": _discover_velites,
         "pi": _discover_pi,
-        "openclaw": _discover_openclaw,
     }
     adapter = adapters.get(runtime)
     if adapter is None:
@@ -84,22 +83,6 @@ def _discover_velites(binary: str, environment: dict[str, str]) -> list[tuple[st
     if not isinstance(value, list):
         raise ValueError("velites model discovery must return a JSON array")
     return _normalized_pairs(value)
-
-
-def _discover_openclaw(binary: str, environment: dict[str, str]) -> list[tuple[str, str]]:
-    value = json.loads(_run([binary, "models", "list", "--json"], environment))
-    rows = value.get("models") if isinstance(value, dict) else None
-    if not isinstance(rows, list):
-        raise ValueError("openclaw model discovery has no models array")
-    pairs = []
-    for row in rows:
-        if not isinstance(row, dict) or row.get("available") is False or row.get("missing") is True:
-            continue
-        key = str(row.get("key") or "")
-        provider, separator, model = key.partition("/")
-        if separator and provider and model:
-            pairs.append((provider, model))
-    return sorted(set(pairs))
 
 
 def _discover_pi(binary: str, environment: dict[str, str]) -> list[tuple[str, str]]:

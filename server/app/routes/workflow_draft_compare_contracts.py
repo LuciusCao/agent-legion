@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from server.app.routes.workflow_draft_compare_metadata_contracts import (
     WorkflowMetadataChange,
@@ -32,7 +32,17 @@ class WorkflowDraftCompareError(BaseModel):
 class WorkflowRevisionSummaryItem(BaseModel):
     id: str
     version: int
-    workflow_key: str
+    workspace_id: str
+    # #211 M2: workflow_revisions lost its workflow_key column (v70); the
+    # deprecated field keeps returning the identity value until the M3
+    # contract drop (2026-10-31).
+    workflow_key: str = Field(
+        description=(
+            "Deprecated: equals workspace_id (schema v62); read workspace_id instead."
+            " Removal is tracked in #211 (deprecated field drops by 2026-10-31)."
+        ),
+        deprecated=True,
+    )
     definition_hash: str
 
 
@@ -48,8 +58,10 @@ class WorkflowNodeChange(BaseModel):
     label: str
     # 'start' marks the entry node (explicit or loader-injected synthetic) so
     # the canvas can synthesize its inspector details from a draft that does
-    # not declare it.
-    node_type: Literal["start", "node"] = "node"
+    # not declare it; 'approval' marks a human decision gate
+    # (EXEC-APPROVAL-001); 'code'/'agent' are the explicit execution kinds
+    # (the loader already normalized any legacy 'node'/missing value).
+    node_type: Literal["start", "approval", "code", "agent"] = "code"
     fields: list[str]
     risk: WorkflowRiskLevel
 

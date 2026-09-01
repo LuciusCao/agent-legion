@@ -1,10 +1,12 @@
 """Parse committed budget/exemption registries at a git revision.
 
-The monotonic check compares against how the registries looked at the HEAD
-/ HEAD^ anchors. Committed revisions may predate the current schema, so
-parsing is deliberately lenient: anything unreadable yields empty maps and
-the anchor simply contributes no floor. The rename-floor carry also lives
-here: a detected rename maps a new path onto the old path's committed floor.
+The monotonic check compares against how the registries looked at the
+anchor revisions (HEAD / HEAD^ by default, or HEAD + the
+``AGENT_LEGION_BUDGET_BASE`` override). Committed revisions may predate the
+current schema, so parsing is deliberately lenient: anything unreadable
+yields empty maps and the anchor simply contributes no floor. The
+rename-floor carry also lives here: a detected rename maps a new path onto
+the old path's committed floor.
 """
 
 from __future__ import annotations
@@ -66,27 +68,31 @@ def rename_floor(
     path: str,
     budget_floors: dict[str, int],
     exemption_floors: dict[str, int],
+    anchors: tuple[str, ...],
 ) -> tuple[int, str] | None:
     """Old floor carried onto ``path`` when git detected a rename onto it.
 
-    ``HEAD`` covers an uncommitted or staged rename, ``HEAD^`` a rename
-    already committed into HEAD (the CI shape, where HEAD^ is the PR base).
-    Carried floors follow the same min-across-anchors rule as ordinary
-    floors, so a rename can only tighten, never loosen. A rename map that
-    could not be built (untracked files + failed snapshot) raises
+    ``HEAD`` covers an uncommitted or staged rename, the second anchor
+    (``HEAD^``, or the ``AGENT_LEGION_BUDGET_BASE`` override) a rename
+    already committed into HEAD (the CI shape, where the base is the PR
+    base). Carried floors follow the same min-across-anchors rule as
+    ordinary floors, so a rename can only tighten, never loosen. A rename
+    map that could not be built (untracked files + failed snapshot) raises
     ``BudgetGitUnavailable``: falling back to "no rename detected" would let
     an unstaged rename pass as a first-time registration (codex review on
     PR #238).
     """
-    head_map = git.rename_map("HEAD")
-    parent_map = git.rename_map("HEAD^")
-    if head_map is None or parent_map is None:
+    rename_maps = [git.rename_map(revision) for revision in anchors]
+    if any(rename_map is None for rename_map in rename_maps):
         raise BudgetGitUnavailable(
             "budget monotonicity: rename detection could not run (worktree "
             "has untracked files and the snapshot index could not be built); "
             "failing closed rather than missing an unstaged rename"
         )
-    old_path = head_map.get(path) or parent_map.get(path)
+    old_path = next(
+        (m[path] for m in rename_maps if m is not None and path in m),
+        None,
+    )
     if old_path is None or old_path == path:
         return None
     budget = budget_floors.get(old_path)
@@ -102,10 +108,11 @@ def effective_floor(
     floors: dict[str, int],
     budget_floors: dict[str, int],
     exemption_floors: dict[str, int],
+    anchors: tuple[str, ...],
 ) -> tuple[int | None, str | None]:
     """Minimum of the path-keyed floor and any rename-carried floor."""
     floor = floors.get(path)
-    carried = rename_floor(git, path, budget_floors, exemption_floors)
+    carried = rename_floor(git, path, budget_floors, exemption_floors, anchors)
     if carried is not None and (floor is None or carried[0] < floor):
         return carried
     return floor, None

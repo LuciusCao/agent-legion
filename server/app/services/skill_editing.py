@@ -5,16 +5,18 @@ checks the runtime skill contract (``SKILL.md`` +
 ``references/output-contract.md`` + ``scripts/validate_output.py``, the
 trio ``workflows/skills.py`` enforces at dispatch) against the skill's
 content directory, and ``save_version`` writes a new skill version into
-the source repository — local-path sources only, URL sources are
-refused (pushing to a remote is an outward action).
+the skill's in-place repository at ``<skills root>/<key>`` (#322:
+in-place is the only mode, there is no remote source to refuse).
 
 Save is all-or-nothing and serialized (lock + checked rollback live in
 ``services/skill_repo_edit``); every input (paths, tag, repo state) is
 validated before any file is written. The commit carries the platform
 identity ``agent-legion-studio <studio@local>``, is tagged, and never
 runs repo hooks (``--no-verify``: an automated authoring flow must not
-execute user-supplied hook code). The DB skill lock is NEVER touched —
-running jobs keep the locked commit until a human relocks.
+execute user-supplied hook code). The DB skill lock is NEVER touched:
+nodes pinned to a tag keep the locked commit until the node is re-pinned
+and relocked, while ``latest`` nodes simply pick the new HEAD up on
+their next dispatch.
 
 Client error messages name the skill key only; host absolute paths go
 to the server log (they would otherwise leak to scoped tokens and
@@ -25,7 +27,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path, PurePosixPath
-from typing import Any, NamedTuple, Protocol
+from typing import Any, NamedTuple
 
 from server.app.services import skill_repo
 from server.app.services.job_errors import (
@@ -40,18 +42,12 @@ from server.app.services.skill_repo_edit import (
     rollback_checked,
     run_edit_git,
 )
-from server.app.skills.config import SkillsConfig, SkillsLock
+from server.app.skills.skill_roots import default_skill_base_dir
 
 logger = logging.getLogger(__name__)
 
 STUDIO_GIT_AUTHOR_NAME = "agent-legion-studio"
 STUDIO_GIT_AUTHOR_EMAIL = "studio@local"
-
-
-class SkillStore(Protocol):
-    def get_sources(self) -> SkillsConfig | None: ...
-
-    def get_lock(self) -> SkillsLock | None: ...
 
 
 class SkillEditValidationError(JobServiceError):
@@ -70,21 +66,17 @@ class SkillFileWrite(NamedTuple):
 class SkillEditingService:
     def __init__(
         self,
-        store: SkillStore,
         base_dir: Path | None = None,
         runs_dir: Path | None = None,
     ) -> None:
-        self._store = store
-        self.base_dir = base_dir or Path.home() / ".agents" / "skills" / "agent-legion"
+        self.base_dir = base_dir or default_skill_base_dir()
         # None resolves lazily to default_skills_runs_dir(); the route passes
         # settings.skills_runs_dir so the lock domain matches SkillManager's.
         self._runs_dir = runs_dir
 
     def validate(self, skill_key: str) -> dict[str, Any]:
         """Runtime contract check against the skill's content directory."""
-        source = self._source(skill_key)
-        content_dir = skill_repo.local_repo_path(source.repo) or self._cache_dir(skill_key)
-        errors = self._contract_errors(content_dir)
+        errors = self._contract_errors(self._skill_dir(skill_key))
         return {"key": skill_key, "valid": not errors, "errors": errors}
 
     def save_version(
@@ -94,13 +86,7 @@ class SkillEditingService:
         new_tag: str,
         message: str,
     ) -> dict[str, Any]:
-        source = self._source(skill_key)
-        repo_dir = skill_repo.local_repo_path(source.repo)
-        if repo_dir is None:
-            raise InvalidOperationError(
-                f"Skill {skill_key!r} uses a remote URL source; only local path sources "
-                "are editable from Studio"
-            )
+        repo_dir = self._skill_dir(skill_key)
         with edit_lock_for(repo_dir, self.base_dir, self._runs_dir):
             return self._save_version_locked(skill_key, repo_dir, files, new_tag, message)
 
@@ -113,8 +99,8 @@ class SkillEditingService:
         message: str,
     ) -> dict[str, Any]:
         if not skill_repo.is_git_repo(repo_dir):
-            logger.error("skill %s source is not a git repo: %s", skill_key, repo_dir)
-            raise NotFoundError(f"Skill {skill_key!r} source is not a git repository")
+            logger.error("skill %s has no in-place git repo: %s", skill_key, repo_dir)
+            raise NotFoundError(f"Skill {skill_key!r} has no in-place git repository")
         head = skill_repo.head_commit(repo_dir)
         if head is None:
             raise InvalidOperationError(f"Skill {skill_key!r} repo has no commits yet")
@@ -158,6 +144,16 @@ class SkillEditingService:
         except Exception:
             # All-or-nothing: any failure after the first write (contract
             # check, add, commit, tag) returns the repo to the recorded HEAD.
+            # #204 broad-except audit: the outcome space here is genuinely
+            # mixed and every member must trigger the same rollback — the
+            # deliberately-raised SkillEditValidationError (a JobServiceError
+            # the route renders as 422), SkillGitError from the git runner
+            # (OSError/timeout are converted inside run_edit_git), OSError
+            # from path.write_text, and programming errors. A narrow family
+            # cannot enumerate the subprocess/filesystem boundary, and the
+            # bare re-raise keeps the original type for the route's mapping;
+            # rollback_checked itself raises SkillRollbackError when it
+            # cannot restore, which correctly escapes as the loudest signal.
             rollback_checked(skill_key, repo_dir, head, written_paths, self._git)
             raise
         commit = skill_repo.head_commit(repo_dir)
@@ -167,13 +163,7 @@ class SkillEditingService:
 
     # Validation helpers.
 
-    def _source(self, skill_key: str):
-        source = (self._store.get_sources() or SkillsConfig()).skills.get(skill_key)
-        if source is None:
-            raise NotFoundError(f"Skill {skill_key!r} is not configured")
-        return source
-
-    def _cache_dir(self, skill_key: str) -> Path:
+    def _skill_dir(self, skill_key: str) -> Path:
         parts = skill_key.split("/")
         if len(parts) != 2 or not all(parts) or ".." in parts:
             raise NotFoundError("Invalid skill key")

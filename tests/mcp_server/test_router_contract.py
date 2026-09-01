@@ -17,6 +17,7 @@ import pytest
 from server.app.mcp_server.config import McpServerConfig
 from server.app.mcp_server.server import create_mcp_server
 from server.app.routes.studio_agent_context import create_studio_agent_context_router
+from server.app.routes.studio_agent_job_tools import create_studio_agent_job_tools_router
 from server.app.routes.studio_agent_tools import create_studio_agent_tools_router
 from server.app.settings import Settings
 
@@ -55,9 +56,9 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
 
     tools = asyncio.run(server.list_tools())
     # 工具面清单变化时同步这里与工具文档（server/app/mcp_server/server.py）。
-    # get_authoring_guide 是本地静态工具（不发 HTTP），不影响下方
-    # recorded == table 的路由比对。
-    assert len(tools) == 11
+    # get_authoring_guide / get_preview_guide 是本地静态工具（不发 HTTP），
+    # 不影响下方 recorded == table 的路由比对。
+    assert len(tools) == 23
     for tool in tools:
         schema = tool.inputSchema
         args = {}
@@ -79,18 +80,34 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
         config={},
     )
     router = create_studio_agent_tools_router(None, settings)  # 枚举路由不触 DB
+    # #211 Phase 2：workflows/{workflow_key} 路径段已退役为 deprecated 别名，
+    # MCP 工具只打无段路径——比对时把别名从路由表里滤掉。
+    _RETIRED_ALIAS = "/workflows/{workflow_key}/nodes/"
     table = {
         # `{param:path}` 转换器归一化为 `{param}`：工具侧占位不含转换器后缀。
         (method, re.sub(r"\{(\w+):\w+\}", r"{\1}", route.path))
-        for router_ in (router, create_studio_agent_context_router(None))
+        for router_ in (
+            router,
+            create_studio_agent_context_router(None),
+            # #329 job 观测工具组：只读端点，枚举同样不触 DB。
+            create_studio_agent_job_tools_router(None, settings),
+        )
         for route in router_.routes
         for method in (route.methods or set()) & _ROUTE_METHODS
+        if _RETIRED_ALIAS not in route.path
     }
 
     recorded = {
         # unquote：skill 工具对 skill_key 段做 URL 编码，占位符 `{param}` 在
         # 记录里以 %7Bparam%7D 出现，解码后与路由模板逐字对齐。
-        (call["method"], unquote(call["url"].removeprefix(_CONFIG.api_base).removeprefix("/api")))
+        # split("?")：查询串（job 观测工具的必填 query 参数，如 job_id）不是
+        # 路由模板的一部分，剥离后再比对。
+        (
+            call["method"],
+            unquote(call["url"].removeprefix(_CONFIG.api_base).removeprefix("/api")).split("?", 1)[
+                0
+            ],
+        )
         for call in calls
     }
     assert recorded == table

@@ -50,13 +50,20 @@ export function AgentStatusIndicator({
 
   return (
     <div className={styles.root}>
-      <IconButton size="small" aria-label="Agent 状态">
-        <MaterialIcon name="smart_toy" />
-        <span
-          aria-hidden="true"
-          className={`${styles.indicator} ${busy ? styles.active : ''}`}
-        />
-        <AgentConnectionDot />
+      <IconButton
+        size="small"
+        aria-label="Agent 状态"
+        sx={{ borderRadius: 2, fontSize: 13, gap: '4px' }}
+      >
+        <span className={styles.iconWrap}>
+          <MaterialIcon name="smart_toy" />
+          <span
+            aria-hidden="true"
+            className={`${styles.indicator} ${busy ? styles.active : ''}`}
+          />
+          <AgentConnectionDot />
+        </span>
+        Agent
       </IconButton>
       <div className={styles.popover} role="status">
         <div className={styles.controlRow}>

@@ -33,6 +33,7 @@
 | `generate_architecture.py` | 从代码 AST 自动生成 `docs/architecture/backend.md`、`frontend.md`、`deployment.md` 的表格章节。 |
 | `generate_architecture_frontend.py` | `generate_architecture.py` 的前端路由提取 helper。 |
 | `check_exemption_age.py` | 提醒移除条件已过期的架构豁免（非阻塞；check.sh / CI 调用）。 |
+| `refresh_issue_states.py` | 联网刷新豁免锚点 GitHub issue 状态清单 `config/architecture/issue-states.json`（`make architecture-issue-states`；nightly 调用），`check_invariants` 离线读该清单做豁免到期检测（#270）。 |
 
 ## Agent Worker 子系统
 
@@ -50,7 +51,7 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 
 | 脚本 | 用途 |
 |------|------|
-| `import-demo.sh` / `seed_demo.py` | `make import-demo` 的两阶段实现：前者把 4 个示例 skill 复制成本机 Git 仓库并打 `v1.0.0` tag；后者先创建或复用绑定 demo workflow 的 workspace，再写入 demo skill source/lock，并把节点代码、Agent 和 DAG revision 注入该 workspace。两阶段均幂等；测试可用 `AGENT_LEGION_DEMO_SKILLS_DIR` 覆盖 skill 目标根目录。 |
+| `import-demo.sh` / `seed_demo.py` | `make import-demo` 的两阶段实现：前者把 4 个示例 skill 复制成本机 Git 仓库并打 `v1.0.0` tag；后者先创建或复用绑定 demo workflow 的 workspace，再把该 tag 解析的 commit 写入 demo skill 的版本锁（skill_lock），并把节点代码、Agent 和 DAG revision 注入该 workspace。两阶段均幂等；测试可用 `AGENT_LEGION_DEMO_SKILLS_DIR` 覆盖 skill 目标根目录。 |
 
 ## 迁移与工具
 
@@ -74,7 +75,6 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 
 | 脚本 | 用途 | 退役条件 |
 |------|------|----------|
-| `view-session.py` | 将 OpenClaw session JSONL 渲染为人类可读的对话日志。 | OpenClaw runner 退役或控制台内置 session 查看能力。 |
 | `trim_terminal_code_manifests.py` | 收缩已终态节点的膨胀 code manifest 行（issue #142 止血）。 | 生产库存量膨胀行排空（新代码路径不再膨胀）。 |
 
 一次性脚本（`diagnose_cms.py`、`cleanup-agent-pollution.py`、`backfill-node-run-dirs.py`、`archive/backfill_source_uuid.py`）已于 2026-07-22 退役删除；一次性迁移脚本（`import-sqlite-to-postgres.py` + `sqlite_import_support.py`、`migrate-config-layout.py`）已于 2026-07-23 随 SQLite→PostgreSQL 迁移与配置布局拆分完成退役删除；`backfill_failure_classification.py`、`backfill_worker_output_validation.py`、`migrate_job_dirs_to_shards.py`（存量行迁移完毕）、`backfill_workflow_revision_resources.py`（loader 已硬拒绝 `resources` 字段）、`velites_replay.py`（灰度完成、基线归档）、`velites_diff_events.py`（阶段 C 取消、条件不再适用）、`bench_gzip_exemption.py`（一次性基准，决策已落地）已于 2026-08-26 退役删除；历史用法见 git 历史。
@@ -84,12 +84,12 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 | 目录 | 用途 |
 |------|------|
 | `architecture/` | `check_architecture.py` / `ratchet_architecture_budgets.py` 的检查实现（预算盘点、边界、路由契约、import 环等按检查域划分的模块）。 |
-| `quality/` | 架构不变量与豁免注册表的加载/校验实现（`invariants.py`、`exemptions.py`、`exemption_age.py`），供 `check_invariants.py` / `check_exemption_age.py` 与 `architecture/file_budgets.py` 使用。 |
+| `quality/` | 架构不变量与豁免注册表的加载/校验实现（`invariants.py`、`exemptions.py`、`exemption_age.py`、`issue_state.py`——后者供 `check_invariants.py` 做豁免锚点 issue 到期检测），供 `check_invariants.py` / `check_exemption_age.py` / `refresh_issue_states.py` 与 `architecture/file_budgets.py` 使用。 |
 | `git-hooks/` | 版本化的 pre-commit / pre-push 钩子 dispatcher，由 `install-git-hooks.sh` 安装到 Git common directory，再转发到 worktree 根的 `.githooks/`。 |
 | `remote/` | 远程 LLM 网关（`llm_gateway.py` 及 HTTP/SSE/stream/config 模块），见 `docs/remote-execution-runbook.md`。 |
 | `stress/` | 压力测试：`simulate_agents.py` 合成负载生成器、`run_e2e_stress.py` 端到端压测 runner。 |
 | `e2e/` | 浏览器 smoke E2E：`run_browser_smoke.py`（确定性冒烟，真后端 + worker 线程 + 独立 Worker 进程 + 进程内 CMS/LLM stub，CI e2e-smoke / nightly-e2e job 调用）、数据库 helper `_database.py`、demo 种子 `_demo_seed.py`、主流程种子 `_main_flow_seed.py`、LLM stub `_llm_stub.py`、Worker 启动 `_worker.py`、backend factory `_backend_factory.py`。 |
-| `seed/` | workflow 种子包导出/导入工具（`export_seed.py` / `import_seed.py` / `seed_common.py`）：把 workflow 定义（DAG、Agent、节点代码、skill 源锁定）在实例间迁移，幂等；平台级通用工具，业务种子包留在私有侧。详见 `scripts/seed/README.md`。 |
+| `seed/` | workflow 种子包导出/导入工具（`export_seed.py` / `import_seed.py` / `seed_common.py`）：把 workflow 定义（DAG、Agent、节点代码、skill 版本锁定）在实例间迁移，幂等；平台级通用工具，业务种子包留在私有侧。详见 `scripts/seed/README.md`。 |
 
 ## 约定
 

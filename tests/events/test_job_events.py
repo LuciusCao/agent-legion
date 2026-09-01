@@ -10,6 +10,7 @@ from fastapi import Request
 from server.app.db.connection import DatabaseConnection, connect_database
 from server.app.events import JobEventManager
 from server.app.events.aggregator import (
+    broadcast_job_update,
     build_job_patch_batch_payload,
     build_resync_required_payload,
     record_job_update,
@@ -30,7 +31,8 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 class FakeJobDB:
     def __init__(self):
-        self.path = TEST_DATABASE_URL
+        # #187 step 3: the facade's DSN is exposed via `dsn_identity` only.
+        self.dsn_identity = TEST_DATABASE_URL
         self._jobs = {
             "j1": {
                 "id": "j1",
@@ -104,8 +106,7 @@ def _insert_workspace_job(conn):
     )
     conn.execute(
         """
-        insert into jobs(id, workspace_id, workflow_key, source_type, source_id)
-        values ('j1', 'ws1', 'p1', 'test', 's1')
+        insert into jobs(id, workspace_id, source_type, source_id) values ('j1', 'ws1', 'test', 's1')
         on conflict(id) do nothing
         """
     )
@@ -127,10 +128,7 @@ def _insert_lease(conn, lease_id, expires_at, status="active"):
     node_run_id = cursor.fetchone()["id"]
     conn.execute(
         """
-        insert into executor_leases(
-            id, execution_id, executor_id, workspace_id, job_id, workflow_key,
-            node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-        ) values (%s, %s, 'e1', 'ws1', 'j1', 'p1', 'n1', %s, %s, %s, %s, %s)
+        insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) values (%s, %s, 'e1', 'ws1', 'j1', 'n1', %s, %s, %s, %s, %s)
         """,
         (
             lease_id,
@@ -484,11 +482,7 @@ def test_run_to_broadcasts_job_updated(manager, tmp_path):
         )
         conn.execute(
             """
-            insert into jobs(
-                id, workspace_id, workflow_key, source_type, source_id,
-                run_id, title, storage_dir
-            )
-            values ('j1', 'ws1', 'p1', 'test', 's1', 'b1', 'J1', %s)
+            insert into jobs(id, workspace_id, source_type, source_id, run_id, title, storage_dir) values ('j1', 'ws1', 'test', 's1', 'b1', 'J1', %s)
             """,
             (str(jobs_dir / "ws1" / "j1"),),
         )
@@ -693,3 +687,30 @@ def test_job_query_service_lists_patch_summaries_by_ids(job_patch_query_service,
     assert "completed_nodes" in summaries[0]
     assert "total_nodes" in summaries[0]
     assert job2["id"] not in [summary["id"] for summary in summaries]
+
+
+def test_record_job_update_survives_bookkeeping_failure(fake_job_db, caplog):
+    """#204 审定保留：buffer 记账抛错 → exception 日志，不向业务调用方
+    （lease 写路径）上抛。"""
+    buffer = FakeJobEventBuffer()
+    fake_job_db.jobs["job1"] = {"id": "job1", "workspace_id": "ws1"}
+    buffer.record_job_updated = lambda workspace_id, job_id: (_ for _ in ()).throw(
+        RuntimeError("buffer exploded")
+    )
+
+    with caplog.at_level("ERROR", logger="server.app.events.aggregator"):
+        record_job_update(fake_job_db, buffer, "job1")  # 不上抛
+
+    assert "Failed to record job update" in caplog.text
+    assert "buffer exploded" in caplog.text
+
+
+def test_broadcast_job_update_survives_read_failure(fake_job_db, caplog):
+    """#204 审定保留：job 读取抛错 → exception 日志，不向业务调用方上抛。"""
+    fake_job_db.get_job = lambda job_id: (_ for _ in ()).throw(RuntimeError("db exploded"))
+
+    with caplog.at_level("ERROR", logger="server.app.events.aggregator"):
+        broadcast_job_update(fake_job_db, object(), "job1")  # 不上抛
+
+    assert "Failed to broadcast job update" in caplog.text
+    assert "db exploded" in caplog.text

@@ -19,6 +19,13 @@ EXEC-CODE-POOL-001 / EXEC-CAPACITY-001 为准；本文「executor 契约」
 `agent_execution_requests` TOAST 膨胀至 198G；完整的 job/workspace/batch/
 skill_versions 改在 claim 响应路径从 DB 重建（内存态，随 secret 注入一同
 下发，永不落盘），终态 code 行自动瘦身回引用。
+**2026-08-31 更新（#76，EXEC-SKILL-NODE-001）**：Agent manifest 的 skill
+绑定改为节点级——节点 `skill: {key, ref}`（随 revision 版本化、随 intake
+冻结）优先，`AgentDefinition.skill` 降为可选 legacy 兜底；manifest 新增
+`skill_ref`（lock 冻结时的有效 ref），`skill_version` 格式由裸 commit 改为
+`ref@commit12`；锁按 (skill, ref) 多值冻结（未锁 ref 首次 dispatch 自动
+冻结，repo 漂移仍触发 relock 闸门），Worker 回传结果的 Host 侧 output 校验
+按 manifest 的 `(skill, skill_ref)` 重解析同一版本。
 日期：2026-08-12
 关联：Issue #30（code 节点 Host→Worker）、Issue #82（节点 SDK）、
 EXEC-CODE-001/002/003、CONFIG-MANIFEST-001、VAULT-SECRET-001、

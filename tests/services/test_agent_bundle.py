@@ -9,6 +9,7 @@ import pytest
 from server.app.agent_broker.agent_bundle import (
     AgentBundleError,
     build_agent_bundle,
+    cleanup_bundle_on_error,
     extract_agent_result,
 )
 from server.app.agent_broker.result_unpack import unpack_agent_result
@@ -68,3 +69,35 @@ def test_result_unpack_promotes_only_expected_outputs(tmp_path: Path) -> None:
     # undeclared files never land in the job dir, and staging leaves nothing.
     assert (job_dir / "expected.json").is_file()
     assert [path.name for path in job_dir.iterdir()] == ["expected.json"]
+
+
+def test_cleanup_bundle_on_error_deletes_file_and_reraises_original(tmp_path: Path) -> None:
+    """#204 审定保留：补偿-裸-re-raise（#233 同款）——with 块抛错时半建的
+    bundle 文件被删除，且原始异常类型原样上抛（不被转换/吞没）。"""
+
+    class ExpectedRefusal(Exception):
+        pass
+
+    bundle_path = tmp_path / "bundles" / "exec-1.tar.gz"
+    bundle_path.parent.mkdir(parents=True)
+    bundle_path.write_bytes(b"partial bundle")
+
+    with (
+        pytest.raises(ExpectedRefusal, match="enqueue refused"),
+        cleanup_bundle_on_error(bundle_path),
+    ):
+        raise ExpectedRefusal("enqueue refused")
+
+    assert not bundle_path.exists()
+
+
+def test_cleanup_bundle_on_error_keeps_file_on_success(tmp_path: Path) -> None:
+    """#204 审定保留：成功路径不动 bundle 文件（只有失败才清理）。"""
+    bundle_path = tmp_path / "bundles" / "exec-2.tar.gz"
+    bundle_path.parent.mkdir(parents=True)
+    bundle_path.write_bytes(b"final bundle")
+
+    with cleanup_bundle_on_error(bundle_path):
+        pass
+
+    assert bundle_path.read_bytes() == b"final bundle"

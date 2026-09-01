@@ -82,10 +82,9 @@ def _setup_workspace(queries: JobQueries, name: str) -> tuple[str, str]:
     with queries.connect() as conn:
         conn.execute(
             """
-            insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
-            values (%s, %s, %s, %s)
+            insert into workspace_node_limits(workspace_id, node_key, concurrency_limit) values (%s, %s, %s)
             """,
-            (workspace_id, "recovery_test", "fetch", 1),
+            (workspace_id, "fetch", 1),
         )
     return workspace_id, job_id
 
@@ -163,7 +162,7 @@ def _make_worker(
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
         config={"workflows": {"enabled": True}},
-        database_url=str(queries.path),
+        database_url=str(queries.dsn_identity),
     )
     worker = WorkflowWorkerThread(
         job_db=queries,

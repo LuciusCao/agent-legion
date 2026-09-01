@@ -7,13 +7,11 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
-from server.app.agent_broker.dispatch import AgentDispatchService
+from server.app.agent_broker.execution_resolution import resolve_execution_block
 from server.app.agent_catalog import AgentDefinition
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.events.agents import AgentStatusManager
-from server.app.services.artifact_store import ArtifactStore
-from server.app.settings import Settings
-from server.app.workflows.schema import WorkflowNode
+from server.app.workflows.schema import WorkflowNode, WorkflowNodeExecution
 from tests.helpers import replace_agent_catalog
 from tests.helpers.agent_worker_api import (
     assert_capacity_matrix,
@@ -147,7 +145,7 @@ def test_incompatible_worker_does_not_claim_or_start_node(job_db) -> None:
     registry.issue_token(
         worker_id="worker-1",
         name="worker",
-        runtimes=["openclaw"],
+        runtimes=["velites"],
         max_concurrency=10,
         labels={"arch": "amd64"},
     )
@@ -835,37 +833,28 @@ def test_stale_pi_and_fresh_velites_requests_coexist_during_migration(job_db) ->
     assert claimed.job_id == "job-new"
 
 
-def test_dispatch_fails_fast_on_unsupported_runtime(job_db, tmp_path) -> None:
-    """EXEC-RUNTIME-DISPATCH-001: openclaw stays fail-fast at dispatch; the
-    error names the supported runtime set."""
-    settings = Settings(
-        root_dir=tmp_path,
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={},
-    )
-    broker = _broker(tmp_path, bundle_dir=tmp_path / "bundles")
-    store = ArtifactStore(tmp_path / "artifacts", TEST_DATABASE_URL)
-    service = AgentDispatchService(settings, broker, store)
-    definition = AgentDefinition(
+@pytest.mark.no_db
+def test_dispatch_fails_fast_on_unregistered_runtime() -> None:
+    """EXEC-RUNTIME-DISPATCH-001: catalog 外的 runtime（含已退役的 openclaw）
+    在 dispatch 前 fail-fast，报错列出受支持集合；不会有 manifest 带着不可
+    构建的 command spec 被冻结。"""
+    node = WorkflowNode(
+        key="generate",
+        label="generate",
         capability="generate",
-        runtime="openclaw",
-        skill="question/generate",
+        outputs=["o.json"],
+        execution=WorkflowNodeExecution(provider="kimi", model="kimi-code"),
     )
-    node = WorkflowNode(key="generate", label="generate", capability="generate", outputs=["o.json"])
 
-    with pytest.raises(ValueError, match=r"supported runtimes: pi, velites"):
-        service.enqueue(
-            agent_id="generator-v1",
-            definition=definition,
-            workspace={"id": "test-workspace"},
-            job={"id": "job-openclaw"},
-            workflow_key="questions",
-            node=node,
-            job_dir=tmp_path / "job",
-            log_path=tmp_path / "job.log",
-            inputs=(),
-        )
+    with pytest.raises(ValueError, match=r"unknown agent runtime 'openclaw'.*pi, velites"):
+        resolve_execution_block(node, "openclaw")
+    with pytest.raises(ValueError, match=r"unknown agent runtime 'rust'.*pi, velites"):
+        resolve_execution_block(node, "rust")
+
+
+def test_awaiting_approval_jobs_stay_claimable() -> None:
+    """EXEC-APPROVAL-001（Codex P2）：审批关只阻塞自身下游——job 处于
+    awaiting_approval 时，其并行分支的远程 claim 不得被当成终态取消。"""
+    from server.app.agent_broker.claim_scan import RUNNABLE_JOB_STATUSES
+
+    assert "awaiting_approval" in RUNNABLE_JOB_STATUSES

@@ -238,12 +238,12 @@ describe('JobActionBar', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
           makeJob({
             id: 'j2',
             status: 'completed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
         ]}
         workflowDefinition={workflow}
@@ -314,7 +314,7 @@ describe('JobActionBar', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
         ]}
         workflowDefinition={workflow}
@@ -521,7 +521,7 @@ describe('JobActionBar in allMatching selection mode', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            workflow_key: 'question_content',
+            workspace_id: 'question_content',
           }),
         ]}
         workflowDefinition={workflow}

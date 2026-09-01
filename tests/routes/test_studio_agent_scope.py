@@ -35,6 +35,7 @@ nodes:
 """
 
 _NODE_CODE = "/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code"
+_NODE_CODE_SEGMENT_FREE = "/api/workspaces/{workspace_id}/nodes/{node_key}/code"
 _CHAT = "/api/workspaces/{workspace_id}/studio-chat"
 
 # Effecting write routes (path templates as they appear in the app's route
@@ -56,6 +57,15 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", f"{_NODE_CODE}/publish", None),
     ("POST", f"{_NODE_CODE}/rollback", {"version": 1}),
     ("DELETE", _NODE_CODE, None),
+    # Preview panel publish/archive (schema v71, #328): the studio agent only
+    # drafts via the tool surface; taking effect stays human-only.
+    ("POST", "/api/workspaces/{workspace_id}/preview-panel/publish", None),
+    ("POST", "/api/workspaces/{workspace_id}/preview-panel/archive", None),
+    # #211 Phase 2: segment-free aliases of the deprecated workflow-key paths
+    # carry the same effecting guards.
+    ("POST", f"{_NODE_CODE_SEGMENT_FREE}/publish", None),
+    ("POST", f"{_NODE_CODE_SEGMENT_FREE}/rollback", {"version": 1}),
+    ("DELETE", _NODE_CODE_SEGMENT_FREE, None),
     ("POST", "/api/agent-definitions/{agent_id}/publish?workspace_id={workspace_id}", None),
     (
         "POST",
@@ -99,6 +109,13 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("DELETE", "/api/workspaces/{workspace_id}/members/{user_id}", None),
     ("PATCH", "/api/workspaces/{workspace_id}/settings/{section}", None),
     ("PUT", "/api/workspaces/{workspace_id}/configuration", None),
+    # Approval-gate decisions (EXEC-APPROVAL-001): human-only by definition —
+    # an in-app agent must never approve, rework or reject on a person's behalf.
+    (
+        "POST",
+        "/api/workspaces/{workspace_id}/jobs/{job_id}/nodes/{node_key}/approval",
+        {"verdict": "approved"},
+    ),
     # Quality review writes and replays.
     ("POST", "/api/workspaces/{workspace_id}/quality/sample-batches", None),
     ("POST", "/api/workspaces/{workspace_id}/quality/sample-items/{item_id}/labels", None),
@@ -140,13 +157,15 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("PUT", "/api/workspaces/{workspace_id}/members"): "require_admin",
     ("PUT", "/api/admin/token-usage-pricing"): "require_admin",
     ("PUT", "/api/admin/instance-settings"): "require_admin",
-    ("PUT", "/api/admin/skill-sources/{skill_key:path}"): "require_admin",
-    ("POST", "/api/admin/skill-sources/relock"): "require_admin",
     ("POST", "/api/admin/connections"): "require_admin",
     ("PUT", "/api/admin/connections/{key}"): "require_admin",
     ("DELETE", "/api/admin/connections/{key}"): "require_admin",
     ("POST", "/api/admin/connections/{key}/test"): "require_admin",
     ("PUT", "/api/admin/studio-agents"): "require_admin",
+    ("POST", "/api/admin/studio-agents/redetect"): "require_admin",
+    # Infra connections admin endpoints (#335): admin-only like the other
+    # /api/admin/* write routes.
+    ("POST", "/api/admin/infra-connections/test"): "require_admin",
     ("POST", "/api/agent-register-tokens"): "require_admin",
     ("DELETE", "/api/agent-register-tokens/{token_id}"): "require_admin",
     ("DELETE", "/api/agent-workers/{worker_id}"): "require_admin",
@@ -163,11 +182,14 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/workspaces/{workspace_id}/workflow-drafts/validate"): "validate only",
     ("POST", "/api/workspaces/{workspace_id}/workflow-drafts/compare"): "read-only compare",
     ("PUT", f"{_NODE_CODE}"): "node code draft write",
+    ("PUT", f"{_NODE_CODE_SEGMENT_FREE}"): "node code draft write",
     ("POST", "/api/agent-definitions"): "creates a draft",
     ("PUT", "/api/agent-definitions/{agent_id}/draft"): "draft write",
     ("POST", "/api/agent-definitions/{agent_id}/copy"): "creates a draft",
     ("POST", "/api/skills/validate"): "validate only",
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-rerun/preview"): "preview only",
+    # Node prompt preview: read-only render, persists nothing.
+    ("POST", "/api/workspaces/{workspace_id}/workflow/node-prompt-preview"): "preview only",
     # Scoped-only tool surface (require_studio_agent_scope): these endpoints
     # exist FOR the scoped token and are draft/validate/register-by-design.
     (
@@ -182,9 +204,29 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
         "PUT",
         "/api/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft",
     ): "scoped-only tool surface",
+    # #211 Phase 2: segment-free alias of the scoped tool draft route.
+    (
+        "PUT",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{node_key}/code/draft",
+    ): "scoped-only tool surface",
     (
         "PUT",
         "/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
+    ): "scoped-only tool surface",
+    # Node prompt read/save tools: preview persists nothing; the save edits
+    # only the workspace's unpublished draft YAML (draft-only by design).
+    (
+        "POST",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/node-prompt",
+    ): "scoped-only tool surface",
+    (
+        "PUT",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/node-prompt",
+    ): "scoped-only tool surface",
+    # Preview panel draft tool (issue #328): draft-only write.
+    (
+        "PUT",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/preview/panel/draft",
     ): "scoped-only tool surface",
     # Skill read/validate/save-version tools (issue #217): draft-only — the
     # save endpoint commits+tags a local skill repo but never touches the
@@ -324,8 +366,6 @@ _ADMIN_ENDPOINTS: list[tuple[str, str, dict | None]] = [
     ("GET", "/api/admin/connections", None),
     ("GET", "/api/admin/instance-settings", None),
     ("GET", "/api/admin/token-usage-pricing", None),
-    ("PUT", "/api/admin/skill-sources/some/skill", {"ref": "main"}),
-    ("POST", "/api/admin/skill-sources/relock", None),
     ("DELETE", "/api/admin/connections/conn-x", None),
 ]
 

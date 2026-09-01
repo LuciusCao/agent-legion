@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 
 import pytest
@@ -16,32 +15,12 @@ from server.app.services.material_bundles import (
     validate_member_path,
 )
 from server.app.services.materials import MaterialInUseError, MaterialsService
-from server.app.storage import ObjectHead
+from tests.fakes.storage import FakeObjectStorage
+
+FakeStorage = FakeObjectStorage
 
 WORKSPACE_ID = "ws-bundles"
 OTHER_WORKSPACE_ID = "ws-bundles-other"
-
-
-class FakeStorage:
-    """In-memory ObjectStorage test double; never touches the network."""
-
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {}
-        self.deleted: list[str] = []
-
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/upload/{storage_key}"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        return io.BytesIO(self.objects[storage_key])
-
-    def delete_object(self, storage_key: str) -> None:
-        self.deleted.append(storage_key)
-        self.objects.pop(storage_key, None)
 
 
 def _sha256(payload: bytes) -> str:
@@ -62,7 +41,7 @@ def materials(job_db, storage) -> MaterialsService:
             " on conflict(id) do nothing",
             (WORKSPACE_ID, OTHER_WORKSPACE_ID),
         )
-    return MaterialsService(job_db.path, storage)
+    return MaterialsService(job_db.dsn_identity, storage)
 
 
 @pytest.fixture
@@ -244,9 +223,9 @@ def _insert_job_referencing_bundle(job_db, bundle_id: str) -> str:
     job_id = f"job-bundle-{bundle_id[:8]}"
     with job_db.connect() as conn:
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type,"
+            "insert into jobs(id, workspace_id, source_type,"
             " source_id, status, input_json)"
-            " values (%s, %s, 'demo_workflow', 'bundle', %s, 'queued', %s)",
+            " values (%s, %s, 'bundle', %s, 'queued', %s)",
             (
                 job_id,
                 WORKSPACE_ID,

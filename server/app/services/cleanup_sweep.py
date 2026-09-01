@@ -18,7 +18,7 @@ from server.app.services.cleanup_sweep_store import CleanupSweepStore
 from server.app.services.job_dir_index import iter_job_dirs
 from server.app.services.job_run_dir_lookup import derive_run_dir_from_index
 from server.app.services.run_dir_cleanup import find_extra_run_dirs, remove_path
-from server.app.storage_paths import resolve_data_path
+from server.app.storage_paths import ManagedPathError, resolve_data_path
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -123,8 +123,16 @@ def _remove_row_artifacts(
         try:
             remove_path(resolve_data_path(log_path_str, data_dir, allow_missing=True))
             return 1
-        except Exception as exc:
-            logger.warning("Failed to remove log %s: %s", log_path_str, exc)
+        except (ManagedPathError, OSError, RuntimeError) as exc:
+            # Expected per-row failure (#204): the stored log path cannot be
+            # resolved inside data_dir (legacy absolute path with an
+            # unrecognizable layout, or an empty/escaping value), or the
+            # filesystem refuses the resolve (permissions, symlink loop —
+            # resolve_data_path deliberately propagates those, codex review
+            # on PR #251). One bad row must not abort the sweep — the mark
+            # still advances past it (best-effort contract, store docstring).
+            # remove_path itself already contains the OSError net.
+            logger.warning("Skip log with unresolvable path %r: %s", log_path_str, exc)
             return 0
     run_dir_str = row["run_dir"]
     if not run_dir_str:
@@ -136,8 +144,14 @@ def _remove_row_artifacts(
     try:
         remove_path(resolve_data_path(run_dir_str, data_dir, allow_missing=True))
         return 1
-    except Exception as exc:
-        logger.warning("Failed to remove run_dir %s: %s", run_dir_str, exc)
+    except (ManagedPathError, OSError, RuntimeError) as exc:
+        # Same per-row discipline as the log branch above (#204): a row whose
+        # run_dir cannot be mapped inside data_dir is skipped (warning), the
+        # sweep keeps walking — OS-level resolve failures (permissions,
+        # symlink loops) included (codex review on PR #251). The high-water
+        # mark advances past it either way, so a permanently unresolvable row
+        # warns once per pass, not once per page, and never wedges the cursor.
+        logger.warning("Skip run_dir with unresolvable path %r: %s", run_dir_str, exc)
         return 0
 
 

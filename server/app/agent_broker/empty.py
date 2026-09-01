@@ -68,4 +68,11 @@ class EmptyClaimTrigger:
         try:
             callback()
         except Exception:
+            # #204 broad-except audit: deliberate best-effort callback. The
+            # restock callback re-enqueues work on the workflow worker's
+            # poll loop; this method runs inline in the Worker's claim
+            # response path, so an exception escaping here would fail the
+            # claim (the Worker retries, but with a 500 instead of an empty
+            # claim). The poll loop is the retry for a failed restock: the
+            # queue stays restocked by its own periodic pass.
             logger.exception("empty-queue restock callback failed")

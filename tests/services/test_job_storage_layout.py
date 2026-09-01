@@ -113,8 +113,7 @@ def _seed_job(conn, job_id, workspace_id, storage_dir) -> None:
     )
     conn.execute(
         """
-        insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)
-        values (%s, %s, 'wf', 'question', %s, %s)
+        insert into jobs(id, workspace_id, source_type, source_id, storage_dir) values (%s, %s, 'question', %s, %s)
         """,
         (job_id, workspace_id, job_id, storage_dir),
     )
@@ -214,8 +213,7 @@ def test_create_jobs_bulk_resubmit_does_not_precreate_shard_dir(job_db, settings
         )
         conn.execute(
             """
-            insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)
-            values (%s, 'ws', 'wf', 'question', 'q-legacy', %s)
+            insert into jobs(id, workspace_id, source_type, source_id, storage_dir) values (%s, 'ws', 'question', 'q-legacy', %s)
             """,
             (job_id, job_storage_ref("ws", job_id, sharded=False)),
         )

@@ -108,13 +108,25 @@ def test_loopback_tools_are_async() -> None:
         "save_node_code_draft",
         "get_node_code",
         "save_agent_definition_draft",
+        "get_node_prompt",
+        "save_node_prompt",
         "get_skill",
         "validate_skill",
         "save_skill_version",
+        "get_preview_context",
+        "get_preview_panel",
+        "save_preview_panel_draft",
+        "get_job_context",
+        "get_job_detail",
+        "get_node_logs",
+        "read_artifact",
+        "list_jobs",
+        "compare_jobs",
     ):
         assert inspect.iscoroutinefunction(tools[name].fn), name
-    # The local-only playbook tool never blocks, so it stays sync.
+    # The local-only playbook tools never block, so they stay sync.
     assert not inspect.iscoroutinefunction(tools["get_authoring_guide"].fn)
+    assert not inspect.iscoroutinefunction(tools["get_preview_guide"].fn)
 
 
 def test_loopback_call_is_fully_async(monkeypatch) -> None:
@@ -160,20 +172,21 @@ def test_save_node_code_draft_puts_code(recorded) -> None:
     server, calls = recorded
     args = {
         "workspace_id": "ws-1",
-        "workflow_key": "wf",
         "node_key": "node",
         "code": "def run(job, job_dir, runtime):\n    return {}\n",
         "change_note": "note",
     }
     _run_tool(server, "save_node_code_draft", args)
     assert calls[0]["method"] == "PUT"
-    assert calls[0]["url"].endswith("/workspaces/ws-1/workflows/wf/nodes/node/code/draft")
+    # #211 Phase 2: node-code tool URLs key on the workspace id alone
+    # (workflows/{workflow_key} segment retired; key == id since v62).
+    assert calls[0]["url"].endswith("/workspaces/ws-1/nodes/node/code/draft")
     assert calls[0]["json"] == {"code": args["code"], "change_note": "note"}
 
 
 def test_save_node_code_draft_empty_note_becomes_null(recorded) -> None:
     server, calls = recorded
-    args = {"workspace_id": "ws-1", "workflow_key": "wf", "node_key": "node", "code": "x"}
+    args = {"workspace_id": "ws-1", "node_key": "node", "code": "x"}
     _run_tool(server, "save_node_code_draft", args)
     assert calls[0]["json"]["change_note"] is None
     assert "expected_capability" not in calls[0]["json"]
@@ -183,7 +196,6 @@ def test_save_node_code_draft_forwards_expected_capability(recorded) -> None:
     server, calls = recorded
     args = {
         "workspace_id": "ws-1",
-        "workflow_key": "wf",
         "node_key": "node",
         "code": "def run(job, job_dir, runtime):\n    return {}\n",
         "expected_capability": "publish_content",
@@ -194,11 +206,9 @@ def test_save_node_code_draft_forwards_expected_capability(recorded) -> None:
 
 def test_get_node_code(recorded) -> None:
     server, calls = recorded
-    _run_tool(
-        server, "get_node_code", {"workspace_id": "ws-1", "workflow_key": "wf", "node_key": "n"}
-    )
+    _run_tool(server, "get_node_code", {"workspace_id": "ws-1", "node_key": "n"})
     assert calls[0]["method"] == "GET"
-    assert calls[0]["url"].endswith("/workspaces/ws-1/workflows/wf/nodes/n/code")
+    assert calls[0]["url"].endswith("/workspaces/ws-1/nodes/n/code")
 
 
 def test_save_agent_definition_draft_default_tools(recorded) -> None:
@@ -229,6 +239,36 @@ def test_get_skill_without_ref(recorded) -> None:
     _run_tool(server, "get_skill", {"skill_key": "wf/review"})
     assert calls[0]["method"] == "GET"
     assert calls[0]["url"].endswith("/skills/wf/review")
+
+
+def test_get_node_prompt_posts_node_key(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_node_prompt", {"workspace_id": "ws-1", "node_key": "gen"})
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/node-prompt")
+    assert calls[0]["json"] == {"node_key": "gen"}
+
+
+def test_get_node_prompt_forwards_definition_yaml(recorded) -> None:
+    server, calls = recorded
+    _run_tool(
+        server,
+        "get_node_prompt",
+        {"workspace_id": "ws-1", "node_key": "gen", "definition_yaml": "key: wf"},
+    )
+    assert calls[0]["json"] == {"node_key": "gen", "definition_yaml": "key: wf"}
+
+
+def test_save_node_prompt_puts_prompt(recorded) -> None:
+    server, calls = recorded
+    _run_tool(
+        server,
+        "save_node_prompt",
+        {"workspace_id": "ws-1", "node_key": "gen", "prompt": "House style."},
+    )
+    assert calls[0]["method"] == "PUT"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/node-prompt")
+    assert calls[0]["json"] == {"node_key": "gen", "prompt": "House style."}
 
 
 def test_get_skill_with_ref_appends_query(recorded) -> None:
@@ -275,6 +315,55 @@ def test_save_skill_version_posts_body(recorded) -> None:
     assert calls[0]["method"] == "POST"
     assert calls[0]["url"].endswith("/skills/wf/review/versions")
     assert calls[0]["json"] == {"files": files, "new_tag": "v2.0.0", "message": "revise"}
+
+
+def test_get_preview_guide_is_served_locally(recorded) -> None:
+    server, calls = recorded
+    text = _run_tool(server, "get_preview_guide", {})
+    # The preview panel playbook ships with the MCP server: no HTTP call.
+    assert calls == []
+    for section in ("Bridge API", "listArtifacts", "readArtifact", "getJobDetail"):
+        assert section in text
+
+
+def test_get_preview_context_defaults_to_latest_job(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_preview_context", {"workspace_id": "ws-1"})
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/preview/context")
+
+
+def test_get_preview_context_forwards_job_id(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_preview_context", {"workspace_id": "ws-1", "job_id": "job 9"})
+    assert calls[0]["url"].endswith("/workspaces/ws-1/preview/context?job_id=job%209")
+
+
+def test_get_preview_panel(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_preview_panel", {"workspace_id": "ws-1"})
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/preview/panel")
+
+
+def test_save_preview_panel_draft_puts_html(recorded) -> None:
+    server, calls = recorded
+    html = "<!doctype html><html><body>p</body></html>"
+    _run_tool(
+        server,
+        "save_preview_panel_draft",
+        {"workspace_id": "ws-1", "html": html, "change_note": "v1"},
+    )
+    assert calls[0]["method"] == "PUT"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/preview/panel/draft")
+    assert calls[0]["json"] == {"html": html, "change_note": "v1"}
+
+
+def test_save_preview_panel_draft_empty_note_becomes_null(recorded) -> None:
+    server, calls = recorded
+    html = "<!doctype html><html><body>p</body></html>"
+    _run_tool(server, "save_preview_panel_draft", {"workspace_id": "ws-1", "html": html})
+    assert calls[0]["json"]["change_note"] is None
 
 
 def test_get_studio_context_uses_the_bound_session(monkeypatch) -> None:

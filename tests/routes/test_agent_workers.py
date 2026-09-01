@@ -87,7 +87,37 @@ def test_agent_worker_register_rejects_unknown_runtime(tmp_path: Path) -> None:
         )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "runtimes must contain pi, openclaw and/or velites"
+    assert response.json()["detail"] == "runtimes must contain pi and/or velites"
+
+
+def test_agent_worker_register_accepts_empty_runtimes_for_code_only_worker(
+    tmp_path: Path,
+) -> None:
+    """issue #254：全部 agent runtime 停用的 code-only Worker 允许空 runtimes 注册。"""
+    app = _make_app(tmp_path)
+
+    with TestClient(app) as client:
+        _authenticate_admin(client)
+        credential = _issue_scoped_token(client)
+        response = client.post(
+            "/api/agent-workers/register",
+            headers={"X-Agent-Worker-Register-Token": credential},
+            json={
+                "worker_id": "code-only-1",
+                "runtimes": [],
+                "capabilities": ["generate"],
+                "max_concurrency": 1,
+                "max_code_concurrency": 2,
+                "protocol_version": 3,
+            },
+        )
+        token = response.json()["worker_token"]
+        worker = client.get("/api/agent-workers/self", headers={"X-Agent-Worker-Token": token})
+
+    assert response.status_code == 201, response.text
+    assert worker.status_code == 200
+    assert worker.json()["runtimes"] == []
+    assert worker.json()["max_code_concurrency"] == 2
 
 
 def test_worker_can_read_only_its_own_status_with_issued_token(tmp_path: Path) -> None:
@@ -112,7 +142,7 @@ def test_worker_can_read_only_its_own_status_with_issued_token(tmp_path: Path) -
 def test_worker_metrics_require_token_and_are_forced_to_own_worker(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
     bucket = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=5)
-    with write_transaction(app.state.job_db.path) as conn:
+    with write_transaction(app.state.job_db.dsn_identity) as conn:
         for worker_id, total_tokens in (("home-mini", 16), ("other-worker", 999)):
             conn.execute(
                 """
@@ -142,7 +172,10 @@ def test_worker_metrics_require_token_and_are_forced_to_own_worker(tmp_path: Pat
     assert session_only.status_code == 401
 
 
-def test_claim_requires_matching_worker_capability_and_model(tmp_path: Path) -> None:
+def test_claim_ignores_worker_capability_mismatch(tmp_path: Path) -> None:
+    """Issue #284: capabilities no longer gate claims — a Worker that never
+    declared the node's capability still claims when runtime and the model
+    allowlist match."""
     app = _make_app(tmp_path)
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
 
@@ -156,8 +189,15 @@ def test_claim_requires_matching_worker_capability_and_model(tmp_path: Path) -> 
             headers={"X-Agent-Worker-Token": wrong_capability},
             json={"worker_id": "home-mini"},
         )
-        assert response.status_code == 204
+        assert response.status_code == 200
 
+
+def test_claim_requires_matching_worker_model(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    _seed_request(app.state.job_db, job_id="job-1", limit=2)
+
+    with TestClient(app) as client:
+        _authenticate_admin(client)
         wrong_model = _register(
             client, capabilities=["generate"], models=[{"provider": "gateway", "model": "other"}]
         )["worker_token"]
@@ -511,14 +551,14 @@ def _seed_code_request(
     expected_outputs: list[str] | None = None,
 ) -> None:
     """Enqueue a self-contained kind='code' request straight into the broker."""
-    with write_transaction(app.state.job_db.path) as conn:
+    with write_transaction(app.state.job_db.dsn_identity) as conn:
         conn.execute(
             "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'demo_workflow')"
             " on conflict(id) do nothing"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (%s, 'test-workspace', 'questions', 'question', %s)",
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values (%s, 'test-workspace', 'question', %s)",
             (job_id, job_id),
         )
         conn.execute("insert into job_nodes(job_id, node_key) values (%s, 'package')", (job_id,))
@@ -636,7 +676,7 @@ def test_code_claim_injects_secrets_into_response_manifest(tmp_path: Path, monke
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
     app = _make_app(tmp_path)
     _seed_code_request(app, with_secret=True)
-    VaultService(app.state.job_db.path, {}).set("test-workspace", "api-token", "s3cr3t")
+    VaultService(app.state.job_db.dsn_identity, {}).set("test-workspace", "api-token", "s3cr3t")
 
     with TestClient(app) as client:
         _authenticate_admin(client)
@@ -702,7 +742,7 @@ def test_heartbeat_v2_returns_cancel_body_for_code_executions(tmp_path: Path) ->
         assert ok.status_code == 200
         assert ok.json() == {"cancelled_execution_ids": []}
 
-        with write_transaction(app.state.job_db.path) as conn:
+        with write_transaction(app.state.job_db.dsn_identity) as conn:
             conn.execute("update jobs set execution_paused=1 where id='job-code-1'")
         cancelled = client.post(url, headers=auth)
         assert cancelled.status_code == 200
@@ -712,7 +752,7 @@ def test_heartbeat_v2_returns_cancel_body_for_code_executions(tmp_path: Path) ->
 def test_result_auth_failure_invalidates_cached_connection_token(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
     _seed_code_request(app)
-    with write_transaction(app.state.job_db.path) as conn:
+    with write_transaction(app.state.job_db.dsn_identity) as conn:
         conn.execute("insert into external_connections(key, type) values ('cms-prod', 'cms')")
         conn.execute(
             "insert into connection_tokens(connection_key, token_ciphertext)"

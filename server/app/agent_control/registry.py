@@ -16,6 +16,7 @@ from server.app.agent_control.declarations import (
 from server.app.agent_control.liveness import WorkerLiveness
 from server.app.agent_control.register_key_guard import resolve_issue_scope
 from server.app.agent_control.register_tokens import AgentRegisterTokenStore
+from server.app.agent_runtime.catalog import AGENT_RUNTIMES
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from shared.protocol import CODE_PROTOCOL_VERSION, MODEL_RUNTIME_PROTOCOL_VERSION
@@ -81,13 +82,15 @@ class AgentWorkerRegistry(AgentRegisterTokenStore):
         if max_code_concurrency > 0 and protocol_version < CODE_PROTOCOL_VERSION:
             raise ValueError(f"code capacity requires protocol_version >= {CODE_PROTOCOL_VERSION}")
         normalized_runtimes = sorted(set(runtimes))
-        if not normalized_runtimes or any(
-            runtime not in {"pi", "openclaw", "velites"} for runtime in normalized_runtimes
-        ):
-            raise ValueError("runtimes must contain pi, openclaw and/or velites")
+        # 空集合合法（issue #254）：code-only Worker 不承接 agent 任务；
+        # 未知 runtime 值仍拒绝。
+        if any(runtime not in AGENT_RUNTIMES for runtime in normalized_runtimes):
+            raise ValueError("runtimes must contain pi and/or velites")
         normalized_labels = normalize_labels(labels or {})
         # None is kept as an internal compatibility mode for older direct
         # registry callers; the HTTP contract always supplies explicit lists.
+        # Capabilities are accepted for contract compatibility but are never
+        # used for claim matching (issue #284) — stored verbatim only.
         normalized_capabilities, normalized_models = normalize_worker_declarations(
             capabilities,
             models,

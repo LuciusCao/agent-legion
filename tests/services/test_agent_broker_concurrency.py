@@ -50,15 +50,15 @@ def _seed_request(
             (workspace_id, workspace_id),
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (%s, %s, 'questions', 'question', %s)",
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values (%s, %s, 'question', %s)",
             (job_id, workspace_id, job_id),
         )
         conn.execute("insert into job_nodes(job_id, node_key) values (%s, %s)", (job_id, node_key))
         conn.execute(
-            "insert into workspace_node_routes(workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values (%s, 'questions', %s, 'agent', 'generator-v1')"
-            " on conflict(workspace_id, workflow_key, node_key) do nothing",
+            "insert into workspace_node_routes(workspace_id, node_key, target_kind, target_id)"
+            " values (%s, %s, 'agent', 'generator-v1')"
+            " on conflict(workspace_id, node_key) do nothing",
             (workspace_id, node_key),
         )
         if workspace_cap is not None:
@@ -436,7 +436,10 @@ def test_unclaimable_sweeper_leaves_matching_worker_requests_queued(job_db) -> N
     assert _request_state(job_db, execution_id) == "queued"
 
 
-def test_unclaimable_sweeper_fails_on_capability_mismatch(job_db) -> None:
+def test_unclaimable_sweeper_ignores_capability_mismatch(job_db) -> None:
+    """Issue #284: capabilities no longer gate claims — a Worker that never
+    declared the candidate's capability still claims it when runtime and the
+    model allowlist match."""
     execution_id = _seed_request(job_db, job_id="cap-mismatch-job")
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_with_declarations(
@@ -447,13 +450,48 @@ def test_unclaimable_sweeper_fails_on_capability_mismatch(job_db) -> None:
     )
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
+    assert fail_unclaimable_model_requests(broker) == []
+    assert job_db.get_job_node("cap-mismatch-job", "generate")["status"] == "pending"
+    assert _request_state(job_db, execution_id) == "queued"
+
+    claimed = broker.claim("worker-1")
+
+    assert claimed is not None
+    assert claimed.execution_id == execution_id
+
+
+def test_unclaimable_sweeper_fails_execution_contract_violation(job_db) -> None:
+    """EXEC-RUNTIME-DISPATCH-001：claim 契约重校验 fail-fast（必填键在
+    revision/defaults/冻结值三层都无来源）的请求由 sweeper 判失败，
+    错误信息给出契约违例原因，而不是静默挂在队列里。"""
+    execution_id = _seed_request(job_db, job_id="contract-violation-job")
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select manifest_json from agent_execution_requests where execution_id=%s",
+            (execution_id,),
+        ).fetchone()
+        manifest = json.loads(row["manifest_json"])
+        manifest["execution"]["provider"] = ""
+        conn.execute(
+            "update agent_execution_requests set manifest_json=%s where execution_id=%s",
+            (json.dumps(manifest), execution_id),
+        )
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_with_declarations(
+        registry,
+        "worker-1",
+        capabilities=["generate"],
+        models=[{"provider": "gateway", "model": "test-model"}],
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
     assert fail_unclaimable_model_requests(broker) == [execution_id]
 
-    node = job_db.get_job_node("cap-mismatch-job", "generate")
+    node = job_db.get_job_node("contract-violation-job", "generate")
     assert node["status"] == "failed"
-    assert "capability 'generate' not declared by any Worker" in node["error_message"]
-    assert "model gateway/test-model not declared" not in node["error_message"]
-    assert node["failure_detail"] == "unclaimable_model"
+    assert "execution contract violation" in node["error_message"]
+    assert "requires a provider" in node["error_message"]
+    assert _request_state(job_db, execution_id) == "done"
 
 
 def test_unclaimable_sweeper_without_workers_is_a_noop(job_db) -> None:
@@ -494,7 +532,7 @@ def test_unclaimable_sweeper_revoked_worker_does_not_count(job_db) -> None:
 def test_unclaimable_sweeper_wildcard_worker_passes(job_db) -> None:
     execution_id = _seed_request(job_db, job_id="wildcard-job")
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
-    _register(registry, "worker-1")  # legacy ("*", "*") model / "*" capability
+    _register(registry, "worker-1")  # legacy ("*", "*", "*") wildcard models
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     assert fail_unclaimable_model_requests(broker) == []
@@ -504,9 +542,9 @@ def test_unclaimable_sweeper_wildcard_worker_passes(job_db) -> None:
 
 
 def test_unclaimable_sweeper_fails_on_runtime_mismatch(job_db) -> None:
-    """EXEC-CLAIM-RUNTIME-001: capability and model match, but no non-revoked
-    Worker declares the definition's runtime — the request fails with an
-    explicit runtime reason instead of rotting in queued."""
+    """EXEC-CLAIM-RUNTIME-001: the model matches, but no non-revoked Worker
+    declares the definition's runtime — the request fails with an explicit
+    runtime reason instead of rotting in queued."""
     execution_id = _seed_request(job_db, job_id="runtime-mismatch-job", runtime="velites")
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_with_declarations(
@@ -549,10 +587,11 @@ def test_unclaimable_sweeper_runtime_match_stays_queued(job_db) -> None:
 
 
 def test_unclaimable_sweeper_fails_on_cross_worker_combination(job_db) -> None:
-    """EXEC-CLAIM-RUNTIME-001: runtime, capability and model are each declared
-    by some Worker but never together on one machine — claim.py judges per
-    Worker, so the request would rot in queued; the sweeper fails it with an
-    explicit combination reason instead of trusting the cross-Worker union."""
+    """EXEC-CLAIM-RUNTIME-001: runtime and model are each declared by some
+    Worker but never together on one machine — claim.py judges per Worker, so
+    the request would rot in queued; the sweeper fails it with an explicit
+    combination reason instead of trusting the cross-Worker union. The
+    differing capabilities are ignored on purpose (issue #284)."""
     execution_id = _seed_request(job_db, job_id="combination-job", runtime="velites")
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_with_declarations(
@@ -575,9 +614,7 @@ def test_unclaimable_sweeper_fails_on_cross_worker_combination(job_db) -> None:
 
     node = job_db.get_job_node("combination-job", "generate")
     assert node["status"] == "failed"
-    assert (
-        "no single Worker declares runtime, capability and model together" in node["error_message"]
-    )
+    assert "no single Worker declares runtime and model together" in node["error_message"]
     assert "not declared by any Worker" not in node["error_message"]
     assert _request_state(job_db, execution_id) == "done"
 
@@ -588,8 +625,8 @@ def test_unclaimable_sweeper_resolves_revision_execution_overrides(job_db) -> No
     with job_db.connect() as conn:
         conn.execute(
             "insert into workflow_revisions("
-            " id, workspace_id, workflow_key, version, status, definition_json, definition_hash)"
-            " values ('rev-1', 'test-workspace', 'questions', 1, 'active', %s, 'hash-1')",
+            " id, workspace_id, version, status, definition_json, definition_hash)"
+            " values ('rev-1', 'test-workspace', 1, 'active', %s, 'hash-1')",
             (
                 json.dumps(
                     {

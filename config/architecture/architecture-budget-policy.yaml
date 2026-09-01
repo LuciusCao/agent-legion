@@ -9,6 +9,13 @@ production:
       extensions: [.py]
     - path: worker
       extensions: [.py]
+    # #293：worker 控制台是原生 JS/CSS 单文件面（无构建链，拆分受限于零依赖
+    # 部署形态），与 worker 的 Python 同受预算治理；绝对上限放宽到 1000 防
+    # 单文件失控，ceiling 按有效行数单调棘轮；vendor/ 第三方最小化产物不属
+    # 于我们维护的源码，排除。
+    - path: worker/ui
+      extensions: [.js, .css]
+      max_lines: 1000
     - path: shared
       extensions: [.py]
     - path: workspace_libs
@@ -17,8 +24,15 @@ production:
     # #[cfg(test)] 单测与实现同居是其惯例，不套 Python 的测试目录模型）。
     - path: velites/src
       extensions: [.rs]
+    # #293：postgres_schema.sql（全量 replay schema）纳入治理。单文件是刻意设计
+    # （幂等 replay 是迁移架构的地基），但登记绝对上限防无意识膨胀：ceiling 按
+    # 有效行数（-- 注释行排除）单调棘轮，max_lines 覆盖到 1200 raw 行。
+    - path: server/app/db
+      extensions: [.sql]
+      max_lines: 1200
   exclude:
     - frontend/src/generated/**
+    - worker/ui/vendor/**
   buffer_lines: 10
   max_lines: 800
 tests:

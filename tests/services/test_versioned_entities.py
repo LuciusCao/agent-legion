@@ -13,7 +13,7 @@ DEFINITION_V2 = {"code": "print('v2')\n", "change_note": "second"}
 
 @pytest.fixture
 def store(job_db):
-    return VersionedEntityStore(job_db.path, "node_code")
+    return VersionedEntityStore(job_db.dsn_identity, "node_code")
 
 
 @pytest.fixture
@@ -173,7 +173,7 @@ def test_workspace_scopes_are_isolated(job_db, store, workspace_id) -> None:
 
 
 def test_global_entities_publish_with_null_workspace(job_db) -> None:
-    store = VersionedEntityStore(job_db.path, "agent")
+    store = VersionedEntityStore(job_db.dsn_identity, "agent")
     store.save_draft("agent-1", {"capability": "cap"}, "hash1", None, "user:u1")
     published = store.publish("agent-1", None)
 

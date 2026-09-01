@@ -1,7 +1,9 @@
 from typing import Any
 
+from server.app.db.rowmap import wire_batch_id
 from server.app.executors.models import CODE_EXECUTOR_ID
 from server.app.jobs import JobQueries
+from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_errors import NotFoundError
 from server.app.services.job_node_ordering import ordered_job_nodes
 from server.app.services.job_node_worker_projection import agent_route_map, claimed_worker_map
@@ -32,13 +34,16 @@ class JobQueryService:
         job_db: JobQueries,
         settings: Settings,
         workspace_execution_config: WorkspaceExecutionConfigurationService,
-        object_store: Any = None,
+        object_store: JobArtifactObjectStore | None = None,
     ):
         self.job_db = job_db
         self.settings = settings
         self.workspace_execution_config = workspace_execution_config
         # D12: artifact listing is the local job_dir ∪ the object-storage
-        # manifest (evicted cache entries stay listed).
+        # manifest (evicted cache entries stay listed). #279 step 1: the
+        # param is typed as the artifact object store the call surface
+        # actually reads (``enabled`` / ``names_for_job``), not Any — the
+        # composition root (main.py) passes exactly this class.
         self.object_store = object_store
 
     def _job_or_404(self, job_id: str) -> dict[str, Any]:
@@ -51,7 +56,7 @@ class JobQueryService:
         # Snapshot-less jobs fall back to their own workspace's active
         # revision (schema v50), never a global template.
         return definition_from_job_snapshot(job) or require_workspace_active_definition(
-            self.job_db, str(job["workspace_id"]), str(job["workflow_key"])
+            self.job_db, str(job["workspace_id"]), str(job["workspace_id"])
         )
 
     def _artifact_names(self, job: dict[str, Any]) -> list[str]:
@@ -95,7 +100,7 @@ class JobQueryService:
 
         if active_revision is _UNSET:
             active = self.job_db.get_active_workflow_revision(
-                str(job["workspace_id"]), str(job["workflow_key"])
+                str(job["workspace_id"]), str(job["workspace_id"])
             )
         else:
             active = active_revision
@@ -105,9 +110,12 @@ class JobQueryService:
         job = resolve_record_paths(job, self.settings.data_dir, {"storage_dir"})
         return {
             **job,
+            # #211 M2: the jobs column is gone (v70); the deprecated API field
+            # keeps the identity value until the M3 removal window closes.
+            "workflow_key": job.get("workflow_key", job["workspace_id"]),
             # Wire compatibility: the API field keeps the legacy name while
             # the column is jobs.run_id (schema v53); the value is the run id.
-            "batch_id": str(job.get("run_id") or ""),
+            "batch_id": wire_batch_id(job),
             "workflow_revision_id": job.get("workflow_revision_id", ""),
             "workflow_version": job_workflow_version,
             "workflow_definition_hash": job.get("workflow_definition_hash", ""),
@@ -147,7 +155,7 @@ class JobQueryService:
         nodes = self.job_db.list_job_nodes(job_id)
         nodes_with_definition = job_nodes_with_definition(nodes, definition)
         worker_map = claimed_worker_map(self.job_db, job_id)
-        agent_map = agent_route_map(self.job_db, str(job["workspace_id"]), str(job["workflow_key"]))
+        agent_map = agent_route_map(self.job_db, str(job["workspace_id"]), str(job["workspace_id"]))
         for node in nodes_with_definition:
             # P-0.5: non-Agent-routed nodes always run on the implicit code
             # pool; the projection is a constant, no configuration lookup.

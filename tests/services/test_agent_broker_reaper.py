@@ -27,16 +27,16 @@ def _insert_request(
             " on conflict(id) do nothing"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values ('job-1', 'test-workspace', 'questions', 'question', 'job-1')"
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values ('job-1', 'test-workspace', 'question', 'job-1')"
             " on conflict(id) do nothing"
         )
         conn.execute(
             "insert into agent_execution_requests("
-            " execution_id, workspace_id, job_id, workflow_key, node_key,"
+            " execution_id, workspace_id, job_id, node_key,"
             " agent_id, agent_definition_hash, node_concurrency_limit,"
             " state, queued_at, finished_at, manifest_json)"
-            " values (%s, 'test-workspace', 'job-1', 'questions', 'review',"
+            " values (%s, 'test-workspace', 'job-1', 'review',"
             " 'generator-v1', 'sha256:whatever', 1, %s, current_timestamp, %s, %s)",
             (
                 execution_id,

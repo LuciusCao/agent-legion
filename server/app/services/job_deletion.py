@@ -154,6 +154,17 @@ class JobDeletionService:
                 _fail(job_id, "rollback_conflict", str(rollback_exc))
             _fail(job_id, exc.reason_code, str(exc))
         except Exception as exc:
+            # #204 broad-except audit: the staging-then-mutation sequence
+            # spans the filesystem (shutil.move onto trash) and the DB write
+            # (delete_job_in_transaction, whose ValueError carries the
+            # business refusals — a foreign-key rejection from a still-
+            # referenced job — and is deliberately NOT caught before this
+            # arm so the original type reaches the route). Whatever fails,
+            # the staged paths must be restored to the pre-delete state
+            # before the failure is normalized to JobOperationError; the
+            # classification above (conflict → skipped) already peeled off
+            # the concurrency case. logger.exception keeps the traceback of
+            # the unexpected kind.
             logger.exception("Unexpected error deleting job %s", job_id)
             try:
                 self._restore_paths(restore_paths)
@@ -219,5 +230,9 @@ class JobDeletionService:
             for staged_log in staged_logs:
                 if staged_log.exists():
                     staged_log.unlink(missing_ok=True)
-        except Exception:
+        except OSError:
+            # #204: pure filesystem teardown of already-committed trash. A
+            # failure leaves a .trash/<operation_id> residue the operator can
+            # clear (or the disk-cleanup sweep); it must not turn a succeeded
+            # deletion into an API error. Only OSError escapes rmtree/unlink.
             logger.exception("Failed to clean staged files after deleting job %s", job_id)

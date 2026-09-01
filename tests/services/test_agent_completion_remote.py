@@ -6,14 +6,19 @@ Worker 直传到每次 execution 唯一的 staging key（jobs-staging/...）；H
 record_remote 登记 + best-effort 删 staging；任一失败整个 result 判
 failed，且不留半应用状态。旧形态 str ref 的 add_ref 路径不变（回归由
 tests/services/test_agent_completion_validation.py 覆盖）。
+
+#338 双形态：.gz staging ref（v4+ worker 压缩上传）HEAD 按压缩字节数核
+验、下载透明解压落 job_dir、content_hash 按未压缩字节；裸 staging ref
+（旧 worker）路径不变。形态切换的重跑（raw → gzip）authority key 随之带
+后缀，旧形态对象留存给仍指向它的清单行直到单事务 retarget。
 """
 
 from __future__ import annotations
 
+import gzip
 import hashlib
-import io
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any
 
 import pytest
 from psycopg import IntegrityError
@@ -22,7 +27,7 @@ from server.app.agent_control.completion import AgentCompletionHandler, AgentOut
 from server.app.db.schema import init_db
 from server.app.db.transaction import write_transaction
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
-from server.app.storage import ObjectHead
+from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
 PAYLOAD = b"remote-artifact-bytes"
@@ -30,40 +35,7 @@ HASH = hashlib.sha256(PAYLOAD).hexdigest()
 STAGING_KEY = "jobs-staging/ws-1/job-1/exec-1/out.json"
 AUTHORITY_KEY = "jobs/ws-1/job-1/out.json"
 
-
-class FakeStorage:
-    """In-memory ObjectStorage test double; never touches the network."""
-
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {}
-        self.put_calls = 0
-
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/upload/{storage_key}"
-
-    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/download/{storage_key}"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        return io.BytesIO(self.objects[storage_key])
-
-    def put_object(self, storage_key: str, data: bytes, content_type: str = "") -> None:
-        self.put_calls += 1
-        self.objects[storage_key] = data
-
-    def put_stream(self, storage_key: str, stream: BinaryIO, size_bytes: int) -> None:
-        self.put_calls += 1
-        self.objects[storage_key] = stream.read()
-
-    def delete_object(self, storage_key: str) -> None:
-        self.objects.pop(storage_key, None)
-
-    def copy_object(self, source_key: str, destination_key: str) -> None:
-        self.objects[destination_key] = self.objects[source_key]
+FakeStorage = FakeObjectStorage
 
 
 class _StubJobDb:
@@ -115,8 +87,8 @@ def _make_handler(
             " on conflict (id) do nothing"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
-            " title, status, storage_dir) values ('job-1', 'ws-1', 'wf', 's', 's1', 't', 'pending', 'd')"
+            "insert into jobs(id, workspace_id, source_type, source_id, "
+            " title, status, storage_dir) values ('job-1', 'ws-1', 's', 's1', 't', 'pending', 'd')"
         )
     jobs_dir = tmp_path / "jobs"
     job = {"id": "job-1", "workspace_id": "ws-1", "storage_dir": "jobs/ws/job-1"}
@@ -524,4 +496,197 @@ def test_record_remote_many_rolls_back_on_mid_batch_failure(tmp_path: Path) -> N
     with pytest.raises(IntegrityError):
         object_store.record_remote_many(rows)
 
+    assert object_store.lookup("job-1", "out.json") is None
+
+
+# --- #338：gzip 双形态 ------------------------------------------------------
+
+GZ_STAGING_KEY = STAGING_KEY + ".gz"
+GZ_AUTHORITY_KEY = AUTHORITY_KEY + ".gz"
+GZ_PAYLOAD = gzip.compress(PAYLOAD)
+
+
+def _gz_ref(content_hash: str = HASH) -> dict:
+    """v4 worker 上报形态：storage_key 带 .gz、size_bytes 是压缩后字节数、
+    content_hash 是未压缩字节哈希。"""
+    return {
+        "storage_key": GZ_STAGING_KEY,
+        "size_bytes": len(GZ_PAYLOAD),
+        "content_hash": content_hash,
+    }
+
+
+def test_finish_gzip_ref_promotes_decoded_and_registers(tmp_path: Path) -> None:
+    """.gz staging ref：HEAD 按压缩字节数核验，job_dir 落未压缩字节，
+    authority key 带 .gz 后缀，清单行 hash=未压缩、size=压缩。"""
+    storage = FakeStorage()
+    storage.objects[GZ_STAGING_KEY] = GZ_PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
+
+    _finish(handler, {"out.json": _gz_ref()})
+
+    assert leases.results[0].status == "completed"
+    assert (job_dir / "out.json").read_bytes() == PAYLOAD  # 解压落盘
+    assert storage.objects == {GZ_AUTHORITY_KEY: GZ_PAYLOAD}  # 提升保形态
+    row = object_store.lookup("job-1", "out.json")
+    assert row is not None
+    assert row["storage_key"] == GZ_AUTHORITY_KEY
+    assert row["content_hash"] == HASH
+    assert row["size_bytes"] == len(GZ_PAYLOAD)
+
+
+def test_finish_gzip_ref_hash_mismatch_fails(tmp_path: Path) -> None:
+    """.gz 对象解压后字节对不上自报 hash：整批失败、无提升无落盘。"""
+    storage = FakeStorage()
+    storage.objects[GZ_STAGING_KEY] = GZ_PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
+
+    _finish(handler, {"out.json": _gz_ref(content_hash="0" * 64)})
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert "hash mismatch" in result.error_message
+    assert not (job_dir / "out.json").exists()
+    assert GZ_AUTHORITY_KEY not in storage.objects
+    assert object_store.lookup("job-1", "out.json") is None
+
+
+def test_finish_gzip_ref_compressed_size_mismatch_fails_head(tmp_path: Path) -> None:
+    """HEAD 核验按压缩对象字节数：worker 报未压缩 size 会被拒。"""
+    storage = FakeStorage()
+    storage.objects[GZ_STAGING_KEY] = GZ_PAYLOAD
+    handler, leases, _, object_store, _ = _make_handler(tmp_path, storage)
+    ref = {**_gz_ref(), "size_bytes": len(PAYLOAD)}  # 未压缩字节数 ≠ HEAD
+
+    _finish(handler, {"out.json": ref})
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert "size" in result.error_message
+    assert object_store.lookup("job-1", "out.json") is None
+
+
+def test_finish_gzip_cancelled_empty_hash_registers_host_computed(tmp_path: Path) -> None:
+    """cancelled 路径：.gz staging 字节边解压边 digest，登记 Host 计算值。"""
+    storage = FakeStorage()
+    storage.objects[GZ_STAGING_KEY] = GZ_PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
+
+    _finish(handler, {"out.json": _gz_ref(content_hash="")}, status="cancelled")
+
+    assert leases.results[0].status == "cancelled"
+    assert not (job_dir / "out.json").exists()
+    row = object_store.lookup("job-1", "out.json")
+    assert row is not None
+    assert row["content_hash"] == HASH
+    assert storage.objects == {GZ_AUTHORITY_KEY: GZ_PAYLOAD}
+
+
+def test_finish_rerun_form_change_raw_to_gzip(tmp_path: Path) -> None:
+    """形态切换的重跑：上次裸对象（旧 worker）、这次 .gz（v4 worker）。
+    新 authority key 带后缀、旧裸对象留存（无覆盖即无需备份），清单行
+    单事务 retarget 到新 key；单节点重跑在新旧混合数据下通过。"""
+    storage = FakeStorage()
+    storage.objects[AUTHORITY_KEY] = b"previous-raw-bytes"
+    storage.objects[GZ_STAGING_KEY] = GZ_PAYLOAD
+    handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
+    # 上一次运行的存量清单行（裸形态）。
+    object_store.record_remote(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="node_a",
+        name="out.json",
+        storage_key=AUTHORITY_KEY,
+        size_bytes=len(b"previous-raw-bytes"),
+        content_hash=hashlib.sha256(b"previous-raw-bytes").hexdigest(),
+    )
+
+    _finish(handler, {"out.json": _gz_ref()})
+
+    assert leases.results[0].status == "completed"
+    assert (job_dir / "out.json").read_bytes() == PAYLOAD
+    # 旧裸对象未被覆盖（新 key 不存在即无备份/回滚），新对象带后缀。
+    assert storage.objects == {AUTHORITY_KEY: b"previous-raw-bytes", GZ_AUTHORITY_KEY: GZ_PAYLOAD}
+    row = object_store.lookup("job-1", "out.json")
+    assert row is not None
+    assert row["storage_key"] == GZ_AUTHORITY_KEY
+    assert row["content_hash"] == HASH
+
+
+def test_verify_remote_accepts_both_staging_key_forms(tmp_path: Path) -> None:
+    """host 按后缀判定两种上传形态都收：裸 key 与 .gz key 均通过布局核验，
+    错位的 key（别的 execution / authority key）照旧拒绝。"""
+    storage = FakeStorage()
+    storage.objects[STAGING_KEY] = PAYLOAD
+    storage.objects[GZ_STAGING_KEY] = GZ_PAYLOAD
+    _, _, _, object_store, _ = _make_handler(tmp_path, storage)
+
+    for key, size in ((STAGING_KEY, len(PAYLOAD)), (GZ_STAGING_KEY, len(GZ_PAYLOAD))):
+        object_store.verify_remote(
+            workspace_id="ws-1",
+            job_id="job-1",
+            name="out.json",
+            storage_key=key,
+            size_bytes=size,
+            execution_id="exec-1",
+        )
+
+    with pytest.raises(ValueError, match="unexpected artifact storage key"):
+        object_store.verify_remote(
+            workspace_id="ws-1",
+            job_id="job-1",
+            name="out.json",
+            storage_key="jobs-staging/ws-1/job-1/other-exec/out.json.gz",
+            size_bytes=len(GZ_PAYLOAD),
+            execution_id="exec-1",
+        )
+
+
+# --- #338 评审 r1 P2-2：decompression-bomb 缺口 ------------------------------
+
+
+def test_finish_gzip_ref_decompression_bomb_fails(tmp_path: Path) -> None:
+    """r1 P2-2 回归：压缩字节过了 max_archive_bytes 闸但解压后超限——下载
+    中途计数中断，整批判 failed，炸弹不落 job_dir、不提升、不登记。"""
+    bomb_raw = b"x" * 4096
+    bomb_gz = gzip.compress(bomb_raw)
+    assert len(bomb_gz) < len(bomb_raw)  # 测试前提：压缩确实更小
+    storage = FakeStorage()
+    storage.objects[GZ_STAGING_KEY] = bomb_gz
+    # 闸值夹在压缩/未压缩之间：verify_remote 按压缩字节过，解压路径必须拦。
+    handler, leases, _, object_store, job_dir = _make_handler(
+        tmp_path, storage, max_archive_bytes=len(bomb_gz)
+    )
+    ref = {
+        "storage_key": GZ_STAGING_KEY,
+        "size_bytes": len(bomb_gz),
+        "content_hash": hashlib.sha256(bomb_raw).hexdigest(),
+    }
+
+    _finish(handler, {"out.json": ref})
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert "decompresses beyond the size limit" in result.error_message
+    assert not (job_dir / "out.json").exists()
+    assert GZ_AUTHORITY_KEY not in storage.objects
+    assert object_store.lookup("job-1", "out.json") is None
+
+
+def test_finish_gzip_cancelled_bomb_fails_on_digest_path(tmp_path: Path) -> None:
+    """cancelled 路径（verify_remote_digest，不落盘）同样按解压字节计数中断。"""
+    bomb_gz = gzip.compress(b"x" * 4096)
+    storage = FakeStorage()
+    storage.objects[GZ_STAGING_KEY] = bomb_gz
+    handler, leases, _, object_store, job_dir = _make_handler(
+        tmp_path, storage, max_archive_bytes=len(bomb_gz)
+    )
+    ref = {"storage_key": GZ_STAGING_KEY, "size_bytes": len(bomb_gz), "content_hash": ""}
+
+    _finish(handler, {"out.json": ref}, status="cancelled")
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert "decompresses beyond the size limit" in result.error_message
+    assert not (job_dir / "out.json").exists()
     assert object_store.lookup("job-1", "out.json") is None

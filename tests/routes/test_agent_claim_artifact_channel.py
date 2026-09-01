@@ -9,9 +9,8 @@ job_artifacts 行的 input_artifacts 升级为 {"url", "sha256"}——URL 不落
 from __future__ import annotations
 
 import hashlib
-import io
 from types import SimpleNamespace
-from typing import Any, BinaryIO
+from typing import Any
 from unittest.mock import MagicMock
 
 from fastapi import FastAPI
@@ -21,47 +20,18 @@ from server.app.db.schema import init_db
 from server.app.db.transaction import write_transaction
 from server.app.routes.agent_worker_claims import create_agent_worker_claim_router
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
-from server.app.storage import ObjectHead
+from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
 PAYLOAD = b"claim-input-bytes"
 HASH = hashlib.sha256(PAYLOAD).hexdigest()
 
-
-class FakeStorage:
-    """In-memory ObjectStorage test double; never touches the network."""
-
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {}
-        self.put_expiries: list[int] = []
-        self.get_expiries: list[int] = []
-
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        self.put_expiries.append(expires_seconds)
-        return f"https://s3.test/upload/{storage_key}?sig=put"
-
-    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
-        self.get_expiries.append(expires_seconds)
-        return f"https://s3.test/download/{storage_key}?sig=get"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        return io.BytesIO(self.objects[storage_key])
-
-    def put_object(self, storage_key: str, data: bytes, content_type: str = "") -> None:
-        self.objects[storage_key] = data
-
-    def put_stream(self, storage_key: str, stream: BinaryIO, size_bytes: int) -> None:
-        self.objects[storage_key] = stream.read()
-
-    def delete_object(self, storage_key: str) -> None:
-        self.objects.pop(storage_key, None)
+FakeStorage = FakeObjectStorage
 
 
 class RaisingStorage(FakeStorage):
+    """presign_put 抛错：模拟 S3 不可达（claim 降级、不注入）。"""
+
     def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
         raise RuntimeError("s3 unreachable")
 
@@ -74,8 +44,8 @@ def _seed() -> None:
             " values ('ws-1', 'ws', 'demo_workflow') on conflict (id) do nothing"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
-            " title, status, storage_dir) values ('job-1', 'ws-1', 'wf', 's', 's1', 't', 'pending', 'd')"
+            "insert into jobs(id, workspace_id, source_type, source_id, "
+            " title, status, storage_dir) values ('job-1', 'ws-1', 's', 's1', 't', 'pending', 'd')"
         )
 
 
@@ -147,9 +117,11 @@ def test_agent_claim_injects_object_channel() -> None:
 
     uploads = manifest["artifact_uploads"]
     assert uploads["out.json"]["storage_key"] == "jobs-staging/ws-1/job-1/exec-1/out.json"
-    assert uploads["out.json"]["url"].endswith("?sig=put")
+    assert uploads["out.json"]["url"].endswith("jobs-staging/ws-1/job-1/exec-1/out.json")
+    assert uploads["out.json"]["url"].startswith("https://s3.test/upload/")
     ref = manifest["input_artifacts"]["q.json"]
-    assert ref["url"].endswith("?sig=get")
+    assert ref["url"].endswith("jobs/ws-1/job-1/q.json")
+    assert ref["url"].startswith("https://s3.test/download/")
     assert ref["sha256"] == hashlib.sha256(PAYLOAD).hexdigest()
     assert "storage_key" not in ref
 
@@ -173,6 +145,80 @@ def test_agent_claim_without_object_storage_unchanged() -> None:
 
     assert "artifact_uploads" not in manifest
     assert manifest["input_artifacts"] == {"q.json": f"sha256:{HASH}"}
+
+
+def test_agent_claim_v4_worker_gets_gzip_specs() -> None:
+    """#338：v4 worker（authorize 报 protocol_version=4）拿 .gz 上传 spec，
+    .gz 输入行升级为 presigned GET + content_encoding 标记。"""
+    import gzip as gzip_mod
+
+    _seed()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    compressed = gzip_mod.compress(PAYLOAD)
+    storage.objects["jobs/ws-1/job-1/q.json.gz"] = compressed
+    store.record_remote(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="upstream",
+        name="q.json",
+        storage_key="jobs/ws-1/job-1/q.json.gz",
+        size_bytes=len(compressed),
+        content_hash=HASH,
+    )
+    broker = MagicMock()
+    broker.claim.return_value = _claimed(_manifest())
+    app = FastAPI()
+    app.include_router(
+        create_agent_worker_claim_router(
+            broker,
+            MagicMock(),
+            lambda request, worker_id=None: {"worker_id": "w1", "protocol_version": 4},
+            lambda request: "lease-1",
+            store,
+        )
+    )
+    client = TestClient(app)
+
+    manifest = _claim(client)
+
+    assert manifest["artifact_uploads"]["out.json"]["storage_key"] == (
+        "jobs-staging/ws-1/job-1/exec-1/out.json.gz"
+    )
+    ref = manifest["input_artifacts"]["q.json"]
+    assert ref["url"].endswith("jobs/ws-1/job-1/q.json.gz")
+    assert ref["sha256"] == HASH  # 未压缩字节哈希
+    assert ref["content_encoding"] == "gzip"
+
+
+def test_agent_claim_mixed_fleet_v3_worker_keeps_raw_specs() -> None:
+    """#338 混合舰队：v3 worker 对同一批 .gz 数据拿裸上传 spec，.gz 输入行
+    不升级（保留 CAS 形态）——不因输入/上传形态 mismatch 失败。"""
+    import gzip as gzip_mod
+
+    _seed()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    compressed = gzip_mod.compress(PAYLOAD)
+    storage.objects["jobs/ws-1/job-1/q.json.gz"] = compressed
+    store.record_remote(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="upstream",
+        name="q.json",
+        storage_key="jobs/ws-1/job-1/q.json.gz",
+        size_bytes=len(compressed),
+        content_hash=HASH,
+    )
+    client, _ = _client(store)  # _client 的 authorize stub 报 protocol_version=3
+
+    manifest = _claim(client)
+
+    assert manifest["artifact_uploads"]["out.json"]["storage_key"] == (
+        "jobs-staging/ws-1/job-1/exec-1/out.json"
+    )
+    assert manifest["input_artifacts"] == {"q.json": f"sha256:{HASH}"}
+    assert storage.presigned_gets == []  # 未为旧 worker 签发 .gz GET
 
 
 def test_agent_claim_presign_expiry_follows_execution_timeout() -> None:

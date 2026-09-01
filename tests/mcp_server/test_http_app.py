@@ -103,14 +103,26 @@ def test_initialize_and_tool_listing(client, job_db) -> None:
     assert response.status_code == 200, response.text
     names = sorted(tool["name"] for tool in _sse_data(response)["result"]["tools"])
     assert names == [
+        "compare_jobs",
         "compare_workflow",
         "get_active_workflow",
         "get_authoring_guide",
+        "get_job_context",
+        "get_job_detail",
         "get_node_code",
+        "get_node_logs",
+        "get_node_prompt",
+        "get_preview_context",
+        "get_preview_guide",
+        "get_preview_panel",
         "get_skill",
         "get_studio_context",
+        "list_jobs",
+        "read_artifact",
         "save_agent_definition_draft",
         "save_node_code_draft",
+        "save_node_prompt",
+        "save_preview_panel_draft",
         "save_skill_version",
         "validate_skill",
         "validate_workflow",
@@ -162,7 +174,9 @@ def test_loopback_api_base_follows_registry_edits(client, job_db, monkeypatch) -
         return "ok"
 
     monkeypatch.setattr(ToolClient, "call", fake_call)
-    StudioAgentRegistryStore(job_db.path).put({"api_base": "http://10.0.0.9:9000", "agents": []})
+    StudioAgentRegistryStore(job_db.dsn_identity).put(
+        {"api_base": "http://10.0.0.9:9000", "agents": []}
+    )
     response = _post(
         client,
         token,

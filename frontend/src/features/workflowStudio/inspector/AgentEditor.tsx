@@ -9,11 +9,10 @@ import {
 } from '../../../api'
 import type { AgentDefinitionPayload, AgentRuntime } from '../../../types'
 import { useUiStore } from '../../../stores/uiStore'
-import { SkillSelector } from '../../../components/SkillSelector'
 import { AgentVersionsDialog } from './AgentVersionsDialog'
 import styles from './AgentsPanel.module.css'
 
-const runtimes: AgentRuntime[] = ['pi', 'openclaw', 'velites']
+const runtimes: AgentRuntime[] = ['pi', 'velites']
 const toolOptions = ['read', 'write', 'bash']
 
 type Props = {
@@ -48,6 +47,8 @@ export function AgentEditor({
   const [agentIdInput, setAgentIdInput] = useState('')
   const [capability, setCapability] = useState(initialCapability ?? '')
   const [runtime, setRuntime] = useState<AgentRuntime>('pi')
+  // #76：skill 不是表单字段（绑定在节点级）；这里只缓存已加载定义的现值，
+  // 保存草稿时原样保留（legacy 兜底），新建 Agent 才传空。
   const [skill, setSkill] = useState('')
   const [tools, setTools] = useState<string[]>(['read', 'write', 'bash'])
   const [requiresLabels, setRequiresLabels] = useState<
@@ -127,7 +128,10 @@ export function AgentEditor({
     return {
       capability: capability.trim(),
       runtime,
-      skill: skill.trim(),
+      // #76：skill 不再是 Agent 表单字段（节点级绑定）；generated 契约里
+      // skill 仍必填（服务端默认 ""）——编辑存量 Agent 原样保留已加载值
+      // （节点未绑 skill 的 workflow 靠它兜底），新建才传空。
+      skill: creating ? '' : skill,
       ...(tools.length > 0 ? { tools } : {}),
       ...(requiresLabels ? { requires_labels: requiresLabels } : {}),
       ...(configSchema ? { config_schema: configSchema } : {}),
@@ -239,9 +243,6 @@ export function AgentEditor({
         </TextField>
       </div>
       <div className={styles.field}>
-        <SkillSelector value={skill} onChange={setSkill} />
-      </div>
-      <div className={styles.field}>
         <TextField
           select
           label="Tools"
@@ -280,7 +281,6 @@ export function AgentEditor({
           disabled={
             busy ||
             capability.trim() === '' ||
-            skill.trim() === '' ||
             (creating && agentIdInput.trim() === '')
           }
         >

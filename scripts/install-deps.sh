@@ -16,8 +16,8 @@
 #   5. deploy/secrets/vault_master_key 缺失时生成（同 init-worktree.sh）
 #   6. scripts/ensure-velites.sh --dest data/bin（指纹一致自动跳过）
 #   7. frontend/node_modules 缺失时 npm ci
-#   8. config/agent-worker.yaml 缺失时从 example 种子（host_url/work_root
-#      改写为本机 dev 值）
+#   8. worker 状态副本 data/agent-worker-service/worker.yaml 缺失时写入最小
+#      本机 dev 配置（host_url/work_root 为本机 dev 值）
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -196,14 +196,21 @@ else
     echo "frontend/node_modules 已存在，跳过 npm ci"
 fi
 
-# 8. Worker 引导配置（缺失时从 example 种子，改写本机 dev 字段）
-if [[ ! -f config/agent-worker.yaml ]]; then
-    cp config/agent-worker.example.yaml config/agent-worker.yaml
-    replace_in_place "s|^host_url:.*|host_url: http://127.0.0.1:${DEV_BACKEND_PORT:-8001}|" config/agent-worker.yaml
-    replace_in_place "s|^work_root:.*|work_root: data/agent-worker|" config/agent-worker.yaml
-    echo "已生成 config/agent-worker.yaml <- example（host_url/work_root 已改写）"
+# 8. Worker 状态副本（worker 唯一生效配置，issue #323；缺失时写入最小本机
+#    dev 配置，其余字段与后续修改一律走 worker 控制台/API）
+STATE_COPY=data/agent-worker-service/worker.yaml
+if [[ ! -f "$STATE_COPY" ]]; then
+    mkdir -p data/agent-worker-service
+    cat > "$STATE_COPY" <<YAML
+host_url: http://127.0.0.1:${DEV_BACKEND_PORT:-8001}
+worker_id: local-dev
+name: Local Dev Worker
+work_root: data/agent-worker
+YAML
+    chmod 600 "$STATE_COPY"
+    echo "已生成 $STATE_COPY（最小 dev 配置；models/token 等走 worker 控制台配置）"
 else
-    echo "config/agent-worker.yaml 已存在，跳过"
+    echo "$STATE_COPY 已存在，跳过"
 fi
 
 cat <<EOF

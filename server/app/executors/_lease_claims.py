@@ -47,13 +47,16 @@ def claim_lease(
         return None
 
     if request.local_node_limit is not None:
+        # #211 Phase 3 (read-layer binding): predicates key on
+        # (workspace_id, node_key) — workflow_key equals the workspace id on
+        # every row (v62 binding, aligned by v68).
         limit_row = conn.execute(
             """
             select concurrency_limit
             from workspace_node_limits
-            where workspace_id=%s and workflow_key=%s and node_key=%s
+            where workspace_id=%s and node_key=%s
             """,
-            (request.workspace_id, request.workflow_key, request.node_key),
+            (request.workspace_id, request.node_key),
         ).fetchone()
         if limit_row is None:
             raise ValueError(
@@ -84,9 +87,9 @@ def claim_lease(
             """
             select count(*) as cnt
             from executor_leases
-            where workspace_id=%s and workflow_key=%s and node_key=%s and status='active' and expires_at>%s
+            where workspace_id=%s and node_key=%s and status='active' and expires_at>%s
             """,
-            (request.workspace_id, request.workflow_key, request.node_key, now_str),
+            (request.workspace_id, request.node_key, now_str),
         ).fetchone()
         node_count = int(node_count_row["cnt"]) if node_count_row is not None else 0
         if node_count >= request.local_node_limit:
@@ -141,10 +144,10 @@ def claim_lease(
     conn.execute(
         """
         insert into executor_leases(
-            id, execution_id, executor_id, workspace_id, job_id, workflow_key,
+            id, execution_id, executor_id, workspace_id, job_id,
             node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
         )
-        values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
+        values (%s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
         """,
         (
             lease_id,
@@ -152,7 +155,6 @@ def claim_lease(
             request.executor_id,
             request.workspace_id,
             request.job_id,
-            request.workflow_key,
             request.node_key,
             node_run_id,
             now_str,

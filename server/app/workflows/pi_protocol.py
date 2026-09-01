@@ -10,7 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from server.app.workflows.velites_command import build_command_for_flavor
+from server.app.agent_runtime.catalog import get_adapter
+from server.app.workflows.node_prompt import build_node_instructions
 from shared.pi_model_error import detect_model_error, fold_model_error
 
 __all__ = [
@@ -20,7 +21,6 @@ __all__ = [
     "SESSION_DIR_PLACEHOLDER",
     "SESSION_NAME_PLACEHOLDER",
     "SKILL_DIR_PLACEHOLDER",
-    "build_command",
     "build_prompt",
     "detect_model_error",
     "fold_model_error",
@@ -38,6 +38,12 @@ PROMPT_FILE_PLACEHOLDER = "{prompt_file}"
 
 
 def build_prompt(manifest: dict[str, Any], *, job_dir: Path, skill_dir: Path) -> str:
+    """Fixed platform envelope plus exactly one node-instructions section.
+
+    The envelope (job/skill paths, validator, declared IO, output discipline)
+    never varies; the closing section semantics live in
+    ``node_prompt.build_node_instructions``.
+    """
     lines = [
         "Execute the loaded node skill for this Agent Legion workflow job.",
         "",
@@ -62,67 +68,34 @@ def build_prompt(manifest: dict[str, Any], *, job_dir: Path, skill_dir: Path) ->
             "and the skill directory. "
             "Finish after all required outputs are written and correct."
         ),
+        "",
+        "Node instructions:",
+        build_node_instructions(manifest),
     ]
-    additional = str(manifest.get("additional_prompt", "")).strip()
-    if additional:
-        lines.extend(["", "Additional node instructions:", additional])
     return "\n".join(lines) + "\n"
-
-
-def build_command(
-    manifest: dict[str, Any],
-    *,
-    skill_dir: Path,
-    session_dir: Path,
-    session_name: str,
-    prompt_file: Path,
-) -> list[str]:
-    execution = manifest["execution"]
-    cmd: list[str] = [
-        str(execution.get("binary") or "pi"),
-        "--mode",
-        "json",
-        "--session-dir",
-        str(session_dir),
-        "--name",
-        session_name,
-        "--no-context-files",
-        "--no-extensions",
-        "--no-prompt-templates",
-        "--no-skills",
-        "--skill",
-        str(skill_dir),
-        "--tools",
-        ",".join(manifest["tools"]),
-        "--approve",
-    ]
-    for flag, key in (("--provider", "provider"), ("--model", "model"), ("--thinking", "thinking")):
-        value = str(execution.get(key) or "")
-        if value:
-            cmd.extend([flag, value])
-    cmd.extend([f"@{prompt_file}", PROMPT_INSTRUCTION])
-    return cmd
 
 
 def render_command_spec(manifest: dict[str, Any]) -> dict[str, Any]:
     """Render prompt/command with path placeholders for Agent bundle shipping.
 
-    The command argv follows ``manifest["runtime"]`` (pi | velites); the
-    placeholder mechanism is runtime-neutral.
+    The command argv comes from the runtime adapter registered for
+    ``manifest["runtime"]`` (``server/app/agent_runtime`` catalog); the
+    placeholder mechanism is runtime-neutral and stays here so the adapter
+    layer never imports this module (no import cycle).
     """
     job_dir = Path(JOB_DIR_PLACEHOLDER)
     skill_dir = Path(SKILL_DIR_PLACEHOLDER)
+    runtime = str(manifest.get("runtime") or "").strip()
     return {
         "version": 1,
         "prompt": build_prompt(manifest, job_dir=job_dir, skill_dir=skill_dir),
-        "command": build_command_for_flavor(
+        "command": get_adapter(runtime).build_command(
             manifest,
             skill_dir=skill_dir,
             session_dir=Path(SESSION_DIR_PLACEHOLDER),
             session_name=SESSION_NAME_PLACEHOLDER,
             prompt_file=Path(PROMPT_FILE_PLACEHOLDER),
             prompt_instruction=PROMPT_INSTRUCTION,
-            pi_fallback=build_command,
         ),
         "prompt_instruction": PROMPT_INSTRUCTION,
     }

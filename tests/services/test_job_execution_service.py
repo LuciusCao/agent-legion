@@ -75,11 +75,7 @@ def _create_active_lease(
     with job_db.connect() as conn:
         conn.execute(
             """
-            insert into executor_leases(
-                id, execution_id, executor_id, workspace_id, job_id, workflow_key,
-                node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-            )
-            values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
+            insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) values (%s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
             """,
             (
                 f"lease-{node_key}",
@@ -87,7 +83,6 @@ def _create_active_lease(
                 "code-default",
                 job["workspace_id"],
                 job["id"],
-                job["workflow_key"],
                 node_key,
                 run["id"],
                 database_timestamp(now),

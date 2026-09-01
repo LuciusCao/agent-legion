@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { IconButton } from '@mui/material'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
@@ -13,12 +14,9 @@ import {
   getTokenUsagePricing,
   updateTokenUsagePricing,
 } from '../api/tokenUsagePricing'
-import type {
-  TokenUsagePricingConfigResponse,
-  TokenUsagePricingRate,
-} from '../api/tokenUsagePricing'
+import type { TokenUsagePricingConfigResponse } from '../api/tokenUsagePricing'
+import { InfraConnectionsSection } from './globalSettings/InfraConnectionsSection'
 import { InstanceSettingsSection } from './globalSettings/InstanceSettingsSection'
-import { SkillSourcesSection } from './globalSettings/SkillSourcesSection'
 import { ConnectionsSection } from './globalSettings/ConnectionsSection'
 import { StudioAgentsSection } from './globalSettings/StudioAgentsSection'
 import {
@@ -26,40 +24,16 @@ import {
   ModelPricingSection,
 } from './globalSettings/ModelPricingSection'
 import type { RateRow } from './globalSettings/ModelPricingSection'
+import { serialize, toRows } from './globalSettings/pricingRows'
+import { GLOBAL_ONBOARDING_PATH } from './GlobalOnboardingPage.storage'
 import styles from './GlobalSettingsPage.module.css'
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
-function toRows(pricing: TokenUsagePricingRate[]): RateRow[] {
-  return pricing.map((rate) => ({
-    provider: rate.provider,
-    model: rate.model,
-    input_per_1m: String(rate.input_per_1m),
-    output_per_1m: String(rate.output_per_1m),
-    cache_read_per_1m: String(rate.cache_read_per_1m),
-  }))
-}
-
-function serialize(currency: string, rows: RateRow[]): string {
-  return JSON.stringify({
-    currency: currency.trim(),
-    pricing: rows.map((row) => ({
-      provider: row.provider.trim(),
-      model: row.model.trim(),
-      input_per_1m: Number(row.input_per_1m),
-      output_per_1m: Number(row.output_per_1m),
-      cache_read_per_1m: Number(row.cache_read_per_1m),
-    })),
-  })
-}
 
 function GlobalSettingsEditor({
   initial,
 }: {
   initial: TokenUsagePricingConfigResponse
 }) {
+  const navigate = useNavigate()
   const [currency, setCurrency] = useState(initial.currency)
   const [rows, setRows] = useState<RateRow[]>(() => toRows(initial.pricing))
   const [baseline, setBaseline] = useState(() =>
@@ -108,7 +82,7 @@ function GlobalSettingsEditor({
       setBaseline(serialize(result.currency, toRows(result.pricing)))
       useUiStore.getState().showToast('全局设置已保存', 'success')
     } catch (err) {
-      setError(errorMessage(err))
+      setError(toErrorMessage(err))
     } finally {
       setSaving(false)
     }
@@ -127,19 +101,21 @@ function GlobalSettingsEditor({
     </div>
   )
 
+  // #333 两层心智：导航按「全局（实例级）」分组并对齐全局 onboarding
+  // 清单（ACP agent 优先），workspace 级设置入口在侧栏底部说明。
   const navItems = useMemo(
     () => [
-      { id: 'model-pricing', label: '模型定价' },
-      { id: 'instance-settings', label: '实例设置' },
-      { id: 'connections', label: '外部服务连接' },
-      { id: 'skill-sources', label: 'Skill 源管理' },
       { id: 'studio-agents', label: 'Studio Agent 管理' },
+      { id: 'connections', label: '外部服务连接' },
+      { id: 'infra-connections', label: '基础设施连接' },
+      { id: 'instance-settings', label: '实例设置' },
+      { id: 'model-pricing', label: '模型定价' },
     ],
     []
   )
   const { activeSection, contentRef, scrollToSection } = useSettingsScrollSpy(
     navItems,
-    'model-pricing'
+    'studio-agents'
   )
 
   return (
@@ -156,6 +132,7 @@ function GlobalSettingsEditor({
     >
       <div className={styles.settingsLayout}>
         <nav className={styles.navSidebar}>
+          <p className={styles.navGroupTitle}>全局（实例级）</p>
           <ul className={styles.navList}>
             {navItems.map((item) => (
               <li key={item.id}>
@@ -174,6 +151,15 @@ function GlobalSettingsEditor({
               </li>
             ))}
           </ul>
+          <button
+            type="button"
+            className={styles.navItem}
+            onClick={() => navigate(GLOBAL_ONBOARDING_PATH)}
+          >
+            全局初始化清单
+          </button>
+          <p className={styles.navGroupTitle}>Workspace 级</p>
+          <p className={styles.navHint}>各 workspace 的设置在其「设置」页。</p>
         </nav>
 
         <div className={styles.contentArea} ref={contentRef}>
@@ -182,6 +168,18 @@ function GlobalSettingsEditor({
               {error}
             </p>
           )}
+          <section id="studio-agents">
+            <StudioAgentsSection />
+          </section>
+          <section id="connections">
+            <ConnectionsSection />
+          </section>
+          <section id="infra-connections">
+            <InfraConnectionsSection />
+          </section>
+          <section id="instance-settings">
+            <InstanceSettingsSection />
+          </section>
           <section id="model-pricing">
             <ModelPricingSection
               currency={currency}
@@ -199,18 +197,6 @@ function GlobalSettingsEditor({
                 setRows((prev) => prev.filter((_, i) => i !== index))
               }
             />
-          </section>
-          <section id="instance-settings">
-            <InstanceSettingsSection />
-          </section>
-          <section id="connections">
-            <ConnectionsSection />
-          </section>
-          <section id="skill-sources">
-            <SkillSourcesSection />
-          </section>
-          <section id="studio-agents">
-            <StudioAgentsSection />
           </section>
         </div>
       </div>

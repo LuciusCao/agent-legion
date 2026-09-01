@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, cast
 
 import requests
 
@@ -41,7 +41,7 @@ def _open_download(url: str) -> BinaryIO:
     if response.status_code != 200:
         response.close()
         raise MaterializeError(f"material download failed with HTTP {response.status_code}")
-    return response.raw
+    return cast(BinaryIO, response.raw)
 
 
 def materialize_claim_material(

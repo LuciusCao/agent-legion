@@ -179,6 +179,27 @@ def test_check_outputs_survives_artifact_store_misconfiguration(
     assert result.produced_artifacts == ("out.json",)
 
 
+def test_failed_storage_probe_is_cached(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A persistently broken storage config probes once: the failure is cached
+    instead of re-running (and re-logging) the failing build on every node."""
+    calls = 0
+
+    def _raise() -> None:
+        nonlocal calls
+        calls += 1
+        raise FileNotFoundError("secret file missing")
+
+    monkeypatch.setattr("server.app.executors.code.build_s3_storage", _raise)
+    executor = _executor()
+
+    with pytest.raises(FileNotFoundError):
+        executor._object_store()
+    assert executor._object_store() is None
+    assert calls == 1
+
+
 def test_upload_failure_keeps_node_completed(context: ExecutionContext) -> None:
     """Best-effort upload (D12): a storage outage never fails the node — the
     local copy stays and the maintenance reconciler re-uploads later."""
@@ -228,3 +249,40 @@ def test_execute_restores_evicted_inputs_before_sandboxed_run(
 
     assert result.status == "completed"
     assert (context.job_dir / "out.json").read_bytes() == payload
+
+
+def test_artifact_store_dsn_resolves_both_connect_source_shapes(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#280: the artifact-store DSN goes through `resolve_dsn`, so a bare DSN
+    string passes through unchanged and a facade resolves via `dsn_identity`
+    — replacing the retired getattr escape hatch on `job_db`."""
+
+    class _FakeStorage:
+        pass
+
+    monkeypatch.setattr("server.app.executors.code.build_s3_storage", lambda: _FakeStorage())
+
+    class _FakeStore:
+        def __init__(self, storage: object, dsn: str | None) -> None:
+            self.dsn = dsn
+
+    built: list[_FakeStore] = []
+    monkeypatch.setattr(
+        "server.app.executors.code.build_artifact_object_store",
+        lambda storage, dsn: built.append(_FakeStore(storage, dsn)) or _FakeStore(storage, dsn),
+    )
+
+    executor = _executor()
+    executor.job_db = "postgresql://bare-dsn"
+    (context.job_dir / "out.json").write_text("{}", encoding="utf-8")
+    executor._check_outputs(context)
+    assert built and built[-1].dsn == "postgresql://bare-dsn"
+
+    class _FakeFacade:
+        dsn_identity = "postgresql://facade-dsn"
+
+    executor.job_db = _FakeFacade()
+    executor._artifact_objects = None
+    executor._check_outputs(context)
+    assert built[-1].dsn == "postgresql://facade-dsn"

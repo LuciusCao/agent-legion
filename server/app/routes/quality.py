@@ -5,7 +5,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 
 from server.app.auth.dependencies import reject_studio_agent_scope, require_user
-from server.app.routes.job_http import raise_job_http_error
+from server.app.routes.job_http import raise_job_http_error, reject_mismatched_workflow_key
 from server.app.routes.quality_contracts import (
     QualityBatchStatsResponse,
     QualityLabelCreateRequest,
@@ -40,11 +40,16 @@ def create_quality_router(
         payload: QualitySampleBatchCreateRequest,
         user: Annotated[dict[str, Any], Depends(require_user)],
     ) -> QualitySampleBatchCreateResponse:
+        # #211 Phase 2: absent workflow_key defaults to the path workspace_id
+        # (equal since v62); read via model_dump because the deprecated field
+        # attribute raises the deprecation warning the suite escalates.
+        body = payload.model_dump()
+        reject_mismatched_workflow_key(workspace_id, body.get("workflow_key"))
         try:
             result = sampling.create_batch(
                 workspace_id,
                 name=payload.name,
-                workflow_key=payload.workflow_key or "",
+                workflow_key=body.get("workflow_key") or workspace_id,
                 node_keys=payload.filters.node_keys,
                 statuses=payload.filters.statuses,
                 since=payload.filters.since,

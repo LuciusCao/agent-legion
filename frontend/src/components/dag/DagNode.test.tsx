@@ -138,6 +138,23 @@ describe('DagNode', () => {
     expect(screen.getByText('未绑定')).toBeInTheDocument()
   })
 
+  // #333：agent 节点 execution 缺口的警告徽标（文案作为 title 悬浮提示）。
+  it('renders the execution warning tag only when executionWarning is set', () => {
+    renderWithProvider({
+      ...baseData,
+      executionWarning: '缺 provider / model，该节点跑不起来',
+    })
+    expect(screen.getByText('缺执行配置')).toHaveAttribute(
+      'title',
+      '缺 provider / model，该节点跑不起来'
+    )
+  })
+
+  it('renders no execution warning tag by default', () => {
+    renderWithProvider(baseData)
+    expect(screen.queryByText('缺执行配置')).not.toBeInTheDocument()
+  })
+
   it('renders not applicable node status', () => {
     renderWithProvider({
       label: '生成关键信息',
@@ -171,5 +188,73 @@ describe('DagNode', () => {
     expect(
       screen.queryByTestId('dag-change-badge-removed')
     ).not.toBeInTheDocument()
+  })
+
+  // #276：置灰态渲染——hover/选中联动时非同链路节点由 DagGraph 写入
+  // data.dimmed = true，节点卡片自身渲染 opacity: 0.45。
+  it('dims the node card when data.dimmed is true', () => {
+    const dimmed = renderWithProvider({ ...baseData, dimmed: true })
+    expect(dimmed.getByTestId('dag-node').style.opacity).toBe('0.45')
+    dimmed.unmount()
+
+    const plain = renderWithProvider(baseData)
+    expect(plain.getByTestId('dag-node').style.opacity).toBe('')
+  })
+
+  // #276：active 态渲染——hover/选中的目标节点由 DagGraph 写入 data.active
+  // = true，卡片渲染蓝色轮廓（旧版 selectedFlowNode 的视觉等价物）。
+  it('outlines the node card when data.active is true', () => {
+    const active = renderWithProvider({ ...baseData, active: true })
+    expect(active.getByTestId('dag-node').className).toContain('active')
+    active.unmount()
+
+    const plain = renderWithProvider(baseData)
+    expect(plain.getByTestId('dag-node').className).not.toContain('active')
+  })
+
+  // #276：memo 比较函数——data 引用变化但业务内容相同（含 dimmed）时，
+  // 节点不应重渲染。这是「hover 只重渲染受影响节点」在组件级的兜底断言：
+  // DagGraph 只在 dimmed 翻转时新建 data，这里模拟「引用变了但内容没变」
+  // 的输入（memo 比较被误改成全等引用比较时，行为退化在这里表现为肉眼不可见，
+  // 所以配套断言「内容变化仍必须渲染」防止比较函数被写成恒 true）。
+  it('skips re-render when only the data reference changes', () => {
+    const { rerender } = render(
+      <ReactFlowProvider>
+        <TestDagNode
+          id="n1"
+          type="dagNode"
+          data={baseData}
+          isConnectable={false}
+        />
+      </ReactFlowProvider>
+    )
+    // 结构相同的另一份 data：内容一致、引用不同（inputs 数组也是新引用，
+    // 与 computeLayout 每次 props 变化时重建数组的行为一致）。
+    const sameContentData: DagNodeData = {
+      ...baseData,
+      inputs: [...baseData.inputs],
+    }
+    rerender(
+      <ReactFlowProvider>
+        <TestDagNode
+          id="n1"
+          type="dagNode"
+          data={sameContentData}
+          isConnectable={false}
+        />
+      </ReactFlowProvider>
+    )
+    // 内容不同的 data（label 变化）必须触发渲染：label 出现在 title 属性上。
+    rerender(
+      <ReactFlowProvider>
+        <TestDagNode
+          id="n1"
+          type="dagNode"
+          data={{ ...baseData, label: 'renamed_label' }}
+          isConnectable={false}
+        />
+      </ReactFlowProvider>
+    )
+    expect(screen.getByTitle('renamed_label')).toBeInTheDocument()
   })
 })

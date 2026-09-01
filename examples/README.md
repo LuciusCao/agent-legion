@@ -11,14 +11,24 @@
   （`ctx.material`）读取 markdown——每个材料一个 job。
 - `skills/`：4 个示例 agent skill（`write-script` / `review-script` /
   `generate-questions` / `review-questions`），随仓库版本化。运行
-  `make import-demo` 把它们导入本机 skill 源目录
-  `~/.agents/skills/agent-legion/education-video-problems-generation/`
-  并逐个 `git init` + 打 tag `v1.0.0`，随后写入 skill lock，并在尚无
+  `make import-demo` 把它们导入本机 skill root 下的
+  `~/.agents/skills/education-video-problems-generation/`
+  并逐个 `git init` + 打 tag `v1.0.0`，随后把该 tag 解析的 commit
+  写入 skill lock（多值锁，按 (skill, ref) 逐项冻结），并在尚无
   demo workspace 时创建和 seed 一个（幂等，不覆盖已有改动）。
+
+skill 内容绑定在节点上（#76）：示例 DAG 的 4 个 agent 节点在定义里声明
+`skill: {key: education-video-problems-generation/<name>, ref: v1.0.0}`
+（随 revision 版本化、随 intake 冻结进 job 快照），内置 demo Agent 定义
+自身不再携带 skill。升级 skill 的流程：在外部 skill 仓库改内容并打新 tag
+→ 把节点 `skill.ref` 指向新 tag（Studio 编辑草稿并发布）→ 首次 dispatch
+自动解析该 ref 并把 commit 冻结进锁。节点 ref 为 `latest`（空 ref 归一为
+它）时跟随仓库 HEAD：每次 dispatch 现场解析、永不入锁。重解析已 pin 的
+ref 走 `make skills-lock`（遍历锁内已有条目）。
 
 示例 DAG（`server/app/workflows/builtin_demo.py` 的
 `education_video_problems_generation`；`server/app/workflows/builtin.py`
-仅 re-export）：
+只是装配入口，把 demo 定义挂进 `BUILTIN_WORKFLOW_DEFINITIONS`）：
 intake_knowledge_points → write_script → review_script →
 generate_questions → review_questions → publish_content（模拟入库，
 不发网络请求）。

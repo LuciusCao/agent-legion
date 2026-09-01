@@ -19,7 +19,7 @@ def list_workspace_agent_routes(job_db: JobQueries, workspace_id: str) -> list[d
     with job_db._connect_read() as conn:
         rows = conn.execute(
             """
-            select r.workflow_key, r.node_key, r.target_id as agent_id,
+            select r.node_key, r.target_id as agent_id,
                    d.definition_json::jsonb->>'capability' as capability,
                    d.definition_json
             from workspace_node_routes r
@@ -27,14 +27,14 @@ def list_workspace_agent_routes(job_db: JobQueries, workspace_id: str) -> list[d
               on d.entity_type='agent' and d.workspace_id = r.workspace_id
              and d.entity_key = r.target_id and d.status='published'
             where r.workspace_id = %s and r.target_kind = 'agent'
-            order by r.workflow_key, r.node_key
+            order by r.node_key
             """,
             (workspace_id,),
         ).fetchall()
-        labels: dict[tuple[str, str], str] = {}
+        labels: dict[str, str] = {}
         revisions = conn.execute(
             """
-            select workflow_key, definition_json from workflow_revisions
+            select definition_json from workflow_revisions
             where workspace_id = %s and status = 'active'
             """,
             (workspace_id,),
@@ -48,8 +48,7 @@ def list_workspace_agent_routes(job_db: JobQueries, workspace_id: str) -> list[d
             continue
         for node_key, node in nodes.items():
             if isinstance(node, dict):
-                key = (str(revision["workflow_key"]), str(node_key))
-                labels[key] = str(node.get("label") or node_key)
+                labels[str(node_key)] = str(node.get("label") or node_key)
 
     routes: list[dict[str, Any]] = []
     for row in rows:
@@ -57,13 +56,14 @@ def list_workspace_agent_routes(job_db: JobQueries, workspace_id: str) -> list[d
             skill = str(json.loads(row["definition_json"]).get("skill") or "")
         except (TypeError, json.JSONDecodeError):
             skill = ""
-        workflow_key = str(row["workflow_key"])
         node_key = str(row["node_key"])
         routes.append(
             {
-                "workflow_key": workflow_key,
+                # #211 M2: the column is gone — the deprecated response field
+                # keeps returning the identity value until the M3 contract drop.
+                "workflow_key": workspace_id,
                 "node_key": node_key,
-                "node_label": labels.get((workflow_key, node_key), node_key),
+                "node_label": labels.get(node_key, node_key),
                 "capability": str(row["capability"]),
                 "agent_id": str(row["agent_id"]),
                 "agent_skill": skill,

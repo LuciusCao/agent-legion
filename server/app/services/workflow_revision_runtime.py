@@ -25,6 +25,21 @@ def _structural_payload(definition: WorkflowDefinition) -> dict:
     return payload
 
 
+def embed_node_code_pins(definition_json: str, pins: dict) -> str:
+    """definition_json with the pins snapshot embedded alongside it (EXEC-CODE-002).
+
+    node_code_pins are publish-moment state, not part of the workflow
+    definition: they ride inside the stored definition_json but stay out of
+    definition_hash (which covers the pure definition). Publish and the
+    runtime-only in-place edit both embed through here (#287).
+    """
+    if not pins:
+        return definition_json
+    payload = json.loads(definition_json)
+    payload["node_code_pins"] = pins
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 def save_revision_runtime_or_publish(
     job_db: JobQueries,
     workspace_id: str,
@@ -43,12 +58,7 @@ def save_revision_runtime_or_publish(
     # hash still covers the pure definition only (same rule as publish).
     new_hash = definition_hash(definition_json)
     current_pins = json.loads(str(active["definition_json"])).get("node_code_pins")
-    if current_pins is not None:
-        payload = json.loads(definition_json)
-        payload["node_code_pins"] = current_pins
-        definition_json = json.dumps(
-            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        )
+    definition_json = embed_node_code_pins(definition_json, current_pins or {})
     with job_db.connect() as conn:
         row = conn.execute(
             "update workflow_revisions set definition_json=%s, definition_hash=%s"

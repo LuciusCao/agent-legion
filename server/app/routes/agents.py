@@ -51,6 +51,17 @@ def create_agents_router(agent_manager: AgentStatusManager) -> APIRouter:
         except WebSocketDisconnect:
             pass
         except Exception:
+            # #204 broad-except audit: the WS receive loop's exit guard.
+            # receive_text()'s outcome space is the ASGI transport layer —
+            # RuntimeError ("receive after disconnect"), ConnectionError/
+            # OSError families from a dropped socket — none of which this
+            # route could enumerate and all of which mean "the client is
+            # gone". Swallowing is correct because the loop has no work
+            # left once the socket dies; the finally below disconnects the
+            # client from the manager so the registry does not leak it.
+            # WebSocketDisconnect (the normal close) is handled above.
+            # logger.exception keeps the traceback for abnormal
+            # disconnect shapes.
             logger.exception("Agents websocket receive loop failed")
         finally:
             agent_manager.disconnect(websocket)

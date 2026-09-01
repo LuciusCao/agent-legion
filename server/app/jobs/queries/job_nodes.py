@@ -42,7 +42,6 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
             existing = conn.execute("select * from jobs where id=%s", (job_id,)).fetchone()
             if existing is not None and (
                 existing["workspace_id"] != workspace_id
-                or existing["workflow_key"] != workflow_key
                 or existing["source_type"] != source_type
                 or existing["source_id"] != source_id
             ):
@@ -50,10 +49,10 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
             conn.execute(
                 """
                 insert into jobs(
-                  id, workspace_id, workflow_key, source_type, source_id, run_id, title, storage_dir, stem,
+                  id, workspace_id, source_type, source_id, run_id, title, storage_dir, stem,
                   workflow_revision_id, workflow_version, workflow_definition_hash, workflow_definition_snapshot_json
                 )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 on conflict(id) do update set
                   title=excluded.title,
                   stem=excluded.stem,
@@ -63,7 +62,6 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
                 (
                     job_id,
                     workspace_id,
-                    workflow_key,
                     source_type,
                     source_id,
                     run_id,
@@ -97,11 +95,15 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
         workspace_id: str | None = None,
         source_id: str | None = None,
         status_not_in: Sequence[str] | None = None,
+        limit: int = 500,
     ) -> list[dict[str, Any]]:
-        clauses, params = [], []
+        # workflow_key is inert (#211 M2 dropped the column): callers may keep
+        # passing it, but jobs are keyed on workspace_id alone.
+        del workflow_key
+        clauses: list[str] = []
+        params: list[Any] = []
         for col, val in (
             ("workspace_id", workspace_id),
-            ("workflow_key", workflow_key),
             ("status", status),
             ("source_id", source_id),
         ):
@@ -112,8 +114,14 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
             clauses.append(f"status not in ({','.join('%s' for _ in status_not_in)})")
             params.extend(status_not_in)
         where = f" where {' and '.join(clauses)}" if clauses else ""
+        # #272: the legacy unbounded list (select * including KB-scale TEXT
+        # columns) needs a hard cap. The frontend already uses the paginated
+        # /jobs/snapshot endpoint; this bound is API-compat protection only.
+        params.append(max(1, min(limit, 500)))
         with self._connect_read() as conn:
-            rows = conn.execute(f"select * from jobs{where} order by created_at desc", params)
+            rows = conn.execute(
+                f"select * from jobs{where} order by created_at desc limit %s", params
+            )
             return [dict(row) for row in rows]
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
@@ -314,7 +322,9 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
                   jobs.title as job_title,
                   jobs.source_id,
                   jobs.source_type,
-                  jobs.workflow_key
+                  -- #211 M2: jobs lost workflow_key (v70); the deprecated
+                  -- response field carries the identity value instead.
+                  jobs.workspace_id as workflow_key
                 from node_runs
                 join jobs on jobs.id = node_runs.job_id
                 where {where}

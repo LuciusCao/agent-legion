@@ -1,9 +1,9 @@
 """Sweep for queued Agent requests no registered Worker can ever claim.
 
 Split out of ``sweepers.py`` for the file-size budget; mirrors
-``fail_stale_definition_requests`` but judges claimability (definition runtime,
-resolved model and capability against Worker declarations) instead of
-definition staleness.
+``fail_stale_definition_requests`` but judges claimability (definition runtime
+and resolved model against Worker declarations) instead of definition
+staleness.
 """
 
 from __future__ import annotations
@@ -29,12 +29,11 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
     """Fail queued requests no registered Worker could ever claim.
 
     The claim path resolves the effective (provider, model) from the job's
-    pinned workflow revision (node ``execution`` overrides over manifest
-    defaults) and matches it against Worker declarations. A job pinned to a
-    revision missing those overrides resolves to a placeholder model no
-    Worker declares, so the request would sit queued forever with no error —
-    the same queue-rot failure mode as ``fail_stale_definition_requests``.
-    Fail the node instead, pointing at the revision's execution overrides.
+    pinned revision (node ``execution`` overrides over manifest defaults)
+    and matches it against Worker declarations; a revision missing those
+    overrides resolves to a placeholder no Worker declares — queue-rot,
+    same failure mode as ``fail_stale_definition_requests``. Fail the node
+    instead, pointing at the revision's execution overrides.
 
     With zero non-revoked Workers registered, do nothing: that is a
     deployment gap (e.g. a restart window), not a definition problem, and
@@ -42,23 +41,21 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
     failed: list[str] = []
     with write_transaction(broker.database_dsn) as conn:
         worker_rows = conn.execute(
-            "select capabilities_json, models_json, runtimes_json"
-            " from agent_workers where revoked_at is null"
+            "select models_json, runtimes_json from agent_workers where revoked_at is null"
         ).fetchall()
         if not worker_rows:
             return failed
         workers: list[WorkerDeclarations] = []
         for worker_row in worker_rows:
-            capabilities, models = agent_claim_compatibility.worker_declarations(worker_row)
+            models = agent_claim_compatibility.worker_model_declarations(worker_row)
             runtimes = set(json.loads(worker_row["runtimes_json"] or "[]"))
-            workers.append((runtimes, capabilities, models))
+            workers.append((runtimes, models))
         # Requests whose pinned definition is disabled/changed are excluded
         # by the enabled-definition join: ``fail_stale_definition_requests``
         # owns them. The revision join mirrors the claim candidate query.
         rows = conn.execute(
             """
             select r.execution_id, r.job_id, r.node_key, r.manifest_json,
-                   d.definition_json::jsonb->>'capability' as capability,
                    d.definition_json::jsonb->>'runtime' as runtime,
                    wr.definition_json as revision_definition_json
             from agent_execution_requests r
@@ -80,14 +77,21 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             (_SWEEP_LIMIT,),
         ).fetchall()
         for row in rows:
-            manifest = agent_claim_compatibility.live_claim_manifest(row)
-            reasons = unmatched_reasons(row, manifest, workers)
-            if not reasons:
-                continue
-            error = (
-                f"No registered Agent Worker can claim this request ({'; '.join(reasons)});"
-                " check the pinned workflow revision's node execution overrides"
-            )
+            try:
+                manifest = agent_claim_compatibility.live_claim_manifest(row)
+            except ValueError as exc:
+                # Execution contract violation (EXEC-RUNTIME-DISPATCH-001):
+                # the claim-side skip keeps the request queued; this sweeper
+                # owns turning it into an actionable failure.
+                error = f"Agent runtime execution contract violation at claim: {exc}"
+            else:
+                reasons = unmatched_reasons(row, manifest, workers)
+                if not reasons:
+                    continue
+                error = (
+                    f"No registered Agent Worker can claim this request ({'; '.join(reasons)});"
+                    " check the pinned workflow revision's node execution overrides"
+                )
             # Declared fields win over rule-based classification; like orphan
             # recovery, this sweeper knows the cause at its write path.
             failure_category, failure_detail = failure_classification.resolve_failure_fields(

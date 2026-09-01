@@ -89,7 +89,9 @@ class Client(TransferOperations):
             "worker_id": config["worker_id"],
             "name": config.get("name", config["worker_id"]),
             "runtimes": config["runtimes"],
-            "capabilities": config.get("capabilities", []),
+            # capabilities 已退役（issue #284）：契约仍接受该字段（旧版 Host 兼容），
+            # 固定上报空列表；Host 侧不再按 capability 匹配。
+            "capabilities": [],
             "models": config.get("models", []),
             "max_concurrency": config["max_concurrency"],
             # Code-execution capacity pool (batch 2); 0/absent = agent-only.
@@ -124,7 +126,7 @@ class Client(TransferOperations):
         document = json.loads(body)
         if int(document.get("host_protocol_version", 0)) < PROTOCOL_VERSION:
             raise WorkerAuthError(
-                "Host protocol does not support runtime-scoped models; upgrade Host before Worker"
+                "Host protocol version is too old for this Worker; upgrade Host before Worker"
             )
         self.token = str(document["worker_token"])
         return dict(document)
@@ -161,7 +163,8 @@ class Client(TransferOperations):
             raise WorkerAuthError(f"HTTP {status}: {body[:300]!r}")
         if status != 200:
             raise RuntimeError(f"Agent claim failed: HTTP {status}: {body[:300]!r}")
-        return json.loads(body)
+        claim: dict[str, Any] | None = json.loads(body)
+        return claim
 
     def get_ops_metrics(self, granularity: str) -> dict[str, Any]:
         """Fetch this Worker's metrics with its issued Worker token."""
@@ -171,7 +174,8 @@ class Client(TransferOperations):
             raise WorkerAuthError(f"HTTP {status}: {body[:300]!r}")
         if status != 200:
             raise RuntimeError(f"ops metrics failed: HTTP {status}: {body[:300]!r}")
-        return json.loads(body)
+        metrics: dict[str, Any] = json.loads(body)
+        return metrics
 
     def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
         """Beat once; returns (status, cancelled_execution_ids).

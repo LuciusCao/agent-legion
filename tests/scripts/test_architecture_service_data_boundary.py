@@ -9,7 +9,11 @@ from scripts.architecture.service_data_boundary import (
     count_service_data_bypasses,
 )
 from scripts.check_architecture import check_repository
-from tests.architecture_budget_helpers import write_neutral_budget_governance
+from tests.architecture_budget_helpers import (
+    boundary_git_repo,
+    write_boundary_baseline,
+    write_neutral_budget_governance,
+)
 
 pytestmark = pytest.mark.no_db
 
@@ -17,14 +21,6 @@ pytestmark = pytest.mark.no_db
 def write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
-
-
-def write_boundary_baseline(root: Path, files: dict[str, list[int]]) -> None:
-    baseline_path = root / "config/architecture/service-data-boundary-baseline.json"
-    baseline_path.parent.mkdir(parents=True, exist_ok=True)
-    baseline_path.write_text(
-        json.dumps({"version": 1, "files": files}, indent=2) + "\n", encoding="utf-8"
-    )
 
 
 def test_counts_sql_literals_by_keyword_family():
@@ -335,3 +331,160 @@ def test_current_repo_passes_its_own_baseline():
     errors = check_service_data_boundary(root)
 
     assert errors == []
+
+
+def test_monotonic_guard_rejects_raised_count(tmp_path: Path):
+    root = boundary_git_repo(tmp_path, {"server/app/services/legacy.py": [3, 1, 0]})
+    write_boundary_baseline(root, {"server/app/services/legacy.py": [4, 1, 0]})
+
+    errors = check_service_data_boundary(root)
+
+    assert any(
+        "baseline triple [4, 1, 0] rose above committed floor [3, 1, 0]" in error
+        for error in errors
+    )
+
+
+def test_monotonic_guard_rejects_new_entry_for_tracked_file(tmp_path: Path):
+    # The add-entry-to-pass channel #292 exists to close: a service file that
+    # HEAD already tracks but the baseline did not register must not gain a
+    # first entry by a silent edit.
+    import subprocess
+
+    root = tmp_path
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+        ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
+    ):
+        subprocess.run(argv, cwd=root, check=True)
+    # The veteran service predates this change: it is committed into HEAD^
+    # (the pre-change anchor), so a baseline entry appearing now is new debt
+    # on a tracked file — including when the attacker commits the entry in
+    # the same change (codex review on #305).
+    write(root / "server/app/services/veteran.py", 'A = "SELECT 1"\n')
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "veteran service, no baseline"], cwd=root, check=True
+    )
+    write(root / "server/app/services/veteran2.py", 'B = "SELECT 2"\n')
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "HEAD layer"], cwd=root, check=True)
+    write_boundary_baseline(root, {"server/app/services/veteran.py": [1, 0, 0]})
+
+    errors = check_service_data_boundary(root)
+
+    assert any("baseline entry appeared without pre-change history" in error for error in errors)
+
+
+def test_monotonic_guard_rejects_first_entry_for_brand_new_file(tmp_path: Path):
+    # codex review round 2 on #305: a NEW service with bypasses violates
+    # BOUNDARY-DATA-001 the same as an old one growing debt — AGENTS.md
+    # requires new services to go through JobQueries too, so the
+    # first-entry channel for a fresh file is closed as well.
+    root = boundary_git_repo(tmp_path, {})
+    write(root / "server/app/services/fresh.py", 'A = "SELECT 1"\n')
+    write_boundary_baseline(root, {"server/app/services/fresh.py": [1, 0, 0]})
+
+    errors = check_service_data_boundary(root)
+
+    assert any("appeared without pre-change history" in error for error in errors)
+
+
+def test_monotonic_guard_accepts_lowered_count(tmp_path):
+    root = boundary_git_repo(tmp_path, {"server/app/services/legacy.py": [3, 1, 0]})
+    write_boundary_baseline(root, {"server/app/services/legacy.py": [2, 1, 0]})
+
+    errors = check_service_data_boundary(root)
+
+    assert not any("rose above committed" in error for error in errors)
+
+
+def test_monotonic_guard_silent_without_git(tmp_path: Path):
+    # Non-git checkouts have no committed anchor; the guard stays quiet
+    # rather than failing (mirrors the budget guard).
+    write_boundary_baseline(tmp_path, {"server/app/services/legacy.py": [3, 1, 0]})
+
+    errors = check_service_data_boundary(tmp_path)
+
+    assert not any("boundary monotonicity" in error for error in errors)
+
+
+def test_monotonic_guard_rejects_committed_new_entry(tmp_path: Path):
+    # codex review on #305: the attacker may COMMIT the new bypasses together
+    # with their baseline entry — HEAD then carries the entry, so historic
+    # evidence must come from HEAD^ only, never from HEAD itself.
+    import subprocess
+
+    root = tmp_path
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+        ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
+    ):
+        subprocess.run(argv, cwd=root, check=True)
+    write(root / "server/app/services/veteran.py", 'A = "SELECT 1"\n')
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "veteran without baseline"], cwd=root, check=True)
+    # The attack: new bypasses on the tracked file + the baseline entry,
+    # committed as one change.
+    write_boundary_baseline(root, {"server/app/services/veteran.py": [1, 0, 0]})
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add baseline entry"], cwd=root, check=True)
+
+    errors = check_service_data_boundary(root)
+
+    assert any("baseline entry appeared without pre-change history" in error for error in errors)
+
+
+def test_monotonic_guard_rejects_entry_for_file_created_this_change(tmp_path: Path):
+    # Same-commit file + bypasses + baseline entry is the smuggling shape
+    # the HEAD^-only historic evidence exists to catch (codex round 2).
+    import subprocess
+
+    root = tmp_path
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+        ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
+    ):
+        subprocess.run(argv, cwd=root, check=True)
+    write(root / "server/app/services/fresh.py", 'A = "SELECT 1"\n')
+    write_boundary_baseline(root, {"server/app/services/fresh.py": [1, 0, 0]})
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "new service with baseline"], cwd=root, check=True)
+
+    errors = check_service_data_boundary(root)
+
+    assert any("appeared without pre-change history" in error for error in errors)
+
+
+def test_monotonic_guard_rejects_rename_count_reset(tmp_path: Path):
+    # subagent review on #305: renaming a service file (and re-keying its
+    # baseline entry) must not reset the boundary counts — the old path's
+    # floor carries onto the new path (#236 semantics).
+    import subprocess
+
+    root = tmp_path
+    write(root / "server/app/services/old_name.py", 'A = "SELECT 1"\n')
+    write_boundary_baseline(root, {"server/app/services/old_name.py": [3, 1, 0]})
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+        ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
+        ["git", "add", "-A"],
+        ["git", "commit", "-q", "-m", "baseline under old name"],
+        ["git", "commit", "-q", "--allow-empty", "-m", "trailing"],
+    ):
+        subprocess.run(argv, cwd=root, check=True)
+    # The attack: rename + re-key with inflated counts.
+    (root / "server/app/services/old_name.py").rename(root / "server/app/services/new_name.py")
+    write_boundary_baseline(root, {"server/app/services/new_name.py": [9, 9, 9]})
+
+    errors = check_service_data_boundary(root)
+
+    assert any("rose above committed floor" in error for error in errors)

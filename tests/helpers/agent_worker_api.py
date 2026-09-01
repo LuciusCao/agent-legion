@@ -77,15 +77,15 @@ def insert_job_rows(
             (workspace_id,),
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (%s, %s, 'questions', 'question', %s)",
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values (%s, %s, 'question', %s)",
             (job_id, workspace_id, job_id),
         )
         conn.execute("insert into job_nodes(job_id, node_key) values (%s, %s)", (job_id, node_key))
         conn.execute(
-            "insert into workspace_node_routes(workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values (%s, 'questions', %s, 'agent', %s)"
-            " on conflict(workspace_id, workflow_key, node_key) do nothing",
+            "insert into workspace_node_routes(workspace_id, node_key, target_kind, target_id)"
+            " values (%s, %s, 'agent', %s)"
+            " on conflict(workspace_id, node_key) do nothing",
             (workspace_id, node_key, agent_id),
         )
         # Capacity is workspace-level now: one row per workspace.
@@ -221,7 +221,10 @@ def register(client: TestClient, credential: str | None = None, **overrides) -> 
         json=payload,
     )
     assert response.status_code == 201, response.text
-    assert response.json()["host_protocol_version"] == 3
+    # Host 声明其最新协议版本（shared/protocol.py 单一事实来源，#338 起 v4）。
+    from shared.protocol import PROTOCOL_VERSION
+
+    assert response.json()["host_protocol_version"] == PROTOCOL_VERSION
     return dict(response.json())
 
 
@@ -250,8 +253,8 @@ def insert_code_job_rows(job_db, *, job_id: str, node_key: str = "package") -> N
             " on conflict(id) do nothing"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (%s, 'test-workspace', 'questions', 'question', %s)",
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values (%s, 'test-workspace', 'question', %s)",
             (job_id, job_id),
         )
         conn.execute("insert into job_nodes(job_id, node_key) values (%s, %s)", (job_id, node_key))

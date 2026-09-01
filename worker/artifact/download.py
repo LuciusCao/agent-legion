@@ -9,9 +9,11 @@ URL comes from the authenticated claim channel, so no SSRF guard applies
 from __future__ import annotations
 
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, cast
 
 import requests
+
+from worker.artifact.gzip import copy_stream
 
 # Single socket timeout for presigned GET downloads; aligned with the
 # transfer-timeout default of the bundle/artifact channel.
@@ -41,20 +43,19 @@ def _open_download(url: str) -> BinaryIO:
     if response.status_code != 200:
         response.close()
         raise RuntimeError(f"artifact download failed with HTTP {response.status_code}")
-    return response.raw
+    return cast(BinaryIO, response.raw)
 
 
-def download_object_artifact(url: str, target: Path) -> None:
-    """Stream a presigned GET to an atomic temp+rename (same .part hygiene
-    as the Host-channel download in worker.host.client)."""
+def download_object_artifact(url: str, target: Path, *, gunzip: bool = False) -> None:
+    """Stream a presigned GET to an atomic temp+rename (same .part hygiene as
+    the Host-channel download); ``gunzip`` (#338) decodes mid-stream."""
     if not url:
         raise RuntimeError("input artifact is missing its download URL")
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(target.suffix + ".part")
     try:
         with _open_download(url) as stream, temporary.open("wb") as handle:
-            while chunk := stream.read(1 << 20):
-                handle.write(chunk)
+            copy_stream(stream, handle, gunzip=gunzip)
         temporary.replace(target)
     finally:
         temporary.unlink(missing_ok=True)

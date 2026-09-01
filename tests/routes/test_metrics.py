@@ -94,8 +94,8 @@ def test_metrics_overview_summary_shape_and_window_independence(client) -> None:
             "insert into workspaces(id, name, default_workflow_key) values ('ops-ws', 'Ops', 'demo_workflow') on conflict(id) do nothing",
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values ('job-1', 'ops-ws', 'questions', 'question', 'job-1')"
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values ('job-1', 'ops-ws', 'question', 'job-1')"
             " on conflict(id) do nothing",
         )
         for node_key, status, started, finished in (
@@ -110,13 +110,7 @@ def test_metrics_overview_summary_shape_and_window_independence(client) -> None:
             # Agent runs 口径：只有被 agent_execution_requests 引用的 run 才计入摘要。
             conn.execute(
                 """
-                insert into agent_execution_requests(
-                    execution_id, workspace_id, job_id, workflow_key, node_key,
-                    agent_id, agent_definition_hash, node_concurrency_limit,
-                    state, queued_at, node_run_id, manifest_json
-                )
-                values (%s, 'ops-ws', 'job-1', 'questions', %s, 'agent-1', 'hash', 1,
-                        'done', %s, %s, '{}')
+                insert into agent_execution_requests(execution_id, workspace_id, job_id, node_key, agent_id, agent_definition_hash, node_concurrency_limit, state, queued_at, node_run_id, manifest_json) values (%s, 'ops-ws', 'job-1', %s, 'agent-1', 'hash', 1, 'done', %s, %s, '{}')
                 """,
                 (f"exec-{node_key}", node_key, started, run["id"]),
             )

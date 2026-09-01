@@ -71,7 +71,7 @@ def test_publish_first_revision_for_blank_workspace(tmp_path):
     """End of the blank flow: a workspace without any revision publishes v1
     once the draft key matches and the capability resolves."""
     app, workspace_id = _app_and_workspace(tmp_path)
-    codes = NodeCodeService(app.state.job_db.path)
+    codes = NodeCodeService(app.state.job_db.dsn_identity)
     codes.save_draft(
         workspace_id,
         "test_publish_flow",

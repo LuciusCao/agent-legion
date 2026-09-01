@@ -20,7 +20,7 @@ discipline:
 
 from __future__ import annotations
 
-import hashlib
+import json
 import logging
 import os
 import threading
@@ -28,11 +28,27 @@ from pathlib import Path
 from typing import Any
 
 from server.app.jobs import JobQueries
+from server.app.services.job_artifact_gzip import (
+    file_sha256,
+    is_gzip_key,
+    row_stale,
+    size_certified,
+)
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from server.app.services.job_errors import NotFoundError
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.settings import Settings
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
+from server.app.workflows.schema import WorkflowDefinitionError
+
+#: Per-job definition failures (#204): #243-family corrupt revisions (incl.
+#: non-mapping JSON) and missing active revisions.
+_DEFINITION_FAILURES = (NotFoundError, json.JSONDecodeError, WorkflowDefinitionError)
+
+#: Per-job path-resolution failures (#204): unmappable storage_dir plus the
+#: OS errors resolve_data_path deliberately propagates.
+_PATH_FAILURES = (ManagedPathError, OSError, RuntimeError)
 
 logger = logging.getLogger(__name__)
 
@@ -53,30 +69,6 @@ def job_cache_max_bytes(env: Any = None) -> int:
         except ValueError:
             pass
     return DEFAULT_JOB_CACHE_MAX_BYTES
-
-
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(1 << 20):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _row_stale(row: dict[str, Any], local_path: Path) -> bool:
-    """True when the local file no longer matches the manifest row.
-
-    A node re-run can produce new bytes while the best-effort upload fails;
-    the old row must not suppress the re-upload forever (and must never
-    certify the new local file for cache eviction).
-    """
-    try:
-        if int(row["size_bytes"]) != local_path.stat().st_size:
-            return True
-    except OSError:
-        return False
-    recorded = str(row.get("content_hash") or "")
-    return bool(recorded) and recorded != _file_sha256(local_path)
 
 
 def reupload_missing(
@@ -110,10 +102,23 @@ def reupload_missing(
             continue
         try:
             definition = definition_from_job_snapshot(job) or require_workspace_active_definition(
-                job_db, str(job["workspace_id"]), str(job["workflow_key"])
+                job_db, str(job["workspace_id"]), str(job["workspace_id"])
             )
+        except _DEFINITION_FAILURES as exc:
+            # #204: per-job definition failures only — corrupt revision JSON
+            # (#243 family incl. non-mapping top level) or no active revision.
+            # A plain ValueError/RuntimeError from a parser bug must propagate
+            # (codex round-3 on PR #251), not silently strand the job.
+            logger.debug("reconciler skips job %s: %s", job_id, exc)
+            continue
+        try:
             job_dir = resolve_job_dir(job, settings.jobs_dir)
-        except Exception:  # skip jobs whose definition/dir cannot be resolved
+        except _PATH_FAILURES as exc:
+            # Path resolution deliberately propagates OS errors (permissions,
+            # symlink loops) and raises ManagedPathError for unmappable
+            # storage_dir — both per-job expected here (same family as the
+            # cleanup_sweep branches, codex review on PR #251).
+            logger.debug("reconciler skips job %s: %s", job_id, exc)
             continue
         if not job_dir.is_dir():
             continue
@@ -126,7 +131,7 @@ def reupload_missing(
                 if not local_path.is_file():
                     continue
                 manifest_row = store.row_for_node(job_id, node_key, name)
-                if manifest_row is not None and not _row_stale(manifest_row, local_path):
+                if manifest_row is not None and not row_stale(manifest_row, local_path):
                     continue
                 # 行缺失或已过期（rerun 产出新字节而上传失败）：（重新）上传，
                 # upsert 刷新清单行。
@@ -140,6 +145,16 @@ def reupload_missing(
                     )
                     uploaded += 1
                 except Exception:
+                    # #204 broad-except audit: per-file best-effort re-upload.
+                    # The upload path's outcome space is genuinely mixed —
+                    # declared storage outages (botocore ClientError after the
+                    # bounded retries inside upload), DB errors from the
+                    # manifest upsert, and unexpected programming errors must
+                    # all leave this pass alive for the other artifacts: the
+                    # reconciler IS the retry mechanism (next pass re-finds
+                    # the still-missing/stale row). A narrow business family
+                    # cannot enumerate the storage layer; the traceback is
+                    # logged so the outage is diagnosable.
                     logger.warning(
                         "reconciler re-upload failed for job %s node %s artifact %s",
                         job_id,
@@ -176,7 +191,9 @@ def _eviction_candidates(
     eviction: a same-size re-run is invisible to a size-only check, and the
     reconciler's re-upload is itself best-effort, so eviction re-hashes
     instead of trusting the row. The hash cost is only paid here — i.e. when
-    the cache is already over budget and eviction is actually needed.
+    the cache is already over budget and eviction is actually needed. #338:
+    ``.gz`` rows record the compressed size, so the size gate skips them and
+    the (uncompressed-semantics) content hash certifies (size_certified).
     """
     with job_db.read() as conn:
         rows = conn.execute(
@@ -191,10 +208,14 @@ def _eviction_candidates(
     for row in rows:
         job = dict(row)
         job_id = str(job["id"])
-        confirmed: dict[str, list[tuple[int, str]]] = {}
+        confirmed: dict[str, list[tuple[int, str, bool]]] = {}
         for manifest_row in store.rows_for_job(job_id):
             confirmed.setdefault(str(manifest_row["name"]), []).append(
-                (int(manifest_row["size_bytes"]), str(manifest_row.get("content_hash") or ""))
+                (
+                    int(manifest_row["size_bytes"]),
+                    str(manifest_row.get("content_hash") or ""),
+                    is_gzip_key(str(manifest_row["storage_key"])),
+                )
             )
         if not confirmed:
             continue
@@ -212,10 +233,10 @@ def _eviction_candidates(
                 stat = entry.stat()
             except OSError:
                 continue
-            if stat.st_size not in {size for size, _hash in manifest_entries}:
+            if not size_certified(manifest_entries, stat.st_size):
                 continue  # size 不符 = 行未确认这份本地字节，不淘汰
-            hashes = {hash_ for _size, hash_ in manifest_entries if hash_}
-            if hashes and _file_sha256(entry) not in hashes:
+            hashes = {hash_ for _size, hash_, _gz in manifest_entries if hash_}
+            if hashes and file_sha256(entry) not in hashes:
                 continue  # 同长度 rerun 新字节：hash 不符不得认证淘汰
             candidates.append((stat.st_mtime, stat.st_size, job_id, entry))
     candidates.sort(key=lambda item: item[0])
@@ -328,6 +349,15 @@ class JobArtifactMaintenanceThread:
             try:
                 self.run_once()
             except Exception:
+                # #204 broad-except audit: the maintenance thread's life
+                # support. run_once (reupload + eviction) is a long walk over
+                # the jobs table, manifest rows, and the filesystem — any
+                # unexpected failure (DB restart mid-walk, a narrow catch
+                # above missing a case) must not kill the only thread that
+                # performs either duty: the local cache would then grow
+                # unbounded and missing manifest rows would never self-heal.
+                # The full traceback is logged; the next interval is the
+                # retry.
                 logger.exception("job artifact maintenance failed")
 
     def stop(self, timeout: float = 3.0) -> None:

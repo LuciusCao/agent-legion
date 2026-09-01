@@ -10,7 +10,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from server.app.auth.dependencies import reject_studio_agent_scope
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import (
+    raise_job_http_error,
+    reject_mismatched_workflow_key,
+    require_workflows_enabled,
+)
 from server.app.routes.run_contracts import (
     RunCreateRequest,
     RunCreateResponse,
@@ -32,12 +36,22 @@ def create_runs_router(service: RunService, settings: Settings) -> APIRouter:
     )
     def create_run(workspace_id: str, payload: RunCreateRequest) -> RunCreateResponse:
         require_workflows_enabled(settings)
+        # exclude_unset keeps input_json verbatim (no params={} filler); the
+        # same dump feeds the deprecated workflow_key read (accessing the
+        # field attribute itself would raise the deprecation warning, which
+        # the test suite escalates to an error).
+        # #211 Phase 2: absent workflow_key defaults to the path workspace_id
+        # (equal since v62).
+        body = payload.model_dump(exclude_unset=True)
+        # Codex P1 on #307: a mismatched explicit key would flow verbatim
+        # into runs/jobs rows (violating the v62 binding) — reject before
+        # the service call.
+        reject_mismatched_workflow_key(workspace_id, body.get("workflow_key"))
         try:
             result = service.create_run(
                 workspace_id,
-                workflow_key=payload.workflow_key,
-                # exclude_unset keeps input_json verbatim (no params={} filler).
-                items=[item.model_dump(exclude_unset=True) for item in payload.items],
+                workflow_key=body.get("workflow_key") or workspace_id,
+                items=body["items"],
             )
         except JobServiceError as exc:
             raise_job_http_error(exc)

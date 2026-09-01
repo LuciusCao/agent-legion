@@ -22,10 +22,12 @@ def local_node(key: str, outputs: list[str] | None = None) -> WorkflowNode:
     )
 
 
-def make_definition(nodes: list[WorkflowNode]) -> WorkflowDefinition:
+def make_definition(
+    nodes: list[WorkflowNode], key: str = "test", label: str = "Test"
+) -> WorkflowDefinition:
     return WorkflowDefinition(
-        key="test",
-        label="Test",
+        key=key,
+        label=label,
         intake=WorkflowIntake(),
         nodes={n.key: n for n in nodes},
     )

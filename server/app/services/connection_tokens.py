@@ -39,6 +39,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from cryptography.fernet import InvalidToken
+
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.connection_adapters import ConnectionAdapterError
@@ -186,7 +188,13 @@ class ConnectionTokenService:
                 .decrypt(str(row["token_ciphertext"]).encode("utf-8"))
                 .decode("utf-8")
             )
-        except Exception:
+        except InvalidToken:
+            # #204: a token that no longer decrypts under the current master
+            # key (key rotation across the undecryptable ciphertext) is
+            # exactly the refresh path — warn and let get_token re-acquire.
+            # VaultMasterKeyMissingError (a VaultError) deliberately does NOT
+            # land here: without a master key the refresh path cannot work
+            # either, so it propagates as the startup-adjacent misconfig it is.
             logger.warning("cached connection token undecryptable, will refresh")
             return None
 

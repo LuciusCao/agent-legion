@@ -2,6 +2,9 @@
 
 日期：2026-07-31 ｜ 分支：`feat/velites-harness` ｜ 环境：`.worktrees/velites`
 
+> 时点快照：本报告的 `path:line` 证据与部分结论反映当时代码；当前状态以
+> 代码、现行文档与 `config/architecture/architecture-invariants.yaml` 为准。
+
 验证方式：Node pi（生产同款 flag 序列）与 velites 各跑一次同一 `review_subtitles`
 任务（3 条字幕、同一 prompt 模板、同模型 `kimi-k2.6`、`--thinking low`），
 再跑坏模型语义与模型矩阵冒烟。产物归档在 `data/velites-m2/`（gitignored）。

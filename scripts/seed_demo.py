@@ -16,17 +16,20 @@ from server.app.services.demo_material_seed import seed_demo_workspace_materials
 from server.app.services.demo_node_migration import migrate_demo_node_codes_to_workspaces
 from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 from server.app.services.instance_settings import apply_instance_settings
-from server.app.services.skill_source_store import SkillSourceStore
+from server.app.services.skill_lock_store import SkillLockStore
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.settings import Settings, load_settings
-from server.app.skills.builtin_sources import BUILTIN_SKILL_SOURCES
-from server.app.skills.config import LockedSkillSource, SkillsConfig, SkillsLock, SkillSourceConfig
-from server.app.skills.seed import seed_skill_sources
+from server.app.skills.config import LockedSkill, SkillsLock
+from server.app.skills.skill_roots import default_skill_base_dir
 from server.app.workflows.builtin import load_builtin_workflow
 
 DEMO_WORKFLOW_KEY = "education_video_problems_generation"
 DEMO_WORKSPACE_NAME = "教育内容生产 Demo"
 DEMO_SKILL_PREFIX = "education-video-problems-generation"
+# The demo DAG pins each Agent-routed node's skill at the import tag
+# (issue #76, ``server.app.workflows.builtin_demo``); ``make import-demo``
+# creates the in-place repos and this tag under the skills root.
+DEMO_SKILL_REF = "v1.0.0"
 DEMO_SKILL_NAMES = (
     "write-script",
     "review-script",
@@ -39,62 +42,10 @@ DEMO_SKILL_NAMES = (
 class SeedDemoResult:
     workspace_id: str
     workspace_created: bool
-    sources_added: int
     locks_updated: int
     node_codes_added: int
     agents_added: int
     materials_added: int
-
-
-def _factory_sources() -> dict[str, SkillSourceConfig]:
-    return {
-        key: source.model_copy(deep=True)
-        for key, source in BUILTIN_SKILL_SOURCES.skills.items()
-        if key.startswith(f"{DEMO_SKILL_PREFIX}/")
-    }
-
-
-def _desired_sources(skill_root: Path | None) -> dict[str, SkillSourceConfig]:
-    factory = _factory_sources()
-    if skill_root is None:
-        return factory
-    root = skill_root.expanduser().resolve()
-    return {
-        f"{DEMO_SKILL_PREFIX}/{name}": SkillSourceConfig(
-            repo=str(root / name),
-            ref=factory[f"{DEMO_SKILL_PREFIX}/{name}"].ref,
-        )
-        for name in DEMO_SKILL_NAMES
-    }
-
-
-def _merge_demo_sources(
-    store: SkillSourceStore, desired: dict[str, SkillSourceConfig]
-) -> tuple[SkillsConfig, int]:
-    config = store.get_sources() or SkillsConfig()
-    factory = _factory_sources()
-    added = 0
-    changed = False
-    for key, source in desired.items():
-        current = config.skills.get(key)
-        if current is None:
-            config.skills[key] = source
-            added += 1
-            changed = True
-        elif current == factory[key] and current != source:
-            # An explicit target may replace only untouched factory values.
-            # Operator-customized sources remain authoritative.
-            config.skills[key] = source
-            changed = True
-    if changed:
-        store.put_sources(config)
-    return config, added
-
-
-def _local_repo_path(repo: str) -> Path | None:
-    if repo.startswith("~/") or Path(repo).is_absolute():
-        return Path(repo).expanduser().resolve()
-    return None
 
 
 def _resolve_commit(repo: Path, ref: str) -> str:
@@ -115,23 +66,26 @@ def _resolve_commit(repo: Path, ref: str) -> str:
     return result.stdout.strip()
 
 
-def _lock_local_demo_sources(store: SkillSourceStore, config: SkillsConfig) -> int:
+def _lock_demo_skills(store: SkillLockStore) -> int:
+    """Pin ``DEMO_SKILL_REF`` for each demo skill in the DB skill lock.
+
+    The repos are the in-place directories ``make import-demo`` created at
+    ``<skills root>/<group>/<name>`` (#322: no source registry, no clone
+    channel). Re-pinning in place keeps any other refs already frozen for
+    the skill.
+    """
     lock = store.get_lock() or SkillsLock()
     updated = 0
     for name in DEMO_SKILL_NAMES:
         key = f"{DEMO_SKILL_PREFIX}/{name}"
-        source = config.skills[key]
-        repo = _local_repo_path(source.repo)
-        if repo is None:
-            # Remote/custom sources are owned by the admin relock flow.
-            continue
-        desired = LockedSkillSource(
-            repo=source.repo,
-            ref=source.ref,
-            commit=_resolve_commit(repo, source.ref),
-        )
-        if lock.skills.get(key) != desired:
-            lock.skills[key] = desired
+        repo = default_skill_base_dir() / DEMO_SKILL_PREFIX / name
+        commit = _resolve_commit(repo, DEMO_SKILL_REF)
+        entry = lock.skills.get(key)
+        if entry is None or entry.refs.get(DEMO_SKILL_REF) != commit:
+            if entry is None:
+                entry = LockedSkill(repo=str(repo))
+            entry.refs[DEMO_SKILL_REF] = commit
+            lock.skills[key] = entry
             updated += 1
     if updated:
         lock.resolved_at = (
@@ -147,7 +101,6 @@ def _lock_local_demo_sources(store: SkillSourceStore, config: SkillsConfig) -> i
 def seed_demo(
     settings: Settings,
     *,
-    skill_root: Path | None = None,
     workspace_name: str = DEMO_WORKSPACE_NAME,
 ) -> SeedDemoResult:
     job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
@@ -175,10 +128,7 @@ def seed_demo(
     )
     workspace_id = str(workspace["id"])
 
-    seed_skill_sources(job_db, settings.root_dir)
-    store = SkillSourceStore(job_db)
-    sources, sources_added = _merge_demo_sources(store, _desired_sources(skill_root))
-    locks_updated = _lock_local_demo_sources(store, sources)
+    locks_updated = _lock_demo_skills(SkillLockStore(job_db))
     node_codes_added = migrate_demo_node_codes_to_workspaces(settings, job_db)
     node_codes_added += len(
         seed_demo_workspace_node_codes(settings, workspace_id, connect_source=job_db)
@@ -202,7 +152,6 @@ def seed_demo(
     return SeedDemoResult(
         workspace_id=workspace_id,
         workspace_created=workspace_created,
-        sources_added=sources_added,
         locks_updated=locks_updated,
         node_codes_added=node_codes_added,
         agents_added=agents_added,
@@ -213,12 +162,6 @@ def seed_demo(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed the built-in education content demo")
     parser.add_argument(
-        "--skills-dir",
-        type=Path,
-        default=os.environ.get("AGENT_LEGION_DEMO_SKILLS_DIR"),
-        help="root containing the four imported demo skill repositories",
-    )
-    parser.add_argument(
         "--workspace-name",
         default=os.environ.get("AGENT_LEGION_DEMO_WORKSPACE_NAME", DEMO_WORKSPACE_NAME),
     )
@@ -226,13 +169,12 @@ def main() -> None:
 
     result = seed_demo(
         load_settings(),
-        skill_root=args.skills_dir,
         workspace_name=args.workspace_name,
     )
     action = "已创建" if result.workspace_created else "已存在，复用"
     print(
         f"[demo seed] workspace {action}: {result.workspace_id}; "
-        f"skill source 新增 {result.sources_added}，lock 更新 {result.locks_updated}，"
+        f"lock 更新 {result.locks_updated}，"
         f"node code 新增 {result.node_codes_added}，Agent 新增 {result.agents_added}，"
         f"材料新增 {result.materials_added}"
     )

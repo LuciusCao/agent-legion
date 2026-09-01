@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -18,92 +17,17 @@ from scripts.architecture.file_budgets import (
     load_budget_baseline,
 )
 from scripts.quality.exemptions import ArchitectureExemption
+from tests.architecture_budget_helpers import (
+    commit_all,
+    git_repo,
+    governed_repo,
+    write_baseline,
+)
+from tests.architecture_budget_helpers import (
+    rewrite_exemption_ceiling as _rewrite_exemption_ceiling,
+)
 
 pytestmark = pytest.mark.no_db
-
-
-def governed_repo(tmp_path: Path, rel_path: str, *, lines: int) -> tuple[Path, BudgetPolicy]:
-    root = tmp_path / "repo"
-    file_path = root / rel_path
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    file_path.write_text("\n".join(["line"] * lines), encoding="utf-8")
-
-    config = root / "config" / "architecture"
-    config.mkdir(parents=True, exist_ok=True)
-    (root / "tests").mkdir(exist_ok=True)
-    (config / "architecture-budget-policy.yaml").write_text(
-        "version: 1\n"
-        "production:\n"
-        "  roots:\n"
-        "    - path: server/app\n"
-        "      extensions: [.py]\n"
-        "  exclude: []\n"
-        "  buffer_lines: 10\n"
-        "  max_lines: 800\n"
-        "tests:\n"
-        "  roots:\n"
-        "    - path: tests\n"
-        "      patterns: ['**/*.py']\n"
-        "  max_lines: 1000\n",
-        encoding="utf-8",
-    )
-
-    policy = BudgetPolicy(
-        production_roots=(ProductionRoot(path="server/app", extensions=(".py",)),),
-        production_exclude=(),
-        buffer_lines=10,
-        production_max_lines=1000,
-        test_roots=(TestRoot(path="tests", patterns=("**/*.py",)),),
-        test_max_lines=1000,
-    )
-
-    return root, policy
-
-
-def write_baseline(root: Path, files_dict: dict[str, int]) -> None:
-    path = root / "config" / "architecture" / "architecture-budgets.json"
-    path.write_text(
-        json.dumps({"version": 3, "files": files_dict}, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
-
-
-def git_repo(
-    tmp_path: Path,
-    files: dict[str, int] | None = None,
-    exemption_ceiling: int | None = None,
-) -> tuple[Path, BudgetPolicy]:
-    """Build a governed repo inside a real git repository.
-
-    The monotonic ceiling check compares against committed revisions, so its
-    tests need an actual git history; ``init`` + ``commit`` of the initial
-    state provides the HEAD anchor, and a second commit (or an uncommitted
-    working-tree edit) plays the role of the raise attempt. The leading
-    empty commit keeps HEAD^ resolvable in every fixture — an unresolvable
-    anchor is itself an error since the codex review on PR #231 (shallow
-    clones must not silently gut the check), and only the dedicated
-    unresolvable-anchor tests build that shape deliberately.
-    """
-    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
-    write_baseline(root, files if files is not None else {"server/app/example.py": 110})
-    if exemption_ceiling is not None:
-        _rewrite_exemption_ceiling(root, ceiling=exemption_ceiling)
-    for argv in (
-        ["git", "init", "-q"],
-        ["git", "config", "user.email", "test@example.com"],
-        ["git", "config", "user.name", "test"],
-        # Empty seed commit: HEAD^ must resolve in the fixture repos.
-        ["git", "commit", "-q", "--allow-empty", "-m", "seed"],
-        ["git", "add", "-A"],
-        ["git", "commit", "-q", "-m", "init"],
-    ):
-        subprocess.run(argv, cwd=root, check=True)
-    return root, policy
-
-
-def commit_all(root: Path, message: str) -> None:
-    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", message], cwd=root, check=True)
 
 
 def write_exempted_repo(
@@ -535,27 +459,6 @@ def test_accepts_new_entry_absent_from_committed_baseline(tmp_path: Path) -> Non
     assert check_file_budgets(root, policy, ()) == []
 
 
-def _rewrite_exemption_ceiling(root: Path, ceiling: int) -> None:
-    registry = root / "config" / "architecture" / "architecture-exemptions.yaml"
-    registry.write_text(
-        yaml.safe_dump(
-            {
-                "exemptions": [
-                    {
-                        "check": "architecture.file_budget",
-                        "path": "server/app/example.py",
-                        "ceiling": ceiling,
-                        "reason": "Oversized module needs staged split.",
-                        "owner": "agent-legion",
-                        "remove_when": "issues/open/001.md",
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-
-
 def test_rejects_exempt_ceiling_raise_over_committed_registry(tmp_path: Path) -> None:
     # The exemption channel may set a higher ceiling than the baseline entry,
     # but an exemption ceiling itself may not grow across revisions.
@@ -917,4 +820,69 @@ def test_monotonic_diagnostics_include_real_git_failure_reason(
     errors = check_file_budgets(root, policy, ())
     assert any(
         "git failed to run" in error and "cannot spawn git binary" in error for error in errors
+    )
+
+
+def test_per_root_max_lines_overrides_absolute_limit(tmp_path: Path) -> None:
+    # #293: a declarative single-file artifact (the full-replay schema) gets
+    # its own absolute limit while every other file keeps the global one.
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
+    big = root / "server/app/db" / "schema.sql"
+    big.parent.mkdir(parents=True, exist_ok=True)
+    big.write_text("\n".join(["create table t;"] * 900), encoding="utf-8")
+    policy = replace(
+        policy,
+        production_roots=(
+            ProductionRoot(path="server/app", extensions=(".py",)),
+            ProductionRoot(path="server/app/db", extensions=(".sql",), max_lines=1000),
+        ),
+    )
+    write_baseline(root, {"server/app/example.py": 110, "server/app/db/schema.sql": 910})
+
+    errors = check_file_budgets(root, policy, ())
+
+    assert not any("exceeds absolute production limit" in e for e in errors)
+
+
+def test_per_root_max_lines_still_enforced(tmp_path: Path) -> None:
+    # The override raises the bar, it does not remove it.
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
+    big = root / "server/app/db" / "schema.sql"
+    big.parent.mkdir(parents=True, exist_ok=True)
+    big.write_text("\n".join(["create table t;"] * 1100), encoding="utf-8")
+    policy = replace(
+        policy,
+        production_roots=(
+            ProductionRoot(path="server/app", extensions=(".py",)),
+            ProductionRoot(path="server/app/db", extensions=(".sql",), max_lines=1000),
+        ),
+    )
+    write_baseline(root, {"server/app/example.py": 110, "server/app/db/schema.sql": 1110})
+
+    errors = check_file_budgets(root, policy, ())
+
+    assert any(
+        "server/app/db/schema.sql: 1100 lines exceeds absolute production limit 1000" in e
+        for e in errors
+    )
+
+
+def test_global_limit_unchanged_outside_override_root(tmp_path: Path) -> None:
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=900)
+    (root / "server/app/db").mkdir(parents=True, exist_ok=True)
+    policy = replace(
+        policy,
+        production_max_lines=800,
+        production_roots=(
+            ProductionRoot(path="server/app", extensions=(".py",)),
+            ProductionRoot(path="server/app/db", extensions=(".sql",), max_lines=1200),
+        ),
+    )
+    write_baseline(root, {"server/app/example.py": 910})
+
+    errors = check_file_budgets(root, policy, ())
+
+    assert any(
+        "server/app/example.py: 900 lines exceeds absolute production limit 800" in e
+        for e in errors
     )

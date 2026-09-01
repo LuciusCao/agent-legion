@@ -29,17 +29,26 @@ def test_schema_version_pin() -> None:
     # test_retire_global_register_tokens_migration.py (v58) →
     # test_jobs_run_id_index.py (v59) → back to the v58 file for the DDL-only
     # v60; v62 owns its own module, v63 is DDL-only (workspace_preview_config),
-    # and v64's data migration lives in
+    # v64's data migration lives in
     # tests/db/test_workspace_execution_defaults_migration.py (the retired
     # default_agent_* / intake_config_json columns still drop in schema.py's
-    # post-chain sweep), so the pin stays here.
-    assert SCHEMA_VERSION == 64
+    # post-chain sweep); v65 is DDL-only (approval_decisions,
+    # EXEC-APPROVAL-001), and v66's data migration lives in
+    # tests/db/test_workflow_node_explicit_types_migration.py; v67 is
+    # DDL-only (jobs_workspace_scan_indexes) and v68 is the jobs key
+    # alignment data migration (#211 Phase 3 read-layer binding); v69 is
+    # DDL-only (executor_leases_workspace_index); v70 retires the
+    # workflow_key columns (#211 Phase 3 M2); v71 widens the
+    # versioned_entities entity_type CHECK for preview panels (#328) and owns
+    # tests/db/test_preview_panels_migration.py, so the pin moves there —
+    # this copy stays as a backstop that the chain tail stays in sync.
+    assert SCHEMA_VERSION == 71
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "workspace_settings_retirement"
+    assert row["name"] == "preview_panels"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:
@@ -67,8 +76,8 @@ def test_renames_ids_to_keys_and_cascades_children() -> None:
         # rename must rewrite both (a missed auth_scoped_tokens row would
         # orphan a live credential).
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values ('bind-job-1', 'bind-rename-ws', 'bind_renamed_flow', 'material', 'm1')"
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values ('bind-job-1', 'bind-rename-ws', 'material', 'm1')"
             " on conflict do nothing"
         )
         conn.execute(

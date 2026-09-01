@@ -89,6 +89,11 @@
   color: var(--status-failed-text);
 }
 
+.awaitingApproval {
+  background: var(--status-approval-bg);
+  color: var(--status-approval-text);
+}
+
 .statusEnd {
   display: flex;
   flex-direction: column;

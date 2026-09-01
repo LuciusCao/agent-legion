@@ -7,6 +7,7 @@ from typing import Protocol
 
 from server.app.agent_broker.code_manifest import CODE_MANIFEST_TRIM
 from server.app.db.connection import DatabaseConnection
+from server.app.db.rowmap import utc_datetime
 from server.app.db.transaction import write_transaction
 from server.app.workflows.sharding import delete_shards
 
@@ -18,11 +19,9 @@ class JobMutationConflict(ValueError):
 
 
 class _AtomicMutationQueries(Protocol):
-    path: str
-
-
-def _timestamp(value: datetime) -> datetime:
-    return value.astimezone(UTC)
+    # #187 step 3: the backing DSN is private; atomic mutations are inside
+    # the data layer, so they read the facade's own `_path` by convention.
+    _path: str
 
 
 def _cancel_queued_sql(placeholders: str) -> str:
@@ -50,7 +49,7 @@ def lease_guarded_mutation(
             where job_id=%s and status='active' and expires_at>%s
             limit 1
             """,
-            (job_id, _timestamp(now)),
+            (job_id, utc_datetime(now)),
         ).fetchone()
         if active_lease is not None:
             raise JobMutationConflict("busy", "Job has an active executor lease")
@@ -282,7 +281,7 @@ class AtomicJobMutationsMixin:
         reject_running_nodes: bool,
     ) -> AbstractContextManager[DatabaseConnection]:
         return lease_guarded_mutation(
-            self.path,
+            self._path,
             job_id,
             now,
             reject_running_nodes=reject_running_nodes,
@@ -297,7 +296,7 @@ class AtomicJobMutationsMixin:
         now: datetime | None = None,
     ) -> None:
         with lease_guarded_mutation(
-            self.path,
+            self._path,
             job_id,
             now or datetime.now(UTC),
             reject_running_nodes=True,

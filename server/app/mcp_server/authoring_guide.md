@@ -21,14 +21,21 @@ Studio. Nothing you do takes effect in production by itself.
   (everything reported as added, `base_revision: null`, and the returned
   `draft_workflow.version` is the synthetic placeholder `0`, not a real
   revision number).
-- `save_node_code_draft(workspace_id, workflow_key, node_key, code, ...)` —
+- `save_node_code_draft(workspace_id, node_key, code, ...)` —
   draft Python source for a code node.
-- `get_node_code(workspace_id, workflow_key, node_key)` — effective code plus
+- `get_node_code(workspace_id, node_key)` — effective code plus
   any pending draft (origin: builtin | custom | none). Nodes that only exist
   in your not-yet-published draft are readable too (a skeleton draft you saved
   reads back; otherwise origin `none`); only start nodes 404.
 - `save_agent_definition_draft(agent_id, capability, runtime, skill, tools)` —
   draft Agent definition for an agent-backed capability.
+- `get_node_prompt(workspace_id, node_key, definition_yaml?)` — the effective
+  run prompt of an agent node: fixed platform envelope + node instructions
+  (auto-assembled default, or the custom `execution.prompt` when set). Read
+  it before writing a custom prompt.
+- `save_node_prompt(workspace_id, node_key, prompt)` — write a custom
+  `execution.prompt` for one node into the workspace's unpublished draft
+  YAML; an empty string clears it back to the auto-assembled default.
 - `get_skill(skill_key, ref=None)` — a skill's configured ref, repo tags
   (latest first), and text files: the LOCKED commit's content when the lock
   pins one, else the working tree; `ref` previews one git tag without moving
@@ -92,7 +99,8 @@ nodes:                      # mapping, declaration order = presentation order
     terminal:               # optional: mark a terminal outcome
       outcome: done
     execution:              # optional, agent nodes: provider/model/thinking/prompt
-      model: gpt-5.2
+      model: gpt-5.2        # prompt: empty = auto-assembled default instructions;
+                            # non-empty = replaces the default wholesale
     config: {}              # optional per-node tunables (see section 5)
 edges:                      # schema_version 2: explicit; optional `when`
   - {from: fetch_data, to: report}
@@ -140,7 +148,7 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
 ## 5. Agent definitions and tunables
 
 `save_agent_definition_draft` binds a capability to an implementation:
-- `runtime`: one of `pi`, `openclaw`, `velites` (anything else is rejected).
+- `runtime`: one of `pi`, `velites` (anything else is rejected).
 - `skill`: relative skill path (`group/skill-name`); absolute paths and `..`
   are rejected.
 - `tools`: allowlist, default `["read", "write", "bash"]`.
@@ -159,32 +167,41 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
   (CONFIG-RUNTIME-MUTABLE-001).
 - Agent execution (`provider`/`model`/`thinking`) resolves node
   `execution.*` overrides → workspace defaults → validation error if unset.
+- Node prompt (`execution.prompt`): the run prompt is a fixed platform
+  envelope (job/skill paths, declared inputs/outputs, output discipline)
+  plus one node-instructions section. Empty `execution.prompt` means the
+  platform auto-assembles that section from the node's label, capability,
+  bound skill, and declared IO; a non-empty value REPLACES the default
+  wholesale — it is not appended. Preview with `get_node_prompt`, edit the
+  draft with `save_node_prompt` (empty string clears back to the default).
 
 ## 6. Skill editing (read → edit → validate → tag)
 
-Skills live in git repos; the runtime pins each skill to a locked commit.
-You may read any tag, validate the working tree, and save a new version —
-you may NEVER relock or publish: a human reviews the git diff and relocks.
+Skills live in git repos under the skills root (`<skills root>/<group>/<name>`,
+in-place is the only mode). A node either follows the repo's live HEAD
+(`latest`) or pins a tag frozen in the skill lock. You may read any tag,
+validate the working tree, and save a new version — you may NEVER relock or
+publish: a human reviews the git diff and re-pins.
 
-1. `get_skill(skill_key)` — the locked commit's content (working tree when
-   no lock exists), or `ref=<tag>` to preview one tag, e.g. one another
-   agent just created; an unknown tag is a structured 404 and changes
+1. `get_skill(skill_key)` — the working tree at HEAD (`latest`), or
+   `ref=<tag>` to preview one tag, e.g. one another agent just created; an
+   unknown tag is a structured 404 and changes
    nothing.
 2. Edit the file contents in your draft, then `validate_skill(skill_key)` —
    the runtime contract: non-empty SKILL.md + references/output-contract.md +
    scripts/validate_output.py. Fix every reported error.
-3. `save_skill_version(skill_key, files, new_tag, message)` — local-path
-   sources only (URL sources refused). Every path is validated before any
+3. `save_skill_version(skill_key, files, new_tag, message)` — writes into the
+   skill's in-place repo. Every path is validated before any
    write (inside the skill dir, no `..`/absolute paths, no `.git`, no
    overwriting untracked files); after writing, the contract check re-runs
    and a failure rolls the repo back to its original commit. On success it
    commits (author agent-legion-studio) and tags `new_tag` (an existing tag
-   is a conflict). The skill lock is untouched: running jobs keep the
-   locked commit.
+   is a conflict). The skill lock is untouched: tag-pinned nodes keep the
+   locked commit, `latest` nodes pick the new HEAD up on their next dispatch.
 4. Show the human the git diff of the new tag and ask them to release it:
-   change the skill source ref + relock in the admin skill-sources UI (or
-   `make skills-lock`). NEVER ask for a relock before the human has seen
-   the diff.
+   re-pin the node's skill ref to the new tag in Studio and relock
+   (`make skills-lock`, or let the first dispatch auto-lock). NEVER ask for
+   a relock before the human has seen the diff.
 
 ## 7. Common errors and what to do
 

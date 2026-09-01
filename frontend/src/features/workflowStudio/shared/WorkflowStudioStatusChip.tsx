@@ -20,28 +20,31 @@ const RISK_TEXT = {
 } as const
 
 /** 顶栏统一状态 chip：合并 已同步/只读/未发布变更计数/风险/计算中/已保留草稿，
- * 有变更时点击打开变更面板，颜色直接编码风险等级。 */
+ * 有变更时点击打开变更面板，颜色直接编码风险等级。只读（查看历史 revision）
+ * 优先于「计算中…」：compare 因草稿未发布变更在后台运行时版本标识不闪断，
+ * 且计数并入只读 chip，让「草稿有未发布更改」在查看 revision 期间持续可见。 */
 export function WorkflowStudioStatusChip(props: Props) {
+  const counts = countNodeChanges(props.summary)
+  const preservedText = props.hasPreservedDraft
+    ? '已保留当前草稿（基线更新未覆盖你的编辑）'
+    : null
+  if (props.readOnly) {
+    const draftChanges = counts ? ` · 草稿未发布变更 ${counts.total}` : ''
+    return (
+      <Chip
+        size="small"
+        color={props.hasPreservedDraft || counts ? 'warning' : 'default'}
+        label={`只读 v${props.version ?? '-'}${draftChanges}`}
+        title={preservedText ?? undefined}
+      />
+    )
+  }
   if (props.compareState === 'loading') {
     return (
       <Chip
         size="small"
         icon={<CircularProgress size={12} />}
         label="计算中…"
-      />
-    )
-  }
-  const counts = countNodeChanges(props.summary)
-  const preservedText = props.hasPreservedDraft
-    ? '已保留当前草稿（基线更新未覆盖你的编辑）'
-    : null
-  if (props.readOnly) {
-    return (
-      <Chip
-        size="small"
-        color={props.hasPreservedDraft ? 'warning' : 'default'}
-        label={`只读 v${props.version ?? '-'}`}
-        title={preservedText ?? undefined}
       />
     )
   }

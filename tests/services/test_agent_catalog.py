@@ -102,3 +102,12 @@ def test_agent_definition_rejects_invalid_config_schema() -> None:
                 "config_schema": {"properties": {"x": {"type": "string", "pattern": "^a"}}},
             }
         )
+
+
+@pytest.mark.no_db
+def test_agent_definition_skill_is_optional() -> None:
+    """#76: skill 降为可选 legacy 兜底——缺省为 ""（未绑定），仍参与 hash。"""
+    bare = AgentDefinition(capability="cap", runtime="pi")
+    assert bare.skill == ""
+    skilled = AgentDefinition(capability="cap", runtime="pi", skill="question/generate")
+    assert bare.definition_hash() != skilled.definition_hash()

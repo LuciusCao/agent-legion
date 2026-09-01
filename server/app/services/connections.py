@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
 from typing import Any
 
+from psycopg import IntegrityError
+
 from server.app.db.dialect import ConnectSource
+from server.app.db.rowmap import iso_optional
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.connection_adapters import (
     ConnectionAdapter,
@@ -39,14 +41,6 @@ _KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 def connection_secret_name(connection_key: str, field: str) -> str:
     """Deterministic instance-vault name for a connection secret field."""
     return f"conn:{connection_key}:{field}"
-
-
-def _timestamp(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return str(value)
 
 
 def _secret_ref_fields(stored: dict[str, Any]) -> list[str]:
@@ -137,10 +131,15 @@ class ConnectionService:
                 )
                 for name, ciphertext in encrypted.items():
                     InstanceVaultService.set_in(conn, name, ciphertext)
-        except Exception as exc:
-            if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
-                raise ConflictError(f"connection {key!r} 已存在") from exc
-            raise
+        except IntegrityError as exc:
+            # #204: the only expected failure of this transaction is the
+            # primary-key unique violation on ``key``; the old string sniff
+            # ("unique"/"duplicate" in the message) also matched unrelated
+            # integrity errors and missed non-English driver renderings.
+            # psycopg's typed IntegrityError is the codebase convention
+            # (versioned_entities, material_bundles); everything else (vault
+            # row failures, connectivity) propagates uncaught.
+            raise ConflictError(f"connection {key!r} 已存在") from exc
         self._republish_executor_schemas()
         return self.get(key)
 
@@ -390,8 +389,8 @@ class ConnectionService:
         token = None
         if token_row is not None:
             token = {
-                "expires_at": _timestamp(token_row["expires_at"]),
-                "refreshed_at": _timestamp(token_row["refreshed_at"]),
+                "expires_at": iso_optional(token_row["expires_at"]),
+                "refreshed_at": iso_optional(token_row["refreshed_at"]),
             }
         return {
             "key": str(row["key"]),
@@ -399,7 +398,7 @@ class ConnectionService:
             "display_name": str(row["display_name"]),
             "config": masked,
             "enabled": bool(row["enabled"]),
-            "created_at": _timestamp(row["created_at"]),
-            "updated_at": _timestamp(row["updated_at"]),
+            "created_at": iso_optional(row["created_at"]),
+            "updated_at": iso_optional(row["updated_at"]),
             "token": token,
         }

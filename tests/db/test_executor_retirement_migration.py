@@ -83,8 +83,8 @@ def _seed_revision(conn, workspace_id: str, nodes: dict) -> str:
     revision_id = f"rev-{workspace_id}"
     conn.execute(
         "insert into workflow_revisions("
-        "id, workspace_id, workflow_key, version, status, definition_json, definition_hash)"
-        " values (%s, %s, 'wf', 1, 'active', %s, %s)",
+        "id, workspace_id, version, status, definition_json, definition_hash)"
+        " values (%s, %s, 1, 'active', %s, %s)",
         (
             revision_id,
             workspace_id,

@@ -18,6 +18,7 @@ from server.app.agent_broker.remote_artifact_support import (
     discard_staging,
     promote_remote,
 )
+from server.app.services.job_artifact_gzip import GZIP_SUFFIX, is_gzip_key
 from server.app.services.job_artifact_objects import (
     JobArtifactObjectStore,
     artifact_staging_key,
@@ -54,10 +55,19 @@ def promote_all(
     (best-effort; a failed restore logs a warning) — otherwise the old
     manifest rows would keep pointing at objects whose bytes no longer match
     the recorded hash/size. Backup keys are cleaned up on every outcome.
+
+    #338: the authority key keeps the staging ref's form marker (``.gz`` or
+    bare). A form-changing re-run targets a key that does not exist yet, so
+    nothing is overwritten or backed up; the previous-form object stays for
+    the still-pointing manifest row until the row upsert retargets it.
     """
     assert object_store.storage is not None
     storage = object_store.storage
-    authority_keys = {name: artifact_storage_key(workspace_id, job_id, name) for name in remote}
+    authority_keys = {
+        name: artifact_storage_key(workspace_id, job_id, name)
+        + (GZIP_SUFFIX if is_gzip_key(str(ref["storage_key"])) else "")
+        for name, ref in remote.items()
+    }
     backups: dict[str, str] = {}  # name -> rollback key of the pre-existing object
     for name, authority_key in authority_keys.items():
         if storage.head_object(authority_key) is not None:
@@ -78,6 +88,15 @@ def promote_all(
             )
             promoted.append(name)
     except Exception:
+        # #204 broad-except audit: compensate-then-bare-re-raise (#233
+        # pattern). The batch loop's outcome space is mixed — storage-layer
+        # errors (botocore surface), ValueError from Worker-untrusted refs,
+        # and programming errors all must roll back the already-overwritten
+        # authority keys before propagating; the re-raise preserves the
+        # original type for apply_remote_artifact_refs' classification, so
+        # nothing is converted or masked. The rollback loop below is itself
+        # per-key best-effort: a failed restore logs a warning and the next
+        # key is still attempted.
         # Roll back the keys this batch already overwrote; keys without a
         # backup had no prior object (the orphan is lifecycle's backstop).
         for name in promoted:
@@ -87,6 +106,16 @@ def promote_all(
             try:
                 storage.copy_object(rollback_key, authority_keys[name])
             except Exception:
+                # #204 broad-except audit: best-effort per-key restore inside
+                # the compensation loop of the audited batch catch above —
+                # same mixed outcome space (botocore storage surface), and
+                # per-key containment is the point: the warning names the key
+                # that still holds new bytes while its manifest row points at
+                # old bytes (the mismatch the backup exists to prevent), the
+                # remaining keys are still attempted, and the orphan-GC/
+                # lifecycle pass is the backstop for the leftovers. The
+                # original promote error keeps propagating regardless; the
+                # traceback rides the warning (exc_info).
                 logger.warning(
                     "failed to roll back artifact object %s", authority_keys[name], exc_info=True
                 )

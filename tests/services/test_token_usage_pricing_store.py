@@ -7,7 +7,7 @@ from server.app.services.token_usage_pricing_store import TokenUsagePricingStore
 
 @pytest.fixture
 def store(job_db) -> TokenUsagePricingStore:
-    store = TokenUsagePricingStore(job_db.path)
+    store = TokenUsagePricingStore(job_db.dsn_identity)
     with job_db.connect() as conn:
         conn.execute("delete from global_settings where key='token_usage'")
     return store

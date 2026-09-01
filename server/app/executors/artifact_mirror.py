@@ -56,6 +56,14 @@ def upload_produced_artifacts(
                 local_path=job_dir / name,
             )
         except Exception:
+            # #204 broad-except audit: deliberate per-file best-effort mirror
+            # (EXEC-ARTIFACT-STORE-001). One artifact's failure must neither
+            # fail the node (the local copy is the node's real output and the
+            # maintenance reconciler re-uploads later) nor skip the remaining
+            # artifacts in the loop. The outcome space is genuinely mixed —
+            # the S3 outage surface after the store's own bounded retries AND
+            # the manifest upsert's DB write — with no single business family
+            # to narrow to; exc_info keeps the per-file root cause visible.
             logger.warning(
                 "artifact upload failed for job %s node %s artifact %s; "
                 "local copy kept for the reconciler",

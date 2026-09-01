@@ -98,7 +98,7 @@ AgentDefinition.runtime = "openclaw" → 未实现，dispatch fail-fast（现状
 - `server/app/agent_workers.py:59-61` — 集合并更新报错文案（"runtimes must contain pi, openclaw and/or velites"）。
 - `worker/config_store.py:80-81` — 集合并更新报错文案；默认值保持 `["pi"]`（声明 velites 是显式运维动作）。
 - `server/app/routes/agent_workers_contracts.py` — 无需改（自由字符串）。
-- 检查 `config/agent-worker.example.yaml`、`deploy/worker.company.example.yaml`、`deploy/worker.home.example.yaml` 的 runtimes 示例注释，补 velites 说明。
+- 检查 `config/agent-worker.example.yaml`、`deploy/worker.host.example.yaml`、`deploy/worker.remote.example.yaml` 的 runtimes 示例注释，补 velites 说明（company/home 两个旧文件名已于 2026-08-19 中性化改名）。
 
 ### 4.2 dispatch 放开
 

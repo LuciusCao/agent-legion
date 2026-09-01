@@ -65,6 +65,14 @@ class MaterialTtlSweeperThread:
             try:
                 self.run_once()
             except Exception:
+                # #204 broad-except audit: the sweeper thread's life support
+                # (same discipline as JobArtifactMaintenanceThread, #251).
+                # run_once walks the materials table and the object store —
+                # a DB restart or storage outage mid-pass must not kill the
+                # only thread performing expiry; the traceback is logged and
+                # the next interval is the retry. Narrow per-material
+                # failures are already contained inside
+                # collect_expired_materials' own per-row catches.
                 logger.exception("materials TTL sweep failed")
 
     def stop(self, timeout: float = 3.0) -> None:

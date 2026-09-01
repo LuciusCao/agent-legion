@@ -10,7 +10,7 @@ Agent Legion 前端是 React 18 + TypeScript SPA，使用 Vite 构建。UI 基�
 - Job 列表、Job Detail（含 DAG、产物、日志、视频播放器）
 - Workflow Studio（工作流可视化编辑）
 - Token Usage 用量统计
-- Settings（Workspace / 全局设置 / Skill 源 / 外部服务连接等）
+- Settings（Workspace / 全局设置 / 外部服务连接等）
 - 通过 SSE 接收后端事件，通过 WebSocket 接收 Agent 状态
 
 ## Directory Structure
@@ -113,6 +113,7 @@ frontend/src/
 |------|----------|
 | `/login` | LoginPage |
 | `/setup` | SetupPage |
+| `/admin/onboarding` | GlobalOnboardingPage |
 | `/admin/*` | AdminRoutes |
 | `/` | DashboardPage |
 | `/monitoring` | MonitoringPage |

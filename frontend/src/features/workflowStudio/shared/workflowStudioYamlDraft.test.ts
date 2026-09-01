@@ -8,7 +8,16 @@ import {
   patchWorkflowNodeOutputs,
   patchWorkflowNodeTerminalOutcome,
 } from './workflowStudioYamlDraft'
+import { patchWorkflowNodeConfigSchema } from './workflowStudioYamlDraft.configSchema'
 import { patchWorkflowNodeExecution } from './workflowStudioYamlDraft.execution'
+import {
+  dumpWorkflowYaml,
+  parseWorkflowYaml,
+} from './workflowStudioYamlDraft.parse'
+import {
+  normalizeNodeSkill,
+  patchWorkflowNodeSkill,
+} from './workflowStudioYamlDraft.skill'
 
 const yaml = `key: demo
 label: Demo
@@ -67,6 +76,73 @@ describe('workflowStudioYamlDraft node patches', () => {
 
   it('patches workflow label', () => {
     expect(patchWorkflowLabel(yaml, 'Demo v2')).toContain('label: Demo v2')
+  })
+
+  it('adds a node skill binding in mapping form when a ref is given', () => {
+    const changed = patchWorkflowNodeSkill(yaml, 'fetch', {
+      key: 'demo/review',
+      ref: 'v1.0.0',
+    })
+    const node = parseWorkflowYaml(changed).nodes?.fetch
+    expect(node?.skill).toEqual({ key: 'demo/review', ref: 'v1.0.0' })
+    expect(changed).toContain('skill:')
+    expect(changed).toContain('key: demo/review')
+    expect(changed).toContain('ref: v1.0.0')
+  })
+
+  it('normalizes an empty ref to latest in the mapping form (#322)', () => {
+    const changed = patchWorkflowNodeSkill(yaml, 'fetch', {
+      key: 'demo/review',
+      ref: '',
+    })
+    expect(parseWorkflowYaml(changed).nodes?.fetch?.skill).toEqual({
+      key: 'demo/review',
+      ref: 'latest',
+    })
+    expect(changed).toContain('ref: latest')
+  })
+
+  it('changes only the ref on an existing latest binding', () => {
+    const withSkill = patchWorkflowNodeSkill(yaml, 'fetch', {
+      key: 'demo/review',
+      ref: '',
+    })
+    const changed = patchWorkflowNodeSkill(withSkill, 'fetch', {
+      key: 'demo/review',
+      ref: 'v2.0.0',
+    })
+    expect(parseWorkflowYaml(changed).nodes?.fetch?.skill).toEqual({
+      key: 'demo/review',
+      ref: 'v2.0.0',
+    })
+  })
+
+  it('removes the binding on null', () => {
+    const withSkill = patchWorkflowNodeSkill(yaml, 'fetch', {
+      key: 'demo/review',
+      ref: 'v1.0.0',
+    })
+    const cleared = patchWorkflowNodeSkill(withSkill, 'fetch', null)
+    expect(parseWorkflowYaml(cleared).nodes?.fetch?.skill).toBeUndefined()
+    expect(cleared).not.toContain('skill')
+  })
+
+  it('normalizes both yaml skill forms and rejects empty keys', () => {
+    expect(normalizeNodeSkill('demo/review')).toEqual({
+      key: 'demo/review',
+      ref: 'latest',
+    })
+    expect(normalizeNodeSkill({ key: 'demo/review', ref: 'v1' })).toEqual({
+      key: 'demo/review',
+      ref: 'v1',
+    })
+    expect(normalizeNodeSkill({ key: 'demo/review' })).toEqual({
+      key: 'demo/review',
+      ref: 'latest',
+    })
+    expect(normalizeNodeSkill(undefined)).toBeNull()
+    expect(normalizeNodeSkill('')).toBeNull()
+    expect(normalizeNodeSkill({ key: ' ' })).toBeNull()
   })
 
   it('patches node execution settings and removes empty inheritance values', () => {
@@ -146,6 +222,88 @@ nodes:
   })
 })
 
+const yamlWithConfigSchema = `key: demo
+label: Demo
+schema_version: 2
+nodes:
+  generate:
+    label: Generate
+    capability: generate_questions
+    config_schema:
+      type: object
+      properties:
+        bank_version:
+          type: string
+          default: v1
+          description: 题库版本
+        dry_run:
+          type: boolean
+          default: false
+      required:
+        - bank_version
+`
+
+describe('workflowStudioYamlDraft config_schema patches', () => {
+  it('round-trips an unchanged config_schema byte-identically', () => {
+    const schema =
+      parseWorkflowYaml(yamlWithConfigSchema).nodes?.generate?.config_schema
+    const changed = patchWorkflowNodeConfigSchema(
+      yamlWithConfigSchema,
+      'generate',
+      schema
+    )
+    expect(changed).toBe(
+      dumpWorkflowYaml(parseWorkflowYaml(yamlWithConfigSchema))
+    )
+  })
+
+  it('toggles runtime_mutable without touching other schema keys', () => {
+    const schema = structuredClone(
+      parseWorkflowYaml(yamlWithConfigSchema).nodes?.generate?.config_schema
+    )
+    schema!.properties!.dry_run.runtime_mutable = true
+    const changed = patchWorkflowNodeConfigSchema(
+      yamlWithConfigSchema,
+      'generate',
+      schema
+    )
+    expect(changed).toContain('runtime_mutable: true')
+    expect(changed).toContain('bank_version:')
+    expect(changed).toContain('description: 题库版本')
+    expect(changed).toContain('- bank_version')
+    // 除新增 runtime_mutable 行外其余字节不变。
+    const baseline = dumpWorkflowYaml(parseWorkflowYaml(yamlWithConfigSchema))
+    expect(changed.replace('          runtime_mutable: true\n', '')).toBe(
+      baseline
+    )
+  })
+
+  it('adds a config_schema to a node that had none', () => {
+    const changed = patchWorkflowNodeConfigSchema(yaml, 'fetch', {
+      type: 'object',
+      properties: { dry_run: { type: 'boolean', runtime_mutable: true } },
+    })
+    expect(changed).toContain('config_schema:')
+    expect(changed).toContain('runtime_mutable: true')
+  })
+
+  it('deletes config_schema on undefined or empty object', () => {
+    const cleared = patchWorkflowNodeConfigSchema(
+      yamlWithConfigSchema,
+      'generate',
+      undefined
+    )
+    expect(cleared).not.toContain('config_schema')
+
+    const clearedEmpty = patchWorkflowNodeConfigSchema(
+      yamlWithConfigSchema,
+      'generate',
+      {}
+    )
+    expect(clearedEmpty).not.toContain('config_schema')
+  })
+})
+
 const yamlWithEdges = `key: demo
 label: Demo
 schema_version: 2
@@ -159,14 +317,14 @@ nodes:
     inputs: []
     outputs: []
 edges:
-  - source: branch
-    target: left
-    condition:
+  - from: branch
+    to: left
+    when:
       artifact: result.json
       path: $.eligible
       equals: true
-  - source: branch
-    target: right
+  - from: branch
+    to: right
 `
 
 describe('workflowStudioYamlDraft edge condition patches', () => {
@@ -181,22 +339,22 @@ describe('workflowStudioYamlDraft edge condition patches', () => {
 
   it('clears an edge condition by index', () => {
     const changed = patchWorkflowEdgeCondition(yamlWithEdges, 0, null)
-    expect(changed).not.toContain('condition:')
+    expect(changed).not.toContain('when:')
   })
 
   it('patches the second edge when source and target repeat', () => {
     const yamlWithDuplicateEdges = `key: demo
 label: Demo
 edges:
-  - source: branch
-    target: left
-    condition:
+  - from: branch
+    to: left
+    when:
       artifact: result.json
       path: $.eligible
       equals: true
-  - source: branch
-    target: left
-    condition:
+  - from: branch
+    to: left
+    when:
       artifact: result.json
       path: $.eligible
       equals: true

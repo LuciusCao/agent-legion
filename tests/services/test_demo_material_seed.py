@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import logging
 from pathlib import Path
 
@@ -13,36 +12,9 @@ from server.app.services.demo_material_seed import (
     DEMO_MATERIALS_DIR,
     seed_demo_workspace_materials,
 )
-from server.app.storage import ObjectHead
+from tests.fakes.storage import FakeObjectStorage
 
-
-class FakeStorage:
-    """In-memory ObjectStorage test double with a put_object switch."""
-
-    def __init__(self, *, fail_put: bool = False) -> None:
-        self.objects: dict[str, bytes] = {}
-        self.fail_put = fail_put
-
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/upload/{storage_key}"
-
-    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/download/{storage_key}"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        return io.BytesIO(self.objects[storage_key])
-
-    def put_object(self, storage_key: str, data: bytes, content_type: str = "") -> None:
-        if self.fail_put:
-            raise ConnectionError("endpoint unreachable")
-        self.objects[storage_key] = data
-
-    def delete_object(self, storage_key: str) -> None:
-        self.objects.pop(storage_key, None)
+FakeStorage = FakeObjectStorage
 
 
 def _seeded_rows(job_db, workspace_id: str) -> list[dict]:
@@ -139,4 +111,31 @@ def test_seed_aborts_gracefully_when_store_unreachable(job_db, settings) -> None
     )
 
     assert seeded == []
+    assert _seeded_rows(job_db, workspace_id) == []
+
+
+def test_seed_aborts_on_boto_outage_but_propagates_programming_errors(job_db, settings) -> None:
+    """#204 窄化：botocore 数据面故障（ClientError/BotoCoreError）按既有的
+    warning + break 降级；编程错误（此处以 TypeError 代表）上抛给
+    workspace 创建调用方，不再被吞成「部分种子完成」。"""
+    workspace_id = str(
+        job_db.create_workspace("demo", default_workflow_key="education_video_problems_generation")[
+            "id"
+        ]
+    )
+
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    for outage in (ClientError({"Error": {"Code": "InternalError"}}, "PutObject"), BotoCoreError()):
+        seeded = seed_demo_workspace_materials(
+            settings, workspace_id, storage=FakeStorage(fail_put_with=outage)
+        )
+        assert seeded == []
+
+    with pytest.raises(TypeError, match="put_object contract violation"):
+        seed_demo_workspace_materials(
+            settings,
+            workspace_id,
+            storage=FakeStorage(fail_put_with=TypeError("put_object contract violation")),
+        )
     assert _seeded_rows(job_db, workspace_id) == []

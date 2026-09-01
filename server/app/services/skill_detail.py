@@ -3,9 +3,9 @@
 ``read_files_at_commit`` reads the skill's text files at a commit via
 ``git show`` without touching the working tree; ``detail_at_ref`` /
 ``skill_detail`` shape the preview-endpoint responses: a tag preview,
-or the default detail serving the LOCKED commit's content when the
-skill lock pins one (falling back to the working tree in the seed
-scenario). Split from ``services/skill_repo.py`` for the file budget.
+or the default detail serving the working tree at HEAD (``latest`` —
+the #322 unpinned-ref semantics; the lock pins only explicit tag refs).
+Split from ``services/skill_repo.py`` for the file budget.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ from typing import Any
 
 from server.app.services import skill_repo
 from server.app.services.job_errors import NotFoundError
-from server.app.skills.config import LockedSkillSource
 
 
 def read_files_at_commit(repo_dir: Path, commit: str) -> list[dict[str, Any]]:
@@ -71,38 +70,26 @@ def detail_at_ref(skill_key: str, ref: str, repo_dir: Path) -> dict[str, Any]:
 
 def skill_detail(
     skill_key: str,
-    configured_ref: str,
     repo_dir: Path,
-    locked: LockedSkillSource | None,
     ref: str | None,
     working_tree_reader: Callable[[Path], list[dict[str, Any]]],
 ) -> dict[str, Any]:
     """Default (no-ref) skill detail plus the ``ref`` preview dispatch.
 
-    With a lock entry whose commit is present in the repo, the default
-    detail reads the LOCKED commit's content — the "current locked
-    version" the Studio panel labels it as — instead of the working
-    tree (steady state is identical: relock checks the lock out). With
-    no usable lock (seed scenario) it falls back to the working tree.
+    The default detail reads the working tree at HEAD — the ``latest``
+    semantics (#322): an unpinned node ref follows the repo's current HEAD,
+    so the working tree IS the content a default dispatch would run. The
+    reported commit is HEAD's (empty when the repo is missing/has none).
     """
     if ref is not None:
         return detail_at_ref(skill_key, ref, repo_dir)
     tags = list(skill_repo.list_tags(repo_dir)) if skill_repo.is_git_repo(repo_dir) else []
-    locked_commit = locked.commit if locked is not None else ""
-    if locked_commit and skill_repo.has_commit(repo_dir, locked_commit):
-        return {
-            "key": skill_key,
-            "ref": configured_ref,
-            "commit": locked_commit,
-            "available": True,
-            "tags": tags,
-            "files": read_files_at_commit(repo_dir, locked_commit),
-        }
+    commit = skill_repo.head_commit(repo_dir) or ""
     available = repo_dir.is_dir()
     return {
         "key": skill_key,
-        "ref": configured_ref,
-        "commit": locked_commit,
+        "ref": "latest",
+        "commit": commit,
         "available": available,
         "tags": tags,
         "files": working_tree_reader(repo_dir) if available else [],

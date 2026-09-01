@@ -8,11 +8,12 @@ from server.app.db.schema import init_db
 
 class JobQueriesBase:
     def __init__(self, path: DatabaseDsn, jobs_dir: Path):
-        # `path`（DSN）保留为实例属性，仅供数据层自身（queries/atomic_
-        # mutations）与 executors lease 仓储使用——BOUNDARY-DATA-001 的
-        # service 检查按 job_db.path 计数，service 侧取连接一律走
-        # ConnectionQueriesMixin 的 connect/read/write 门面方法（#187：
-        # 切断「任何拿到 JobQueries 的 service 都能自建连接」的 DSN 逃逸口）。
-        self.path = path
+        # `_path`（DSN）是数据层私有属性，仅供 queries/atomic_mutations
+        # 内部使用——#187 第三步：`.path` 已私有化，`dsn_identity` 是唯一
+        # 公开只读访问器（BOUNDARY-DATA-001；数据层之外的连接获取一律走
+        # ConnectionQueriesMixin 的 connect/read/write 门面方法，lease 仓储
+        # 与 artifact store 经 dsn_identity 持有字符串 DSN）。直接读
+        # `job_db._path` 属于数据层自我约定，service 侧出现即违规。
+        self._path = path
         self.jobs_dir = jobs_dir
         init_db(path)

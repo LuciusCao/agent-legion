@@ -1,11 +1,15 @@
+import gzip
+import hashlib
 import io
 from pathlib import Path
 
 import pytest
 
+from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_artifacts import JobArtifactService
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.storage_paths import resolve_job_dir
+from tests.fakes.storage import FakeObjectStorage
 
 
 @pytest.fixture
@@ -92,7 +96,10 @@ def test_job_artifact_service_reads_from_object_store(job_db, job):
 
 def test_job_artifact_service_object_error_becomes_404(job_db, job):
     """对象被 lifecycle 删除 / 存储故障 → 按未找到处理（404），不冒泡 500。"""
-    service = JobArtifactService(job_db, _FakeObjectStore(error=RuntimeError("NoSuchKey")))
+    from botocore.exceptions import ClientError
+
+    boto_outage = ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+    service = JobArtifactService(job_db, _FakeObjectStore(error=boto_outage))
 
     with pytest.raises(NotFoundError, match="Artifact not found"):
         service.read(job["id"], "result.json")
@@ -178,10 +185,33 @@ def test_job_artifact_service_open_raw_missing(job_db, job):
 
 def test_job_artifact_service_open_raw_object_error_is_404(job_db, job):
     """对象存储故障 → 404 而非 500（对齐 read() 的降级语义）。"""
-    service = JobArtifactService(job_db, _FakeObjectStore(error=RuntimeError("NoSuchKey")))
+    from botocore.exceptions import ClientError
+
+    boto_outage = ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+    service = JobArtifactService(job_db, _FakeObjectStore(error=boto_outage))
 
     with pytest.raises(NotFoundError, match="Artifact not found"):
         service.open_raw(job["id"], "result.json")
+
+
+def test_job_artifact_service_open_raw_programming_error_propagates(job_db, job):
+    """#204 窄化：raw 端点只降级 boto 数据面故障族；注入的编程错误
+    （TypeError）原样上抛给路由层 500，不再被吞成 404。"""
+    service = JobArtifactService(
+        job_db, _FakeObjectStore(error=TypeError("store contract violation"))
+    )
+
+    with pytest.raises(TypeError, match="store contract violation"):
+        service.open_raw(job["id"], "result.json")
+
+
+def test_job_artifact_service_read_object_programming_error_propagates(job_db, job):
+    """#204 窄化：read() 的对象存储回退同样只降级声明的失败族
+    （ClientError/BotoCoreError/OSError/UnicodeDecodeError）。"""
+    service = JobArtifactService(job_db, _FakeObjectStore(error=TypeError("bad double")))
+
+    with pytest.raises(TypeError, match="bad double"):
+        service.read(job["id"], "result.json")
 
 
 def test_job_artifact_service_open_raw_rejects_traversal(artifact_service, job):
@@ -237,3 +267,82 @@ def test_job_artifact_service_open_raw_no_range_uses_full_stream(job_db, job):
     assert raw.stream is not None
     assert raw.stream.read() == b"0123456789"
     assert store.range_calls == []
+
+
+# --- #338：.gz 对象双形态读（真实 JobArtifactObjectStore + 内存存储） --------
+
+_GZ_RAW = b'{"gz": true, "items": [1, 2, 3]}'
+_GZ_COMPRESSED = gzip.compress(_GZ_RAW)
+_GZ_HASH = hashlib.sha256(_GZ_RAW).hexdigest()
+
+
+def _seed_gz_row(job_db, job) -> JobArtifactObjectStore:
+    """登记一条 .gz 形态的产物行（storage_key 带后缀、size=压缩、hash=未压缩）。"""
+    workspace_id = job["workspace_id"]
+    storage_key = f"jobs/{workspace_id}/{job['id']}/result.json.gz"
+    storage = FakeObjectStorage(objects={storage_key: _GZ_COMPRESSED})
+    store = JobArtifactObjectStore(job_db, storage)
+    store.record_remote(
+        workspace_id=workspace_id,
+        job_id=job["id"],
+        node_key="upstream",
+        name="result.json",
+        storage_key=storage_key,
+        size_bytes=len(_GZ_COMPRESSED),
+        content_hash=_GZ_HASH,
+    )
+    return store
+
+
+def test_read_object_gunzips_gz_object(job_db, job):
+    """文本预览：.gz 对象透明解压后 decode（本地无缓存副本，走对象分支）。"""
+    service = JobArtifactService(job_db, _seed_gz_row(job_db, job))
+
+    result = service.read(job["id"], "result.json")
+
+    assert result == {"name": "result.json", "content": _GZ_RAW.decode("utf-8")}
+
+
+def test_open_raw_gz_object_passthrough_with_encoding(job_db, job):
+    """raw 端点：.gz 对象按存储字节透传 + content_encoding 标记；Range 请求
+    被忽略（gzip 流不支持分段解码），size_bytes 是压缩后字节数。"""
+    store = _seed_gz_row(job_db, job)
+    service = JobArtifactService(job_db, store)
+
+    raw = service.open_raw(job["id"], "result.json", range_header="bytes=0-3")
+
+    assert raw.stream is not None
+    assert raw.stream.read() == _GZ_COMPRESSED  # 透传压缩字节（全量）
+    assert raw.content_encoding == "gzip"
+    assert raw.size_bytes == len(_GZ_COMPRESSED)
+    assert raw.range_start is None and raw.range_end is None
+
+
+def test_object_store_open_stream_dual_form(job_db, job):
+    """store 层契约：open_stream 对 .gz 透明解压、对裸对象原样；
+    open_object_stream 永远返回存储字节。"""
+    store = _seed_gz_row(job_db, job)
+    row = store.lookup(job["id"], "result.json")
+    assert row is not None
+
+    with store.open_stream(row) as stream:
+        assert stream.read() == _GZ_RAW
+    with store.open_object_stream(row) as stream:
+        assert stream.read() == _GZ_COMPRESSED
+
+    # 裸形态行（存量数据）：open_stream 原样返回。
+    bare_key = f"jobs/{job['workspace_id']}/{job['id']}/bare.json"
+    store.storage.objects[bare_key] = _GZ_RAW
+    store.record_remote(
+        workspace_id=job["workspace_id"],
+        job_id=job["id"],
+        node_key="upstream",
+        name="bare.json",
+        storage_key=bare_key,
+        size_bytes=len(_GZ_RAW),
+        content_hash=_GZ_HASH,
+    )
+    bare_row = store.lookup(job["id"], "bare.json")
+    assert bare_row is not None
+    with store.open_stream(bare_row) as stream:
+        assert stream.read() == _GZ_RAW

@@ -11,7 +11,7 @@ from server.app.services.instance_settings_store import InstanceSettingsStore
 
 @pytest.fixture
 def store(job_db) -> InstanceSettingsStore:
-    store = InstanceSettingsStore(job_db.path)
+    store = InstanceSettingsStore(job_db.dsn_identity)
     with job_db.connect() as conn:
         conn.execute("delete from global_settings where key='instance'")
     return store
@@ -58,9 +58,8 @@ def test_default_document_matches_retired_yaml_values() -> None:
         "max_archive_bytes": 64 * 1024 * 1024,
         "min_protocol_version": 1,
     }
-    # openclaw defaults are cwd-only now: the retired knobs
-    # (command_template/skill_safety/...) were configurable but never consumed.
-    assert document["openclaw"] == {"cwd": "."}
+    # The retired openclaw block is stripped from stored documents (#75).
+    assert "openclaw" not in document
 
 
 def test_effective_document_merges_partial_stored_over_defaults() -> None:

@@ -12,8 +12,9 @@ these definitions — the loader merges the workflow top-level ``execution``
 defaults into every non-start node (code nodes simply never read them) and
 node ``execution.*`` overrides win; workspace-level defaults were retired at
 schema v64. The demo expects the operator to configure execution in Studio.
-Skills resolve to the local source roots
-imported by ``make import-demo`` (see ``server.app.skills.builtin_sources``).
+Skill bindings live on the demo DAG nodes (issue #76), not on these
+definitions; the referenced skills resolve to the in-place repos imported by
+``make import-demo`` under the skills root.
 """
 
 from __future__ import annotations
@@ -22,33 +23,15 @@ from server.app.agent_catalog import AgentDefinition
 from server.app.db.dialect import ConnectSource
 from server.app.services.agent_service import AgentService
 
-_DEMO_SKILL_PREFIX = "education-video-problems-generation"
-
 DEMO_WORKFLOW_KEY = "education_video_problems_generation"
 
 BUILTIN_AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
-    agent_id: AgentDefinition(capability=capability, runtime="velites", skill=skill)
-    for agent_id, capability, skill in [
-        (
-            "example-write-script-v1",
-            "write_script",
-            f"{_DEMO_SKILL_PREFIX}/write-script",
-        ),
-        (
-            "example-review-script-v1",
-            "review_script",
-            f"{_DEMO_SKILL_PREFIX}/review-script",
-        ),
-        (
-            "example-generate-questions-v1",
-            "generate_questions",
-            f"{_DEMO_SKILL_PREFIX}/generate-questions",
-        ),
-        (
-            "example-review-questions-v1",
-            "review_questions",
-            f"{_DEMO_SKILL_PREFIX}/review-questions",
-        ),
+    agent_id: AgentDefinition(capability=capability, runtime="velites")
+    for agent_id, capability in [
+        ("example-write-script-v1", "write_script"),
+        ("example-review-script-v1", "review_script"),
+        ("example-generate-questions-v1", "generate_questions"),
+        ("example-review-questions-v1", "review_questions"),
     ]
 }
 

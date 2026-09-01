@@ -4,6 +4,9 @@ import json
 import logging
 from typing import Any
 
+import psycopg
+
+from server.app.db.rowmap import wire_batch_id
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
@@ -165,15 +168,25 @@ class JobIntakeService:
                 frozen_config=node_config,
             )
         except Exception:
-            # create_run committed before create_jobs_bulk ran; without
-            # compensation the orphaned run row would make an identical
-            # resubmission hit the deterministic-id upsert and return the
-            # empty run. Best-effort (guarded by not-exists): never mask the
+            # #204 broad-except audit: compensate-then-bare-re-raise (#233
+            # pattern). create_run committed before create_jobs_bulk ran;
+            # without compensation the orphaned run row would make an
+            # identical resubmission hit the deterministic-id upsert and
+            # return the empty run. The width is deliberate: ANY creation
+            # failure (DB constraint, serialization, programming error)
+            # must trigger the cleanup, then the bare raise preserves the
+            # original error verbatim — nothing is swallowed.
+            # Best-effort (guarded by not-exists): never mask the
             # original failure.
             try:
                 self.job_db.delete_run_without_jobs(str(batch["id"]))
-            except Exception:
-                logger.warning("run %s left orphaned after job creation failed", batch["id"])
+            except (OSError, psycopg.Error) as exc:
+                # #204: same compensation-only catch as run_service — a DB
+                # connectivity failure must not mask the original creation
+                # error; programming errors propagate to the route's 500.
+                logger.warning(
+                    "run %s left orphaned after job creation failed: %s", batch["id"], exc
+                )
             raise
         if jobs:
             notify_schedulable_work()
@@ -182,7 +195,7 @@ class JobIntakeService:
             job["storage_dir"] = str(resolve_job_dir(job, self.settings.jobs_dir))
             # Wire compatibility: API/SSE consumers still read ``batch_id``
             # (route renames are a later slice); the value is the run id.
-            job["batch_id"] = str(job.get("run_id") or "")
+            job["batch_id"] = wire_batch_id(job)
 
         batch["created_count"] = len(jobs)
         if self.job_event_buffer is not None:

@@ -47,7 +47,7 @@ use crate::tools::{resolve_in_cwd, ToolContext, ToolKind, ToolOutput};
 /// Exit code for a run that ended without its declared `--require-output`
 /// artifacts (output contract violation). Harness faults exit 2 (see
 /// main.rs); 0 keeps Pi semantics for everything else.
-const EXIT_MISSING_OUTPUTS: u8 = 1;
+pub const EXIT_MISSING_OUTPUTS: u8 = 1;
 
 pub struct AgentConfig {
     /// Session identifier (`--name`); a pid-based fallback is generated.
@@ -390,4 +390,70 @@ fn enabled_tool_names(tools: &[ToolKind]) -> String {
         .map(|kind| kind.name())
         .collect::<Vec<_>>()
         .join(",")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The agent loop itself (`run`) is exercised by the library integration
+    // tests in tests/agent_loop.rs (ScriptedProvider + MemorySink); what
+    // stays here are the private pure helpers only the same crate/file can
+    // reach: enabled_tool_names, outputs_remediation_message,
+    // resolve_required_outputs / missing_outputs.
+
+    #[test]
+    fn enabled_tool_names_joins_in_order() {
+        assert_eq!(enabled_tool_names(&[ToolKind::Read]), "read");
+        assert_eq!(
+            enabled_tool_names(&[ToolKind::Read, ToolKind::Write, ToolKind::Bash]),
+            "read,write,bash"
+        );
+    }
+
+    #[test]
+    fn outputs_remediation_message_lists_every_missing_artifact() {
+        let message = outputs_remediation_message(&["a.txt".to_string(), "b.txt".to_string()]);
+        assert!(message.starts_with("SYSTEM NOTICE:"));
+        assert!(message.contains("a.txt, b.txt"));
+        assert!(message.ends_with("then stop."));
+    }
+
+    #[test]
+    fn resolve_required_outputs_reports_missing_by_display_path() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("out")).unwrap();
+        let cwd = dir.path().canonicalize().unwrap();
+
+        let required = resolve_required_outputs(&[PathBuf::from("out/result.json")], &cwd).unwrap();
+        assert_eq!(required.len(), 1);
+        assert_eq!(required[0].display, "out/result.json");
+        assert!(required[0].resolved.ends_with("out/result.json"));
+        // Not yet written: reported missing under the CLI-relative name.
+        assert_eq!(missing_outputs(&required), vec!["out/result.json"]);
+
+        std::fs::write(dir.path().join("out/result.json"), "data").unwrap();
+        assert!(missing_outputs(&required).is_empty());
+    }
+
+    #[test]
+    fn resolve_required_outputs_rejects_sandbox_escapes() {
+        // An escaping --require-output path is a caller misconfiguration,
+        // never a runtime "missing" entry.
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().canonicalize().unwrap();
+        for escape in ["../outside.txt", "/etc/passwd"] {
+            // Match instead of unwrap_err: RequiredOutput is not Debug.
+            let err = match resolve_required_outputs(&[PathBuf::from(escape)], &cwd) {
+                Ok(_) => panic!("escaping --require-output `{escape}` must be rejected"),
+                Err(err) => err,
+            };
+            let message = err.to_string();
+            assert!(
+                message.contains(&format!("invalid --require-output `{escape}`")),
+                "unexpected error: {message}"
+            );
+            assert!(message.contains("escapes"));
+        }
+    }
 }

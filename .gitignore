@@ -28,7 +28,6 @@ deploy/worker.remote.yaml
 deploy/compose.local.yaml
 deploy/compose.worker.local.yaml
 deploy/velites-provider.env
-config/agent-worker.yaml
 htmlcov/
 htmlcov_backend/
 
@@ -41,3 +40,6 @@ htmlcov_backend/
 .quick-gate.lock/
 .pytest-aff-index.json
 .pytest-aff-coverage*
+
+# Tower multi-agent workspace (comms state + nested mission worktrees)
+.tower/

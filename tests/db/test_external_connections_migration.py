@@ -212,6 +212,9 @@ def test_batch_payloads_gain_connection(monkeypatch) -> None:
             """
         )
         conn.execute(
+            # job_batches keeps its workflow_key column (historical table
+            # shape rebuilt above); the value feeds the migration's legacy
+            # CMS workflow_key filter.
             "insert into job_batches(id, workspace_id, workflow_key, source_kind,"
             " source_payload_json) values ('b1', 'ws-mig-batch', 'question_comprehension_info',"
             " 'question_ids', %s)",

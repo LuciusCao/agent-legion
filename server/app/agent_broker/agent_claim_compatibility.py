@@ -6,16 +6,22 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from server.app.agent_runtime.catalog import get_adapter
+from server.app.agent_runtime.execution import resolve_execution_chain, validate_execution_contract
 from server.app.workflows.pi_protocol import render_command_spec
 
 
-def worker_declarations(row: Mapping[str, Any]) -> tuple[set[str], set[tuple[str, str, str]]]:
-    capabilities = set(json.loads(row["capabilities_json"] or "[]"))
-    models = {
+def worker_model_declarations(row: Mapping[str, Any]) -> set[tuple[str, str, str]]:
+    """The Worker's registered model allowlist triples.
+
+    Worker capabilities used to ride along here; claim admission no longer
+    matches capabilities (issue #284), so only the model declarations are
+    still relevant to claiming.
+    """
+    return {
         (str(item.get("runtime") or "*"), str(item["provider"]), str(item["model"]))
         for item in json.loads(row["models_json"] or "[]")
     }
-    return capabilities, models
 
 
 def live_claim_manifest(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -26,6 +32,11 @@ def live_claim_manifest(row: Mapping[str, Any]) -> dict[str, Any]:
         definition = json.loads(str(raw_revision))
         node = (definition.get("nodes") or {}).get(str(row["node_key"])) or {}
         node_execution = node.get("execution") or {}
+        # The label feeds the auto-assembled default instructions at re-render
+        # time; keep it in step with the revision (legacy manifests lack it
+        # and fall back to the node key inside build_prompt).
+        if label := str(node.get("label") or ""):
+            manifest["node_label"] = label
     frozen = manifest.get("execution") or {}
     # Legacy key, absent on manifests enqueued after schema v64 (workspace
     # Agent defaults retired): kept so in-flight queued manifests still
@@ -39,14 +50,20 @@ def live_claim_manifest(row: Mapping[str, Any]) -> dict[str, Any]:
     # manifests only) -> the fully resolved execution frozen at enqueue.
     # Removing a node override therefore falls back to the workflow top-level
     # default (merged into the revision) or, when neither exists, to the
-    # frozen enqueue-time value.
-    manifest["execution"] = {
-        **frozen,
-        **{
-            key: node_execution.get(key) or defaults.get(key) or frozen.get(key) or ""
-            for key in ("provider", "model", "thinking")
-        },
-    }
+    # frozen enqueue-time value. The re-fetched key set is the runtime
+    # adapter's execution contract (EXEC-RUNTIME-DISPATCH-001), not a
+    # hardcoded list.
+    runtime = str(manifest.get("runtime") or row.get("runtime") or "")
+    contract_keys = tuple(get_adapter(runtime).execution.keys)
+    # Resolve every contract-governed key through the chain so validation
+    # also sees keys the runtime does NOT support: a revision upgrade that
+    # configures one (or loses the last source of a required key) fails fast
+    # here instead of silently shipping.
+    resolved = resolve_execution_chain(node_execution, defaults, frozen)
+    validate_execution_contract(node_key=str(row["node_key"]), runtime=runtime, values=resolved)
+    # Only contract keys are re-fetched into the shipped execution block;
+    # unsupported keys can only reach here empty (validation raised otherwise).
+    manifest["execution"] = {**frozen, **{key: resolved[key] for key in contract_keys}}
     manifest["additional_prompt"] = str(node_execution.get("prompt") or "")
     if all(key in manifest for key in ("tools", "inputs", "expected_outputs")):
         manifest["command_spec"] = render_command_spec(manifest)
@@ -56,20 +73,17 @@ def live_claim_manifest(row: Mapping[str, Any]) -> dict[str, Any]:
 def worker_can_run(
     candidate: Mapping[str, Any],
     manifest: Mapping[str, Any],
-    worker_capabilities: set[str],
     worker_models: set[tuple[str, str, str]],
 ) -> bool:
-    capability = str(candidate["capability"])
+    """Model allowlist check; capabilities no longer gate claims (issue #284)."""
     execution = manifest.get("execution") or {}
     model = (
         str(candidate.get("runtime") or ""),
         str(execution.get("provider") or ""),
         str(execution.get("model") or ""),
     )
-    capability_matches = capability in worker_capabilities or "*" in worker_capabilities
-    model_matches = (
+    return (
         model in worker_models
         or ("*", model[1], model[2]) in worker_models
         or ("*", "*", "*") in worker_models
     )
-    return capability_matches and model_matches

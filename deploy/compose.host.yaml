@@ -90,7 +90,7 @@ services:
     secrets: [postgres_pgpass, vault_master_key]
     volumes:
       - host-data:/var/lib/agent-legion
-      - ${AGENT_SKILLS_DIR:-../skills}:/root/.agents/skills/agent-legion:ro
+      - ${AGENT_SKILLS_DIR:-../skills}:/root/.agents/skills:ro
     ports:
       - ${AGENT_LEGION_HOST_BIND:-127.0.0.1}:8000:8000
     stop_grace_period: 25s

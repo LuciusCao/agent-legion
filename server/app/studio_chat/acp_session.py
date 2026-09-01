@@ -192,7 +192,13 @@ class AcpSessionHandle:
         # The loop may already be closed (session torn down between the state
         # check and the hand-off); align with _kill_process and never let a
         # late cancel surface as a 500.
-        with contextlib.suppress(Exception):
+        # #204 suppress audit: call_soon_threadsafe fails with exactly two
+        # families in that race — RuntimeError from the loop's closed-check
+        # and OSError when the self-pipe socket closes between the check and
+        # the write. Narrowing to that pair keeps the teardown race silent
+        # while a genuine programming error in the hand-off now surfaces
+        # instead of being swallowed as a no-op cancel.
+        with contextlib.suppress(RuntimeError, OSError):
             loop.call_soon_threadsafe(_send)
 
     def close(self) -> None:
@@ -224,13 +230,27 @@ class AcpSessionHandle:
         # wedged — exactly the case this escalation exists for — and the child
         # would leak as an orphan. Process.kill() is a plain signal send and
         # safe to issue off-loop.
-        with contextlib.suppress(Exception):
+        # #204 suppress audit: the re-validated kill still races the child's
+        # own death — os.kill then raises ProcessLookupError (pid already
+        # reaped) or PermissionError (pid recycled outside our uid); those
+        # are the expected teardown races and stay suppressed, mirroring
+        # CodeExecutor._terminate_child. Anything else is a real bug in the
+        # escalation path and now propagates instead of silently skipping it.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             process.kill()
 
     def _thread_main(self) -> None:
         try:
             asyncio.run(self._run())
         except Exception:
+            # #204 broad-except audit: the session thread's last-chance
+            # reporter. _run catches its own Exception space, so what lands
+            # here is a failure of the finally path (the on_exit callback) or
+            # exotic asyncio teardown errors; without this catch the thread
+            # would die silently — ready_event never set (spawn then waits
+            # out the full 60s timeout) and no on_error reaches the service —
+            # so the crash is logged with the traceback and reported to the
+            # session as an error instead.
             logger.exception("studio chat ACP session loop crashed")
             self.callbacks.on_error("ACP session loop crashed")
         finally:
@@ -280,10 +300,24 @@ class AcpSessionHandle:
             # exc_info: this is the primary failure signal for the whole ACP
             # session lifecycle — losing the traceback makes spawn/transport
             # problems undiagnosable from the logs alone.
+            # #204 broad-except audit: the catch stays broad because the
+            # outcome space is genuinely mixed — expected agent-side
+            # refusals (RequestError from initialize / session open),
+            # transport deaths (ConnectionError / OSError) and programming
+            # errors all funnel into the SAME designed semantics here: the
+            # session is marked error and the user sees a dead session
+            # instead of a hung one. Nothing is masked (the traceback is
+            # logged) and no exception type is converted on the way out.
             logger.warning("studio chat ACP session failed: %s", exc, exc_info=True)
             self.callbacks.on_error(str(exc))
         finally:
             # Reap terminals a crashed/killed agent never released itself.
+            # #204 suppress audit: close_all already contains per-terminal
+            # failure isolation (its _swallow helper logs each kill/release),
+            # so this suppress only guards the finally itself — an exception
+            # raised while reaping must not REPLACE the failure already
+            # propagating out of _run (Python would otherwise drop the
+            # original). Cleanup-never-classify, the #233 pattern.
             with contextlib.suppress(Exception):
                 await client.terminals.close_all()
 

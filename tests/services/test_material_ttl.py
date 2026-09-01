@@ -1,7 +1,7 @@
 """Materials TTL 治理（design §10，#160）：expires_at 写入、到期翻
 expired、expired 新引用被拒、零引用物理删除。
 
-FakeStorage 内存实现注入（同 tests/services/test_materials.py）；instance
+FakeObjectStorage 内存实现注入（同 tests/services/test_materials.py）；instance
 设置经 InstanceSettingsStore 直接写文档（校验层由
 tests/routes/test_instance_settings_routes.py 覆盖）。
 """
@@ -9,10 +9,9 @@ tests/routes/test_instance_settings_routes.py 覆盖）。
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 from datetime import UTC, datetime
-from typing import BinaryIO
+from typing import Any
 
 import pytest
 
@@ -29,45 +28,15 @@ from server.app.services.material_ttl import (
 )
 from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from server.app.services.materials import MaterialsService
-from server.app.storage import ObjectHead
 from shared.material_cache import MaterializeError
+from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
+
+FakeStorage = FakeObjectStorage
 
 WORKSPACE_ID = "ws-ttl"
 PAYLOAD = b"ttl-material-bytes"
 HASH = hashlib.sha256(PAYLOAD).hexdigest()
-
-
-class FakeStorage:
-    """In-memory ObjectStorage test double; never touches the network."""
-
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {}
-        self.fail_deletes = False
-
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/upload/{storage_key}"
-
-    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/download/{storage_key}"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        return io.BytesIO(self.objects[storage_key])
-
-    def put_object(self, storage_key: str, data: bytes, content_type: str = "") -> None:
-        self.objects[storage_key] = data
-
-    def put_stream(self, storage_key: str, stream: BinaryIO, size_bytes: int) -> None:
-        self.objects[storage_key] = stream.read()
-
-    def delete_object(self, storage_key: str) -> None:
-        if self.fail_deletes:
-            raise RuntimeError("s3 delete failed")
-        self.objects.pop(storage_key, None)
 
 
 @pytest.fixture
@@ -123,9 +92,9 @@ def _set_expires_at(material_id: str, sql_interval: str) -> None:
 def _reference_job(material_id: str) -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
+            "insert into jobs(id, workspace_id, source_type, source_id,"
             " title, status, storage_dir, input_json)"
-            " values ('job-ref-1', %s, 'wf', 'material', %s, 't', 'pending', 'd', %s)",
+            " values ('job-ref-1', %s, 'material', %s, 't', 'pending', 'd', %s)",
             (
                 WORKSPACE_ID,
                 material_id,
@@ -178,6 +147,9 @@ def test_materials_ttl_days_passes_facade_through_untouched(
         """Stands in for JobQueries: any non-str ConnectSource shape."""
 
         dsn_identity = TEST_DATABASE_URL
+
+        def get_global_settings_document(self, key: str) -> dict[str, Any] | None:
+            return None  # #281: KV read now goes through the facade itself.
 
     facade = FakeFacade()
     received: list[object] = []

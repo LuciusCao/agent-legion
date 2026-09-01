@@ -85,7 +85,6 @@ else
     echo "启动 Worker :$WORKER_PORT …"
     ulimit -n 65535
     nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m worker.service \
-        --config config/agent-worker.yaml \
         --state-dir data/agent-worker-service \
         --host 127.0.0.1 --port "$WORKER_PORT" \
         > data/logs/prod-worker.log 2>&1 &

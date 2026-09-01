@@ -25,15 +25,15 @@ export function ghostDraftNodeDetails(
   const edges: WorkflowEdgeResponse[] = parseWorkflowEdgeConditions(
     definitionYaml
   )
-    .filter((edge) => edge.source && edge.target)
+    .filter((edge) => edge.from && edge.to)
     .map((edge) => ({
-      source: edge.source as string,
-      target: edge.target as string,
-      condition: edge.condition?.path
+      source: edge.from as string,
+      target: edge.to as string,
+      condition: edge.when?.path
         ? {
-            artifact: edge.condition.artifact ?? '',
-            path: edge.condition.path,
-            equals: edge.condition.equals,
+            artifact: edge.when.artifact ?? '',
+            path: edge.when.path,
+            equals: edge.when.equals,
           }
         : null,
     }))
@@ -44,12 +44,22 @@ export function ghostDraftNodeDetails(
     after: parsed.after ?? [],
     inputs: parsed.inputs ?? [],
     outputs: parsed.outputs ?? [],
+    // 显式类型还原（#284 + EXEC-APPROVAL-001）：start/approval 各自还原；
+    // 其余节点还原 code|agent，遗留 `type: node` 与缺失一律按 code（与
+    // 后端 loader 归一化一致）。
     ...(parsed.type === 'start'
       ? {
           node_type: 'start',
           accepted_item_types: parsed.accepted_item_types ?? [],
         }
-      : {}),
+      : {
+          node_type:
+            parsed.type === 'agent'
+              ? 'agent'
+              : parsed.type === 'approval'
+                ? 'approval'
+                : 'code',
+        }),
   }
   return {
     node,

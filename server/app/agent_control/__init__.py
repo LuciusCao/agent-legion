@@ -2,9 +2,9 @@
 
 Worker registration and credentials lifecycle: the registry, scoped register
 tokens (issue / delete / cascade), registration key guard, worker
-declarations normalization, liveness throttling, execution completion
-handling, and openclaw CLI discovery. Scheduling and claim policy live in
-``server.app.agent_broker``; this package owns the management surface only.
+declarations normalization, liveness throttling, and execution completion
+handling. Scheduling and claim policy live in ``server.app.agent_broker``;
+this package owns the management surface only.
 """
 
 from typing import TYPE_CHECKING, Any

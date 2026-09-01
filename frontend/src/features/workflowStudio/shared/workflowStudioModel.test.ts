@@ -141,8 +141,8 @@ describe('workflowStudioModel', () => {
       '    capability: intake',
       '    after: [_start]',
       'edges:',
-      '  - source: _start',
-      '    target: intake',
+      '  - from: _start',
+      '    to: intake',
       '',
     ].join('\n')
 
@@ -169,14 +169,15 @@ describe('workflowStudioModel', () => {
       '    inputs: [a.json]',
       '    outputs: [b.json]',
       'edges:',
-      '  - source: _start',
-      '    target: intake',
+      '  - from: _start',
+      '    to: intake',
       '',
     ].join('\n')
 
     const details = ghostDraftNodeDetails(yaml, 'intake')
 
-    expect(details?.node.node_type).toBeUndefined()
+    // 草稿未声明 type：与后端 loader 归一化一致，ghost 节点按 code 还原。
+    expect(details?.node.node_type).toBe('code')
     expect(details?.node.label).toBe('读取知识点')
     expect(details?.node.capability).toBe('intake')
     expect(details?.node.inputs).toEqual(['a.json'])

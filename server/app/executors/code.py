@@ -29,6 +29,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from server.app.db.dialect import resolve_dsn
 from server.app.executors._code_sandbox import execute_custom_sandboxed
 from server.app.executors.artifact_mirror import (
     build_artifact_object_store,
@@ -100,8 +101,16 @@ class CodeExecutor:
     def _object_store(self) -> Any | None:
         """Instance object storage for materialization, probed lazily."""
         if not self._storage_probed:
-            self._storage_probed = True
-            self._object_storage = build_s3_storage()
+            # Assign before flipping the flag (same first-probe race as the
+            # velites probe in _code_sandbox): concurrent readers must not
+            # see probed=True with the storage still None. The flag is set
+            # even when the build raises: a persistently broken storage
+            # config must not re-probe (and re-log the full exception) on
+            # every node — the caller already degrades to mirroring-disabled.
+            try:
+                self._object_storage = build_s3_storage()
+            finally:
+                self._storage_probed = True
         return self._object_storage
 
     def _artifact_object_store(self) -> JobArtifactObjectStore | None:
@@ -110,9 +119,23 @@ class CodeExecutor:
             # Settings/storage misconfiguration (e.g. a missing secret file
             # surfaced by load_s3_settings) must never fail the node
             # (EXEC-ARTIFACT-STORE-001): disable mirroring instead.
+            # #204 broad-except audit: one-time lazy probe whose outcome is
+            # cached for the executor's lifetime. The failure families are
+            # deliberately not enumerated — env parsing, secret-file reads
+            # and client construction each raise their own types, and any of
+            # them means "artifact mirroring is unavailable on this host",
+            # which is a degradation the node must survive. exc_info keeps
+            # the configuration root cause visible for the operator.
             try:
+                # #280: the DSN for the artifact store comes from
+                # `resolve_dsn` (the ConnectSource normalizer, #187)
+                # instead of a getattr escape hatch on `job_db`. The
+                # explicit None check keeps the "no DB handle → no
+                # artifact store" degradation for job_db-less executors
+                # (tests).
                 self._artifact_objects = build_artifact_object_store(
-                    self._object_store(), getattr(self.job_db, "path", None)
+                    self._object_store(),
+                    resolve_dsn(self.job_db) if self.job_db is not None else None,
                 )
             except Exception:
                 logger.warning("artifact store unavailable; mirroring disabled", exc_info=True)
@@ -159,6 +182,13 @@ class CodeExecutor:
             # a targeted rerun may find declared inputs reclaimed, so restore
             # them from object storage best-effort first. Failures never change
             # node semantics — the node errors on the missing input itself.
+            # #204 broad-except audit: this wraps the restore loop's own
+            # per-file containment for the one thing it deliberately lets
+            # escape — the manifest lookup's DB read (restore_missing_inputs
+            # already catches per-file storage errors itself). A transient DB
+            # outage at restore time must degrade to "run with local files"
+            # rather than fail a node whose inputs are all present locally;
+            # the traceback is logged so the silent degradation is visible.
             try:
                 restore_missing_inputs(
                     self._artifact_object_store(),
@@ -167,6 +197,18 @@ class CodeExecutor:
                     inputs=context.inputs,
                 )
             except Exception:
+                # #204 broad-except audit: this wraps the restore loop's own
+                # per-file containment for the one thing it deliberately lets
+                # escape — the manifest lookup's DB read (restore_missing_inputs
+                # already catches per-file storage errors itself). A transient DB
+                # outage at restore time must degrade to "run with local files"
+                # rather than fail a node whose inputs are all present locally.
+                # Swallowing is correct because restore is strictly best-effort
+                # (EXEC-ARTIFACT-STORE-001): the outcome space is the psycopg/
+                # pool surface of that lookup, and a node whose declared inputs
+                # are all present locally never touches this failure mode at
+                # all. The traceback is logged (exc_info) so the silent
+                # degradation stays visible to the operator.
                 logger.warning(
                     "input restore failed for job %s; continuing with local files only",
                     context.job_id,

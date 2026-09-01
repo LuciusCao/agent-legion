@@ -26,7 +26,7 @@ function makeNodeChanges(): ChangeSummaryViewModel['nodeChanges'] {
       type: 'added',
       nodeKey: 'c',
       label: 'C',
-      nodeType: 'node',
+      nodeType: 'code',
       fields: [],
       severity: 'info',
     },
@@ -34,7 +34,7 @@ function makeNodeChanges(): ChangeSummaryViewModel['nodeChanges'] {
       type: 'modified',
       nodeKey: 'a',
       label: 'A',
-      nodeType: 'node',
+      nodeType: 'code',
       fields: [],
       severity: 'info',
     },
@@ -42,7 +42,7 @@ function makeNodeChanges(): ChangeSummaryViewModel['nodeChanges'] {
       type: 'removed',
       nodeKey: 'd',
       label: 'D',
-      nodeType: 'node',
+      nodeType: 'code',
       fields: [],
       severity: 'warning',
     },
@@ -75,6 +75,22 @@ describe('WorkflowStudioStatusChip', () => {
   it('shows the viewed revision version when read-only', () => {
     renderChip({ readOnly: true, version: 3 })
     expect(screen.getByText('只读 v3')).toBeInTheDocument()
+  })
+
+  it('keeps the draft-changes hint visible on the read-only chip', () => {
+    renderChip({
+      readOnly: true,
+      version: 2,
+      summary: makeSummary({ nodeChanges: makeNodeChanges() }),
+    })
+    const chip = screen.getByText('只读 v2 · 草稿未发布变更 3')
+    expect(chip.closest('.MuiChip-root')).toHaveClass('MuiChip-colorWarning')
+  })
+
+  it('keeps the read-only version chip while compare is loading', () => {
+    renderChip({ readOnly: true, version: 2, compareState: 'loading' })
+    expect(screen.getByText('只读 v2')).toBeInTheDocument()
+    expect(screen.queryByText('计算中…')).not.toBeInTheDocument()
   })
 
   it('merges the preserved-draft hint into the read-only chip', () => {

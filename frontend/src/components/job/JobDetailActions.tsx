@@ -7,6 +7,7 @@ import { JobRunToDialog } from './JobRunToDialog'
 import { JobDeleteDialog } from './JobDeleteDialog'
 import { MaterialIcon } from '../MaterialIcon'
 import { canContinueJob, computeActionDisabled } from '../jobActionEligibility'
+import { JobApprovalActionButton } from './JobApprovalActionButton'
 import { JobWorkflowUpgradeButton } from './JobWorkflowUpgradeButton'
 import styles from './JobDetailActions.module.css'
 
@@ -23,6 +24,7 @@ export type JobDetailActionsProps = {
   onDelete: () => void | Promise<void>
   onOpenArtifacts: () => void
   onUpgradeWorkflow?: () => void | Promise<void>
+  onOpenApproval?: () => void
 }
 
 export function JobDetailActions({
@@ -38,6 +40,7 @@ export function JobDetailActions({
   onDelete,
   onOpenArtifacts,
   onUpgradeWorkflow,
+  onOpenApproval,
 }: JobDetailActionsProps) {
   const [rerunOpen, setRerunOpen] = useState(false)
   const [runToOpen, setRunToOpen] = useState(false)
@@ -50,6 +53,11 @@ export function JobDetailActions({
   return (
     <>
       <div className={styles.actions} data-testid="job-detail-actions">
+        <JobApprovalActionButton
+          jobs={jobs}
+          loading={loading}
+          onOpenApproval={onOpenApproval}
+        />
         <IconButton
           aria-label="重跑"
           title="重跑"

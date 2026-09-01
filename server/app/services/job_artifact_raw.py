@@ -9,7 +9,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from botocore.exceptions import BotoCoreError, ClientError
+
 from server.app.http_range import parse_range_header
+from server.app.services.job_artifact_gzip import is_gzip_key
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_artifact_raw_types import RawArtifact
 
@@ -32,6 +35,11 @@ def open_raw_artifact(
     range_header 解析为单区间后走对象存储的 ranged read（本地分支忽略
     区间——FileResponse 自行处理 Range 头）。存储故障按 NotFoundError
     降级，与 read() 一致；消费（与关闭）返回句柄是调用方责任。
+
+    #338 双形态：``.gz`` 对象按存储字节透传（``content_encoding="gzip"``，
+    路由层加 Content-Encoding 响应头），manifest ``size_bytes`` 是压缩后
+    字节数（与透传 body 的 Content-Length 一致）。gzip 流不支持分段解
+    码——``.gz`` 对象的 Range 请求被忽略（始终全量返回）。
     """
     if artifact_path.exists() and artifact_path.is_file():
         return RawArtifact(name=artifact_name, path=artifact_path)
@@ -41,25 +49,36 @@ def open_raw_artifact(
         if row is not None:
             size = row.get("size_bytes")
             size_bytes = int(size) if isinstance(size, int) else None
-            byte_range = parse_range_header(range_header, size_bytes)
+            gzipped = is_gzip_key(str(row["storage_key"]))
+            # .gz 对象：Range 失效（docstring），永远全量透传存储字节。
+            byte_range = None if gzipped else parse_range_header(range_header, size_bytes)
             try:
-                if byte_range is not None:
+                if gzipped:
+                    stream = store.open_object_stream(row)
+                elif byte_range is not None:
                     stream = store.open_range_stream(row, *byte_range)
                 else:
                     stream = store.open_stream(row)
-            except Exception:
+            except (ClientError, BotoCoreError) as exc:
+                # #204: the store's open/open_range surface is the boto3 data
+                # plane (S3StorageClient) — its declared failure family is
+                # ClientError (a missing/lifecycle-deleted object surfaces as
+                # NoSuchKey) plus BotoCoreError (endpoint unreachable). Both
+                # degrade to NotFoundError per the read() contract above;
+                # anything else is a programming error and surfaces as 500.
                 logger.warning(
                     "failed to open raw artifact %s of job %s from object storage",
                     artifact_name,
                     job_id,
                     exc_info=True,
                 )
-                raise NotFoundError("Artifact not found") from None
+                raise NotFoundError("Artifact not found") from exc
             return RawArtifact(
                 name=artifact_name,
                 stream=stream,
                 size_bytes=size_bytes,
                 range_start=byte_range[0] if byte_range else None,
                 range_end=byte_range[1] if byte_range else None,
+                content_encoding="gzip" if gzipped else None,
             )
     raise NotFoundError("Artifact not found")

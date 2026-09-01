@@ -83,7 +83,7 @@ class QualityReplayService:
                     f"node {node_key!r} is not part of the job's frozen workflow snapshot"
                 )
             agent_id, pin = self._resolve_agent_pin(
-                conn, workspace_id, str(job["workflow_key"]), node, agent_version
+                conn, workspace_id, str(job["workspace_id"]), node, agent_version
             )
             self._reconcile_item_rows(conn, item_id, node_key)
             active = conn.execute(
@@ -112,6 +112,17 @@ class QualityReplayService:
                 workspace_id, item, job, definition, node, replay_id, pin
             )
         except Exception as exc:
+            # #204 broad-except audit: compensate-then-CLASSIFY (#233
+            # variant). The catch is wide because build_copy_job spans the
+            # copy job's whole construction (DB writes, artifact copies,
+            # snapshot parsing) whose failure space is mixed; but nothing is
+            # masked — compensate_failed_setup records business failures as
+            # a failed replay row and deletes the row for unexpected ones,
+            # JobServiceError re-raises as-is, and everything else converts
+            # to InvalidOperationError WITH the original chained (`from`),
+            # so programming errors stay visible (traceback + cause) while
+            # the half-created replay never blocks retries at the
+            # one-active-replay guard.
             # Business failures (expected, user-relevant) are recorded as a
             # failed replay; programming errors are NOT masked as replay
             # business failures — they leave no row behind and propagate.
@@ -218,9 +229,9 @@ class QualityReplayService:
         route = conn.execute(
             """
             select target_kind, target_id from workspace_node_routes
-            where workspace_id = %s and workflow_key = %s and node_key = %s
+            where workspace_id = %s and node_key = %s
             """,
-            (workspace_id, workflow_key, node.key),
+            (workspace_id, node.key),
         ).fetchone()
         if route is None:
             raise InvalidOperationError(f"node {node.key!r} has no workspace route; cannot replay")

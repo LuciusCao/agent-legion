@@ -76,6 +76,12 @@ def report_absolute_db_paths_background(db: JobQueries) -> None:
         try:
             report_absolute_db_paths(db)
         except Exception:
+            # #204 broad-except audit: the report thread's life support. It
+            # runs detached at startup purely to surface legacy absolute
+            # path rows (issue #37) — a DB blip mid-scan must not leave an
+            # unhandled-exception traceback on a daemon thread (noisy, and
+            # in some setups fatal to the process). The report is advisory:
+            # failing it changes no behavior. Traceback logged.
             logger.exception("path-hygiene startup report failed")
 
     threading.Thread(target=_run, name="path-hygiene-report", daemon=True).start()

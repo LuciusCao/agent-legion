@@ -248,11 +248,7 @@ def test_recover_skips_jobs_with_active_lease(
         node_run_id = cursor.fetchone()["id"]
         conn.execute(
             """
-            insert into executor_leases(
-                id, execution_id, executor_id, workspace_id, job_id, workflow_key,
-                node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-            )
-            values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
+            insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) values (%s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
             """,
             (
                 "lease-1",
@@ -260,7 +256,6 @@ def test_recover_skips_jobs_with_active_lease(
                 "exec-active",
                 workspace_id,
                 job_id,
-                "demo_workflow",
                 "node_a",
                 node_run_id,
                 database_timestamp(datetime.now(UTC)),
@@ -346,7 +341,7 @@ def test_recover_skips_job_when_lease_claimed_concurrently(
         conn.execute("commit")
 
     now_str = database_timestamp(datetime.now(UTC))
-    with write_transaction(queries.path) as conn1:
+    with write_transaction(queries.dsn_identity) as conn1:
         candidates = conn1.execute(
             """
             select j.id

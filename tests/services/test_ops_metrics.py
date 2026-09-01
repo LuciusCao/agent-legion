@@ -36,8 +36,8 @@ def _seed_workspace_job(job_id: str = "job-1", workspace_id: str = "ops-ws") -> 
             (workspace_id,),
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (%s, %s, 'questions', 'question', %s) on conflict(id) do nothing",
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values (%s, %s, 'question', %s) on conflict(id) do nothing",
             (job_id, workspace_id, job_id),
         )
 
@@ -97,11 +97,7 @@ def _insert_execution(
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             """
-            insert into agent_execution_requests(
-              execution_id, workspace_id, job_id, workflow_key, node_key,
-              agent_id, agent_definition_hash, node_concurrency_limit, state,
-              worker_id, node_run_id, queued_at, manifest_json
-            ) values (%s, 'ops-ws', 'job-1', 'questions', %s, 'agent-1', 'hash', 5, %s, %s, %s, %s, '{}')
+            insert into agent_execution_requests(execution_id, workspace_id, job_id, node_key, agent_id, agent_definition_hash, node_concurrency_limit, state, worker_id, node_run_id, queued_at, manifest_json) values (%s, 'ops-ws', 'job-1', %s, 'agent-1', 'hash', 5, %s, %s, %s, %s, '{}')
             """,
             (execution_id, f"node-{execution_id}", state, worker_id, node_run_id, queued_at),
         )
@@ -467,13 +463,7 @@ def _insert_node_run(
         if agent_run:
             conn.execute(
                 """
-                insert into agent_execution_requests(
-                    execution_id, workspace_id, job_id, workflow_key, node_key,
-                    agent_id, agent_definition_hash, node_concurrency_limit,
-                    state, queued_at, node_run_id, manifest_json
-                )
-                values (%s, 'ops-ws', %s, 'questions', 'generate', 'agent-1', 'hash', 1,
-                        'done', %s, %s, '{}')
+                insert into agent_execution_requests(execution_id, workspace_id, job_id, node_key, agent_id, agent_definition_hash, node_concurrency_limit, state, queued_at, node_run_id, manifest_json) values (%s, 'ops-ws', %s, 'generate', 'agent-1', 'hash', 1, 'done', %s, %s, '{}')
                 """,
                 (f"exec-{run_id}", job_id, started_at, run_id),
             )
@@ -632,14 +622,14 @@ def test_queue_alert_blocked_from_fresh_signal() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into agent_queue_signals(id, kind, reasons_json, updated_at)"
-            " values (1, 'blocked', '{\"capability_or_model_mismatch\": 8}', current_timestamp)"
+            " values (1, 'blocked', '{\"model_mismatch\": 8}', current_timestamp)"
         )
 
     alert = _service().query_summary()["queue_alert"]
 
     assert alert is not None
     assert alert["kind"] == "blocked"
-    assert alert["reasons"] == {"capability_or_model_mismatch": 8}
+    assert alert["reasons"] == {"model_mismatch": 8}
     assert alert["at"] is not None
 
 
@@ -687,7 +677,7 @@ def test_blocked_signal_written_by_empty_claim_diagnostics() -> None:
     _seed_workspace_job()
     _insert_execution("ex-head", "queued")
     with read_connection(TEST_DATABASE_URL) as conn:
-        log_blocked_queue(TEST_DATABASE_URL, conn, {"capability_or_model_mismatch": 3})
+        log_blocked_queue(TEST_DATABASE_URL, conn, {"model_mismatch": 3})
 
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
@@ -695,7 +685,7 @@ def test_blocked_signal_written_by_empty_claim_diagnostics() -> None:
         ).fetchone()
     assert row is not None
     assert row["kind"] == "blocked"
-    assert _json.loads(row["reasons_json"]) == {"capability_or_model_mismatch": 3}
+    assert _json.loads(row["reasons_json"]) == {"model_mismatch": 3}
 
 
 def test_sample_writes_per_workspace_rows() -> None:
@@ -736,11 +726,7 @@ def _insert_execution_ws(
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             """
-            insert into agent_execution_requests(
-              execution_id, workspace_id, job_id, workflow_key, node_key,
-              agent_id, agent_definition_hash, node_concurrency_limit, state,
-              queued_at, manifest_json
-            ) values (%s, %s, %s, 'questions', %s, 'agent-1', 'hash', 5, %s, %s, '{}')
+            insert into agent_execution_requests(execution_id, workspace_id, job_id, node_key, agent_id, agent_definition_hash, node_concurrency_limit, state, queued_at, manifest_json) values (%s, %s, %s, %s, 'agent-1', 'hash', 5, %s, %s, '{}')
             """,
             (execution_id, workspace_id, job_id, f"node-{execution_id}", state, queued_at),
         )
@@ -787,7 +773,7 @@ def test_queue_alert_blocked_requires_workspace_queue() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into agent_queue_signals(id, kind, reasons_json, updated_at)"
-            " values (1, 'blocked', '{\"capability_or_model_mismatch\": 4}', current_timestamp)"
+            " values (1, 'blocked', '{\"model_mismatch\": 4}', current_timestamp)"
         )
 
     assert _service().query_summary(workspace_id="ops-ws")["queue_alert"]["kind"] == "blocked"

@@ -43,32 +43,37 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v64, workspace_settings_retirement) must
-# leave behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v64's catalog effect is the post-chain cleanup dropping
-# the three retired workspaces.default_agent_* columns plus
-# intake_config_json — rewinding re-adds them (a v63 database still has them)
-# so the upgrade under test must drop them again to match a fresh catalog.
-# v64 also carries a data migration (backfilling default_agent_* into the
-# active revision's top-level execution); it changes rows, not the catalog,
-# and is a no-op on this test's empty scratch schema. v63
-# (workspace_preview_config) adds preview_config_json, which exists at
-# SCHEMA_VERSION-1, so the undo step leaves it in place.
+# Effects the newest migration (v71, preview_panels, #328) must leave behind
+# so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. v71 only widens the versioned_entities entity_type CHECK
+# (drop + re-add, same pattern as v30/v47): no table/column/index delta, so
+# the catalog inventories stay empty and the constraint rewind rides the DDL
+# hook below; the v70 (retire_workflow_key_columns) effects stay in place —
+# they belong to the SCHEMA_VERSION-1 shape after the rewind.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "workspace_settings_retirement"
+_NEWEST_MIGRATION_NAME = "preview_panels"
 # (table, column DDL) pairs re-created by the undo step.
-_NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = (
-    ("workspaces", "default_agent_provider text not null default ''"),
-    ("workspaces", "default_agent_model text not null default ''"),
-    ("workspaces", "default_agent_thinking text not null default ''"),
-    ("workspaces", "intake_config_json text not null default '{}'"),
+_NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
+# Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
+# faithful v70: the pre-v71 entity_type CHECK (without 'preview_panel').
+_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = (
+    """
+    alter table versioned_entities
+      drop constraint if exists versioned_entities_entity_type_check;
+    alter table versioned_entities
+      add constraint versioned_entities_entity_type_check
+      check(entity_type in ('node_code', 'agent'))
+    """,
 )
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]
 _CatalogIndexes = set[tuple[str, str, str]]
+# (table, constraint_name, definition) — the unique/PK constraint layer
+# (column drops auto-drop dependent constraints; index-only diffs miss them).
+_CatalogConstraints = set[tuple[str, str, str]]
 
 
 def _undo_newest_migration(database_dsn: str) -> None:
@@ -82,6 +87,8 @@ def _undo_newest_migration(database_dsn: str) -> None:
             conn.execute(f"drop index if exists {index_name}")
         for table, column_ddl in _NEWEST_MIGRATION_COLUMNS_RESTORE:
             conn.execute(f"alter table {table} add column if not exists {column_ddl}")
+        for statement in _NEWEST_MIGRATION_UNDO_DDL:
+            conn.execute(statement)
         conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
 
 
@@ -109,6 +116,29 @@ def _catalog_indexes(schema_name: str) -> _CatalogIndexes:
             )
             for row in conn.execute(
                 "select tablename, indexname, indexdef from pg_indexes where schemaname=%s",
+                (schema_name,),
+            ).fetchall()
+        }
+
+
+def _catalog_constraints(schema_name: str) -> _CatalogConstraints:
+    with read_connection(TEST_DATABASE_URL) as conn:
+        return {
+            (
+                str(row["table_name"]),
+                str(row["constraint_name"]),
+                # conkey ordinal form: name-independent across shapes whose
+                # column order differs (the unique constraint's definition
+                # embeds no schema name but does embed column names).
+                str(row["constraintdef"]),
+            )
+            for row in conn.execute(
+                """
+                select tc.table_name, tc.constraint_name, pg_get_constraintdef(c.oid) as constraintdef
+                from information_schema.table_constraints tc
+                join pg_constraint c on c.conname = tc.constraint_name
+                where tc.table_schema=%s and tc.constraint_type in ('UNIQUE', 'PRIMARY KEY')
+                """,
                 (schema_name,),
             ).fetchall()
         }
@@ -153,8 +183,10 @@ def test_upgraded_database_matches_fresh_catalog() -> None:
     try:
         fresh_columns = _catalog_columns(TEST_SCHEMA)
         fresh_indexes = _catalog_indexes(TEST_SCHEMA)
+        fresh_constraints = _catalog_constraints(TEST_SCHEMA)
         upgraded_columns = _catalog_columns(parity_schema)
         upgraded_indexes = _catalog_indexes(parity_schema)
+        upgraded_constraints = _catalog_constraints(parity_schema)
     finally:
         # Leave no scratch schema behind for later tests on this worker.
         with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as admin:
@@ -171,4 +203,9 @@ def test_upgraded_database_matches_fresh_catalog() -> None:
         "indexes diverge between fresh and upgraded databases:\n"
         f"only fresh: {sorted(fresh_indexes - upgraded_indexes)}\n"
         f"only upgraded: {sorted(upgraded_indexes - fresh_indexes)}"
+    )
+    assert upgraded_constraints == fresh_constraints, (
+        "constraints diverge between fresh and upgraded databases:\n"
+        f"only fresh: {sorted(fresh_constraints - upgraded_constraints)}\n"
+        f"only upgraded: {sorted(upgraded_constraints - fresh_constraints)}"
     )

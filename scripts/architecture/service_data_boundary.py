@@ -1,19 +1,13 @@
 """Ratchet guard: services must reach the database through the JobQueries
 facade, not by opening their own connections.
 
-The service layer is consolidating onto ``server/app/jobs/queries`` (see
-``services/job_pause.py`` and ~38 other facade-only services). Legacy
-services that hand-write SQL or import the ``server.app.db`` connection
-primitives are grandfathered by a ratchet-down baseline: no entry for a
-bypassing file is an error, above is too.
+Services consolidate onto ``server/app/jobs/queries`` (~38 facade-only
+services); legacy SQL/DB-primitive usage is grandfathered by a ratchet-down
+baseline — no entry for a bypassing file is an error, above is too.
 
-Counted per service file (``server/app/services/**``):
-1. SQL statement string literals (SELECT/INSERT/UPDATE/DELETE/CREATE/
-   ALTER/DROP keyword match, sql_placeholders heuristic plus DDL);
-2. ``read_connection`` / ``write_transaction`` references (imports or
-   calls) — the DB-primitive escape hatch;
-3. DSN escape references (#187 getattr-escape closure): ``.path`` /
-   ``.dsn_identity`` reads on a Name, and their ``getattr(x, ...)`` twin.
+Counted per service file (``server/app/services/**``): SQL string literals
+(keyword match), ``read_connection`` / ``write_transaction`` references,
+and DSN escape reads (``.path`` / ``.dsn_identity`` incl. getattr twins).
 """
 
 from __future__ import annotations
@@ -26,6 +20,7 @@ from scripts.architecture.service_data_boundary_baseline import (
     ServiceDataBoundaryConfigurationError,
     load_service_data_boundary_baseline,
 )
+from scripts.architecture.service_data_boundary_monotonicity import boundary_regression_errors
 
 __test__ = False
 
@@ -102,7 +97,11 @@ def collect_service_data_bypasses(root: Path) -> dict[str, tuple[int, int, int]]
 
 
 def check_service_data_boundary(root: Path) -> list[str]:
-    """Reject facade bypasses above the baseline or in new service files."""
+    """Reject facade bypasses above the baseline or in new service files.
+
+    Plus the #292 monotonic anchor guard — see
+    ``service_data_boundary_monotonicity``.
+    """
     try:
         baseline = load_service_data_boundary_baseline(root / BASELINE_RELATIVE_PATH)
     except ServiceDataBoundaryConfigurationError as exc:
@@ -129,4 +128,5 @@ def check_service_data_boundary(root: Path) -> list[str]:
                 f"exceeds baseline {allowed}; route new DB access "
                 "through JobQueries instead"
             )
+    errors.extend(boundary_regression_errors(root, baseline.files))
     return sorted(errors)

@@ -5,6 +5,13 @@
 > published `runtime: pi` 定义已翻转为 velites）；Agent 定义经 Studio
 > 管理并发布进 `versioned_entities`；manifest 执行块统一为 `execution.*`。
 > 本文档保留为设计定稿记录。
+>
+> **2026-08-31 补注（#76）**：skill 内容绑定已从 Agent 定义下沉到
+> workflow 节点——Agent 路由节点声明 `skill: {key, ref}`（随 revision
+> 版本化、随 intake 冻结），`AgentDefinition.skill` 降为可选 legacy 兜底；
+> 锁按 (skill, ref) 多值冻结 commit，manifest 增加 `skill_ref`、
+> `skill_version` 改为 `ref@commit12`（invariant EXEC-SKILL-NODE-001）。
+> 下文 §2/§5/§7 中「Agent 定义拥有 skill」的描述反映定稿时点。
 
 ## 背景与目标
 
@@ -68,6 +75,13 @@ if not model:
 > （`default_agent_provider/model/thinking` 三列），已随 schema v64 退役——
 > 执行配置只存在于 versioned 的 workflow 定义里。
 
+**runtime 级契约校验（issue #75 阶段 2）**：Host 侧 runtime catalog
+（`server/app/agent_runtime`）的每个 adapter 用 `ExecutionContract` 声明
+自己支持哪些 execution 键、哪些必填（pi/velites：provider+model 必填、
+thinking 可选）。dispatch 冻结 manifest 前与 Worker claim 重解析时统一
+按契约校验：必填键缺失、或节点配置了 runtime 不支持的键（非空值），
+fail-fast 且报错含节点 key / runtime / 键名。契约表外的键一律视为不支持。
+
 ### 2. AgentDefinition（纯净版）
 
 ```python
@@ -76,8 +90,9 @@ class AgentDefinition(BaseModel):
 
     agent_id: str                    # 如 "demo-review-questions-v1"
     capability: str                  # 如 "review_questions"
-    runtime: Literal["pi", "openclaw", "velites"]
-    skill: str                       # 如 "education-video-problems-generation/review-questions"
+    runtime: Literal["pi", "velites"]
+    skill: str = ""                  # #76 起可选（空 = 未绑定）：仅作 legacy 兜底，
+                                     # 权威绑定在 workflow 节点（key + 可选 ref）
     tools: tuple[str, ...] = ("read", "write", "bash")
     config_schema: dict[str, Any] = {}  # 节点可调参数 schema
     enabled: bool = True
@@ -169,7 +184,8 @@ manifest = {
     "config": {...},
     "tools": ["read", "write", "bash"],
     "skill": "education-video-problems-generation/review-questions",
-    "skill_version": "abc123",
+    "skill_ref": "v1.0.0",                  # #76：lock 冻结时的有效 ref（节点声明或 source 默认）
+    "skill_version": "v1.0.0@abc123def456", # #76：格式 ref@commit12（原为裸 commit）
     "log_path": "...",
     "execution": {
         "binary": "velites",
@@ -237,19 +253,27 @@ Studio
 
 ### 7. Skill 选择交互
 
+> #76 起：Agent 定义上的 skill 只是 legacy 兜底，权威绑定在 workflow 节点
+> （节点详情里声明 `skill: {key, ref}`，ref 空 = 归一为 `latest`，跟随仓库
+> HEAD）；本节交互仍用于编辑 Agent 定义的兜底 skill。
+
 **两种方式**：
 
 **方式 A：Folder Picker**
 1. 点击"选择技能目录"
-2. 打开系统 folder picker，选中 skill 目录（如 `~/.agents/skills/agent-legion/education-video-problems-generation/review-questions/`）
+2. 打开系统 folder picker，选中 skill 目录（如 `~/.agents/skills/education-video-problems-generation/review-questions/`）
 3. App 校验目录包含 `SKILL.md`
 4. 校验通过后，显示该 skill 的 tags（从 SKILL.md frontmatter 读取）
 5. 用户从 tag 下拉选择（最新 tag 置顶）
 
 **方式 B：绝对路径输入**
-1. 用户输入绝对路径（如 `/Users/xxx/.agents/skills/agent-legion/education-video-problems-generation/review-questions`）
+1. 用户输入绝对路径（如 `/Users/xxx/.agents/skills/education-video-problems-generation/review-questions`）
 2. App 实时校验路径存在且包含 `SKILL.md`
 3. 校验通过后，同样显示 tag 下拉选择
+
+skill 目录必须位于 skill root（`~/.agents/skills`）之下；skill key 就是目录相对
+skill root 的两段路径 `<group>/<name>`（上例即
+`education-video-problems-generation/review-questions`）。
 
 ### 8. API 设计
 

@@ -90,6 +90,20 @@ def sync_job_status(conn: DatabaseConnection, job_id: str) -> None:
         )
         return
 
+    # A parked approval gate surfaces as the job status once nothing is
+    # running: "a human is needed" outranks the generic queued. Parallel
+    # branches that later claim flip the job back to running above.
+    awaiting = conn.execute(
+        "select 1 from job_nodes where job_id=%s and status='awaiting_approval'",
+        (job_id,),
+    ).fetchone()
+    if awaiting is not None:
+        conn.execute(
+            "update jobs set status=%s, updated_at=%s where id=%s",
+            ("awaiting_approval", database_timestamp(datetime.now(UTC)), job_id),
+        )
+        return
+
     non_terminal = conn.execute(
         """
         select 1 from job_nodes

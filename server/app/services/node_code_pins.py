@@ -7,8 +7,9 @@ source (fail-closed on drift, EXEC-CODE-003).
 
 from __future__ import annotations
 
-import json
 from typing import Any, cast
+
+from server.app.db.rowmap import parse_object
 
 
 def node_code_pins_from_job_snapshot(job: dict) -> dict[str, Any]:
@@ -18,15 +19,18 @@ def node_code_pins_from_job_snapshot(job: dict) -> dict[str, Any]:
     ``upgrade_workflow`` rewrites the snapshot on revision upgrades but never
     the batch payload. ``{}`` = no snapshot (legacy), no pins, or a corrupt
     payload (the corrupt case is already logged by
-    ``definition_from_job_snapshot``); callers fall back to the batch pins.
+    ``definition_from_job_snapshot``); non-object snapshot tops degrade the
+    same way (codex on #264). Callers fall back to the batch pins.
     """
+    # #278: the inline tolerant parse collapses into ``parse_object`` —
+    # json.JSONDecodeError is a ValueError and a non-str column renders as
+    # TypeError, so (TypeError, ValueError) ≡ the shared helper's except
+    # clause; ``raw or ""`` short-circuits {} for the no-snapshot case.
     raw = job.get("workflow_definition_snapshot_json") or ""
     if not raw:
         return {}
-    try:
-        pins = json.loads(str(raw)).get("node_code_pins")
-    except Exception:
-        return {}
+    snapshot = parse_object(raw)
+    pins = snapshot.get("node_code_pins")
     return dict(pins) if isinstance(pins, dict) else {}
 
 

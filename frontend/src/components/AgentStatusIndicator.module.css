@@ -2,10 +2,16 @@
   position: relative;
 }
 
+/* 图标+文字布局后，状态点改挂在图标自身的角上。 */
+.iconWrap {
+  position: relative;
+  display: inline-flex;
+}
+
 .indicator {
   position: absolute;
-  right: 7px;
-  bottom: 7px;
+  right: -2px;
+  bottom: -2px;
   width: 8px;
   height: 8px;
   border: 2px solid #ffffff;

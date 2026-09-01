@@ -4,13 +4,18 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from server.app.agent_control.registry import MODEL_RUNTIME_PROTOCOL_VERSION
+from shared.protocol import PROTOCOL_VERSION
 
 
 class RegisterAgentWorkerRequest(BaseModel):
     worker_id: str = Field(min_length=1, max_length=64)
     name: str = Field(default="", max_length=128)
-    runtimes: list[str] = Field(min_length=1)
+    # 空集合合法（issue #254）：code-only Worker 不声明任何 agent runtime，
+    # 只经 max_code_concurrency 承接 code 任务。
+    runtimes: list[str] = Field(default_factory=list)
+    # Deprecated (issue #284): accepted for older Workers that still report
+    # it, but ignored — claim admission never matches capabilities. Stored
+    # verbatim on the registration row; no migration of existing values.
     capabilities: list[str] = Field(default_factory=list)
     models: list[dict[str, str]] = Field(default_factory=list)
     max_concurrency: int = Field(gt=0, le=1024)
@@ -32,7 +37,9 @@ class AgentWorkerWorkspace(BaseModel):
 
 class RegisterAgentWorkerResponse(BaseModel):
     worker_token: str
-    host_protocol_version: int = MODEL_RUNTIME_PROTOCOL_VERSION
+    # 本 Host 的最新协议版本（shared/protocol.py 单一事实来源）：Worker 拿
+    # 它与本机声明比对，对本机不支持的新 Host fail-closed。
+    host_protocol_version: int = PROTOCOL_VERSION
     # Server-resolved workspace admission scope; [] means all workspaces.
     allowed_workspaces: list[str]
     # Same scope enriched with workspace names (one row per presented token's
@@ -92,6 +99,8 @@ class AgentWorkerSummary(BaseModel):
     worker_id: str
     name: str
     runtimes: list[str]
+    # Legacy declared capabilities (issue #284): informational only, never
+    # used for claim matching.
     capabilities: list[str]
     models: list[dict[str, str]]
     max_concurrency: int
@@ -126,7 +135,17 @@ class AgentClaimResponse(BaseModel):
     lease_id: str
     workspace_id: str
     job_id: str
-    workflow_key: str
+    # #211 Phase 2: the claim's workflow_key equals workspace_id (schema v62
+    # binding); Workers read workspace_id. The field stays in the response
+    # until the Phase 3/4 removal window so already-shipped Worker images
+    # keep parsing the body.
+    workflow_key: str = Field(
+        description=(
+            "Deprecated: equals workspace_id (schema v62); read workspace_id instead. "
+            "Removal is tracked in #211 (deprecated field drops by 2026-10-31)."
+        ),
+        deprecated=True,
+    )
     node_key: str
     agent_id: str
     # 'agent' (default) or 'code' (batch 2): code claims carry a

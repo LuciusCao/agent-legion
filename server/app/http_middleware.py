@@ -8,6 +8,7 @@ from starlette.middleware.gzip import IdentityResponder
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from server.app.http_gzip import SelectiveGZipResponder
+from server.app.http_request_id import RequestIdMiddleware
 from server.app.settings import Settings
 
 
@@ -49,3 +50,8 @@ def add_http_middleware(app: FastAPI, settings: Settings) -> None:
     # 9 for a few percent worse ratio. Compression runs synchronously on the
     # event loop, so the CPU saved here is loop latency for every SSE/WS peer.
     app.add_middleware(SelectiveGZipMiddleware, compresslevel=6)
+    # Request-id correlation + slow-request logging (#273). Added last, so it
+    # runs outermost: every response (CORS preflight included) carries the id,
+    # and the slow-request timing covers the full app stack, not just the
+    # router. See http_request_id.py for the pass-through/template tradeoffs.
+    app.add_middleware(RequestIdMiddleware)

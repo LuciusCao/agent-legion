@@ -26,13 +26,11 @@ def _seed_workspace(conn, workspace_id: str) -> None:
     )
 
 
-def _insert_job(
-    conn, job_id: str, workspace_id: str, workflow_key: str = "video_knowledge"
-) -> None:
+def _insert_job(conn, job_id: str, workspace_id: str) -> None:
     conn.execute(
-        "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, status)"
-        " values (%s, %s, %s, 'test', %s, 'queued')",
-        (job_id, workspace_id, workflow_key, job_id),
+        "insert into jobs(id, workspace_id, source_type, source_id, status)"
+        " values (%s, %s, 'test', %s, 'queued')",
+        (job_id, workspace_id, job_id),
     )
 
 
@@ -43,16 +41,16 @@ def _insert_node(conn, job_id: str, node_key: str, status: str) -> None:
     )
 
 
-def _group_by_counts(conn, workspace_id: str, workflow_key: str) -> dict[str, dict[str, int]]:
+def _group_by_counts(conn, workspace_id: str) -> dict[str, dict[str, int]]:
     rows = conn.execute(
         """
         select jn.node_key, jn.status, count(*) as cnt
         from job_nodes jn
         join jobs j on j.id = jn.job_id
-        where j.workspace_id = %s and j.workflow_key = %s
+        where j.workspace_id = %s
         group by 1, 2
         """,
-        (workspace_id, workflow_key),
+        (workspace_id,),
     ).fetchall()
     result: dict[str, dict[str, int]] = {}
     for row in rows:
@@ -60,13 +58,13 @@ def _group_by_counts(conn, workspace_id: str, workflow_key: str) -> dict[str, di
     return result
 
 
-def _table_counts(conn, workspace_id: str, workflow_key: str) -> dict[str, dict[str, int]]:
+def _table_counts(conn, workspace_id: str) -> dict[str, dict[str, int]]:
     rows = conn.execute(
         """
         select node_key, status, cnt from workspace_job_node_status_counts
-        where workspace_id = %s and workflow_key = %s and cnt <> 0
+        where workspace_id = %s and cnt <> 0
         """,
-        (workspace_id, workflow_key),
+        (workspace_id,),
     ).fetchall()
     result: dict[str, dict[str, int]] = {}
     for row in rows:
@@ -92,7 +90,7 @@ def test_counts_table_and_triggers_exist() -> None:
                 " where trigger_schema=current_schema()"
             ).fetchall()
         }
-    assert columns == {"workspace_id", "workflow_key", "node_key", "status", "cnt"}
+    assert columns == {"workspace_id", "node_key", "status", "cnt"}
     assert {
         "job_nodes_status_counts_sync",
         "jobs_node_status_counts_deduct",
@@ -112,16 +110,12 @@ def test_trigger_tracks_node_insert_update_delete() -> None:
         )
         # Direct job_nodes delete (workflow-upgrade mutation path).
         conn.execute("delete from job_nodes where job_id='jnsc-trig-1' and node_key='review'")
-        assert _table_counts(conn, "jnsc-trig-ws", "video_knowledge") == _group_by_counts(
-            conn, "jnsc-trig-ws", "video_knowledge"
-        )
+        assert _table_counts(conn, "jnsc-trig-ws") == _group_by_counts(conn, "jnsc-trig-ws")
         # Updates that leave status/node_key/job_id unchanged must not drift.
         conn.execute(
             "update job_nodes set error_message='x' where job_id='jnsc-trig-1' and node_key='intake'"
         )
-        assert _table_counts(conn, "jnsc-trig-ws", "video_knowledge") == _group_by_counts(
-            conn, "jnsc-trig-ws", "video_knowledge"
-        )
+        assert _table_counts(conn, "jnsc-trig-ws") == _group_by_counts(conn, "jnsc-trig-ws")
 
 
 def test_job_delete_cascade_deducts_counts() -> None:
@@ -134,9 +128,7 @@ def test_job_delete_cascade_deducts_counts() -> None:
             _insert_node(conn, job_id, "review", "failed")
         # Deleting the job cascades to job_nodes; counts must leave entirely.
         conn.execute("delete from jobs where id='jnsc-del-1'")
-        assert _table_counts(conn, "jnsc-del-ws", "video_knowledge") == _group_by_counts(
-            conn, "jnsc-del-ws", "video_knowledge"
-        )
+        assert _table_counts(conn, "jnsc-del-ws") == _group_by_counts(conn, "jnsc-del-ws")
 
 
 def test_job_rekey_moves_counts() -> None:
@@ -148,16 +140,11 @@ def test_job_rekey_moves_counts() -> None:
         _insert_node(conn, "jnsc-mv-1", "review", "pending")
         # Workspace move: counts must leave the old workspace entirely.
         conn.execute("update jobs set workspace_id='jnsc-mv-ws2' where id='jnsc-mv-1'")
-        assert _table_counts(conn, "jnsc-mv-ws", "video_knowledge") == {}
-        assert _table_counts(conn, "jnsc-mv-ws2", "video_knowledge") == _group_by_counts(
-            conn, "jnsc-mv-ws2", "video_knowledge"
-        )
-        # Workflow re-key: counts move to the new workflow_key.
-        conn.execute("update jobs set workflow_key='wf_other' where id='jnsc-mv-1'")
-        assert _table_counts(conn, "jnsc-mv-ws2", "video_knowledge") == {}
-        assert _table_counts(conn, "jnsc-mv-ws2", "wf_other") == _group_by_counts(
-            conn, "jnsc-mv-ws2", "wf_other"
-        )
+        assert _table_counts(conn, "jnsc-mv-ws") == {}
+        assert _table_counts(conn, "jnsc-mv-ws2") == _group_by_counts(conn, "jnsc-mv-ws2")
+        # (#211 M2) The workflow re-key half of this test retired with the
+        # workflow_key column: the rekey trigger now narrows to workspace_id
+        # moves and there is no key dimension to move between.
 
 
 def test_backfill_rebuilds_and_is_idempotent() -> None:
@@ -169,9 +156,9 @@ def test_backfill_rebuilds_and_is_idempotent() -> None:
         # Wipe the counter table so the backfill is exercised from scratch.
         conn.execute("delete from workspace_job_node_status_counts")
         migrate_workspace_job_node_status_counts(conn)
-        first = _table_counts(conn, "jnsc-bf-ws", "video_knowledge")
+        first = _table_counts(conn, "jnsc-bf-ws")
         migrate_workspace_job_node_status_counts(conn)
-        second = _table_counts(conn, "jnsc-bf-ws", "video_knowledge")
+        second = _table_counts(conn, "jnsc-bf-ws")
     assert first == {"intake": {"completed": 1}, "review": {"failed": 1}}
     assert second == first
 
@@ -181,19 +168,18 @@ def test_count_workspace_job_nodes_by_status_matches_group_by(tmp_path) -> None:
         _seed_workspace(conn, "jnsc-read-ws")
         _insert_job(conn, "jnsc-read-1", "jnsc-read-ws")
         _insert_job(conn, "jnsc-read-2", "jnsc-read-ws")
-        _insert_job(conn, "jnsc-read-3", "jnsc-read-ws", workflow_key="wf_other")
+        _insert_job(conn, "jnsc-read-3", "jnsc-read-ws")
         _insert_node(conn, "jnsc-read-1", "intake", "completed")
         _insert_node(conn, "jnsc-read-1", "review", "pending")
         _insert_node(conn, "jnsc-read-2", "intake", "failed")
         _insert_node(conn, "jnsc-read-3", "intake", "completed")
     with read_connection(TEST_DATABASE_URL) as conn:
-        expected = _group_by_counts(conn, "jnsc-read-ws", "video_knowledge")
+        expected = _group_by_counts(conn, "jnsc-read-ws")
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     assert (
         queries.count_workspace_job_nodes_by_status("jnsc-read-ws", "video_knowledge") == expected
     )
-    # Counts are scoped per workflow_key, and an unknown workspace is empty.
-    assert queries.count_workspace_job_nodes_by_status("jnsc-read-ws", "wf_other") == {
-        "intake": {"completed": 1}
-    }
+    # The workflow_key argument is inert post-v70 (counts are workspace-scoped);
+    # an unknown workspace is empty.
+    assert queries.count_workspace_job_nodes_by_status("jnsc-read-ws", "wf_other") == expected
     assert queries.count_workspace_job_nodes_by_status("jnsc-missing-ws", "video_knowledge") == {}

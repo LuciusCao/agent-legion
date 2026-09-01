@@ -6,6 +6,7 @@ import { deriveJobDetailPresentation } from './jobDetail/deriveJobDetailPresenta
 import styles from './JobDetailPage.module.css'
 import { ArtifactListDialog } from '../components/artifact/ArtifactListDialog'
 import { ArtifactPreviewDialog } from '../components/artifact/ArtifactPreviewDialog'
+import { useJobApprovalGate } from './jobDetail/useJobApprovalGate'
 import { DagFullscreenDialog } from '../components/dag/DagFullscreenDialog'
 import { TokenUsageDialog } from '../components/tokenUsage/TokenUsageDialog'
 import { NonUploadableNotice } from '../components/job/NonUploadableNotice'
@@ -24,6 +25,7 @@ export default function JobDetailPage() {
     actionLoading,
     handleRerun,
     handleRunTo,
+    handleApproval,
     handleContinue,
     handleUpgradeWorkflow,
     handlePackage,
@@ -78,6 +80,9 @@ export default function JobDetailPage() {
 
   const openArtifactList = useCallback(() => setArtifactListOpen(true), [])
 
+  // prettier-ignore
+  const { openApproval, approvalDialog } = useJobApprovalGate(workspaceId, jobId, detail, actionLoading, handleApproval, openArtifact)
+
   useJobDetailActions({
     detail,
     nodeCatalog,
@@ -90,6 +95,7 @@ export default function JobDetailPage() {
     onClearPacked: handleClearPacked,
     onDelete: handleDelete,
     onOpenArtifacts: openArtifactList,
+    onOpenApproval: openApproval,
   })
 
   if (!jobId) {
@@ -150,6 +156,7 @@ export default function JobDetailPage() {
           onClose={() => setPreviewOpen(false)}
         />
       )}
+      {approvalDialog}
       <DagFullscreenDialog
         open={dagDialogOpen}
         jobId={jobId}

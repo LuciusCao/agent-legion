@@ -7,12 +7,12 @@ rerun 产出新字节而上传失败时，旧 (job_id,node_key,name) 清单行�
 
 from __future__ import annotations
 
+import gzip
 import hashlib
-import io
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, BinaryIO
+from typing import Any
 
 import pytest
 
@@ -24,43 +24,13 @@ from server.app.services.job_artifact_maintenance import (
     reupload_missing,
 )
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
-from server.app.storage import ObjectHead
+from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
 OLD_PAYLOAD = b"old-bytes"
 NEW_PAYLOAD = b"new-bytes-longer"
 
-
-class FakeStorage:
-    """In-memory ObjectStorage test double; never touches the network."""
-
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {}
-
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/upload/{storage_key}"
-
-    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/download/{storage_key}"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        return io.BytesIO(self.objects[storage_key])
-
-    def put_object(self, storage_key: str, data: bytes, content_type: str = "") -> None:
-        self.objects[storage_key] = data
-
-    def put_stream(self, storage_key: str, stream: BinaryIO, size_bytes: int) -> None:
-        self.objects[storage_key] = stream.read()
-
-    def delete_object(self, storage_key: str) -> None:
-        self.objects.pop(storage_key, None)
-
-    def copy_object(self, source_key: str, destination_key: str) -> None:
-        self.objects[destination_key] = self.objects[source_key]
+FakeStorage = FakeObjectStorage
 
 
 @pytest.fixture(autouse=True)
@@ -75,9 +45,9 @@ def _seed_job(status: str = "completed") -> dict[str, Any]:
             " values ('ws-1', 'ws', 'demo_workflow') on conflict (id) do nothing"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
+            "insert into jobs(id, workspace_id, source_type, source_id,"
             " title, status, storage_dir) values"
-            " ('job-1', 'ws-1', 'wf', 's', 's1', 't', %s, 'jobs/ws/job-1')",
+            " ('job-1', 'ws-1', 's', 's1', 't', %s, 'jobs/ws/job-1')",
             (status,),
         )
         conn.execute(
@@ -101,7 +71,9 @@ def _job_db(job: dict[str, Any]) -> Any:
         with read_connection(TEST_DATABASE_URL) as conn:
             yield conn
 
-    return SimpleNamespace(path=TEST_DATABASE_URL, get_job=lambda job_id: dict(job), read=_read)
+    return SimpleNamespace(
+        dsn_identity=TEST_DATABASE_URL, get_job=lambda job_id: dict(job), read=_read
+    )
 
 
 def _settings(tmp_path: Path) -> Any:
@@ -175,6 +147,96 @@ def test_reconciler_skips_fresh_row(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     )
 
     assert reupload_missing(store, _job_db(job), _settings(tmp_path)) == 0
+
+
+# --- #338 评审 r1 P2-1：.gz 行的双形态 size 语义 -----------------------------
+
+_GZ_KEY = "jobs/ws-1/job-1/out.json.gz"
+
+
+def _seed_gz_row(store: JobArtifactObjectStore, storage: FakeStorage, payload: bytes) -> None:
+    """登记一条 .gz 形态清单行：size_bytes=压缩后、content_hash=未压缩。"""
+    storage.objects[_GZ_KEY] = gzip.compress(payload)
+    store.record_remote(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="n1",
+        name="out.json",
+        storage_key=_GZ_KEY,
+        size_bytes=len(storage.objects[_GZ_KEY]),
+        content_hash=hashlib.sha256(payload).hexdigest(),
+    )
+
+
+def test_reconciler_does_not_reupload_healthy_gz_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """r1 P2-1 回归：.gz 行的压缩 size 与本地未压缩文件恒不等，但 hash
+    相符即健康——reconciler 不得误判 stale 重传回裸形态。"""
+    job = _seed_job()
+    _definition(monkeypatch)
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    job_dir = tmp_path / "jobs" / "ws" / "job-1"
+    job_dir.mkdir(parents=True)
+    (job_dir / "out.json").write_bytes(OLD_PAYLOAD)
+    _seed_gz_row(store, storage, OLD_PAYLOAD)
+
+    assert reupload_missing(store, _job_db(job), _settings(tmp_path)) == 0
+    # 行保持 .gz 形态（未被重传 upsert 回裸 key）。
+    row = store.row_for_node("job-1", "n1", "out.json")
+    assert row is not None and row["storage_key"] == _GZ_KEY
+
+
+def test_reconciler_reuploads_gz_row_when_content_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """.gz 行 + rerun 新字节（hash 不符）→ 仍判定 stale 并重传（host 侧
+    reconciler 上传保持裸形态，双形态读不受影响）。"""
+    job = _seed_job()
+    _definition(monkeypatch)
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    job_dir = tmp_path / "jobs" / "ws" / "job-1"
+    job_dir.mkdir(parents=True)
+    local = job_dir / "out.json"
+    local.write_bytes(OLD_PAYLOAD)
+    _seed_gz_row(store, storage, OLD_PAYLOAD)
+    local.write_bytes(NEW_PAYLOAD)
+
+    assert reupload_missing(store, _job_db(job), _settings(tmp_path)) == 1
+
+
+def test_eviction_certifies_gz_row_by_content_hash(tmp_path: Path) -> None:
+    """r1 P2-1 回归：.gz 行的产物凭 content_hash 拿到淘汰认证（压缩 size
+    不再阻断缓存预算对其生效）。"""
+    job = _complete_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    job_dir = tmp_path / "jobs" / "ws" / "job-1"
+    job_dir.mkdir(parents=True)
+    confirmed = job_dir / "out.json"
+    confirmed.write_bytes(OLD_PAYLOAD)
+    _seed_gz_row(store, storage, OLD_PAYLOAD)
+
+    assert evict_cache_to_capacity(store, _job_db(job), _settings(tmp_path), max_bytes=0) == 1
+    assert not confirmed.exists()
+
+
+def test_eviction_skips_gz_row_on_hash_mismatch(tmp_path: Path) -> None:
+    """.gz 行 hash 与本地文件不符（rerun 新字节未上传）→ 不得认证淘汰。"""
+    job = _complete_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    job_dir = tmp_path / "jobs" / "ws" / "job-1"
+    job_dir.mkdir(parents=True)
+    local = job_dir / "out.json"
+    local.write_bytes(OLD_PAYLOAD)
+    _seed_gz_row(store, storage, OLD_PAYLOAD)
+    local.write_bytes(NEW_PAYLOAD)
+
+    assert evict_cache_to_capacity(store, _job_db(job), _settings(tmp_path), max_bytes=0) == 0
+    assert local.read_bytes() == NEW_PAYLOAD
 
 
 def _complete_job() -> dict[str, Any]:
@@ -258,9 +320,9 @@ def _add_active_lease() -> None:
         run_id = conn.execute("select id from node_runs where job_id='job-1'").fetchone()["id"]
         conn.execute(
             "insert into executor_leases("
-            " id, execution_id, executor_id, workspace_id, job_id, workflow_key,"
+            " id, execution_id, executor_id, workspace_id, job_id,"
             " node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at)"
-            " values ('lease-1', 'exec-1', 'code', 'ws-1', 'job-1', 'wf', 'n1', %s,"
+            " values ('lease-1', 'exec-1', 'code', 'ws-1', 'job-1', 'n1', %s,"
             " 'active', now(), now(), now() + make_interval(hours => 1))",
             (run_id,),
         )
@@ -334,3 +396,167 @@ def test_eviction_rechecks_precondition_before_every_unlink(
     assert calls == 2
     remaining = [path for path in job_dir.iterdir() if path.is_file()]
     assert len(remaining) == 1
+
+
+def test_reconciler_skips_job_without_active_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#204 窄化：workspace 无 active revision（NotFoundError）→ 跳过该 job、
+    pass 继续（返回 0 而不是上抛）。"""
+    job = _seed_job()
+    # 无快照 + 无 active revision → require_workspace_active_definition 抛 NotFoundError
+    monkeypatch.setattr(job_artifact_maintenance, "definition_from_job_snapshot", lambda job: None)
+
+    job_db = _job_db(job)
+    job_db.get_active_workflow_revision = lambda ws, key: None
+
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    assert reupload_missing(store, job_db, _settings(tmp_path)) == 0
+
+
+def test_reconciler_skips_job_with_unmappable_storage_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#204 窄化：storage_dir 无法映射进 data 根（ManagedPathError）→ 跳过。"""
+    job = _seed_job()
+    _definition(monkeypatch)
+    job["storage_dir"] = "/etc/passwd"  # 绝对路径无法回基到 data 根内
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    assert reupload_missing(store, _job_db(job), _settings(tmp_path)) == 0
+
+
+def test_reconciler_propagates_programming_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#204 窄化：定义解析抛出非预期编程错误（TypeError）→ 上抛给线程保命网，
+    不再被静默吞成「本 pass 零上传」。"""
+    job = _seed_job()
+
+    def _boom(job: dict[str, Any]) -> Any:
+        raise TypeError("parser bug")
+
+    monkeypatch.setattr(job_artifact_maintenance, "definition_from_job_snapshot", _boom)
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    with pytest.raises(TypeError, match="parser bug"):
+        reupload_missing(store, _job_db(job), _settings(tmp_path))
+
+
+def test_reconciler_survives_upload_failure_and_continues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#204 保留补强：单产物上传失败（存储异常）→ warning 日志、其余产物
+    继续上传，pass 不中断（reconciler 即重试机制）。"""
+    job = _seed_job()
+    definition = SimpleNamespace(nodes={"n1": SimpleNamespace(outputs=["a.json", "b.json"])})
+    monkeypatch.setattr(
+        job_artifact_maintenance, "definition_from_job_snapshot", lambda job: definition
+    )
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    job_dir = tmp_path / "jobs" / "ws" / "job-1"
+    job_dir.mkdir(parents=True)
+    (job_dir / "a.json").write_bytes(OLD_PAYLOAD)
+    (job_dir / "b.json").write_bytes(OLD_PAYLOAD)
+    real_upload = store.upload
+
+    def _flaky_upload(**kwargs: Any) -> Any:
+        if kwargs["name"] == "a.json":
+            raise RuntimeError("storage outage")
+        return real_upload(**kwargs)
+
+    monkeypatch.setattr(store, "upload", _flaky_upload)
+
+    with caplog.at_level("WARNING", logger="server.app.services.job_artifact_maintenance"):
+        assert reupload_missing(store, _job_db(job), _settings(tmp_path)) == 1
+
+    # b.json 上传成功；a.json 的失败被 warning 记录（含 job 上下文）
+    assert storage.objects["jobs/ws-1/job-1/b.json"] == OLD_PAYLOAD
+    assert "jobs/ws-1/job-1/a.json" not in storage.objects
+    assert any("reconciler re-upload failed" in record.message for record in caplog.records)
+
+
+def test_reconciler_skips_job_with_corrupt_active_revision_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex review on PR #251: an active revision whose definition_json is
+    corrupt (JSONDecodeError / WorkflowDefinitionError — the #243 family) must
+    skip that job, not abort the reconciler pass (which would also stall
+    eviction for every other job)."""
+
+    class _CorruptRevision(dict):
+        pass
+
+    job = _seed_job()
+    monkeypatch.setattr(job_artifact_maintenance, "definition_from_job_snapshot", lambda job: None)
+    job_db = _job_db(job)
+    # definition_json 不是合法 JSON → json.loads 抛 JSONDecodeError
+    job_db.get_active_workflow_revision = lambda ws, key: {"definition_json": "{not valid json"}
+
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    assert reupload_missing(store, job_db, _settings(tmp_path)) == 0
+
+
+def test_reconciler_skips_job_with_non_mapping_revision_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex round-2 on PR #251: a revision whose definition_json parses as
+    valid JSON but a non-mapping top level ([], null) used to escape the
+    narrow catch as AttributeError (payload.get) and abort the whole pass —
+    now the shape guard in snapshot_shape converts it to
+    WorkflowDefinitionError and the job is skipped."""
+    job = _seed_job()
+    monkeypatch.setattr(job_artifact_maintenance, "definition_from_job_snapshot", lambda job: None)
+    job_db = _job_db(job)
+    job_db.get_active_workflow_revision = lambda ws, key: {"definition_json": "[]"}
+
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    assert reupload_missing(store, job_db, _settings(tmp_path)) == 0
+
+
+def test_reconciler_propagates_parser_valueerror_not_swallowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex round-3 on PR #251: a plain ValueError from a definition-parser
+    bug must propagate (the job's artifacts must not be silently stranded),
+    unlike the #243-family JSON corruption which skips per-job."""
+    job = _seed_job()
+    monkeypatch.setattr(job_artifact_maintenance, "definition_from_job_snapshot", lambda job: None)
+
+    def _boom(job_db, workspace_id, workflow_key):
+        raise ValueError("parser implementation bug")
+
+    monkeypatch.setattr(job_artifact_maintenance, "require_workspace_active_definition", _boom)
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    with pytest.raises(ValueError, match="parser implementation bug"):
+        reupload_missing(store, _job_db(job), _settings(tmp_path))
+
+
+def test_reconciler_skips_job_on_os_resolve_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR #251 review P2-2: _PATH_FAILURES (OSError/RuntimeError from
+    resolve_job_dir — permissions, symlink loops) must skip just that job;
+    narrowing it back to ManagedPathError alone would turn red here."""
+    job = _seed_job()
+    _definition(monkeypatch)
+
+    def _boom(job, jobs_dir):
+        raise RuntimeError("symlink loop detected")
+
+    monkeypatch.setattr(job_artifact_maintenance, "resolve_job_dir", _boom)
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    assert reupload_missing(store, _job_db(job), _settings(tmp_path)) == 0

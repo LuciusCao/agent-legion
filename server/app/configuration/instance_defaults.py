@@ -2,15 +2,12 @@
 
 bootstrap/security-level keys are env-only with these code defaults (= the
 last tracked yaml values); cleanup/monitoring are hydrated from the DB
-instance settings document when one exists. The retired ``openclaw:`` yaml
-section defaults live in ``openclaw_defaults.py``.
+instance settings document when one exists.
 """
 
 from __future__ import annotations
 
 from typing import Any
-
-from server.app.configuration.openclaw_defaults import apply_openclaw_config_defaults
 
 DEFAULT_DATABASE_URL = "postgresql://127.0.0.1:5432/agent_legion"
 DEFAULT_DATA_DIR = "data"
@@ -28,8 +25,7 @@ def apply_instance_config_defaults(config: dict[str, Any]) -> None:
     Consumers (CleanupConfig, OpsMetricsService, WorkflowMaintenance) read
     these sections from the config dict; explicit single-file configs may
     still carry them, so only missing keys are filled. ``server.cors``
-    defaults stay in ``CorsSettings`` and are not written here. The retired
-    ``openclaw:`` section is filled the same way (see openclaw_defaults.py).
+    defaults stay in ``CorsSettings`` and are not written here.
     """
     config.setdefault("data_dir", DEFAULT_DATA_DIR)
     sections = (
@@ -43,4 +39,3 @@ def apply_instance_config_defaults(config: dict[str, Any]) -> None:
             config[section] = node = {}
         for key, value in defaults.items():
             node.setdefault(key, value)
-    apply_openclaw_config_defaults(config)

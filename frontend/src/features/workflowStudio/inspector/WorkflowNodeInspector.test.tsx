@@ -112,7 +112,7 @@ const yamlWithoutStart = [
 ].join('\n')
 
 function makeCompareSummary(
-  nodeType: 'start' | 'node'
+  nodeType: 'start' | 'code'
 ): ChangeSummaryViewModel {
   return {
     createsRevision: true,
@@ -179,7 +179,7 @@ describe('WorkflowNodeInspector compare fallback for a synthetic start ghost', (
   it('does not synthesize details for a non-start node change', () => {
     renderInspector('_start', {
       definitionYaml: yamlWithoutStart,
-      compareSummary: makeCompareSummary('node'),
+      compareSummary: makeCompareSummary('code'),
     })
 
     expect(screen.getByText('未加载 workflow')).toBeInTheDocument()

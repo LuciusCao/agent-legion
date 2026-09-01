@@ -40,8 +40,8 @@ def vault_key(monkeypatch):
 
 @pytest.fixture
 def services(job_db, settings, vault_key):
-    connections = ConnectionService(job_db.path, settings.config)
-    tokens = ConnectionTokenService(job_db.path, settings.config)
+    connections = ConnectionService(job_db.dsn_identity, settings.config)
+    tokens = ConnectionTokenService(job_db.dsn_identity, settings.config)
     return connections, tokens
 
 

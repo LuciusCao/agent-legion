@@ -103,13 +103,19 @@ def test_code_claim_requires_declared_code_capacity(job_db) -> None:
     assert row["state"] == "queued"
 
 
-def test_code_claim_requires_matching_capability(job_db) -> None:
+def test_code_claim_ignores_capability_mismatch(job_db) -> None:
+    """Issue #284: code claim admission is protocol version + code pool
+    capacity + workspace ACL — capabilities no longer gate anything."""
     broker = _broker(job_db.jobs_dir.parent)
     _insert_code_job_rows(job_db, job_id="job-1")
-    _enqueue_code(broker, job_id="job-1")
+    execution_id = _enqueue_code(broker, job_id="job-1")
     _register_code_worker(capabilities=["other-capability"])
 
-    assert broker.claim("worker-code") is None
+    claimed = broker.claim("worker-code")
+
+    assert claimed is not None
+    assert claimed.kind == "code"
+    assert claimed.execution_id == execution_id
 
 
 def test_code_pool_full_skips_code_but_not_agent_candidates(job_db) -> None:

@@ -212,9 +212,9 @@ def test_persist_node_run_usage_creates_row(tmp_path):
             ("ws-1", "Test"),
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-            "values (%s, %s, %s, %s, %s) on conflict (id) do nothing",
-            ("job-1", "ws-1", "wf", "source", "id"),
+            "insert into jobs(id, workspace_id, source_type, source_id) "
+            "values (%s, %s, %s, %s) on conflict (id) do nothing",
+            ("job-1", "ws-1", "source", "id"),
         )
         conn.execute(
             "insert into node_runs(id, job_id, node_key, status) values (%s, %s, %s, %s)"

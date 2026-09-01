@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   Button,
   Dialog,
@@ -5,8 +6,11 @@ import {
   DialogContent,
   DialogTitle,
 } from '@mui/material'
-import { JsonTree } from '../JsonTree'
-import { tryParseJson } from '../../lib/parsers'
+import {
+  ArtifactPreviewBody,
+  ArtifactPreviewModeToggle,
+  type ArtifactPreviewMode,
+} from './ArtifactRenderedPreview'
 import styles from './ArtifactPreviewDialog.module.css'
 
 export interface ArtifactPreviewDialogProps {
@@ -22,9 +26,9 @@ export function ArtifactPreviewDialog({
   content,
   onClose,
 }: ArtifactPreviewDialogProps) {
-  if (!open) return null
+  const [mode, setMode] = useState<ArtifactPreviewMode>('rendered')
 
-  const parsedJson = name.endsWith('.json') ? tryParseJson(content) : null
+  if (!open) return null
 
   return (
     <Dialog
@@ -33,13 +37,17 @@ export function ArtifactPreviewDialog({
       maxWidth={false}
       PaperProps={{ sx: { maxWidth: '900px', width: '95vw' } }}
     >
-      <DialogTitle>{name}</DialogTitle>
+      <DialogTitle className={styles.title}>
+        <span className={styles.titleName}>{name}</span>
+        <ArtifactPreviewModeToggle name={name} mode={mode} onMode={setMode} />
+      </DialogTitle>
       <DialogContent className={styles.content}>
-        {parsedJson !== null ? (
-          <JsonTree data={parsedJson} />
-        ) : (
-          <pre className={styles.pre}>{content}</pre>
-        )}
+        <ArtifactPreviewBody
+          name={name}
+          content={content}
+          mode={mode}
+          preClassName={styles.pre}
+        />
       </DialogContent>
       <DialogActions>
         <Button variant="text" onClick={onClose}>

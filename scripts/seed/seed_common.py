@@ -153,6 +153,19 @@ def secret_like_fields(obj: Any, path: str = "$") -> list[str]:
     return hits
 
 
+def lock_entry_refs(entry: dict[str, Any], default_ref: str | None = None) -> dict[str, str]:
+    # ref -> commit pins of one skill lock entry; tolerates both lock shapes
+    # (issue #76): v2 {repo, refs: {ref: commit}} and the legacy v1 {repo,
+    # ref, commit} (a ref-less v1 entry is read as pinning ``default_ref``).
+    refs = entry.get("refs")
+    if isinstance(refs, dict):
+        return {str(ref): str(commit) for ref, commit in refs.items()}
+    commit = str(entry.get("commit") or "")
+    if not commit:
+        return {}
+    return {str(entry.get("ref") or default_ref or ""): commit}
+
+
 def validate_seed(
     seed: dict[str, Any],
     forbidden_prefixes: tuple[str, ...] = DEFAULT_FORBIDDEN_IMPORT_PREFIXES,
@@ -234,19 +247,13 @@ def validate_seed(
         if not isinstance(skills, dict):
             problems.append("skills must be a mapping")
         else:
-            sources = skills.get("sources") or {}
             lock = (skills.get("lock") or {}).get("skills") or {}
-            if sorted(sources) != sorted(lock):
-                problems.append("skills.sources keys differ from skills.lock keys")
             for key, locked in lock.items():
-                commit = str((locked or {}).get("commit") or "")
-                if len(commit) != 40 or any(c not in "0123456789abcdef" for c in commit):
-                    problems.append(f"skill {key!r}: lock commit is not a 40-hex sha")
-            for key, source in sources.items():
-                if not str((source or {}).get("repo") or "") or not str(
-                    (source or {}).get("ref") or ""
-                ):
-                    problems.append(f"skill {key!r}: source missing repo/ref")
+                for ref, commit in lock_entry_refs(locked or {}).items():
+                    if len(commit) != 40 or any(c not in "0123456789abcdef" for c in commit):
+                        problems.append(
+                            f"skill {key!r} ref {ref!r}: lock commit is not a 40-hex sha"
+                        )
 
     for hit in secret_like_fields(seed):
         problems.append(

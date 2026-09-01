@@ -96,11 +96,13 @@ class QualitySamplingService:
     ) -> dict[str, Any]:
         """Create a batch and snapshot up to ``sample_size`` matching runs."""
         resolved_seed = seed or uuid.uuid4().hex
+        # #211 Phase 3 (read-layer binding): the candidate filter keys on
+        # jobs.workspace_id alone — workflow_key equals it on every row (v62
+        # binding), so the column predicate was redundant. The parameter
+        # stays for the quality_sample_batches insert (column drops in
+        # Phase 4).
         clauses = ["jobs.workspace_id = %s"]
         params: list[Any] = [workspace_id]
-        if workflow_key:
-            clauses.append("jobs.workflow_key = %s")
-            params.append(workflow_key)
         if node_keys:
             clauses.append("node_runs.node_key = any(%s)")
             params.append(list(node_keys))

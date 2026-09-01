@@ -25,9 +25,7 @@ from server.app.db.schema import init_db
 from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.services.agent_service import reset_published_agent_cache
-from server.app.services.skill_source_store import SkillSourceStore
 from server.app.settings import load_settings
-from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_SOURCES
 
 # Test Agent catalog: Agent definitions are workspace-scoped (schema v46), so
 # there is no global seed here — workspaces do not exist at schema-reset time.
@@ -44,14 +42,9 @@ from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_
 # revision nodes, and the runtime registry is the single implicit code pool.
 
 
-# Test skill sources: the built-in constants (retired config/skills.yaml +
-# skills.lock transcription) re-seeded into global_settings after every
-# TRUNCATE, mirroring the app startup seed so DB-driven skill resolution
-# (SkillManager, skill catalog) sees the pinned skills.
-def _seed_skill_sources() -> None:
-    store = SkillSourceStore(TEST_DATABASE_URL)
-    store.put_sources(BUILTIN_SKILL_SOURCES.model_copy(deep=True))
-    store.put_lock(BUILTIN_SKILL_LOCK.model_copy(deep=True))
+# Test skill lock: none. The skill_sources registry is retired (#322) and the
+# lock starts empty — pinned refs auto-lock on first dispatch; tests that
+# need a frozen pin seed global_settings themselves.
 
 
 # Deterministic pricing seeded into global_settings after every TRUNCATE (see
@@ -128,7 +121,7 @@ def pytest_configure() -> None:
 # Files that connect to PostgreSQL directly instead of through a root fixture.
 # Keep this inventory explicit so new direct consumers are visible in review;
 # fixture-based consumers are classified by _POSTGRES_FIXTURES below. Both
-# directions are enforced by tests/test_pytest_postgres_boundaries.py: a file
+# directions are enforced by tests/app/test_pytest_postgres_boundaries.py: a file
 # importing tests.postgres_support (or calling psycopg.connect) must be listed
 # in the manifest, and every listed path must still exist. The manifest lives
 # in config/architecture/postgres-test-files.json (#192).
@@ -388,14 +381,12 @@ def _isolate_postgres_database(_assert_shared_app_invariants, request):
     if fresh:
         _rebuild_schema()
         reset_published_agent_cache()
-        _seed_skill_sources()
         _capture_seed_snapshot()
     else:
         close_database_pools()
         replayed = _reset_schema_data()
         reset_published_agent_cache()
         if not replayed:
-            _seed_skill_sources()
             _capture_seed_snapshot()
     yield
     if fresh:
@@ -418,7 +409,7 @@ def _assert_shared_app_invariants():
     conftest declares ``_assert_shared_app_invariants`` as its first
     parameter. That makes the ordering an explicit dependency chain instead
     of alphabetical fixture-name sorting; the structure is enforced by
-    tests/test_pytest_postgres_boundaries.py. fresh=True apps are private
+    tests/app/test_pytest_postgres_boundaries.py. fresh=True apps are private
     and never tracked.
     """
     _SHARED_APP_USAGE.clear()

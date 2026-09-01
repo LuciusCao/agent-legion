@@ -29,7 +29,8 @@ data/  (videos, logs, packages, jobs, run traces)
 关键设计规则（由架构检查强制，见仓库根 [AGENTS.md](../../AGENTS.md) 与
 [workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md)）：
 
-- Workflow 节点只声明 `capability` —— agent/skill 接线在 Agent 定义里，code
+- Workflow 节点声明 `capability`（agent 路由节点另可声明 `skill` 内容绑定，
+  `key` + 可选 `ref`，#76）—— agent 接线在 Agent 定义里，code
   节点解析到已发布的 `node_code`。
 - Route 是薄 HTTP 适配层；业务逻辑在 service；executor 一律经 lease 申请容量。
 - 前端 transport 类型从后端 OpenAPI schema 生成
@@ -70,3 +71,7 @@ banner 标注了后续演进对其中结论的修订。
 | [velites-m2-validation.md](velites-m2-validation.md) | 时点报告（2026-07-31）：velites 与 Node pi 真 gateway 对照验证 |
 | [risk-review-2026-06-13.md](risk-review-2026-06-13.md) | 2026-06-13 时点架构风险快照 |
 | [risk-review-2026-07-18.md](risk-review-2026-07-18.md) | 2026-07-18 架构 Review：扩展性、可维护性与分布式演进路线 |
+| [workflow-key-retirement-inventory.md](workflow-key-retirement-inventory.md) | `workflow_key` 退役盘点（issue #211 Phase 1 产出，退役执行的输入清单） |
+
+索引完整性约定：本目录新增 `.md` 文件必须同时登记进「现行文档」或
+「历史设计记录」其中一张表（PR 检查项）；未登记的文件视为索引债。

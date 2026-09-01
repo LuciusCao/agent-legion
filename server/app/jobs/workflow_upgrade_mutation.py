@@ -12,6 +12,7 @@ def upgrade_job_workflow(
     workflow_definition_hash: str,
     workflow_definition_snapshot_json: str,
     node_keys: list[str],
+    frozen_config_json: str | None = None,
 ) -> None:
     conn.execute("delete from job_nodes where job_id=%s", (job_id,))
     for node_key in node_keys:
@@ -31,6 +32,7 @@ def upgrade_job_workflow(
             workflow_version=%s,
             workflow_definition_hash=%s,
             workflow_definition_snapshot_json=%s,
+            frozen_config_json=%s,
             execution_mode='full',
             target_node_key=null,
             execution_paused=0,
@@ -43,6 +45,7 @@ def upgrade_job_workflow(
             workflow_version,
             workflow_definition_hash,
             workflow_definition_snapshot_json,
+            frozen_config_json,
             job_id,
         ),
     )

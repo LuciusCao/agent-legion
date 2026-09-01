@@ -125,29 +125,29 @@ const workflowWithStart: WorkflowDefinitionRecord = {
 describe('workflowNodes', () => {
   describe('nodesForJob', () => {
     it('returns nodes from workflowNodesByKey when available', () => {
-      const job = makeJob({ workflow_key: 'question_content' })
+      const job = makeJob({ workspace_id: 'question_content' })
       expect(nodesForJob(job, workflowNodesByKey, null)).toEqual(workflow.nodes)
     })
 
     it('falls back to workflowDefinition when key matches', () => {
-      const job = makeJob({ workflow_key: 'question_content' })
+      const job = makeJob({ workspace_id: 'question_content' })
       expect(nodesForJob(job, null, workflow)).toEqual(workflow.nodes)
     })
 
     it('prefers workflowNodesByKey over workflowDefinition', () => {
-      const job = makeJob({ workflow_key: 'question_content' })
+      const job = makeJob({ workspace_id: 'question_content' })
       expect(nodesForJob(job, workflowNodesByKey, otherWorkflow)).toEqual(
         workflow.nodes
       )
     })
 
     it('returns null when workflow is unknown', () => {
-      const job = makeJob({ workflow_key: 'unknown' })
+      const job = makeJob({ workspace_id: 'unknown' })
       expect(nodesForJob(job, workflowNodesByKey, workflow)).toBeNull()
     })
 
     it('filters out start nodes', () => {
-      const job = makeJob({ workflow_key: 'question_content' })
+      const job = makeJob({ workspace_id: 'question_content' })
       const nodes = nodesForJob(job, null, workflowWithStart)
       expect(nodes).toEqual(workflow.nodes)
       expect(nodes?.some((n) => n.key === '_start')).toBe(false)
@@ -160,19 +160,19 @@ describe('workflowNodes', () => {
     })
 
     it('returns all nodes for a single known workflow', () => {
-      const jobs = [makeJob({ workflow_key: 'question_content' })]
+      const jobs = [makeJob({ workspace_id: 'question_content' })]
       expect(computeOrderedNodes(jobs, workflow, null)).toEqual(workflow.nodes)
     })
 
     it('returns nodes from workflowNodesByKey when definition is omitted', () => {
-      const jobs = [makeJob({ workflow_key: 'question_content' })]
+      const jobs = [makeJob({ workspace_id: 'question_content' })]
       expect(computeOrderedNodes(jobs, null, workflowNodesByKey)).toEqual(
         workflow.nodes
       )
     })
 
     it('returns an empty array when no job has a known workflow', () => {
-      const jobs = [makeJob({ workflow_key: 'unknown' })]
+      const jobs = [makeJob({ workspace_id: 'unknown' })]
       expect(computeOrderedNodes(jobs, workflow, workflowNodesByKey)).toEqual(
         []
       )
@@ -180,8 +180,8 @@ describe('workflowNodes', () => {
 
     it('returns the intersection of common nodes across multiple workflows', () => {
       const jobs = [
-        makeJob({ id: 'j1', workflow_key: 'question_content' }),
-        makeJob({ id: 'j2', workflow_key: 'other_workflow' }),
+        makeJob({ id: 'j1', workspace_id: 'question_content' }),
+        makeJob({ id: 'j2', workspace_id: 'other_workflow' }),
       ]
       const result = computeOrderedNodes(jobs, workflow, workflowNodesByKey)
       expect(result).toHaveLength(1)
@@ -190,15 +190,15 @@ describe('workflowNodes', () => {
 
     it('preserves the order of the first job’s nodes', () => {
       const jobs = [
-        makeJob({ id: 'j1', workflow_key: 'question_content' }),
-        makeJob({ id: 'j2', workflow_key: 'other_workflow' }),
+        makeJob({ id: 'j1', workspace_id: 'question_content' }),
+        makeJob({ id: 'j2', workspace_id: 'other_workflow' }),
       ]
       const result = computeOrderedNodes(jobs, workflow, workflowNodesByKey)
       expect(result.map((n) => n.key)).toEqual(['extract'])
     })
 
     it('excludes start nodes so rerun/run-to dialogs default to an executable node', () => {
-      const jobs = [makeJob({ workflow_key: 'question_content' })]
+      const jobs = [makeJob({ workspace_id: 'question_content' })]
       const result = computeOrderedNodes(jobs, workflowWithStart, null)
       expect(result.map((n) => n.key)).toEqual([
         'extract',
@@ -212,7 +212,7 @@ describe('workflowNodes', () => {
       const jobs = [
         makeJob({
           id: 'j1',
-          workflow_key: 'question_content',
+          workspace_id: 'question_content',
           node_summaries: [
             {
               node_key: 'extract',
@@ -224,7 +224,7 @@ describe('workflowNodes', () => {
         }),
         makeJob({
           id: 'j2',
-          workflow_key: 'question_content',
+          workspace_id: 'question_content',
           node_summaries: [],
         }),
       ]
@@ -243,10 +243,10 @@ describe('workflowNodes', () => {
       const jobs = [
         makeJob({
           id: 'j1',
-          workflow_key: 'question_content',
+          workspace_id: 'question_content',
           source_id: 'Q1',
         }),
-        makeJob({ id: 'j2', workflow_key: 'other_workflow', source_id: 'Q2' }),
+        makeJob({ id: 'j2', workspace_id: 'other_workflow', source_id: 'Q2' }),
       ]
       const result = excludedJobs(
         jobs,
@@ -260,8 +260,8 @@ describe('workflowNodes', () => {
 
     it('returns all jobs when the node key is unknown', () => {
       const jobs = [
-        makeJob({ id: 'j1', workflow_key: 'question_content' }),
-        makeJob({ id: 'j2', workflow_key: 'other_workflow' }),
+        makeJob({ id: 'j1', workspace_id: 'question_content' }),
+        makeJob({ id: 'j2', workspace_id: 'other_workflow' }),
       ]
       const result = excludedJobs(jobs, 'unknown', workflowNodesByKey, workflow)
       expect(result).toHaveLength(2)
@@ -269,8 +269,8 @@ describe('workflowNodes', () => {
 
     it('returns no jobs when every job contains the node key', () => {
       const jobs = [
-        makeJob({ id: 'j1', workflow_key: 'question_content' }),
-        makeJob({ id: 'j2', workflow_key: 'other_workflow' }),
+        makeJob({ id: 'j1', workspace_id: 'question_content' }),
+        makeJob({ id: 'j2', workspace_id: 'other_workflow' }),
       ]
       const result = excludedJobs(jobs, 'extract', workflowNodesByKey, workflow)
       expect(result).toHaveLength(0)
@@ -278,8 +278,8 @@ describe('workflowNodes', () => {
 
     it('excludes jobs with unknown workflows', () => {
       const jobs = [
-        makeJob({ id: 'j1', workflow_key: 'question_content' }),
-        makeJob({ id: 'j2', workflow_key: 'unknown' }),
+        makeJob({ id: 'j1', workspace_id: 'question_content' }),
+        makeJob({ id: 'j2', workspace_id: 'unknown' }),
       ]
       const result = excludedJobs(jobs, 'extract', workflowNodesByKey, workflow)
       expect(result).toHaveLength(1)

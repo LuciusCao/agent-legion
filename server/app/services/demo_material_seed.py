@@ -25,6 +25,9 @@ import logging
 import uuid
 from typing import TYPE_CHECKING
 
+import psycopg
+from botocore.exceptions import BotoCoreError, ClientError
+
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.storage import ObjectStorage, build_s3_storage
@@ -113,7 +116,15 @@ def seed_demo_workspace_materials(
                         storage_key,
                     ),
                 )
-        except Exception:
+        except (ClientError, BotoCoreError, OSError, psycopg.Error):
+            # #204: the seeding loop's failure space is the boto3 data plane
+            # (object put), the DB write (psycopg.Error — DB writes raise it, not OSError, codex on #264), and the
+            # read of the source markdown (OSError). All are transient
+            # infrastructure failures the module docstring already frames as
+            # "degrade with a warning, the next seed call completes the
+            # rest"; an abort (not skip) is correct because the loop's
+            # idempotency key is per-file, so a partial seed resumes cleanly.
+            # Programming errors propagate to the workspace-creation caller.
             logger.warning(
                 "demo material seed aborted for workspace %s at %s (object store "
                 "unreachable?); seeded so far: %d",

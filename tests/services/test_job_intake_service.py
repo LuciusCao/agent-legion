@@ -210,7 +210,7 @@ def test_job_intake_freezes_node_code_versions(job_db, settings):
     from server.app.services.node_codes import NodeCodeService
 
     workspace = _create_workspace_with_revision(job_db, settings)
-    codes = NodeCodeService(job_db.path)
+    codes = NodeCodeService(job_db.dsn_identity)
     codes.save_draft(
         workspace["id"],
         "education_video_problems_generation",

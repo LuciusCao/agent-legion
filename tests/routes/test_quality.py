@@ -23,9 +23,11 @@ def _seed_runs() -> None:
             [("completed", "node-a"), ("completed", "node-a"), ("failed", "node-b")]
         ):
             job_id = f"job-{index}"
+            # v62 invariant: workflow_key == workspace id (the batch-create
+            # default derives the filter from the path workspace_id).
             conn.execute(
-                "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-                " values (%s, %s, 'wf-a', 'test', %s)",
+                "insert into jobs(id, workspace_id, source_type, source_id)"
+                " values (%s, %s, 'test', %s)",
                 (job_id, WORKSPACE, job_id),
             )
             conn.execute(
@@ -124,9 +126,10 @@ def test_stats_confusion_matrix(client):
         ]
         for index, (node_key, status, failure_detail) in enumerate(runs):
             job_id = f"job-cm-{index}"
+            # v62 invariant: workflow_key == workspace id.
             conn.execute(
-                "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-                " values (%s, %s, 'wf-a', 'test', %s)",
+                "insert into jobs(id, workspace_id, source_type, source_id)"
+                " values (%s, %s, 'test', %s)",
                 (job_id, WORKSPACE, job_id),
             )
             conn.execute(
@@ -203,3 +206,45 @@ def test_anonymous_access_rejected(anon_client):
         json={"name": "b", "sample_size": 5},
     )
     assert response.status_code == 401
+
+
+def test_create_batch_without_workflow_key_defaults_to_workspace_id(client):
+    """#211 Phase 2 第二批：缺省 workflow_key 由服务端从 path 推导。
+
+    缺省（推导为 workspace id，即 v62 恒等值）命中 _seed_runs 的全部 3 行；
+    显式传恒等 key 是 no-op；显式传不匹配 key 在 Phase 3 读法绑定后是 400
+    （不匹配的 key 不可能存在于该 workspace，v62 绑定——不再静默收窄为 0 行）。
+    """
+    _seed_runs()
+    absent = client.post(
+        f"{BASE}/sample-batches",
+        json={"name": "absent-key", "sample_size": 10, "seed": "seed-absent"},
+    )
+    assert absent.status_code == 200, absent.text
+    assert absent.json()["sampled_count"] == 3
+    assert absent.json()["workflow_key"] == WORKSPACE
+
+    equal = client.post(
+        f"{BASE}/sample-batches",
+        json={
+            "name": "explicit-key",
+            "workflow_key": WORKSPACE,
+            "sample_size": 10,
+            "seed": "seed-explicit",
+        },
+    )
+    assert equal.status_code == 200, equal.text
+    assert equal.json()["sampled_count"] == 3
+    assert equal.json()["workflow_key"] == WORKSPACE
+
+    mismatched = client.post(
+        f"{BASE}/sample-batches",
+        json={
+            "name": "mismatched-key",
+            "workflow_key": "legacy_wf_a",
+            "sample_size": 10,
+            "seed": "seed-mismatched",
+        },
+    )
+    assert mismatched.status_code == 400, mismatched.text
+    assert "workflow_key must equal the workspace id" in mismatched.json()["detail"]

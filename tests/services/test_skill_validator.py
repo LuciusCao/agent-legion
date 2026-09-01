@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from server.app.services.skill_validator import SkillValidator
-from server.app.skills.config import LockedSkillSource, SkillsLock
+from server.app.skills.config import LockedSkill, SkillsLock
 
 pytestmark = pytest.mark.no_db
 
@@ -52,9 +52,7 @@ def base_dir(tmp_path):
 
 def test_validate_happy_path_with_tags(base_dir, tmp_path) -> None:
     skill_dir = _make_skill(base_dir, "wf/review", tags=["v1.0.0", "v1.10.0", "v1.2.0"])
-    lock = SkillsLock(
-        skills={"wf/review": LockedSkillSource(repo="local", ref="v1.2.0", commit="abc123")}
-    )
+    lock = SkillsLock(skills={"wf/review": LockedSkill(repo="local", refs={"v1.2.0": "abc123"})})
 
     result = SkillValidator(base_dir, lambda: lock).validate(str(skill_dir))
 
@@ -63,7 +61,31 @@ def test_validate_happy_path_with_tags(base_dir, tmp_path) -> None:
     # version:refname sort keeps semver order, latest first.
     assert result.tags == ("v1.10.0", "v1.2.0", "v1.0.0")
     assert result.latest_tag == "v1.10.0"
+    # No sources seam wired: the sole pin is the unambiguous locked ref.
     assert result.locked_ref == "v1.2.0"
+
+
+def test_locked_ref_reports_the_sole_pin(base_dir, tmp_path) -> None:
+    """#322: without the retired source registry there is no declared default
+    ref — a sole pin is the unambiguous locked-ref display answer."""
+    skill_dir = _make_skill(base_dir, "wf/review", tags=["v1.0.0", "v1.2.0"])
+    lock = SkillsLock(skills={"wf/review": LockedSkill(repo="local", refs={"v1.0.0": "a" * 40})})
+
+    result = SkillValidator(base_dir, lambda: lock).validate(str(skill_dir))
+    assert result.locked_ref == "v1.0.0"
+
+
+def test_locked_ref_is_none_with_ambiguous_pins(base_dir, tmp_path) -> None:
+    """Multiple pinned refs have no unambiguous "locked" answer anymore."""
+    skill_dir = _make_skill(base_dir, "wf/review", tags=["v1.0.0", "v1.2.0"])
+    lock = SkillsLock(
+        skills={
+            "wf/review": LockedSkill(repo="local", refs={"v1.0.0": "a" * 40, "v1.2.0": "b" * 40})
+        }
+    )
+
+    result = SkillValidator(base_dir, lambda: lock).validate(str(skill_dir))
+    assert result.locked_ref is None
 
 
 def test_validate_expands_home(monkeypatch, base_dir, tmp_path) -> None:

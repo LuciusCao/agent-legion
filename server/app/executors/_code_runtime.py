@@ -19,6 +19,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from server.app.config_schema import node_safe_settings_config
+from server.app.db.dialect import resolve_dsn
 from server.app.executors.cancellation import CancellationToken
 from server.app.executors.models import ExecutionContext
 from server.app.services.connection_tokens import ConnectionTokenService
@@ -87,6 +88,13 @@ def _prefetch_skill_versions(executor: CodeExecutor, context: ExecutionContext) 
     try:
         runs = job_db.list_node_runs(job_id)
     except Exception:
+        # #204 broad-except audit: deliberate degradation, per the module
+        # contract above — a transient DB error must not fail the node over
+        # an AUDIT input (skill versions), so the mapping degrades to empty
+        # and the node runs without the version hints. list_node_runs is a
+        # bare SQL read with no business exception family; exc_info keeps
+        # the DB root cause visible at debug level (this is a soft input,
+        # not worth an operator-facing error).
         logger.debug("list_node_runs failed for job %s", job_id, exc_info=True)
         return {}
     return {
@@ -123,10 +131,23 @@ def consume_auth_failure_marker(executor: CodeExecutor, context: ExecutionContex
             marker.unlink(missing_ok=True)
     if not key and isinstance(context.node_config, Mapping):
         key = str(context.node_config.get("connection") or "").strip()
-    dsn = str(getattr(executor.job_db, "path", "") or "").strip()
+    # #280: the DSN for the privileged token invalidation comes from
+    # `resolve_dsn` (the ConnectSource normalizer, #187) instead of a
+    # getattr escape hatch on whatever shape `job_db` happens to be. A
+    # missing DSN still degrades to the same no-op (job_db-less tests,
+    # plain objects) as the retired getattr default.
+    dsn = resolve_dsn(executor.job_db).strip() if executor.job_db is not None else ""
     if not key or not dsn:
         return
     try:
         ConnectionTokenService(dsn).report_auth_failure(key)
     except Exception:  # reporting must never mask the node's own failure
+        # #204 broad-except audit: post-node privileged action. The node's
+        # result (completed/failed, artifacts) is already determined and this
+        # runs after the child exits, so an invalidation failure — the delete
+        # above is a bare SQL write — must not convert a finished node into
+        # a thrown error and lose the result. The consequence is bounded and
+        # self-healing: the stale cached token is rejected again on the next
+        # upstream auth failure and re-reported; logger.exception keeps the
+        # traceback. Caller is the executor's output path, not a retry loop.
         logger.exception("connection %s: failed to report auth failure", key)

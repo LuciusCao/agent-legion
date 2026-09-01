@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import threading
 import time
@@ -18,36 +17,12 @@ from server.app.services.materials import (
     MaterialStorageUnavailableError,
     MaterialVerificationError,
 )
-from server.app.storage import ObjectHead
+from tests.fakes.storage import FakeObjectStorage
+
+FakeStorage = FakeObjectStorage
 
 WORKSPACE_ID = "ws-materials"
 OTHER_WORKSPACE_ID = "ws-materials-other"
-
-
-class FakeStorage:
-    """In-memory ObjectStorage test double; never touches the network."""
-
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {}
-        self.presigned: list[tuple[str, int]] = []
-        self.deleted: list[str] = []
-
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        self.presigned.append((storage_key, expires_seconds))
-        return f"https://s3.test/upload/{storage_key}"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        if payload is None:
-            return None
-        return ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        return io.BytesIO(self.objects[storage_key])
-
-    def delete_object(self, storage_key: str) -> None:
-        self.deleted.append(storage_key)
-        self.objects.pop(storage_key, None)
 
 
 def _sha256(payload: bytes) -> str:
@@ -67,7 +42,7 @@ def service(job_db, storage) -> MaterialsService:
             " values (%s, 'Materials', 'demo_workflow') on conflict(id) do nothing",
             (WORKSPACE_ID,),
         )
-    return MaterialsService(job_db.path, storage)
+    return MaterialsService(job_db.dsn_identity, storage)
 
 
 def _presign_ready(service: MaterialsService, storage: FakeStorage, payload: bytes) -> dict:
@@ -195,7 +170,7 @@ def test_complete_rejects_expired_material(service, job_db) -> None:
 
 
 def test_operations_require_configured_storage(job_db) -> None:
-    service = MaterialsService(job_db.path, None)
+    service = MaterialsService(job_db.dsn_identity, None)
 
     with pytest.raises(MaterialStorageUnavailableError):
         service.presign(WORKSPACE_ID, filename="x.txt", size_bytes=1)
@@ -246,9 +221,9 @@ def _insert_job_referencing(job_db, material_id: str, *, status: str = "queued")
     job_id = f"job-{material_id[:8]}-{status}"
     with job_db.connect() as conn:
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type,"
+            "insert into jobs(id, workspace_id, source_type,"
             " source_id, status, input_json)"
-            " values (%s, %s, 'demo_workflow', 'material', %s, %s, %s)",
+            " values (%s, %s, 'material', %s, %s, %s)",
             (
                 job_id,
                 WORKSPACE_ID,
@@ -295,9 +270,9 @@ def test_delete_ignores_unrelated_job_inputs(service, storage, job_db) -> None:
     _insert_job_referencing(job_db, "other-material")
     with job_db.connect() as conn:
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type,"
+            "insert into jobs(id, workspace_id, source_type,"
             " source_id, input_json)"
-            " values ('job-ref-item', %s, 'demo_workflow', 'ref', 'conn:ext', %s)",
+            " values ('job-ref-item', %s, 'ref', 'conn:ext', %s)",
             (WORKSPACE_ID, json.dumps({"type": "ref", "connection_key": "c"})),
         )
 
@@ -329,7 +304,7 @@ def test_delete_blocked_by_key_share_sees_committed_reference(service, storage, 
         except Exception as exc:  # 线程内意外失败也要带回主线程定位
             outcome.append(f"error:{exc!r}")
 
-    holder = connect_database(job_db.path)
+    holder = connect_database(job_db.dsn_identity)
     try:
         with holder:
             # 模拟 run 创建侧：对材料行持 KEY SHARE（未提交）。

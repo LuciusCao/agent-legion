@@ -8,7 +8,7 @@ create table if not exists workspaces (
   resource_config_json text not null default '{}',
   node_config_json text not null default '{}',
   default_entity text not null default 'question',
-  -- Retired at schema v63 (workspace_settings_retirement): still created here
+  -- Retired at schema v64 (workspace_settings_retirement): still created here
   -- so the v62 data migration can replay its insert on older databases; the
   -- post-chain cleanup in schema.py drops all four columns.
   intake_config_json text not null default '{}',
@@ -59,29 +59,26 @@ create table if not exists workspace_node_bindings (
 
 create table if not exists workspace_node_limits (
   workspace_id text not null references workspaces(id) on delete cascade,
-  workflow_key text not null,
   node_key text not null,
   concurrency_limit integer not null check(concurrency_limit > 0),
-  primary key(workspace_id, workflow_key, node_key)
+  primary key(workspace_id, node_key)
 );
 
 create table if not exists workspace_node_routes (
   workspace_id text not null references workspaces(id) on delete cascade,
-  workflow_key text not null,
   node_key text not null,
   target_kind text not null check(target_kind in ('handler_executor', 'agent')),
   target_id text not null,
-  primary key(workspace_id, workflow_key, node_key)
+  primary key(workspace_id, node_key)
 );
 
 create table if not exists workspace_node_capacities (
   workspace_id text not null references workspaces(id) on delete cascade,
-  workflow_key text not null,
   node_key text not null,
   max_concurrency integer not null check(max_concurrency > 0),
   source_revision_id text not null default '',
   updated_at timestamptz not null default current_timestamp,
-  primary key(workspace_id, workflow_key, node_key)
+  primary key(workspace_id, node_key)
 );
 
 -- Workspace-level Agent execution capacity (supersedes per-node
@@ -122,7 +119,6 @@ create table if not exists job_batches (
 create table if not exists runs (
   id text primary key,
   workspace_id text not null references workspaces(id) on delete cascade,
-  workflow_key text not null,
   source_kind text not null default '',
   status text not null default 'created',
   frozen_pins_json text not null default '{}',
@@ -138,7 +134,6 @@ create table if not exists runs (
 create table if not exists jobs (
   id text primary key,
   workspace_id text not null references workspaces(id) on delete cascade,
-  workflow_key text not null,
   source_type text not null,
   source_id text not null,
   run_id text not null default '',
@@ -199,7 +194,6 @@ create table if not exists executor_leases (
   executor_id text not null,
   workspace_id text not null references workspaces(id) on delete cascade,
   job_id text not null references jobs(id) on delete cascade,
-  workflow_key text not null,
   node_key text not null,
   node_run_id bigint not null references node_runs(id) on delete cascade,
   status text not null check(status in ('active', 'released', 'expired')),
@@ -222,14 +216,13 @@ create table if not exists workspace_packages (
 create table if not exists workflow_revisions (
   id text primary key,
   workspace_id text not null references workspaces(id) on delete cascade,
-  workflow_key text not null,
   version integer not null,
   status text not null check(status in ('draft', 'active', 'archived')),
   definition_json text not null,
   definition_hash text not null,
   created_at timestamptz not null default current_timestamp,
   published_at timestamptz,
-  unique(workspace_id, workflow_key, version)
+  unique(workspace_id, version)
 );
 
 -- Workflow catalog (schema v40) is retired at schema v50 (issue #112): the
@@ -312,7 +305,6 @@ create table if not exists agent_execution_requests (
   execution_id text primary key,
   workspace_id text not null references workspaces(id) on delete cascade,
   job_id text not null references jobs(id) on delete cascade,
-  workflow_key text not null,
   node_key text not null,
   -- Request flavor (schema v39): 'agent' rows carry an Agent payload and join
   -- versioned_entities at claim; 'code' rows carry a self-contained code
@@ -357,7 +349,7 @@ create index if not exists idx_agent_requests_queued_head
   on agent_execution_requests(workspace_id, kind, queued_at, execution_id)
   where state = 'queued';
 create index if not exists idx_agent_requests_node_active
-  on agent_execution_requests(workspace_id, workflow_key, node_key, state);
+  on agent_execution_requests(workspace_id, node_key, state);
 create index if not exists idx_agent_requests_worker_active
   on agent_execution_requests(worker_id, state);
 -- One active request per node; 'reporting' still owns the node until the
@@ -457,20 +449,21 @@ create index if not exists idx_job_batches_intake_queue
 create index if not exists idx_runs_workspace on runs(workspace_id, created_at);
 create index if not exists idx_runs_intake_queue
   on runs(status, updated_at) where status in ('queued', 'processing');
-create index if not exists idx_jobs_workflow_status on jobs(workflow_key, status);
+-- #211 M2: workspace-keyed twins of the retired workflow_key indexes.
+create index if not exists idx_jobs_workspace_status on jobs(workspace_id, status);
 -- Workflow worker incremental scan (list_changed_job_marks) filters by
--- workflow_key and updated_at > watermark on every poll pass.
-create index if not exists idx_jobs_workflow_updated on jobs(workflow_key, updated_at);
+-- workspace_id and updated_at > watermark on every poll pass; twin of the
+-- retired idx_jobs_workflow_updated (#211 Phase 3).
+create index if not exists idx_jobs_workspace_updated on jobs(workspace_id, updated_at);
 -- Workflow worker periodic full rescan (list_active_job_marks, schema v35):
--- filters active rows of one workflow ordered by created_at desc. Partial so
+-- filters active rows of one workspace ordered by created_at desc. Partial so
 -- terminal rows (the overwhelming majority on a busy instance) neither bloat
 -- the index nor force a seq scan + sort of the whole jobs table every pass.
-create index if not exists idx_jobs_active_marks
-  on jobs(workflow_key, created_at desc)
+-- Twin of the retired idx_jobs_active_marks (#211 Phase 3).
+create index if not exists idx_jobs_workspace_active_marks
+  on jobs(workspace_id, created_at desc)
   where status not in ('completed', 'failed');
-create index if not exists idx_jobs_workflow_source on jobs(workflow_key, source_type, source_id);
-create index if not exists idx_jobs_workspace_workflow_status on jobs(workspace_id, workflow_key, status);
-create index if not exists idx_jobs_workspace_workflow_source on jobs(workspace_id, workflow_key, source_type, source_id);
+create index if not exists idx_jobs_workspace_source on jobs(workspace_id, source_type, source_id);
 -- Snapshot pagination (list_jobs_paginated) and the legacy unbounded job list
 -- both filter by workspace and order by (created_at desc, id desc); without
 -- this index every page re-sorts all jobs of the workspace.
@@ -541,24 +534,23 @@ create trigger jobs_status_counts_sync
 -- Backfill lives in migrate_workspace_job_node_status_counts.
 create table if not exists workspace_job_node_status_counts (
   workspace_id text not null references workspaces(id) on delete cascade,
-  workflow_key text not null,
   node_key text not null,
   status text not null,
   cnt bigint not null,
-  primary key(workspace_id, workflow_key, node_key, status)
+  primary key(workspace_id, node_key, status)
 );
 create or replace function bump_job_node_status_counts(
-  p_workspace_id text, p_workflow_key text, p_node_key text, p_status text, p_delta bigint
+  p_workspace_id text, p_node_key text, p_status text, p_delta bigint
 ) returns void as $$
 begin
   if p_delta > 0 then
-    insert into workspace_job_node_status_counts(workspace_id, workflow_key, node_key, status, cnt)
-    values (p_workspace_id, p_workflow_key, p_node_key, p_status, p_delta)
-    on conflict (workspace_id, workflow_key, node_key, status)
+    insert into workspace_job_node_status_counts(workspace_id, node_key, status, cnt)
+    values (p_workspace_id, p_node_key, p_status, p_delta)
+    on conflict (workspace_id, node_key, status)
     do update set cnt = workspace_job_node_status_counts.cnt + p_delta;
   else
     update workspace_job_node_status_counts set cnt = cnt + p_delta
-    where workspace_id = p_workspace_id and workflow_key = p_workflow_key
+    where workspace_id = p_workspace_id
       and node_key = p_node_key and status = p_status;
   end if;
 end;
@@ -566,38 +558,33 @@ $$ language plpgsql;
 create or replace function sync_job_node_status_counts() returns trigger as $$
 declare
   parent_ws text;
-  parent_wf text;
 begin
   if TG_OP = 'INSERT' then
-    select workspace_id, workflow_key into parent_ws, parent_wf
-      from jobs where id = NEW.job_id;
+    select workspace_id into parent_ws from jobs where id = NEW.job_id;
     if found then
-      perform bump_job_node_status_counts(parent_ws, parent_wf, NEW.node_key, NEW.status, 1);
+      perform bump_job_node_status_counts(parent_ws, NEW.node_key, NEW.status, 1);
     end if;
     return NEW;
   elsif TG_OP = 'DELETE' then
     -- On cascade delete the parent jobs row is already gone (the jobs
     -- BEFORE DELETE trigger deducted this job's counts set-based); only a
     -- direct job_nodes delete finds the parent and decrements here.
-    select workspace_id, workflow_key into parent_ws, parent_wf
-      from jobs where id = OLD.job_id;
+    select workspace_id into parent_ws from jobs where id = OLD.job_id;
     if found then
-      perform bump_job_node_status_counts(parent_ws, parent_wf, OLD.node_key, OLD.status, -1);
+      perform bump_job_node_status_counts(parent_ws, OLD.node_key, OLD.status, -1);
     end if;
     return OLD;
   else
     if NEW.job_id is distinct from OLD.job_id
        or NEW.node_key is distinct from OLD.node_key
        or NEW.status is distinct from OLD.status then
-      select workspace_id, workflow_key into parent_ws, parent_wf
-        from jobs where id = OLD.job_id;
+      select workspace_id into parent_ws from jobs where id = OLD.job_id;
       if found then
-        perform bump_job_node_status_counts(parent_ws, parent_wf, OLD.node_key, OLD.status, -1);
+        perform bump_job_node_status_counts(parent_ws, OLD.node_key, OLD.status, -1);
       end if;
-      select workspace_id, workflow_key into parent_ws, parent_wf
-        from jobs where id = NEW.job_id;
+      select workspace_id into parent_ws from jobs where id = NEW.job_id;
       if found then
-        perform bump_job_node_status_counts(parent_ws, parent_wf, NEW.node_key, NEW.status, 1);
+        perform bump_job_node_status_counts(parent_ws, NEW.node_key, NEW.status, 1);
       end if;
     end if;
     return NEW;
@@ -613,25 +600,30 @@ begin
     select node_key, status, count(*) as cnt from job_nodes
     where job_id = OLD.id group by 1, 2
   ) s
-  where c.workspace_id = OLD.workspace_id and c.workflow_key = OLD.workflow_key
+  where c.workspace_id = OLD.workspace_id
     and c.node_key = s.node_key and c.status = s.status;
   return OLD;
 end;
 $$ language plpgsql;
--- Job re-key (workspace move / workflow_key change): move every node count.
+-- Job workspace move: move every node count (the workflow_key dimension is
+-- gone with the column — #211 M2).
 create or replace function rekey_job_node_status_counts() returns trigger as $$
 begin
+  -- Same workspace: nothing to move.
+  if NEW.workspace_id is not distinct from OLD.workspace_id then
+    return NEW;
+  end if;
   update workspace_job_node_status_counts c set cnt = c.cnt - s.cnt
   from (
     select node_key, status, count(*) as cnt from job_nodes
     where job_id = OLD.id group by 1, 2
   ) s
-  where c.workspace_id = OLD.workspace_id and c.workflow_key = OLD.workflow_key
+  where c.workspace_id = OLD.workspace_id
     and c.node_key = s.node_key and c.status = s.status;
-  insert into workspace_job_node_status_counts(workspace_id, workflow_key, node_key, status, cnt)
-  select NEW.workspace_id, NEW.workflow_key, node_key, status, count(*)
-  from job_nodes where job_id = NEW.id group by 3, 4
-  on conflict (workspace_id, workflow_key, node_key, status)
+  insert into workspace_job_node_status_counts(workspace_id, node_key, status, cnt)
+  select NEW.workspace_id, node_key, status, count(*)
+  from job_nodes where job_id = NEW.id group by 2, 3
+  on conflict (workspace_id, node_key, status)
   do update set cnt = workspace_job_node_status_counts.cnt + excluded.cnt;
   return NEW;
 end;
@@ -647,18 +639,25 @@ create trigger jobs_node_status_counts_deduct
   for each row execute function deduct_job_node_status_counts();
 drop trigger if exists jobs_node_status_counts_rekey on jobs;
 create trigger jobs_node_status_counts_rekey
-  after update of workspace_id, workflow_key on jobs
+  after update of workspace_id on jobs
   for each row execute function rekey_job_node_status_counts();
 create index if not exists idx_executor_leases_global_active on executor_leases(executor_id, status, expires_at);
 create index if not exists idx_executor_leases_workspace_active on executor_leases(workspace_id, executor_id, status, expires_at);
-create index if not exists idx_executor_leases_workflow_node_active on executor_leases(workspace_id, workflow_key, node_key, status, expires_at);
+-- (idx_executor_leases_workspace_node_active carries the claim-path count
+-- predicate since v69; the five-column workflow_key variant retired in M2.)
+-- #211 Phase 3 M1: workspace-keyed twin — the claim-path count predicate
+-- binds (workspace_id, node_key, status, expires_at); skipping the middle
+-- workflow_key column defeats the index above (Codex P2 on #321). The
+-- twin replaces it when M2 drops the column.
+create index if not exists idx_executor_leases_workspace_node_active
+  on executor_leases(workspace_id, node_key, status, expires_at);
 create index if not exists idx_executor_leases_status_expires_at on executor_leases(status, expires_at);
 create index if not exists idx_executor_leases_job_status on executor_leases(job_id, status);
 
 drop table if exists remote_executions;
 drop table if exists remote_workers;
 create index if not exists idx_workspace_packages_workspace_id on workspace_packages(workspace_id, created_at desc);
-create index if not exists idx_workflow_revisions_active on workflow_revisions(workspace_id, workflow_key, status);
+create index if not exists idx_workflow_revisions_active on workflow_revisions(workspace_id, status);
 create index if not exists idx_node_run_token_usage_workspace on node_run_token_usage(workspace_id, node_key);
 create index if not exists idx_node_run_token_usage_model on node_run_token_usage(provider, model);
 create index if not exists idx_node_run_token_usage_skill_version on node_run_token_usage(skill_version);
@@ -847,14 +846,15 @@ create unique index if not exists workflow_node_codes_published
   where status = 'published';
 
 -- Versioned entities (schema v26): unified draft → published → archived
--- lifecycle storage for custom node codes ('node_code') and Agent definitions
--- ('agent'; executor definitions joined at v30 and retired at v47).
+-- lifecycle storage for custom node codes ('node_code'), Agent definitions
+-- ('agent'; executor definitions joined at v30 and retired at v47), and
+-- workspace preview panel bundles ('preview_panel', v71, #328).
 -- New node-code and Agent entities are workspace-scoped. workspace_id may be
 -- NULL only on legacy node-code rows retained for historical replay. NULLS
 -- NOT DISTINCT keeps uniqueness meaningful for those rows (PostgreSQL 15+).
 create table if not exists versioned_entities (
   id text primary key,
-  entity_type text not null check(entity_type in ('node_code', 'agent')),
+  entity_type text not null check(entity_type in ('node_code', 'agent', 'preview_panel')),
   workspace_id text references workspaces(id) on delete cascade,
   entity_key text not null,
   version integer not null,
@@ -1125,3 +1125,24 @@ create table if not exists workspace_workflow_drafts (
   created_at timestamptz not null default current_timestamp,
   updated_at timestamptz not null default current_timestamp
 );
+
+-- Approval decisions (schema v65): the insert-only audit of human verdicts
+-- on ``type: approval`` gates (EXEC-APPROVAL-001). One row per decision,
+-- never updated or deleted; the newest row per (job_id, node_key) is the
+-- current decision and the full history reconstructs the review rounds
+-- (rework loops re-park the node, so several rows per gate are normal).
+-- ``decided_by`` follows the uniform actor format ``user:{id}``; decisions
+-- are accepted from human sessions only — studio_agent scoped tokens are
+-- rejected at the route layer.
+create table if not exists approval_decisions (
+  id text primary key,
+  job_id text not null references jobs(id) on delete cascade,
+  node_key text not null,
+  verdict text not null check(verdict in ('approved', 'rework', 'rejected')),
+  note text not null default '',
+  rework_target text not null default '',
+  decided_by text not null default '',
+  created_at timestamptz not null default current_timestamp
+);
+create index if not exists idx_approval_decisions_job_node
+  on approval_decisions(job_id, node_key, created_at desc);

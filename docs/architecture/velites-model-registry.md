@@ -7,7 +7,7 @@
 Host 只声明 Agent 节点所需的 `runtime/provider/model`，不持有 provider endpoint、
 协议方言或凭据。每台 Worker 对启用的 runtime 运行各自的模型发现 adapter，将发现结果
 与本地 `models` allowlist 求交集，并把有效的 `(runtime, provider, model)` 三元组注册给
-Host。Host 仅把任务交给声明了同一三元组且 capability 匹配的 Worker。
+Host。Host 仅把任务交给声明了同一三元组的 Worker（capability 匹配已随 issue #284 退役）。
 
 velites 的单一事实源是 `~/.velites/models.json`（`VELITES_MODELS_PATH` 可覆盖）：
 
@@ -74,8 +74,7 @@ velites models list --json
 ## Runtime adapters
 
 - velites：`velites models list --json`；
-- Pi：`pi --list-models`，其文本方言只在 Pi discovery adapter 内解析；
-- OpenClaw：`openclaw models list --json`，只广播 `available != false` 且非 missing 的模型。
+- Pi：`pi --list-models`，其文本方言只在 Pi discovery adapter 内解析。
 
 一个 runtime 探测失败只降级该 runtime；其他 runtime 和 code 执行池继续工作。运行态
 effective models 不回写持久化 YAML。Worker 重启或 runtime/allowlist 配置变更会重新探测。

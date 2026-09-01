@@ -31,7 +31,7 @@ class JobRerunStateQueriesMixin(ConnectionQueriesMixin):
         del workspace_id  # workspace scoping is the caller's semantic check
         params = [str(job_id) for job_id in job_ids]
         sql = (
-            "select id, workspace_id, status, workflow_key, workflow_definition_snapshot_json"
+            "select id, workspace_id, status, workflow_definition_snapshot_json"
             f" from jobs where id in ({','.join('%s' for _ in job_ids)})"
         )
         with self._connect_read() as conn:

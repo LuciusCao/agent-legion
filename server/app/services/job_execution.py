@@ -74,7 +74,7 @@ class JobExecutionService:
         # Jobs without an intake-frozen snapshot fall back to their own
         # workspace's active revision (schema v50), never a global template.
         return definition_from_job_snapshot(job) or require_workspace_active_definition(
-            self.job_db, str(job["workspace_id"]), str(job["workflow_key"])
+            self.job_db, str(job["workspace_id"]), str(job["workspace_id"])
         )
 
     def run_to(
@@ -265,6 +265,16 @@ class JobExecutionService:
                 job_id, "run_to", "failed", target_node_key, "cleanup_failed", str(exc)
             ) from exc
         except Exception as exc:
+            # #204 broad-except audit: the terminal safety net of a
+            # staged filesystem + DB mutation sequence. The business arms
+            # above already peeled off the concurrency conflict
+            # (JobMutationConflict → skipped) and the staged-output
+            # contract violations (ValueError → cleanup_failed); what lands
+            # here is the genuinely unexpected (DB connectivity mid-mutation,
+            # a bug). Either way the staged files must be rolled back before
+            # normalizing to JobOperationError — leaving them staged would
+            # strand artifacts the rerun just removed from their original
+            # locations. logger.exception keeps the traceback.
             logger.exception("Failed to persist run-to target for job %s", job_id)
             if staged is not None:
                 staged.rollback()

@@ -71,8 +71,8 @@ def _seed(client_tmp_path):
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into workspace_node_routes("
-            "workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values (%s, 'test', 'generate', 'handler_executor', 'code-default')",
+            "workspace_id, node_key, target_kind, target_id)"
+            " values (%s, 'generate', 'handler_executor', 'code-default')",
             (workspace_id,),
         )
         conn.execute(

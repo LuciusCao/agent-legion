@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 from pathlib import Path
 
@@ -17,9 +16,9 @@ from server.app.services.material_bundle_cache import (
 )
 from server.app.services.material_bundles import MaterialBundlesService
 from server.app.services.material_cache import material_runtime_block
-from server.app.storage import ObjectHead
 from shared.material_bundle import bundle_address
 from shared.material_cache import MaterializeError
+from tests.fakes.storage import FakeObjectStorage
 
 WORKSPACE_ID = "ws-bundle-cache"
 PAYLOAD_A = b"bundle-member-a" * 20
@@ -30,31 +29,11 @@ KEY_A = f"{WORKSPACE_ID}/{HASH_A}/a.txt"
 KEY_B = f"{WORKSPACE_ID}/{HASH_B}/b.txt"
 
 
-class FakeStorage:
-    """In-memory ObjectStorage double（含 presign_get）；不碰网络。"""
+def _fake_storage() -> FakeObjectStorage:
+    return FakeObjectStorage(objects={KEY_A: PAYLOAD_A, KEY_B: PAYLOAD_B})
 
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {KEY_A: PAYLOAD_A, KEY_B: PAYLOAD_B}
-        self.opened = 0
-        self.presigned_gets: list[str] = []
 
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/upload/{storage_key}"
-
-    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
-        self.presigned_gets.append(storage_key)
-        return f"https://s3.test/download/{storage_key}?sig=fake"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        self.opened += 1
-        return io.BytesIO(self.objects[storage_key])
-
-    def delete_object(self, storage_key: str) -> None:
-        self.objects.pop(storage_key, None)
+FakeStorage = _fake_storage
 
 
 @pytest.fixture
@@ -80,7 +59,7 @@ def bundle(job_db, storage) -> dict:
                 " values (%s, %s, %s, 'x.txt', 'text/plain', %s, %s, 'ready')",
                 (material_id, WORKSPACE_ID, content_hash, size, storage_key),
             )
-    service = MaterialBundlesService(job_db.path)
+    service = MaterialBundlesService(job_db.dsn_identity)
     return service.create(
         WORKSPACE_ID,
         name="folder",
@@ -103,7 +82,7 @@ def test_is_bundle_input() -> None:
 
 def test_runtime_block_materializes_directory_tree(job_db, bundle, storage, tmp_path: Path) -> None:
     block = bundle_runtime_block(
-        job_db.path, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
     )
 
     assert block is not None
@@ -123,11 +102,11 @@ def test_runtime_block_materializes_directory_tree(job_db, bundle, storage, tmp_
 
 def test_runtime_block_hits_cache_on_second_call(job_db, bundle, storage, tmp_path: Path) -> None:
     first = bundle_runtime_block(
-        job_db.path, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
     )
     opened_after_first = storage.opened
     second = bundle_runtime_block(
-        job_db.path, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
     )
 
     assert second["path"] == first["path"]
@@ -141,7 +120,7 @@ def test_runtime_block_pins_all_members_against_eviction(
     monkeypatch.setenv("AGENT_LEGION_MATERIAL_CACHE_MAX_BYTES", "1")
 
     block = bundle_runtime_block(
-        job_db.path, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
     )
 
     tree = Path(block["path"])
@@ -154,10 +133,15 @@ def test_runtime_block_pins_all_members_against_eviction(
 
 def test_runtime_block_returns_none_for_non_bundle(job_db, storage, tmp_path: Path) -> None:
     job = {"input_json": json.dumps({"type": "material", "material_id": "mat-a"})}
-    assert bundle_runtime_block(job_db.path, tmp_path, WORKSPACE_ID, job, storage=storage) is None
+    assert (
+        bundle_runtime_block(job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage)
+        is None
+    )
     # 单文件物化对 bundle 输入同样返回 None（分发在 prefetch/claim 层）。
     assert (
-        material_runtime_block(job_db.path, tmp_path, WORKSPACE_ID, _job("b-1"), storage=storage)
+        material_runtime_block(
+            job_db.dsn_identity, tmp_path, WORKSPACE_ID, _job("b-1"), storage=storage
+        )
         is None
     )
 
@@ -170,19 +154,21 @@ def test_runtime_block_fails_closed_when_member_not_ready(
 
     with pytest.raises(MaterializeError, match="not ready"):
         bundle_runtime_block(
-            job_db.path, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+            job_db.dsn_identity, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
         )
 
 
 def test_runtime_block_unknown_bundle_is_readable_error(job_db, storage, tmp_path: Path) -> None:
     with pytest.raises(MaterializeError, match="not found"):
         bundle_runtime_block(
-            job_db.path, tmp_path, WORKSPACE_ID, _job("b-missing"), storage=storage
+            job_db.dsn_identity, tmp_path, WORKSPACE_ID, _job("b-missing"), storage=storage
         )
 
 
 def test_claim_block_presigns_each_member_without_storage_key(job_db, bundle, storage) -> None:
-    block = bundle_claim_block(job_db.path, WORKSPACE_ID, _job(bundle["id"]), storage=storage)
+    block = bundle_claim_block(
+        job_db.dsn_identity, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+    )
 
     assert block is not None
     assert block["kind"] == "bundle"

@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class AgentDefinitionResponse(BaseModel):
     id: str
-    runtime: Literal["pi", "openclaw", "velites"]
+    runtime: Literal["pi", "velites"]
     capability: str
     skill: str
     tools: list[str] = Field(default_factory=list)

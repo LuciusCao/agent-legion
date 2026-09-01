@@ -11,16 +11,17 @@ import pytest
 from server.app.agent_broker import dispatch as agent_dispatch
 from server.app.agent_broker.dispatch import AgentDispatchService
 from server.app.agent_catalog import AgentDefinition
-from server.app.workflows.schema import WorkflowNode, WorkflowNodeExecution
+from server.app.skills.checkout import SkillCheckout
+from server.app.workflows.schema import WorkflowNode, WorkflowNodeExecution, WorkflowNodeSkill
 
 _EXECUTION_ID = "00000000-0000-0000-0000-000000000123"
 
 
-def _definition(*, runtime: str = "pi") -> AgentDefinition:
+def _definition(*, runtime: str = "pi", skill: str = "question/generate") -> AgentDefinition:
     return AgentDefinition(
         capability="generate",
         runtime=runtime,
-        skill="question/generate",
+        skill=skill,
         tools=("read", "write"),
         config_schema={
             "type": "object",
@@ -32,12 +33,13 @@ def _definition(*, runtime: str = "pi") -> AgentDefinition:
     )
 
 
-def _node() -> WorkflowNode:
+def _node(*, skill: WorkflowNodeSkill | None = None) -> WorkflowNode:
     return WorkflowNode(
         key="generate",
         label="Generate",
         capability="generate",
         outputs=["answer.json"],
+        skill=skill,
         execution=WorkflowNodeExecution(
             provider="node-provider",
             model="node-model",
@@ -60,8 +62,14 @@ def harness(settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simple
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
 
-    resolve_skill_dir = MagicMock(return_value=skill_dir)
-    get_skill_version = MagicMock(return_value="skill-v1")
+    skill_checkout = SkillCheckout(
+        key="question/generate",
+        ref="v1",
+        run_dir=skill_dir,
+        commit="c" * 40,
+        version=f"v1@{'c' * 12}",
+    )
+    checkout_node_skill = MagicMock(return_value=skill_checkout)
     stage_agent_inputs = MagicMock()
     render_command_spec = MagicMock(return_value={"command": ["pi", "--print"]})
 
@@ -79,8 +87,7 @@ def harness(settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simple
         agent_dispatch, "build_skill_manager", lambda _root, _runs_dir=None: manager
     )
     monkeypatch.setattr(agent_dispatch, "AgentEnqueuePool", _pool)
-    monkeypatch.setattr(agent_dispatch, "resolve_skill_dir", resolve_skill_dir)
-    monkeypatch.setattr(agent_dispatch, "get_skill_version", get_skill_version)
+    monkeypatch.setattr(agent_dispatch, "checkout_node_skill", checkout_node_skill)
     monkeypatch.setattr(agent_dispatch, "stage_agent_inputs", stage_agent_inputs)
     monkeypatch.setattr(agent_dispatch, "render_command_spec", render_command_spec)
     monkeypatch.setattr(agent_dispatch, "build_agent_bundle", build_agent_bundle)
@@ -95,8 +102,8 @@ def harness(settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simple
         broker=broker,
         artifact_store=artifact_store,
         skill_dir=skill_dir,
-        resolve_skill_dir=resolve_skill_dir,
-        get_skill_version=get_skill_version,
+        skill_checkout=skill_checkout,
+        checkout_node_skill=checkout_node_skill,
         stage_agent_inputs=stage_agent_inputs,
         render_command_spec=render_command_spec,
         build_agent_bundle=build_agent_bundle,
@@ -104,14 +111,19 @@ def harness(settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simple
     )
 
 
-def _enqueue(harness: SimpleNamespace, *, definition: AgentDefinition | None = None) -> bool:
+def _enqueue(
+    harness: SimpleNamespace,
+    *,
+    definition: AgentDefinition | None = None,
+    node: WorkflowNode | None = None,
+) -> bool:
     return harness.service.enqueue(
         agent_id="generator-v1",
         definition=definition or _definition(),
         workspace={"id": "workspace-1", "name": "Workspace"},
         job={"id": "job-1", "title": "Question"},
         workflow_key="questions",
-        node=_node(),
+        node=node or _node(),
         job_dir=harness.tmp_path / "jobs" / "job-1",
         log_path=harness.tmp_path / "logs" / "job-1.log",
         inputs=("question.json",),
@@ -131,16 +143,8 @@ def test_enqueue_skips_an_existing_active_request(harness: SimpleNamespace) -> N
     assert _enqueue(harness) is False
 
     harness.broker.has_active_request.assert_called_once_with("job-1", "generate")
-    harness.resolve_skill_dir.assert_not_called()
+    harness.checkout_node_skill.assert_not_called()
     harness.broker.enqueue.assert_not_called()
-
-
-def test_enqueue_rejects_an_unsupported_runtime(harness: SimpleNamespace) -> None:
-    with pytest.raises(ValueError, match="runtime 'openclaw' is not implemented"):
-        _enqueue(harness, definition=_definition(runtime="openclaw"))
-
-    harness.resolve_skill_dir.assert_not_called()
-    harness.manager.cleanup_execution.assert_not_called()
 
 
 def test_enqueue_builds_an_immutable_manifest_and_bundle(harness: SimpleNamespace) -> None:
@@ -152,9 +156,16 @@ def test_enqueue_builds_an_immutable_manifest_and_bundle(harness: SimpleNamespac
     assert request.workspace_id == "workspace-1"
     assert request.job_id == "job-1"
     assert request.node_key == "generate"
+    assert manifest["node_label"] == "Generate"
     assert manifest["config"] == {"page_size": 25}
     assert manifest["expected_outputs"] == ["answer.json"]
-    assert manifest["skill_version"] == "skill-v1"
+    assert manifest["skill"] == "question/generate"
+    assert manifest["skill_version"] == f"v1@{'c' * 12}"
+    assert manifest["skill_ref"] == "v1"
+    checkout_args = harness.checkout_node_skill.call_args.args
+    assert checkout_args[0] is harness.manager
+    assert checkout_args[1].key == "generate"
+    assert checkout_args[2:] == ("question/generate", _EXECUTION_ID)
     assert manifest["command_spec"] == {"command": ["pi", "--print"]}
     assert manifest["bundle_name"] == f"{_EXECUTION_ID}.tar.gz"
     assert manifest["execution"] == {
@@ -253,3 +264,37 @@ def test_enqueue_removes_partial_bundle_when_build_fails(harness: SimpleNamespac
     assert not bundle_path.exists()
     harness.broker.enqueue.assert_not_called()
     harness.manager.cleanup_execution.assert_called_once_with(_EXECUTION_ID)
+
+
+def test_node_skill_binding_wins_and_flows_into_manifest(harness: SimpleNamespace) -> None:
+    """#76: a skill-less Agent definition + node-declared skill enqueues fine;
+    the manifest records the node binding's key/ref/version."""
+    node = _node(skill=WorkflowNodeSkill(key="question/node-generate", ref="v2"))
+    harness.skill_checkout = SkillCheckout(
+        key="question/node-generate",
+        ref="v2",
+        run_dir=harness.skill_dir,
+        commit="d" * 40,
+        version=f"v2@{'d' * 12}",
+    )
+    harness.checkout_node_skill.return_value = harness.skill_checkout
+
+    assert _enqueue(harness, definition=_definition(skill=""), node=node) is True
+
+    harness.checkout_node_skill.assert_called_once_with(harness.manager, node, "", _EXECUTION_ID)
+    manifest = dict(harness.broker.enqueue.call_args.args[0].manifest)
+    assert manifest["skill"] == "question/node-generate"
+    assert manifest["skill_ref"] == "v2"
+    assert manifest["skill_version"] == f"v2@{'d' * 12}"
+    assert harness.build_agent_bundle.call_args.kwargs["skill_dir"] == harness.skill_dir
+
+
+def test_enqueue_fails_when_neither_side_binds_a_skill(harness: SimpleNamespace) -> None:
+    harness.checkout_node_skill.side_effect = ValueError(
+        "Agent node generate has no skill on node or Agent definition"
+    )
+
+    with pytest.raises(ValueError, match="no skill on node or Agent definition"):
+        _enqueue(harness, definition=_definition(skill=""))
+
+    harness.broker.enqueue.assert_not_called()

@@ -3,35 +3,14 @@
 from __future__ import annotations
 
 import hashlib
-import io
 
 import pytest
 
-from server.app.storage import ObjectHead
+from tests.fakes.storage import FakeObjectStorage
 
 CSRF = {"x-agent-legion-request": "1"}
 
-
-class FakeStorage:
-    """In-memory ObjectStorage test double; never touches the network."""
-
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {}
-        self.deleted: list[str] = []
-
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/upload/{storage_key}"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        return io.BytesIO(self.objects[storage_key])
-
-    def delete_object(self, storage_key: str) -> None:
-        self.deleted.append(storage_key)
-        self.objects.pop(storage_key, None)
+FakeStorage = FakeObjectStorage
 
 
 @pytest.fixture
@@ -156,9 +135,9 @@ def test_delete_referenced_bundle_returns_409(client, storage, job_db) -> None:
     bundle = _create_bundle(client, storage, workspace_id)
     with job_db.connect() as conn:
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type,"
+            "insert into jobs(id, workspace_id, source_type,"
             " source_id, status, input_json)"
-            " values ('job-bundle-ref', %s, 'demo_workflow', 'bundle', %s, 'queued', %s)",
+            " values ('job-bundle-ref', %s, 'bundle', %s, 'queued', %s)",
             (
                 workspace_id,
                 bundle["id"],

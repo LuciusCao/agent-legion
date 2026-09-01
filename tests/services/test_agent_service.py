@@ -30,7 +30,7 @@ def workspace_id(job_db) -> str:
 
 @pytest.fixture
 def service(job_db, workspace_id) -> AgentService:
-    return AgentService(job_db.path, workspace_id)
+    return AgentService(job_db.dsn_identity, workspace_id)
 
 
 def test_save_draft_then_publish_round_trip(service, workspace_id) -> None:

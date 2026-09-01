@@ -19,6 +19,17 @@ export function canContinueJob(job: JobSummary): boolean {
   )
 }
 
+export function canApproveJob(job: JobSummary): boolean {
+  // A gate may await while parallel branches keep the job "running", so the
+  // node summaries decide; the job-level status is the fallback.
+  return (
+    job.status === 'awaiting_approval' ||
+    (job.node_summaries ?? []).some(
+      (node) => node.status === 'awaiting_approval'
+    )
+  )
+}
+
 export type JobActionDisabled = {
   rerun: boolean
   runTo: boolean

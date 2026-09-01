@@ -26,7 +26,7 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_storage_paths.py
+        target: tests/services/test_storage_paths.py
         gate: quick
       - kind: integration
         target: tests/full/test_storage_path_corruption.py
@@ -50,7 +50,7 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_workspace_job_control_flow.py
+        target: tests/services/test_workspace_job_control_flow.py
         gate: quick
       - kind: contract
         target: scripts/check_architecture.py
@@ -62,7 +62,7 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_workspace_configuration_service.py::test_code_pool_stats_report_capacity_and_leases
+        target: tests/services/test_workspace_configuration_service.py::test_code_pool_stats_report_capacity_and_leases
         gate: quick
       - kind: integration
         target: tests/routes/jobs/test_workspace_stats.py::test_workspace_stats_code_pool_reflects_leases
@@ -83,7 +83,7 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_workflow_worker_concurrency.py::test_global_capacity_enforced_by_lease_transaction
+        target: tests/workflows/test_workflow_worker_concurrency.py::test_global_capacity_enforced_by_lease_transaction
         gate: quick
       - kind: integration
         target: tests/executors/leases/test_capacity_limits.py::test_workspace_a_can_starve_workspace_b_at_global_capacity
@@ -98,7 +98,7 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_workflow_worker_concurrency.py::test_round_robin_allows_small_workspace_to_claim
+        target: tests/workflows/test_workflow_worker_concurrency.py::test_round_robin_allows_small_workspace_to_claim
         gate: quick
       - kind: integration
         target: tests/full/test_executor_worker_fairness.py::test_shared_capacity_and_round_robin_fairness
@@ -126,7 +126,7 @@ invariants:
         gate: full
 
   - id: EXEC-CANCEL-001
-    statement: "Adapter-specific cancellation terminates active Pi/OpenClaw subprocess groups and isolated code node subprocesses within a bounded grace period; worker shutdown waits only the grace period and releases capacity after child exit."
+    statement: "Adapter-specific cancellation terminates active Pi/velites subprocess groups and isolated code node subprocesses within a bounded grace period; worker shutdown waits only the grace period and releases capacity after child exit."
     owner: workspace-executor
     risk: critical
     evidence:
@@ -155,13 +155,13 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_settings.py
+        target: tests/configuration/test_settings.py
         gate: quick
       - kind: integration
-        target: tests/test_startup_validation.py
+        target: tests/configuration/test_startup_validation.py
         gate: quick
       - kind: integration
-        target: tests/test_configuration_loader.py
+        target: tests/configuration/test_configuration_loader.py
         gate: quick
       - kind: integration
         target: tests/full/test_split_config_startup.py
@@ -193,12 +193,20 @@ invariants:
       cannot override. Budget exemptions freeze an explicit ceiling and must
       include a tracked removal condition; affected modules must be split rather
       than indefinitely exempted. Exemptions whose removal reference is older
-      than 30 days are reported by the full gate.
+      than 30 days are reported by the full gate. Issue-anchored exemptions
+      (issues/open/github.com/...) expire when the anchor issue is closed:
+      the quick gate compares the anchor against the tracked issue-state
+      manifest (config/architecture/issue-states.json, refreshed offline via
+      make architecture-issue-states or the weekly exemption-expiry job), and
+      a closed anchor fails check_invariants with "exemption expired" (#270).
     owner: architecture
     risk: high
     evidence:
       - kind: contract
         target: scripts/check_architecture.py
+        gate: quick
+      - kind: contract
+        target: scripts/check_invariants.py
         gate: quick
       - kind: contract
         target: tests/scripts/test_check_architecture.py
@@ -211,6 +219,9 @@ invariants:
         gate: quick
       - kind: contract
         target: tests/scripts/test_architecture_exemption_age.py
+        gate: quick
+      - kind: contract
+        target: tests/scripts/test_architecture_issue_state.py
         gate: quick
 
   - id: BOUNDARY-VIDEO-001
@@ -302,7 +313,7 @@ invariants:
         gate: full
 
   - id: EXEC-AGENTDEF-001
-    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared by the workspace-scoped Agent Catalog (versioned_entities with workspace_id set, published via AgentService; schema v46 — exactly one published Agent per capability per workspace, no global fallback at resolution); the Host exposes that published catalog so Workflow Studio resolves Agent nodes by capability within the current workspace and edits provider/model overrides against workspace-level defaults without treating Agents as legacy executors. Workers separately declare node capabilities and runtime/provider/model triples derived from each selected runtime's local discovery intersected with its operator allowlist, alongside labels, protocol version, and machine-wide max_concurrency."
+    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared by the workspace-scoped Agent Catalog (versioned_entities with workspace_id set, published via AgentService; schema v46 — exactly one published Agent per capability per workspace, no global fallback at resolution); the Host exposes that published catalog so Workflow Studio resolves Agent nodes by capability within the current workspace and edits provider/model overrides against workspace-level defaults without treating Agents as legacy executors. Since #76 the definition's skill field is optional and serves only as the legacy fallback at dispatch — the workflow node's own skill binding (EXEC-SKILL-NODE-001) takes precedence and owns the version pin. Workers separately declare node capabilities and runtime/provider/model triples derived from each selected runtime's local discovery intersected with its operator allowlist, alongside labels, protocol version, and machine-wide max_concurrency."
     owner: workspace-executor
     risk: critical
     evidence:
@@ -412,10 +423,10 @@ invariants:
         target: tests/executors/test_code_executor.py::test_config_rejects_retired_path_key
         gate: quick
       - kind: integration
-        target: tests/test_workflow_revisions.py::test_publish_revision_records_node_code_pins
+        target: tests/workflows/test_workflow_revisions.py::test_publish_revision_records_node_code_pins
         gate: quick
       - kind: integration
-        target: tests/test_workflow_revisions.py::test_runtime_only_update_preserves_node_code_pins
+        target: tests/workflows/test_workflow_revisions.py::test_runtime_only_update_preserves_node_code_pins
         gate: quick
 
   # Rust-side wrap policy (seatbelt/bwrap argv) is covered by
@@ -586,7 +597,7 @@ invariants:
         gate: full
 
   - id: STUDIO-AGENT-001
-    statement: "Studio agent conversation runs authenticate with short-lived scoped tokens minted by the server (auth_scoped_tokens persists only sha256 digests; each token binds the initiating user and actor_scope='studio_agent', carries a TTL that is fixed at mint time and slides forward only at studio chat turn start when close to expiry (#158 — the agent's MCP headers cannot be re-pointed mid-session; renewal never revives an already-expired token), and is revocable; a leaked token still dies on its own once the session goes idle or closes). Run tokens additionally bind the chat session's workspace (schema v45, auth_scoped_tokens.workspace_id): workspace-path tool endpoints refuse a bound token operating on any other workspace with 403, the studio chat read endpoints (session/message reads and the SSE stream) enforce the same binding (#158), and the session-context endpoint hides foreign (bound) or non-member (unbound) sessions behind 404; unbound self-service tokens (origin='user') follow workspace membership, mirroring require_workspace_access. Scoped tokens resolve only through the Bearer channel, and every effecting endpoint mounts reject_studio_agent_scope to refuse them with 403 while draft/validate endpoints stay reachable. Effecting endpoints comprise the publish/rollback/archive flows (workflow drafts, node code, agent definitions — the executor definition endpoints retired with the executor concept, schema v47), job lifecycle and execution triggers (job delete, rerun/run-to/continue and their batch variants, batch intake, workflow upgrade, quality replays), workspace/secret/package/member/settings/configuration writes, worker pause/resume, and the studio chat effecting endpoints (session create/close, message send/cancel, permission answers, context push — a scoped token must not mint fresh run tokens, self-approve permission prompts, nor rewrite the context it reads back); require_admin additionally refuses any scoped identity outright, so admin endpoints stay unreachable even though a scoped token inherits the initiating user's role. The skill tool endpoints (get/validate/save-version, #217) are instance-scoped by design: they sit on the global tool router with no workspace binding, so a run token bound to workspace A can read and tag every local skill repo — skills are instance-level shared resources, save_skill_version never touches the skill lock (release stays a human admin relock), and token minting is admin-only."
+    statement: "Studio agent conversation runs authenticate with short-lived scoped tokens minted by the server (auth_scoped_tokens persists only sha256 digests; each token binds the initiating user and actor_scope='studio_agent', carries a TTL that is fixed at mint time and slides forward only at studio chat turn start when close to expiry (#158 — the agent's MCP headers cannot be re-pointed mid-session; renewal never revives an already-expired token), and is revocable; a leaked token still dies on its own once the session goes idle or closes). Run tokens additionally bind the chat session's workspace (schema v45, auth_scoped_tokens.workspace_id): workspace-path tool endpoints refuse a bound token operating on any other workspace with 403, the studio chat read endpoints (session/message reads and the SSE stream) enforce the same binding (#158), and the session-context endpoint hides foreign (bound) or non-member (unbound) sessions behind 404; unbound self-service tokens (origin='user') follow workspace membership, mirroring require_workspace_access. Scoped tokens resolve only through the Bearer channel, and every effecting endpoint mounts reject_studio_agent_scope to refuse them with 403 while draft/validate endpoints stay reachable. Effecting endpoints comprise the publish/rollback/archive flows (workflow drafts, node code, agent definitions — the executor definition endpoints retired with the executor concept, schema v47), job lifecycle and execution triggers (job delete, rerun/run-to/continue and their batch variants, batch intake, workflow upgrade, quality replays), workspace/secret/package/member/settings/configuration writes, worker pause/resume, and the studio chat effecting endpoints (session create/close, message send/cancel, permission answers, context push — a scoped token must not mint fresh run tokens, self-approve permission prompts, nor rewrite the context it reads back); require_admin additionally refuses any scoped identity outright, so admin endpoints stay unreachable even though a scoped token inherits the initiating user's role. The skill tool endpoints (get/validate/save-version, #217) are instance-scoped by design: they sit on the global tool router with no workspace binding, so a run token bound to workspace A can read and tag every local skill repo — skills are instance-level shared resources, save_skill_version never touches the skill lock (release stays a human admin relock), and token minting is admin-only. The node prompt tools (get/save, workspace-bound) are draft-only by the same token: the save edits the workspace's unpublished workflow draft YAML (nodes.<key>.execution.prompt) and never publishes."
     owner: security
     risk: high
     evidence:
@@ -607,7 +618,7 @@ invariants:
         gate: quick
 
   - id: STUDIO-AGENT-002
-    statement: "Studio chat sessions (phase 3 chunk 4) run user-selected ACP agents whose command lines come only from the admin-maintained instance-level registry (global_settings key 'studio_agents'); non-admin users pick an agent by id and the picker API never exposes command/args and only lists agents whose command currently resolves on this host (PATH-level probe, ~60s TTL cache, warmed at backend startup); creating a session with an unavailable agent fails with a clear error before any spawn, and creation is rejected once a global cap of live sessions is reached — the cap check and the session-row INSERT share one transaction under an advisory lock so concurrent creators cannot race past it, and backend startup reconciles rows left in a live status by a crashed or restarted process to error (sessions are in-process only; zombies would otherwise hold cap slots forever) (#158). Closed or errored sessions (including reaped zombies) can be resumed via POST .../resume: the resume claim (closed/error -> starting) rides the same cap advisory lock with the active-count predicate inside the UPDATE, any stale registered runtime is torn down by the claim winner immediately after the atomic claim and before the spawn (a pre-claim teardown would let a claim loser destroy the winner's freshly registered runtime), and a stale exit echo from the old runtime's thread may only tear down its own pinned runtime identity — never the registry's current entry or the newer generation's session row (ABA), so no agent subprocess is orphaned, a fresh scoped token is minted (the old one was revoked at close or dies on TTL), and the agent subprocess is respawned — ACP session/load of the persisted acp_session_id when the freshly-initialized agent advertises loadSession, otherwise a fresh ACP session with the persisted user/agent transcript injected once into the first post-resume prompt; resuming a session still live on this server is an idempotent no-op, and the persisted message timeline is never rewritten. Each session mints one scoped token (origin='run', TTL renewed at turn start per STUDIO-AGENT-001) that crosses the process boundary only as an HTTP header inside the ACP session/new request — kimi >= 0.38 accepts only http/sse MCP servers there, so the tool surface is served in-app as a streamable-HTTP endpoint at /api/studio-agent/mcp guarded solely by an ASGI-level studio-agent scoped-token check (the Mount bypasses route-layer auth dependencies), with the token riding Authorization Bearer and the chat session binding riding x-agent-legion-mcp-session-id — never persisted, never logged, never present in message or SSE payloads — and is revoked when the session closes or the agent process dies (#158 teardown). The registry's api_base is the egress target for these tokens: the write side validates it as a plain absolute http(s) URL and warns when the host is not loopback/private, and the MCP loopback resolves it per request so an admin edit cannot split the injected URL from the loopback target (#158). Permission requests for agent-legion MCP tools auto-approve (the scoped token is the authority boundary), and local read-only ACP tool kinds (read/search — the Read/Glob/Grep class) auto-approve as side-effect-free; all other tool calls default to human confirmation (auto-denied after a 120s timeout so an abandoned tab cannot park a turn) with a per-session allow-all switch, and cancelling a turn settles every pending permission as denied."
+    statement: "Studio chat sessions (phase 3 chunk 4) run user-selected ACP agents whose command lines come only from the instance-level registry (global_settings key 'studio_agents') — admin-maintained manual entries plus auto-detected entries from a fixed built-in catalog (#332): detection executes only the catalog's static executable names via PATH probe plus a fixed '--version' argument with a hard timeout (every probe failure degrades silently), merges detected templates as source: detected through a row-locked transactional RMW (SELECT ... FOR UPDATE after insert-if-absent, so concurrent redetects and admin edits queue instead of last-wins overwriting), and never overrides manual rows (same-id manual wins; any admin edit of a detected row flips it to manual), with the source provenance re-derived server-side on every PUT so it cannot be forged through the API; non-admin users pick an agent by id and the picker API never exposes command/args (detected entries included) and only lists agents whose command currently resolves on this host (PATH-level probe, ~60s TTL cache, warmed at backend startup); creating a session with an unavailable agent fails with a clear error before any spawn, and creation is rejected once a global cap of live sessions is reached — the cap check and the session-row INSERT share one transaction under an advisory lock so concurrent creators cannot race past it, and backend startup reconciles rows left in a live status by a crashed or restarted process to error (sessions are in-process only; zombies would otherwise hold cap slots forever) (#158). Closed or errored sessions (including reaped zombies) can be resumed via POST .../resume: the resume claim (closed/error -> starting) rides the same cap advisory lock with the active-count predicate inside the UPDATE, any stale registered runtime is torn down by the claim winner immediately after the atomic claim and before the spawn (a pre-claim teardown would let a claim loser destroy the winner's freshly registered runtime), and a stale exit echo from the old runtime's thread may only tear down its own pinned runtime identity — never the registry's current entry or the newer generation's session row (ABA), so no agent subprocess is orphaned, a fresh scoped token is minted (the old one was revoked at close or dies on TTL), and the agent subprocess is respawned — ACP session/load of the persisted acp_session_id when the freshly-initialized agent advertises loadSession, otherwise a fresh ACP session with the persisted user/agent transcript injected once into the first post-resume prompt; resuming a session still live on this server is an idempotent no-op, and the persisted message timeline is never rewritten. Each session mints one scoped token (origin='run', TTL renewed at turn start per STUDIO-AGENT-001) that crosses the process boundary only as an HTTP header inside the ACP session/new request — kimi >= 0.38 accepts only http/sse MCP servers there, so the tool surface is served in-app as a streamable-HTTP endpoint at /api/studio-agent/mcp guarded solely by an ASGI-level studio-agent scoped-token check (the Mount bypasses route-layer auth dependencies), with the token riding Authorization Bearer and the chat session binding riding x-agent-legion-mcp-session-id — never persisted, never logged, never present in message or SSE payloads — and is revoked when the session closes or the agent process dies (#158 teardown). The registry's api_base is the egress target for these tokens: the write side validates it as a plain absolute http(s) URL and warns when the host is not loopback/private, and the MCP loopback resolves it per request so an admin edit cannot split the injected URL from the loopback target (#158). Permission requests for agent-legion MCP tools auto-approve (the scoped token is the authority boundary), and local read-only ACP tool kinds (read/search — the Read/Glob/Grep class) auto-approve as side-effect-free; all other tool calls default to human confirmation (auto-denied after a 120s timeout so an abandoned tab cannot park a turn) with a per-session allow-all switch, and cancelling a turn settles every pending permission as denied."
     owner: security
     risk: high
     evidence:
@@ -619,6 +630,15 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/routes/test_studio_agents_admin.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_agent_catalog.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_registry.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_global_settings_kv.py
         gate: quick
       - kind: integration
         target: tests/services/test_studio_chat_service_sessions.py
@@ -648,13 +668,13 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_config_schema.py
+        target: tests/configuration/test_config_schema.py
         gate: quick
       - kind: integration
         target: tests/services/test_node_config.py
         gate: quick
       - kind: integration
-        target: tests/test_workflow_definition.py
+        target: tests/workflows/test_workflow_definition.py
         gate: quick
       - kind: integration
         target: tests/full/test_node_config_manifest.py
@@ -666,7 +686,7 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_config_schema.py
+        target: tests/configuration/test_config_schema.py
         gate: quick
       - kind: integration
         target: tests/services/test_node_config.py
@@ -730,18 +750,18 @@ invariants:
         gate: quick
 
   - id: CONFIG-YAML-001
-    statement: "Tracked split config yaml files carry no secret values: the global `cms:` section is retired from split yaml (CMS selector defaults live in the capability config_schema; endpoint URLs and credentials live on the instance-level external connection, schema v34), so a `cms` key in any split file fails the owned-key check, while single-file explicit configs still reject the retired `cms.token` / `cms.token_gen` keys at startup (G2); the `openclaw` section is retired from split yaml into the DB instance settings document (a split-file `openclaw` key fails the owned-key check; the admin API contract rejects extra keys), and `openclaw.skill_safety` refs (G3, pinned by the DB `skill_lock` document in `global_settings`) are rejected at startup validation and by the instance-settings admin API (422), and the env-only sections `vault` / `auth` are rejected by the owned-key check when written into any split file. Secrets reach the runtime only via env overrides or the vault."
+    statement: "Tracked split config yaml files carry no secret values: the global `cms:` section is retired from split yaml (CMS selector defaults live in the capability config_schema; endpoint URLs and credentials live on the instance-level external connection, schema v34), so a `cms` key in any split file fails the owned-key check, while single-file explicit configs still reject the retired `cms.token` / `cms.token_gen` keys at startup (G2); the `openclaw` section is retired with the openclaw runtime itself (#75 — stored instance documents are stripped at read time and writes are rejected with 422), and the env-only sections `vault` / `auth` are rejected by the owned-key check when written into any split file. Secrets reach the runtime only via env overrides or the vault."
     owner: config
     risk: high
     evidence:
       - kind: contract
-        target: tests/test_config_yaml_hygiene.py
+        target: tests/configuration/test_config_yaml_hygiene.py
         gate: quick
       - kind: integration
-        target: tests/test_settings.py
+        target: tests/configuration/test_settings.py
         gate: quick
       - kind: integration
-        target: tests/test_configuration_loader.py
+        target: tests/configuration/test_configuration_loader.py
         gate: quick
 
   - id: EXEC-EVENT-SCHEMA-001
@@ -781,15 +801,24 @@ invariants:
         gate: quick
 
   - id: EXEC-SKILL-HERMETIC-001
-    statement: "The skills base dir is a read-only runtime input: cache lock files live under runs_dir (never next to the skill cache), and resolving a skill whose cache already sits clean at the pinned commit performs no writes (no checkout/clean) — a read-only skills mount (container deployment) works for every steady-state execution and validation. Writes (clone/fetch/checkout/clean) happen only on cache misses or version changes."
+    statement: "The skills base dir is a strictly read-only runtime input: skill execution content is materialized by exporting the resolved commit's tree via `git archive` into the runs dir — pure object-database reads with ZERO working-tree writes against the user's authoritative in-place repo (#330 retired the checkout -f/clean -fd chain, which destroyed uncommitted work and left detached HEADs behind; a dirty working tree is now ignored with a warning, never deleted). Cache lock files live under runs_dir (never next to the skill repo), and a read-only skills mount (container deployment) works for every execution and validation. Skills are local in-place git repositories under the skill root: in-place is the only mode (#322 retired the global skill_sources registry and the remote clone channel, including the missing-cache re-clone self-heal), and a missing repo directory fails with guidance instead of being re-cloned."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_skill_manager.py::test_get_skill_dir_works_with_read_only_skills_base
+        target: tests/skills/test_skill_manager.py::test_get_skill_dir_works_with_read_only_skills_base
         gate: quick
       - kind: integration
-        target: tests/test_skill_manager.py::test_cache_lock_files_live_under_runs_dir
+        target: tests/skills/test_skill_manager.py::test_cache_lock_files_live_under_runs_dir
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager.py::test_missing_skill_repo_raises_with_guidance
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager.py::test_dispatch_preserves_the_authoritative_working_tree
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager.py::test_untracked_files_stay_out_of_the_run_dir
         gate: quick
 
   - id: EXEC-SKILL-RUNS-SCRATCH-001
@@ -814,18 +843,51 @@ invariants:
         gate: quick
 
   - id: EXEC-SKILL-CLEAN-TTL-001
-    statement: "Skill cache cleanliness verification (rev-parse + status probes) is memoized per cache dir for the doc-cache TTL (SkillManager._verified_clean, deriving from doc_cache_ttl_seconds): within the TTL a dirtied or externally switched cache is served as-is, and the first probe after expiry repairs it via checkout -f + clean -fd — dirty detection is TTL-bounded, never lost. A commit change always misses the memo and re-probes, so relocks never serve a stale commit beyond the doc-cache TTL they already tolerate; doc_cache_ttl_seconds=0 restores per-call probing."
+    statement: "Every dispatch runs exactly the commit its (skill, ref) resolution recorded: materialization exports that commit's tree via `git archive` — there is no shared mutable checkout, so a concurrent or subsequent dispatch of another ref cannot leak its content into this run dir (the failure mode the retired per-instance TTL memo and the checkout/clean repair chain defended against is gone by construction, #330). Alternating pinned dispatches of different refs each receive their own frozen commit, a pinned dispatch never moves HEAD, so `latest` keeps following the branch tip, and uncommitted working-tree changes are ignored with a warning rather than deleted."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_skill_manager.py::test_cleanliness_probes_memoized_within_ttl
+        target: tests/skills/test_skill_manager.py::test_checkout_reprobes_cache_after_another_instance_switch
         gate: quick
       - kind: integration
-        target: tests/test_skill_manager.py::test_cleanliness_probes_rerun_after_ttl_and_repair_dirty_cache
+        target: tests/skills/test_skill_manager.py::test_pinned_dispatch_does_not_detach_latest
         gate: quick
       - kind: integration
-        target: tests/test_skill_manager.py::test_cleanliness_probes_every_call_when_ttl_zero
+        target: tests/skills/test_skill_manager.py::test_latest_dispatch_warns_on_a_dirty_working_tree
+        gate: quick
+
+  - id: EXEC-SKILL-NODE-001
+    statement: "An Agent-routed workflow node binds its skill content at the node level (issue #76): the optional node `skill` block (`key` + optional `ref`; the string form is key-only, and an empty ref normalizes to `latest` at load time) is parsed by the loader (rejected on start/approval nodes), versions with the workflow revision snapshot, and rides the intake freeze into the job snapshot. The publish gate requires every Agent-routed node to name a skill on the node or on its published Agent definition, and rejects a skill declared on a code-routed node. Dispatch resolves the effective skill node-first (AgentDefinition.skill is the optional legacy fallback; both empty fails the node) and checks out the in-place repository under the skill root — the global skill_sources registry is retired (#322) and lock.repo is written for audit only. Ref semantics: `latest` (including a normalized empty ref) follows the repository HEAD, re-resolved on every dispatch and never entering the lock; a pinned tag goes through the multi-valued lock (skill_lock v2: per-skill {repo, refs: {ref -> commit}}, v1 documents self-upgrade on read) — a locked (skill, ref) pair executes exactly its frozen commit, an unlocked pinned ref resolves and auto-locks its own entry on first dispatch, and relock (CLI `make skills-lock`) walks the lock's existing entries and re-resolves every pinned ref. The Agent manifest records `skill`, `skill_ref` (`latest` for head-following nodes), `skill_version` (`ref@commit12`) and `skill_commit` (the full resolved sha), and the Host-side Worker-result output validation re-materializes exactly that `skill_commit` — immune to HEAD moves and retagging (#330); legacy manifests without `skill_commit` fall back to re-resolving (skill, skill_ref). The demo workflow's Agent nodes pin `ref: v1.0.0` instead of relying on the builtin Agent definitions (which no longer carry a skill)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/workflows/test_workflow_node_skill.py
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_checkout.py::test_checkout_node_skill_prefers_the_node_binding
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager.py::test_empty_ref_normalizes_to_latest_and_follows_head
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager.py::test_pinned_tag_locks_on_first_dispatch
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager_lock.py::test_ref_drift_locks_each_ref_independently
+        gate: quick
+      - kind: integration
+        target: tests/skills/test_skill_manager_lock.py::test_concurrent_refs_auto_lock_retains_both_pins
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation.py::test_validates_against_the_manifests_frozen_ref
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation.py::test_exact_commit_validation_is_immune_to_head_moves
+        gate: quick
+      - kind: integration
+        target: tests/services/test_workflow_draft_publish.py
         gate: quick
 
   - id: EXEC-HARNESS-SANDBOX-001
@@ -856,19 +918,34 @@ invariants:
         gate: quick
 
   - id: EXEC-RUNTIME-DISPATCH-001
-    statement: "Agent command construction is pinned by AgentDefinition.runtime: pi builds the pi argv, velites builds the velites argv (the retired workflows.pi.flavor selection layer is gone); provider/model/thinking resolve strictly from the node execution override, then the workflow top-level execution default (merged into the node's effective execution at definition load — the workspace-level default retired at schema v63), else dispatch fails fast before any manifest is frozen; the provider identity is passed unchanged to the selected runtime, and unknown runtimes fail fast."
+    statement: "Agent command construction is pinned by AgentDefinition.runtime through the Host-side runtime catalog (server/app/agent_runtime): each runtime's adapter owns its argv builder and declares an ExecutionContract over the manifest execution keys (provider/model/thinking); provider/model/thinking resolve strictly from the node execution override, then the workflow top-level execution default (merged into the node's effective execution at definition load — the workspace-level default retired at schema v63), and a required key missing or a configured non-empty key the adapter does not support fails fast at dispatch before any manifest is frozen; claim re-resolution re-fetches the contract key set from the live revision and re-validates it, so an in-flight job upgraded to a revision that introduces an unsupported key or loses a required key gets an actionable failure instead of a silent ship (the claim scan skips the poisoned candidate and the unclaimable sweeper fails the request); the provider identity is passed unchanged to the selected runtime, and runtimes outside the catalog fail fast."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: contract
         target: tests/workflows/test_velites_command.py
         gate: quick
+      - kind: contract
+        target: tests/agent_runtime/test_execution_contracts.py
+        gate: quick
       - kind: integration
-        target: tests/services/test_agent_broker.py::test_dispatch_fails_fast_on_unsupported_runtime
+        target: tests/services/test_agent_claim_compatibility.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_broker.py::test_dispatch_fails_fast_on_unregistered_runtime
         gate: quick
       - kind: integration
         target: tests/full/test_velites_harness_e2e.py::test_velites_runtime_agent_worker_chain_end_to_end
         gate: full
+
+  - id: EXEC-RUNTIME-CATALOG-001
+    statement: "The Host-side agent runtime set has a single source of truth: server/app/agent_runtime/catalog.AGENT_RUNTIMES. The three AgentDefinition.runtime Literal declarations (agent_catalog/definition.py, routes/agent_definition_contracts.py, routes/agent_catalog_contracts.py — kept literal to preserve the OpenAPI/frontend type surface), the Worker registration runtime whitelist (agent_control/registry.py), and the Worker-side runtime sets (worker/runtime/catalog.py SUPPORTED_RUNTIMES, worker/cli_args.py --disable-runtime choices) are pinned equal to the catalog by a static consistency test."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/agent_runtime/test_runtime_catalog.py
+        gate: quick
 
   # Rust-side registry parsing, credential resolution and CLI output are
   # covered by velites/tests/models_cli.rs; registry targets allow only tests//scripts/.
@@ -905,7 +982,7 @@ invariants:
         target: tests/services/test_job_storage_layout.py
         gate: quick
       - kind: integration
-        target: tests/test_run_dir_cleanup.py
+        target: tests/services/test_run_dir_cleanup.py
         gate: quick
 
   - id: EXEC-CLAIM-RUNTIME-001
@@ -1006,7 +1083,7 @@ invariants:
         target: tests/routes/jobs/test_workspace_crud.py
         gate: quick
       - kind: contract
-        target: tests/test_workspace_settings_api.py
+        target: tests/services/test_workspace_settings_api.py
         gate: quick
 
   - id: MATERIAL-ACCESS-001
@@ -1120,13 +1197,28 @@ invariants:
         target: tests/workflows/test_workflow_start_node.py
         gate: quick
       - kind: integration
-        target: tests/test_workflow_scheduler.py::test_legacy_snapshot_without_start_keeps_readiness_behavior
+        target: tests/workflows/test_workflow_scheduler.py::test_legacy_snapshot_without_start_keeps_readiness_behavior
         gate: quick
       - kind: integration
         target: tests/services/test_run_service.py::test_ref_item_rejected_under_material_only_contract
         gate: quick
       - kind: integration
         target: tests/routes/test_runs_api.py::test_item_type_rejected_by_start_contract
+        gate: quick
+
+  - id: EXEC-WORKFLOW-NODE-TYPE-001
+    statement: "Non-start workflow nodes declare an explicit execution type (type: code|agent, #284 phase 2, schema v66): the loader normalizes the legacy 'node' spelling and an omitted type to 'code', and the v66 migration backfills stored active revisions and Studio drafts from the workspace_node_routes projection with the same rule so no ghost structural revision appears. Publish validation branches on the type — type=agent requires the capability to resolve to exactly one published Agent, type=code requires resolvable published workspace node code (an idle published Agent on the same capability is allowed). Revision publication materializes workspace_node_routes rows only for type=agent nodes; Agent publish/archive never rewrites routes (the startup reconcile is retired) — routes change only at revision publication."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/workflows/test_workflow_start_node.py
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_workflow_revisions.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_workflow_node_explicit_types_migration.py
         gate: quick
 
   - id: BOUNDARY-DATA-001
@@ -1151,4 +1243,22 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/db/test_db.py::test_database_initialization_records_postgres_schema
+        gate: quick
+
+  - id: EXEC-APPROVAL-001
+    statement: "A ``type: approval`` node never dispatches to any executor or Agent: the workflow worker parks its job_node at awaiting_approval (no lease, no node_run), downstream nodes stay blocked until the node completes, and the only transition out is an approval-API decision from a human session — studio_agent scoped tokens are rejected on the decision route, and every decision is recorded as an insert-only approval_decisions row with the uniform user:{id} actor."
+    owner: workflow-worker
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_approval_flow.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/jobs/test_job_approvals.py
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_approval_node_definition.py
+        gate: quick
+      - kind: contract
+        target: tests/routes/test_studio_agent_scope.py
         gate: quick

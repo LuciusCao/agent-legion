@@ -46,6 +46,7 @@ def _agent(capability: str = "generate", schema: dict | None = None) -> AgentDef
 
 
 def _definition(node_config: dict | None = None) -> WorkflowDefinition:
+    """The agent-node fixture: capability ``generate`` is Agent-routed."""
     return WorkflowDefinition(
         key="wf",
         label="Wf",
@@ -56,6 +57,27 @@ def _definition(node_config: dict | None = None) -> WorkflowDefinition:
                 label="Generate",
                 capability="generate",
                 config=node_config or {},
+                node_type="agent",
+            )
+        },
+    )
+
+
+def _code_definition_sharing_agent_capability(
+    node_config: dict | None = None,
+) -> WorkflowDefinition:
+    """type=code node whose capability also has a published Agent (#284)."""
+    return WorkflowDefinition(
+        key="wf",
+        label="Wf",
+        intake=WorkflowIntake(),
+        nodes={
+            "generate": WorkflowNode(
+                key="generate",
+                label="Generate",
+                capability="generate",
+                config=node_config or {},
+                node_type="code",
             )
         },
     )
@@ -280,6 +302,23 @@ def test_resolve_workflow_node_configs_agent_nodes_skip_reserved_keys() -> None:
     assert resolved == {"generate": {"page_size": 50}}
 
 
+def test_code_node_ignores_agent_schema_with_matching_capability() -> None:
+    """Codex P1 on PR #288: a type=code node sharing its capability with a
+    published Agent must NOT resolve against the Agent's schema — it keeps
+    the reserved-merged code schema, so intake neither drops the reserved
+    execution keys nor rejects the node's config."""
+    definition = _code_definition_sharing_agent_capability({"timeout_seconds": 30})
+    agents = {"a": _agent("generate", SCHEMA)}
+
+    schemas = workflow_node_config_schemas(definition, agents)
+    properties = schemas["generate"]["properties"]
+    assert "page_size" not in properties  # the Agent schema is not applied
+    assert properties["timeout_seconds"]["default"] == 600
+
+    resolved = resolve_workflow_node_configs(definition, agents, None)
+    assert resolved == {"generate": {"timeout_seconds": 30, "sandbox_network": False}}
+
+
 def test_resolve_workflow_node_configs_reserved_keys_overridable() -> None:
     definition = _node_schema_definition({"timeout_seconds": 30})
     workspace = {"node_config": {"wf": {"intake": {"sandbox_network": True}}}}
@@ -336,3 +375,35 @@ def test_reserved_execution_defaults_validate_seed() -> None:
         "timeout_seconds": 30,
         "sandbox_network": True,
     }
+
+
+def test_resolve_workflow_node_configs_skips_approval_gates() -> None:
+    """Approval gate config (rework_target) is platform semantics, not an
+    execution config: intake freeze must not validate it against a schema
+    (EXEC-APPROVAL-001)."""
+    from server.app.workflows.definition import workflow_definition_from_mapping
+
+    definition = workflow_definition_from_mapping(
+        {
+            "key": "gated",
+            "label": "Gated",
+            "schema_version": 2,
+            "nodes": {
+                "entry": {"type": "start", "label": "入口"},
+                "write": {"label": "写稿", "capability": "write_script"},
+                "gate": {
+                    "type": "approval",
+                    "label": "审批",
+                    "config": {"rework_target": "write"},
+                },
+            },
+            "edges": [
+                {"from": "entry", "to": "write"},
+                {"from": "write", "to": "gate"},
+            ],
+        }
+    )
+
+    resolved = resolve_workflow_node_configs(definition, {}, None)
+
+    assert "gate" not in resolved

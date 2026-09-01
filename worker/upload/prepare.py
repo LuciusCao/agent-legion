@@ -27,6 +27,14 @@ def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]
     try:
         return prepare_result(task)
     except Exception as exc:
+        # #204 broad-except audit: 归档准备的故意降级（prepare_result 的
+        # docstring 契约："may raise — caller degrades"，镜像拆分前的内联
+        # catch-all）。逃逸族混族——events 扫描/压缩、tar 构建（OSError）、
+        # code_runner 的归档路径、manifest 畸形——但结果必须永远可上报，
+        # 否则执行会卡到租约过期被 Host 重调度。吞是对的：降级产物是空
+        # result.tar.gz + failed_metadata，语义钉子即"准备失败 = run
+        # failed"。日志保全：错误文本截断 4000 字符后随 error_message 报
+        # 给 Host，随结果持久化、两侧可见。
         archive = task.execution_dir / "result.tar.gz"
         write_empty_archive(archive)
         return failed_metadata(task, f"result preparation failed: {exc}"), archive, []
@@ -45,7 +53,7 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
         # 批次 2：code 归档（expected_outputs + 根部 node.log）与 metadata
         # 由 code_runner 负责（含 auth_failure_connection）。延迟导入：
         # code_runner 依赖 upload_queue.UploadTask，顶层导入会成环。
-        from worker.code_runner import prepare_code_result
+        from worker.result_archive import prepare_code_result
 
         return prepare_code_result(task)
     job_dir = task.execution_dir / "job"
@@ -68,7 +76,7 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
             result_status, error = "completed", ""
     else:
         result_status, error = "failed", f"Agent process exited {task.exit_code}"
-    metadata: dict[str, Any] = {
+    metadata = {
         "status": result_status,
         "exit_code": task.exit_code,
         "error_message": error,

@@ -5,6 +5,8 @@ import type { WorkspaceSettings } from '../../types'
  * saveAll 的 PUT /configuration 契约：settings 必须是白名单 pick。
  * GET /settings 返回的服务端附加键（nodeConfig/nodeConfigSchemas）
  * 不在 PUT 契约（extra=forbid）里，全量回传会 422。
+ * workflowKey 已随 #211 Phase 2 第二批停发（key 与 workspace id 恒等
+ * 且不可变，PUT 缺省=沿用已存），快照里带着也不得回传。
  */
 
 const mockApi = vi.fn()
@@ -79,9 +81,10 @@ describe('saveActions PUT body', () => {
     expect(ok).toBe(true)
     const body = JSON.parse(mockApi.mock.calls[0][1].body)
     expect(Object.keys(body.settings).sort()).toEqual(
-      ['entityType', 'previewHidden', 'workflowKey'].sort()
+      ['entityType', 'previewHidden'].sort()
     )
     expect(body.settings.previewHidden).toEqual(['questions.json'])
+    expect(body.settings.workflowKey).toBeUndefined()
     expect(body.settings.nodeConfig).toBeUndefined()
     expect(body.settings.nodeConfigSchemas).toBeUndefined()
   })

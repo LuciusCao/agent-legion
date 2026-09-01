@@ -29,7 +29,7 @@ NODE = "fetch_items"
 
 @pytest.fixture
 def service(job_db):
-    return NodeCodeService(job_db.path)
+    return NodeCodeService(job_db.dsn_identity)
 
 
 @pytest.fixture
@@ -141,7 +141,7 @@ def test_versions_number_by_max_plus_one(service, workspace_id) -> None:
 
 
 def test_gate_disabled_rejects_every_entry(job_db, workspace_id) -> None:
-    gated = NodeCodeService(job_db.path, custom_nodes_enabled=False)
+    gated = NodeCodeService(job_db.dsn_identity, custom_nodes_enabled=False)
 
     with pytest.raises(CustomNodesDisabledError):
         gated.get_effective_code(workspace_id, WF, NODE)
@@ -177,37 +177,51 @@ def test_freeze_node_code_versions_pins_only_published(job_db, service, workspac
     # A draft without publish is not pinned.
     service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
 
-    pins = freeze_node_code_versions(job_db.path, True, workspace_id, WF, [NODE, "fetch_media"])
+    pins = freeze_node_code_versions(
+        job_db.dsn_identity, True, workspace_id, WF, [NODE, "fetch_media"]
+    )
 
     assert list(pins) == [NODE]
     assert pins[NODE]["version"] == 1
     published = service.get_code_by_version(workspace_id, WF, NODE, 1)
     assert pins[NODE]["code_hash"] == published["code_hash"]
     # Gate off: intake never touches the table.
-    assert freeze_node_code_versions(job_db.path, False, workspace_id, WF, [NODE]) == {}
+    assert freeze_node_code_versions(job_db.dsn_identity, False, workspace_id, WF, [NODE]) == {}
 
 
 def test_resolve_dispatch_node_code_priority(job_db, service, workspace_id) -> None:
     # Builtin: no custom code at all.
-    assert resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, None) is None
+    assert (
+        resolve_dispatch_node_code(job_db.dsn_identity, True, workspace_id, WF, NODE, None) is None
+    )
     service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
     service.publish(workspace_id, WF, NODE)
-    assert resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, None) == VALID_CODE
+    assert (
+        resolve_dispatch_node_code(job_db.dsn_identity, True, workspace_id, WF, NODE, None)
+        == VALID_CODE
+    )
     # A frozen job keeps v1 even after v2 is published.
     service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
     service.publish(workspace_id, WF, NODE)
     frozen = {"version": 1, "code_hash": code_hash(VALID_CODE)}
     assert (
-        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen) == VALID_CODE
+        resolve_dispatch_node_code(job_db.dsn_identity, True, workspace_id, WF, NODE, frozen)
+        == VALID_CODE
     )
     # Archived frozen versions stay readable.
     service.archive_all(workspace_id, WF, NODE)
     assert (
-        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen) == VALID_CODE
+        resolve_dispatch_node_code(job_db.dsn_identity, True, workspace_id, WF, NODE, frozen)
+        == VALID_CODE
     )
-    assert resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, None) is None
+    assert (
+        resolve_dispatch_node_code(job_db.dsn_identity, True, workspace_id, WF, NODE, None) is None
+    )
     # Gate off: builtin, no error.
-    assert resolve_dispatch_node_code(job_db.path, False, workspace_id, WF, NODE, frozen) is None
+    assert (
+        resolve_dispatch_node_code(job_db.dsn_identity, False, workspace_id, WF, NODE, frozen)
+        is None
+    )
 
 
 def test_resolve_dispatch_node_code_rejects_hash_mismatch(job_db, service, workspace_id) -> None:
@@ -216,7 +230,7 @@ def test_resolve_dispatch_node_code_rejects_hash_mismatch(job_db, service, works
 
     frozen = {"version": 1, "code_hash": "tampered"}
     with pytest.raises(ValueError, match="hash mismatch"):
-        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen)
+        resolve_dispatch_node_code(job_db.dsn_identity, True, workspace_id, WF, NODE, frozen)
 
 
 def test_resolve_dispatch_node_code_fails_closed_on_missing_version(
@@ -229,7 +243,7 @@ def test_resolve_dispatch_node_code_fails_closed_on_missing_version(
 
     frozen = {"version": 99, "code_hash": "whatever"}
     with pytest.raises(ValueError, match="frozen node code version missing"):
-        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen)
+        resolve_dispatch_node_code(job_db.dsn_identity, True, workspace_id, WF, NODE, frozen)
 
 
 def test_save_draft_guard_rejects_concurrently_published_row(
@@ -288,13 +302,13 @@ def test_frozen_pin_matches_across_scopes_by_hash(job_db, service, workspace_id)
     service.publish(workspace_id, WF, NODE)
 
     frozen = {"version": 1, "code_hash": code_hash(GLOBAL_CODE)}
-    resolved = resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen)
+    resolved = resolve_dispatch_node_code(job_db.dsn_identity, True, workspace_id, WF, NODE, frozen)
     assert resolved == GLOBAL_CODE
 
     # And the workspace pin still resolves the workspace code.
     frozen_ws = {"version": 1, "code_hash": code_hash(VALID_CODE)}
     assert (
-        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen_ws)
+        resolve_dispatch_node_code(job_db.dsn_identity, True, workspace_id, WF, NODE, frozen_ws)
         == VALID_CODE
     )
 
@@ -308,7 +322,7 @@ def test_frozen_pin_matching_neither_scope_still_fails_closed(
 
     frozen = {"version": 1, "code_hash": "tampered"}
     with pytest.raises(ValueError, match="hash mismatch"):
-        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen)
+        resolve_dispatch_node_code(job_db.dsn_identity, True, workspace_id, WF, NODE, frozen)
 
 
 def test_seed_global_tolerates_concurrent_seed_race(service, monkeypatch) -> None:

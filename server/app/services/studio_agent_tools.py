@@ -112,7 +112,9 @@ class StudioAgentToolsService:
         return {
             "state": "active",
             "workflow_key": workflow_key,
-            "revision": dict(revision),
+            # #211 M2: workflow_revisions lost workflow_key (v70); the
+            # deprecated summary field carries the identity value.
+            "revision": {**revision, "workflow_key": workflow_key},
             "workflow": workflow_definition_to_response_payload(definition),
             "definition_yaml": definition_to_yaml(definition),
         }

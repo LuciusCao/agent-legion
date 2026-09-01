@@ -1,10 +1,9 @@
 """One claimed execution's run: prepare, spawn, wait, and hand off the result.
 
-Split out of ``worker.executor`` for the file-size budget (mirrors the
-Host-side ``_code_sandbox.py`` split pattern): the executor module keeps the
-claim supervisor loop, this module owns the per-execution lifecycle for both
-kinds — ``agent`` (Pi/OpenClaw/velites runtime subprocess) and, since batch 2,
-``code`` (node code through the velites sandbox via ``worker.code_runner``).
+Split out of ``worker.executor`` for the file-size budget: the executor module
+keeps the claim supervisor loop, this module owns the per-execution lifecycle
+for both kinds — ``agent`` (Pi/velites runtime subprocess) and ``code``
+(node code through the velites sandbox via ``worker.code_runner``).
 """
 
 from __future__ import annotations
@@ -71,6 +70,13 @@ def deliver_result(
         try:
             released = client.release_slot(execution_id, task.lease_id)
         except Exception as exc:
+            # #204 broad-except audit: best-effort 容量释放。release_slot
+            # 故意无重试（见 host/transfer.py），逃逸族是 HTTP 传输层错误；
+            # 但收窄无益且更糟：任何失败的后果空间一致且有界——Host 侧
+            # slot 保持占用直到 report（404 旧语义），租约心跳仍在跳，结果
+            # 照常投递。窄捕获放走编程错误会让 deliver_result 整体失败 =
+            # 结果丢失、等租约过期重调度，严格更糟。日志保全：print 记录
+            # 异常与降级后果（slot held until report）。
             print(
                 f"release-slot failed for {execution_id}: {exc}; slot held until report",
                 flush=True,
@@ -85,6 +91,13 @@ def deliver_result(
             try:
                 uploads.submit(task)
             except Exception:
+                # #204 broad-except audit: compensate-then-bare-re-raise
+                # （#233 模式，同 server/app/agent_broker/agent_bundle.py）。
+                # 宽是因为 submit 的逃逸族混族（marker 原子写的 OSError、
+                # 调度器已关停的 RuntimeError 等），而无论哪种失败都必须先
+                # 停心跳再上抛——否则心跳线程泄漏、租约被一个已失败的
+                # 任务续命。裸 re-raise 保留原始异常类型，由 executor 的
+                # future reap（executor.py）打印 traceback 兜底。
                 heartbeat.stop.set()  # 停止租约心跳线程，避免泄漏
                 heartbeat.adopted.clear()
                 raise
@@ -114,11 +127,8 @@ def run_execution(
     download_slots: threading.Semaphore,
 ) -> None:
     """Run one claimed execution and hand its result to the upload queue.
-
-    The execution slot (this thread) is occupied only by work that needs the
-    Agent itself: download inputs, run the process. Everything after process
-    exit — compression, archive, upload, report — belongs to the UploadQueue,
-    and the Host-side slot is released via release-slot right at exit."""
+    Post-exit work (compression, archive, upload, report) belongs to the
+    UploadQueue; the Host-side slot is released via release-slot right at exit."""
     execution_id = str(claim["execution_id"])
     lease_id = str(claim["lease_id"])
     node_key = str(claim["node_key"])
@@ -133,7 +143,7 @@ def run_execution(
     status_fields = {
         "job_id": str(claim.get("job_id", "")),
         "node_key": node_key,
-        "workflow_key": str(claim.get("workflow_key", "")),
+        "workspace_id": str(claim.get("workspace_id", "")),
         "agent_id": str(claim.get("agent_id", "")),
         "run_dir": "" if exec_kind == "code" else str(run_dir),
     }
@@ -202,8 +212,8 @@ def run_execution(
                 # Drop token-delta spam as it streams by; deltas are discarded at upload time anyway.
                 pump = spawn_event_pump(proc, output, f"pi-events-{execution_id[:8]}")
                 # Fallback aligns with the Host product constant
-                # (dispatch.EXECUTION_TIMEOUT_SECONDS = 1800); manifests
-                # always carry timeout_seconds, so this only covers
+                # (agent_runtime.execution.EXECUTION_TIMEOUT_SECONDS = 1800);
+                # manifests always carry timeout_seconds, so this only covers
                 # hand-built/legacy manifests.
                 timeout = float(manifest.get("execution", {}).get("timeout_seconds", 1800))
                 exit_code, report_result = wait_for_exit(
@@ -236,6 +246,14 @@ def run_execution(
         # 掉，不会进这里——最后一次 attempt 不为过期结果殉葬（P1）。
         print(f"skipping claim of {execution_id}: dir holds a pending upload", flush=True)
     except Exception as exc:
+        # #204 broad-except audit: 单次执行的故意遏制边界（语义钉子：执行
+        # 失败要转化为一次 failed 结果上报，而非异常逃逸）。try 体横跨下载、
+        # spawn、等待与任务构造，逃逸族混族——传输错误、OSError、manifest
+        # 畸形的 ValueError 等；deliver_result 在 try 之外，逃逸即丢结果、
+        # 等租约过期后被 Host 重调度。吞是对的：降级产物是 prebuilt failed
+        # report，str(exc) 截断后随 error_message 上报。日志保全：
+        # traceback.print_exc() 先行输出完整堆栈。PendingUploadExists 已在
+        # 上臂按 #203 语义单独处理，不会落进这里。
         traceback.print_exc()
         task = UploadTask(
             execution_id=execution_id,

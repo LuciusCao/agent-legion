@@ -155,23 +155,23 @@ def build_code_bundle(bundle_path: Path, *, code_text: str, workspace_libs_dir: 
 
 
 def has_online_code_worker(database_dsn: ConnectSource, capability: str, workspace_id: str) -> bool:
-    """True when an online Worker can claim *capability* in *workspace_id*.
+    """True when an online Worker can claim code executions in *workspace_id*.
 
     ``database_dsn``: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187).
 
-    Mirrors the claim-side filters (capability, protocol v2, allowed_workspaces
+    Mirrors the claim-side filters (protocol v2, code capacity, allowed_workspaces
     admission) — an inadmissible Worker would wedge the job in queued for good
-    (no queued-timeout fallback, batch 2 decision 3)."""
+    (no queued-timeout fallback, batch 2 decision 3). ``capability`` is retained
+    for caller/cache compatibility but no longer filters anything (issue #284)."""
+    del capability  # admission no longer matches capabilities (issue #284)
     with read_connection(database_dsn) as conn:
         row = conn.execute(
             "select 1 from agent_workers where revoked_at is null"
             " and max_code_concurrency > 0 and protocol_version >= %s"
             " and last_seen_at > now() - make_interval(secs => %s)"
-            " and (capabilities_json::jsonb @> jsonb_build_array(%s::text)"
-            " or capabilities_json::jsonb @> '[\"*\"]'::jsonb)"
             " and (allowed_workspaces_json::jsonb = '[]'::jsonb or allowed_workspaces_json::jsonb @> jsonb_build_array(%s::text))"
             " limit 1",
-            (_CODE_PROTOCOL_VERSION, _ONLINE_THRESHOLD_SECONDS, capability, workspace_id),
+            (_CODE_PROTOCOL_VERSION, _ONLINE_THRESHOLD_SECONDS, workspace_id),
         ).fetchone()
     return row is not None
 
@@ -334,6 +334,13 @@ class CodeDispatchService:
         try:
             run = self.job_db.get_run(run_id)
         except Exception:
+            # #204 broad-except audit: deliberate degradation on the enqueue
+            # path. The batch row is an SDK convenience (ctx.batch); only its
+            # audit hash was persisted (#142) and the claim-response path
+            # re-fetches it strictly, so a transient DB error here degrades
+            # to None (debug log) instead of failing the dispatch — the poll
+            # pass would only retry the same enqueue next time anyway. The
+            # DB driver surface is not a business-exception family.
             logger.debug("get_run failed for job %s", job.get("id"), exc_info=True)
             return None
         batch_row = sdk_batch_row(run, job)

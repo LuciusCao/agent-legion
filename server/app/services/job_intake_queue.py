@@ -35,6 +35,15 @@ class JobIntakeQueue:
         try:
             self._consume_chunk(batch)
         except Exception as exc:
+            # #204 broad-except audit: batch-level containment on the async
+            # intake worker. _consume_chunk's inner catch already contains
+            # per-chunk failures (the documented CMS-outage/malformed-value
+            # space), so what reaches here is the run-bookkeeping itself
+            # failing — a corrupt queue_payload (json.loads of a torn write)
+            # or a DB failure mid-status-update. The claimed run must be
+            # recorded failed (or it would be re-claimed forever); note the
+            # update call can itself fail and propagate, which is correct:
+            # the run then stays queued and the next tick retries it.
             logger.exception("async intake batch %s failed", batch["id"])
             self.job_db.update_intake_run(str(batch["id"]), status="failed", error_message=str(exc))
         return True
@@ -47,7 +56,9 @@ class JobIntakeQueue:
         end = min(start + INTAKE_QUEUE_CHUNK_SIZE, len(input_values))
         revision = self.job_db.get_workflow_revision(
             str(batch["workspace_id"]),
-            str(batch["workflow_key"]),
+            # #211 M2: runs no longer carry workflow_key (v70); the signature
+            # keeps the argument but the column is gone from the read.
+            str(batch["workspace_id"]),
             str(queue_state["workflow_revision_id"]),
         )
         if revision is None:
@@ -75,6 +86,14 @@ class JobIntakeQueue:
             # remaining chunks proceed. Jobs already committed by earlier
             # chunks stay; the failed chunk's values can be re-submitted in a
             # new batch (dedup keys filter already-created jobs).
+            # #204 broad-except audit: the resolver space is genuinely mixed
+            # and unenumerable here — external-CMS transport errors of
+            # whatever library the resolver uses, ValueError from malformed
+            # input values, DB failures from create_jobs_bulk, and
+            # programming errors all take the same skip-and-continue path,
+            # because the batch's progress cursor is the recovery mechanism
+            # (recorded error + re-submittable values). The outer catch in
+            # consume_once contains what this one misses.
             logger.exception("async intake batch %s chunk [%s:%s] failed", batch["id"], start, end)
             chunk_errors = queue_state.setdefault("chunk_errors", [])
             if len(chunk_errors) < MAX_CHUNK_ERRORS:
@@ -111,8 +130,11 @@ class JobIntakeQueue:
         revision: dict[str, Any],
         values: list[str],
     ) -> None:
+        # #211 M2: runs rows no longer carry workflow_key (v70); the service
+        # signatures keep the argument, but the identity value (workspace_id)
+        # is what every write/read path uses now.
         existing_keys = self.job_db.list_job_dedup_keys(
-            str(batch["workspace_id"]), str(batch["workflow_key"])
+            str(batch["workspace_id"]), str(batch["workspace_id"])
         )
         candidates, _ = resolve_fresh_candidates(
             spec,
@@ -127,7 +149,7 @@ class JobIntakeQueue:
         )
         jobs = self.job_db.create_jobs_bulk(
             candidates=candidates,
-            workflow_key=str(batch["workflow_key"]),
+            workflow_key=str(batch["workspace_id"]),
             run_id=str(batch["id"]),
             node_keys=list(definition.executable_nodes),
             workspace_id=str(batch["workspace_id"]),

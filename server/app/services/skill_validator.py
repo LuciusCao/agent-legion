@@ -1,7 +1,7 @@
 """Skill path validation and tag discovery for the Studio Agent editor.
 
 A skill is a directory under the managed skills base dir
-(``~/.agents/skills/agent-legion``) containing a ``SKILL.md``; each skill
+(``~/.agents/skills``) containing a ``SKILL.md``; each skill
 directory is its own git repository whose tags are the selectable refs
 (the DB ``skill_lock`` document stays the authority on which ref is pinned —
 the validator only reports what exists, it never mutates the lock).
@@ -114,10 +114,19 @@ class SkillValidator:
         try:
             lock = self._lock_getter()
         except Exception:
+            # #204 broad-except audit: the lock getter is an injected seam
+            # (default: parsing the DB ``skill_lock`` document in
+            # skill_lock_store) whose failure family is not this module's
+            # to enumerate — a corrupt lock document, a DB blip, or a test
+            # double's error must all degrade to "no locked ref shown" in
+            # the editor rather than 500 the whole validation response.
+            # The lock stays authoritative elsewhere; this is display-only.
             return None
         if lock is None:
             return None
         entry = lock.skills.get(skill_key)
-        if entry is None:
+        if entry is None or not entry.refs:
             return None
-        return entry.ref or None
+        # Without the retired source registry there is no declared default
+        # ref: only a sole pin is an unambiguous "locked ref" display answer.
+        return next(iter(entry.refs)) if len(entry.refs) == 1 else None

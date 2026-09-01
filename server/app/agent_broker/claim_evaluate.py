@@ -39,12 +39,7 @@ def evaluate_candidate(
     view: WorkerView,
     state: ScanState,
 ) -> AgentClaim | None:
-    """Try to claim one candidate; record the skip reason when it loses.
-
-    Returns the claim on success. On a skip, ``state.skip_reasons`` gains
-    exactly one entry naming the cause; skips past the compatibility filters
-    (row lock and beyond) also consume one bounded claim attempt.
-    """
+    """Try to claim one candidate; on a skip, record the cause in state.skip_reasons."""
     selected_workspace = str(selected["workspace_id"])
     if selected_workspace not in state.pause_cache:
         check = broker.is_workspace_paused
@@ -58,11 +53,18 @@ def evaluate_candidate(
     kind = str(selected["kind"])
     # Code manifests are fully frozen at enqueue: no revision-time execution
     # re-resolution (the payload carries no provider/model).
-    manifest = (
-        json.loads(str(selected["manifest_json"]))
-        if kind == "code"
-        else agent_claim_compatibility.live_claim_manifest(selected)
-    )
+    if kind == "code":
+        manifest = json.loads(str(selected["manifest_json"]))
+    else:
+        try:
+            manifest = agent_claim_compatibility.live_claim_manifest(selected)
+        except ValueError:
+            # Execution contract violation (EXEC-RUNTIME-DISPATCH-001): skip
+            # here and keep the request queued — the unclaimable sweeper
+            # fails it with the actionable message. Raising would 500 every
+            # claim poll and head-of-line block the agent queue.
+            state.skip_reasons["execution_contract_invalid"] += 1
+            return None
     # Workspace admission scope from the server-side registration snapshot
     # (EXEC-WORKERACL-001): [] means all workspaces; a non-empty list
     # restricts this Worker to those workspaces. Never trust Worker-
@@ -82,12 +84,9 @@ def evaluate_candidate(
         if view.code_active >= view.code_capacity:
             state.skip_reasons["code_capacity_full"] += 1
             return None
-        # Code Workers carry no runtime/model declarations: the code text
-        # rides the bundle, so capability matching is the whole contract.
-        capability = str(selected["capability"])
-        if capability not in view.capabilities and "*" not in view.capabilities:
-            state.skip_reasons["capability_or_model_mismatch"] += 1
-            return None
+        # Code claim admission stops here (issue #284): protocol version plus
+        # code-pool capacity plus the workspace ACL above — capabilities no
+        # longer gate anything (the code text rides the bundle).
     else:
         if view.agent_active >= view.agent_capacity:
             state.skip_reasons["capacity_full"] += 1
@@ -95,10 +94,8 @@ def evaluate_candidate(
         if selected["runtime"] not in view.runtimes:
             state.skip_reasons["runtime_mismatch"] += 1
             return None
-        if not agent_claim_compatibility.worker_can_run(
-            selected, manifest, view.capabilities, view.models
-        ):
-            state.skip_reasons["capability_or_model_mismatch"] += 1
+        if not agent_claim_compatibility.worker_can_run(selected, manifest, view.models):
+            state.skip_reasons["model_mismatch"] += 1
             return None
     if not labels_satisfy(
         view.labels, json.loads(selected["definition_json"]).get("requires_labels", {})
@@ -198,9 +195,9 @@ def evaluate_candidate(
     conn.execute(
         """
         insert into executor_leases(
-          id, execution_id, executor_id, workspace_id, job_id, workflow_key,
+          id, execution_id, executor_id, workspace_id, job_id,
           node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-        ) values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', current_timestamp, current_timestamp, %s)
+        ) values (%s, %s, %s, %s, %s, %s, %s, 'active', current_timestamp, current_timestamp, %s)
         """,
         (
             lease_id,
@@ -208,7 +205,6 @@ def evaluate_candidate(
             executor_id,
             selected["workspace_id"],
             selected["job_id"],
-            selected["workflow_key"],
             selected["node_key"],
             run["id"],
             expires_at,
@@ -236,7 +232,6 @@ def evaluate_candidate(
         execution_id=selected["execution_id"],
         workspace_id=selected["workspace_id"],
         job_id=selected["job_id"],
-        workflow_key=selected["workflow_key"],
         node_key=selected["node_key"],
         agent_id=selected["agent_id"],
         lease_id=lease_id,

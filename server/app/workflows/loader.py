@@ -5,6 +5,10 @@ from typing import Any
 
 import yaml
 
+from server.app.workflows.approval_node import (
+    strip_snapshot_placeholders,
+    validate_approval_edges,
+)
 from server.app.workflows.node_config_schema import load_node_config_schema
 from server.app.workflows.schema import (
     WorkflowCondition,
@@ -22,6 +26,7 @@ from server.app.workflows.validator import _validate_acyclic
 from server.app.workflows.workflow_execution_defaults import apply_workflow_execution
 from server.app.workflows.workflow_intake import load_intake
 from server.app.workflows.workflow_node_execution import load_node_execution
+from server.app.workflows.workflow_node_skill import load_node_skill
 
 
 def _string_list(value: Any, field_name: str, node_key: str) -> list[str]:
@@ -183,7 +188,10 @@ def _load_nodes(
 
         node_type, accepted_item_types = load_start_fields(raw_node, node_key)
         capability = raw_node.get("capability", "")
-        if not isinstance(capability, str) or (not capability and node_type != "start"):
+        # start and approval nodes never dispatch, so they carry no capability.
+        if not isinstance(capability, str) or (
+            not capability and node_type not in ("start", "approval")
+        ):
             raise WorkflowDefinitionError(f"Node {node_key} capability must be a non-empty string")
 
         inputs = _string_list(raw_node.get("inputs"), "inputs", node_key)
@@ -210,6 +218,7 @@ def _load_nodes(
             execution=load_node_execution(raw_node, node_key),
             config=dict(raw_config),
             config_schema=load_node_config_schema(raw_node, node_key),
+            skill=load_node_skill(raw_node, node_key),
             shard=_load_shard(raw_node, node_key, inputs),
             reduce=_load_reduce(raw_node, node_key),
             node_type=node_type,
@@ -260,6 +269,7 @@ def workflow_definition_from_mapping(
     execution, nodes = apply_workflow_execution(raw, _load_nodes(raw_nodes))
     edges = _load_edges(raw, nodes, schema_version)
     nodes, edges = ensure_start_node(nodes, edges)
+    validate_approval_edges(nodes, edges)
     _validate_acyclic(nodes, edges)
     return WorkflowDefinition(
         key=key,
@@ -291,22 +301,10 @@ def workflow_definition_from_dict(
         # Snapshots store the dataclass field name; the yaml spelling is ``type``.
         if "node_type" in raw_node:
             raw_node["type"] = raw_node.pop("node_type")
-        # asdict snapshots carry every field on every node: strip the empty
-        # placeholders a start node must not declare, and the default contract
-        # copy on non-start nodes (only a start node may declare it).
-        if raw_node.get("type") == "start":
-            for placeholder in (
-                "capability",
-                "execution",
-                "shard",
-                "reduce",
-                "terminal",
-                "config",
-                "config_schema",
-            ):
-                raw_node.pop(placeholder, None)
-        else:
-            raw_node.pop("accepted_item_types", None)
+        # asdict snapshots carry every field on every node: strip the
+        # per-type placeholders a start/approval node must not declare, and
+        # the default contract copy on non-start nodes.
+        strip_snapshot_placeholders(raw_node)
         ensure_mapping(raw_node.get("terminal"), f"node {node_key} 'terminal'")
         raw["nodes"][node_key] = raw_node
     for edge in edges_payload:

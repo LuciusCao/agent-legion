@@ -7,6 +7,7 @@ tests/services/test_agent_artifact_inject.py 互为两端。
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import io
 import json
@@ -18,12 +19,12 @@ from typing import Any, BinaryIO
 import pytest
 import requests
 
-from worker import bundle_io
 from worker.artifact import download as artifact_download
+from worker.artifact import inputs as artifact_inputs
 from worker.artifact import upload as artifact_upload
 from worker.artifact.upload import DirectUploadError, upload_artifact_direct
 from worker.bundle_io import download_input_artifacts
-from worker.code_runner import prepare_code_result
+from worker.result_archive import prepare_code_result
 from worker.status import ExecutionStatusReporter
 from worker.upload.queue import UploadQueue, UploadTask
 
@@ -65,6 +66,45 @@ def test_upload_artifact_direct_streams_and_reports_ref(
         "size_bytes": len(PAYLOAD),
         "content_hash": HASH,
     }
+
+
+def test_upload_artifact_direct_gzip_spec_compresses_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#338：spec storage_key 带 .gz 后缀 → PUT 压缩字节；ref 的 size_bytes
+    是压缩后（HEAD 可核验的唯一数字），content_hash 仍是未压缩字节哈希。"""
+    path = tmp_path / "output.json"
+    path.write_bytes(PAYLOAD)
+    received = _fake_put(monkeypatch, [200])
+    spec = {**SPEC, "storage_key": SPEC["storage_key"] + ".gz"}
+
+    ref = upload_artifact_direct(path, spec)
+
+    assert len(received) == 1
+    assert gzip.decompress(received[0]) == PAYLOAD  # PUT 的是 gzip 流
+    assert received[0] != PAYLOAD and len(received[0]) < len(PAYLOAD)
+    assert ref == {
+        "storage_key": spec["storage_key"],
+        "size_bytes": len(received[0]),  # 压缩后字节数
+        "content_hash": HASH,  # 未压缩字节哈希，语义不变
+    }
+
+
+def test_upload_artifact_direct_gzip_retries_reuse_compressed_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """gzip 形态重试不再读盘：每次 attempt 复用同一份压缩字节。"""
+    path = tmp_path / "output.json"
+    path.write_bytes(PAYLOAD)
+    monkeypatch.setattr(artifact_upload, "_RETRY_BASE_SECONDS", 0.01)
+    received = _fake_put(monkeypatch, [500, 200])
+    spec = {**SPEC, "storage_key": SPEC["storage_key"] + ".gz"}
+
+    ref = upload_artifact_direct(path, spec)
+
+    assert len(received) == 2
+    assert received[0] == received[1]
+    assert ref is not None and ref["content_hash"] == HASH
 
 
 def test_upload_artifact_direct_4xx_is_terminal(
@@ -366,6 +406,48 @@ def test_download_input_artifacts_dict_form_verifies_sha256(
         download_input_artifacts(client, manifest, tmp_path / "job", threading.Semaphore(1))  # type: ignore[arg-type]
 
 
+def test_download_input_artifacts_gzip_form_gunzips_and_verifies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#338：ref 带 content_encoding=gzip → 边下边解压落盘，sha256 按未压缩
+    字节校验（与 content_hash 语义一致）。"""
+    _fake_open_download(monkeypatch, gzip.compress(PAYLOAD))
+    client = _DownloadFakeClient({})
+    manifest = {
+        "input_artifacts": {
+            "inputs/q.json": {
+                "url": "https://s3.test/get/x?sig=1",
+                "sha256": HASH,
+                "content_encoding": "gzip",
+            },
+        }
+    }
+
+    download_input_artifacts(client, manifest, tmp_path / "job", threading.Semaphore(1))  # type: ignore[arg-type]
+
+    assert (tmp_path / "job" / "inputs" / "q.json").read_bytes() == PAYLOAD
+
+
+def test_download_input_artifacts_gzip_form_detects_tamper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """gzip 形态下被篡改的对象解压后 sha256 不匹配，照样拒绝。"""
+    _fake_open_download(monkeypatch, gzip.compress(b"tampered"))
+    client = _DownloadFakeClient({})
+    manifest = {
+        "input_artifacts": {
+            "inputs/q.json": {
+                "url": "https://s3.test/get/x?sig=1",
+                "sha256": HASH,
+                "content_encoding": "gzip",
+            },
+        }
+    }
+
+    with pytest.raises(RuntimeError, match="digest mismatch"):
+        download_input_artifacts(client, manifest, tmp_path / "job", threading.Semaphore(1))  # type: ignore[arg-type]
+
+
 def test_download_input_artifacts_string_form_keeps_cas_channel(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -407,7 +489,7 @@ def test_download_input_artifacts_dict_form_retries_with_semaphore(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """dict 分支与 CAS 分支对齐：download_slots 限流 + transient 退避重试。"""
-    monkeypatch.setattr(bundle_io, "_RETRY_BACKOFF_BASE_SECONDS", 0.01)
+    monkeypatch.setattr(artifact_inputs, "_RETRY_BACKOFF_BASE_SECONDS", 0.01)
     slots = threading.Semaphore(1)
     calls: list[str] = []
 

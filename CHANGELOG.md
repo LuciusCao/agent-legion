@@ -6,6 +6,55 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Deprecated
+- workflow_key 兼容窗口期公告（issue #211）：全部 deprecated 契约面的迁移文案统一标注移除时间 **2026-10-31**——27 个请求/响应字段、10 条 URL 别名、claim 协议字段将在终态批移除。显式发送恒等值（=workspace id）继续放行至该日期；不匹配值已由守卫拒绝（400）。所有部署实例须在窗口期内升级至 ≥ schema v68（存量 workflow_key 已对齐）。
+
+### Added
+- Workflow nodes declare an explicit execution type `type: code | agent`
+  (issue #284 phase 2, schema v66): the publish gate branches on it
+  (agent nodes require exactly one published Agent for the capability,
+  code nodes require published node code), revision publication
+  materializes Agent routes only for `type: agent` nodes, and the startup
+  route reconcile is retired — routes now change only at revision
+  publication. Legacy `type: node` and an omitted type normalize to
+  `code`; the v66 migration backfills stored active revisions and Studio
+  drafts from the route projection.
+- 架构盘点：workflow_key 退役 Phase 1 分类清单（`docs/architecture/workflow-key-retirement-inventory.md`，issue #211）——四类穷尽引用 + Phase 2-4 执行依据。
+- Host 侧 agent runtime catalog（`server/app/agent_runtime`，issue #75）：
+  runtime 全集单一事实来源（`AGENT_RUNTIMES`）+ 每 runtime 一个 adapter
+  （argv 构建 + `ExecutionContract`）；「新增 agent runtime 接入指南」见
+  `docs/architecture/velites-harness.md`。
+
+### Changed
+- 节点 `skill.ref` 语义显式化（issue #322）：`latest`（空 ref 已归一为它）= 跟随 skill 仓库 HEAD，每次 dispatch 现场解析、永不入锁；具体 tag = 首次 dispatch 把解析的 commit 冻结进 `skill_lock`（v2 多值 `{repo, refs}`），唯一 relock 通道为 CLI `make skills-lock`（遍历锁内已有条目重解析 pinned refs）。**行为变化**：存量 published revision 中 ref 为空的节点原先冻结在 skill source 默认 ref 的 commit 上，升级后改为跟随仓库 HEAD；需要复现的节点应在 Studio 草稿中显式 pin tag 并重新发布。
+- Agent execution 契约 runtime 化（issue #75）：Host 侧 runtime catalog
+  （`server/app/agent_runtime`）的每个 adapter 声明自己支持的 manifest
+  execution 键（provider/model/thinking）与必填性；dispatch 与 Worker claim
+  重解析统一按契约校验——配置了 runtime 不支持的键（非空值）或必填键在
+  解析链上不再有来源时 fail-fast。**行为变化**：在飞 job 跨 revision 升级
+  后若节点引入了 runtime 不支持的 execution 键（或必填键不再可解析），
+  claim 从静默下发变为可行动报错（claim 扫描跳过该候选，unclaimable
+  sweeper 将请求判失败并给出指向节点 execution 覆盖的错误信息）。
+
+### Removed
+- 全局 skill_sources 注册表整体退役（issue #322 决策项 1）：skill 收敛为 `~/.agents/skills/<group>/<name>` 下的本地 in-place git 仓库（唯一模式），删除远程 clone 通道、repo 漂移闸门与缓存缺失 re-clone 自愈（缓存缺失改为报错并指引在 skill root 下创建）；admin `/api/admin/skill-sources*` 端点与「Skill 源管理」设置面板一并删除，`skill_lock` 的 `repo` 字段退化为仅审计。启动一次性迁移幂等删除 DB `global_settings` 里残留的 `skill_sources` 文档（保留 `skill_lock`）。
+- dev 侧 worker 配置种子 `config/agent-worker.yaml` 与模板
+  `config/agent-worker.example.yaml` 整体退役（issue #323）：worker 唯一
+  生效配置收敛为状态副本 `data/agent-worker-service/worker.yaml`（控制台/
+  API 驱动），消除「改了种子文件不生效」的双层配置漂移。`init-worktree.sh`
+  / `install-deps.sh` 的种子逻辑改为直写状态副本，`worker.service --config`
+  变为纯可选 bootstrap（仅 docker/远程 headless 部署使用，模板见
+  `deploy/worker.*.example.yaml`），`make dev-up` 的 worker 启动闸门改判
+  状态副本是否存在。
+- openclaw runtime 整体退役（issue #75）：曾短暂经 catalog adapter 接入
+  （`openclaw agent --local --json`），因其 stdout 只有一次性结果
+  envelope——无流式事件、无 token 计量——按用户决策移除；agent runtime
+  回到 pi / velites 两个。连带退役：实例设置 `openclaw` 块（存量 DB 文档
+  读取时整块剥离、写入返回 422）、`AGENT_LEGION_OPENCLAW_CWD` env、
+  `openclaw.cwd` 启动校验、Host 侧 openclaw agents 发现、Worker 侧
+  openclaw 条目与模型发现 adapter。未来需要时按 adapter 机制重新接入
+  （指南见 `docs/architecture/velites-harness.md`）。
+
 ## [0.4.0-alpha] - 2026-08-29
 
 ### Added
@@ -45,7 +94,7 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 - Workspace Settings「Agent 默认配置」(`default_agent_provider/model/thinking`):
   the provider/model/thinking resolution chain is now node `execution.*` →
   workflow-level `execution` default → actionable error; the three columns are
-  dropped in schema v63 (cleanup-phase drop after the v62 replay, per the
+  dropped in schema v64 (cleanup-phase drop after the v62 replay, per the
   `cms_config_json` precedent). New manifests no longer bake
   `execution_defaults`; claim re-resolution stays tolerant of legacy in-flight
   manifests.
@@ -193,9 +242,9 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 - **Breaking (deployments):** the global worker register token is retired —
   registration uses workspace-scoped tokens only, issued per workspace in the
-  admin UI (设置 → Worker Token, workspace is now mandatory at issuance) and
-  managed in the Worker console's new "Workspace 访问" panel; leftover
-  `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` env vars or yaml
+  admin UI (workspace 设置 → Agent 与 Worker, workspace is now mandatory at
+  issuance) and managed in the Worker console's new "Workspace 访问" panel;
+  leftover `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` env vars or yaml
   `agent_workers.register_token(_file)` keys now fail startup with migration
   guidance (#35, schema v58).
 - Worker registration presents all configured scoped tokens in one call

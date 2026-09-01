@@ -45,7 +45,7 @@ def _setup(
 ):
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="demo_workflow")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
     block_event = threading.Event()
     executor = BlockingExecutor("code", block_event)
     definition = make_definition([local_node("fetch")])
@@ -62,8 +62,8 @@ def _setup(
     if node_limit is not None:
         with job_db.connect() as conn:
             conn.execute(
-                "insert into workspace_node_limits(workspace_id, workflow_key, node_key,"
-                " concurrency_limit) values (%s, 'test', 'fetch', %s)",
+                "insert into workspace_node_limits(workspace_id, node_key, "
+                " concurrency_limit) values (%s, 'fetch', %s)",
                 (ws["id"], node_limit),
             )
     worker = make_worker(tmp_path, db_path, executor, [definition], code_capacity=capacity)

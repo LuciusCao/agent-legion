@@ -59,13 +59,18 @@ def _resolve_uncached(
     node_key: str,
     capability: str,
 ) -> NodeRoute:
+    # #211 Phase 3 (read-layer binding): the route predicate keys on
+    # (workspace_id, node_key) — workflow_key equals the workspace id on
+    # every row (v62 binding, aligned by v68). The cache key keeps the
+    # workflow_key component until Phase 4 (frozen snapshots may still carry
+    # a pre-v62 key, so the composite key stays collision-free).
     with worker.job_db._connect_read() as conn:
         route = conn.execute(
             """
             select target_kind, target_id from workspace_node_routes
-            where workspace_id=%s and workflow_key=%s and node_key=%s
+            where workspace_id=%s and node_key=%s
             """,
-            (workspace_id, workflow_key, node_key),
+            (workspace_id, node_key),
         ).fetchone()
         # Agent routing is decided by the materialized workspace_node_routes
         # projection, not by any node-level declaration.

@@ -84,11 +84,7 @@ def _insert_active_lease(
         node_run_id = cursor.fetchone()["id"]
         conn.execute(
             """
-            insert into executor_leases(
-                id, execution_id, executor_id, workspace_id, job_id, workflow_key,
-                node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-            )
-            values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
+            insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) values (%s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
             """,
             (
                 f"lease-{job_id}",
@@ -96,7 +92,6 @@ def _insert_active_lease(
                 "local",
                 workspace_id,
                 job_id,
-                "demo_workflow",
                 node_key,
                 node_run_id,
                 database_timestamp(now),
@@ -182,7 +177,7 @@ def test_delete_succeeds_for_inactive_job(job_db: JobQueries, tmp_path: Path) ->
 
 
 def _create_artifact_store(job_db: JobQueries, tmp_path: Path) -> ArtifactStore:
-    return ArtifactStore(tmp_path / "artifacts", job_db.path)
+    return ArtifactStore(tmp_path / "artifacts", job_db.dsn_identity)
 
 
 def test_delete_cleans_artifact_refs_and_unreferenced_files(
@@ -191,7 +186,7 @@ def test_delete_cleans_artifact_refs_and_unreferenced_files(
     settings = _create_settings(tmp_path)
     lease_repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
     # Grace-free store so the test exercises physical GC of just-created blobs.
-    store = ArtifactStore(tmp_path / "artifacts", job_db.path, gc_grace_seconds=0)
+    store = ArtifactStore(tmp_path / "artifacts", job_db.dsn_identity, gc_grace_seconds=0)
     service = JobDeletionService(job_db, lease_repo, settings, artifact_store=store)
 
     job_a = _create_job(job_db, "ws-gc", "Q100", status="completed")

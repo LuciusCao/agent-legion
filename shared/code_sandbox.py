@@ -29,22 +29,14 @@ import site
 import sys
 from pathlib import Path
 
-# Code bundle member names (batch 2 contract, shared by the Host-side packer
-# server/app/agent_broker/agent_bundle.py and the Worker-side runner).
-CODE_BUNDLE_NODE_FILE = "node_code.py"
-CODE_BUNDLE_LIBS_DIR = "workspace_libs"
-# Result-archive member carrying the node's captured stdout/stderr for
-# kind='code' results (batch 2 decision 10); the Host promotes it to the
-# run's canonical log path.
-CODE_RESULT_LOG_MEMBER = "node.log"
-# Mirrors workspace_libs/node_sdk.py NODE_RUNTIME_DIR / AUTH_FAILURE_MARKER.
-# node_sdk must stay import-self-contained (the code bundle ships only the
-# workspace_libs snapshot), so that mirror keeps a comment pointer instead of
-# importing this module.
-AUTH_FAILURE_MARKER_PATH = ".node_runtime/auth_failure"
-# Connection keys reported by node code via report_auth_failure; bounded on
-# both sides (Host route agent_worker_results, Worker result metadata).
-MAX_CONNECTION_KEY_CHARS = 128
+# 契约常量经本模块 re-export（#282 之前它们就定义在这里；worker/host 的
+# 既有 import 路径保持不变）。单一事实源是 shared/code_contract.py。
+from shared.code_contract import AUTH_FAILURE_MARKER_PATH as AUTH_FAILURE_MARKER_PATH
+from shared.code_contract import CODE_BUNDLE_LIBS_DIR as CODE_BUNDLE_LIBS_DIR
+from shared.code_contract import CODE_BUNDLE_NODE_FILE as CODE_BUNDLE_NODE_FILE
+from shared.code_contract import CODE_RESULT_LOG_MEMBER as CODE_RESULT_LOG_MEMBER
+from shared.code_contract import CODE_RESULT_METADATA_KEYS as CODE_RESULT_METADATA_KEYS
+from shared.code_contract import MAX_CONNECTION_KEY_CHARS as MAX_CONNECTION_KEY_CHARS
 
 
 def child_env(import_root: Path) -> dict[str, str]:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from server.app.services.job_errors import InvalidOperationError
@@ -11,14 +11,14 @@ def validate_workspace_node_limits(
     *,
     workflow: WorkflowDefinition | None,
     node_limits: Sequence[Mapping[str, Any]],
-    agent_capabilities: Collection[str] = (),
     code_capacity: int,
 ) -> None:
     """Validate per-node concurrency limits (P-0.5: the only node-level knob).
 
     Node limits cap concurrency inside the implicit code pool, so a limit may
-    never exceed the instance code_capacity. Agent-routed nodes run on Agent
-    workers, not the code pool, and cannot carry a node limit.
+    never exceed the instance code_capacity. ``type: agent`` nodes run on
+    Agent workers, not the code pool, and cannot carry a node limit (the
+    explicit node type decides, #284).
     """
     seen_limits: set[tuple[str, str]] = set()
     for node_limit in node_limits:
@@ -37,7 +37,9 @@ def validate_workspace_node_limits(
             continue
         if key[0] != workflow.key or key[1] not in workflow.nodes:
             raise InvalidOperationError(f"Unknown Workflow Node {key[0]}.{key[1]}")
-        if workflow.nodes[key[1]].capability in agent_capabilities:
+        # Explicit node type decides (#284): a code node may share its
+        # capability with a published Agent and still carry a node limit.
+        if workflow.nodes[key[1]].node_type == "agent":
             raise InvalidOperationError(
                 f"Agent-routed Node {key[0]}.{key[1]} cannot have a Node limit"
             )

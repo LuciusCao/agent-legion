@@ -36,6 +36,9 @@ class WorkflowNodeExecution:
     provider: str = ""
     model: str = ""
     thinking: str = ""
+    # Node-level only (the top-level block rejects it): empty means the
+    # platform auto-assembles the default node instructions; a non-empty
+    # value REPLACES that default wholesale in the run prompt.
     prompt: str = ""
 
 
@@ -64,6 +67,12 @@ class WorkflowReduceSpec:
 
 
 @dataclass(frozen=True)
+class WorkflowNodeSkill:
+    key: str
+    ref: str = ""
+
+
+@dataclass(frozen=True)
 class WorkflowNode:
     key: str
     label: str
@@ -75,10 +84,18 @@ class WorkflowNode:
     execution: WorkflowNodeExecution = field(default_factory=WorkflowNodeExecution)
     config: dict[str, Any] = field(default_factory=dict)
     config_schema: dict[str, Any] = field(default_factory=dict)
+    # Agent-routed nodes may bind the skill content they run (issue #76);
+    # the binding versions with the revision snapshot. An empty ref falls
+    # back to the skill_sources default ref at resolution time.
+    skill: WorkflowNodeSkill | None = None
     shard: WorkflowShardSpec | None = None
     reduce: WorkflowReduceSpec | None = None
-    # ``start`` nodes carry the entry contract and never execute (EXEC-WORKFLOW-START-001).
-    node_type: str = "node"
+    # ``start`` nodes carry the entry contract and never execute (EXEC-WORKFLOW-START-001);
+    # ``approval`` gates park for a human decision (EXEC-APPROVAL-001); every
+    # other node explicitly runs as ``code`` (implicit code pool) or ``agent``
+    # (Agent-routed). The loader normalizes the legacy ``node`` spelling and
+    # a missing ``type`` to ``code``.
+    node_type: str = "code"
     accepted_item_types: tuple[str, ...] = DEFAULT_ACCEPTED_ITEM_TYPES
 
 

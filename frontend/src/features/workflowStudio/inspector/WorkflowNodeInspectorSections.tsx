@@ -1,6 +1,7 @@
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { SelectedWorkflowNodeDetails } from '../shared/workflowStudioModel'
 import { WorkflowNodeCodeSection } from '../code-editor/WorkflowNodeCodeSection'
+import { WorkflowNodeConfigSchemaSection } from './WorkflowNodeConfigSchemaSection'
 import { WorkflowNodeConfigSection } from './WorkflowNodeConfigSection'
 import { WorkflowNodeDataContractSection } from './WorkflowNodeDataContractSection'
 import { WorkflowNodeDependencySection } from './WorkflowNodeDependencySection'
@@ -13,7 +14,8 @@ export type InspectorSectionProps = {
   agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
-  workflowKey: string
+  /** type=code 节点「切换为 Agent 执行」（改写草稿 YAML type；Body 注入）。 */
+  onSwitchToAgent?: () => boolean
   readOnly?: boolean
 }
 
@@ -36,19 +38,15 @@ export function WorkflowNodeInspectorSections(props: InspectorSectionProps) {
         setDefinitionYaml={props.setDefinitionYaml}
         readOnly={props.readOnly}
       />
-      <WorkflowNodeExecutionSection
+      <WorkflowNodeConfigSchemaSection
+        key={`config-schema-${node.key}`}
         node={node}
-        agentCatalog={props.agentCatalog}
-        definitionYaml={props.definitionYaml}
-        setDefinitionYaml={props.setDefinitionYaml}
-        workflowKey={props.workflowKey}
-        readOnly={props.readOnly}
+        {...props}
       />
+      <WorkflowNodeExecutionSection node={node} {...props} />
       <WorkflowNodeCodeSection
         key={`code-${node.key}`}
         node={node}
-        agentCatalog={props.agentCatalog}
-        workflowKey={props.workflowKey}
         readOnly={props.readOnly}
       />
       <WorkflowNodeConfigSection

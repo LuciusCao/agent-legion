@@ -14,11 +14,12 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
+from worker.config_response import public_config_response
 from worker.metrics_proxy import create_metrics_proxy_router
-from worker.registration.token import registration_token_configured
 from worker.service_bind import embed_control_token
-from worker.service_models import RegisterTokenPayload, WorkerConfigPayload
-from worker.supervisor import WorkerConfigStore, WorkerSupervisor, public_config
+from worker.service_models import WorkerConfigPayload
+from worker.service_tokens import create_register_token_router
+from worker.supervisor import WorkerConfigStore, WorkerSupervisor
 
 logger = logging.getLogger(__name__)
 
@@ -28,21 +29,14 @@ logger = logging.getLogger(__name__)
 # 重读状态副本，调大立即放行新 claim、调小不杀在跑执行，新容量随下一次
 # claim 上报 Host，无需重新注册或重启。code 容量 0→>0 的 velites 守卫由
 # 循环内 hot_code_concurrency fail-closed 执行（缺失 velites 时拒绝热开
-# 并打日志），不依赖重启预检。host_url / worker_id / runtimes 等进程级
-# 配置仍走重启路径。
+# 并打日志），不依赖重启预检。host_url / worker_id / disabled_runtimes 等
+# 进程级配置仍走重启路径（生效 runtimes 随重启重新探测）。
 _HOT_CONFIG_FIELDS = {
     "claim_enabled",
     "max_concurrency",
     "max_code_concurrency",
     "upload_max_concurrency",
 }
-
-
-def _public_config_response(store: WorkerConfigStore, config: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **public_config(config),
-        "register_token_configured": registration_token_configured(config, store.state_dir),
-    }
 
 
 def _forget_previous_worker(config: dict[str, Any]) -> None:
@@ -113,7 +107,7 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool 
     @app.get("/api/config", dependencies=guarded)
     def get_config() -> dict[str, Any]:
         config = supervisor.store.read(require_identity=False)
-        return _public_config_response(supervisor.store, config)
+        return public_config_response(supervisor, config)
 
     @app.put("/api/config", dependencies=guarded)
     def put_config(payload: WorkerConfigPayload) -> dict[str, Any]:
@@ -132,7 +126,7 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool 
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {
-            "config": _public_config_response(supervisor.store, config),
+            "config": public_config_response(supervisor, config),
             "status": supervisor.status(),
             "restarted": restarted,
         }
@@ -142,56 +136,32 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool 
         supervisor.restart()
         return supervisor.status()
 
-    @app.get("/api/register-tokens", dependencies=guarded)
-    def list_register_tokens() -> dict[str, Any]:
-        """Scoped token 清单（仅 id 与验证状态，永不回显明文）。"""
-        tokens = supervisor.store.read_registration_tokens()
-        token_status = supervisor.token_status()
-        return {
-            "tokens": [
-                {
-                    "token_id": row["token_id"],
-                    "state": token_status.get(row["token_id"], "pending"),
-                }
-                for row in tokens
-            ]
-        }
-
-    @app.post("/api/register-tokens", dependencies=guarded)
-    def add_register_token(payload: RegisterTokenPayload) -> dict[str, Any]:
-        """添加一个 scoped token 并重启（重注册会验证全部 token）。"""
-        try:
-            supervisor.store.upsert_registration_token(payload.register_token)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        supervisor.restart()
-        return supervisor.status()
-
-    @app.delete("/api/register-tokens/{token_id}", status_code=200, dependencies=guarded)
-    def remove_register_token(token_id: str) -> dict[str, Any]:
-        if not supervisor.store.remove_registration_token(token_id):
-            raise HTTPException(status_code=404, detail="token not found")
-        supervisor.restart()
-        return supervisor.status()
-
     @app.get("/api/logs", dependencies=guarded)
     def logs(limit: int = Query(default=200, ge=1, le=500)) -> dict[str, list[str]]:
         return {"lines": supervisor.logs(limit)}
 
     app.include_router(create_metrics_proxy_router(supervisor), dependencies=guarded)
+    app.include_router(create_register_token_router(supervisor, guarded))
 
     return app
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the Agent Legion Worker Service")
-    parser.add_argument("--config", type=Path, default=Path("config/agent-worker.yaml"))
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="可选 bootstrap：仅状态副本缺失时导入一次的种子配置（docker/远程部署用）",
+    )
     parser.add_argument("--state-dir", type=Path, default=Path("data/agent-worker-service"))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
     args = parser.parse_args()
     worker_dir = Path(__file__).resolve().parent  # worker/ 包根（executor.py 与 ui/ 同级）
-    store = WorkerConfigStore(args.state_dir.resolve(), args.config.resolve())
+    store = WorkerConfigStore(
+        args.state_dir.resolve(), args.config.resolve() if args.config is not None else None
+    )
     supervisor = WorkerSupervisor(store, worker_dir / "executor.py")
     app = create_app(supervisor, worker_dir / "ui", embed_token=embed_control_token(args.host))
     uvicorn.run(app, host=args.host, port=args.port)

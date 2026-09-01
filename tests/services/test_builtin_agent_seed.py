@@ -17,6 +17,9 @@ from server.app.agent_catalog.builtin import (
     seed_demo_workspace_agent_definitions,
 )
 from server.app.services.agent_service import AgentService
+from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION
+from server.app.workflows.definition import workflow_definition_from_dict
+from server.app.workflows.workflow_node_skill import node_skill_publish_error
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -27,7 +30,7 @@ def workspace_id(job_db) -> str:
 
 @pytest.fixture
 def service(job_db, workspace_id) -> AgentService:
-    return AgentService(job_db.path, workspace_id)
+    return AgentService(job_db.dsn_identity, workspace_id)
 
 
 def test_seed_publishes_demo_agents_into_the_workspace(service, workspace_id) -> None:
@@ -44,13 +47,34 @@ def test_seed_publishes_demo_agents_into_the_workspace(service, workspace_id) ->
         assert published is not None, agent_id
         assert published == expected, agent_id
         assert published.runtime == "velites"
-        assert published.skill.startswith("education-video-problems-generation/")
+        # issue #76: the skill binding lives on the demo DAG nodes, not on the
+        # Agent definitions (legacy fallback left empty).
+        assert published.skill == ""
+
+
+@pytest.mark.no_db
+def test_demo_dag_nodes_carry_the_skill_binding() -> None:
+    """The demo DAG declares (key, ref) skill bindings on its four Agent nodes,
+    so a revision publish passes the node-skill gate with skill-less Agents."""
+    definition = workflow_definition_from_dict(DEMO_WORKFLOW_DEFINITION)
+    expected = {
+        "write_script": "write-script",
+        "review_script": "review-script",
+        "generate_questions": "generate-questions",
+        "review_questions": "review-questions",
+    }
+    for node_key, skill_name in expected.items():
+        node = definition.nodes[node_key]
+        assert node.skill is not None, node_key
+        assert node.skill.key == f"education-video-problems-generation/{skill_name}"
+        assert node.skill.ref == "v1.0.0"
+        assert node_skill_publish_error(node, agent_skill="") is None, node_key
 
 
 def test_seed_leaves_other_workspaces_empty(job_db, workspace_id) -> None:
     other = job_db.create_workspace("Other WS", default_workflow_key="demo_workflow")["id"]
     seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id)
-    assert AgentService(job_db.path, other).list_latest() == []
+    assert AgentService(job_db.dsn_identity, other).list_latest() == []
 
 
 def test_seed_is_idempotent(service, workspace_id) -> None:

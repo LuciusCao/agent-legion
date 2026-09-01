@@ -54,6 +54,14 @@ class AgentEnqueuePool:
             try:
                 fn()
             except Exception:
+                # #204 broad-except audit: pool-thread life support. The
+                # candidate has no broker row yet (dedup happens after the
+                # enqueue succeeds), so the next poll pass re-evaluates and
+                # resubmits it — but only if THIS thread survives: a narrow
+                # catch would let one staging/bundling failure permanently
+                # kill one of the fixed daemon workers (no respawn). The
+                # traceback is the only signal; nothing is masked because the
+                # retry is structural, not exception-driven.
                 # The candidate has no broker row, so the next poll pass
                 # re-evaluates and resubmits it; the log is the only signal.
                 logger.exception("background agent enqueue failed")

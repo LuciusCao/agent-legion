@@ -30,9 +30,10 @@ class FailedNodeRunQueriesMixin(ConnectionQueriesMixin):
         """
         inner_clauses = ["jobs.workspace_id = %s"]
         params: list[Any] = [workspace_id]
-        if workflow_key:
-            inner_clauses.append("jobs.workflow_key = %s")
-            params.append(workflow_key)
+        # #211 Phase 3 (read-layer binding): the workflow_key predicate was
+        # redundant — jobs.workspace_id (the join key above) already filters,
+        # and the column equals it on every row (v62 binding). The parameter
+        # stays signature-compatible; callers stop passing it.
         if job_ids:
             placeholders = ",".join("%s" for _ in job_ids)
             inner_clauses.append(f"node_runs.job_id in ({placeholders})")
@@ -71,7 +72,9 @@ class FailedNodeRunQueriesMixin(ConnectionQueriesMixin):
                     node_runs.failure_detail,
                     node_runs.error_message,
                     node_runs.finished_at,
-                    jobs.workflow_key,
+                    -- #211 M2: jobs lost workflow_key (v70); the deprecated
+                    -- response field carries the identity value instead.
+                    jobs.workspace_id as workflow_key,
                     row_number() over (
                       partition by node_runs.job_id, node_runs.node_key
                       order by node_runs.id desc

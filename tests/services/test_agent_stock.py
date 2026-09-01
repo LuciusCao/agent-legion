@@ -131,16 +131,16 @@ def _insert_request(
             "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'Test', 'demo_workflow') on conflict(id) do nothing"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
+            "insert into jobs(id, workspace_id, source_type, source_id,"
             " workflow_revision_id)"
-            " values (%s, 'ws1', 'questions', 'question', %s, %s) on conflict(id) do nothing",
+            " values (%s, 'ws1', 'question', %s, %s) on conflict(id) do nothing",
             (job_id, job_id, revision_id or ""),
         )
         conn.execute(
             "insert into agent_execution_requests(execution_id, workspace_id, job_id,"
-            " workflow_key, node_key, agent_id, agent_definition_hash,"
+            " node_key, agent_id, agent_definition_hash,"
             " node_concurrency_limit, queued_at, manifest_json, state, finished_at)"
-            " values (%s, 'ws1', %s, 'questions', %s, %s, 'hash', 1,"
+            " values (%s, 'ws1', %s, %s, %s, 'hash', 1,"
             " current_timestamp, '{}', %s,"
             + (finished_at if finished_at is not None else "null")
             + ")",
@@ -198,9 +198,9 @@ def _insert_revision(job_db, *, revision_id: str, nodes: dict, edges: list) -> N
             "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'Test', 'demo_workflow') on conflict(id) do nothing"
         )
         conn.execute(
-            "insert into workflow_revisions(id, workspace_id, workflow_key, version,"
+            "insert into workflow_revisions(id, workspace_id, version,"
             " status, definition_json, definition_hash)"
-            " values (%s, 'ws1', 'questions', 1, 'active', %s, 'hash')",
+            " values (%s, 'ws1', 1, 'active', %s, 'hash')",
             (revision_id, definition_json),
         )
 

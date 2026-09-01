@@ -6,19 +6,15 @@ once at startup (``create_app``, right after ``JobQueries`` is constructed)
 and takes effect on restart; there is no runtime hot-reload:
 
 - executor runtime scalars plus ``workflows.enabled`` /
-  ``agent_workers.{max_archive_bytes,min_protocol_version}``, the
-  ``openclaw`` block and ``code_capacity`` are merged onto the loaded
-  ``ExecutorRuntimeConfig`` and re-validated;
+  ``agent_workers.{max_archive_bytes,min_protocol_version}`` and
+  ``code_capacity`` are merged onto the loaded ``ExecutorRuntimeConfig`` and
+  re-validated;
 - ``cleanup`` / ``monitoring`` values are written back into ``settings.config``
   for construction-time consumers (OpsMetricsService, CleanupConfig, WorkflowMaintenance).
-
-``AGENT_LEGION_OPENCLAW_CWD`` outranks the DB document (re-applied post-merge).
 """
 
 from __future__ import annotations
 
-import copy
-import os
 from typing import Any
 
 from server.app.configuration.executor_runtime import ExecutorRuntimeConfig
@@ -26,7 +22,6 @@ from server.app.configuration.instance_defaults import (
     DEFAULT_CLEANUP_CONFIG,
     DEFAULT_MONITORING_CONFIG,
 )
-from server.app.configuration.openclaw_defaults import DEFAULT_OPENCLAW_CONFIG
 from server.app.db.dialect import ConnectSource
 from server.app.services.instance_settings_store import InstanceSettingsStore
 from server.app.settings import Settings
@@ -41,9 +36,6 @@ _EXECUTOR_SCALAR_KEYS = (
     "code_capacity",
 )
 
-# Same variable load_settings maps onto config["openclaw"]["cwd"].
-_OPENCLAW_CWD_ENV = "AGENT_LEGION_OPENCLAW_CWD"
-
 
 def default_instance_document() -> dict[str, Any]:
     """Return the code-default instance settings document."""
@@ -51,7 +43,6 @@ def default_instance_document() -> dict[str, Any]:
     document: dict[str, Any] = {
         "cleanup": dict(DEFAULT_CLEANUP_CONFIG),
         "monitoring": dict(DEFAULT_MONITORING_CONFIG),
-        "openclaw": copy.deepcopy(DEFAULT_OPENCLAW_CONFIG),
         "workflows": {"enabled": runtime.workflows.enabled},
         "agent_workers": {
             "max_archive_bytes": runtime.agent_workers.max_archive_bytes,
@@ -77,38 +68,25 @@ def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-# OpenClaw keys retired with the legacy business workflow pipeline. Stored
-# documents from older deployments still carry them; they are stripped at read
-# time (before response validation — InstanceOpenClawSettings is extra=forbid)
-# so the effective document matches the cwd-only shape without a data migration.
-_RETIRED_OPENCLAW_KEYS = (
-    "command_template",
-    "timeout_seconds",
-    "isolated_workspace_root",
-    "skill_safety",
-)
+def _strip_retired_blocks(stored: dict[str, Any]) -> dict[str, Any]:
+    """Remove retired top-level blocks from a stored document copy.
 
-
-def _strip_retired_openclaw_keys(stored: dict[str, Any]) -> dict[str, Any]:
-    """Remove retired ``openclaw`` keys from a stored document copy."""
-    openclaw = stored.get("openclaw")
-    if not isinstance(openclaw, dict):
+    The ``openclaw`` block retired with the openclaw runtime (#75): stored
+    documents from older deployments still carry it; it is stripped at read
+    time (before response validation — InstanceSettingsDocument is
+    extra=forbid) so the effective document matches the current shape without
+    a data migration.
+    """
+    if "openclaw" not in stored:
         return stored
-    retired = [key for key in _RETIRED_OPENCLAW_KEYS if key in openclaw]
-    if not retired:
-        return stored
-    stripped = dict(stored)
-    stripped["openclaw"] = {
-        key: value for key, value in openclaw.items() if key not in _RETIRED_OPENCLAW_KEYS
-    }
-    return stripped
+    return {key: value for key, value in stored.items() if key != "openclaw"}
 
 
 def effective_instance_document(stored: dict[str, Any] | None) -> dict[str, Any]:
     """Return the effective document: stored values over code defaults."""
     if stored is None:
         return default_instance_document()
-    return _merge(default_instance_document(), _strip_retired_openclaw_keys(stored))
+    return _merge(default_instance_document(), _strip_retired_blocks(stored))
 
 
 def apply_instance_settings(settings: Settings, database_dsn: ConnectSource) -> None:
@@ -129,11 +107,6 @@ def apply_instance_settings(settings: Settings, database_dsn: ConnectSource) -> 
     base["agent_workers"]["min_protocol_version"] = effective["agent_workers"][
         "min_protocol_version"
     ]
-    openclaw = {**base["openclaw"], **effective["openclaw"]}
-    env_cwd = os.environ.get(_OPENCLAW_CWD_ENV)
-    if env_cwd is not None:
-        openclaw["cwd"] = os.path.expanduser(env_cwd)
-    base["openclaw"] = openclaw
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(base)
     settings.config["cleanup"] = effective["cleanup"]
     settings.config["monitoring"] = effective["monitoring"]

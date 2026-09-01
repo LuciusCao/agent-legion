@@ -116,7 +116,9 @@ def test_material_item_creates_job_with_frozen_input(service, job_db, settings) 
     assert result["created_count"] == 1
     run = result["run"]
     assert run["source_kind"] == "items"
-    assert run["workflow_key"] == WORKFLOW_KEY
+    # #211 M2: the runs column is gone; the deprecated record field carries
+    # the workspace id (the identity value since v62).
+    assert run["workflow_key"] == WORKSPACE_ID
     assert "node_code_versions" in run["frozen_pins"]
     job = result["jobs"][0]
     assert job["source_type"] == "material"
@@ -336,7 +338,7 @@ def test_material_deleted_mid_creation_fails_and_compensates_run(service, job_db
         except Exception as exc:  # 线程内意外失败也要带回主线程定位
             outcome.append(f"error:{exc!r}")
 
-    holder = connect_database(job_db.path)
+    holder = connect_database(job_db.dsn_identity)
     try:
         with holder:
             # 模拟进行中的材料删除：行已删但事务未提交。
@@ -357,12 +359,17 @@ def test_material_deleted_mid_creation_fails_and_compensates_run(service, job_db
     assert job_db.list_job_dedup_keys(WORKSPACE_ID, WORKFLOW_KEY) == set()
 
 
-def test_missing_workspace_and_revision_are_rejected(service) -> None:
+def test_missing_workspace_and_revision_are_rejected(service, job_db) -> None:
     with pytest.raises(NotFoundError, match="Workspace not found"):
         service.create_run("missing", workflow_key=WORKFLOW_KEY, items=[_material_item("m")])
+    # v62（#211）：每 workspace 只有一个 workflow 概念，revision 按 workspace
+    # 解析——no-revision 场景用「创建但从未发布」的独立 workspace 构造。
+    job_db.create_workspace("ws-never-published", default_workflow_key="ws-never-published")
     with pytest.raises(InvalidOperationError, match="no active workflow revision"):
         service.create_run(
-            WORKSPACE_ID, workflow_key="unknown_workflow", items=[_material_item("m")]
+            "ws-never-published",
+            workflow_key="ws-never-published",
+            items=[_material_item("m")],
         )
 
 
@@ -442,3 +449,54 @@ def test_material_item_accepted_under_material_only_contract(service, job_db) ->
             "select node_key from job_nodes where job_id=%s order by node_key", (job["id"],)
         ).fetchall()
     assert "_start" not in [row["node_key"] for row in rows]
+
+
+def test_create_run_compensation_failure_does_not_mask_original_error(
+    service, job_db, monkeypatch, caplog
+) -> None:
+    """#204 窄化：create_jobs_bulk 失败后的 run 行补偿自身失败（DB 连接层
+    OSError）只记 warning，原始错误原样上抛（不被吞也不被换型）。"""
+    _insert_material(job_db, WORKSPACE_ID, "mat-comp-1")
+
+    def _failing_bulk(**kwargs):
+        raise ValueError("Job identity collision for mat-comp-1")
+
+    def _failing_discard(run_id: str) -> None:
+        raise OSError("db connection reset during compensation")
+
+    monkeypatch.setattr(job_db, "create_jobs_bulk", _failing_bulk)
+    monkeypatch.setattr(job_db, "delete_run_without_jobs", _failing_discard)
+
+    with (
+        caplog.at_level("WARNING", logger="server.app.services.run_service"),
+        pytest.raises(InvalidOperationError, match="Job identity collision"),
+    ):
+        service.create_run(
+            WORKSPACE_ID,
+            workflow_key=WORKFLOW_KEY,
+            items=[_material_item("mat-comp-1")],
+        )
+
+    assert "left orphaned after job creation failed" in caplog.text
+
+
+def test_create_run_compensation_programming_error_propagates(service, job_db, monkeypatch) -> None:
+    """#204 窄化：补偿路径的编程错误（TypeError）不再被吞——上抛给
+    调用方（这里表现为原始 ValueError 之后的第二个异常被链式抛出）。"""
+    _insert_material(job_db, WORKSPACE_ID, "mat-comp-2")
+
+    def _failing_bulk(**kwargs):
+        raise ValueError("Job identity collision for mat-comp-2")
+
+    def _broken_discard(run_id: str) -> None:
+        raise TypeError("discard contract violation")
+
+    monkeypatch.setattr(job_db, "create_jobs_bulk", _failing_bulk)
+    monkeypatch.setattr(job_db, "delete_run_without_jobs", _broken_discard)
+
+    with pytest.raises(TypeError, match="discard contract violation"):
+        service.create_run(
+            WORKSPACE_ID,
+            workflow_key=WORKFLOW_KEY,
+            items=[_material_item("mat-comp-2")],
+        )

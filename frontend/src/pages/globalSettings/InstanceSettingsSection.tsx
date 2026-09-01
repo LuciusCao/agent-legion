@@ -12,16 +12,10 @@ import type {
   InstanceSettingsResponse,
   InstanceSettingsUpdate,
 } from '../../api/instanceSettings'
-import {
-  buildOpenClawPayload,
-  OpenClawInstanceFields,
-  openClawFormValues,
-} from './OpenClawInstanceFields'
-import type { InstanceFormValues } from './OpenClawInstanceFields'
 import { FIELD_GROUPS, fieldDef } from './instanceSettingsFields'
 import styles from '../GlobalSettingsPage.module.css'
 
-type FormValues = InstanceFormValues
+type FormValues = Record<string, string | boolean>
 
 function toFormValues(doc: InstanceSettingsResponse): FormValues {
   return {
@@ -48,7 +42,6 @@ function toFormValues(doc: InstanceSettingsResponse): FormValues {
     'agent_workers.min_protocol_version': String(
       doc.agent_workers.min_protocol_version
     ),
-    ...openClawFormValues(doc.openclaw),
   }
 }
 
@@ -113,7 +106,6 @@ function buildPayload(values: FormValues): InstanceSettingsUpdate {
         'agent_workers.min_protocol_version'
       ),
     },
-    openclaw: buildOpenClawPayload(values),
   }
 }
 
@@ -212,7 +204,14 @@ function InstanceSettingsEditor({
           ))}
         </div>
       ))}
-      <OpenClawInstanceFields values={values} setValues={setValues} />
+      <div className={styles.row}>
+        <span className={styles.label}>Skill 根目录</span>
+        <code>{initial.skills_root}</code>
+        <span className={styles.hint}>
+          暂不支持修改；workspace 技能默认位于{' '}
+          {`${initial.skills_root}/<workspace>/`}
+        </span>
+      </div>
       <button
         type="button"
         className={styles.textButton}

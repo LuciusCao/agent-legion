@@ -80,6 +80,23 @@ chmod 600 deploy/.env
 插值该变量；velites 可在自己的 `models.json` 中把 `apiKey` 配成
 `$LLM_GATEWAY_TOKEN`。上游 LLM provider 凭证本身只存在于 gateway 进程。
 
+### Skill root 上移迁移（`agent-legion` 前缀退役）
+
+skill root 已上移为 `~/.agents/skills`（单一来源
+`server/app/skills/skill_roots.py`），compose 挂载点同步上移为
+`${AGENT_SKILLS_DIR:-../skills}:/root/.agents/skills:ro`。skill 是 root 下的
+本地 in-place git 仓库（唯一模式；#322 起无注册表、无远程 clone 通道、
+无缓存缺失 re-clone 自愈）——缓存目录缺失即报错并指引在 skill root 下
+创建，`:ro` 挂载下仓库路径必须在挂载树内真实存在。从旧版本（skill 位于
+嵌套根 `~/.agents/skills/agent-legion/<group>/<name>`）升级的实例：
+
+1. 重跑 `make import-demo`（默认目标根已改为
+   `~/.agents/skills/education-video-problems-generation`），把 demo repo 建到新
+   位置（幂等，不覆盖已有改动）。
+2. pinned ref 的锁在首次 dispatch 或 `make skills-lock` 时按新位置的仓库
+   重新解析（`skill_lock` 的 `repo` 字段仅审计，不再参与解析）。
+3. 旧位置的 repo 可保留（作为普通本地目录）或自行清理。
+
 ## 3. 启动部署机的 stack
 
 ```bash
@@ -97,7 +114,7 @@ curl http://192.0.2.1:8000/api/health
 mkdir -p deploy/secrets
 ```
 
-无需先复制或编辑 Worker YAML：首次启动会导入仓库内的引导配置，随后在本机控制台填写 Host 地址、Worker ID 和能力。已有引导 YAML（如复制自 `deploy/worker.remote.example.yaml`）的机器可继续使用；启动前设置 `AGENT_WORKER_CONFIG=./<your-worker>.yaml`，Worker Service 会在首次启动时导入它。
+无需先复制或编辑 Worker YAML：Worker 首次启动为未配置状态，直接在本机控制台填写 Host 地址、Worker ID 等即可生效（issue #323 后 `--config` 仅作可选 bootstrap）。已有引导 YAML（如复制自 `deploy/worker.remote.example.yaml`）的机器可继续使用；启动时经 `--config ./<your-worker>.yaml` 传入（compose 部署设置 `AGENT_WORKER_CONFIG=./<your-worker>.yaml`），Worker Service 会在首次启动时导入它。
 
 Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope**，`worker.yaml` 不需要也不允许声明 workspace（issue #35 后全局 token 已退役，只保留 scoped token 一种）：
 
@@ -152,22 +169,27 @@ make stack-logs STACK=worker
 - 注册令牌允许接入的 Workspace 范围；
 - 运行时、并发数、标签和最近日志。
 
-页面保存配置后会原子写入控制卷。身份、能力、可用模型或注册 Token 变化时会重启执行进程并重新注册；领取开关和三个容量参数（`max_concurrency` / `max_code_concurrency` / `upload_max_concurrency`）都会热更新，无需重启。每次 Worker 执行进程启动（包括服务启动、手动重启和崩溃后的自动重启）都会先把 claim 置为关闭，即使上次退出前处于开启状态也不会自动恢复；用户必须在控制台点击「开始领取」，或执行 `workerctl claim enable`，之后 Worker 才会按本机 `max_concurrency` 拉取任务。
+页面保存配置后会原子写入控制卷。身份、可用模型或注册 Token 变化时会重启执行进程并重新注册；领取开关和三个容量参数（`max_concurrency` / `max_code_concurrency` / `upload_max_concurrency`）都会热更新，无需重启。每次 Worker 执行进程启动（包括服务启动、手动重启和崩溃后的自动重启）都会先把 claim 置为关闭，即使上次退出前处于开启状态也不会自动恢复；用户必须在控制台点击「开始领取」，或执行 `workerctl claim enable`，之后 Worker 才会按本机 `max_concurrency` 拉取任务。
 
-Worker 必须声明 `capabilities`；`models` 是可选的 runtime-scoped allowlist，不再是
-模型事实源。启动时 Worker 对每个选中的 runtime 执行其发现 adapter（velites 使用
+Worker 不再需要声明 `capabilities`（issue #284 起该机制退役：claim 准入不再按
+capability 匹配；旧配置里的 `capabilities:` 键只是 deprecated no-op，存在时启动
+warning，建议删除）。`models` 是可选的 runtime-scoped allowlist，不再是
+模型事实源。Agent runtime 声明由本机探测推导（issue #254）：启动时按二进制解析
+（自带副本 `data/bin/` 优先、PATH 兜底）探测已安装的 runtime 并默认全部启用，
+`disabled_runtimes`（控制台「配置 → Agent 运行时」或 `workerctl configure
+--disable-runtime`）反选停用。Worker 对每个生效的 runtime 执行其发现 adapter
+（velites 使用
 `velites models list --json`），最终注册集合 = 发现结果 ∩ allowlist；该 runtime 没有
-allowlist 条目时允许其全部发现结果。只有 runtime、capability、provider、model 全部匹配，
-Host 才会下发任务。
+allowlist 条目时允许其全部发现结果。Agent 任务的准入条件：workspace token 授权、
+runtime 匹配、provider/model 命中 allowlist、labels 满足 `requires_labels`。
 
 ### code 节点执行池（协议 v2）
 
 自足的 workflow code 节点（静态 import 闭包 ⊆ `workspace_libs` + stdlib + `requests`；repo 内置的示例节点全部满足）可以被分派到 Worker：Host 把节点代码文本 + sha256 `code_hash` 与 `workspace_libs` 快照打进 bundle 下发，Worker 在 `velites sandbox wrap` OS 沙箱内执行（内置与自定义节点同一条沙箱路径）。接入方式：
 
-- **code capability 声明**：与 agent 一样写在 `capabilities` 列表里（同一通道，Host 按 capability 匹配，不看 model）；
-- **容量**：`max_code_concurrency`（默认 0 = 不领取 code 任务），与 `max_concurrency` 是两个独立池，Host 分开记账、分开强制，长 code 任务不会挤占 agent 容量；code 任务也不占 workspace 级 Agent 并发上限；
+- **容量**：`max_code_concurrency`（默认 0 = 不领取 code 任务），与 `max_concurrency` 是两个独立池，Host 分开记账、分开强制，长 code 任务不会挤占 agent 容量；code 任务也不占 workspace 级 Agent 并发上限。code 任务的准入只需要协议版本 ≥ v2、code 池有余量、workspace 在 token 授权范围内，无需任何 capability 声明（issue #284）；
 - **热更新**：`max_code_concurrency` 与 `max_concurrency` 一样经控制台或 `PUT /api/config` 热生效，不重启执行进程、不打断在跑执行；调大立即放行新 claim，调小在运行数降到新上限以下前停止继续 claim。唯一例外是 0→>0 的热开启要求本机可解析 `velites` 二进制（启动预检的同一道 fail-closed 守卫，EXEC-CODE-003）：缺失时循环内拒绝热开并打日志提示，装好 velites 后下一轮循环自动生效，避免热开后 code 任务在 Host 侧空转重试；
-- **回落语义**：没有声明该 capability 的在线 code Worker 时（探测按 capability 匹配，含 `"*"` 通配），dispatch 直接回落 Host 本地 executor 执行，code 任务不会滞留在队列里等 Worker。
+- **回落语义**：没有在线 code Worker（协议 ≥ v2、code 池有余量、workspace 已授权）时，dispatch 直接回落 Host 本地 executor 执行，code 任务不会滞留在队列里等 Worker。
 
 **velites 二进制来源（Worker 自带沙箱）**：Worker 解析 velites 的顺序是「自带副本 `<仓库根>/data/bin/velites` 优先，PATH 兜底」，启动预检与 code 执行共用同一解析逻辑；两处都找不到才 fail-closed。因此 Worker 机器**不需要预装 velites**：
 
@@ -183,6 +205,13 @@ Host 的 `min_protocol_version` 仍为 1。升级必须遵循 **Host first, Work
 注册响应携带 `host_protocol_version`，新 Worker 若发现 Host 低于 v3（旧响应缺少该字段
 也视为旧 Host）会以退出码 2 fail-closed，不进入 claim，避免旧 Host 把 runtime-scoped
 模型降成二元 provider/model 后误投到另一个 runtime。确认 Host 健康后再逐台重启 Worker。
+
+**workflow_key 兼容窗口期（issue #211，截止 2026-10-31）**：claim 响应中的
+`workflow_key` 字段已 deprecated（与 `workspace_id` 恒等，schema v62 绑定）。字段
+与列将于 2026-10-31 的终态批移除——所有 Host 实例须在窗口期内升级至 ≥ schema v68
+（存量 workflow_key 已对齐），Worker 镜像须改为读取 `workspace_id`；仍解析旧字段
+的 Worker 在字段移除后将解析失败。升级顺序沿用 **Host first, Worker second**：
+v68 及以上的 Host 仍下发 `workflow_key`（兼容窗口内），Worker 可在其后任意时间切换。
 
 节点的 provider、model、thinking 和 prompt 可以继续在 workflow 编辑器中修改。只修改这些运行配置会更新当前 revision，而不会创建新版本；已创建但尚未领取的 Job 会在领取时使用其 revision 的最新运行配置。任务一旦领取，就固定使用领取时下发的配置。
 
@@ -223,9 +252,8 @@ docker compose -f deploy/compose.worker.yaml exec worker workerctl configure \
   --host-url http://192.0.2.1:8000 \
   --worker-id remote-worker-1 \
   --name 'Remote Worker' \
-  --runtime pi \
+  --disable-runtime velites \
   --max-concurrency 10 \
-  --capability subtitle_review \
   --model openai/gpt-5.2 \
   --register-token-file ./marketing.token \
   --label os=linux --label arch=arm64
@@ -233,11 +261,11 @@ docker compose -f deploy/compose.worker.yaml exec worker workerctl configure \
 
 `./marketing.token` 是本机保存的 scoped token 文件（从 Host Web UI 复制明文后以 0600 权限保存，文件名自定）；compose 不再挂载全局 token。
 
-`--register-token-file` 在 Worker 本机读取 Host 签发的 scoped token，再通过 loopback 控制 API 写入权限为 0600 的状态文件（与控制台「添加并验证」同构）；不要把 token 明文放进命令参数或 shell 历史。重复执行可添加多个 workspace 的 token。对于树莓派、云服务器等无显示器设备，上述 `workerctl` 命令覆盖初始化、状态检查、能力和模型声明、动态扩容、claim 开关、日志与进程重启，不依赖浏览器。
+`--register-token-file` 在 Worker 本机读取 Host 签发的 scoped token，再通过 loopback 控制 API 写入权限为 0600 的状态文件（与控制台「添加并验证」同构）；不要把 token 明文放进命令参数或 shell 历史。重复执行可添加多个 workspace 的 token。对于树莓派、云服务器等无显示器设备，上述 `workerctl` 命令覆盖初始化、状态检查、模型声明、动态扩容、claim 开关、日志与进程重启，不依赖浏览器。
 
 ### 崩溃重启与失败状态
 
-Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程内指数退避重试注册，不会打印 traceback，也不会触发 supervisor 重启。执行进程因其他原因崩溃后按指数退避自动重启：5 秒起步、每次 ×2、封顶 300 秒；稳定运行满 60 秒后重置退避。退出码 2（Host 明确拒绝注册——例如持有的全部 key 已被删除，或启动预检失败——例如声明了某个 runtime 但其二进制在自带副本与 PATH 上都找不到）不自动重启，进入 failed 状态，需修正配置后手动 `workerctl restart`。`status` 中的 `restart_count`、`next_restart_delay`、`failed` 字段反映这些状态；容器 healthcheck 会把 failed 或已配置但进程未运行视为 unhealthy。
+Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程内指数退避重试注册，不会打印 traceback，也不会触发 supervisor 重启。执行进程因其他原因崩溃后按指数退避自动重启：5 秒起步、每次 ×2、封顶 300 秒；稳定运行满 60 秒后重置退避。退出码 2（Host 明确拒绝注册——例如持有的全部 key 已被删除，或启动预检失败——例如 `max_code_concurrency > 0` 但 velites 二进制在自带副本与 PATH 上都找不到）不自动重启，进入 failed 状态，需修正配置后手动 `workerctl restart`。`status` 中的 `restart_count`、`next_restart_delay`、`failed` 字段反映这些状态；容器 healthcheck 会把 failed 或已配置但进程未运行视为 unhealthy。
 
 ### 挂载配置与状态副本不一致
 
@@ -251,15 +279,16 @@ Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程�
 ### 全新克隆的本地 Worker（无 init-worktree.sh）
 
 外部用户从干净克隆起步时没有 init-worktree.sh 的种子自动化，`make dev-up`
-只在 `config/agent-worker.yaml` 存在时才会启动 Worker。手工步骤（README
-Quick Start 已含命令）：
+只在 worker 状态副本 `data/agent-worker-service/worker.yaml` 存在时才会启动
+Worker（issue #323 后 dev 侧不再有 `config/agent-worker.yaml` 种子）。
+`make install`（install-deps.sh）已自动写入最小 dev 配置；未跑过时的手工步骤：
 
-1. `cp config/agent-worker.example.yaml config/agent-worker.yaml`，按本机改
-   `host_url`（dev 栈后端端口，默认 `http://127.0.0.1:8001`）、
-   `work_root: data/agent-worker`，并按要跑的 workflow 声明
-   `capabilities` / `models`。
-2. 起后端并登录 Host Web UI，在「设置 → Worker Token」为目标 workspace 签发
-   scoped token；到 Worker 控制台（默认 `http://127.0.0.1:8789`）的
+1. 写入最小状态副本 `data/agent-worker-service/worker.yaml`（0600），含
+   `host_url`（dev 栈后端端口，默认 `http://127.0.0.1:8001`）、`worker_id`、
+   `name`、`work_root: data/agent-worker`；其余字段（如 `models` allowlist，
+   留空表示允许 runtime 发现的全部模型）之后走 Worker 控制台/API 配置。
+2. 起后端并登录 Host Web UI，在 workspace「设置 → Agent 与 Worker」为目标
+   workspace 签发 scoped token；到 Worker 控制台（默认 `http://127.0.0.1:8789`）的
    「Workspace 访问（Scoped Token）」区块粘贴添加。Worker 侧 token 随时可以
    补——注册失败只影响 Worker 自身，不需要重启后端。
 3. 重跑 `make dev-up`（幂等）启动 Worker，然后在 worker 控制台打开
@@ -270,7 +299,7 @@ Quick Start 已含命令）：
 在开发 worktree 里起本地栈（`make dev-up`，或分开 `make dev-backend` + `make dev-worker`）时，job 一直停在 `queued` 或秒败，按顺序查这三处——`scripts/init-worktree.sh` 已尽量自动化，但各自有时机前提：
 
 1. **Workspace 调度默认暂停**：后端每次启动都把全部 workspace 重置为暂停（刻意设计，防止重启后任务不受控自跑），unknown workspace 也默认暂停。恢复调度是按需操作：后端首次启动建表 seed 之后执行 `scripts/resume-workspaces.sh`（未建表时以退出码 1 失败并提示），或在 workspace 控制台手动恢复。症状：workflow worker 日志每 3 秒一轮但 `jobs=0`。
-2. **Worker 未声明 capabilities/models**：claim 按「runtime + capability + model」三元组逐 Worker 匹配，未声明即判「无 Worker 可认领」，job 秒败并带 `not declared by any Worker` 错误。init 脚本会从基准 worktree 种子 `config/agent-worker.yaml`（含完整声明）；注意生效配置是状态副本 `data/agent-worker-service/worker.yaml`，首次导入后改 config 文件不生效，要走控制台或 `PUT /api/config`。
+2. **Worker 的 models allowlist 不含任务所需模型**：agent 任务的 claim 准入按「runtime + provider/model」逐 Worker 匹配（capability 已不参与匹配，issue #284），全部 Worker 都不满足即判「无 Worker 可认领」，job 秒败并带 `not declared by any Worker` 错误。注意生效配置是状态副本 `data/agent-worker-service/worker.yaml`，首次导入后改 config 文件不生效，要走控制台或 `PUT /api/config`。
 3. **`claim_enabled` 默认 false**：Worker 每次启动/重启都先关闭 claim（只注册心跳、不领任务），症状是后端日志没有任何 `POST /api/agent-executions/claim`。经 worker 控制台或 `PUT /api/config`（`{"claim_enabled": true}`，热字段立即生效）打开。
 
 ## 6. 验证两个 Worker
@@ -281,7 +310,7 @@ Quick Start 已含命令）：
 curl -b <登录 cookie> -H 'X-CSRF-Token: <csrf-token>' http://192.0.2.1:8000/api/agent-workers
 ```
 
-响应中应同时看到 `host-local-1` 和 `remote-worker-1`。每个 Worker 还带 `allowed_workspaces`：为空（展示为「全部」）表示用全局 token 注册、可承接所有 workspace 的任务；否则列出 scoped token 授权的唯一 workspace。提交工作流后，Job 详情会分别显示逻辑 `agent_id` 和实际承接任务的 `worker_id`。
+响应中应同时看到 `host-local-1` 和 `remote-worker-1`。每个 Worker 还带 `allowed_workspaces`：为空表示不受 workspace 过滤的 legacy 注册——Worker 侧展示为「全部」，Host 管理 UI 展示为「待迁移（旧全局注册）」；scoped token 注册的并集永远非空。否则列出当前存活 scoped token 授权的 workspace，该字段按注册时解析的 key 绑定实时重派生——全局 token 注册已随 issue #35 退役（见 §4「token 即 scope」）。提交工作流后，Job 详情会分别显示逻辑 `agent_id` 和实际承接任务的 `worker_id`。
 
 并发只受两层约束：每个 workspace 的 Agent 并发上限，以及各 Worker 本机的 `max_concurrency`。workspace 级上限在 workspace 设置页的「Agent 并发上限」配置（随主保存按钮一起保存），对该 workspace 的全部 Agent 节点统一生效——不再按节点单独设置。例如上限 20、三个 Worker 各 10 时，该 workspace 最多并行 20 个 Agent 执行，不要求三个 Worker 都跑满。Worker 只能 claim 其 `allowed_workspaces` 范围内 workspace 的任务。控制台修改 `max_concurrency` 会热生效，无需重启；调低容量不会终止在途任务，而是在运行数降到新上限以下前停止继续 claim。关闭「任务领取」同样只阻止新 claim，不影响已经领取的任务。code 节点任务是独立的第二个池：只受 Worker 本机 `max_code_concurrency` 约束（不占 workspace 级 Agent 上限），同样热更新免重启（0→>0 需本机已装 velites，见 §5「code 节点执行池」）。
 

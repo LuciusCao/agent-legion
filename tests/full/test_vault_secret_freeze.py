@@ -48,7 +48,7 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
     WorkflowRevisionService(job_db).ensure_active_revision(workspace_id, definition)
 
     # Create the connection; the token is diverted to the instance vault.
-    connections = ConnectionService(job_db.path, settings.config)
+    connections = ConnectionService(job_db.dsn_identity, settings.config)
     connections.create(
         CONNECTION_KEY,
         "static_bearer",
@@ -129,6 +129,8 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
     assert frozen["connection"] == CONNECTION_KEY
 
     # Runtime resolve: the dispatch chain sees the plaintext in memory.
-    resolved = ConnectionTokenService(job_db.path, settings.config).runtime_config(CONNECTION_KEY)
+    resolved = ConnectionTokenService(job_db.dsn_identity, settings.config).runtime_config(
+        CONNECTION_KEY
+    )
     assert resolved["token"] == PLAINTEXT
     assert resolved["base_url"] == "http://cms.example.com"

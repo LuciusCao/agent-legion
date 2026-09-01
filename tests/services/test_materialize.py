@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 from pathlib import Path
 
@@ -14,8 +13,8 @@ from server.app.services.material_cache import (
     material_claim_block,
     material_runtime_block,
 )
-from server.app.storage import ObjectHead
 from shared.material_cache import MaterializeError
+from tests.fakes.storage import FakeObjectStorage
 
 WORKSPACE_ID = "ws-mat-cache"
 PAYLOAD = b"host-side-material" * 50
@@ -24,31 +23,11 @@ MATERIAL_ID = "mat-1"
 STORAGE_KEY = f"{WORKSPACE_ID}/{HASH}/notes.txt"
 
 
-class FakeStorage:
-    """In-memory ObjectStorage double（含 presign_get）；不碰网络。"""
+def _fake_storage() -> FakeObjectStorage:
+    return FakeObjectStorage(objects={STORAGE_KEY: PAYLOAD})
 
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {STORAGE_KEY: PAYLOAD}
-        self.opened = 0
-        self.presigned_gets: list[str] = []
 
-    def presign_put(self, storage_key: str, size_bytes: int, expires_seconds: int = 3600) -> str:
-        return f"https://s3.test/upload/{storage_key}"
-
-    def presign_get(self, storage_key: str, expires_seconds: int = 3600) -> str:
-        self.presigned_gets.append(storage_key)
-        return f"https://s3.test/download/{storage_key}?sig=fake"
-
-    def head_object(self, storage_key: str) -> ObjectHead | None:
-        payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
-
-    def open_stream(self, storage_key: str) -> io.BytesIO:
-        self.opened += 1
-        return io.BytesIO(self.objects[storage_key])
-
-    def delete_object(self, storage_key: str) -> None:
-        self.objects.pop(storage_key, None)
+FakeStorage = _fake_storage
 
 
 @pytest.fixture
@@ -91,7 +70,9 @@ def test_runtime_block_materializes_and_hits_cache(
 ) -> None:
     job = _job({"type": "material", "material_id": material})
 
-    block = material_runtime_block(job_db.path, tmp_path, WORKSPACE_ID, job, storage=storage)
+    block = material_runtime_block(
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage
+    )
 
     assert block is not None
     assert block["material_id"] == material
@@ -103,7 +84,9 @@ def test_runtime_block_materializes_and_hits_cache(
     assert path.read_bytes() == PAYLOAD
     assert storage.opened == 1
 
-    again = material_runtime_block(job_db.path, tmp_path, WORKSPACE_ID, job, storage=storage)
+    again = material_runtime_block(
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage
+    )
     assert again is not None and again["path"] == str(path)
     assert storage.opened == 1, "cache hit must not re-download"
 
@@ -111,7 +94,7 @@ def test_runtime_block_materializes_and_hits_cache(
 def test_runtime_block_returns_none_for_non_material(job_db, storage, tmp_path: Path) -> None:
     assert (
         material_runtime_block(
-            job_db.path,
+            job_db.dsn_identity,
             tmp_path,
             WORKSPACE_ID,
             _job({"type": "ref", "external_id": "q-1"}),
@@ -119,17 +102,17 @@ def test_runtime_block_returns_none_for_non_material(job_db, storage, tmp_path: 
         )
         is None
     )
-    assert material_runtime_block(job_db.path, tmp_path, WORKSPACE_ID, _job(None)) is None
+    assert material_runtime_block(job_db.dsn_identity, tmp_path, WORKSPACE_ID, _job(None)) is None
 
 
 def test_runtime_block_errors_are_readable(job_db, material, storage, tmp_path: Path) -> None:
     with pytest.raises(MaterializeError, match="missing material_id"):
         material_runtime_block(
-            job_db.path, tmp_path, WORKSPACE_ID, _job({"type": "material"}), storage=storage
+            job_db.dsn_identity, tmp_path, WORKSPACE_ID, _job({"type": "material"}), storage=storage
         )
     with pytest.raises(MaterializeError, match="material not found"):
         material_runtime_block(
-            job_db.path,
+            job_db.dsn_identity,
             tmp_path,
             WORKSPACE_ID,
             _job({"type": "material", "material_id": "nope"}),
@@ -139,7 +122,7 @@ def test_runtime_block_errors_are_readable(job_db, material, storage, tmp_path: 
         conn.execute("update materials set status='uploading' where id=%s", (material,))
     with pytest.raises(MaterializeError, match="not ready"):
         material_runtime_block(
-            job_db.path,
+            job_db.dsn_identity,
             tmp_path,
             WORKSPACE_ID,
             _job({"type": "material", "material_id": material}),
@@ -154,7 +137,7 @@ def test_runtime_block_without_configured_storage(
 
     with pytest.raises(MaterializeError, match="storage is not configured"):
         material_runtime_block(
-            job_db.path,
+            job_db.dsn_identity,
             tmp_path,
             WORKSPACE_ID,
             _job({"type": "material", "material_id": material}),
@@ -163,7 +146,7 @@ def test_runtime_block_without_configured_storage(
 
 def test_claim_block_carries_presigned_url_without_storage_key(job_db, material, storage) -> None:
     block = material_claim_block(
-        job_db.path,
+        job_db.dsn_identity,
         WORKSPACE_ID,
         _job({"type": "material", "material_id": material}),
         storage=storage,
@@ -179,7 +162,7 @@ def test_claim_block_carries_presigned_url_without_storage_key(job_db, material,
     # 非 material 输入不下发材料块。
     assert (
         material_claim_block(
-            job_db.path,
+            job_db.dsn_identity,
             WORKSPACE_ID,
             _job({"type": "ref", "external_id": "q-1"}),
             storage=storage,

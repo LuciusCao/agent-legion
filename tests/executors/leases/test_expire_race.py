@@ -35,7 +35,7 @@ def _claimed_stale_lease(job_db: JobQueries, repo: ExecutorLeaseRepository, name
     )
     assert claim is not None
     past = database_timestamp(datetime.now(UTC) - timedelta(seconds=10))
-    with write_transaction(job_db.path) as conn:
+    with write_transaction(job_db.dsn_identity) as conn:
         conn.execute(
             "update executor_leases set expires_at=%s where id=%s",
             (past, claim.lease_id),
@@ -44,7 +44,7 @@ def _claimed_stale_lease(job_db: JobQueries, repo: ExecutorLeaseRepository, name
 
 
 def _lease_status(job_db: JobQueries, lease_id: str) -> str:
-    with read_connection(job_db.path) as conn:
+    with read_connection(job_db.dsn_identity) as conn:
         row = conn.execute("select status from executor_leases where id=%s", (lease_id,)).fetchone()
     assert row is not None
     return str(row["status"])
@@ -56,7 +56,7 @@ def test_expire_skips_lease_finished_concurrently(tmp_path: Path) -> None:
     _, job_id, claim = _claimed_stale_lease(job_db, repo, "ws-expire-finish")
     now_str = database_timestamp(datetime.now(UTC))
 
-    with write_transaction(job_db.path) as conn1:
+    with write_transaction(job_db.dsn_identity) as conn1:
         stale = conn1.execute(_STALE_SELECT, (now_str,)).fetchall()
         assert [str(row["id"]) for row in stale] == [claim.lease_id]
         # A concurrent finish commits between the SELECT and the UPDATE.
@@ -76,7 +76,7 @@ def test_expire_skips_lease_renewed_concurrently(tmp_path: Path) -> None:
     _, job_id, claim = _claimed_stale_lease(job_db, repo, "ws-expire-renew")
     now_str = database_timestamp(datetime.now(UTC))
 
-    with write_transaction(job_db.path) as conn1:
+    with write_transaction(job_db.dsn_identity) as conn1:
         stale = conn1.execute(_STALE_SELECT, (now_str,)).fetchall()
         assert [str(row["id"]) for row in stale] == [claim.lease_id]
         # A concurrent heartbeat renews the lease past the expiry cutoff.

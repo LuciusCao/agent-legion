@@ -4,8 +4,8 @@ Skill read/validate/save-version for the built-in Studio authoring agent.
 Skills are instance-level, so these endpoints sit on the global tool
 router (no workspace binding) while still requiring a studio-agent
 scoped token. ``save_skill_version`` is draft-only by design: it commits
-and tags the skill's LOCAL source repo but never touches the DB skill
-lock — publishing (ref change + relock) stays a human admin action.
+and tags the skill's LOCAL in-place repo but never touches the DB skill
+lock — publishing (re-pin + relock) stays a human admin action.
 """
 
 from fastapi import APIRouter
@@ -21,14 +21,13 @@ from server.app.routes.studio_agent_skill_contracts import (
 from server.app.services.job_errors import JobServiceError
 from server.app.services.skill_catalog import SkillCatalogService
 from server.app.services.skill_editing import SkillEditingService, SkillFileWrite
-from server.app.services.skill_source_store import SkillSourceStore
 from server.app.settings import Settings
 
 
 def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Settings) -> APIRouter:
     router = APIRouter()
     catalog = SkillCatalogService(job_db)
-    editing = SkillEditingService(SkillSourceStore(job_db), runs_dir=settings.skills_runs_dir)
+    editing = SkillEditingService(runs_dir=settings.skills_runs_dir)
 
     @router.get("/studio-agent/tools/skills/{skill_key:path}", response_model=SkillDetailResponse)
     def get_skill(skill_key: str, ref: str | None = None) -> SkillDetailResponse:

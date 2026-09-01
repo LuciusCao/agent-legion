@@ -34,7 +34,7 @@ def vault_key(monkeypatch):
 
 @pytest.fixture
 def vault(job_db, settings, vault_key):
-    return VaultService(job_db.path, settings.config)
+    return VaultService(job_db.dsn_identity, settings.config)
 
 
 def test_set_get_round_trip(vault, job_db):
@@ -108,7 +108,7 @@ def test_ciphertext_is_not_plaintext(vault, job_db):
 def test_missing_master_key_blocks_writes_and_reads(job_db, settings, monkeypatch):
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY", raising=False)
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
-    vault = VaultService(job_db.path, {})
+    vault = VaultService(job_db.dsn_identity, {})
     workspace = job_db.create_workspace(
         default_workflow_key="education_video_problems_generation", name="vault-no-key"
     )
@@ -120,7 +120,7 @@ def test_missing_master_key_blocks_writes_and_reads(job_db, settings, monkeypatc
 def test_invalid_master_key_rejected(job_db, monkeypatch):
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", "not-a-fernet-key")
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
-    vault = VaultService(job_db.path, {})
+    vault = VaultService(job_db.dsn_identity, {})
     with pytest.raises(VaultError, match="not a valid Fernet key"):
         vault.set("ws", "api-token", PLAINTEXT)
 
@@ -157,11 +157,11 @@ def test_resolve_secret_refs_without_master_key_raises(job_db, monkeypatch):
     workspace = job_db.create_workspace(
         default_workflow_key="education_video_problems_generation", name="vault-no-key-resolve"
     )
-    VaultService(job_db.path, {}).set(workspace["id"], "api-token", PLAINTEXT)
+    VaultService(job_db.dsn_identity, {}).set(workspace["id"], "api-token", PLAINTEXT)
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY", raising=False)
 
     with pytest.raises(VaultMasterKeyMissingError):
-        VaultService(job_db.path, {}).resolve_secret_refs(
+        VaultService(job_db.dsn_identity, {}).resolve_secret_refs(
             {"token": {"secret_ref": "api-token"}}, workspace["id"]
         )
 

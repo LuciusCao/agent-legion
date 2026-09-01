@@ -32,6 +32,8 @@ AGENT_LEGION_MCP_TOOL_NAMES = frozenset(
         "save_node_code_draft",
         "get_node_code",
         "save_agent_definition_draft",
+        "get_node_prompt",
+        "save_node_prompt",
         "get_skill",
         "validate_skill",
         "save_skill_version",
