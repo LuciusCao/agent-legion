@@ -145,6 +145,24 @@ def _job_summary(job: dict[str, Any], settings: Settings) -> dict[str, Any]:
     return summary
 
 
+def _merged_artifact_names(
+    job: dict[str, Any],
+    settings: Settings,
+    object_store: JobArtifactObjectStore,
+) -> list[str]:
+    """Local job_dir names unioned with the object-store manifest.
+
+    The object store is the authoritative artifact copy (EXEC-ARTIFACT-STORE-001);
+    the local directory is an evictable cache, so a summary that only scans it
+    under-reports worker-executed jobs. Every job surfaced by the authoring
+    context (selected AND recent) must merge both.
+    """
+    names = set(_job_summary(job, settings)["artifacts"])
+    if object_store.enabled:
+        names |= object_store.names_for_job(str(job["id"]))
+    return sorted(names)
+
+
 def get_preview_context(
     job_db: JobQueries,
     settings: Settings,
@@ -169,15 +187,13 @@ def get_preview_context(
     elif jobs:
         selected = jobs[0]
 
+    object_store = JobArtifactObjectStore(job_db, build_s3_storage())
     samples: dict[str, str] = {}
     truncated: list[str] = []
     selected_summary: dict[str, Any] | None = None
     if selected is not None:
-        object_store = JobArtifactObjectStore(job_db, build_s3_storage())
         artifacts = JobArtifactService(job_db, object_store)
-        names = sorted(set(_job_summary(selected, settings)["artifacts"]))
-        if object_store.enabled:
-            names = sorted(set(names) | set(object_store.names_for_job(str(selected["id"]))))
+        names = _merged_artifact_names(selected, settings, object_store)
         selected_summary = _job_summary(selected, settings)
         selected_summary["artifacts"] = names
         for name in names[:_SAMPLE_ARTIFACT_LIMIT]:
@@ -194,7 +210,13 @@ def get_preview_context(
 
     return {
         "workspace_id": workspace_id,
-        "recent_jobs": [_job_summary(job, settings) for job in jobs],
+        "recent_jobs": [
+            {
+                **_job_summary(job, settings),
+                "artifacts": _merged_artifact_names(job, settings, object_store),
+            }
+            for job in jobs
+        ],
         "selected_job": selected_summary,
         "samples": samples,
         "sample_max_chars": _SAMPLE_MAX_CHARS,

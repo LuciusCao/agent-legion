@@ -17,6 +17,15 @@ import {
 } from './usePreviewPanel'
 import styles from './PreviewPanelSection.module.css'
 
+/** key 用的 bundle 稳定指纹（草稿轮询比较内容而非引用，避免无谓重挂）。 */
+function hashBundle(html: string): string {
+  let hash = 0
+  for (let i = 0; i < html.length; i++) {
+    hash = (Math.imul(hash, 31) + html.charCodeAt(i)) | 0
+  }
+  return (hash >>> 0).toString(36)
+}
+
 export interface PreviewPanelSectionProps {
   jobId: string
   workspaceId?: string
@@ -58,7 +67,16 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
         </header>
       )}
       {bundle ? (
-        <PreviewPanelHost key={jobId} jobId={jobId} html={bundle} />
+        // key 含 bundle 内容（codex P2）：草稿轮询更新 bundle 时若沿用旧
+        // iframe，React 在同一 contentWindow 上做 srcDoc 导航——旧文档仍在
+        // 途的桥请求会由宿主把响应投递给同一个 WindowProxy，而新文档的
+        // 请求编号又从 1 重新计数，旧响应可能错误地应答新文档的同编号
+        // 请求。bundle 变化即整树重挂：旧窗口销毁，在途响应无处可投。
+        <PreviewPanelHost
+          key={`${jobId}:${hashBundle(bundle)}`}
+          jobId={jobId}
+          html={bundle}
+        />
       ) : (
         fallback
       )}

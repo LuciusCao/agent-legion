@@ -79,7 +79,80 @@ describe('PreviewPanelHost 沙箱红线', () => {
 
     expect(iframe.getAttribute('sandbox')).toBe('allow-scripts')
     expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin')
-    expect(iframe.getAttribute('srcdoc')).toBe(BUNDLE)
+    await flush()
+  })
+
+  it('srcDoc 注入宿主 CSP：策略含绝对平台 origin、无无效的 self、https 图放行（codex P1 + 评审加固）', async () => {
+    const { container } = renderHost()
+    const srcdoc = getIframe(container).getAttribute('srcdoc') ?? ''
+
+    const metaMatch = srcdoc.match(
+      /<meta http-equiv="Content-Security-Policy" content="([^"]*)">/
+    )
+    expect(metaMatch).not.toBeNull()
+    const policy = metaMatch![1]
+    expect(policy).toContain("default-src 'none'")
+    expect(policy).toContain(`connect-src ${window.location.origin}`)
+    expect(policy).toContain(
+      `script-src 'unsafe-inline' ${window.location.origin}`
+    )
+    expect(policy).toContain(
+      `style-src 'unsafe-inline' ${window.location.origin}`
+    )
+    expect(policy).toContain(`font-src ${window.location.origin}`)
+    // 'self' 在 opaque origin 下不匹配任何 URL（CSP3）——出现即说明回退
+    // 到了无效写法，平台 katex 资产会被误断。
+    expect(policy).not.toContain("'self'")
+    // img：内置消毒器白名单保留 https 远程题干图（no-referrer 强制），
+    // data: 支持图表；http: 不放行。
+    expect(policy).toContain('img-src data: https:')
+    expect(policy).toContain("form-action 'none'")
+    // bundle 原文完整保留在注入结果里。
+    expect(srcdoc).toContain('<body>panel</body>')
+    await flush()
+  })
+
+  it('CSP meta 落进真实 <head>：注释/字符串/属性里的伪 <head> 抢占不了落点（评审 P0）', async () => {
+    const adversarial = [
+      // 注释里的伪 <head>：正则定位会把 meta 注进注释内部。
+      '<!doctype html><!-- <head> --><html><head><title>t</title></head><body>panel</body></html>',
+      // JS 字符串字面量里的伪 <head>。
+      '<!doctype html><html><script>var s = "<head>"</script><head><title>t</title></head><body>panel</body></html>',
+      // 属性值里的伪 <head>。
+      '<!doctype html><html data-x="<head>"><head><title>t</title></head><body>panel</body></html>',
+    ]
+    for (const html of adversarial) {
+      const { container } = render(
+        <PreviewPanelHost jobId="job-1" html={html} />,
+        {
+          wrapper: TestQueryProvider,
+        }
+      )
+      const srcdoc = getIframe(container).getAttribute('srcdoc') ?? ''
+      // 解析器语义定位：meta 必须在真实 head 内（title 之前），
+      // 且不能落入注释/脚本/属性（那些位置序列化后不构成 meta 元素）。
+      const headMatch = srcdoc.match(/<head>([\s\S]*?)<\/head>/)
+      expect(headMatch).not.toBeNull()
+      expect(headMatch![1]).toContain('Content-Security-Policy')
+      expect(headMatch![1]).toContain('<title>t</title>')
+      // 整个文档恰好一个 CSP meta（伪 head 场景下旧实现会出现 0 个）。
+      expect(srcdoc.match(/Content-Security-Policy/g)).toHaveLength(1)
+      await flush()
+    }
+  })
+
+  it('无 <head> 的 bundle 也能注入 CSP（解析器隐式建 head）', async () => {
+    const { container } = render(
+      <PreviewPanelHost
+        jobId="job-1"
+        html="<!doctype html><html><body>headless</body></html>"
+      />,
+      { wrapper: TestQueryProvider }
+    )
+    const srcdoc = getIframe(container).getAttribute('srcdoc') ?? ''
+
+    expect(srcdoc).toMatch(/<head><meta http-equiv="Content-Security-Policy"/)
+    expect(srcdoc).toContain('<body>headless</body>')
     await flush()
   })
 })

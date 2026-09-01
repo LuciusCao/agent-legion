@@ -735,6 +735,7 @@
     "scripts/check_exemption_age.py": 58,
     "scripts/check_invariants.py": 69,
     "scripts/check_reruns.py": 182,
+    "scripts/check_versions.py": 252,
     "scripts/e2e/_backend_factory.py": 22,
     "scripts/e2e/_cms_stub.py": 75,
     "scripts/e2e/_database.py": 64,
