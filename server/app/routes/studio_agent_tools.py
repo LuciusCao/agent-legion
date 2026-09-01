@@ -23,7 +23,6 @@ from server.app.routes.agent_definition_contracts import (
     AgentVersionResponse,
 )
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
-from server.app.routes.studio_agent_job_tools import create_studio_agent_job_tools_router
 from server.app.routes.studio_agent_preview_tools import create_studio_agent_preview_tools_router
 from server.app.routes.studio_agent_prompt_tools import create_studio_agent_prompt_tools_router
 from server.app.routes.studio_agent_skill_tools import create_studio_agent_skill_tools_router
@@ -69,9 +68,7 @@ def _agent_version_response(entity: VersionedEntity) -> AgentVersionResponse:
     )
 
 
-def create_studio_agent_tools_router(
-    job_db: JobQueries, settings: Settings, object_store: Any | None = None
-) -> APIRouter:
+def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> APIRouter:
     router = APIRouter(dependencies=[Depends(require_studio_agent_scope)])
     # Workspace-path endpoints additionally enforce the run token's workspace
     # binding (schema v45, STUDIO-AGENT-001); global endpoints stay on `router`.
@@ -218,9 +215,5 @@ def create_studio_agent_tools_router(
     # Preview panel tools (issue #328): context/panel reads + draft write —
     # workspace-bound like the prompt tools (scoped token + workspace binding).
     workspace_scoped.include_router(create_studio_agent_preview_tools_router(job_db, settings))
-    # Job observation tools (issue #329): read-only diagnosis surface. The
-    # router carries its own guards (session-bound context route must NOT get
-    # the workspace path-param dependency), so it hangs off the base router.
-    router.include_router(create_studio_agent_job_tools_router(job_db, settings, object_store))
     router.include_router(workspace_scoped)
     return router
