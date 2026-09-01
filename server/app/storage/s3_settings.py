@@ -5,6 +5,9 @@ a business connector: endpoint/bucket/credentials are injected exclusively
 through ``AGENT_LEGION_S3_*`` environment variables (MATERIAL-SECRET-001) —
 never tracked yaml, the DB, API payloads, or logs. Secret values support the
 ``_FILE`` variant like the vault master key and worker register token.
+Non-secret connection parameters (endpoint/bucket/region) may be echoed back
+to signed-in admins through the read-only infra-connections API (#335);
+credentials themselves never leave the process.
 
 An unconfigured store (no bucket) is a valid state: ``load_s3_settings``
 returns None and the materials API degrades to 503 without affecting the

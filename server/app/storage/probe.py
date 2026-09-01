@@ -4,8 +4,10 @@ Two consumers share the same short-timeout ``head_bucket`` probe: the
 startup self-check (one log line, never fatal — an unconfigured or
 unreachable store is a deliberate degrade, not a boot failure) and the
 ``/api/health`` storage field (behind a few-second cache so health scrapes
-never hammer RustFS). Reasons stay in server logs; the API only ever
-exposes the configured/reachable booleans.
+never hammer RustFS). Reasons stay in server logs — with one deliberate
+exception (#335): the admin-only infra-connections test endpoint relays the
+``TypeName: message`` reason to signed-in admins, while the public health
+surface only ever exposes the configured/reachable booleans.
 """
 
 from __future__ import annotations
