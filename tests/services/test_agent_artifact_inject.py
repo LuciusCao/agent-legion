@@ -3,10 +3,15 @@
 inject_artifact_object_block：enabled 时下发 artifact_uploads（presigned
 PUT）并把有 job_artifacts 行的 input_artifacts 升级为 {"url", "sha256"}
 dict 形态；S3 异常时整体降级、不注入（Worker 走旧 CAS 通道）。
+
+#338：注入按 claiming worker 的协议版本分流——v4+ 拿 .gz 上传 spec 与
+content_encoding=gzip 输入 ref；旧 worker 上传 spec 保持裸 key，.gz 输入
+行不升级（保留 dispatch 时 staging 的 CAS 形态），混合舰队不错配。
 """
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 from pathlib import Path
 
@@ -167,6 +172,123 @@ def test_code_claim_rebuild_injects_object_block() -> None:
     )
     # 持久化的原 manifest 不被改写（内存态 copy）。
     assert "artifact_uploads" not in manifest
+
+
+def test_inject_v4_worker_gets_gzip_upload_spec(tmp_path: Path) -> None:
+    """#338：v4 worker 的上传 spec staging key 带 .gz 后缀（压缩标记即后缀）。"""
+    _make_job()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, FakeStorage())
+    manifest = _manifest()
+
+    inject_artifact_object_block(store, manifest, worker_protocol_version=4)
+
+    uploads = manifest["artifact_uploads"]
+    assert uploads["out.json"]["storage_key"] == "jobs-staging/ws-1/job-1/exec-1/out.json.gz"
+    assert uploads["out.json"]["url"].endswith("jobs-staging/ws-1/job-1/exec-1/out.json.gz")
+
+
+def _seed_gz_input_row(store: JobArtifactObjectStore, storage: FakeStorage) -> None:
+    """登记一个 .gz 形态的上游产物行（content_hash 按未压缩字节）。"""
+    compressed = gzip.compress(PAYLOAD)
+    storage.objects["jobs/ws-1/job-1/q.json.gz"] = compressed
+    store.record_remote(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="upstream",
+        name="q.json",
+        storage_key="jobs/ws-1/job-1/q.json.gz",
+        size_bytes=len(compressed),
+        content_hash=HASH,
+    )
+
+
+def test_inject_v4_worker_gz_input_upgrades_with_encoding_marker() -> None:
+    """#338：v4 worker 的 .gz 输入行升级为 presigned GET + content_encoding
+    标记；sha256 仍是未压缩字节哈希。"""
+    _make_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    _seed_gz_input_row(store, storage)
+    manifest = _manifest()
+
+    inject_artifact_object_block(store, manifest, worker_protocol_version=4)
+
+    ref = manifest["input_artifacts"]["q.json"]
+    assert ref["url"].endswith("jobs/ws-1/job-1/q.json.gz")
+    assert ref["sha256"] == HASH
+    assert ref["content_encoding"] == "gzip"
+    assert "storage_key" not in ref
+
+
+def test_inject_v4_worker_bare_input_upgrades_without_marker(tmp_path: Path) -> None:
+    """#338 混合数据：v4 worker 读存量裸对象行，升级形态与现状一致（无标记）。"""
+    _make_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    source = tmp_path / "q.json"
+    source.write_bytes(PAYLOAD)
+    store.upload(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="upstream",
+        name="q.json",
+        local_path=source,
+    )
+    manifest = _manifest()
+
+    inject_artifact_object_block(store, manifest, worker_protocol_version=4)
+
+    ref = manifest["input_artifacts"]["q.json"]
+    assert ref["url"].endswith("jobs/ws-1/job-1/q.json")
+    assert ref["sha256"] == HASH
+    assert "content_encoding" not in ref
+
+
+def test_inject_legacy_worker_keeps_cas_form_for_gz_input() -> None:
+    """#338 混合舰队：旧协议 worker（默认 v1）的 .gz 输入行不升级——保留
+    dispatch 时 staging 的 CAS 形态（本地未压缩副本），不会把压缩字节当
+    产物字节下发导致 digest mismatch。"""
+    _make_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    _seed_gz_input_row(store, storage)
+    manifest = _manifest()
+
+    inject_artifact_object_block(store, manifest)  # 默认 worker_protocol_version=1
+
+    assert manifest["input_artifacts"] == {"q.json": f"sha256:{HASH}"}
+    # 上传 spec 同样保持裸 key（旧 worker 裸传，host 按后缀判定照收）。
+    assert manifest["artifact_uploads"]["out.json"]["storage_key"] == (
+        "jobs-staging/ws-1/job-1/exec-1/out.json"
+    )
+    assert storage.presigned_gets == []  # 未为 .gz 行签发 GET
+
+
+def test_code_claim_rebuild_forwards_worker_protocol_version() -> None:
+    """code claim 路径：worker 协议版本经 resolve_code_runtime_context 透传
+    到注入（v4 → .gz spec；默认 → 裸 key）。"""
+    _make_job()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, FakeStorage())
+    manifest = {
+        "job_id": "job-1",
+        "workspace_id": "ws-1",
+        "execution_id": "exec-1",
+        "expected_outputs": ["out.json"],
+        "input_artifacts": {},
+        "runtime_context": {"job_id": "job-1", "workspace_id": "ws-1"},
+    }
+
+    resolved = resolve_code_runtime_context(
+        manifest, TEST_DATABASE_URL, {}, store, worker_protocol_version=4
+    )
+    assert resolved["artifact_uploads"]["out.json"]["storage_key"] == (
+        "jobs-staging/ws-1/job-1/exec-1/out.json.gz"
+    )
+
+    resolved = resolve_code_runtime_context(manifest, TEST_DATABASE_URL, {}, store)
+    assert resolved["artifact_uploads"]["out.json"]["storage_key"] == (
+        "jobs-staging/ws-1/job-1/exec-1/out.json"
+    )
 
 
 def test_inject_presign_expiry_follows_code_node_timeout(tmp_path: Path) -> None:

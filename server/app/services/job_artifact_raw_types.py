@@ -17,6 +17,12 @@ class RawArtifact:
     Local files are served by FileResponse (native Range support for media
     seeking); stream-backed artifacts come from object storage — ranged
     reads (media seek) carry the requested inclusive byte range.
+
+    ``content_encoding`` (#338): ``"gzip"`` marks a ``.gz`` object served as
+    its stored (compressed) bytes — the route passes them through with a
+    ``Content-Encoding: gzip`` response header (browsers decode natively,
+    API clients gunzip themselves). Ranged reads are undefined on gzip
+    streams, so range_start/range_end stay None on this form.
     """
 
     name: str
@@ -26,3 +32,5 @@ class RawArtifact:
     # 请求的字节区间（闭区间）；None = 全量。仅在对象存储分支生效。
     range_start: int | None = None
     range_end: int | None = None
+    # 对象存储存储形态的 Content-Encoding 透传标记（#338）；None = 裸字节。
+    content_encoding: str | None = None

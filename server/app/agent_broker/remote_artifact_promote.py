@@ -18,6 +18,7 @@ from server.app.agent_broker.remote_artifact_support import (
     discard_staging,
     promote_remote,
 )
+from server.app.services.job_artifact_gzip import GZIP_SUFFIX, is_gzip_key
 from server.app.services.job_artifact_objects import (
     JobArtifactObjectStore,
     artifact_staging_key,
@@ -54,10 +55,19 @@ def promote_all(
     (best-effort; a failed restore logs a warning) — otherwise the old
     manifest rows would keep pointing at objects whose bytes no longer match
     the recorded hash/size. Backup keys are cleaned up on every outcome.
+
+    #338: the authority key keeps the staging ref's form marker (``.gz`` or
+    bare). A form-changing re-run targets a key that does not exist yet, so
+    nothing is overwritten or backed up; the previous-form object stays for
+    the still-pointing manifest row until the row upsert retargets it.
     """
     assert object_store.storage is not None
     storage = object_store.storage
-    authority_keys = {name: artifact_storage_key(workspace_id, job_id, name) for name in remote}
+    authority_keys = {
+        name: artifact_storage_key(workspace_id, job_id, name)
+        + (GZIP_SUFFIX if is_gzip_key(str(ref["storage_key"])) else "")
+        for name, ref in remote.items()
+    }
     backups: dict[str, str] = {}  # name -> rollback key of the pre-existing object
     for name, authority_key in authority_keys.items():
         if storage.head_object(authority_key) is not None:

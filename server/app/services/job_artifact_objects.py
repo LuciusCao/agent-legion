@@ -7,6 +7,12 @@ evictable cache (EXEC-ARTIFACT-STORE-001). Reads resolve local-first with the
 object store as fallback so legacy jobs (never uploaded) keep working without
 data migration. With no bucket configured the whole feature is inert: writes are
 no-ops and lookups return None, so callers fall back to the local job_dir.
+
+Object-layer gzip compression (#338): v4+ Workers upload gzip-compressed bytes
+under a ``.gz``-suffixed ``storage_key``; the suffix is the form marker and
+``open_stream`` decodes transparently (scheme: ``job_artifact_gzip``).
+``size_bytes`` on a ``.gz`` row is the stored (compressed) size — the only
+HEAD-verifiable number.
 """
 
 from __future__ import annotations
@@ -19,11 +25,12 @@ from typing import Any, BinaryIO
 
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
+from server.app.services.job_artifact_gzip import GZIP_SUFFIX, content_stream
+from server.app.services.job_artifact_rows import upsert_artifact_row_tx
 from server.app.storage import ObjectStorage
 
 logger = logging.getLogger(__name__)
 
-_HASH_CHUNK_BYTES = 1024 * 1024
 _UPLOAD_ATTEMPTS = 3
 _UPLOAD_BACKOFF_SECONDS = 0.5
 # Public: the claim-time injector derives longer presign TTLs from the node
@@ -64,14 +71,6 @@ def valid_artifact_name(name: str) -> bool:
     return bool(name) and "/" not in name and "\\" not in name and name not in {".", ".."}
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(_HASH_CHUNK_BYTES):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 class JobArtifactObjectStore:
     """Upload/register/lookup service for job artifacts in object storage."""
 
@@ -107,7 +106,8 @@ class JobArtifactObjectStore:
         if not valid_artifact_name(name):
             raise ValueError(f"invalid artifact name: {name!r}")
         size_bytes = local_path.stat().st_size
-        content_hash = _sha256(local_path)
+        with local_path.open("rb") as handle:
+            content_hash = hashlib.file_digest(handle, "sha256").hexdigest()
         storage_key = artifact_storage_key(workspace_id, job_id, name)
         last_error: Exception | None = None
         for attempt in range(_UPLOAD_ATTEMPTS):
@@ -138,7 +138,7 @@ class JobArtifactObjectStore:
         else:
             assert last_error is not None
             raise last_error
-        return self._upsert_row(
+        return self._register_row(
             job_id=job_id,
             node_key=node_key,
             name=name,
@@ -179,7 +179,10 @@ class JobArtifactObjectStore:
             expected_key = artifact_staging_key(workspace_id, job_id, execution_id, name)
         else:
             expected_key = artifact_storage_key(workspace_id, job_id, name)
-        if storage_key != expected_key:
+        # #338 dual-form: v4+ Workers upload to the ``.gz``-suffixed key,
+        # older Workers to the bare key — the Host accepts both and the
+        # suffix alone decides the stored form downstream.
+        if storage_key not in {expected_key, expected_key + GZIP_SUFFIX}:
             raise ValueError(f"unexpected artifact storage key: {storage_key!r}")
         head = self.storage.head_object(storage_key)
         if head is None:
@@ -215,7 +218,7 @@ class JobArtifactObjectStore:
             storage_key=storage_key,
             size_bytes=size_bytes,
         )
-        return self._upsert_row(
+        return self._register_row(
             job_id=job_id,
             node_key=node_key,
             name=name,
@@ -238,8 +241,9 @@ class JobArtifactObjectStore:
             return None
         with write_transaction(self._dsn) as conn:
             return [
-                self._upsert_row_tx(
+                upsert_artifact_row_tx(
                     conn,
+                    _UPSERT_ROW_SQL,
                     job_id=str(row["job_id"]),
                     node_key=str(row["node_key"]),
                     name=str(row["name"]),
@@ -249,6 +253,29 @@ class JobArtifactObjectStore:
                 )
                 for row in rows
             ]
+
+    def _register_row(
+        self,
+        *,
+        job_id: str,
+        node_key: str,
+        name: str,
+        storage_key: str,
+        size_bytes: int,
+        content_hash: str,
+    ) -> dict[str, Any]:
+        """Single-row upsert in its own transaction (batch path inlines it)."""
+        with write_transaction(self._dsn) as conn:
+            return upsert_artifact_row_tx(
+                conn,
+                _UPSERT_ROW_SQL,
+                job_id=job_id,
+                node_key=node_key,
+                name=name,
+                storage_key=storage_key,
+                size_bytes=size_bytes,
+                content_hash=content_hash,
+            )
 
     def lookup(self, job_id: str, name: str) -> dict[str, Any] | None:
         """Latest manifest row for an artifact name (internal: has storage_key)."""
@@ -285,11 +312,18 @@ class JobArtifactObjectStore:
         return {str(row["name"]) for row in rows}
 
     def open_stream(self, row: dict[str, Any]) -> BinaryIO:
+        """Content-byte stream: ``.gz`` objects decode transparently (#338);
+        use ``open_object_stream`` for the stored bytes as-is."""
+        assert self.storage is not None
+        return content_stream(self.storage, str(row["storage_key"]))
+
+    def open_object_stream(self, row: dict[str, Any]) -> BinaryIO:
+        """Stored bytes as-is: raw-endpoint gzip passthrough / HEAD semantics."""
         assert self.storage is not None
         return self.storage.open_stream(str(row["storage_key"]))
 
     def open_range_stream(self, row: dict[str, Any], start: int, end: int) -> BinaryIO:
-        """Ranged read for media seek: [start, end] inclusive."""
+        """Ranged read [start, end] inclusive; undefined for ``.gz`` (#338)."""
         assert self.storage is not None
         return self.storage.open_range(str(row["storage_key"]), start, end)
 
@@ -317,44 +351,3 @@ class JobArtifactObjectStore:
                 logger.warning(
                     "failed to delete artifact object %s", row["storage_key"], exc_info=True
                 )
-
-    def _upsert_row(
-        self,
-        *,
-        job_id: str,
-        node_key: str,
-        name: str,
-        storage_key: str,
-        size_bytes: int,
-        content_hash: str,
-    ) -> dict[str, Any]:
-        with write_transaction(self._dsn) as conn:
-            return self._upsert_row_tx(
-                conn,
-                job_id=job_id,
-                node_key=node_key,
-                name=name,
-                storage_key=storage_key,
-                size_bytes=size_bytes,
-                content_hash=content_hash,
-            )
-
-    @staticmethod
-    def _upsert_row_tx(
-        conn: Any,
-        *,
-        job_id: str,
-        node_key: str,
-        name: str,
-        storage_key: str,
-        size_bytes: int,
-        content_hash: str,
-    ) -> dict[str, Any]:
-        """Single upsert inside an already-open transaction (shared by
-        ``_upsert_row`` and the atomic batch ``record_remote_many``)."""
-        row = conn.execute(
-            _UPSERT_ROW_SQL,
-            (job_id, node_key, name, storage_key, size_bytes, content_hash),
-        ).fetchone()
-        assert row is not None
-        return dict(row)
