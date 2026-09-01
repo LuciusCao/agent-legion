@@ -57,11 +57,14 @@ def finish_shard_execution(
     )
     if aggregate in ("completed", "failed"):
         error_message = failed_shard_error(conn, lease["job_id"], lease["node_key"])
+        # Status guard mirrors complete_empty_shard_node: the shard row locks
+        # already serialize concurrent finishers, but a late finish racing a
+        # reset/rerun must not overwrite a node that left the runnable set.
         conn.execute(
             """
             update job_nodes
             set status=%s, error_message=%s, finished_at=%s
-            where job_id=%s and node_key=%s
+            where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale', 'running')
             """,
             (aggregate, error_message, now_str, lease["job_id"], lease["node_key"]),
         )
