@@ -1,8 +1,22 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from '../../testing/TestMemoryRouter'
 import { JobListItem } from './JobListItem'
 import type { JobSummary } from '../../types/jobTypes'
+
+// 排查入口（#329）会挂载诊断面板；无可用 agent 时面板停在空态，无需真实后端。
+vi.mock('../../features/workflowStudio/chat/studioChatApi', () => ({
+  fetchStudioChatAgents: vi.fn().mockResolvedValue([]),
+  fetchStudioChatSessions: vi.fn().mockResolvedValue([]),
+  fetchStudioChatMessages: vi.fn().mockResolvedValue([]),
+  fetchStudioChatSession: vi.fn(),
+  createStudioChatSession: vi.fn(),
+  sendStudioChatMessage: vi.fn(),
+  cancelStudioChatTurn: vi.fn(),
+  setStudioChatAllowAll: vi.fn(),
+  answerStudioChatPermission: vi.fn(),
+  updateStudioChatContext: vi.fn(),
+}))
 
 const mockJob: JobSummary = {
   id: 'j1',
@@ -445,5 +459,47 @@ describe('JobListItem', () => {
     )
 
     expect(screen.getByText('打包组装')).toBeInTheDocument()
+  })
+
+  it('shows the 排查 entry on failed jobs and opens the diagnosis dialog', async () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{
+            ...mockJob,
+            status: 'failed',
+            active_node_key: 'assemble_package',
+          }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+          workspaceId="ws1"
+        />
+      </MemoryRouter>
+    )
+
+    const entry = screen.getByRole('button', { name: '排查' })
+    fireEvent.click(entry)
+
+    // 行点击导航不得触发；弹窗按失败节点名绑定上下文。
+    const dialog = await screen.findByRole('dialog', { name: '排查：打包组装' })
+    expect(dialog).toBeInTheDocument()
+    await screen.findByText(/未检测到可用的 ACP agent/)
+  })
+
+  it('hides the 排查 entry for non-failed jobs or missing workspace', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={mockJob}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+          workspaceId="ws1"
+        />
+      </MemoryRouter>
+    )
+    // mockJob.status === 'running'
+    expect(screen.queryByRole('button', { name: '排查' })).toBeNull()
   })
 })

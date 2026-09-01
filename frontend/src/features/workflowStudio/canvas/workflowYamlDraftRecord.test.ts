@@ -163,4 +163,62 @@ describe('workflowYamlToDefinitionRecord', () => {
       workflowYamlToDefinitionRecord('key: demo\nedges:\n  - oops\n')
     ).toBeNull()
   })
+
+  it('merges top-level execution defaults into non-start nodes (#333)', () => {
+    // 对齐后端 loader：顶层 execution 默认合并进每个非 start 节点（节点值
+    // 优先），草稿记录的节点 execution 即有效值，与 published 快照同形。
+    const record = workflowYamlToDefinitionRecord(`key: demo
+execution:
+  provider: openai
+  model: gpt-5
+nodes:
+  _start:
+    type: start
+  review:
+    type: agent
+    capability: review
+  fetch:
+    capability: fetch
+    execution:
+      provider: pi
+`)
+    const nodes = Object.fromEntries(
+      (record?.nodes ?? []).map((node) => [node.key, node])
+    )
+    expect(nodes.review?.execution).toEqual({
+      provider: 'openai',
+      model: 'gpt-5',
+      thinking: '',
+      prompt: '',
+    })
+    expect(nodes.fetch?.execution).toEqual({
+      provider: 'pi',
+      model: 'gpt-5',
+      thinking: '',
+      prompt: '',
+    })
+    expect(nodes._start?.execution).toBeUndefined()
+  })
+
+  it('normalizes non-string execution values instead of crashing the canvas (codex P1)', () => {
+    // `provider: 1`、`model: true`：合法 YAML、非法契约值。草稿持久化后
+    // 重开会反复走到这里——不得抛异常，非字符串按未配置归一（后续由
+    // 节点警告徽标提示缺失）。
+    const record = workflowYamlToDefinitionRecord(`key: demo
+nodes:
+  review:
+    type: agent
+    capability: review
+    execution:
+      provider: 1
+      model: true
+`)
+    expect(record).not.toBeNull()
+    expect(record?.nodes[0]?.execution).toEqual({
+      provider: '',
+      model: '',
+      thinking: '',
+      prompt: '',
+    })
+  })
 })

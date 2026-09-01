@@ -147,6 +147,80 @@ def test_agent_claim_without_object_storage_unchanged() -> None:
     assert manifest["input_artifacts"] == {"q.json": f"sha256:{HASH}"}
 
 
+def test_agent_claim_v4_worker_gets_gzip_specs() -> None:
+    """#338：v4 worker（authorize 报 protocol_version=4）拿 .gz 上传 spec，
+    .gz 输入行升级为 presigned GET + content_encoding 标记。"""
+    import gzip as gzip_mod
+
+    _seed()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    compressed = gzip_mod.compress(PAYLOAD)
+    storage.objects["jobs/ws-1/job-1/q.json.gz"] = compressed
+    store.record_remote(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="upstream",
+        name="q.json",
+        storage_key="jobs/ws-1/job-1/q.json.gz",
+        size_bytes=len(compressed),
+        content_hash=HASH,
+    )
+    broker = MagicMock()
+    broker.claim.return_value = _claimed(_manifest())
+    app = FastAPI()
+    app.include_router(
+        create_agent_worker_claim_router(
+            broker,
+            MagicMock(),
+            lambda request, worker_id=None: {"worker_id": "w1", "protocol_version": 4},
+            lambda request: "lease-1",
+            store,
+        )
+    )
+    client = TestClient(app)
+
+    manifest = _claim(client)
+
+    assert manifest["artifact_uploads"]["out.json"]["storage_key"] == (
+        "jobs-staging/ws-1/job-1/exec-1/out.json.gz"
+    )
+    ref = manifest["input_artifacts"]["q.json"]
+    assert ref["url"].endswith("jobs/ws-1/job-1/q.json.gz")
+    assert ref["sha256"] == HASH  # 未压缩字节哈希
+    assert ref["content_encoding"] == "gzip"
+
+
+def test_agent_claim_mixed_fleet_v3_worker_keeps_raw_specs() -> None:
+    """#338 混合舰队：v3 worker 对同一批 .gz 数据拿裸上传 spec，.gz 输入行
+    不升级（保留 CAS 形态）——不因输入/上传形态 mismatch 失败。"""
+    import gzip as gzip_mod
+
+    _seed()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    compressed = gzip_mod.compress(PAYLOAD)
+    storage.objects["jobs/ws-1/job-1/q.json.gz"] = compressed
+    store.record_remote(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="upstream",
+        name="q.json",
+        storage_key="jobs/ws-1/job-1/q.json.gz",
+        size_bytes=len(compressed),
+        content_hash=HASH,
+    )
+    client, _ = _client(store)  # _client 的 authorize stub 报 protocol_version=3
+
+    manifest = _claim(client)
+
+    assert manifest["artifact_uploads"]["out.json"]["storage_key"] == (
+        "jobs-staging/ws-1/job-1/exec-1/out.json"
+    )
+    assert manifest["input_artifacts"] == {"q.json": f"sha256:{HASH}"}
+    assert storage.presigned_gets == []  # 未为旧 worker 签发 .gz GET
+
+
 def test_agent_claim_presign_expiry_follows_execution_timeout() -> None:
     """presign TTL 从 execution.timeout_seconds 派生：max(3600, t + 900)。"""
     _seed()

@@ -1,8 +1,6 @@
-"""Claim / heartbeat routes for the Agent Worker data plane.
-
-Split out of ``agent_workers.py`` for the file-size budget (mirrors
-``agent_worker_metrics.py``): the factory receives the shared auth closures
-from the main router.
+"""Claim routes for the Agent Worker data plane (split from
+``agent_workers.py`` for the file budget; heartbeat lives in
+``agent_worker_heartbeat``, mirrors ``agent_worker_metrics.py``).
 """
 
 from __future__ import annotations
@@ -17,10 +15,9 @@ from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.artifact_object_block import inject_artifact_object_block
 from server.app.agent_broker.code_dispatch import resolve_code_manifest_config
 from server.app.agent_broker.code_manifest import resolve_code_runtime_context
-from server.app.agent_control.registry import CODE_PROTOCOL_VERSION
+from server.app.routes.agent_worker_heartbeat import register_heartbeat_route
 from server.app.routes.agent_workers_contracts import (
     AgentClaimResponse,
-    AgentHeartbeatResponse,
     ClaimAgentExecutionRequest,
 )
 from server.app.settings import Settings
@@ -41,7 +38,9 @@ def create_agent_worker_claim_router(
     def claim(
         payload: ClaimAgentExecutionRequest, request: Request
     ) -> Response | AgentClaimResponse:
-        authorize_worker(request, payload.worker_id)
+        worker = authorize_worker(request, payload.worker_id)
+        # #338: the claiming Worker's protocol version selects the artifact
+        # object form (v4+ gets .gz specs; older Workers stay raw dual-form).
         try:
             claimed = broker.claim(
                 payload.worker_id, payload.max_concurrency, payload.max_code_concurrency
@@ -63,7 +62,11 @@ def create_agent_worker_claim_router(
                     manifest, broker.database_dsn, settings.config
                 )
                 manifest = resolve_code_runtime_context(
-                    manifest, broker.database_dsn, settings.config, job_artifact_objects
+                    manifest,
+                    broker.database_dsn,
+                    settings.config,
+                    job_artifact_objects,
+                    worker_protocol_version=int(worker["protocol_version"]),
                 )
             except Exception as exc:
                 # #204 broad-except audit: claim-time manifest resolution that
@@ -93,7 +96,11 @@ def create_agent_worker_claim_router(
             # only, so URLs never persist and never expire in the queue. A
             # storage error degrades to the legacy CAS channel inside the
             # helper; the claim never fails over injection.
-            inject_artifact_object_block(job_artifact_objects, manifest)
+            inject_artifact_object_block(
+                job_artifact_objects,
+                manifest,
+                worker_protocol_version=int(worker["protocol_version"]),
+            )
         return AgentClaimResponse(
             execution_id=claimed.execution_id,
             lease_id=claimed.lease_id,
@@ -109,21 +116,5 @@ def create_agent_worker_claim_router(
             bundle_url=f"/api/agent-executions/{claimed.execution_id}/bundle",
         )
 
-    @router.post(
-        "/agent-executions/{execution_id}/heartbeat",
-        response_model=AgentHeartbeatResponse,
-    )
-    def heartbeat(execution_id: str, request: Request) -> Response | AgentHeartbeatResponse:
-        worker = authorize_worker(request)
-        lease_id = require_lease_id(request)
-        if not broker.heartbeat(execution_id, str(worker["worker_id"]), lease_id):
-            raise HTTPException(status_code=409, detail="execution is not owned by this Worker")
-        # Protocol v2 (batch 2): the body carries explicit cancellations for
-        # this Worker's claimed kind='code' executions. v1 Workers keep the
-        # legacy empty 204 (they cannot hold code executions anyway).
-        if int(worker["protocol_version"]) >= CODE_PROTOCOL_VERSION:
-            cancelled = broker.cancelled_code_executions(str(worker["worker_id"]))
-            return AgentHeartbeatResponse(cancelled_execution_ids=cancelled)
-        return Response(status_code=204)
-
+    register_heartbeat_route(router, broker, authorize_worker, require_lease_id)
     return router

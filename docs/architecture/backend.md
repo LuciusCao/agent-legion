@@ -108,7 +108,7 @@ server/app/
 | GET | `/agent-register-tokens` | `list_register_tokens` | routes/agent_register_tokens.py |
 | DELETE | `/agent-register-tokens/{token_id}` | `delete_register_token` | routes/agent_register_tokens.py |
 | POST | `/agent-executions/claim` | `claim` | routes/agent_worker_claims.py |
-| POST | `/agent-executions/{execution_id}/heartbeat` | `heartbeat` | routes/agent_worker_claims.py |
+| POST | `/agent-executions/{execution_id}/heartbeat` | `heartbeat` | routes/agent_worker_heartbeat.py |
 | GET | `/agent-workers/self/metrics` | `get_worker_metrics` | routes/agent_worker_metrics.py |
 | POST | `/agent-workers/register` | `register` | routes/agent_workers.py |
 | GET | `/agent-workers/self` | `get_worker_self` | routes/agent_workers.py |
@@ -131,6 +131,8 @@ server/app/
 | GET | `/dashboard/events` | `dashboard_events` | routes/dashboard_events.py |
 | GET | `/workspaces/{workspace_id}/failed-node-runs` | `list_failed_node_runs` | routes/failed_node_runs.py |
 | POST | `/workspaces/{workspace_id}/jobs/rerun-by-failure` | `rerun_jobs_by_failure_category` | routes/failed_node_runs.py |
+| GET | `/admin/infra-connections` | `get_infra_connections` | routes/infra_connections.py |
+| POST | `/admin/infra-connections/test` | `test_infra_connection` | routes/infra_connections.py |
 | GET | `/admin/instance-settings` | `get_instance_settings` | routes/instance_settings.py |
 | PUT | `/admin/instance-settings` | `put_instance_settings` | routes/instance_settings.py |
 | POST | `/workspaces/{workspace_id}/jobs/{job_id}/nodes/{node_key}/approval` | `decide_approval` | routes/job_approvals.py |
@@ -173,6 +175,10 @@ server/app/
 | PATCH | `/workspaces/{workspace_id}/packages/{package_id:int}` | `update_workspace_package_route` | routes/packages.py |
 | POST | `/workspaces/{workspace_id}/jobs/package` | `package_workspace_jobs` | routes/packages.py |
 | GET | `/workspaces/{workspace_id}/packages/{filename:path}` | `download_workspace_package` | routes/packages.py |
+| GET | `/workspaces/{workspace_id}/preview-panel/published` | `get_published` | routes/preview_panels.py |
+| GET | `/workspaces/{workspace_id}/preview-panel` | `get_state` | routes/preview_panels.py |
+| POST | `/workspaces/{workspace_id}/preview-panel/publish` | `publish` | routes/preview_panels.py |
+| POST | `/workspaces/{workspace_id}/preview-panel/archive` | `archive` | routes/preview_panels.py |
 | POST | `/workspaces/{workspace_id}/quality/sample-batches` | `create_sample_batch` | routes/quality.py |
 | GET | `/workspaces/{workspace_id}/quality/sample-batches` | `list_sample_batches` | routes/quality.py |
 | GET | `/workspaces/{workspace_id}/quality/sample-batches/{batch_id}` | `get_sample_batch` | routes/quality.py |
@@ -186,9 +192,19 @@ server/app/
 | GET | `/workspaces/{workspace_id}/runs` | `list_runs` | routes/runs.py |
 | GET | `/workspaces/{workspace_id}/runs/{run_id}` | `get_run` | routes/runs.py |
 | GET | `/agent-catalog/skills/{skill_key:path}` | `get_skill` | routes/skill_catalog_route.py |
+| GET | `/skills/directories` | `list_skill_directories` | routes/skill_directories.py |
 | POST | `/skills/validate` | `validate_skill` | routes/skills.py |
 | GET | `/skills/tags` | `list_skill_tags` | routes/skills.py |
 | GET | `/studio-agent/tools/chat-sessions/{session_id}/context` | `get_chat_session_context` | routes/studio_agent_context.py |
+| GET | `/studio-agent/tools/chat-sessions/{session_id}/job-context` | `get_job_context` | routes/studio_agent_job_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/jobs` | `list_jobs` | routes/studio_agent_job_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/jobs/compare` | `compare_jobs` | routes/studio_agent_job_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/jobs/{job_id}` | `get_job_detail` | routes/studio_agent_job_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/jobs/{job_id}/logs` | `get_node_logs` | routes/studio_agent_job_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}` | `read_artifact` | routes/studio_agent_job_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/preview/context` | `preview_context` | routes/studio_agent_preview_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/preview/panel` | `get_preview_panel` | routes/studio_agent_preview_tools.py |
+| PUT | `/studio-agent/tools/workspaces/{workspace_id}/preview/panel/draft` | `save_preview_panel_draft` | routes/studio_agent_preview_tools.py |
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/node-prompt` | `get_node_prompt` | routes/studio_agent_prompt_tools.py |
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/node-prompt` | `save_node_prompt_route` | routes/studio_agent_prompt_tools.py |
 | GET | `/studio-agent/tools/skills/{skill_key:path}` | `get_skill` | routes/studio_agent_skill_tools.py |
@@ -207,6 +223,7 @@ server/app/
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `get_node_code_state` | routes/studio_agent_tools.py |
 | GET | `/admin/studio-agents` | `get_studio_agents` | routes/studio_agents_admin.py |
 | PUT | `/admin/studio-agents` | `put_studio_agents` | routes/studio_agents_admin.py |
+| POST | `/admin/studio-agents/redetect` | `redetect_studio_agents` | routes/studio_agents_admin.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/agents` | `list_agents` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions` | `create_session` | routes/studio_chat.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions` | `list_sessions` | routes/studio_chat.py |
@@ -337,6 +354,11 @@ server/app/
 | ConnectionTestResponse | BaseModel | ok: bool, message: str | app/routes/connections_contracts.py |
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
+| DatabaseConnectionView | BaseModel | engine: str, host: str, port: int | None, name: str, user: str, password_set:... | app/routes/infra_connections_contracts.py |
+| StorageConnectionView | BaseModel | configured: bool, endpoint_url: str, public_endpoint_url: str, bucket: str, r... | app/routes/infra_connections_contracts.py |
+| InfraConnectionsResponse | BaseModel | database: DatabaseConnectionView, storage: StorageConnectionView | app/routes/infra_connections_contracts.py |
+| InfraConnectionTestRequest | BaseModel | target: Literal['database', 'storage'] | app/routes/infra_connections_contracts.py |
+| InfraConnectionTestResponse | BaseModel | target: Literal['database', 'storage'], ok: bool, reason: str | None | app/routes/infra_connections_contracts.py |
 | InstanceCleanupSettings | BaseModel | log_retention_days: int, run_dir_retention_days: int, interval_seconds: int | app/routes/instance_settings_contracts.py |
 | InstanceMonitoringSettings | BaseModel | sample_interval_seconds: float, retention_days: int | app/routes/instance_settings_contracts.py |
 | InstanceWorkflowsSettings | BaseModel | enabled: bool | app/routes/instance_settings_contracts.py |
@@ -445,10 +467,31 @@ server/app/
 | SkillValidateRequest | BaseModel | path: str | app/routes/skill_contracts.py |
 | SkillValidateResponse | BaseModel | valid: bool, path: str, skill_key: str | None, error: str | None, tags: list[... | app/routes/skill_contracts.py |
 | SkillTagsResponse | BaseModel | path: str, tags: list[str], latest_tag: str | None | app/routes/skill_contracts.py |
+| SkillDirectoriesResponse | BaseModel | workspace_id: str, directories: list[str] | app/routes/skill_directories_contracts.py |
 | StudioContextNode | BaseModel | key: str, capability: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextEdge | BaseModel | source: str, target: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextWorkflow | BaseModel | workflow_key: str, version: int, nodes: list[StudioContextNode], edges: list[... | app/routes/studio_agent_context_contracts.py |
 | StudioChatContextResponse | BaseModel | workspace_id: str, selected_node_key: str | None, draft_yaml: str | None, wor... | app/routes/studio_agent_context_contracts.py |
+| StudioAgentJobSummaryNode | BaseModel | node_key: str, label: str, status: str, error_message: str | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobView | BaseModel | id: str, title: str, status: str, outcome: str, created_at: datetime | None, ... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobListResponse | BaseModel | jobs: list[StudioAgentJobView], returned: int, limit: int | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobNode | BaseModel | node_key: str, label: str, capability: str, status: str, error_message: str, ... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobRun | BaseModel | id: int, node_key: str, status: str, error_message: str, started_at: datetime... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentSuggestedAction | BaseModel | action: str, job_id: str, node_key: str, label: str, requires_confirmation: b... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobDetail | BaseModel | job: StudioAgentJobView, nodes: list[StudioAgentJobNode], runs: list[StudioAg... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobLogsResponse | BaseModel | job_id: str, run_id: int, node_key: str, status: str, error_message: str, log... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentArtifactResponse | BaseModel | name: str, content: str, truncated: bool | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobCompareNode | BaseModel | node_key: str, status_a: str, status_b: str, error_a: str, error_b: str, chan... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobCompareSummary | BaseModel | nodes_changed: int, newly_failed: list[str], recovered: list[str] | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobCompareResponse | BaseModel | job_a: StudioAgentJobView, job_b: StudioAgentJobView, nodes: list[StudioAgent... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentRecentFailure | BaseModel | job_id: str, node_key: str, failure_category: str, error_message: str, finish... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobContextResponse | BaseModel | session_id: str, workspace_id: str, focus_node_key: str | None, job: StudioAg... | app/routes/studio_agent_job_tool_contracts.py |
+| PreviewPanelVersionResponse | BaseModel | id: str, workspace_id: str | None, entity_key: str, version: int, status: Lit... | app/routes/studio_agent_preview_contracts.py |
+| PreviewPanelStateResponse | BaseModel | published: PreviewPanelVersionResponse | None, draft: PreviewPanelVersionResp... | app/routes/studio_agent_preview_contracts.py |
+| PreviewPanelPublishedResponse | BaseModel | published: PreviewPanelVersionResponse | None | app/routes/studio_agent_preview_contracts.py |
+| PreviewPanelDraftRequest | BaseModel | html: str, change_note: str | None | app/routes/studio_agent_preview_contracts.py |
+| PreviewContextJobSummary | BaseModel | id: str, status: str | None, source_type: str | None, source_id: str | None, ... | app/routes/studio_agent_preview_contracts.py |
+| PreviewContextResponse | BaseModel | workspace_id: str, recent_jobs: list[PreviewContextJobSummary], selected_job:... | app/routes/studio_agent_preview_contracts.py |
 | SkillValidationIssue | BaseModel | path: str, error: str | app/routes/studio_agent_skill_contracts.py |
 | SkillValidateToolResponse | BaseModel | key: str, valid: bool, errors: list[SkillValidationIssue] | app/routes/studio_agent_skill_contracts.py |
 | SkillVersionFileWrite | BaseModel | path: str, content: str | app/routes/studio_agent_skill_contracts.py |
@@ -460,8 +503,9 @@ server/app/
 | StudioAgentTokensResponse | BaseModel | tokens: list[StudioAgentTokenEntry] | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenRevokeResponse | BaseModel | id: str, revoked: bool | app/routes/studio_agent_token_contracts.py |
 | StudioAgentActiveWorkflowResponse | BaseModel | state: Literal['active', 'empty'], workflow_key: str | None, revision: Workfl... | app/routes/studio_agent_tool_contracts.py |
-| StudioAgentRegistryEntry | BaseModel | id: str, label: str, command: str, args: list[str] | app/routes/studio_agents_admin_contracts.py |
+| StudioAgentRegistryEntry | BaseModel | id: str, label: str, command: str, args: list[str], source: Literal['manual',... | app/routes/studio_agents_admin_contracts.py |
 | StudioAgentRegistryDocument | BaseModel | api_base: str, agents: list[StudioAgentRegistryEntry] | app/routes/studio_agents_admin_contracts.py |
+| StudioAgentDetection | BaseModel | detected: bool, path: str | None, version: str | None | app/routes/studio_agents_admin_contracts.py |
 | StudioChatAgentOption | BaseModel | id: str, label: str | app/routes/studio_chat_contracts.py |
 | StudioChatAgentsResponse | BaseModel | agents: list[StudioChatAgentOption] | app/routes/studio_chat_contracts.py |
 | StudioChatSessionCreateRequest | BaseModel | agent_id: str, title: str | app/routes/studio_chat_contracts.py |

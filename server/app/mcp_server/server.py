@@ -26,7 +26,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from server.app.mcp_server import prompt_tools, skill_tools
+from server.app.mcp_server import job_tools, preview_tools, prompt_tools, skill_tools
 from server.app.mcp_server.authoring_guide import AUTHORING_GUIDE
 from server.app.mcp_server.config import McpConfigError, McpServerConfig
 from server.app.mcp_server.tool_client import ToolClient
@@ -172,6 +172,12 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
     # preview/save tools, both split into sibling modules for the budget.
     skill_tools.register_skill_tools(mcp, _client)
     prompt_tools.register_prompt_tools(mcp, _client)
+    # Preview panel tools (issue #328): context/panel reads + draft save,
+    # draft-only like the rest of the surface.
+    preview_tools.register_preview_tools(mcp, _client)
+    # Job observation tools (issue #329): read-only diagnosis surface —
+    # context/detail/logs/artifacts/list/compare; no effecting operations.
+    job_tools.register_job_tools(mcp, _client)
 
     return mcp
 

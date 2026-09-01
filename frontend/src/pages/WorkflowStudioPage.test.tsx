@@ -82,7 +82,29 @@ vi.mock('../api', () => {
         },
       ],
     },
-    definition_yaml: 'key: demo_video_workflow\nlabel: 知识视频 DAG\n',
+    // definition_yaml 与真实后端一致：active revision 的完整定义序列化
+    // （含 nodes/edges——revision_format 恒序列化全量定义）。此前 mock 只有
+    // key/label 两行，draft 记录解析出 0 节点并覆盖 activeWorkflow 派生的
+    // DAG，快机器上基线同步先于 findByText 完成导致画布恒空（环境竞态）。
+    definition_yaml: [
+      'key: demo_video_workflow',
+      'label: 知识视频 DAG',
+      'nodes:',
+      '  fetch_items:',
+      '    label: 获取题目',
+      '    capability: fetch_items',
+      '    outputs: [questions.json]',
+      '  clean_items:',
+      '    label: 清洗与解析',
+      '    capability: clean_items',
+      '    after: [fetch_items]',
+      '    inputs: [questions.json]',
+      '    outputs: [questions_parsed.json]',
+      'edges:',
+      '  - from: fetch_items',
+      '    to: clean_items',
+      '',
+    ].join('\n'),
   }
 
   return {

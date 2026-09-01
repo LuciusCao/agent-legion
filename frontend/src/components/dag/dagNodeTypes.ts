@@ -14,6 +14,9 @@ export interface DagNodeData extends Record<string, unknown> {
   nodeKey?: string
   capability?: string
   executorUnbound?: boolean
+  /** #333：agent 节点有效 execution 缺 provider/model 时的警告文案（仅
+   * Studio 画布注入；缺失即 undefined，节点不显示警告徽标）。 */
+  executionWarning?: string
   topologyBadges?: Array<'start' | 'entry' | 'branch' | 'terminal'>
   terminalOutcome?: string
   inputs: string[]

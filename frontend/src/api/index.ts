@@ -16,7 +16,7 @@ export {
 // prettier-ignore
 export { archiveAgent, copyAgent, createAgentDefinition, fetchAgentDefinition, fetchAgentDefinitions, fetchAgentVersions, publishAgent, rollbackAgent, saveAgentDraft } from './agentDefinitions'
 // prettier-ignore
-export { fetchSkillTags, validateSkillPath } from './skills'
+export { fetchSkillDirectories, fetchSkillTags, validateSkillPath } from './skills'
 export { decideApproval, fetchApprovalDecisions } from './jobApprovalApi'
 // prettier-ignore
 export type { ApprovalDecision, ApprovalDecisionCreateRequest, ApprovalVerdict } from './jobApprovalApi'

@@ -89,6 +89,24 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
             "/api/studio-agent/tools/skills/wf/review/versions",
             {"files": [{"path": "SKILL.md", "content": "x"}], "new_tag": "v2", "message": "m"},
         ),
+        # Preview panel tools (issue #328): context/panel reads + draft write.
+        ("GET", f"{base}/preview/context", None),
+        ("GET", f"{base}/preview/panel", None),
+        ("PUT", f"{base}/preview/panel/draft", {"html": "not html"}),
+        # Job observation tools (issue #329): all read-only; unknown
+        # jobs/sessions 404, which still proves the scope guard let the token
+        # through. Effecting job actions (rerun/run-to) are deliberately absent
+        # from this surface (STUDIO-AGENT-001).
+        ("GET", f"{base}/jobs", None),
+        ("GET", f"{base}/jobs/compare?job_id_a=a&job_id_b=b", None),
+        ("GET", f"{base}/jobs/job-x", None),
+        ("GET", f"{base}/jobs/job-x/logs", None),
+        ("GET", f"{base}/jobs/job-x/artifacts/artifact-x.json", None),
+        (
+            "GET",
+            "/api/studio-agent/tools/chat-sessions/session-x/job-context?job_id=job-x",
+            None,
+        ),
     ]
 
 

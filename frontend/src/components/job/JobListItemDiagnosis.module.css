@@ -1,0 +1,9 @@
+.diagnoseButton {
+  /* 失败 job 的排查入口（#329）：低调图标按钮，hover 时才上色。 */
+  color: #5f6368;
+  flex-shrink: 0;
+}
+
+.diagnoseButton:hover {
+  color: var(--status-failed-text);
+}

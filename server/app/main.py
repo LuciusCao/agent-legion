@@ -51,6 +51,7 @@ from server.app.skills.skill_sources_retirement import retire_skill_sources_docu
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
 from server.app.storage import build_s3_storage_checked
+from server.app.studio_chat.agent_catalog import spawn_startup_detection
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.service import StudioChatService
 from server.app.worker_control import WorkspaceWorkerControl
@@ -119,9 +120,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # PATH-level availability of every registered chat agent: warms the probe
     # cache and logs the entries the picker will hide on this host.
     studio_chat_service.warm_availability_probe()
-    agent_broker = agent_plane.broker
-    agent_dispatch = agent_plane.dispatch
-    agent_completion = agent_plane.completion
     executor_leases = agent_plane.executor_leases
     agent_worker_registry = agent_plane.worker_registry
     workflow_worker_thread: WorkflowWorkerThread | None = None
@@ -156,10 +154,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 settings,
                 job_db=job_db,
                 executor_leases=executor_leases,
-                agent_broker=agent_broker,
+                agent_broker=agent_plane.broker,
                 workspace_worker_control=workspace_worker_control,
                 agent_manager=agent_manager,
-                agent_dispatch=agent_dispatch,
+                agent_dispatch=agent_plane.dispatch,
             )
             app.state.worker_startup = worker_status
             # Routes pick the thread up here to trigger scan-list reloads
@@ -182,6 +180,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         background_tasks.start(app)
         studio_chat_service.reap_zombie_sessions()
         studio_registry = StudioAgentRegistryStore(job_db)
+        # Startup auto-detection (#332): daemon thread, best-effort; gated on
+        # start_worker so test/export apps never spawn probe subprocesses.
+        if start_worker:
+            spawn_startup_detection(studio_registry)
         studio_mcp, studio_mcp_app = create_studio_mcp_http_app(
             job_db, lambda: str(studio_registry.get()["api_base"])
         )
@@ -217,10 +219,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.settings = settings
     app.state.job_db = job_db
     app.state.auth_service = build_auth_service(job_db, settings.config)
-    app.state.agent_broker = agent_broker
-    app.state.agent_dispatch = agent_dispatch
+    app.state.agent_broker = agent_plane.broker
+    app.state.agent_dispatch = agent_plane.dispatch
     app.state.agent_worker_registry = agent_worker_registry
-    app.state.agent_completion = agent_completion
+    app.state.agent_completion = agent_plane.completion
     app.state.executor_leases = executor_leases
     app.state.artifact_store = artifact_store
     app.state.agent_manager = agent_manager
@@ -252,9 +254,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 job_event_manager=job_event_manager,
                 job_event_buffer=job_event_buffer,
                 artifact_store=artifact_store,
-                agent_broker=agent_broker,
+                agent_broker=agent_plane.broker,
                 agent_worker_registry=agent_worker_registry,
-                agent_completion=agent_completion,
+                agent_completion=agent_plane.completion,
                 ops_metrics=ops_metrics,
                 quality_sampling=quality.quality_sampling,
                 quality_labels=quality.quality_labels,

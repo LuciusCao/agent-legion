@@ -221,7 +221,10 @@ def register(client: TestClient, credential: str | None = None, **overrides) -> 
         json=payload,
     )
     assert response.status_code == 201, response.text
-    assert response.json()["host_protocol_version"] == 3
+    # Host 声明其最新协议版本（shared/protocol.py 单一事实来源，#338 起 v4）。
+    from shared.protocol import PROTOCOL_VERSION
+
+    assert response.json()["host_protocol_version"] == PROTOCOL_VERSION
     return dict(response.json())
 
 

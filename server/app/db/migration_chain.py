@@ -49,12 +49,11 @@ from server.app.db.migrations import (
     migrate_workspace_job_node_status_counts,
     migrate_workspace_secrets,
 )
-from server.app.db.migrations.job_status_counts import (
-    migrate_workspace_job_status_counts,
-)
+from server.app.db.migrations.job_status_counts import migrate_workspace_job_status_counts
 from server.app.db.migrations.jobs_workflow_key_alignment import (
     migrate_jobs_workflow_key_alignment,
 )
+from server.app.db.migrations.preview_panels import migrate_preview_panels
 from server.app.db.migrations.retire_workflow_key_columns import (
     migrate_retire_workflow_key_columns,
 )
@@ -161,6 +160,12 @@ MIGRATIONS: list[SchemaMigration] = [
     # workspace-keyed twins. Requires v68 alignment (values all equal the
     # workspace id) and M1's predicate/write normalization.
     SchemaMigration(70, "retire_workflow_key_columns", migrate_retire_workflow_key_columns),
+    # v71 (#328): widen the versioned_entities entity_type CHECK so
+    # workspace-scoped preview panel bundles join the draft → published
+    # lifecycle. DDL-only in shape but carried as an apply fn: the schema
+    # file's create-table-if-not-exists never rewrites the CHECK on existing
+    # databases (same drop + re-add pattern as v30/v47).
+    SchemaMigration(71, "preview_panels", migrate_preview_panels),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]

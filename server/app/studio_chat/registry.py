@@ -1,7 +1,9 @@
 """Instance-level ACP agent registry for Studio chat (phase 3 chunk 4).
 
 Admins maintain the list of launchable ACP agents ({id, label, command,
-args[]}) plus the API base URL the bundled MCP server should call back. The
+args[]}, plus a server-managed ``source`` provenance marker: detected
+catalog entries merge in without ever overriding manual rows, #332) plus
+the API base URL the bundled MCP server should call back. The
 document lives in ``global_settings`` under its own key (``studio_agents``)
 rather than inside the monolithic ``instance`` settings document: that
 document has whole-document replace semantics and an admin UI that rebuilds
@@ -18,6 +20,7 @@ defaults-synthesis domain logic.
 from __future__ import annotations
 
 import ipaddress
+from collections.abc import Callable
 from typing import Any, cast
 from urllib.parse import urlsplit
 
@@ -74,6 +77,12 @@ class StudioAgentRegistryStore:
 
     def put(self, document: dict[str, Any]) -> None:
         self._kv().put_global_settings_document(GLOBAL_SETTINGS_KEY, document)
+
+    def update(self, updater: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
+        """Transactionally read-modify-write the stored document (#332): the
+        detected/manual source merges must not lose a concurrent admin edit
+        or detection pass (single-transaction RMW, issue #281 KV mixin)."""
+        self._kv().update_global_settings_document(GLOBAL_SETTINGS_KEY, updater)
 
     def find_agent(self, agent_id: str) -> dict[str, Any] | None:
         for agent in self.get()["agents"]:

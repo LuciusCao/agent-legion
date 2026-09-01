@@ -3,6 +3,7 @@ import { AuthGate } from './components/AuthGate'
 import AdminRoutes from './routes/AdminRoutes'
 import {
   DashboardPage,
+  GlobalOnboardingPage,
   JobDetailPage,
   LoginPage,
   MonitoringPage,
@@ -21,6 +22,8 @@ export default function AppRoutes() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/setup" element={<SetupPage />} />
+        {/* #333：admin bootstrap 后的全局初始化清单（静态段优先于 /admin/* splat）。 */}
+        <Route path="/admin/onboarding" element={<GlobalOnboardingPage />} />
         <Route path="/admin/*" element={<AdminRoutes />} />
         <Route path="/" element={<DashboardPage />} />
         <Route path="/monitoring" element={<MonitoringPage />} />
