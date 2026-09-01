@@ -23,11 +23,26 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from datetime import UTC, datetime
-from typing import Literal
 
 from server.app.db.connection import DatabaseConnection
+from server.app.workflows.sharding_finish import (
+    ShardStatus,
+    aggregate_shard_state,
+    on_shard_finished,
+)
 
-ShardStatus = Literal["pending", "running", "completed", "failed"]
+__all__ = [
+    "ShardLimitExceeded",
+    "ShardStatus",
+    "aggregate_shard_state",
+    "delete_shards",
+    "failed_shard_error",
+    "materialize_shards",
+    "on_shard_finished",
+    "read_shard_outputs",
+    "shard_index_for_execution",
+    "try_start_shard",
+]
 
 _RUNNABLE_NODE_STATUSES = ("pending", "ready", "stale", "running")
 
@@ -71,56 +86,6 @@ def materialize_shards(
         (job_id, node_key),
     ).fetchone()
     return int(row["cnt"]) if row is not None else 0
-
-
-def aggregate_shard_state(conn: DatabaseConnection, job_id: str, node_key: str) -> ShardStatus:
-    """Collapse shard statuses into the node's aggregate state.
-
-    Precedence: all completed -> ``completed``; any failed -> ``failed`` (a
-    shard row only reads ``failed`` once the caller recorded the terminal
-    failure — retry/reset decisions stay with the caller); any running ->
-    ``running``; otherwise ``pending``.
-    """
-    rows = conn.execute(
-        "select status from node_shards where job_id=%s and node_key=%s",
-        (job_id, node_key),
-    ).fetchall()
-    if not rows:
-        return "pending"
-    statuses = {str(row["status"]) for row in rows}
-    if statuses == {"completed"}:
-        return "completed"
-    if "failed" in statuses:
-        return "failed"
-    if "running" in statuses:
-        return "running"
-    return "pending"
-
-
-def on_shard_finished(
-    conn: DatabaseConnection,
-    job_id: str,
-    node_key: str,
-    shard_index: int,
-    status: ShardStatus,
-    output_json: str = "",
-    error_message: str = "",
-) -> ShardStatus:
-    """Record a shard's terminal status and return the aggregate state.
-
-    The caller (lease finish path) decides from the aggregate whether the
-    owning ``job_nodes`` row advances; intermediate aggregates must not touch
-    the node state machine.
-    """
-    conn.execute(
-        """
-        update node_shards
-        set status=%s, output_json=%s, error_message=%s, finished_at=%s
-        where job_id=%s and node_key=%s and shard_index=%s
-        """,
-        (status, output_json, error_message, _now(), job_id, node_key, shard_index),
-    )
-    return aggregate_shard_state(conn, job_id, node_key)
 
 
 def try_start_shard(
