@@ -49,8 +49,20 @@ const adminUser: UserResponse = {
 const registry: StudioAgentRegistryResponse = {
   api_base: 'http://127.0.0.1:8000',
   agents: [
-    { id: 'kimi', label: 'Kimi Code', command: 'kimi', args: ['acp'] },
-    { id: 'claude', label: 'Claude Code', command: 'claude', args: [] },
+    {
+      id: 'kimi',
+      label: 'Kimi Code',
+      command: 'kimi',
+      args: ['acp'],
+      source: 'manual',
+    },
+    {
+      id: 'claude',
+      label: 'Claude Code',
+      command: 'claude',
+      args: [],
+      source: 'detected',
+    },
   ],
   availability: { kimi: true, claude: false },
 }
