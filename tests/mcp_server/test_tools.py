@@ -116,6 +116,12 @@ def test_loopback_tools_are_async() -> None:
         "get_preview_context",
         "get_preview_panel",
         "save_preview_panel_draft",
+        "get_job_context",
+        "get_job_detail",
+        "get_node_logs",
+        "read_artifact",
+        "list_jobs",
+        "compare_jobs",
     ):
         assert inspect.iscoroutinefunction(tools[name].fn), name
     # The local-only playbook tools never block, so they stay sync.
