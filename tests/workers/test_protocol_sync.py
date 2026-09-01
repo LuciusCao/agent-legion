@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 from shared.code_sandbox import CODE_RESULT_METADATA_KEYS
 from shared.protocol import (
+    ARTIFACT_GZIP_PROTOCOL_VERSION,
     CODE_PROTOCOL_VERSION,
     MODEL_RUNTIME_PROTOCOL_VERSION,
     PROTOCOL_VERSION,
@@ -39,14 +40,14 @@ def test_worker_declared_version_is_latest_shared() -> None:
     from worker.host.client import PROTOCOL_VERSION as worker_declared
 
     assert worker_declared is PROTOCOL_VERSION
-    assert PROTOCOL_VERSION == MODEL_RUNTIME_PROTOCOL_VERSION
+    assert PROTOCOL_VERSION == ARTIFACT_GZIP_PROTOCOL_VERSION
 
 
 def test_host_contract_default_matches_shared() -> None:
     from server.app.routes.agent_workers_contracts import RegisterAgentWorkerResponse
 
     field = RegisterAgentWorkerResponse.model_fields["host_protocol_version"]
-    assert field.default == MODEL_RUNTIME_PROTOCOL_VERSION
+    assert field.default == PROTOCOL_VERSION
 
 
 def test_server_registry_constants_match_shared() -> None:
@@ -63,7 +64,7 @@ def test_server_registry_constants_match_shared() -> None:
 
 def test_pydantic_default_binding_is_stable() -> None:
     # The contract default binds the shared constant at class-creation time;
-    # a plain literal regression (host_protocol_version: int = 3) would keep
+    # a plain literal regression (host_protocol_version: int = 4) would keep
     # passing the value check above only until the shared constant bumps —
     # assert identity of the annotation source instead.
     from server.app.routes.agent_workers_contracts import (
@@ -71,7 +72,7 @@ def test_pydantic_default_binding_is_stable() -> None:
     )
 
     assert issubclass(Response, BaseModel)
-    assert Response.model_fields["host_protocol_version"].default is MODEL_RUNTIME_PROTOCOL_VERSION
+    assert Response.model_fields["host_protocol_version"].default is PROTOCOL_VERSION
 
 
 # --- #282: 无守卫的镜像契约 -------------------------------------------------

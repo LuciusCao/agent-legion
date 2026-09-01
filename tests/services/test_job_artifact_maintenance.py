@@ -7,6 +7,7 @@ rerun 产出新字节而上传失败时，旧 (job_id,node_key,name) 清单行�
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 from contextlib import contextmanager
 from pathlib import Path
@@ -146,6 +147,96 @@ def test_reconciler_skips_fresh_row(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     )
 
     assert reupload_missing(store, _job_db(job), _settings(tmp_path)) == 0
+
+
+# --- #338 评审 r1 P2-1：.gz 行的双形态 size 语义 -----------------------------
+
+_GZ_KEY = "jobs/ws-1/job-1/out.json.gz"
+
+
+def _seed_gz_row(store: JobArtifactObjectStore, storage: FakeStorage, payload: bytes) -> None:
+    """登记一条 .gz 形态清单行：size_bytes=压缩后、content_hash=未压缩。"""
+    storage.objects[_GZ_KEY] = gzip.compress(payload)
+    store.record_remote(
+        workspace_id="ws-1",
+        job_id="job-1",
+        node_key="n1",
+        name="out.json",
+        storage_key=_GZ_KEY,
+        size_bytes=len(storage.objects[_GZ_KEY]),
+        content_hash=hashlib.sha256(payload).hexdigest(),
+    )
+
+
+def test_reconciler_does_not_reupload_healthy_gz_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """r1 P2-1 回归：.gz 行的压缩 size 与本地未压缩文件恒不等，但 hash
+    相符即健康——reconciler 不得误判 stale 重传回裸形态。"""
+    job = _seed_job()
+    _definition(monkeypatch)
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    job_dir = tmp_path / "jobs" / "ws" / "job-1"
+    job_dir.mkdir(parents=True)
+    (job_dir / "out.json").write_bytes(OLD_PAYLOAD)
+    _seed_gz_row(store, storage, OLD_PAYLOAD)
+
+    assert reupload_missing(store, _job_db(job), _settings(tmp_path)) == 0
+    # 行保持 .gz 形态（未被重传 upsert 回裸 key）。
+    row = store.row_for_node("job-1", "n1", "out.json")
+    assert row is not None and row["storage_key"] == _GZ_KEY
+
+
+def test_reconciler_reuploads_gz_row_when_content_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """.gz 行 + rerun 新字节（hash 不符）→ 仍判定 stale 并重传（host 侧
+    reconciler 上传保持裸形态，双形态读不受影响）。"""
+    job = _seed_job()
+    _definition(monkeypatch)
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    job_dir = tmp_path / "jobs" / "ws" / "job-1"
+    job_dir.mkdir(parents=True)
+    local = job_dir / "out.json"
+    local.write_bytes(OLD_PAYLOAD)
+    _seed_gz_row(store, storage, OLD_PAYLOAD)
+    local.write_bytes(NEW_PAYLOAD)
+
+    assert reupload_missing(store, _job_db(job), _settings(tmp_path)) == 1
+
+
+def test_eviction_certifies_gz_row_by_content_hash(tmp_path: Path) -> None:
+    """r1 P2-1 回归：.gz 行的产物凭 content_hash 拿到淘汰认证（压缩 size
+    不再阻断缓存预算对其生效）。"""
+    job = _complete_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    job_dir = tmp_path / "jobs" / "ws" / "job-1"
+    job_dir.mkdir(parents=True)
+    confirmed = job_dir / "out.json"
+    confirmed.write_bytes(OLD_PAYLOAD)
+    _seed_gz_row(store, storage, OLD_PAYLOAD)
+
+    assert evict_cache_to_capacity(store, _job_db(job), _settings(tmp_path), max_bytes=0) == 1
+    assert not confirmed.exists()
+
+
+def test_eviction_skips_gz_row_on_hash_mismatch(tmp_path: Path) -> None:
+    """.gz 行 hash 与本地文件不符（rerun 新字节未上传）→ 不得认证淘汰。"""
+    job = _complete_job()
+    storage = FakeStorage()
+    store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+    job_dir = tmp_path / "jobs" / "ws" / "job-1"
+    job_dir.mkdir(parents=True)
+    local = job_dir / "out.json"
+    local.write_bytes(OLD_PAYLOAD)
+    _seed_gz_row(store, storage, OLD_PAYLOAD)
+    local.write_bytes(NEW_PAYLOAD)
+
+    assert evict_cache_to_capacity(store, _job_db(job), _settings(tmp_path), max_bytes=0) == 0
+    assert local.read_bytes() == NEW_PAYLOAD
 
 
 def _complete_job() -> dict[str, Any]:

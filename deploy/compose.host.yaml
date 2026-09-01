@@ -17,21 +17,73 @@ services:
       timeout: 3s
       retries: 20
 
-  rustfs:
+  seaweedfs:
     # 材料对象存储（materials-and-runs 设计 §6.1）：S3 兼容，代码只对 S3 API
-    # 编程，可平替 MinIO/Garage/AWS S3。RustFS 尚无 GA tag（1.0.0-alpha/beta），
-    # 用 latest 跟随官方文档；凭据从 deploy/.env 注入（勿用官方示例的
-    # rustfsadmin 默认值），host 经同一组 AGENT_LEGION_S3_* 访问。
+    # 编程，可平替 RustFS/MinIO/AWS S3。默认本地后端（#340 调研：RustFS 的
+    # 后台 scanner 全量巡检在百万小对象下持续空转，SeaweedFS 的 volume/needle
+    # 布局 + filer 元数据 DB 结构性不存在该问题，闲置开销与对象数无关——
+    # 实测见 issue #340 评论）。凭据从 deploy/.env 注入，host 经同一组
+    # AGENT_LEGION_S3_* 访问。
     #
-    # 挂在 materials-local profile 下：默认 docker compose up 不拉起，由
-    # scripts/local-s3-decide.sh（AGENT_LEGION_LOCAL_S3=auto|always|never）
-    # 决策后给 compose 加 --profile materials-local；配置外部 S3 时不再启动。
-    # 凭据插值不能用 :? 强校验——profile 未启用时 compose 仍会解析插值，
-    # 会误伤不配静态凭据的外部 S3 用户；凭据齐备性由 local-s3-decide.sh
-    # 在 start 决策时 fail-fast（直接绕开 prod-up 入口徒手 compose 且启用
-    # profile 时，留空凭据会回落镜像默认的公开凭据，不要这么做）。
+    # 单容器 all-in-one（master+volume+filer+S3 gateway），S3 口 8333、
+    # master UI 9333。
+    #
+    # 挂在 materials-local profile 下（默认后端）：由 scripts/local-s3-decide.sh
+    # （AGENT_LEGION_LOCAL_S3=auto|always|never + BACKEND 默认 seaweedfs）决策；
+    # 切回 rustfs 设 AGENT_LEGION_LOCAL_S3_BACKEND=rustfs。凭据插值不能用
+    # :? 强校验——profile 未启用时 compose 仍会解析插值，会误伤不配静态凭据的
+    # 外部 S3 用户；凭据齐备性由 local-s3-decide.sh 在 start 决策时 fail-fast。
     profiles: ["materials-local"]
-    image: rustfs/rustfs:latest
+    image: chrislusf/seaweedfs:4.45
+    restart: unless-stopped
+    # entrypoint 覆盖为 sh -c，从插值 env 现场生成 s3.config（凭据是
+    # install-deps.sh 生成的 hex，无 JSON 转义风险）；原生 entrypoint.sh 的
+    # 两件事自己补：/data 属主修正 + su-exec 降权到 seaweed 用户（非 root）。
+    # -master.volumeSizeLimitMB 收小默认 volume（默认 30GB 对 dev 数据集
+    # 过大，2GB 让 vacuum 重写更细粒度）。
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # 属主不匹配才递归 chown（对齐原生 entrypoint 的 stat 守卫——grown
+        # filer leveldb 上每次启动全量 chown 会拖慢重启）；s3.config 收紧
+        # 到 0600（凭据文件，容器内仅 root/seaweed 两用户，纵深防御）。
+        if [ "$(stat -c %u /data 2>/dev/null)" != "1000" ]; then
+          chown -R seaweed:seaweed /data 2>/dev/null || true
+        fi
+        umask 077
+        printf '%s\n' '{"identities":[{"name":"agent-legion","credentials":[{"accessKey":"'"$AGENT_LEGION_S3_ACCESS_KEY"'","secretKey":"'"$AGENT_LEGION_S3_SECRET_KEY"'"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' > /tmp/s3.json
+        exec su-exec seaweed weed server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json -master.volumeSizeLimitMB=2048 -volume.max=0
+    environment:
+      AGENT_LEGION_S3_ACCESS_KEY: ${AGENT_LEGION_S3_ACCESS_KEY:-}
+      AGENT_LEGION_S3_SECRET_KEY: ${AGENT_LEGION_S3_SECRET_KEY:-}
+    volumes:
+      - seaweedfs-data:/data
+    ports:
+      - ${AGENT_LEGION_S3_BIND:-127.0.0.1}:8333:8333
+      - ${AGENT_LEGION_S3_BIND:-127.0.0.1}:9333:9333
+    healthcheck:
+      # S3 口的 /healthz 是 weed server 的健康端点（匿名 200；根路径 / 是
+      # 403——S3 API 对匿名请求的正常行为，不能当探针，同 rustfs 教训 #340）。
+      test: [CMD, "curl", "-fsS", "http://127.0.0.1:8333/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+
+  rustfs:
+    # 可选本地后端（逃生舱）：AGENT_LEGION_LOCAL_S3_BACKEND=rustfs 时经
+    # materials-local-rustfs profile 拉起（local-s3-decide.sh 分派）。存量
+    # rustfs 卷用户迁移前可停在它上面（数据迁移见 docs/materials-storage-
+    # deployment.md「迁移后端」）。
+    #
+    # 镜像 pin 到明确版本而非 latest（#340）：磁盘格式是 MinIO xl 兼容格式
+    # 且存量卷由既有版本写入，latest 漂移即行为漂移；升级 = 有意改这一行 +
+    # 验证存量卷可挂载。
+    #
+    # scanner/heal 显式关闭（#340）：单盘本地形态下巡检无意义，而它的命名
+    # 空间全量遍历会读每个对象的 xl.meta——小对象（≤128KiB）数据内联其中，
+    # 「元数据巡检」= 重读全部数据（rustfs/rustfs#6219 同类案例）。
+    profiles: ["materials-local-rustfs"]
+    image: rustfs/rustfs:1.0.0-beta.12
     restart: unless-stopped
     command: ["/data"]
     environment:
@@ -40,13 +92,17 @@ services:
       RUSTFS_CONSOLE_ENABLE: "true"
       RUSTFS_ACCESS_KEY: ${AGENT_LEGION_S3_ACCESS_KEY:-}
       RUSTFS_SECRET_KEY: ${AGENT_LEGION_S3_SECRET_KEY:-}
+      RUSTFS_SCANNER_ENABLED: "false"
+      RUSTFS_HEAL_ENABLED: "false"
     volumes:
       - rustfs-data:/data
     ports:
       - ${AGENT_LEGION_S3_BIND:-127.0.0.1}:9000:9000
       - ${AGENT_LEGION_S3_BIND:-127.0.0.1}:9001:9001
     healthcheck:
-      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:9000/ || exit 1"]
+      # 根路径 / 对匿名请求返回 403（S3 API 行为，不代表服务故障），须探
+      # MinIO 兼容的 liveness 端点；探 / 会让容器永远 unhealthy（#340）。
+      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:9000/minio/health/live || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 20
@@ -60,7 +116,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      # rustfs 不在此处：它挂在 materials-local profile 下，depends_on 指向
+      # seaweedfs/rustfs 不在此处：两者挂在各自 profile 下，depends_on 指向
       # 未启用 profile 的服务会让 compose 直接报 "depends on undefined
       # service" 拒绝启动；且 S3 是软依赖（不可达时材料 API 降级 503，
       # 启动自检 probe 会持续暴露，见 server/app/storage/probe.py）。
@@ -74,14 +130,14 @@ services:
       AGENT_LEGION_DATA_DIR: /var/lib/agent-legion
       # 无冒号的 ${VAR-默认值} 形式：deploy/.env 显式写 AGENT_LEGION_S3_ENDPOINT=
       # （空值）时生效为「AWS 默认端点」，不会被默认值盖掉；外部 S3 在这里
-      # 配远程地址后，local-s3-decide.sh 会同步跳过本地 rustfs。
-      AGENT_LEGION_S3_ENDPOINT: ${AGENT_LEGION_S3_ENDPOINT-http://rustfs:9000}
+      # 配远程地址后，local-s3-decide.sh 会同步跳过本地后端。
+      AGENT_LEGION_S3_ENDPOINT: ${AGENT_LEGION_S3_ENDPOINT-http://seaweedfs:8333}
       # presigned URL 的签发地址：浏览器直传与 compose 网络外的 remote worker
-      # 都访问不到内部地址 rustfs:9000，必须用客户端可达地址签发（SigV4 把
-      # Host 签进签名，不能签后改写）。默认值匹配 rustfs 的端口映射
-      # （${AGENT_LEGION_S3_BIND:-127.0.0.1}:9000）；非本机访问时在
-      # deploy/.env 覆盖为外部可达地址。
-      AGENT_LEGION_S3_PUBLIC_ENDPOINT: ${AGENT_LEGION_S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
+      # 都访问不到内部地址 seaweedfs:8333，必须用客户端可达地址签发（SigV4 把
+      # Host 签进签名，不能签后改写）。默认值匹配 seaweedfs 的端口映射
+      # （${AGENT_LEGION_S3_BIND:-127.0.0.1}:8333）；非本机访问时在
+      # deploy/.env 覆盖为外部可达地址；切 rustfs 后端时同步覆盖为 :9000。
+      AGENT_LEGION_S3_PUBLIC_ENDPOINT: ${AGENT_LEGION_S3_PUBLIC_ENDPOINT:-http://127.0.0.1:8333}
       AGENT_LEGION_S3_BUCKET: ${AGENT_LEGION_S3_BUCKET:-agent-legion}
       # 留空 = boto3 默认凭据链（IAM role 等外部 S3 场景）；本地 RustFS 形态
       # 的凭据齐备性由 scripts/local-s3-decide.sh 在 prod-up 入口 fail-fast。
@@ -155,6 +211,7 @@ secrets:
 
 volumes:
   postgres-data:
+  seaweedfs-data:
   rustfs-data:
   host-data:
   worker-data:

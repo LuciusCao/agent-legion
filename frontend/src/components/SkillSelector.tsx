@@ -85,6 +85,10 @@ export function SkillSelector({ workspaceId, value, onChange }: Props) {
         rootReady={rootReady}
         validating={validating}
         onValidate={(name) => void handleValidate(name)}
+        onEdit={() => {
+          // 输入一旦变化，在飞的校验结果即过期（codex P1 on #341）。
+          validateSeq.current += 1
+        }}
       />
       {rootLoadFailed && (
         <p style={{ color: '#ed6c02', fontSize: 12 }}>

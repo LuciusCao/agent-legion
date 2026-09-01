@@ -349,3 +349,23 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/328
   ceiling: 190
+- check: architecture.file_budget
+  path: server/app/mcp_server/server.py
+  reason: Issue 329 adds the job observation tool group registration
+    (job_tools.register_job_tools) to the shared MCP assembly, one effective
+    line past the baseline ceiling (155). The assembly already stitches four
+    tool modules inline; the durable fix is moving the register calls into a
+    single registry/assembly module, at which point this exemption goes stale.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/329
+  ceiling: 156
+- check: architecture.file_budget
+  path: server/app/routes/__init__.py
+  reason: Issue 329 mounts the job diagnosis observation router in the route
+    assembly (one import + one secured() call, three effective lines past the
+    baseline ceiling 137). The file is the single mount point for every
+    feature router; the durable fix is splitting the assembly per domain, at
+    which point this exemption goes stale.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/329
+  ceiling: 140
