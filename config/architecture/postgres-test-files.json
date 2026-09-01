@@ -79,6 +79,7 @@
     "tests/routes/test_agent_worker_result_spool.py",
     "tests/routes/test_agent_workers.py",
     "tests/routes/test_artifacts_route.py",
+    "tests/routes/test_infra_connections_routes.py",
     "tests/routes/test_jobs_route_contracts.py",
     "tests/routes/test_metrics.py",
     "tests/routes/test_misc.py",

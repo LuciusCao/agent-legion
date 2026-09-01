@@ -10,6 +10,14 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 - workflow_key 兼容窗口期公告（issue #211）：全部 deprecated 契约面的迁移文案统一标注移除时间 **2026-10-31**——27 个请求/响应字段、10 条 URL 别名、claim 协议字段将在终态批移除。显式发送恒等值（=workspace id）继续放行至该日期；不匹配值已由守卫拒绝（400）。所有部署实例须在窗口期内升级至 ≥ schema v68（存量 workflow_key 已对齐）。
 
 ### Added
+- 发版解耦纪律 + 版本清单一致性检查（`scripts/check_versions.py`，挂 backend
+  静态轮）：velites（`velites/Cargo.toml`）与 frontend（`frontend/package.json`）
+  持有独立版本线，禁止随仓库版本（`pyproject.toml`）锁步 bump——无谓的版本前进
+  会改变 velites 子树 tree hash（`ensure-velites.sh` 的二进制新鲜度指纹）与
+  Docker 缓存键，触发全量 `cargo build` / 镜像层重建。检查两条规则：清单 ↔
+  lock 版本一致；独立组件的版本前进必须伴随锚点以来的源码改动（仓库发版顺手
+  bump 无源码改动的组件会被拒绝）。规则详见 `scripts/check_versions.py`
+  模块 docstring 与 CONTRIBUTING「House rules」。
 - Workflow nodes declare an explicit execution type `type: code | agent`
   (issue #284 phase 2, schema v66): the publish gate branches on it
   (agent nodes require exactly one published Agent for the capability,
