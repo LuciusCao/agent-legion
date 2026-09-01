@@ -1,0 +1,112 @@
+"""Skill directory listing route (Studio skill picker, #327)."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+from fastapi import Depends
+from fastapi.testclient import TestClient
+
+import server.app.routes.skill_directories as skill_directories_routes
+from server.app.auth.workspace_access import require_workspace_access
+
+
+@pytest.fixture
+def skills_base(tmp_path):
+    base = tmp_path / "skills"
+    (base / "ws-1" / "write-script").mkdir(parents=True)
+    (base / "ws-1" / "review-questions").mkdir(parents=True)
+    (base / "ws-1" / "notes.txt").write_text("not a dir", encoding="utf-8")
+    (base / "ws-2" / "generate-questions").mkdir(parents=True)
+    return base
+
+
+def _mount(app, job_db) -> None:
+    # routes/__init__.py is a shared file wired by the tower at merge time;
+    # mount the router on a private app with the production auth dependency.
+    # mount_spa's ``/api/{path:path}`` 404 guard is registered inside
+    # create_app, so a plain include_router would land behind it and never
+    # match: pop the guard, mount, then re-append it at the end.
+    guard = next(
+        route for route in app.router.routes if getattr(route, "path", None) == "/api/{path:path}"
+    )
+    app.router.routes.remove(guard)
+    app.include_router(
+        skill_directories_routes.create_skill_directories_router(job_db, app.state.settings),
+        prefix="/api",
+        dependencies=[Depends(require_workspace_access)],
+    )
+    app.router.routes.append(guard)
+
+
+@pytest.fixture
+def directories_client(client_factory, job_db, skills_base, monkeypatch):
+    monkeypatch.setattr(
+        skill_directories_routes,
+        "build_skill_manager",
+        lambda _dsn, _runs_dir=None: SimpleNamespace(base_dir=skills_base),
+    )
+    with client_factory(fresh=True, configure=lambda app: _mount(app, job_db)) as client:
+        yield client
+
+
+def test_directories_endpoint(directories_client) -> None:
+    response = directories_client.get("/api/skills/directories", params={"workspace_id": "ws-1"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "workspace_id": "ws-1",
+        "directories": ["review-questions", "write-script"],
+    }
+
+
+def test_directories_endpoint_isolates_scopes(directories_client) -> None:
+    response = directories_client.get("/api/skills/directories", params={"workspace_id": "ws-2"})
+
+    assert response.status_code == 200
+    assert response.json()["directories"] == ["generate-questions"]
+
+
+def test_directories_endpoint_empty_for_unknown_scope(directories_client) -> None:
+    response = directories_client.get("/api/skills/directories", params={"workspace_id": "ws-nope"})
+
+    # The bootstrap admin bypasses membership checks, so an unknown id still
+    # reaches the handler and gets the empty listing.
+    assert response.status_code == 200
+    assert response.json() == {"workspace_id": "ws-nope", "directories": []}
+
+
+def test_directories_endpoint_rejects_traversal_scope(directories_client) -> None:
+    response = directories_client.get("/api/skills/directories", params={"workspace_id": ".."})
+
+    assert response.status_code == 200
+    assert response.json()["directories"] == []
+
+
+def test_directories_endpoint_requires_auth(client_factory, job_db) -> None:
+    with client_factory(
+        authenticated=False, fresh=True, configure=lambda app: _mount(app, job_db)
+    ) as anon:
+        response = anon.get("/api/skills/directories", params={"workspace_id": "ws-1"})
+
+    assert response.status_code == 401
+
+
+def test_directories_endpoint_non_member_gets_404(directories_client) -> None:
+    created_ws = directories_client.post("/api/workspaces", json={"id": "ws-1", "name": "ws one"})
+    assert created_ws.status_code == 200, created_ws.text
+    created_user = directories_client.post(
+        "/api/users", json={"username": "member1", "password": "pw1"}
+    )
+    assert created_user.status_code == 201, created_user.text
+    member = TestClient(directories_client.app)
+    login = member.post("/api/auth/login", json={"username": "member1", "password": "pw1"})
+    assert login.status_code == 200, login.text
+    member.headers["x-agent-legion-request"] = "1"
+
+    # require_workspace_access reads the workspace_id query param: non-members
+    # get 404 (not 403) so workspace existence cannot be enumerated.
+    response = member.get("/api/skills/directories", params={"workspace_id": "ws-1"})
+
+    assert response.status_code == 404
