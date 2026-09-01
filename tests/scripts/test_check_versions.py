@@ -192,6 +192,34 @@ def test_lockstep_bump_without_source_changes_is_rejected(tmp_path: Path) -> Non
     assert any("锁步" in error and "velites/Cargo.toml" in error for error in errors)
 
 
+def test_anchor_is_last_version_change_not_head_caret(tmp_path: Path) -> None:
+    """锚点语义的区分性用例（评审 P2）。
+
+    序列：baseline → velites 特性合入 → 仓库落版（只动 pyproject）→
+    velites 落版。velites 版本的上一次变化在 baseline，锚点应取 baseline
+    （区间含 feat 提交 → 放行）；朴素的 HEAD^ 语义会把锚点定在「仓库落版」
+    上（区间只有 pyproject 变化 → 误拒合法的组件落版）。此用例钉住
+    「锚点 = 版本上一次 differing 的提交」这一核心设计决策，防止未来被
+    "简化"成 HEAD^ 而测试全绿。
+    """
+    root = tmp_path / "repo"
+    root.mkdir()
+    _init_git_repo(root)
+    _write_repo_files(root)
+    _commit(root, "baseline 0.1.0")
+    (root / "velites/src/lib.rs").parent.mkdir(parents=True, exist_ok=True)
+    (root / "velites/src/lib.rs").write_text("pub fn new() {}\n", encoding="utf-8")
+    _commit(root, "feat(velites): new feature")
+    _write_repo_files(root, repo_version="0.2.0")
+    _commit(root, "chore(release): 仓库 0.2.0（不含 velites）")
+    _write_repo_files(root, velites_version="0.2.0")
+    _commit(root, "chore(release): velites 0.2.0")
+
+    errors, notes = check_all(root)
+    assert errors == []
+    assert any("velites" in note and "✓" in note for note in notes)
+
+
 def test_uncommitted_lockstep_bump_is_rejected(tmp_path: Path) -> None:
     """工作区里未提交的锁步 bump 同样拦得住（diff 到工作树）。"""
     root = tmp_path / "repo"

@@ -329,7 +329,7 @@ exemptions:
     iframe that enforces it.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/328
-  ceiling: 202
+  ceiling: 199
 - check: architecture.file_budget
   path: frontend/src/features/previewPanel/PreviewPanelSection.tsx
   reason: The Codex P2 review on PR 345 added bundle content into the
