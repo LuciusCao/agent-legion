@@ -24,7 +24,7 @@ def test_schema_v57_recorded() -> None:
     """Latest-migration record pin (moved from
     tests/db/test_job_node_status_counts_migration.py, v56)."""
     # The pin narrative now lives in tests/db/test_workspace_id_key_binding.py;
-    # v70 (preview_panels, #328) is the current chain tail.
+    # v71 (preview_panels, #328) is the current chain tail.
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)

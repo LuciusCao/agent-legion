@@ -4,12 +4,13 @@
  * - 已发布 bundle → bundle host 接管，fallback 不再渲染；
  * - 「定制预览」对话期间左栏实时渲染草稿（仅当前用户可见）。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { PreviewPanelSection } from './PreviewPanelSection'
 import type { PreviewPanelState, PreviewPanelVersion } from './previewPanelApi'
 import { TestQueryProvider } from '../../testing/testQueryClient'
+import { useAuthStore } from '../../stores/authStore'
 
 const mockFetchPublished = vi.fn()
 const mockFetchState = vi.fn()
@@ -73,6 +74,16 @@ beforeEach(() => {
     published: null,
     draft: null,
   } satisfies PreviewPanelState)
+  // 定制入口 admin-only（P4 惯例）：默认以 admin 身份渲染。
+  act(() => {
+    useAuthStore.setState({ user: { role: 'admin' } as never })
+  })
+})
+
+afterEach(() => {
+  act(() => {
+    useAuthStore.setState({ user: null })
+  })
 })
 
 describe('PreviewPanelSection', () => {
@@ -162,5 +173,22 @@ describe('PreviewPanelSection', () => {
         .querySelector('iframe')
       expect(iframe?.getAttribute('srcdoc')).toBe(PUBLISHED_HTML)
     })
+  })
+
+  it('非 admin 成员不渲染「定制预览」入口（P4 惯例，治理面端点对其 403）', async () => {
+    act(() => {
+      useAuthStore.setState({ user: { role: 'member' } as never })
+    })
+    mockFetchPublished.mockResolvedValue(
+      makeVersion(PUBLISHED_HTML, 'published')
+    )
+    renderSection()
+
+    // 面板内容对成员照常渲染，但定制入口与治理面查询都不出现。
+    await waitFor(() =>
+      expect(screen.getByTestId('preview-panel-host')).toBeInTheDocument()
+    )
+    expect(screen.queryByRole('button', { name: '定制预览' })).toBeNull()
+    expect(mockFetchState).not.toHaveBeenCalled()
   })
 })

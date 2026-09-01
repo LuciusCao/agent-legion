@@ -4,8 +4,11 @@
  * - 无 → 渲染 fallback（question 的内置 bundle / 通用产物预览，由调用方组装）；
  * - 「定制预览」按钮唤起 Studio 对话（agent 写草稿）；对话期间左栏实时渲染
  *   草稿——这是本页面的客户端状态，只对当前用户可见，发布永远是人工动作。
+ * 定制入口 admin-only（与 WorkflowStudioButton 同一惯例，P4/STUDIO-AGENT-001：
+ * 治理面端点本身 admin/scoped-only，非 admin 点开只会收获一串 403）。
  */
 import { useState, type ReactNode } from 'react'
+import { useAuthStore } from '../../stores/authStore'
 import { PreviewPanelHost } from './PreviewPanelHost'
 import { CustomizePreviewDialog } from './CustomizePreviewDialog'
 import {
@@ -21,19 +24,18 @@ export interface PreviewPanelSectionProps {
   fallback: ReactNode
 }
 
-export function PreviewPanelSection({
-  jobId,
-  workspaceId,
-  fallback,
-}: PreviewPanelSectionProps) {
+export function PreviewPanelSection(props: PreviewPanelSectionProps) {
+  const { jobId, workspaceId, fallback } = props
   const [customizing, setCustomizing] = useState(false)
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
   const publishedQuery = usePublishedPreviewPanel(workspaceId)
-  const stateQuery = usePreviewPanelState(workspaceId, customizing)
+  // 治理面状态查询只在 admin 打开对话框时启用：非 admin 永远不发 403 轮询。
+  const stateQuery = usePreviewPanelState(workspaceId, customizing && isAdmin)
   const published = publishedQuery.data ?? null
   const draft = stateQuery.data?.draft ?? null
 
   // 对话开着且有草稿 → 左栏渲染草稿（仅自己可见）；否则渲染已发布版本。
-  const draftPreview = customizing && draft !== null
+  const draftPreview = customizing && isAdmin && draft !== null
   const bundle = draftPreview ? draft.html : published?.html
 
   return (
@@ -44,13 +46,15 @@ export function PreviewPanelSection({
           {draftPreview && (
             <span className={styles.draftBadge}>草稿预览中</span>
           )}
-          <button
-            type="button"
-            className={styles.customizeButton}
-            onClick={() => setCustomizing(true)}
-          >
-            定制预览
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              className={styles.customizeButton}
+              onClick={() => setCustomizing(true)}
+            >
+              定制预览
+            </button>
+          )}
         </header>
       )}
       {bundle ? (
@@ -58,7 +62,7 @@ export function PreviewPanelSection({
       ) : (
         fallback
       )}
-      {customizing && workspaceId && (
+      {customizing && isAdmin && workspaceId && (
         <CustomizePreviewDialog
           workspaceId={workspaceId}
           state={stateQuery.data ?? null}
