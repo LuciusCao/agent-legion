@@ -196,6 +196,12 @@ server/app/
 | POST | `/skills/validate` | `validate_skill` | routes/skills.py |
 | GET | `/skills/tags` | `list_skill_tags` | routes/skills.py |
 | GET | `/studio-agent/tools/chat-sessions/{session_id}/context` | `get_chat_session_context` | routes/studio_agent_context.py |
+| GET | `/studio-agent/tools/chat-sessions/{session_id}/job-context` | `get_job_context` | routes/studio_agent_job_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/jobs` | `list_jobs` | routes/studio_agent_job_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/jobs/compare` | `compare_jobs` | routes/studio_agent_job_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/jobs/{job_id}` | `get_job_detail` | routes/studio_agent_job_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/jobs/{job_id}/logs` | `get_node_logs` | routes/studio_agent_job_tools.py |
+| GET | `/studio-agent/tools/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}` | `read_artifact` | routes/studio_agent_job_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/preview/context` | `preview_context` | routes/studio_agent_preview_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/preview/panel` | `get_preview_panel` | routes/studio_agent_preview_tools.py |
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/preview/panel/draft` | `save_preview_panel_draft` | routes/studio_agent_preview_tools.py |
@@ -466,6 +472,20 @@ server/app/
 | StudioContextEdge | BaseModel | source: str, target: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextWorkflow | BaseModel | workflow_key: str, version: int, nodes: list[StudioContextNode], edges: list[... | app/routes/studio_agent_context_contracts.py |
 | StudioChatContextResponse | BaseModel | workspace_id: str, selected_node_key: str | None, draft_yaml: str | None, wor... | app/routes/studio_agent_context_contracts.py |
+| StudioAgentJobSummaryNode | BaseModel | node_key: str, label: str, status: str, error_message: str | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobView | BaseModel | id: str, title: str, status: str, outcome: str, created_at: datetime | None, ... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobListResponse | BaseModel | jobs: list[StudioAgentJobView], returned: int, limit: int | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobNode | BaseModel | node_key: str, label: str, capability: str, status: str, error_message: str, ... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobRun | BaseModel | id: int, node_key: str, status: str, error_message: str, started_at: datetime... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentSuggestedAction | BaseModel | action: str, job_id: str, node_key: str, label: str, requires_confirmation: b... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobDetail | BaseModel | job: StudioAgentJobView, nodes: list[StudioAgentJobNode], runs: list[StudioAg... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobLogsResponse | BaseModel | job_id: str, run_id: int, node_key: str, status: str, error_message: str, log... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentArtifactResponse | BaseModel | name: str, content: str, truncated: bool | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobCompareNode | BaseModel | node_key: str, status_a: str, status_b: str, error_a: str, error_b: str, chan... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobCompareSummary | BaseModel | nodes_changed: int, newly_failed: list[str], recovered: list[str] | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobCompareResponse | BaseModel | job_a: StudioAgentJobView, job_b: StudioAgentJobView, nodes: list[StudioAgent... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentRecentFailure | BaseModel | job_id: str, node_key: str, failure_category: str, error_message: str, finish... | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobContextResponse | BaseModel | session_id: str, workspace_id: str, focus_node_key: str | None, job: StudioAg... | app/routes/studio_agent_job_tool_contracts.py |
 | PreviewPanelVersionResponse | BaseModel | id: str, workspace_id: str | None, entity_key: str, version: int, status: Lit... | app/routes/studio_agent_preview_contracts.py |
 | PreviewPanelStateResponse | BaseModel | published: PreviewPanelVersionResponse | None, draft: PreviewPanelVersionResp... | app/routes/studio_agent_preview_contracts.py |
 | PreviewPanelPublishedResponse | BaseModel | published: PreviewPanelVersionResponse | None | app/routes/studio_agent_preview_contracts.py |
