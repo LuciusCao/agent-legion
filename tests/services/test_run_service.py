@@ -116,7 +116,9 @@ def test_material_item_creates_job_with_frozen_input(service, job_db, settings) 
     assert result["created_count"] == 1
     run = result["run"]
     assert run["source_kind"] == "items"
-    assert run["workflow_key"] == WORKFLOW_KEY
+    # #211 M2: the runs column is gone; the deprecated record field carries
+    # the workspace id (the identity value since v62).
+    assert run["workflow_key"] == WORKSPACE_ID
     assert "node_code_versions" in run["frozen_pins"]
     job = result["jobs"][0]
     assert job["source_type"] == "material"

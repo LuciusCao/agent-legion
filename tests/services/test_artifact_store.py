@@ -29,8 +29,8 @@ def _make_job(db_path, job_id: str) -> None:
             "insert into workspaces(id, name, default_workflow_key) values ('ws', 'ws', 'demo_workflow') on conflict (id) do nothing"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
-            " title, status, storage_dir) values (%s, 'ws', 'wf', 's', 's1', 't', 'pending', 'd')",
+            "insert into jobs(id, workspace_id, source_type, source_id, "
+            " title, status, storage_dir) values (%s, 'ws', 's', 's1', 't', 'pending', 'd')",
             (job_id,),
         )
 

@@ -43,27 +43,76 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v66, workflow_node_explicit_types) must
+# Effects the newest migration (v70, retire_workflow_key_columns) must
 # leave behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v66 is a pure data migration (backfilling explicit node
-# types into active revisions and Studio drafts from the route projection):
-# it changes rows, not the catalog, so the undo inventory is empty and the
-# upgrade under test only replays the idempotent DDL file plus the v66 data
-# migration (a no-op on this test's empty scratch schema). v65
-# (approval_decisions) is DDL-only and already holds at SCHEMA_VERSION-1,
-# so the undo step leaves the table in place.
+# SCHEMA_VERSION-1. v70 is DDL-only: it drops the workflow_key column from
+# nine tables, rebuilds four composite PKs without it, and swaps the retired
+# key-leading indexes for workspace-keyed twins. The undo step re-adds the
+# columns (with their v69-era types), restores the old composite PKs, drops
+# the twin indexes the fresh schema replays, and recreates the retired
+# indexes so both catalogs match after the upgrade under test.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
-# v69 (executor_leases_workspace_index) is DDL-only: one workspace-keyed
-# lease-count index (Codex P2 on #321); the undo step drops it.
-_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ("idx_executor_leases_workspace_node_active",)
-_NEWEST_MIGRATION_NAME = "executor_leases_workspace_index"
+_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = (
+    "idx_jobs_workspace_status",
+    "idx_jobs_workspace_source",
+    "idx_jobs_workspace_active_marks",
+    # Same-name old-shape indexes the rewind must restore (v69 shape): the
+    # upgrade replay skips existing names and the column drop auto-drops
+    # them, so the v70 migration has to recreate the terminal shapes — the
+    # rewind simulating v69 must carry the OLD shapes or the upgrade path
+    # under test never exercises the recreation (Codex P2 #334).
+    "idx_workflow_revisions_active",
+    "idx_agent_requests_node_active",
+    "idx_executor_leases_workflow_node_active",
+)
+# Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
+# faithful v69: the same-name indexes carry their workflow_key shapes, the
+# revision unique constraint survives with its column, and the four
+# composite-PK tables keep their three-column keys — the migration's
+# drop-PK → drop-column → add-narrowed-PK loop only runs against the old
+# keys (subagent review #334: a narrowed-PK "v69" never exercises it).
+_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = (
+    "create index if not exists idx_workflow_revisions_active"
+    " on workflow_revisions(workspace_id, workflow_key, status)",
+    "create index if not exists idx_agent_requests_node_active"
+    " on agent_execution_requests(workspace_id, workflow_key, node_key, state)",
+    "create index if not exists idx_executor_leases_workflow_node_active"
+    " on executor_leases(workspace_id, workflow_key, node_key, status, expires_at)",
+    "alter table workflow_revisions add constraint"
+    " workflow_revisions_workspace_id_workflow_key_version_key"
+    " unique (workspace_id, workflow_key, version)",
+    "alter table workspace_node_limits drop constraint workspace_node_limits_pkey",
+    "alter table workspace_node_limits add primary key (workspace_id, workflow_key, node_key)",
+    "alter table workspace_node_routes drop constraint workspace_node_routes_pkey",
+    "alter table workspace_node_routes add primary key (workspace_id, workflow_key, node_key)",
+    "alter table workspace_node_capacities drop constraint workspace_node_capacities_pkey",
+    "alter table workspace_node_capacities add primary key (workspace_id, workflow_key, node_key)",
+    "alter table workspace_job_node_status_counts drop constraint"
+    " workspace_job_node_status_counts_pkey",
+    "alter table workspace_job_node_status_counts add primary key"
+    " (workspace_id, workflow_key, node_key, status)",
+)
+_NEWEST_MIGRATION_NAME = "retire_workflow_key_columns"
 # (table, column DDL) pairs re-created by the undo step.
-_NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
+_NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = (
+    ("runs", "workflow_key text not null default ''"),
+    ("jobs", "workflow_key text not null default ''"),
+    ("executor_leases", "workflow_key text not null default ''"),
+    ("agent_execution_requests", "workflow_key text not null default ''"),
+    ("workflow_revisions", "workflow_key text not null default ''"),
+    ("workspace_node_limits", "workflow_key text not null default ''"),
+    ("workspace_node_routes", "workflow_key text not null default ''"),
+    ("workspace_node_capacities", "workflow_key text not null default ''"),
+    ("workspace_job_node_status_counts", "workflow_key text not null default ''"),
+)
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]
 _CatalogIndexes = set[tuple[str, str, str]]
+# (table, constraint_name, definition) — the unique/PK constraint layer
+# (column drops auto-drop dependent constraints; index-only diffs miss them).
+_CatalogConstraints = set[tuple[str, str, str]]
 
 
 def _undo_newest_migration(database_dsn: str) -> None:
@@ -77,6 +126,8 @@ def _undo_newest_migration(database_dsn: str) -> None:
             conn.execute(f"drop index if exists {index_name}")
         for table, column_ddl in _NEWEST_MIGRATION_COLUMNS_RESTORE:
             conn.execute(f"alter table {table} add column if not exists {column_ddl}")
+        for statement in _NEWEST_MIGRATION_UNDO_DDL:
+            conn.execute(statement)
         conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
 
 
@@ -104,6 +155,29 @@ def _catalog_indexes(schema_name: str) -> _CatalogIndexes:
             )
             for row in conn.execute(
                 "select tablename, indexname, indexdef from pg_indexes where schemaname=%s",
+                (schema_name,),
+            ).fetchall()
+        }
+
+
+def _catalog_constraints(schema_name: str) -> _CatalogConstraints:
+    with read_connection(TEST_DATABASE_URL) as conn:
+        return {
+            (
+                str(row["table_name"]),
+                str(row["constraint_name"]),
+                # conkey ordinal form: name-independent across shapes whose
+                # column order differs (the unique constraint's definition
+                # embeds no schema name but does embed column names).
+                str(row["constraintdef"]),
+            )
+            for row in conn.execute(
+                """
+                select tc.table_name, tc.constraint_name, pg_get_constraintdef(c.oid) as constraintdef
+                from information_schema.table_constraints tc
+                join pg_constraint c on c.conname = tc.constraint_name
+                where tc.table_schema=%s and tc.constraint_type in ('UNIQUE', 'PRIMARY KEY')
+                """,
                 (schema_name,),
             ).fetchall()
         }
@@ -148,8 +222,10 @@ def test_upgraded_database_matches_fresh_catalog() -> None:
     try:
         fresh_columns = _catalog_columns(TEST_SCHEMA)
         fresh_indexes = _catalog_indexes(TEST_SCHEMA)
+        fresh_constraints = _catalog_constraints(TEST_SCHEMA)
         upgraded_columns = _catalog_columns(parity_schema)
         upgraded_indexes = _catalog_indexes(parity_schema)
+        upgraded_constraints = _catalog_constraints(parity_schema)
     finally:
         # Leave no scratch schema behind for later tests on this worker.
         with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as admin:
@@ -166,4 +242,9 @@ def test_upgraded_database_matches_fresh_catalog() -> None:
         "indexes diverge between fresh and upgraded databases:\n"
         f"only fresh: {sorted(fresh_indexes - upgraded_indexes)}\n"
         f"only upgraded: {sorted(upgraded_indexes - fresh_indexes)}"
+    )
+    assert upgraded_constraints == fresh_constraints, (
+        "constraints diverge between fresh and upgraded databases:\n"
+        f"only fresh: {sorted(fresh_constraints - upgraded_constraints)}\n"
+        f"only upgraded: {sorted(upgraded_constraints - fresh_constraints)}"
     )

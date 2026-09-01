@@ -33,9 +33,9 @@ class JobStatusQueriesMixin(ConnectionQueriesMixin):
             rows = conn.execute(
                 """
                 select node_key, status, cnt from workspace_job_node_status_counts
-                where workspace_id = %s and workflow_key = %s and cnt <> 0
+                where workspace_id = %s and cnt <> 0
                 """,
-                (workspace_id, workflow_key),
+                (workspace_id,),
             )
             for row in rows:
                 node_counts = result.setdefault(row["node_key"], {})

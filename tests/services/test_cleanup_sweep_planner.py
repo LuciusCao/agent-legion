@@ -50,8 +50,8 @@ def test_sweep_forces_index_and_serves_pages(tmp_path, monkeypatch):
             "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'demo_workflow')"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)"
-            " values ('job-1', 'ws1', 'wf', 'question', 'job-1', '')"
+            "insert into jobs(id, workspace_id, source_type, source_id, storage_dir)"
+            " values ('job-1', 'ws1', 'question', 'job-1', '')"
         )
         conn.execute(
             "insert into node_runs(job_id, node_key, status, log_path, finished_at)"
@@ -100,9 +100,9 @@ def test_sweep_skips_unresolvable_log_path_and_continues(tmp_path, monkeypatch):
             "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'demo_workflow')"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)"
-            " values ('job-1', 'ws1', 'wf', 'question', 'job-1', ''),"
-            " ('job-2', 'ws1', 'wf', 'question', 'job-2', '')"
+            "insert into jobs(id, workspace_id, source_type, source_id, storage_dir)"
+            " values ('job-1', 'ws1', 'question', 'job-1', ''),"
+            " ('job-2', 'ws1', 'question', 'job-2', '')"
         )
         conn.execute(
             "insert into node_runs(job_id, node_key, status, log_path, finished_at)"
@@ -134,8 +134,8 @@ def test_sweep_unresolvable_run_dir_warns_without_raising(tmp_path):
             "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'demo_workflow')"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)"
-            " values ('job-1', 'ws1', 'wf', 'question', 'job-1', '')"
+            "insert into jobs(id, workspace_id, source_type, source_id, storage_dir)"
+            " values ('job-1', 'ws1', 'question', 'job-1', '')"
         )
         conn.execute(
             "insert into node_runs(job_id, node_key, status, run_dir, finished_at)"
@@ -165,8 +165,8 @@ def test_sweep_survives_os_level_resolve_failures(tmp_path, monkeypatch):
             "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'demo_workflow')"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)"
-            " values ('job-1', 'ws1', 'wf', 'question', 'job-1', '')"
+            "insert into jobs(id, workspace_id, source_type, source_id, storage_dir)"
+            " values ('job-1', 'ws1', 'question', 'job-1', '')"
         )
         conn.execute(
             "insert into node_runs(job_id, node_key, status, log_path, finished_at)"

@@ -47,7 +47,7 @@ def check_rerun_eligibility(
     the real rerun would do.
     """
     definition = definition_from_job_snapshot(job) or require_workspace_active_definition(
-        service.job_db, str(job["workspace_id"]), str(job["workflow_key"])
+        service.job_db, str(job["workspace_id"]), str(job["workspace_id"])
     )
     if actual_node_key not in definition.nodes:
         return JobOperationError(

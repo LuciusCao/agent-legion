@@ -382,9 +382,9 @@ def test_job_detail_projects_agent_route_over_code_pool(query_service, job_db):
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_routes(workspace_id, workflow_key, node_key,"
-            " target_kind, target_id) values (%s, %s, %s, 'agent', 'agent-v1')",
-            (workspace["id"], "education_video_problems_generation", "assemble_package"),
+            "insert into workspace_node_routes(workspace_id, node_key, "
+            " target_kind, target_id) values (%s, %s, 'agent', 'agent-v1')",
+            (workspace["id"], "assemble_package"),
         )
 
     detail = query_service.detail(job["id"])
@@ -641,9 +641,9 @@ def _create_two_node_job(job_db) -> dict[str, Any]:
 def _bind_agent(job_db, workspace_id: str, node_key: str) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_routes(workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values (%s, 'education_video_problems_generation', %s, 'agent', 'example-write-script-v1')"
-            " on conflict(workspace_id, workflow_key, node_key) do update set"
+            "insert into workspace_node_routes(workspace_id, node_key, target_kind, target_id)"
+            " values (%s, %s, 'agent', 'example-write-script-v1')"
+            " on conflict(workspace_id, node_key) do update set"
             " target_kind='agent', target_id=excluded.target_id",
             (workspace_id, node_key),
         )
@@ -658,11 +658,7 @@ def _insert_active_lease(job_db, job: dict[str, Any], node_key: str, execution_i
     with job_db.connect() as conn:
         conn.execute(
             """
-            insert into executor_leases(
-                id, execution_id, executor_id, workspace_id, job_id, workflow_key,
-                node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-            )
-            values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
+            insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) values (%s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
             """,
             (
                 f"lease-{execution_id}",
@@ -670,7 +666,6 @@ def _insert_active_lease(job_db, job: dict[str, Any], node_key: str, execution_i
                 "agent:example-write-script-v1",
                 job["workspace_id"],
                 job["id"],
-                job["workflow_key"],
                 node_key,
                 run["id"],
                 database_timestamp(now),
@@ -692,14 +687,13 @@ def _insert_agent_request(job_db, execution_id: str, job, node_key: str) -> None
             (job["workspace_id"],),
         ).fetchone()
         conn.execute(
-            "insert into agent_execution_requests(execution_id, workspace_id, job_id, workflow_key,"
+            "insert into agent_execution_requests(execution_id, workspace_id, job_id,"
             " node_key, agent_id, agent_definition_hash, node_concurrency_limit, queued_at, manifest_json)"
-            " values (%s, %s, %s, %s, %s, 'example-write-script-v1', %s, 20, current_timestamp, '{}')",
+            " values (%s, %s, %s, %s, 'example-write-script-v1', %s, 20, current_timestamp, '{}')",
             (
                 execution_id,
                 job["workspace_id"],
                 job["id"],
-                job["workflow_key"],
                 node_key,
                 definition["definition_hash"],
             ),

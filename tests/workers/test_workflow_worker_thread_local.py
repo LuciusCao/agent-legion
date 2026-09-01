@@ -264,16 +264,16 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
         _seed_trivial_node_code(db_path, ws["id"], "test", key)
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (%s, %s, %s, %s)",
-            (ws["id"], "test", "root", 1),
+            "insert into workspace_node_limits (workspace_id, node_key, concurrency_limit) values (%s, %s, %s)",
+            (ws["id"], "root", 1),
         )
         conn.execute(
-            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (%s, %s, %s, %s)",
-            (ws["id"], "test", "left", 1),
+            "insert into workspace_node_limits (workspace_id, node_key, concurrency_limit) values (%s, %s, %s)",
+            (ws["id"], "left", 1),
         )
         conn.execute(
-            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (%s, %s, %s, %s)",
-            (ws["id"], "test", "target", 1),
+            "insert into workspace_node_limits (workspace_id, node_key, concurrency_limit) values (%s, %s, %s)",
+            (ws["id"], "target", 1),
         )
 
     worker = _make_worker(tmp_path, db_path, executor, [definition])

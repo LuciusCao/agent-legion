@@ -77,7 +77,6 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                 (
                     job_id,
                     workspace_id,
-                    workflow_key,
                     str(candidate["entity_type"]),
                     source_id,
                     run_id,
@@ -119,9 +118,8 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                 current = by_id.get(str(row[0]))
                 if current is not None and (
                     current["workspace_id"] != row[1]
-                    or current["workflow_key"] != row[2]
-                    or current["source_type"] != row[3]
-                    or current["source_id"] != row[4]
+                    or current["source_type"] != row[2]
+                    or current["source_id"] != row[3]
                 ):
                     raise ValueError(f"Job identity collision for {row[0]}")
             for row in rows:
@@ -131,11 +129,11 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
             conn.executemany(
                 """
                 insert into jobs(
-                  id, workspace_id, workflow_key, source_type, source_id, run_id, title,
+                  id, workspace_id, source_type, source_id, run_id, title,
                   storage_dir, stem, workflow_revision_id, workflow_version,
                   workflow_definition_hash, workflow_definition_snapshot_json,
                   input_json, frozen_config_json
-                ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 on conflict(id) do update set
                   title=excluded.title, stem=excluded.stem, run_id=excluded.run_id,
                   input_json=excluded.input_json, frozen_config_json=excluded.frozen_config_json,
@@ -154,5 +152,10 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
             created = conn.execute(
                 f"select * from jobs where id in ({placeholders})", job_ids
             ).fetchall()
-        created_by_id = {str(row["id"]): dict(row) for row in created}
+        created_by_id = {str(row["id"]): dict[str, Any](dict(row)) for row in created}
+        # #211 M2: the jobs column is gone (v70); callers that surface rows on
+        # the wire keep the deprecated workflow_key field via the identity
+        # value (workflow_key == workspace_id since v62).
+        for created_row in created_by_id.values():
+            created_row.setdefault("workflow_key", workspace_id)
         return [created_by_id[job_id] for job_id in job_ids]

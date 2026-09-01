@@ -191,12 +191,11 @@ def _setup_workspace(
         for node in definition.nodes.values():
             conn.execute(
                 """
-                insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
-                values (%s, %s, %s, %s)
-                on conflict(workspace_id, workflow_key, node_key) do update set
+                insert into workspace_node_limits(workspace_id, node_key, concurrency_limit) values (%s, %s, %s)
+                on conflict(workspace_id, node_key) do update set
                   concurrency_limit=excluded.concurrency_limit
                 """,
-                (workspace_id, definition.key, node.key, 1),
+                (workspace_id, node.key, 1),
             )
     return workspace_id, job_id
 
@@ -504,12 +503,11 @@ def test_worker_runs_only_target_closure_in_until_node_mode(
         for node in definition.nodes.values():
             conn.execute(
                 """
-                insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
-                values (%s, %s, %s, %s)
-                on conflict(workspace_id, workflow_key, node_key) do update set
+                insert into workspace_node_limits(workspace_id, node_key, concurrency_limit) values (%s, %s, %s)
+                on conflict(workspace_id, node_key) do update set
                   concurrency_limit=excluded.concurrency_limit
                 """,
-                (workspace_id, "branched", node.key, 1),
+                (workspace_id, node.key, 1),
             )
     # Since #96 every code node needs published code to dispatch; the
     # _FakeExecutor never reads the text.

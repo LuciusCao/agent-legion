@@ -27,8 +27,8 @@ def _seed(job_db, *, job_id: str, log_path: str, run_dir: str, storage_dir: str)
             "insert into workspaces(id, name, default_workflow_key) values ('ws-path', 'Test', 'demo_workflow') on conflict(id) do nothing"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)"
-            " values (%s, 'ws-path', 'questions', 'question', %s, %s)",
+            "insert into jobs(id, workspace_id, source_type, source_id, storage_dir)"
+            " values (%s, 'ws-path', 'question', %s, %s)",
             (job_id, job_id, storage_dir),
         )
         conn.execute(

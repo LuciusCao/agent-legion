@@ -59,16 +59,11 @@ def _seed_old_root(old_root: Path) -> None:
         )
         conn.execute(
             """
-            insert into jobs(
-                id, workspace_id, workflow_key, source_type, source_id,
-                run_id, title, storage_dir, status
-            )
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            insert into jobs(id, workspace_id, source_type, source_id, run_id, title, storage_dir, status) values (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 JOB_ID,
                 WORKSPACE_ID,
-                WORKFLOW_KEY,
                 "question",
                 SOURCE_ID,
                 "batch1",

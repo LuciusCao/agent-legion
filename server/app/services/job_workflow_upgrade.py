@@ -56,7 +56,7 @@ class JobWorkflowUpgradeService:
             )
 
         active = self.job_db.get_active_workflow_revision(
-            str(job["workspace_id"]), str(job["workflow_key"])
+            str(job["workspace_id"]), str(job["workspace_id"])
         )
         if active is None:
             return self._result(

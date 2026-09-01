@@ -135,9 +135,9 @@ def test_delete_referenced_bundle_returns_409(client, storage, job_db) -> None:
     bundle = _create_bundle(client, storage, workspace_id)
     with job_db.connect() as conn:
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type,"
+            "insert into jobs(id, workspace_id, source_type,"
             " source_id, status, input_json)"
-            " values ('job-bundle-ref', %s, 'demo_workflow', 'bundle', %s, 'queued', %s)",
+            " values ('job-bundle-ref', %s, 'bundle', %s, 'queued', %s)",
             (
                 workspace_id,
                 bundle["id"],

@@ -44,7 +44,7 @@ def _run_record(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(row["id"]),
         "workspace_id": str(row["workspace_id"]),
-        "workflow_key": str(row["workflow_key"]),
+        "workflow_key": str(row["workspace_id"]),
         "source_kind": str(row["source_kind"]),
         "status": str(row["status"]),
         "created_count": int(row["created_count"]),

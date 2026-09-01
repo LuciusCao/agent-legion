@@ -254,9 +254,68 @@ exemptions:
     entity-key published-wins twin rules (twin pass precedes the demotion so
     frozen-pin hashes survive; both-published twins resolve to the
     window-era row), state-table multi-generation dedupe, and the re-prefix
-    separator guard. The overage is that single transaction's honest cost;
-    Phase 4 drops the workflow_key columns and this exemption goes stale
+    separator guard. The issue-211 M2 batch adds the post-v70 shape guard
+    via the shared has_column probe (fresh databases already run the
+    terminal shape; each pass skips its table instead of failing the
+    replay). The overage is that single transaction's honest cost; M2
+    dropped the workflow_key columns, and M3 (retiring the deprecated
+    contract fields) collapses these migration bodies and the exemption
     with them.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 242
+- check: architecture.file_budget
+  path: server/app/db/migration_chain.py
+  reason: The issue-211 M2 batch registers v70 (retire_workflow_key_columns) —
+    one registry entry plus its comment; the chain only grows one entry per
+    schema version. Stale after the M3 cleanup collapses the chain comments.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
+  ceiling: 108
+- check: architecture.file_budget
+  path: server/app/db/migrations/runs_sql.py
+  reason: The issue-211 M2 batch adds _INSERT_RUNS_SQL_V70 — the
+    column-less twin of the job_batches cutover (without it a pre-v53
+    database upgraded to v70+ silently drops every historical batch row).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
+  ceiling: 145
+- check: architecture.file_budget
+  path: server/app/db/migrations/workspace_execution_defaults.py
+  reason: The issue-211 M2 batch adds the revision-key probe and the
+    column-less query twin (pre-v64 databases upgraded to v70+ would
+    otherwise fail the v64 migration on the dropped workflow_key column).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
+  ceiling: 104
+- check: architecture.file_budget
+  path: server/app/db/migrations/retire_workflow_key_columns.py
+  reason: The issue-211 M2 v70 module carries the workflow_key column
+    retirement plus the shared has_column shape probe the historical
+    migrations import, and the Codex review on PR 334 (P1/P2) added the
+    upgrade-path recreation of the narrowed revision unique constraint and
+    the two same-name workspace-keyed indexes the column drop auto-drops
+    (fresh databases already carry them via the schema replay). Goes stale
+    when M3 retires the last deprecated contract fields and the probe
+    consumers collapse.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
+  ceiling: 91
+- check: architecture.file_budget
+  path: server/app/jobs/queries/batch.py
+  reason: The issue-211 M2 batch centralizes the deprecated workflow_key
+    identity backfill in create_run (the runs column dropped at v70; the
+    wire field equals workspace_id since v62, removal window 2026-10-31).
+    Stale when M3 retires the deprecated contract field.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
+  ceiling: 83
+- check: architecture.file_budget
+  path: server/app/jobs/queries/batch_queue.py
+  reason: The issue-211 M2 batch applies the same deprecated workflow_key
+    identity backfill to the remaining runs-row write paths (intake claim,
+    depleted requeue, intake update) so every runs-row consumer inherits
+    the field until the 2026-10-31 removal window closes.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
+  ceiling: 82

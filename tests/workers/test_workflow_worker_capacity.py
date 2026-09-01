@@ -62,8 +62,8 @@ def _setup(
     if node_limit is not None:
         with job_db.connect() as conn:
             conn.execute(
-                "insert into workspace_node_limits(workspace_id, workflow_key, node_key,"
-                " concurrency_limit) values (%s, 'test', 'fetch', %s)",
+                "insert into workspace_node_limits(workspace_id, node_key, "
+                " concurrency_limit) values (%s, 'fetch', %s)",
                 (ws["id"], node_limit),
             )
     worker = make_worker(tmp_path, db_path, executor, [definition], code_capacity=capacity)

@@ -44,9 +44,9 @@ def _seed_job(status: str = "completed") -> dict[str, Any]:
             " values ('ws-1', 'ws', 'demo_workflow') on conflict (id) do nothing"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
+            "insert into jobs(id, workspace_id, source_type, source_id,"
             " title, status, storage_dir) values"
-            " ('job-1', 'ws-1', 'wf', 's', 's1', 't', %s, 'jobs/ws/job-1')",
+            " ('job-1', 'ws-1', 's', 's1', 't', %s, 'jobs/ws/job-1')",
             (status,),
         )
         conn.execute(
@@ -229,9 +229,9 @@ def _add_active_lease() -> None:
         run_id = conn.execute("select id from node_runs where job_id='job-1'").fetchone()["id"]
         conn.execute(
             "insert into executor_leases("
-            " id, execution_id, executor_id, workspace_id, job_id, workflow_key,"
+            " id, execution_id, executor_id, workspace_id, job_id,"
             " node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at)"
-            " values ('lease-1', 'exec-1', 'code', 'ws-1', 'job-1', 'wf', 'n1', %s,"
+            " values ('lease-1', 'exec-1', 'code', 'ws-1', 'job-1', 'n1', %s,"
             " 'active', now(), now(), now() + make_interval(hours => 1))",
             (run_id,),
         )

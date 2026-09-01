@@ -150,11 +150,8 @@ def test_workspace_execution_configuration_lifecycle(tmp_path):
         assert echoed.status_code == 200
 
     assert app.state.job_db.get_workspace_node_limits(ws_id) == [
-        {
-            "workflow_key": "education_video_problems_generation",
-            "node_key": "publish_content",
-            "concurrency_limit": 2,
-        }
+        # #211 M2: the stored rows key on (workspace_id, node_key) only.
+        {"node_key": "publish_content", "concurrency_limit": 2}
     ]
 
 

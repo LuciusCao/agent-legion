@@ -61,7 +61,7 @@ def claim_shard_node(
     if shard is None:
         return False
     workspace_id = workspace["id"]
-    workflow_key = str(job["workflow_key"])
+    workflow_key = str(job["workspace_id"])
     node_key = node.key
     log_path = worker.settings.logs_dir.resolve() / "jobs" / f"{job['id']}-{node_key}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,7 +103,7 @@ def claim_shard_node(
             continue
         if shard.max_concurrency is not None and running >= shard.max_concurrency:
             break
-        if not snapshot.has_capacity(workspace_id, workflow_key, node_key):
+        if not snapshot.has_capacity(workspace_id, node_key):
             break
         shard_index = int(row["shard_index"])
         shard_log_path = log_path.with_name(f"{job['id']}-{node_key}-shard-{shard_index}.log")
@@ -131,7 +131,7 @@ def claim_shard_node(
         )
         if claim is None:
             break  # capacity lost to a race; the next poll pass re-evaluates
-        snapshot.record_claim(workspace_id, workflow_key, node_key)
+        snapshot.record_claim(workspace_id, node_key)
         running += 1
         claimed_any = True
         context = ExecutionContext(

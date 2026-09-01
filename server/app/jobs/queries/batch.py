@@ -4,7 +4,10 @@ import hashlib
 import json
 from typing import Any
 
-from server.app.jobs.queries.batch_queue import RunQueueQueriesMixin
+from server.app.jobs.queries.batch_queue import (
+    RunQueueQueriesMixin,
+    backfill_deprecated_workflow_key,
+)
 from server.app.jobs.queries.batch_queue_sql import RUN_UPSERT_CONFLICT
 
 
@@ -44,17 +47,17 @@ class RunQueriesMixin(RunQueueQueriesMixin):
             conn.execute(
                 f"""
                 insert into runs(
-                  id, workspace_id, workflow_key, source_kind, status,
+                  id, workspace_id, source_kind, status,
                   frozen_pins_json, queue_payload_json
-                ) values (%s, %s, %s, %s, %s, %s, %s)
+                ) values (%s, %s, %s, %s, %s, %s)
                 {RUN_UPSERT_CONFLICT}
                 """,
-                (run_id, workspace_id, workflow_key, source_kind, status, pins_json, queue_json),
+                (run_id, workspace_id, source_kind, status, pins_json, queue_json),
             )
             row = conn.execute("select * from runs where id=%s", (run_id,)).fetchone()
         if row is None:
             raise RuntimeError("run upsert did not return a row")
-        return dict(row)
+        return backfill_deprecated_workflow_key(dict(row))
 
     def delete_run_without_jobs(self, run_id: str) -> None:
         """Delete a run only while it owns no jobs (creation compensation)."""

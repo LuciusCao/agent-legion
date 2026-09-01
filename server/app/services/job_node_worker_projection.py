@@ -33,7 +33,7 @@ def agent_route_map(connect_source: Any, workspace_id: str, workflow_key: str) -
     with read_connection(connect_source) as conn:
         rows = conn.execute(
             "select node_key, target_id from workspace_node_routes"
-            " where workspace_id=%s and workflow_key=%s and target_kind='agent'",
-            (workspace_id, workflow_key),
+            " where workspace_id=%s and target_kind='agent'",
+            (workspace_id,),
         ).fetchall()
     return {str(row["node_key"]): str(row["target_id"]) for row in rows}

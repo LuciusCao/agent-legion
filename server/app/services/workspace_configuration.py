@@ -211,7 +211,12 @@ class WorkspaceConfigurationService:
             "workspace": saved_workspace,
             "settings": self._payload(saved_workspace),
             "execution_configuration": {
-                "node_limits": self.job_db.get_workspace_node_limits(workspace_id),
+                # #211 M2: the limits table lost workflow_key (v70); the
+                # deprecated response field carries the identity value.
+                "node_limits": [
+                    {**limit, "workflow_key": workspace_id}
+                    for limit in self.job_db.get_workspace_node_limits(workspace_id)
+                ],
                 "migration_warnings": [],
             },
             "agent_capacity": self.job_db.get_workspace_agent_capacity(workspace_id),

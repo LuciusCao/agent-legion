@@ -30,9 +30,9 @@ def insert_job(
     source_id: str | None = None,
 ) -> None:
     conn.execute(
-        "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-        " values (%s, %s, %s, %s, %s) on conflict (id) do nothing",
-        (job_id, workspace_id, workflow_key, source_type, source_id or job_id),
+        "insert into jobs(id, workspace_id, source_type, source_id)"
+        " values (%s, %s, %s, %s) on conflict (id) do nothing",
+        (job_id, workspace_id, source_type, source_id or job_id),
     )
 
 

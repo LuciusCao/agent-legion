@@ -75,7 +75,7 @@ def commit_rerun(
     """
     if definition is None:
         definition = definition_from_job_snapshot(job) or require_workspace_active_definition(
-            service.job_db, str(job["workspace_id"]), str(job["workflow_key"])
+            service.job_db, str(job["workspace_id"]), str(job["workspace_id"])
         )
 
     stale_nodes = downstream_nodes(definition, actual_node_key)

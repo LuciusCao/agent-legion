@@ -89,7 +89,7 @@ class ApprovalDecisionService:
             )
         job = self._require_job(workspace_id, job_id)
         definition = definition_from_job_snapshot(job) or require_workspace_active_definition(
-            self.job_db, str(job["workspace_id"]), str(job["workflow_key"])
+            self.job_db, str(job["workspace_id"]), str(job["workspace_id"])
         )
         node = definition.nodes.get(node_key)
         if node is None or node.node_type != APPROVAL_NODE_TYPE:

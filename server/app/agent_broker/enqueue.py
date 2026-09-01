@@ -37,18 +37,15 @@ def enqueue_request(broker: AgentExecutionBroker, request: AgentExecutionRequest
             conn.execute(
                 """
                 insert into agent_execution_requests(
-                  execution_id, workspace_id, job_id, workflow_key, node_key,
+                  execution_id, workspace_id, job_id, node_key,
                   kind, agent_id, agent_definition_hash, node_concurrency_limit,
                   queued_at, manifest_json, pinned_agent_version
-                ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, current_timestamp, %s, %s)
+                ) values (%s, %s, %s, %s, %s, %s, %s, %s, current_timestamp, %s, %s)
                 """,
                 (
                     execution_id,
                     request.workspace_id,
                     request.job_id,
-                    # #211 M1: normalize on write — pre-v62 frozen snapshots
-                    # may still carry the old key; new rows record the identity.
-                    request.workspace_id,
                     request.node_key,
                     request.kind,
                     request.agent_id,

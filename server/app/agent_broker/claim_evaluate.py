@@ -195,9 +195,9 @@ def evaluate_candidate(
     conn.execute(
         """
         insert into executor_leases(
-          id, execution_id, executor_id, workspace_id, job_id, workflow_key,
+          id, execution_id, executor_id, workspace_id, job_id,
           node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-        ) values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', current_timestamp, current_timestamp, %s)
+        ) values (%s, %s, %s, %s, %s, %s, %s, 'active', current_timestamp, current_timestamp, %s)
         """,
         (
             lease_id,
@@ -205,7 +205,6 @@ def evaluate_candidate(
             executor_id,
             selected["workspace_id"],
             selected["job_id"],
-            selected["workflow_key"],
             selected["node_key"],
             run["id"],
             expires_at,
@@ -233,7 +232,6 @@ def evaluate_candidate(
         execution_id=selected["execution_id"],
         workspace_id=selected["workspace_id"],
         job_id=selected["job_id"],
-        workflow_key=selected["workflow_key"],
         node_key=selected["node_key"],
         agent_id=selected["agent_id"],
         lease_id=lease_id,

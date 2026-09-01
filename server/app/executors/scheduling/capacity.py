@@ -23,13 +23,13 @@ class CapacitySnapshot:
     """Remaining claim capacity: one global number plus per-node remainders."""
 
     global_remaining: int = 0
-    node_remaining: dict[tuple[str, str, str], int] = field(default_factory=dict)
+    node_remaining: dict[tuple[str, str], int] = field(default_factory=dict)
 
     def has_any_capacity(self) -> bool:
         """Return True when the pool still has global claim capacity."""
         return self.global_remaining > 0
 
-    def has_capacity(self, workspace_id: str, workflow_key: str, node_key: str) -> bool:
+    def has_capacity(self, workspace_id: str, node_key: str) -> bool:
         """Return True when a claim for this node looks worthwhile.
 
         Nodes without a configured limit have no per-node ceiling; the global
@@ -37,13 +37,13 @@ class CapacitySnapshot:
         """
         if self.global_remaining <= 0:
             return False
-        remaining = self.node_remaining.get((workspace_id, workflow_key, node_key))
+        remaining = self.node_remaining.get((workspace_id, node_key))
         return remaining is None or remaining > 0
 
-    def record_claim(self, workspace_id: str, workflow_key: str, node_key: str) -> None:
+    def record_claim(self, workspace_id: str, node_key: str) -> None:
         """Decrement local counters after a successful claim."""
         self.global_remaining = max(self.global_remaining - 1, 0)
-        key = (workspace_id, workflow_key, node_key)
+        key = (workspace_id, node_key)
         if key in self.node_remaining:
             self.node_remaining[key] = max(self.node_remaining[key] - 1, 0)
 
@@ -67,28 +67,27 @@ def load_capacity_snapshot(db_path: str, code_capacity: int) -> CapacitySnapshot
         ).fetchone()
         node_rows = conn.execute(
             """
-            select workspace_id, workflow_key, node_key, count(*) as cnt
+            select workspace_id, node_key, count(*) as cnt
             from executor_leases
             where status='active' and expires_at>%s
-            group by workspace_id, workflow_key, node_key
+            group by workspace_id, node_key
             """,
             (now_str,),
         ).fetchall()
         limit_rows = conn.execute(
             """
-            select workspace_id, workflow_key, node_key, concurrency_limit
+            select workspace_id, node_key, concurrency_limit
             from workspace_node_limits
             """
         ).fetchall()
 
     used_global = int(global_row["cnt"]) if global_row is not None else 0
     used_nodes = {
-        (str(row["workspace_id"]), str(row["workflow_key"]), str(row["node_key"])): int(row["cnt"])
-        for row in node_rows
+        (str(row["workspace_id"]), str(row["node_key"])): int(row["cnt"]) for row in node_rows
     }
     snapshot = CapacitySnapshot(global_remaining=max(code_capacity - used_global, 0))
     for row in limit_rows:
-        key = (str(row["workspace_id"]), str(row["workflow_key"]), str(row["node_key"]))
+        key = (str(row["workspace_id"]), str(row["node_key"]))
         snapshot.node_remaining[key] = max(
             int(row["concurrency_limit"]) - used_nodes.get(key, 0), 0
         )

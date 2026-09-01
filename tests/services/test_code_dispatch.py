@@ -161,8 +161,8 @@ def _insert_job(job_db, job_id: str = "job-1") -> None:
             " on conflict(id) do nothing"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (%s, 'test-workspace', 'questions', 'question', %s)",
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values (%s, 'test-workspace', 'question', %s)",
             (job_id, job_id),
         )
         conn.execute("insert into job_nodes(job_id, node_key) values (%s, 'package')", (job_id,))
@@ -311,8 +311,8 @@ def test_enqueue_persists_lightweight_reference_and_claim_rebuilds_full_context(
     _insert_job(job_db)
     with job_db.connect() as conn:
         conn.execute(
-            "insert into runs(id, workspace_id, workflow_key, source_kind, frozen_pins_json)"
-            " values ('batch-1', 'test-workspace', 'questions', 'question',"
+            "insert into runs(id, workspace_id, source_kind, frozen_pins_json)"
+            " values ('batch-1', 'test-workspace', 'question',"
             ' \'{"node_code_versions": {"package": {"version": 3, "marker_142": true}}}\')'
         )
         conn.execute(

@@ -15,15 +15,15 @@ def _insert_agent_job(conn, job_id: str = "job-kind-probe") -> None:
         " on conflict(id) do nothing"
     )
     conn.execute(
-        "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-        " values (%s, 'test-workspace', 'questions', 'question', %s)",
+        "insert into jobs(id, workspace_id, source_type, source_id)"
+        " values (%s, 'test-workspace', 'question', %s)",
         (job_id, job_id),
     )
 
 
 def _insert_request(conn, kind: str | None) -> None:
     columns = (
-        "execution_id, workspace_id, job_id, workflow_key, node_key,"
+        "execution_id, workspace_id, job_id, node_key,"
         " agent_id, agent_definition_hash, node_concurrency_limit,"
         " queued_at, manifest_json"
     )
@@ -31,13 +31,13 @@ def _insert_request(conn, kind: str | None) -> None:
         conn.execute(
             f"insert into agent_execution_requests({columns})"
             " values ('exec-kind-default', 'test-workspace', 'job-kind-probe',"
-            " 'questions', 'package', 'package', 'hash', 1, current_timestamp, '{}')",
+            " 'package', 'package', 'hash', 1, current_timestamp, '{}')",
         )
         return
     conn.execute(
         f"insert into agent_execution_requests({columns}, kind)"
         " values ('exec-kind-explicit', 'test-workspace', 'job-kind-probe',"
-        " 'questions', 'package', 'package', 'hash', 1, current_timestamp, '{}', %s)",
+        " 'package', 'package', 'hash', 1, current_timestamp, '{}', %s)",
         (kind,),
     )
 

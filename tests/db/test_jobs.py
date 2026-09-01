@@ -30,8 +30,10 @@ def test_create_batch_and_question_jobs(tmp_path):
         workspace_id=workspace["id"],
     )
 
-    assert batch["workflow_key"] == "education_video_problems_generation"
     assert batch["workspace_id"] == "default"
+    # Deprecated wire field keeps the identity value after v70 dropped the
+    # runs.workflow_key column (#211 M2; removal window 2026-10-31).
+    assert batch["workflow_key"] == workspace["id"]
     assert job["id"] == "default_education_video_problems_generation_Q001"
     assert job["workspace_id"] == "default"
     assert job["storage_dir"].endswith(

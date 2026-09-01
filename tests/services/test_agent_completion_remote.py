@@ -81,8 +81,8 @@ def _make_handler(
             " on conflict (id) do nothing"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
-            " title, status, storage_dir) values ('job-1', 'ws-1', 'wf', 's', 's1', 't', 'pending', 'd')"
+            "insert into jobs(id, workspace_id, source_type, source_id, "
+            " title, status, storage_dir) values ('job-1', 'ws-1', 's', 's1', 't', 'pending', 'd')"
         )
     jobs_dir = tmp_path / "jobs"
     job = {"id": "job-1", "workspace_id": "ws-1", "storage_dir": "jobs/ws/job-1"}
