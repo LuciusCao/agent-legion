@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchSkillDirectories, validateSkillPath } from '../api'
 import { getInstanceSettings } from '../api/instanceSettings'
 import type { InstanceSettingsResponse } from '../api/instanceSettings'
 import { TestQueryProvider } from '../testing/testQueryClient'
+import type { SkillValidateResponse } from '../types'
 import { SkillSelector } from './SkillSelector'
 
 vi.mock('../api', () => ({
@@ -275,5 +276,66 @@ describe('SkillSelector', () => {
     fireEvent.change(input, { target: { value: 'write' } })
 
     expect(mockValidate).not.toHaveBeenCalled()
+  })
+
+  it('ignores a stale validation response when a newer pick is in flight', async () => {
+    // 前缀关联候选（review / review-questions）快速连选：A 先发、B 后发，
+    // B 先返回、A 晚返回——A 是过期响应，不得覆盖 B 的回填（codex P1 on #336）。
+    mockFetchDirectories.mockResolvedValue({
+      workspace_id: 'ws-1',
+      directories: ['review', 'review-questions'],
+    })
+    let resolveA!: (value: SkillValidateResponse) => void
+    let resolveB!: (value: SkillValidateResponse) => void
+    mockValidate
+      .mockImplementationOnce(
+        () =>
+          new Promise<SkillValidateResponse>((resolve) => {
+            resolveA = resolve
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<SkillValidateResponse>((resolve) => {
+            resolveB = resolve
+          })
+      )
+    const onChange = vi.fn()
+    const { container } = renderSelector(onChange)
+
+    const input = screen.getByLabelText('Skill 目录名')
+    await waitFor(() => expect(input).toBeEnabled())
+    await waitFor(() =>
+      expect(
+        container.querySelector(
+          'datalist#skill-directory-options option[value="review-questions"]'
+        )
+      ).not.toBeNull()
+    )
+    fireEvent.change(input, { target: { value: 'review' } })
+    fireEvent.change(input, { target: { value: 'review-questions' } })
+    await waitFor(() => expect(mockValidate).toHaveBeenCalledTimes(2))
+
+    // 后选的 B 先返回：正常回填。
+    resolveB({
+      valid: true,
+      path: '/abs/review-questions',
+      skill_key: 'ws-1/review-questions',
+      tags: [],
+      latest_tag: null,
+      locked_ref: null,
+    })
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith('ws-1/review-questions')
+    )
+
+    // 先选的 A 晚返回（且为失败）：过期响应不得二次回填、不得弹错误、
+    // 也不得把按钮卡回「校验中」。
+    await act(async () => {
+      resolveA({ valid: false, path: '/abs/review', error: 'stale failure' })
+    })
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '校验' })).toBeInTheDocument()
   })
 })
