@@ -205,6 +205,31 @@
         font-family: 'Times New Roman', serif;
         font-style: italic;
       }
+      /* 题干高亮（对齐旧面板的下划渐变样式） */
+      .highlight {
+        background: linear-gradient(
+          180deg,
+          transparent 60%,
+          rgba(255, 235, 59, 0.85) 60%
+        );
+        color: var(--pp-text);
+        border-radius: 2px;
+        padding: 0 2px;
+      }
+      .highlight-corrected {
+        background: linear-gradient(
+          180deg,
+          transparent 60%,
+          rgba(239, 68, 68, 0.45) 60%
+        );
+        color: var(--pp-text);
+        border-radius: 2px;
+        padding: 0 2px;
+      }
+      .rich-text img {
+        max-width: 100%;
+        height: auto;
+      }
       pre.raw {
         white-space: pre-wrap;
         word-break: break-word;
@@ -318,9 +343,8 @@
         }
 
         // 富文本：先 HTML 转义，再把 LaTeX 段交给 katex（或降级原文）。
-        function richText(text, displayMode) {
-          var parts = splitLatex(String(text == null ? '' : text))
-          var html = parts
+        function renderLatexParts(parts, displayMode) {
+          return parts
             .map(function (part) {
               if (part.type === 'text') return escapeHtml(part.content)
               if (window.katex) {
@@ -340,7 +364,207 @@
               )
             })
             .join('')
-          return displayMode ? html.replace(/\n/g, '<br>') : html
+        }
+
+        // ---- 白名单 HTML 消毒（对齐宿主 lib/sanitizeHtml 的 RichText
+        // profile：p/br/strong/em/ul/ol/li/span/div/img 标签集，属性仅
+        // src/alt/referrerpolicy 且 img src 限 http(s)，其余标签 unwrap
+        // 保留子节点——事件属性随属性白名单一律剥除。无外部依赖：bundle 是
+        // 单文件沙箱 HTML，DOMPurify 不可用，这里用 DOMParser 手写等价物。） ----
+        var ALLOWED_TAGS = {
+          p: 1,
+          br: 1,
+          strong: 1,
+          em: 1,
+          ul: 1,
+          ol: 1,
+          li: 1,
+          span: 1,
+          div: 1,
+          img: 1,
+        }
+        var SAFE_URI = /^https?:\/\//i
+
+        function stripTags(html) {
+          var tmp = document.createElement('div')
+          tmp.innerHTML = String(html == null ? '' : html)
+          return tmp.textContent || ''
+        }
+
+        // 行内富文本（对齐宿主 RichText inline 模式：剥标签 + LaTeX 分段）。
+        function richInline(text) {
+          return renderLatexParts(splitLatex(stripTags(text)), false)
+        }
+
+        function serializeBlockChildren(node) {
+          var out = ''
+          Array.prototype.forEach.call(node.childNodes, function (child) {
+            if (child.nodeType === 3) {
+              out += renderLatexParts(splitLatex(child.textContent || ''), true)
+              return
+            }
+            if (child.nodeType !== 1) return
+            var tag = child.tagName.toLowerCase()
+            // 不在白名单的标签 unwrap 保留子节点（KEEP_CONTENT 语义）。
+            if (!ALLOWED_TAGS[tag]) {
+              out += serializeBlockChildren(child)
+              return
+            }
+            if (tag === 'br') {
+              out += '<br>'
+              return
+            }
+            if (tag === 'img') {
+              var src = child.getAttribute('src') || ''
+              if (SAFE_URI.test(src)) {
+                out +=
+                  '<img src="' +
+                  escapeHtml(src) +
+                  '" alt="' +
+                  escapeHtml(child.getAttribute('alt') || '') +
+                  '" referrerpolicy="no-referrer">'
+              }
+              return
+            }
+            out +=
+              '<' + tag + '>' + serializeBlockChildren(child) + '</' + tag + '>'
+          })
+          return out
+        }
+
+        // 块级富文本（对齐宿主 sanitizeHtml + renderLatexInHtml：白名单消毒
+        // 后的 HTML 结构保留，文本节点内做 LaTeX 渲染）。
+        function richBlock(html) {
+          var doc = new DOMParser().parseFromString(
+            String(html == null ? '' : html),
+            'text/html'
+          )
+          return serializeBlockChildren(doc.body)
+        }
+
+        // ---- 题干高亮（对齐宿主 lib/questionHighlight 的匹配语义） ----
+        function findLatexRanges(text) {
+          var ranges = []
+          var pattern =
+            /(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$[^$\n]+?\$)/g
+          var match
+          while ((match = pattern.exec(text)) !== null) {
+            ranges.push({
+              start: match.index,
+              end: match.index + match[0].length,
+            })
+          }
+          return ranges
+        }
+
+        function adjustHighlightBoundaries(text, start, end) {
+          // 高亮边界不得切断 LaTeX 段：落入段内时外扩到段边界。
+          var ranges = findLatexRanges(text)
+          var newStart = start
+          var newEnd = end
+          ranges.forEach(function (range) {
+            if (newStart > range.start && newStart < range.end)
+              newStart = Math.min(newStart, range.start)
+            if (newEnd > range.start && newEnd < range.end)
+              newEnd = Math.max(newEnd, range.end)
+          })
+          return { start: newStart, end: newEnd }
+        }
+
+        function findNearestOccurrence(plain, target, nearStart) {
+          var idx = plain.indexOf(target)
+          if (idx === -1) return -1
+          var best = idx
+          var bestDist = Math.abs(idx - nearStart)
+          while ((idx = plain.indexOf(target, idx + 1)) !== -1) {
+            var dist = Math.abs(idx - nearStart)
+            if (dist < bestDist) {
+              bestDist = dist
+              best = idx
+            }
+          }
+          return best
+        }
+
+        function resolveHighlightBounds(plain, item) {
+          var pos = item.content && item.content.position
+          if (
+            !pos ||
+            typeof pos.start !== 'number' ||
+            typeof pos.end !== 'number' ||
+            pos.start < 0 ||
+            pos.end > plain.length ||
+            pos.end <= pos.start
+          ) {
+            return null
+          }
+          var start = pos.start
+          var end = pos.end
+          var corrected = false
+          var target = item.content.text || item.content.derived_text
+          if (target && plain.slice(start, end) !== target) {
+            var found = findNearestOccurrence(plain, target, start)
+            if (found !== -1) {
+              start = found
+              end = found + target.length
+              corrected = true
+            }
+          }
+          var bounds = adjustHighlightBoundaries(plain, start, end)
+          bounds.id = item.key_info_id
+          bounds.corrected = corrected
+          return bounds
+        }
+
+        function buildHighlightedStemParts(stem, items) {
+          var plain = stripTags(stem)
+          if (!plain || items.length === 0) return null
+          var ranges = items
+            .map(function (item) {
+              return resolveHighlightBounds(plain, item)
+            })
+            .filter(Boolean)
+            .sort(function (a, b) {
+              return a.start - b.start
+            })
+          if (ranges.length === 0) return null
+          var merged = []
+          ranges.forEach(function (range) {
+            var last = merged[merged.length - 1]
+            if (last && range.start <= last.end) {
+              last.end = Math.max(last.end, range.end)
+              last.corrected = last.corrected || range.corrected
+              last.ids.push(range.id)
+            } else {
+              merged.push({
+                start: range.start,
+                end: range.end,
+                ids: [range.id],
+                corrected: range.corrected,
+              })
+            }
+          })
+          var parts = []
+          var cursor = 0
+          merged.forEach(function (range) {
+            if (range.start > cursor) {
+              parts.push({
+                type: 'plain',
+                text: plain.slice(cursor, range.start),
+              })
+            }
+            parts.push({
+              type: 'highlight',
+              text: plain.slice(range.start, range.end),
+              ids: range.ids,
+              corrected: range.corrected,
+            })
+            cursor = range.end
+          })
+          if (cursor < plain.length) {
+            parts.push({ type: 'plain', text: plain.slice(cursor) })
+          }
+          return parts
         }
 
         // ---- 数据形状适配（镜像宿主 hooks 的提取逻辑） ----
@@ -548,18 +772,61 @@
           var keyInfoList = ctx.comprehension.keyInfoList
           var possibleErrorList = ctx.comprehension.possibleErrorList
 
-          // 题干
+          // 题干：选中信息点/易错点时按旧面板语义高亮匹配文本（无选中则
+          // 走白名单消毒的富文本渲染）。
+          var highlightedKeyInfos = []
+          if (state.selectedKeyInfoId) {
+            var selectedInfo = keyInfoList.find(function (k) {
+              return k.key_info_id === state.selectedKeyInfoId
+            })
+            if (selectedInfo) highlightedKeyInfos.push(selectedInfo)
+          }
+          if (state.selectedErrorId) {
+            var selectedErr = possibleErrorList.find(function (e) {
+              return e.error_id === state.selectedErrorId
+            })
+            if (selectedErr) {
+              ;(selectedErr.related_key_info_ids || []).forEach(function (id) {
+                var related = keyInfoList.find(function (item) {
+                  return item.key_info_id === id
+                })
+                if (related && highlightedKeyInfos.indexOf(related) === -1) {
+                  highlightedKeyInfos.push(related)
+                }
+              })
+            }
+          }
+          var stemParts = buildHighlightedStemParts(
+            question.stem || '',
+            highlightedKeyInfos
+          )
+          var stemHtml
+          if (stemParts) {
+            stemHtml = stemParts
+              .map(function (part) {
+                if (part.type === 'highlight') {
+                  return (
+                    '<span class="' +
+                    (part.corrected ? 'highlight-corrected' : 'highlight') +
+                    '" data-ids="' +
+                    escapeHtml(part.ids.join(',')) +
+                    '">' +
+                    renderLatexParts(splitLatex(part.text), false) +
+                    '</span>'
+                  )
+                }
+                return renderLatexParts(splitLatex(part.text), true)
+              })
+              .join('')
+          } else if (question.stem) {
+            stemHtml = richBlock(question.stem)
+          } else {
+            stemHtml = '<p class="empty">无题干</p>'
+          }
+
           var stemCard = el('section', 'card')
           stemCard.appendChild(el('h2', 'section-title', '题干'))
-          stemCard.appendChild(
-            el(
-              'div',
-              'rich-text',
-              question.stem
-                ? richText(question.stem, true)
-                : '<p class="empty">无题干</p>'
-            )
-          )
+          stemCard.appendChild(el('div', 'rich-text', stemHtml))
           root.appendChild(stemCard)
 
           // 审题信息（gate：generate_key_info completed）
@@ -610,7 +877,7 @@
                 el('span', 'option-label', escapeHtml(label) + '.')
               )
               if (isCorrect) item.appendChild(el('span', null, '✓ '))
-              item.appendChild(el('span', null, richText(content)))
+              item.appendChild(el('span', null, richInline(content)))
               list.appendChild(item)
             })
             optionsCard.appendChild(list)
@@ -635,7 +902,7 @@
                 row.appendChild(el('span', null, '第' + (idx + 1) + '空：'))
                 ;((blank && blank.alternatives) || []).forEach(function (alt) {
                   row.appendChild(
-                    el('span', 'badge badge-answer', richText(alt))
+                    el('span', 'badge badge-answer', richInline(alt))
                   )
                 })
                 answerCard.appendChild(row)
@@ -643,7 +910,7 @@
             } else if (answerItems2 && answerItems2.length > 0) {
               answerItems2.forEach(function (item) {
                 answerCard.appendChild(
-                  el('span', 'badge badge-answer', richText(item))
+                  el('span', 'badge badge-answer', richInline(item))
                 )
               })
             } else {
@@ -696,17 +963,17 @@
                 ;(group || []).forEach(function (step) {
                   if (step.title)
                     groupEl.appendChild(
-                      el('h4', 'step-title', richText(step.title, true))
+                      el('h4', 'step-title', richBlock(step.title))
                     )
                   groupEl.appendChild(
-                    el('div', null, richText(step.content || '', true))
+                    el('div', null, richBlock(step.content || ''))
                   )
                 })
                 analysisCard.appendChild(groupEl)
               })
             } else if (typeof question.analysis === 'string') {
               analysisCard.appendChild(
-                el('div', null, richText(question.analysis, true))
+                el('div', null, richBlock(question.analysis))
               )
             } else {
               analysisCard.appendChild(
@@ -744,7 +1011,7 @@
             )
             chip.appendChild(el('span', 'chip-index', String(idx + 1)))
             chip.appendChild(
-              el('span', null, richText(options.labelOf(item, idx)))
+              el('span', null, richInline(options.labelOf(item, idx)))
             )
             var decision = options.decisions[id]
             chip.insertAdjacentHTML('beforeend', reviewMark(decision))
@@ -788,7 +1055,7 @@
               : (info.content &&
                   (info.content.text || info.content.derived_text)) ||
                 ''
-          card.appendChild(el('div', null, richText(text)))
+          card.appendChild(el('div', null, richInline(text)))
 
           if (info.question_comprehension_ability) {
             card.appendChild(
@@ -813,7 +1080,7 @@
           if (related.length > 0) {
             var html = '<strong>关联常见错误</strong><ul>'
             related.forEach(function (err) {
-              html += '<li>' + richText(err.error_description || '') + '</li>'
+              html += '<li>' + richInline(err.error_description || '') + '</li>'
             })
             html += '</ul>'
             card.appendChild(el('div', 'detail-section', html))
@@ -821,7 +1088,9 @@
 
           if (info.question && info.question.text) {
             var socratic = el('div', 'socratic')
-            socratic.appendChild(el('div', null, richText(info.question.text)))
+            socratic.appendChild(
+              el('div', null, richInline(info.question.text))
+            )
             ;(info.question.options || []).forEach(function (opt) {
               var mark = opt && opt.is_correct ? '✓ ' : ''
               socratic.appendChild(
@@ -831,7 +1100,7 @@
                   mark +
                     escapeHtml((opt && opt.label) || '') +
                     '. ' +
-                    richText((opt && opt.text) || '')
+                    richInline((opt && opt.text) || '')
                 )
               )
             })
@@ -864,7 +1133,7 @@
               el(
                 'span',
                 'badge badge-answer badge-error-answer',
-                richText(answer)
+                richInline(answer)
               )
             )
           })
@@ -874,7 +1143,7 @@
           )
           card.appendChild(cardHeader)
           card.appendChild(
-            el('div', null, richText(err.error_description || ''))
+            el('div', null, richInline(err.error_description || ''))
           )
 
           var related = (err.related_key_info_ids || [])
@@ -891,7 +1160,7 @@
             related.forEach(function (k) {
               tagsHtml +=
                 '<span class="tag">' +
-                richText(
+                richInline(
                   (k.content && (k.content.text || k.content.derived_text)) ||
                     k.key_info_id
                 ) +

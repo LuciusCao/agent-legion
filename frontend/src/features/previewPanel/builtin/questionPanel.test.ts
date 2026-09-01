@@ -208,6 +208,104 @@ describe('官方内置 question 面板 bundle', () => {
     expect(appText(doc)).toContain('24×10×15=3600')
   })
 
+  it('富文本走白名单消毒：保留 p/strong/em/img(http)，剥除危险标签与属性', async () => {
+    const { doc } = bootPanel({
+      detail: makeDetail(ALL_TERMINAL_NODES),
+      artifacts: {
+        'questions.json': JSON.stringify({
+          questions: [
+            {
+              normalized: {
+                stem:
+                  '<p>学校订了<strong>24箱</strong>牛奶' +
+                  '<script>alert(1)</script><em>哦</em>' +
+                  '<img src="https://cdn.test/a.png">' +
+                  '<img src="javascript:alert(1)" onerror="alert(2)">' +
+                  '<a href="https://x.test">链接</a></p>',
+              },
+            },
+          ],
+        }),
+      },
+    })
+
+    await waitForText(doc, '学校订了')
+    const stem = doc.querySelector('#app .rich-text')!
+    // 白名单标签保留
+    expect(stem.querySelector('strong')?.textContent).toBe('24箱')
+    expect(stem.querySelector('em')?.textContent).toBe('哦')
+    // script 与 a 不在白名单：unwrap 后子文本保留为惰性文本，标签不落地
+    expect(stem.querySelector('script')).toBeNull()
+    expect(stem.querySelector('a')).toBeNull()
+    expect(stem.textContent).toContain('alert(1)')
+    expect(stem.textContent).toContain('链接')
+    // img：http(s) src 保留并强制 no-referrer；javascript: src 整个剥除，事件属性不落地
+    const imgs = stem.querySelectorAll('img')
+    expect(imgs).toHaveLength(1)
+    expect(imgs[0].getAttribute('src')).toBe('https://cdn.test/a.png')
+    expect(imgs[0].getAttribute('referrerpolicy')).toBe('no-referrer')
+    expect(imgs[0].getAttribute('onerror')).toBeNull()
+  })
+
+  it('选中审题信息 chip 时题干按匹配文本高亮', async () => {
+    const keyInfo = {
+      ...KEY_INFO,
+      // 题干 plain 文本：'学校订了24箱牛奶，每箱 $10$ 盒，一共多少袋？'
+      // '每箱 $10$' 位于 [10, 17)。
+      content: { text: '每箱 $10$', position: { start: 10, end: 17 } },
+    }
+    const { doc } = bootPanel({
+      detail: makeDetail(ALL_TERMINAL_NODES),
+      artifacts: {
+        'questions.json': JSON.stringify({
+          questions: [{ normalized: QUESTION }],
+        }),
+        'comprehension_info.json': JSON.stringify({
+          comprehension_data: {
+            key_info_list: [keyInfo],
+            possible_error_list: [],
+          },
+        }),
+      },
+    })
+
+    await waitForText(doc, '审题信息')
+    doc.querySelector<HTMLButtonElement>('#app .chip')!.click()
+    const highlight = doc.querySelector('#app .rich-text .highlight')
+    expect(highlight).not.toBeNull()
+    // $10$ 按 LaTeX 段渲染（无 katex 资源时降级 span），定界符不落地
+    expect(highlight!.textContent).toBe('每箱 10')
+    expect(highlight!.querySelector('.latex-fallback')?.textContent).toBe('10')
+    expect(highlight!.getAttribute('data-ids')).toBe('ki-1')
+  })
+
+  it('position 与目标文本不符时按最近出现处纠正并标记 corrected', async () => {
+    const keyInfo = {
+      ...KEY_INFO,
+      content: { text: '每箱 $10$ 盒', position: { start: 0, end: 4 } },
+    }
+    const { doc } = bootPanel({
+      detail: makeDetail(ALL_TERMINAL_NODES),
+      artifacts: {
+        'questions.json': JSON.stringify({
+          questions: [{ normalized: QUESTION }],
+        }),
+        'comprehension_info.json': JSON.stringify({
+          comprehension_data: {
+            key_info_list: [keyInfo],
+            possible_error_list: [],
+          },
+        }),
+      },
+    })
+
+    await waitForText(doc, '审题信息')
+    doc.querySelector<HTMLButtonElement>('#app .chip')!.click()
+    const corrected = doc.querySelector('#app .rich-text .highlight-corrected')
+    expect(corrected).not.toBeNull()
+    expect(corrected!.textContent).toBe('每箱 10 盒')
+  })
+
   it('应用宿主注入的主题变量', async () => {
     const { doc, themeCalls } = bootPanel({
       detail: makeDetail(ALL_TERMINAL_NODES),

@@ -163,6 +163,9 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/admin/connections/{key}/test"): "require_admin",
     ("PUT", "/api/admin/studio-agents"): "require_admin",
     ("POST", "/api/admin/studio-agents/redetect"): "require_admin",
+    # Infra connections admin endpoints (#335): admin-only like the other
+    # /api/admin/* write routes.
+    ("POST", "/api/admin/infra-connections/test"): "require_admin",
     ("POST", "/api/agent-register-tokens"): "require_admin",
     ("DELETE", "/api/agent-register-tokens/{token_id}"): "require_admin",
     ("DELETE", "/api/agent-workers/{worker_id}"): "require_admin",
