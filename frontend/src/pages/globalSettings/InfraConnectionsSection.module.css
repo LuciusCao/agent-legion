@@ -1,0 +1,46 @@
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 400;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.badgeOk {
+  color: #2e7d32;
+  background: #e6f4ea;
+}
+.badgeFail {
+  color: #c62828;
+  background: #fdecea;
+}
+.badgeMuted {
+  color: #74777f;
+  background: #f0f0f0;
+}
+.kvGrid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  row-gap: 4px;
+  column-gap: 8px;
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+.kvGrid dt {
+  color: #74777f;
+}
+.kvGrid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.okText {
+  font-size: 13px;
+  color: #2e7d32;
+  margin: 4px 0;
+}
+.failText {
+  font-size: 13px;
+  color: #c62828;
+  margin: 4px 0;
+}
