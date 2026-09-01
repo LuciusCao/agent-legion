@@ -7,10 +7,13 @@ branch stays verifiable with or without that wiring.
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 import pytest
 
 from server.app.jobs import JobQueries
 from server.app.routes.infra_connections import create_infra_connections_router
+from tests.postgres_support import TEST_DATABASE_URL
 
 CSRF = {"x-agent-legion-request": "1"}
 INFRA_URL = "/api/admin/infra-connections"
@@ -75,13 +78,30 @@ def test_get_database_summary(client_factory) -> None:
 
     assert response.status_code == 200, response.text
     database = response.json()["database"]
-    assert database["engine"] == "postgresql"
-    assert database["host"] == "127.0.0.1"
-    assert database["port"] == 5432
-    assert database["name"].startswith("agent_legion_test_")
-    assert database["password_set"] is False
-    # The test DSN carries ?options=-csearch_path=...; the masked URL drops it.
-    assert database["masked_url"] == f"postgresql://127.0.0.1:5432/{database['name']}"
+    # Expectations derive from the actual test DSN — CI's
+    # AGENT_LEGION_TEST_DATABASE_URL carries user+password while the local
+    # derived DSN carries neither, so nothing here may be hard-coded.
+    dsn = urlsplit(TEST_DATABASE_URL)
+    user = dsn.username or ""
+    password_set = bool(dsn.password)
+    host = dsn.hostname or ""
+    name = dsn.path.lstrip("/")
+    assert database["engine"] == dsn.scheme
+    assert database["host"] == host
+    assert database["port"] == dsn.port
+    assert database["name"] == name
+    assert database["user"] == user
+    assert database["password_set"] is password_set
+    # Masked URL: userinfo follows the DSN (password masked as ***), the
+    # ?options=-csearch_path=... query string is dropped.
+    userinfo = f"{user}:***@" if password_set else (f"{user}@" if user else "")
+    masked_host = f"[{host}]" if ":" in host else host
+    expected_masked = f"{dsn.scheme}://{userinfo}{masked_host}"
+    if dsn.port is not None:
+        expected_masked += f":{dsn.port}"
+    if name:
+        expected_masked += f"/{name}"
+    assert database["masked_url"] == expected_masked
     assert "options=" not in database["masked_url"]
 
 
