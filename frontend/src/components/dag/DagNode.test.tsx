@@ -138,6 +138,23 @@ describe('DagNode', () => {
     expect(screen.getByText('未绑定')).toBeInTheDocument()
   })
 
+  // #333：agent 节点 execution 缺口的警告徽标（文案作为 title 悬浮提示）。
+  it('renders the execution warning tag only when executionWarning is set', () => {
+    renderWithProvider({
+      ...baseData,
+      executionWarning: '缺 provider / model，该节点跑不起来',
+    })
+    expect(screen.getByText('缺执行配置')).toHaveAttribute(
+      'title',
+      '缺 provider / model，该节点跑不起来'
+    )
+  })
+
+  it('renders no execution warning tag by default', () => {
+    renderWithProvider(baseData)
+    expect(screen.queryByText('缺执行配置')).not.toBeInTheDocument()
+  })
+
   it('renders not applicable node status', () => {
     renderWithProvider({
       label: '生成关键信息',

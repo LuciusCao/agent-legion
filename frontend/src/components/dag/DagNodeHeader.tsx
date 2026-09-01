@@ -25,6 +25,14 @@ export function DagNodeHeader({ data }: { data: DagNodeData }) {
       )}
       <DagNodeExecutionBadge data={data} />
       <DagNodeChangeBadge changeType={data.changeType} />
+      {data.executionWarning && (
+        <span
+          className={styles.executionWarningTag}
+          title={data.executionWarning}
+        >
+          缺执行配置
+        </span>
+      )}
       {data.executorUnbound && (
         <span
           className={styles.unboundTag}

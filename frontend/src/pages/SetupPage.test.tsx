@@ -19,6 +19,10 @@ function renderSetup() {
       <Routes>
         <Route path="/setup" element={<SetupPage />} />
         <Route path="/" element={<div>dashboard home</div>} />
+        <Route
+          path="/admin/onboarding"
+          element={<div>global onboarding</div>}
+        />
       </Routes>
     </MemoryRouter>
   )
@@ -61,7 +65,7 @@ describe('SetupPage', () => {
     expect(bootstrap).not.toHaveBeenCalled()
   })
 
-  it('creates the administrator with trimmed names and navigates home', async () => {
+  it('creates the administrator with trimmed names and enters global onboarding', async () => {
     bootstrap.mockResolvedValue(undefined)
     renderSetup()
     const user = await fillSetup()
@@ -69,7 +73,8 @@ describe('SetupPage', () => {
     await user.click(screen.getByRole('button', { name: '创建并登录' }))
 
     expect(bootstrap).toHaveBeenCalledWith('admin', 'secret', 'Administrator')
-    expect(await screen.findByText('dashboard home')).toBeInTheDocument()
+    // #333：bootstrap 后先进入全局初始化清单，而不是直接进产品。
+    expect(await screen.findByText('global onboarding')).toBeInTheDocument()
   })
 
   it('allows an empty optional display name', async () => {

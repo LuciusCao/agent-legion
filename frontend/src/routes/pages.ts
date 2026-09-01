@@ -27,3 +27,6 @@ export const QualityPage = lazy(() => import('../pages/QualityPage'))
 export const GlobalSettingsPage = lazy(
   () => import('../pages/GlobalSettingsPage')
 )
+export const GlobalOnboardingPage = lazy(
+  () => import('../pages/GlobalOnboardingPage')
+)
