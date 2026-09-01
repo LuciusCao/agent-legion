@@ -46,7 +46,9 @@ services:
       - ${AGENT_LEGION_S3_BIND:-127.0.0.1}:9000:9000
       - ${AGENT_LEGION_S3_BIND:-127.0.0.1}:9001:9001
     healthcheck:
-      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:9000/ || exit 1"]
+      # 根路径 / 对匿名请求返回 403（S3 API 行为，不代表服务故障），须探
+      # MinIO 兼容的 liveness 端点；探 / 会让容器永远 unhealthy（#340）。
+      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:9000/minio/health/live || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 20
