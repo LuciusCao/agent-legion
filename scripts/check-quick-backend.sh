@@ -139,9 +139,9 @@ run_tests() {
         -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \
-        "${telemetry_args[@]}" \
-        "${cov_args[@]}" \
-        "${split_cov_floor_args[@]}"
+        ${telemetry_args[@]+"${telemetry_args[@]}"} \
+        ${cov_args[@]+"${cov_args[@]}"} \
+        ${split_cov_floor_args[@]+"${split_cov_floor_args[@]}"}
       ;;
     aff)
       # Agent inner-loop tier: affected-test selection over the unit layer.
@@ -192,9 +192,9 @@ run_tests() {
           -n "$workers" --dist worksteal \
           --reruns 1 \
           --reruns-delay 2 \
-          "${telemetry_args[@]}" \
-          "${cov_args[@]}" \
-          "${split_cov_floor_args[@]}"
+          ${telemetry_args[@]+"${telemetry_args[@]}"} \
+          ${cov_args[@]+"${cov_args[@]}"} \
+          ${split_cov_floor_args[@]+"${split_cov_floor_args[@]}"}
       fi
       ;;
     aff-index)
@@ -242,10 +242,10 @@ run_tests() {
         -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \
-        "${shard_args[@]}" \
-        "${telemetry_args[@]}" \
-        "${cov_args[@]}" \
-        "${split_cov_floor_args[@]}"
+        ${shard_args[@]+"${shard_args[@]}"} \
+        ${telemetry_args[@]+"${telemetry_args[@]}"} \
+        ${cov_args[@]+"${cov_args[@]}"} \
+        ${split_cov_floor_args[@]+"${split_cov_floor_args[@]}"}
       ;;
     full)
       # The local full tier is the unit layer — same selection as GATE_TIER=unit.
@@ -271,9 +271,9 @@ run_tests() {
         -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \
-        "${telemetry_args[@]}" \
-        "${cov_args[@]}" \
-        "${split_cov_floor_args[@]}"
+        ${telemetry_args[@]+"${telemetry_args[@]}"} \
+        ${cov_args[@]+"${cov_args[@]}"} \
+        ${split_cov_floor_args[@]+"${split_cov_floor_args[@]}"}
       ;;
     *)
       echo "Unsupported GATE_TIER: ${GATE_TIER}" >&2
