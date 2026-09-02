@@ -187,6 +187,33 @@ def test_merge_detected_never_overrides_manual_same_id() -> None:
     assert merged["agents"][1]["source"] == "detected"
 
 
+def test_merge_detected_adopts_decataloged_entries_as_manual() -> None:
+    """A catalog cutover that removed an id (gemini-cli/goose) must not
+    delete the stored detected entry on the next detection pass — it is
+    adopted as manual so the agent stays registered and launchable."""
+    document = {
+        "api_base": "http://127.0.0.1:8000",
+        "agents": [
+            {
+                "id": "goose",
+                "label": "Goose",
+                "command": "goose",
+                "args": ["acp"],
+                "source": "detected",
+            }
+        ],
+    }
+    # The binary is still on PATH (still detected by the caller's statuses),
+    # but "goose" is no longer in AGENT_CATALOG.
+    merged = merge_detected_into_document(document, _statuses("goose", "kimi"))
+
+    goose = next(agent for agent in merged["agents"] if agent["id"] == "goose")
+    assert goose["source"] == "manual"
+    assert goose["command"] == "goose"
+    kimi = next(agent for agent in merged["agents"] if agent["id"] == "kimi")
+    assert kimi["source"] == "detected"
+
+
 def test_merge_detected_treats_missing_source_as_manual() -> None:
     """Legacy registry rows carry no source marker: they are admin-owned and
     must survive detection passes untouched."""

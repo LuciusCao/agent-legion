@@ -9,12 +9,17 @@ review——两个暴露在 admin UI 的概念（「启用工作流」「代码�
 
 ### 1.1 「启用工作流」（`workflows.enabled`）
 
-- **语义**：不是"工作流功能"的业务开关，而是 **workflow worker 轮询线程的
-  进程级开关**（`worker_startup.py:47`：关掉则不启动 Sweeper 与
-  WorkflowWorkerThread，本进程退化为纯 API 服务）。
-- **现存业务影响**：`is_enabled` 的唯一消费方就是 `worker_startup`——即
-  "同一份代码，按部署形态决定是否承担执行职责"。单机部署（当前唯一支持的
-  形态）下它**没有任何合理的关闭理由**：关掉 = 所有任务永远不执行。
+- **语义**：不是"工作流功能"的业务开关，而是**进程级执行开关**，有两个
+  消费面：
+  1. `worker_startup.py:47`（`WorkflowWorkerThread.is_enabled`）：关掉则不
+     启动 Sweeper 与 WorkflowWorkerThread，本进程不承担执行职责；
+  2. `server/app/routes/job_http.py::require_workflows_enabled`：被 jobs、
+     workflow revisions、skills、job mutations/artifacts、studio agent
+     tools 等 15 个路由模块共 125 处调用——关掉后**这整套 workflow API
+     直接返回 404**（"Workflows are disabled"），不只是后台不执行。
+- **现存业务影响**："同一份代码，按部署形态决定是否承担执行与 workflow
+  API 职责"。单机部署（当前唯一支持的形态）下它**没有任何合理的关闭理由**：
+  关掉 = 所有任务永远不执行 + 全部 workflow API 404。
 - **为什么还在**：多副本部署预案的雏形（API 副本关执行、专属 worker 副本开
   执行）。但多副本至今未落地，且真正的多副本拆分方案（独立 worker 进程）
   也不该复用这个实例级 DB 设置——那是部署编排（compose/env）的事。
@@ -44,9 +49,11 @@ review——两个暴露在 admin UI 的概念（「启用工作流」「代码�
    （`instanceSettingsFields.ts` / `InstanceSettingsSection` /
    `instance_settings.py` 文档默认值）。
 2. **运行时开关改 env**：`AGENT_LEGION_DISABLE_EXECUTION=1`（或同类
-   显式 env）替代 DB 设置，语义不变（进程启动时读取一次）。DB 键保留
-   读时剥离（同 `openclaw` 块先例，`_strip_retired_blocks`），存量文档
-   不需要数据迁移。
+   显式 env）替代 DB 设置，进程启动时读取一次，**两个消费面都改读同一
+   env**——`worker_startup.is_enabled` 与 `require_workflows_enabled`
+   （后者影响 15 个路由模块 / 125 处调用的 404 行为，需随开关语义一起
+   迁移并逐路由确认）。DB 键保留读时剥离（同 `openclaw` 块先例，
+   `_strip_retired_blocks`），存量文档不需要数据迁移。
 3. **多副本部署落地时**重新评估：届时若需要 per-副本 开关，应由部署编排
    （compose profile / env）承担，而不是回到实例级 DB 设置。
 

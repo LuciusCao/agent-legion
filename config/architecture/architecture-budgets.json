@@ -574,7 +574,7 @@
     "frontend/src/pages/DashboardPage.tsx": 75,
     "frontend/src/pages/GlobalOnboardingPage.module.css": 111,
     "frontend/src/pages/GlobalOnboardingPage.storage.ts": 18,
-    "frontend/src/pages/GlobalOnboardingPage.tsx": 120,
+    "frontend/src/pages/GlobalOnboardingPage.tsx": 115,
     "frontend/src/pages/GlobalSettingsPage.module.css": 167,
     "frontend/src/pages/GlobalSettingsPage.tsx": 137,
     "frontend/src/pages/JobDetailPage.module.css": 50,

@@ -198,14 +198,23 @@ def merge_detected_into_document(
     through untouched; stale detected rows are dropped and re-added from the
     catalog template for ids detected this pass — unless a manual entry owns
     the id (manual wins). Entries whose binary vanished simply drop out of
-    the detected set. Other document keys (api_base, ...) are preserved.
+    the detected set. A detected entry whose id left AGENT_CATALOG (catalog
+    cutover, e.g. gemini-cli/goose removal) is adopted as manual instead of
+    being dropped — removing a template must never delete a registered,
+    launchable agent. Other document keys (api_base, ...) are preserved.
     """
     detected = detected_ids(statuses)
-    kept = [
-        agent
-        for agent in document.get("agents", [])
-        if not (isinstance(agent, dict) and agent.get("source") == SOURCE_DETECTED)
-    ]
+    catalog_ids = {entry.id for entry in AGENT_CATALOG}
+    kept: list[dict[str, Any]] = []
+    for agent in document.get("agents", []):
+        is_detected = isinstance(agent, dict) and agent.get("source") == SOURCE_DETECTED
+        if is_detected and agent.get("id") not in catalog_ids:
+            logger.info(
+                "studio agent registry: %r adopted as manual (left the catalog)", agent.get("id")
+            )
+            kept.append(dict(agent, source=SOURCE_MANUAL))
+        elif not is_detected:
+            kept.append(agent)
     manual_ids = {agent.get("id") for agent in kept}
     merged = dict(document)
     merged["agents"] = kept + [
