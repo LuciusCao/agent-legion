@@ -498,3 +498,18 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/329
   ceiling: 140
+- check: architecture.file_budget
+  path: server/app/agent_broker/reaper.py
+  reason: >-
+    Issue 357 persists the reap watermark: the first pass after a
+    restart restores it from global_settings (ReapWatermarkStore) instead
+    of rescanning all terminal rows, and every completed pass saves the
+    advance (5 effective lines past the baseline ceiling 66). The restore
+    and the save sit exactly at the watermark's two transition points, so
+    moving them to a helper would separate the cursor semantics from the
+    scan they gate; the durable fix is merging the two query branches into
+    the shared store module when the next reaper change touches it, at
+    which point this exemption goes stale.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/357
+  ceiling: 81
