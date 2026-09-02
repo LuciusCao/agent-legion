@@ -463,7 +463,7 @@
     "frontend/src/features/workflowStudio/shared/useWorkflowStudioRevisionSelection.ts": 78,
     "frontend/src/features/workflowStudio/shared/useWorkspaceDisplayName.ts": 31,
     "frontend/src/features/workflowStudio/shared/useWorkspaceRuntimeModels.ts": 21,
-    "frontend/src/features/workflowStudio/shared/workflowStudioApprovalRework.ts": 49,
+    "frontend/src/features/workflowStudio/shared/workflowStudioApprovalRework.ts": 45,
     "frontend/src/features/workflowStudio/shared/workflowStudioModel.ts": 58,
     "frontend/src/features/workflowStudio/shared/workflowStudioNav.ts": 21,
     "frontend/src/features/workflowStudio/shared/workflowStudioRouting.ts": 44,
