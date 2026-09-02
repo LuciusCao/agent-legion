@@ -54,12 +54,12 @@ class JobEventBuffer:
         out monotonically by the DB row, and a single process spends its own
         segment in order, so issued revisions stay globally monotonic across
         segments and restarts (a fresh instance pulls the next segment from
-        the already-advanced row). Single-process deployment assumption: with
-        multiple replicas each holding a different segment, the
-        inter-segment publish reorder window is ≤ SEGMENT_SIZE — the SSE
-        consumers only compare revisions as a watermark (stale patches are
-        dropped), so they tolerate reordering, only the resync heuristics
-        would need revisiting."""
+        the already-advanced row). Single-process assumption (uvicorn runs
+        without --workers). Multi-replica residual risks, documented not
+        fixed (Codex P2 on #363): publish reorder ≤ SEGMENT_SIZE (watermark
+        consumers tolerate it); a client switched back to an old replica
+        drops the new one's patches until the old segment drains — needs a
+        cross-instance monotonic guard before multi-replica ships."""
         if self._db_path is None:
             self._revision += 1
             return self._revision
