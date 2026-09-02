@@ -1,14 +1,11 @@
 import {
   dumpWorkflowYaml,
-  parseWorkflowYaml,
+  parseWorkflowYamlStrictNodes,
 } from './workflowStudioYamlDraft.parse'
 import type { SwitchableNodeType } from './workflowStudioYamlDraft.nodeType'
 
-// 画布「添加节点」的入参（#392 Phase 3）：类型 + key（必填、唯一）；
-// label 缺省 = key；code/agent 需要非空 capability（loader 契约），缺省
-// = key；approval 无 capability。新节点默认不接线（after: []）——边的
-// 接线走 YAML 编辑器或「依赖关系」，添加流程的提示文案会说明（approval
-// 在 validate 时会要求可执行入边，属预期引导）。
+// 画布「添加节点」的入参（#392 Phase 3）。新节点默认不接线（after: []）
+// ——接线只能走 YAML 编辑器（「依赖关系」段是只读展示）。
 export type AppendWorkflowNodeInput = {
   nodeType: SwitchableNodeType
   key: string
@@ -19,8 +16,12 @@ export type AppendWorkflowNodeInput = {
 export class WorkflowNodeAppendError extends Error {}
 
 // 追加节点进草稿 YAML。校验全部在写入前完成（AGENTS.md L88）：key 为
-// 合法 YAML 标量、不与既有节点/合成 _start 冲突；code/agent 的
-// capability 非空。失败抛 WorkflowNodeAppendError，草稿不动。
+// 合法 YAML 标量且不与既有节点/合成 _start 冲突；草稿经
+// parseWorkflowYamlStrictNodes 结构守卫（nodes 数组/字符串或某节点非
+// mapping 的草稿拒绝追加——对象展开会把索引当节点键、覆盖保存时不可逆
+// 破坏草稿）；code/agent 的 capability 非空（label 与 capability 缺省
+// = key，approval 无 capability）。失败抛 WorkflowNodeAppendError，
+// 草稿不动。
 export function appendWorkflowNode(
   rawYaml: string,
   input: AppendWorkflowNodeInput
@@ -31,8 +32,14 @@ export function appendWorkflowNode(
       '节点 Key 必须是非空且不含空格/冒号的字符串'
     )
   }
-  const draft = parseWorkflowYaml(rawYaml)
-  if (draft.nodes?.[key] !== undefined) {
+  let draft: ReturnType<typeof parseWorkflowYamlStrictNodes>
+  try {
+    draft = parseWorkflowYamlStrictNodes(rawYaml)
+  } catch {
+    throw new WorkflowNodeAppendError('草稿结构异常；请先在 YAML 编辑器修正')
+  }
+  const nodes = draft.nodes ?? {}
+  if (nodes[key] !== undefined) {
     throw new WorkflowNodeAppendError(`节点 Key「${key}」已存在`)
   }
   const capability =
@@ -43,7 +50,7 @@ export function appendWorkflowNode(
     )
   }
   const next = {
-    ...(draft.nodes ?? {}),
+    ...nodes,
     [key]: {
       type: input.nodeType,
       label: input.label?.trim() || key,

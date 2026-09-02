@@ -71,11 +71,29 @@ describe('appendWorkflowNode', () => {
     ).toThrow(WorkflowNodeAppendError)
   })
 
-  it('rejects empty or malformed keys', () => {
+  it('rejects malformed keys', () => {
     for (const key of ['', '  ', 'has space', 'a:b']) {
       expect(() =>
         appendWorkflowNode(baseYaml, { nodeType: 'code', key })
       ).toThrow(WorkflowNodeAppendError)
     }
+  })
+
+  it('rejects structurally malformed drafts before touching nodes (codex P2 on #400)', () => {
+    // 语法合法但 nodes 是数组/字符串、或某既有节点不是 mapping 的草稿：
+    // 对象展开会把索引当节点键、覆盖保存时不可逆破坏草稿——必须拒绝。
+    const nodesAsArray = 'key: demo\nnodes:\n  - _start\n  - intake\n'
+    expect(() =>
+      appendWorkflowNode(nodesAsArray, { nodeType: 'code', key: 'draft' })
+    ).toThrow('草稿结构异常')
+    const nodesAsString = 'key: demo\nnodes: intake\n'
+    expect(() =>
+      appendWorkflowNode(nodesAsString, { nodeType: 'code', key: 'draft' })
+    ).toThrow('草稿结构异常')
+    const scalarNode =
+      'key: demo\nnodes:\n  _start:\n    type: start\n  intake: just-a-string\n'
+    expect(() =>
+      appendWorkflowNode(scalarNode, { nodeType: 'code', key: 'draft' })
+    ).toThrow('草稿结构异常')
   })
 })

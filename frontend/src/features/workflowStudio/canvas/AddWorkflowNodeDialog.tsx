@@ -121,8 +121,9 @@ export function AddWorkflowNodeDialog(props: Props) {
           </label>
         )}
         <p className={styles.hint}>
-          新节点默认不接线：依赖请在节点详情「依赖关系」或 YAML 编辑器中
-          配置；审批门需要至少一条来自可执行节点的入边才能通过校验。
+          新节点默认不接线：请用「编辑 YAML」在 nodes 段给新节点补
+          after/edges（节点详情的「依赖关系」是只读展示）；审批门需要
+          至少一条来自可执行节点的入边才能通过校验。
         </p>
       </DialogContent>
       <DialogActions>
