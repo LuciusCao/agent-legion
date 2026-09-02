@@ -89,9 +89,9 @@ def test_manual_entry_wins_over_detection_and_survives_redetection() -> None:
             stored,
         )
     )
-    store.update(lambda stored: merge_detected_into_document(stored, _statuses("kimi", "goose")))
+    store.update(lambda stored: merge_detected_into_document(stored, _statuses("kimi", "codex")))
     agents = store.get()["agents"]
-    assert [agent["id"] for agent in agents] == ["kimi", "goose"]
+    assert [agent["id"] for agent in agents] == ["kimi", "codex"]
     assert agents[0] == {
         "id": "kimi",
         "label": "Mine",

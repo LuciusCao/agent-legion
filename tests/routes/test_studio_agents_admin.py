@@ -164,7 +164,7 @@ def test_get_reports_per_agent_detection_status(client, monkeypatch) -> None:
         monkeypatch,
         {
             "kimi": CatalogDetection(True, "/usr/local/bin/kimi", "kimi, version 0.55.0"),
-            "goose": CatalogDetection(False),
+            "codex": CatalogDetection(False),
         },
     )
     payload = client.get(REGISTRY_URL).json()
@@ -174,7 +174,7 @@ def test_get_reports_per_agent_detection_status(client, monkeypatch) -> None:
             "path": "/usr/local/bin/kimi",
             "version": "kimi, version 0.55.0",
         },
-        "goose": {"detected": False, "path": None, "version": None},
+        "codex": {"detected": False, "path": None, "version": None},
     }
 
 
@@ -208,17 +208,17 @@ def test_redetect_never_overrides_manual_entries(client, monkeypatch) -> None:
         monkeypatch,
         {
             "kimi": CatalogDetection(True, "/usr/bin/kimi", None),
-            "goose": CatalogDetection(True, "/usr/bin/goose", "goose 1.0"),
+            "codex": CatalogDetection(True, "/usr/bin/codex-acp", "codex 1.0"),
         },
     )
     payload = client.post(REDETECT_URL).json()
     agents = {agent["id"]: agent for agent in payload["agents"]}
     # Manual kimi row untouched (same id wins over the detected template);
-    # catalog goose appended as detected.
+    # catalog codex appended as detected.
     assert agents["kimi"]["command"] == "/opt/kimi"
     assert agents["kimi"]["source"] == "manual"
     assert agents["mine"]["source"] == "manual"
-    assert agents["goose"]["source"] == "detected"
+    assert agents["codex"]["source"] == "detected"
 
 
 def test_put_preserves_detected_source_for_unchanged_rows(client, monkeypatch) -> None:

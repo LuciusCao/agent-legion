@@ -66,9 +66,14 @@ _CURRENT_DOCS = (
 
 # Files under docs/ that read like current-state docs but are not: the
 # docs-governance proposal quotes retired terms in its pattern table and
-# examples, and the time-point snapshot zone is wholesale exempt.
+# examples, and the time-point snapshot zone is wholesale exempt. Same for
+# governance proposals in general — they must be able to NAME the retired
+# concepts they propose to retire.
 _DOC_EXEMPT_PREFIXES = ("docs/reviews/",)
-_DOC_EXEMPT_FILES = {"docs/architecture/docs-governance-proposal.md"}
+_DOC_EXEMPT_FILES = {
+    "docs/architecture/docs-governance-proposal.md",
+    "docs/architecture/instance-settings-legacy-concepts-governance.md",
+}
 
 # Retirement-phrase context: a hit inside such a sentence is describing the
 # retirement itself. Known blind spot (recorded in the proposal §2.1): the

@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { Button } from '@mui/material'
 import { getStudioAgents } from '../api/studioAgents'
@@ -7,10 +6,7 @@ import type { StudioAgentRegistryResponse } from '../api/studioAgents'
 import { useAuthStore } from '../stores/authStore'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { toErrorMessage } from '../lib/queryError'
-import {
-  dismissGlobalOnboarding,
-  isGlobalOnboardingDismissed,
-} from './GlobalOnboardingPage.storage'
+import { dismissGlobalOnboarding } from './GlobalOnboardingPage.storage'
 import styles from './GlobalOnboardingPage.module.css'
 
 type StudioAgentEntry = NonNullable<
@@ -37,18 +33,17 @@ function isAgentAvailable(
 }
 
 /**
- * #333 全局 onboarding：admin bootstrap 后、进入产品前的极简全局清单。
- * 核心项是 ACP agent 确认（配合 #332 自动探测，确认成本趋近于零）；
- * skill 源等其余实例配置刻意不进清单。任何离开动作都会写 dismissed
- * 标记（localStorage），之后可从全局设置侧栏的「全局初始化清单」回补。
+ * #333 全局 onboarding：admin bootstrap 后、进入产品前的欢迎页。核心是
+ * 告诉管理员产品的工作方式（和 AI agent 对话搭建功能）并确认检测到的
+ * agent；支持 ACP 协议的其他 agent 可跳去全局设置手动添加。任何离开
+ * 动作都会写 dismissed 标记（localStorage），回补入口已随设置页侧栏
+ * 退役（bootstrap 跳转是唯一正常入口，直接访问 URL 仍可达）。
  */
 export default function GlobalOnboardingPage() {
   const navigate = useNavigate()
   const currentUser = useAuthStore((s) => s.user)
-  // 回补识别：已 dismiss 后经全局设置入口回来时给出状态提示（只读一次）。
-  const [wasDismissed] = useState(() => isGlobalOnboardingDismissed())
   const { data, error } = useQuery({
-    // 与全局设置「Studio Agent 管理」共享缓存：回补跳转不重复请求。
+    // 与全局设置「Studio Agent 管理」共享缓存：跳转过去不重复请求。
     queryKey: extraQueryKeys.studioAgents(),
     queryFn: getStudioAgents,
     enabled: currentUser?.role === 'admin',
@@ -65,43 +60,20 @@ export default function GlobalOnboardingPage() {
 
   const agents: StudioAgentWithDetection[] = data?.agents ?? []
   const availability = data?.availability ?? {}
-  const availableCount = agents.filter((agent) =>
-    isAgentAvailable(agent, availability)
-  ).length
-  const agentsReady = agents.length > 0 && availableCount === agents.length
   const loadError = toErrorMessage(error)
 
   return (
     <div className={styles.page}>
       <div className={styles.card}>
-        <h1 className={styles.title}>全局初始化清单</h1>
+        <h1 className={styles.title}>连接你的 AI Agent</h1>
         <p className={styles.hint}>
-          进入产品前确认实例级配置。清单只收全局项；workspace 级配置在各
-          workspace 内引导。
+          在产品中，你可以直接和 AI agent 对话来搭建功能。以下是在服务器上
+          检测到的 agent；如果你使用其他支持 ACP 协议的 agent，也可以手动 添加。
         </p>
-        {wasDismissed && (
-          <p className={styles.hint}>
-            你之前已完成或跳过该清单，可随时在这里回补确认。
-          </p>
-        )}
         <section className={styles.item}>
           <div className={styles.itemHeader}>
-            <h2 className={styles.itemTitle}>确认 ACP agent（Studio 对话）</h2>
-            {data && (
-              <span
-                className={
-                  agentsReady ? styles.statusReady : styles.statusPending
-                }
-              >
-                {agentsReady ? '已就绪' : '待确认'}
-              </span>
-            )}
+            <h2 className={styles.itemTitle}>检测到的 agent</h2>
           </div>
-          <p className={styles.hint}>
-            ACP agent 注册表仅供 Studio 对话 spawn 使用；节点执行的运行时由
-            workspace 的 Agent 定义与 worker 决定。可用性以后端 PATH 探测为
-            准，可稍后在全局设置的「Studio Agent 管理」调整。
-          </p>
           {loadError && (
             <p className={styles.error} role="alert">
               {loadError}
@@ -110,7 +82,8 @@ export default function GlobalOnboardingPage() {
           {!data && !loadError && <p className={styles.hint}>加载中…</p>}
           {data && agents.length === 0 && (
             <p className={styles.hint}>
-              尚未探测到可用的 ACP agent；不影响节点执行，可在全局设置中注册。
+              未检测到已安装的 agent。可先手动添加条目，或安装内置支持的
+              agent（Claude Code、Codex、Kimi）后回到全局设置重新检测。
             </p>
           )}
           {agents.length > 0 && (
@@ -138,13 +111,16 @@ export default function GlobalOnboardingPage() {
               })}
             </ul>
           )}
+          <Button
+            variant="text"
+            onClick={() => leave('/admin/settings#studio-agents')}
+          >
+            手动添加 agent
+          </Button>
         </section>
         <div className={styles.actions}>
           <Button variant="contained" onClick={() => leave('/')}>
             进入产品
-          </Button>
-          <Button variant="text" onClick={() => leave('/admin/settings')}>
-            去全局设置
           </Button>
         </div>
       </div>

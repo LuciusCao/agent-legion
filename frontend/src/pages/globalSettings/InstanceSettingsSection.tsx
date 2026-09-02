@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { FormControlLabel, Switch } from '@mui/material'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import { toErrorMessage } from '../../lib/queryError'
 import { useUiStore } from '../../stores/uiStore'
@@ -8,130 +7,48 @@ import {
   getInstanceSettings,
   updateInstanceSettings,
 } from '../../api/instanceSettings'
-import type {
-  InstanceSettingsResponse,
-  InstanceSettingsUpdate,
-} from '../../api/instanceSettings'
-import { FIELD_GROUPS, fieldDef } from './instanceSettingsFields'
+import type { InstanceSettingsResponse } from '../../api/instanceSettings'
+import { FIELD_GROUPS, RETENTION_FIELD_GROUPS } from './instanceSettingsFields'
+import { GROUP_HINTS } from './instanceSettingsHints'
+import {
+  buildPayload,
+  FieldGroupFields,
+  toFormValues,
+} from './instanceSettingsForm'
+import type { FormValues } from './instanceSettingsForm'
 import styles from '../GlobalSettingsPage.module.css'
-
-type FormValues = Record<string, string | boolean>
-
-function toFormValues(doc: InstanceSettingsResponse): FormValues {
-  return {
-    'cleanup.log_retention_days': String(doc.cleanup.log_retention_days),
-    'cleanup.run_dir_retention_days': String(
-      doc.cleanup.run_dir_retention_days
-    ),
-    'cleanup.interval_seconds': String(doc.cleanup.interval_seconds),
-    'monitoring.sample_interval_seconds': String(
-      doc.monitoring.sample_interval_seconds
-    ),
-    'monitoring.retention_days': String(doc.monitoring.retention_days),
-    heartbeat_interval_seconds: String(doc.heartbeat_interval_seconds),
-    lease_ttl_seconds: String(doc.lease_ttl_seconds),
-    heartbeat_failure_threshold: String(doc.heartbeat_failure_threshold),
-    sweeper_enabled: doc.sweeper_enabled,
-    sweeper_interval_seconds: String(doc.sweeper_interval_seconds),
-    code_capacity: String(doc.code_capacity),
-    materials_ttl_days: String(doc.materials_ttl_days),
-    execution_retention_days: String(doc.execution_retention_days),
-    'workflows.enabled': doc.workflows.enabled,
-    'workflows.max_items_per_run': String(doc.workflows.max_items_per_run),
-    'agent_workers.max_archive_bytes': String(
-      doc.agent_workers.max_archive_bytes
-    ),
-    'agent_workers.min_protocol_version': String(
-      doc.agent_workers.min_protocol_version
-    ),
-  }
-}
-
-function parseNumber(values: FormValues, path: string): number {
-  const def = fieldDef(path)
-  const raw = String(values[path] ?? '').trim()
-  const parsed = Number(raw)
-  if (
-    !raw ||
-    !Number.isFinite(parsed) ||
-    parsed < 0 ||
-    (!def.allowZero && parsed === 0)
-  ) {
-    throw new Error(
-      `${def.label} 必须是${def.allowZero ? '非负' : '大于 0 的'}数字`
-    )
-  }
-  const value = def.integer ? Math.round(parsed) : parsed
-  if (def.integer && value < (def.allowZero ? 0 : 1)) {
-    throw new Error(
-      `${def.label} 必须是${def.allowZero ? '非负整数' : '不小于 1 的整数'}`
-    )
-  }
-  return value
-}
-
-function buildPayload(values: FormValues): InstanceSettingsUpdate {
-  return {
-    cleanup: {
-      log_retention_days: parseNumber(values, 'cleanup.log_retention_days'),
-      run_dir_retention_days: parseNumber(
-        values,
-        'cleanup.run_dir_retention_days'
-      ),
-      interval_seconds: parseNumber(values, 'cleanup.interval_seconds'),
-    },
-    monitoring: {
-      sample_interval_seconds: parseNumber(
-        values,
-        'monitoring.sample_interval_seconds'
-      ),
-      retention_days: parseNumber(values, 'monitoring.retention_days'),
-    },
-    heartbeat_interval_seconds: parseNumber(
-      values,
-      'heartbeat_interval_seconds'
-    ),
-    lease_ttl_seconds: parseNumber(values, 'lease_ttl_seconds'),
-    heartbeat_failure_threshold: parseNumber(
-      values,
-      'heartbeat_failure_threshold'
-    ),
-    sweeper_enabled: Boolean(values.sweeper_enabled),
-    sweeper_interval_seconds: parseNumber(values, 'sweeper_interval_seconds'),
-    code_capacity: parseNumber(values, 'code_capacity'),
-    materials_ttl_days: parseNumber(values, 'materials_ttl_days'),
-    execution_retention_days: parseNumber(values, 'execution_retention_days'),
-    workflows: {
-      enabled: Boolean(values['workflows.enabled']),
-      max_items_per_run: parseNumber(values, 'workflows.max_items_per_run'),
-    },
-    agent_workers: {
-      max_archive_bytes: parseNumber(values, 'agent_workers.max_archive_bytes'),
-      min_protocol_version: parseNumber(
-        values,
-        'agent_workers.min_protocol_version'
-      ),
-    },
-  }
-}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
+
+// 保留策略组（材料 TTL、执行面保留——均为热读立即生效的业务参数）直接
+// 展示；其余调优参数默认折叠进「高级参数」，排障或容量调优时再展开。
+const RETENTION_TITLES = new Set(RETENTION_FIELD_GROUPS.map((g) => g.title))
+const VISIBLE_GROUPS = FIELD_GROUPS.filter((g) => RETENTION_TITLES.has(g.title))
+const ADVANCED_GROUPS = FIELD_GROUPS.filter(
+  (g) => !RETENTION_TITLES.has(g.title)
+)
 
 function InstanceSettingsEditor({
   initial,
 }: {
   initial: InstanceSettingsResponse
 }) {
+  const queryClient = useQueryClient()
   const [values, setValues] = useState<FormValues>(() => toFormValues(initial))
   const [baseline, setBaseline] = useState(() =>
     JSON.stringify(toFormValues(initial))
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const isDirty = JSON.stringify(values) !== baseline
+
+  function setValue(path: string, value: string | boolean) {
+    setValues((prev) => ({ ...prev, [path]: value }))
+  }
 
   async function handleSave() {
     setError('')
@@ -141,9 +58,11 @@ function InstanceSettingsEditor({
       const next = toFormValues(result)
       setValues(next)
       setBaseline(JSON.stringify(next))
+      // 同步 query cache：保存后 30s 内重进页面不得回显旧值（staleTime 窗口）。
+      queryClient.setQueryData(extraQueryKeys.instanceSettings(), result)
       useUiStore
         .getState()
-        .showToast('实例设置已保存，重启服务后生效', 'success')
+        .showToast('实例设置已保存，除保留策略外需重启生效', 'success')
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -151,65 +70,40 @@ function InstanceSettingsEditor({
     }
   }
 
+  function renderGroup(group: (typeof FIELD_GROUPS)[number]) {
+    return (
+      <div key={group.title}>
+        <p className={styles.groupTitle}>{group.title}</p>
+        {GROUP_HINTS[group.title] && (
+          <p className={styles.hint}>{GROUP_HINTS[group.title]}</p>
+        )}
+        <FieldGroupFields group={group} values={values} onChange={setValue} />
+      </div>
+    )
+  }
+
   return (
     <div className={styles.card}>
       <h3 className={styles.heading}>实例设置</h3>
-      <p className={styles.hint}>全局运行时配置；保存后需重启服务才能生效。</p>
+      <p className={styles.hint}>
+        默认值适用于绝大多数部署，仅在排障或容量调优时调整。除材料与执行面
+        保留期外，保存后需重启服务才能生效。
+      </p>
       {error && (
         <p className={styles.error} role="alert">
           {error}
         </p>
       )}
-      {FIELD_GROUPS.map((group) => (
-        <div key={group.title}>
-          <p className={styles.groupTitle}>{group.title}</p>
-          {group.fields.map((field) => (
-            <div className={styles.row} key={field.path}>
-              <label
-                className={styles.label}
-                htmlFor={`instance-${field.path}`}
-              >
-                {field.label}
-              </label>
-              <input
-                id={`instance-${field.path}`}
-                className={styles.currencyInput}
-                type="number"
-                min="0"
-                max={field.max}
-                step={field.integer ? '1' : 'any'}
-                value={String(values[field.path] ?? '')}
-                onChange={(e) =>
-                  setValues((prev) => ({
-                    ...prev,
-                    [field.path]: e.target.value,
-                  }))
-                }
-              />
-              {field.hint && <span className={styles.hint}>{field.hint}</span>}
-            </div>
-          ))}
-          {group.toggles.map((toggle) => (
-            <div className={styles.row} key={toggle.path}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={Boolean(values[toggle.path])}
-                    onChange={(e) =>
-                      setValues((prev) => ({
-                        ...prev,
-                        [toggle.path]: e.target.checked,
-                      }))
-                    }
-                    inputProps={{ 'aria-label': toggle.label }}
-                  />
-                }
-                label={toggle.label}
-              />
-            </div>
-          ))}
-        </div>
-      ))}
+      {VISIBLE_GROUPS.map(renderGroup)}
+      <button
+        type="button"
+        className={styles.textButton}
+        aria-expanded={advancedOpen}
+        onClick={() => setAdvancedOpen((prev) => !prev)}
+      >
+        {advancedOpen ? '收起高级参数' : '展开高级参数'}
+      </button>
+      {advancedOpen && ADVANCED_GROUPS.map(renderGroup)}
       <div className={styles.row}>
         <span className={styles.label}>Skill 根目录</span>
         <code>{initial.skills_root}</code>

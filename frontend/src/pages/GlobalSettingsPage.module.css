@@ -49,14 +49,6 @@
   color: #1a1c1e;
   font-weight: 500;
 }
-/* #333 两层心智：侧栏分组标题与分层提示。 */
-.navGroupTitle,
-.navHint {
-  font-size: 12px;
-  color: #74777f;
-  margin: 8px 0;
-  padding: 0 16px;
-}
 .contentArea {
   flex: 1;
   min-width: 0;
@@ -163,17 +155,4 @@
   font-size: 13px;
   color: #74777f;
   margin: 0;
-}
-.saveButtonWrap {
-  position: relative;
-  display: inline-flex;
-}
-.saveBadge {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: #ba1a1a;
 }

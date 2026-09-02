@@ -356,7 +356,7 @@ server/app/
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
 | DatabaseConnectionView | BaseModel | engine: str, host: str, port: int | None, name: str, user: str, password_set:... | app/routes/infra_connections_contracts.py |
-| StorageConnectionView | BaseModel | configured: bool, endpoint_url: str, public_endpoint_url: str, bucket: str, r... | app/routes/infra_connections_contracts.py |
+| StorageConnectionView | BaseModel | configured: bool, backend: str, endpoint_url: str, public_endpoint_url: str, ... | app/routes/infra_connections_contracts.py |
 | InfraConnectionsResponse | BaseModel | database: DatabaseConnectionView, storage: StorageConnectionView | app/routes/infra_connections_contracts.py |
 | InfraConnectionTestRequest | BaseModel | target: Literal['database', 'storage'] | app/routes/infra_connections_contracts.py |
 | InfraConnectionTestResponse | BaseModel | target: Literal['database', 'storage'], ok: bool, reason: str | None | app/routes/infra_connections_contracts.py |

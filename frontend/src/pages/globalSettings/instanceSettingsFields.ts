@@ -1,4 +1,5 @@
-// 实例设置表单的字段元数据表（从 InstanceSettingsSection 拆出以控制体积预算）。
+// 实例设置表单的字段元数据表（从 InstanceSettingsSection 拆出以控制体积预算；
+// 各组用户视角说明在 instanceSettingsHints.ts）。
 // P-0.5：code_capacity（内置 code 池容量，实例级，重启生效）在「代码池」组。
 // 保留策略类字段（materials/execution retention）见姊妹文件
 // instanceSettingsRetentionFields.ts。
@@ -113,10 +114,9 @@ export const FIELD_GROUPS: FieldGroup[] = [
 ]
 
 export function fieldDef(path: string): NumberFieldDef {
-  for (const group of FIELD_GROUPS) {
-    for (const field of group.fields) {
-      if (field.path === path) return field
-    }
-  }
-  throw new Error(`unknown instance settings field: ${path}`)
+  const field = FIELD_GROUPS.flatMap((g) => g.fields).find(
+    (f) => f.path === path
+  )
+  if (!field) throw new Error(`unknown instance settings field: ${path}`)
+  return field
 }

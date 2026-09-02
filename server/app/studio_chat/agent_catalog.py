@@ -57,6 +57,9 @@ class CatalogAgent:
     version_args: tuple[str, ...]
 
 
+# Supported agents only: gemini-cli and goose were removed from the catalog
+# (product decision, settings-ux-polish) — existing registry entries for them
+# are untouched (manual rows survive), they simply stop auto-detecting.
 AGENT_CATALOG: tuple[CatalogAgent, ...] = (
     CatalogAgent("kimi", "Kimi Code", "kimi", ("acp",), ("kimi",), ("--version",)),
     CatalogAgent(
@@ -68,15 +71,6 @@ AGENT_CATALOG: tuple[CatalogAgent, ...] = (
         ("--version",),
     ),
     CatalogAgent("codex", "OpenAI Codex (ACP)", "codex-acp", (), ("codex-acp",), ("--version",)),
-    CatalogAgent(
-        "gemini-cli",
-        "Gemini CLI",
-        "gemini",
-        ("--experimental-acp",),
-        ("gemini",),
-        ("--version",),
-    ),
-    CatalogAgent("goose", "Goose", "goose", ("acp",), ("goose",), ("--version",)),
 )
 
 
