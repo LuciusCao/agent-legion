@@ -6,12 +6,8 @@ list itself outgrew the ceiling). DDL-only versions (new indexes/columns)
 have no Python function — their DDL lives in ``postgres_schema.sql`` and
 is replayed by the idempotent full-file apply — but they still get a
 registry entry so ``max(version)`` stays meaningful for upgrade gating.
-The name per version is the migration that version introduced (see the
-pin tests under tests/db/).
-
 Order note: migrate_runs (v53) must run after every migration that still
-reads job_batches (e.g. the v34 external-connections payload rewrite); the
-version-sorted registry guarantees this.
+reads job_batches; the version-sorted registry guarantees this.
 """
 
 from __future__ import annotations
@@ -34,6 +30,7 @@ from server.app.db.migrations import (
     migrate_jobs_run_id_index,
     migrate_local_executor_removal,
     migrate_node_cms_config,
+    migrate_ops_runtime_profile_samples,
     migrate_retire_global_register_tokens,
     migrate_runs,
     migrate_scoped_token_origin,
@@ -162,10 +159,11 @@ MIGRATIONS: list[SchemaMigration] = [
     SchemaMigration(70, "retire_workflow_key_columns", migrate_retire_workflow_key_columns),
     # v71 (#328): widen the versioned_entities entity_type CHECK so
     # workspace-scoped preview panel bundles join the draft → published
-    # lifecycle. DDL-only in shape but carried as an apply fn: the schema
-    # file's create-table-if-not-exists never rewrites the CHECK on existing
-    # databases (same drop + re-add pattern as v30/v47).
+    # lifecycle; carried as an apply fn because create-table-if-not-exists
+    # never rewrites the CHECK on existing databases (drop + re-add).
     SchemaMigration(71, "preview_panels", migrate_preview_panels),
+    # v72 (#359 L1): runtime-profile gauge table; seeded to the ops series.
+    SchemaMigration(72, "ops_runtime_profile_samples", migrate_ops_runtime_profile_samples),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]

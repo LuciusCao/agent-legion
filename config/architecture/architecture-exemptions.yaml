@@ -265,14 +265,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 242
 - check: architecture.file_budget
-  path: server/app/db/migration_chain.py
-  reason: The issue-211 M2 batch registers v70 (retire_workflow_key_columns) —
-    one registry entry plus its comment; the chain only grows one entry per
-    schema version. Stale after the M3 cleanup collapses the chain comments.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 108
-- check: architecture.file_budget
   path: server/app/db/migrations/runs_sql.py
   reason: The issue-211 M2 batch adds _INSERT_RUNS_SQL_V70 — the
     column-less twin of the job_batches cutover (without it a pre-v53
@@ -393,6 +385,109 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/329
   ceiling: 156
+- check: architecture.file_budget
+  path: server/app/agent_broker/agent_result_commit.py
+  reason: >-
+    Issue #359 adds the execute-done counter at the terminal-commit point
+    (two effective lines). The counter must fire exactly where the lease
+    and request both reach their terminal state — moving it out would
+    separate the gauge from the state transition it measures.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 72
+- check: architecture.file_budget
+  path: server/app/agent_broker/broker.py
+  reason: >-
+    Issue #359 wraps the claim path with the latency/204 gauge (timer plus
+    a finally that covers every return path). The timer must bracket the
+    whole broker.claim body — including the empty-claim signal and the
+    worker-poll notify — so the gauge measures what a Worker experiences;
+    extracting it would split the claim protocol from its measurement.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 246
+- check: architecture.file_budget
+  path: server/app/agent_broker/dispatch_pool.py
+  reason: >-
+    Issue #359 counts submissions and saturation skips in submit() plus a
+    pending_depth() reader for the sampler. The counters must sit at the
+    queue boundary they observe; the pool module is already the smallest
+    unit that owns the backlog semantics.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 60
+- check: architecture.file_budget
+  path: server/app/db/postgres_schema.sql
+  reason: >-
+    Issue #359 adds the ops_runtime_profile_samples gauge table (schema
+    v72): the six-stage pipeline columns are one cohesive block in the
+    declarative schema file whose growth model is one block per schema
+    version. Splitting a create-table block out of the replay schema would
+    fork the single source of truth for fresh databases; revisit only if
+    the schema file needs a structural split of its own.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 851
+- check: architecture.file_budget
+  path: server/app/agent_broker/sweepers.py
+  reason: >-
+    Issue #359's review round counts sweeper force-closed executions in
+    the done-rate gauge (the requeue-limit branch): without it the execute
+    stage undercounts exactly when workers are lost en masse. The two
+    counters sit at the branch that owns the terminal transition; moving
+    them out would split the sweep outcome from its measurement.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 167
+
+- check: architecture.file_budget
+  path: server/app/services/runtime_profile/classifier.py
+  reason: >-
+    Issue #359's P1 review round added the blocked-claim branch (the #351
+    discrimination table's blocked row: deep queue + workers claiming +
+    every candidate skipped). The branch shares the evidence dict and the
+    verdict helpers with its sibling rules; splitting the classifier by
+    rule family would separate the priority order (documented in the
+    module docstring) from the code that implements it.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 145
+
+- check: architecture.file_budget
+  path: server/app/services/runtime_profile/sampling.py
+  reason: >-
+    Issue #359's P0/P1 review round grew the sampler: per-bucket DB-pool
+    wait DELTAS (cumulative-counter memo) and the wide-window bin rollup
+    both belong with the values they prepare, next to the facade calls
+    they feed. Splitting either into the queries layer would move value
+    marshalling away from the only caller; revisit if a second gauge
+    family joins the sampler.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 108
+
+- check: architecture.file_budget
+  path: server/app/services/ops_metrics/service.py
+  reason: >-
+    Issue #359 extends the sampling pass to persist the runtime-profile
+    gauge row (one call plus the pool/pool-backlog gauge readers kept next
+    to their only consumer). The sampler stays one cohesive write surface;
+    the durable split is a sampling-dispatch module if more gauge families
+    join, at which point this exemption goes stale.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 230
+- check: architecture.file_budget
+  path: server/app/workflow_worker/thread.py
+  reason: >-
+    Issue #359 instruments the pass loop (one note_pass call plus the
+    dispatch registration in start()); three effective lines past the
+    baseline. The pass loop is the single place pass timing exists; the
+    durable fix is a metrics-bridge module if more instrumentation joins
+    the loop, at which point this exemption goes stale.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 190
 - check: architecture.file_budget
   path: server/app/routes/__init__.py
   reason: Issue 329 mounts the job diagnosis observation router in the route

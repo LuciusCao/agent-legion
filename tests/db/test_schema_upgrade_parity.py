@@ -43,17 +43,15 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v71, preview_panels, #328) must leave behind
-# so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v71 only widens the versioned_entities entity_type CHECK
-# (drop + re-add, same pattern as v30/v47): no table/column/index delta, so
-# the catalog inventories stay empty and the constraint rewind rides the DDL
-# hook below; the v70 (retire_workflow_key_columns) effects stay in place —
+# Effects the newest migration (v72, ops_runtime_profile_samples, #359) must
+# leave behind so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. v72 creates one gauge table plus its bucket index; the
+# v71 (preview_panels) CHECK widening and the v70 effects stay in place —
 # they belong to the SCHEMA_VERSION-1 shape after the rewind.
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("ops_runtime_profile_samples",)
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
-_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "preview_panels"
+_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ("idx_ops_runtime_profile_bucket",)
+_NEWEST_MIGRATION_NAME = "ops_runtime_profile_samples"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a

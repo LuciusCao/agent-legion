@@ -218,7 +218,7 @@ def test_upgrade_path_applies_alignment(tmp_path: Path) -> None:
     assert row is not None
     assert str(row["name"]) == "jobs_workflow_key_alignment"
     assert tail is not None
-    assert str(tail["name"]) == "preview_panels"
+    assert str(tail["name"]) == "ops_runtime_profile_samples"
 
 
 def test_aligned_entity_history_is_preserved(fresh_db) -> None:

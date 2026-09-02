@@ -130,6 +130,7 @@
     "tests/services/test_quality_sampling.py",
     "tests/services/test_quality_stats.py",
     "tests/services/test_run_dir_cleanup.py",
+    "tests/services/test_runtime_profile.py",
     "tests/services/test_scoped_tokens.py",
     "tests/services/test_studio_chat_availability.py",
     "tests/services/test_studio_chat_issue158.py",
