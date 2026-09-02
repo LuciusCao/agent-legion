@@ -51,7 +51,9 @@ export function WorkflowNodeInspectorHeader(props: Props) {
             aria-label="节点类型"
             className={styles.typeSelect}
             value={props.nodeType}
-            onChange={(event) => handleChange(event.target.value as SwitchableNodeType)}
+            onChange={(event) =>
+              handleChange(event.target.value as SwitchableNodeType)
+            }
           >
             {(Object.keys(NODE_TYPE_LABELS) as SwitchableNodeType[]).map(
               (type) => (

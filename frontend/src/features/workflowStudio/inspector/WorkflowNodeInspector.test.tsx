@@ -200,9 +200,7 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     expect(setDefinitionYaml).not.toHaveBeenCalled()
     const { useUiStore } = await import('../../../stores/uiStore')
     await vi.waitFor(() =>
-      expect(useUiStore.getState().toast?.message).toContain(
-        '可执行节点的入边'
-      )
+      expect(useUiStore.getState().toast?.message).toContain('可执行节点的入边')
     )
   })
 
