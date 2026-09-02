@@ -58,17 +58,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # container job 的默认 shell 是 sh（dash，无 pipefail）；脚本步骤统一
+      # bash——首次触发即踩坑（sh: Illegal option -o pipefail）。
       - name: Build release binary
+        shell: bash
         run: cargo build --release --locked --manifest-path velites/Cargo.toml
 
       # 构建即冒烟：产物必须能在目标平台上跑起来（--version 走 clap 的
       # version 属性，不需要配置与网络）。
       - name: Smoke test
+        shell: bash
         run: ./velites/target/release/velites --version
 
       # 版本号直接取自 tag（validate job 已核对与 Cargo.toml 一致），避免在
       # rust 容器里引入 python3 依赖。
       - name: Package
+        shell: bash
         run: |
           set -euo pipefail
           name="velites-${GITHUB_REF_NAME#velites-v}-${{ matrix.triple }}"
