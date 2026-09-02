@@ -110,16 +110,17 @@ describe('GlobalOnboardingPage', () => {
     expect(screen.getByText('不可用')).toBeInTheDocument()
   })
 
-  it('offers manual add jumping to the studio-agents settings section', async () => {
+  it('shows the deferred manual-add hint next to the enter button', async () => {
     renderPage()
     await screen.findByText('Kimi Code')
 
-    fireEvent.click(screen.getByRole('button', { name: '手动添加 agent' }))
-
-    expect(storageStub.getItem(DISMISS_KEY)).toBe('1')
-    expect((await screen.findByTestId('location')).textContent).toBe(
-      '/admin/settings#studio-agents'
-    )
+    // 手动添加降级为提示文案（不再跳转），与「进入产品」同在 actions 行。
+    expect(
+      screen.getByText('你也可以稍后前往设置页面手动添加')
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '手动添加 agent' })
+    ).not.toBeInTheDocument()
   })
 
   it('accepts the #332 per-agent detection shape (availability/detected/source)', async () => {
@@ -167,8 +168,9 @@ describe('GlobalOnboardingPage', () => {
     expect(
       await screen.findByText(/未检测到已安装的 agent/)
     ).toBeInTheDocument()
+    // 空状态也保留了 deferred 手动添加提示。
     expect(
-      screen.getByRole('button', { name: '手动添加 agent' })
+      screen.getByText('你也可以稍后前往设置页面手动添加')
     ).toBeInTheDocument()
   })
 

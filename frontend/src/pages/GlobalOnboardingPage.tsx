@@ -111,14 +111,9 @@ export default function GlobalOnboardingPage() {
               })}
             </ul>
           )}
-          <Button
-            variant="text"
-            onClick={() => leave('/admin/settings#studio-agents')}
-          >
-            手动添加 agent
-          </Button>
         </section>
         <div className={styles.actions}>
+          <p className={styles.actionsHint}>你也可以稍后前往设置页面手动添加</p>
           <Button variant="contained" onClick={() => leave('/')}>
             进入产品
           </Button>
