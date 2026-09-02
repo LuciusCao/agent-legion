@@ -8,6 +8,20 @@ from server.app.db.retry import with_database_conflict_retry
 from server.app.db.transaction import write_transaction
 from server.app.events.models import CompactedJobEvents, JobEvent, JobEventKind
 
+SEGMENT_SIZE = 1024
+"""Revisions handed out per ``job_event_seq`` bump (#353).
+
+Segmented allocation: each bump advances the singleton row by a whole
+segment (``value = value + SEGMENT_SIZE``) and the segment is spent from an
+in-process counter, so row-lock contention on wavefront boundaries shrinks
+by the segment size. 1024 sits inside the recommended 512–2048 band: at the
+~dozens-of-writes/sec baseline a segment lasts long enough to ride out a
+wavefront, while the worst-case restart waste and the multi-replica
+inter-segment reorder window both stay ≤ 1024 revisions. Revisions are
+monotonic, not dense: unused tail numbers of an exhausted process's last
+segment are simply skipped (accepted trade-off — every consumer treats the
+revision as a watermark, never a dense index)."""
+
 
 class JobEventBuffer:
     """In-memory event buffer; ``db_path`` (the JobQueries facade in
@@ -20,6 +34,10 @@ class JobEventBuffer:
         self._events: deque[JobEvent] = deque()
         self._resync_workspace_ids: set[str] = set()
         self._revision = 0
+        # #353 segmented allocation state. ``_segment_end`` is the inclusive
+        # last revision of the DB-granted segment (0 = nothing granted yet);
+        # both fields are only touched under ``self._lock``.
+        self._segment_end = 0
         self._lock = Lock()
 
     def current_revision(self) -> int:
@@ -30,21 +48,41 @@ class JobEventBuffer:
     def _next_revision_locked(self) -> int:
         """Advance the global revision. Caller must hold ``self._lock`` so the
         deque append order always matches revision order and ``self._revision``
-        never regresses under concurrent recorders. The DB bump already
-        serializes issuers on the ``job_event_seq`` singleton row, so holding
-        the lock across it adds no extra contention."""
+        never regresses under concurrent recorders. Segmented allocation (#353):
+        the ``job_event_seq`` singleton row is bumped once per SEGMENT_SIZE
+        revisions; the segment tail is spent from memory. Segments are handed
+        out monotonically by the DB row, and a single process spends its own
+        segment in order, so issued revisions stay globally monotonic across
+        segments and restarts (a fresh instance pulls the next segment from
+        the already-advanced row). Single-process assumption (uvicorn runs
+        without --workers). Multi-replica residual risks, documented not
+        fixed (Codex P2 on #363): publish reorder ≤ SEGMENT_SIZE (watermark
+        consumers tolerate it); a client switched back to an old replica
+        drops the new one's patches until the old segment drains — needs a
+        cross-instance monotonic guard before multi-replica ships."""
         if self._db_path is None:
             self._revision += 1
             return self._revision
-        bumped = self._bump_seq(self._db_path)
-        self._revision = max(self._revision, bumped)
+        if self._revision >= self._segment_end:
+            # Segment exhausted: take the next [value+1, value+SEGMENT_SIZE]
+            # window from the singleton row in one UPDATE. The row's value
+            # after the bump is the inclusive end of this process's window;
+            # the start is end-SEGMENT_SIZE+1 — never 0-based, because other
+            # processes (or a previous incarnation of this one) may already
+            # have spent earlier segments, so a fresh instance must resume
+            # counting from the DB watermark, not from zero.
+            end = self._bump_seq(self._db_path, SEGMENT_SIZE)
+            self._segment_end = end
+            self._revision = max(self._revision, end - SEGMENT_SIZE)
+        self._revision += 1
         return self._revision
 
     @with_database_conflict_retry
-    def _bump_seq(self, db_path: str) -> int:
+    def _bump_seq(self, db_path: str, count: int = 1) -> int:
         with write_transaction(db_path) as conn:
             row = conn.execute(
-                "update job_event_seq set value = value + 1 where id = 1 returning value"
+                "update job_event_seq set value = value + %s where id = 1 returning value",
+                (count,),
             ).fetchone()
         if row is None:
             raise RuntimeError("job_event_seq singleton row is missing")
