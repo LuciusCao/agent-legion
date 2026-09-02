@@ -12,7 +12,7 @@ Actual disk reclamation is an ops step AFTER this script — ``VACUUM FULL`` /
 ``pg_repack`` at low peak (VACUUM FULL locks the table). New code rows never
 grow again: enqueue persists only the stub and the claim response rebuilds
 the payloads in memory; terminal transitions slim automatically
-(``server/app/agent_broker/code_manifest.py``).
+(``server/app/agent_broker/manifest_trim.py``).
 
 Usage:
     uv run python -m scripts.trim_terminal_code_manifests [--dry-run] \
@@ -24,7 +24,7 @@ from __future__ import annotations
 import argparse
 import logging
 
-from server.app.agent_broker.code_manifest import CODE_MANIFEST_TRIM
+from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.db.transaction import write_transaction
 from server.app.settings import load_settings
 
@@ -56,7 +56,7 @@ def trim_terminal_code_manifests(
                 return int(row["cnt"]) if row else 0
             updated = conn.execute(
                 "update agent_execution_requests set manifest_json="
-                + CODE_MANIFEST_TRIM
+                + MANIFEST_TRIM
                 + " where execution_id in ("
                 " select execution_id from agent_execution_requests where "
                 + _HEAVY_CONTEXT_WHERE

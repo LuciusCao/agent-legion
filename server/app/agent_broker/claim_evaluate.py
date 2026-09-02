@@ -24,7 +24,7 @@ from server.app.agent_broker.claim_scan import (
     WorkerView,
     labels_satisfy,
 )
-from server.app.agent_broker.code_manifest import CODE_MANIFEST_TRIM
+from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.agent_control.registry import CODE_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
@@ -244,8 +244,6 @@ def evaluate_candidate(
 def cancel_request(conn: Any, execution_id: str) -> None:
     conn.execute(
         "update agent_execution_requests set state='cancelled',"
-        " finished_at=current_timestamp, manifest_json="
-        + CODE_MANIFEST_TRIM
-        + " where execution_id=%s",
+        " finished_at=current_timestamp, manifest_json=" + MANIFEST_TRIM + " where execution_id=%s",
         (execution_id,),
     )

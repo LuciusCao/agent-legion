@@ -652,6 +652,13 @@ create index if not exists idx_executor_leases_workspace_active on executor_leas
 create index if not exists idx_executor_leases_workspace_node_active
   on executor_leases(workspace_id, node_key, status, expires_at);
 create index if not exists idx_executor_leases_status_expires_at on executor_leases(status, expires_at);
+-- Retention keyset page (#354): the sweeper walks non-active leases by
+-- (expires_at, id) with status != 'active' — an inequality on the leading
+-- column of the status index, so it cannot serve the ordering. This partial
+-- twin gives the page an ordered scan without a sort, which matters on the
+-- first full sweep of a fat table.
+create index if not exists idx_executor_leases_retention_page
+  on executor_leases(expires_at, id) where status != 'active';
 create index if not exists idx_executor_leases_job_status on executor_leases(job_id, status);
 
 drop table if exists remote_executions;

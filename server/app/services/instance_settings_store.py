@@ -14,6 +14,7 @@ this store is the domain facade over one fixed key.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from server.app.db.dialect import ConnectSource
@@ -37,7 +38,18 @@ class InstanceSettingsStore:
         return self._kv().get_global_settings_document(GLOBAL_SETTINGS_KEY)
 
     def put(self, document: dict[str, Any]) -> None:
+        """Replace the stored document (whole-document semantics)."""
         self._kv().put_global_settings_document(GLOBAL_SETTINGS_KEY, document)
+
+    def update(self, updater: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
+        """Read-modify-write the stored document in one transaction.
+
+        The same row-locked RMW the cleanup-sweep cursor store uses
+        (#281): concurrent writers queue on the row lock instead of
+        last-wins overwriting each other. Consumers that only ever write
+        through ``put`` (the admin route) are unaffected.
+        """
+        self._kv().update_global_settings_document(GLOBAL_SETTINGS_KEY, updater)
 
     def _kv(self) -> GlobalSettingsKVQueriesMixin:
         """The KV accessor: the facade itself, or an adapter for a bare DSN
