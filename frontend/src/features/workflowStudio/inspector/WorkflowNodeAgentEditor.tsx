@@ -12,32 +12,24 @@ type Props = {
   /** 已绑定该 capability 的 Agent id；null = 新建模式（capability 预填）。 */
   agentId: string | null
   capability: string
-  /** 节点显式执行类型（#284）：type=code 且无 Agent 时入口文案为
-   * 「切换为 Agent 执行」，创建成功后由 onSwitchToAgent 改写草稿 YAML。 */
-  nodeType?: 'code' | 'agent'
-  /** type=code 节点新建 Agent 成功后回调：把草稿 YAML 的节点 type 改为
-   * agent（返回是否改写成功）。 */
-  onSwitchToAgent?: () => boolean
   readOnly?: boolean
 }
 
 /**
- * 节点详情内嵌的 Agent 编辑/新建入口。Agent 定义仍是 workspace 级共享实体
- * （versioned_entities，一 capability 一 published），此处仅改变 UI 承载；
- * 保存/发布/归档后失效 Agent 目录与 Studio capability 路由缓存。
+ * type=agent 节点详情内嵌的 Agent 编辑/新建入口（#392 起只挂在 agent 节点
+ * 上；code 节点的类型变更走头部类型选择器）。Agent 定义仍是 workspace 级
+ * 共享实体（versioned_entities，一 capability 一 published），此处仅改变
+ * UI 承载；保存/发布/归档后失效 Agent 目录与 Studio capability 路由缓存。
  */
 export function WorkflowNodeAgentEditor({
   agentId,
   capability,
-  nodeType,
-  onSwitchToAgent,
   readOnly,
 }: Props) {
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
   const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined
   if (readOnly || !workspaceId) return null
-  const switchToAgent = !agentId && nodeType === 'code'
 
   function refresh() {
     void queryClient.invalidateQueries({
@@ -52,15 +44,13 @@ export function WorkflowNodeAgentEditor({
   return (
     <div>
       <Button size="small" onClick={() => setOpen((value) => !value)}>
-        {agentEditorButtonLabel(open, agentId, switchToAgent)}
+        {agentEditorButtonLabel(open, agentId)}
       </Button>
       {open && (
         <WorkflowNodeAgentEditorPanel
           workspaceId={workspaceId}
           agentId={agentId}
           capability={capability}
-          switchToAgent={switchToAgent}
-          onSwitchToAgent={onSwitchToAgent}
           onRefresh={refresh}
           onClose={() => setOpen(false)}
         />

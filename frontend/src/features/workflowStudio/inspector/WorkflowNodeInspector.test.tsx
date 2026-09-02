@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { createElement, type ReactNode } from 'react'
 import { WorkflowNodeInspector } from './WorkflowNodeInspector'
@@ -83,6 +83,65 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     expect(screen.getByText('依赖关系')).toBeInTheDocument()
     // 不再是「选择一个节点」空态。
     expect(screen.queryByText('选择一个节点')).not.toBeInTheDocument()
+  })
+
+  it('shows the node type selector on the header (#392)', async () => {
+    renderInspector('intake')
+
+    // code 节点头部有类型选择器（原生 select），三选一；start 不在选项里。
+    const selector = await screen.findByLabelText('节点类型')
+    expect(selector).toHaveValue('code')
+    expect(screen.getByRole('option', { name: 'Code' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Agent' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '审批门' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('option', { name: 'start' })
+    ).not.toBeInTheDocument()
+  })
+
+  it('switches the node type via the selector and sanitizes fields', async () => {
+    const setDefinitionYaml = vi.fn()
+    const yamlWithAgentFields = draftYaml.replace(
+      '  intake:\n    label: 读取知识点\n    capability: intake\n',
+      '  intake:\n    type: agent\n    label: 读取知识点\n' +
+        '    capability: intake\n    skill: demo/skill\n'
+    )
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        agentCatalog={[]}
+        selectedNodeKey="intake"
+        definitionYaml={yamlWithAgentFields}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    await screen.findByLabelText('节点执行能力')
+    fireEvent.change(await screen.findByLabelText('节点类型'), {
+      target: { value: 'approval' },
+    })
+
+    expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
+    const nextYaml = setDefinitionYaml.mock.calls[0][0] as string
+    // type 改为 approval 且字段按目标类型清洗（capability/skill 剥除）。
+    expect(nextYaml).toContain('type: approval')
+    expect(nextYaml).not.toContain('capability: intake')
+    expect(nextYaml).not.toContain('skill: demo/skill')
+  })
+
+  it('renders no agent entry on a code node (#392 regression)', async () => {
+    renderInspector('intake')
+
+    await screen.findByLabelText('节点执行能力')
+    // code 节点不再长出 Agent 编辑/新建入口（类型变更走头部选择器）。
+    expect(
+      screen.queryByRole('button', { name: '为此 capability 新建 Agent' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '编辑 Agent' })
+    ).not.toBeInTheDocument()
   })
 
   it('keeps the read-only entry contract for a ghost start node', () => {

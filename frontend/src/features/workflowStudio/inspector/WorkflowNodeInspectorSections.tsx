@@ -14,8 +14,6 @@ export type InspectorSectionProps = {
   agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
-  /** type=code 节点「切换为 Agent 执行」（改写草稿 YAML type；Body 注入）。 */
-  onSwitchToAgent?: () => boolean
   readOnly?: boolean
 }
 

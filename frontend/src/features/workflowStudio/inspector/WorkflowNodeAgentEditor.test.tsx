@@ -168,8 +168,7 @@ describe('WorkflowNodeAgentEditor', () => {
     expect(mocks.fetchAgentDefinition).not.toHaveBeenCalled()
   })
 
-  it('offers 切换为 Agent 执行 for a code node and stays open in publish mode after create', async () => {
-    const onSwitchToAgent = vi.fn().mockReturnValue(true)
+  it('stays open in publish mode after creating a draft agent (agent node entry, #392)', async () => {
     mocks.createAgentDefinition.mockResolvedValue({ agent_id: 'agent-new' })
     mocks.fetchAgentDefinition.mockResolvedValue({
       latest: {
@@ -183,14 +182,11 @@ describe('WorkflowNodeAgentEditor', () => {
       },
       published: null,
     })
-    renderEditor({
-      agentId: null,
-      capability: 'generate_key_info',
-      nodeType: 'code',
-      onSwitchToAgent,
-    })
+    renderEditor({ agentId: null, capability: 'generate_key_info' })
 
-    fireEvent.click(screen.getByRole('button', { name: '切换为 Agent 执行' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: '为此 capability 新建 Agent' })
+    )
     fireEvent.change(await screen.findByLabelText('Agent ID'), {
       target: { value: 'agent-new' },
     })
@@ -198,14 +194,7 @@ describe('WorkflowNodeAgentEditor', () => {
       fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
     })
 
-    const { useUiStore } = await import('../../../stores/uiStore')
-    await vi.waitFor(() =>
-      expect(useUiStore.getState().toast?.message).toBe(
-        '已切换为 Agent 执行，发布 Agent 与 workflow 后生效'
-      )
-    )
     expect(mocks.createAgentDefinition).toHaveBeenCalled()
-    expect(onSwitchToAgent).toHaveBeenCalledTimes(1)
     // 面板不关：切到编辑/发布模式加载新草稿（/api/agent-catalog 只回
     // published，直接关面板会让用户无法从该入口发布它）。
     await vi.waitFor(() =>
@@ -215,32 +204,6 @@ describe('WorkflowNodeAgentEditor', () => {
       )
     )
     expect(await screen.findByRole('button', { name: '发布' })).toBeEnabled()
-  })
-
-  it('degrades to a manual-edit hint when the draft type switch fails', async () => {
-    const onSwitchToAgent = vi.fn().mockReturnValue(false)
-    mocks.createAgentDefinition.mockResolvedValue({ agent_id: 'agent-new' })
-    renderEditor({
-      agentId: null,
-      capability: 'generate_key_info',
-      nodeType: 'code',
-      onSwitchToAgent,
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: '切换为 Agent 执行' }))
-    fireEvent.change(await screen.findByLabelText('Agent ID'), {
-      target: { value: 'agent-new' },
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
-    })
-
-    const { useUiStore } = await import('../../../stores/uiStore')
-    await vi.waitFor(() =>
-      expect(useUiStore.getState().toast?.message).toBe(
-        'Agent 草稿已创建；请手动在 YAML 将节点 type 改为 agent 并发布'
-      )
-    )
   })
 
   it('renders nothing in read-only mode or without a workspace', () => {
