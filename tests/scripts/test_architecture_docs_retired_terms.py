@@ -102,6 +102,16 @@ def test_hits_current_behavior_mention() -> None:
     assert hits == [(1, terms[0])]
 
 
+def test_hits_prose_aliases_that_motivated_the_check() -> None:
+    # The #360 review's actual drift phrasings (codex review on #375): the
+    # path pattern alone would miss both the English prose form and the
+    # Chinese form that reintroduced the retired concepts.
+    prose = (RetiredTerm(pattern=r"\bpipeline nodes?\b"),)
+    chinese = (RetiredTerm(pattern=r"外部 skill"),)
+    assert find_retired_term_hits(["pipeline nodes run the stages"], prose) != []
+    assert find_retired_term_hits(["外部 skill 仓库按锁定 commit 固定版本"], chinese) != []
+
+
 def test_exempts_retirement_phrase_in_same_line() -> None:
     terms = (RetiredTerm(pattern=r"\bopenclaw\b", retired_in="#75"),)
     hits = find_retired_term_hits(["the openclaw runtime was retired in #75"], terms)
