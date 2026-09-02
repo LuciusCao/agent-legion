@@ -191,6 +191,7 @@ server/app/
 | POST | `/workspaces/{workspace_id}/runs` | `create_run` | routes/runs.py |
 | GET | `/workspaces/{workspace_id}/runs` | `list_runs` | routes/runs.py |
 | GET | `/workspaces/{workspace_id}/runs/{run_id}` | `get_run` | routes/runs.py |
+| GET | `/metrics/runtime-profile` | `get_runtime_profile` | routes/runtime_profile.py |
 | GET | `/agent-catalog/skills/{skill_key:path}` | `get_skill` | routes/skill_catalog_route.py |
 | GET | `/skills/directories` | `list_skill_directories` | routes/skill_directories.py |
 | POST | `/skills/validate` | `validate_skill` | routes/skills.py |
@@ -462,6 +463,9 @@ server/app/
 | RunListResponse | BaseModel | runs: list[RunRecord] | app/routes/run_contracts.py |
 | RunJobStats | BaseModel | total: int, by_status: dict[str, int] | app/routes/run_contracts.py |
 | RunDetailResponse | BaseModel | run: RunRecord, job_stats: RunJobStats | app/routes/run_contracts.py |
+| ProfileBucket | BaseModel | bucket_start: str, intake_runs: int, intake_items: int, pass_count: int, pass... | app/routes/runtime_profile_contracts.py |
+| ProfileVerdict | BaseModel | stage: str, conclusion: str, evidence: dict[str, object] | app/routes/runtime_profile_contracts.py |
+| RuntimeProfileResponse | BaseModel | buckets: list[ProfileBucket], verdict: ProfileVerdict | app/routes/runtime_profile_contracts.py |
 | SkillFileResponse | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/skill_contracts.py |
 | SkillDetailResponse | BaseModel | key: str, ref: str, commit: str, available: bool, tags: list[str], files: lis... | app/routes/skill_contracts.py |
 | SkillValidateRequest | BaseModel | path: str | app/routes/skill_contracts.py |

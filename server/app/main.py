@@ -33,6 +33,7 @@ from server.app.services.agent_catalog_projection import AgentCatalogService
 from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.demo_node_migration import migrate_demo_node_codes_to_workspaces
+from server.app.services.execution_retention_sweeper import ExecutionRetentionThread
 from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.job_artifact_maintenance import JobArtifactMaintenanceThread
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
@@ -54,6 +55,7 @@ from server.app.storage import build_s3_storage_checked
 from server.app.studio_chat.agent_catalog import spawn_startup_detection
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.service import StudioChatService
+from server.app.sweeper_owned_startup import start_sweeper_owned_threads
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.worker_startup import start_worker_threads
 from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -124,9 +126,15 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     agent_worker_registry = agent_plane.worker_registry
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None
-    artifact_gc_thread: ArtifactOrphanGcThread | None = None
-    artifact_maintenance_thread: JobArtifactMaintenanceThread | None = None
-    material_ttl_thread: MaterialTtlSweeperThread | None = None
+    slow_sweeps: (
+        tuple[
+            ArtifactOrphanGcThread,
+            JobArtifactMaintenanceThread,
+            MaterialTtlSweeperThread,
+            ExecutionRetentionThread,
+        ]
+        | None
+    ) = None
     background_tasks = BackgroundTasks(
         workspace_event_aggregator=workspace_event_aggregator,
         agent_broadcast_controller=agent_manager.broadcast_controller,
@@ -143,8 +151,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal workflow_worker_thread, sweeper_thread, artifact_gc_thread
-        nonlocal artifact_maintenance_thread, material_ttl_thread
+        nonlocal workflow_worker_thread, sweeper_thread, slow_sweeps
         job_event_manager.bus.attach_loop(asyncio.get_running_loop())
         replica_probe.probe()
         if start_worker:
@@ -165,18 +172,13 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             app.state.workflow_worker = workflow_worker_thread
             if workflow_worker_thread is not None:
                 app.state.code_executor = workflow_worker_thread.runtime.executor
-            # Orphan GC shares the sweeper ownership rule: exactly one
-            # replica (sweeper_enabled) reclaims, the rest stay idle.
+            # Orphan GC / artifact maintenance / materials TTL / execution
+            # retention share the sweeper ownership rule: exactly one replica
+            # (sweeper_enabled) runs the slow sweeps, the rest stay idle.
             if settings.executor_runtime.sweeper_enabled:
-                artifact_gc_thread = ArtifactOrphanGcThread(artifact_store)
-                artifact_gc_thread.start()
-                artifact_maintenance_thread = JobArtifactMaintenanceThread(
-                    job_artifact_objects, job_db, settings
+                slow_sweeps = start_sweeper_owned_threads(
+                    artifact_store, job_artifact_objects, job_db, settings, object_storage
                 )
-                artifact_maintenance_thread.start()
-                # Materials TTL (design §10): same single-replica ownership.
-                material_ttl_thread = MaterialTtlSweeperThread(job_db, object_storage)
-                material_ttl_thread.start()
         background_tasks.start(app)
         studio_chat_service.reap_zombie_sessions()
         studio_registry = StudioAgentRegistryStore(job_db)
@@ -203,9 +205,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             studio_chat_service.shutdown()
             for thread in (
                 sweeper_thread,
-                artifact_gc_thread,
-                artifact_maintenance_thread,
-                material_ttl_thread,
+                *(slow_sweeps or ()),
             ):
                 if thread is not None:
                     thread.stop()

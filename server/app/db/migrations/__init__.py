@@ -28,11 +28,14 @@ from server.app.db.migrations.local_executor_removal import (
     migrate_local_executor_removal,  # noqa: F401
 )
 from server.app.db.migrations.node_cms_config import migrate_node_cms_config  # noqa: F401
+from server.app.db.migrations.ops_runtime_profile_samples import (
+    migrate_ops_runtime_profile_samples,  # noqa: F401
+)
 from server.app.db.migrations.retire_global_register_tokens import (  # noqa: F401
     migrate_retire_global_register_tokens,
 )
-from server.app.db.migrations.run_job_status_counts import (  # noqa: F401
-    migrate_run_job_status_counts,
+from server.app.db.migrations.run_job_status_counts import (
+    migrate_run_job_status_counts,  # noqa: F401
 )
 from server.app.db.migrations.runs import migrate_runs  # noqa: F401
 from server.app.db.migrations.scoped_token_origin import migrate_scoped_token_origin  # noqa: F401

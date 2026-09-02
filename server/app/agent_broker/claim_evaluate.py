@@ -24,7 +24,7 @@ from server.app.agent_broker.claim_scan import (
     WorkerView,
     labels_satisfy,
 )
-from server.app.agent_broker.code_manifest import CODE_MANIFEST_TRIM
+from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.agent_control.registry import CODE_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
@@ -131,14 +131,20 @@ def evaluate_candidate(
         cancel_request(conn, selected["execution_id"])
         state.skip_reasons["job_terminal"] += 1
         return None
-    # Fixed lock order across all capacity domains: the workspace-level
-    # Agent capacity domain first, then the Worker machine domain.
-    ws_domain = f"agent-ws:{selected['workspace_id']}"
-    conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (ws_domain,))
+    # Fixed lock order across all capacity domains: the workspace-level Agent
+    # capacity domain first, then the Worker machine domain (issue #351): a
+    # code claim skips the workspace lock entirely — that domain is agent-only
+    # (see the capacity check below), so taking it for code would be pure
+    # queueing overhead against concurrent agent claims. The order stays
+    # acyclic: agent takes ws→worker, code takes only worker.
+    if kind != "code":
+        ws_domain = f"agent-ws:{selected['workspace_id']}"
+        conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (ws_domain,))
     conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"agent-worker:{worker_id}",))
 
     # Workspace-level capacity is agent-only; code has no workspace cap in
-    # this phase (batch 2 decision 2).
+    # this phase (batch 2 decision 2), so the ws lock and the cap check are
+    # both agent-branch-only.
     if kind != "code":
         capacity = conn.execute(
             "select max_concurrency from workspace_agent_capacities where workspace_id=%s",
@@ -244,8 +250,6 @@ def evaluate_candidate(
 def cancel_request(conn: Any, execution_id: str) -> None:
     conn.execute(
         "update agent_execution_requests set state='cancelled',"
-        " finished_at=current_timestamp, manifest_json="
-        + CODE_MANIFEST_TRIM
-        + " where execution_id=%s",
+        " finished_at=current_timestamp, manifest_json=" + MANIFEST_TRIM + " where execution_id=%s",
         (execution_id,),
     )

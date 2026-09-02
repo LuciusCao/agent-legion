@@ -27,6 +27,7 @@ const settings: InstanceSettingsResponse = {
   sweeper_interval_seconds: 60,
   code_capacity: 16,
   materials_ttl_days: 0,
+  execution_retention_days: 0,
   workflows: { enabled: true, max_items_per_run: 20000 },
   agent_workers: { max_archive_bytes: 104857600, min_protocol_version: 2 },
   skills_root: '~/.agents/skills',
@@ -67,6 +68,17 @@ describe('InstanceSettingsSection', () => {
       '36500'
     )
     expect(screen.getByText('保存后立即生效，无需重启')).toBeInTheDocument()
+    // 执行面保留（#354）与材料字段同款钉法：值、0 关闭语义的上界、热读 hint。
+    expect(screen.getByLabelText('执行记录保留天数（0 关闭）')).toHaveValue(0)
+    expect(screen.getByLabelText('执行记录保留天数（0 关闭）')).toHaveAttribute(
+      'max',
+      '36500'
+    )
+    expect(
+      screen.getByText(
+        '终态执行行（请求/租约/用量）按窗口删除；0 为不删除，保存后立即生效'
+      )
+    ).toBeInTheDocument()
     expect(screen.getByLabelText('启用 sweeper')).toBeChecked()
     expect(screen.getByLabelText('启用工作流')).toBeChecked()
     expect(screen.getByText(/需重启服务才能生效/)).toBeInTheDocument()

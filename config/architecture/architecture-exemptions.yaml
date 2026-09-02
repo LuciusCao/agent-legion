@@ -1,15 +1,5 @@
 exemptions:
 - check: architecture.file_budget
-  path: frontend/src/pages/globalSettings/instanceSettingsFields.ts
-  reason: The issue-358 batch adds the workflows.max_items_per_run field row
-    (the admin-side edit surface for the per-run item cap); the declarative
-    field table grew past its plain baseline by that single entry. Stale
-    when the instance settings form is next restructured or the table is
-    split by group.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/358
-  ceiling: 149
-- check: architecture.file_budget
   path: server/app/routes/artifacts.py
   reason: Artifact routes authenticate the per-Worker token used by Agent
     execution transport, and the per-file upload path grew past the plain
@@ -314,11 +304,27 @@ exemptions:
   ceiling: 178
 
 - check: architecture.file_budget
+  path: server/app/db/migrations/__init__.py
+  reason: >-
+    The #358/#359 merge round registers two new migration functions
+    (ops_runtime_profile_samples, run_job_status_counts); ruff's isort
+    normalizes each single-name import with a noqa marker to the
+    parenthesized form, so the file grew by two lines against its baseline.
+    The file is a pure re-export index whose growth model is one entry per
+    migration module; revisit if the migrations package gains a programmatic
+    registry.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/358
+  ceiling: 67
+
+- check: architecture.file_budget
   path: server/app/db/migration_chain.py
-  reason: The chain registers one entry per schema version and cannot shrink;
-    it grew past the plain baseline with v70 (#211 M2) and again with v73
-    (#358 run_job_status_counts — one import plus one entry, offset by
-    compressing the module docstring). Stale after the issue-211 M3 cleanup
+  reason: >-
+    Re-filed (#358 merge round): the chain now carries v72
+    (ops_runtime_profile_samples, from #359) and v73 (run_job_status_counts,
+    this PR) — one import plus one entry each on top of the v70 growth the
+    original exemption described. The chain only grows one entry per schema
+    version and cannot shrink; stale after the issue-211 M3 cleanup
     collapses the chain comments.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
@@ -436,6 +442,110 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/329
   ceiling: 156
 - check: architecture.file_budget
+  path: server/app/agent_broker/agent_result_commit.py
+  reason: >-
+    Issue #359 adds the execute-done counter at the terminal-commit point
+    (two effective lines). The counter must fire exactly where the lease
+    and request both reach their terminal state — moving it out would
+    separate the gauge from the state transition it measures.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 72
+- check: architecture.file_budget
+  path: server/app/agent_broker/broker.py
+  reason: >-
+    Issue #359 wraps the claim path with the latency/204 gauge (timer plus
+    a finally that covers every return path). The timer must bracket the
+    whole broker.claim body — including the empty-claim signal and the
+    worker-poll notify — so the gauge measures what a Worker experiences;
+    extracting it would split the claim protocol from its measurement.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 246
+- check: architecture.file_budget
+  path: server/app/agent_broker/dispatch_pool.py
+  reason: >-
+    Issue #359 counts submissions and saturation skips in submit() plus a
+    pending_depth() reader for the sampler. The counters must sit at the
+    queue boundary they observe; the pool module is already the smallest
+    unit that owns the backlog semantics.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 60
+- check: architecture.file_budget
+  path: server/app/db/postgres_schema.sql
+  reason: >-
+    Re-filed (#358 merge round): the schema file now carries BOTH new
+    tables — ops_runtime_profile_samples (v72, #359) and
+    run_job_status_counts (v73, #358) — each one cohesive block whose
+    growth model is one block per schema version. Splitting a create-table
+    block out of the replay schema would fork the single source of truth
+    for fresh databases; revisit only if the schema file needs a
+    structural split of its own.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 863
+- check: architecture.file_budget
+  path: server/app/agent_broker/sweepers.py
+  reason: >-
+    Issue #359's review round counts sweeper force-closed executions in
+    the done-rate gauge (the requeue-limit branch): without it the execute
+    stage undercounts exactly when workers are lost en masse. The two
+    counters sit at the branch that owns the terminal transition; moving
+    them out would split the sweep outcome from its measurement.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 167
+
+- check: architecture.file_budget
+  path: server/app/services/runtime_profile/classifier.py
+  reason: >-
+    Issue #359's P1 review round added the blocked-claim branch (the #351
+    discrimination table's blocked row: deep queue + workers claiming +
+    every candidate skipped). The branch shares the evidence dict and the
+    verdict helpers with its sibling rules; splitting the classifier by
+    rule family would separate the priority order (documented in the
+    module docstring) from the code that implements it.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 145
+
+- check: architecture.file_budget
+  path: server/app/services/runtime_profile/sampling.py
+  reason: >-
+    Issue #359's P0/P1 review round grew the sampler: per-bucket DB-pool
+    wait DELTAS (cumulative-counter memo) and the wide-window bin rollup
+    both belong with the values they prepare, next to the facade calls
+    they feed. Splitting either into the queries layer would move value
+    marshalling away from the only caller; revisit if a second gauge
+    family joins the sampler.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 108
+
+- check: architecture.file_budget
+  path: server/app/services/ops_metrics/service.py
+  reason: >-
+    Issue #359 extends the sampling pass to persist the runtime-profile
+    gauge row (one call plus the pool/pool-backlog gauge readers kept next
+    to their only consumer). The sampler stays one cohesive write surface;
+    the durable split is a sampling-dispatch module if more gauge families
+    join, at which point this exemption goes stale.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 230
+- check: architecture.file_budget
+  path: server/app/workflow_worker/thread.py
+  reason: >-
+    Issue #359 instruments the pass loop (one note_pass call plus the
+    dispatch registration in start()); three effective lines past the
+    baseline. The pass loop is the single place pass timing exists; the
+    durable fix is a metrics-bridge module if more instrumentation joins
+    the loop, at which point this exemption goes stale.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 190
+- check: architecture.file_budget
   path: server/app/routes/__init__.py
   reason: Issue 329 mounts the job diagnosis observation router in the route
     assembly (one import + one secured() call, three effective lines past the
@@ -445,3 +555,32 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/329
   ceiling: 140
+- check: architecture.file_budget
+  path: server/app/events/buffer.py
+  reason: Issue 353 swaps the per-event job_event_seq bump for segmented
+    allocation (one UPDATE grants SEGMENT_SIZE revisions, spent from an
+    in-process counter). The growth is a module-level constant with its
+    trade-off docstring (segment size rationale, watermark-not-dense-index
+    consumer contract, multi-replica reorder window) plus the segment
+    window arithmetic in _next_revision_locked — all of it must stay next
+    to the issuer it governs; splitting the allocator out would separate
+    the deque-order invariant from the lock that enforces it. Revisit when
+    the events package grows a second revision consumer.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/349
+  ceiling: 130
+- check: architecture.file_budget
+  path: server/app/agent_broker/reaper.py
+  reason: >-
+    Issue 357 persists the reap watermark: the first pass after a
+    restart restores it from global_settings (ReapWatermarkStore) instead
+    of rescanning all terminal rows, and every completed pass saves the
+    advance (5 effective lines past the baseline ceiling 66). The restore
+    and the save sit exactly at the watermark's two transition points, so
+    moving them to a helper would separate the cursor semantics from the
+    scan they gate; the durable fix is merging the two query branches into
+    the shared store module when the next reaper change touches it, at
+    which point this exemption goes stale.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/357
+  ceiling: 81

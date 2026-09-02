@@ -39,10 +39,11 @@ def test_schema_version_pin() -> None:
     # alignment data migration (#211 Phase 3 read-layer binding); v69 is
     # DDL-only (executor_leases_workspace_index); v70 retires the
     # workflow_key columns (#211 Phase 3 M2); v71 widens the
-    # versioned_entities entity_type CHECK for preview panels (#328); v73
-    # adds the run_job_status_counts counter table (#358) and owns
-    # tests/db/test_run_job_status_counts_migration.py, so the pin moves
-    # there — this copy stays as a backstop that the chain tail stays in sync.
+    # versioned_entities entity_type CHECK for preview panels (#328); v72
+    # adds the ops_runtime_profile_samples gauge table (#359); v73 adds the
+    # run_job_status_counts counter table (#358) and owns
+    # tests/db/test_run_job_status_counts_migration.py — this copy stays as
+    # a backstop that the chain tail stays in sync.
     assert SCHEMA_VERSION == 73
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(

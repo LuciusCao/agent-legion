@@ -526,17 +526,12 @@ create trigger jobs_status_counts_sync
   after insert or delete or update of status, workspace_id on jobs
   for each row execute function sync_workspace_job_status_counts();
 -- RUN job status counters (schema v73, DB-RUN-JOB-STATUS-COUNTS-001):
--- count_jobs_by_status_in_run served run-detail job_stats with a group-by
--- over the run's whole jobs slice — O(run jobs) per refresh (#358); row
--- triggers keep this table in sync so the read is a PK lookup, and it is
--- the data source for the #350 run progress view. run_id='' rows are not
--- counted; no FK to runs (jobs.run_id is unconstrained text by design, so
--- any non-empty run_id is counted; a vanished run lingers at cnt=0, which
--- the cnt<>0 read skips; backfill: migrate_run_job_status_counts). The
--- sync trigger on jobs lives in the v73 MIGRATION, not here: a schema-file
--- entry references NEW.run_id, which does not exist until migrate_runs
--- (v53) renames batch_id — the same replay-order rule as idx_jobs_run_id
--- (v59).
+-- trigger-maintained counter table replacing the run-detail group-by
+-- (#358; data source for the #350 progress view). run_id='' skipped; no
+-- FK (jobs.run_id unconstrained); vanished runs linger at cnt=0 which the
+-- cnt<>0 read skips. The jobs sync trigger lives in the v73 MIGRATION, not
+-- here — it references NEW.run_id, absent until v53's rename (same
+-- replay-order rule as idx_jobs_run_id, v59).
 create table if not exists run_job_status_counts (
   run_id text not null,
   status text not null,
@@ -670,6 +665,10 @@ create index if not exists idx_executor_leases_workspace_active on executor_leas
 create index if not exists idx_executor_leases_workspace_node_active
   on executor_leases(workspace_id, node_key, status, expires_at);
 create index if not exists idx_executor_leases_status_expires_at on executor_leases(status, expires_at);
+-- Retention keyset page (#354): non-active leases by (expires_at, id) —
+-- the status index cannot serve this ordering (leading inequality).
+create index if not exists idx_executor_leases_retention_page
+  on executor_leases(expires_at, id) where status != 'active';
 create index if not exists idx_executor_leases_job_status on executor_leases(job_id, status);
 
 drop table if exists remote_executions;
@@ -757,6 +756,41 @@ create table if not exists agent_queue_signals (
   reasons_json text not null default '{}',
   updated_at timestamptz not null default current_timestamp
 );
+
+-- Runtime profile samples (schema v72, #359 L1): one row per minute bucket
+-- with the six-stage pipeline gauges (depth/rate/latency) plus DB-pool
+-- waits. Retention shares monitoring.retention_days; latency null = the
+-- stage saw no traffic ("no signal", never 0).
+create table if not exists ops_runtime_profile_samples (
+  bucket_start timestamptz primary key,
+  intake_runs integer not null default 0,
+  intake_items integer not null default 0,
+  pass_count integer not null default 0,
+  pass_seconds_total double precision not null default 0,
+  pass_scan_seconds_max double precision not null default 0,
+  pass_slow_count integer not null default 0,
+  enqueue_submitted integer not null default 0,
+  enqueue_pool_skipped integer not null default 0,
+  enqueue_pending integer not null default 0,
+  enqueue_stock_gated integer not null default 0,
+  claim_count integer not null default 0,
+  claim_empty_count integer not null default 0,
+  claim_seconds_total double precision not null default 0,
+  claim_seconds_max double precision not null default 0,
+  -- reached a terminal state in the bucket.
+  execute_active integer not null default 0,
+  execute_done integer not null default 0,
+  execute_requeued integer not null default 0,
+  result_count integer not null default 0,
+  result_seconds_total double precision not null default 0,
+  result_seconds_max double precision not null default 0,
+  db_pool_waiting integer not null default 0,
+  db_pool_wait_seconds_total double precision not null default 0,
+  created_at timestamptz not null default current_timestamp
+);
+create index if not exists idx_ops_runtime_profile_bucket
+  on ops_runtime_profile_samples(bucket_start);
+
 
 -- Auth (schema v13): local users, revocable server-side sessions, and
 -- per-workspace membership for the B-end self-hosted rollout. Session rows

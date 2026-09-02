@@ -20,6 +20,7 @@ from .packages import create_packages_router
 from .preview_panels import create_preview_panels_router
 from .quality import create_quality_router
 from .quality_replays import create_quality_replays_router
+from .runtime_profile import create_runtime_profile_router
 from .skill_directories import create_skill_directories_router
 from .skills import create_skills_router
 from .studio_agent_context import create_studio_agent_context_router
@@ -40,8 +41,6 @@ from .workspaces import create_workspaces_router
 
 
 def _require_all_or_none(parts: tuple, names: tuple[str, ...]) -> tuple:
-    """Fail loudly on a partially-wired plane (issue #189): mounting must be
-    all-or-nothing, otherwise the routes vanish silently."""
     if any(part is None for part in parts) != all(part is None for part in parts):
         raise ValueError(f"partially wired: {', '.join(names)} must be provided together")
     return parts
@@ -90,6 +89,7 @@ def create_router(deps: RouterDeps) -> APIRouter:
         )
     if deps.ops_metrics is not None:
         secured(create_metrics_router(deps.ops_metrics))
+        secured(create_runtime_profile_router(deps.ops_metrics))
     quality_plane = _require_all_or_none(
         (
             deps.quality_sampling,

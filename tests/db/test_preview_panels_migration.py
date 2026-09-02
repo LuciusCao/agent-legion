@@ -71,7 +71,9 @@ def test_migration_widens_legacy_check_and_is_idempotent() -> None:
 def test_upgrade_from_v70_applies_the_widening() -> None:
     # Upgrade path: a database recorded at v70 replays the schema file (a no-op
     # for the existing table) and runs the v71+ migrations. At SCHEMA_VERSION
-    # 73 the increment also includes v73 (run_job_status_counts, #358).
+    # 73 the chain tail is run_job_status_counts: init_db's high-water skip
+    # means the test must drop v71 AND every later version (73 included) to
+    # force the replay; the extra migrations' applies are idempotent.
     assert SCHEMA_VERSION == 73
     assert MIGRATIONS[-1].name == "run_job_status_counts"
     with write_transaction(TEST_DATABASE_URL) as conn:

@@ -238,26 +238,34 @@ def create_agent_workers_router(
         )
         if payload is None or str(payload["lease_id"]) != lease_id:
             raise HTTPException(status_code=409, detail="execution is not owned by this Worker")
-        staged = await spool_result_body(request, broker.bundle_dir, config.max_archive_bytes)
+        # Runtime profile (#359): result-submit latency spans spool + commit
+        # (the artifact verify cost the issue calls out lives inside commit).
+        from server.app.services.runtime_profile import profile
+
+        result_timer = profile.result_timer()
         try:
-            # The blocking DB/disk commit runs in the threadpool: at agent scale
-            # (multiple reports per second) holding the event loop here stalls
-            # every heartbeat, claim, and dashboard stream behind it.
-            await concurrency.run_in_threadpool(
-                commit_agent_result,
-                broker,
-                completion,
-                execution_id,
-                worker_id,
-                lease_id,
-                outcome,
-                record,
-                staged,
-            )
+            staged = await spool_result_body(request, broker.bundle_dir, config.max_archive_bytes)
+            try:
+                # The blocking DB/disk commit runs in the threadpool: at agent scale
+                # (multiple reports per second) holding the event loop here stalls
+                # every heartbeat, claim, and dashboard stream behind it.
+                await concurrency.run_in_threadpool(
+                    commit_agent_result,
+                    broker,
+                    completion,
+                    execution_id,
+                    worker_id,
+                    lease_id,
+                    outcome,
+                    record,
+                    staged,
+                )
+            finally:
+                # A successful commit atomically renamed the staging file into
+                # place; on any failure it is reclaimed here.
+                discard_staged_result(staged)
         finally:
-            # A successful commit atomically renamed the staging file into
-            # place; on any failure it is reclaimed here.
-            discard_staged_result(staged)
+            profile.note_result(result_timer.stop())
         return Response(status_code=204)
 
     # The /agent-register-tokens management surface lives in its own module
