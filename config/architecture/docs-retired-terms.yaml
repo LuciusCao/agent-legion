@@ -14,9 +14,17 @@ terms:
   - pattern: 'server/app/pipeline'
     retired_in: '5dac451b (legacy video-hive dead code retirement)'
     note: 视频流水线模块已删除；非 agent 节点是 workflow code nodes
+  - pattern: '\bpipeline nodes?\b'
+    retired_in: '5dac451b / #360 文档 review'
+    note: 促成本检查的实际漂移表述（总览图曾写 pipeline nodes）；
+      现行说法是 workflow code nodes
   - pattern: '\bexternal skills?\b'
     retired_in: '#322'
     note: skill 是 skill root 下的本地 in-place git 仓库；写 skills (local in-place git)
+  - pattern: '外部 skill'
+    retired_in: '#322 / #360 文档 review'
+    note: 中文语境的同类漂移表述（README 曾写「外部 skill 仓库 +
+      锁定 commit」）；skill 是 skill root 下的本地仓库
   - pattern: '\bexecutor (definition|binding|allocation)s?\b'
     retired_in: 'schema v47 (#284)'
     note: executor 概念退役；executors/ 包与 worker/executor.py 模块名合法保留
