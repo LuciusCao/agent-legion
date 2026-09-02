@@ -5,6 +5,7 @@ import { useStudioChatQueue } from './useStudioChatQueue'
 import { useStudioContextSync } from './useStudioContextSync'
 import { useStudioDraftSync } from './useStudioDraftSync'
 import { StudioChatSessionBar } from './StudioChatSessionBar'
+import { StudioChatAgentConfig } from './StudioChatAgentConfig'
 import { StudioChatMessageList } from './StudioChatMessageList'
 import { StudioChatQueueBar } from './StudioChatQueueBar'
 import { StudioChatResumeBar } from './StudioChatResumeBar'
@@ -70,6 +71,7 @@ export function StudioChatPanel(props: Props) {
         }
         newChatDisabled={!selectedAgentId || chat.starting}
       />
+      <StudioChatAgentConfig workspaceId={workspaceId} session={chat.session} />
       <div className={styles.scopeNote}>
         Agent 来自管理员配置并按本机安装过滤；agent 只能产出草稿与校验，
         <b>发布永远由你确认</b>。
