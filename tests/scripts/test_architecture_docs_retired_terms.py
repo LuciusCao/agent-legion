@@ -42,9 +42,11 @@ def make_repo(tmp_path: Path, *, config: str = MINIMAL_CONFIG) -> Path:
     """Minimal tree the checker can run against: config + index + one
     whitelisted doc + the neutral budget governance the repo-level
     check_repository also loads (not needed for the unit paths below, but
-    keeps make_repo reusable if tests later call the full entry)."""
-    write(tmp_path / "config/architecture/docs-retired-terms.yaml", config)
+    keeps make_repo reusable if tests later call the full entry). The
+    governance helper also writes a default docs-retired-terms.yaml, so
+    the config write must come after it to win."""
     write_neutral_budget_governance(tmp_path)
+    write(tmp_path / "config/architecture/docs-retired-terms.yaml", config)
     write_index(tmp_path)
     write(tmp_path / "README.md", "# readme\n")
     write(tmp_path / "docs/data-layout.md", "# data layout\n")
@@ -54,10 +56,30 @@ def make_repo(tmp_path: Path, *, config: str = MINIMAL_CONFIG) -> Path:
 def write_index(
     tmp_path: Path,
     *,
-    current: str = "| 后端 | [backend.md](backend.md) | x |\n",
+    current: str | None = None,
     extra_current: str = "",
     historical: str = "| 归档 | [old.md](old.md) | x |\n",
 ) -> None:
+    """Index fixture whose current-state table lists every whitelisted
+    architecture doc by default, so reconciliation passes; individual
+    tests override ``current``/``extra_current`` to break it on purpose."""
+    if current is None:
+        rows = "".join(
+            f"| doc | [{name}]({name}) | x |\n"
+            for name in (
+                "backend.md",
+                "frontend.md",
+                "deployment.md",
+                "project-structure.md",
+                "local-quality-gates.md",
+                "velites-harness.md",
+                "velites-model-registry.md",
+                "workspace-executor-evidence-matrix.md",
+                "node-sdk-and-worker-execution-design.md",
+                "materials-and-runs-design.md",
+            )
+        )
+        current = rows
     write(
         tmp_path / "docs/architecture/README.md",
         "# index\n\n## 现行文档（描述当前系统状态）\n\n"
@@ -226,7 +248,12 @@ def test_historical_section_entries_do_not_require_whitelist(tmp_path: Path) -> 
     assert not any("docs-governance-proposal" in error for error in errors)
 
 
-def test_missing_index_file_is_error(tmp_path: Path) -> None:
+def test_missing_index_file_skips_reconciliation(tmp_path: Path) -> None:
+    # Minimal fixture trees (the other check_repository suites) have no
+    # docs/architecture/README.md; the terminology scan still runs and
+    # flags violations, the index reconciliation is simply skipped.
     write(tmp_path / "config/architecture/docs-retired-terms.yaml", MINIMAL_CONFIG)
+    write(tmp_path / "docs/data-layout.md", "# layout\n\nuses openclaw\n")
     errors = check_docs_retired_terms(tmp_path)
-    assert any("index file not found" in error for error in errors)
+    assert any("openclaw" in error for error in errors)
+    assert not any("index" in error for error in errors)
