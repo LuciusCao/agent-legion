@@ -373,3 +373,17 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/329
   ceiling: 140
+- check: architecture.file_budget
+  path: server/app/events/buffer.py
+  reason: Issue 353 swaps the per-event job_event_seq bump for segmented
+    allocation (one UPDATE grants SEGMENT_SIZE revisions, spent from an
+    in-process counter). The growth is a module-level constant with its
+    trade-off docstring (segment size rationale, watermark-not-dense-index
+    consumer contract, multi-replica reorder window) plus the segment
+    window arithmetic in _next_revision_locked — all of it must stay next
+    to the issuer it governs; splitting the allocator out would separate
+    the deque-order invariant from the lock that enforces it. Revisit when
+    the events package grows a second revision consumer.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/353
+  ceiling: 130
