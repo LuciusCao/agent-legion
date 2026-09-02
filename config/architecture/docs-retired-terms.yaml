@@ -1,0 +1,39 @@
+# 现行文档禁用的退役术语表（docs_retired_terms 检查的数据文件）。
+#
+# 维护纪律（AGENTS.md §5 / docs/architecture/docs-governance-proposal.md §4）：
+# - 概念退役 PR 必须同步追加条目并清零现行文档命中。
+# - pattern 只增不删；确需删除（概念复活）须在注释里记录 issue 依据。
+# - 误伤走 exemptions（带 remove_when），不许删 pattern。
+# - pattern 必须瞄准概念性表述，禁止匹配活代码路径（executors/ 包、
+#   worker/executor.py 是活代码；"executor" 单词本身不可入表）。
+#
+# 命中行的上下文（前后各 1 行）含退役表述词（已退役/不再/retired/…）
+# 视为合法历史引用，放行。
+
+terms:
+  - pattern: 'server/app/pipeline'
+    retired_in: '5dac451b (legacy video-hive dead code retirement)'
+    note: 视频流水线模块已删除；非 agent 节点是 workflow code nodes
+  - pattern: '\bexternal skills?\b'
+    retired_in: '#322'
+    note: skill 是 skill root 下的本地 in-place git 仓库；写 skills (local in-place git)
+  - pattern: '\bexecutor (definition|binding|allocation)s?\b'
+    retired_in: 'schema v47 (#284)'
+    note: executor 概念退役；executors/ 包与 worker/executor.py 模块名合法保留
+  - pattern: '\bopenclaw\b'
+    retired_in: '#75'
+    note: openclaw runtime 整体退役；agent runtime 只剩 pi / velites
+  - pattern: 'config/(app|workflow|agent_legion)\.yaml'
+    retired_in: 'split yaml 退役'
+    note: 文件存在即启动报错；有效配置 = 代码默认值 + env 覆盖 + DB 实例设置
+  - pattern: 'config/skills\.(yaml|lock)'
+    retired_in: '#322'
+    note: skill pin 锁在 DB global_settings 的 skill_lock 文档
+  - pattern: 'agent-worker\.example\.yaml'
+    retired_in: '#323'
+    note: worker 唯一生效配置是状态副本 data/agent-worker-service/worker.yaml
+  - pattern: 'AGENT_LEGION_WORKER_REGISTER_TOKEN'
+    retired_in: '#35'
+    note: 全局 register token 退役，改 workspace-scoped token
+
+exemptions: []
