@@ -468,7 +468,7 @@
     "frontend/src/features/workflowStudio/shared/workflowStudioRouting.ts": 44,
     "frontend/src/features/workflowStudio/shared/workflowStudioTopology.ts": 147,
     "frontend/src/features/workflowStudio/shared/workflowStudioViewState.ts": 38,
-    "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.approvalConfig.ts": 53,
+    "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.approvalConfig.ts": 52,
     "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.configSchema.ts": 30,
     "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.execution.ts": 39,
     "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.executionDefaults.ts": 30,
