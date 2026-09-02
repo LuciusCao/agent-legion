@@ -123,23 +123,36 @@ class AgentExecutionBroker:
         declared_max_concurrency: int | None = None,
         declared_max_code_concurrency: int | None = None,
     ) -> AgentClaim | None:
+        from server.app.services.runtime_profile import profile
+
+        timer = profile.claim_timer()
+        claimed: AgentClaim | None = None
         try:
-            with write_transaction(self.database_dsn) as conn:
-                claimed, skip_reasons = claim_in_transaction(
-                    self, conn, worker_id, declared_max_concurrency, declared_max_code_concurrency
-                )
-        except ClaimRacedError:
-            return None
-        if claimed is None:
-            # Demand signal: a Worker found no work; restock immediately when
-            # the queue is truly empty, or surface the skip-reason histogram
-            # when unclaimable stock blocked the claim (debounced, see empty).
-            self.empty_claim.note_empty_claim(self.database_dsn, skip_reasons=skip_reasons)
-        # Record only after the commit has succeeded, never inside the tx.
-        if claimed is not None:
-            record_job_update(self.job_db, self.job_event_buffer, claimed.job_id)
-        self._notify_worker_poll(worker_id, claimed)
-        return claimed
+            try:
+                with write_transaction(self.database_dsn) as conn:
+                    claimed, skip_reasons = claim_in_transaction(
+                        self,
+                        conn,
+                        worker_id,
+                        declared_max_concurrency,
+                        declared_max_code_concurrency,
+                    )
+            except ClaimRacedError:
+                return None
+            if claimed is None:
+                # Demand signal: a Worker found no work; restock immediately when
+                # the queue is truly empty, or surface the skip-reason histogram
+                # when unclaimable stock blocked the claim (debounced, see empty).
+                self.empty_claim.note_empty_claim(self.database_dsn, skip_reasons=skip_reasons)
+            # Record only after the commit has succeeded, never inside the tx.
+            if claimed is not None:
+                record_job_update(self.job_db, self.job_event_buffer, claimed.job_id)
+            self._notify_worker_poll(worker_id, claimed)
+            return claimed
+        finally:
+            # Runtime profile (#359): server-side claim latency + 204 share.
+            # The finally covers every return path, including ClaimRacedError's.
+            profile.note_claim(timer.stop(), empty=claimed is None)
 
     def _notify_worker_poll(self, worker_id: str, claimed: AgentClaim | None) -> None:
         """Mirror Worker presence/capacity into the status panel: every idle

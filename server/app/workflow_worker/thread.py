@@ -85,6 +85,18 @@ class WorkflowWorkerThread:
 
     def start(self) -> None:
         self.reload_scan_entries()
+        # Runtime profile (#359): register the dispatch so the metrics
+        # sampler can read the enqueue pool's backlog depth. Best-effort —
+        # the profile surface must never gate the worker's own startup.
+        try:
+            from server.app.services.runtime_profile import profile
+
+            profile.dispatch_service = self.code_dispatch
+        except Exception:
+            # #204 broad-except audit: metrics registration only; a failure
+            # here leaves the enqueue-depth gauge reading 0 while the worker
+            # itself runs normally, so it must not abort scheduling startup.
+            pass
 
         def _loop() -> None:
             while not self.stop_event.is_set():
@@ -162,6 +174,15 @@ class WorkflowWorkerThread:
         )
         if scan_seconds > 15:
             logger.warning("slow workflow worker pass: " + pass_stats[0], *pass_stats[1:])
+        from server.app.services.runtime_profile import profile
+
+        profile.note_pass(
+            seconds=scan_seconds + claim_seconds,
+            scan_seconds=scan_seconds,
+            slow=scan_seconds > 15,
+        )
+        if worker_stats := getattr(self.state.agent_pass, "stock_gated", 0):
+            profile.note_enqueue_stock_gated(worker_stats)
         return claims > 0
 
     def _is_paused(self, workspace_id: str) -> bool:

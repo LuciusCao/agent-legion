@@ -257,7 +257,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "preview_panels"
+    assert migration["name"] == "ops_runtime_profile_samples"
 
 
 @pytest.mark.fresh_schema

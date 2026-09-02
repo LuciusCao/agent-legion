@@ -740,6 +740,54 @@ create table if not exists agent_queue_signals (
   updated_at timestamptz not null default current_timestamp
 );
 
+-- Runtime profile samples (schema v72, #359 L1): one global row per minute
+-- bucket carrying the six-stage execution-pipeline gauges (intake / pass /
+-- enqueue / claim / execute / result — each stage a depth, a rate and a
+-- p50/p95 latency in seconds) plus the DB-pool and advisory-lock
+-- cross-cutting waits. Written by the ops-metrics sampling loop; retention
+-- shares monitoring.retention_days via the same cleanup pass. Latency
+-- columns are null when the stage saw no traffic in the bucket (the
+-- classifier must treat null as "no signal", never 0).
+create table if not exists ops_runtime_profile_samples (
+  bucket_start timestamptz primary key,
+  -- intake: runs created + items enqueued in the bucket.
+  intake_runs integer not null default 0,
+  intake_items integer not null default 0,
+  -- pass: workflow-worker poll passes, their wall time and phase split.
+  pass_count integer not null default 0,
+  pass_seconds_total double precision not null default 0,
+  pass_scan_seconds_max double precision not null default 0,
+  pass_slow_count integer not null default 0,
+  -- enqueue pool: submissions, saturation skips, queue depth at sample time.
+  enqueue_submitted integer not null default 0,
+  enqueue_pool_skipped integer not null default 0,
+  enqueue_pending integer not null default 0,
+  enqueue_stock_gated integer not null default 0,
+  -- claim: HTTP claims served (204s carry their own counter), server-side
+  -- latency accumulates over served claims (204 included).
+  claim_count integer not null default 0,
+  claim_empty_count integer not null default 0,
+  claim_seconds_total double precision not null default 0,
+  claim_seconds_max double precision not null default 0,
+  -- execute: active executions at sample time; done counts executions that
+  -- reached a terminal state in the bucket.
+  execute_active integer not null default 0,
+  execute_done integer not null default 0,
+  execute_requeued integer not null default 0,
+  -- result: submissions served and their server-side latency.
+  result_count integer not null default 0,
+  result_seconds_total double precision not null default 0,
+  result_seconds_max double precision not null default 0,
+  -- cross-cutting: DB pool waits (requests queued for a connection beyond
+  -- the immediate checkout) and advisory-lock waits observed in the bucket.
+  db_pool_waiting integer not null default 0,
+  db_pool_wait_seconds_total double precision not null default 0,
+  created_at timestamptz not null default current_timestamp
+);
+create index if not exists idx_ops_runtime_profile_bucket
+  on ops_runtime_profile_samples(bucket_start);
+
+
 -- Auth (schema v13): local users, revocable server-side sessions, and
 -- per-workspace membership for the B-end self-hosted rollout. Session rows
 -- store only the sha256 of the bearer token so a database leak does not

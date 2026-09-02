@@ -26,6 +26,7 @@ from server.app.jobs.queries.job_rerun_states import JobRerunStateQueriesMixin
 from server.app.jobs.queries.job_scan_delta import JobScanDeltaMixin
 from server.app.jobs.queries.job_scan_marks import JobScanMarksMixin
 from server.app.jobs.queries.quality_replays import QualityReplayQueriesMixin
+from server.app.jobs.queries.runtime_profile import RuntimeProfileQueriesMixin
 from server.app.jobs.queries.scoped_token_management import (
     ScopedTokenManagementQueriesMixin,
 )
@@ -69,6 +70,7 @@ class RunDomainQueriesMixin(
     JobArtifactKeyQueriesMixin,
     QualityReplayQueriesMixin,
     ApprovalDecisionQueriesMixin,
+    RuntimeProfileQueriesMixin,
     AtomicJobMutationsMixin,
     JobExecutionControlMixin,
 ):

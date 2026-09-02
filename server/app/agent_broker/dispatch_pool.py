@@ -43,8 +43,18 @@ class AgentEnqueuePool:
         try:
             self._queue.put_nowait(fn)
         except queue.Full:
+            from server.app.services.runtime_profile import profile
+
+            profile.note_enqueue_pool_skipped()
             return False
+        from server.app.services.runtime_profile import profile
+
+        profile.note_enqueue_submitted()
         return True
+
+    def pending_depth(self) -> int:
+        """Momentary backlog size (profile gauge; approximate under load)."""
+        return int(self._queue.qsize())
 
     def _run(self) -> None:
         while True:

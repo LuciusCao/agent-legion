@@ -41,14 +41,16 @@ def test_schema_version_pin() -> None:
     # workflow_key columns (#211 Phase 3 M2); v71 widens the
     # versioned_entities entity_type CHECK for preview panels (#328) and owns
     # tests/db/test_preview_panels_migration.py, so the pin moves there —
-    # this copy stays as a backstop that the chain tail stays in sync.
-    assert SCHEMA_VERSION == 71
+    # this copy stays as a backstop that the chain tail stays in sync; v72
+    # adds the ops_runtime_profile_samples gauge table (#359) and owns
+    # tests/services/test_runtime_profile.py.
+    assert SCHEMA_VERSION == 72
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "preview_panels"
+    assert row["name"] == "ops_runtime_profile_samples"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:

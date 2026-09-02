@@ -12,6 +12,7 @@ carries a window-independent ``summary`` (see ``ops_metrics.summary``).
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -33,6 +34,54 @@ Granularity = Literal["6h", "24h", "30d"]
 _DEFAULT_SAMPLE_INTERVAL_SECONDS = 60
 # 30d 窗口需要至少 30 天的采样保留，否则长尾段永远为空。
 _DEFAULT_RETENTION_DAYS = 30
+
+logger = logging.getLogger(__name__)
+
+
+def _db_pool_wait_gauges(database_dsn: ConnectSource) -> tuple[int, float]:
+    """Read psycopg-pool wait gauges for the DSN's pool (best-effort).
+
+    Returns (requests that waited, seconds waited). ``get_stats()`` carries
+    ``requests_waiting`` (momentary depth) and ``usage_ms`` (cumulative
+    checkout time) — wait *time* is not directly reported, so the classifier
+    consumes ``usage_ms`` deltas as the wait proxy: sustained checkout
+    saturation inflates it proportionally. A missing/renamed field degrades
+    to (0, 0.0) — never raises.
+    """
+    try:
+        from server.app.db.pools import pool_for
+
+        pool = pool_for(str(database_dsn))
+        stats = pool.get_stats()
+        waiting = int(stats.get("requests_waiting", 0) or 0)
+        usage_ms = float(stats.get("usage_ms", 0.0) or 0.0)
+        return waiting, usage_ms / 1000.0
+    except Exception:
+        # #204 broad-except audit: gauge reader, not a pipeline component.
+        # The pool stats shape moves between psycopg-pool versions and this
+        # runs inside the metrics sampler's profile branch; a failure means
+        # "no DB-pool signal this bucket" (0, 0.0), never a sampling abort.
+        return 0, 0.0
+
+
+def _enqueue_pending_depth() -> int:
+    """Momentary backlog of the agent enqueue pool (0 when unwired).
+
+    The pool lives on the workflow worker's CodeDispatchService (same
+    instance the worker thread submits to); the sampler cannot reach the
+    app object, so the worker thread registers its dispatch on the profile
+    at startup and the gauge reads through that registration.
+    """
+    try:
+        from server.app.services.runtime_profile.counters import profile
+
+        dispatch = profile.dispatch_service
+        return int(dispatch.enqueue_pool.pending_depth()) if dispatch is not None else 0
+    except Exception:
+        # #204 broad-except audit: same gauge-reader contract as above —
+        # the dispatch is registered by the worker thread and may not exist
+        # in test/embedded shapes; absence reads as depth 0.
+        return 0
 
 
 def _fetch_one(conn: DatabaseConnection, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any]:
@@ -71,6 +120,12 @@ class OpsMetricsService:
         that goes idle simply stops appearing in later buckets, and buckets
         already written are never revised (upserts only refresh rows for the
         current active set).
+
+        The same pass also persists one runtime-profile gauge row (#359):
+        the six-stage pipeline counters are process deltas over the bucket,
+        the depth gauges reuse the queries already run here (queued,
+        active_executions) plus the enqueue pool backlog, and the DB-pool
+        wait gauges come from the psycopg pool stats.
         """
         sampled_at = now or datetime.now(UTC)
         bucket_start = sampled_at.replace(second=0, microsecond=0) - timedelta(minutes=1)
@@ -160,6 +215,37 @@ class OpsMetricsService:
                     tokens=tokens_by_worker.get(worker_id, _EMPTY_TOKENS),
                 )
             upsert_workspace_samples(conn, bucket_start, workspace_samples)
+        self._sample_runtime_profile(bucket_start, queued=int(queued), active=active_executions)
+
+    def _sample_runtime_profile(self, bucket_start: datetime, *, queued: int, active: int) -> None:
+        """Persist the #359 runtime-profile gauge row; failures degrade to a
+        missing profile row (the ops series must not depend on it)."""
+        try:
+            from server.app.services.runtime_profile import persist_profile_sample, profile
+
+            pool_waiting, pool_wait_seconds = _db_pool_wait_gauges(self._database_dsn)
+            persist_profile_sample(
+                self._database_dsn,
+                bucket_start,
+                profile,
+                queued_depth=queued,
+                active_executions=active,
+                enqueue_pending=_enqueue_pending_depth(),
+                db_pool_waiting=pool_waiting,
+                db_pool_wait_seconds=pool_wait_seconds,
+            )
+        except Exception:
+            # #204 broad-except audit: metrics-side best-effort. The profile
+            # row shares the ops sampling transaction boundary but not its
+            # success contract: a missing profile bucket only thins the
+            # series (the classifier reads whatever rows exist), while
+            # letting this raise would kill the ops samples that already
+            # committed in the caller and abort the sampling loop's
+            # catch-up. The outcome space is the profile write surface plus
+            # the pool-stat readers (attribute shapes differ across
+            # psycopg-pool versions); logger.exception keeps the traceback
+            # so a persistent failure is visible in logs.
+            logger.exception("runtime profile sample failed for bucket %s", bucket_start)
 
     def sample_catch_up(self, now: datetime | None = None) -> int:
         """Persist every missing minute bucket since the last written sample."""
@@ -171,7 +257,17 @@ class OpsMetricsService:
             result = conn.execute(
                 "delete from ops_metric_samples where bucket_start < %s", (cutoff,)
             )
-            return result.rowcount
+        # Runtime-profile rows share the same retention window (#359), via the
+        # JobQueries facade (BOUNDARY-DATA-001; new SQL does not join the
+        # grandfathered baseline of this file).
+        from server.app.jobs.queries.runtime_profile import (
+            runtime_profile_queries_from_dsn,
+        )
+
+        runtime_profile_queries_from_dsn(self._database_dsn).delete_runtime_profile_samples_before(
+            cutoff
+        )
+        return result.rowcount
 
     def query_summary(
         self, worker_id: str | None = None, workspace_id: str | None = None
