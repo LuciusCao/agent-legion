@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from server.app.agent_broker import AgentExecutionBroker, reaper
@@ -230,3 +230,140 @@ def test_startup_full_scan_ignores_json_nul_escape(job_db, tmp_path) -> None:
 
     assert broker.reap_terminal_bundles() == 1
     assert not bundle.exists()
+
+
+def _persisted_watermark(job_db) -> datetime | None:
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select value from global_settings where key='reap_watermark'"
+        ).fetchone()
+    if row is None:
+        return None
+    return datetime.fromisoformat(json.loads(str(row["value"]))["watermark"])
+
+
+def test_reap_watermark_persisted_after_pass(job_db, tmp_path) -> None:
+    """Every completed pass advances the persisted watermark (#357): the
+    in-memory cursor and the ``global_settings`` document carry the same
+    anchor (scan start minus the overlap window)."""
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir, data_dir=tmp_path)
+
+    before = datetime.now(UTC) - reaper._REAP_OVERLAP
+    broker.reap_terminal_bundles()
+    after = datetime.now(UTC) - reaper._REAP_OVERLAP
+
+    assert broker._reap_watermark is not None
+    stored = _persisted_watermark(job_db)
+    assert stored is not None
+    assert before <= stored <= after
+    assert stored == broker._reap_watermark
+
+
+def test_restart_resumes_from_persisted_watermark(job_db, tmp_path) -> None:
+    """Acceptance 1: a restarted process must NOT rescan all terminal rows.
+    With a persisted watermark and old terminal rows outside the overlap
+    window, the first pass of a fresh broker uses the indexed incremental
+    query (finished_at >= watermark), so old bundles survive and only rows
+    inside the window are reaped."""
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    first = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir, data_dir=tmp_path)
+    first.reap_terminal_bundles()  # sets AND persists the watermark
+    stored = _persisted_watermark(job_db)
+    assert stored is not None
+
+    # History rows: finished long before the persisted watermark. A restarted
+    # full scan (the pre-#357 behavior) would reap both bundles.
+    for exec_id in ("old-done", "old-cancelled"):
+        (bundle_dir / f"{exec_id}.tar.gz").write_bytes(b"bundle")
+        _insert_request(
+            job_db,
+            execution_id=exec_id,
+            state="done" if exec_id.endswith("done") else "cancelled",
+            bundle_name=f"{exec_id}.tar.gz",
+            finished_at=stored - timedelta(days=1),
+        )
+    # A fresh row inside the overlap window: must be reaped.
+    (bundle_dir / "fresh.tar.gz").write_bytes(b"bundle")
+    _insert_request(
+        job_db,
+        execution_id="fresh",
+        state="done",
+        bundle_name="fresh.tar.gz",
+        finished_at=datetime.now(UTC),
+    )
+
+    restarted = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir, data_dir=tmp_path)
+    with patch.object(
+        DatabaseConnection, "stream", autospec=True, wraps=DatabaseConnection.stream
+    ) as stream_spy:
+        reaped = restarted.reap_terminal_bundles()
+
+    # Only the overlap-window row was scanned/reaped; the two history rows
+    # outside the window survived — proof the first pass was incremental.
+    assert reaped == 1
+    assert not (bundle_dir / "fresh.tar.gz").exists()
+    assert (bundle_dir / "old-done.tar.gz").is_file()
+    assert (bundle_dir / "old-cancelled.tar.gz").is_file()
+    # The incremental query shape (not the full-scan one) served the pass.
+    query = stream_spy.call_args.args[2]
+    assert "state='done' and finished_at >= %s" in query
+    assert "state in ('done', 'cancelled')" not in query
+    # The restored in-memory cursor equals the persisted value.
+    assert restarted._reap_watermark is not None
+    assert stored <= restarted._reap_watermark
+
+
+def test_missing_watermark_falls_back_to_full_scan(job_db, tmp_path) -> None:
+    """Acceptance 3: with no persisted document (fresh install or deleted
+    key) the first pass replays the full scan — same behavior as #139."""
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    old_bundle = bundle_dir / "old.tar.gz"
+    old_bundle.write_bytes(b"bundle")
+    _insert_request(
+        job_db,
+        execution_id="old",
+        state="done",
+        bundle_name="old.tar.gz",
+        finished_at=datetime.now(UTC) - timedelta(days=1),
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir, data_dir=tmp_path)
+
+    assert broker.reap_terminal_bundles() == 1
+    assert not old_bundle.exists()
+    # The fallback pass still persists its watermark for the next restart.
+    assert _persisted_watermark(job_db) is not None
+
+
+def test_corrupt_watermark_falls_back_to_full_scan(job_db, tmp_path) -> None:
+    """Acceptance 3: a corrupt document (non-ISO timestamp) must not break
+    reaping — the pass degrades to the full scan instead of raising."""
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into global_settings(key, value) values ('reap_watermark', %s)"
+            " on conflict(key) do update set value=excluded.value",
+            (json.dumps({"watermark": "not-a-timestamp"}),),
+        )
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    stale = bundle_dir / "stale.tar.gz"
+    stale.write_bytes(b"bundle")
+    _insert_request(
+        job_db,
+        execution_id="stale",
+        state="done",
+        bundle_name="stale.tar.gz",
+        finished_at=datetime.now(UTC) - timedelta(days=1),
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir, data_dir=tmp_path)
+
+    reaped = broker.reap_terminal_bundles()
+
+    assert reaped == 1
+    assert not stale.exists()
+    assert broker._reap_watermark is not None
+    # The recovered pass overwrites the corrupt document.
+    assert _persisted_watermark(job_db) is not None
