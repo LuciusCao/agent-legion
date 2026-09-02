@@ -18,6 +18,14 @@ path = "src/lib.rs"
 name = "velites"
 path = "src/main.rs"
 
+# #383：沙箱包装器的独立 bin——worker 镜像的基础设施（EXEC-CODE-003 的
+# code 节点沙箱），与 agent harness 分家。名字刻意不同：runtime 自动探测
+# （#254）按二进制名精确匹配，velites-sandbox 不进 RUNTIME_CATALOG，烤进
+# 镜像不会让 worker 声明 velites agent runtime。
+[[bin]]
+name = "velites-sandbox"
+path = "src/bin/velites_sandbox.rs"
+
 [[bin]]
 name = "velites-schema"
 path = "src/bin/velites_schema.rs"

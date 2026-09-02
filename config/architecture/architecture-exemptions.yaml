@@ -332,6 +332,114 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/328
   ceiling: 79
 - check: architecture.file_budget
+  path: server/app/executors/_code_sandbox.py
+  reason: >-
+    #383: the Host-side sandbox probe switched from shutil.which("velites")
+    to the shared resolve_sandbox_binary primitive (velites-sandbox ->
+    velites candidates) and the fail-closed error text now names the docker
+    host form's semantics (code local fallback disabled — running code nodes
+    on a Worker is the supported path) and the bare-metal remedy.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/383
+  ceiling: 207
+- check: architecture.file_budget
+  path: server/app/routes/agent_workers.py
+  reason: >-
+    #381 version handshake: the register endpoint logs the reported
+    runtime_versions mapping (worker code x velites version matrix) at
+    registration time. Drift diagnostics for externally-mounted runtimes;
+    informational only, no admission change.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  ceiling: 236
+- check: architecture.file_budget
+  path: server/app/routes/agent_workers_contracts.py
+  reason: >-
+    #381 version handshake: RegisterAgentWorkerRequest gained the
+    informational runtime_versions mapping (default empty for older
+    Workers). One field on the request contract.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  ceiling: 92
+- check: architecture.file_budget
+  path: shared/code_sandbox.py
+  reason: >-
+    #383 added the sandbox-binary resolution primitive here (candidates
+    velites-sandbox -> velites; bundled data/bin dir then PATH) because the
+    module is already the stdlib-only shared home both the Host executor and
+    the Worker code runner import. The primitive keeps one probe surface for
+    both sides so "preflight passes = runtime resolves the same wrapper";
+    BUNDLED_SANDBOX_DIR is re-exported by worker/binary_resolution.py as the
+    single source of truth for the shared directory.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/383
+  ceiling: 141
+- check: architecture.file_budget
+  path: worker/host/client.py
+  reason: >-
+    #381 version handshake: the registration payload gained one
+    informational runtime_versions mapping (effective runtimes' --version
+    outputs). Single line addition to an existing payload builder.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  ceiling: 164
+- check: architecture.file_budget
+  path: worker/runtime/catalog.py
+  reason: >-
+    #381 version handshake: probe_runtime_versions asks each effective
+    runtime for its --version output so the registration payload carries
+    the "worker code x velites version" compatibility matrix (velites is
+    independently versioned once externally mounted; drift becomes
+    observable instead of a human upgrade discipline). Purely additive
+    function beside the detection code it complements; unknown results
+    record "<unknown>" by design (observability, not a fail-closed guard).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  ceiling: 90
+- check: architecture.file_budget
+  path: worker/runtime/controls.py
+  reason: >-
+    #383 rewired hot_code_concurrency's fail-closed guard from
+    resolve_binary("velites") to the shared sandbox resolver
+    (velites-sandbox -> velites, bundled dir then PATH) so hot-opening the
+    code pool matches the startup preflight's probe surface. One-line
+    semantic change on an existing function; no split warranted.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/383
+  ceiling: 51
+- check: architecture.file_budget
+  path: worker/runtime/preflight.py
+  reason: >-
+    #381 moved velites/pi out of the worker image (runtime executors are
+    externally-mounted binaries now), which turned "forgot to mount" from a
+    rare deployment accident into a routine mistake with a silent failure
+    mode — auto-detection yields an empty set and the worker registers with
+    zero capacity. The expect-runtimes guard added here (env parsing,
+    missing-detection against the runtime catalog, actionable error text
+    covering the bundled dir and PATH) doubles the file past its first
+    ceiling. The module stays a single cohesive concern (startup
+    preconditions for the executor); splitting the guard into its own
+    module was rejected because preflight_error would reduce to a shell
+    over two helpers. Revisit the split if preflight grows a third guard.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  ceiling: 80
+- check: architecture.file_budget
+  path: worker/runtime/setup.py
+  reason: >-
+    #381 wired AGENT_WORKER_EXPECT_RUNTIMES through prepare_runtime_models
+    (env read + ValueError mapping into the shared startup-error string)
+    alongside the existing resolve_config_runtimes handling, and the codex
+    review on #384 extended it: model-discovery failures for an *expected*
+    runtime now hard-fail startup (a wrong-arch binary passes the
+    existence probe and only breaks at exec time), while unexpected
+    runtimes keep the soft warning. This module is the composition point
+    between config parsing, preflight, and model discovery; there is no
+    meaningful split for the guard wiring.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  ceiling: 62
+- check: architecture.file_budget
   path: server/app/services/preview_panels.py
   reason: The Codex P2 review on PR 345 unified the artifact inventory on
     _merged_artifact_names so every recent job merges the object-store

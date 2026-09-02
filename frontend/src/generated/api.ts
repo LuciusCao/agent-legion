@@ -5111,6 +5111,10 @@ export interface components {
        * @default 1
        */
       protocol_version: number
+      /** Runtime Versions */
+      runtime_versions?: {
+        [key: string]: string
+      }
       /** Runtimes */
       runtimes?: string[]
       /** Worker Id */

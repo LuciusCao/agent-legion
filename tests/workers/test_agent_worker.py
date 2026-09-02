@@ -252,12 +252,17 @@ def test_client_registration_declares_latest_protocol_and_code_capacity() -> Non
             "runtimes": ["velites"],
             "max_concurrency": 1,
             "max_code_concurrency": 3,
+            # #381 版本握手：prepare_runtime_models 产出的映射必须原样进
+            # payload（informational 字段无守卫，改名/漏传会静默降级为 {}，
+            # 此断言钉住接线——subagent 二轮评审 P3-1）。
+            "runtime_versions": {"velites": "velites 0.4.0-alpha"},
         },
         ["token-a", "token-b"],
     )
 
     assert seen[0]["protocol_version"] == 4
     assert seen[0]["max_code_concurrency"] == 3
+    assert seen[0]["runtime_versions"] == {"velites": "velites 0.4.0-alpha"}
     # issue #35：全部 scoped token 逗号拼进同一个注册请求。
     assert headers["X-Agent-Worker-Register-Tokens"] == "token-a,token-b"
 

@@ -202,7 +202,7 @@ def test_node_code_fails_closed_without_sandbox(
     Since #96 this applies to ALL code nodes: the bare multiprocessing child
     for repo-file builtins is gone with the path mechanism.
     """
-    monkeypatch.setattr("server.app.executors._code_sandbox.shutil.which", lambda _name: None)
+    monkeypatch.setattr("server.app.executors._code_sandbox.resolve_sandbox_binary", lambda: None)
     result = _run(
         _executor(),
         context,

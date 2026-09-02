@@ -218,15 +218,16 @@ in:
   is the bare-metal path; in container deployments the state copy lives in
   the control volume.
 
-The Worker does **not** require a preinstalled velites: binary resolution is
-shared between the startup preflight and the code runner
-(`worker/binary_resolution.py::resolve_binary`) and checks the bundled copy
-`<repo>/data/bin/velites` before PATH. Docker worker images already ship
-velites; bare-metal deployments install the bundled copy with
-`./scripts/ensure-velites.sh --dest data/bin` (fingerprint-gated rebuild, run
-on a machine with the same OS/arch as the Worker; ship per-platform binaries
-when packaging). Only when neither location yields a binary does the
-fail-closed semantics trigger.
+Since #381 the worker image ships **no** agent runtime executor: velites is
+an externally-mounted, platform-matched binary (compose binds `VELITES_BIN`
+to `/app/data/bin/velites`; releases come from the velites-release workflow's
+GitHub Releases, see agent-worker-deployment.md §5), and the
+`AGENT_WORKER_EXPECT_RUNTIMES` guard fail-closes a worker that cannot probe
+its expected runtimes. The code-node sandbox wrapper is separate (#383): the
+image bakes `velites-sandbox` in at `/usr/local/bin`, so code capacity never
+depends on the mounted velites. Bare-metal deployments keep
+`./scripts/ensure-velites.sh --dest data/bin` (fingerprint-gated rebuild;
+same OS/arch as the Worker) for both roles.
 
 When no online code-capable Worker exists, dispatch falls back to the local
 Host executor — code tasks never rot in a queue waiting for a Worker.

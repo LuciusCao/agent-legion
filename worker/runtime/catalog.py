@@ -14,6 +14,7 @@ code 守卫）、模型发现（worker/runtime/models.py 的 adapter 键）、�
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -47,6 +48,35 @@ def detect_installed_runtimes() -> dict[str, str]:
                 installed[runtime] = resolved
                 break
     return installed
+
+
+def probe_runtime_versions(runtimes: Iterable[str]) -> dict[str, str]:
+    """#381 版本握手：取每个生效 runtime 的 ``--version`` 输出（strip 后）。
+
+    外挂后 velites 版本由运维方独立管理，「worker 代码 × velites 版本」的
+    兼容矩阵从此有可观测的数据面：注册 payload 携带本映射（host 侧日志/
+    排障用），版本漂移从人肉升级纪律变成可查询字段。探测失败（旧版 pi 无
+    --version 等）记 "<unknown>"——握手是观测性增强，不是 fail-closed 守卫；
+    真正的 fail-closed（二进制缺失、发现失败）在 preflight/models 层。"""
+    versions: dict[str, str] = {}
+    for runtime in sorted(set(runtimes)):
+        binary = resolve_binary(runtime) if runtime in RUNTIME_CATALOG else None
+        version = "<unknown>"
+        if binary:
+            try:
+                result = subprocess.run(
+                    [binary, "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                if result.returncode == 0:
+                    version = (result.stdout or result.stderr).strip()[:120] or "<unknown>"
+            except (OSError, subprocess.SubprocessError):
+                pass
+        versions[runtime] = version
+    return versions
 
 
 def effective_runtimes(
