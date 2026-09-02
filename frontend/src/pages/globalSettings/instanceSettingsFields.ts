@@ -78,7 +78,7 @@ export const FIELD_GROUPS: FieldGroup[] = [
     toggles: [{ path: 'sweeper_enabled', label: '启用 sweeper' }],
   },
   {
-    title: '运行限制',
+    title: '运行与本地执行',
     fields: [
       // #358：单次 run 条目上限（0 不限制），超限提交被 API 拒绝。
       // workflows.enabled 已随 #385/#389 退役（部署形态由 code_capacity 表达）。
@@ -88,12 +88,13 @@ export const FIELD_GROUPS: FieldGroup[] = [
         integer: true,
         allowZero: true,
       },
+      {
+        path: 'code_capacity',
+        label: '本地执行并发上限（0 = 纯远程模式）',
+        integer: true,
+        allowZero: true,
+      },
     ],
-    toggles: [],
-  },
-  {
-    title: '本地执行',
-    fields: [{ path: 'code_capacity', label: '本地执行并发上限（0 = 纯远程模式）', integer: true, allowZero: true }],
     toggles: [],
   },
   ...RETENTION_FIELD_GROUPS,

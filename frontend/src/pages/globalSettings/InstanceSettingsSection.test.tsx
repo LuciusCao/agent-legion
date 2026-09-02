@@ -112,7 +112,7 @@ describe('InstanceSettingsSection', () => {
       screen.getByText('资源占用的采样频率与监控数据保留时长。')
     ).toBeInTheDocument()
     expect(
-      screen.getByText(/无远程 worker 可用时，代码节点由宿主本地沙箱执行/)
+      screen.getByText(/无远程 worker 时代码节点由宿主本地沙箱执行/)
     ).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: '收起高级参数' })
