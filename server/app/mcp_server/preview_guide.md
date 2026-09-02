@@ -29,17 +29,33 @@ the host page, and `allow-same-origin` is NEVER granted (a same-origin script
 bundle would be able to call every platform API with the viewer's session —
 that is the security red line this design exists to avoid).
 
+The host also injects a Content-Security-Policy into your document before it
+parses (the meta lands in the real `<head>`, positioned by the HTML parser —
+you cannot preempt or remove it): `default-src 'none'`, inline
+`script-src`/`style-src` plus the platform origin (scripts, styles, fonts,
+and `connect-src`), `img-src data: https:`, `form-action 'none'`. This
+tightens outbound network at the host, not by convention: `fetch()`,
+`sendBeacon()`, form submissions, and subresource loads to any external
+origin will not fire. Known residual: CSP does not govern iframe
+self-navigation, so `location.href = …`-style navigation with a query string
+remains technically possible — accepted as a documented limitation (it cannot
+carry response bodies, only what the script already knows).
+
 Consequences for your markup:
 
 - Everything must be inline in the single HTML file: `<style>` and `<script>`
-  blocks, no external origins. CDN references may be unreachable on
-  self-hosted deployments — do not rely on them.
+  blocks, no external script/style origins. CDN references are blocked by the
+  host CSP (and may be unreachable on self-hosted deployments) — do not rely
+  on them.
 - Platform build assets the host explicitly offers (currently
   `assets.katexCssUrl` / `assets.katexJsUrl` for LaTeX) MAY be loaded; always
   degrade gracefully when absent.
-- Network access from the bundle is untrusted output by definition: never
-  `fetch()` the platform API directly (it fails — no credentials on an opaque
-  origin — and is not the contract). Use the bridge.
+- Remote `https:` images render (the built-in question panel's sanitizer
+  allows them with `referrerpolicy="no-referrer"`); `http:` images and every
+  other subresource origin do not.
+- Never `fetch()` the platform API directly: it fails (no credentials on an
+  opaque origin, and `connect-src` only permits the platform origin) and is
+  not the contract. Use the bridge.
 
 ## 3. Bridge API (postMessage, read-only)
 

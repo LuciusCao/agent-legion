@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.preview_panels import (
     MAX_BUNDLE_BYTES,
@@ -12,6 +13,7 @@ from server.app.services.preview_panels import (
     get_preview_context,
 )
 from server.app.storage_paths import resolve_job_dir
+from tests.fakes.storage import FakeObjectStorage
 
 VALID_HTML = "<!doctype html><html><body><h1>panel</h1></body></html>"
 UPDATED_HTML = "<!doctype html><html><body><h1>panel v2</h1></body></html>"
@@ -192,3 +194,57 @@ def test_get_preview_context_rejects_job_from_another_workspace(
 
     with pytest.raises(NotFoundError):
         get_preview_context(job_db, settings, workspace_id, job_id=str(foreign["id"]))
+
+
+def test_get_preview_context_merges_object_store_manifest_for_all_recent_jobs(
+    job_db, settings, workspace_id, tmp_path, monkeypatch
+) -> None:
+    """recent_jobs 里每个任务的产物清单都合并对象存储 manifest（codex P2）。
+
+    对象存储是产物权威副本、本地目录只是可淘汰缓存：只扫 job_dir 的
+    recent_jobs 会在 worker 执行的任务上报空/缺失清单，authoring context
+    就拿不到真实数据形状。
+    """
+    local_only = job_db.create_job(
+        workflow_key="wf",
+        source_type="question",
+        source_id="src-1",
+        run_id="run-1",
+        title="local",
+        node_keys=[],
+        workspace_id=workspace_id,
+    )
+    worker_job = job_db.create_job(
+        workflow_key="wf",
+        source_type="question",
+        source_id="src-2",
+        run_id="run-2",
+        title="worker",
+        node_keys=[],
+        workspace_id=workspace_id,
+    )
+    local_dir = resolve_job_dir(local_only, settings.jobs_dir)
+    (local_dir / "local.txt").write_text("local artifact", encoding="utf-8")
+
+    storage = FakeObjectStorage()
+    store = JobArtifactObjectStore(job_db, storage)
+    remote_source = tmp_path / "remote.json"
+    remote_source.write_text('{"remote": true}', encoding="utf-8")
+    store.upload(
+        workspace_id=workspace_id,
+        job_id=str(worker_job["id"]),
+        node_key="node-1",
+        name="remote.json",
+        local_path=remote_source,
+    )
+    monkeypatch.setattr("server.app.services.preview_panels.build_s3_storage", lambda: storage)
+
+    context = get_preview_context(job_db, settings, workspace_id)
+
+    by_source = {job["source_id"]: job for job in context["recent_jobs"]}
+    assert by_source["src-1"]["artifacts"] == ["local.txt"]
+    # worker 任务本地目录为空：清单完全来自对象存储 manifest。
+    assert by_source["src-2"]["artifacts"] == ["remote.json"]
+    # selected（最近任务）与 recent 使用同一 union 语义。
+    assert context["selected_job"]["id"] == worker_job["id"]
+    assert context["selected_job"]["artifacts"] == ["remote.json"]

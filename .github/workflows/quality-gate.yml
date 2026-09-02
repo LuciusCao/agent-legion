@@ -392,6 +392,34 @@ jobs:
             test-results/backend-full-reruns.json
           retention-days: 1
 
+  # Docs retired-terms guard for docs-only PRs (codex review on #375): the
+  # changes filter maps docs/*|*.md|LICENSE to backend=false, so backend-unit
+  # (which runs the static round including check_architecture) is skipped
+  # exactly when a docs-only PR is most likely to reintroduce retired
+  # terminology. This job always runs: with backend=true every step is gated
+  # off and it reports success in seconds (the postgres no-op pattern), with
+  # backend=false it executes the standalone module entry in a --no-project
+  # env — only pyyaml, no uv sync.
+  docs-terms:
+    name: docs-terms
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        if: needs.changes.outputs.backend == 'false'
+
+      - uses: astral-sh/setup-uv@v5
+        if: needs.changes.outputs.backend == 'false'
+        with:
+          python-version: "3.13"
+
+      - name: Docs retired-terms guard
+        if: needs.changes.outputs.backend == 'false'
+        run: uv run --no-project --with pyyaml python -m scripts.architecture.docs_retired_terms
+        env:
+          PYTHONPATH: .
+
   # Combined coverage floor + aggregate backend evidence (issue #193): the
   # needs-DAG guarantees backend-unit and every backend-postgres shard
   # finished before this job starts, replacing the old 40x15s `gh api`
