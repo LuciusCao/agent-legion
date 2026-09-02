@@ -3824,6 +3824,8 @@ export interface components {
     InstanceWorkflowsSettings: {
       /** Enabled */
       enabled: boolean
+      /** Max Items Per Run */
+      max_items_per_run: number
     }
     /** JobBatchRequest */
     JobBatchRequest: {

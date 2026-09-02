@@ -2,12 +2,11 @@
 
 Split from ``schema.py`` for the file-size budget (and from
 ``migration_registry.py``, which re-exports this chain, when the import
-list itself outgrew the ceiling). DDL-only versions (new indexes/columns)
-have no Python function — their DDL lives in ``postgres_schema.sql`` and
-is replayed by the idempotent full-file apply — but they still get a
-registry entry so ``max(version)`` stays meaningful for upgrade gating.
-Order note: migrate_runs (v53) must run after every migration that still
-reads job_batches; the version-sorted registry guarantees this.
+list itself outgrew the ceiling). DDL-only versions have no Python
+function — their DDL lives in ``postgres_schema.sql`` — but they still get
+a registry entry so ``max(version)`` stays meaningful for upgrade gating.
+migrate_runs (v53) must run after every migration that still reads
+job_batches; the version-sorted registry guarantees it.
 """
 
 from __future__ import annotations
@@ -32,6 +31,7 @@ from server.app.db.migrations import (
     migrate_node_cms_config,
     migrate_ops_runtime_profile_samples,
     migrate_retire_global_register_tokens,
+    migrate_run_job_status_counts,
     migrate_runs,
     migrate_scoped_token_origin,
     migrate_studio_chat_context,
@@ -164,6 +164,12 @@ MIGRATIONS: list[SchemaMigration] = [
     SchemaMigration(71, "preview_panels", migrate_preview_panels),
     # v72 (#359 L1): runtime-profile gauge table; seeded to the ops series.
     SchemaMigration(72, "ops_runtime_profile_samples", migrate_ops_runtime_profile_samples),
+    # v73 (#358): run-level job status counters. count_jobs_by_status_in_run
+    # was a group-by over the run's whole jobs slice; the trigger-maintained
+    # run_job_status_counts (DB-RUN-JOB-STATUS-COUNTS-001) turns the run
+    # detail read into a PK lookup and is the data source for the #350 run
+    # progress view.
+    SchemaMigration(73, "run_job_status_counts", migrate_run_job_status_counts),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]

@@ -34,6 +34,7 @@
     "tests/db/test_preview_panels_migration.py",
     "tests/db/test_quality_loop_schema.py",
     "tests/db/test_retire_global_register_tokens_migration.py",
+    "tests/db/test_run_job_status_counts_migration.py",
     "tests/db/test_runs_migration.py",
     "tests/db/test_schema_upgrade_parity.py",
     "tests/db/test_schema_version_registry.py",

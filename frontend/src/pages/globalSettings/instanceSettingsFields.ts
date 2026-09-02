@@ -77,7 +77,15 @@ export const FIELD_GROUPS: FieldGroup[] = [
   },
   {
     title: '功能开关',
-    fields: [],
+    fields: [
+      // #358：单次 run 条目上限（0 不限制），超限提交被 API 拒绝。
+      {
+        path: 'workflows.max_items_per_run',
+        label: '单次 run 条目上限（0 不限制）',
+        integer: true,
+        allowZero: true,
+      },
+    ],
     toggles: [{ path: 'workflows.enabled', label: '启用工作流' }],
   },
   {

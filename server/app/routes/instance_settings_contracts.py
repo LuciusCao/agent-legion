@@ -24,6 +24,12 @@ class InstanceWorkflowsSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool
+    # Hard cap on one run's submitted items (#358 / #349 P0-1); 0 disables.
+    # Restart-effective like the rest of the workflows block.
+    # No PUT default: a full-document PUT that omits the field must not
+    # silently re-arm a disabled (0) cap — same strictness as `enabled`.
+    # The read path merges the code default for legacy documents.
+    max_items_per_run: int = Field(ge=0)
 
 
 class InstanceAgentWorkersSettings(BaseModel):

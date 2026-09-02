@@ -43,28 +43,22 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v72, ops_runtime_profile_samples, #359) must
-# leave behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v72 creates one gauge table plus its bucket index; the
-# v71 (preview_panels) CHECK widening and the v70 effects stay in place —
+# Effects the newest migration (v73, run_job_status_counts, #358) must leave
+# behind so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. v73 creates the run_job_status_counts counter table with
+# its row trigger on jobs (drop-then-create in the schema replay, so the
+# trigger needs no explicit undo — the table drop takes the catalog rows with
+# it and the replay recreates both); the v70/v71 effects stay in place —
 # they belong to the SCHEMA_VERSION-1 shape after the rewind.
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("ops_runtime_profile_samples",)
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("run_job_status_counts",)
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
-_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ("idx_ops_runtime_profile_bucket",)
-_NEWEST_MIGRATION_NAME = "ops_runtime_profile_samples"
+_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
+_NEWEST_MIGRATION_NAME = "run_job_status_counts"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v70: the pre-v71 entity_type CHECK (without 'preview_panel').
-_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = (
-    """
-    alter table versioned_entities
-      drop constraint if exists versioned_entities_entity_type_check;
-    alter table versioned_entities
-      add constraint versioned_entities_entity_type_check
-      check(entity_type in ('node_code', 'agent'))
-    """,
-)
+# faithful v72: none — v73 is pure additive DDL + backfill.
+_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]

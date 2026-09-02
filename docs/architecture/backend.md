@@ -298,7 +298,7 @@ server/app/
 | AgentEnqueueConfig | BaseModel | workers: int, max_pending: int | app/configuration/executor_knobs.py |
 | AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/configuration/executor_knobs.py |
 | CodeStockConfig | BaseModel | enabled: bool, factor: float, min_stock: int, max_stock: int, refresh_seconds... | app/configuration/executor_knobs.py |
-| WorkflowsRuntimeConfig | BaseModel | enabled: bool, custom_nodes_enabled: bool | app/configuration/executor_runtime.py |
+| WorkflowsRuntimeConfig | BaseModel | enabled: bool, custom_nodes_enabled: bool, max_items_per_run: int | app/configuration/executor_runtime.py |
 | AgentWorkersRuntimeConfig | BaseModel | max_archive_bytes: int, min_protocol_version: int | app/configuration/executor_runtime.py |
 | ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/configuration/executor_runtime.py |
 | CodeCapabilityConfig | BaseModel | timeout_seconds: int, sandbox_network: bool, config_schema: dict[str, Any] | app/executors/contracts.py |
@@ -362,7 +362,7 @@ server/app/
 | InfraConnectionTestResponse | BaseModel | target: Literal['database', 'storage'], ok: bool, reason: str | None | app/routes/infra_connections_contracts.py |
 | InstanceCleanupSettings | BaseModel | log_retention_days: int, run_dir_retention_days: int, interval_seconds: int | app/routes/instance_settings_contracts.py |
 | InstanceMonitoringSettings | BaseModel | sample_interval_seconds: float, retention_days: int | app/routes/instance_settings_contracts.py |
-| InstanceWorkflowsSettings | BaseModel | enabled: bool | app/routes/instance_settings_contracts.py |
+| InstanceWorkflowsSettings | BaseModel | enabled: bool, max_items_per_run: int | app/routes/instance_settings_contracts.py |
 | InstanceAgentWorkersSettings | BaseModel | max_archive_bytes: int, min_protocol_version: int | app/routes/instance_settings_contracts.py |
 | InstanceSettingsDocument | BaseModel | cleanup: InstanceCleanupSettings, monitoring: InstanceMonitoringSettings, hea... | app/routes/instance_settings_contracts.py |
 | ApprovalDecisionCreateRequest | BaseModel | verdict: ApprovalVerdict, note: str, rework_target: str | app/routes/job_approval_contracts.py |

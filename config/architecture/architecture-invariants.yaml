@@ -1077,6 +1077,15 @@ invariants:
         target: tests/db/test_job_node_status_counts_migration.py
         gate: quick
 
+  - id: DB-RUN-JOB-STATUS-COUNTS-001
+    statement: "run_job_status_counts is the read source for count_jobs_by_status_in_run (the run detail endpoint's job_stats and the data source for the #350 run progress view); a group-by over the run's whole jobs slice is O(run jobs) per call and turned every run-detail refresh on a 10^6-item run into a million-row scan (issue #358). Row triggers on jobs (insert/delete/update of status, run_id) keep the counter table transactionally in sync with every write path regardless of caller; run_id='' rows (jobs with no run) are skipped, and the table carries no FK to runs because jobs.run_id is deliberately unconstrained text — counts are maintained for any non-empty run_id exactly like the group-by it replaced, and rows whose run disappears linger at cnt=0, invisible to the cnt<>0 read. The v73 backfill rebuilds it from jobs (excluding run_id='') and is idempotent. The read omits zero-count rows, so results are identical to the group-by it replaced."
+    owner: jobs
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/db/test_run_job_status_counts_migration.py
+        gate: quick
+
   - id: DB-WORKFLOW-CATALOG-001
     statement: "The global workflow catalog (workflow_catalog table, schema v40) is retired at schema v50 (issue #112): a workflow is the DAG inside one workspace, so workspaces.default_workflow_key is a plain text identifier (old job rows keep their workflow_key as text) and the workspace's ACTIVE workflow_revision is the only runtime definition source — node override validation and settings schemas (workspace_node_config / workspace_settings_schemas), snapshot-less job fallbacks (job detail, run-to, rerun, preview), package artifact curation, and the worker scan list all resolve it; the catalog list/register HTTP APIs and the studio-agent register/list tools are gone, and the built-in demo definition stays in the repo (server/app/workflows/builtin.py). Schema v62 supersedes the creation semantics: workspace creation takes an explicit caller-provided id which IS the workflow key (bound and immutable, no demo/blank modes and no create-path seeding — demo workspaces are provisioned by `make import-demo` / scripts/seed_demo.py), the first-publish key adoption path is removed, and the v62 migration renames legacy workspace ids to their bound keys; see DB-WORKSPACE-KEY-BINDING-001. The v50 migration drops the catalog table after warning about registered keys no workspace references."
     owner: workspace-executor

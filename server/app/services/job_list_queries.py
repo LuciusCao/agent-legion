@@ -4,16 +4,30 @@ from typing import Any
 
 from server.app.jobs.queries.job_filtering import (
     JobListFilter,
-    count_jobs_filtered,
     job_facets,
 )
 from server.app.jobs.queries.job_pagination import list_jobs_paginated
+from server.app.services.job_list_count_cache import TtlCache
 from server.app.services.job_patch_queries import JobPatchQueryService
 from server.app.services.job_patch_query_summaries import summarize_paginated_jobs
 
 
 class JobListQueryService(JobPatchQueryService):
     """Filtered/paginated job list queries for the workspace job list view."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # First-screen aggregate cache (#358): the filtered total and the
+        # facet group-bys scan the workspace's whole filtered jobs slice on
+        # every refresh; a short TTL collapses a refresh storm into one scan
+        # per window per filter. Per service instance (per process), and the
+        # key carries the workspace so cross-workspace isolation is inherent.
+        self._aggregate_cache = TtlCache()
+
+    def _cached_facets(self, workspace_id: str, job_filter: JobListFilter) -> dict[str, Any]:
+        return self._aggregate_cache.get_or_compute(
+            (workspace_id, job_filter), lambda: job_facets(self.job_db, workspace_id, job_filter)
+        )
 
     def page(
         self,
@@ -33,10 +47,13 @@ class JobListQueryService(JobPatchQueryService):
         jobs = summarize_paginated_jobs(self, self.job_db, jobs)
         # The filtered total and job stats are only consumed from the first
         # page; computing them on cursor pages repeats workspace-wide
-        # aggregations for no benefit.
-        total = (
-            count_jobs_filtered(self.job_db, workspace_id, job_filter) if cursor is None else None
-        )
+        # aggregations for no benefit. The total rides the same cached facet
+        # computation as /jobs/facets (identical filter → identical count),
+        # so a first page followed by a facets call scans the slice once
+        # per TTL window instead of twice per refresh.
+        total = None
+        if cursor is None:
+            total = self._cached_facets(workspace_id, job_filter)["total"]
         stats = self.job_db.count_jobs_by_status(workspace_id) if cursor is None else {}
         return {
             "workspace_id": workspace_id,
@@ -48,11 +65,13 @@ class JobListQueryService(JobPatchQueryService):
         }
 
     def facets(self, workspace_id: str, job_filter: JobListFilter) -> dict[str, Any]:
-        raw = job_facets(self.job_db, workspace_id, job_filter)
+        raw = self._cached_facets(workspace_id, job_filter)
         return {
             "workspace_id": workspace_id,
             "total": raw["total"],
-            "status_counts": raw["status_counts"],
+            # Shallow copy: the cached dict is shared by every hit of this
+            # window; a caller mutating the response must not poison it.
+            "status_counts": dict(raw["status_counts"]),
             # Version keys are stringified; the null version is keyed "none".
             "version_counts": {
                 ("none" if version is None else str(version)): count

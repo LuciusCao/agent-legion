@@ -37,6 +37,13 @@ class WorkflowsRuntimeConfig(BaseModel):
     # members (design §7 trust assumption). Disable via
     # AGENT_LEGION_CUSTOM_NODES_ENABLED=0.
     custom_nodes_enabled: bool = True
+    # Hard cap on one run's submitted items (#358 / #349 P0-1): a single
+    # POST /runs inserts every item in one transaction, so oversized runs
+    # blow memory and transaction length before the first job even executes.
+    # Default sits on the batched-submission baseline ceiling (2×10^4 items
+    # per run); 0 disables the cap (not recommended). Instance-settings
+    # managed, takes effect on restart.
+    max_items_per_run: int = Field(default=20_000, ge=0)
 
 
 class AgentWorkersRuntimeConfig(BaseModel):

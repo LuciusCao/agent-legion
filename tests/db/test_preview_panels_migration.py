@@ -5,8 +5,9 @@ from __future__ import annotations
 import pytest
 from psycopg import IntegrityError
 
+from server.app.db.migration_registry import MIGRATIONS
 from server.app.db.migrations.preview_panels import migrate_preview_panels
-from server.app.db.schema import init_db
+from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -69,16 +70,14 @@ def test_migration_widens_legacy_check_and_is_idempotent() -> None:
 @pytest.mark.fresh_schema
 def test_upgrade_from_v70_applies_the_widening() -> None:
     # Upgrade path: a database recorded at v70 replays the schema file (a no-op
-    # for the existing table) and runs only the v71 migration. Since v72 the
-    # chain tail is ops_runtime_profile_samples; deleting the v71 row also
-    # replays v72's seeding, so assert on the preview_panels row itself.
+    # for the existing table) and runs the v71+ migrations. At SCHEMA_VERSION
+    # 73 the chain tail is run_job_status_counts: init_db's high-water skip
+    # means the test must drop v71 AND every later version (73 included) to
+    # force the replay; the extra migrations' applies are idempotent.
+    assert SCHEMA_VERSION == 73
+    assert MIGRATIONS[-1].name == "run_job_status_counts"
     with write_transaction(TEST_DATABASE_URL) as conn:
-        # Drop v71 (the migration under test) AND v72 (the chain tail): with
-        # v72 still recorded, init_db's high-water skip (max applied >=
-        # SCHEMA_VERSION) would return early and never re-run the v71
-        # widening. Replaying v72 alongside is harmless — its seeding is
-        # idempotent (on conflict do nothing).
-        conn.execute("delete from schema_migrations where version in (71, 72)")
+        conn.execute("delete from schema_migrations where version >= 71")
         conn.execute(_LEGACY_CHECK_DDL)
     init_db(TEST_DATABASE_URL)
     with write_transaction(TEST_DATABASE_URL) as conn:
