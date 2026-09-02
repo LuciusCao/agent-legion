@@ -323,3 +323,14 @@ def _extract_section(text: str, heading_prefix: str) -> str | None:
             break
         collected.append(line)
     return "\n".join(collected)
+
+
+if __name__ == "__main__":
+    # Standalone entry for the CI docs-terms job (which runs this module in a
+    # --no-project env with only pyyaml) and for local debugging; the full
+    # gate path stays check_repository.
+    repo_root = Path(__file__).resolve().parents[2]
+    failures = check_docs_retired_terms(repo_root)
+    for failure in failures:
+        print(f"ERROR: {failure}")
+    raise SystemExit(1 if failures else 0)
