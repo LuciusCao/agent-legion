@@ -85,13 +85,18 @@ class WorkflowWorkerThread:
 
     def start(self) -> None:
         self.reload_scan_entries()
-        # Runtime profile (#359): register the dispatch so the metrics
-        # sampler can read the enqueue pool's backlog depth. Best-effort —
-        # the profile surface must never gate the worker's own startup.
+        # Runtime profile (#359): register BOTH enqueue pools (agent bundling
+        # on agent_dispatch, code bundling on code_dispatch) so the metrics
+        # sampler's depth gauge sums the real backlogs. Best-effort — the
+        # profile surface must never gate the worker's own startup.
         try:
             from server.app.services.runtime_profile import profile
 
-            profile.dispatch_service = self.code_dispatch
+            profile.enqueue_pools = [
+                service.enqueue_pool
+                for service in (self.agent_dispatch, self.code_dispatch)
+                if service is not None and service.enqueue_pool is not None
+            ]
         except Exception:
             # #204 broad-except audit: metrics registration only; a failure
             # here leaves the enqueue-depth gauge reading 0 while the worker

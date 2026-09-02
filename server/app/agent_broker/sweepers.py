@@ -127,6 +127,13 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
         from server.app.services.runtime_profile import profile
 
         profile.note_execution_requeued(len(requeued))
+    # Force-closed rows (requeue limit exceeded) are terminal executions too:
+    # the done-rate gauge must not undercount exactly when workers are lost
+    # en masse (independent-review P2 on #367).
+    if len(requeued) < len(rows):
+        from server.app.services.runtime_profile import profile
+
+        profile.note_execution_done(len(rows) - len(requeued))
     return requeued
 
 

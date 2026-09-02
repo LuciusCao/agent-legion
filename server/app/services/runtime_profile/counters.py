@@ -5,10 +5,15 @@ claim, execute, result. The hot paths (worker claim HTTP handler, result
 commit, enqueue pool submit, workflow-worker pass loop, run intake) bump
 plain integer/float attributes under a single ``Lock``-free discipline:
 
-- counters are only ever incremented (or maximized) — single ``+=`` on the
-  GIL keeps each bump atomic enough for gauges; a lost increment under the
-  interpreter's preemption just rounds a rate, never corrupts a monotonic
-  total;
+- counters are only ever incremented (or maximized). A plain ``+=`` under
+  the GIL is NOT atomic: two interleaved LOAD/ADD/STORE pairs can lose one
+  increment, and a maximized field can regress to a smaller concurrent
+  value. Both losses only ever UNDERCOUNT a gauge (never fabricate load),
+  which is acceptable for triage heuristics — write that down rather than
+  claim safety. ``snapshot_and_reset`` holds the lock for the copy+reset,
+  but writers do not take it: increments landing between the dict copy and
+  the reset are permanently dropped (lost for both buckets) — again a
+  bounded undercount at microsecond window × pipeline rates;
 - the sampling loop snapshots all counters under ``registry_lock`` and
   resets the per-bucket deltas — writers never block on readers because
   the snapshot copies references out in one critical section measured in
@@ -96,13 +101,15 @@ class RuntimeProfile:
     failure inside a ``finally``-free instrumentation call would turn a
     metrics bug into an outage; the try/except below is the guardrail).
 
-    ``dispatch_service`` is an optional back-reference the workflow worker
-    registers at startup: the sampler's enqueue-depth gauge reads the live
-    pool backlog through it (Typed as Any to keep this module free of
-    agent_broker imports — the reference is write-once, read-only).
+    ``enqueue_pools`` holds the live AgentEnqueuePool instances the workflow
+    worker registers at startup — BOTH pools (agent bundling on
+    agent_dispatch, code bundling on code_dispatch; independent-review
+    P1 on #367 caught the single-registration variant measuring only the
+    code pool). Typed as Any to keep this module free of agent_broker
+    imports; write-once at startup, read-only afterwards.
     """
 
-    dispatch_service: Any = None
+    enqueue_pools: list[Any] = []
 
     def __init__(self) -> None:
         self.counters = RuntimeProfileCounters()
@@ -146,8 +153,8 @@ class RuntimeProfile:
 
     # --- execute ------------------------------------------------------------
 
-    def note_execution_done(self) -> None:
-        self.counters.execute_done += 1
+    def note_execution_done(self, count: int = 1) -> None:
+        self.counters.execute_done += count
 
     def note_execution_requeued(self, count: int = 1) -> None:
         self.counters.execute_requeued += count
@@ -163,26 +170,24 @@ class RuntimeProfile:
     # --- shared context-manager helpers --------------------------------------
 
     class _Timed:
-        """Records wall time into a callback on exit; never raises."""
+        """Pure wall-time measurement handed to the note_* call (Codex P2 on
+        #367): stop() only RETURNS the elapsed seconds — the note_* method
+        owns every accumulation. An earlier variant also accumulated into
+        the total here, double-counting every claim/result latency."""
 
-        __slots__ = ("_profile", "_field", "_start")
+        __slots__ = ("_start",)
 
-        def __init__(self, profile: RuntimeProfile, field: str) -> None:
-            self._profile = profile
-            self._field = field
+        def __init__(self) -> None:
             self._start = time.monotonic()
 
         def stop(self) -> float:
-            elapsed = time.monotonic() - self._start
-            counters = self._profile.counters
-            setattr(counters, self._field, getattr(counters, self._field) + elapsed)
-            return elapsed
+            return time.monotonic() - self._start
 
     def claim_timer(self) -> _Timed:
-        return RuntimeProfile._Timed(self, "claim_seconds_total")
+        return RuntimeProfile._Timed()
 
     def result_timer(self) -> _Timed:
-        return RuntimeProfile._Timed(self, "result_seconds_total")
+        return RuntimeProfile._Timed()
 
 
 # Module-level singleton; the app wiring replaces it wholesale in tests.

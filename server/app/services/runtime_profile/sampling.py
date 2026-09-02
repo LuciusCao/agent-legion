@@ -66,6 +66,54 @@ def persist_profile_sample(
     runtime_profile_queries_from_dsn(dsn).upsert_runtime_profile_sample(bucket_start, values)
 
 
-def query_profile_series(dsn: ConnectSource, buckets: int = 30) -> list[dict[str, Any]]:
-    """Read the most recent ``buckets`` gauge rows, oldest first."""
-    return runtime_profile_queries_from_dsn(dsn).recent_runtime_profile_samples(buckets)
+# Columns aggregated by max when rolling minute rows up into wider bins
+# (latencies and momentary depths); everything else sums.
+_MAX_AGGREGATED_COLUMNS = frozenset(
+    {
+        "pass_scan_seconds_max",
+        "claim_seconds_max",
+        "result_seconds_max",
+        "execute_active",
+        "enqueue_pending",
+        "db_pool_waiting",
+    }
+)
+
+
+def _rollup(rows: list[dict[str, Any]], bin_seconds: int) -> list[dict[str, Any]]:
+    """Fold minute rows into fixed bins (epoch-floor, like ops series)."""
+    if bin_seconds <= 60:
+        return rows
+    bins: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        start = row["bucket_start"]
+        # The row factory may render timestamptz as a string depending on
+        # the connection's session timezone; normalize before epoch-floor.
+        if isinstance(start, str):
+            start = datetime.fromisoformat(start)
+        key = int(start.timestamp()) // bin_seconds * bin_seconds
+        if key not in bins:
+            bins[key] = dict(row)
+            continue
+        acc = bins[key]
+        for column, value in row.items():
+            if column == "bucket_start" or value is None:
+                continue
+            if column in _MAX_AGGREGATED_COLUMNS:
+                acc[column] = max(acc[column] or 0, value)
+            else:
+                acc[column] = (acc[column] or 0) + value
+    return [bins[key] for key in sorted(bins)]
+
+
+def query_profile_series(
+    dsn: ConnectSource, buckets: int = 30, bin_seconds: int = 60
+) -> list[dict[str, Any]]:
+    """Read the most recent ``buckets`` gauge rows, oldest first.
+
+    ``bin_seconds > 60`` rolls minute rows up into fixed epoch-floor bins
+    (latencies/depths take the max, counters sum) so a wide window stays a
+    bounded response — same shape as the ops-metrics series rollup.
+    """
+    rows = runtime_profile_queries_from_dsn(dsn).recent_runtime_profile_samples(buckets)
+    return _rollup(rows, bin_seconds)

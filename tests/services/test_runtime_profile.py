@@ -57,12 +57,19 @@ def test_counters_snapshot_resets_deltas() -> None:
     assert profile.counters.snapshot_and_reset()["claim_count"] == 0
 
 
-def test_claim_timer_accumulates_elapsed_time() -> None:
+def test_claim_timer_accumulates_exactly_once() -> None:
+    """Codex P2 on #367: the timer must be pure — note_* owns accumulation.
+
+    The old _Timed.stop also added to claim_seconds_total, so broker.claim
+    double-counted every latency (timer + note_claim), inflating averages,
+    the claim threshold and the DB-wait share alike.
+    """
     profile = RuntimeProfile()
-    timer = profile.claim_timer()
-    elapsed = timer.stop()
+    elapsed = profile.claim_timer().stop()
     assert elapsed >= 0.0
-    assert profile.counters.claim_seconds_total == elapsed
+    assert profile.counters.claim_seconds_total == 0.0  # pure timer: no add
+    profile.note_claim(elapsed, empty=True)
+    assert profile.counters.claim_seconds_total == elapsed  # exactly once
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +155,18 @@ def test_classifier_claim_serialization() -> None:
     assert "#351" in verdict["conclusion"]
 
 
+def test_classifier_deep_queue_with_blocked_claims_names_claim_blockage() -> None:
+    """#351 table's blocked row: deep queue, workers claiming, all skipped."""
+    verdict = classify_bottleneck(
+        _sample(queued_depth=50, claim_count=80, claim_empty_count=80),
+        online_workers=4,
+        queue_alert="blocked",
+    )
+    assert verdict["stage"] == "claim"
+    assert "不可领取" in verdict["conclusion"]
+    assert verdict["evidence"]["queue_alert"] == "blocked"
+
+
 def test_classifier_no_signal_reports_none() -> None:
     verdict = classify_bottleneck(_sample(), online_workers=2)
     assert verdict["stage"] == "none"
@@ -213,6 +232,29 @@ def test_series_ordered_oldest_first() -> None:
 
 # ---------------------------------------------------------------------------
 # route (postgres tier via the app client)
+
+
+def test_series_rollup_aggregates_wide_bins() -> None:
+    from server.app.services.runtime_profile.sampling import _rollup
+    from tests.helpers.profile_rows import bucket_matches
+
+    profile = RuntimeProfile()
+    base = _NOW.replace(second=0, microsecond=0)
+    for minute in range(5):
+        persist_profile_sample(
+            TEST_DATABASE_URL,
+            base + timedelta(minutes=minute),
+            profile,
+            queued_depth=0,
+            active_executions=0,
+            enqueue_pending=minute + 1,  # depth: max within the bin
+        )
+    rows = query_profile_series(TEST_DATABASE_URL, buckets=10)
+    rolled = _rollup(rows, bin_seconds=300)
+    assert len(rolled) == 1  # five minutes collapse into one 5-minute bin
+    assert rolled[0]["enqueue_pending"] == 5  # max, not sum
+    assert rolled[0]["pass_count"] == 0  # untouched counters stay 0
+    assert bucket_matches(rolled[0]["bucket_start"], base)
 
 
 def test_runtime_profile_route_serves_buckets_and_verdict(client: TestClient) -> None:

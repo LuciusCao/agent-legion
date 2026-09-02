@@ -5,8 +5,8 @@ result: depth + rate + latency) sampled into ``ops_runtime_profile_samples``
 by the ops-metrics loop, plus DB-pool / advisory-lock cross-cutting waits.
 
 L2 — the bottleneck classifier (``classifier.py``) turns the latest gauges
-plus the existing queue-alert signal into one human-readable verdict with
-evidence, served by ``GET /api/metrics/runtime-profile``.
+plus the existing queue-alert signal (blocked/stalled, passed in as context
+by the route) into one human-readable verdict with evidence, served by ``GET /api/metrics/runtime-profile``.
 
 L3 (on-demand py-spy / pg_stat_statements) is deliberately not implemented
 here — the issue scopes it as a separate deliverable.

@@ -37,46 +37,52 @@ _DEFAULT_RETENTION_DAYS = 30
 
 logger = logging.getLogger(__name__)
 
+# Last-read cumulative pool counters (module state: one sampler per process).
+# psycopg-pool reports lifetime cumulatives (requests_queued /
+# requests_wait_ms count every getconn since pool creation); the profile
+# buckets need the per-minute DELTA, so each read remembers the previous
+# value. Empirically verified against psycopg-pool 3.3: the getconn/putconn
+# path this repo uses (server/app/db/connection.py) accumulates both keys —
+# usage_ms does NOT grow on this path (only the `pool.connection()` context
+# manager updates it), so it must not be used as the wait signal.
+_DB_POOL_LAST_STATS: dict[str, int] = {}
+
 
 def _db_pool_wait_gauges(database_dsn: ConnectSource) -> tuple[int, float]:
-    """Read psycopg-pool wait gauges for the DSN's pool (best-effort).
+    """Per-bucket pool-wait deltas (best-effort; never raises).
 
-    Returns (requests that waited, seconds waited). ``get_stats()`` carries
-    ``requests_waiting`` (momentary depth) and ``usage_ms`` (cumulative
-    checkout time) — wait *time* is not directly reported, so the classifier
-    consumes ``usage_ms`` deltas as the wait proxy: sustained checkout
-    saturation inflates it proportionally. A missing/renamed field degrades
-    to (0, 0.0) — never raises.
+    Keyed by ``resolve_dsn`` — a facade's ``str()`` is an object repr that
+    would mint a fresh never-used pool reporting zeros (P0 on #367).
     """
     try:
+        from server.app.db.dialect import resolve_dsn
         from server.app.db.pools import pool_for
 
-        pool = pool_for(str(database_dsn))
-        stats = pool.get_stats()
-        waiting = int(stats.get("requests_waiting", 0) or 0)
-        usage_ms = float(stats.get("usage_ms", 0.0) or 0.0)
-        return waiting, usage_ms / 1000.0
+        stats = pool_for(resolve_dsn(database_dsn)).get_stats()
+        queued = int(stats.get("requests_queued", 0) or 0)
+        wait_ms = int(stats.get("requests_wait_ms", 0) or 0)
+        delta_queued = max(queued - _DB_POOL_LAST_STATS.get("queued", 0), 0)
+        delta_wait_ms = max(wait_ms - _DB_POOL_LAST_STATS.get("wait_ms", 0), 0)
+        _DB_POOL_LAST_STATS["queued"] = queued
+        _DB_POOL_LAST_STATS["wait_ms"] = wait_ms
+        return delta_queued, delta_wait_ms / 1000.0
     except Exception:
         # #204 broad-except audit: gauge reader, not a pipeline component.
-        # The pool stats shape moves between psycopg-pool versions and this
-        # runs inside the metrics sampler's profile branch; a failure means
-        # "no DB-pool signal this bucket" (0, 0.0), never a sampling abort.
+        # A failure means "no DB-pool signal this bucket", never a sampling
+        # abort; the traceback is not actionable beyond the log line.
         return 0, 0.0
 
 
 def _enqueue_pending_depth() -> int:
-    """Momentary backlog of the agent enqueue pool (0 when unwired).
+    """Momentary combined enqueue backlog (0 when unwired).
 
-    The pool lives on the workflow worker's CodeDispatchService (same
-    instance the worker thread submits to); the sampler cannot reach the
-    app object, so the worker thread registers its dispatch on the profile
-    at startup and the gauge reads through that registration.
+    Both pools count (agent bundling + code bundling; P1 on #367) — the
+    worker thread registers them on the profile at startup.
     """
     try:
         from server.app.services.runtime_profile.counters import profile
 
-        dispatch = profile.dispatch_service
-        return int(dispatch.enqueue_pool.pending_depth()) if dispatch is not None else 0
+        return sum(int(pool.pending_depth()) for pool in profile.enqueue_pools)
     except Exception:
         # #204 broad-except audit: same gauge-reader contract as above —
         # the dispatch is registered by the worker thread and may not exist
@@ -105,6 +111,11 @@ class OpsMetricsService:
     @property
     def sample_interval_seconds(self) -> float:
         return self._sample_interval_seconds
+
+    @property
+    def database_dsn(self) -> ConnectSource:
+        """Read accessor for co-sampling surfaces (runtime profile, #359)."""
+        return self._database_dsn
 
     def sample_once(self, now: datetime | None = None) -> None:
         """Persist samples for the last completed UTC minute bucket.

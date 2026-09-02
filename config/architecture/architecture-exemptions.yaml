@@ -429,6 +429,44 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
   ceiling: 851
 - check: architecture.file_budget
+  path: server/app/agent_broker/sweepers.py
+  reason: >-
+    Issue #359's review round counts sweeper force-closed executions in
+    the done-rate gauge (the requeue-limit branch): without it the execute
+    stage undercounts exactly when workers are lost en masse. The two
+    counters sit at the branch that owns the terminal transition; moving
+    them out would split the sweep outcome from its measurement.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 167
+
+- check: architecture.file_budget
+  path: server/app/services/runtime_profile/classifier.py
+  reason: >-
+    Issue #359's P1 review round added the blocked-claim branch (the #351
+    discrimination table's blocked row: deep queue + workers claiming +
+    every candidate skipped). The branch shares the evidence dict and the
+    verdict helpers with its sibling rules; splitting the classifier by
+    rule family would separate the priority order (documented in the
+    module docstring) from the code that implements it.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 145
+
+- check: architecture.file_budget
+  path: server/app/services/runtime_profile/sampling.py
+  reason: >-
+    Issue #359's P0/P1 review round grew the sampler: per-bucket DB-pool
+    wait DELTAS (cumulative-counter memo) and the wide-window bin rollup
+    both belong with the values they prepare, next to the facade calls
+    they feed. Splitting either into the queries layer would move value
+    marshalling away from the only caller; revisit if a second gauge
+    family joins the sampler.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 108
+
+- check: architecture.file_budget
   path: server/app/services/ops_metrics/service.py
   reason: >-
     Issue #359 extends the sampling pass to persist the runtime-profile

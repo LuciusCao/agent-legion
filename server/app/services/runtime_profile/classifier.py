@@ -10,7 +10,11 @@ blockage).
 Priority order matters: upstream starvation is checked before downstream
 saturation because an empty queue makes every downstream stage look idle —
 the same evidence, opposite diagnosis. DB-pool contention outranks stage
-rules because it inflates every latency the stage rules compare.
+rules because it inflates every latency the stage rules compare. Inside the
+deep-queue branch, claim-side blockage (the #351 discrimination table's
+"blocked" row: workers claim, candidates all unclaimable — surfaced by the
+empty-claim skip-reason signal / queue_alert) is checked before host-side
+stage rules, because a blocked claim path makes every host stage look slow.
 """
 
 from __future__ import annotations
@@ -95,6 +99,21 @@ def classify_bottleneck(sample: dict[str, Any], **context: Any) -> dict[str, Any
 
     # --- downstream saturation needs a deep queue first -----------------------
     if queued >= _QUEUED_DEEP:
+        # Blocked claim path (#351 table's blocked row): deep queue, workers
+        # actively claiming but every candidate skipped — the queue-alert
+        # signal (blocked) or a high empty ratio with traffic names it.
+        queue_alert_kind = str(context.get("queue_alert", "") or "")
+        if claim_count > 0:
+            empty_ratio = claim_empty / claim_count
+            if empty_ratio >= 0.5 or queue_alert_kind == "blocked":
+                evidence["empty_claim_ratio"] = round(empty_ratio, 3)
+                evidence["queue_alert"] = queue_alert_kind or None
+                return _verdict(
+                    "claim",
+                    "claim 侧阻塞：队列有货但候选全部不可领取（worker 兼容性/模型/容量不匹配，"
+                    "见 skip-reason 直方图与 queue_alert 信号）",
+                    evidence,
+                )
         if pool_skipped > 0:
             return _verdict(
                 "enqueue",
