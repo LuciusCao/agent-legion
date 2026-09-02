@@ -10,7 +10,7 @@ import { compareWorkflowDraft } from '../../../api/workflowDraftCompare'
 import { buildChangeSummary } from '../validation/workflowStudioChanges'
 import type { CompareResponse } from '../shared/useWorkflowDraftCompare.types'
 import { WorkflowChangeSummaryPanel } from '../validation/WorkflowChangeSummaryPanel'
-import { useStudioNav } from '../shared/workflowStudioNav'
+import { useStudioNav } from '../shared/useStudioNavState'
 import type {
   AgentDefinitionDraftView,
   NodeCodeDraftView,

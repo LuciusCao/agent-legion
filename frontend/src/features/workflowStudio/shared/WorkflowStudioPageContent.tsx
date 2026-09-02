@@ -1,25 +1,27 @@
-import { useMemo } from 'react'
 import type { useWorkflowStudio } from './useWorkflowStudio'
-import { nodeKeyForAgent, StudioNavContext } from './workflowStudioNav'
-import type { StudioNav } from './workflowStudioNav'
+import { nodeKeyForAgent } from './workflowStudioNav'
+import { StudioNavContext, useStudioNavState } from './useStudioNavState'
 import { WorkflowStudioLayout } from './WorkflowStudioLayout'
+import { useUiStore } from '../../../stores/uiStore'
 
 type Studio = ReturnType<typeof useWorkflowStudio>
 
+const NO_BINDING_NODE_TOAST =
+  '当前 workflow 草稿中没有绑定该 Agent capability 的节点'
+
 export function WorkflowStudioPageContent(props: { studio: Studio }) {
-  const { studio } = props
+  const { workflow, agentCatalog, agentDefinitions, setSelectedNodeKey } =
+    props.studio
+  const showToast = useUiStore((s) => s.showToast)
   // Agent 管理弹窗已删除：nav 通道收敛为「选中绑定该 capability 的节点」，
-  // agent 的查看/编辑在节点详情内嵌完成。useMemo 稳住 context value。
-  const { workflow, agentCatalog } = studio
-  const nav: StudioNav = useMemo(
-    () => ({
-      openAgent: (agentId) => {
-        const key = nodeKeyForAgent(agentId, workflow, agentCatalog)
-        if (key) studio.setSelectedNodeKey(key)
-      },
-    }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只依赖 nav 实际消费的稳定字段
-    [workflow, agentCatalog, studio.setSelectedNodeKey]
+  // agent 的查看/编辑在节点详情内嵌完成。#387：draft-only Agent 经
+  // agentDefinitions 回落解析；capability 无节点绑定（空 workflow）时 toast
+  // 反馈，不再静默空转。openAgent 同时记住目标草稿身份（codex P1）。
+  const nav = useStudioNavState(
+    (agentId) =>
+      nodeKeyForAgent(agentId, workflow, agentCatalog, agentDefinitions),
+    setSelectedNodeKey,
+    () => showToast(NO_BINDING_NODE_TOAST, 'error')
   )
   // studio/view 状态由 PageHost 层的 StudioStateContext/StudioViewContext 提供，
   // 这里只补 nav 通道。
