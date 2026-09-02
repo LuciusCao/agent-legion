@@ -9,6 +9,8 @@ refresh storm collapses into one scan per window.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from server.app.jobs.queries.job_filtering import JobListFilter
@@ -172,3 +174,35 @@ def test_workspaces_are_isolated_by_cache_key(list_service, job_db) -> None:
     _insert_job(job_db, ws_b, "j-2")
     assert list_service.facets(ws_a, _filter())["total"] == 1
     assert list_service.facets(ws_b, _filter())["total"] == 2
+
+
+def test_cold_key_computes_once_under_thread_storm() -> None:
+    """Single-flight (Codex P2 on #374): concurrent misses on one key run
+    exactly one compute — without the keyed lock every thread would scan."""
+    import threading
+
+    from server.app.services.job_list_count_cache import TtlCache
+
+    cache = TtlCache(ttl_seconds=60.0)
+    calls = {"n": 0}
+    barrier = threading.Barrier(8)
+
+    def slow_compute() -> int:
+        calls["n"] += 1
+        time.sleep(0.05)
+        return 42
+
+    results: list[int] = []
+
+    def worker() -> None:
+        barrier.wait(timeout=10)
+        results.append(cache.get_or_compute("storm-key", slow_compute))
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+    assert not any(thread.is_alive() for thread in threads)
+    assert calls["n"] == 1, f"expected single-flight, got {calls['n']} computes"
+    assert results == [42] * 8

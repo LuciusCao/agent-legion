@@ -17,6 +17,7 @@ window per filter.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Hashable
 from typing import TypeVar, cast
@@ -41,21 +42,53 @@ class TtlCache:
         self._ttl = ttl_seconds
         self._max_entries = max_entries
         self._entries: dict[Hashable, tuple[float, object]] = {}
+        # Single-flight (Codex P2 on #374): sync FastAPI handlers share one
+        # service instance across the threadpool, so a cold/expired key under
+        # a refresh storm would otherwise run one full-scan compute per
+        # thread. Keyed locks keep different filters computing in parallel
+        # while collapsing same-key computes; the lock map is bounded by the
+        # entry cap (pruned on eviction).
+        self._locks: dict[Hashable, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
+
+    def _lock_for(self, key: Hashable) -> threading.Lock:
+        with self._locks_guard:
+            lock = self._locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                self._locks[key] = lock
+                if len(self._locks) > self._max_entries:
+                    for stale in list(self._locks)[: len(self._locks) - self._max_entries]:
+                        self._locks.pop(stale, None)
+            return lock
 
     def get_or_compute(self, key: Hashable, compute: Callable[[], T]) -> T:
-        """Return the cached value for ``key`` or compute, cache, and return it."""
+        """Return the cached value for ``key`` or compute, cache, and return it.
+
+        Same-key computes are single-flight: concurrent misses block on the
+        per-key lock and the first finisher's value serves everyone.
+        """
         now = time.monotonic()
         hit = self._entries.get(key)
         if hit is not None and now - hit[0] < self._ttl:
             return cast(T, hit[1])
-        value = compute()
-        if len(self._entries) >= self._max_entries:
-            # Soft bound: drop the oldest inserted entries (dicts keep
-            # insertion order; no LRU bookkeeping needed at this cardinality).
-            for stale_key in list(self._entries)[: len(self._entries) - self._max_entries + 1]:
-                self._entries.pop(stale_key, None)
-        self._entries[key] = (now, value)
-        return value
+        with self._lock_for(key):
+            # Re-check under the lock: the first finisher may have refreshed
+            # the entry while this thread was blocked.
+            now = time.monotonic()
+            hit = self._entries.get(key)
+            if hit is not None and now - hit[0] < self._ttl:
+                return cast(T, hit[1])
+            value = compute()
+            if len(self._entries) >= self._max_entries:
+                # Soft bound: drop the oldest inserted entries (dicts keep
+                # insertion order; no LRU bookkeeping needed at this cardinality).
+                for stale_key in list(self._entries)[: len(self._entries) - self._max_entries + 1]:
+                    self._entries.pop(stale_key, None)
+            self._entries[key] = (now, value)
+            return value
 
     def clear(self) -> None:
         self._entries.clear()
+        with self._locks_guard:
+            self._locks.clear()

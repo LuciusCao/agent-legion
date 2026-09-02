@@ -288,6 +288,19 @@ exemptions:
   ceiling: 74
 
 - check: architecture.file_budget
+  path: server/app/services/job_list_count_cache.py
+  reason: >-
+    Issue #358's review round (Codex P2 on #374) adds keyed single-flight
+    locking to the TTL cache: sync handlers share one service across the
+    FastAPI threadpool, so a cold key under a refresh storm ran one
+    full-scan compute per thread. The lock map lives with the entries it
+    guards; splitting it out would separate the eviction bound from the
+    map it bounds.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/358
+  ceiling: 74
+
+- check: architecture.file_budget
   path: server/app/services/job_intake.py
   reason: >-
     Issue #358's review round (P1 on #374) extends the per-run items cap
