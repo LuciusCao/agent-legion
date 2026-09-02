@@ -3,6 +3,9 @@
  * - 未定制 workspace（published=null）→ 渲染 fallback（现有通用预览）；
  * - 已发布 bundle → bundle host 接管，fallback 不再渲染；
  * - 「定制预览」对话期间左栏实时渲染草稿（仅当前用户可见）。
+ *
+ * srcdoc 断言一律用「包含」：宿主会在 bundle 头部注入 CSP meta
+ * （PreviewPanelHost 的出站网络红线），完整字符串不再等于 bundle 原文。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
@@ -11,6 +14,7 @@ import { PreviewPanelSection } from './PreviewPanelSection'
 import type { PreviewPanelState, PreviewPanelVersion } from './previewPanelApi'
 import { TestQueryProvider } from '../../testing/testQueryClient'
 import { useAuthStore } from '../../stores/authStore'
+import { expectConsoleError, expectConsoleWarning } from '../../test-setup'
 
 const mockFetchPublished = vi.fn()
 const mockFetchState = vi.fn()
@@ -111,7 +115,7 @@ describe('PreviewPanelSection', () => {
     const iframe = screen
       .getByTestId('preview-panel-host')
       .querySelector('iframe')
-    expect(iframe?.getAttribute('srcdoc')).toBe(PUBLISHED_HTML)
+    expect(iframe?.getAttribute('srcdoc')).toContain('published panel')
     expect(screen.queryByTestId('generic-fallback')).toBeNull()
   })
 
@@ -148,7 +152,7 @@ describe('PreviewPanelSection', () => {
         .getByTestId('preview-panel-host')
         .querySelector('iframe')
         ?.getAttribute('srcdoc')
-    ).toBe(PUBLISHED_HTML)
+    ).toContain('published panel')
 
     fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
     await waitFor(() =>
@@ -158,7 +162,7 @@ describe('PreviewPanelSection', () => {
       const iframe = screen
         .getByTestId('preview-panel-host')
         .querySelector('iframe')
-      expect(iframe?.getAttribute('srcdoc')).toBe(DRAFT_HTML)
+      expect(iframe?.getAttribute('srcdoc')).toContain('draft panel')
     })
     expect(screen.getByText('草稿预览中')).toBeInTheDocument()
 
@@ -171,7 +175,7 @@ describe('PreviewPanelSection', () => {
       const iframe = screen
         .getByTestId('preview-panel-host')
         .querySelector('iframe')
-      expect(iframe?.getAttribute('srcdoc')).toBe(PUBLISHED_HTML)
+      expect(iframe?.getAttribute('srcdoc')).toContain('published panel')
     })
   })
 
@@ -190,5 +194,55 @@ describe('PreviewPanelSection', () => {
     )
     expect(screen.queryByRole('button', { name: '定制预览' })).toBeNull()
     expect(mockFetchState).not.toHaveBeenCalled()
+  })
+
+  it('bundle 内容变化时重挂 iframe（旧文档在途桥请求的响应无处可投，codex P2）', async () => {
+    // react-query 的 refetch 落在 fake-timer 区间外时，查询解析会脱离
+    // act 包裹（known noise），声明预期以聚焦本用例的断言。
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
+    vi.useFakeTimers()
+    try {
+      mockFetchPublished.mockResolvedValue(
+        makeVersion(PUBLISHED_HTML, 'published')
+      )
+      // 首轮 state：无草稿。
+      mockFetchState.mockResolvedValue({
+        published: makeVersion(PUBLISHED_HTML, 'published'),
+        draft: null,
+      } satisfies PreviewPanelState)
+      renderSection()
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+      // 打开定制对话启用草稿轮询（3s refetchInterval），左栏切到草稿渲染。
+      fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+      const firstFrame = screen
+        .getByTestId('preview-panel-host')
+        .querySelector('iframe')
+      expect(firstFrame?.getAttribute('srcdoc')).toContain('published panel')
+
+      // 轮询推进：agent 保存了新草稿（bundle 内容更新）。key 含 bundle
+      // 内容 → iframe 元素必须被替换——沿用同一 contentWindow 做 srcDoc
+      // 导航会让旧文档在途请求的响应错误应答新文档的同编号请求。
+      mockFetchState.mockResolvedValue({
+        published: makeVersion(PUBLISHED_HTML, 'published'),
+        draft: makeVersion(DRAFT_HTML, 'draft'),
+      } satisfies PreviewPanelState)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3100)
+      })
+
+      const secondFrame = screen
+        .getByTestId('preview-panel-host')
+        .querySelector('iframe')
+      expect(secondFrame?.getAttribute('srcdoc')).toContain('draft panel')
+      expect(secondFrame).not.toBe(firstFrame)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
