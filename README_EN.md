@@ -31,9 +31,10 @@ repeatable, auditable production process.
   HTTP, claim executions, and upload artifacts. Capacity is leased and
   enforced per pool, so a flood of cheap code tasks never starves your
   agent runs.
-- **Reproducible and auditable.** External skills are plain git repos
-  pinned to a locked commit; every node execution leaves a full trace
-  (prompt, event stream, stderr) you can inspect after the fact.
+- **Reproducible and auditable.** Skills are local git repos under the skill
+  root; nodes pinned to a tag have their commit locked in the database. Every
+  node execution leaves a full trace (prompt, event stream, stderr) you can
+  inspect after the fact.
 - **Secrets handled properly.** Workspace and instance credentials are
   Fernet-encrypted in a vault; configs and snapshots only ever carry
   references, never plaintext.

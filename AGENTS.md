@@ -108,9 +108,9 @@ CodeExecutor(...).execute(context)
 
 更多完整规则与示例见 [docs/architecture/workspace-executor-evidence-matrix.md](docs/architecture/workspace-executor-evidence-matrix.md)。
 
-## 7. Pi / External Skills
+## 7. Pi / Skills
 
-- Skill 只在外部仓库修改，不要复制或 symlink 到项目根。外部 skill 仓库的位置自便，但被节点绑定或 agent 定义引用的 skill 目录必须位于 skill root（`~/.agents/skills`）之下，skill key 为其下的两段相对路径 `<group>/<name>`。
+- Skill 只在其本地仓库修改，不要复制或 symlink 到项目根。skill 仓库的位置自便，但被节点绑定或 agent 定义引用的 skill 目录必须位于 skill root（`~/.agents/skills`）之下，skill key 为其下的两段相对路径 `<group>/<name>`。
 - skill root 统一为 `~/.agents/skills`（单一来源 `server/app/skills/skill_roots.py`，实例设置只读展示）；workspace 的 agent skill 默认位于 `~/.agents/skills/<workspace_id>/`，SkillSelector 以只读前缀 + 相对目录名录入。skill 是 skill root 下的本地 in-place git 仓库（唯一模式，无注册表、无远程 clone 通道，#322）；缓存目录缺失即报错，按指引在 skill root 下创建。
 - 节点 `skill.ref` 语义：`latest`（空 ref 已归一为它）= 跟随仓库 HEAD，每次 dispatch 现场解析、永不入锁；具体 tag = 首次 dispatch 把 commit 冻结进 DB `skill_lock`（v2 多值 `{repo, refs: {ref → commit}}`，repo 仅审计，EXEC-SKILL-NODE-001）。重解析已 pin 的 ref 走 CLI `make skills-lock`（遍历锁内已有条目）；admin `/api/admin/skill-sources*` 端点与「Skill 源管理」面板已随注册表一并删除。
 - 完整流程见 [examples/README.md](examples/README.md)（demo skill 的接线方式）。
