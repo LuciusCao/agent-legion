@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 
+from shared import code_sandbox
 from shared.code_sandbox import build_sandbox_argv
 from worker import binary_resolution
 from worker.code_runner import (
@@ -410,6 +411,7 @@ def test_execute_code_uses_bundled_velites_when_path_missing(
     )
     stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled_dir)
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", bundled_dir)
     monkeypatch.setattr(shutil, "which", lambda _binary: None)
 
     client = FakeClient(_code_bundle(tmp_path))

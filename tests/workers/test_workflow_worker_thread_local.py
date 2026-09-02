@@ -340,8 +340,10 @@ def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkey
         )
         if proc.returncode != 0 or not velites.exists():
             pytest.skip(f"velites build failed: {proc.stderr[-400:]}")
+    # #383：host 侧沙箱解析走 shared.code_sandbox.resolve_sandbox_binary
+    # （候选 velites-sandbox → velites，自带副本目录 → PATH）。
     monkeypatch.setattr(
-        "server.app.executors._code_sandbox.shutil.which", lambda _name: str(velites)
+        "server.app.executors._code_sandbox.resolve_sandbox_binary", lambda: str(velites)
     )
 
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")

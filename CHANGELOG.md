@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Changed
+- worker 镜像与 agent runtime 解耦（#381/#383，PR #384）：velites/pi 移出
+  worker 镜像——镜像收敛为纯执行服务（Python worker + bwrap + 内置的
+  `velites-sandbox` code 沙箱包装器），velites agent runtime 以平台匹配的
+  外挂二进制提供（compose bind mount 到 `/app/data/bin/velites`，long
+  syntax 缺源拒启）。新增 `AGENT_WORKER_EXPECT_RUNTIMES` 期望 runtime 守卫
+  （探测不到/被停用/模型发现失败均 fail-fast，退出码 2）；注册 payload 携带
+  生效 runtime 的 `--version`（版本握手可观测，外挂后的漂移排障依据）。
+  pi 在 docker 镜像内不可用（npm 入口依赖 node），部署走裸机。新增
+  `velites-v*` tag 触发的三平台 release workflow（linux amd64/arm64、
+  macos arm64）；host 容器的 code 本地兜底禁用（避免为兜底路径给后端
+  容器加 seccomp/cap 特权）。
+
 ### Deprecated
 - workflow_key 兼容窗口期公告（issue #211）：全部 deprecated 契约面的迁移文案统一标注移除时间 **2026-10-31**——27 个请求/响应字段、10 条 URL 别名、claim 协议字段将在终态批移除。显式发送恒等值（=workspace id）继续放行至该日期；不匹配值已由守卫拒绝（400）。所有部署实例须在窗口期内升级至 ≥ schema v68（存量 workflow_key 已对齐）。
 

@@ -8,8 +8,8 @@
     frontend      frontend/package.json（+ lockfile）   npm 包
 
 锁步 bump 的代价是真实的：``scripts/ensure-velites.sh`` 以 ``velites/`` 子树的
-git tree hash 做二进制新鲜度指纹，Docker 的 velites-build stage 以 ``COPY
-velites/`` 为缓存键——Cargo.toml 里的版本号一变（即使 velites 源码没动）就会
+git tree hash 做二进制新鲜度指纹（Docker 侧只剩 velites-sandbox-build
+stage 构建 code 池沙箱包装器，缓存键语义不变）——Cargo.toml 里的版本号一变（即使 velites 源码没动）就会
 触发全量 ``cargo build --release`` 与镜像层重建；frontend/package.json 同理
 击穿 ``npm ci`` 缓存层。
 

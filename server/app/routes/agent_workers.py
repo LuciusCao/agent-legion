@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Annotated, Any
 
@@ -28,6 +29,8 @@ from server.app.routes.agent_workers_contracts import (
 )
 from server.app.services.ops_metrics import OpsMetricsService
 from server.app.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 _LEASE_HEADER = "x-agent-lease-id"
@@ -133,6 +136,19 @@ def create_agent_workers_router(
             raise HTTPException(status_code=401, detail=detail) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # #381 版本握手：外挂后 velites 版本由运维方独立管理，把「worker 代码
+        # × runtime 版本」矩阵打进注册日志——漂移排障的第一现场，不落库。
+        # 记在注册事务成功之后（codex P2 on #384）：runtimes 值非法（400）或
+        # key 并发删除（401）不应留下「已注册」的观测记录——版本信息不落库，
+        # 这条日志就是唯一现场，失败的注册不该进兼容矩阵。
+        if payload.runtime_versions:
+            logger.info(
+                "agent worker registered: worker_id=%s protocol=%s runtimes=%s versions=%s",
+                payload.worker_id,
+                payload.protocol_version,
+                payload.runtimes,
+                payload.runtime_versions,
+            )
         return RegisterAgentWorkerResponse(
             worker_token=token,
             allowed_workspaces=[row["workspace_id"] for row in scope],

@@ -177,6 +177,15 @@ services:
       - SYS_ADMIN
     volumes:
       - ./worker.host.example.yaml:/etc/agent-legion/worker.yaml:ro
+      # velites 二进制外挂（issue #381）：worker 镜像不含 agent runtime 执行器，
+      # 同 compose.worker.yaml 的挂载说明——自带副本目录优先于 PATH，架构须与
+      # 镜像一致，产物来自 velites-release workflow 的 GitHub Release。
+      # long syntax + create_host_path: false：源缺失时 compose 启动即拒绝，
+      # 不让 docker 静默建目录（详见 compose.worker.yaml 同段注释）。
+      - type: bind
+        source: ${VELITES_BIN:-../velites-bin/velites}
+        target: /app/data/bin/velites
+        read_only: true
       - ${PI_CONFIG_DIR:-../pi-config}:/root/.pi/agent:ro
       - ${VELITES_CONFIG_DIR:-../velites-config}:/root/.velites:ro
       - worker-data:/var/lib/agent-legion-worker
@@ -194,6 +203,11 @@ services:
       # (git- and docker-ignored) or the shell environment — never inline here.
       LLM_GATEWAY_TOKEN: ${LLM_GATEWAY_TOKEN:-}
       AGENT_WORKER_IMAGE_VERSION: ${AGENT_WORKER_IMAGE_VERSION:-agent-legion-worker:local}
+      # 期望 runtime 守卫（issue #381）：探测不到即 fail-fast。无冒号的
+      # ${VAR-默认值} 形式——deploy/.env 显式写空值时生效为「禁用守卫」
+      # （零 runtime 注册合法），不会被默认值盖掉（同 AGENT_LEGION_S3_ENDPOINT
+      # 的插值语义）。
+      AGENT_WORKER_EXPECT_RUNTIMES: ${AGENT_WORKER_EXPECT_RUNTIMES-velites}
     stop_grace_period: 30s
     healthcheck:
       # Healthy = 服务可达，且控制面未进入 failed，且（Worker 进程在跑或尚未配置）。

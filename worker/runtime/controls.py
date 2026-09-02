@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from worker.binary_resolution import resolve_binary
+from shared.code_sandbox import resolve_sandbox_binary
 
 MAX_DYNAMIC_CONCURRENCY = 1024
 
@@ -58,10 +58,11 @@ def load_code_concurrency(path: Path) -> int:
 def hot_code_concurrency(current: int, loaded: int) -> tuple[int, bool]:
     """Hot-applied code pool capacity; returns (effective, rejected).
 
-    Hot-opening code capacity (0 -> >0) requires a resolvable velites binary
-    (EXEC-CODE-003 fail-closed), enforced at startup by preflight_error; a
-    direct config-file edit must not bypass that guard. Resizing stays hot.
+    Hot-opening code capacity (0 -> >0) requires a resolvable sandbox wrapper
+    (velites-sandbox or velites, EXEC-CODE-003 fail-closed), enforced at
+    startup by preflight_error; a direct config-file edit must not bypass
+    that guard. Resizing stays hot.
     """
-    if loaded > 0 and current == 0 and resolve_binary("velites") is None:
+    if loaded > 0 and current == 0 and resolve_sandbox_binary() is None:
         return current, True
     return loaded, False

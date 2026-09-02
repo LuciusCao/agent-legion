@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from shared import code_sandbox
 from worker import binary_resolution, config_store
 from worker.config_store import validate_config
 from worker.runtime import catalog
@@ -26,8 +27,14 @@ from worker.runtime.status import runtime_status
 
 @pytest.fixture(autouse=True)
 def _isolated_bundled_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """把自带二进制目录指向不存在的位置，避免开发机 data/bin 污染测试。"""
+    """把自带二进制目录指向不存在的位置，避免开发机 data/bin 污染测试。
+
+    目录常量定义在 shared/code_sandbox.py（BUNDLED_SANDBOX_DIR）、
+    worker/binary_resolution.py re-export（BUNDLED_BINARY_DIR）——模块属性
+    各自独立，两侧都 patch，与 test_runtime_preflight.py 的隔离约定对齐
+    （subagent 二轮评审 P2-4）。"""
     monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bin")
+    monkeypatch.setattr(code_sandbox, "BUNDLED_SANDBOX_DIR", tmp_path / "no-bin")
 
 
 def _only(*installed: str):
@@ -173,3 +180,35 @@ def test_detection_uses_catalog_resolve_binary(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(catalog, "resolve_binary", _only("velites"))
     config = validate_config(_base_config(disabled_runtimes=[]))
     assert config["runtimes"] == ["velites"]
+
+
+@pytest.mark.no_db
+def test_probe_runtime_versions_reports_and_tolerates_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#381 版本握手：--version 成功上报、失败记 <unknown>（观测性非守卫）。"""
+
+    class _Proc:
+        def __init__(self, code: int, out: str = "") -> None:
+            self.returncode = code
+            self.stdout = out
+            self.stderr = ""
+
+    def fake_run(argv: list[str], **_kwargs: object) -> _Proc:
+        if argv[0].endswith("velites"):
+            return _Proc(0, "velites 0.4.0-alpha\n")
+        return _Proc(1, "")
+
+    monkeypatch.setattr(catalog, "resolve_binary", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(catalog.subprocess, "run", fake_run)
+
+    assert catalog.probe_runtime_versions(["velites", "pi"]) == {
+        "velites": "velites 0.4.0-alpha",
+        "pi": "<unknown>",
+    }
+
+
+@pytest.mark.no_db
+def test_probe_runtime_versions_unresolvable_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(catalog, "resolve_binary", lambda _name: None)
+    assert catalog.probe_runtime_versions(["velites"]) == {"velites": "<unknown>"}
