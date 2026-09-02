@@ -3,7 +3,8 @@
 Split from acp_session.py (file budget). session/load is attempted only when
 the freshly-initialized agent advertises loadSession; any load failure falls
 back to a fresh session, and the service rebuilds context from the persisted
-transcript instead.
+transcript instead. Both paths return an ``OpenedAcpSession`` carrying the
+agent-advertised modes/configOptions (#368, shape in session_config.py).
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ from typing import Any
 
 from acp.exceptions import RequestError
 from acp.schema import HttpMcpServer
+
+from server.app.studio_chat.session_config import OpenedAcpSession, opened_session
 
 logger = logging.getLogger(__name__)
 
@@ -24,20 +27,18 @@ async def open_acp_session(
     mcp_server: HttpMcpServer,
     resume_acp_session_id: str | None,
     capabilities: dict[str, Any],
-) -> tuple[str, bool]:
-    """Open the ACP session; returns (acp_session_id, loaded_existing).
+) -> OpenedAcpSession:
+    """Open the ACP session; returns the id plus the advertised config surface.
 
     ``capabilities`` must come from THIS process's initialize response — the
     persisted snapshot of a previous process says nothing about the fresh one.
     """
     if resume_acp_session_id and capabilities.get("loadSession"):
         try:
-            await conn.load_session(
-                cwd=cwd,
-                session_id=resume_acp_session_id,
-                mcp_servers=[mcp_server],
+            load = await conn.load_session(
+                cwd=cwd, session_id=resume_acp_session_id, mcp_servers=[mcp_server]
             )
-            return resume_acp_session_id, True
+            return opened_session(resume_acp_session_id, True, load)
         except RequestError as exc:
             # The agent kept the session on its own side (e.g. kimi's local
             # session store) and may have lost it: fall back to a fresh ACP
@@ -56,4 +57,4 @@ async def open_acp_session(
                 exc,
             )
     session = await conn.new_session(cwd=cwd, mcp_servers=[mcp_server])
-    return str(session.session_id), False
+    return opened_session(str(session.session_id), False, session)

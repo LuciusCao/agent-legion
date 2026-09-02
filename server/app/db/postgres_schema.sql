@@ -1030,6 +1030,12 @@ create table if not exists studio_chat_sessions (
   -- The canvas' unpublished workflow draft YAML (v57); pushed by the frontend
   -- through the same PUT context route, read by get_studio_context.
   draft_yaml text,
+  -- Agent-advertised session mode state / config options (v72, #368): JSON
+  -- mirrors of the ACP session/new (or session/load) response, kept current
+  -- by current_mode_update / config_option_update notifications. NULL means
+  -- the agent does not advertise the capability (UI hides the control).
+  session_modes_json text,
+  config_options_json text,
   error_detail text not null default '',
   created_at timestamptz not null default current_timestamp,
   updated_at timestamptz not null default current_timestamp,
@@ -1041,6 +1047,9 @@ create index if not exists idx_studio_chat_sessions_workspace
 alter table studio_chat_sessions add column if not exists selected_node_key text;
 -- Upgrade path for pre-v57 databases.
 alter table studio_chat_sessions add column if not exists draft_yaml text;
+-- Upgrade path for pre-v72 databases (#368, agent config mirrors).
+alter table studio_chat_sessions add column if not exists session_modes_json text;
+alter table studio_chat_sessions add column if not exists config_options_json text;
 
 create table if not exists studio_chat_messages (
   id text primary key,

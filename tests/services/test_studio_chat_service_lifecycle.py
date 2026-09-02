@@ -25,6 +25,7 @@ from server.app.studio_chat import spawn as spawn_module
 from server.app.studio_chat.acp_session import AcpSessionHandle
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.service import StudioChatService
+from server.app.studio_chat.session_config import OpenedAcpSession
 from tests.helpers import wait_for_predicate
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -160,7 +161,7 @@ def test_ready_callback_does_not_revive_closed_session(chat) -> None:
     session = service.create_session(workspace_id, user_id, "fake-agent")
     service.close_session(session["id"], workspace_id)
 
-    service._on_ready(session["id"], {}, "late-acp-session")
+    service._on_ready(session["id"], {}, OpenedAcpSession("late-acp-session", False, None, None))
 
     assert service.get_session(session["id"])["status"] == "closed"
 
@@ -314,7 +315,7 @@ def test_handle_cancel_after_loop_closed_is_a_noop() -> None:
     RuntimeError back into the request path (#91)."""
 
     class _NoopCallbacks:
-        def on_ready(self, capabilities, acp_session_id) -> None: ...
+        def on_ready(self, capabilities, opened) -> None: ...
 
         def on_update(self, update) -> None: ...
 

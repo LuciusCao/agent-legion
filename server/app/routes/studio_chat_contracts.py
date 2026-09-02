@@ -42,6 +42,11 @@ class StudioChatSessionRecord(BaseModel):
     status: SessionStatus
     acp_session_id: str | None
     capability_snapshot: dict[str, Any]
+    # Agent-advertised session config surface (#368): the ACP SessionModeState
+    # / configOptions mirrors (camelCase wire keys, kept current by update
+    # notifications). None = the agent does not advertise the capability.
+    session_modes: dict[str, Any] | None = None
+    config_options: list[dict[str, Any]] | None = None
     allow_all_permissions: bool
     mcp_status: McpStatus
     selected_node_key: str | None
@@ -82,12 +87,6 @@ class StudioChatMessageResponse(BaseModel):
 
 class StudioChatMessagesResponse(BaseModel):
     messages: list[StudioChatMessageRecord]
-
-
-class StudioChatAllowAllRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool
 
 
 class StudioChatContextUpdateRequest(BaseModel):

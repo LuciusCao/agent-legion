@@ -166,6 +166,10 @@ MIGRATIONS: list[SchemaMigration] = [
     # file's create-table-if-not-exists never rewrites the CHECK on existing
     # databases (same drop + re-add pattern as v30/v47).
     SchemaMigration(71, "preview_panels", migrate_preview_panels),
+    # v72 is DDL-only (#368): the studio_chat_sessions session_modes_json /
+    # config_options_json mirrors come from the schema-file replay (its
+    # alter-if-not-exists covers pre-v72 tables), no data migration.
+    SchemaMigration(72, "studio_chat_agent_config"),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]

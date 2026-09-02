@@ -39,16 +39,17 @@ def test_schema_version_pin() -> None:
     # alignment data migration (#211 Phase 3 read-layer binding); v69 is
     # DDL-only (executor_leases_workspace_index); v70 retires the
     # workflow_key columns (#211 Phase 3 M2); v71 widens the
-    # versioned_entities entity_type CHECK for preview panels (#328) and owns
-    # tests/db/test_preview_panels_migration.py, so the pin moves there —
+    # versioned_entities entity_type CHECK for preview panels (#328); v72 is
+    # DDL-only (studio_chat_agent_config, #368) and owns
+    # tests/db/test_studio_chat_schema.py, so the pin moves there —
     # this copy stays as a backstop that the chain tail stays in sync.
-    assert SCHEMA_VERSION == 71
+    assert SCHEMA_VERSION == 72
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "preview_panels"
+    assert row["name"] == "studio_chat_agent_config"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:

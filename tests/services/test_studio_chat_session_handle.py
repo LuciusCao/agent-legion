@@ -160,7 +160,7 @@ def test_session_load_falls_back_on_agent_refusal() -> None:
     """A JSON-RPC refusal (RequestError) is the expected business failure:
     fall back to session/new, never fail the resume."""
 
-    async def _run() -> tuple[str, bool]:
+    async def _run():
         conn = _Conn(load_error=RequestError(-32000, "no such session"))
         return await open_acp_session(
             conn,
@@ -170,14 +170,14 @@ def test_session_load_falls_back_on_agent_refusal() -> None:
             capabilities={"loadSession": True},
         )
 
-    session_id, loaded = asyncio.run(_run())
+    session_id, loaded, _modes, _config_options = asyncio.run(_run())
 
     assert session_id == "fresh-1"
     assert loaded is False
 
 
 def test_session_load_load_success_short_circuits() -> None:
-    async def _run() -> tuple[str, bool]:
+    async def _run():
         conn = _Conn(load_error=None)
         return await open_acp_session(
             conn,
@@ -187,7 +187,7 @@ def test_session_load_load_success_short_circuits() -> None:
             capabilities={"loadSession": True},
         )
 
-    session_id, loaded = asyncio.run(_run())
+    session_id, loaded, _modes, _config_options = asyncio.run(_run())
 
     assert session_id == "old-1"
     assert loaded is True
@@ -198,7 +198,7 @@ def test_session_load_programming_error_fails_the_resume() -> None:
     family) must fail the resume loudly — a silent session/new fallback would
     drop the resumed context with no record that the load path is broken."""
 
-    async def _run() -> tuple[str, bool]:
+    async def _run():
         conn = _Conn(load_error=TypeError("broken call path"))
         return await open_acp_session(
             conn,
@@ -216,7 +216,7 @@ def test_session_load_skipped_without_capability() -> None:
     """No loadSession advertisement: straight to session/new (the flag gates
     the attempt, so an unadvertised load never happens)."""
 
-    async def _run() -> tuple[str, bool]:
+    async def _run():
         conn = _Conn(load_error=AssertionError("must not be called"))
         return await open_acp_session(
             conn,
@@ -226,7 +226,7 @@ def test_session_load_skipped_without_capability() -> None:
             capabilities={"loadSession": False},
         )
 
-    session_id, loaded = asyncio.run(_run())
+    session_id, loaded, _modes, _config_options = asyncio.run(_run())
 
     assert session_id == "fresh-1"
     assert loaded is False

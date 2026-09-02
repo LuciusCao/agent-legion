@@ -101,13 +101,13 @@ class _FakeAgent:
                 }
             )
         elif method == "session/new":
-            self._send(
-                {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {"sessionId": self.acp_session_id},
-                }
-            )
+            result: dict[str, Any] = {"sessionId": self.acp_session_id}
+            # Optional agent-advertised session config surface (#368).
+            if "modes" in self.script:
+                result["modes"] = self.script["modes"]
+            if "config_options" in self.script:
+                result["configOptions"] = self.script["config_options"]
+            self._send({"jsonrpc": "2.0", "id": request_id, "result": result})
         elif method == "session/load":
             if self.script.get("load_error"):
                 self._send(
@@ -118,7 +118,46 @@ class _FakeAgent:
                     }
                 )
             else:
+                result = {}
+                if "load_modes" in self.script:
+                    result["modes"] = self.script["load_modes"]
+                if "load_config_options" in self.script:
+                    result["configOptions"] = self.script["load_config_options"]
+                self._send({"jsonrpc": "2.0", "id": request_id, "result": result})
+        elif method == "session/set_mode":
+            if self.script.get("set_mode_error"):
+                self._send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {"code": -32000, "message": "mode rejected"},
+                    }
+                )
+            else:
                 self._send({"jsonrpc": "2.0", "id": request_id, "result": {}})
+        elif method == "session/set_config_option":
+            # Echo the scripted full config state with the requested value
+            # folded in (the protocol returns the FULL state, #368); with
+            # bare_set_config_response the agent violates the protocol and
+            # omits configOptions (required field — the client SDK rejects it).
+            options = self.script.get("config_options")
+            if options is None or self.script.get("bare_set_config_response"):
+                self._send({"jsonrpc": "2.0", "id": request_id, "result": {}})
+            else:
+                params = message["params"]
+                updated = [
+                    {**option, "currentValue": params["value"]}
+                    if option.get("id") == params["configId"]
+                    else option
+                    for option in options
+                ]
+                self._send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {"configOptions": updated},
+                    }
+                )
         elif method == "session/prompt":
             failure = self._run_prompt(message["params"].get("sessionId", self.acp_session_id))
             if failure is not None:

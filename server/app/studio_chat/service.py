@@ -42,6 +42,7 @@ from server.app.studio_chat.teardown import teardown_runtime
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import AcpEventHandlers
+    from server.app.studio_chat.session_config import OpenedAcpSession
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +285,10 @@ class StudioChatService:
         self.store.publish_session(session_id)
         return self.get_session(session_id)
 
+    # Agent-side session mode / config option switching (#368) has no facade
+    # method: routes call studio_chat.session_config directly with this
+    # service (file budget; same layering as the resume delegate).
+
     def set_selected_node(
         self, session_id: str, workspace_id: str, node_key: str | None
     ) -> dict[str, Any]:
@@ -328,8 +333,10 @@ class StudioChatService:
 
     # -- callbacks from the ACP session thread (events.py) -----------------
 
-    def _on_ready(self, session_id: str, capabilities: dict[str, Any], acp_session_id: str) -> None:
-        self._events().on_ready(session_id, capabilities, acp_session_id)
+    def _on_ready(
+        self, session_id: str, capabilities: dict[str, Any], opened: OpenedAcpSession
+    ) -> None:
+        self._events().on_ready(session_id, capabilities, opened)
 
     def _on_update(self, session_id: str, update: dict[str, Any]) -> None:
         self._events().on_update(session_id, update)

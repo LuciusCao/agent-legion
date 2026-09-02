@@ -9,10 +9,24 @@ session, and never on cancelled turns.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from server.app.studio_chat.prompts import looks_like_agent_legion_tool_call
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import ServiceBackend
+
+
+def is_agent_legion_tool_call(payload: dict[str, Any]) -> bool:
+    # Match only the structured identity fields (title/kind/name). Never
+    # serialize the whole payload: rawInput carries the agent's local
+    # command text (e.g. a Bash line mentioning a platform tool name),
+    # which must not win an MCP auto-approve.
+    fields = (payload.get(key) for key in ("title", "kind", "name"))
+    return any(
+        looks_like_agent_legion_tool_call(value) for value in fields if isinstance(value, str)
+    )
+
 
 MCP_UNVERIFIED_HINT = (
     "本会话还没有任何 agent-legion 平台工具调用的迹象；如果你期望"

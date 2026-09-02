@@ -18,7 +18,8 @@ from server.app.jobs.queries.studio_chat_resume import (
 
 _SESSION_COLUMNS = (
     "id, workspace_id, user_id, agent_id, title, status, acp_session_id,"
-    " capability_snapshot_json, allow_all_permissions, mcp_status,"
+    " capability_snapshot_json, session_modes_json, config_options_json,"
+    " allow_all_permissions, mcp_status,"
     " selected_node_key, draft_yaml, error_detail, created_at, updated_at, closed_at"
 )
 
@@ -26,6 +27,11 @@ _SESSION_COLUMNS = (
 def _session_record(row: Any) -> dict[str, Any]:
     record = dict(row)
     record["capability_snapshot"] = json.loads(record.pop("capability_snapshot_json") or "{}")
+    # NULL means "agent does not advertise the capability" (#368) — distinct
+    # from an advertised-but-empty list, so no default-to-{} coercion here.
+    modes_json, options_json = record.pop("session_modes_json"), record.pop("config_options_json")
+    record["session_modes"] = json.loads(modes_json) if modes_json is not None else None
+    record["config_options"] = json.loads(options_json) if options_json is not None else None
     return record
 
 
@@ -46,6 +52,10 @@ def _build_session_updates(fields: dict[str, Any]) -> dict[str, Any]:
     for key, value in fields.items():
         if key == "capability_snapshot":
             updates["capability_snapshot_json"] = json.dumps(value)
+        elif key in ("session_modes", "config_options"):
+            # None stays NULL (agent does not advertise); anything else is
+            # serialized JSON (#368).
+            updates[f"{key}_json"] = json.dumps(value) if value is not None else None
         elif key in allowed:
             updates[key] = value
         else:
