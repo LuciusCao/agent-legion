@@ -5,6 +5,7 @@ import {
   WorkflowNodeApprovalSection,
 } from './WorkflowNodeAgentConfigBody'
 import { WorkflowNodeAgentEditor } from './WorkflowNodeAgentEditor'
+import { useCapabilityAgent } from './useAgentDefinitions'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
 
 type Props = {
@@ -18,15 +19,15 @@ type Props = {
   readOnly?: boolean
 }
 export function WorkflowNodeExecutionSection(props: Props) {
+  const { node } = props
+  // #387：draft-only Agent 回落 agent-definitions（useCapabilityAgent；
+  // 路由 workspaceId 与 openAgent 的 pendingAgentId 也在该 hook 内消费）。
+  const { agent, isDraft } = useCapabilityAgent(props)
   // EXEC-APPROVAL-001：审批门不 dispatch，专属区块（无 Agent 编辑入口）。
-  if (props.node.node_type === 'approval')
-    return <WorkflowNodeApprovalSection />
+  if (node.node_type === 'approval') return <WorkflowNodeApprovalSection />
   // #284：节点类型由显式 node_type 判定；agentCatalog 仅用于按 capability
   // 找 Agent 定义做展示/编辑，不再参与类型判定。
-  const isAgentNode = props.node.node_type === 'agent'
-  const agent = props.agentCatalog.find(
-    (definition) => definition.capability === props.node.capability
-  )
+  const isAgentNode = node.node_type === 'agent'
   return (
     <section className={inspectorStyles.section} aria-label="节点执行能力">
       <div className={inspectorStyles.sectionTitle}>
@@ -34,8 +35,9 @@ export function WorkflowNodeExecutionSection(props: Props) {
       </div>
       {isAgentNode ? (
         <WorkflowNodeAgentConfigBody
-          node={props.node}
+          node={node}
           agentDefinition={agent}
+          isDraft={isDraft}
           definitionYaml={props.definitionYaml}
           setDefinitionYaml={props.setDefinitionYaml}
           readOnly={props.readOnly}
@@ -46,7 +48,7 @@ export function WorkflowNodeExecutionSection(props: Props) {
       )}
       <WorkflowNodeAgentEditor
         agentId={agent?.id ?? null}
-        capability={props.node.capability}
+        capability={node.capability}
         nodeType={isAgentNode ? 'agent' : 'code'}
         onSwitchToAgent={props.onSwitchToAgent}
         readOnly={props.readOnly}

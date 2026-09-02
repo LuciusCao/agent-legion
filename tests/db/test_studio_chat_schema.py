@@ -24,7 +24,7 @@ def test_schema_v57_recorded() -> None:
     """Latest-migration record pin (moved from
     tests/db/test_job_node_status_counts_migration.py, v56)."""
     # The pin narrative now lives in tests/db/test_workspace_id_key_binding.py;
-    # v72 (studio_chat_agent_config, #368) is the current chain tail.
+    # v74 (studio_chat_agent_config, #368) is the current chain tail.
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
@@ -83,23 +83,6 @@ def test_v56_database_gains_draft_yaml_via_init_db() -> None:
 
 
 @pytest.mark.fresh_schema
-def test_v71_database_gains_agent_config_columns_via_init_db() -> None:
-    # Pre-v72 databases lack the agent config mirrors (#368); init_db replays
-    # the v72 migration whose ALTERs add both columns.
-    with write_transaction(TEST_DATABASE_URL) as conn:
-        conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
-        conn.execute("alter table studio_chat_sessions drop column session_modes_json")
-        conn.execute("alter table studio_chat_sessions drop column config_options_json")
-
-    init_db(TEST_DATABASE_URL)
-
-    with read_connection(TEST_DATABASE_URL) as conn:
-        columns = _columns(conn, "studio_chat_sessions")
-        assert "session_modes_json" in columns
-        assert "config_options_json" in columns
-
-
-@pytest.mark.fresh_schema
 def test_v42_database_upgrades_via_init_db() -> None:
     # Reproduce the real upgrade path: a database that applied v42 has no
     # studio chat tables and no current schema_migrations row, so init_db
@@ -143,3 +126,20 @@ def test_v42_database_upgrades_via_init_db() -> None:
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute("select seq from studio_chat_messages where id='m-1'").fetchone()
     assert row is not None and row["seq"] >= 1
+
+
+@pytest.mark.fresh_schema
+def test_v73_database_gains_agent_config_columns_via_init_db() -> None:
+    # Pre-v74 databases lack the agent config mirrors (#368); init_db replays
+    # the schema file whose ALTERs add both columns.
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
+        conn.execute("alter table studio_chat_sessions drop column session_modes_json")
+        conn.execute("alter table studio_chat_sessions drop column config_options_json")
+
+    init_db(TEST_DATABASE_URL)
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        columns = _columns(conn, "studio_chat_sessions")
+        assert "session_modes_json" in columns
+        assert "config_options_json" in columns

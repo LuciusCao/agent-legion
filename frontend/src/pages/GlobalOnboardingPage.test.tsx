@@ -27,7 +27,7 @@ function installLocalStorageStub() {
     getItem: (key) => store.get(key) ?? null,
     key: (index) => [...store.keys()][index] ?? null,
     removeItem: (key) => void store.delete(key),
-    setItem: (key, value) => void store.set(key, String(value)),
+    setItem: (key, value) => store.set(key, String(value)),
   }
   Object.defineProperty(window, 'localStorage', {
     configurable: true,
@@ -69,7 +69,7 @@ const registry: StudioAgentRegistryResponse = {
 
 function LocationProbe() {
   const location = useLocation()
-  return <div data-testid="location">{location.pathname}</div>
+  return <div data-testid="location">{location.pathname + location.hash}</div>
 }
 
 function renderPage() {
@@ -97,29 +97,30 @@ beforeEach(() => {
 })
 
 describe('GlobalOnboardingPage', () => {
-  it('lists ACP agents with availability from the registry', async () => {
+  it('welcomes with the agent-driven pitch and lists detected agents', async () => {
     renderPage()
 
     expect(
-      await screen.findByRole('heading', { name: '全局初始化清单' })
+      await screen.findByRole('heading', { name: '连接你的 AI Agent' })
     ).toBeInTheDocument()
+    expect(screen.getByText(/和 AI agent 对话来搭建功能/)).toBeInTheDocument()
     expect(await screen.findByText('Kimi Code')).toBeInTheDocument()
     expect(screen.getByText('kimi acp')).toBeInTheDocument()
     expect(screen.getByText('可用')).toBeInTheDocument()
     expect(screen.getByText('不可用')).toBeInTheDocument()
-    // 有不可用项 → 清单项待确认。
-    expect(screen.getByText('待确认')).toBeInTheDocument()
   })
 
-  it('marks the item ready when every agent is available', async () => {
-    vi.mocked(getStudioAgents).mockResolvedValue({
-      ...registry,
-      availability: { kimi: true, claude: true },
-    })
-
+  it('shows the deferred manual-add hint next to the enter button', async () => {
     renderPage()
+    await screen.findByText('Kimi Code')
 
-    expect(await screen.findByText('已就绪')).toBeInTheDocument()
+    // 手动添加降级为提示文案（不再跳转），与「进入产品」同在 actions 行。
+    expect(
+      screen.getByText('你也可以稍后前往设置页面手动添加')
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '手动添加 agent' })
+    ).not.toBeInTheDocument()
   })
 
   it('accepts the #332 per-agent detection shape (availability/detected/source)', async () => {
@@ -155,7 +156,7 @@ describe('GlobalOnboardingPage', () => {
     expect(screen.getByText('不可用')).toBeInTheDocument()
   })
 
-  it('shows an empty-state hint when no agent is registered', async () => {
+  it('shows an empty-state hint guiding manual add when no agent is detected', async () => {
     vi.mocked(getStudioAgents).mockResolvedValue({
       api_base: 'http://127.0.0.1:8000',
       agents: [],
@@ -165,7 +166,11 @@ describe('GlobalOnboardingPage', () => {
     renderPage()
 
     expect(
-      await screen.findByText(/尚未探测到可用的 ACP agent/)
+      await screen.findByText(/未检测到已安装的 agent/)
+    ).toBeInTheDocument()
+    // 空状态也保留了 deferred 手动添加提示。
+    expect(
+      screen.getByText('你也可以稍后前往设置页面手动添加')
     ).toBeInTheDocument()
   })
 
@@ -177,28 +182,6 @@ describe('GlobalOnboardingPage', () => {
 
     expect(storageStub.getItem(DISMISS_KEY)).toBe('1')
     expect((await screen.findByTestId('location')).textContent).toBe('/')
-  })
-
-  it('dismisses and navigates to global settings via 去全局设置', async () => {
-    renderPage()
-    await screen.findByText('Kimi Code')
-
-    fireEvent.click(screen.getByRole('button', { name: '去全局设置' }))
-
-    expect(storageStub.getItem(DISMISS_KEY)).toBe('1')
-    expect((await screen.findByTestId('location')).textContent).toBe(
-      '/admin/settings'
-    )
-  })
-
-  it('notes the revisit when the checklist was already dismissed', async () => {
-    storageStub.setItem(DISMISS_KEY, '1')
-
-    renderPage()
-
-    expect(
-      await screen.findByText(/之前已完成或跳过该清单/)
-    ).toBeInTheDocument()
   })
 
   it('redirects non-admin users home', async () => {

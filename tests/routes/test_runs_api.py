@@ -296,3 +296,20 @@ def test_create_run_rejects_mismatched_workflow_key(client, job_db, settings):
 
     assert response.status_code == 400, response.text
     assert "workflow_key must equal the workspace id" in response.json()["detail"]
+
+
+def test_create_run_rejects_items_over_limit(client, job_db, monkeypatch) -> None:
+    """#358: oversized items arrays get a 400 with split guidance."""
+    workspace_id = _create_workspace(client)
+    _insert_material(job_db, workspace_id, "mat-1")
+    # Scope the cap through the shared app's settings via monkeypatch so it
+    # auto-restores (the in-memory app.state survives across tests).
+    workflows = client.app.state.settings.executor_runtime.workflows
+    monkeypatch.setattr(workflows, "max_items_per_run", 2)
+
+    response = _create_run(client, workspace_id, [{"type": "material", "material_id": "mat-1"}] * 3)
+
+    assert response.status_code == 400, response.text
+    assert "exceed the per-run limit: 3 > 2" in response.json()["detail"]
+    assert "Split the submission" in response.json()["detail"]
+    assert client.get(f"/api/workspaces/{workspace_id}/runs").json()["runs"] == []

@@ -924,6 +924,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/metrics/runtime-profile': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Runtime Profile */
+    get: operations['get_runtime_profile_api_metrics_runtime_profile_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/skills/directories': {
     parameters: {
       query?: never
@@ -3792,6 +3809,8 @@ export interface components {
       cleanup: components['schemas']['InstanceCleanupSettings']
       /** Code Capacity */
       code_capacity: number
+      /** Execution Retention Days */
+      execution_retention_days: number
       /** Heartbeat Failure Threshold */
       heartbeat_failure_threshold: number
       /** Heartbeat Interval Seconds */
@@ -3818,6 +3837,8 @@ export interface components {
       cleanup: components['schemas']['InstanceCleanupSettings']
       /** Code Capacity */
       code_capacity: number
+      /** Execution Retention Days */
+      execution_retention_days: number
       /** Heartbeat Failure Threshold */
       heartbeat_failure_threshold: number
       /** Heartbeat Interval Seconds */
@@ -3837,6 +3858,8 @@ export interface components {
     InstanceWorkflowsSettings: {
       /** Enabled */
       enabled: boolean
+      /** Max Items Per Run */
+      max_items_per_run: number
     }
     /** JobBatchRequest */
     JobBatchRequest: {
@@ -4660,6 +4683,66 @@ export interface components {
       /** Workspace Id */
       workspace_id: string | null
     }
+    /** ProfileBucket */
+    ProfileBucket: {
+      /** Bucket Start */
+      bucket_start: string
+      /** Claim Count */
+      claim_count: number
+      /** Claim Empty Count */
+      claim_empty_count: number
+      /** Claim Seconds Max */
+      claim_seconds_max: number
+      /** Claim Seconds Total */
+      claim_seconds_total: number
+      /** Db Pool Wait Seconds Total */
+      db_pool_wait_seconds_total: number
+      /** Db Pool Waiting */
+      db_pool_waiting: number
+      /** Enqueue Pending */
+      enqueue_pending: number
+      /** Enqueue Pool Skipped */
+      enqueue_pool_skipped: number
+      /** Enqueue Stock Gated */
+      enqueue_stock_gated: number
+      /** Enqueue Submitted */
+      enqueue_submitted: number
+      /** Execute Active */
+      execute_active: number
+      /** Execute Done */
+      execute_done: number
+      /** Execute Requeued */
+      execute_requeued: number
+      /** Intake Items */
+      intake_items: number
+      /** Intake Runs */
+      intake_runs: number
+      /** Pass Count */
+      pass_count: number
+      /** Pass Scan Seconds Max */
+      pass_scan_seconds_max: number
+      /** Pass Seconds Total */
+      pass_seconds_total: number
+      /** Pass Slow Count */
+      pass_slow_count: number
+      /** Result Count */
+      result_count: number
+      /** Result Seconds Max */
+      result_seconds_max: number
+      /** Result Seconds Total */
+      result_seconds_total: number
+    }
+    /** ProfileVerdict */
+    ProfileVerdict: {
+      /** Conclusion */
+      conclusion: string
+      /** Evidence */
+      evidence: {
+        [key: string]: unknown
+      }
+      /** Stage */
+      stage: string
+    }
     /** QualityArtifactContent */
     QualityArtifactContent: {
       /** Content */
@@ -5064,6 +5147,10 @@ export interface components {
        * @default 1
        */
       protocol_version: number
+      /** Runtime Versions */
+      runtime_versions?: {
+        [key: string]: string
+      }
       /** Runtimes */
       runtimes?: string[]
       /** Worker Id */
@@ -5248,6 +5335,12 @@ export interface components {
       /** Total */
       total: number | null
     }
+    /** RuntimeProfileResponse */
+    RuntimeProfileResponse: {
+      /** Buckets */
+      buckets: components['schemas']['ProfileBucket'][]
+      verdict: components['schemas']['ProfileVerdict']
+    }
     /**
      * SkillDetailResponse
      * @description Skill detail; with the ``ref`` query param the content comes from that
@@ -5375,8 +5468,15 @@ export interface components {
     /**
      * StorageConnectionView
      * @description Object-store summary; credentials reduce to a derivation kind.
+     *
+     *     ``backend`` is a display-only label inferred from the endpoint host
+     *     (e.g. SeaweedFS / RustFS / MinIO / AWS S3); the platform itself only
+     *     ever speaks the S3 API, so it never knows the server product for
+     *     certain — an unrecognized host falls back to "S3 兼容（<host>）".
      */
     StorageConnectionView: {
+      /** Backend */
+      backend: string
       /** Bucket */
       bucket: string
       /** Configured */
@@ -8835,6 +8935,37 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['OpsMetricsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_runtime_profile_api_metrics_runtime_profile_get: {
+    parameters: {
+      query?: {
+        window?: '6h' | '24h'
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RuntimeProfileResponse']
         }
       }
       /** @description Validation Error */

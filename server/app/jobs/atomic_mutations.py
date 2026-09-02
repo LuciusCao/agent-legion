@@ -5,7 +5,7 @@ from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime
 from typing import Protocol
 
-from server.app.agent_broker.code_manifest import CODE_MANIFEST_TRIM
+from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.db.connection import DatabaseConnection
 from server.app.db.rowmap import utc_datetime
 from server.app.db.transaction import write_transaction
@@ -25,10 +25,10 @@ class _AtomicMutationQueries(Protocol):
 
 
 def _cancel_queued_sql(placeholders: str) -> str:
-    """Rerun-path cancel SQL; slims code manifests in the same statement (#142)."""
+    """Rerun-path cancel SQL; slims manifests in the same statement (#142/#354)."""
     return (
         "update agent_execution_requests set state='cancelled', finished_at=current_timestamp,"
-        f" manifest_json={CODE_MANIFEST_TRIM} where job_id=%s and node_key in ({placeholders})"
+        f" manifest_json={MANIFEST_TRIM} where job_id=%s and node_key in ({placeholders})"
         " and state='queued'"
     )
 

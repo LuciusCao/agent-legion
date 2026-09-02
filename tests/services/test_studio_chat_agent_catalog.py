@@ -131,7 +131,7 @@ def test_detect_caches_within_ttl_and_force_bypasses() -> None:
 def test_detected_ids_filters_to_present_agents() -> None:
     statuses = {
         "kimi": CatalogDetection(True, "/usr/bin/kimi", None),
-        "goose": CatalogDetection(False),
+        "codex": CatalogDetection(False),
     }
     assert detected_ids(statuses) == {"kimi"}
 
@@ -152,11 +152,11 @@ def test_merge_detected_appends_missing_and_refreshes_stale() -> None:
                 "args": ["acp"],
                 "source": "detected",
             },
-            {"id": "goose", "label": "Gone", "command": "goose", "args": [], "source": "detected"},
+            {"id": "codex", "label": "Gone", "command": "codex", "args": [], "source": "detected"},
         ],
     }
     merged = merge_detected_into_document(document, _statuses("kimi"))
-    # api_base preserved; manual entry untouched; goose dropped (vanished);
+    # api_base preserved; manual entry untouched; codex dropped (vanished);
     # kimi re-added from the fresh template (stale label gone).
     assert merged["api_base"] == "http://127.0.0.1:8000"
     assert [agent["id"] for agent in merged["agents"]] == ["mine", "kimi"]
@@ -180,11 +180,38 @@ def test_merge_detected_never_overrides_manual_same_id() -> None:
             }
         ]
     }
-    merged = merge_detected_into_document(document, _statuses("kimi", "goose"))
-    assert [agent["id"] for agent in merged["agents"]] == ["kimi", "goose"]
+    merged = merge_detected_into_document(document, _statuses("kimi", "codex"))
+    assert [agent["id"] for agent in merged["agents"]] == ["kimi", "codex"]
     assert merged["agents"][0]["command"] == "/opt/kimi-custom"
     assert merged["agents"][0]["source"] == "manual"
     assert merged["agents"][1]["source"] == "detected"
+
+
+def test_merge_detected_adopts_decataloged_entries_as_manual() -> None:
+    """A catalog cutover that removed an id (gemini-cli/goose) must not
+    delete the stored detected entry on the next detection pass — it is
+    adopted as manual so the agent stays registered and launchable."""
+    document = {
+        "api_base": "http://127.0.0.1:8000",
+        "agents": [
+            {
+                "id": "goose",
+                "label": "Goose",
+                "command": "goose",
+                "args": ["acp"],
+                "source": "detected",
+            }
+        ],
+    }
+    # The binary is still on PATH (still detected by the caller's statuses),
+    # but "goose" is no longer in AGENT_CATALOG.
+    merged = merge_detected_into_document(document, _statuses("goose", "kimi"))
+
+    goose = next(agent for agent in merged["agents"] if agent["id"] == "goose")
+    assert goose["source"] == "manual"
+    assert goose["command"] == "goose"
+    kimi = next(agent for agent in merged["agents"] if agent["id"] == "kimi")
+    assert kimi["source"] == "detected"
 
 
 def test_merge_detected_treats_missing_source_as_manual() -> None:

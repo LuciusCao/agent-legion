@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { deleteAgentWorker } from '../../api'
 import type { AgentRegisterTokenSummary, AgentWorkerSummary } from '../../api'
+import { formatDateTime } from '../../lib/formatters'
 import { toErrorMessage } from '../../lib/queryError'
 import { ConfirmDialog } from '../ConfirmDialog'
 import styles from './WorkerTokensSection.module.css'
@@ -79,7 +80,7 @@ export function AgentWorkerList({
                 className={`${styles.chip} ${
                   worker.online ? styles.chipActive : ''
                 }`}
-                title={`最近心跳 ${worker.last_seen_at}`}
+                title={`最近心跳 ${formatDateTime(worker.last_seen_at)}`}
               >
                 {worker.online ? '在线' : '离线'}
               </span>

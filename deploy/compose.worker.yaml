@@ -17,6 +17,22 @@ services:
       - SYS_ADMIN
     volumes:
       - ${AGENT_WORKER_CONFIG:-../deploy/worker.remote.example.yaml}:/etc/agent-legion/worker.yaml:ro
+      # velites 二进制外挂（issue #381）：worker 镜像不含任何 agent runtime
+      # 执行器，velites 以平台匹配的二进制挂到自带副本目录（/app/data/bin，
+      # binary_resolution.py 自带副本优先、PATH 兜底）。产物来自
+      # velites-release workflow 的 GitHub Release（velites-v* tag）：x86_64
+      # 主机取 *-x86_64-unknown-linux-gnu.tar.gz、arm64 取
+      # *-aarch64-unknown-linux-gnu.tar.gz，解出的 velites chmod +x 后放这里；
+      # 必须与 worker 镜像架构一致。
+      #
+      # long syntax + create_host_path: false（review on #381）：短语法下源
+      # 路径不存在时 docker 会静默创建 root 属主的空**目录**，resolve_binary
+      # 的 is_file 检查 fail-closed 但报错迷惑；显式声明让 compose 在 up 时
+      # 即拒绝启动，把「忘了放二进制」提前到部署动作本身。
+      - type: bind
+        source: ${VELITES_BIN:-../velites-bin/velites}
+        target: /app/data/bin/velites
+        read_only: true
       - ${PI_CONFIG_DIR:-../pi-config}:/root/.pi/agent:ro
       - ${VELITES_CONFIG_DIR:-../velites-config}:/root/.velites:ro
       - worker-data:/var/lib/agent-legion-worker
@@ -34,6 +50,12 @@ services:
       # (git- and docker-ignored) or the shell environment — never inline here.
       LLM_GATEWAY_TOKEN: ${LLM_GATEWAY_TOKEN:-}
       AGENT_WORKER_IMAGE_VERSION: ${AGENT_WORKER_IMAGE_VERSION:-agent-legion-worker:local}
+      # Expected-runtime guard (issue #381): fail-fast (exit 2) at startup
+      # when these runtimes cannot be probed, turning "forgot to mount
+      # velites" from silent zero capacity into an explicit startup error.
+      # 无冒号的 ${VAR-默认值} 形式：deploy/.env 显式写空值时生效为「禁用
+      # 守卫」（零 runtime 注册合法，如纯 code 池形态），不会被默认值盖掉。
+      AGENT_WORKER_EXPECT_RUNTIMES: ${AGENT_WORKER_EXPECT_RUNTIMES-velites}
     stop_grace_period: 30s
     healthcheck:
       # Healthy = 服务可达，且控制面未进入 failed，且（Worker 进程在跑或尚未配置）。

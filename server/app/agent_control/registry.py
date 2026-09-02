@@ -66,11 +66,13 @@ class AgentWorkerRegistry(AgentRegisterTokenStore):
         labels: Mapping[str, Any] | None = None,
         protocol_version: int = 1,
         image_version: str = "",
+        runtime_versions: Mapping[str, str] | None = None,
         allowed_workspaces: Sequence[str] | None = None,
         register_token_ids: Sequence[str] | None = None,
     ) -> str:
-        # image_version is accepted for forward compatibility but not stored:
-        # the agent_workers table has no column for it yet.
+        # image_version / runtime_versions are accepted for forward
+        # compatibility but not stored: the agent_workers table has no column
+        # for either yet (the handshake fields live in the register log only).
         if not _WORKER_ID.fullmatch(worker_id):
             raise ValueError("worker_id must be 1-64 chars of [A-Za-z0-9_-] starting alphanumeric")
         if len(name) > _MAX_NAME_LENGTH:

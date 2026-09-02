@@ -207,6 +207,10 @@ def register(client: TestClient, credential: str | None = None, **overrides) -> 
         "labels": {"arch": "arm64"},
         "protocol_version": 1,
         "image_version": "agent-legion-worker:test",
+        # #381 版本握手：默认带真实形状的字段——每条注册路由测试都走
+        # 含 runtime_versions 的 model_dump（subagent 二轮评审 P1-1 的回归
+        # 钉子：字段若未进 issue_token 签名，这里 38 个测试即刻全红）。
+        "runtime_versions": {"pi": "pi 0.80.10"},
     }
     # tokens is a header-level option, not a payload field: pop it before the
     # update so it never leaks into the JSON body.

@@ -113,6 +113,7 @@ def test_get_storage_unconfigured(client_factory) -> None:
     storage = response.json()["storage"]
     assert storage == {
         "configured": False,
+        "backend": "",
         "endpoint_url": "",
         "public_endpoint_url": "",
         "bucket": "",
@@ -146,6 +147,7 @@ def test_get_storage_env_injected_static_credentials(client_factory, monkeypatch
     assert response.status_code == 200, response.text
     storage = response.json()["storage"]
     assert storage["configured"] is True
+    assert storage["backend"] == "RustFS"
     assert storage["endpoint_url"] == "http://rustfs:9000"
     assert storage["public_endpoint_url"] == "http://localhost:9100"
     assert storage["bucket"] == "infra-bucket"

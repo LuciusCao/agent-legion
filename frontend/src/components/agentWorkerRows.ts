@@ -1,4 +1,5 @@
 import type { AgentWorkerSummary as WorkerSummary } from '../api/agentWorkers'
+import { formatDateTime } from '../lib/formatters'
 import type { AgentStatus } from '../types'
 
 export interface WorkerRow {
@@ -34,7 +35,7 @@ export function buildWorkerRows(
       name: worker.name || worker.worker_id,
       workload: `${status ? `${status} ` : ''}${taskCount}/${maxTasks}`,
       online: worker.online,
-      heartbeatTitle: `最近心跳 ${worker.last_seen_at}`,
+      heartbeatTitle: `最近心跳 ${formatDateTime(worker.last_seen_at)}`,
     }
   })
 

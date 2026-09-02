@@ -1,12 +1,9 @@
 """Read-only infrastructure connection summaries for the admin surface (#335).
 
-The admin settings page shows how the instance reaches its two pieces of
-platform infrastructure — the PostgreSQL database and the S3-compatible
-object store — without ever exposing credentials: the database password is
-masked to ``***`` in the displayed URL (and the whole URL collapses to the
-mask on parse failure), while storage credentials reduce to a derivation
-kind (``static`` / ``default-chain`` / ``unconfigured``). Everything here is
-pure: the route layer owns env/DSN access and probe execution.
+Display-safe views of the instance's two pieces of platform infrastructure
+(the PostgreSQL DSN with the password masked, the S3-compatible store with
+credentials collapsed to a derivation kind). Everything here is pure: the
+route layer owns env/DSN access and probe execution.
 """
 
 from __future__ import annotations
@@ -95,6 +92,7 @@ class StorageConnectionInfo:
     """Non-secret view of the instance object-store configuration."""
 
     configured: bool
+    backend: str
     endpoint_url: str
     public_endpoint_url: str
     bucket: str
@@ -103,26 +101,41 @@ class StorageConnectionInfo:
     reachable: bool
 
 
+# String fields of the unconfigured placeholder view (all empty).
+_EMPTY_STRING_FIELDS = ("backend", "endpoint_url", "public_endpoint_url", "bucket", "region")
+# Display-only host markers → product label (seaweedfs/rustfs/minio/amazonaws).
+_BACKEND_LABELS = dict(seaweedfs="SeaweedFS", rustfs="RustFS", minio="MinIO", amazonaws="AWS S3")
+
+
+def _infer_storage_backend(endpoint_url: str) -> str:
+    """Best-effort display label for the store's server product."""
+    if not endpoint_url:
+        return "AWS S3"
+    host = (urlsplit(endpoint_url).hostname or "").lower()
+    if not host:  # unparseable input (e.g. missing scheme): no host to name
+        return "S3 兼容"
+    for marker, label in _BACKEND_LABELS.items():
+        if marker in host:
+            return label
+    return f"S3 兼容（{host}）"
+
+
 def describe_storage(settings: S3Settings | None, *, reachable: bool) -> StorageConnectionInfo:
     """Summarize the object-store config; credentials collapse to a kind.
 
-    ``reachable`` is supplied by the caller (the shared health cache for
-    display, a fresh probe for the connectivity test) so this function stays
-    pure. An unconfigured store reports ``unconfigured`` and can never be
-    reachable.
+    ``reachable`` is supplied by the caller (health cache / fresh probe) so
+    this stays pure; unconfigured is never reachable.
     """
     if settings is None:
         return StorageConnectionInfo(
             configured=False,
-            endpoint_url="",
-            public_endpoint_url="",
-            bucket="",
-            region="",
             credentials="unconfigured",
             reachable=False,
+            **dict.fromkeys(_EMPTY_STRING_FIELDS, ""),
         )
     return StorageConnectionInfo(
         configured=True,
+        backend=_infer_storage_backend(settings.endpoint_url),
         endpoint_url=settings.endpoint_url,
         public_endpoint_url=settings.public_endpoint_url,
         bucket=settings.bucket,

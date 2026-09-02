@@ -53,6 +53,19 @@ export function formatDuration(ms: number): string {
   return m > 0 ? `${m}分${s}秒` : `${s}秒`
 }
 
+/**
+ * Render a backend timestamp in the browser's local timezone. Backend
+ * timestamps are UTC ISO strings with an explicit offset; legacy SQLite
+ * rows can still return offset-less "YYYY-MM-DD HH:MM:SS" strings (also
+ * UTC), which browsers would otherwise parse as local time.
+ */
+export function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '—'
+  const hasOffset = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value.trim())
+  const date = new Date(hasOffset ? value : `${value.replace(' ', 'T')}Z`)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN')
+}
+
 export function formatRelativeTime(isoDate: string): string {
   const date = new Date(isoDate)
   const now = new Date()

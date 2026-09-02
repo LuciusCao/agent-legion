@@ -54,9 +54,9 @@ def main() -> int:
     max_concurrency, claim_enabled = runtime_controls.load_claim_controls(args.config)
     max_code_concurrency = runtime_controls.load_code_concurrency(args.config)
     if error := prepare_runtime_models(config, code_concurrency=max_code_concurrency):
-        # 退出码 2（supervisor 不自动重启）：配置无法解析（disabled_runtimes 非法）
-        # 或 code 容量缺少 velites 沙箱二进制是部署缺口，重试无意义，必须人工
-        # 修复后重启。
+        # 退出码 2（supervisor 不自动重启）：配置无法解析（disabled_runtimes 非法、
+        # AGENT_WORKER_EXPECT_RUNTIMES 声明了探测不到的 runtime）或 code 容量缺少
+        # velites 沙箱二进制是部署缺口，重试无意义，必须人工修复后重启。
         print(error, flush=True)
         return 2
     transfer = load_transfer_controls(args.config)
@@ -166,8 +166,9 @@ def main() -> int:
                 )
                 if code_rejected and not code_hot_reject_logged:
                     print(
-                        "max_code_concurrency 0→>0 需要可执行的 velites 二进制"
-                        "（启动预检项），热更拒绝生效；请安装 velites 后重启 worker",
+                        "max_code_concurrency 0→>0 需要可解析的沙箱包装器（velites-sandbox"
+                        " 或 velites，启动预检项），热更拒绝生效；docker 形态该包装器内置"
+                        "镜像（此错误通常意味着镜像损坏），裸机请安装后重启 worker",
                         flush=True,
                     )
                 code_hot_reject_logged = code_rejected

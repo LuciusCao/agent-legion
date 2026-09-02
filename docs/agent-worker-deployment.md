@@ -106,6 +106,8 @@ curl http://192.0.2.1:8000/api/health
 
 该命令启动 PostgreSQL、Host 和部署机本地 Worker。它们使用 [compose.host.yaml](../deploy/compose.host.yaml) 编排。本地 RustFS（材料对象存储）是否随 stack 启动由 `AGENT_LEGION_LOCAL_S3`（默认 `auto`）经 `scripts/local-s3-decide.sh` 决策：配置外部 S3 后自动跳过，详见 [materials-storage-deployment.md](materials-storage-deployment.md)。
 
+**velites 二进制前置（#381）**：worker 镜像不含 agent runtime 执行器，启动 stack 前必须先把平台匹配的 velites 二进制放到 `VELITES_BIN`（默认 `../velites-bin/velites`，即仓库平级的 `velites-bin/`）——compose 用 long syntax bind mount，源文件缺失会**拒绝启动**（不会静默建目录）。产物获取与架构匹配见 §5「velites 二进制来源」的 Docker 小节。
+
 ## 4. Worker 机器准备
 
 将同一版本的仓库放到 Worker 机器，并准备注册密钥目录：
@@ -187,14 +189,14 @@ runtime 匹配、provider/model 命中 allowlist、labels 满足 `requires_label
 
 自足的 workflow code 节点（静态 import 闭包 ⊆ `workspace_libs` + stdlib + `requests`；repo 内置的示例节点全部满足）可以被分派到 Worker：Host 把节点代码文本 + sha256 `code_hash` 与 `workspace_libs` 快照打进 bundle 下发，Worker 在 `velites sandbox wrap` OS 沙箱内执行（内置与自定义节点同一条沙箱路径）。接入方式：
 
-- **容量**：`max_code_concurrency`（默认 0 = 不领取 code 任务），与 `max_concurrency` 是两个独立池，Host 分开记账、分开强制，长 code 任务不会挤占 agent 容量；code 任务也不占 workspace 级 Agent 并发上限。code 任务的准入只需要协议版本 ≥ v2、code 池有余量、workspace 在 token 授权范围内，无需任何 capability 声明（issue #284）；
+- **容量**：`max_code_concurrency`（默认 0 = 不领取 code 任务），与 `max_concurrency` 是两个独立池，Host 分开记账、分开强制，长 code 任务不会挤占 agent 容量；code 任务也不占 workspace 级 Agent 并发上限。code 任务的准入只需要协议版本 ≥ v2、code 池有余量、workspace 在 token 授权范围内，无需任何 capability 声明（issue #284）。code 沙箱包装器（`velites-sandbox`）自 #383 起内置在 worker 镜像里——code 池不依赖外挂 velites，纯 pi worker 或什么都不挂的 worker 也能开 code 池；host 侧的 code 本地兜底在 docker 形态下禁用（详见下文 velites 小节的 host 说明）；
 - **热更新**：`max_code_concurrency` 与 `max_concurrency` 一样经控制台或 `PUT /api/config` 热生效，不重启执行进程、不打断在跑执行；调大立即放行新 claim，调小在运行数降到新上限以下前停止继续 claim。唯一例外是 0→>0 的热开启要求本机可解析 `velites` 二进制（启动预检的同一道 fail-closed 守卫，EXEC-CODE-003）：缺失时循环内拒绝热开并打日志提示，装好 velites 后下一轮循环自动生效，避免热开后 code 任务在 Host 侧空转重试；
 - **回落语义**：没有在线 code Worker（协议 ≥ v2、code 池有余量、workspace 已授权）时，dispatch 直接回落 Host 本地 executor 执行，code 任务不会滞留在队列里等 Worker。
 
-**velites 二进制来源（Worker 自带沙箱）**：Worker 解析 velites 的顺序是「自带副本 `<仓库根>/data/bin/velites` 优先，PATH 兜底」，启动预检与 code 执行共用同一解析逻辑；两处都找不到才 fail-closed。因此 Worker 机器**不需要预装 velites**：
+**velites 二进制来源（Worker 自带沙箱）**：Worker 解析 velites 的顺序是「自带副本 `<仓库根>/data/bin/velites` 优先，PATH 兜底」，启动预检与 code 执行共用同一解析逻辑；两处都找不到才 fail-closed。worker 镜像**不含任何 agent runtime 执行器**（issue #381）——velites 与 pi 都由部署方以外挂二进制提供，本机装什么 runtime 就声明什么：
 
-- **Docker 部署**：worker 镜像已内置 velites（`/usr/local/bin/velites`，Dockerfile 的 velites-build 阶段按目标平台构建），无需任何额外动作；
-- **裸机/开发部署**（直接跑 `worker.executor`，如 `make dev-worker`）：在**与 Worker 同 OS/架构**的机器上、仓库根执行 `./scripts/ensure-velites.sh --dest data/bin`，脚本按 velites/ 源码指纹决定是否需要 `cargo build --release`（指纹不变的重复执行直接跳过），产物原子安置到 `data/bin/velites`。打包分发时按平台分别构建：把对应平台的 `data/bin/velites` 随仓库（或 worker 代码包）一起带到目标机器即可。macOS 产物用 seatbelt、Linux 产物用 bubblewrap（Linux 主机需可用的 bwrap：setuid 或非特权 user namespace），沙箱后端不可用同样 fail-closed。
+- **Docker 部署**：从 GitHub Release（`velites-v*` tag，velites-release workflow 产出）下载与宿主机架构一致的 tarball，解出的 `velites` 放到 compose 的 `VELITES_BIN`（默认 `../velites-bin/velites`）——compose 把它 bind mount 到容器内 `/app/data/bin/velites`（自带副本目录，优先于 PATH）。架构必须与 worker 镜像一致（x86_64 取 `*-x86_64-unknown-linux-gnu`，arm64 取 `*-aarch64-unknown-linux-gnu`）；挂载了错误架构的二进制能通过存在性探测，但执行时以 exec format error 失败——期望 runtime 守卫会把它转成启动失败（见下）。**防漏挂载守卫**：compose 默认注入 `AGENT_WORKER_EXPECT_RUNTIMES=velites`（`deploy/.env` 可覆盖：多值逗号分隔；显式置空禁用守卫，零 runtime 注册合法——零 runtime / 纯 code 池形态同时叠加 `deploy/compose.worker.zero-runtime.yaml` override 去掉 velites bind mount，否则无条件挂载会要求准备一个用不上的二进制文件），启动时探测不到期望 runtime、或期望 runtime 模型发现失败（含架构错配）即 fail-fast（退出码 2，supervisor 不自动重启、healthcheck 变 unhealthy）。**pi 在 docker 镜像内不可用**：pi 的入口是 npm 包脚本，依赖 node 运行时与包树，而 #381 已把它们移出镜像——pi 部署走裸机形态（PATH 或 `data/bin/`），需要在 docker 跑 pi 时自行构建含 node+pi 的镜像变体；
+- **裸机/开发部署**（直接跑 `worker.executor`，如 `make dev-worker`）：在**与 Worker 同 OS/架构**的机器上、仓库根执行 `./scripts/ensure-velites.sh --dest data/bin`，脚本按 velites/ 源码指纹决定是否需要 `cargo build --release`（指纹不变的重复执行直接跳过），产物原子安置到 `data/bin/velites`。无源码/工具链的机器可直接取 Release 产物安置到同一目录。macOS 产物用 seatbelt、Linux 产物用 bubblewrap（Linux 主机需可用的 bwrap：setuid 或非特权 user namespace），沙箱后端不可用同样 fail-closed。裸机部署同样可设 `AGENT_WORKER_EXPECT_RUNTIMES`（如 systemd 单元的 `Environment=`）启用期望 runtime 守卫；不设时保持「探测到什么声明什么」的默认语义。
 
 **secret 边界**：节点 secret（vault 解出的连接凭据）只在 claim 响应里经既有 HTTPS 通道注入——落库的 manifest 与 bundle 都不含 secret；Worker 仅内存持有、经 stdin 传给沙箱子进程——secret 标记键在 Host 侧 `split_manifest_config` 就不进下发 manifest，Worker 侧没有任何 config 派生数据落盘，secret 不接触 Worker 文件系统与日志。随 manifest 下发的 settings 快照按 section 白名单过滤（`node_safe_settings_config`）——白名单当前为空（`NODE_SETTINGS_CONFIG_SECTIONS = ()`，业务 section 已随业务节点迁出），vault/auth/database/agent_workers 等实例级 section 不落库、不下发、不进沙箱 stdin。
 
@@ -265,7 +267,7 @@ docker compose -f deploy/compose.worker.yaml exec worker workerctl configure \
 
 ### 崩溃重启与失败状态
 
-Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程内指数退避重试注册，不会打印 traceback，也不会触发 supervisor 重启。执行进程因其他原因崩溃后按指数退避自动重启：5 秒起步、每次 ×2、封顶 300 秒；稳定运行满 60 秒后重置退避。退出码 2（Host 明确拒绝注册——例如持有的全部 key 已被删除，或启动预检失败——例如 `max_code_concurrency > 0` 但 velites 二进制在自带副本与 PATH 上都找不到）不自动重启，进入 failed 状态，需修正配置后手动 `workerctl restart`。`status` 中的 `restart_count`、`next_restart_delay`、`failed` 字段反映这些状态；容器 healthcheck 会把 failed 或已配置但进程未运行视为 unhealthy。
+Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程内指数退避重试注册，不会打印 traceback，也不会触发 supervisor 重启。执行进程因其他原因崩溃后按指数退避自动重启：5 秒起步、每次 ×2、封顶 300 秒；稳定运行满 60 秒后重置退避。退出码 2（Host 明确拒绝注册——例如持有的全部 key 已被删除，或启动预检失败——例如 `max_code_concurrency > 0` 但沙箱包装器（velites-sandbox 或 velites）在自带副本目录与 PATH 上都找不到；docker 形态该包装器内置镜像，此错误通常意味着镜像损坏）不自动重启，进入 failed 状态，需修正配置后手动 `workerctl restart`。`status` 中的 `restart_count`、`next_restart_delay`、`failed` 字段反映这些状态；容器 healthcheck 会把 failed 或已配置但进程未运行视为 unhealthy。
 
 ### 挂载配置与状态副本不一致
 

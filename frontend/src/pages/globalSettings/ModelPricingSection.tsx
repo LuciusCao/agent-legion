@@ -34,12 +34,7 @@ export function ModelPricingSection({
   onRemoveRow,
 }: ModelPricingSectionProps) {
   return (
-    <div className={styles.card}>
-      <h3 className={styles.heading}>模型定价</h3>
-      <p className={styles.hint}>
-        按 provider + model 配置每百万 token 价格；历史 run 按各自使用的
-        provider + model 匹配价格分别计费，用于统计各 workspace 的成本消耗。
-      </p>
+    <>
       <div className={styles.row}>
         <label className={styles.label} htmlFor="pricing-currency">
           货币单位
@@ -142,6 +137,6 @@ export function ModelPricingSection({
       <button type="button" className={styles.textButton} onClick={onAddRow}>
         添加一行
       </button>
-    </div>
+    </>
   )
 }

@@ -68,6 +68,12 @@ def test_runs_baseline_shape() -> None:
 
 def _rebuild_v52_shape(conn) -> None:
     """Undo v53 so init_db replays the upgrade: v52 jobs + job_batches."""
+    # The v73 run-status trigger reads NEW.run_id; a real v52 database never
+    # had it, and leaving it attached through the rename below breaks every
+    # jobs write of the fixture with UndefinedColumn. Drop it like any other
+    # post-v52 artifact before rewinding the column — the v73 migration
+    # recreates it after the v53 rename on the init_db upgrade path.
+    conn.execute("drop trigger if exists jobs_run_status_counts_sync on jobs")
     conn.execute("alter table jobs drop column if exists input_json")
     conn.execute("alter table jobs drop column if exists frozen_config_json")
     conn.execute("alter table jobs rename column run_id to batch_id")

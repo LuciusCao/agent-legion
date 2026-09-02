@@ -191,6 +191,7 @@ server/app/
 | POST | `/workspaces/{workspace_id}/runs` | `create_run` | routes/runs.py |
 | GET | `/workspaces/{workspace_id}/runs` | `list_runs` | routes/runs.py |
 | GET | `/workspaces/{workspace_id}/runs/{run_id}` | `get_run` | routes/runs.py |
+| GET | `/metrics/runtime-profile` | `get_runtime_profile` | routes/runtime_profile.py |
 | GET | `/agent-catalog/skills/{skill_key:path}` | `get_skill` | routes/skill_catalog_route.py |
 | GET | `/skills/directories` | `list_skill_directories` | routes/skill_directories.py |
 | POST | `/skills/validate` | `validate_skill` | routes/skills.py |
@@ -299,7 +300,7 @@ server/app/
 | AgentEnqueueConfig | BaseModel | workers: int, max_pending: int | app/configuration/executor_knobs.py |
 | AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/configuration/executor_knobs.py |
 | CodeStockConfig | BaseModel | enabled: bool, factor: float, min_stock: int, max_stock: int, refresh_seconds... | app/configuration/executor_knobs.py |
-| WorkflowsRuntimeConfig | BaseModel | enabled: bool, custom_nodes_enabled: bool | app/configuration/executor_runtime.py |
+| WorkflowsRuntimeConfig | BaseModel | enabled: bool, custom_nodes_enabled: bool, max_items_per_run: int | app/configuration/executor_runtime.py |
 | AgentWorkersRuntimeConfig | BaseModel | max_archive_bytes: int, min_protocol_version: int | app/configuration/executor_runtime.py |
 | ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/configuration/executor_runtime.py |
 | CodeCapabilityConfig | BaseModel | timeout_seconds: int, sandbox_network: bool, config_schema: dict[str, Any] | app/executors/contracts.py |
@@ -357,13 +358,13 @@ server/app/
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
 | DatabaseConnectionView | BaseModel | engine: str, host: str, port: int | None, name: str, user: str, password_set:... | app/routes/infra_connections_contracts.py |
-| StorageConnectionView | BaseModel | configured: bool, endpoint_url: str, public_endpoint_url: str, bucket: str, r... | app/routes/infra_connections_contracts.py |
+| StorageConnectionView | BaseModel | configured: bool, backend: str, endpoint_url: str, public_endpoint_url: str, ... | app/routes/infra_connections_contracts.py |
 | InfraConnectionsResponse | BaseModel | database: DatabaseConnectionView, storage: StorageConnectionView | app/routes/infra_connections_contracts.py |
 | InfraConnectionTestRequest | BaseModel | target: Literal['database', 'storage'] | app/routes/infra_connections_contracts.py |
 | InfraConnectionTestResponse | BaseModel | target: Literal['database', 'storage'], ok: bool, reason: str | None | app/routes/infra_connections_contracts.py |
 | InstanceCleanupSettings | BaseModel | log_retention_days: int, run_dir_retention_days: int, interval_seconds: int | app/routes/instance_settings_contracts.py |
 | InstanceMonitoringSettings | BaseModel | sample_interval_seconds: float, retention_days: int | app/routes/instance_settings_contracts.py |
-| InstanceWorkflowsSettings | BaseModel | enabled: bool | app/routes/instance_settings_contracts.py |
+| InstanceWorkflowsSettings | BaseModel | enabled: bool, max_items_per_run: int | app/routes/instance_settings_contracts.py |
 | InstanceAgentWorkersSettings | BaseModel | max_archive_bytes: int, min_protocol_version: int | app/routes/instance_settings_contracts.py |
 | InstanceSettingsDocument | BaseModel | cleanup: InstanceCleanupSettings, monitoring: InstanceMonitoringSettings, hea... | app/routes/instance_settings_contracts.py |
 | ApprovalDecisionCreateRequest | BaseModel | verdict: ApprovalVerdict, note: str, rework_target: str | app/routes/job_approval_contracts.py |
@@ -464,6 +465,9 @@ server/app/
 | RunListResponse | BaseModel | runs: list[RunRecord] | app/routes/run_contracts.py |
 | RunJobStats | BaseModel | total: int, by_status: dict[str, int] | app/routes/run_contracts.py |
 | RunDetailResponse | BaseModel | run: RunRecord, job_stats: RunJobStats | app/routes/run_contracts.py |
+| ProfileBucket | BaseModel | bucket_start: str, intake_runs: int, intake_items: int, pass_count: int, pass... | app/routes/runtime_profile_contracts.py |
+| ProfileVerdict | BaseModel | stage: str, conclusion: str, evidence: dict[str, object] | app/routes/runtime_profile_contracts.py |
+| RuntimeProfileResponse | BaseModel | buckets: list[ProfileBucket], verdict: ProfileVerdict | app/routes/runtime_profile_contracts.py |
 | SkillFileResponse | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/skill_contracts.py |
 | SkillDetailResponse | BaseModel | key: str, ref: str, commit: str, available: bool, tags: list[str], files: lis... | app/routes/skill_contracts.py |
 | SkillValidateRequest | BaseModel | path: str | app/routes/skill_contracts.py |

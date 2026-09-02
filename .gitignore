@@ -28,6 +28,10 @@ deploy/worker.remote.yaml
 deploy/compose.local.yaml
 deploy/compose.worker.local.yaml
 deploy/velites-provider.env
+# velites 外挂二进制落点（#381 compose 挂载默认源）
+velites-bin/
+deploy/pi-config/
+deploy/velites-config/
 htmlcov/
 htmlcov_backend/
 

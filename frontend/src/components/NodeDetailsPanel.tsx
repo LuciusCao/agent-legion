@@ -1,4 +1,5 @@
 import type { components } from '../generated/api'
+import { formatDateTime } from '../lib/formatters'
 import { formatDuration, STATUS_ICON, STATUS_LABEL } from './dagNodeStatus'
 import { MaterialIcon } from './MaterialIcon'
 import type { DagNodeData } from './dag/DagNode'
@@ -88,7 +89,9 @@ export function NodeDetailsPanel({
             {latestRun.runner && (
               <div className={styles.muted}>Runner:{latestRun.runner}</div>
             )}
-            <div className={styles.muted}>开始：{latestRun.started_at}</div>
+            <div className={styles.muted}>
+              开始：{formatDateTime(latestRun.started_at)}
+            </div>
             {latestRun.exit_code !== null && (
               <div>退出码：{latestRun.exit_code}</div>
             )}

@@ -7,7 +7,7 @@ from psycopg import IntegrityError
 
 from server.app.db.migration_registry import MIGRATIONS
 from server.app.db.migrations.preview_panels import migrate_preview_panels
-from server.app.db.schema import init_db
+from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -69,9 +69,12 @@ def test_migration_widens_legacy_check_and_is_idempotent() -> None:
 
 @pytest.mark.fresh_schema
 def test_upgrade_from_v70_applies_the_widening() -> None:
-    # Upgrade path: a database with no v71 record replays the schema file (a
-    # no-op for the existing table) and re-runs the v71 migration. The
-    # chain-tail pin moved to tests/db/test_studio_chat_schema.py (v72).
+    # Upgrade path: a database recorded at v70 replays the schema file (a no-op
+    # for the existing table) and runs the v71+ migrations. At SCHEMA_VERSION
+    # 74 the chain tail is studio_chat_agent_config: init_db's high-water skip
+    # means the test must drop v71 AND every later version (74 included) to
+    # force the replay; the extra migrations' applies are idempotent.
+    assert SCHEMA_VERSION == 74
     assert MIGRATIONS[-1].name == "studio_chat_agent_config"
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("delete from schema_migrations where version >= 71")

@@ -66,6 +66,11 @@ def commit_agent_result(
         if broker.mark_done(execution_id, worker_id, lease_id, record) is None:
             raise HTTPException(status_code=409, detail="execution is no longer owned")
         succeeded = True
+        # Runtime profile (#359): execute-stage done rate (a worker execution
+        # reached its terminal state through the normal result path).
+        from server.app.services.runtime_profile import profile
+
+        profile.note_execution_done()
         if outcome.auth_failure_connection:
             # Batch 2 (design §5.3): the node recorded an upstream auth
             # failure; the Host performs the privileged invalidation.

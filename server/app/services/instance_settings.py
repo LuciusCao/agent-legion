@@ -43,7 +43,10 @@ def default_instance_document() -> dict[str, Any]:
     document: dict[str, Any] = {
         "cleanup": dict(DEFAULT_CLEANUP_CONFIG),
         "monitoring": dict(DEFAULT_MONITORING_CONFIG),
-        "workflows": {"enabled": runtime.workflows.enabled},
+        "workflows": {
+            "enabled": runtime.workflows.enabled,
+            "max_items_per_run": runtime.workflows.max_items_per_run,
+        },
         "agent_workers": {
             "max_archive_bytes": runtime.agent_workers.max_archive_bytes,
             "min_protocol_version": runtime.agent_workers.min_protocol_version,
@@ -51,6 +54,9 @@ def default_instance_document() -> dict[str, Any]:
         # Materials TTL (design §10): 0 = disabled; read fresh from the DB at
         # material completion/sweep time, never hydrated into Settings.
         "materials_ttl_days": 0,
+        # Execution-plane row retention (#354): 0 = disabled (safe default);
+        # read fresh from the DB at sweep time, never hydrated into Settings.
+        "execution_retention_days": 0,
     }
     for key in _EXECUTOR_SCALAR_KEYS:
         document[key] = getattr(runtime, key)
@@ -68,18 +74,28 @@ def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-def _strip_retired_blocks(stored: dict[str, Any]) -> dict[str, Any]:
-    """Remove retired top-level blocks from a stored document copy.
+# Host-private state blocks riding the stored ``instance`` document: they
+# are written by background machinery through InstanceSettingsStore.update
+# and must never surface in the admin contract (InstanceSettingsDocument is
+# extra=forbid, so a stray block would 500 the GET/PUT round-trip).
+_PRIVATE_BLOCKS = ("openclaw", "execution_retention_cursor")
 
-    The ``openclaw`` block retired with the openclaw runtime (#75): stored
-    documents from older deployments still carry it; it is stripped at read
-    time (before response validation — InstanceSettingsDocument is
-    extra=forbid) so the effective document matches the current shape without
-    a data migration.
+
+def _strip_retired_blocks(stored: dict[str, Any]) -> dict[str, Any]:
+    """Remove non-contract top-level blocks from a stored document copy.
+
+    - ``openclaw``: retired with the openclaw runtime (#75); stored documents
+      from older deployments still carry it.
+    - ``execution_retention_cursor`` (#354): the retention sweep's persisted
+      keyset high-water marks. A concurrent admin PUT (whole-document
+      replace) can wipe it — that only costs the sweep a cursor reset, the
+      deletion predicate re-filters everything on the next pass.
+    Both are stripped at read time (before response validation) so the
+    effective document matches the current shape without a data migration.
     """
-    if "openclaw" not in stored:
+    if not any(block in stored for block in _PRIVATE_BLOCKS):
         return stored
-    return {key: value for key, value in stored.items() if key != "openclaw"}
+    return {key: value for key, value in stored.items() if key not in _PRIVATE_BLOCKS}
 
 
 def effective_instance_document(stored: dict[str, Any] | None) -> dict[str, Any]:
@@ -103,6 +119,7 @@ def apply_instance_settings(settings: Settings, database_dsn: ConnectSource) -> 
     for key in _EXECUTOR_SCALAR_KEYS:
         base[key] = effective[key]
     base["workflows"]["enabled"] = effective["workflows"]["enabled"]
+    base["workflows"]["max_items_per_run"] = effective["workflows"]["max_items_per_run"]
     base["agent_workers"]["max_archive_bytes"] = effective["agent_workers"]["max_archive_bytes"]
     base["agent_workers"]["min_protocol_version"] = effective["agent_workers"][
         "min_protocol_version"

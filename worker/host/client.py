@@ -98,6 +98,9 @@ class Client(TransferOperations):
             "max_code_concurrency": int(config.get("max_code_concurrency", 0) or 0),
             "labels": config.get("labels", {}),
             "protocol_version": PROTOCOL_VERSION,
+            # #381 版本握手：生效 runtime 的 --version 输出（外挂后 velites 版本
+            # 独立管理，兼容矩阵需可观测）。informational——Host 记日志不拦截。
+            "runtime_versions": config.get("runtime_versions", {}),
         }
         tokens = ",".join(token for token in management_tokens if token)
         if not tokens:

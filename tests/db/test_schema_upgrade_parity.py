@@ -43,12 +43,12 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v72, studio_chat_agent_config, #368) must
+# Effects the newest migration (v74, studio_chat_agent_config, #368) must
 # leave behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v72 adds the studio_chat_sessions agent config mirror
-# columns (DDL-only, schema-file replay): the undo drops both; the v71
-# (preview_panels) CHECK widening stays in place — it belongs to the
-# SCHEMA_VERSION-1 shape after the rewind.
+# SCHEMA_VERSION-1. v74 adds the studio_chat_sessions agent config mirror
+# columns (DDL-only, schema-file replay): the undo drops both; the v72/v73
+# effects stay in place — they belong to the SCHEMA_VERSION-1 shape after
+# the rewind.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("studio_chat_sessions", "session_modes_json", "text"),
@@ -59,7 +59,7 @@ _NEWEST_MIGRATION_NAME = "studio_chat_agent_config"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v71 (no extra DDL: v72 is purely additive columns).
+# faithful v73 (no extra DDL: v74 is purely additive columns).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.

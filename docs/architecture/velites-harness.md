@@ -411,10 +411,13 @@ pi_config/pi_command_builder/pi_prompt 链）已整体删除（#108）。
 - 金丝雀关闭（2026-08-04，`14ec130f`）：`flavor: velites` 与审题链路
   `runtime: velites` 落为 tracked 默认值。
 
-**worker bundle 与部署**：二进制不打进 bundle（bundle 只带 skill + prompt），
-由 worker 镜像或 worker 侧 PATH 提供；Worker 声明某 runtime 前启动预检会
-探测对应二进制（缺失即拒启动）。容器部署前置：worker 镜像含 velites 二进制
-+ bwrap setuid；容器 seccomp 需放行 `unshare`（见 §5 沙箱小节的运行时要求）。
+**worker bundle 与部署**：二进制不打进 bundle（bundle 只带 skill + prompt）。
+#254 起 runtime 声明 = 启动时自动探测（自带副本 `data/bin/` 优先、PATH
+兜底），探测到即启用、`disabled_runtimes` 反选停用；#381 起执行器不进
+worker 镜像——velites 经 compose 外挂（`AGENT_WORKER_EXPECT_RUNTIMES`
+守卫防漏挂载），code 池沙箱则由镜像内置的 `velites-sandbox` 独立 bin 承担
+（#383，与 harness 分家）。容器部署前置：bwrap setuid 仍在镜像内；容器
+seccomp 需放行 `unshare`（见 §5 沙箱小节的运行时要求）。
 
 **Pi CLI 安装与验证**（仅 `runtime: pi` 的 agent 需要）：
 

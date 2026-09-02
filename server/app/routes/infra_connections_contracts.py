@@ -18,9 +18,16 @@ class DatabaseConnectionView(BaseModel):
 
 
 class StorageConnectionView(BaseModel):
-    """Object-store summary; credentials reduce to a derivation kind."""
+    """Object-store summary; credentials reduce to a derivation kind.
+
+    ``backend`` is a display-only label inferred from the endpoint host
+    (e.g. SeaweedFS / RustFS / MinIO / AWS S3); the platform itself only
+    ever speaks the S3 API, so it never knows the server product for
+    certain — an unrecognized host falls back to "S3 兼容（<host>）".
+    """
 
     configured: bool
+    backend: str
     endpoint_url: str
     public_endpoint_url: str
     bucket: str

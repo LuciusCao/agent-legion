@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { formatInteractionStats, formatRelativeTime } from './formatters'
+import {
+  formatDateTime,
+  formatInteractionStats,
+  formatRelativeTime,
+} from './formatters'
 
 describe('formatRelativeTime', () => {
   beforeEach(() => {
@@ -32,6 +36,30 @@ describe('formatRelativeTime', () => {
     expect(formatRelativeTime('2024-04-01T12:00:00.000Z')).toBe(
       new Date('2024-04-01T12:00:00.000Z').toLocaleDateString('zh-CN')
     )
+  })
+})
+
+describe('formatDateTime', () => {
+  it('renders offset-bearing ISO strings in the local timezone', () => {
+    expect(formatDateTime('2026-07-22T02:15:31+00:00')).toBe(
+      new Date('2026-07-22T02:15:31+00:00').toLocaleString('zh-CN')
+    )
+  })
+
+  it('treats offset-less legacy strings as UTC', () => {
+    expect(formatDateTime('2026-07-22 02:15:31')).toBe(
+      new Date('2026-07-22T02:15:31Z').toLocaleString('zh-CN')
+    )
+  })
+
+  it('returns em dash for missing values', () => {
+    expect(formatDateTime(null)).toBe('—')
+    expect(formatDateTime(undefined)).toBe('—')
+    expect(formatDateTime('')).toBe('—')
+  })
+
+  it('returns the raw value when it cannot be parsed', () => {
+    expect(formatDateTime('not a date')).toBe('not a date')
   })
 })
 

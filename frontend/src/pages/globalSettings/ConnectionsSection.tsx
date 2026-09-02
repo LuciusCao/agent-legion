@@ -378,8 +378,8 @@ export function ConnectionsSection() {
     <div className={styles.card}>
       <h3 className={styles.heading}>外部服务连接</h3>
       <p className={styles.hint}>
-        实例级外部服务凭据集中管理；secret 值加密存储，节点配置通过连接 key
-        引用。
+        集中保存第三方服务的访问凭据（API key、token 等），加密存储。workspace
+        中的节点通过「连接 key」引用凭据，无需在流程里 粘贴明文密钥。
       </p>
       {(error || loadError) && (
         <p className={styles.error} role="alert">
