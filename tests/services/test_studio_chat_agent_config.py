@@ -193,6 +193,8 @@ def test_set_session_mode_switches_and_mirrors(chat) -> None:
     wait_for_predicate(lambda: len(_sunk_requests(script_path, "session/set_mode")) == 1)
     request = _sunk_requests(script_path, "session/set_mode")[0]
     assert request["params"]["modeId"] == "plan"
+    # The mirror is durably in the row, not only in the return value.
+    assert service.get_session(session["id"])["session_modes"]["currentModeId"] == "plan"
 
 
 def test_set_session_mode_rejects_out_of_list_id(chat) -> None:
@@ -360,3 +362,111 @@ def test_mode_update_for_non_advertising_agent_is_dropped(chat) -> None:
     )
 
     assert service.get_session(session["id"])["session_modes"] is None
+
+
+# -- PR #393 review batch ---------------------------------------------------
+
+GROUPED_SCRIPT = {
+    "capabilities": {"loadSession": False},
+    "config_options": [
+        {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "k3",
+            "options": [
+                {
+                    "group": "kimi",
+                    "name": "Kimi",
+                    "options": [
+                        {"value": "k3", "name": "K3"},
+                        {"value": "k3-256k", "name": "K3 256k"},
+                    ],
+                }
+            ],
+        }
+    ],
+    "on_prompt": [],
+}
+
+
+def test_grouped_options_whitelist_accepts_nested_values(chat) -> None:
+    # ``options`` is a protocol union: flat values OR groups. Grouped entries
+    # must contribute their nested values to the whitelist — and never a
+    # bogus top-level "None" (PR #393 review, P1).
+    service, _bus, register, workspace_id, user_id = chat
+    register(GROUPED_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+
+    updated = set_session_config_option(service, session["id"], workspace_id, "model", "k3-256k")
+
+    by_id = {option["id"]: option for option in updated["config_options"]}
+    assert by_id["model"]["currentValue"] == "k3-256k"
+    with pytest.raises(InvalidOperationError):
+        set_session_config_option(service, session["id"], workspace_id, "model", "None")
+
+
+def test_set_config_option_mirror_takes_agent_response_not_request(chat) -> None:
+    # The agent has the last word on values (clamp / linked options): the
+    # mirror takes the RESPONSE's currentValue, never echoes the request.
+    clamped = [
+        KIMI_CONFIG_OPTIONS[0],
+        {**KIMI_CONFIG_OPTIONS[1], "currentValue": "high"},
+    ]
+    service, _bus, register, workspace_id, user_id = chat
+    register({**CONFIG_SCRIPT, "set_config_response": clamped})
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+
+    updated = set_session_config_option(service, session["id"], workspace_id, "thinking", "max")
+
+    by_id = {option["id"]: option for option in updated["config_options"]}
+    assert by_id["thinking"]["currentValue"] == "high"
+
+
+def test_notifications_over_the_wire_rewrite_mirrors(chat) -> None:
+    # Full wire path (PR #393 review): fake agent notification → SDK schema
+    # validation → _ClientImpl dump → apply_config_update. Pins that the
+    # SDK's CurrentModeUpdate / ConfigOptionUpdate classes exist in the
+    # locked SDK version and their dumped key names (currentModeId /
+    # configOptions) match what the mirror rewrites read.
+    shifted = [
+        {
+            "id": "thinking",
+            "name": "Thinking",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": "medium",
+            "options": [{"value": "medium", "name": "Medium"}, {"value": "high", "name": "High"}],
+        }
+    ]
+    script = {
+        **CONFIG_SCRIPT,
+        "on_prompt": [
+            {"notify": {"sessionUpdate": "current_mode_update", "currentModeId": "plan"}},
+            {"notify": {"sessionUpdate": "config_option_update", "configOptions": shifted}},
+        ],
+    }
+    service, _bus, register, workspace_id, user_id = chat
+    register(script)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+
+    service.send_message(session["id"], workspace_id, "go")
+
+    wait_for_predicate(lambda: service.get_session(session["id"])["config_options"] == shifted)
+    assert service.get_session(session["id"])["session_modes"]["currentModeId"] == "plan"
+
+
+def test_mode_notification_outside_advertised_list_is_dropped(chat) -> None:
+    # The mirror doubles as the whitelist data source: a currentModeId the
+    # agent never advertised must not be persisted (PR #393 review, P2) —
+    # logged and dropped instead.
+    service, _bus, register, workspace_id, user_id = chat
+    register(CONFIG_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+
+    service._on_update(
+        session["id"], {"sessionUpdate": "current_mode_update", "currentModeId": "rm -rf"}
+    )
+
+    assert service.get_session(session["id"])["session_modes"]["currentModeId"] == "default"

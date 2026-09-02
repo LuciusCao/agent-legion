@@ -47,3 +47,11 @@ class SessionRuntime:
         # Whether the one-time advisory mcp_unverified hint was already
         # posted for this session (per-session, not per-turn).
         self.mcp_hint_shown = False
+        # Agent config switching (#368, PR #393 review): config_lock
+        # serializes the whole validate→forward→write-back span of a switch
+        # (held across the RPC — never take it on the notification path);
+        # config_version (guarded by ``lock``) bumps on every accepted
+        # notification rewrite so an overtaken switch skips its stale
+        # write-back.
+        self.config_lock = threading.Lock()
+        self.config_version = 0

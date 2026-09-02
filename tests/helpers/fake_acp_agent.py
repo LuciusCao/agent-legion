@@ -139,10 +139,20 @@ class _FakeAgent:
             # Echo the scripted full config state with the requested value
             # folded in (the protocol returns the FULL state, #368); with
             # bare_set_config_response the agent violates the protocol and
-            # omits configOptions (required field — the client SDK rejects it).
+            # omits configOptions (required field — the client SDK rejects it);
+            # set_config_response overrides the echo entirely — the agent has
+            # the last word on values (clamp / linked-option scenarios).
             options = self.script.get("config_options")
             if options is None or self.script.get("bare_set_config_response"):
                 self._send({"jsonrpc": "2.0", "id": request_id, "result": {}})
+            elif self.script.get("set_config_response") is not None:
+                self._send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {"configOptions": self.script["set_config_response"]},
+                    }
+                )
             else:
                 params = message["params"]
                 updated = [

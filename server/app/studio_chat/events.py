@@ -14,12 +14,12 @@ from typing import TYPE_CHECKING, Any, Protocol
 from server.app.studio_chat.mcp_hint import is_agent_legion_tool_call, maybe_emit_mcp_hint
 from server.app.studio_chat.permissions import handle_permission_request
 from server.app.studio_chat.runtime import SessionRuntime
-from server.app.studio_chat.session_config import apply_config_update, session_config_fields
+from server.app.studio_chat.session_config_state import apply_config_update, session_config_fields
 from server.app.studio_chat.store import StudioChatStore
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
-    from server.app.studio_chat.session_config import OpenedAcpSession
+    from server.app.studio_chat.session_config_state import OpenedAcpSession
 
 _EXIT_DETAIL = "agent process exited"
 

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
 
 from acp.schema import (
@@ -101,11 +100,10 @@ class SessionConfigHandleMixin:
             # The loop shut down between the state read and the submit.
             coro.close()
             raise
-        try:
-            return future.result(timeout=SET_CONFIG_TIMEOUT_SECONDS)
-        except FutureTimeoutError:
-            # Cancel the in-flight request: without this the set could still
-            # land on the agent AFTER the HTTP caller saw the 409, leaving
-            # the mirror and the agent's real state silently diverged.
-            future.cancel()
-            raise
+        # No cancel on timeout (PR #393 review): the request already crossed
+        # the process boundary — cancelling the local future cannot un-send
+        # it, only fake certainty. The caller's 409 says "state uncertain";
+        # a late application heals through the agent's own update
+        # notification (apply_config_update), and one that never notifies is
+        # exactly the drift the notification-path warning logs make visible.
+        return future.result(timeout=SET_CONFIG_TIMEOUT_SECONDS)

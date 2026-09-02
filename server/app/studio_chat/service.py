@@ -42,7 +42,7 @@ from server.app.studio_chat.teardown import teardown_runtime
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import AcpEventHandlers
-    from server.app.studio_chat.session_config import OpenedAcpSession
+    from server.app.studio_chat.session_config_state import OpenedAcpSession
 
 logger = logging.getLogger(__name__)
 

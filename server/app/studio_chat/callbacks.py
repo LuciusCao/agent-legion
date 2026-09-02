@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
-    from server.app.studio_chat.session_config import OpenedAcpSession
+    from server.app.studio_chat.session_config_state import OpenedAcpSession
 
 
 class ServiceCallbacks:

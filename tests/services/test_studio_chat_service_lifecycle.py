@@ -25,7 +25,7 @@ from server.app.studio_chat import spawn as spawn_module
 from server.app.studio_chat.acp_session import AcpSessionHandle
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.service import StudioChatService
-from server.app.studio_chat.session_config import OpenedAcpSession
+from server.app.studio_chat.session_config_state import OpenedAcpSession
 from tests.helpers import wait_for_predicate
 from tests.postgres_support import TEST_DATABASE_URL
 

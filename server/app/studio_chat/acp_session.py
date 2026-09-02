@@ -51,7 +51,7 @@ from server.app.studio_chat.terminals import AcpTerminalStore, TerminalClientMix
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
-    from server.app.studio_chat.session_config import OpenedAcpSession
+    from server.app.studio_chat.session_config_state import OpenedAcpSession
 
 logger = logging.getLogger(__name__)
 

@@ -15,7 +15,7 @@ from typing import Any
 from acp.exceptions import RequestError
 from acp.schema import HttpMcpServer
 
-from server.app.studio_chat.session_config import OpenedAcpSession, opened_session
+from server.app.studio_chat.session_config_state import OpenedAcpSession, opened_session
 
 logger = logging.getLogger(__name__)
 
