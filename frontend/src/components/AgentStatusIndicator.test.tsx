@@ -4,6 +4,7 @@ import { AgentStatusIndicator } from './AgentStatusIndicator'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { useConnectionStatusStore } from '../stores/connectionStatusStore'
 import type { AgentWorkerSummary as WorkerSummary } from '../api/agentWorkers'
+import { formatDateTime } from '../lib/formatters'
 import { createMockAgentsState, createMockUiState } from '../testing/fixtures'
 import { makeAgentStatus } from '../testing/workspaceFixtures'
 import type { AgentStatus } from '../types'
@@ -240,12 +241,12 @@ describe('AgentStatusIndicator', () => {
     expect(screen.getByText('已注册 Worker')).toBeInTheDocument()
     await screen.findByText('Online Mac')
     expect(screen.getByText('Offline Mac')).toBeInTheDocument()
-    expect(screen.getByTitle('最近心跳 2026-07-22 02:15:31')).toHaveTextContent(
-      '在线'
-    )
-    expect(screen.getByTitle('最近心跳 2026-07-22 01:00:00')).toHaveTextContent(
-      '离线'
-    )
+    expect(
+      screen.getByTitle(`最近心跳 ${formatDateTime('2026-07-22 02:15:31')}`)
+    ).toHaveTextContent('在线')
+    expect(
+      screen.getByTitle(`最近心跳 ${formatDateTime('2026-07-22 01:00:00')}`)
+    ).toHaveTextContent('离线')
   })
 
   it('filters workers by allowed workspaces; empty list means all workspaces', async () => {
