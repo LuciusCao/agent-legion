@@ -1,8 +1,7 @@
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import { IconButton, Tooltip } from '@mui/material'
 import type { SwitchableNodeType } from '../shared/workflowStudioYamlDraft.nodeType'
-import { NodeTypeSelect } from './NodeTypeSelect'
-import { isSwitchableNodeType } from './nodeTypeSelector'
+import { HeaderNodeTypeSlot } from './NodeTypeSelect'
 import styles from './WorkflowNodeInspectorHeader.module.css'
 
 type Props = {
@@ -16,20 +15,14 @@ type Props = {
 }
 
 export function WorkflowNodeInspectorHeader(props: Props) {
-  const nodeType = props.nodeType
-  const switchable = isSwitchableNodeType(nodeType) ? nodeType : null
   return (
     <header className={styles.header}>
       <div className={styles.identity}>
         <h2 className={styles.title}>{props.label}</h2>
-        {switchable && props.onNodeTypeChange ? (
-          <NodeTypeSelect
-            nodeType={switchable}
-            onChange={props.onNodeTypeChange}
-          />
-        ) : (
-          <span className={styles.kind}>{nodeType ?? 'code'}</span>
-        )}
+        <HeaderNodeTypeSlot
+          nodeType={props.nodeType}
+          onNodeTypeChange={props.onNodeTypeChange}
+        />
       </div>
       <Tooltip title="关闭节点配置">
         <IconButton
