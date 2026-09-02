@@ -195,11 +195,14 @@ def _expire_lease_row(conn: DatabaseConnection, row: dict[str, Any], now_str: st
                 str(row["job_id"]),
                 str(row["node_key"]),
             )
+            # Status guard mirrors finish_shard_execution: a late expiry
+            # racing a reset/rerun must not overwrite a terminal node.
             conn.execute(
                 """
                 update job_nodes
                 set status=%s, stale_reason='', error_message=%s, finished_at=%s
                 where job_id=%s and node_key=%s
+                    and status in ('pending', 'ready', 'stale', 'running')
                 """,
                 (
                     aggregate,
