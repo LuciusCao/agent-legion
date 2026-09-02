@@ -257,7 +257,7 @@ export function StudioAgentsSection() {
       <h3 className={styles.heading}>Studio Agent 管理</h3>
       <p className={styles.hint}>
         在这里管理 Studio 对话可启动的 AI agent（需支持 ACP 协议，如 Claude
-        Code、Codex、Kimi）。点击「重新检测」会自动发现服务器上 已安装的
+        Code、Codex、Kimi）。点击「重新检测」会自动发现服务器上已安装的
         agent；也可以手动添加，手动条目不会被检测覆盖。
       </p>
       {loadError && (

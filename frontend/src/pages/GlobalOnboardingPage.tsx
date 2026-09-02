@@ -68,7 +68,7 @@ export default function GlobalOnboardingPage() {
         <h1 className={styles.title}>连接你的 AI Agent</h1>
         <p className={styles.hint}>
           在产品中，你可以直接和 AI agent 对话来搭建功能。以下是在服务器上
-          检测到的 agent；如果你使用其他支持 ACP 协议的 agent，也可以手动 添加。
+          检测到的 agent；如果你使用其他支持 ACP 协议的 agent，也可以手动添加。
         </p>
         <section className={styles.item}>
           <div className={styles.itemHeader}>

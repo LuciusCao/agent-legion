@@ -610,6 +610,7 @@
     "frontend/src/pages/globalSettings/instanceSettingsFields.ts": 116,
     "frontend/src/pages/globalSettings/instanceSettingsRetentionFields.ts": 41,
     "frontend/src/pages/globalSettings/instanceSettingsForm.tsx": 154,
+    "frontend/src/pages/globalSettings/instanceSettingsHints.ts": 20,
     "frontend/src/pages/globalSettings/pricingRows.ts": 33,
     "frontend/src/pages/jobDetail/EntityPanel.tsx": 32,
     "frontend/src/pages/jobDetail/deriveJobDetailPresentation.ts": 41,

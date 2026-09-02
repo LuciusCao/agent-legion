@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useUiStore } from '../../stores/uiStore'
+import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import { updateTokenUsagePricing } from '../../api/tokenUsagePricing'
 import type { TokenUsagePricingConfigResponse } from '../../api/tokenUsagePricing'
 import { toErrorMessage } from '../../lib/queryError'
@@ -45,6 +47,7 @@ export function ModelPricingCard({
 }: {
   initial: TokenUsagePricingConfigResponse
 }) {
+  const queryClient = useQueryClient()
   const [currency, setCurrency] = useState(initial.currency)
   const [rows, setRows] = useState<RateRow[]>(() => toRows(initial.pricing))
   const [baseline, setBaseline] = useState(() =>
@@ -68,6 +71,8 @@ export function ModelPricingCard({
     try {
       const result = await updateTokenUsagePricing(payload)
       setBaseline(serialize(result.currency, toRows(result.pricing)))
+      // 同步 query cache：保存后 30s 内重进页面不得回显旧值（staleTime 窗口）。
+      queryClient.setQueryData(extraQueryKeys.tokenUsagePricing(), result)
       useUiStore.getState().showToast('模型定价已保存', 'success')
     } catch (err) {
       setError(toErrorMessage(err))

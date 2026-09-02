@@ -122,9 +122,11 @@ const instanceSettings: InstanceSettingsResponse = {
   skills_root: '~/.agents/skills',
 }
 
-function renderPage() {
+function renderPage(hash?: string) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter
+      initialEntries={hash ? [`/admin/settings${hash}`] : undefined}
+    >
       <GlobalSettingsPage />
     </MemoryRouter>
   )
@@ -182,6 +184,35 @@ describe('GlobalSettingsPage', () => {
     expect(
       within(nav).getByRole('button', { name: 'Studio Agent 管理' })
     ).toHaveAttribute('aria-current', 'true')
+  })
+
+  it('scrolls to the section named by the URL hash on mount', async () => {
+    vi.mocked(getTokenUsagePricing).mockResolvedValue(pricingConfig)
+    // jsdom 未实现 scrollIntoView，stub 掉以观察锚点滚动
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+
+    renderPage('#instance-settings')
+    await screen.findByRole('navigation')
+
+    const target = document.getElementById('instance-settings')
+    expect(target).not.toBeNull()
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(scrollIntoView).toHaveBeenCalledWith()
+    // 只滚目标 section，不把所有 section 各滚一遍。
+    const callsOnSections = scrollIntoView.mock.instances.length
+    expect(callsOnSections).toBeLessThanOrEqual(1)
+  })
+
+  it('ignores hashes that do not name a settings section', async () => {
+    vi.mocked(getTokenUsagePricing).mockResolvedValue(pricingConfig)
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+
+    renderPage('#not-a-section')
+    await screen.findByRole('navigation')
+
+    expect(scrollIntoView).not.toHaveBeenCalled()
   })
 
   it('moves the active nav item on click', async () => {

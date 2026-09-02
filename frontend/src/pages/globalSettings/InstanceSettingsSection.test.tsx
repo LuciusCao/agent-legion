@@ -106,9 +106,15 @@ describe('InstanceSettingsSection', () => {
       20000
     )
     expect(screen.getByText(/需重启服务才能生效/)).toBeInTheDocument()
-    // 每组带一句面向用户的说明。
+    // 每组带一句面向用户的说明（抽查三组，含此前缺失的监控/代码池组）。
     expect(
       screen.getByText('自动删除过期的运行日志与产物，控制磁盘占用。')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('资源占用的采样频率与监控数据保留时长。')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('代码节点共享的执行线程池大小，即同时执行的代码节点数。')
     ).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: '收起高级参数' })

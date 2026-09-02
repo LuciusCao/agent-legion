@@ -101,11 +101,10 @@ class StorageConnectionInfo:
     reachable: bool
 
 
-# Display-only host markers → server product label (compose service names are
-# stable: seaweedfs / rustfs / minio). The platform only ever speaks the S3 API
-# and carries no explicit backend-type configuration, so the label is inferred;
-# a wrong guess mislabels the UI, never affects behavior (#335 display layer).
-_BACKEND_LABELS = (("seaweedfs", "SeaweedFS"), ("rustfs", "RustFS"), ("minio", "MinIO"))
+# String fields of the unconfigured placeholder view (all empty).
+_EMPTY_STRING_FIELDS = ("backend", "endpoint_url", "public_endpoint_url", "bucket", "region")
+# Display-only host markers → product label (seaweedfs/rustfs/minio/amazonaws).
+_BACKEND_LABELS = dict(seaweedfs="SeaweedFS", rustfs="RustFS", minio="MinIO", amazonaws="AWS S3")
 
 
 def _infer_storage_backend(endpoint_url: str) -> str:
@@ -113,7 +112,9 @@ def _infer_storage_backend(endpoint_url: str) -> str:
     if not endpoint_url:
         return "AWS S3"
     host = (urlsplit(endpoint_url).hostname or "").lower()
-    for marker, label in _BACKEND_LABELS:
+    if not host:  # unparseable input (e.g. missing scheme): no host to name
+        return "S3 兼容"
+    for marker, label in _BACKEND_LABELS.items():
         if marker in host:
             return label
     return f"S3 兼容（{host}）"
@@ -122,19 +123,15 @@ def _infer_storage_backend(endpoint_url: str) -> str:
 def describe_storage(settings: S3Settings | None, *, reachable: bool) -> StorageConnectionInfo:
     """Summarize the object-store config; credentials collapse to a kind.
 
-    ``reachable`` is supplied by the caller (health cache for display, fresh
-    probe for the test) so this stays pure; unconfigured is never reachable.
+    ``reachable`` is supplied by the caller (health cache / fresh probe) so
+    this stays pure; unconfigured is never reachable.
     """
     if settings is None:
         return StorageConnectionInfo(
             configured=False,
-            backend="",
-            endpoint_url="",
-            public_endpoint_url="",
-            bucket="",
-            region="",
             credentials="unconfigured",
             reachable=False,
+            **dict.fromkeys(_EMPTY_STRING_FIELDS, ""),
         )
     return StorageConnectionInfo(
         configured=True,

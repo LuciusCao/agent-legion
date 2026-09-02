@@ -15,8 +15,9 @@ review——两个暴露在 admin UI 的概念（「启用工作流」「代码�
      启动 Sweeper 与 WorkflowWorkerThread，本进程不承担执行职责；
   2. `server/app/routes/job_http.py::require_workflows_enabled`：被 jobs、
      workflow revisions、skills、job mutations/artifacts、studio agent
-     tools 等 15 个路由模块共 125 处调用——关掉后**这整套 workflow API
-     直接返回 404**（"Workflows are disabled"），不只是后台不执行。
+     tools 等 38 个路由文件共约 94 处实际调用（含符号引用 126 行）——关掉后
+     **这整套 workflow API 直接返回 404**（"Workflows are disabled"），
+     不只是后台不执行。
 - **现存业务影响**："同一份代码，按部署形态决定是否承担执行与 workflow
   API 职责"。单机部署（当前唯一支持的形态）下它**没有任何合理的关闭理由**：
   关掉 = 所有任务永远不执行 + 全部 workflow API 404。
@@ -31,7 +32,8 @@ review——两个暴露在 admin UI 的概念（「启用工作流」「代码�
   `ThreadPoolExecutor(max_workers=code_capacity)`，重启生效）。
 - **现存业务影响**：真实且活跃——所有非 Agent 路由节点（schema v47 后的
   `type: code` 节点）都跑在这个池里，容量满了会 `code_capacity_full` 跳过
-  （`agent_broker/claim_evaluate.py`，2026-08-18 还修过它的饿死 bug）。
+  （`agent_broker/` 的 claim 链路在 2026-08-19 修过一次相关饿死 bug，
+  `90dc35fb`）。
 - **结论**：**不是过时概念**，是真实的容量调优参数；但"代码池"这个名称是
   执行器时代（executor registry/kinds 机器，v47 已退役）的残留，对不了解
   内部实现的用户没有意义。
@@ -51,7 +53,7 @@ review——两个暴露在 admin UI 的概念（「启用工作流」「代码�
 2. **运行时开关改 env**：`AGENT_LEGION_DISABLE_EXECUTION=1`（或同类
    显式 env）替代 DB 设置，进程启动时读取一次，**两个消费面都改读同一
    env**——`worker_startup.is_enabled` 与 `require_workflows_enabled`
-   （后者影响 15 个路由模块 / 125 处调用的 404 行为，需随开关语义一起
+   （后者影响 38 个路由文件 / 约 94 处调用的 404 行为，需随开关语义一起
    迁移并逐路由确认）。DB 键保留读时剥离（同 `openclaw` 块先例，
    `_strip_retired_blocks`），存量文档不需要数据迁移。
 3. **多副本部署落地时**重新评估：届时若需要 per-副本 开关，应由部署编排
@@ -61,8 +63,9 @@ review——两个暴露在 admin UI 的概念（「启用工作流」「代码�
 
 1. UI label 从「代码池 / code 池容量」改为「并发执行上限」类人话表述，
    保留 `code_capacity` 契约字段名（避免无收益的契约 churn）。
-2. 说明文案已随本 PR 落地（「代码节点共享的执行线程池大小，即同时执行的
-   代码节点数」）；改名项与后续可能的 admin UI 全局文案统一一并做。
+2. 分组说明已随本 PR 落地（`instanceSettingsHints.ts`，代码池组即
+   「代码节点共享的执行线程池大小，即同时执行的代码节点数」）；label 改名项
+   与后续可能的 admin UI 全局文案统一一并做。
 
 ## 3. 风险与依赖
 

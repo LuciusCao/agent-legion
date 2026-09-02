@@ -123,7 +123,11 @@ def test_describe_storage_default_chain_when_no_access_key() -> None:
         ("http://seaweedfs:8333", "SeaweedFS"),
         ("http://rustfs:9000", "RustFS"),
         ("https://minio.example.com", "MinIO"),
+        ("https://s3.amazonaws.com", "AWS S3"),
+        ("https://s3.cn-north-1.amazonaws.com.cn", "AWS S3"),
         ("http://s3.internal:9000", "S3 兼容（s3.internal）"),
+        # Unparseable input (no scheme → no hostname): degrade without empty parens.
+        ("rustfs:9000", "S3 兼容"),
         ("", "AWS S3"),
     ],
 )
