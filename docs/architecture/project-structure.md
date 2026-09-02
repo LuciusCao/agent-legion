@@ -114,7 +114,8 @@ agent-legion/
 ├── deploy/                     # Docker Compose 与部署模板
 │   ├── compose.host.yaml
 │   ├── compose.worker.yaml
-│   └── secrets/
+│   ├── worker.*.example.yaml   # Worker 可选 bootstrap 配置模板
+│   └── secrets/                # 本机密钥（gitignored，init-worktree.sh 生成）
 ├── examples/                   # 示例 workflow 资源
 │   └── education-video-problems-generation/
 ├── docs/
