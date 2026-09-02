@@ -385,5 +385,5 @@ exemptions:
     the deque-order invariant from the lock that enforces it. Revisit when
     the events package grows a second revision consumer.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/353
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/349
   ceiling: 130

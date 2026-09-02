@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import threading
 from pathlib import Path
 
@@ -104,8 +105,10 @@ def test_default_segment_size_amortizes_by_two_orders_of_magnitude(db_path, bump
         buf.record("ws1", f"job{i}", "updated")
 
     updates = len(bump_call_counter)
-    assert updates == 3  # ceil(3000/1024)
-    assert updates * 100 <= m  # ≥ 两个数量级（实际 1000x）
+    # 自适应段大小：默认档调参（如 512）时断言随 SEGMENT_SIZE 重定价。
+    expected_updates = math.ceil(m / buffer_module.SEGMENT_SIZE)
+    assert updates == expected_updates
+    assert updates * 100 <= m  # ≥ 两个数量级（默认 1024 档实际 1000x）
     assert buf.current_revision() == baseline + m
     assert _read_seq_value(db_path) == baseline + 3 * buffer_module.SEGMENT_SIZE
 
@@ -149,6 +152,7 @@ def test_concurrent_records_on_shared_buffer_unique_revisions(
         t.start()
     for t in threads:
         t.join(15)
+    assert not any(t.is_alive() for t in threads), "segmented issuance thread hung"
 
     assert len(issued) == 40
     assert len(set(issued)) == 40  # 无重复
@@ -181,6 +185,7 @@ def test_revision_unique_across_concurrent_instances(db_path, monkeypatch):
         t.start()
     for t in threads:
         t.join(15)
+    assert not any(t.is_alive() for t in threads), "segmented issuance thread hung"
     assert len(issued) == 40
     assert len(set(issued)) == 40  # 无重复（每实例各持一段）
     assert min(issued) < max(issued)  # 单调推进（跨段跨实例）
