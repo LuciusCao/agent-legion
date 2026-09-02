@@ -320,6 +320,36 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 82
 - check: architecture.file_budget
+  path: frontend/src/features/previewPanel/PreviewPanelHost.tsx
+  reason: The Codex P1 review on PR 345 added the host-injected CSP (the
+    outbound-network red line (sandbox allow-scripts does not block
+    fetch/sendBeacon/img to external origins)). The policy constant, the
+    srcDoc head-injection helper and its documentation grow the security
+    surface in place -- splitting them out would separate the CSP from the
+    iframe that enforces it.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/328
+  ceiling: 199
+- check: architecture.file_budget
+  path: frontend/src/features/previewPanel/PreviewPanelSection.tsx
+  reason: The Codex P2 review on PR 345 added bundle content into the
+    PreviewPanelHost remount key plus the hashBundle helper -- a
+    cross-navigation bridge-request isolation fix that must stay at the
+    composition site to keep the in-flight-window reasoning local.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/328
+  ceiling: 79
+- check: architecture.file_budget
+  path: server/app/services/preview_panels.py
+  reason: The Codex P2 review on PR 345 unified the artifact inventory on
+    _merged_artifact_names so every recent job merges the object-store
+    manifest like the selected job does (the object store is the
+    authoritative copy, the local dir an evictable cache). Single-purpose
+    helper next to its only consumer.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/328
+  ceiling: 190
+- check: architecture.file_budget
   path: server/app/services/s3_jobs_gc.py
   reason: >-
     Re-filed (systematic review round, PR #344): the S3 jobs GC service

@@ -155,6 +155,7 @@
     "tests/workers/test_workflow_worker_thread_paths.py",
     "tests/workers/test_workspace_scan.py",
     "tests/workflows/test_sharding.py",
+    "tests/workflows/test_sharding_concurrency.py",
     "tests/workflows/test_skill_repo_gate.py",
     "tests/workflows/test_workflow_draft_compare.py",
     "tests/workflows/test_workflow_execution_control.py",

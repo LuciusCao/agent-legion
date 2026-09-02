@@ -14,6 +14,11 @@ run_static_checks() {
   echo "=== Architecture Invariant Registry ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_invariants
 
+  echo "=== Version Manifests ==="
+  # 清单 ↔ lock 一致 + 发版解耦纪律（velites/frontend 版本线独立于仓库版本，
+  # 禁止锁步 bump——无谓的版本前进会击穿 velites 二进制指纹与 Docker 缓存层）。
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_versions
+
   # The business skill shared-assets check (scripts/check-skills-shared.py)
   # retired with the business skill sources; the script itself leaves with the
   # business runtime code in P4.
