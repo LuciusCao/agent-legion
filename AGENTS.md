@@ -61,6 +61,7 @@
 - 新增 invariant 或临时豁免要同步更新 registry。
 - spec / plan 必须包含 `Quality Impact` 小节。
 - 宽捕获纪律（#204/#298）：`server/app` 与 `worker/` 下新增 `except Exception`（或裸 `except:`）必须带 `# #204 broad-except audit:` 注释（讲清失败语义、为什么吞、结果空间、日志保全），或收窄为具体异常族；无注释的宽捕获会被 `scripts/architecture/broad_except_audit.py` 拒绝。
+- 概念退役 PR 必须同步在 `config/architecture/docs-retired-terms.yaml` 追加 pattern 条目，并清零现行文档命中（退役表述上下文豁免，语义见 `scripts/architecture/docs_retired_terms.py`）；现行文档白名单须与 `docs/architecture/README.md` 现行文档索引表同步。
 - 不要手写 frontend transport types，必须从 `frontend/src/generated/api.ts` 派生。
 - 超出体积预算的文件必须拆分或回退，不能手动抬高 ceiling。ceiling 按有效行数计（排除注释行与空行），不要为凑预算压缩注释；`max_lines` 绝对上限按原始行数计（#293 起声明式产物 root 可覆盖：`server/app/db` 的 `.sql` 与 `worker/ui` 的 `.js/.css` 各有 root 级 `max_lines`）。
 - ceiling 单调只降不升（#209）：`check_architecture` 按 git 锚点拒绝**已跟踪条目**的任何上抬；唯一合法上抬通道是带 `remove_when` 的 `architecture.file_budget` 豁免。改名不重置 ceiling（git rename 检测沿用旧路径地板，#236）；真正的全新文件首次登记（actual + buffer）不受约束。release train（develop→main）例外：CI 在 `base=main && head=develop` 的 PR 与 main/master 合并后 push 重跑时设 `AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN=1` 让锚点只看 HEAD（#249）；feature→develop 的 PR 与本地门禁保持 HEAD^ 基线锚点严格性。本地模拟 CI 的 PR 锚点判定：设 `AGENT_LEGION_BUDGET_BASE=origin/develop` 后锚点变为 HEAD + 该 base ref（release-train opt-out 优先；base ref 无法解析硬失败，按指引 fetch；边界基线守卫共用该覆盖）。
@@ -108,9 +109,9 @@ CodeExecutor(...).execute(context)
 
 更多完整规则与示例见 [docs/architecture/workspace-executor-evidence-matrix.md](docs/architecture/workspace-executor-evidence-matrix.md)。
 
-## 7. Pi / External Skills
+## 7. Pi / Skills
 
-- Skill 只在外部仓库修改，不要复制或 symlink 到项目根。外部 skill 仓库的位置自便，但被节点绑定或 agent 定义引用的 skill 目录必须位于 skill root（`~/.agents/skills`）之下，skill key 为其下的两段相对路径 `<group>/<name>`。
+- Skill 只在其本地仓库修改，不要复制或 symlink 到项目根。skill 仓库的位置自便，但被节点绑定或 agent 定义引用的 skill 目录必须位于 skill root（`~/.agents/skills`）之下，skill key 为其下的两段相对路径 `<group>/<name>`。
 - skill root 统一为 `~/.agents/skills`（单一来源 `server/app/skills/skill_roots.py`，实例设置只读展示）；workspace 的 agent skill 默认位于 `~/.agents/skills/<workspace_id>/`，SkillSelector 以只读前缀 + 相对目录名录入。skill 是 skill root 下的本地 in-place git 仓库（唯一模式，无注册表、无远程 clone 通道，#322）；缓存目录缺失即报错，按指引在 skill root 下创建。
 - 节点 `skill.ref` 语义：`latest`（空 ref 已归一为它）= 跟随仓库 HEAD，每次 dispatch 现场解析、永不入锁；具体 tag = 首次 dispatch 把 commit 冻结进 DB `skill_lock`（v2 多值 `{repo, refs: {ref → commit}}`，repo 仅审计，EXEC-SKILL-NODE-001）。重解析已 pin 的 ref 走 CLI `make skills-lock`（遍历锁内已有条目）；admin `/api/admin/skill-sources*` 端点与「Skill 源管理」面板已随注册表一并删除。
 - 完整流程见 [examples/README.md](examples/README.md)（demo skill 的接线方式）。

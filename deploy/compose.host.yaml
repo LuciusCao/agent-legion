@@ -52,6 +52,9 @@ services:
         fi
         umask 077
         printf '%s\n' '{"identities":[{"name":"agent-legion","credentials":[{"accessKey":"'"$AGENT_LEGION_S3_ACCESS_KEY"'","secretKey":"'"$AGENT_LEGION_S3_SECRET_KEY"'"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' > /tmp/s3.json
+        # s3.json 必须让降权后的运行用户可读：umask 077 产出的 0600 若留在
+        # root 名下，su-exec 后 weed 读不到会 Fatalf 退出（重启循环）。
+        chown seaweed:seaweed /tmp/s3.json
         exec su-exec seaweed weed server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json -master.volumeSizeLimitMB=2048 -volume.max=0
     environment:
       AGENT_LEGION_S3_ACCESS_KEY: ${AGENT_LEGION_S3_ACCESS_KEY:-}
