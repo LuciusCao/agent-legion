@@ -2,7 +2,7 @@ from tests.helpers import publish_builtin_revision
 
 
 def test_workspace_jobs_snapshot_returns_jobs_stats_and_revision(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         job_db = client.app.state.job_db
         workspace = job_db.create_workspace(
             "snapshot-ws", default_workflow_key="education_video_problems_generation"
@@ -36,7 +36,7 @@ def test_workspace_jobs_snapshot_returns_jobs_stats_and_revision(client_factory)
 
 
 def test_workspace_jobs_snapshot_paginates_with_cursor(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         job_db = client.app.state.job_db
         workspace = job_db.create_workspace(
             "cursor-ws", default_workflow_key="education_video_problems_generation"
@@ -86,7 +86,7 @@ def test_workspace_jobs_snapshot_paginates_with_cursor(client_factory):
 
 
 def test_workspace_jobs_snapshot_returns_newest_first(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         job_db = client.app.state.job_db
         workspace = job_db.create_workspace(
             "order-ws", default_workflow_key="education_video_problems_generation"
@@ -119,7 +119,7 @@ def test_workspace_jobs_snapshot_returns_newest_first(client_factory):
 
 
 def test_workspace_jobs_snapshot_batches_active_revision_lookup(client_factory, monkeypatch):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         job_db = client.app.state.job_db
         workspace = job_db.create_workspace(
             "batch-ws", default_workflow_key="education_video_problems_generation"

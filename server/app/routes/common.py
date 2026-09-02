@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from server.app.services.health_status import pure_remote_workers_status
 from server.app.storage.probe import cached_storage_status
 
 
@@ -20,7 +21,8 @@ def create_common_router() -> APIRouter:
 
     @router.get("/health", response_model=HealthResponse)
     def health(request: Request) -> HealthResponse:
-        workers = getattr(request.app.state, "worker_startup", None)
+        # #389: workers carries the pure-remote live code-Worker count.
+        workers = pure_remote_workers_status(request.app.state)
         return HealthResponse(
             ok=True,
             workers=workers or None,

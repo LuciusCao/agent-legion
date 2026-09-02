@@ -11,7 +11,6 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 
 from server.app.auth.dependencies import reject_studio_agent_scope, require_user
-from server.app.routes.job_http import require_workflows_enabled
 from server.app.routes.job_operation_contracts import (
     BatchJobMutationResponse,
     BatchPauseJobsRequest,
@@ -19,12 +18,10 @@ from server.app.routes.job_operation_contracts import (
     JobMutationResultResponse,
 )
 from server.app.services.job_pause import JobPauseService
-from server.app.settings import Settings
 
 
 def create_job_pause_router(
     job_pause: JobPauseService,
-    settings: Settings,
 ) -> APIRouter:
     router = APIRouter(dependencies=[Depends(reject_studio_agent_scope)])
 
@@ -37,7 +34,6 @@ def create_job_pause_router(
         payload: BatchPauseJobsRequest,
         user: Annotated[dict[str, Any], Depends(require_user)],
     ) -> BatchJobMutationResponse:
-        require_workflows_enabled(settings)
         results = job_pause.batch_pause(
             workspace_id,
             payload.job_ids,
@@ -58,7 +54,6 @@ def create_job_pause_router(
         workspace_id: str,
         payload: BatchResumeJobsRequest,
     ) -> BatchJobMutationResponse:
-        require_workflows_enabled(settings)
         results = job_pause.batch_resume(
             workspace_id,
             payload.job_ids,

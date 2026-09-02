@@ -425,7 +425,6 @@ def test_mid_publish_projection_failure_rolls_back_revision_insert(
 
 def test_get_active_workflow_revision_returns_definition_and_yaml(tmp_path: Path) -> None:
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as client:
         response = client.post(
             "/api/workspaces",
@@ -456,7 +455,6 @@ def test_get_active_workflow_revision_returns_definition_and_yaml(tmp_path: Path
 
 def test_get_workflow_revision_detail_returns_definition_and_yaml(tmp_path: Path) -> None:
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as client:
         response = client.post(
             "/api/workspaces",
@@ -488,7 +486,6 @@ def test_get_workflow_revision_detail_returns_404_for_unknown_revision(
     tmp_path: Path,
 ) -> None:
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     workspace = app.state.job_db.create_workspace(
         "Studio",
         default_workflow_key="education_video_problems_generation",
@@ -504,7 +501,6 @@ def test_get_workflow_revision_detail_rejects_other_workspace_revision(
     tmp_path: Path,
 ) -> None:
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as client:
         first = client.post(
             "/api/workspaces",
@@ -543,7 +539,6 @@ def test_get_active_workflow_revision_returns_404_for_workspace_without_revision
     tmp_path: Path,
 ) -> None:
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     workspace = app.state.job_db.create_workspace(
         "No Revision",
         default_workflow_key="education_video_problems_generation",

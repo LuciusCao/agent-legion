@@ -43,14 +43,19 @@ def prepare_code_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[st
     auth_failure = str(outcome.get("auth_failure_connection") or "").strip()
     if auth_failure:
         metadata["auth_failure_connection"] = auth_failure
+    # Shard executions (#389)：per-shard 输出载荷（reduce fan-in 用）；
+    # 普通 code 结果不携带该键。
+    shard_output = str(outcome.get("output_json") or "")
+    if shard_output:
+        metadata["output_json"] = shard_output
     # #282 键集守卫：metadata 键是 Worker↔Host 的进程边界契约（无编译器、无
     # schema），写出的键必须落在 shared.CODE_RESULT_METADATA_KEYS 之内且必含
-    # 恒在键——auth_failure_connection 仅在节点实际上报时携带。漂移在此
+    # 恒在键——auth_failure_connection / output_json 仅在适用时携带。漂移在此
     # fail-closed（prepare_or_failed 会降级为 failed 上报，不会静默丢字段）；
     # 契约回归另由 tests/workers/test_protocol_sync.py 的守卫测试拦截。
     written = set(metadata)
     if written - CODE_RESULT_METADATA_KEYS or (
-        CODE_RESULT_METADATA_KEYS - {"auth_failure_connection"} - written
+        CODE_RESULT_METADATA_KEYS - {"auth_failure_connection", "output_json"} - written
     ):
         raise ValueError(
             "code result metadata key set does not match "

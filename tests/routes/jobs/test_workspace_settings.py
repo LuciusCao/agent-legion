@@ -12,7 +12,7 @@ def _create_workspace(
 
 
 def test_create_workspace_stores_resource_config_override(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         response = c.post(
             "/api/workspaces",
             json={
@@ -40,7 +40,7 @@ def test_create_workspace_stores_resource_config_override(client_factory):
 
 
 def test_workspace_rejects_legacy_cms_config(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         created = c.post(
             "/api/workspaces",
             json={
@@ -60,7 +60,7 @@ def test_workspace_rejects_legacy_cms_config(client_factory):
 
 
 def test_workspace_settings_without_cms_fields(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws_id = _create_workspace(c)
         response = c.get(f"/api/workspaces/{ws_id}/settings")
 
@@ -75,7 +75,7 @@ def test_workspace_settings_without_cms_fields(client_factory):
 
 
 def test_workspace_settings_returns_node_config(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws_id = _create_workspace(c)
         saved = c.patch(
             f"/api/workspaces/{ws_id}/settings/nodes",
@@ -90,7 +90,7 @@ def test_workspace_settings_returns_node_config(client_factory):
 
 
 def test_patch_settings_nodes_saves_node_config(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws_id = _create_workspace(c)
         response = c.patch(
             f"/api/workspaces/{ws_id}/settings/nodes",

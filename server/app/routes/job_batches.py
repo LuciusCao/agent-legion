@@ -5,18 +5,15 @@ from server.app.routes.job_contracts import JobBatchRequest, JobBatchResponse
 from server.app.routes.job_http import (
     raise_job_http_error,
     reject_mismatched_workflow_key,
-    require_workflows_enabled,
 )
 from server.app.services.job_errors import JobServiceError
 from server.app.services.job_intake import JobIntakeService
-from server.app.settings import Settings
 
 
-def create_job_batches_router(service: JobIntakeService, settings: Settings) -> APIRouter:
+def create_job_batches_router(service: JobIntakeService) -> APIRouter:
     router = APIRouter()
 
     def create(workspace_id: str, payload: JobBatchRequest) -> JobBatchResponse:
-        require_workflows_enabled(settings)
         # #211 Phase 2: absent workflow_key defaults to the path workspace_id
         # (equal since v62); explicit values keep flowing through verbatim.
         body = payload.model_dump()

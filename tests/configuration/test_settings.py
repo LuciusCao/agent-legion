@@ -277,7 +277,7 @@ def test_load_settings_rejects_retired_workflows_pi_yaml(tmp_path, monkeypatch):
     """``workflows.pi`` 块已退役（agent 配置治理 phase 3）：启动 fail-fast。"""
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
-        'data_dir: data\nworkflows:\n  enabled: true\n  pi:\n    binary: pi\n    model: ""\n',
+        'data_dir: data\nworkflows:\n  pi:\n    binary: pi\n    model: ""\n',
         encoding="utf-8",
     )
 
@@ -285,16 +285,28 @@ def test_load_settings_rejects_retired_workflows_pi_yaml(tmp_path, monkeypatch):
         load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
 
+def test_load_settings_rejects_retired_workflows_enabled_key(tmp_path, monkeypatch):
+    """``workflows.enabled`` 已退役（#385/#389）：extra=forbid 拒绝残留键。"""
+    config_path = tmp_path / "workflow.yaml"
+    config_path.write_text(
+        "data_dir: data\nworkflows:\n  enabled: false\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="enabled"):
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+
 def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
-        "data_dir: data\nworkflows:\n  enabled: true\n",
+        "data_dir: data\n",
         encoding="utf-8",
     )
 
     settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
-    assert settings.executor_runtime.workflows.enabled is True
+    assert settings.executor_runtime.workflows.custom_nodes_enabled is True
 
 
 def test_load_settings_ignores_retired_openclaw_block(tmp_path, monkeypatch):
@@ -317,7 +329,7 @@ def test_load_settings_ignores_retired_openclaw_block(tmp_path, monkeypatch):
 
     settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
-    assert settings.executor_runtime.workflows.enabled is True
+    assert settings.executor_runtime.workflows.custom_nodes_enabled is True
 
 
 @pytest.mark.parametrize(
@@ -342,7 +354,7 @@ def test_env_override_precedes_yaml(
     if layout == "legacy":
         config_path_file = tmp_path / "workflow.yaml"
         config_path_file.write_text(
-            "data_dir: data\nworkflows:\n  enabled: false\nskills:\n  runs_dir: yaml-runs\n",
+            "data_dir: data\nskills:\n  runs_dir: yaml-runs\n",
             encoding="utf-8",
         )
     else:

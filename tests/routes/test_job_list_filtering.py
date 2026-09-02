@@ -53,7 +53,7 @@ def _facets(client, workspace_id, query=""):
 
 
 def test_status_filter_folds_unknown_statuses_into_pending(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         job_db = client.app.state.job_db
         workspace = _make_workspace(job_db, "filter-status-ws")
         queued = _make_job(job_db, workspace["id"], "q-queued")
@@ -72,7 +72,7 @@ def test_status_filter_folds_unknown_statuses_into_pending(client_factory):
 
 
 def test_search_filter_matches_across_fields_case_insensitively(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         job_db = client.app.state.job_db
         workspace = _make_workspace(job_db, "filter-search-ws")
         by_title = _make_job(job_db, workspace["id"], "q-title", title="Algebra Question")
@@ -97,7 +97,7 @@ def test_search_filter_matches_across_fields_case_insensitively(client_factory):
 
 
 def test_search_filter_escapes_like_wildcards(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         job_db = client.app.state.job_db
         workspace = _make_workspace(job_db, "filter-escape-ws")
         percent = _make_job(job_db, workspace["id"], "q-percent", title="100% legit")
@@ -108,7 +108,7 @@ def test_search_filter_escapes_like_wildcards(client_factory):
 
 
 def test_workflow_version_filters(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         job_db = client.app.state.job_db
         workspace = _make_workspace(job_db, "filter-version-ws")
         v1 = _make_job(job_db, workspace["id"], "q-v1")
@@ -132,7 +132,7 @@ def test_workflow_version_filters(client_factory):
 
 
 def test_active_node_key_prefers_running_then_first_failed(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         job_db = client.app.state.job_db
         workspace = _make_workspace(job_db, "filter-node-ws")
         failed_job = _make_job(job_db, workspace["id"], "q-failed")
@@ -151,7 +151,7 @@ def test_active_node_key_prefers_running_then_first_failed(client_factory):
 
 
 def test_packed_filter(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         job_db = client.app.state.job_db
         workspace = _make_workspace(job_db, "filter-packed-ws")
         packed = _make_job(job_db, workspace["id"], "q-packed")
@@ -167,7 +167,7 @@ def test_packed_filter(client_factory):
 
 
 def test_filtered_pagination_returns_total_only_on_first_page(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         job_db = client.app.state.job_db
         workspace = _make_workspace(job_db, "filter-page-ws")
         created = []
@@ -196,7 +196,7 @@ def test_filtered_pagination_returns_total_only_on_first_page(client_factory):
 
 
 def test_facets_exclude_own_dimension(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         job_db = client.app.state.job_db
         workspace = _make_workspace(job_db, "facets-ws")
         job_a = _make_job(job_db, workspace["id"], "q-a", title="alpha one")
@@ -219,7 +219,7 @@ def test_facets_exclude_own_dimension(client_factory):
 
 
 def test_facets_null_keys_and_unfiltered_counts(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         job_db = client.app.state.job_db
         workspace = _make_workspace(job_db, "facets-null-ws")
         job_a = _make_job(job_db, workspace["id"], "q-a")
@@ -240,15 +240,9 @@ def test_facets_null_keys_and_unfiltered_counts(client_factory):
         assert by_node["node_counts"] == {"n1": 1, "": 1}
 
 
-def test_facets_requires_workflows_enabled(client_factory):
-    with client_factory(workflows_enabled=False) as client:
-        response = client.get("/api/workspaces/any/jobs/facets")
-    assert response.status_code == 404
-
-
 @pytest.mark.parametrize("endpoint", ["snapshot", "facets"])
 def test_filtered_endpoints_reject_conflicting_version_params(client_factory, endpoint):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         response = client.get(
             f"/api/workspaces/any/jobs/{endpoint}?workflow_version=1&workflow_version_none=true"
         )

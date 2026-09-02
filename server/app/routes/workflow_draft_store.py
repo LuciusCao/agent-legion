@@ -14,17 +14,16 @@ from fastapi import APIRouter, Depends
 
 from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.workflow_draft_store_contracts import (
     WorkflowDraftStoreRequest,
     WorkflowDraftStoreResponse,
 )
 from server.app.services.job_errors import JobServiceError
 from server.app.services.workflow_draft_store import get_workflow_draft, save_workflow_draft
-from server.app.settings import Settings
 
 
-def create_workflow_draft_store_router(job_db: JobQueries, settings: Settings) -> APIRouter:
+def create_workflow_draft_store_router(job_db: JobQueries) -> APIRouter:
     router = APIRouter()
 
     @router.get(
@@ -32,7 +31,6 @@ def create_workflow_draft_store_router(job_db: JobQueries, settings: Settings) -
         response_model=WorkflowDraftStoreResponse,
     )
     def get_draft(workspace_id: str) -> WorkflowDraftStoreResponse:
-        require_workflows_enabled(settings)
         try:
             draft = get_workflow_draft(job_db, workspace_id)
         except JobServiceError as exc:
@@ -49,7 +47,6 @@ def create_workflow_draft_store_router(job_db: JobQueries, settings: Settings) -
     def put_draft(
         workspace_id: str, request: WorkflowDraftStoreRequest
     ) -> WorkflowDraftStoreResponse:
-        require_workflows_enabled(settings)
         try:
             draft = save_workflow_draft(job_db, workspace_id, request.definition_yaml)
         except JobServiceError as exc:

@@ -16,7 +16,6 @@ from tests.helpers.auth import authenticate_client
 @pytest.fixture
 def app_with_workspace(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     response = authenticate_client(TestClient(app)).post(
         "/api/workspaces",
         json={"id": "education_video_problems_generation", "name": "Studio"},
@@ -277,7 +276,6 @@ def test_compare_invalid_yaml_returns_errors_and_no_summary(app_with_workspace):
 
 def test_compare_missing_active_revision_returns_revision_error(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     workspace = app.state.job_db.create_workspace(
         "Empty",
         default_workflow_key="education_video_problems_generation",
@@ -300,7 +298,6 @@ def test_compare_allow_missing_baseline_previews_full_draft(tmp_path):
     workflow diffs against an empty base — every node/edge/intake field shows
     as added and a no_baseline flag explains the preview mode."""
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     workspace = app.state.job_db.create_workspace(
         "Empty",
         default_workflow_key="education_video_problems_generation",
@@ -341,7 +338,6 @@ def test_compare_node_changes_carry_node_type(tmp_path):
     ``_start``; its added change is marked node_type 'start' so the canvas can
     synthesize the ghost node's inspector details."""
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     workspace = app.state.job_db.create_workspace("Empty", default_workflow_key="demo")
     raw = (
         "key: demo\n"
@@ -375,7 +371,6 @@ def test_compare_route_accepts_allow_missing_baseline(tmp_path):
     """HTTP compare route exposes allow_missing_baseline (Studio empty mode):
     a never-published workspace previews the draft instead of a revision error."""
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     workspace = app.state.job_db.create_workspace(
         "Empty",
         default_workflow_key="education_video_problems_generation",

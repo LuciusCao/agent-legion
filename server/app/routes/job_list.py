@@ -3,11 +3,10 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from server.app.jobs.queries.job_filtering import JobListFilter
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.job_list_contracts import JobFacetsResponse, JobsPageResponse
 from server.app.services.job_errors import JobServiceError
 from server.app.services.job_list_queries import JobListQueryService
-from server.app.settings import Settings
 
 
 def _job_list_filter(
@@ -37,7 +36,6 @@ def _job_list_filter(
 
 def create_job_list_router(
     job_list_queries: JobListQueryService,
-    settings: Settings,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -54,7 +52,6 @@ def create_job_list_router(
         packed: int | None = None,
         paused: bool | None = None,
     ) -> JobsPageResponse:
-        require_workflows_enabled(settings)
         job_filter = _job_list_filter(
             status, search, workflow_version, workflow_version_none, active_node_key, packed, paused
         )
@@ -77,7 +74,6 @@ def create_job_list_router(
         packed: int | None = None,
         paused: bool | None = None,
     ) -> JobFacetsResponse:
-        require_workflows_enabled(settings)
         job_filter = _job_list_filter(
             status, search, workflow_version, workflow_version_none, active_node_key, packed, paused
         )

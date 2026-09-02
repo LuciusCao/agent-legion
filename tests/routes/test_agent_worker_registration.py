@@ -171,7 +171,6 @@ def test_delete_workspace_cascades_bound_keys(tmp_path: Path) -> None:
     dead workspace in its scope, and a same-name recreation (which reuses the
     slug id) would instantly re-admit the stale Worker."""
     app = _make_app(tmp_path)
-    app.state.settings.executor_runtime.workflows.enabled = True
 
     with TestClient(app) as client:
         _authenticate_admin(client)

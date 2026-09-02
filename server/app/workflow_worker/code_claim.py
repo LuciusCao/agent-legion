@@ -49,12 +49,16 @@ def try_claim_code_worker_node(
     log_path: Path,
     inputs: tuple[str, ...],
     workflow_key: str,
+    *,
+    shard_runtime: dict[str, Any] | None = None,
 ) -> bool:
     """Route a code-pool candidate to a remote code Worker when possible.
 
     True = handled (enqueued, already queued/in flight, or failed as a
     configuration error); False = not Worker-routable right now, the caller
-    falls back to local execution.
+    falls back to local execution. ``shard_runtime`` (#389) carries a shard
+    execution's ``shard_index`` / ``shard_input`` payload so shard rows ride
+    the same remote path; the runtime keys mirror the local executor's.
     """
     dispatch = worker.code_dispatch
     if dispatch is None:
@@ -155,6 +159,7 @@ def try_claim_code_worker_node(
                 custom_code=True,
                 config=config,
                 secret_config=secret_config,
+                shard_runtime=shard_runtime,
             )
         except (ValueError, VaultError, JobServiceError) as exc:
             # Same trade-off as the agent enqueue pool: a configuration error

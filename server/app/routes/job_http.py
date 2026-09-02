@@ -14,7 +14,6 @@ from server.app.services.job_errors import (
 from server.app.services.job_log_raw import PayloadTooLargeError
 from server.app.services.job_operation_error import JobOperationError
 from server.app.services.skill_editing import SkillEditValidationError
-from server.app.settings import Settings
 
 
 def reject_mismatched_workflow_key(workspace_id: str, workflow_key: str | None) -> None:
@@ -30,9 +29,10 @@ def reject_mismatched_workflow_key(workspace_id: str, workflow_key: str | None) 
         )
 
 
-def require_workflows_enabled(settings: Settings) -> None:
-    if not settings.executor_runtime.workflows.enabled:
-        raise HTTPException(status_code=404, detail="Workflows are disabled")
+# ``require_workflows_enabled`` retired (#385/#389): the gray-release 404
+# gate covered the entire core API surface with no legitimate off state in
+# single-node deployments; the API plane is now always available and the
+# deployment shape is expressed by code_capacity (0 = pure-remote).
 
 
 def raise_job_http_error(error: JobServiceError) -> Never:

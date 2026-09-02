@@ -25,7 +25,7 @@ def _create_job(c) -> tuple[str, Path]:
 
 
 def test_raw_endpoint_serves_image_with_media_type(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         job_id, storage = _create_job(c)
         (storage / "frame.png").write_bytes(b"\x89PNG\r\n\x1a\nfake-bytes")
 
@@ -37,7 +37,7 @@ def test_raw_endpoint_serves_image_with_media_type(client_factory):
 
 
 def test_raw_endpoint_serves_unknown_extension_as_download(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         job_id, storage = _create_job(c)
         (storage / "report.html").write_text("<script>alert(1)</script>", encoding="utf-8")
 
@@ -50,7 +50,7 @@ def test_raw_endpoint_serves_unknown_extension_as_download(client_factory):
 
 
 def test_raw_endpoint_svg_forced_to_download(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         job_id, storage = _create_job(c)
         (storage / "diagram.svg").write_text(
             '<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>',
@@ -64,7 +64,7 @@ def test_raw_endpoint_svg_forced_to_download(client_factory):
 
 
 def test_raw_endpoint_missing_artifact_is_404(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         job_id, _ = _create_job(c)
 
         response = c.get(f"/api/jobs/{job_id}/artifacts/nope.png/raw")
@@ -73,7 +73,7 @@ def test_raw_endpoint_missing_artifact_is_404(client_factory):
 
 
 def test_raw_endpoint_rejects_traversal(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         job_id, _ = _create_job(c)
 
         response = c.get(f"/api/jobs/{job_id}/artifacts/..%2Fagent_legion.sqlite/raw")
@@ -83,7 +83,7 @@ def test_raw_endpoint_rejects_traversal(client_factory):
 
 
 def test_raw_endpoint_unknown_job_is_404(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         response = c.get("/api/jobs/missing/artifacts/frame.png/raw")
 
     assert response.status_code == 404

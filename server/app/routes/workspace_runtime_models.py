@@ -4,7 +4,6 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from server.app.agent_control.registry import AgentWorkerRegistry
-from server.app.routes.job_http import require_workflows_enabled
 from server.app.services.workspace_runtime_models import workspace_runtime_models
 from server.app.settings import Settings
 
@@ -32,7 +31,6 @@ def create_workspace_runtime_models_router(
         匹配才是权威。通配 ``*`` 声明原样透传，字面 ``*`` 选项的过滤在
         前端 datalist 层（runtimeModelOptions.ts）。
         """
-        require_workflows_enabled(settings)
         return WorkspaceRuntimeModelsResponse(
             runtimes=workspace_runtime_models(registry, workspace_id)
         )

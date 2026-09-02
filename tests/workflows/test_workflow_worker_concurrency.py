@@ -126,11 +126,10 @@ def _make_worker(
         logs_dir=tmp_path / "logs",
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
-        config={"workflows": {"enabled": True}},
+        config={},
         database_url=str(db_path),
         executor_runtime=ExecutorRuntimeConfig.model_validate(
             {
-                "workflows": {"enabled": True},
                 "code_capacity": code_capacity,
             }
         ),

@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from server.app.routes.job_artifact_media import raw_media_type
 from server.app.routes.job_artifact_raw_response import raw_response
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import raise_job_http_error
 from server.app.services.job_artifacts import JobArtifactService
 from server.app.services.job_errors import JobServiceError
 from server.app.settings import Settings
@@ -40,7 +40,6 @@ def register_raw_artifact_route(
         artifact_name: str,
         range_header: str | None = Header(default=None, alias="Range"),
     ) -> FileResponse | StreamingResponse:
-        require_workflows_enabled(settings)
         # Range 解析在 service.open_raw 内（本地分支忽略，FileResponse 原生支持）。
         try:
             return raw_response(service.open_raw(job_id, artifact_name, range_header))

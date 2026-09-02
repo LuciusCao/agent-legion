@@ -54,6 +54,11 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
     auth_failure_raw = metadata.get("auth_failure_connection", "")
     if not isinstance(auth_failure_raw, str) or len(auth_failure_raw) > _MAX_CONNECTION_KEY_CHARS:
         raise ValueError("invalid auth_failure_connection")
+    # Shard executions (#389): the per-shard output payload for reduce
+    # fan-in; bounded like the error message it accompanies.
+    output_json_raw = metadata.get("output_json", "")
+    if not isinstance(output_json_raw, str) or len(output_json_raw) > _MAX_ERROR_MESSAGE_CHARS:
+        raise ValueError("invalid output_json")
     outcome = AgentOutcome(
         status=status,  # type: ignore[arg-type]
         exit_code=exit_code,
@@ -62,6 +67,7 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
         output_artifacts=output_artifacts,
         run_dir=run_dir,
         auth_failure_connection=auth_failure_raw.strip(),
+        output_json=output_json_raw,
     )
     record = {
         "status": status,
@@ -70,5 +76,6 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
         "output_artifacts": output_artifacts,
         "run_dir": run_dir,
         "auth_failure_connection": auth_failure_raw.strip(),
+        "output_json": output_json_raw,
     }
     return outcome, record

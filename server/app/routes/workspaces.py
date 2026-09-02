@@ -16,7 +16,7 @@ from server.app.routes.job_contracts import (
     WorkspaceStatsResponse,
     WorkspaceUpdateRequest,
 )
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.workspace_contracts import WorkspaceRecord
 from server.app.routes.workspace_runtime_models import create_workspace_runtime_models_router
 from server.app.scheduler_wakeup import notify_schedulable_work, reload_worker_scan_entries
@@ -37,7 +37,6 @@ def create_workspaces_router(
 
     @router.get("/workspaces", response_model=WorkspacesResponse)
     def list_workspaces() -> WorkspacesResponse:
-        require_workflows_enabled(settings)
         try:
             workspaces = [WorkspaceRecord.model_validate(w) for w in service.list_workspaces()]
             return WorkspacesResponse(workspaces=workspaces)
@@ -50,7 +49,6 @@ def create_workspaces_router(
         payload: WorkspaceCreateRequest,
         _admin: Annotated[dict[str, Any], Depends(require_admin)],
     ) -> WorkspaceResponse:
-        require_workflows_enabled(settings)
         try:
             workspace = service.create(payload.model_dump())
         except JobServiceError as exc:
@@ -65,7 +63,6 @@ def create_workspaces_router(
 
     @router.get("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
     def get_workspace(workspace_id: str) -> WorkspaceResponse:
-        require_workflows_enabled(settings)
         try:
             workspace = WorkspaceRecord.model_validate(service.get(workspace_id))
             return WorkspaceResponse(workspace=workspace)
@@ -74,7 +71,6 @@ def create_workspaces_router(
 
     @guarded.patch("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
     def update_workspace(workspace_id: str, payload: WorkspaceUpdateRequest) -> WorkspaceResponse:
-        require_workflows_enabled(settings)
         try:
             workspace = service.update(workspace_id, payload.model_dump(exclude_unset=True))
             return WorkspaceResponse(workspace=WorkspaceRecord.model_validate(workspace))
@@ -83,7 +79,6 @@ def create_workspaces_router(
 
     @guarded.delete("/workspaces/{workspace_id}", response_model=DeleteWorkspaceResponse)
     def delete_workspace(workspace_id: str) -> DeleteWorkspaceResponse:
-        require_workflows_enabled(settings)
         try:
             service.delete(workspace_id)
             return DeleteWorkspaceResponse(deleted=workspace_id)
@@ -92,7 +87,6 @@ def create_workspaces_router(
 
     @router.get("/workspaces/{workspace_id}/stats", response_model=WorkspaceStatsResponse)
     def get_workspace_stats(workspace_id: str) -> WorkspaceStatsResponse:
-        require_workflows_enabled(settings)
         try:
             return WorkspaceStatsResponse(**service.stats(workspace_id))
         except JobServiceError as exc:
@@ -104,14 +98,11 @@ def create_workspaces_router(
         responses={200: {"content": {"text/event-stream": {}}}},
     )
     async def workspace_events(request: Request, workspace_id: str) -> StreamingResponse:
-        require_workflows_enabled(settings)
         if job_event_manager is None:
             raise HTTPException(status_code=503, detail="Event manager not available")
         return await job_event_manager.connect(request, workspace_channel(workspace_id))
 
-    router.include_router(
-        create_dashboard_events_router(settings, job_event_manager=job_event_manager)
-    )
+    router.include_router(create_dashboard_events_router(job_event_manager=job_event_manager))
     # Studio 节点执行 datalist 的数据源（在线 Worker 的 runtime/model 声明）；
     # registry 是 agent_workers 的既有门面（BOUNDARY-DATA-001）。
     router.include_router(

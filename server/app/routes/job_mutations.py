@@ -14,7 +14,6 @@ from server.app.routes.job_contracts import (
 )
 from server.app.routes.job_http import (
     raise_job_operation_error,
-    require_workflows_enabled,
 )
 from server.app.routes.job_operation_contracts import (
     BatchJobIdsRequest,
@@ -30,7 +29,6 @@ from server.app.services.job_execution import JobExecutionService
 from server.app.services.job_operation_error import JobOperationError
 from server.app.services.job_queries import JobQueryService
 from server.app.services.job_rerun import JobRerunService
-from server.app.settings import Settings
 
 
 def create_job_mutations_router(
@@ -38,7 +36,6 @@ def create_job_mutations_router(
     job_rerun: JobRerunService,
     job_deletion: JobDeletionService,
     job_execution: JobExecutionService,
-    settings: Settings,
 ) -> APIRouter:
     router = APIRouter(dependencies=[Depends(reject_studio_agent_scope)])
 
@@ -50,7 +47,6 @@ def create_job_mutations_router(
         workspace_id: str,
         payload: JobBatchRerunRequest,
     ) -> BatchJobMutationResponse:
-        require_workflows_enabled(settings)
         results = job_rerun.batch_rerun(
             workspace_id,
             payload.job_ids,
@@ -68,7 +64,6 @@ def create_job_mutations_router(
         workspace_id: str,
         payload: BatchJobIdsRequest,
     ) -> BatchJobMutationResponse:
-        require_workflows_enabled(settings)
         results = job_deletion.batch_delete(
             workspace_id,
             payload.job_ids,
@@ -81,7 +76,6 @@ def create_job_mutations_router(
 
     @router.post("/jobs/{job_id}/nodes/{node_key}/rerun", response_model=JobMutationResultResponse)
     def rerun_node(job_id: str, node_key: str) -> JobMutationResultResponse:
-        require_workflows_enabled(settings)
         job = job_queries.job_db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -93,7 +87,6 @@ def create_job_mutations_router(
 
     @router.delete("/jobs/{job_id}", response_model=DeleteJobResponse)
     def delete_job(job_id: str) -> DeleteJobResponse:
-        require_workflows_enabled(settings)
         job = job_queries.job_db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -105,7 +98,6 @@ def create_job_mutations_router(
 
     @router.post("/jobs/{job_id}/run-to", response_model=JobMutationResultResponse)
     def run_to(job_id: str, payload: RunToRequest) -> JobMutationResultResponse:
-        require_workflows_enabled(settings)
         job = job_queries.job_db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -128,7 +120,6 @@ def create_job_mutations_router(
         job_id: str,
         payload: ContinueJobRequest,
     ) -> JobMutationResultResponse:
-        require_workflows_enabled(settings)
         job = job_queries.job_db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -146,7 +137,6 @@ def create_job_mutations_router(
         workspace_id: str,
         payload: BatchRunToRequest,
     ) -> BatchJobMutationResponse:
-        require_workflows_enabled(settings)
         results = job_execution.batch_run_to(
             workspace_id,
             payload.job_ids,

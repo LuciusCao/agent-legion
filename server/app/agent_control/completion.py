@@ -43,6 +43,10 @@ class AgentOutcome:
     # token to be invalidated (upstream auth failure); the commit path
     # performs the privileged invalidation. Empty = no request.
     auth_failure_connection: str = ""
+    # Shard executions (#389): the per-shard output payload reported by a
+    # remote code Worker; flows into ExecutionResult.output_json →
+    # node_shards.output_json for reduce fan-in. Empty = not a shard run.
+    output_json: str = ""
 
 
 def report_auth_failure_safe(database_dsn: ConnectSource, connection_key: str) -> None:
@@ -204,6 +208,9 @@ class AgentCompletionHandler:
                 skill_version=str(manifest.get("skill_version", "")),
                 produced_artifacts=produced,
                 runner=worker_id,
+                # Shard runs (#389): the remote shard payload for reduce
+                # fan-in; empty on ordinary code results.
+                output_json=outcome.output_json if status == "completed" else "",
             ),
         )
 

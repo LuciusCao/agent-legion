@@ -150,25 +150,32 @@ def test_report_background_logs_failures_without_raising(monkeypatch, caplog) ->
 
 
 def test_start_worker_threads_kicks_background_report(settings, monkeypatch) -> None:
-    """Lifespan startup wires the background variant, never the sync scan."""
+    """Lifespan startup wires the background variant, never the sync scan.
+
+    The retired workflows.enabled short-circuit used to return before any
+    assembly; with it gone (#385/#389) the report still fires first, before
+    the (stubbed) sweeper/worker assembly runs."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
     from server.app import worker_startup
 
-    settings.executor_runtime.workflows.enabled = False
     calls: list = []
     monkeypatch.setattr(
         worker_startup,
         "report_absolute_db_paths_background",
         calls.append,
     )
+    monkeypatch.setattr(worker_startup, "CodeDispatchService", MagicMock())
 
     worker_startup.start_worker_threads(
         settings,
         job_db=None,
-        executor_leases=None,
-        agent_broker=None,
+        executor_leases=MagicMock(),
+        agent_broker=MagicMock(),
         workspace_worker_control=None,
         agent_manager=None,
-        agent_dispatch=None,
+        agent_dispatch=SimpleNamespace(skill_manager=MagicMock(), artifact_store=MagicMock()),
     )
 
     assert len(calls) == 1

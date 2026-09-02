@@ -114,7 +114,7 @@ def create_router(deps: RouterDeps) -> APIRouter:
         secured(create_materials_router(deps.materials_service))
     studio_secured(create_workflow_revisions_router(deps.job_db, deps.settings))
     studio_secured(create_workflow_node_codes_router(deps.job_db, deps.settings))
-    studio_secured(create_agent_definitions_router(deps.job_db, deps.settings))
+    studio_secured(create_agent_definitions_router(deps.job_db))
     secured(create_skills_router(deps.job_db, deps.settings))
     secured(create_skill_directories_router(deps.job_db, deps.settings))
     secured(create_workspace_configuration_router(deps.workspace_configuration, deps.settings))
@@ -122,7 +122,7 @@ def create_router(deps: RouterDeps) -> APIRouter:
         deps.agent_catalog, deps.workspace_execution_configuration, deps.settings, deps.job_db
     )
     secured(agent_catalog_router)
-    secured(create_workspace_agent_routes_router(deps.job_db, deps.settings))
+    secured(create_workspace_agent_routes_router(deps.job_db))
     # Preview panels (#328): the published-bundle read is member-level (job
     # detail iframe host); state/publish/archive carry their own Studio
     # authoring + reject_studio_agent_scope guards inside the router.

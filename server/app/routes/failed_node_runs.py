@@ -14,7 +14,6 @@ from server.app.routes.failed_node_run_contracts import (
 from server.app.routes.job_http import (
     raise_job_http_error,
     reject_mismatched_workflow_key,
-    require_workflows_enabled,
 )
 from server.app.routes.job_rerun_by_failure_contracts import (
     JobRerunByFailureRequest,
@@ -24,7 +23,6 @@ from server.app.routes.job_rerun_by_failure_contracts import (
 from server.app.services.failed_node_runs import FailedNodeRunQueryService
 from server.app.services.job_errors import JobServiceError
 from server.app.services.job_rerun import JobRerunService
-from server.app.settings import Settings
 
 # #211 Phase 2: query-param deprecation wording (server-side default).
 _DEPRECATED_QUERY = "Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211 (deprecated field drops by 2026-10-31)."
@@ -33,7 +31,6 @@ _DEPRECATED_QUERY = "Deprecated: defaults to the workspace id from the path (equ
 def create_failed_node_runs_router(
     job_db: JobQueries,
     job_rerun: JobRerunService,
-    settings: Settings,
 ) -> APIRouter:
     router = APIRouter()
     queries = FailedNodeRunQueryService(job_db)
@@ -52,7 +49,6 @@ def create_failed_node_runs_router(
         ] = None,
         since: datetime | None = None,
     ) -> FailedNodeRunsResponse:
-        require_workflows_enabled(settings)
         # Codex P1 on #307 (guard parity): with the read-layer predicate gone,
         # a mismatched explicit key can no longer narrow the list — reject it
         # instead of silently widening the result.
@@ -77,7 +73,6 @@ def create_failed_node_runs_router(
         workspace_id: str,
         payload: JobRerunByFailureRequest,
     ) -> JobRerunByFailureResponse:
-        require_workflows_enabled(settings)
         # #211 Phase 2: absent workflow_key defaults to the path workspace_id
         # (equal since v62); read via model_dump because the deprecated field
         # attribute raises the deprecation warning the suite escalates.

@@ -11,33 +11,35 @@ from server.app.configuration.executor_runtime import (
 
 def test_workflows_runtime_config_defaults():
     config = WorkflowsRuntimeConfig()
-    # Default on: matches the retired tracked workflow.yaml value
-    # (workflows.enabled: true).
-    assert config.enabled is True
+    # ``enabled`` retired (#385/#389); custom_nodes_enabled stays the active
+    # DB-backed code gate (EXEC-CODE-002).
+    assert config.custom_nodes_enabled is True
+
+
+def test_workflows_runtime_config_rejects_retired_enabled_key():
+    with pytest.raises(ValidationError) as exc_info:
+        WorkflowsRuntimeConfig.model_validate({"enabled": False})
+    assert "enabled" in str(exc_info.value)
 
 
 def test_workflows_runtime_config_valid_overrides():
-    config = WorkflowsRuntimeConfig(enabled=False, custom_nodes_enabled=False)
-    assert config.enabled is False
+    config = WorkflowsRuntimeConfig(custom_nodes_enabled=False)
     assert config.custom_nodes_enabled is False
 
 
 def test_executor_runtime_config_from_full_config():
     raw = {
         "data_dir": "data",
-        "workflows": {
-            "enabled": True,
-        },
         # The openclaw block retired with the openclaw runtime (#75): leftover
         # content is ignored (extra="ignore"), not validated.
         "openclaw": {
             "cwd": ".",
             "command_template": ["openclaw", "agent"],
-            "skill_safety": {"enabled": True, "repos": [{"path": "~/.skills/s1"}]},
+            "skill_safety": {"repos": [{"path": "~/.skills/s1"}]},
         },
     }
     config = ExecutorRuntimeConfig.model_validate(raw)
-    assert config.workflows.enabled is True
+    assert config.workflows.custom_nodes_enabled is True
     assert "openclaw" not in config.model_dump()
 
 
@@ -84,7 +86,6 @@ def test_executor_runtime_config_rejects_non_positive_sweeper_interval():
 def test_executor_runtime_config_ignores_unknown_top_level_keys():
     raw = {
         "executors": {"legacy-default": {"kind": "unknown"}},
-        "workflows": {"enabled": False},
     }
     config = ExecutorRuntimeConfig.model_validate(raw)
-    assert config.workflows.enabled is False
+    assert config.workflows.custom_nodes_enabled is True

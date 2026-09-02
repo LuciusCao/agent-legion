@@ -65,7 +65,6 @@ def _publish_secret_node_schema(workspace_id: str) -> None:
 @pytest.fixture
 def app(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     return app
 
 

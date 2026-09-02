@@ -29,9 +29,12 @@ logger = logging.getLogger(__name__)
 class WorkflowsRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # Default on: matches the retired tracked workflow.yaml value
-    # (workflows.enabled: true); tunable via the DB instance settings document.
-    enabled: bool = True
+    # ``enabled`` retired (#385/#389): the gray-release switch drifted into a
+    # de-facto product master switch with no legitimate off state in
+    # single-node deployments. The deployment-shape responsibility now lives
+    # on ``executor_runtime.code_capacity`` (0 = pure-remote control plane)
+    # plus the sweeper escape hatch; stored DB documents carrying the key
+    # are stripped at read time (instance_settings).
     # Feature gate for DB-backed custom workflow node codes (EXEC-CODE-002).
     # Default on in this phase: self-hosted, workspace editors are all team
     # members (design §7 trust assumption). Disable via
@@ -63,10 +66,13 @@ class ExecutorRuntimeConfig(BaseModel):
     lease_ttl_seconds: int = Field(default=90, ge=1)
     heartbeat_failure_threshold: int = Field(default=3, ge=1)
     cancellation_grace_seconds: int = Field(default=5, ge=0)
-    # Implicit single code pool capacity (P-0.5): non-Agent-routed nodes all
-    # claim from this pool. Instance-settings managed; takes effect on
-    # restart (no hot reload).
-    code_capacity: int = Field(default=16, gt=0)
+    # Local fallback execution capacity (#389): non-Agent-routed nodes run
+    # here only when no remote code Worker is available. Instance-settings
+    # managed; takes effect on restart (no hot reload). 0 = pure remote mode
+    # — the host executes no code nodes locally and the executor stack is
+    # not assembled at all (requires an online code-capable Worker to make
+    # progress).
+    code_capacity: int = Field(default=16, ge=0)
     sweeper_enabled: bool = True
     sweeper_interval_seconds: float = Field(default=5.0, gt=0)
     workflows: WorkflowsRuntimeConfig = Field(default_factory=WorkflowsRuntimeConfig)

@@ -11,15 +11,12 @@ from tests.helpers import publish_legacy_intake_revision
 
 @pytest.fixture
 def workspace_client(client_factory, monkeypatch):
-    """Ensure workflows are enabled and provide a helper to create workspaces/jobs."""
+    """Provide a helper to create workspaces/jobs."""
     # Private app per test: these tests assert on exact file counts under the
     # app data_dir, and workspace ids are name-derived, so the worker-session
     # shared app's data_dir residue would leak between identically-named
     # workspaces across tests/files.
     with client_factory(fresh=True) as client:
-        monkeypatch.setitem(
-            client.app.state.settings.config.setdefault("workflows", {}), "enabled", True
-        )
         yield client
 
 

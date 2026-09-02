@@ -1,7 +1,6 @@
 from fastapi import APIRouter
 
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import require_workflows_enabled
 from server.app.routes.skill_contracts import (
     SkillTagsResponse,
     SkillValidateRequest,
@@ -22,7 +21,6 @@ def create_skills_router(job_db: JobQueries, settings: Settings) -> APIRouter:
 
     @router.post("/skills/validate", response_model=SkillValidateResponse)
     def validate_skill(request: SkillValidateRequest) -> SkillValidateResponse:
-        require_workflows_enabled(settings)
         result = _validator().validate(request.path)
         return SkillValidateResponse(
             valid=result.valid,
@@ -36,7 +34,6 @@ def create_skills_router(job_db: JobQueries, settings: Settings) -> APIRouter:
 
     @router.get("/skills/tags", response_model=SkillTagsResponse)
     def list_skill_tags(path: str) -> SkillTagsResponse:
-        require_workflows_enabled(settings)
         result = _validator().list_tags(path)
         return SkillTagsResponse(
             path=result.path, tags=list(result.tags), latest_tag=result.latest_tag

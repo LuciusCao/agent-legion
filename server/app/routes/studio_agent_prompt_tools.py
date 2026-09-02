@@ -12,7 +12,7 @@ workspace binding), split out here for the file-size budget.
 from fastapi import APIRouter
 
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.workflow_node_prompt_contracts import (
     NodePromptPreviewRequest,
     NodePromptPreviewResponse,
@@ -21,10 +21,9 @@ from server.app.routes.workflow_node_prompt_contracts import (
 )
 from server.app.services.job_errors import JobServiceError
 from server.app.services.node_prompt_preview import preview_node_prompt, save_node_prompt
-from server.app.settings import Settings
 
 
-def create_studio_agent_prompt_tools_router(job_db: JobQueries, settings: Settings) -> APIRouter:
+def create_studio_agent_prompt_tools_router(job_db: JobQueries) -> APIRouter:
     router = APIRouter()
 
     @router.post(
@@ -34,7 +33,6 @@ def create_studio_agent_prompt_tools_router(job_db: JobQueries, settings: Settin
     def get_node_prompt(
         workspace_id: str, payload: NodePromptPreviewRequest
     ) -> NodePromptPreviewResponse:
-        require_workflows_enabled(settings)
         try:
             result = preview_node_prompt(
                 job_db, workspace_id, payload.node_key, payload.definition_yaml
@@ -50,7 +48,6 @@ def create_studio_agent_prompt_tools_router(job_db: JobQueries, settings: Settin
     def save_node_prompt_route(
         workspace_id: str, payload: NodePromptSaveRequest
     ) -> NodePromptSaveResponse:
-        require_workflows_enabled(settings)
         try:
             result = save_node_prompt(job_db, workspace_id, payload.node_key, payload.prompt)
         except JobServiceError as exc:

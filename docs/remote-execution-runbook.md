@@ -232,6 +232,17 @@ same OS/arch as the Worker) for both roles.
 When no online code-capable Worker exists, dispatch falls back to the local
 Host executor — code tasks never rot in a queue waiting for a Worker.
 
+**Pure-remote mode (#389).** Setting the instance's `code_capacity` to 0
+(admin 全局设置 → 本地执行, restart-effective) assembles **no** local
+executor stack on the Host: no velites sandbox subprocesses, no thread pool,
+no local heartbeat loop — code nodes execute 100% on remote code-capable
+Workers. Pair it with a Worker fleet whose `max_code_concurrency` is sized
+for your load. Without an online code Worker, code nodes queue silently (by
+design); `/api/health` surfaces `execution_mode: pure_remote` plus the live
+`online_code_workers` count, and the Host logs a WARNING at startup when the
+count is 0. Shard executions follow the same rule: remote first, and in
+pure-remote mode there is no local fallback at all.
+
 **Secret boundary for code tasks.** Node secrets (vault-resolved connection
 credentials) are injected into the claim response only — queued manifests and
 bundles are stored secret-free. The Worker holds them in memory only, passes

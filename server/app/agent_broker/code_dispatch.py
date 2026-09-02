@@ -1,14 +1,12 @@
 """Code-payload dispatch: build kind='code' manifests/bundles and enqueue.
 
-Batch 2 (design §7): a worker-eligible code-executor node is shipped to a
-remote Worker as a self-contained payload — the code text (builtin repo file
-or frozen custom version, resolved exactly like ``resolve_dispatch_node_code``)
-plus a ``workspace_libs`` snapshot ride the bundle; the queued manifest carries
-only non-secret config plus vault ``secret_ref`` markers, and the claim
-response re-resolves secrets on the fly (VAULT-SECRET-001: secrets never hit
-the DB, the bundle, or logs). The persisted ``runtime_context`` is likewise
-only a lightweight audit stub (issue #142); the claim response rebuilds the
-full DB-derived payloads in memory (``code_manifest.resolve_code_runtime_context``).
+Batch 2 (design §7): a worker-eligible code node ships to a remote Worker as
+a self-contained payload — the code text plus a ``workspace_libs`` snapshot
+ride the bundle; the queued manifest carries only non-secret config plus
+vault ``secret_ref`` markers, and the claim response re-resolves secrets on
+the fly (VAULT-SECRET-001). The persisted ``runtime_context`` is a
+lightweight audit stub (issue #142); the claim response rebuilds the full
+DB-derived payloads in memory (``code_manifest.resolve_code_runtime_context``).
 """
 
 from __future__ import annotations
@@ -37,6 +35,7 @@ from server.app.agent_broker.code_manifest import runtime_context_stub
 from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
 from server.app.agent_control.registry import CODE_PROTOCOL_VERSION as _CODE_PROTOCOL_VERSION
 from server.app.agent_control.registry import ONLINE_THRESHOLD_SECONDS as _ONLINE_THRESHOLD_SECONDS
+from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
 from server.app.executors.contracts import CodeCapabilityConfig
@@ -157,8 +156,6 @@ def build_code_bundle(bundle_path: Path, *, code_text: str, workspace_libs_dir: 
 def has_online_code_worker(database_dsn: ConnectSource, capability: str, workspace_id: str) -> bool:
     """True when an online Worker can claim code executions in *workspace_id*.
 
-    ``database_dsn``: JobQueries facade or bare DSN (BOUNDARY-DATA-001, #187).
-
     Mirrors the claim-side filters (protocol v2, code capacity, allowed_workspaces
     admission) — an inadmissible Worker would wedge the job in queued for good
     (no queued-timeout fallback, batch 2 decision 3). ``capability`` is retained
@@ -174,6 +171,12 @@ def has_online_code_worker(database_dsn: ConnectSource, capability: str, workspa
             (_CODE_PROTOCOL_VERSION, _ONLINE_THRESHOLD_SECONDS, workspace_id),
         ).fetchone()
     return row is not None
+
+
+def has_online_code_workers(database_dsn: ConnectSource) -> bool:
+    """Any online code Worker exists (#389 pass gate); workspace admission is
+    the claim transaction's business. Predicate: ``AgentWorkerRegistry``."""
+    return AgentWorkerRegistry(database_dsn).count_online_code_workers() > 0
 
 
 class CodeDispatchService:
@@ -239,8 +242,13 @@ class CodeDispatchService:
         custom_code: bool,
         config: dict[str, Any],
         secret_config: dict[str, Any],
+        shard_runtime: dict[str, Any] | None = None,
     ) -> bool:
-        """Stage inputs, build the bundle, and enqueue a kind='code' request."""
+        """Stage inputs, build the bundle, and enqueue a kind='code' request.
+
+        ``shard_runtime`` (#389): a shard execution's ``shard_index`` /
+        ``shard_input`` payload, so the remote Worker rebuilds the same
+        runtime dict the local executor hands to node code."""
         if self.broker.has_active_request(str(job["id"]), node.key):
             return False
         execution_id = str(uuid.uuid4())
@@ -290,7 +298,7 @@ class CodeDispatchService:
             log_path=log_path,
             inputs=inputs,
             expected_outputs=tuple(node.outputs),
-            runtime={"node_execution": asdict(node.execution)},
+            runtime={"node_execution": asdict(node.execution), **(shard_runtime or {})},
         )
         stage_agent_inputs(self.artifact_store, context, manifest)
         if self.broker.bundle_dir is None:

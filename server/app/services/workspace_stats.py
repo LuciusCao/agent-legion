@@ -16,8 +16,9 @@ def build_workspace_stats(
     if not workflow_key:
         raise InvalidOperationError("Workspace workflow is not set")
     latest_run = job_db.get_latest_node_run_for_workspace(workspace_id)
-    # Single implicit code pool (P-0.5): capacity comes from the instance
-    # settings; availability is global (the pool is shared across workspaces).
+    # Local fallback execution capacity (#389): availability is global (the
+    # pool is shared across workspaces); capacity 0 (pure-remote mode) means
+    # no local slots — remote Workers account their own capacity.
     capacity = settings.executor_runtime.code_capacity
     counts = job_db.get_code_pool_counts(workspace_id)
     code_pool = {
