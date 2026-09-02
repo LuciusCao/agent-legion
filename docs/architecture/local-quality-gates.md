@@ -156,14 +156,20 @@ unaffected. Passing evidence is shared through the same Git common directory.
 `develop` / `main` / `master`, pushes to `main` / `master` (a `develop`
 merge is already covered by its PR gate, so push runs there were dropped to
 save Actions minutes), plus manual dispatch. Docs-only changes (`docs/**`,
-`**/*.md`, `LICENSE`) still trigger the workflow but every lane evaluates
-to false in the `changes` job: single jobs skip outright (a skipped
-required check satisfies branch protection), while the `backend-postgres`
-matrix carries its lane condition on the steps instead of the job — a
-job-level skip would report one check with the literal name
+`**/*.md`, `LICENSE`) still trigger the workflow but every backend/frontend
+lane evaluates to false in the `changes` job: single jobs skip outright (a
+skipped required check satisfies branch protection), while the
+`backend-postgres` matrix carries its lane condition on the steps instead of
+the job — a job-level skip would report one check with the literal name
 `backend-postgres-${{ matrix.shard }}` and the required per-shard contexts
 would never appear — so each shard boots as a seconds-long no-op and
-reports success. A `paths-ignore` trigger would keep the workflow from
+reports success. The `docs-terms` guard is the one check that still runs on
+that path (codex review on #375/#377): docs-only PRs are exactly the ones
+that can reintroduce retired terminology into current-state docs, so the
+retired-terms check gets its own lightweight job that executes whenever the
+backend lane is off (`backend-unit` runs it inside `check_architecture`
+whenever the backend lane is on — the two entries are exact complements).
+A `paths-ignore` trigger would keep the workflow from
 starting at all and leave required checks pending forever — the docs-only
 PR deadlock first hit on #316 (single jobs) and #319 (matrix shards).
 The weekly schedule lives in `.github/workflows/nightly-gate.yml` (issue
@@ -207,6 +213,11 @@ the same ref:
 - **rust** — `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
   and `cargo test` in `velites/`.
 - **e2e-smoke** — the deterministic browser smoke suite.
+- **docs-terms** — the retired-terms docs guard as a standalone lightweight
+  job (`uv run --no-project --with pyyaml`, no uv sync). Always reports a
+  check (no lane skip): a no-op success while the backend lane is on, the
+  real module entry while it is off — the exact complement of the
+  `check_architecture` static round inside `backend-unit`.
 - **docker-build** — CI-only image build lane (host + worker targets). It runs
   only when the `changes` job detects image-relevant path changes
   (`Dockerfile`, `.dockerignore`, dependency locks, `worker/`, `shared/`,
@@ -296,9 +307,12 @@ Configure the repository on GitHub as follows:
 2. Require the `backend-unit`, `api-check`, `backend-postgres-a`,
    `backend-postgres-b`, `backend-postgres-c`, `backend-coverage`,
    `frontend-logic`, `frontend-component`,
-   `frontend-coverage`, `rust`, `e2e-smoke`, and `docker-build` status checks
-   to pass before
-   merging; require branches to be up to date.
+   `frontend-coverage`, `rust`, `e2e-smoke`, `docker-build`, and `docs-terms`
+   status checks to pass before
+   merging; require branches to be up to date. `docs-terms` is the docs-only
+   PR lane for the retired-terms guard (codex review on #375/#377): without
+   it in the required set, a docs-only PR can merge with the guard red
+   because every other required context is skipped-or-green on that path.
 3. Disable force-push and branch deletion for protected branches.
 4. Merge changes through a pull request; do not edit protected branches in the web UI.
 

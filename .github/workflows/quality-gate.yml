@@ -36,9 +36,10 @@ jobs:
   # gate by changed paths, mirroring the local pre-push lane policy —
   # frontend-only changes skip the backend pytest shards (api-check still
   # runs), velites-only changes run just the rust job, docs-only changes
-  # skip every lane (only this detection job runs — triggers carry no
-  # paths-ignore, because a workflow that never starts leaves required
-  # checks pending forever and blocks docs-only PRs, first hit on #316).
+  # skip every backend/frontend lane (only this detection job and the
+  # docs-terms guard run — triggers carry no paths-ignore, because a
+  # workflow that never starts leaves required checks pending forever and
+  # blocks docs-only PRs, first hit on #316).
   # Shared files (config, scripts, tests,
   # workflows, anything outside frontend//velites//docs/) run the full
   # backend+frontend gate; dispatch runs always get every lane.
