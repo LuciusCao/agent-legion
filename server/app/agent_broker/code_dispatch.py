@@ -4,7 +4,7 @@ Batch 2 (design §7): a worker-eligible code node ships to a remote Worker as
 a self-contained payload — the code text plus a ``workspace_libs`` snapshot
 ride the bundle; the queued manifest carries only non-secret config plus
 vault ``secret_ref`` markers, and the claim response re-resolves secrets on
-the fly (VAULT-SECRET-001). The persisted ``runtime_context`` is a
+the fly (VAULT-SECRET-001, in code_manifest_config). The persisted ``runtime_context`` is a
 lightweight audit stub (issue #142); the claim response rebuilds the full
 DB-derived payloads in memory (``code_manifest.resolve_code_runtime_context``).
 """
@@ -42,12 +42,7 @@ from server.app.executors.contracts import CodeCapabilityConfig
 from server.app.executors.models import ExecutionContext
 from server.app.jobs import JobQueries
 from server.app.services.artifact_store import ArtifactStore
-from server.app.services.connection_tokens import (
-    ConnectionTokenService,
-    inject_connection_config,
-)
 from server.app.services.run_payload import sdk_batch_row
-from server.app.services.vault import VaultService
 from server.app.settings import Settings
 from server.app.workflows.definition import WorkflowNode
 
@@ -57,74 +52,6 @@ logger = logging.getLogger(__name__)
 # probe answer may lag a Worker (dis)appearing by a few seconds without harm
 # (a stale "online" just queues a claimable request).
 _ONLINE_PROBE_TTL_SECONDS = 5.0
-
-
-class PlaintextSecretError(ValueError):
-    """A secret-marked config key holds a legacy plaintext value.
-
-    Plaintext secrets can never be persisted in the queued manifest
-    (VAULT-SECRET-001), so the node is not Worker-routable; the caller falls
-    back to local execution, which resolves secrets in memory only.
-    """
-
-
-def split_manifest_config(
-    schema: dict[str, Any], unresolved_config: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Split an UNRESOLVED node config into persistable parts.
-
-    Returns ``(config, secret_config)``: non-secret schema-whitelisted keys
-    (CONFIG-MANIFEST-001) go to ``config`` verbatim; secret-marked keys go to
-    ``secret_config`` only in vault ``{"secret_ref": name}`` form (a
-    reference, not a secret). A legacy plaintext secret value raises
-    ``PlaintextSecretError``.
-    """
-    raw_properties = schema.get("properties") if isinstance(schema, dict) else None
-    properties = raw_properties if isinstance(raw_properties, dict) else {}
-    config: dict[str, Any] = {}
-    secret_config: dict[str, Any] = {}
-    for key, value in unresolved_config.items():
-        prop = properties.get(key)
-        if not isinstance(prop, dict):
-            continue
-        if not prop.get("secret", False):
-            config[key] = value
-            continue
-        if value in (None, ""):
-            continue
-        if isinstance(value, dict) and "secret_ref" in value:
-            secret_config[key] = value
-            continue
-        raise PlaintextSecretError(
-            f"secret config key {key!r} holds a legacy plaintext value; "
-            "the node stays on local execution"
-        )
-    return config, secret_config
-
-
-def resolve_code_manifest_config(
-    manifest: dict[str, Any],
-    database_dsn: Any,
-    settings_config: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """Claim-time secret injection for a claimed kind='code' manifest.
-
-    Returns a manifest copy whose ``config`` is fully resolved (vault
-    plaintext + the injected connection block), with ``secret_config``
-    removed. Runs on the claim-response path only, after the claim
-    transaction committed: the resolved plaintext crosses the existing HTTPS
-    channel to the Worker and is never persisted.
-    """
-    config = {**manifest.get("config", {}), **manifest.get("secret_config", {})}
-    schema = manifest.get("config_schema") or {}
-    vault = VaultService(database_dsn, settings_config)
-    config = vault.resolve_secret_refs(config, str(manifest.get("workspace_id") or ""))
-    config = inject_connection_config(
-        config, schema, ConnectionTokenService(database_dsn, settings_config)
-    )
-    resolved = {**manifest, "config": config}
-    resolved.pop("secret_config", None)
-    return resolved
 
 
 def _json_safe(value: Any) -> Any:
@@ -156,10 +83,10 @@ def build_code_bundle(bundle_path: Path, *, code_text: str, workspace_libs_dir: 
 def has_online_code_worker(database_dsn: ConnectSource, capability: str, workspace_id: str) -> bool:
     """True when an online Worker can claim code executions in *workspace_id*.
 
-    Mirrors the claim-side filters (protocol v2, code capacity, allowed_workspaces
-    admission) — an inadmissible Worker would wedge the job in queued for good
-    (no queued-timeout fallback, batch 2 decision 3). ``capability`` is retained
-    for caller/cache compatibility but no longer filters anything (issue #284)."""
+    Mirrors the claim-side filters (protocol v2, code capacity, workspace
+    admission) — an inadmissible Worker would wedge the job in queued for
+    good. ``capability`` no longer filters anything (issue #284); it stays
+    for caller/cache compatibility."""
     del capability  # admission no longer matches capabilities (issue #284)
     with read_connection(database_dsn) as conn:
         row = conn.execute(
@@ -247,8 +174,11 @@ class CodeDispatchService:
         """Stage inputs, build the bundle, and enqueue a kind='code' request.
 
         ``shard_runtime`` (#389): a shard execution's ``shard_index`` /
-        ``shard_input`` payload, so the remote Worker rebuilds the same
-        runtime dict the local executor hands to node code."""
+        ``shard_input`` payload. It is written into the PERSISTED manifest
+        (top-level keys) — the remote Worker reads them from there to rebuild
+        the same runtime dict the local executor hands to node code, and the
+        claim transaction reads ``shard_index`` to bind the execution to its
+        ``node_shards`` row (dedup + shard-aware completion)."""
         if self.broker.has_active_request(str(job["id"]), node.key):
             return False
         execution_id = str(uuid.uuid4())
@@ -281,7 +211,20 @@ class CodeDispatchService:
             # claim-response path rebuilds the payloads in memory
             # (resolve_code_runtime_context); nothing heavy is persisted.
             "runtime_context": runtime_context_stub(job, workspace, self._prefetch_job_batch(job)),
+            # Shard identity rides the manifest top level (#389): the claim
+            # transaction flips the node_shards row (dedup by execution_id),
+            # the Worker injects the payload into the child runtime dict.
+            **(shard_runtime or {}),
         }
+        if shard_runtime is not None:
+            # The shard's output rides the ARCHIVE as a regular expected
+            # output (same filename contract as the local executor,
+            # _shard_contract.shard_output_name): no size-capped metadata
+            # channel; completion reads it from the unpacked job_dir.
+            manifest["expected_outputs"] = [
+                *manifest["expected_outputs"],
+                f"shard_output-{shard_runtime['shard_index']}.json",
+            ]
         context = ExecutionContext(
             execution_id=execution_id,
             lease_id="",

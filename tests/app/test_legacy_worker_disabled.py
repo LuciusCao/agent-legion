@@ -10,9 +10,6 @@ def test_start_worker_starts_only_workflow_worker(tmp_path, monkeypatch) -> None
         started["workflow"] += 1
 
     monkeypatch.setattr(main.WorkflowWorkerThread, "start", fake_workflow_start)
-    monkeypatch.setattr(
-        main.WorkflowWorkerThread, "is_enabled", staticmethod(lambda settings: True)
-    )
     monkeypatch.setattr(main.AgentStatusManager, "discover", lambda self: [])
     monkeypatch.setattr(main, "validate_settings", lambda settings: None)
 
@@ -21,4 +18,5 @@ def test_start_worker_starts_only_workflow_worker(tmp_path, monkeypatch) -> None
         pass  # lifespan startup runs here
 
     assert app.title == "Agent Legion"
+    # workflows.enabled is retired (#385/#389): the worker always starts.
     assert started["workflow"] == 1

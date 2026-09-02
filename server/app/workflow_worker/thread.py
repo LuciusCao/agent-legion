@@ -145,9 +145,10 @@ class WorkflowWorkerThread:
         )
         # Pure-remote deployments (#389): with code_capacity=0 the local
         # snapshot has no capacity, but remote code Workers can still claim —
-        # the pass must keep scanning (coupling fix ③). Only a host with no
-        # local capacity, no published Agents and no online code Worker has
-        # nothing at all to dispatch.
+        # the pass must keep scanning (coupling fix ③). Known limit (unchanged
+        # from pre-#389 behavior): a saturated pool plus zero Agents skips the
+        # scan, so a ready approval gate parks only after a slot frees; in
+        # pure-remote mode an offline Worker fleet has the same effect.
         if not (
             snapshot.has_any_capacity() or has_online_code_workers(self.job_db)
         ) and not has_published_agent_definitions(self.job_db):

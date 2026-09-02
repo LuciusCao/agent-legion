@@ -35,15 +35,16 @@ AUTH_FAILURE_MARKER_PATH = ".node_runtime/auth_failure"
 MAX_CONNECTION_KEY_CHARS = 128
 # Keys of the kind='code' result-metadata dict (issue #282): the Worker's
 # ``prepare_code_result`` (worker/code_runner.py) writes exactly these —
-# ``auth_failure_connection`` and ``output_json`` only when applicable — and
+# ``auth_failure_connection`` only when the node actually reported one — and
 # the Host reads them in ``parse_result_metadata``
 # (server/app/routes/agent_worker_results.py) via ``.get`` with defaults, so
 # an absent optional key is not an error. A process-boundary contract with no
 # compiler and no schema; before #282 both sides were handwritten literals
 # kept in sync by comment only. ``run_dir`` is deliberately NOT part of this
-# set: it is agent-path-only and code results never carry it.
-# ``output_json`` (#389) is shard-path-only: the per-shard output payload
-# for reduce fan-in (Host persists it into node_shards.output_json).
+# set: it is agent-path-only and code results never carry it. Shard outputs
+# (#389) also never ride this channel — they ship as regular archive members
+# (``shard_output-<index>.json`` expected outputs), avoiding the header-size
+# ceiling entirely.
 CODE_RESULT_METADATA_KEYS: frozenset[str] = frozenset(
     {
         "status",
@@ -52,6 +53,5 @@ CODE_RESULT_METADATA_KEYS: frozenset[str] = frozenset(
         "command",
         "output_artifacts",
         "auth_failure_connection",
-        "output_json",
     }
 )

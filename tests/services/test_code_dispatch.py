@@ -19,13 +19,15 @@ from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.agent_bundle import CODE_BUNDLE_LIBS_DIR, CODE_BUNDLE_NODE_FILE
 from server.app.agent_broker.code_dispatch import (
     CodeDispatchService,
-    PlaintextSecretError,
     has_online_code_worker,
-    resolve_code_manifest_config,
-    split_manifest_config,
 )
 from server.app.agent_broker.code_eligibility import is_worker_eligible
 from server.app.agent_broker.code_manifest import resolve_code_runtime_context
+from server.app.agent_broker.code_manifest_config import (
+    PlaintextSecretError,
+    resolve_code_manifest_config,
+    split_manifest_config,
+)
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.db.transaction import write_transaction
 from server.app.executors.contracts import CodeCapabilityConfig
@@ -534,3 +536,40 @@ def test_claim_runtime_context_material_none_for_ref_input(job_db, monkeypatch) 
     resolved = resolve_code_runtime_context(manifest, TEST_DATABASE_URL, {})
 
     assert resolved["runtime_context"]["material"] is None
+
+
+def test_enqueue_persists_shard_identity_and_output_contract(job_db, tmp_path) -> None:
+    """#389 (codex P1-1/P2-2): a shard dispatch writes shard_index/shard_input
+    into the PERSISTED manifest top level (the claim transaction binds the
+    node_shards row off it) and appends the shard output file to
+    expected_outputs (archive channel — no size-capped metadata)."""
+    _insert_job(job_db)
+    service = _service(job_db, tmp_path)
+
+    queued = service.enqueue(
+        capability="package",
+        capability_config=CodeCapabilityConfig(),
+        workspace={"id": "test-workspace"},
+        job={"id": "job-1"},
+        workflow_key="questions",
+        node=_node(),
+        job_dir=tmp_path / "job",
+        log_path=tmp_path / "logs" / "jobs" / "job-1-package.log",
+        inputs=(),
+        code_text=_CODE,
+        custom_code=False,
+        config={},
+        secret_config={},
+        shard_runtime={"shard_index": 3, "shard_input": {"q": 7}},
+    )
+
+    assert queued is True
+    with job_db._connect_read() as conn:
+        row = conn.execute("select * from agent_execution_requests").fetchone()
+    manifest = json.loads(row["manifest_json"])
+    # P1-1: shard identity persisted at the manifest top level.
+    assert manifest["shard_index"] == 3
+    assert manifest["shard_input"] == {"q": 7}
+    # P2-2: the shard payload ships as a regular expected output.
+    assert "shard_output-3.json" in manifest["expected_outputs"]
+    assert "output_json" not in manifest

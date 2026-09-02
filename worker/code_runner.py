@@ -231,9 +231,13 @@ def _outcome(
     expected_outputs: tuple[str, ...],
     timeout: float,
     write_error: list[BaseException],
-    manifest: dict[str, Any] | None = None,
 ) -> dict[str, str]:
-    """Map (exit code, result file, outputs) to the reported status/error."""
+    """Map (exit code, result file, outputs) to the reported status/error.
+
+    Shard runs (#389) carry their per-shard payload as a REGULAR expected
+    output (``shard_output-<index>.json``, added Host-side at enqueue): the
+    missing-outputs check below enforces it and the archive ships it back —
+    no size-capped metadata channel."""
     if exit_code == 130:
         # Shutdown or Host-driven cancel: wait_for_exit SIGTERMs the group and
         # reports 130 in both cases (same convention as the agent path).
@@ -260,18 +264,7 @@ def _outcome(
             "status": "failed",
             "error_message": f"Missing outputs after code run: {', '.join(missing)}",
         }
-    outcome: dict[str, str] = {"status": "completed", "error_message": ""}
-    # Shard executions (#389): the per-shard output payload rides the result
-    # metadata (Host-side ExecutionResult.output_json → node_shards.output_json
-    # for reduce fan-in). Host-side local execution reads it from the
-    # shard-output file; the remote path ships it explicitly.
-    if manifest is not None and "shard_index" in manifest:
-        for name in (f"shard_output-{manifest['shard_index']}.json", "shard_output.json"):
-            path = job_dir / PurePosixPath(name)
-            if path.is_file():
-                outcome["output_json"] = path.read_text(encoding="utf-8")
-                break
-    return outcome
+    return {"status": "completed", "error_message": ""}
 
 
 def _feed_stdin(
@@ -380,7 +373,6 @@ def execute_code(
             tuple(str(name) for name in manifest.get("expected_outputs", [])),
             timeout,
             write_error,
-            manifest=manifest,
         )
         outcome["auth_failure_connection"] = read_auth_failure_key(job_dir, manifest)
         return UploadTask(

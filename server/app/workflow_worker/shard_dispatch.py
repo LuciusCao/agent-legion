@@ -8,7 +8,6 @@ caller gates on the same config.
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -83,7 +82,11 @@ def claim_shard_locally(
         job_dir=job_dir,
         log_path=log_path,
         inputs=tuple(node.inputs),
-        expected_outputs=tuple(node.outputs),
+        # Mirror the remote contract (#389 review P2-2): the shard output
+        # file is an expected output on both paths, so a shard node whose
+        # code only writes node.outputs fails identically locally and
+        # remotely instead of silently yielding an empty reduce payload.
+        expected_outputs=(*node.outputs, f"shard_output-{shard_index}.json"),
         runtime={
             "node_execution": asdict(node.execution),
             "shard_index": shard_index,
@@ -92,11 +95,3 @@ def claim_shard_locally(
     )
     submit_claim(worker, CODE_EXECUTOR_ID, claim, context)
     return True
-
-
-def shard_runtime_payload(row: dict[str, Any]) -> dict[str, Any]:
-    """The remote manifest's shard payload block for one shard row."""
-    return {
-        "shard_index": int(row["shard_index"]),
-        "shard_input": json.loads(row["input_json"]),
-    }

@@ -12,7 +12,11 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   「本地执行」——本地兜底执行并发上限，0 = 纯远程模式）：宿主容量为 0 时
   不再组装本地执行栈（CodeExecutor/ExecutionRuntime/线程池/velites 沙箱
   依赖全部消失），code 节点 100% 由远程 code Worker 执行；shard 分片执行
-  同样先远程后本地；调度线程 pass 级早退修复（纯远程部署不再被饿死）；
+  远程化——分片身份（`shard_index`/`shard_input`）写入持久化 manifest，
+  broker claim 事务经 `try_start_shard` 绑定 `node_shards` 行（行级去重），
+  分片输出以 `shard_output-<index>.json` 作为常规 expected_output 随归档
+  回传（不走尺寸受限的 metadata 通道）；调度线程 pass 级早退修复（纯远程
+  部署不再被饿死，且保留审批门等免 dispatch 工作的处理机会）；
   `/api/health` 在纯远程模式下实时报告在线 code Worker 数（启动为 0 打
   WARNING），防静默停摆。
 - `workflows.enabled` 退役（#385，由 #389 第 3 步收编）：该开关已从灰度

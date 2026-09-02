@@ -12,6 +12,7 @@ from server.app.agent_broker.result_unpack import (
     unpack_agent_result,
 )
 from server.app.db.dialect import ConnectSource
+from server.app.executors._shard_contract import read_shard_output
 from server.app.executors.artifact_mirror import upload_produced_artifacts
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, ExecutionStatus
@@ -43,10 +44,6 @@ class AgentOutcome:
     # token to be invalidated (upstream auth failure); the commit path
     # performs the privileged invalidation. Empty = no request.
     auth_failure_connection: str = ""
-    # Shard executions (#389): the per-shard output payload reported by a
-    # remote code Worker; flows into ExecutionResult.output_json →
-    # node_shards.output_json for reduce fan-in. Empty = not a shard run.
-    output_json: str = ""
 
 
 def report_auth_failure_safe(database_dsn: ConnectSource, connection_key: str) -> None:
@@ -208,9 +205,11 @@ class AgentCompletionHandler:
                 skill_version=str(manifest.get("skill_version", "")),
                 produced_artifacts=produced,
                 runner=worker_id,
-                # Shard runs (#389): the remote shard payload for reduce
-                # fan-in; empty on ordinary code results.
-                output_json=outcome.output_json if status == "completed" else "",
+                # Shard runs (#389): the per-shard payload rides the archive
+                # as a regular expected output (shard_output-<index>.json);
+                # read it from the unpacked job_dir — the same file the local
+                # executor would have produced, no size-capped metadata hop.
+                output_json=read_shard_output(job_dir, manifest) if status == "completed" else "",
             ),
         )
 

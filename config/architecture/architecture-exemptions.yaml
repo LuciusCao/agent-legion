@@ -576,17 +576,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
   ceiling: 851
-- check: architecture.file_budget
-  path: server/app/agent_broker/sweepers.py
-  reason: >-
-    Issue #359's review round counts sweeper force-closed executions in
-    the done-rate gauge (the requeue-limit branch): without it the execute
-    stage undercounts exactly when workers are lost en masse. The two
-    counters sit at the branch that owns the terminal transition; moving
-    them out would split the sweep outcome from its measurement.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
-  ceiling: 167
 
 - check: architecture.file_budget
   path: server/app/services/runtime_profile/classifier.py

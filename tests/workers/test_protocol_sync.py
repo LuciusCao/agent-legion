@@ -132,27 +132,15 @@ def test_code_result_metadata_keys_match_prepare_code_result(tmp_path: Path) -> 
             command=("/usr/bin/velites", "sandbox", "wrap"),
         )
 
-    always_present = keys - {"auth_failure_connection", "output_json"}
+    always_present = keys - {"auth_failure_connection"}
     metadata, _, _ = prepare_code_result(_task({"status": "completed", "error_message": ""}))
     assert set(metadata) == always_present
 
     metadata_auth, _, _ = prepare_code_result(
         _task({"status": "completed", "error_message": "", "auth_failure_connection": "cms-main"})
     )
-    assert set(metadata_auth) == keys - {"output_json"}
+    assert set(metadata_auth) == keys
     assert metadata_auth["auth_failure_connection"] == "cms-main"
-
-    metadata_shard, _, _ = prepare_code_result(
-        _task(
-            {
-                "status": "completed",
-                "error_message": "",
-                "output_json": '{"shard": 0, "input": {"q": 1}}',
-            }
-        )
-    )
-    assert set(metadata_shard) == keys - {"auth_failure_connection"}
-    assert metadata_shard["output_json"] == '{"shard": 0, "input": {"q": 1}}'
 
     metadata_empty, _, _ = prepare_code_result(_task(None))
     assert set(metadata_empty) == always_present
@@ -172,7 +160,6 @@ def test_host_metadata_reader_consumes_all_code_result_keys() -> None:
         "command": ["/usr/bin/velites", "sandbox", "wrap"],
         "output_artifacts": {},
         "auth_failure_connection": "cms-main",
-        "output_json": '{"shard": 1}',
     }
     assert set(payload) == set(CODE_RESULT_METADATA_KEYS)
     outcome, record = parse_result_metadata(json.dumps(payload))
@@ -183,5 +170,3 @@ def test_host_metadata_reader_consumes_all_code_result_keys() -> None:
     assert outcome.output_artifacts == {}
     assert outcome.auth_failure_connection == "cms-main"
     assert record["auth_failure_connection"] == "cms-main"
-    assert outcome.output_json == '{"shard": 1}'
-    assert record["output_json"] == '{"shard": 1}'

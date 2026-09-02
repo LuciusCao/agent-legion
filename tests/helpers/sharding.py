@@ -67,11 +67,11 @@ class FakeShardExecutor:
             return ExecutionResult(
                 status="failed", exit_code=1, error_message=f"shard {shard_index} failed"
             )
-        return ExecutionResult(
-            status="completed",
-            exit_code=0,
-            output_json=json.dumps({"shard": shard_index, "input": context.runtime["shard_input"]}),
-        )
+        # Mirror the real contract (#389): the shard payload rides the
+        # shard_output-<index>.json file AND the result's output_json.
+        payload = json.dumps({"shard": shard_index, "input": context.runtime["shard_input"]})
+        (context.job_dir / f"shard_output-{shard_index}.json").write_text(payload, encoding="utf-8")
+        return ExecutionResult(status="completed", exit_code=0, output_json=payload)
 
     def cancel(self, execution_id: str) -> None:
         pass
