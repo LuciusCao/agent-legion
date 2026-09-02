@@ -107,6 +107,56 @@ describe('WorkflowNodeAgentEditor', () => {
     )
   })
 
+  // #387：普通新建（非 switchToAgent）创建的是 draft-only Agent，目录里
+  // 查不到；关面板会让「发布」按钮永远不可达——创建后面板必须留在编辑/
+  // 发布模式。
+  it('stays open in publish mode after a plain create (not just switchToAgent)', async () => {
+    mocks.createAgentDefinition.mockResolvedValue({ agent_id: 'agent-new' })
+    mocks.fetchAgentDefinition.mockResolvedValue({
+      latest: {
+        status: 'draft',
+        definition: {
+          capability: 'generate_key_info',
+          runtime: 'pi',
+          skill: 'demo/skill',
+          tools: ['read'],
+        },
+      },
+      published: null,
+    })
+    renderEditor({ agentId: null, capability: 'generate_key_info' })
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '为此 capability 新建 Agent' })
+    )
+    fireEvent.change(await screen.findByLabelText('Agent ID'), {
+      target: { value: 'agent-new' },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
+    })
+
+    const { useUiStore } = await import('../../../stores/uiStore')
+    await vi.waitFor(() =>
+      // AgentEditor 的创建 toast（Panel 不再叠加第二条，subagent P3）。
+      expect(useUiStore.getState().toast?.message).toBe(
+        'Agent「agent-new」草稿已创建'
+      )
+    )
+    // 面板不关：切到编辑/发布模式加载新草稿，「发布」按钮可达。
+    await vi.waitFor(() =>
+      expect(mocks.fetchAgentDefinition).toHaveBeenCalledWith(
+        'ws1',
+        'agent-new'
+      )
+    )
+    expect(await screen.findByRole('button', { name: '发布' })).toBeEnabled()
+    // 入口按钮同步切到编辑态文案。
+    expect(
+      screen.getByRole('button', { name: '收起 Agent 编辑' })
+    ).toBeInTheDocument()
+  })
+
   it('opens the create form prefilled with the node capability', async () => {
     renderEditor({ agentId: null, capability: 'generate_key_info' })
 

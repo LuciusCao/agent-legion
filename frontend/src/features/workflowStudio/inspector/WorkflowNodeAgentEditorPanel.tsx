@@ -25,11 +25,12 @@ export function agentEditorButtonLabel(
   return switchToAgent ? '切换为 Agent 执行' : '为此 capability 新建 Agent'
 }
 
-// 内嵌 AgentEditor 的接线层：保存/发布/归档后刷新目录并收起。「切换为
-// Agent 执行」是例外——/api/agent-catalog 只回 published，新建草稿后若直接
+// 内嵌 AgentEditor 的接线层：保存/发布/归档后刷新目录并收起。新建路径
+// （含「切换为 Agent 执行」）是例外——新建的是 draft-only Agent，若直接
 // 关面板，用户无法再从这里发布它（发布门禁会挡住 workflow），所以创建后
-// 保留新 Agent ID 并留在面板里切到编辑/发布模式，让「创建草稿 → 发布 →
-// type 切换生效」在面板内闭环（codex P2 on PR #288）。
+// 保留新 Agent ID 并留在面板里切到编辑/发布模式，让「创建草稿 → 发布」在
+// 面板内闭环（switchToAgent 先例：codex P2 on PR #288；#387 扩展到普通
+// 新建）。
 export function WorkflowNodeAgentEditorPanel(props: Props) {
   const showToast = useUiStore((s) => s.showToast)
   const [createdAgentId, setCreatedAgentId] = useState<string | null>(null)
@@ -38,7 +39,9 @@ export function WorkflowNodeAgentEditorPanel(props: Props) {
   function handleSaved(newAgentId: string) {
     props.onRefresh()
     if (!props.switchToAgent) {
-      props.onClose()
+      // 不另弹 toast：AgentEditor 的「草稿已创建」已可见（双 toast 会互相
+      // 顶掉，subagent review P3 on #391），留面板本身就是发布引导。
+      setCreatedAgentId(newAgentId)
       return
     }
     const switched = props.onSwitchToAgent?.() ?? false
