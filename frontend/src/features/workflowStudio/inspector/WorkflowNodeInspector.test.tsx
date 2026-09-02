@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { createElement, type ReactNode } from 'react'
+import yaml from 'js-yaml'
 import { WorkflowNodeInspector } from './WorkflowNodeInspector'
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
 import { api } from '../../../api'
@@ -146,11 +147,17 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
       expect.stringContaining('切换为审批门将清除')
     )
     expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
+    // 节点级断言（js-yaml 解析，避免 toContain 被其他节点的 type 行命中）。
     const nextYaml = setDefinitionYaml.mock.calls[0][0] as string
-    // type 改为 approval 且字段按目标类型清洗（capability/skill 剥除）。
-    expect(nextYaml).toContain('type: approval')
-    expect(nextYaml).not.toContain('capability: intake')
-    expect(nextYaml).not.toContain('skill: demo/skill')
+    const node = (
+      yaml.load(nextYaml) as {
+        nodes?: Record<string, Record<string, unknown>>
+      }
+    ).nodes?.intake
+    expect(node?.type).toBe('approval')
+    // capability/skill 按目标类型清洗剥除。
+    expect(node).not.toHaveProperty('capability')
+    expect(node).not.toHaveProperty('skill')
   })
 
   it('keeps the draft untouched when the approval-switch confirm is dismissed', async () => {
@@ -177,7 +184,7 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
   })
 
   it('blocks →approval without an executable upstream and toasts the reason', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const setDefinitionYaml = vi.fn()
     // intake 只有 start 上游：validate_approval_edges 同语义，前置校验拦下。
     render(
@@ -198,6 +205,8 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     })
 
     expect(setDefinitionYaml).not.toHaveBeenCalled()
+    // 校验先于确认：前置校验都没过，就不该弹破坏性确认（P3 review）。
+    expect(confirmSpy).not.toHaveBeenCalled()
     const { useUiStore } = await import('../../../stores/uiStore')
     await vi.waitFor(() =>
       expect(useUiStore.getState().toast?.message).toContain('可执行节点的入边')

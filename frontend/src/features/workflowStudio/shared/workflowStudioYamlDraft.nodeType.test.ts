@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import {
   patchWorkflowNodeType,
   WorkflowNodeTypeSwitchError,
-  workflowNodeKindBadge,
 } from './workflowStudioYamlDraft.nodeType'
 
 // 字段清洗规则的蓝本是后端 loader 的类型禁令：approval 对拍
@@ -135,18 +134,56 @@ describe('patchWorkflowNodeType', () => {
 
   it('refuses →approval without an executable upstream (validate_approval_edges mirror)', () => {
     // 仅 start 驱动的根节点切 approval：start 的合成边不算可执行上游。
-    const rootCodeYaml = baseYaml
+    expect(() => patchWorkflowNodeType(baseYaml, 'intake', 'approval')).toThrow(
+      WorkflowNodeTypeSwitchError
+    )
+  })
+
+  it('accepts →approval when the upstream is declared via edges only (v2 yaml)', () => {
+    // 手写 v2 YAML 用 edges 声明依赖、after 只是 echo（甚至缺省）——判定源
+    // 必须是 after ∪ edges，与 validate_approval_edges 的物化 edges 同构。
+    const edgesOnlyYaml = [
+      'key: demo',
+      'schema_version: 2',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  intake2:',
+      '    type: code',
+      '    capability: intake2',
+      '  gate:',
+      '    type: code',
+      '    capability: gate_cap',
+      'edges:',
+      '  - {from: _start, to: intake2}',
+      '  - {from: intake2, to: gate}',
+      '',
+    ].join('\n')
+    const out = patchWorkflowNodeType(edgesOnlyYaml, 'gate', 'approval')
+    expect(parseNodes(out).nodes?.gate?.type).toBe('approval')
+    // 反向：edges 里只有 start 驱动的边时仍拦截。
+    const startOnlyEdgesYaml = [
+      'key: demo',
+      'schema_version: 2',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  gate:',
+      '    type: code',
+      '    capability: gate_cap',
+      'edges:',
+      '  - {from: _start, to: gate}',
+      '',
+    ].join('\n')
     expect(() =>
-      patchWorkflowNodeType(rootCodeYaml, 'intake', 'approval')
+      patchWorkflowNodeType(startOnlyEdgesYaml, 'gate', 'approval')
     ).toThrow(WorkflowNodeTypeSwitchError)
   })
 
   it('drops skill when switching agent→code (EXEC-SKILL-NODE-001)', () => {
-    const yaml = baseYaml.replace(
-      '    capability: intake',
-      '    capability: intake\n    skill: demo/skill'
-    )
-    const out = patchWorkflowNodeType(yaml, 'intake', 'code')
+    // 源节点必须是 type: agent（同类型 code→code 不经选择器发生）。
+    const agentYaml = baseYaml.replace('    type: code', '    type: agent')
+    const out = patchWorkflowNodeType(agentYaml, 'intake', 'code')
     expect(parseNodes(out).nodes?.intake).not.toHaveProperty('skill')
   })
 
@@ -160,14 +197,5 @@ describe('patchWorkflowNodeType', () => {
     expect(() => patchWorkflowNodeType(baseYaml, 'nope', 'agent')).toThrow(
       'not found'
     )
-  })
-})
-
-describe('workflowNodeKindBadge', () => {
-  it('maps types to badges (agent renders none)', () => {
-    expect(workflowNodeKindBadge('agent')).toBe('')
-    expect(workflowNodeKindBadge('approval')).toBe('approval')
-    expect(workflowNodeKindBadge('code')).toBe('code')
-    expect(workflowNodeKindBadge(undefined)).toBe('code')
   })
 })

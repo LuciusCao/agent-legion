@@ -1,8 +1,9 @@
 # Studio 节点类型抽象落地：类型选择器 + 按类型注册设置区块
 
-状态：**设计稿（待评审）**。承接 issue #392；worktree
-`feat/studio-node-type-selector-392`。本文档给出问题分析、目标形态、
-分阶段实施方案与取舍记录，`path:line` 证据以 develop@e4e4590c 为准。
+状态：**Phase 1 已实施**（PR #395，2026-09-02；经 codex 与 subagent
+两轮评审修正）。Phase 2/3 未实施。承接 issue #392；本文档给出问题
+分析、目标形态、分阶段实施方案与取舍记录，`path:line` 证据以
+develop@e4e4590c 为准。
 
 上游语境：#284 引入显式 `type: code|agent`（invariant
 `EXEC-WORKFLOW-NODE-TYPE-001`）；#266 加入 `type: approval`（人工审批门，
@@ -228,7 +229,8 @@ const REGISTRY: Record<'code'|'agent'|'approval', NodeTypeSectionSpec>
   - Phase 3：`appendWorkflowNode` 的 YAML 追加单测 + approval 徽标渲染。
 - **质量门**：前端 lane（vitest + tsc + eslint）全绿是合入前提；本 PR
   为纯前端变更，CI 按路径裁剪不触发后端 postgres lane。回归面集中在
-  workflowStudio inspector（46 个组件测试文件 / 316 用例全量跑过）。
+  workflowStudio 全目录测试（58 文件 / 430+ 用例）与全前端 vitest
+  全量跑过（合入前最终数字以 gate 输出为准）。
 - **回归风险面**：
   - 类型切换写草稿（`setDefinitionYaml`）复用现有 draft 持久化链，不
     新增写路径；误切换的兜底是草稿版本化（workflow-draft API）。
