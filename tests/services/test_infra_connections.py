@@ -81,6 +81,7 @@ def test_describe_storage_unconfigured_never_reachable() -> None:
     assert info.credentials == "unconfigured"
     assert info.reachable is False
     assert info.bucket == ""
+    assert info.backend == ""
 
 
 def test_describe_storage_static_credentials() -> None:
@@ -96,6 +97,7 @@ def test_describe_storage_static_credentials() -> None:
     info = describe_storage(settings, reachable=True)
 
     assert info.configured is True
+    assert info.backend == "RustFS"
     assert info.endpoint_url == "http://rustfs:9000"
     assert info.public_endpoint_url == "http://localhost:9100"
     assert info.bucket == "materials"
@@ -111,3 +113,26 @@ def test_describe_storage_default_chain_when_no_access_key() -> None:
 
     assert info.credentials == "default-chain"
     assert info.reachable is False
+    # Empty endpoint targets the AWS S3 default endpoint.
+    assert info.backend == "AWS S3"
+
+
+@pytest.mark.parametrize(
+    ("endpoint_url", "expected"),
+    [
+        ("http://seaweedfs:8333", "SeaweedFS"),
+        ("http://rustfs:9000", "RustFS"),
+        ("https://minio.example.com", "MinIO"),
+        ("https://s3.amazonaws.com", "AWS S3"),
+        ("https://s3.cn-north-1.amazonaws.com.cn", "AWS S3"),
+        ("http://s3.internal:9000", "S3 兼容（s3.internal）"),
+        # Unparseable input (no scheme → no hostname): degrade without empty parens.
+        ("rustfs:9000", "S3 兼容"),
+        ("", "AWS S3"),
+    ],
+)
+def test_infer_storage_backend_labels(endpoint_url: str, expected: str) -> None:
+    """The backend label is display-only, inferred from the endpoint host."""
+    settings = S3Settings(bucket="materials", endpoint_url=endpoint_url)
+
+    assert describe_storage(settings, reachable=False).backend == expected

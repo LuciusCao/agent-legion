@@ -152,6 +152,8 @@ function StorageBlock({
       )}
       {storage.configured && (
         <dl className={localStyles.kvGrid}>
+          <dt>服务类型</dt>
+          <dd>{storage.backend}</dd>
           <dt>Endpoint</dt>
           <dd>{storage.endpoint_url || 'AWS S3（默认端点）'}</dd>
           <dt>公开 Endpoint</dt>

@@ -53,6 +53,7 @@ data/  (videos, logs, packages, jobs, run traces)
 | 材料与 runs | [materials-and-runs-design.md](materials-and-runs-design.md) | runs / 材料 / bundle 文件夹条目 / 产物对象存储的输入模型与治理设计 |
 | velites 模型注册 | [velites-model-registry.md](velites-model-registry.md) | runtime-owned 模型发现与 velites provider registry（Worker 侧发现、Host 侧三元组路由） |
 | 文档治理 | [docs-governance-proposal.md](docs-governance-proposal.md) | 现行文档退役术语基线检查（`docs_retired_terms`）的机制说明与维护指引 |
+| 实例设置旧概念治理 | [instance-settings-legacy-concepts-governance.md](instance-settings-legacy-concepts-governance.md) | 「启用工作流」退役与「代码池」改名的治理提案（未实施；settings-ux-polish review 产出） |
 
 ## 历史设计记录（时点快照，仅供溯源）
 

@@ -5430,8 +5430,15 @@ export interface components {
     /**
      * StorageConnectionView
      * @description Object-store summary; credentials reduce to a derivation kind.
+     *
+     *     ``backend`` is a display-only label inferred from the endpoint host
+     *     (e.g. SeaweedFS / RustFS / MinIO / AWS S3); the platform itself only
+     *     ever speaks the S3 API, so it never knows the server product for
+     *     certain — an unrecognized host falls back to "S3 兼容（<host>）".
      */
     StorageConnectionView: {
+      /** Backend */
+      backend: string
       /** Bucket */
       bucket: string
       /** Configured */

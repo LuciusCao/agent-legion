@@ -112,6 +112,13 @@
 .actions {
   display: flex;
   gap: 12px;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   margin-top: 8px;
+}
+
+.actionsHint {
+  font-size: 13px;
+  color: #74777f;
+  margin: 0;
 }
