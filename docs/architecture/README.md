@@ -69,6 +69,7 @@ banner 标注了后续演进对其中结论的修订。
 | [agent-config-implementation-plan.md](agent-config-implementation-plan.md) | 上述治理的详细实施计划（已完成） |
 | [workflow-studio-evolution-design.md](workflow-studio-evolution-design.md) | Studio 定位（agent authoring + 可视化调优发布台）与阶段路线 |
 | [studio-phase3-implementation-plan.md](studio-phase3-implementation-plan.md) | Studio 内置 agent 实施计划（MCP/ACP 三层分离，已落地） |
+| [studio-node-type-selector-design.md](studio-node-type-selector-design.md) | Studio 节点类型抽象落地设计：inspector 类型选择器 + 按类型注册 section 集（#392，设计稿） |
 | [velites-runtime-promotion.md](velites-runtime-promotion.md) | velites 升格为一级 runtime 的实施计划（已落地） |
 | [velites-poc-report.md](velites-poc-report.md) | 时点报告（2026-07-31）：pi_agent_rust 替换 Node Pi CLI 的 PoC 验证 |
 | [velites-m2-validation.md](velites-m2-validation.md) | 时点报告（2026-07-31）：velites 与 Node pi 真 gateway 对照验证 |
