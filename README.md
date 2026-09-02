@@ -25,9 +25,9 @@ Agent Legion 是一个自托管控制台，把 AI agent 变成内容生产线的
 - **加机器就能扩容。** 远程 Agent Worker 经 HTTP 注册、领取执行、上传
   产物。容量按池分配并强制隔离，廉价的 code 任务洪水永远不会饿死你的
   agent 执行。
-- **可复现、可审计。** 外部 skill 就是普通 git 仓库，按锁定的 commit
-  固定版本；每次节点执行都留下完整痕迹（prompt、事件流、stderr），
-  事后可随时复查。
+- **可复现、可审计。** skill 是 skill root 下的本地 git 仓库，pin 到
+  具体 tag 的节点把 commit 锁进 DB；每次节点执行都留下完整痕迹
+  （prompt、事件流、stderr），事后可随时复查。
 - **秘密妥善处理。** workspace 与实例级凭据经 Fernet 加密进 vault；
   配置与快照只携带引用，永不落明文。
 - **默认多用户。** Cookie 会话 + CSRF 防护、admin 用户管理、按
