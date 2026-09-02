@@ -5,16 +5,23 @@ import {
 
 // approval rework 候选计算（#392 Phase 2）：镜像后端
 // approval_rework.execute_rework 的资格校验——target 必须在本审批门的
-// 祖先闭包内（排除 start，start 不参与重置）。非祖先目标保存后到运行期
-// rework 才被拒，选择器只给运行期必然合法的选项。边的判定源 =
-// after ∪ 草稿 edges（手写 v2 YAML 用 edges 声明依赖，与类型切换前置
-// 校验同一语义）。
+// 祖先闭包内（排除 start，start 不参与重置）。判定源 = after ∪ 草稿
+// edges：v1 草稿与 loader 物化（after 派生边 ∪ raw edges）精确一致；
+// v2 草稿以 edges 数组为准、after 是 echo 容错超集——手写 v2 的 after
+// 若引用 edges 未连的节点，候选会比运行期 ancestor_closure 宽（编辑
+// 合法后即收敛），不产生非法选项。
 export function approvalReworkCandidates(
   rawYaml: string,
   approvalKey: string
 ): string[] {
-  const draft = parseWorkflowYaml(rawYaml)
-  return reworkCandidatesFromDraft(draft, approvalKey)
+  // 渲染路径调用：YAML 编辑中途的非法文本让 parse 抛错时返回空候选
+  // （readApprovalNodeConfig 同款防御），编辑合法后自然恢复。
+  try {
+    const draft = parseWorkflowYaml(rawYaml)
+    return reworkCandidatesFromDraft(draft, approvalKey)
+  } catch {
+    return []
+  }
 }
 
 export function reworkCandidatesFromDraft(
@@ -31,14 +38,16 @@ export function reworkCandidatesFromDraft(
     set.add(edge.from)
     upstreamOf.set(edge.to, set)
   }
-  // 依赖闭包（BFS）：after 声明边 + edges 数组边双源。
+  // 依赖闭包（BFS）：after 声明边 + edges 数组边双源。终止条件用
+  // !== undefined——after 来自未校验的草稿文本，混入空串 key 时不能
+  // 让它静默截断整条遍历。
   const closure = new Set<string>()
   const queue = [
     ...(nodes[approvalKey]?.after ?? []),
     ...(upstreamOf.get(approvalKey) ?? []),
   ]
-  for (let dep = queue.shift(); dep; dep = queue.shift()) {
-    if (closure.has(dep)) continue
+  for (let dep = queue.shift(); dep !== undefined; dep = queue.shift()) {
+    if (!dep || closure.has(dep)) continue
     closure.add(dep)
     queue.push(...(nodes[dep]?.after ?? []), ...(upstreamOf.get(dep) ?? []))
   }

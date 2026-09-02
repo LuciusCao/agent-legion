@@ -47,18 +47,40 @@ describe('readApprovalNodeConfig', () => {
 })
 
 describe('patchWorkflowNodeApprovalConfig', () => {
-  it('overwrites only the whitelist keys', () => {
+  it('overwrites only the given key, keeping the other at its draft value', () => {
+    // 只传 reworkTarget：feedback_artifact 保留草稿现值（不物化读侧
+    // 默认 review_feedback.json）。
     const out = patchWorkflowNodeApprovalConfig(dagYaml, 'gate', {
       reworkTarget: 'intake',
-      feedbackArtifact: 'notes.md',
     })
     expect(parseNode(out, 'gate').config).toEqual({
+      rework_target: 'intake',
+      feedback_artifact: 'review.json',
+    })
+    // 只传 feedbackArtifact：rework_target 同理保留。
+    const out2 = patchWorkflowNodeApprovalConfig(dagYaml, 'gate', {
+      feedbackArtifact: 'notes.md',
+    })
+    expect(parseNode(out2, 'gate').config).toEqual({
       rework_target: 'intake',
       feedback_artifact: 'notes.md',
     })
   })
 
-  it('drops the config block entirely when both keys are empty', () => {
+  it('seeds the backend default when patching an approval node without config', () => {
+    const bare = dagYaml.replace(
+      '    config: {rework_target: intake, feedback_artifact: review.json}\n',
+      ''
+    )
+    const out = patchWorkflowNodeApprovalConfig(bare, 'gate', {
+      reworkTarget: 'intake',
+    })
+    expect(parseNode(out, 'gate').config).toEqual({
+      rework_target: 'intake',
+    })
+  })
+
+  it('drops the config block entirely when both keys are explicitly cleared', () => {
     const out = patchWorkflowNodeApprovalConfig(dagYaml, 'gate', {
       reworkTarget: '',
       feedbackArtifact: '',

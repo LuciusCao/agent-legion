@@ -33,8 +33,8 @@ const draftYaml = [
   '    capability: intake',
   '    after: [_start]',
   'edges:',
-  '  - source: _start',
-  '    target: intake',
+  '  - from: _start',
+  '    to: intake',
   '',
 ].join('\n')
 
@@ -121,8 +121,8 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
       '    skill: demo/skill',
       '    after: [draft_gen]',
       'edges:',
-      '  - source: _start',
-      '    target: draft_gen',
+      '  - from: _start',
+      '    to: draft_gen',
       '',
     ].join('\n')
     render(

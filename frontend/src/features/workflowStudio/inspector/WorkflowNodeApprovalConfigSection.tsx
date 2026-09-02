@@ -26,11 +26,13 @@ export function WorkflowNodeApprovalConfigSection(props: Props) {
   )
   const patch = (next: Partial<typeof config>) => {
     try {
+      // 只传变更键：patch 保留未传键的草稿现值，不物化读侧默认值。
       props.setDefinitionYaml(
-        patchWorkflowNodeApprovalConfig(props.definitionYaml, props.node.key, {
-          ...config,
-          ...next,
-        })
+        patchWorkflowNodeApprovalConfig(
+          props.definitionYaml,
+          props.node.key,
+          next
+        )
       )
     } catch {
       // 非法输入（如 feedback_artifact 带路径）不落草稿；静默保留原值，

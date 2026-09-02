@@ -38,8 +38,8 @@ const dagYaml = [
   '    config: {rework_target: intake, feedback_artifact: review.json}',
   '    after: [intake]',
   'edges:',
-  '  - source: _start',
-  '    target: intake',
+  '  - from: _start',
+  '    to: intake',
   '',
 ].join('\n')
 
@@ -199,5 +199,57 @@ describe('WorkflowNodeInspector for approval nodes (#392 Phase 2)', () => {
     ).nodes?.gate
     // 清空 rework_target：白名单键从 config 删除，feedback_artifact 保留。
     expect(node?.config).toEqual({ feedback_artifact: 'review.json' })
+  })
+
+  it('does not crash on mid-edit invalid yaml (read-side defense)', async () => {
+    mockApi.mockResolvedValue({
+      origin: 'none',
+      code: '',
+      has_draft: false,
+      draft_code: null,
+      draft_version: null,
+    })
+    useSettingStore.setState({ workspaceId: 'ws1' })
+    // 真实路径：已发布 workflow 提供节点详情（baseline 回落），YAML 编辑器
+    // 逐键落草稿产生瞬态非法文本——ApprovalConfigSection 拿 baseline 节点
+    // 对非法草稿调 parse，读函数必须吞错返回默认值（subagent P1 on #399），
+    // 否则整个 Studio 崩到全局错误页。
+    const brokenYaml = dagYaml.replace(
+      'config: {rework_target: intake, feedback_artifact: review.json}',
+      'config: {rework_target: intake'
+    )
+    const publishedWorkflow = {
+      key: 'demo',
+      label: 'demo',
+      nodes: [
+        {
+          key: 'gate',
+          label: '人工把关',
+          capability: '',
+          after: [],
+          inputs: [],
+          outputs: [],
+          node_type: 'approval',
+        },
+      ],
+      edges: [],
+    }
+    render(
+      <WorkflowNodeInspector
+        workflow={publishedWorkflow as never}
+        agentCatalog={[]}
+        selectedNodeKey="gate"
+        definitionYaml={brokenYaml}
+        setDefinitionYaml={() => {}}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    // section 渲染默认值（不抛、不崩）；下拉为空候选。
+    expect(await screen.findByLabelText('重置目标')).toHaveValue('')
+    expect(screen.getByLabelText('评审备注文件名')).toHaveValue(
+      'review_feedback.json'
+    )
   })
 })
