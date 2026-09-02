@@ -52,7 +52,7 @@ data/  (videos, logs, packages, jobs, run traces)
 | 节点 SDK / Worker 执行 | [node-sdk-and-worker-execution-design.md](node-sdk-and-worker-execution-design.md) | 节点 SDK（NodeContext）与 code 节点执行迁移 Worker 的合并设计（Issue #30/#82） |
 | 材料与 runs | [materials-and-runs-design.md](materials-and-runs-design.md) | runs / 材料 / bundle 文件夹条目 / 产物对象存储的输入模型与治理设计 |
 | velites 模型注册 | [velites-model-registry.md](velites-model-registry.md) | runtime-owned 模型发现与 velites provider registry（Worker 侧发现、Host 侧三元组路由） |
-| 文档治理提案 | [docs-governance-proposal.md](docs-governance-proposal.md) | 现行文档退役术语基线检查的设计提案（未实施；#360 文档 review 产出） |
+| 文档治理 | [docs-governance-proposal.md](docs-governance-proposal.md) | 现行文档退役术语基线检查（`docs_retired_terms`）的机制说明与维护指引 |
 
 ## 历史设计记录（时点快照，仅供溯源）
 
