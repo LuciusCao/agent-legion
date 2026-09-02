@@ -101,3 +101,24 @@ def test_effective_document_strips_retired_openclaw_block_from_stored_document()
     InstanceSettingsResponse.model_validate(document)
     # The caller's stored document is not mutated.
     assert "command_template" in stored["openclaw"]
+
+
+def test_effective_document_strips_retention_cursor_block() -> None:
+    """The retention sweep's persisted keyset cursors (#354) ride the stored
+    instance document but are host-private state: the effective document must
+    drop them so the extra=forbid response model validates."""
+    from server.app.routes.instance_settings_contracts import InstanceSettingsResponse
+    from server.app.services.instance_settings import effective_instance_document
+
+    stored = {
+        "execution_retention_days": 30,
+        "execution_retention_cursor": {
+            "requests:done": {"at": "2026-01-01T00:00:00+00:00", "id": "exec-1"}
+        },
+    }
+
+    document = effective_instance_document(stored)
+
+    assert "execution_retention_cursor" not in document
+    assert document["execution_retention_days"] == 30
+    InstanceSettingsResponse.model_validate(document)

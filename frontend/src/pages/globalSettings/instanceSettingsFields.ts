@@ -1,28 +1,13 @@
 // 实例设置表单的字段元数据表（从 InstanceSettingsSection 拆出以控制体积预算）。
 // P-0.5：code_capacity（内置 code 池容量，实例级，重启生效）在「代码池」组。
+// 保留策略类字段（materials/execution retention）见姊妹文件
+// instanceSettingsRetentionFields.ts。
 
-export interface NumberFieldDef {
-  path: string
-  label: string
-  integer: boolean
-  // 允许 0（语义为「关闭」的字段，如材料 TTL）；缺省要求 > 0。
-  allowZero?: boolean
-  // input 的 max 属性（与后端契约上界一致）；缺省不设。
-  max?: number
-  // 字段级提示，覆盖卡片顶部的统一文案（如热读字段无需重启）。
-  hint?: string
-}
+import type { FieldGroup, NumberFieldDef } from './instanceSettingsFieldTypes'
+import { RETENTION_FIELD_GROUPS } from './instanceSettingsRetentionFields'
 
-export interface ToggleDef {
-  path: string
-  label: string
-}
-
-export interface FieldGroup {
-  title: string
-  fields: NumberFieldDef[]
-  toggles: ToggleDef[]
-}
+export type { FieldGroup, NumberFieldDef } from './instanceSettingsFieldTypes'
+export { RETENTION_FIELD_GROUPS } from './instanceSettingsRetentionFields'
 
 export const FIELD_GROUPS: FieldGroup[] = [
   {
@@ -100,20 +85,7 @@ export const FIELD_GROUPS: FieldGroup[] = [
     fields: [{ path: 'code_capacity', label: 'code 池容量', integer: true }],
     toggles: [],
   },
-  {
-    title: '材料',
-    fields: [
-      {
-        path: 'materials_ttl_days',
-        label: '材料保留天数（0 关闭）',
-        integer: true,
-        allowZero: true,
-        max: 36500,
-        hint: '保存后立即生效，无需重启',
-      },
-    ],
-    toggles: [],
-  },
+  ...RETENTION_FIELD_GROUPS,
   {
     title: 'Worker 限制',
     fields: [

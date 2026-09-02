@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from server.app.agent_broker.claim import cancel_request
-from server.app.agent_broker.code_manifest import CODE_MANIFEST_TRIM
+from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.db.transaction import write_transaction
 from server.app.executors._failed_node_recording import record_failed_node_without_execution
 from server.app.services import failure_classification
@@ -24,11 +24,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Shared terminal 'done' write for the sweep paths: closes the request and
-# slims the code manifest back to the audit stub in the same statement
-# (CODE_MANIFEST_TRIM, issue #142).
+# slims the manifest back to the audit stub in the same statement
+# (MANIFEST_TRIM per kind: code #142, agent #354).
 _SWEEP_DONE_SQL = (
     "update agent_execution_requests set state='done', outcome_json=%s,"
-    " finished_at=current_timestamp, manifest_json=" + CODE_MANIFEST_TRIM + " where execution_id=%s"
+    " finished_at=current_timestamp, manifest_json=" + MANIFEST_TRIM + " where execution_id=%s"
 )
 
 
@@ -62,7 +62,7 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 conn.execute(
                     "update agent_execution_requests set state='done',"
                     " finished_at=current_timestamp, manifest_json="
-                    + CODE_MANIFEST_TRIM
+                    + MANIFEST_TRIM
                     + " where execution_id=%s and state in ('claimed', 'reporting')",
                     (row["execution_id"],),
                 )

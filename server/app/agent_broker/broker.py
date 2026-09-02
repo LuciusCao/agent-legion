@@ -22,9 +22,9 @@ from server.app.agent_broker.claim import (
     ClaimRacedError,
     claim_in_transaction,
 )
-from server.app.agent_broker.code_manifest import CODE_MANIFEST_TRIM
 from server.app.agent_broker.empty import EmptyClaimTrigger
 from server.app.agent_broker.enqueue import enqueue_request
+from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
@@ -264,7 +264,7 @@ class AgentExecutionBroker:
             conn.execute(
                 "update agent_execution_requests set state='done', outcome_json=%s,"
                 " finished_at=current_timestamp, manifest_json="
-                + CODE_MANIFEST_TRIM
+                + MANIFEST_TRIM
                 + " where execution_id=%s",
                 (json.dumps(dict(outcome), ensure_ascii=False), execution_id),
             )

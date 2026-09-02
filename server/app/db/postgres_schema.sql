@@ -652,6 +652,13 @@ create index if not exists idx_executor_leases_workspace_active on executor_leas
 create index if not exists idx_executor_leases_workspace_node_active
   on executor_leases(workspace_id, node_key, status, expires_at);
 create index if not exists idx_executor_leases_status_expires_at on executor_leases(status, expires_at);
+-- Retention keyset page (#354): the sweeper walks non-active leases by
+-- (expires_at, id) with status != 'active' — an inequality on the leading
+-- column of the status index, so it cannot serve the ordering. This partial
+-- twin gives the page an ordered scan without a sort, which matters on the
+-- first full sweep of a fat table.
+create index if not exists idx_executor_leases_retention_page
+  on executor_leases(expires_at, id) where status != 'active';
 create index if not exists idx_executor_leases_job_status on executor_leases(job_id, status);
 
 drop table if exists remote_executions;
@@ -740,14 +747,10 @@ create table if not exists agent_queue_signals (
   updated_at timestamptz not null default current_timestamp
 );
 
--- Runtime profile samples (schema v72, #359 L1): one global row per minute
--- bucket carrying the six-stage execution-pipeline gauges (intake / pass /
--- enqueue / claim / execute / result — each stage a depth, a rate and a
--- p50/p95 latency in seconds) plus the DB-pool and advisory-lock
--- cross-cutting waits. Written by the ops-metrics sampling loop; retention
--- shares monitoring.retention_days via the same cleanup pass. Latency
--- columns are null when the stage saw no traffic in the bucket (the
--- classifier must treat null as "no signal", never 0).
+-- Runtime profile samples (schema v72, #359 L1): one row per minute bucket
+-- with the six-stage pipeline gauges (depth/rate/latency) plus DB-pool
+-- waits. Retention shares monitoring.retention_days; latency null = the
+-- stage saw no traffic ("no signal", never 0).
 create table if not exists ops_runtime_profile_samples (
   bucket_start timestamptz primary key,
   -- intake: runs created + items enqueued in the bucket.
