@@ -10,6 +10,13 @@ export const NODE_TYPE_LABELS: Record<SwitchableNodeType, string> = {
   approval: '审批门',
 }
 
+// 切到 approval 会剥掉的字段（确认文案用；与 patchWorkflowNodeType 的
+// APPROVAL_FORBIDDEN_FIELDS 镜像清单保持同步）。
+const APPROVAL_SWITCH_WARNING =
+  '切换为审批门将清除该节点的 capability、execution、skill、' +
+  'shard/reduce、config_schema 与审批白名单以外的 config，且不可撤销' +
+  '（草稿历史可在 workflow-draft 版本中回退）。确定切换吗？'
+
 type Props = {
   label: string
   nodeKey: string
@@ -26,6 +33,15 @@ export function WorkflowNodeInspectorHeader(props: Props) {
     props.nodeType === 'code' ||
     props.nodeType === 'agent' ||
     props.nodeType === 'approval'
+  function handleChange(type: SwitchableNodeType) {
+    if (type === props.nodeType) return
+    // 切到 approval 是破坏性清洗（P1：设计稿 §4 要求确认文案明示清除
+    // 内容；草稿自动保存，误选即覆盖）。取消时把 select 值弹回原类型。
+    if (type === 'approval' && !window.confirm(APPROVAL_SWITCH_WARNING)) {
+      return
+    }
+    props.onNodeTypeChange?.(type)
+  }
   return (
     <header className={styles.header}>
       <div className={styles.identity}>
@@ -35,10 +51,7 @@ export function WorkflowNodeInspectorHeader(props: Props) {
             aria-label="节点类型"
             className={styles.typeSelect}
             value={props.nodeType}
-            onChange={(event) => {
-              const change = props.onNodeTypeChange
-              change?.(event.target.value as SwitchableNodeType)
-            }}
+            onChange={(event) => handleChange(event.target.value as SwitchableNodeType)}
           >
             {(Object.keys(NODE_TYPE_LABELS) as SwitchableNodeType[]).map(
               (type) => (

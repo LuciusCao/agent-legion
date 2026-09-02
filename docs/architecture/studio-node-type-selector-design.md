@@ -91,22 +91,33 @@ patchWorkflowNodeType(rawYaml, nodeKey, targetType: NodeType): string
 - start 不可切出（现有行为）；**切入 start 一并禁止**——一个 DAG 只允许
   一个 start（`ensure_start_node` 会拒绝第二个），选择器根本不提供该选项，
   保持 fail-closed。
+- **前置校验（写入前，不满足即保留原类型）**：草稿会自动保存，直接写
+  type 会把「type 已改、必填字段缺失」的半应用态持久化。目标 code/agent
+  要求非空 capability（loader.py 拒绝空 capability；approval 节点按契约
+  无 capability，approval→code/agent 必须先在「基本设置」补齐）；目标
+  approval 要求 after 里存在非 start 的上游（`validate_approval_edges`
+  同语义——仅 start 驱动的根节点切 approval 不可发布）。校验失败抛
+  `WorkflowNodeTypeSwitchError`，调用侧 toast 提示、草稿不动。
 - 切换时按目标类型做**字段清洗**，规则镜像后端：
 
   | 目标类型 | 清洗动作 |
-  |---|---|
-  | code | 剥 `skill`（#76：code 节点禁 skill）；剥 approval 专属 config 键（`rework_target/feedback_artifact`） |
-  | agent | 保留 `skill`；剥 approval 专属 config 键；保留 `capability`（门禁要求） |
-  | approval | 剥 `capability/execution/skill/shard/reduce/config_schema`；config 只留 `rework_target/feedback_artifact`（白名单） |
+|---|---|
+| code | 剥 `skill`（#76：code 节点禁 skill）；源是 approval 时剥审批专属 config 键 |
+| agent | 保留 `skill`；源是 approval 时剥审批专属 config 键；保留 `capability`（门禁要求） |
+| approval | 剥 `capability/execution/skill/shard/reduce/config_schema`；config 只留 `rework_target/feedback_artifact`（白名单） |
 
   清洗放独立纯函数 `sanitizeNodeForType(node, targetType)`，便于单测
-  直接对拍后端 `validate_approval_fields` 的用例。
+  直接对拍后端 `validate_approval_fields` 的用例。审批 config 键
+  （`rework_target/feedback_artifact`）并非全局保留字——可执行节点的
+  合法 config 键由其 `config_schema` 决定——因此只在**源类型是
+  approval** 时剥除，code↔agent 互切不动 config。
 
 **Inspector 头部** — `WorkflowNodeInspectorHeader.tsx`：kind 徽标位置
-替换为只读 MUI `Select`（readOnly 时退化为现有徽标）。选项
-`code/agent/approval`，start 不出现。onChange → `patchWorkflowNodeType`
-→ `setDefinitionYaml`，失败 toast 降级提示（沿用 switchToAgent 的降级
-文案模式）。
+替换为原生 `<select>`（与 inspector 现有原生 select 约定一致，readOnly
+时退化为徽标）。选项 `code/agent/approval`，start 不出现。onChange →
+（切 approval 先 `window.confirm` 确认清洗范围，studio 现有约定）→
+`patchWorkflowNodeType` → `setDefinitionYaml`；前置校验失败 toast、
+不可恢复错误降级提示手动改 YAML。
 
 **Agent 入口归位** — `WorkflowNodeExecutionSection.tsx`：code 类型不再
 渲染 `WorkflowNodeAgentEditor`。该入口移入 agent 类型的 section 集
@@ -172,18 +183,15 @@ const REGISTRY: Record<'code'|'agent'|'approval', NodeTypeSectionSpec>
   execution/skill 配置。这是 fail-closed 的代价（保留字段 = 下一次
   validate 必炸）。UI 上在切换确认文案中明示「将清除 X 类字段」，
   不做暂存回填——草稿有版本化的 workflow-draft API 兜底可回退。
-- **测试基线**：清洗规则纯函数直接对拍
-  `tests/workflows/test_approval_node_definition.py` 的字段禁令用例；
-  UI 层沿用 `WorkflowNodeInspector.test.tsx` 的渲染断言模式，新增
-  「code 节点无 Agent 入口」「approval 节点无 execution section」等
-  负向断言（正是本次用户反馈的回归线）。
 
 ## 5. 验收标准
 
 1. code 节点 inspector 不再出现任何 Agent 创建/编辑入口；类型选择器在
    头部，code/agent/approval 三选一。
-2. 任一类型切换后，草稿 YAML 立即通过 `validateWorkflowDraft`
-   （不因类型禁令字段报错）。
+2. 任一**通过前置校验的**类型切换后，草稿 YAML 立即通过
+   `validateWorkflowDraft`（不因类型禁令字段报错）；前置校验拦截的
+   切换（缺 capability、无可执行入边）保留原类型并 toast 提示，草稿
+   不落入半应用态。
 3. approval 节点经 UI 创建（Phase 3 后），带徽标、可配
    rework_target/feedback_artifact、无 execution/code/agent section。
 4. 现有 e2e 关键路径不回归：draft-only Agent 闭环（#387）、start 契约
@@ -191,8 +199,9 @@ const REGISTRY: Record<'code'|'agent'|'approval', NodeTypeSectionSpec>
 
 ## 6. 风险与开放问题
 
-- **R1 徽标→选择器的视觉回归**：头部徽标被 MUI Select 替换，紧凑布局
-  （`WorkflowNodeInspectorHeader.module.css`）需适配移动端。低风险，
+- **R1 徽标→选择器的视觉回归**：头部徽标被原生 select 替换（MUI Select
+  因 jsdom 下 menu 渲染与 inspector 现有原生 select 约定而弃用），紧凑
+  布局（`WorkflowNodeInspectorHeader.module.css`）需适配移动端。低风险，
   样式微调。
 - **R2 清洗规则与后端禁令漂移**：镜像规则可能随后端演进而过期。缓解：
   注释互相锚定（前端函数注释指向 `_FORBIDDEN_APPROVAL_FIELDS`），测试
@@ -201,3 +210,30 @@ const REGISTRY: Record<'code'|'agent'|'approval', NodeTypeSectionSpec>
   要求 approval 至少一条来自可执行节点的入边。新建未接线的 approval
   节点在 validate 时会报错——这是预期行为（引导用户接线），但创建
   流程的提示文案需说明，不静默吞错。
+
+## 7. Quality Impact
+
+- **无新 invariant / 无后端变更**：纯前端收口，后端
+  `EXEC-WORKFLOW-NODE-TYPE-001` / `EXEC-APPROVAL-001` 原样适用；不新增
+  迁移、不动 OpenAPI schema（`WorkflowNodeResponse.node_type` 取值域
+  已覆盖）。
+- **测试范围**：
+  - Phase 1（本 PR 已落地）：`workflowStudioYamlDraft.nodeType.test.ts`
+    纯函数单测（切换/清洗/前置校验/start 拒切），approval 禁令用例对拍
+    `tests/workflows/test_approval_node_definition.py`；
+    `WorkflowNodeInspector.test.tsx` 组件级断言（选择器渲染、切换清洗
+    传递、code 节点无 Agent 入口回归线、确认弹窗、前置校验 toast）。
+  - Phase 2：`nodeTypeRegistry` 的类型→section 组合表测试 + 各 section
+    卸载后的负向断言。
+  - Phase 3：`appendWorkflowNode` 的 YAML 追加单测 + approval 徽标渲染。
+- **质量门**：前端 lane（vitest + tsc + eslint）全绿是合入前提；本 PR
+  为纯前端变更，CI 按路径裁剪不触发后端 postgres lane。回归面集中在
+  workflowStudio inspector（46 个组件测试文件 / 316 用例全量跑过）。
+- **回归风险面**：
+  - 类型切换写草稿（`setDefinitionYaml`）复用现有 draft 持久化链，不
+    新增写路径；误切换的兜底是草稿版本化（workflow-draft API）。
+  - 「切换为 Agent 执行」按钮退役不删 Agent 面板本身——#387 闭环迁至
+    agent 节点入口，`WorkflowNodeAgentEditor.test.tsx` 用例改造后语义
+    对齐。
+  - 清洗规则仅影响草稿文本；已发布 revision 与运行中 job 不受影响
+    （发布才物化新 revision）。

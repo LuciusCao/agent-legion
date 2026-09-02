@@ -100,12 +100,30 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
   })
 
   it('switches the node type via the selector and sanitizes fields', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const setDefinitionYaml = vi.fn()
-    const yamlWithAgentFields = draftYaml.replace(
-      '  intake:\n    label: 读取知识点\n    capability: intake\n',
-      '  intake:\n    type: agent\n    label: 读取知识点\n' +
-        '    capability: intake\n    skill: demo/skill\n'
-    )
+    // intake 有可执行上游 draft_gen（approval 入边前置校验要求）。
+    const yamlWithAgentFields = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  draft_gen:',
+      '    type: code',
+      '    label: 起草',
+      '    capability: draft_gen',
+      '    after: [_start]',
+      '  intake:',
+      '    type: agent',
+      '    label: 读取知识点',
+      '    capability: intake',
+      '    skill: demo/skill',
+      '    after: [draft_gen]',
+      'edges:',
+      '  - source: _start',
+      '    target: draft_gen',
+      '',
+    ].join('\n')
     render(
       <WorkflowNodeInspector
         workflow={null}
@@ -123,12 +141,69 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
       target: { value: 'approval' },
     })
 
+    // 切 approval 是破坏性清洗：先确认（取消路径见下个用例）。
+    expect(window.confirm).toHaveBeenCalledWith(
+      expect.stringContaining('切换为审批门将清除')
+    )
     expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
     const nextYaml = setDefinitionYaml.mock.calls[0][0] as string
     // type 改为 approval 且字段按目标类型清洗（capability/skill 剥除）。
     expect(nextYaml).toContain('type: approval')
     expect(nextYaml).not.toContain('capability: intake')
     expect(nextYaml).not.toContain('skill: demo/skill')
+  })
+
+  it('keeps the draft untouched when the approval-switch confirm is dismissed', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const setDefinitionYaml = vi.fn()
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        agentCatalog={[]}
+        selectedNodeKey="intake"
+        definitionYaml={draftYaml}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    await screen.findByLabelText('节点执行能力')
+    fireEvent.change(await screen.findByLabelText('节点类型'), {
+      target: { value: 'approval' },
+    })
+
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+  })
+
+  it('blocks →approval without an executable upstream and toasts the reason', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const setDefinitionYaml = vi.fn()
+    // intake 只有 start 上游：validate_approval_edges 同语义，前置校验拦下。
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        agentCatalog={[]}
+        selectedNodeKey="intake"
+        definitionYaml={draftYaml}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    await screen.findByLabelText('节点执行能力')
+    fireEvent.change(await screen.findByLabelText('节点类型'), {
+      target: { value: 'approval' },
+    })
+
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+    const { useUiStore } = await import('../../../stores/uiStore')
+    await vi.waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toContain(
+        '可执行节点的入边'
+      )
+    )
   })
 
   it('renders no agent entry on a code node (#392 regression)', async () => {
