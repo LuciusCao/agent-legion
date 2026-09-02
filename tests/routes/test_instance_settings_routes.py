@@ -35,6 +35,7 @@ def _payload() -> dict:
         "sweeper_interval_seconds": 5.0,
         "code_capacity": 16,
         "materials_ttl_days": 0,
+        "execution_retention_days": 0,
         "workflows": {"enabled": True},
         "agent_workers": {"max_archive_bytes": 64 * 1024 * 1024, "min_protocol_version": 1},
     }
@@ -88,6 +89,26 @@ def test_get_strips_legacy_stored_openclaw_block(client) -> None:
 
     assert response.status_code == 200, response.text
     assert "openclaw" not in response.json()
+
+
+def test_get_strips_retention_cursor_block(client) -> None:
+    """The retention sweep's persisted keyset cursors (#354) ride the stored
+    instance document; GET must drop them instead of failing the
+    extra=forbid response validation with a 500."""
+    from server.app.services.instance_settings_store import InstanceSettingsStore
+
+    store = InstanceSettingsStore(client.app.state.job_db.dsn_identity)
+    document = _payload()
+    document["execution_retention_cursor"] = {
+        "requests:done": {"at": "2026-01-01T00:00:00+00:00", "id": "exec-1"}
+    }
+    store.put(document)
+
+    response = client.get(INSTANCE_SETTINGS_URL)
+
+    assert response.status_code == 200, response.text
+    assert "execution_retention_cursor" not in response.json()
+    assert response.json()["execution_retention_days"] == 0
 
 
 def test_put_roundtrip(client) -> None:

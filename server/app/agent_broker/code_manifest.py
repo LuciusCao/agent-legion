@@ -2,18 +2,19 @@
 
 The queued manifest must never embed the heavy ``runtime_context`` payloads:
 a full intake batch row is ~1.7MB, and ~112k code executions grew
-``agent_execution_requests`` to ~198G of TOAST. This module owns the three
-halves of the fix:
+``agent_execution_requests`` to ~198G of TOAST. This module owns the enqueue
+and claim halves of the fix:
 
 - ``runtime_context_stub``: the lightweight audit reference (job/workspace
   ids, batch_id + batch_hash) that IS persisted at enqueue;
 - ``resolve_code_runtime_context``: the claim-response-path rebuild of the
   full runtime_context (job, workspace, settings_config, job_batch,
   skill_versions) — memory only, never persisted, mirroring the secret
-  injection in ``resolve_code_manifest_config``;
-- ``CODE_MANIFEST_TRIM``: the SQL fragment that slims terminal kind='code'
-  rows back to the stub (legacy rows enqueued before the fix still carry the
-  full context; every terminal transition applies it).
+  injection in ``resolve_code_manifest_config``.
+
+The terminal-state trim SQL (code stub here, agent skeleton in
+``manifest_trim.py``) lives in ``manifest_trim.MANIFEST_TRIM``; every
+terminal transition of ``agent_execution_requests`` applies it.
 """
 
 from __future__ import annotations
@@ -31,33 +32,6 @@ from server.app.services.material_cache import material_claim_block
 from server.app.services.run_payload import sdk_batch_row
 
 logger = logging.getLogger(__name__)
-
-# SQL fragment: replace the heavy runtime_context of a kind='code' row with
-# the lightweight audit stub. Applied on every terminal-state transition
-# (broker mark_done, cancel_request, requeue-limit-exceeded, zombie-claim
-# close, agent-disabled and unclaimable sweeps, rerun cancellation in
-# jobs/atomic_mutations.py); the qualified table name keeps the correlated
-# jobs lookup unambiguous inside each UPDATE.
-CODE_MANIFEST_TRIM = """
-case when kind = 'code' then
-  jsonb_set(
-    manifest_json::jsonb,
-    '{runtime_context}',
-    jsonb_build_object(
-      'job_id', agent_execution_requests.job_id,
-      'workspace_id', agent_execution_requests.workspace_id,
-      'batch_id', coalesce(
-        nullif(manifest_json::jsonb #>> '{runtime_context,batch_id}', ''),
-        nullif(manifest_json::jsonb #>> '{runtime_context,job,batch_id}', ''),
-        nullif(manifest_json::jsonb #>> '{runtime_context,job,run_id}', ''),
-        (select nullif(j.run_id, '') from jobs j where j.id = agent_execution_requests.job_id)
-      ),
-      'batch_hash', nullif(manifest_json::jsonb #>> '{runtime_context,batch_hash}', '')
-    )
-  )::text
-else manifest_json
-end
-"""
 
 
 def _json_safe(value: Any) -> Any:

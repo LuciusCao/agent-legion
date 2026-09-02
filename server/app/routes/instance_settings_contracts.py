@@ -51,6 +51,13 @@ class InstanceSettingsDocument(BaseModel):
     # DB at material completion time, so edits take effect without restart.
     # Upper bound ~100 years: larger values overflow now() + make_interval.
     materials_ttl_days: int = Field(ge=0, le=36500)
+    # Execution-plane row retention in days (issue #354); 0 = disabled
+    # (nothing is ever deleted — the safe default). When enabled, the
+    # execution-retention sweep deletes terminal ``agent_execution_requests``
+    # / ``executor_leases`` / ``node_run_token_usage`` rows older than the
+    # window, in small batches. Read fresh from the DB at sweep time, so
+    # edits take effect without restart.
+    execution_retention_days: int = Field(ge=0, le=36500)
     workflows: InstanceWorkflowsSettings
     agent_workers: InstanceAgentWorkersSettings
 

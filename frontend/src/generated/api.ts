@@ -3758,6 +3758,8 @@ export interface components {
       cleanup: components['schemas']['InstanceCleanupSettings']
       /** Code Capacity */
       code_capacity: number
+      /** Execution Retention Days */
+      execution_retention_days: number
       /** Heartbeat Failure Threshold */
       heartbeat_failure_threshold: number
       /** Heartbeat Interval Seconds */
@@ -3784,6 +3786,8 @@ export interface components {
       cleanup: components['schemas']['InstanceCleanupSettings']
       /** Code Capacity */
       code_capacity: number
+      /** Execution Retention Days */
+      execution_retention_days: number
       /** Heartbeat Failure Threshold */
       heartbeat_failure_threshold: number
       /** Heartbeat Interval Seconds */
