@@ -86,7 +86,19 @@ on conflict (run_id, status) do update set cnt = excluded.cnt
 """
 
 
+# Retention keyset page (#354 review P2): non-active leases by (expires_at,
+# id) — the status index cannot serve this ordering (leading inequality).
+# Lives in the migration (not the schema file) to keep the schema file
+# within its absolute line budget; create-if-not-exists keeps replay
+# idempotent, and fresh databases run every migration after the replay.
+_RETENTION_INDEX_DDL = """
+create index if not exists idx_executor_leases_retention_page
+  on executor_leases(expires_at, id) where status != 'active';
+"""
+
+
 def migrate_run_job_status_counts(conn: Any) -> None:
     """Create the run counter trigger and backfill it from jobs (v73)."""
     conn.execute(_TRIGGER_DDL)
+    conn.execute(_RETENTION_INDEX_DDL)
     conn.execute(_BACKFILL_SQL)

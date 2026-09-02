@@ -475,16 +475,15 @@ exemptions:
 - check: architecture.file_budget
   path: server/app/db/postgres_schema.sql
   reason: >-
-    Re-filed (#358 merge round): the schema file now carries BOTH new
-    tables — ops_runtime_profile_samples (v72, #359) and
-    run_job_status_counts (v73, #358) — each one cohesive block whose
-    growth model is one block per schema version. Splitting a create-table
-    block out of the replay schema would fork the single source of truth
-    for fresh databases; revisit only if the schema file needs a
-    structural split of its own.
+    Issue #359 adds the ops_runtime_profile_samples gauge table (schema
+    v72): the six-stage pipeline columns are one cohesive block in the
+    declarative schema file whose growth model is one block per schema
+    version. Splitting a create-table block out of the replay schema would
+    fork the single source of truth for fresh databases; revisit only if
+    the schema file needs a structural split of its own.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
-  ceiling: 863
+  ceiling: 851
 - check: architecture.file_budget
   path: server/app/agent_broker/sweepers.py
   reason: >-

@@ -532,12 +532,8 @@ create trigger jobs_status_counts_sync
 -- cnt<>0 read skips. The jobs sync trigger lives in the v73 MIGRATION, not
 -- here — it references NEW.run_id, absent until v53's rename (same
 -- replay-order rule as idx_jobs_run_id, v59).
-create table if not exists run_job_status_counts (
-  run_id text not null,
-  status text not null,
-  cnt bigint not null,
-  primary key(run_id, status)
-);
+create table if not exists run_job_status_counts (run_id text not null, status text not null,
+  cnt bigint not null, primary key(run_id, status));
 -- Workspace job NODE status counters (schema v56, DB-JOB-NODE-STATUS-COUNTS-001):
 -- count_workspace_job_nodes_by_status serves the workspace DAG endpoint; as a
 -- join+group-by over job_nodes ⋈ jobs it is O(workspace job_nodes) per call
@@ -665,10 +661,7 @@ create index if not exists idx_executor_leases_workspace_active on executor_leas
 create index if not exists idx_executor_leases_workspace_node_active
   on executor_leases(workspace_id, node_key, status, expires_at);
 create index if not exists idx_executor_leases_status_expires_at on executor_leases(status, expires_at);
--- Retention keyset page (#354): non-active leases by (expires_at, id) —
--- the status index cannot serve this ordering (leading inequality).
-create index if not exists idx_executor_leases_retention_page
-  on executor_leases(expires_at, id) where status != 'active';
+
 create index if not exists idx_executor_leases_job_status on executor_leases(job_id, status);
 
 drop table if exists remote_executions;
