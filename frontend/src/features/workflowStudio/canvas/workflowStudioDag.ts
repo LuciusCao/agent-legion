@@ -4,7 +4,7 @@ import type {
 } from '../../../components/dag/DagGraph'
 import type { WorkflowDefinitionRecord } from '../../../types'
 import { conditionLabel } from '../shared/workflowStudioModel'
-import { topologyBadges } from './workflowStudioDagBadges'
+import { topologyBadges } from '../shared/workflowStudioTopologyBadges'
 import { nodeExecutionWarning } from './workflowStudioExecutionWarnings'
 import {
   resolveStudioNodeRouting,

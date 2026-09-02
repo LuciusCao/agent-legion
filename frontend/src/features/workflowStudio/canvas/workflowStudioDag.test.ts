@@ -169,4 +169,18 @@ describe('buildDagNodes', () => {
       true
     )
   })
+
+  it('badges approval nodes and keeps them free of execution warnings (#392 Phase 3)', () => {
+    const nodes = buildDagNodes({
+      ...workflow,
+      nodes: workflow.nodes.map((node) =>
+        node.key === 'branch' ? { ...node, node_type: 'approval' } : node
+      ),
+    })
+
+    // approval 专属徽标（EXEC-APPROVAL-001），叠加拓扑徽标（branch）。
+    expect(nodes[1].topologyBadges).toEqual(['approval', 'branch'])
+    // 审批门不 dispatch：不产生 execution 缺口误报。
+    expect(nodes[1].executionWarning).toBeUndefined()
+  })
 })

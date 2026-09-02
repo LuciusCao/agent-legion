@@ -3,6 +3,14 @@ import type { DagNodeStatus } from '../dagNodeStatus'
 
 export type DagNodeChangeType = 'added' | 'modified' | 'removed'
 
+// 拓扑/类型徽标联合（#392 Phase 3）：approval 为审批门专属徽标。
+export type TopologyBadge =
+  | 'start'
+  | 'approval'
+  | 'entry'
+  | 'branch'
+  | 'terminal'
+
 export interface DagNodeData extends Record<string, unknown> {
   label: string
   status: DagNodeStatus
@@ -17,7 +25,7 @@ export interface DagNodeData extends Record<string, unknown> {
   /** #333：agent 节点有效 execution 缺 provider/model 时的警告文案（仅
    * Studio 画布注入；缺失即 undefined，节点不显示警告徽标）。 */
   executionWarning?: string
-  topologyBadges?: Array<'start' | 'entry' | 'branch' | 'terminal'>
+  topologyBadges?: TopologyBadge[]
   terminalOutcome?: string
   inputs: string[]
   outputs: string[]

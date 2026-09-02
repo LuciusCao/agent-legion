@@ -43,7 +43,7 @@ export interface DagGraphNode {
   executorUnbound?: boolean
   /** Studio 注入的 execution 缺口警告文案（#333）；见 dagNodeTypes。 */
   executionWarning?: string
-  topologyBadges?: Array<'start' | 'entry' | 'branch' | 'terminal'>
+  topologyBadges?: Array<'start' | 'approval' | 'entry' | 'branch' | 'terminal'>
   terminalOutcome?: string
   inputs?: string[]
   outputs?: string[]
