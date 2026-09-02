@@ -1,9 +1,9 @@
 import type { WorkflowNodeRecord } from '../../../types'
-import { parseWorkflowYaml } from '../shared/workflowStudioYamlDraft.parse'
 import {
   patchWorkflowNodeApprovalConfig,
   readApprovalNodeConfig,
 } from '../shared/workflowStudioYamlDraft.approvalConfig'
+import { approvalReworkCandidates } from '../shared/workflowStudioApprovalRework'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
 import editorStyles from './WorkflowStructuredEditor.module.css'
 
@@ -15,9 +15,9 @@ type Props = {
 }
 
 // 审批门专属配置（#392 Phase 2，EXEC-APPROVAL-001）：rework_target =
-// rework 决策默认重置的上游节点（候选 = 草稿里的可执行节点，start 不
-// 参与重置）；feedback_artifact = 评审备注写入的产物文件名。写路径经
-// patchWorkflowNodeApprovalConfig 只落白名单键。
+// rework 决策默认重置的上游节点（候选 = 祖先闭包内的可执行节点，见
+// workflowStudioApprovalRework）；feedback_artifact = 评审备注写入的
+// 产物文件名。写路径经 patchWorkflowNodeApprovalConfig 只落白名单键。
 export function WorkflowNodeApprovalConfigSection(props: Props) {
   const config = readApprovalNodeConfig(props.definitionYaml, props.node.key)
   const candidates = approvalReworkCandidates(
@@ -33,7 +33,7 @@ export function WorkflowNodeApprovalConfigSection(props: Props) {
         })
       )
     } catch {
-      // 非法输入（如 feedback_artifact 带路径）不落草稿；静默保留原值,
+      // 非法输入（如 feedback_artifact 带路径）不落草稿；静默保留原值，
       // 输入框受控回弹。本节点只可能是 approval（registry 保证）。
     }
   }
@@ -73,15 +73,4 @@ export function WorkflowNodeApprovalConfigSection(props: Props) {
       </p>
     </section>
   )
-}
-
-// rework 候选 = 本节点之外的可执行节点（code/agent/approval；start 不
-// 参与重置，loader 也不会把它重置）。
-function approvalReworkCandidates(rawYaml: string, selfKey: string): string[] {
-  const nodes: Record<string, { type?: string }> =
-    parseWorkflowYaml(rawYaml).nodes ?? {}
-  return Object.entries(nodes)
-    .filter(([key, node]) => key !== selfKey && node.type !== 'start')
-    .map(([key]) => key)
-    .sort()
 }

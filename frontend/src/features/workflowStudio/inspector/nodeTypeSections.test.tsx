@@ -112,6 +112,58 @@ describe('WorkflowNodeInspector for approval nodes (#392 Phase 2)', () => {
     expect(screen.getByLabelText('节点名称')).toHaveValue('人工把关')
   })
 
+  it('offers only ancestor nodes as rework candidates (execute_rework mirror)', async () => {
+    mockApi.mockResolvedValue({
+      origin: 'none',
+      code: '',
+      has_draft: false,
+      draft_code: null,
+      draft_version: null,
+    })
+    useSettingStore.setState({ workspaceId: 'ws1' })
+    // gate 的上游 = intake；publish 是 gate 的下游、side 是平行分支，
+    // 都不是合法 rework 目标（运行期 ancestor_closure 会拒）。
+    const yamlWithBranches = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  intake:',
+      '    type: code',
+      '    capability: intake',
+      '    after: [_start]',
+      '  side:',
+      '    type: code',
+      '    capability: side',
+      '    after: [_start]',
+      '  gate:',
+      '    type: approval',
+      '    after: [intake]',
+      '  publish:',
+      '    type: code',
+      '    capability: publish',
+      '    after: [gate]',
+      '',
+    ].join('\n')
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        agentCatalog={[]}
+        selectedNodeKey="gate"
+        definitionYaml={yamlWithBranches}
+        setDefinitionYaml={() => {}}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    const select = (await screen.findByLabelText(
+      '重置目标'
+    )) as HTMLSelectElement
+    const options = Array.from(select.options).map((o) => o.value)
+    expect(options).toEqual(['', 'intake'])
+  })
+
   it('writes rework_target through the approval config patcher', async () => {
     const setDefinitionYaml = vi.fn()
     mockApi.mockResolvedValue({
