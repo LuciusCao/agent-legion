@@ -196,16 +196,23 @@ describe('WorkflowNodeExecutionSection', () => {
     )
   })
 
-  it('shows the code-pool state and the switch-to-agent entry for a code node', () => {
+  it('shows the code-pool state without any agent entry for a code node (#392)', () => {
     renderSection({
       node: { ...node, node_type: 'code', capability: 'missing' },
       ...editorProps,
     })
 
     expect(screen.getByText('内置 code 池执行')).toBeInTheDocument()
+    // code 节点不再长出 Agent 入口（类型变更走头部类型选择器）。
     expect(
-      screen.getByRole('button', { name: '切换为 Agent 执行' })
-    ).toBeInTheDocument()
+      screen.queryByRole('button', { name: '切换为 Agent 执行' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '为此 capability 新建 Agent' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '编辑 Agent' })
+    ).not.toBeInTheDocument()
   })
 
   it('points an agent node without a published Agent to the create entry', () => {
