@@ -58,6 +58,16 @@ See [README.md](README.md) for the full quick start and the demo workflow.
   logs — use the vault / env channels described in AGENTS.md §8.
 - Architecture boundary changes must be reflected in
   `config/architecture/` (invariants, exemptions, budgets); see AGENTS.md §5.
+- Versioning is decoupled per component: `velites/Cargo.toml` and
+  `frontend/package.json` carry their own version lines and must **not** be
+  bumped alongside the repository version (`pyproject.toml`). Advance them
+  only when the component itself changed since its last version bump —
+  `scripts/check_versions.py` (part of the backend static round) rejects a
+  lockstep bump with no source changes behind it, because the velites binary
+  freshness fingerprint (`ensure-velites.sh`) and the Docker layer cache key
+  off the component's source tree. Lockfile versions must stay in sync with
+  their manifest (`uv lock` / `cargo update -w` /
+  `npm install --package-lock-only`).
 
 ## Reporting issues
 

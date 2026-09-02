@@ -83,3 +83,24 @@ entries:
   observed: Local pre-push quick gate for 9f479768 (pull request 175),
     2026-08-26; retry run passed in 47s.
   recurring: true
+- id: FLAKY-008
+  scope: backend:shard-finish-aggregate-race
+  owner: workflow-runtime
+  reason: >-
+    tests/full/test_shard_fanout_e2e.py::test_shard_fanout_aggregates_to_completed
+    failed once on develop (CI run 32805657584, backend-postgres-b, 2026-08-25)
+    and reproduced locally at ~12% per isolated run: every shard and lease
+    committed terminal, yet the node wedged in 'running' — not poll timing
+    (widening the window never recovers). Root cause is a lost-update race in
+    on_shard_finished: two concurrent finish transactions for the last shards
+    each read the peer's uncommitted status under READ COMMITTED, both
+    computed a non-terminal aggregate, and nothing ever re-read it. Fixed by
+    taking ordered row locks on the node's shard rows before the update, so
+    the second finisher observes the first one's commit (regression tests in
+    tests/workflows/test_sharding_concurrency.py). Delete this entry once a
+    scheduled nightly run confirms the fix; NOT covered by retrying — the
+    wedge is permanent, and the tests/full lane runs without --reruns.
+  observed: CI run 32805657584 (develop, backend-postgres-b) 2026-08-25;
+    local repro ~1-in-8 isolated runs before the fix, 55+ consecutive passes
+    after.
+  deadline: 2026-09-15
