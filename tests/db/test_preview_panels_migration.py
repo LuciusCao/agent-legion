@@ -70,11 +70,12 @@ def test_migration_widens_legacy_check_and_is_idempotent() -> None:
 @pytest.mark.fresh_schema
 def test_upgrade_from_v70_applies_the_widening() -> None:
     # Upgrade path: a database recorded at v70 replays the schema file (a no-op
-    # for the existing table) and runs only the v71 migration.
-    assert SCHEMA_VERSION == 71
-    assert MIGRATIONS[-1].name == "preview_panels"
+    # for the existing table) and runs the v71+ migrations. At SCHEMA_VERSION
+    # 72 the increment also includes v72 (run_job_status_counts, #358).
+    assert SCHEMA_VERSION == 72
+    assert MIGRATIONS[-1].name == "run_job_status_counts"
     with write_transaction(TEST_DATABASE_URL) as conn:
-        conn.execute("delete from schema_migrations where version = 71")
+        conn.execute("delete from schema_migrations where version >= 71")
         conn.execute(_LEGACY_CHECK_DDL)
     init_db(TEST_DATABASE_URL)
     with write_transaction(TEST_DATABASE_URL) as conn:

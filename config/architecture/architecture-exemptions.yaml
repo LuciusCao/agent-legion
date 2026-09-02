@@ -1,5 +1,15 @@
 exemptions:
 - check: architecture.file_budget
+  path: frontend/src/pages/globalSettings/instanceSettingsFields.ts
+  reason: The issue-358 batch adds the workflows.max_items_per_run field row
+    (the admin-side edit surface for the per-run item cap); the declarative
+    field table grew past its plain baseline by that single entry. Stale
+    when the instance settings form is next restructured or the table is
+    split by group.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/358
+  ceiling: 149
+- check: architecture.file_budget
   path: server/app/routes/artifacts.py
   reason: Artifact routes authenticate the per-Worker token used by Agent
     execution transport, and the per-file upload path grew past the plain
@@ -266,9 +276,11 @@ exemptions:
   ceiling: 242
 - check: architecture.file_budget
   path: server/app/db/migration_chain.py
-  reason: The issue-211 M2 batch registers v70 (retire_workflow_key_columns) —
-    one registry entry plus its comment; the chain only grows one entry per
-    schema version. Stale after the M3 cleanup collapses the chain comments.
+  reason: The chain registers one entry per schema version and cannot shrink;
+    it grew past the plain baseline with v70 (#211 M2) and again with v72
+    (#358 run_job_status_counts — one import plus one entry, offset by
+    compressing the module docstring). Stale after the issue-211 M3 cleanup
+    collapses the chain comments.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 108

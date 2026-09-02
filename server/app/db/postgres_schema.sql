@@ -525,6 +525,24 @@ drop trigger if exists jobs_status_counts_sync on jobs;
 create trigger jobs_status_counts_sync
   after insert or delete or update of status, workspace_id on jobs
   for each row execute function sync_workspace_job_status_counts();
+-- RUN job status counters (schema v72, DB-RUN-JOB-STATUS-COUNTS-001):
+-- count_jobs_by_status_in_run served run-detail job_stats with a group-by
+-- over the run's whole jobs slice — O(run jobs) per refresh (#358); row
+-- triggers keep this table in sync so the read is a PK lookup, and it is
+-- the data source for the #350 run progress view. run_id='' rows are not
+-- counted; no FK to runs (jobs.run_id is unconstrained text by design, so
+-- any non-empty run_id is counted; a vanished run lingers at cnt=0, which
+-- the cnt<>0 read skips; backfill: migrate_run_job_status_counts). The
+-- sync trigger on jobs lives in the v72 MIGRATION, not here: a schema-file
+-- entry references NEW.run_id, which does not exist until migrate_runs
+-- (v53) renames batch_id — the same replay-order rule as idx_jobs_run_id
+-- (v59).
+create table if not exists run_job_status_counts (
+  run_id text not null,
+  status text not null,
+  cnt bigint not null,
+  primary key(run_id, status)
+);
 -- Workspace job NODE status counters (schema v56, DB-JOB-NODE-STATUS-COUNTS-001):
 -- count_workspace_job_nodes_by_status serves the workspace DAG endpoint; as a
 -- join+group-by over job_nodes ⋈ jobs it is O(workspace job_nodes) per call

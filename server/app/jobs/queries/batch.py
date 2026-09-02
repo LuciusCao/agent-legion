@@ -87,9 +87,13 @@ class RunQueriesMixin(RunQueueQueriesMixin):
         return [dict(row) for row in rows]
 
     def count_jobs_by_status_in_run(self, run_id: str) -> dict[str, int]:
+        # Reads the trigger-maintained counter table
+        # (DB-RUN-JOB-STATUS-COUNTS-001) instead of a group-by over the
+        # run's whole jobs slice — the run detail endpoint polls this per
+        # refresh, which scanned every job of 10^6-item runs (#358).
         with self._connect_read() as conn:
             rows = conn.execute(
-                "select status, count(*) as count from jobs where run_id=%s group by status",
+                "select status, cnt from run_job_status_counts where run_id=%s and cnt<>0",
                 (run_id,),
             ).fetchall()
-        return {str(row["status"]): int(row["count"]) for row in rows}
+        return {str(row["status"]): int(row["cnt"]) for row in rows}

@@ -36,6 +36,7 @@ function toFormValues(doc: InstanceSettingsResponse): FormValues {
     code_capacity: String(doc.code_capacity),
     materials_ttl_days: String(doc.materials_ttl_days),
     'workflows.enabled': doc.workflows.enabled,
+    'workflows.max_items_per_run': String(doc.workflows.max_items_per_run),
     'agent_workers.max_archive_bytes': String(
       doc.agent_workers.max_archive_bytes
     ),
@@ -98,7 +99,10 @@ function buildPayload(values: FormValues): InstanceSettingsUpdate {
     sweeper_interval_seconds: parseNumber(values, 'sweeper_interval_seconds'),
     code_capacity: parseNumber(values, 'code_capacity'),
     materials_ttl_days: parseNumber(values, 'materials_ttl_days'),
-    workflows: { enabled: Boolean(values['workflows.enabled']) },
+    workflows: {
+      enabled: Boolean(values['workflows.enabled']),
+      max_items_per_run: parseNumber(values, 'workflows.max_items_per_run'),
+    },
     agent_workers: {
       max_archive_bytes: parseNumber(values, 'agent_workers.max_archive_bytes'),
       min_protocol_version: parseNumber(

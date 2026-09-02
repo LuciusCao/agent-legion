@@ -116,7 +116,7 @@ const instanceSettings: InstanceSettingsResponse = {
   sweeper_interval_seconds: 60,
   code_capacity: 16,
   materials_ttl_days: 0,
-  workflows: { enabled: true },
+  workflows: { enabled: true, max_items_per_run: 20000 },
   agent_workers: { max_archive_bytes: 104857600, min_protocol_version: 2 },
   skills_root: '~/.agents/skills',
 }

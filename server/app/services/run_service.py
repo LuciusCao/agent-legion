@@ -86,6 +86,13 @@ class RunService:
         definition = workflow_definition_from_dict(json.loads(active_revision["definition_json"]))
         if not items:
             raise InvalidOperationError("At least one item is required")
+        max_items = self.settings.executor_runtime.workflows.max_items_per_run
+        if max_items and len(items) > max_items:
+            raise InvalidOperationError(
+                f"Run items exceed the per-run limit: {len(items)} > {max_items}."
+                " Split the submission into smaller runs (the limit is"
+                " workflows.max_items_per_run in instance settings)."
+            )
         validate_run_item_types(definition, items)
 
         # Validate everything (items, node config, pins) before the first

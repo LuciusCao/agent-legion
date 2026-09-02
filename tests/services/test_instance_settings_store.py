@@ -53,7 +53,7 @@ def test_default_document_matches_retired_yaml_values() -> None:
     assert document["heartbeat_failure_threshold"] == 3
     assert document["sweeper_enabled"] is True
     assert document["sweeper_interval_seconds"] == 5.0
-    assert document["workflows"] == {"enabled": True}
+    assert document["workflows"] == {"enabled": True, "max_items_per_run": 20_000}
     assert document["agent_workers"] == {
         "max_archive_bytes": 64 * 1024 * 1024,
         "min_protocol_version": 1,

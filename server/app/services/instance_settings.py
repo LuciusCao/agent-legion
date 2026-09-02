@@ -43,7 +43,10 @@ def default_instance_document() -> dict[str, Any]:
     document: dict[str, Any] = {
         "cleanup": dict(DEFAULT_CLEANUP_CONFIG),
         "monitoring": dict(DEFAULT_MONITORING_CONFIG),
-        "workflows": {"enabled": runtime.workflows.enabled},
+        "workflows": {
+            "enabled": runtime.workflows.enabled,
+            "max_items_per_run": runtime.workflows.max_items_per_run,
+        },
         "agent_workers": {
             "max_archive_bytes": runtime.agent_workers.max_archive_bytes,
             "min_protocol_version": runtime.agent_workers.min_protocol_version,
@@ -103,6 +106,7 @@ def apply_instance_settings(settings: Settings, database_dsn: ConnectSource) -> 
     for key in _EXECUTOR_SCALAR_KEYS:
         base[key] = effective[key]
     base["workflows"]["enabled"] = effective["workflows"]["enabled"]
+    base["workflows"]["max_items_per_run"] = effective["workflows"]["max_items_per_run"]
     base["agent_workers"]["max_archive_bytes"] = effective["agent_workers"]["max_archive_bytes"]
     base["agent_workers"]["min_protocol_version"] = effective["agent_workers"][
         "min_protocol_version"

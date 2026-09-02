@@ -35,7 +35,7 @@ def _payload() -> dict:
         "sweeper_interval_seconds": 5.0,
         "code_capacity": 16,
         "materials_ttl_days": 0,
-        "workflows": {"enabled": True},
+        "workflows": {"enabled": True, "max_items_per_run": 20_000},
         "agent_workers": {"max_archive_bytes": 64 * 1024 * 1024, "min_protocol_version": 1},
     }
 

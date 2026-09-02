@@ -3803,6 +3803,11 @@ export interface components {
     InstanceWorkflowsSettings: {
       /** Enabled */
       enabled: boolean
+      /**
+       * Max Items Per Run
+       * @default 20000
+       */
+      max_items_per_run: number
     }
     /** JobBatchRequest */
     JobBatchRequest: {

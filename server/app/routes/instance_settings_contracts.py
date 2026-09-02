@@ -24,6 +24,9 @@ class InstanceWorkflowsSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool
+    # Hard cap on one run's submitted items (#358 / #349 P0-1); 0 disables.
+    # Restart-effective like the rest of the workflows block.
+    max_items_per_run: int = Field(default=20_000, ge=0)
 
 
 class InstanceAgentWorkersSettings(BaseModel):
