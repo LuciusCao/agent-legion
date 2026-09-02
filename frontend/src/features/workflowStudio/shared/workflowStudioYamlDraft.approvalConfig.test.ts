@@ -67,7 +67,7 @@ describe('patchWorkflowNodeApprovalConfig', () => {
     })
   })
 
-  it('seeds the backend default when patching an approval node without config', () => {
+  it('leaves feedback_artifact absent when not provided so the backend default applies', () => {
     const bare = dagYaml.replace(
       '    config: {rework_target: intake, feedback_artifact: review.json}\n',
       ''
