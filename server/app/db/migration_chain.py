@@ -165,12 +165,12 @@ MIGRATIONS: list[SchemaMigration] = [
     # file's create-table-if-not-exists never rewrites the CHECK on existing
     # databases (same drop + re-add pattern as v30/v47).
     SchemaMigration(71, "preview_panels", migrate_preview_panels),
-    # v72 (#358): run-level job status counters. count_jobs_by_status_in_run
+    # v73 (#358): run-level job status counters. count_jobs_by_status_in_run
     # was a group-by over the run's whole jobs slice; the trigger-maintained
     # run_job_status_counts (DB-RUN-JOB-STATUS-COUNTS-001) turns the run
     # detail read into a PK lookup and is the data source for the #350 run
     # progress view.
-    SchemaMigration(72, "run_job_status_counts", migrate_run_job_status_counts),
+    SchemaMigration(73, "run_job_status_counts", migrate_run_job_status_counts),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]

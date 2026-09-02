@@ -43,9 +43,9 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v72, run_job_status_counts, #358) must leave
+# Effects the newest migration (v73, run_job_status_counts, #358) must leave
 # behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v72 creates the run_job_status_counts counter table with
+# SCHEMA_VERSION-1. v73 creates the run_job_status_counts counter table with
 # its row trigger on jobs (drop-then-create in the schema replay, so the
 # trigger needs no explicit undo — the table drop takes the catalog rows with
 # it and the replay recreates both); the v70/v71 effects stay in place —
@@ -57,7 +57,7 @@ _NEWEST_MIGRATION_NAME = "run_job_status_counts"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v71: none — v72 is pure additive DDL + backfill.
+# faithful v72: none — v73 is pure additive DDL + backfill.
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.

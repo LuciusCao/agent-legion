@@ -1,4 +1,4 @@
-"""Schema v72: run_job_status_counts trigger-maintained counter table.
+"""Schema v73: run_job_status_counts trigger-maintained counter table.
 
 Issue #358: count_jobs_by_status_in_run fed the run detail endpoint's
 job_stats with a group-by over the run's whole jobs slice — O(run jobs) per

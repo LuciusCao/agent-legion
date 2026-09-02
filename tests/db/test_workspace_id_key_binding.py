@@ -43,7 +43,7 @@ def test_schema_version_pin() -> None:
     # adds the run_job_status_counts counter table (#358) and owns
     # tests/db/test_run_job_status_counts_migration.py, so the pin moves
     # there — this copy stays as a backstop that the chain tail stays in sync.
-    assert SCHEMA_VERSION == 72
+    assert SCHEMA_VERSION == 73
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)

@@ -1,10 +1,10 @@
-"""Data migration applied alongside the idempotent DDL replay (v72)."""
+"""Data migration applied alongside the idempotent DDL replay (v73)."""
 
 from __future__ import annotations
 
 from typing import Any
 
-# Run job status counts (schema v72, #358): count_jobs_by_status_in_run feeds
+# Run job status counts (schema v73, #358): count_jobs_by_status_in_run feeds
 # the run detail endpoint's job_stats (and, later, the #350 run progress
 # view). As a group-by over the run's whole jobs slice it is O(run jobs) per
 # call; a 10^6-item run turned every run-detail refresh into a million-row
@@ -16,7 +16,7 @@ from typing import Any
 # replays before the v53 migrate_runs renames jobs.batch_id -> run_id, and a
 # trigger function reading NEW.run_id would fail on every jobs write of a
 # v52-shape database — the same replay-order rule as idx_jobs_run_id (v59).
-# At v72 the rename has happened on every upgrade path (v53 < v72 in the
+# At v73 the rename has happened on every upgrade path (v53 < v73 in the
 # version-sorted chain of the same init_db transaction).
 _TRIGGER_DDL = """
 create or replace function sync_run_job_status_counts() returns trigger as $$
@@ -70,6 +70,6 @@ on conflict (run_id, status) do update set cnt = excluded.cnt
 
 
 def migrate_run_job_status_counts(conn: Any) -> None:
-    """Create the run counter trigger and backfill it from jobs (v72)."""
+    """Create the run counter trigger and backfill it from jobs (v73)."""
     conn.execute(_TRIGGER_DDL)
     conn.execute(_BACKFILL_SQL)
