@@ -1,5 +1,11 @@
 import { useState } from 'react'
-import { Button, Dialog, DialogActions, DialogContent } from '@mui/material'
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+} from '@mui/material'
 import { useUiStore } from '../../../stores/uiStore'
 import type { SwitchableNodeType } from '../shared/workflowStudioYamlDraft.nodeType'
 import {
@@ -30,14 +36,19 @@ type Props = {
 // capability 缺省 = key，approval 无 capability）。提交经
 // appendWorkflowNode 全量校验后追加进草稿并选中新节点；新节点默认
 // 不接线——提示文案说明接线方式（approval 需可执行入边，validate 会
-// 引导）。失败 toast 原因、草稿不动（AGENTS.md L88）。
+// 引导）。失败 toast 原因、草稿不动（AGENTS.md L88）。open 切换时整体
+// 卸载重挂：每次打开都是全新表单状态，无需手动清理上次输入。
 export function AddWorkflowNodeDialog(props: Props) {
+  if (!props.open) return null
+  return <AddWorkflowNodeForm {...props} />
+}
+
+function AddWorkflowNodeForm(props: Props) {
   const showToast = useUiStore((s) => s.showToast)
   const [nodeType, setNodeType] = useState<SwitchableNodeType>('code')
   const [key, setKey] = useState('')
   const [label, setLabel] = useState('')
   const [capability, setCapability] = useState('')
-  if (!props.open) return null
 
   function submit() {
     const nodeKey = key.trim()
@@ -50,9 +61,7 @@ export function AddWorkflowNodeDialog(props: Props) {
       })
       props.onAppended(nextYaml, nodeKey)
       showToast(`节点「${nodeKey}」已添加（未接线）`, 'success')
-      setKey('')
-      setLabel('')
-      setCapability('')
+      props.onClose()
     } catch (error) {
       showToast(
         error instanceof WorkflowNodeAppendError
@@ -65,6 +74,7 @@ export function AddWorkflowNodeDialog(props: Props) {
 
   return (
     <Dialog open onClose={props.onClose} fullWidth maxWidth="sm">
+      <DialogTitle>添加节点</DialogTitle>
       <DialogContent className={styles.body}>
         <label className={styles.field}>
           <span className={styles.fieldLabel}>类型</span>

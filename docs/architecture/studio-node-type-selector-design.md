@@ -157,8 +157,11 @@ export const NODE_TYPE_SECTIONS: Record<'code'|'agent'|'approval', SectionSpec>
 
 ### Phase 3：approval 的画布可见性 + 节点创建入口（补齐体验）
 
-- **DAG 徽标**：`workflowStudioDagBadges.ts` 为 approval 加专属徽标
-  （拓扑徽标 entry/branch/terminal 照常叠加），与 start 徽标同款样式。
+- **DAG 徽标**：为 approval 加专属徽标（拓扑徽标 entry/branch/terminal
+  照常叠加），与 start 徽标同款样式。落地：`TopologyBadge` 联合
+  （`components/dag/dagNodeTypes.ts`）+ 计算迁至
+  `shared/workflowStudioTopologyBadges.ts`（原 canvas/ 下的
+  workflowStudioDagBadges.ts 已删除）。
 - **节点创建**：画布工具栏（`WorkflowStudioCanvasToolbar.tsx`）加
   「添加节点」：选类型（code/agent/approval）→ key/label/capability
   （approval 不需要 capability）→ 追加进草稿 YAML（新 patch helper

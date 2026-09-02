@@ -27,6 +27,7 @@ import { NodeDetailsPanel } from '../NodeDetailsPanel'
 import { filterRelevantRuns } from '../../lib/jobRuns'
 import { estimateDagNodeHeight } from '../dagNodeHeight'
 import { applyHighlight, hoverReducer } from '../dagHighlight'
+import type { TopologyBadge } from './dagNodeTypes'
 import styles from './DagGraph.module.css'
 
 export interface DagGraphNode {
@@ -43,7 +44,7 @@ export interface DagGraphNode {
   executorUnbound?: boolean
   /** Studio 注入的 execution 缺口警告文案（#333）；见 dagNodeTypes。 */
   executionWarning?: string
-  topologyBadges?: Array<'start' | 'approval' | 'entry' | 'branch' | 'terminal'>
+  topologyBadges?: TopologyBadge[]
   terminalOutcome?: string
   inputs?: string[]
   outputs?: string[]

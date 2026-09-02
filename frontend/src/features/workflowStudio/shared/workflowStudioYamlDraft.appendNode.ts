@@ -16,7 +16,8 @@ export type AppendWorkflowNodeInput = {
 export class WorkflowNodeAppendError extends Error {}
 
 // 追加节点进草稿 YAML。校验全部在写入前完成（AGENTS.md L88）：key 为
-// 合法 YAML 标量且不与既有节点/合成 _start 冲突；草稿经
+// 合法 YAML 标量且不与草稿既有节点冲突（显式声明的 _start 在其内；
+// 未显式声明时后端注入合成 start 会自动让位改名，无冲突风险）；草稿经
 // parseWorkflowYamlStrictNodes 结构守卫（nodes 数组/字符串或某节点非
 // mapping 的草稿拒绝追加——对象展开会把索引当节点键、覆盖保存时不可逆
 // 破坏草稿）；code/agent 的 capability 非空（label 与 capability 缺省

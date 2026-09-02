@@ -95,5 +95,11 @@ describe('appendWorkflowNode', () => {
     expect(() =>
       appendWorkflowNode(scalarNode, { nodeType: 'code', key: 'draft' })
     ).toThrow('草稿结构异常')
+    // edges 非数组：渲染侧会回退 published 画布，写路径同步拒绝，避免
+    // 「toast 已添加但画布不显示新节点」的脱节（subagent P3 on #400）。
+    const badEdges = 'key: demo\nnodes:\n  _start:\n    type: start\nedges: not-a-list\n'
+    expect(() =>
+      appendWorkflowNode(badEdges, { nodeType: 'code', key: 'draft' })
+    ).toThrow('草稿结构异常')
   })
 })

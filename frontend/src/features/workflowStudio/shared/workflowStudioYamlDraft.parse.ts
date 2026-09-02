@@ -59,8 +59,11 @@ export function parseWorkflowYamlStrictNodes(
   const draft = parseWorkflowYaml(rawYaml)
   const nodes = draft.nodes ?? {}
   if (!isMapping(nodes)) throw new Error('draft nodes is not a mapping')
-  for (const [key, node] of Object.entries(nodes)) {
-    if (!isMapping(node)) throw new Error(`draft node ${key} is not a mapping`)
+  const badNode = Object.entries(nodes).find(([, n]) => !isMapping(n))
+  if (badNode) throw new Error(`draft node ${badNode[0]} is not a mapping`)
+  // edges 非数组时渲染侧 record 解析失败、画布回退已发布版本——同步拒绝。
+  if (draft.edges !== undefined && !Array.isArray(draft.edges)) {
+    throw new Error('draft edges is not an array')
   }
   return draft
 }
