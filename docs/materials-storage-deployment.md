@@ -1,13 +1,20 @@
 # 材料存储（SeaweedFS / RustFS / S3）部署与运维
 
 Agent Legion 的材料（用户上传文件）与后续的 job 产物统一存放在 S3 兼容
-对象存储中。默认自托管 [SeaweedFS](https://github.com/chrislusf/seaweedfs)
+对象存储中。**默认自托管 [SeaweedFS](https://github.com/chrislusf/seaweedfs)**
 （Apache 2.0，volume/needle 布局，为海量小文件设计）；RustFS 保留为可切换
 的逃生舱后端（存量卷迁移期使用）。代码只对 S3 API 编程，可平行切换
 Amazon S3 / MinIO / Garage。设计背景见
 [docs/architecture/materials-and-runs-design.md](architecture/materials-and-runs-design.md)。
 
-默认后端切换的依据（#340 调研）：MinIO 血统的 RustFS 把对象存为「一目录 +
+### 双后端适用场景
+
+| 后端 | 适用场景 | 原因 |
+|---|---|---|
+| **SeaweedFS（默认）** | 海量小文件（本仓库主形态：job 产物 JSON / 材料文本，实测 prod 桶 101 万对象中 86% ≤4KB、平均约 4KB/对象） | volume/needle 布局把小对象顺序写进 2GB volume 大文件，元数据在 filer DB——对象数增长只加 filer 行，不加磁盘目录项；闲置开销与对象数解耦 |
+| RustFS（逃生舱） | 大对象为主的部署（≥1MB 占比高的材料库，如视频/模型文件） | MinIO 血统的 erasure-code 布局对大对象吞吐友好；小对象密集命名空间会触发 scanner 巡检问题（下节），存量大文件部署反而不受影响 |
+
+选择默认后端的依据（#340 调研）：MinIO 血统的 RustFS 把对象存为「一目录 +
 一 xl.meta」，后台 scanner 的用量巡检要遍历全命名空间并读取每个对象的
 xl.meta——小对象（≤128KiB）数据内联其中，「巡检」字面等于重读全部数据，
 闲置 CPU/IO 随对象数线性增长（百万对象级的命名空间下可出现零流量空转多日的
@@ -15,6 +22,17 @@ xl.meta——小对象（≤128KiB）数据内联其中，「巡检」字面等�
 的元数据在 filer 数据库里、数据在 volume 大文件中仅存指针，结构性不存在
 该问题（实测对象数 ×4 闲置开销持平，全量列举约 2.5 倍速）。详见 issue
 #340 的调研评论。
+
+### 产物 gzip 压缩（#338）与后端选择
+
+#338 起产物走「Worker 上传前 gzip 压缩、读取侧透传 + 客户端解压」——
+压缩发生在对象层**之外**（`worker/artifact/gzip.py`，对象本体就是 gzip
+字节流），不依赖任何后端的透明压缩 / `Content-Encoding` 元数据语义。
+对 SeaweedFS 无负面影响，且方向上互相强化：压缩把 JSON 产物进一步缩小
+（几十 KB 级压到几 KB），正是 SeaweedFS volume/needle 布局最擅长的小对象
+形态；presigned PUT/GET 只签 Bucket+Key（`s3_client.py`），gzip 对象的
+上传下载对后端完全透明。`Content-Encoding: gzip` 响应头由 Host 路由层
+根据 key 的 `.gz` 后缀自行添加（`job_artifact_raw.py`），同样不经后端。
 
 ## 1. 组件与配置面
 
