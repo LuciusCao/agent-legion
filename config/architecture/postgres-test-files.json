@@ -94,6 +94,7 @@
     "tests/services/test_agent_artifacts.py",
     "tests/services/test_agent_broker.py",
     "tests/services/test_agent_broker_batch.py",
+    "tests/services/test_agent_broker_claim_locks.py",
     "tests/services/test_agent_broker_claim_scan.py",
     "tests/services/test_agent_broker_claim_windows.py",
     "tests/services/test_agent_broker_concurrency.py",

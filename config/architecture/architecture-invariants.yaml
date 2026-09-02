@@ -312,6 +312,27 @@ invariants:
         target: tests/full/test_agent_worker_control_plane.py::test_agent_capacity_matrix_across_workers
         gate: full
 
+  - id: EXEC-CLAIM-LOCK-001
+    statement: "The agent-ws:<workspace> advisory lock guards the agent-only workspace capacity domain; an agent claim takes locks in fixed order ws then worker, a code claim (no workspace capacity domain) takes only the agent-worker lock — the lock graph stays a single directed edge, cycle-free, and code claims never queue behind concurrent agent claims (issue #351)."
+    owner: workspace-executor
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/services/test_agent_broker_claim_locks.py::test_code_claim_transaction_never_holds_agent_ws_lock
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_broker_claim_locks.py::test_code_claim_never_requests_the_agent_ws_lock
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_broker_claim_locks.py::test_agent_claim_lock_order_is_ws_then_worker
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_broker_claim_locks.py::test_code_claim_completes_while_agent_ws_lock_held
+        gate: quick
+      - kind: integration
+        target: tests/full/test_agent_worker_control_plane.py::test_http_claim_cycle_releases_capacity_and_updates_panel
+        gate: full
+
   - id: EXEC-AGENTDEF-001
     statement: "Agent capability, runtime, skill, tools, and resource requirements are declared by the workspace-scoped Agent Catalog (versioned_entities with workspace_id set, published via AgentService; schema v46 — exactly one published Agent per capability per workspace, no global fallback at resolution); the Host exposes that published catalog so Workflow Studio resolves Agent nodes by capability within the current workspace and edits provider/model overrides against workspace-level defaults without treating Agents as legacy executors. Since #76 the definition's skill field is optional and serves only as the legacy fallback at dispatch — the workflow node's own skill binding (EXEC-SKILL-NODE-001) takes precedence and owns the version pin. Workers separately declare node capabilities and runtime/provider/model triples derived from each selected runtime's local discovery intersected with its operator allowlist, alongside labels, protocol version, and machine-wide max_concurrency."
     owner: workspace-executor
