@@ -448,20 +448,15 @@ describe('WorkflowNodeExecutionSection', () => {
     expect(screen.queryByText(/5c5eae7/)).not.toBeInTheDocument()
   })
 
-  it('shows the approval-gate hint and hides the agent editor for approval nodes', () => {
-    renderSection({
+  it('renders nothing for approval nodes (#392 Phase 2: registry gates the section)', () => {
+    const { container } = renderSection({
       node: { ...node, node_type: 'approval', capability: '' },
       ...editorProps,
     })
 
-    expect(screen.getByText('审批门')).toBeInTheDocument()
-    expect(screen.getByText(/awaiting_approval/)).toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: '切换为 Agent 执行' })
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: '为此 capability 新建 Agent' })
-    ).not.toBeInTheDocument()
+    // 审批门由 WorkflowNodeApprovalConfigSection 承载；本 section 挂在
+    // code/agent 类型（nodeTypeSections 注册表），直接喂 approval 渲染空。
+    expect(container).toBeEmptyDOMElement()
   })
 
   it('toggles the embedded agent editor for the bound agent', () => {

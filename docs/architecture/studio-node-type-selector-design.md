@@ -1,7 +1,7 @@
 # Studio 节点类型抽象落地：类型选择器 + 按类型注册设置区块
 
-状态：**Phase 1 已实施**（PR #395，2026-09-02；经 codex 与 subagent
-两轮评审修正）。Phase 2/3 未实施。承接 issue #392；本文档给出问题
+状态：**Phase 1/2 已实施**（Phase 1 = PR #395；Phase 2 = 本 PR，
+2026-09-02）。Phase 3 未实施。承接 issue #392；本文档给出问题
 分析、目标形态、分阶段实施方案与取舍记录，`path:line` 证据以
 develop@e4e4590c 为准。
 

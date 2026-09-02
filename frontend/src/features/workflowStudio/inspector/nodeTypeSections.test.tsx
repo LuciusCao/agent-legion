@@ -1,0 +1,151 @@
+import yaml from 'js-yaml'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { createElement, type ReactNode } from 'react'
+import { WorkflowNodeInspector } from './WorkflowNodeInspector'
+import { NODE_TYPE_SECTIONS } from './nodeTypeSections'
+import { api } from '../../../api'
+import { useSettingStore } from '../../../stores/settingStore'
+import { createTestQueryClient } from '../../../testing/testQueryClient'
+
+vi.mock('../../../api', () => ({ api: vi.fn() }))
+
+const mockApi = vi.mocked(api)
+
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(
+    QueryClientProvider,
+    { client: createTestQueryClient() },
+    children
+  )
+}
+
+// 三类型 DAG：gate 是中游审批门（after intake）。
+const dagYaml = [
+  'key: demo',
+  'nodes:',
+  '  _start:',
+  '    type: start',
+  '  intake:',
+  '    type: code',
+  '    label: 读取知识点',
+  '    capability: intake',
+  '    after: [_start]',
+  '  gate:',
+  '    type: approval',
+  '    label: 人工把关',
+  '    config: {rework_target: intake, feedback_artifact: review.json}',
+  '    after: [intake]',
+  'edges:',
+  '  - source: _start',
+  '    target: intake',
+  '',
+].join('\n')
+
+function renderInspector(nodeKey: string) {
+  return render(
+    <WorkflowNodeInspector
+      workflow={null}
+      agentCatalog={[]}
+      selectedNodeKey={nodeKey}
+      definitionYaml={dagYaml}
+      setDefinitionYaml={() => {}}
+      onClose={() => {}}
+    />,
+    { wrapper }
+  )
+}
+
+describe('nodeTypeSections registry (#392 Phase 2)', () => {
+  it('composes code sections: schema/code/execution present, approval config absent', () => {
+    const names = NODE_TYPE_SECTIONS.code.sections.map((s) => s.name)
+    expect(names).toContain('CodeSection')
+    expect(names).toContain('ExecutionSection')
+    expect(names).not.toContain('ApprovalConfigSection')
+  })
+
+  it('composes agent sections without the code-pool section', () => {
+    const names = NODE_TYPE_SECTIONS.agent.sections.map((s) => s.name)
+    expect(names).toContain('ExecutionSection')
+    expect(names).not.toContain('CodeSection')
+    expect(names).not.toContain('ApprovalConfigSection')
+  })
+
+  it('composes approval sections without execution/code/schema/config', () => {
+    const names = NODE_TYPE_SECTIONS.approval.sections.map((s) => s.name)
+    expect(names).toContain('ApprovalConfigSection')
+    expect(names).toContain('DataContractSection')
+    expect(names).toContain('DependencySection')
+    for (const absent of [
+      'ExecutionSection',
+      'CodeSection',
+      'ConfigSchemaSection',
+      'NodeConfigSection',
+    ]) {
+      expect(names).not.toContain(absent)
+    }
+  })
+})
+
+describe('WorkflowNodeInspector for approval nodes (#392 Phase 2)', () => {
+  it('renders the approval config section and no execution/code sections', async () => {
+    mockApi.mockResolvedValue({
+      origin: 'none',
+      code: '',
+      has_draft: false,
+      draft_code: null,
+      draft_version: null,
+    })
+    useSettingStore.setState({ workspaceId: 'ws1' })
+    renderInspector('gate')
+
+    // 审批门配置段：rework_target 下拉 + feedback_artifact 输入。
+    expect(await screen.findByLabelText('重置目标')).toHaveValue('intake')
+    expect(screen.getByLabelText('评审备注文件名')).toHaveValue('review.json')
+    // 执行能力 / 节点代码 / 配置 Schema 段不渲染（registry 保证）。
+    expect(screen.queryByLabelText('节点执行能力')).not.toBeInTheDocument()
+    expect(screen.queryByText('节点代码')).not.toBeInTheDocument()
+    expect(screen.queryByText('配置 Schema')).not.toBeInTheDocument()
+    // 基本设置无「能力 Key」（approval 契约禁 capability）。
+    expect(screen.queryByLabelText('能力')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('节点名称')).toHaveValue('人工把关')
+  })
+
+  it('writes rework_target through the approval config patcher', async () => {
+    const setDefinitionYaml = vi.fn()
+    mockApi.mockResolvedValue({
+      origin: 'none',
+      code: '',
+      has_draft: false,
+      draft_code: null,
+      draft_version: null,
+    })
+    useSettingStore.setState({ workspaceId: 'ws1' })
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        agentCatalog={[]}
+        selectedNodeKey="gate"
+        definitionYaml={dagYaml}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    fireEvent.change(await screen.findByLabelText('重置目标'), {
+      target: { value: '' },
+    })
+
+    expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
+    const nextYaml = setDefinitionYaml.mock.calls[0][0] as string
+    const node = (
+      yaml.load(nextYaml) as {
+        nodes?: Record<string, Record<string, unknown>>
+      }
+    ).nodes?.gate
+    // 清空 rework_target：白名单键从 config 删除，feedback_artifact 保留。
+    expect(node?.config).toEqual({ feedback_artifact: 'review.json' })
+  })
+})

@@ -28,6 +28,9 @@ export function WorkflowNodeStructuredEditor({
     onDefinitionYamlChange(
       patchWorkflowNodeCapability(definitionYaml, node.key, event.target.value)
     )
+  // approval 契约禁 capability（loader _FORBIDDEN_APPROVAL_FIELDS），基本
+  // 设置不给能力 Key 输入；start 不走本编辑器（契约段独占）。
+  const showsCapability = node.node_type !== 'approval'
 
   return (
     <section
@@ -44,15 +47,17 @@ export function WorkflowNodeStructuredEditor({
           onChange={handleLabelChange}
         />
       </label>
-      <label className={styles.field}>
-        <span className={styles.fieldLabel}>能力 Key</span>
-        <input
-          aria-label="能力"
-          className={styles.fieldInput}
-          value={capability}
-          onChange={handleCapabilityChange}
-        />
-      </label>
+      {showsCapability && (
+        <label className={styles.field}>
+          <span className={styles.fieldLabel}>能力 Key</span>
+          <input
+            aria-label="能力"
+            className={styles.fieldInput}
+            value={capability}
+            onChange={handleCapabilityChange}
+          />
+        </label>
+      )}
     </section>
   )
 }
