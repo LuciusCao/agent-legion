@@ -37,7 +37,11 @@ register token），而"退役公告写了"不等于"所有现行文档都改了
 - **豁免语义**：命中行的上下文出现"退役表述词"（`已退役|已随|不再|退役|retired|
   removed|已删除|历史|legacy`，前后同句或紧邻 1 行）即视为**合法引用**——文档本来就
   需要写"#322 起注册表已退役"这类话。这与 `broad_except_audit.py` 的"带审计注释即
-  放行"同构。
+  放行"同构。**已知盲区**：豁免词出现在同句但语义不覆盖目标词时会误放行（实测样例：
+  本 PR review 抓到的 `examples/README.md`「自身不再携带 skill。升级 skill 的流程：
+  在外部 skill 仓库改内容……」——「不再」修饰的是 demo Agent，不是"外部仓库"）。
+  词窗豁免是成本与误报的折衷，残余漏网靠 review 兜底；若实测漏网率不可接受，
+  落地时可升级为"豁免词必须在目标词的同一分句内"的窄窗语义。
 - **历史文档天然豁免**：只扫白名单，`risk-review-*`、`velites-poc-report` 等时点
   快照与 `docs/reviews/` 不在名单内。
 
@@ -182,8 +186,10 @@ playbook"暂不入白名单（它们随 feature PR 高频重写、且发布节�
   形状）；纯静态、`@pytest.mark.no_db`，进 smoke 层，不触碰 TRUNCATE 隔离。
 - **维护成本**：每次概念退役 PR 多两步（yaml 追加条目 + 清零命中），与 invariant
   registry 的既有义务同量级；pattern 只增不删，删除须记 issue 依据（同 budgets
-  JSON 的 git 锚点纪律）。豁免到期检测复用 nightly 的 `exemption-expiry` job
-  （读同一 yaml 的 `remove_when`，机制已存在）。
+  JSON 的 git 锚点纪律）。豁免到期检测与 nightly 的 `exemption-expiry` job
+  （`scripts/quality/exemptions.py`，读 `architecture-exemptions.yaml` 的
+  `remove_when`）是同构机制，但该 job **不会自动读新 yaml**——落地 PR 需把它扩展
+  到 `docs-retired-terms.yaml`（或首版不做：`exemptions: []` 时到期检测空转）。
 
 ## 6. 验收标准
 
