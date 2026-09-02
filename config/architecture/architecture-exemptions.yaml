@@ -275,9 +275,35 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 242
 - check: architecture.file_budget
+  path: server/app/db/migrations/run_job_status_counts.py
+  reason: >-
+    Issue #358's review round (P2 on #374) adds the dead-row recycle
+    trigger (runs delete purges the counter rows): the counter table is
+    deliberately FK-free because jobs.run_id is unconstrained text, so the
+    recycle cannot ride a cascade like the v36 workspace twin. Both
+    triggers and the backfill are one migration's cohesive DDL; splitting
+    the file would separate the sync function from its recycle pair.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/358
+  ceiling: 74
+
+- check: architecture.file_budget
+  path: server/app/services/job_intake.py
+  reason: >-
+    Issue #358's review round (P1 on #374) extends the per-run items cap
+    to the intake path — the same check-and-raise the /runs service carries,
+    placed right after candidate resolution and before the run/jobs writes.
+    Duplicating the cap constant away from the resolve gate would invite the
+    two paths to drift; revisit when the creation paths converge on one
+    service.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/358
+  ceiling: 178
+
+- check: architecture.file_budget
   path: server/app/db/migration_chain.py
   reason: The chain registers one entry per schema version and cannot shrink;
-    it grew past the plain baseline with v70 (#211 M2) and again with v72
+    it grew past the plain baseline with v70 (#211 M2) and again with v73
     (#358 run_job_status_counts — one import plus one entry, offset by
     compressing the module docstring). Stale after the issue-211 M3 cleanup
     collapses the chain comments.
@@ -313,15 +339,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 91
-- check: architecture.file_budget
-  path: server/app/jobs/queries/batch.py
-  reason: The issue-211 M2 batch centralizes the deprecated workflow_key
-    identity backfill in create_run (the runs column dropped at v70; the
-    wire field equals workspace_id since v62, removal window 2026-10-31).
-    Stale when M3 retires the deprecated contract field.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 83
 - check: architecture.file_budget
   path: server/app/jobs/queries/batch_queue.py
   reason: The issue-211 M2 batch applies the same deprecated workflow_key

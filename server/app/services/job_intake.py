@@ -124,6 +124,18 @@ class JobIntakeService:
         if not candidates:
             raise InvalidOperationError("No tasks were resolved from input")
 
+        # Same per-run cap as the /runs API (workflows.max_items_per_run,
+        # #358/#349 P0-1): intake is the other active run-creation path and
+        # an unbounded question_ids list would hit the same memory and
+        # transaction-length wall before the first job executes.
+        max_items = self.settings.executor_runtime.workflows.max_items_per_run
+        if max_items and len(candidates) > max_items:
+            raise InvalidOperationError(
+                f"Run items exceed the per-run limit: {len(candidates)} > {max_items}."
+                " Split the submission into smaller runs (the limit is"
+                " workflows.max_items_per_run in instance settings)."
+            )
+
         if mode.input_field == "question_ids":
             resolved_ids = input_values
         elif mode.input_field == "knowledge_codes":

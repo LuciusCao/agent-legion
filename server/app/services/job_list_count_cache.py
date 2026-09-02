@@ -53,7 +53,7 @@ class TtlCache:
             # Soft bound: drop the oldest inserted entries (dicts keep
             # insertion order; no LRU bookkeeping needed at this cardinality).
             for stale_key in list(self._entries)[: len(self._entries) - self._max_entries + 1]:
-                del self._entries[stale_key]
+                self._entries.pop(stale_key, None)
         self._entries[key] = (now, value)
         return value
 

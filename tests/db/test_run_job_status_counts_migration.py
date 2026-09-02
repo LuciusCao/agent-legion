@@ -174,10 +174,11 @@ def test_count_jobs_by_status_in_run_matches_group_by(tmp_path) -> None:
     assert queries.count_jobs_by_status_in_run("rjsc-missing-run") == {}
     # The read is a PK lookup, not a scan of the run's jobs slice: pin the
     # plan shape so a future rewrite cannot silently regress to a group-by.
+    from server.app.jobs.queries.batch import RUN_STATUS_COUNTS_SQL
+
     with queries._connect_read() as conn:
         plan = conn.execute(
-            "explain (costs off) select status, cnt from run_job_status_counts"
-            " where run_id = %s and cnt <> 0",
+            "explain (costs off) " + RUN_STATUS_COUNTS_SQL,
             ("rjsc-read-run",),
         ).fetchall()
     plan_text = "\n".join(str(row[0]) if not isinstance(row, dict) else str(row) for row in plan)

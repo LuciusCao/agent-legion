@@ -69,7 +69,9 @@ class JobListQueryService(JobPatchQueryService):
         return {
             "workspace_id": workspace_id,
             "total": raw["total"],
-            "status_counts": raw["status_counts"],
+            # Shallow copy: the cached dict is shared by every hit of this
+            # window; a caller mutating the response must not poison it.
+            "status_counts": dict(raw["status_counts"]),
             # Version keys are stringified; the null version is keyed "none".
             "version_counts": {
                 ("none" if version is None else str(version)): count

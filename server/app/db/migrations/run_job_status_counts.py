@@ -57,6 +57,23 @@ drop trigger if exists jobs_run_status_counts_sync on jobs;
 create trigger jobs_run_status_counts_sync
   after insert or delete or update of status, run_id on jobs
   for each row execute function sync_run_job_status_counts();
+
+-- Dead-row recycle (#358 review P2): the counter table carries no FK to
+-- runs (jobs.run_id is deliberately unconstrained text), so a deleted
+-- run's cnt=0 rows would otherwise linger forever — the v36 workspace
+-- twin is cascaded by its FK, this one needs the explicit sweep. The
+-- where clause keeps unrelated counter rows (no such thing today, but
+-- the guard costs nothing).
+create or replace function purge_run_job_status_counts() returns trigger as $$
+begin
+  delete from run_job_status_counts where run_id = OLD.id;
+  return OLD;
+end;
+$$ language plpgsql;
+drop trigger if exists runs_purge_status_counts on runs;
+create trigger runs_purge_status_counts
+  after delete on runs
+  for each row execute function purge_run_job_status_counts();
 """
 
 # The backfill rebuilds the table from jobs; on-conflict replace makes the
