@@ -1,9 +1,6 @@
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { SelectedWorkflowNodeDetails } from '../shared/workflowStudioModel'
-import {
-  switchWorkflowNodeToAgent,
-  workflowNodeKindBadge,
-} from '../shared/workflowStudioYamlDraft.nodeType'
+import { useNodeTypeSwitch } from './useNodeTypeSwitch'
 import { WorkflowNodeInspectorHeader } from './WorkflowNodeInspectorHeader'
 import { WorkflowNodeInspectorSections } from './WorkflowNodeInspectorSections'
 import styles from './WorkflowNodeInspector.module.css'
@@ -19,26 +16,23 @@ type Props = {
 
 export function WorkflowNodeInspectorBody(props: Props) {
   const { node } = props.details
-  // type=code 节点「切换为 Agent 执行」：改写草稿 YAML 的节点 type。
-  const switchToAgent = () =>
-    switchWorkflowNodeToAgent(
-      props.definitionYaml,
-      node.key,
-      props.setDefinitionYaml
-    )
+  // 头部类型选择器（#392）接线；start 只读展示，不下发回调。
+  const changeNodeType = useNodeTypeSwitch(
+    props.definitionYaml,
+    node.key,
+    props.setDefinitionYaml
+  )
   return (
     <section aria-label="Workflow inspector" className={styles.panel}>
       <WorkflowNodeInspectorHeader
         label={node.label}
         nodeKey={node.key}
-        executorKind={workflowNodeKindBadge(node.node_type)}
+        nodeType={node.node_type}
+        onNodeTypeChange={props.readOnly ? undefined : changeNodeType}
         onClose={props.onClose}
       />
       <div className={styles.content}>
-        <WorkflowNodeInspectorSections
-          {...props}
-          onSwitchToAgent={switchToAgent}
-        />
+        <WorkflowNodeInspectorSections {...props} />
       </div>
     </section>
   )
