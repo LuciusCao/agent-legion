@@ -1,6 +1,6 @@
 # 文档漂移治理方案：现行文档退役术语基线（proposal）
 
-状态：**提案**（未实施；评审通过后按 §5 落地，落地时本文改判「已实施」并瘦身）
+状态：**提案**（未实施；评审通过后按 §6 落地，落地时本文改判「已实施」并瘦身）
 提出背景：develop→main release train #360（2026-09-01）的文档 review——合并点现行文档
 （非时点快照）存在退役术语残留：`docs/architecture/README.md` 总览图写
 "pipeline nodes"（`server/app/pipeline/` 已于 5dac451b 退役）、"external skills (git,
@@ -95,12 +95,20 @@ _CURRENT_DOCS = (
     "docs/architecture/velites-harness.md",
     "docs/architecture/velites-model-registry.md",
     "docs/architecture/workspace-executor-evidence-matrix.md",
+    "docs/architecture/node-sdk-and-worker-execution-design.md",
+    "docs/architecture/materials-and-runs-design.md",
     "docs/agent-worker-deployment.md", "docs/data-layout.md",
     "docs/materials-storage-deployment.md", "docs/postgresql-runbook.md",
     "docs/remote-execution-runbook.md", "docs/studio-agent-mcp.md",
     "scripts/README.md", "examples/README.md",
 )
 ```
+
+**白名单维护规则（codex review #364 P2 采纳后固化）**：`_CURRENT_DOCS` 必须与
+`docs/architecture/README.md` "现行文档"索引表保持同步——索引表新增/移除现行文档时
+同步改白名单（§3 的索引对账检查落地后由检查强制）。两份带实施状态 banner 的设计
+文档（`node-sdk-and-worker-execution-design.md`、`materials-and-runs-design.md`）
+按索引表归类属现行文档，已入白名单；dry-run 实测两者当前零违规。
 
 **CHANGELOG.md 不入白名单**（本方案 dry-run 的实测结论）：它的各版本段落按定义
 描述"当时发生的变化"，退役项天然高频合法出现（"openclaw runtime 整体退役"、
@@ -155,7 +163,29 @@ playbook"暂不入白名单（它们随 feature PR 高频重写、且发布节�
 - pattern 只增不删；确需删除（概念复活）须在 yaml 注释里记录 issue 依据，
   同 budgets JSON 的 git 锚点纪律。
 
-## 5. 验收标准
+## 5. Quality Impact
+
+按 AGENTS.md §5「spec / plan 必须包含 Quality Impact 小节」的要求补齐（codex review
+#364 P1）：
+
+- **gate 时长**：新增检查是纯文本 regex 扫描（23 个白名单文档 × 8 条 pattern，
+  实测量级 <100ms），挂 `check_repository` 静态段，对 quick/full/CI 各 lane 的
+  时长影响不可测。docs-only PR 不增加 lane（AGENTS.md §4 的路径裁剪机制天然覆盖）。
+- **误报面**：三层收窄——regex 只禁概念组合词（`executor definition/binding/
+  allocation`）不禁活代码路径（`executors/` 包、`worker/executor.py`）；命中行
+  上下文含退役表述词即放行（同 `broad_except_audit.py` 审计注释语义）；CHANGELOG
+  与时点快照不在白名单。首版 pattern 已对全仓 dry-run 实测：23 文档 0 违规、
+  唯一误伤面（CHANGELOG 的历史段落）已通过移出白名单消除。残余误报走
+  `exemptions`（带 `remove_when`），不许删 pattern。
+- **测试范围**：新增 `tests/scripts/test_architecture_docs_retired_terms.py`
+  （夹具法：命中/豁免/白名单外三路径，同 `test_architecture_sql_placeholders.py`
+  形状）；纯静态、`@pytest.mark.no_db`，进 smoke 层，不触碰 TRUNCATE 隔离。
+- **维护成本**：每次概念退役 PR 多两步（yaml 追加条目 + 清零命中），与 invariant
+  registry 的既有义务同量级；pattern 只增不删，删除须记 issue 依据（同 budgets
+  JSON 的 git 锚点纪律）。豁免到期检测复用 nightly 的 `exemption-expiry` job
+  （读同一 yaml 的 `remove_when`，机制已存在）。
+
+## 6. 验收标准
 
 - `uv run python -m scripts.check_architecture` 在含一个故意违规 fixture 的
   worktree 上红、干净树上绿。
