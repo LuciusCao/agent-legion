@@ -370,6 +370,21 @@ def test_compose_healthchecks_probe_real_liveness_endpoints() -> None:
     assert "9000/ " not in rustfs_test and "9000/'" not in rustfs_test
 
 
+def test_compose_seaweedfs_s3_config_readable_after_privilege_drop() -> None:
+    """umask 077（s3.json 收紧到 0600）与 su-exec 降权并存时，文件属主必须
+    先对齐运行用户：root 名下的 0600 在降权后不可读，weed 加载 s3.config 即
+    glog.Fatalf，容器陷入重启循环（#340 部署线；引入点是 #346 评审提交
+    5c5a8932 加 umask 077 时没配套 chown，表象是 raft "Not current leader"，
+    实为容器活不过选主完成）。revert 掉 chown、或把它挪到 exec su-exec
+    之后（exec 后不再返回，永远不会执行）时此测试必须红。"""
+    command = str(_services()["seaweedfs"]["command"])
+    assert "umask 077" in command
+    assert "-s3.config=/tmp/s3.json" in command
+    assert "chown seaweed:seaweed /tmp/s3.json" in command
+    # 顺序契约：chown 必须发生在 exec su-exec 降权之前。
+    assert command.index("chown seaweed:seaweed /tmp/s3.json") < command.index("exec su-exec")
+
+
 def test_compose_host_has_no_hard_dependency_on_local_backends() -> None:
     """depends_on 指向未启用 profile 的服务会让 compose 直接报
     "depends on undefined service"，host 不得硬依赖任一本地后端。"""
