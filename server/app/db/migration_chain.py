@@ -170,6 +170,10 @@ MIGRATIONS: list[SchemaMigration] = [
     # detail read into a PK lookup and is the data source for the #350 run
     # progress view.
     SchemaMigration(73, "run_job_status_counts", migrate_run_job_status_counts),
+    # v74 is DDL-only (#368): the studio_chat_sessions session_modes_json /
+    # config_options_json mirrors come from the schema-file replay (its
+    # alter-if-not-exists covers pre-v74 tables), no data migration.
+    SchemaMigration(74, "studio_chat_agent_config"),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]

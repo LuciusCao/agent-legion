@@ -11,14 +11,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
 
-from server.app.studio_chat.mcp_hint import maybe_emit_mcp_hint
+from server.app.studio_chat.mcp_hint import is_agent_legion_tool_call, maybe_emit_mcp_hint
 from server.app.studio_chat.permissions import handle_permission_request
-from server.app.studio_chat.prompts import looks_like_agent_legion_tool_call
 from server.app.studio_chat.runtime import SessionRuntime
+from server.app.studio_chat.session_config_state import apply_config_update, session_config_fields
 from server.app.studio_chat.store import StudioChatStore
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
+    from server.app.studio_chat.session_config_state import OpenedAcpSession
 
 _EXIT_DETAIL = "agent process exited"
 
@@ -50,17 +51,19 @@ class AcpEventHandlers:
     def __init__(self, backend: ServiceBackend) -> None:
         self._backend = backend
 
-    def on_ready(self, session_id: str, capabilities: dict[str, Any], acp_session_id: str) -> None:
+    def on_ready(
+        self, session_id: str, capabilities: dict[str, Any], opened: OpenedAcpSession
+    ) -> None:
         # A close that raced the startup window already owns the final status;
         # readiness must not resurrect a closed (or failed) session. The guard
         # rides the UPDATE itself (#158): a re-read-then-write would leave a
-        # check-and-set window for close to land in between.
+        # check-and-set window for close to land in between. The agent config
+        # surface fields (#368) ride the same UPDATE (session_config.py).
         self._backend.db.update_studio_chat_session_if(
             session_id,
             status_not_in=("closed", "error"),
             status="idle",
-            capability_snapshot=capabilities,
-            acp_session_id=acp_session_id,
+            **session_config_fields(capabilities, opened),
         )
 
     def on_update(self, session_id: str, update: dict[str, Any]) -> None:
@@ -79,7 +82,7 @@ class AcpEventHandlers:
             if runtime is not None:
                 with runtime.lock:
                     runtime.stream.reset()
-            if self.is_agent_legion_tool_call(update) and runtime is not None:
+            if is_agent_legion_tool_call(update) and runtime is not None:
                 with runtime.lock:
                     if not runtime.mcp_observed:
                         runtime.mcp_observed = True
@@ -92,7 +95,9 @@ class AcpEventHandlers:
                     runtime.stream.reset()
             self._backend.store.append_message(session_id, "plan", "agent", update)
             return
-        # user_message_chunk / mode / usage updates: not persisted.
+        if apply_config_update(self._backend, session_id, update):
+            return  # mode/config mirror rewrites (#368, session_config.py)
+        # user_message_chunk / usage updates: not persisted.
 
     def on_permission_request(
         self, session_id: str, tool_call: dict[str, Any], options: list[dict[str, Any]]
@@ -173,18 +178,3 @@ class AcpEventHandlers:
             session_id, "status", "system", {"event": "error", "detail": _EXIT_DETAIL}
         )
         self._backend.store.publish_session(session_id)
-
-    @staticmethod
-    def is_agent_legion_tool_call(payload: dict[str, Any]) -> bool:
-        # Match only the structured identity fields (title/kind/name). Never
-        # serialize the whole payload: rawInput carries the agent's local
-        # command text (e.g. a Bash line mentioning a platform tool name),
-        # which must not win an MCP auto-approve.
-        fields = (payload.get(key) for key in ("title", "kind", "name"))
-        return any(
-            looks_like_agent_legion_tool_call(value) for value in fields if isinstance(value, str)
-        )
-
-
-# Module-level alias: permissions.py imports this without a class qualifier.
-is_agent_legion_tool_call = AcpEventHandlers.is_agent_legion_tool_call

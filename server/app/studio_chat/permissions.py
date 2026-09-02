@@ -46,7 +46,7 @@ def handle_permission_request(
     options: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Apply the permission policy; blocks on the human answer when parked."""
-    from server.app.studio_chat.events import is_agent_legion_tool_call
+    from server.app.studio_chat.mcp_hint import is_agent_legion_tool_call
 
     if is_agent_legion_tool_call(tool_call):
         runtime = backend.runtime(session_id)

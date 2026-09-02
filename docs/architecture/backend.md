@@ -234,8 +234,10 @@ server/app/
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `list_messages` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `send_message` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/cancel` | `cancel_turn` | routes/studio_chat.py |
-| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/allow-all` | `set_allow_all` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/{request_id}` | `answer_permission` | routes/studio_chat.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/allow-all` | `set_allow_all` | routes/studio_chat_config.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/mode` | `set_mode` | routes/studio_chat_config.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/config-options` | `set_config_option` | routes/studio_chat_config.py |
 | PUT | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/context` | `update_context` | routes/studio_chat_context.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/events` | `session_events` | routes/studio_chat_events.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/token-usage` | `get_run_token_usage` | routes/token_usage.py |
@@ -510,6 +512,9 @@ server/app/
 | StudioAgentRegistryEntry | BaseModel | id: str, label: str, command: str, args: list[str], source: Literal['manual',... | app/routes/studio_agents_admin_contracts.py |
 | StudioAgentRegistryDocument | BaseModel | api_base: str, agents: list[StudioAgentRegistryEntry] | app/routes/studio_agents_admin_contracts.py |
 | StudioAgentDetection | BaseModel | detected: bool, path: str | None, version: str | None | app/routes/studio_agents_admin_contracts.py |
+| StudioChatAllowAllRequest | BaseModel | enabled: bool | app/routes/studio_chat_config.py |
+| StudioChatSetModeRequest | BaseModel | mode_id: str | app/routes/studio_chat_config.py |
+| StudioChatSetConfigOptionRequest | BaseModel | config_id: str, value: str | app/routes/studio_chat_config.py |
 | StudioChatAgentOption | BaseModel | id: str, label: str | app/routes/studio_chat_contracts.py |
 | StudioChatAgentsResponse | BaseModel | agents: list[StudioChatAgentOption] | app/routes/studio_chat_contracts.py |
 | StudioChatSessionCreateRequest | BaseModel | agent_id: str, title: str | app/routes/studio_chat_contracts.py |
@@ -520,7 +525,6 @@ server/app/
 | StudioChatMessageRecord | BaseModel | id: str, session_id: str, kind: MessageKind, role: MessageRole, content: dict... | app/routes/studio_chat_contracts.py |
 | StudioChatMessageResponse | BaseModel | message: StudioChatMessageRecord | app/routes/studio_chat_contracts.py |
 | StudioChatMessagesResponse | BaseModel | messages: list[StudioChatMessageRecord] | app/routes/studio_chat_contracts.py |
-| StudioChatAllowAllRequest | BaseModel | enabled: bool | app/routes/studio_chat_contracts.py |
 | StudioChatContextUpdateRequest | BaseModel | selected_node_key: str | None, draft_yaml: str | None | app/routes/studio_chat_contracts.py |
 | StudioChatPermissionAnswerRequest | BaseModel | option_id: str | None, deny: bool | app/routes/studio_chat_contracts.py |
 | StudioChatPermissionAnswerResponse | BaseModel | resolved: str | app/routes/studio_chat_contracts.py |

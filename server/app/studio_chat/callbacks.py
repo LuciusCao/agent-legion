@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
+    from server.app.studio_chat.session_config_state import OpenedAcpSession
 
 
 class ServiceCallbacks:
@@ -21,8 +22,8 @@ class ServiceCallbacks:
         # thread cannot tear down a newer runtime registered by resume (ABA).
         self.runtime: SessionRuntime | None = None
 
-    def on_ready(self, capabilities: dict[str, Any], acp_session_id: str) -> None:
-        self._service._on_ready(self._session_id, capabilities, acp_session_id)
+    def on_ready(self, capabilities: dict[str, Any], opened: OpenedAcpSession) -> None:
+        self._service._on_ready(self._session_id, capabilities, opened)
 
     def on_update(self, update: dict[str, Any]) -> None:
         self._service._on_update(self._session_id, update)

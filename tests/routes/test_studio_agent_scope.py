@@ -138,6 +138,14 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", f"{_CHAT}/sessions/{{session_id}}/cancel", None),
     ("POST", f"{_CHAT}/sessions/{{session_id}}/permissions/allow-all", {"enabled": True}),
     ("POST", f"{_CHAT}/sessions/{{session_id}}/permissions/{{request_id}}", {"deny": True}),
+    # Agent session config switching (#368): a scoped token must not steer its
+    # own session's mode/model/thinking level.
+    ("POST", f"{_CHAT}/sessions/{{session_id}}/mode", {"mode_id": "default"}),
+    (
+        "POST",
+        f"{_CHAT}/sessions/{{session_id}}/config-options",
+        {"config_id": "model", "value": "k3"},
+    ),
     # Context push (Studio node selection): the agent reads it back via
     # get_studio_context, so a scoped token must not rewrite its own context.
     ("PUT", f"{_CHAT}/sessions/{{session_id}}/context", {"selected_node_key": "n"}),

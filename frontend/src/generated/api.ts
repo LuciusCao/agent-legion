@@ -2632,6 +2632,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/config-options': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Set Config Option */
+    post: operations['set_config_option_api_workspaces__workspace_id__studio_chat_sessions__session_id__config_options_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/context': {
     parameters: {
       query?: never
@@ -2678,6 +2695,23 @@ export interface paths {
     put?: never
     /** Send Message */
     post: operations['send_message_api_workspaces__workspace_id__studio_chat_sessions__session_id__messages_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/mode': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Set Mode */
+    post: operations['set_mode_api_workspaces__workspace_id__studio_chat_sessions__session_id__mode_post']
     delete?: never
     options?: never
     head?: never
@@ -5942,6 +5976,12 @@ export interface components {
       }
       /** Closed At */
       closed_at: string | null
+      /** Config Options */
+      config_options?:
+        | {
+            [key: string]: unknown
+          }[]
+        | null
       /**
        * Created At
        * Format: date-time
@@ -5960,6 +6000,10 @@ export interface components {
       mcp_status: 'unknown' | 'verified' | 'unverified'
       /** Selected Node Key */
       selected_node_key: string | null
+      /** Session Modes */
+      session_modes?: {
+        [key: string]: unknown
+      } | null
       /**
        * Status
        * @enum {string}
@@ -5991,6 +6035,26 @@ export interface components {
     StudioChatSessionsResponse: {
       /** Sessions */
       sessions: components['schemas']['StudioChatSessionRecord'][]
+    }
+    /**
+     * StudioChatSetConfigOptionRequest
+     * @description Set one agent-side config option (select type only); the id and value
+     *     must be in the session's advertised configOptions.
+     */
+    StudioChatSetConfigOptionRequest: {
+      /** Config Id */
+      config_id: string
+      /** Value */
+      value: string
+    }
+    /**
+     * StudioChatSetModeRequest
+     * @description Switch the agent-side session mode; the mode must be in the session's
+     *     advertised availableModes (server-side whitelist).
+     */
+    StudioChatSetModeRequest: {
+      /** Mode Id */
+      mode_id: string
     }
     /** StudioContextEdge */
     StudioContextEdge: {
@@ -12752,6 +12816,42 @@ export interface operations {
       }
     }
   }
+  set_config_option_api_workspaces__workspace_id__studio_chat_sessions__session_id__config_options_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioChatSetConfigOptionRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   update_context_api_workspaces__workspace_id__studio_chat_sessions__session_id__context_put: {
     parameters: {
       query?: never
@@ -12877,6 +12977,42 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['StudioChatMessageResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  set_mode_api_workspaces__workspace_id__studio_chat_sessions__session_id__mode_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioChatSetModeRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
         }
       }
       /** @description Validation Error */

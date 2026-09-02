@@ -1086,13 +1086,20 @@ create index if not exists idx_studio_chat_sessions_workspace
 alter table studio_chat_sessions add column if not exists selected_node_key text;
 -- Upgrade path for pre-v57 databases.
 alter table studio_chat_sessions add column if not exists draft_yaml text;
+-- Agent-advertised session mode state / config options (v74, #368): JSON
+-- mirrors of the ACP session/new (or session/load) response, kept current by
+-- current_mode_update / config_option_update notifications. NULL means the
+-- agent does not advertise the capability (UI hides the control). The ALTER
+-- covers fresh AND pre-v74 databases alike (the create-table block above
+-- deliberately omits both columns: the schema file's growth budget is one
+-- effective line per column, and this single statement is that line).
+alter table studio_chat_sessions add column if not exists session_modes_json text, add column if not exists config_options_json text;
 
 create table if not exists studio_chat_messages (
   id text primary key,
   seq bigint generated always as identity,
   session_id text not null references studio_chat_sessions(id) on delete cascade,
-  kind text not null
-    check(kind in ('text', 'tool_call', 'plan', 'permission', 'status', 'thought')),
+  kind text not null check(kind in ('text', 'tool_call', 'plan', 'permission', 'status', 'thought')),
   role text not null check(role in ('user', 'agent', 'system')),
   content_json text not null default '{}',
   created_at timestamptz not null default current_timestamp

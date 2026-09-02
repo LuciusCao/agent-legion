@@ -32,22 +32,26 @@ from acp.schema import (
     AllowedOutcome as AcpAllowedOutcome,
 )
 from acp.schema import (
-    ClientCapabilities,
+    DeniedOutcome as AcpDeniedOutcome,
+)
+from acp.schema import (
     HttpMcpServer,
     Implementation,
     RequestPermissionResponse,
     TextContentBlock,
 )
-from acp.schema import (
-    DeniedOutcome as AcpDeniedOutcome,
-)
 
+from server.app.studio_chat.acp_session_config import (
+    SessionConfigHandleMixin,
+    studio_client_capabilities,
+)
 from server.app.studio_chat.capabilities import capability_snapshot
 from server.app.studio_chat.session_load import open_acp_session
 from server.app.studio_chat.terminals import AcpTerminalStore, TerminalClientMixin
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
+    from server.app.studio_chat.session_config_state import OpenedAcpSession
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +82,7 @@ class AcpSessionCallbacks(Protocol):
     # stale exit cannot tear down a newer runtime registered by resume (ABA).
     runtime: SessionRuntime | None
 
-    def on_ready(self, capabilities: dict[str, Any], acp_session_id: str) -> None: ...
+    def on_ready(self, capabilities: dict[str, Any], opened: OpenedAcpSession) -> None: ...
 
     def on_update(self, update: dict[str, Any]) -> None: ...
 
@@ -124,7 +128,7 @@ class _ClientImpl(TerminalClientMixin):
         return RequestPermissionResponse(outcome=AcpDeniedOutcome(outcome="cancelled"))
 
 
-class AcpSessionHandle:
+class AcpSessionHandle(SessionConfigHandleMixin):
     """Owns one ACP agent subprocess plus its asyncio loop thread."""
 
     def __init__(
@@ -274,25 +278,25 @@ class AcpSessionHandle:
                 self._drain_stderr(process)
                 initialize = await conn.initialize(
                     protocol_version=PROTOCOL_VERSION,
-                    # terminal=True: kimi's Bash/Grep run via the ACP
-                    # terminal protocol; without the flag they fail upfront.
-                    client_capabilities=ClientCapabilities(terminal=True),
+                    # Declaration rationale lives in acp_session_config.py.
+                    client_capabilities=studio_client_capabilities(),
                     client_info=Implementation(
                         name="agent-legion-studio", title="Agent Legion", version="1"
                     ),
                 )
                 capabilities = capability_snapshot(initialize)
-                acp_session_id, loaded = await open_acp_session(
+                opened = await open_acp_session(
                     conn,
                     cwd=self.cwd,
                     mcp_server=self.mcp_server,
                     resume_acp_session_id=self._resume_acp_session_id,
                     capabilities=capabilities,
                 )
+                acp_session_id = opened.acp_session_id
                 with self._state_lock:
                     self._acp_session_id = acp_session_id
-                self.loaded_existing = loaded
-                self.callbacks.on_ready(capabilities, acp_session_id)
+                self.loaded_existing = opened.loaded_existing
+                self.callbacks.on_ready(capabilities, opened)
                 # Startup handshake complete: release the create_session waiter.
                 self.ready_event.set()
                 await self._prompt_loop(conn, acp_session_id)

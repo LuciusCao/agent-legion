@@ -448,3 +448,19 @@ def test_scoped_token_reads_are_bound_to_session_workspace(client, tmp_path) -> 
         )
     finally:
         client.delete(url_a)
+
+
+def test_allow_all_route_registers_before_permission_answer() -> None:
+    # FastAPI matches routes in registration order: the fixed
+    # permissions/allow-all path (studio_chat_config sub-router, #368) must
+    # register before guarded's permissions/{request_id} template, or the
+    # allow-all toggle would be swallowed as request_id="allow-all".
+    from typing import Any, cast
+
+    from server.app.routes.studio_chat import create_studio_chat_router
+
+    router = create_studio_chat_router(cast("Any", None))
+    paths = [getattr(route, "path", "") for route in router.routes]
+    allow_all = next(i for i, p in enumerate(paths) if p.endswith("/permissions/allow-all"))
+    answer = next(i for i, p in enumerate(paths) if p.endswith("/permissions/{request_id}"))
+    assert allow_all < answer
