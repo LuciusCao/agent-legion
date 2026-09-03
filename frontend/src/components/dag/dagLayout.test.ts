@@ -46,9 +46,9 @@ describe('computeLayout (#417 edgeless degenerate layout)', () => {
   it('lays an edgeless graph out as a stable key-ordered grid, not array order', () => {
     // 症状复现（issue #417）：字母序的 published 记录 + 无边 → dagre 按数组
     // 序竖排，expand_analysis 之类冒充拓扑入口。网格布局必须按 key 排序：
-    // zeta 在数组首位也不得占网格第一格。5 个孤立节点 → 2 列网格，key 序
-    // 依次入格：alpha(0,0) beta(1,0) expand_analysis(0,1) intake(1,1)
-    // zeta(0,2)。
+    // zeta 在数组首位也不得占网格第一格。5 个孤立节点 → 3 列网格（⌈√5⌉），
+    // key 序依次入格：alpha(0,0) beta(1,0) expand_analysis(2,0)
+    // intake(0,1) zeta(1,1)。
     const nodes = [
       node('zeta'),
       node('expand_analysis'),
@@ -68,8 +68,36 @@ describe('computeLayout (#417 edgeless degenerate layout)', () => {
     // 同行右进、行满换行。
     expect(beta.y).toBe(alpha.y)
     expect(beta.x).toBeGreaterThan(alpha.x)
-    expect(expand.y).toBeGreaterThan(alpha.y)
+    expect(expand.y).toBe(alpha.y)
+    expect(expand.x).toBeGreaterThan(beta.x)
     expect(zeta.y).toBeGreaterThan(expand.y)
+  })
+
+  it('spreads two isolated nodes across two columns, not a vertical line (#424 codex 复审)', () => {
+    // n=2 时 ⌊√2⌋=1：旧公式把两个节点排回 x=0 的竖直单列——正是 #417
+    // 治理要消除的退化形态（小型 workflow 仍有离散/疑似缺失观感）。
+    // n>1 必须至少两列。
+    const nodes = [node('alpha'), node('beta')]
+    const { rfNodes } = computeLayout(nodes, [], normalize)
+    const byKey = new Map(rfNodes.map((n) => [n.id, n.position]))
+    const alpha = byKey.get('alpha')!
+    const beta = byKey.get('beta')!
+    expect(alpha.x).toBe(0)
+    expect(beta.x).toBeGreaterThan(0)
+    expect(beta.y).toBe(alpha.y)
+  })
+
+  it('spreads three isolated nodes across two columns (#424 codex 复审)', () => {
+    // n=3 时 ⌊√3⌋=1 同样退化为竖直单列；⌈√3⌉=2 列，key 序入格：
+    // a(0,0) b(1,0) c(0,1)——第三个节点才换行，且 x 不全为 0。
+    const nodes = [node('a'), node('b'), node('c')]
+    const { rfNodes } = computeLayout(nodes, [], normalize)
+    const byKey = new Map(rfNodes.map((n) => [n.id, n.position]))
+    expect(byKey.get('a')!.x).toBe(0)
+    expect(byKey.get('b')!.x).toBeGreaterThan(0)
+    expect(byKey.get('b')!.y).toBe(byKey.get('a')!.y)
+    expect(byKey.get('c')!.x).toBe(0)
+    expect(byKey.get('c')!.y).toBeGreaterThan(byKey.get('a')!.y)
   })
 
   it('is deterministic across calls with shuffled node arrays', () => {
