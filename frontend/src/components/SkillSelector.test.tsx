@@ -199,11 +199,13 @@ describe('SkillSelector', () => {
     } as SkillDetail)
     renderSelector({ value: 'ns/skill', skillRef: 'v1.2.0' })
 
-    await waitFor(() => expect(mockGetSkillDetail).toHaveBeenCalledWith('ns/skill'))
+    await waitFor(() =>
+      expect(mockGetSkillDetail).toHaveBeenCalledWith('ns/skill')
+    )
     // 选中 tag 经 combobox 文本断言（未绑定校验流程时同样可选版本）。
-    expect(
-      screen.getByRole('combobox', { name: '版本' })
-    ).toHaveTextContent('v1.2.0')
+    expect(screen.getByRole('combobox', { name: '版本' })).toHaveTextContent(
+      'v1.2.0'
+    )
     fireEvent.mouseDown(screen.getByLabelText('版本'))
     expect(
       await screen.findByRole('option', { name: 'v1.3.0（最新）' })
@@ -216,15 +218,18 @@ describe('SkillSelector', () => {
   it('normalizes an empty bound ref to latest in the version select (#322)', () => {
     renderSelector({ value: 'ns/skill', skillRef: '' })
 
-    expect(
-      screen.getByRole('combobox', { name: '版本' })
-    ).toHaveTextContent('latest')
+    expect(screen.getByRole('combobox', { name: '版本' })).toHaveTextContent(
+      'latest'
+    )
   })
 
   it('disables the version select until a skill is bound', () => {
     renderSelector()
 
-    expect(screen.getByLabelText('版本')).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByLabelText('版本')).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    )
     expect(screen.getByText('先经上方校验选择 skill')).toBeInTheDocument()
   })
 

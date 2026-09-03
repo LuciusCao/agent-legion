@@ -179,7 +179,9 @@ describe('WorkflowNodeSkillEditor', () => {
   })
 
   it('echoes the latest-resolved skill version from the most recent run (#410)', async () => {
-    mockFetchNodeRuns.mockResolvedValue([runWithSkillVersion('latest@abc123def456')])
+    mockFetchNodeRuns.mockResolvedValue([
+      runWithSkillVersion('latest@abc123def456'),
+    ])
     renderEditor({
       definitionYaml:
         'nodes:\n  n1:\n    capability: cap\n    skill: demo/review\n',
