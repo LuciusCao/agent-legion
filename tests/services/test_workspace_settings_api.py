@@ -12,7 +12,6 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def test_workspace_settings_round_trip(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
@@ -61,7 +60,6 @@ def test_workspace_settings_round_trip(tmp_path):
 
 def test_workspace_settings_workflow_rejects_legacy_concurrency_fields(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
@@ -162,7 +160,6 @@ def _inject_write_script_config_schema(workspace_id: str) -> None:
 
 def test_workspace_settings_nodes_round_trip(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
@@ -219,7 +216,6 @@ def test_workspace_settings_nodes_round_trip(tmp_path):
 
 def test_workspace_settings_nodes_reject_invalid_overrides(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
@@ -257,7 +253,6 @@ def test_workspace_settings_nodes_reject_invalid_overrides(tmp_path):
 
 def test_workspace_settings_node_config_is_schema_validated(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
@@ -307,7 +302,6 @@ def test_node_override_validation_uses_workspace_active_revision(tmp_path):
     from tests.helpers import load_builtin_definition
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
@@ -360,7 +354,6 @@ def test_blank_workspace_first_publish_adopts_key_and_runs_job(tmp_path):
     from server.app.services.node_codes import NodeCodeService
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",

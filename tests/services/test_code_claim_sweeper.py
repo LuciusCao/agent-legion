@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from cryptography.fernet import Fernet
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
-from server.app.agent_broker.code_dispatch import resolve_code_manifest_config
+from server.app.agent_broker.code_manifest_config import resolve_code_manifest_config
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.services.vault import VaultService
 from tests.postgres_support import TEST_DATABASE_URL
@@ -134,3 +135,78 @@ def test_sweeper_requeue_reclaim_reinjects_current_secret(job_db, monkeypatch) -
     resolved_second = resolve_code_manifest_config(second.manifest, TEST_DATABASE_URL, {})
     assert resolved_second["config"] == {"mode": "fast", "token": "rotated-secret"}
     assert "secret_config" not in resolved_second
+
+
+def test_sweeper_requeue_resets_bound_shard_row(job_db, monkeypatch) -> None:
+    """#389 review P1-1: a Worker-lost remote SHARD claim must reset its
+    node_shards row on requeue — try_start_shard bound the execution_id at
+    claim time, and a stranded 'running' row would make every later claim
+    reject the shard forever (pending-only guard)."""
+    monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
+    _register_code_worker()
+    import tempfile
+
+    data_dir = Path(tempfile.mkdtemp(prefix="shard-sweep-"))
+    broker = _broker(data_dir)
+    _insert_code_job_rows(job_db, job_id="job-shard-sweep")
+    vault = VaultService(job_db.dsn_identity, {})
+    vault.set("test-workspace", "api-token", "s3cr3t")
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into node_shards(job_id, node_key, shard_index, status, input_json)"
+            " values ('job-shard-sweep', 'package', 1, 'pending', '{}')"
+        )
+    execution_id = broker.enqueue(
+        AgentExecutionRequest(
+            workspace_id="test-workspace",
+            job_id="job-shard-sweep",
+            workflow_key="questions",
+            node_key="package",
+            agent_id="package",
+            agent_definition_hash="codehash",
+            manifest={
+                "kind": "code",
+                "workspace_id": "test-workspace",
+                "capability": "package",
+                "code_hash": "abc123",
+                "job_id": "job-shard-sweep",
+                "log_path": "logs/job-shard-sweep.log",
+                "config_schema": _SCHEMA,
+                "config": {"mode": "fast"},
+                "secret_config": {"token": {"secret_ref": "api-token"}},
+                "shard_index": 1,
+                "shard_input": {},
+            },
+            kind="code",
+        )
+    )
+    claimed = broker.claim("worker-code")
+    assert claimed is not None and claimed.execution_id == execution_id
+
+    def _shard_row(job_db):
+        with job_db._connect_read() as conn:
+            return dict(
+                conn.execute(
+                    "select status, execution_id from node_shards"
+                    " where job_id='job-shard-sweep' and node_key='package' and shard_index=1"
+                ).fetchone()
+            )
+
+    # Claim bound the shard row to this execution.
+    bound = _shard_row(job_db)
+    assert bound["status"] == "running" and str(bound["execution_id"]) == execution_id
+
+    import time
+
+    time.sleep(1.1)  # lease_ttl_seconds=1
+    assert broker.sweep_expired_claims() == [execution_id]
+
+    # The requeue reset the shard row: pending again, unbound — a later
+    # claim of the same request can rebind it.
+    reset = _shard_row(job_db)
+    assert reset["status"] == "pending"
+    assert reset["execution_id"] == ""
+    requeued = broker.claim("worker-code")
+    assert requeued is not None and requeued.execution_id == execution_id
+    assert _shard_row(job_db)["execution_id"] == execution_id

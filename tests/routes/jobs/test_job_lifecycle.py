@@ -27,7 +27,6 @@ def test_get_job_detail_and_artifact_when_enabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
@@ -59,7 +58,6 @@ def test_job_detail_includes_pi_run_trace(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
@@ -98,7 +96,6 @@ def test_job_detail_includes_node_dependencies(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
@@ -127,7 +124,6 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
@@ -157,7 +153,6 @@ def test_delete_job_returns_404_for_unknown_job(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         resp = c.delete("/api/jobs/nonexistent")
     assert resp.status_code == 404
@@ -169,7 +164,6 @@ def test_delete_job_rejects_running_job(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         c.post(
@@ -210,7 +204,6 @@ def test_delete_job_cascades_and_returns_deleted_id(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         c.post(
@@ -242,7 +235,6 @@ def test_list_workspace_runs_returns_joined_job_metadata(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         batch = c.post(
@@ -282,7 +274,6 @@ def test_list_workspace_runs_filters_by_status_and_node(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         batch = c.post(
@@ -319,7 +310,6 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = c.post(
             "/api/workspaces",
@@ -353,7 +343,6 @@ def test_get_artifact_returns_404(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         # Job not found
         resp = c.get("/api/jobs/nonexistent/artifacts/test.json")
@@ -366,7 +355,6 @@ def test_get_job_run_log_returns_redacted_tail(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     app.state.settings.config["secret_token"] = "leaked-token"
     log_dir = app.state.settings.logs_dir / "jobs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -412,7 +400,6 @@ def test_get_job_run_log_returns_404_for_missing_run(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
@@ -438,7 +425,6 @@ def test_get_job_run_log_rejects_escape(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
@@ -468,7 +454,6 @@ def test_reject_invalid_job_subpath(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         # Job not found
         resp = c.get("/api/jobs/nonexistent/invalid/path")
@@ -481,7 +466,6 @@ def test_job_detail_includes_node_inputs_outputs(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
 
     with authenticate_client(TestClient(app)) as c:
         c.post(

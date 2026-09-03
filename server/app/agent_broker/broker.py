@@ -278,7 +278,9 @@ class AgentExecutionBroker:
 
     def fail_stale_definition_requests(self) -> list[str]:
         """Fail queued requests whose pinned Agent definition is gone or disabled."""
-        return sweepers.fail_stale_definition_requests(self)
+        from server.app.agent_broker.sweeper_definitions import fail_stale_definition_requests
+
+        return fail_stale_definition_requests(self)
 
     def discard_result_archive(self, archive_name: str) -> None:
         """Reclaim a per-attempt result archive; names are unique per attempt."""

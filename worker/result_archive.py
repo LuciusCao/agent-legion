@@ -45,9 +45,10 @@ def prepare_code_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[st
         metadata["auth_failure_connection"] = auth_failure
     # #282 键集守卫：metadata 键是 Worker↔Host 的进程边界契约（无编译器、无
     # schema），写出的键必须落在 shared.CODE_RESULT_METADATA_KEYS 之内且必含
-    # 恒在键——auth_failure_connection 仅在节点实际上报时携带。漂移在此
-    # fail-closed（prepare_or_failed 会降级为 failed 上报，不会静默丢字段）；
-    # 契约回归另由 tests/workers/test_protocol_sync.py 的守卫测试拦截。
+    # 恒在键——auth_failure_connection 仅在节点实际上报时携带；分片输出（#389）
+    # 走归档成员（shard_output-<index>.json 是普通 expected_output），不经
+    # metadata。漂移在此 fail-closed（prepare_or_failed 会降级为 failed 上报，
+    # 不会静默丢字段）；契约回归另由 tests/workers/test_protocol_sync.py 拦截。
     written = set(metadata)
     if written - CODE_RESULT_METADATA_KEYS or (
         CODE_RESULT_METADATA_KEYS - {"auth_failure_connection"} - written

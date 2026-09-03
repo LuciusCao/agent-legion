@@ -190,6 +190,10 @@ def build_child_payload(
         runtime["job_batch"] = context["job_batch"]
     if materials is not None:
         runtime["materials"] = materials
+    # Shard executions (#389): the manifest carries the shard payload the
+    # Host-side local executor would inject via context.runtime; the child
+    # runtime dict is the same loose contract surface either way.
+    runtime.update({k: manifest[k] for k in ("shard_index", "shard_input") if k in manifest})
     return {
         "code": code_text,
         "job": runtime["job"],
@@ -228,7 +232,12 @@ def _outcome(
     timeout: float,
     write_error: list[BaseException],
 ) -> dict[str, str]:
-    """Map (exit code, result file, outputs) to the reported status/error."""
+    """Map (exit code, result file, outputs) to the reported status/error.
+
+    Shard runs (#389) carry their per-shard payload as a REGULAR expected
+    output (``shard_output-<index>.json``, added Host-side at enqueue): the
+    missing-outputs check below enforces it and the archive ships it back —
+    no size-capped metadata channel."""
     if exit_code == 130:
         # Shutdown or Host-driven cancel: wait_for_exit SIGTERMs the group and
         # reports 130 in both cases (same convention as the agent path).

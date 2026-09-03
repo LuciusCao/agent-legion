@@ -142,22 +142,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 56
 - check: architecture.file_budget
-  path: server/app/routes/failed_node_runs.py
-  reason: Same issue-211 Phase 3 read-binding guard as job_http.py — this
-    route adds it on the GET query face (the redundant jobs.workflow_key
-    predicate was removed in the same batch).
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 87
-- check: architecture.file_budget
-  path: server/app/routes/job_batches.py
-  reason: Same issue-211 Phase 3 read-binding guard as job_http.py — this
-    route adds it because a mismatched key would flow verbatim into jobs rows
-    (Codex P1 on PR 307).
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 34
-- check: architecture.file_budget
   path: velites/src/agent.rs
   reason: >-
     Issue #297 added the first inline unit tests to the agent loop module
@@ -592,17 +576,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
   ceiling: 851
-- check: architecture.file_budget
-  path: server/app/agent_broker/sweepers.py
-  reason: >-
-    Issue #359's review round counts sweeper force-closed executions in
-    the done-rate gauge (the requeue-limit branch): without it the execute
-    stage undercounts exactly when workers are lost en masse. The two
-    counters sit at the branch that owns the terminal transition; moving
-    them out would split the sweep outcome from its measurement.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
-  ceiling: 167
 
 - check: architecture.file_budget
   path: server/app/services/runtime_profile/classifier.py
@@ -641,17 +614,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
   ceiling: 230
-- check: architecture.file_budget
-  path: server/app/workflow_worker/thread.py
-  reason: >-
-    Issue #359 instruments the pass loop (one note_pass call plus the
-    dispatch registration in start()); three effective lines past the
-    baseline. The pass loop is the single place pass timing exists; the
-    durable fix is a metrics-bridge module if more instrumentation joins
-    the loop, at which point this exemption goes stale.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
-  ceiling: 190
 - check: architecture.file_budget
   path: server/app/routes/__init__.py
   reason: Issue 329 mounts the job diagnosis observation router in the route

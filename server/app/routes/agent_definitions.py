@@ -19,11 +19,10 @@ from server.app.routes.agent_definition_contracts import (
     AgentVersionsResponse,
     AgentVersionSummary,
 )
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import raise_job_http_error
 from server.app.services.agent_service import AgentService
 from server.app.services.job_errors import JobServiceError
 from server.app.services.versioned_entities import VersionedEntity
-from server.app.settings import Settings
 
 # The catalog is workspace-scoped (schema v46): every endpoint takes the
 # required workspace_id query parameter, which the router-level
@@ -72,7 +71,7 @@ def _parse_definition(payload: AgentDefinitionPayload) -> AgentDefinition:
         raise HTTPException(status_code=422, detail=detail) from exc
 
 
-def create_agent_definitions_router(job_db: JobQueries, settings: Settings) -> APIRouter:
+def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
     """DB-backed Agent catalog: draft → publish lifecycle (v26).
 
     Mounted through ``secured()``: workspace members manage Agent definitions;
@@ -85,7 +84,6 @@ def create_agent_definitions_router(job_db: JobQueries, settings: Settings) -> A
 
     @router.get("/agent-definitions", response_model=AgentListResponse)
     def list_agent_definitions(workspace_id: WorkspaceId) -> AgentListResponse:
-        require_workflows_enabled(settings)
         items: list[AgentListItem] = []
         for entity in _service(workspace_id).list_latest():
             items.append(
@@ -106,7 +104,6 @@ def create_agent_definitions_router(job_db: JobQueries, settings: Settings) -> A
     def create_agent_definition(
         request: AgentCreateRequest, workspace_id: WorkspaceId, user: UserDep
     ) -> AgentVersionResponse:
-        require_workflows_enabled(settings)
         definition = _parse_definition(request)
         try:
             entity = _service(workspace_id).save_draft(
@@ -118,7 +115,6 @@ def create_agent_definitions_router(job_db: JobQueries, settings: Settings) -> A
 
     @router.get("/agent-definitions/{agent_id}", response_model=AgentDetailResponse)
     def get_agent_definition(agent_id: str, workspace_id: WorkspaceId) -> AgentDetailResponse:
-        require_workflows_enabled(settings)
         versions = _service(workspace_id).list_versions(agent_id)
         if not versions:
             raise HTTPException(status_code=404, detail=f"Unknown Agent: {agent_id}")
@@ -134,7 +130,6 @@ def create_agent_definitions_router(job_db: JobQueries, settings: Settings) -> A
     def list_agent_definition_versions(
         agent_id: str, workspace_id: WorkspaceId
     ) -> AgentVersionsResponse:
-        require_workflows_enabled(settings)
         versions = _service(workspace_id).list_versions(agent_id)
         if not versions:
             raise HTTPException(status_code=404, detail=f"Unknown Agent: {agent_id}")
@@ -144,7 +139,6 @@ def create_agent_definitions_router(job_db: JobQueries, settings: Settings) -> A
     def save_agent_definition_draft(
         agent_id: str, request: AgentDefinitionPayload, workspace_id: WorkspaceId, user: UserDep
     ) -> AgentVersionResponse:
-        require_workflows_enabled(settings)
         definition = _parse_definition(request)
         try:
             entity = _service(workspace_id).save_draft(agent_id, definition, f"user:{user['id']}")
@@ -156,7 +150,6 @@ def create_agent_definitions_router(job_db: JobQueries, settings: Settings) -> A
     def publish_agent_definition(
         agent_id: str, workspace_id: WorkspaceId, _guard: ScopeGuard = None
     ) -> AgentVersionResponse:
-        require_workflows_enabled(settings)
         try:
             entity = _service(workspace_id).publish(agent_id)
         except JobServiceError as exc:
@@ -171,7 +164,6 @@ def create_agent_definitions_router(job_db: JobQueries, settings: Settings) -> A
         user: UserDep,
         _guard: ScopeGuard = None,
     ) -> AgentVersionResponse:
-        require_workflows_enabled(settings)
         try:
             entity = _service(workspace_id).rollback(
                 agent_id, request.version, f"user:{user['id']}"
@@ -184,7 +176,6 @@ def create_agent_definitions_router(job_db: JobQueries, settings: Settings) -> A
     def copy_agent_definition(
         agent_id: str, request: AgentCopyRequest, workspace_id: WorkspaceId, user: UserDep
     ) -> AgentVersionResponse:
-        require_workflows_enabled(settings)
         try:
             entity = _service(workspace_id).copy(
                 agent_id, request.new_agent_id, f"user:{user['id']}"
@@ -197,7 +188,6 @@ def create_agent_definitions_router(job_db: JobQueries, settings: Settings) -> A
     def archive_agent_definition(
         agent_id: str, workspace_id: WorkspaceId, _guard: ScopeGuard = None
     ) -> AgentArchiveResponse:
-        require_workflows_enabled(settings)
         try:
             archived = _service(workspace_id).archive_all(agent_id)
         except JobServiceError as exc:

@@ -36,7 +36,7 @@ def _payload() -> dict:
         "code_capacity": 16,
         "materials_ttl_days": 0,
         "execution_retention_days": 0,
-        "workflows": {"enabled": True, "max_items_per_run": 20_000},
+        "workflows": {"max_items_per_run": 20_000},
         "agent_workers": {"max_archive_bytes": 64 * 1024 * 1024, "min_protocol_version": 1},
     }
 
@@ -80,7 +80,7 @@ def test_get_strips_legacy_stored_openclaw_block(client) -> None:
             "openclaw": {
                 "cwd": "/tmp/openclaw-legacy",
                 "command_template": ["openclaw", "agent"],
-                "skill_safety": {"enabled": True, "repos": [{"path": "~/.skills/s1"}]},
+                "skill_safety": {"repos": [{"path": "~/.skills/s1"}]},
             }
         }
     )

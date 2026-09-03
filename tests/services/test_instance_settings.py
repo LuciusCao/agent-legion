@@ -32,7 +32,7 @@ def test_apply_overrides_executor_runtime_and_writes_back_config(settings, job_d
             "lease_ttl_seconds": 120,
             "heartbeat_interval_seconds": 2.5,
             "sweeper_enabled": False,
-            "workflows": {"enabled": False},
+            "workflows": {"enabled": False, "max_items_per_run": 500},
             "agent_workers": {"max_archive_bytes": 1024},
             "cleanup": {"log_retention_days": 30, "interval_seconds": 60},
             "monitoring": {"sample_interval_seconds": 15},
@@ -45,7 +45,10 @@ def test_apply_overrides_executor_runtime_and_writes_back_config(settings, job_d
     assert runtime.lease_ttl_seconds == 120
     assert runtime.heartbeat_interval_seconds == 2.5
     assert runtime.sweeper_enabled is False
-    assert runtime.workflows.enabled is False
+    # The stored workflows.enabled key is retired (#385/#389): stripped at
+    # read time; max_items_per_run still hydrates.
+    assert runtime.workflows.max_items_per_run == 500
+    assert not hasattr(runtime.workflows, "enabled")
     assert runtime.agent_workers.max_archive_bytes == 1024
     # Keys absent from the stored document keep the loaded/default values.
     assert runtime.heartbeat_failure_threshold == 3
@@ -90,7 +93,7 @@ def test_effective_document_strips_retired_openclaw_block_from_stored_document()
         "openclaw": {
             "cwd": "/tmp/openclaw-db",
             "command_template": ["openclaw", "agent"],
-            "skill_safety": {"enabled": True, "repos": [{"path": "~/.skills/s1"}]},
+            "skill_safety": {"repos": [{"path": "~/.skills/s1"}]},
         }
     }
 

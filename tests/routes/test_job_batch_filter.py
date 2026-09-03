@@ -66,7 +66,7 @@ def _status(client, job_id: str) -> str:
 
 
 def test_batch_rerun_filter_selects_matching_jobs(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         ws_id = _create_workspace(client, "rerun-filter-ws")
         failed_a, failed_b, completed = _create_jobs(client, ws_id, ["F1", "F2", "C1"])
         job_db = client.app.state.job_db
@@ -89,7 +89,7 @@ def test_batch_rerun_filter_selects_matching_jobs(client_factory):
 
 
 def test_batch_rerun_filter_honors_exclude_ids(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         ws_id = _create_workspace(client, "rerun-exclude-ws")
         kept, excluded = _create_jobs(client, ws_id, ["F3", "F4"])
         job_db = client.app.state.job_db
@@ -113,7 +113,7 @@ def test_batch_rerun_filter_honors_exclude_ids(client_factory):
 
 
 def test_batch_rerun_explicit_job_ids_still_work(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         ws_id = _create_workspace(client, "rerun-explicit-ws")
         (job_id,) = _create_jobs(client, ws_id, ["F5"])
         client.app.state.job_db.update_job_status(job_id, "failed", "boom")
@@ -129,7 +129,7 @@ def test_batch_rerun_explicit_job_ids_still_work(client_factory):
 
 
 def test_batch_selection_requires_exactly_one_of_job_ids_or_filter(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         ws_id = _create_workspace(client, "selection-validation-ws")
         (job_id,) = _create_jobs(client, ws_id, ["V1"])
 
@@ -165,7 +165,7 @@ def test_batch_selection_requires_exactly_one_of_job_ids_or_filter(client_factor
 
 
 def test_batch_delete_filter_and_exclude_ids(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         ws_id = _create_workspace(client, "delete-filter-ws")
         excluded, deleted, pending = _create_jobs(client, ws_id, ["D1", "D2", "D3"])
         job_db = client.app.state.job_db
@@ -197,7 +197,7 @@ def test_batch_delete_filter_and_exclude_ids(client_factory):
 
 
 def test_batch_run_to_filter_selects_matching_jobs(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         ws_id = _create_workspace(client, "run-to-filter-ws")
         pending, failed = _create_jobs(client, ws_id, ["R1", "R2"])
         job_db = client.app.state.job_db
@@ -219,7 +219,7 @@ def test_batch_run_to_filter_selects_matching_jobs(client_factory):
 
 
 def test_package_filter_selects_matching_jobs(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         ws_id = _create_workspace(client, "package-filter-ws")
         done_a, done_b, failed = _create_jobs(client, ws_id, ["P1", "P2", "P3"])
         job_db = client.app.state.job_db
@@ -244,7 +244,7 @@ def test_package_filter_selects_matching_jobs(client_factory):
 
 
 def test_package_filter_empty_match_returns_400(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         ws_id = _create_workspace(client, "package-empty-ws")
         _create_jobs(client, ws_id, ["P4"])
 
@@ -258,7 +258,7 @@ def test_package_filter_empty_match_returns_400(client_factory):
 
 
 def test_clear_packed_filter_selects_matching_jobs(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         ws_id = _create_workspace(client, "clear-packed-filter-ws")
         packed_a, packed_b, unpacked = _create_jobs(client, ws_id, ["X1", "X2", "X3"])
         job_db = client.app.state.job_db
@@ -279,7 +279,7 @@ def test_clear_packed_filter_selects_matching_jobs(client_factory):
 
 
 def test_clear_packed_filter_empty_match_returns_400(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         ws_id = _create_workspace(client, "clear-packed-empty-ws")
         _create_jobs(client, ws_id, ["X4"])
 
@@ -293,7 +293,7 @@ def test_clear_packed_filter_empty_match_returns_400(client_factory):
 
 
 def test_rerun_by_failure_filter_and_exclude_ids(client_factory):
-    with client_factory(workflows_enabled=True) as client:
+    with client_factory() as client:
         ws_id = _create_workspace(client, "rerun-by-failure-filter-ws")
         job_a, job_b, job_c = _create_jobs(client, ws_id, ["B1", "B2", "B3"])
         for job_id in (job_a, job_b, job_c):

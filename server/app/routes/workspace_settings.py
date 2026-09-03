@@ -5,7 +5,7 @@ from server.app.routes.job_contracts import (
     WorkspaceSettingsResponse,
     WorkspaceSettingsSectionRequest,
 )
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.workspace_secrets import create_workspace_secrets_router
 from server.app.services.job_errors import JobServiceError
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
@@ -20,7 +20,6 @@ def create_workspace_settings_router(
 
     @router.get("/workspaces/{workspace_id}/settings", response_model=WorkspaceSettingsResponse)
     def get_workspace_settings(workspace_id: str) -> WorkspaceSettingsResponse:
-        require_workflows_enabled(settings)
         try:
             return WorkspaceSettingsResponse(settings=service.settings_payload(workspace_id))
         except JobServiceError as exc:
@@ -36,7 +35,6 @@ def create_workspace_settings_router(
         section: str,
         payload: WorkspaceSettingsSectionRequest,
     ) -> WorkspaceSettingsResponse:
-        require_workflows_enabled(settings)
         try:
             return WorkspaceSettingsResponse(
                 settings=service.update_section(

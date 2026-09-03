@@ -22,7 +22,7 @@ from server.app.routes.agent_definition_contracts import (
     AgentDefinitionPayload,
     AgentVersionResponse,
 )
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_agent_preview_tools import create_studio_agent_preview_tools_router
 from server.app.routes.studio_agent_prompt_tools import create_studio_agent_prompt_tools_router
 from server.app.routes.studio_agent_skill_tools import create_studio_agent_skill_tools_router
@@ -84,7 +84,6 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
     def validate_workflow(
         workspace_id: str, payload: WorkflowDraftRequest
     ) -> WorkflowDraftValidationResponse:
-        require_workflows_enabled(settings)
         errors = _service().validate_workflow(workspace_id, payload.definition_yaml)
         return WorkflowDraftValidationResponse(valid=not errors, errors=errors)
 
@@ -95,7 +94,6 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
     def compare_workflow(
         workspace_id: str, payload: WorkflowDraftRequest
     ) -> WorkflowDraftCompareResponse:
-        require_workflows_enabled(settings)
         try:
             result = _service().compare_workflow(workspace_id, payload.definition_yaml)
         except JobServiceError as exc:
@@ -140,7 +138,6 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
         workflow_key: str | None = None,
     ) -> WorkflowNodeCodeVersionResponse:
-        require_workflows_enabled(settings)
         key = _resolve_key(workspace_id, workflow_key)
         try:
             row = _service().save_node_code_draft(
@@ -166,7 +163,6 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         payload: AgentDefinitionPayload,
         user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
     ) -> AgentVersionResponse:
-        require_workflows_enabled(settings)
         definition = _parse_agent_definition(payload)
         try:
             entity = _service().save_agent_definition_draft(
@@ -181,7 +177,6 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         response_model=StudioAgentActiveWorkflowResponse,
     )
     def get_active_revision(workspace_id: str) -> StudioAgentActiveWorkflowResponse:
-        require_workflows_enabled(settings)
         try:
             payload = _service().get_active_revision(workspace_id)
         except JobServiceError as exc:
@@ -202,7 +197,6 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
     def get_node_code_state(
         workspace_id: str, node_key: str, workflow_key: str | None = None
     ) -> WorkflowNodeCodeResponse:
-        require_workflows_enabled(settings)
         key = _resolve_key(workspace_id, workflow_key)
         try:
             state = _service().get_node_code_state(workspace_id, key, node_key)
@@ -211,7 +205,7 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         return WorkflowNodeCodeResponse(**state)
 
     router.include_router(create_studio_agent_skill_tools_router(job_db, settings))
-    workspace_scoped.include_router(create_studio_agent_prompt_tools_router(job_db, settings))
+    workspace_scoped.include_router(create_studio_agent_prompt_tools_router(job_db))
     # Preview panel tools (issue #328): context/panel reads + draft write —
     # workspace-bound like the prompt tools (scoped token + workspace binding).
     workspace_scoped.include_router(create_studio_agent_preview_tools_router(job_db, settings))

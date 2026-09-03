@@ -36,7 +36,7 @@ export const WORKSPACE_LABELS = {
   jobs: '任务',
   runs: '运行记录',
   settings: '设置',
-  executors: '执行器',
+  executors: '本地执行',
   intake: '接入模式',
   workflow: '工作流',
   packages: '打包',

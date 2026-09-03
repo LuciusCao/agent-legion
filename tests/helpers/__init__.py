@@ -115,11 +115,7 @@ def make_workflow_worker(
 
     definition = load_builtin_definition(workflow_key)
     settings = app_main.load_settings(data_dir=tmp_path)
-    settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
-        {
-            "workflows": {"enabled": True},
-        }
-    )
+    settings.executor_runtime = ExecutorRuntimeConfig.model_validate({})
 
     # P-0.5: 单一隐含 code 池，直接装配。
     from server.app.executors.code import CodeExecutor

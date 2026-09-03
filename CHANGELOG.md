@@ -7,6 +7,26 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 ## [Unreleased]
 
 ### Changed
+- host 纯控制面模式：workflow 执行与宿主进程解耦（#389，收编 #385/#386）。
+  `code_capacity` 合法化 0 值（契约 `gt=0→ge=0`，UI「代码池」组改述为
+  「本地执行」——本地兜底执行并发上限，0 = 纯远程模式）：宿主容量为 0 时
+  不再组装本地执行栈（CodeExecutor/ExecutionRuntime/线程池/velites 沙箱
+  依赖全部消失），code 节点 100% 由远程 code Worker 执行；shard 分片执行
+  远程化——分片身份（`shard_index`/`shard_input`）写入持久化 manifest，
+  broker claim 事务经 `try_start_shard` 绑定 `node_shards` 行（行级去重），
+  分片输出以 `shard_output-<index>.json` 作为常规 expected_output 随归档
+  回传（不走尺寸受限的 metadata 通道）；调度线程 pass 级早退修复（纯远程
+  部署不再被饿死，且保留审批门等免 dispatch 工作的处理机会）；
+  `/api/health` 在纯远程模式下实时报告在线 code Worker 数（启动为 0 打
+  WARNING），防静默停摆。
+- `workflows.enabled` 退役（#385，由 #389 第 3 步收编）：该开关已从灰度
+  开关漂移为事实上的产品总开关，单机部署无合理关闭场景。404 门禁
+  `require_workflows_enabled` 整体移除（38 个路由文件、约 150 处调用，
+  API 面永远可用）；`worker_startup.is_enabled` 分支删除（worker 总是
+  启动，部署形态改由 `code_capacity` 表达）；实例设置契约删除该键，
+  存量 DB 文档读取时键级剥离（`workflows.max_items_per_run` 活跃保留），
+  无数据迁移。升级窗口内旧前端整文档 PUT 携带该键会 422（破坏性契约
+  变更，刷新前端即恢复）。
 - worker 镜像与 agent runtime 解耦（#381/#383，PR #384）：velites/pi 移出
   worker 镜像——镜像收敛为纯执行服务（Python worker + bwrap + 内置的
   `velites-sandbox` code 沙箱包装器），velites agent runtime 以平台匹配的

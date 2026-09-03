@@ -41,7 +41,10 @@ MAX_CONNECTION_KEY_CHARS = 128
 # an absent optional key is not an error. A process-boundary contract with no
 # compiler and no schema; before #282 both sides were handwritten literals
 # kept in sync by comment only. ``run_dir`` is deliberately NOT part of this
-# set: it is agent-path-only and code results never carry it.
+# set: it is agent-path-only and code results never carry it. Shard outputs
+# (#389) also never ride this channel — they ship as regular archive members
+# (``shard_output-<index>.json`` expected outputs), avoiding the header-size
+# ceiling entirely.
 CODE_RESULT_METADATA_KEYS: frozenset[str] = frozenset(
     {
         "status",

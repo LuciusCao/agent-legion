@@ -150,6 +150,7 @@
     "tests/skills/test_skill_catalog_service.py",
     "tests/skills/test_skill_sources_retirement.py",
     "tests/workers/test_code_stock_gate.py",
+    "tests/workers/test_pure_remote_mode.py",
     "tests/workers/test_scheduler_wakeup.py",
     "tests/workers/test_worker_control_db.py",
     "tests/workers/test_workflow_worker_capacity.py",

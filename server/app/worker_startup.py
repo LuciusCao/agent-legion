@@ -12,6 +12,7 @@ from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.sweeper import SweeperThread
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import register_wakeup
+from server.app.services.health_status import record_pure_remote_startup
 from server.app.services.path_hygiene import report_absolute_db_paths_background
 from server.app.settings import Settings
 from server.app.worker_control import WorkspaceWorkerControl
@@ -44,27 +45,39 @@ def start_worker_threads(
     # thread — readiness must not wait on it (issue #106).
     report_absolute_db_paths_background(job_db)
     worker_startup: dict[str, str] = {}
-    if not WorkflowWorkerThread.is_enabled(settings):
-        return None, None, worker_startup
-    # P-0.5: the single implicit code pool — one CodeExecutor, assembled
-    # directly; the executor registry/kinds machinery is retired (v47).
-    code_executor = CodeExecutor(
-        repo_root=settings.root_dir,
-        settings_config=settings.config,
-        job_db=job_db,
-        cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
-        # Materialization cache lives under the instance data dir (design
-        # §6.2) so it is covered by the same data-volume lifecycle.
-        materials_cache_root=settings.data_dir / MATERIALS_CACHE_DIRNAME,
-    )
-    execution_runtime = ExecutionRuntime(
-        executor_leases,
-        code_executor,
-        heartbeat_interval_seconds=settings.executor_runtime.heartbeat_interval_seconds,
-        lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
-        heartbeat_failure_threshold=settings.executor_runtime.heartbeat_failure_threshold,
-        cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
-    )
+    # ``workflows.enabled`` is retired (#385/#389): the worker always starts;
+    # the deployment shape is expressed by code_capacity below.
+    # Pure-remote mode (#389): code_capacity == 0 assembles NO local executor
+    # stack — no velites sandbox subprocesses, no thread pool, no local
+    # heartbeat loop. The workflow worker still runs (it is the scheduler:
+    # ready scan, routing, remote dispatch, approval gates), but every code
+    # node must execute on a remote code-capable Worker. The health endpoint
+    # surfaces the online code-Worker count so a stalled pure-remote fleet is
+    # visible (tasks queue silently when no Worker is online).
+    pure_remote = settings.executor_runtime.code_capacity <= 0
+    execution_runtime: ExecutionRuntime | None = None
+    if not pure_remote:
+        # P-0.5: the single implicit code pool — one CodeExecutor, assembled
+        # directly; the executor registry/kinds machinery is retired (v47).
+        code_executor = CodeExecutor(
+            repo_root=settings.root_dir,
+            settings_config=settings.config,
+            job_db=job_db,
+            cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
+            # Materialization cache lives under the instance data dir (design
+            # §6.2) so it is covered by the same data-volume lifecycle.
+            materials_cache_root=settings.data_dir / MATERIALS_CACHE_DIRNAME,
+        )
+        execution_runtime = ExecutionRuntime(
+            executor_leases,
+            code_executor,
+            heartbeat_interval_seconds=settings.executor_runtime.heartbeat_interval_seconds,
+            lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
+            heartbeat_failure_threshold=settings.executor_runtime.heartbeat_failure_threshold,
+            cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
+        )
+    if pure_remote:
+        record_pure_remote_startup(worker_startup, job_db)
     sweeper_thread: SweeperThread | None = None
     # The sweeper owns all lease hygiene; sweeper_enabled=False means
     # an external sweeper process (multi-replica deployments).

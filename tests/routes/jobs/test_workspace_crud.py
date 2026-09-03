@@ -27,7 +27,6 @@ def test_fresh_install_workspace_and_revision_flow(tmp_path):
     from tests.helpers import load_builtin_definition
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         assert c.get("/api/workspaces").json()["workspaces"] == []
         created = c.post(
@@ -58,7 +57,6 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         workspace_response = c.post(
             "/api/workspaces",
@@ -108,7 +106,6 @@ def test_legacy_workspace_jobs_endpoint_caps_results(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
@@ -133,25 +130,12 @@ def test_legacy_workspace_jobs_endpoint_caps_results(tmp_path):
     assert len(response.json()["jobs"]) == 3
 
 
-def test_delete_workspace_hidden_when_workflows_disabled(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = False
-    with authenticate_client(TestClient(app)) as c:
-        response = c.delete("/api/workspaces/some_ws")
-    assert response.status_code == 404
-
-
 def test_delete_workspace_named_default_is_allowed(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
@@ -169,7 +153,6 @@ def test_delete_workspace_rejects_when_jobs_running(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
@@ -200,7 +183,6 @@ def test_delete_workspace_cascades_and_returns_deleted_id(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
@@ -251,7 +233,6 @@ def test_delete_workspace_returns_404_for_unknown_workspace(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         response = c.delete("/api/workspaces/nonexistent")
     assert response.status_code == 404
@@ -265,7 +246,6 @@ def test_create_workspace_binds_key_and_seeds_nothing(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         created = c.post("/api/workspaces", json={"id": "blank_ws", "name": "Blank WS"})
         workspace = created.json()["workspace"]
@@ -289,7 +269,6 @@ def test_create_workspace_blank_name_returns_400_not_409(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         response = c.post("/api/workspaces", json={"id": "blank_name_ws", "name": "   "})
 
@@ -303,7 +282,6 @@ def test_create_workspace_rejects_bad_and_duplicate_ids(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         for bad_id in ("", "Bad-Upper", "1 space", "_leading", "a" * 65):
             response = c.post("/api/workspaces", json={"id": bad_id, "name": "Bad"})
@@ -323,7 +301,6 @@ def test_create_workspace_rejects_retired_fields(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         response = c.post(
             "/api/workspaces",
@@ -383,7 +360,6 @@ def test_create_workspace_rejects_retired_intake_config(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         response = c.post(
             "/api/workspaces",
@@ -404,7 +380,6 @@ def test_update_workspace_rejects_retired_intake_config(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         created = c.post(
             "/api/workspaces",

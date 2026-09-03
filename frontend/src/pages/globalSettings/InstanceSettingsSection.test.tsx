@@ -28,7 +28,7 @@ const settings: InstanceSettingsResponse = {
   code_capacity: 16,
   materials_ttl_days: 0,
   execution_retention_days: 0,
-  workflows: { enabled: true, max_items_per_run: 20000 },
+  workflows: { max_items_per_run: 20000 },
   agent_workers: { max_archive_bytes: 104857600, min_protocol_version: 2 },
   skills_root: '~/.agents/skills',
 }
@@ -76,7 +76,6 @@ describe('InstanceSettingsSection', () => {
     ).toBeInTheDocument()
     // 高级参数默认折叠：调优字段不出现在文档中。
     expect(screen.queryByLabelText('日志保留天数')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('启用工作流')).not.toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: '展开高级参数' })
     ).toHaveAttribute('aria-expanded', 'false')
@@ -101,12 +100,11 @@ describe('InstanceSettingsSection', () => {
     expect(screen.getByLabelText('心跳失败阈值')).toHaveValue(3)
     expect(screen.getByLabelText('最低协议版本')).toHaveValue(2)
     expect(screen.getByLabelText('启用 sweeper')).toBeChecked()
-    expect(screen.getByLabelText('启用工作流')).toBeChecked()
     expect(screen.getByLabelText('单次 run 条目上限（0 不限制）')).toHaveValue(
       20000
     )
     expect(screen.getByText(/需重启服务才能生效/)).toBeInTheDocument()
-    // 每组带一句面向用户的说明（抽查三组，含此前缺失的监控/代码池组）。
+    // 每组带一句面向用户的说明（抽查三组，含此前缺失的监控/本地执行组）。
     expect(
       screen.getByText('自动删除过期的运行日志与产物，控制磁盘占用。')
     ).toBeInTheDocument()
@@ -114,7 +112,7 @@ describe('InstanceSettingsSection', () => {
       screen.getByText('资源占用的采样频率与监控数据保留时长。')
     ).toBeInTheDocument()
     expect(
-      screen.getByText('代码节点共享的执行线程池大小，即同时执行的代码节点数。')
+      screen.getByText(/无远程 worker 时代码节点由宿主本地沙箱执行/)
     ).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: '收起高级参数' })
@@ -139,7 +137,6 @@ describe('InstanceSettingsSection', () => {
     fireEvent.change(screen.getByLabelText('心跳间隔（秒）'), {
       target: { value: '12.5' },
     })
-    fireEvent.click(screen.getByLabelText('启用工作流'))
     fireEvent.click(screen.getByText('保存实例设置'))
 
     await waitFor(() => {
@@ -147,7 +144,7 @@ describe('InstanceSettingsSection', () => {
         ...updateBase,
         cleanup: { ...settings.cleanup, log_retention_days: 46 },
         heartbeat_interval_seconds: 12.5,
-        workflows: { enabled: false, max_items_per_run: 20000 },
+        workflows: { max_items_per_run: 20000 },
       })
     })
     // Baseline updated: the form is clean again after a successful save.

@@ -28,18 +28,10 @@ def _load_and_validate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config_t
     validate_settings(settings)
 
 
-def test_disabled_workflows_require_no_pi_binary(tmp_path, monkeypatch):
-    config = _minimal_config()
-    config += "\nworkflows:\n  enabled: false\n"
-
-    _load_and_validate(tmp_path, monkeypatch, config)
-
-
 def test_agent_workflows_do_not_require_pi_binary_on_host(tmp_path, monkeypatch):
-    config = _minimal_config()
-    config += "\nworkflows:\n  enabled: true\n"
-
-    _load_and_validate(tmp_path, monkeypatch, config)
+    # ``workflows.enabled`` is retired (#385/#389): agent runtimes are
+    # preflighted on the Worker side, so the host never needs a pi binary.
+    _load_and_validate(tmp_path, monkeypatch, _minimal_config())
 
 
 def test_enabled_workflows_accept_pi_command_from_path(tmp_path, monkeypatch):
@@ -52,7 +44,6 @@ def test_enabled_workflows_accept_pi_command_from_path(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
     config = _minimal_config()
     config += (
-        "\nworkflows:\n  enabled: true\n"
         "executors:\n"
         "  pi-legacy:\n"
         "    kind: pi\n"

@@ -12,6 +12,12 @@ independent execution. ``max_concurrency`` is a pure hint: it only bounds how
 many shards of the node are dispatched per pass; authoritative capacity
 enforcement stays inside ``leases.try_claim``.
 
+Shard execution follows the same dual path as ordinary code nodes (#389):
+each shard first tries the remote code Worker (``try_claim_code_worker_node``
+on a shard-shaped node view); the local code pool stays the fallback when it
+has capacity. In pure-remote mode (``code_capacity == 0``) only the remote
+path exists.
+
 Reduce fan-in: before a reduce node is claimed, the shard outputs of its
 ``from`` node are aggregated into ``<node_key>.shards.json`` in the job dir.
 File writing belongs to the job execution service layer, never to routes.
@@ -20,21 +26,16 @@ File writing belongs to the job execution service layer, never to routes.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.db.transaction import write_transaction
 from server.app.executors._lease_shards import complete_empty_shard_node
-from server.app.executors.models import (
-    CODE_EXECUTOR_ID,
-    ConfigurationFailureRequest,
-    ExecutionContext,
-    LeaseClaimRequest,
-)
+from server.app.executors.models import ConfigurationFailureRequest
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.jobs.queries.workspace_node_limits import get_local_node_limit
-from server.app.workflow_worker.execution import submit_claim
+from server.app.workflow_worker.code_claim import try_claim_code_worker_node
+from server.app.workflow_worker.shard_dispatch import claim_shard_locally
 from server.app.workflows.definition import WorkflowNode
 from server.app.workflows.sharding import (
     ShardLimitExceeded,
@@ -71,8 +72,6 @@ def claim_shard_node(
     with worker.job_db._connect_read() as conn:
         local_node_limit = get_local_node_limit(conn, workspace_id, workflow_key, node_key)
 
-    global_capacity = worker.settings.executor_runtime.code_capacity
-
     rows = _read_shard_rows(worker, job["id"], node_key)
     if not rows:
         try:
@@ -103,60 +102,49 @@ def claim_shard_node(
             continue
         if shard.max_concurrency is not None and running >= shard.max_concurrency:
             break
-        if not snapshot.has_capacity(workspace_id, node_key):
-            break
         shard_index = int(row["shard_index"])
         shard_log_path = log_path.with_name(f"{job['id']}-{node_key}-shard-{shard_index}.log")
-        claim = worker.leases.try_claim(
-            LeaseClaimRequest(
-                executor_id=CODE_EXECUTOR_ID,
-                global_capacity=global_capacity,
-                workspace_id=workspace_id,
-                job_id=job["id"],
-                workflow_key=workflow_key,
-                node_key=node_key,
-                capability=node.capability,
-                local_node_limit=local_node_limit,
-                lease_ttl_seconds=worker.runtime.lease_ttl_seconds,
-                log_path=str(shard_log_path),
-                execution_mode=control_snapshot.get("execution_mode", "full")
-                if control_snapshot
-                else "full",
-                target_node_key=control_snapshot.get("target_node_key")
-                if control_snapshot
-                else None,
-                allowed_node_keys=tuple(sorted(allowed_node_keys)) if allowed_node_keys else (),
-                shard_index=shard_index,
-            )
-        )
-        if claim is None:
-            break  # capacity lost to a race; the next poll pass re-evaluates
-        snapshot.record_claim(workspace_id, node_key)
-        running += 1
-        claimed_any = True
-        context = ExecutionContext(
-            execution_id=claim.execution_id,
-            lease_id=claim.lease_id,
-            node_run_id=claim.node_run_id,
-            executor_id=claim.executor_id,
-            workspace_id=claim.workspace_id,
-            job_id=claim.job_id,
-            workflow_key=claim.workflow_key,
-            node_key=claim.node_key,
-            capability=claim.capability,
-            workspace=dict(workspace),
-            job=dict(job),
-            job_dir=job_dir,
-            log_path=shard_log_path,
-            inputs=tuple(node.inputs),
-            expected_outputs=tuple(node.outputs),
-            runtime={
-                "node_execution": asdict(node.execution),
-                "shard_index": shard_index,
-                "shard_input": json.loads(row["input_json"]),
-            },
-        )
-        submit_claim(worker, CODE_EXECUTOR_ID, claim, context)
+        shard_input = json.loads(row["input_json"])
+
+        # Remote path first (#389): mirror the ordinary code-node routing —
+        # True = handled remotely (or failed as a config error); False falls
+        # through to the local pool via shard_dispatch.
+        if try_claim_code_worker_node(
+            worker,
+            workspace,
+            job,
+            node,
+            job_dir,
+            shard_log_path,
+            tuple(node.inputs),
+            workflow_key,
+            shard_runtime={"shard_index": shard_index, "shard_input": shard_input},
+        ):
+            running += 1
+            claimed_any = True
+            continue
+        if worker.settings.executor_runtime.code_capacity <= 0:
+            # Pure-remote mode: no local fallback exists; leave the shard
+            # pending for the next pass (remote worker offline / ineligible).
+            continue
+        if claim_shard_locally(
+            worker,
+            workspace,
+            job,
+            node,
+            job_dir,
+            shard_log_path,
+            shard_index=shard_index,
+            shard_input=shard_input,
+            local_node_limit=local_node_limit,
+            control_snapshot=control_snapshot,
+            allowed_node_keys=allowed_node_keys,
+            snapshot=snapshot,
+        ):
+            running += 1
+            claimed_any = True
+        else:
+            break  # local capacity exhausted; the next poll pass re-evaluates
     return claimed_any
 
 

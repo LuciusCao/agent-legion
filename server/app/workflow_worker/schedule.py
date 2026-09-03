@@ -147,18 +147,26 @@ def try_claim_and_submit(
     executor_id = resolved.target_id
 
     # Batch 2: a code-pool candidate with an online code-capable Worker and a
-    # Worker-eligible payload is enqueued to the broker; anything else falls
-    # through to the local executor path below (the safety net).
+    # Worker-eligible payload is enqueued to the broker. Pure-remote mode
+    # (#389, code_capacity == 0) stops here: the local fallback below is
+    # structurally unavailable, so an unshippable payload parks the node for
+    # the next pass (remote-first candidates whose payload is Worker-
+    # ineligible need an online worker or operator attention, never a local
+    # sandbox that does not exist).
     if try_claim_code_worker_node(
         worker, workspace, job, node, job_dir, log_path, inputs, workflow_key
     ):
         return True
 
+    if worker.settings.executor_runtime.code_capacity <= 0:
+        return False
+
     # Cheap gate before config resolution: when the pass snapshot says the
     # code pool (or this node's limit) is out of capacity, the claim cannot
     # succeed (claim_executor_node re-checks authoritatively), so skip the
     # per-pop batch lookup and config resolution for the thousands of doomed
-    # candidates that pile up behind a saturated pool.
+    # candidates that pile up behind a saturated pool. In pure-remote mode
+    # this snapshot always reports zero global capacity.
     if not snapshot.has_capacity(workspace_id, node_key):
         return False
 

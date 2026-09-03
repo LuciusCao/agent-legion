@@ -13,8 +13,8 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.artifact_object_block import inject_artifact_object_block
-from server.app.agent_broker.code_dispatch import resolve_code_manifest_config
 from server.app.agent_broker.code_manifest import resolve_code_runtime_context
+from server.app.agent_broker.code_manifest_config import resolve_code_manifest_config
 from server.app.routes.agent_worker_heartbeat import register_heartbeat_route
 from server.app.routes.agent_workers_contracts import (
     AgentClaimResponse,

@@ -24,8 +24,9 @@ from server.app.agent_broker.claim_scan import (
     WorkerView,
     labels_satisfy,
 )
-from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
+from server.app.agent_broker.manifest_trim import cancel_request
 from server.app.agent_control.registry import CODE_PROTOCOL_VERSION
+from server.app.workflows.sharding import try_start_shard
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
@@ -161,16 +162,35 @@ def evaluate_candidate(
                 state.skip_reasons["capacity_raced"] += 1
                 return None
 
-    updated = conn.execute(
-        "update job_nodes set status='running', stale_reason='', error_message='',"
-        " started_at=current_timestamp, finished_at=null"
-        " where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale')",
-        (selected["job_id"], selected["node_key"]),
-    )
-    if updated.rowcount == 0:
-        cancel_request(conn, selected["execution_id"])
-        state.skip_reasons["node_not_pending"] += 1
-        return None
+    # Shard-aware claiming (#389): a kind='code' manifest may carry a shard
+    # identity (shard_index top-level key). try_start_shard binds this
+    # execution_id to its node_shards row (the row-level dedup) and performs
+    # the same job_nodes → running flip; the plain flip would orphan the
+    # shard row (finish_shard_execution would never find it).
+    shard_index = manifest.get("shard_index")
+    if shard_index is not None:
+        if not try_start_shard(
+            conn,
+            selected["job_id"],
+            selected["node_key"],
+            int(shard_index),
+            selected["execution_id"],
+            datetime.now(UTC),
+        ):
+            cancel_request(conn, selected["execution_id"])
+            state.skip_reasons["shard_not_pending"] += 1
+            return None
+    else:
+        updated = conn.execute(
+            "update job_nodes set status='running', stale_reason='', error_message='',"
+            " started_at=current_timestamp, finished_at=null"
+            " where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale')",
+            (selected["job_id"], selected["node_key"]),
+        )
+        if updated.rowcount == 0:
+            cancel_request(conn, selected["execution_id"])
+            state.skip_reasons["node_not_pending"] += 1
+            return None
 
     log_path = claim_log_path(manifest, broker.data_dir)
     # Dispatch-time config audit (CONFIG-RUNTIME-MUTABLE-001): the manifest
@@ -244,12 +264,4 @@ def evaluate_candidate(
         node_run_id=int(run["id"]),
         manifest=manifest,
         kind=kind,
-    )
-
-
-def cancel_request(conn: Any, execution_id: str) -> None:
-    conn.execute(
-        "update agent_execution_requests set state='cancelled',"
-        " finished_at=current_timestamp, manifest_json=" + MANIFEST_TRIM + " where execution_id=%s",
-        (execution_id,),
     )

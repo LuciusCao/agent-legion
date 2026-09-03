@@ -22,16 +22,14 @@ from server.app.routes.job_approval_contracts import (
 from server.app.routes.job_http import (
     raise_job_http_error,
     raise_job_operation_error,
-    require_workflows_enabled,
 )
 from server.app.services.approval_decisions import ApprovalDecisionService
 from server.app.services.job_errors import JobServiceError
 from server.app.services.job_operation_error import JobOperationError
-from server.app.settings import Settings
 
 
 def create_job_approvals_router(
-    approvals: ApprovalDecisionService, settings: Settings
+    approvals: ApprovalDecisionService,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -47,7 +45,6 @@ def create_job_approvals_router(
         payload: ApprovalDecisionCreateRequest,
         user: Annotated[dict[str, Any], Depends(require_user)],
     ) -> ApprovalDecisionResponse:
-        require_workflows_enabled(settings)
         try:
             decision = approvals.decide(
                 workspace_id,
@@ -69,7 +66,6 @@ def create_job_approvals_router(
         response_model=ApprovalDecisionListResponse,
     )
     def list_approval_decisions(workspace_id: str, job_id: str) -> ApprovalDecisionListResponse:
-        require_workflows_enabled(settings)
         try:
             decisions = approvals.list_decisions(workspace_id, job_id)
         except JobServiceError as exc:

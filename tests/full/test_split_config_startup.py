@@ -26,7 +26,9 @@ def test_repository_split_configuration_builds_application(tmp_path: Path, monke
     ):
         monkeypatch.setenv(key, "")
     settings = load_settings(data_dir=tmp_path / "settings-data")
-    assert settings.executor_runtime.workflows.enabled is True
+    # workflows.enabled retired (#385/#389); the workflows block still
+    # carries the active custom_nodes_enabled gate.
+    assert settings.executor_runtime.workflows.custom_nodes_enabled is True
     # Executor definitions are retired (schema v47, P-0.5): the implicit code
     # pool is sized from the instance code_capacity (default 16).
     app = create_app(data_dir=tmp_path / "app-data", start_worker=False)

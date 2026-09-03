@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from server.app.auth.dependencies import reject_studio_agent_scope
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.workspace_execution_contracts import (
     WorkspaceConfigurationRequest,
     WorkspaceConfigurationResponse,
@@ -25,7 +25,6 @@ def create_workspace_configuration_router(
         workspace_id: str,
         payload: WorkspaceConfigurationRequest,
     ) -> WorkspaceConfigurationResponse:
-        require_workflows_enabled(settings)
         try:
             result = service.replace_configuration(
                 workspace_id,

@@ -11,14 +11,8 @@ def _create_workspace(client, name="Stats WS", default_workflow_key="stats_ws"):
     return workspace_id
 
 
-def test_workspace_stats_hidden_when_workflows_disabled(client_factory):
-    with client_factory(workflows_enabled=False) as c:
-        response = c.get("/api/workspaces/default/stats")
-    assert response.status_code == 404
-
-
 def test_workspace_stats_returns_counts_and_executor_status(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws = c.post(
             "/api/workspaces",
             json={"id": "stats_ws", "name": "Stats WS"},
@@ -48,7 +42,7 @@ def test_workspace_stats_returns_counts_and_executor_status(client_factory):
 
 
 def test_workspace_stats_code_pool_reflects_leases(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         job_db = c.app.state.job_db
         ws = c.post(
             "/api/workspaces",
@@ -93,7 +87,7 @@ def test_workspace_stats_code_pool_reflects_leases(client_factory):
 
 
 def test_workspace_stats_latest_run_reflects_node_runs(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws_id = _create_workspace(c)
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -118,6 +112,6 @@ def test_workspace_stats_latest_run_reflects_node_runs(client_factory):
 
 
 def test_workspace_stats_returns_404_for_unknown_workspace(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         resp = c.get("/api/workspaces/nonexistent/stats")
     assert resp.status_code == 404

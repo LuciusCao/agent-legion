@@ -171,7 +171,8 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             # (workflow registration hot refresh).
             app.state.workflow_worker = workflow_worker_thread
             if workflow_worker_thread is not None:
-                app.state.code_executor = workflow_worker_thread.runtime.executor
+                # None in pure-remote mode (#389): no local executor stack.
+                app.state.code_executor = workflow_worker_thread.local_executor()
             # Orphan GC / artifact maintenance / materials TTL / execution
             # retention share the sweeper ownership rule: exactly one replica
             # (sweeper_enabled) runs the slow sweeps, the rest stay idle.

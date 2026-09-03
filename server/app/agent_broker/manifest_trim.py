@@ -27,6 +27,8 @@ builders for the enqueue side stay in their per-kind modules.
 
 from __future__ import annotations
 
+from typing import Any
+
 # The kind='code' trim body — replace the heavy runtime_context with the
 # lightweight audit stub. The qualified table name keeps the correlated jobs
 # lookup unambiguous inside each UPDATE.
@@ -81,3 +83,15 @@ _AGENT_TRIM_BODY = """
 MANIFEST_TRIM = (
     "case when kind = 'code' then\n" + _CODE_TRIM_BODY + "else\n" + _AGENT_TRIM_BODY + "end\n"
 )
+
+
+def cancel_request(conn: Any, execution_id: str) -> None:
+    """Cancel a queued request (terminal transition + manifest trim).
+
+    Moved from claim_evaluate (#389 budget): cancel IS a terminal transition,
+    so the trim SQL lives beside it."""
+    conn.execute(
+        "update agent_execution_requests set state='cancelled',"
+        " finished_at=current_timestamp, manifest_json=" + MANIFEST_TRIM + " where execution_id=%s",
+        (execution_id,),
+    )

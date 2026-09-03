@@ -4,6 +4,12 @@ Extracted from the worker thread to keep it within its size budget. Claiming
 lives in ``server.app.workflow_worker.schedule``; once a lease is claimed the
 functions here submit the execution to the executor pool and reap finished
 futures.
+
+Pure-remote mode (#389): with ``code_capacity == 0`` the host assembles no
+local executor stack at all, so ``submit_claim`` never runs — local claims
+are structurally impossible (the capacity snapshot reports zero and the
+lease claim transaction rejects ``global_capacity == 0``). The assertions
+here are a tripwire against that contract drifting.
 """
 
 from __future__ import annotations
@@ -35,7 +41,13 @@ def submit_claim(
     execution is refilled on the next pass instead of after the idle
     backoff.
     """
-    pool = worker._pool_for(executor_id)
+    if worker.settings.executor_runtime.code_capacity <= 0:
+        # Not reachable while the composition root honors the contract (the
+        # local path is gated on the same config), but failing loudly here is
+        # far better than queuing onto a pool that pure-remote mode never
+        # built: the lease would expire into the sweeper's failure path.
+        raise RuntimeError("submit_claim reached with code_capacity == 0 (pure-remote mode)")
+    pool = worker.state.pools[executor_id]
     future = pool.submit(run_claim, worker, claim, context)
     future.add_done_callback(lambda _f: worker.state.wake_event.set())
     worker.state.futures[claim.execution_id] = future
@@ -46,6 +58,9 @@ def run_claim(
     worker: WorkflowWorkerThread, claim: ClaimedExecution, context: ExecutionContext
 ) -> ExecutionResult | None:
     try:
+        # Unreachable with runtime=None (pure-remote): submit_claim is the
+        # only caller and raises first when code_capacity == 0.
+        assert worker.runtime is not None
         return worker.runtime.run(claim, context)
     except Exception as exc:
         # #204 broad-except audit: pool-thread safety net. This function runs

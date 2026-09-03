@@ -23,7 +23,6 @@ def test_create_question_jobs_when_enabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
@@ -52,7 +51,6 @@ def test_async_batch_returns_queued_and_consumes_in_chunks(tmp_path, monkeypatch
     monkeypatch.setattr("server.app.services.job_intake_queue.INTAKE_QUEUE_CHUNK_SIZE", 2)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     intake_queue = JobIntakeQueue(app.state.job_db, app.state.settings, app.state.job_event_buffer)
     monkeypatch.setattr(
         "server.app.services.job_intake_queue.JobIntakeQueue.consume_once",
@@ -107,7 +105,6 @@ def test_async_batch_claim_is_atomic_across_consumers(tmp_path, monkeypatch):
         lambda self: False,
     )
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
@@ -133,7 +130,6 @@ def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
@@ -159,7 +155,6 @@ def test_create_workspace_job_batch_from_direct_ids_uses_opaque_title(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         workspace = c.post(
             "/api/workspaces",
@@ -198,7 +193,6 @@ def test_create_workspace_job_batch_rejects_empty_ids(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
@@ -280,7 +274,6 @@ def test_async_batch_resubmit_after_job_deletion_requeues_and_rebuilds(tmp_path,
     from server.app.services.job_intake_queue import JobIntakeQueue
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     intake_queue = JobIntakeQueue(app.state.job_db, app.state.settings, app.state.job_event_buffer)
     monkeypatch.setattr(
         "server.app.services.job_intake_queue.JobIntakeQueue.consume_once",
@@ -348,7 +341,6 @@ def test_async_batch_resubmit_without_deletion_keeps_idempotency(tmp_path, monke
     from server.app.services.job_intake_queue import JobIntakeQueue
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     intake_queue = JobIntakeQueue(app.state.job_db, app.state.settings, app.state.job_event_buffer)
     monkeypatch.setattr(
         "server.app.services.job_intake_queue.JobIntakeQueue.consume_once",
@@ -408,7 +400,6 @@ def test_async_batch_chunk_failure_is_recorded_and_remaining_chunks_continue(tmp
     monkeypatch.setattr("server.app.services.job_intake_queue.INTAKE_QUEUE_CHUNK_SIZE", 1)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     intake_queue = JobIntakeQueue(app.state.job_db, app.state.settings, app.state.job_event_buffer)
     monkeypatch.setattr(
         "server.app.services.job_intake_queue.JobIntakeQueue.consume_once",

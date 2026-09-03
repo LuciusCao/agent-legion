@@ -16,7 +16,6 @@ nodes:
 def _app_and_workspace(tmp_path):
     """Blank-style workspace: row exists, no revision seeded."""
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     workspace = app.state.job_db.create_workspace(
         "Publish WS",
         default_workflow_key="test_publish_flow",

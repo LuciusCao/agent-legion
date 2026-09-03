@@ -3,16 +3,16 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from concurrent.futures import wait
 from typing import Any
 
 from server.app.agent_broker import AgentDispatchService
-from server.app.agent_broker.code_dispatch import CodeDispatchService
+from server.app.agent_broker.code_dispatch import CodeDispatchService, has_online_code_workers
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.scheduling.capacity import load_capacity_snapshot
 from server.app.jobs import JobQueries
 from server.app.services.agent_service import has_published_agent_definitions
+from server.app.services.runtime_profile import profile
 from server.app.settings import Settings
 from server.app.workflow_worker.agent_gate import prepare_agent_pass
 from server.app.workflow_worker.catalog_scan import (
@@ -27,6 +27,7 @@ from server.app.workflow_worker.pass_log import log_pass_end, log_pass_start, pa
 from server.app.workflow_worker.pools import ensure_pools
 from server.app.workflow_worker.ready import build_ready_queues
 from server.app.workflow_worker.schedule import claim_ready_queues
+from server.app.workflow_worker.shutdown import stop_worker
 from server.app.workflow_worker.state import WorkflowWorkerState
 from server.app.workflows.definition import WorkflowDefinition
 
@@ -38,15 +39,18 @@ class WorkflowWorkerThread:
         self,
         job_db: JobQueries,
         leases: ExecutorLeaseRepository,
-        runtime: ExecutionRuntime,
         settings: Settings,
         workspace_worker_control: Any | None = None,
         agent_manager: Any | None = None,
         agent_dispatch: AgentDispatchService | None = None,
         code_dispatch: CodeDispatchService | None = None,
+        runtime: ExecutionRuntime | None = None,
     ):
         self.job_db = job_db
         self.leases = leases
+        # None in pure-remote mode (#389): the local executor stack is not
+        # assembled when code_capacity == 0, and the poll loop structurally
+        # never submits local claims.
         self.runtime = runtime
         self.settings = settings
         self.workspace_worker_control = workspace_worker_control
@@ -60,9 +64,13 @@ class WorkflowWorkerThread:
         # Code stockpile gate (issue #125): TTL-cached, shared across passes.
         self.code_stock = CodeStockGate(job_db, settings.executor_runtime.code_stock)
 
-    @staticmethod
-    def is_enabled(settings: Settings) -> bool:
-        return settings.executor_runtime.workflows.enabled
+    # ``is_enabled`` retired (#385/#389): the workflows.enabled gray-release
+    # switch is gone; the worker always runs and the deployment shape is
+    # expressed by code_capacity (0 = pure-remote, no local executor stack).
+
+    def local_executor(self) -> Any | None:
+        """The local code executor, or None in pure-remote mode (#389)."""
+        return getattr(self.runtime, "executor", None)
 
     def wake(self) -> None:
         """Wake the poll loop immediately; registered via scheduler_wakeup."""
@@ -79,9 +87,6 @@ class WorkflowWorkerThread:
 
     def _ensure_pools(self) -> None:
         ensure_pools(self)
-
-    def _pool_for(self, executor_id: str) -> Any:
-        return self.state.pools[executor_id]
 
     def start(self) -> None:
         self.reload_scan_entries()
@@ -138,7 +143,15 @@ class WorkflowWorkerThread:
         snapshot = load_capacity_snapshot(
             self.leases.path, self.settings.executor_runtime.code_capacity
         )
-        if not snapshot.has_any_capacity() and not has_published_agent_definitions(self.job_db):
+        # Pure-remote deployments (#389): with code_capacity=0 the local
+        # snapshot has no capacity, but remote code Workers can still claim —
+        # the pass must keep scanning (coupling fix ③). Known limit (unchanged
+        # from pre-#389 behavior): a saturated pool plus zero Agents skips the
+        # scan, so a ready approval gate parks only after a slot frees; in
+        # pure-remote mode an offline Worker fleet has the same effect.
+        if not (
+            snapshot.has_any_capacity() or has_online_code_workers(self.job_db)
+        ) and not has_published_agent_definitions(self.job_db):
             return False
 
         scan_started = time.monotonic()
@@ -179,12 +192,8 @@ class WorkflowWorkerThread:
         )
         if scan_seconds > 15:
             logger.warning("slow workflow worker pass: " + pass_stats[0], *pass_stats[1:])
-        from server.app.services.runtime_profile import profile
-
         profile.note_pass(
-            seconds=scan_seconds + claim_seconds,
-            scan_seconds=scan_seconds,
-            slow=scan_seconds > 15,
+            seconds=scan_seconds + claim_seconds, scan_seconds=scan_seconds, slow=scan_seconds > 15
         )
         if worker_stats := getattr(self.state.agent_pass, "stock_gated", 0):
             profile.note_enqueue_stock_gated(worker_stats)
@@ -200,39 +209,6 @@ class WorkflowWorkerThread:
         return collect_runnable_workspace_jobs(self)
 
     def stop(self, timeout: float = 3) -> None:
-        self.stop_event.set()
-        self.state.wake_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=timeout)
-        # Cancel still-active executions so adapters terminate children and
-        # finish leases within a bounded grace period.
-        grace = getattr(self.runtime, "cancellation_grace_seconds", 5)
-        for execution_id in list(self.state.futures):
-            try:
-                self.runtime.cancel(execution_id)
-            except Exception:
-                # #204 broad-except audit: shutdown safety net — every
-                # remaining execution gets its cancel attempted; one failing
-                # cancel must not skip the others or break out of the
-                # shutdown sequence below (pool shutdown, state cleanup).
-                logger.exception("failed to cancel execution %s during shutdown", execution_id)
-        futures = list(self.state.futures.values())
-        done, pending = wait(futures, timeout=max(timeout, grace))
-        for future in done:
-            try:
-                future.result()
-            except Exception:
-                # #204 broad-except audit: same as reap_futures — the failure
-                # was already reported and compensated by run_claim; shutdown
-                # must keep draining the remaining futures instead of
-                # aborting mid-loop with pools still registered.
-                logger.exception("workflow future failed during shutdown")
-        if pending:
-            logger.warning(
-                "%s workflow future(s) still active after shutdown timeout", len(pending)
-            )
-        self.state.futures.clear()
-        self.state.future_claims.clear()
-        for pool in self.state.pools.values():
-            pool.shutdown(wait=False, cancel_futures=True)
-        self.state.pools.clear()
+        # Cancel in-flight executions, drain futures, shut pools (see
+        # shutdown.py; split for the size budget).
+        stop_worker(self, timeout=timeout)

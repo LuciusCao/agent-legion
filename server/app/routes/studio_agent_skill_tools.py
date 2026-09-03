@@ -11,7 +11,7 @@ lock — publishing (re-pin + relock) stays a human admin action.
 from fastapi import APIRouter
 
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.skill_contracts import SkillDetailResponse
 from server.app.routes.studio_agent_skill_contracts import (
     SkillSaveVersionRequest,
@@ -31,7 +31,6 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
 
     @router.get("/studio-agent/tools/skills/{skill_key:path}", response_model=SkillDetailResponse)
     def get_skill(skill_key: str, ref: str | None = None) -> SkillDetailResponse:
-        require_workflows_enabled(settings)
         try:
             return SkillDetailResponse(**catalog.detail(skill_key, ref=ref))
         except JobServiceError as exc:
@@ -42,7 +41,6 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
         response_model=SkillValidateToolResponse,
     )
     def validate_skill(skill_key: str) -> SkillValidateToolResponse:
-        require_workflows_enabled(settings)
         try:
             return SkillValidateToolResponse(**editing.validate(skill_key))
         except JobServiceError as exc:
@@ -56,7 +54,6 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
     def save_skill_version(
         skill_key: str, payload: SkillSaveVersionRequest
     ) -> SkillSaveVersionResponse:
-        require_workflows_enabled(settings)
         files = [SkillFileWrite(path=item.path, content=item.content) for item in payload.files]
         try:
             result = editing.save_version(skill_key, files, payload.new_tag, payload.message)

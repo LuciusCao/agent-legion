@@ -527,10 +527,8 @@ def agent_manager():
 def app_factory(tmp_path):
     from server.app.main import create_app
 
-    def factory(*, workflows_enabled=None, configure=None):
+    def factory(*, configure=None):
         app = create_app(data_dir=tmp_path, start_worker=False)
-        if workflows_enabled is not None:
-            app.state.settings.executor_runtime.workflows.enabled = workflows_enabled
         if configure is not None:
             configure(app)
         return app

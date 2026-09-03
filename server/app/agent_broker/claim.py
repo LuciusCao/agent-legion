@@ -17,9 +17,9 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.agent_broker import agent_claim_compatibility
 from server.app.agent_broker.agent_worker_capacity import sync_declared_capacity, touch_worker
-from server.app.agent_broker.claim_evaluate import cancel_request
 from server.app.agent_broker.claim_scan import AgentClaim, ClaimRacedError, ScanState, WorkerView
 from server.app.agent_broker.claim_windows import needed_claim_kinds, scan_kind
+from server.app.agent_broker.manifest_trim import cancel_request
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker

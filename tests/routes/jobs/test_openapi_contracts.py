@@ -32,16 +32,20 @@ def test_workspace_agent_routes_are_absent_from_openapi(tmp_path):
     assert "WorkspaceAgentConfig" not in schema["components"]["schemas"]
 
 
-def test_job_routes_are_hidden_when_workflows_disabled(tmp_path):
+def test_job_routes_are_available_without_former_gate(tmp_path):
+    """#385/#389: the workflows.enabled 404 gate is retired — the core API
+    surface answers regardless of deployment shape (a pure-remote host still
+    serves definitions, runs and artifacts read-only)."""
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = False
     with authenticate_client(TestClient(app)) as c:
         response = c.get("/api/workspaces/ws1/jobs")
         workspaces = c.get("/api/workspaces")
 
-    assert response.status_code == 404
-    assert workspaces.status_code == 404
+    # No longer 404-by-gate: the routes exist (auth/lookup errors are fine,
+    # "Workflows are disabled" is gone).
+    assert response.status_code != 404 or "disabled" not in response.json().get("detail", "")
+    assert workspaces.status_code != 404 or "disabled" not in workspaces.json().get("detail", "")

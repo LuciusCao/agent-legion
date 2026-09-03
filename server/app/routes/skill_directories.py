@@ -1,7 +1,6 @@
 from fastapi import APIRouter
 
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import require_workflows_enabled
 from server.app.routes.skill_directories_contracts import SkillDirectoriesResponse
 from server.app.services.skill_browser import SkillBrowser
 from server.app.settings import Settings
@@ -21,7 +20,6 @@ def create_skill_directories_router(job_db: JobQueries, settings: Settings) -> A
         # The ``workspace_id`` query-param name is load-bearing:
         # require_workspace_access reads it and rejects non-members (404)
         # before this handler runs.
-        require_workflows_enabled(settings)
         directories = _browser().list_directories(workspace_id)
         return SkillDirectoriesResponse(workspace_id=workspace_id, directories=list(directories))
 

@@ -1,6 +1,7 @@
 // 实例设置表单的字段元数据表（从 InstanceSettingsSection 拆出以控制体积预算；
 // 各组用户视角说明在 instanceSettingsHints.ts）。
-// P-0.5：code_capacity（内置 code 池容量，实例级，重启生效）在「代码池」组。
+// #389：code_capacity（本地兜底执行并发上限，实例级，重启生效）在
+// 「本地执行」组，0 = 纯远程模式（不在宿主本地执行 code 节点）。
 // 保留策略类字段（materials/execution retention）见姊妹文件
 // instanceSettingsRetentionFields.ts。
 
@@ -77,21 +78,23 @@ export const FIELD_GROUPS: FieldGroup[] = [
     toggles: [{ path: 'sweeper_enabled', label: '启用 sweeper' }],
   },
   {
-    title: '功能开关',
+    title: '运行与本地执行',
     fields: [
       // #358：单次 run 条目上限（0 不限制），超限提交被 API 拒绝。
+      // workflows.enabled 已随 #385/#389 退役（部署形态由 code_capacity 表达）。
       {
         path: 'workflows.max_items_per_run',
         label: '单次 run 条目上限（0 不限制）',
         integer: true,
         allowZero: true,
       },
+      {
+        path: 'code_capacity',
+        label: '本地执行并发上限（0 = 纯远程模式）',
+        integer: true,
+        allowZero: true,
+      },
     ],
-    toggles: [{ path: 'workflows.enabled', label: '启用工作流' }],
-  },
-  {
-    title: '代码池',
-    fields: [{ path: 'code_capacity', label: 'code 池容量', integer: true }],
     toggles: [],
   },
   ...RETENTION_FIELD_GROUPS,

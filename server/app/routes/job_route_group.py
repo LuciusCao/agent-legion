@@ -52,29 +52,27 @@ def include_job_routes(
         object_store=object_store,
     )
 
-    router.include_router(create_job_batches_router(services.intake, settings))
-    router.include_router(create_jobs_router(services.queries, settings))
+    router.include_router(create_job_batches_router(services.intake))
+    router.include_router(create_jobs_router(services.queries))
     router.include_router(
         create_job_mutations_router(
-            services.queries, services.rerun, services.deletion, services.execution, settings
+            services.queries, services.rerun, services.deletion, services.execution
         )
     )
-    router.include_router(create_job_pause_router(services.pause, settings))
-    router.include_router(create_job_approvals_router(services.approvals, settings))
+    router.include_router(create_job_pause_router(services.pause))
+    router.include_router(create_job_approvals_router(services.approvals))
     router.include_router(create_job_snapshot_router(services.patch_queries, settings))
-    stress_router = create_job_stress_events_router(settings, job_event_buffer)
+    stress_router = create_job_stress_events_router(job_event_buffer)
     if stress_router is not None:
         router.include_router(stress_router)
     router.include_router(
-        create_job_workflow_upgrade_router(services.queries, services.workflow_upgrade, settings)
+        create_job_workflow_upgrade_router(services.queries, services.workflow_upgrade)
     )
-    router.include_router(
-        create_job_workflow_upgrade_batch_router(services.workflow_upgrade, settings)
-    )
+    router.include_router(create_job_workflow_upgrade_batch_router(services.workflow_upgrade))
     router.include_router(create_job_artifacts_router(services.artifacts, settings, services.logs))
     router.include_router(create_token_usage_router(services.queries, settings))
-    router.include_router(create_job_invalid_paths_router(services.artifacts, settings))
-    router.include_router(create_workspace_runs_router(services.queries, settings))
-    router.include_router(create_runs_router(services.runs, settings))
-    router.include_router(create_failed_node_runs_router(job_db, services.rerun, settings))
-    router.include_router(create_batch_rerun_preview_router(services.rerun, settings))
+    router.include_router(create_job_invalid_paths_router(services.artifacts))
+    router.include_router(create_workspace_runs_router(services.queries))
+    router.include_router(create_runs_router(services.runs))
+    router.include_router(create_failed_node_runs_router(job_db, services.rerun))
+    router.include_router(create_batch_rerun_preview_router(services.rerun))

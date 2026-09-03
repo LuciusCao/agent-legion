@@ -36,7 +36,8 @@ describe('WorkspaceCard', () => {
 
   it('renders executor status correctly', () => {
     render(<WorkspaceCard {...createProps()} />)
-    const executorsSection = screen.getByText('执行器').parentElement!
+    // #386 术语改述：「执行器」→「本地执行」。
+    const executorsSection = screen.getByText('本地执行').parentElement!
     expect(executorsSection.textContent).toContain('2/14')
   })
 

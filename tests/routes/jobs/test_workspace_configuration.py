@@ -16,7 +16,6 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c, "default", "education_video_problems_generation")
         response = c.put(
@@ -58,7 +57,6 @@ def test_workspace_configuration_rejects_invalid_node_limit_without_partial_upda
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c, "rollback", "education_video_problems_generation")
 
@@ -108,7 +106,6 @@ def test_workspace_execution_configuration_lifecycle(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c, "lifecycle", "education_video_problems_generation")
         saved = c.put(
@@ -161,7 +158,6 @@ def test_workspace_configuration_agent_capacity_round_trip(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c, "capacity", "education_video_problems_generation")
         saved = c.put(
@@ -215,7 +211,7 @@ def test_put_configuration_without_workflow_key_succeeds(client_factory):
     契约侧 workflowKey 降 optional（缺省=沿用已存，同 previewHidden 的
     兼容模式）；旧版前端 PUT 白名单缺 key 时 422 的行为就此退役。
     """
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws_id = _create_workspace(c, "no-key")
         response = _settings_put(c, ws_id, {"entityType": "video"})
 
@@ -225,7 +221,7 @@ def test_put_configuration_without_workflow_key_succeeds(client_factory):
 
 def test_put_configuration_with_matching_workflow_key_round_trips(client_factory):
     """旧快照带 key（值匹配）仍是 no-op 往返：兼容窗口内显式传值不报错。"""
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws_id = _create_workspace(c, "with-key")
         response = _settings_put(c, ws_id, {"workflowKey": ws_id, "entityType": "video"})
 
@@ -236,7 +232,7 @@ def test_put_configuration_with_matching_workflow_key_round_trips(client_factory
 
 def test_put_configuration_with_mismatched_workflow_key_is_rejected(client_factory):
     """key 与 workspace id 不匹配仍走不可变守卫（400）。"""
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws_id = _create_workspace(c, "immutable")
         response = _settings_put(
             c, ws_id, {"workflowKey": "some_other_workflow", "entityType": "video"}
@@ -247,7 +243,7 @@ def test_put_configuration_with_mismatched_workflow_key_is_rejected(client_facto
 
 def test_put_configuration_old_snapshot_round_trip_keeps_stored_fields(client_factory):
     """旧客户端快照往返（带 key、带 previewHidden）完整保留服务端状态。"""
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws_id = _create_workspace(c, "old-snapshot")
         # 先用 PATCH section 建立已存的 previewHidden。
         patched = c.patch(

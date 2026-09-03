@@ -175,7 +175,6 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
     workflow_path = _write_test_workflow(tmp_path)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
 
     with authenticate_client(TestClient(app)) as client:
         ws_response = client.post(
@@ -341,7 +340,6 @@ def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
     workflow_path = _write_test_workflow(tmp_path)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
 
     with authenticate_client(TestClient(app)) as client:
         ws_response = client.post(
@@ -400,7 +398,6 @@ def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
     workflow_path = _write_test_workflow(tmp_path)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
 
     with authenticate_client(TestClient(app)) as client:
         ws_response = client.post(

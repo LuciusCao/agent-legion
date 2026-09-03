@@ -43,5 +43,9 @@ terms:
   - pattern: 'AGENT_LEGION_WORKER_REGISTER_TOKEN'
     retired_in: '#35'
     note: 全局 register token 退役，改 workspace-scoped token
+  - pattern: 'workflows\.enabled'
+    retired_in: '#385/#389'
+    note: 灰度开关退役；部署形态由 code_capacity 表达（0 = 纯控制面），
+      存量 DB 文档读时键级剥离
 
 exemptions: []
