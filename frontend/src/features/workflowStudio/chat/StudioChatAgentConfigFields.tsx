@@ -1,4 +1,4 @@
-import { UI_LEVELS, type UiLevel } from './thoughtLevel'
+import { UI_LEVELS, levelLabel, type UiLevel } from './thoughtLevel'
 import { isGroup, type ConfigEntry, type ThoughtView } from './agentConfigView'
 import styles from './StudioChatAgentConfig.module.css'
 
@@ -79,7 +79,7 @@ export function ThoughtLevelField({
   // 通用档走映射；未知原生值原样透传（value 不在 UI_LEVELS 里即为原生值）。
   const resolve = (picked: string) =>
     (UI_LEVELS as readonly string[]).includes(picked)
-      ? map.toNative[picked as UiLevel]!
+      ? (map.toNative[picked as UiLevel] ?? picked)
       : picked
   return (
     <label className={styles.field} title={thought.description}>
@@ -105,7 +105,7 @@ export function ThoughtLevelField({
         {map.current === 'off' && <option value="">关闭</option>}
         {UI_LEVELS.filter((ui) => map.toNative[ui] !== undefined).map((ui) => (
           <option key={ui} value={ui}>
-            {map.toNative[ui] === ui ? ui : `${ui}（→ ${map.toNative[ui]}）`}
+            {levelLabel(ui, map.toNative[ui])}
           </option>
         ))}
         {map.unknownValues.map((value) => (

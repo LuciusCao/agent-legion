@@ -1,21 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 
-/** 模型切换后档位联动的漂移提示：思考档位的当前值变了、而最近一次动作不是
- * 用户自己切档 → 提示；用户切档引起的变化不提示。 */
+/** 模型切换后档位联动的漂移判定（PR #398 review）：切会话不是漂移（换 sessionId
+ * 时静默重置基线）；用户自己切档引起的那一次变化不算（ownToken 是发起切换时
+ * 生成的对象，吞掉一次即视为已消费，之后 agent 自主变档照常提示）。 */
 export function useThoughtDrift(
+  sessionId: string | null,
   current: string | null,
-  ownChange: boolean
-): string | null {
-  const previous = useRef(current)
-  const [drift, setDrift] = useState<string | null>(null)
+  ownToken: object | null
+): boolean {
+  const seen = useRef({ sessionId, current, consumed: null as object | null })
+  const [drifted, setDrifted] = useState(false)
   useEffect(() => {
-    if (previous.current === current) return
-    setDrift(
-      ownChange || current === null
-        ? null
-        : `思考档位已随模型切换变为 ${current}`
-    )
-    previous.current = current
-  }, [current, ownChange])
-  return drift
+    const prev = seen.current
+    const own = ownToken !== null && ownToken !== prev.consumed
+    const changed = prev.sessionId === sessionId && prev.current !== current
+    seen.current = {
+      sessionId,
+      current,
+      consumed: changed && own ? ownToken : prev.consumed,
+    }
+    if (prev.sessionId !== sessionId) setDrifted(false)
+    else if (changed) setDrifted(!own && current !== null)
+  }, [sessionId, current, ownToken])
+  return drifted
 }

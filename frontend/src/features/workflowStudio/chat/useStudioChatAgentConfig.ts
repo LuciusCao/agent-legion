@@ -69,6 +69,11 @@ export function useStudioChatAgentConfig(
     session: effective,
     pending: scoped(pending),
     lastAction: scoped(lastAction),
+    // 对象身份即「这一次动作」：漂移提示吞掉一次变化后按身份判已消费。
+    lastActionToken:
+      lastAction !== null && lastAction.sessionId === sessionId
+        ? lastAction
+        : null,
     error: scoped(error),
     setMode,
     setOption,

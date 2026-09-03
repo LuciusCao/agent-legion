@@ -50,6 +50,11 @@ export type ThoughtLevelMap = {
   readOnly: boolean
 }
 
+/** 通用档的展示标签：落点与档位词不同时带「→ 原生值」（下拉选项与漂移提示同精度）。 */
+export function levelLabel(ui: string, native: string | undefined): string {
+  return native === undefined || native === ui ? ui : `${ui}（→ ${native}）`
+}
+
 /** 通用档 X 落到的原生档：≤X 的最大已知档，否则已知最小档。 */
 function clampToKnown(target: UiLevel, known: Level[]): Level | undefined {
   const weaker = known.filter((level) => rank(level) <= rank(target))

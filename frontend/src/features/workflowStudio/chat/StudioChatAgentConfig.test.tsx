@@ -281,4 +281,77 @@ describe('StudioChatAgentConfig', () => {
     await settled(selectB)
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
+
+  it('does not announce drift when the user merely switches sessions', () => {
+    const goose = record({
+      id: 's2',
+      config_options: [
+        {
+          ...KIMI_OPTIONS[1],
+          currentValue: 'off',
+          options: [{ value: 'off' }, { value: 'low' }],
+        },
+      ],
+    })
+    const { rerender } = render(
+      <StudioChatAgentConfig workspaceId="ws1" session={record()} />
+    )
+    rerender(<StudioChatAgentConfig workspaceId="ws1" session={goose} />)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('after an own thought change, a later agent-driven change is still announced', async () => {
+    const own = record({
+      config_options: [
+        KIMI_OPTIONS[0],
+        { ...KIMI_OPTIONS[1], currentValue: 'max' },
+      ],
+    })
+    mockApi.setStudioChatConfigOption.mockResolvedValue(own)
+    const { rerender } = render(
+      <StudioChatAgentConfig workspaceId="ws1" session={record()} />
+    )
+    const select = screen.getByLabelText('思考档位')
+    fireEvent.change(select, { target: { value: 'max' } })
+    await settled(select)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    // agent changes the level on its own (SSE snapshot): announced, with native precision
+    rerender(
+      <StudioChatAgentConfig
+        workspaceId="ws1"
+        session={record({
+          config_options: [
+            KIMI_OPTIONS[0],
+            {
+              ...KIMI_OPTIONS[1],
+              currentValue: 'xhigh',
+              options: [...KIMI_OPTIONS[1].options, { value: 'xhigh' }],
+            },
+          ],
+        })}
+      />
+    )
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '思考档位已随模型切换变为 high（→ xhigh）'
+    )
+  })
+
+  it('disables every control on a closed session, like the input box', () => {
+    render(
+      <StudioChatAgentConfig
+        workspaceId="ws1"
+        session={record({ status: 'closed' })}
+      />
+    )
+    expect(screen.getByLabelText('Agent 权限模式')).toBeDisabled()
+    expect(screen.getByLabelText('模型')).toBeDisabled()
+    expect(screen.getByLabelText('思考档位')).toBeDisabled()
+  })
+
+  it('exposes the two-layer permission note to assistive tech', () => {
+    render(<StudioChatAgentConfig workspaceId="ws1" session={record()} />)
+    expect(
+      screen.getByRole('img', { name: /两层互不改写/ })
+    ).toBeInTheDocument()
+  })
 })

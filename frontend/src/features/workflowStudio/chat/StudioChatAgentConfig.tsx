@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import type { StudioChatSessionRecord } from './studioChatApi'
 import { agentConfigView } from './agentConfigView'
 import { NativeSelect, ThoughtLevelField } from './StudioChatAgentConfigFields'
+import { levelLabel } from './thoughtLevel'
 import { useStudioChatAgentConfig } from './useStudioChatAgentConfig'
 import { useThoughtDrift } from './useThoughtDrift'
 import styles from './StudioChatAgentConfig.module.css'
@@ -17,12 +18,16 @@ type Props = {
 export function StudioChatAgentConfig(props: Props) {
   const config = useStudioChatAgentConfig(props.workspaceId, props.session)
   const view = useMemo(() => agentConfigView(config.session), [config.session])
-  const drift = useThoughtDrift(
+  const drifted = useThoughtDrift(
+    config.session?.id ?? null,
     view.thought?.map.current ?? null,
-    config.lastAction !== null && config.lastAction === view.thought?.id
+    config.lastAction === view.thought?.id ? config.lastActionToken : null
   )
   if (!view.visible) return null
-  const busy = config.pending !== null
+  // 与输入框的禁用条件对齐：终态会话（closed/error）上切配置只会得到 409。
+  const status = config.session?.status
+  const busy =
+    config.pending !== null || status === 'closed' || status === 'error'
   return (
     <div className={styles.bar} role="group" aria-label="Agent 配置">
       {view.modes && (
@@ -43,6 +48,8 @@ export function StudioChatAgentConfig(props: Props) {
           </select>
           <span
             className={styles.hint}
+            role="img"
+            aria-label="说明：这是 agent 自身的运行模式；平台侧「本次对话全部允许」在权限卡上独立设置，两层互不改写。"
             title="这是 agent 自身的运行模式；平台侧「本次对话全部允许」在权限卡上独立设置，两层互不改写。"
           >
             ⓘ
@@ -90,9 +97,10 @@ export function StudioChatAgentConfig(props: Props) {
           </div>
         </details>
       )}
-      {drift && (
+      {drifted && view.thought?.map.current && (
         <span className={styles.drift} role="status">
-          {drift}
+          思考档位已随模型切换变为{' '}
+          {levelLabel(view.thought.map.current, view.thought.currentValue)}
         </span>
       )}
       {config.error && (
