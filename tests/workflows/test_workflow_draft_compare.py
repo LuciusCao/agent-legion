@@ -216,8 +216,6 @@ def test_compare_config_removal_creates_revision(app_with_workspace):
     definition = load_builtin_definition("education_video_problems_generation")
     node = definition.nodes["write_script"]
     definition.nodes["write_script"] = replace(node, config={"sandbox_network": True})
-    with authenticate_client(TestClient(app)) as client:
-        _compare(client, workspace_id, definition_to_yaml(definition))
 
     # Re-publish so the baseline carries the config, then strip it in a draft.
     WorkflowRevisionService(app.state.job_db).publish_workspace_revision(workspace_id, definition)
