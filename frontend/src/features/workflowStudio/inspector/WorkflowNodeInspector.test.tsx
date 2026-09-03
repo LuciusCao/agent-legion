@@ -226,6 +226,34 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('keeps Agent schema ownership inside Agent config (#406)', async () => {
+    const agentYaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  intake:',
+      '    type: agent',
+      '    label: 读取知识点',
+      '    capability: intake',
+      '    after: [_start]',
+      '    config_schema:',
+      '      properties:',
+      '        ignored_node_schema:',
+      '          type: boolean',
+      '',
+    ].join('\n')
+
+    renderInspector('intake', { definitionYaml: agentYaml })
+
+    expect(await screen.findByLabelText('节点执行能力')).toHaveTextContent(
+      'Agent 配置'
+    )
+    expect(
+      screen.queryByLabelText('配置 Schema intake')
+    ).not.toBeInTheDocument()
+  })
+
   it('keeps the read-only entry contract for a ghost start node', () => {
     renderInspector('_start')
 

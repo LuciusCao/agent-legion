@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 ## [Unreleased]
 
 ### Changed
+- Workflow Studio 按节点类型收口「配置 Schema」归属（#406）：
+  `type: agent` 节点不再渲染节点 YAML 的 `config_schema` 区块，
+  Agent schema 统一归「Agent 配置」内的 Agent Definition 编辑入口；
+  `type: code` 节点的 schema 编辑与 `runtime_mutable` 行为保持不变。
 - host 纯控制面模式：workflow 执行与宿主进程解耦（#389，收编 #385/#386）。
   `code_capacity` 合法化 0 值（契约 `gt=0→ge=0`，UI「代码池」组改述为
   「本地执行」——本地兜底执行并发上限，0 = 纯远程模式）：宿主容量为 0 时
