@@ -83,11 +83,16 @@
 /* #415：label 从单行省略改为最多两行（-webkit-line-clamp，主流浏览器均
    支持该前缀形式），超长 token（如 review_key_info_a 这类 node key 作
    label）用 overflow-wrap 断行，避免一整段不可断内容把自身挤出 flex 行
-   被左侧裁掉；min-width:0 允许在 icon + 徽标挤压下收缩；完整文本由
-   DagNodeHeader 的 title 兜底。 */
+   被左侧裁掉；完整文本由 DagNodeHeader 的 title 兜底。
+   #423 codex P2——最坏徽标组合的布局推演（280 卡片 − 24 padding − 4
+   border = 252 内容宽；gap 8×5）：icon 18 + workerTag ≤88 + terminalTag
+   ≤88 + 固定徽标（executionWarning「缺执行」/change/executor 枚举取最
+   宽 ≈40-52）+ label 96 = 290-302 > 252，flex 溢出由带 min-width:0 的
+   两个动态徽标收缩吸收（88→约 38-50，省略号截断），label 保住 96px
+   下限（252 的 1/3 强）始终可读——保底优于让 flex 把 label 挤到 0。 */
 .label {
   flex: 1;
-  min-width: 0;
+  min-width: 96px;
   font-weight: 600;
   overflow: hidden;
   overflow-wrap: break-word;
