@@ -2,8 +2,9 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 
 from server.app.db.connection import connect_database
-from server.app.jobs import JobQueries
-from server.app.services import run_dir_cleanup
+from server.app.executors._path_canonicalization import canonicalize_run_dir
+from server.app.executors.models import ExecutionResult
+from server.app.jobs import JobQueries, storage_layout
 from server.app.services.cleanup_sweep import (
     RUN_DIR_UPDATE_BATCH_SIZE,
     cleanup_extra_runs_per_node,
@@ -121,15 +122,24 @@ def test_cleanup_extra_runs_per_node_scans_all_nodes(tmp_path):
     assert [row["run_dir"] for row in rows] == ["", ""]
 
 
-def test_find_extra_run_dirs_breaks_timestamp_ties_deterministically(tmp_path, monkeypatch):
-    # CI shards (coarse Linux mtime granularity) can stamp back-to-back run
-    # dirs identically; the survivor must then not depend on iterdir order.
+def test_derived_run_dir_survives_cleanup_when_timestamps_tie(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
     job_dir = make_job_dir(data_dir, "ws1", "job-1")
     node_dir = job_dir / "runs" / "node-a"
     for name in ("tok-b", "tok-c", "tok-a"):
         (node_dir / name).mkdir(parents=True)
-    monkeypatch.setattr(run_dir_cleanup, "_birthtime", lambda path: 1.0)
+    monkeypatch.setattr(storage_layout, "_run_dir_timestamp", lambda path: 1.0)
+
+    result = ExecutionResult(status="completed", exit_code=0)
+    derived = canonicalize_run_dir(
+        result,
+        data_dir,
+        "",
+        "node-a",
+        "job-1",
+        (job_dir,),
+    )
+    assert derived == make_data_relative(node_dir / "tok-c", data_dir)
 
     forward = sorted(p.name for p, _ in find_extra_run_dirs(data_dir, job_dir, "node-a"))
     assert forward == ["tok-a", "tok-b"]
@@ -138,6 +148,19 @@ def test_find_extra_run_dirs_breaks_timestamp_ties_deterministically(tmp_path, m
     monkeypatch.setattr(Path, "iterdir", lambda self: reversed(list(real_iterdir(self))))
     backward = sorted(p.name for p, _ in find_extra_run_dirs(data_dir, job_dir, "node-a"))
     assert backward == forward
+
+    with closing(connect_database(TEST_DATABASE_URL)) as conn:
+        _setup(conn)
+        conn.execute(
+            "insert into node_runs(job_id, node_key, status, run_dir) values (%s, %s, 'completed', %s)",
+            ("job-1", "node-a", derived),
+        )
+        removed = cleanup_extra_runs_for_node(conn, data_dir, job_dir, "node-a")
+        row = conn.execute("select run_dir from node_runs").fetchone()
+
+    assert removed == 2
+    assert row["run_dir"] == derived
+    assert (node_dir / "tok-c").is_dir()
 
 
 def test_cleanup_extra_runs_per_node_batches_updates(tmp_path, monkeypatch):

@@ -15,7 +15,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from server.app.jobs.storage_layout import resolve_job_dir_candidates
+from server.app.jobs.storage_layout import resolve_job_dir_candidates, run_dir_recency_key
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
 
 
@@ -76,7 +76,7 @@ def derive_run_dir_from_job_dirs(job_dirs: Iterable[Path], node_key: str) -> Pat
         token_dirs.extend(d for d in run_parent.iterdir() if d.is_dir())
     if not token_dirs:
         return None
-    return max(token_dirs, key=lambda p: p.stat().st_mtime)
+    return max(token_dirs, key=run_dir_recency_key)
 
 
 def derive_run_dir_from_log_path(

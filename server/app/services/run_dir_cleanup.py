@@ -7,6 +7,7 @@ from pathlib import Path
 import psycopg
 
 from server.app.db.connection import DatabaseConnection
+from server.app.jobs.storage_layout import run_dir_recency_key
 from server.app.storage_paths import ManagedPathError, make_data_relative
 
 logger = logging.getLogger(__name__)
@@ -23,11 +24,6 @@ def remove_path(path: Path) -> None:
         logger.warning("Failed to remove %s: %s", path, exc)
 
 
-def _birthtime(path: Path) -> float:
-    st = path.stat()
-    return getattr(st, "st_birthtime", st.st_mtime)
-
-
 def find_extra_run_dirs(data_dir: Path, job_dir: Path, node_key: str) -> list[tuple[Path, str]]:
     """Return run dirs older than the newest for a node as (path, data-relative) pairs."""
     run_parent = job_dir / "runs" / node_key
@@ -38,7 +34,7 @@ def find_extra_run_dirs(data_dir: Path, job_dir: Path, node_key: str) -> list[tu
         return []
     # Newest first. Coarse filesystem clocks can stamp two dirs identically;
     # the name tie-break keeps the survivor independent of iterdir order.
-    token_dirs.sort(key=lambda d: (_birthtime(d), d.name), reverse=True)
+    token_dirs.sort(key=run_dir_recency_key, reverse=True)
     extra: list[tuple[Path, str]] = []
     for old in token_dirs[1:]:
         try:

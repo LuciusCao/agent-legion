@@ -1297,7 +1297,7 @@
     "server/app/services/quality_stats.py": 110,
     "server/app/services/reap_watermark_store.py": 77,
     "server/app/services/run_bundle_candidate.py": 48,
-    "server/app/services/run_dir_cleanup.py": 67,
+    "server/app/services/run_dir_cleanup.py": 66,
     "server/app/services/run_item_types.py": 32,
     "server/app/services/run_payload.py": 60,
     "server/app/services/run_service.py": 230,
