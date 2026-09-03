@@ -2,6 +2,9 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { DagNode, DagNodeData } from './DagNode'
 import { describe, it, expect } from 'vitest'
 import { ReactFlowProvider } from '@xyflow/react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import badgeStyles from './DagNodeBadges.module.css'
 
 const TestDagNode = DagNode as unknown as React.FC<{
   id: string
@@ -46,6 +49,19 @@ describe('DagNode', () => {
     expect(screen.getByText('入口')).toBeInTheDocument()
     expect(screen.getByText('分支')).toBeInTheDocument()
     expect(screen.getByText(/耗时 12.4s/)).toBeInTheDocument()
+  })
+
+  // #415：label 不再单行省略——两行 line-clamp 由 CSS（.label 的
+  // -webkit-line-clamp: 2）承担，jsdom 测不了布局，这里兜底断言完整文本
+  // 仍渲染在 DOM 里且 title 属性携带全文（tooltip 兜底），换行/裁剪交给
+  // CSS 消费者验证。
+  it('keeps the full label text in the DOM with a title tooltip', () => {
+    renderWithProvider({
+      ...baseData,
+      label: '生成审题关键信息汇总摘要',
+    })
+    const label = screen.getByTitle('生成审题关键信息汇总摘要')
+    expect(label).toHaveTextContent('生成审题关键信息汇总摘要')
   })
 
   it('renders input and output chips', () => {
@@ -97,6 +113,121 @@ describe('DagNode', () => {
     )
   })
 
+  // #423 review P2：动态徽标（terminalTag/workerTag）内容来自用户数据/运行
+  // 时，长值不能挤压 label 或伸出卡片。jsdom 测不了布局，这里三层断言：
+  // 1) 长文本完整保留在 DOM 且 title 携带全文（截断只交给 CSS）；
+  // 2) 徽标确实挂在可收缩截断的 class 上（组件契约——terminalTag 由
+  //    DagNodeTerminalBadge、workerTag 由 DagNodeExecutionBadge 渲染）；
+  // 3) 该 class 在 DagNodeBadges.module.css 里具备「可收缩 + max-width +
+  //    单行省略」完整策略（读源文件断言，防止选择器被改错对象）。固定短
+  //    徽标（executorTag 等）则断言保持 flex-shrink: 0 不收缩。
+  it('keeps a long terminal outcome truncatable without crowding out the label', () => {
+    renderWithProvider({
+      ...baseData,
+      terminalOutcome:
+        'a-very-long-terminal-outcome-that-exceeds-the-badge-budget',
+    })
+    const terminalTag = screen.getByTitle(
+      'a-very-long-terminal-outcome-that-exceeds-the-badge-budget'
+    )
+    expect(terminalTag.className).toContain(badgeStyles.terminalTag)
+    // label 仍完整渲染在同一个 header 行里（不被徽标顶掉）
+    expect(screen.getByTitle(baseData.label)).toBeInTheDocument()
+  })
+
+  it('keeps a long unassigned agentId truncatable without crowding out the label', () => {
+    renderWithProvider({
+      ...baseData,
+      agentId: 'an-extremely-long-queued-agent-id-without-a-worker-assignment',
+    })
+    const badge = screen.getByTestId('dag-node-execution-badge')
+    expect(badge.className).toContain(badgeStyles.workerTag)
+    expect(badge).toHaveAttribute(
+      'title',
+      'an-extremely-long-queued-agent-id-without-a-worker-assignment'
+    )
+    expect(screen.getByTitle(baseData.label)).toBeInTheDocument()
+  })
+
+  // #423 codex P2：最坏徽标组合——agent 终端节点同时带 agentId（workerTag）、
+  // terminalOutcome（terminalTag）、executionWarning（固定警告徽标），草稿
+  // 对比再叠 change badge（workflowStudioDagChanges.ts 会合法同时生成这些
+  // 字段）。两个动态徽标即使各自限制 88px，与 icon/警告/间隔合计仍可能超
+  // 过 280px 卡片约 252px 的内容宽（icon 18 + 88×2 + 固定徽标 + 5 个 gap
+  // ≈ 260+），此时负空间若全由动态徽标吸收，flex: 1 的 label 会被进一步
+  // 挤压甚至压到 0 宽（min-width: 0 已放行）。jsdom 测不了布局，这里按既有
+  // 模式做源断言：.label 保留 min-width 保底（252 的 1/3 强），两个动态徽标
+  // 保持可收缩（min-width: 0 吸收溢出、ellipsis 截断），四个徽标与长 label
+  // 同时渲染不互相顶掉（组件契约）。
+  it('keeps the label a readable minimum under the worst badge combination', () => {
+    renderWithProvider({
+      ...baseData,
+      label:
+        'an-extremely-long-node-label-with-many-badges-crowding-the-header',
+      agentId: 'key-info-generator',
+      terminalOutcome:
+        'a-very-long-terminal-outcome-that-exceeds-the-badge-budget',
+      executionWarning: '缺 provider / model，该节点跑不起来',
+      changeType: 'modified',
+    })
+    // 四个徽标 + 长 label 全部同时渲染（change badge 的 testid 兜底其存在）
+    expect(screen.getByTestId('dag-node-execution-badge')).toBeInTheDocument()
+    expect(
+      screen.getByTitle(
+        'a-very-long-terminal-outcome-that-exceeds-the-badge-budget'
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText('缺执行')).toHaveAttribute(
+      'title',
+      '缺 provider / model，该节点跑不起来'
+    )
+    expect(screen.getByTestId('dag-change-badge-modified')).toBeInTheDocument()
+    expect(
+      screen.getByTitle(
+        'an-extremely-long-node-label-with-many-badges-crowding-the-header'
+      )
+    ).toBeInTheDocument()
+    // label 的 min-width 保底写在 .label 规则里（读源断言防止被改掉）
+    const nodeCss = readFileSync(
+      resolve(__dirname, 'DagNode.module.css'),
+      'utf-8'
+    )
+    const labelRule = nodeCss.match(/\.label\s*\{([^}]*)\}/)
+    expect(labelRule).not.toBeNull()
+    expect(labelRule![1]).toMatch(/min-width: \d+px/)
+    expect(labelRule![1]).toContain('flex: 1')
+  })
+
+  it('gives dynamic badges a shrink-and-ellipsis CSS strategy while fixed badges stay rigid', () => {
+    const css = readFileSync(
+      resolve(__dirname, 'DagNodeBadges.module.css'),
+      'utf-8'
+    )
+    const dynamicRule = css.match(
+      /\.terminalTag,\s*\n\.workerTag\s*\{([^}]*)\}/
+    )
+    expect(dynamicRule).not.toBeNull()
+    const declarations = dynamicRule![1]
+    // 可收缩 + max-width 上限 + 单行省略 + 允许收缩到内容以下
+    expect(declarations).toContain('flex-shrink: 1')
+    expect(declarations).toMatch(/max-width: \d+px/)
+    expect(declarations).toContain('overflow: hidden')
+    expect(declarations).toContain('white-space: nowrap')
+    expect(declarations).toContain('text-overflow: ellipsis')
+    expect(declarations).toContain('min-width: 0')
+    // 固定短徽标不收缩：DagNode.module.css 的共享基线
+    // （executorTag/executionWarningTag）保持 flex-shrink: 0
+    const nodeCss = readFileSync(
+      resolve(__dirname, 'DagNode.module.css'),
+      'utf-8'
+    )
+    const baselineRule = nodeCss.match(
+      /\.executorTag,\s*\n\.executionWarningTag\s*\{([^}]*)\}/
+    )
+    expect(baselineRule).not.toBeNull()
+    expect(baselineRule![1]).toContain('flex-shrink: 0')
+  })
+
   it('falls back to executorId when workerId is missing', () => {
     renderWithProvider({
       ...baseData,
@@ -139,12 +270,14 @@ describe('DagNode', () => {
   })
 
   // #333：agent 节点 execution 缺口的警告徽标（文案作为 title 悬浮提示）。
+  // #423 codex P2：短文案「缺执行」（固定徽标不收缩，缩短以缓解最坏组合
+  // 挤压），完整缺口说明仍在 title。
   it('renders the execution warning tag only when executionWarning is set', () => {
     renderWithProvider({
       ...baseData,
       executionWarning: '缺 provider / model，该节点跑不起来',
     })
-    expect(screen.getByText('缺执行配置')).toHaveAttribute(
+    expect(screen.getByText('缺执行')).toHaveAttribute(
       'title',
       '缺 provider / model，该节点跑不起来'
     )
@@ -152,7 +285,7 @@ describe('DagNode', () => {
 
   it('renders no execution warning tag by default', () => {
     renderWithProvider(baseData)
-    expect(screen.queryByText('缺执行配置')).not.toBeInTheDocument()
+    expect(screen.queryByText('缺执行')).not.toBeInTheDocument()
   })
 
   it('renders not applicable node status', () => {

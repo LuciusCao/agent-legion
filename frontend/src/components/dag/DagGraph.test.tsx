@@ -130,22 +130,25 @@ describe('DagGraph', () => {
   // 拿不到 handleBounds 就连边都不渲染。stub 出固定几何，再手动调一次
   // updateNodeInternals（真实环境由 ResizeObserver 完成同一件事），才能让
   // EdgeWrapper 走到自定义 DagEdge 的渲染，断言 stroke/opacity 内联样式。
+  // 必须与 DagGraph.tsx 的 NODE_WIDTH / DagNode.module.css 的 .node 宽度
+  // 保持一致（#415 起为 280）——handle 位置由该几何推导。
+  const STUB_WIDTH = 280
   function stubDomGeometry() {
     const rect = {
       x: 0,
       y: 0,
       top: 0,
       left: 0,
-      right: 240,
+      right: STUB_WIDTH,
       bottom: 100,
-      width: 240,
+      width: STUB_WIDTH,
       height: 100,
       toJSON: () => ({}),
     } as DOMRect
     Element.prototype.getBoundingClientRect = () => rect
     Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
       configurable: true,
-      get: () => 240,
+      get: () => STUB_WIDTH,
     })
     Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
       configurable: true,
