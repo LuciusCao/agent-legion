@@ -215,9 +215,11 @@ def test_get_job_detail_run_carries_skill_version(client):
 def test_list_workspace_node_runs_carries_skill_version(client):
     # #410: same column via the workspace node-runs listing (the inspector's
     # latest-run data source). #410 review: the endpoint response validates
-    # against NodeRunResponse (was a loose dict list, codex P1 on #427) — the
-    # strict model already rejects missing/extra fields, and the schema pins
-    # the typed item shape for the generated frontend contract.
+    # against NodeRunResponse (was a loose dict list, codex P1 on #427) —
+    # pydantic v2 default is extra='ignore': extra fields are stripped, not
+    # rejected, and missing fields with defaults (skill_version) pass too
+    # (independent review P3 on #427). The real backstops are the generated
+    # frontend types and the schema assertions pinning the typed item shape.
     workspace_id, job_id = _create_test_job(client)
     client.app.state.job_db.start_node_run(
         job_id,

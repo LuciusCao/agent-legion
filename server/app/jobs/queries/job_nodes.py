@@ -302,7 +302,10 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
     ) -> list[dict[str, Any]]:
         # #410 review: the endpoint response is NodeRunResponse (was a loose
         # dict list, codex P1 on #427), so project node_runs columns only —
-        # join fields the contract does not declare would fail validation.
+        # pydantic v2 default is extra='ignore': join fields the contract
+        # does not declare are silently stripped, not rejected (independent
+        # review P3 on #427). The real backstops are the generated frontend
+        # types and the schema assertions in test_jobs_route_contracts.
         clauses = ["jobs.workspace_id = %s"]
         params: list[Any] = [workspace_id]
         if status:
