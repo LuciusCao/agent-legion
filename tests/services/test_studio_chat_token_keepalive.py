@@ -142,6 +142,49 @@ def test_fresh_token_is_left_untouched_by_keepalive(job_db, settings) -> None:
         service.shutdown()
 
 
+def test_token_dying_between_check_and_update_is_detected(job_db, settings, monkeypatch) -> None:
+    """The check→update race (#411 codex review): the liveness SELECT sees a
+    live token, but the token is revoked before the conditional UPDATE
+    commits — the slide matches zero rows. The keepalive must NOT report
+    alive on the stale SELECT alone: the rowcount forces a re-check, which
+    now sees the revocation and emits the notice even though no further
+    tool_call ever arrives."""
+    user_id = str(job_db.create_user("race-user", password_hash=None)["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, user_id)
+    # Age the token into the keepalive threshold band so the slide attempts
+    # a real UPDATE (a no-op band would also return False but for the
+    # boring reason, masking the race under test).
+    with job_db.connect() as conn:
+        conn.execute(
+            "update auth_scoped_tokens set expires_at = current_timestamp"
+            " + interval '45 minutes' where token_hash=%s",
+            (hash_token(token),),
+        )
+    service, _bus, session_id, _runtime, _workspace_id = _direct_session(job_db, settings, token)
+    try:
+        real_get = job_db.get_scoped_token_user
+        real_extend = job_db.extend_scoped_token_expiry
+
+        def revoking_get(token_hash: str):
+            record = real_get(token_hash)
+            if record is not None:
+                # Revoke between the keepalive's liveness SELECT and its
+                # slide UPDATE — exactly the window the rowcount covers.
+                scoped_tokens.revoke_scoped_token(job_db, token)
+            return record
+
+        def failing_extend(*args, **kwargs):
+            real_extend(*args, **kwargs)
+            return False  # the slide found the row already revoked: 0 rows
+
+        monkeypatch.setattr(job_db, "get_scoped_token_user", revoking_get)
+        monkeypatch.setattr(job_db, "extend_scoped_token_expiry", failing_extend)
+        service._on_update(session_id, _tool_call("tc-race"))
+        assert len(_invalidation_messages(service, session_id)) == 1
+    finally:
+        service.shutdown()
+
+
 def test_disabled_user_token_detected_as_dead(job_db, settings) -> None:
     """The admin-kills-access path (#411 review): disabling the user leaves
     the token row untouched but the lookup joins u.disabled_at — the
@@ -292,8 +335,11 @@ def test_keepalive_db_failure_is_swallowed_and_retried(job_db, settings, monkeyp
         assert not _invalidation_messages(service, session_id)
         # Retry on the next tool_call: the check now succeeds (live token,
         # no notice) — proving the done-flag was reset by the failure path.
+        # Three lookups: the retry's liveness SELECT plus the rowcount
+        # re-check (the fresh 2h token needs no slide, so the UPDATE
+        # returns False and _token_alive re-verifies liveness).
         service._on_update(session_id, _tool_call("tc-b"))
-        assert calls["n"] == 2
+        assert calls["n"] == 3
         assert not _invalidation_messages(service, session_id)
     finally:
         service.shutdown()
