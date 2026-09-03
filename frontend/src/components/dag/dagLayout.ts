@@ -32,10 +32,11 @@ export function isolatedNodeKeys(
 // #417 无边图的退化布局治理：dagre 对没有任何边的图按传入数组顺序竖排，
 // 而字母序的 published 节点数组会把 expand_analysis 之类排在首位冒充拓扑
 // 入口（「部分节点丢失」的观感来源）。改为：孤立节点（无边图 = 全部节点）
-// 按 key 稳定排序铺进网格（列数 clamp(⌊√n⌋,1,5)，行内右进、行满换行），
-// 铺在连通分量的 dagre 实际底部之下（隔离带 ISOLATED_GAP）。有边图里
-// dagre 本就把孤立分量排在连通分量下方——网格只替换孤立节点的占位坐标，
-// 连通分量的 dagre 布局不受影响；任何输入都得到稳定、可预期的排布。
+// 按 key 稳定排序铺进网格（列数 clamp(⌈√n⌉,2,5)，n=1 单列；行内右进、
+// 行满换行），铺在连通分量的 dagre 实际底部之下（隔离带 ISOLATED_GAP）。
+// 有边图里 dagre 本就把孤立分量排在连通分量下方——网格只替换孤立节点的
+// 占位坐标，连通分量的 dagre 布局不受影响；任何输入都得到稳定、可预期的
+// 排布。
 const ISOLATED_GAP = 120
 const ISOLATED_NODESEP = 60
 
@@ -47,9 +48,12 @@ function isolatedGridPositions(
   const isolated = [...isolatedKeys].sort(stableKeyOrder)
   const positions = new Map<string, { x: number; y: number }>()
   if (isolated.length === 0) return positions
-  const columns = Math.min(
-    5,
-    Math.max(1, Math.floor(Math.sqrt(isolated.length)))
+  // 列数：⌈√n⌉ 向上取整（n=2、3 时 floor 仍得 1，会把小图排回竖直单列，
+  // 正是本次治理要消除的退化），clamp 到 [2,5]；n=1 是唯一合法单列形态
+  // （#424 codex 复审）。
+  const columns = Math.max(
+    Math.min(Math.ceil(Math.sqrt(isolated.length)), 5),
+    isolated.length > 1 ? 2 : 1
   )
   // 网格首行顶 = 连通分量实际底边 + ISOLATED_GAP（无边图时 connectedBottom
   // 为 0，网格从画布顶部隔一个 ISOLATED_GAP 开始）。
