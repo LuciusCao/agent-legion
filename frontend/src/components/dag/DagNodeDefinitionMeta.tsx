@@ -3,6 +3,7 @@ import styles from './DagNodeDefinitionMeta.module.css'
 
 const TOPOLOGY_LABEL = {
   start: '起点',
+  approval: '审批门',
   entry: '入口',
   branch: '分支',
   terminal: '终点',

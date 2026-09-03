@@ -38,19 +38,34 @@ export type WorkflowYamlNode = {
 export type WorkflowYamlEdge = {
   from?: string
   to?: string
-  when?: {
-    artifact?: string
-    path?: string
-    equals?: string | number | boolean | null
-  }
+  when?: { artifact?: string; path?: string; equals?: unknown }
 }
 
 export function parseWorkflowYaml(rawYaml: string): WorkflowYamlObject {
   const parsed = yaml.load(rawYaml)
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Workflow YAML must be a mapping')
-  }
+  if (!isMapping(parsed)) throw new Error('Workflow YAML must be a mapping')
   return parsed as WorkflowYamlObject
+}
+
+// 结构校验版解析（写路径专用）：语法合法但 nodes 是数组/字符串、或某
+// 既有节点不是 mapping 的草稿，对象展开会把索引当节点键——写路径
+// （如 appendWorkflowNode）覆盖保存前必须先过这道守卫。
+const isMapping = (value: unknown) =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+export function parseWorkflowYamlStrictNodes(
+  rawYaml: string
+): WorkflowYamlObject {
+  const draft = parseWorkflowYaml(rawYaml)
+  const nodes = draft.nodes ?? {}
+  if (!isMapping(nodes)) throw new Error('draft nodes is not a mapping')
+  const badNode = Object.entries(nodes).find(([, n]) => !isMapping(n))
+  if (badNode) throw new Error(`draft node ${badNode[0]} is not a mapping`)
+  // edges 非数组时渲染侧 record 解析失败、画布回退已发布版本——同步拒绝。
+  if (draft.edges !== undefined && !Array.isArray(draft.edges)) {
+    throw new Error('draft edges is not an array')
+  }
+  return draft
 }
 
 export function dumpWorkflowYaml(value: WorkflowYamlObject): string {
