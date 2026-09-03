@@ -15,6 +15,7 @@ vi.mock('../../../api/workspaceNodeRunsApi', () => ({
 
 vi.mock('../../../components/SkillSelector', () => ({
   SkillSelector: (props: {
+    nodeKey: string
     value: string
     onChange: (key: string) => void
     skillRef: string
@@ -181,7 +182,11 @@ describe('WorkflowNodeSkillEditor', () => {
     })
 
     expect(skillSelectorProps).toHaveBeenLastCalledWith(
-      expect.objectContaining({ value: 'demo/review', skillRef: 'v1.0.0' })
+      expect.objectContaining({
+        nodeKey: 'n1',
+        value: 'demo/review',
+        skillRef: 'v1.0.0',
+      })
     )
   })
 

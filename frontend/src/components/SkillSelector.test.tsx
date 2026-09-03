@@ -35,6 +35,7 @@ function settingsWithRoot(skillsRoot: string): InstanceSettingsResponse {
 function renderSelector(
   props: Partial<{
     value: string
+    nodeKey: string
     onChange: (key: string) => void
     skillRef: string
     onSkillRefChange: (ref: string) => void
@@ -44,6 +45,7 @@ function renderSelector(
     <TestQueryProvider>
       <SkillSelector
         workspaceId="ws-1"
+        nodeKey={props.nodeKey ?? 'node-a'}
         value={props.value ?? ''}
         onChange={props.onChange ?? (() => {})}
         skillRef={props.skillRef ?? ''}
@@ -60,6 +62,7 @@ function renderSelector(
         <TestQueryProvider>
           <SkillSelector
             workspaceId="ws-1"
+            nodeKey={next.nodeKey ?? props.nodeKey ?? 'node-a'}
             value={next.value ?? ''}
             onChange={next.onChange ?? props.onChange ?? (() => {})}
             skillRef={next.skillRef ?? ''}
@@ -116,11 +119,11 @@ describe('SkillSelector', () => {
     expect(mockValidate).toHaveBeenCalledWith(
       '~/.agents/skills/ws-1/write-script'
     )
-    // 回填后输入仍是发起校验的相对名（受控跟随绑定，codex r2 P1 on #427：
-    // key 即技能根下的相对路径，与本 workspace 路径校验回填的首段
-    // workspaceId 一起原样回显——首段正是校验时的目录前缀组成段）。
+    // 回填后输入仍是发起校验的相对名（受控跟随绑定，codex r2 P1 on #427；
+    // codex 三轮 P2 on #427：首段 workspaceId 与只读前缀重复，回显余段，
+    // 与前缀拼回 = 原绑定路径，不再拼出 ws-1/ws-1/write-script）。
     view.rerenderWith({ value: 'ws-1/write-script', skillRef: '' })
-    await waitFor(() => expect(input).toHaveValue('ws-1/write-script'))
+    await waitFor(() => expect(input).toHaveValue('write-script'))
     expect(await screen.findByText('已锁定版本：abc123')).toBeInTheDocument()
     const versionSelect = await screen.findByLabelText('版本')
     await waitFor(() => expect(versionSelect).toBeEnabled())
@@ -162,9 +165,9 @@ describe('SkillSelector', () => {
 
     const versionSelect = await screen.findByLabelText('版本')
     await waitFor(() => expect(versionSelect).toBeEnabled())
-    // 受控回显是 effect 驱动的异步同步：等回显完成再操作（key 全段即
-    // 技能根下的相对路径）。
-    await waitFor(() => expect(input).toHaveValue('ws-1/write-script'))
+    // 受控回显是 effect 驱动的异步同步：等回显完成再操作（ws 形态 key
+    // 首段与只读前缀重复，回显余段——codex 三轮 P2 on #427）。
+    await waitFor(() => expect(input).toHaveValue('write-script'))
     fireEvent.mouseDown(versionSelect)
     fireEvent.click(await screen.findByRole('option', { name: 'v1.1.0' }))
 
@@ -620,20 +623,21 @@ describe('SkillSelector', () => {
   })
 
   it('shows the bound skill directory in the input when echoing an existing binding (codex r2 P1 on #427)', async () => {
-    // 打开已有绑定：目录输入回显 key 的全段（技能根下的完整相对路径，
-    // 二轮复审 P3-3 on #427——不再假设首段是 workspaceId 而截断）。
+    // 打开已有绑定：目录输入回显 key 余段（首段 workspaceId 与只读前缀
+    // 重复，codex 三轮 P2 on #427）——nested 形态同理保留后续全段。
     renderSelector({ value: 'ws-1/question_analysis/generate_key_info' })
 
     const input = screen.getByLabelText('Skill 目录名')
     await waitFor(() => expect(input).toBeEnabled())
-    expect(input).toHaveValue('ws-1/question_analysis/generate_key_info')
+    expect(input).toHaveValue('question_analysis/generate_key_info')
   })
 
   it('echoes a group-form key as the full path under the skills root (independent review P3-3 on #427)', async () => {
     // demo workflow 的 group 形态 key（YAML 手写/历史数据，首段不是
     // workspaceId）：回显必须保留全段，剥掉首段会显示成 write-script、
-    // 与 workspace 前缀拼出的路径不再是原绑定路径。
-    const view = renderSelector({
+    // 与 workspace 前缀拼出的路径不再是原绑定路径。原绑定 key 直接点
+    // 「校验」：拼出的路径 = 前缀 + 全段，等于原绑定路径（key 不变形）。
+    renderSelector({
       value: 'education-video-problems-generation/write-script',
     })
 
@@ -642,12 +646,43 @@ describe('SkillSelector', () => {
     expect(input).toHaveValue(
       'education-video-problems-generation/write-script'
     )
-    // 两种形态都验证：ws-1/write-script（校验器对 <skills_root>/<ws>/ 下
-    // 路径构造的 key）同样原样全段回显。
-    view.rerenderWith({
-      value: 'ws-1/write-script',
+    fireEvent.click(screen.getByRole('button', { name: '校验' }))
+    await waitFor(() =>
+      expect(mockValidate).toHaveBeenCalledWith(
+        '~/.agents/skills/ws-1/education-video-problems-generation/write-script'
+      )
+    )
+  })
+
+  it('echoes only the remaining directory when the key starts with the current workspace (codex r3 P2 on #427)', async () => {
+    // 常规 workspace 绑定 ws-1/write-script：回显 write-script（首段与
+    // 只读前缀 ~/.agents/skills/ws-1/ 重复，回显全段会让用户点「校验」
+    // 拼出 ws-1/ws-1/write-script，把有效绑定报成目录不存在）。原绑定
+    // 回显后直接点「校验」：拼出的 key 仍等于原绑定 key、skill_key 回填
+    // 原 key（validator 以技能根为 base_dir，路径解析回同一目录）。
+    mockValidate.mockResolvedValueOnce({
+      valid: true,
+      path: '/abs/skill',
+      skill_key: 'ws-1/write-script',
+      tags: [],
+      latest_tag: null,
+      locked_ref: null,
     })
-    await waitFor(() => expect(input).toHaveValue('ws-1/write-script'))
+    const onChange = vi.fn()
+    renderSelector({ value: 'ws-1/write-script', onChange })
+
+    const input = screen.getByLabelText('Skill 目录名')
+    await waitFor(() => expect(input).toBeEnabled())
+    expect(input).toHaveValue('write-script')
+    fireEvent.click(screen.getByRole('button', { name: '校验' }))
+    await waitFor(() =>
+      expect(mockValidate).toHaveBeenCalledWith(
+        '~/.agents/skills/ws-1/write-script'
+      )
+    )
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith('ws-1/write-script')
+    )
   })
 
   it('follows the bound directory when the inspector switches nodes (codex r2 P1 on #427)', async () => {
@@ -672,23 +707,22 @@ describe('SkillSelector', () => {
     expect(input).toHaveValue('skill-a')
 
     // 切换到节点 B（检查器不卸载，仅 value 变化）：输入跟随 B 的绑定
-    // （key 全段回显——ws-1 前缀下输入 ws-1/skill-b 与原绑定路径一致）。
+    // （codex 三轮 P2 on #427：首段 workspaceId 与只读前缀重复，回显
+    // 余段 skill-b——与前缀拼回即原绑定路径）。
     view.rerenderWith({ value: 'ws-1/skill-b' })
-    expect(input).toHaveValue('ws-1/skill-b')
+    expect(input).toHaveValue('skill-b')
     // 等回显查询落地，避免其解析落在 act 外告警。
     await waitFor(() =>
       expect(mockGetSkillDetail).toHaveBeenCalledWith('ws-1/skill-b')
     )
 
-    // 此时点「校验」校验的是 B 的目录，不会再把 A 绑上去（B 的输入即
-    // workspace 段 + 目录名，拼前缀 = 原绑定路径，validator 归一化重复段）。
+    // 此时点「校验」校验的是 B 的目录，不会再把 A 绑上去（输入与前缀
+    // 拼出 = 原绑定路径，不再拼出 ws-1/ws-1 双段）。
     mockValidate.mockClear()
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '校验' }))
     })
-    expect(mockValidate).toHaveBeenCalledWith(
-      '~/.agents/skills/ws-1/ws-1/skill-b'
-    )
+    expect(mockValidate).toHaveBeenCalledWith('~/.agents/skills/ws-1/skill-b')
   })
 
   it('keeps user edits in the input while the binding stays unchanged', async () => {
@@ -697,7 +731,7 @@ describe('SkillSelector', () => {
 
     const input = screen.getByLabelText('Skill 目录名')
     await waitFor(() => expect(input).toBeEnabled())
-    expect(input).toHaveValue('ws-1/skill-a')
+    expect(input).toHaveValue('skill-a')
     fireEvent.change(input, { target: { value: 'skill-a-custom' } })
     expect(input).toHaveValue('skill-a-custom')
   })
@@ -740,6 +774,88 @@ describe('SkillSelector', () => {
     expect(screen.getByRole('button', { name: '校验' })).toBeInTheDocument()
   })
 
+  it('discards a late response after switching between two unbound nodes (codex r3 P1 on #427)', async () => {
+    // 节点 A、B 都未绑定（value 同为空串）：切换节点不改变 value，旧的
+    // 「监听绑定值」守卫失效——A 的在途响应仍可调用其捕获的旧 onChange，
+    // 基于旧 definitionYaml 覆盖 B 上刚完成的草稿编辑。nodeKey 入校验
+    // 上下文后，value 不变的节点切换同样作废在飞校验。
+    let resolveA!: (value: SkillValidateResponse) => void
+    mockValidate.mockImplementationOnce(
+      () =>
+        new Promise<SkillValidateResponse>((resolve) => {
+          resolveA = resolve
+        })
+    )
+    const onChange = vi.fn()
+    const view = renderSelector({ onChange, value: '', nodeKey: 'node-a' })
+
+    const input = screen.getByLabelText('Skill 目录名')
+    await waitFor(() => expect(input).toBeEnabled())
+    fireEvent.change(input, { target: { value: 'skill-a' } })
+    fireEvent.click(screen.getByRole('button', { name: '校验' }))
+    await waitFor(() => expect(mockValidate).toHaveBeenCalledTimes(1))
+
+    // 切换到节点 B（同样未绑定，value 仍为空串，只有 nodeKey 变化）。
+    view.rerenderWith({ nodeKey: 'node-b', value: '' })
+
+    await act(async () => {
+      resolveA({
+        valid: true,
+        path: '/abs/skill-a',
+        skill_key: 'ws-1/skill-a',
+        tags: ['v9.9.9'],
+        latest_tag: 'v9.9.9',
+        locked_ref: 'aaabbb',
+      })
+    })
+    // A 的迟到响应不得写盘（onChange 触发即 patch 旧节点草稿）、不得
+    // 弹 A 的锁定版本、也不得残留 A 的 tags 进 B 的版本下拉。
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.queryByText('已锁定版本：aaabbb')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '校验' })).toBeInTheDocument()
+    expect(mockGetSkillDetail).not.toHaveBeenCalledWith('ws-1/skill-a')
+  })
+
+  it('discards a late response after switching between two nodes bound to the same key (codex r3 P1 on #427)', async () => {
+    // A、B 恰好绑定同一个 key：切换节点 value 不变。B 上刚完成的草稿编辑
+    // （换绑流程中间态）不得被 A 发起的校验回写覆盖。
+    let resolveA!: (value: SkillValidateResponse) => void
+    mockValidate.mockImplementationOnce(
+      () =>
+        new Promise<SkillValidateResponse>((resolve) => {
+          resolveA = resolve
+        })
+    )
+    const onChange = vi.fn()
+    const view = renderSelector({
+      onChange,
+      value: 'ws-1/skill-b',
+      nodeKey: 'node-a',
+    })
+
+    const input = screen.getByLabelText('Skill 目录名')
+    await waitFor(() => expect(input).toBeEnabled())
+    fireEvent.change(input, { target: { value: 'skill-x' } })
+    fireEvent.click(screen.getByRole('button', { name: '校验' }))
+    await waitFor(() => expect(mockValidate).toHaveBeenCalledTimes(1))
+
+    // 切换到节点 B（绑定同 key，value 不变，仅 nodeKey 变化）。
+    view.rerenderWith({ nodeKey: 'node-b', value: 'ws-1/skill-b' })
+
+    await act(async () => {
+      resolveA({
+        valid: true,
+        path: '/abs/skill-x',
+        skill_key: 'ws-1/skill-x',
+        tags: [],
+        latest_tag: null,
+        locked_ref: null,
+      })
+    })
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '校验' })).toBeInTheDocument()
+  })
+
   it('shows the invalid-result error when re-binding an already bound node fails (independent review P2 on #427)', async () => {
     // 已绑定 skill 的节点换绑时输错目录名：key 未变（value 仍为旧绑定），
     // invalid 结果按「校验发起时 value 快照」归属当前节点——错误必须可见，
@@ -754,7 +870,7 @@ describe('SkillSelector', () => {
 
     const input = screen.getByLabelText('Skill 目录名')
     await waitFor(() => expect(input).toBeEnabled())
-    expect(input).toHaveValue('ws-1/skill-b')
+    expect(input).toHaveValue('skill-b')
     fireEvent.change(input, { target: { value: 'nope' } })
     fireEvent.click(screen.getByRole('button', { name: '校验' }))
 
@@ -776,7 +892,7 @@ describe('SkillSelector', () => {
 
     const input = screen.getByLabelText('Skill 目录名')
     await waitFor(() => expect(input).toBeEnabled())
-    expect(input).toHaveValue('ws-1/skill-b')
+    expect(input).toHaveValue('skill-b')
     fireEvent.change(input, { target: { value: 'skill-b' } })
     fireEvent.click(screen.getByRole('button', { name: '校验' }))
 
@@ -799,7 +915,7 @@ describe('SkillSelector', () => {
 
     const input = screen.getByLabelText('Skill 目录名')
     await waitFor(() => expect(input).toBeEnabled())
-    expect(input).toHaveValue('ws-1/skill-b')
+    expect(input).toHaveValue('skill-b')
     fireEvent.change(input, { target: { value: 'nope' } })
     fireEvent.click(screen.getByRole('button', { name: '校验' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(

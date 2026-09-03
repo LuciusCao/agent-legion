@@ -73,6 +73,7 @@ export function WorkflowNodeSkillEditor(props: Props) {
       {workspaceId && (
         <SkillSelector
           workspaceId={workspaceId}
+          nodeKey={props.node.key}
           value={bound?.key ?? ''}
           onChange={handleSkillKeyChange}
           skillRef={bound?.ref ?? ''}
