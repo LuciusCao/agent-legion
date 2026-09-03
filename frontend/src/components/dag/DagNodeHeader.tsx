@@ -10,6 +10,8 @@ import { STATUS_ICON } from '../dagNodeStatus'
  * DagNode 头部行（#276 预算拆分）：状态图标、标签、executor/agent 徽标与
  * 未绑定/终态标记。渲染输入只有 data 的展示字段（memo 由外层 DagNode 兜底，
  * 这里不重复 memo——它随 DagNode 一起执行）。
+ * 警告徽标短文案「缺执行」（#423 codex P2）：完整缺口说明在 title，缩短
+ * 理由见 DagNode.module.css 的 .label 布局推演注释。
  */
 export function DagNodeHeader({ data }: { data: DagNodeData }) {
   const icon = STATUS_ICON[data.status]
@@ -31,7 +33,7 @@ export function DagNodeHeader({ data }: { data: DagNodeData }) {
           className={styles.executionWarningTag}
           title={data.executionWarning}
         >
-          缺执行配置
+          缺执行
         </span>
       )}
       {data.executorUnbound && (
