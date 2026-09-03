@@ -99,6 +99,13 @@ describe('buildThoughtLevelMap', () => {
     expect(map.toNative.max).toBe('max')
   })
 
+  it('an all-unknown list with more than one value stays selectable, not read-only', () => {
+    const map = buildThoughtLevelMap('a', [{ value: 'a' }, { value: 'b' }])
+    expect(map.readOnly).toBe(false)
+    expect(map.unknownValues).toEqual(['a', 'b'])
+    expect(map.toNative).toEqual({})
+  })
+
   it('minimal (weaker than low) displays as low, not as off', () => {
     const map = buildThoughtLevelMap('minimal', [
       { value: 'minimal' },

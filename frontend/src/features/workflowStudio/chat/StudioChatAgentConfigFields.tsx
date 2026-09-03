@@ -60,21 +60,27 @@ type ThoughtProps = {
 
 /** 通用思考档位：用户只见一套档位词（low/medium/high/max），落到 agent 真实
  * 档位值；落点与档位词不同的标注「→ 实际值」（kimi 无 medium 时 medium→low）。
- * off 渲染为独立开关；单档列表降级只读；未知当前值原样显示。 */
+ * off 渲染为独立开关；单档列表降级只读；agent 广告的未知值（如 turbo）作为
+ * 原生回退选项附在通用档之后——看得见、选得到、切走后切得回。 */
 export function ThoughtLevelField({
   thought,
   disabled,
   onChange,
 }: ThoughtProps) {
   const { map } = thought
-  const unknownCurrent = map.current === null ? thought.currentValue : null
   const uiValue: string =
-    map.current === 'off' ? '' : (map.current ?? unknownCurrent ?? '')
+    map.current === 'off' ? '' : (map.current ?? thought.currentValue)
   const firstOn =
     map.toNative.medium ??
     map.toNative.low ??
     map.toNative.high ??
-    map.toNative.max
+    map.toNative.max ??
+    map.unknownValues[0]
+  // 通用档走映射；未知原生值原样透传（value 不在 UI_LEVELS 里即为原生值）。
+  const resolve = (picked: string) =>
+    (UI_LEVELS as readonly string[]).includes(picked)
+      ? map.toNative[picked as UiLevel]!
+      : picked
   return (
     <label className={styles.field} title={thought.description}>
       思考档位
@@ -94,17 +100,17 @@ export function ThoughtLevelField({
         aria-label="思考档位"
         value={uiValue}
         disabled={disabled || map.readOnly || map.current === 'off'}
-        onChange={(event) =>
-          onChange(map.toNative[event.target.value as UiLevel]!)
-        }
+        onChange={(event) => onChange(resolve(event.target.value))}
       >
         {map.current === 'off' && <option value="">关闭</option>}
-        {unknownCurrent !== null && (
-          <option value={unknownCurrent}>{unknownCurrent}</option>
-        )}
         {UI_LEVELS.filter((ui) => map.toNative[ui] !== undefined).map((ui) => (
           <option key={ui} value={ui}>
             {map.toNative[ui] === ui ? ui : `${ui}（→ ${map.toNative[ui]}）`}
+          </option>
+        ))}
+        {map.unknownValues.map((value) => (
+          <option key={value} value={value}>
+            {value}
           </option>
         ))}
       </select>

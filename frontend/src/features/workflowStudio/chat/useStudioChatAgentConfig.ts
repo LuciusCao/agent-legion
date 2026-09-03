@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { StudioChatSessionRecord } from './studioChatApi'
 import {
   setStudioChatConfigOption,
   setStudioChatMode,
 } from './studioChatConfigApi'
+
+type Scoped<T> = { sessionId: string; value: T }
 
 /** agent 配置切换（#368）。切换成功的响应作为「本地覆盖」立即生效——只在它
  * 所基于的会话快照仍是当前快照时（SSE 推来的更新快照永远更新：并发通知/
@@ -17,10 +19,15 @@ export function useStudioChatAgentConfig(
     base: StudioChatSessionRecord | null
     record: StudioChatSessionRecord
   } | null>(null)
-  const [pending, setPending] = useState<string | null>(null)
-  const [lastAction, setLastAction] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  // pending / lastAction / error 都带着所属会话 id：切到别的会话后，旧会话
+  // 在途请求的失败与禁用状态不得串到新会话（Codex P2 on PR #398）。
+  const [pending, setPending] = useState<Scoped<string> | null>(null)
+  const [lastAction, setLastAction] = useState<Scoped<string> | null>(null)
+  const [error, setError] = useState<Scoped<string> | null>(null)
   const effective = local && local.base === session ? local.record : session
+  const sessionId = session?.id ?? null
+  const scoped = <T>(value: Scoped<T> | null): T | null =>
+    value !== null && value.sessionId === sessionId ? value.value : null
 
   const run = useCallback(
     async (
@@ -28,15 +35,20 @@ export function useStudioChatAgentConfig(
       call: (ws: string, id: string) => Promise<StudioChatSessionRecord>
     ) => {
       if (!workspaceId || !session) return
-      setPending(key)
-      setLastAction(key)
+      const owner = session.id
+      setPending({ sessionId: owner, value: key })
+      setLastAction({ sessionId: owner, value: key })
       setError(null)
       try {
-        setLocal({ base: session, record: await call(workspaceId, session.id) })
+        setLocal({ base: session, record: await call(workspaceId, owner) })
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : '切换失败')
+        const message = cause instanceof Error ? cause.message : '切换失败'
+        setError({ sessionId: owner, value: message })
       } finally {
-        setPending(null)
+        // 只清自己那次的 pending：更晚发起的（同会话或别的会话）不受影响。
+        setPending((current) =>
+          current?.sessionId === owner && current.value === key ? null : current
+        )
       }
     },
     [workspaceId, session]
@@ -53,25 +65,12 @@ export function useStudioChatAgentConfig(
       ),
     [run]
   )
-  return { session: effective, pending, lastAction, error, setMode, setOption }
-}
-
-/** 模型切换后档位联动的漂移提示：思考档位的当前值变了、而最近一次动作不是
- * 用户自己切档 → 提示；用户切档引起的变化不提示。 */
-export function useThoughtDrift(
-  current: string | null,
-  ownChange: boolean
-): string | null {
-  const previous = useRef(current)
-  const [drift, setDrift] = useState<string | null>(null)
-  useEffect(() => {
-    if (previous.current === current) return
-    setDrift(
-      ownChange || current === null
-        ? null
-        : `思考档位已随模型切换变为 ${current}`
-    )
-    previous.current = current
-  }, [current, ownChange])
-  return drift
+  return {
+    session: effective,
+    pending: scoped(pending),
+    lastAction: scoped(lastAction),
+    error: scoped(error),
+    setMode,
+    setOption,
+  }
 }

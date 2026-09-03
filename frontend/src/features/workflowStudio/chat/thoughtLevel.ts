@@ -43,9 +43,10 @@ export type ThoughtLevelMap = {
   current: UiLevel | 'off' | null
   /** 广告列表里的关闭位原生 value（off/none/disabled），没有则 null。 */
   offValue: string | null
-  /** 不可归一化的原生值——原样透出高级设置，不强行归一。 */
+  /** 不可归一化但 agent 确实广告了的原生值——原样作为回退选项保留（可选、
+   * 可切回），不强行归一、不参与通用档映射。 */
   unknownValues: string[]
-  /** 单档（含零可选档）→ 控件降级为只读展示。 */
+  /** 可选项（已知档 + 关闭位 + 未知值）不超过一个 → 控件降级为只读展示。 */
   readOnly: boolean
 }
 
@@ -93,6 +94,7 @@ export function buildThoughtLevelMap(
     current,
     offValue,
     unknownValues,
-    readOnly: known.length + (offValue === null ? 0 : 1) <= 1,
+    readOnly:
+      known.length + unknownValues.length + (offValue === null ? 0 : 1) <= 1,
   }
 }

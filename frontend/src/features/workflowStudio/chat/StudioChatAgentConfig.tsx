@@ -2,10 +2,8 @@ import { useMemo } from 'react'
 import type { StudioChatSessionRecord } from './studioChatApi'
 import { agentConfigView } from './agentConfigView'
 import { NativeSelect, ThoughtLevelField } from './StudioChatAgentConfigFields'
-import {
-  useStudioChatAgentConfig,
-  useThoughtDrift,
-} from './useStudioChatAgentConfig'
+import { useStudioChatAgentConfig } from './useStudioChatAgentConfig'
+import { useThoughtDrift } from './useThoughtDrift'
 import styles from './StudioChatAgentConfig.module.css'
 
 type Props = {

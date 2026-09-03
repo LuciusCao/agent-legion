@@ -221,4 +221,64 @@ describe('StudioChatAgentConfig', () => {
     )
     await settled(screen.getByLabelText('模型'))
   })
+
+  it('keeps unknown advertised thought values selectable and switchable back', async () => {
+    const withTurbo = record({
+      config_options: [
+        {
+          ...KIMI_OPTIONS[1],
+          options: [...KIMI_OPTIONS[1].options, { value: 'turbo' }],
+        },
+      ],
+    })
+    mockApi.setStudioChatConfigOption.mockResolvedValue(withTurbo)
+    render(<StudioChatAgentConfig workspaceId="ws1" session={withTurbo} />)
+    const select = screen.getByLabelText('思考档位') as HTMLSelectElement
+    // visible even while a known level is current
+    expect(screen.getByRole('option', { name: 'turbo' })).toBeInTheDocument()
+    fireEvent.change(select, { target: { value: 'turbo' } })
+    expect(mockApi.setStudioChatConfigOption).toHaveBeenLastCalledWith(
+      'ws1',
+      's1',
+      'thinking',
+      'turbo'
+    )
+    await settled(select)
+    // and from an unknown current value the generic levels still switch back
+    fireEvent.change(select, { target: { value: 'high' } })
+    expect(mockApi.setStudioChatConfigOption).toHaveBeenLastCalledWith(
+      'ws1',
+      's1',
+      'thinking',
+      'high'
+    )
+    await settled(select)
+  })
+
+  it("does not leak a switched-away session's pending / error into the new session", async () => {
+    let reject: (cause: Error) => void = () => undefined
+    mockApi.setStudioChatMode.mockImplementation(
+      () =>
+        new Promise((_resolve, rej) => {
+          reject = rej
+        })
+    )
+    const { rerender } = render(
+      <StudioChatAgentConfig workspaceId="ws1" session={record()} />
+    )
+    fireEvent.change(screen.getByLabelText('Agent 权限模式'), {
+      target: { value: 'plan' },
+    })
+    expect(screen.getByLabelText('Agent 权限模式')).toBeDisabled()
+    // the user switches to session B while A's request is still in flight
+    rerender(
+      <StudioChatAgentConfig workspaceId="ws1" session={record({ id: 's2' })} />
+    )
+    const selectB = screen.getByLabelText('Agent 权限模式')
+    expect(selectB).toBeEnabled()
+    reject(new Error('A rejected'))
+    await waitFor(() => expect(mockApi.setStudioChatMode).toHaveBeenCalled())
+    await settled(selectB)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
 })
