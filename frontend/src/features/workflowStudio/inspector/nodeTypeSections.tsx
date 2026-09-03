@@ -34,13 +34,12 @@ export const NODE_TYPE_SECTIONS: Record<SwitchableNodeType, SectionSpec> = {
       DependencySection,
     ],
   },
-  // agent：基本设置 → 生效 schema（agent = 指引）→ 执行能力（Agent
-  // 配置 + 编辑入口）→ 节点配置 → 数据契约 → 依赖。无节点代码段
-  // （code 池专属）。
+  // agent：基本设置 → 执行能力（Agent 配置 + 编辑入口）→
+  // 节点配置 → 数据契约 → 依赖。Agent 的有效 config_schema 归 Agent
+  // Definition 管理，不渲染节点 YAML 的 schema 编辑区（#406）。
   agent: {
     sections: [
       EditorSection,
-      ConfigSchemaSection,
       ExecutionSection,
       NodeConfigSection,
       DataContractSection,

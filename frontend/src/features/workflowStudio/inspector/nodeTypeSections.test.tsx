@@ -69,6 +69,7 @@ describe('nodeTypeSections registry (#392 Phase 2)', () => {
     const names = NODE_TYPE_SECTIONS.agent.sections.map((s) => s.name)
     expect(names).toContain('ExecutionSection')
     expect(names).not.toContain('CodeSection')
+    expect(names).not.toContain('ConfigSchemaSection')
     expect(names).not.toContain('ApprovalConfigSection')
   })
 
