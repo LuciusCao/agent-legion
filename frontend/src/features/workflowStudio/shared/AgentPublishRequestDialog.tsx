@@ -25,6 +25,7 @@ export function AgentPublishRequestDialog() {
       open={open}
       {...reviewDialogProps(studio)}
       confirming={agentRequest.confirming}
+      canceling={agentRequest.canceling}
       onConfirm={async () => {
         await agentRequest.confirm()
         view.setChangesPanelOpen(true)
