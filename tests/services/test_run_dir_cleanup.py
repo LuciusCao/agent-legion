@@ -1,14 +1,17 @@
 from contextlib import closing, contextmanager
+from pathlib import Path
 
 from server.app.db.connection import connect_database
-from server.app.jobs import JobQueries
+from server.app.executors._path_canonicalization import canonicalize_run_dir
+from server.app.executors.models import ExecutionResult
+from server.app.jobs import JobQueries, storage_layout
 from server.app.services.cleanup_sweep import (
     RUN_DIR_UPDATE_BATCH_SIZE,
     cleanup_extra_runs_per_node,
 )
-from server.app.services.run_dir_cleanup import cleanup_extra_runs_for_node
+from server.app.services.run_dir_cleanup import cleanup_extra_runs_for_node, find_extra_run_dirs
 from server.app.storage_paths import make_data_relative
-from tests.helpers.job_dirs import job_storage_ref, make_job_dir
+from tests.helpers.job_dirs import job_storage_ref, make_job_dir, pin_run_dir_order
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -62,6 +65,7 @@ def test_cleanup_extra_runs_for_node_keeps_newest(tmp_path):
     new_dir.mkdir(parents=True)
     (old_dir / "events.jsonl").write_text("old")
     (new_dir / "events.jsonl").write_text("new")
+    pin_run_dir_order(old_dir, new_dir)
 
     with closing(connect_database(TEST_DATABASE_URL)) as conn:
         _setup(conn)
@@ -98,8 +102,10 @@ def test_cleanup_extra_runs_per_node_scans_all_nodes(tmp_path):
     for job_id in ("job-1", "job-2"):
         node_dir = make_job_dir(data_dir, "ws1", job_id) / "runs" / "node-a"
         old_dir = node_dir / "old"
+        new_dir = node_dir / "new"
         old_dir.mkdir(parents=True)
-        (node_dir / "new").mkdir(parents=True)
+        new_dir.mkdir(parents=True)
+        pin_run_dir_order(old_dir, new_dir)
         old_dirs.append((job_id, old_dir))
 
     with db.connect() as conn:
@@ -114,6 +120,47 @@ def test_cleanup_extra_runs_per_node_scans_all_nodes(tmp_path):
     with db._connect_read() as conn:
         rows = conn.execute("select run_dir from node_runs").fetchall()
     assert [row["run_dir"] for row in rows] == ["", ""]
+
+
+def test_derived_run_dir_survives_cleanup_when_timestamps_tie(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    job_dir = make_job_dir(data_dir, "ws1", "job-1")
+    node_dir = job_dir / "runs" / "node-a"
+    for name in ("tok-b", "tok-c", "tok-a"):
+        (node_dir / name).mkdir(parents=True)
+    monkeypatch.setattr(storage_layout, "_run_dir_timestamp", lambda path: 1.0)
+
+    result = ExecutionResult(status="completed", exit_code=0)
+    derived = canonicalize_run_dir(
+        result,
+        data_dir,
+        "",
+        "node-a",
+        "job-1",
+        (job_dir,),
+    )
+    assert derived == make_data_relative(node_dir / "tok-c", data_dir)
+
+    forward = sorted(p.name for p, _ in find_extra_run_dirs(data_dir, job_dir, "node-a"))
+    assert forward == ["tok-a", "tok-b"]
+
+    real_iterdir = Path.iterdir
+    monkeypatch.setattr(Path, "iterdir", lambda self: reversed(list(real_iterdir(self))))
+    backward = sorted(p.name for p, _ in find_extra_run_dirs(data_dir, job_dir, "node-a"))
+    assert backward == forward
+
+    with closing(connect_database(TEST_DATABASE_URL)) as conn:
+        _setup(conn)
+        conn.execute(
+            "insert into node_runs(job_id, node_key, status, run_dir) values (%s, %s, 'completed', %s)",
+            ("job-1", "node-a", derived),
+        )
+        removed = cleanup_extra_runs_for_node(conn, data_dir, job_dir, "node-a")
+        row = conn.execute("select run_dir from node_runs").fetchone()
+
+    assert removed == 2
+    assert row["run_dir"] == derived
+    assert (node_dir / "tok-c").is_dir()
 
 
 def test_cleanup_extra_runs_per_node_batches_updates(tmp_path, monkeypatch):

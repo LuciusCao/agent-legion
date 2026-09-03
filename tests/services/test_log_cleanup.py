@@ -1,4 +1,3 @@
-import os
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
@@ -8,7 +7,7 @@ from server.app.services import cleanup_sweep
 from server.app.services.cleanup_sweep_store import CleanupSweepStore
 from server.app.services.log_cleanup import CleanupConfig, cleanup_old_logs
 from server.app.storage_paths import make_data_relative
-from tests.helpers.job_dirs import job_storage_ref, make_job_dir
+from tests.helpers.job_dirs import job_storage_ref, make_job_dir, pin_run_dir_order
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -146,20 +145,6 @@ def test_cleanup_config_from_settings():
     assert cfg.keep_only_latest_run_per_node is True
 
 
-def _pin_run_dir_order(old_dir, new_dir):
-    """Make the keep-latest sweep's newest/oldest pick deterministic.
-
-    ``find_extra_run_dirs`` orders run dirs by ``st_birthtime`` where available
-    (macOS) and ``st_mtime`` otherwise (Linux). Two dirs created back-to-back
-    can compare equal on platforms with coarser timestamps, leaving the pick
-    to arbitrary directory iteration order — so pin the mtimes explicitly.
-    """
-    old_ts = (datetime.now(UTC) - timedelta(days=2)).timestamp()
-    new_ts = (datetime.now(UTC) - timedelta(days=1)).timestamp()
-    os.utime(old_dir, (old_ts, old_ts))
-    os.utime(new_dir, (new_ts, new_ts))
-
-
 def test_cleanup_keeps_only_latest_run_per_node(tmp_path):
     data_dir, db = _make_db(tmp_path)
     node_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a"
@@ -169,7 +154,7 @@ def test_cleanup_keeps_only_latest_run_per_node(tmp_path):
     new_dir.mkdir(parents=True)
     (old_dir / "events.jsonl").write_text("old")
     (new_dir / "events.jsonl").write_text("new")
-    _pin_run_dir_order(old_dir, new_dir)
+    pin_run_dir_order(old_dir, new_dir)
 
     with db.connect() as conn:
         _seed_workspace(conn)
@@ -274,7 +259,7 @@ def test_cleanup_deletes_files_outside_db_transaction(tmp_path, monkeypatch):
     new_dir = node_dir / "tok-new"
     old_dir.mkdir(parents=True)
     new_dir.mkdir(parents=True)
-    _pin_run_dir_order(old_dir, new_dir)
+    pin_run_dir_order(old_dir, new_dir)
     log_path = data_dir / "logs" / "jobs" / "job-1-node-a.log"
     log_path.parent.mkdir(parents=True)
     log_path.write_text("old log")
