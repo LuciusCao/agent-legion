@@ -21,7 +21,8 @@ type Props = {
  * 后绑定 key）+ 版本下拉（latest 跟随 HEAD / 具体 tag 首次 dispatch 冻结进
  * skill_lock）」，不再有只读 Skill 回显字段、参考 tag 下拉或独立 Skill ref
  * 输入。编辑真相源是草稿 YAML，回写经 patchWorkflowNodeSkill（恒 mapping
- * 形态，对齐后端 echo），response 的 node.skill 只作已发布状态的回显兜底。 */
+ * 形态，对齐后端 echo），response 的 node.skill 只作已发布状态的回显兜底。
+ * 换绑 skill 时 ref 重置为 latest（codex 二轮 P1 on #427）。 */
 export function WorkflowNodeSkillEditor(props: Props) {
   const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined
   // 区分「草稿里没有这个节点」（回显 published 绑定）与「草稿节点存在但无
@@ -45,6 +46,16 @@ export function WorkflowNodeSkillEditor(props: Props) {
     )
   }
 
+  // 校验回填 skill key（codex 二轮 P1 on #427）：换绑不同 skill 时不携带
+  // 旧 skill 的 tag——B@旧tag 无法被 B 的仓库解析，发布后首次 dispatch 才
+  // 失败；跟 HEAD 的默认策略是 latest。同一 key 重新校验则保留已选版本。
+  function handleSkillKeyChange(key: string) {
+    patch({
+      key,
+      ref: key === bound?.key ? (bound?.ref ?? 'latest') : 'latest',
+    })
+  }
+
   if (props.readOnly) {
     return bound ? (
       <TextField
@@ -63,7 +74,7 @@ export function WorkflowNodeSkillEditor(props: Props) {
         <SkillSelector
           workspaceId={workspaceId}
           value={bound?.key ?? ''}
-          onChange={(key) => patch({ key, ref: bound?.ref ?? 'latest' })}
+          onChange={handleSkillKeyChange}
           skillRef={bound?.ref ?? ''}
           onSkillRefChange={(ref) => {
             if (!bound) return

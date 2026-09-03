@@ -112,6 +112,51 @@ describe('WorkflowNodeSkillEditor', () => {
     })
   })
 
+  it('resets the ref to latest when switching to a different skill (codex r2 P1 on #427)', () => {
+    // 节点已绑定 demo/review@v1.0.0 后校验选择新 skill（stub 固定回填
+    // demo/other）：换 key 不携带旧 skill 的 tag——B@v1.0.0 无法被 B 的仓库
+    // 解析，发布后首次 dispatch 才失败。
+    const setDefinitionYaml = vi.fn()
+    renderEditor({
+      definitionYaml:
+        'nodes:\n  n1:\n    capability: cap\n    skill:\n      key: demo/review\n      ref: v1.0.0\n',
+      setDefinitionYaml,
+    })
+
+    // 模拟换绑：SkillSelector 校验回填另一个 key（经受控 value 传回）。
+    const onChange = skillSelectorProps.mock.calls[
+      skillSelectorProps.mock.calls.length - 1
+    ][0].onChange as (key: string) => void
+    onChange('demo/other')
+
+    const nextYaml = setDefinitionYaml.mock.calls[0][0] as string
+    expect(parseWorkflowNode(nextYaml, 'n1')?.skill).toEqual({
+      key: 'demo/other',
+      ref: 'latest',
+    })
+  })
+
+  it('keeps the picked ref when re-validating the same skill (codex r2 P1 on #427)', () => {
+    // 同一 key 重新校验：已选版本保留，不因换绑逻辑被重置。
+    const setDefinitionYaml = vi.fn()
+    renderEditor({
+      definitionYaml:
+        'nodes:\n  n1:\n    capability: cap\n    skill:\n      key: demo/review\n      ref: v1.0.0\n',
+      setDefinitionYaml,
+    })
+
+    const onChange = skillSelectorProps.mock.calls[
+      skillSelectorProps.mock.calls.length - 1
+    ][0].onChange as (key: string) => void
+    onChange('demo/review')
+
+    const nextYaml = setDefinitionYaml.mock.calls[0][0] as string
+    expect(parseWorkflowNode(nextYaml, 'n1')?.skill).toEqual({
+      key: 'demo/review',
+      ref: 'v1.0.0',
+    })
+  })
+
   it('patches the version select choice as the ref onto the bound key (#410)', () => {
     const setDefinitionYaml = vi.fn()
     renderEditor({
