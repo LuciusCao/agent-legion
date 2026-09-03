@@ -7,6 +7,8 @@ fixtures follow the sharded layout (`storage_layout.job_shard`). Pass
 
 from __future__ import annotations
 
+import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from server.app.jobs.storage_layout import job_shard
@@ -24,3 +26,18 @@ def make_job_dir(data_dir: Path, workspace_id: str, job_id: str, *, sharded: boo
     path = data_dir / job_storage_ref(workspace_id, job_id, sharded=sharded)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def pin_run_dir_order(*run_dirs: Path) -> None:
+    """Make the keep-latest sweep's newest/oldest pick deterministic.
+
+    ``find_extra_run_dirs`` orders run dirs by ``st_birthtime`` where available
+    (macOS) and ``st_mtime`` otherwise (Linux). Two dirs created back-to-back
+    can compare equal on platforms with coarser timestamps, so tests that
+    depend on which dir survives must pin the mtimes explicitly. Pass the dirs
+    oldest first; each gets a timestamp one day newer than the previous one.
+    """
+    base = datetime.now(UTC) - timedelta(days=len(run_dirs) + 1)
+    for index, run_dir in enumerate(run_dirs):
+        ts = (base + timedelta(days=index)).timestamp()
+        os.utime(run_dir, (ts, ts))
