@@ -49,15 +49,26 @@ class StudioChatMessageQueriesMixin(ConnectionQueriesMixin):
     def list_studio_chat_messages(
         self, session_id: str, *, after_seq: int = 0, limit: int = 500
     ) -> list[dict[str, Any]]:
+        """List messages after ``after_seq``, newest first capped at ``limit``.
+
+        The cap takes the LATEST rows, not the earliest (#411): a session
+        that outgrew the limit used to hand back its first 500 messages
+        while silently dropping everything newer — the UI re-entering such a
+        long conversation showed ancient history and the ongoing turn looked
+        like it had vanished. desc + reverse keeps the ascending contract of
+        the return value; incremental after_seq refills stay exact. Trade-
+        off: a client >limit behind refills the newest window and keeps a
+        gap (no before_seq API); remounting replaces the list wholesale.
+        """
         with self._connect_read() as conn:
             rows = conn.execute(
                 "select id, session_id, kind, role, content_json, seq, created_at"
                 " from studio_chat_messages where session_id=%s and seq>%s"
-                " order by seq limit %s",
+                " order by seq desc limit %s",
                 (session_id, after_seq, limit),
             ).fetchall()
         messages = []
-        for row in rows:
+        for row in reversed(rows):
             record = dict(row)
             record["content"] = json.loads(record.pop("content_json") or "{}")
             messages.append(record)

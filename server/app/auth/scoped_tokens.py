@@ -85,7 +85,8 @@ def renew_scoped_token(
     same token is kept alive while the human keeps prompting. No-op for
     revoked tokens, tokens with more than ``threshold`` life left, and —
     deliberately — already-expired tokens: an idle session's leaked token
-    must not spring back to life on the next prompt.
+    must not spring back to life on the next prompt. Mid-turn keepalive for
+    in-flight agents lives in studio_chat.token_keepalive (#411).
     """
     current = now or datetime.now(UTC)
     queries.extend_scoped_token_expiry(hash_token(token), current + ttl, current + threshold)
