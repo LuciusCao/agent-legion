@@ -9,6 +9,7 @@ from typing import Any
 from server.app.agent_control.register_token_workspace_removal import (
     cascade_delete_workspace_register_tokens,
 )
+from server.app.db.connection import DatabaseConnection
 from server.app.jobs.node_limits import (
     get_workspace_node_limits,
     replace_workspace_node_limits,
@@ -235,6 +236,36 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
         if row is None:
             raise RuntimeError("workspace configuration update did not return a row")
         return _workspace_record(row)
+
+    def write_workspace_node_config_section(
+        self,
+        conn: DatabaseConnection,
+        workspace_id: str,
+        workflow_key: str,
+        section: Mapping[str, Any],
+    ) -> None:
+        """Replace one workflow's override section inside a caller transaction.
+
+        The publish pipeline applies the override prune atomically with the
+        revision insert that publishes it (codex 终轮 P1-3): only *this*
+        workflow's section is replaced — sibling workflow sections are
+        re-read under the row lock and preserved, so the column rewrite
+        never discards concurrent settings writes for other workflows. The
+        row read takes ``for update`` so a racing settings PATCH commits
+        either fully before or fully after the prune, never in between.
+        Never commits on its own — ``conn`` comes from ``connect()``.
+        """
+        row = conn.execute(
+            "select node_config_json from workspaces where id=%s for update",
+            (workspace_id,),
+        ).fetchone()
+        node_config = json.loads(row["node_config_json"]) if row and row["node_config_json"] else {}
+        node_config = node_config if isinstance(node_config, dict) else {}
+        node_config[workflow_key] = dict(section)
+        conn.execute(
+            "update workspaces set node_config_json=%s, updated_at=current_timestamp where id=%s",
+            (json.dumps(node_config, ensure_ascii=False, sort_keys=True), workspace_id),
+        )
 
     def delete_workspace(self, workspace_id: str) -> None:
         with self.connect() as conn:

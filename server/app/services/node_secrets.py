@@ -48,6 +48,12 @@ def strip_secret_fields(config_schema: dict[str, Any], values: Any) -> Any:
     return {key: value for key, value in values.items() if key not in fields}
 
 
+def is_secret_ref_marker(value: Any) -> bool:
+    """A vault reference marker (``{"secret_ref": name}``) as stored by the
+    settings PATCH chain (``apply_node_secret_fields``)."""
+    return isinstance(value, dict) and set(value) == {"secret_ref"}
+
+
 def apply_node_secret_fields(
     vault: VaultService,
     workspace_id: str,

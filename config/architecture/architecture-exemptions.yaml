@@ -1,5 +1,20 @@
 exemptions:
 - check: architecture.file_budget
+  path: server/app/jobs/queries/workspace.py
+  reason: >-
+    The publish pipeline's override prune had to land inside the revision
+    transaction (codex 终轮 P1-3 on #428), and the section-scoped
+    node_config_json write (FOR UPDATE re-read, replace only the publishing
+    workflow's section) lives on this mixin because every other workspace
+    column write already does — a service-layer helper would need the raw
+    connection this mixin owns. The durable resolution is splitting the
+    workspace-node-override writes (node config + node limits) into their
+    own queries mixin when the next workspace write arrives; the exemption
+    goes stale with that split or whenever the file shrinks under 301.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/418
+  ceiling: 332
+- check: architecture.file_budget
   path: server/app/routes/artifacts.py
   reason: Artifact routes authenticate the per-Worker token used by Agent
     execution transport, and the per-file upload path grew past the plain
@@ -46,20 +61,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/280
   ceiling: 135
-- check: architecture.file_budget
-  path: server/app/services/node_config.py
-  reason: The publish-time override prune (#418 second review, P2-1) belongs
-    in this module because every helper it needs already lives here —
-    workspace_node_overrides and workflow_node_config_schemas define exactly
-    what "stale" means against the just-published revision, and the type
-    mirror of config_schema._type_matches keeps intake and prune from
-    drifting apart. The durable resolution is extracting the resolution
-    chain (resolve_node_config and friends) into its own module once
-    node_config grows a third concern beyond resolve/prune; the prune entry
-    points are the natural split seam.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/418
-  ceiling: 243
 - check: architecture.file_budget
   path: server/app/storage/s3_client.py
   reason: The job-detail artifact preview (issue 11) added open_range (ranged

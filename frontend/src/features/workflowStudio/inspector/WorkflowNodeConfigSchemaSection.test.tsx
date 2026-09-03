@@ -303,6 +303,42 @@ describe('WorkflowNodeConfigSchemaSection (#418 structured editor)', () => {
     })
   })
 
+  it('offers only enum-allowed options in the boolean default dropdown (codex 终轮 P2)', () => {
+    // boolean + enum: [true]：下拉只展示 true——false 会被后端以「默认值
+    // 不在 enum」拒绝发布，从源头杜绝写入。
+    const enumYaml = yamlText.replace(
+      '        dry_run:\n          type: boolean\n          default: false',
+      '        dry_run:\n          type: boolean\n          enum: [true]'
+    )
+    const { unmount } = renderSection({ definitionYaml: enumYaml })
+
+    const select = screen.getByLabelText('默认值 dry_run') as HTMLSelectElement
+    const options = Array.from(select.options).map((option) => option.value)
+    expect(options).toEqual(['', 'true'])
+    // 旧 default: false 不在 enum 内：回显空（无默认），不可再选回 false。
+    expect(select.value).toBe('')
+    unmount()
+
+    // 选 true 正常落草稿。
+    const setDefinitionYaml = vi.fn()
+    renderSection({ definitionYaml: enumYaml, setDefinitionYaml })
+    fireEvent.change(screen.getByLabelText('默认值 dry_run'), {
+      target: { value: 'true' },
+    })
+    const schema = patchedSchema(setDefinitionYaml.mock.calls[0][0])
+    expect(schema).toMatchObject({
+      properties: { dry_run: { type: 'boolean', default: true } },
+    })
+  })
+  it('offers both boolean options when no enum constrains the property', () => {
+    renderSection()
+
+    const select = screen.getByLabelText('默认值 dry_run') as HTMLSelectElement
+    const options = Array.from(select.options).map((option) => option.value)
+    expect(options).toEqual(['', 'true', 'false'])
+    expect(select.value).toBe('false')
+  })
+
   it('rejects out-of-bounds numeric defaults with an inline error (#428 codex 二轮 P2)', () => {
     const setDefinitionYaml = vi.fn()
     renderSection({
