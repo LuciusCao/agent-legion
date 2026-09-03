@@ -83,6 +83,7 @@ const mockRuns: NodeRun[] = [
     run_dir: '',
     session_dir: '',
     runner: '',
+    skill_version: '',
   },
 ]
 
@@ -263,6 +264,35 @@ describe('JobProgressPanel', () => {
     )
     expect(screen.getByText('代码')).toBeInTheDocument()
     expect(screen.getByText('Pi Agent')).toBeInTheDocument()
+  })
+
+  it('renders the run skill version when present (#410)', () => {
+    renderWithClient(
+      <JobProgressPanel
+        jobId="j1"
+        nodes={mockNodes}
+        runs={[
+          {
+            ...mockRuns[0],
+            skill_version: 'latest@abc123def456',
+          },
+        ]}
+        onOpenDagDialog={vi.fn()}
+      />
+    )
+    expect(screen.getByText('latest@abc123def456')).toBeInTheDocument()
+  })
+
+  it('omits the skill version badge when the run has none (#410)', () => {
+    renderWithClient(
+      <JobProgressPanel
+        jobId="j1"
+        nodes={mockNodes}
+        runs={[{ ...mockRuns[0], skill_version: '' }]}
+        onOpenDagDialog={vi.fn()}
+      />
+    )
+    expect(screen.queryByText(/Skill 版本/)).not.toBeInTheDocument()
   })
 
   it('hides old run errors and logs after a node rerun', () => {

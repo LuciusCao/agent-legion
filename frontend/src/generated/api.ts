@@ -4559,6 +4559,11 @@ export interface components {
       runner: string
       /** Session Dir */
       session_dir: string
+      /**
+       * Skill Version
+       * @default
+       */
+      skill_version: string
       /** Started At */
       started_at: string
       /** Status */

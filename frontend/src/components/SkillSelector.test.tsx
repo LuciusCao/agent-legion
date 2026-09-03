@@ -1,9 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { getSkillDetail } from '../api/agentCatalogApi'
 import { fetchSkillDirectories, validateSkillPath } from '../api'
 import { getInstanceSettings } from '../api/instanceSettings'
 import type { InstanceSettingsResponse } from '../api/instanceSettings'
 import { TestQueryProvider } from '../testing/testQueryClient'
+import type { SkillDetail } from '../types/agentCatalogTypes'
 import type { SkillValidateResponse } from '../types'
 import { SkillSelector } from './SkillSelector'
 
@@ -12,12 +14,17 @@ vi.mock('../api', () => ({
   fetchSkillDirectories: vi.fn(),
 }))
 
+vi.mock('../api/agentCatalogApi', () => ({
+  getSkillDetail: vi.fn(),
+}))
+
 vi.mock('../api/instanceSettings', () => ({
   getInstanceSettings: vi.fn(),
 }))
 
 const mockValidate = vi.mocked(validateSkillPath)
 const mockFetchDirectories = vi.mocked(fetchSkillDirectories)
+const mockGetSkillDetail = vi.mocked(getSkillDetail)
 const mockGetSettings = vi.mocked(getInstanceSettings)
 
 function settingsWithRoot(skillsRoot: string): InstanceSettingsResponse {
@@ -25,12 +32,44 @@ function settingsWithRoot(skillsRoot: string): InstanceSettingsResponse {
   return { skills_root: skillsRoot } as InstanceSettingsResponse
 }
 
-function renderSelector(onChange: (key: string) => void = () => {}) {
-  return render(
+function renderSelector(
+  props: Partial<{
+    value: string
+    onChange: (key: string) => void
+    skillRef: string
+    onSkillRefChange: (ref: string) => void
+  }> = {}
+) {
+  const view = render(
     <TestQueryProvider>
-      <SkillSelector workspaceId="ws-1" value="" onChange={onChange} />
+      <SkillSelector
+        workspaceId="ws-1"
+        value={props.value ?? ''}
+        onChange={props.onChange ?? (() => {})}
+        skillRef={props.skillRef ?? ''}
+        onSkillRefChange={props.onSkillRefChange ?? (() => {})}
+      />
     </TestQueryProvider>
   )
+  // 宿主（WorkflowNodeSkillEditor）会把校验回填的 key 作为 value 传回；
+  // 单测用 rerender 模拟这一环。
+  return {
+    ...view,
+    rerenderWith: (next: typeof props) =>
+      view.rerender(
+        <TestQueryProvider>
+          <SkillSelector
+            workspaceId="ws-1"
+            value={next.value ?? ''}
+            onChange={next.onChange ?? props.onChange ?? (() => {})}
+            skillRef={next.skillRef ?? ''}
+            onSkillRefChange={
+              next.onSkillRefChange ?? props.onSkillRefChange ?? (() => {})
+            }
+          />
+        </TestQueryProvider>
+      ),
+  }
 }
 
 describe('SkillSelector', () => {
@@ -41,9 +80,17 @@ describe('SkillSelector', () => {
       workspace_id: 'ws-1',
       directories: [],
     })
+    mockGetSkillDetail.mockResolvedValue({
+      available: true,
+      commit: 'abc123def456',
+      files: [],
+      key: 'ns/skill',
+      ref: 'main',
+      tags: [],
+    } as SkillDetail)
   })
 
-  it('fills the skill key and shows tags after a successful validation', async () => {
+  it('fills the skill key and offers latest + tags in the version select after a successful validation', async () => {
     mockValidate.mockResolvedValue({
       valid: true,
       path: '/abs/skill',
@@ -53,7 +100,7 @@ describe('SkillSelector', () => {
       locked_ref: 'abc123',
     })
     const onChange = vi.fn()
-    renderSelector(onChange)
+    const view = renderSelector({ onChange })
 
     // 等技能根前缀加载完成（此前输入保持禁用），只读前缀 + 相对目录名输入。
     const input = screen.getByLabelText('Skill 目录名')
@@ -68,7 +115,117 @@ describe('SkillSelector', () => {
       '~/.agents/skills/ws-1/write-script'
     )
     expect(screen.getByText('已锁定版本：abc123')).toBeInTheDocument()
-    expect(screen.getByLabelText('可用 tag（参考）')).toBeInTheDocument()
+    // 宿主回填 key 后版本下拉可用：latest + 全部 tag（替代旧「可用 tag（参考）」）。
+    view.rerenderWith({ value: 'ns/skill', skillRef: '' })
+    const versionSelect = await screen.findByLabelText('版本')
+    await waitFor(() => expect(versionSelect).toBeEnabled())
+    fireEvent.mouseDown(versionSelect)
+    expect(
+      await screen.findByRole('option', {
+        name: 'latest（当前最新 tag：v1.2.0）',
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('option', { name: 'v1.2.0（最新）' })
+    ).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'v1.1.0' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('可用 tag（参考）')).not.toBeInTheDocument()
+  })
+
+  it('writes the picked tag into ref via the version select (#410)', async () => {
+    mockValidate.mockResolvedValue({
+      valid: true,
+      path: '/abs/skill',
+      skill_key: 'ns/skill',
+      tags: ['v1.2.0', 'v1.1.0'],
+      latest_tag: 'v1.2.0',
+      locked_ref: null,
+    })
+    const onSkillRefChange = vi.fn()
+    const view = renderSelector({ onSkillRefChange })
+
+    const input = screen.getByLabelText('Skill 目录名')
+    await waitFor(() => expect(input).toBeEnabled())
+    fireEvent.change(input, { target: { value: 'write-script' } })
+    fireEvent.click(screen.getByRole('button', { name: '校验' }))
+    view.rerenderWith({ value: 'ns/skill', skillRef: '' })
+
+    const versionSelect = await screen.findByLabelText('版本')
+    await waitFor(() => expect(versionSelect).toBeEnabled())
+    fireEvent.mouseDown(versionSelect)
+    fireEvent.click(await screen.findByRole('option', { name: 'v1.1.0' }))
+
+    expect(onSkillRefChange).toHaveBeenCalledWith('v1.1.0')
+  })
+
+  it('keeps picking latest possible when no tags exist (degraded helper text)', async () => {
+    mockValidate.mockResolvedValue({
+      valid: true,
+      path: '/abs/skill',
+      skill_key: 'ns/skill',
+      tags: [],
+      latest_tag: null,
+      locked_ref: null,
+    })
+    const view = renderSelector()
+
+    const input = screen.getByLabelText('Skill 目录名')
+    await waitFor(() => expect(input).toBeEnabled())
+    fireEvent.change(input, { target: { value: 'write-script' } })
+    fireEvent.click(screen.getByRole('button', { name: '校验' }))
+    view.rerenderWith({ value: 'ns/skill', skillRef: '' })
+
+    const versionSelect = await screen.findByLabelText('版本')
+    await waitFor(() => expect(versionSelect).toBeEnabled())
+    // 降级：无 tag 时 latest 是唯一选项（无「当前最新 tag」标注）。
+    fireEvent.mouseDown(versionSelect)
+    expect(
+      await screen.findByRole('option', { name: 'latest（跟随最新）' })
+    ).toBeInTheDocument()
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    expect(
+      screen.getByText('仓库暂无 tag：latest 跟随仓库最新提交')
+    ).toBeInTheDocument()
+  })
+
+  it('echoes the bound skill ref as the version value and loads its tags from the detail endpoint', async () => {
+    mockGetSkillDetail.mockResolvedValue({
+      available: true,
+      commit: 'abc123def456',
+      files: [],
+      key: 'ns/skill',
+      ref: 'main',
+      tags: ['v1.3.0', 'v1.2.0'],
+    } as SkillDetail)
+    renderSelector({ value: 'ns/skill', skillRef: 'v1.2.0' })
+
+    await waitFor(() => expect(mockGetSkillDetail).toHaveBeenCalledWith('ns/skill'))
+    // 选中 tag 经 combobox 文本断言（未绑定校验流程时同样可选版本）。
+    expect(
+      screen.getByRole('combobox', { name: '版本' })
+    ).toHaveTextContent('v1.2.0')
+    fireEvent.mouseDown(screen.getByLabelText('版本'))
+    expect(
+      await screen.findByRole('option', { name: 'v1.3.0（最新）' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('option', { name: 'latest（当前最新 tag：v1.3.0）' })
+    ).toBeInTheDocument()
+  })
+
+  it('normalizes an empty bound ref to latest in the version select (#322)', () => {
+    renderSelector({ value: 'ns/skill', skillRef: '' })
+
+    expect(
+      screen.getByRole('combobox', { name: '版本' })
+    ).toHaveTextContent('latest')
+  })
+
+  it('disables the version select until a skill is bound', () => {
+    renderSelector()
+
+    expect(screen.getByLabelText('版本')).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByText('先经上方校验选择 skill')).toBeInTheDocument()
   })
 
   it('strips leading slashes from the relative name before composing', async () => {
@@ -161,7 +318,7 @@ describe('SkillSelector', () => {
       error: 'SKILL.md 不存在',
     })
     const onChange = vi.fn()
-    renderSelector(onChange)
+    renderSelector({ onChange })
 
     const input = screen.getByLabelText('Skill 目录名')
     await waitFor(() => expect(input).toBeEnabled())
@@ -172,29 +329,6 @@ describe('SkillSelector', () => {
       'SKILL.md 不存在'
     )
     expect(onChange).not.toHaveBeenCalled()
-  })
-
-  it('notes that tag selection is reference-only (pin via the node Skill ref)', async () => {
-    mockValidate.mockResolvedValue({
-      valid: true,
-      path: '/abs/skill',
-      skill_key: 'ns/skill',
-      tags: ['v1.2.0', 'v1.1.0'],
-      latest_tag: 'v1.2.0',
-      locked_ref: null,
-    })
-    renderSelector()
-
-    const input = screen.getByLabelText('Skill 目录名')
-    await waitFor(() => expect(input).toBeEnabled())
-    fireEvent.change(input, { target: { value: 'write-script' } })
-    fireEvent.click(screen.getByRole('button', { name: '校验' }))
-
-    const tagSelect = await screen.findByLabelText('可用 tag（参考）')
-    fireEvent.mouseDown(tagSelect)
-    fireEvent.click(await screen.findByRole('option', { name: 'v1.1.0' }))
-
-    expect(await screen.findByText(/此处选择仅作参考/)).toBeInTheDocument()
   })
 
   it('offers the workspace skill directories as datalist candidates', async () => {
@@ -232,7 +366,7 @@ describe('SkillSelector', () => {
       locked_ref: null,
     })
     const onChange = vi.fn()
-    const { container } = renderSelector(onChange)
+    const { container } = renderSelector({ onChange })
 
     const input = screen.getByLabelText('Skill 目录名')
     await waitFor(() => expect(input).toBeEnabled())
@@ -301,7 +435,7 @@ describe('SkillSelector', () => {
           })
       )
     const onChange = vi.fn()
-    const { container } = renderSelector(onChange)
+    const { container } = renderSelector({ onChange })
 
     const input = screen.getByLabelText('Skill 目录名')
     await waitFor(() => expect(input).toBeEnabled())
@@ -354,7 +488,7 @@ describe('SkillSelector', () => {
         })
     )
     const onChange = vi.fn()
-    const { container } = renderSelector(onChange)
+    const { container } = renderSelector({ onChange })
 
     const input = screen.getByLabelText('Skill 目录名')
     await waitFor(() => expect(input).toBeEnabled())

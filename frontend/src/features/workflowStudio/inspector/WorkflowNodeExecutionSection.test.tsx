@@ -419,9 +419,8 @@ describe('WorkflowNodeExecutionSection', () => {
   it('renders the node skill editor for agent-routed nodes only', () => {
     const { unmount } = renderSection({ node, ...editorProps })
 
-    // Agent 路由节点：skill 编辑行（key 选择 + ref 输入）。
+    // Agent 路由节点：skill 编辑区（目录 + 版本两控件合一，#410）。
     expect(screen.getByTestId('skill-selector-stub')).toBeInTheDocument()
-    expect(screen.getByLabelText('Skill ref')).toBeInTheDocument()
     unmount()
 
     renderSection({
@@ -429,7 +428,6 @@ describe('WorkflowNodeExecutionSection', () => {
       ...editorProps,
     })
     expect(screen.queryByTestId('skill-selector-stub')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Skill ref')).not.toBeInTheDocument()
   })
 
   it('omits the skill row and version line when the definition has no skill', () => {

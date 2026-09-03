@@ -96,6 +96,10 @@ class NodeRunResponse(BaseModel):
     run_dir: str
     session_dir: str
     runner: str = ""
+    # #410: the version the run actually executed (skill repo HEAD commit or
+    # the frozen tag). Empty for runs that predate skill binding; surfaced so
+    # the studio can echo the resolved version for `latest` bindings.
+    skill_version: str = ""
 
 
 class LogEventResponse(BaseModel):

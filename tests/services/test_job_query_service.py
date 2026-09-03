@@ -571,6 +571,31 @@ def test_detail_preserves_empty_optional_run_dirs(query_service, job_db, setting
     assert run["session_dir"] == ""
 
 
+def test_detail_and_workspace_runs_carry_skill_version(query_service, job_db, settings):
+    # #410: node_runs.skill_version must flow through both read paths so the
+    # studio can echo the resolved version for `latest` bindings.
+    job = _create_job_with_node_run(job_db, settings)
+    job_db.update_job_node(job["id"], "assemble_package", status="stale")
+    job_db.start_node_run(
+        job["id"],
+        "assemble_package",
+        ["cmd"],
+        "logs/another.log",
+        skill_version="latest@abc123def456",
+    )
+
+    detail = query_service.detail(job["id"])
+    assert len(detail["runs"]) == 2
+    assert detail["runs"][0]["skill_version"] == ""
+    assert detail["runs"][1]["skill_version"] == "latest@abc123def456"
+
+    runs = query_service.workspace_runs(job["workspace_id"])
+    assert [run["skill_version"] for run in runs] == [
+        "latest@abc123def456",
+        "",
+    ]
+
+
 def test_query_service_does_not_mutate_repository_records(query_service, job_db, settings):
     job = _create_job_with_node_run(job_db, settings)
     original_job = job_db.get_job(job["id"])
