@@ -251,6 +251,26 @@ describe('WorkflowNodeConfigSchemaSection (#418 structured editor)', () => {
     expect(setDefinitionYaml).not.toHaveBeenCalled()
   })
 
+  it('clears the displayed default when a type switch strips it (#428 二轮 NIT-2a)', () => {
+    // 类型切换 strip 掉 default 后，输入框显示随之清空，不再残留旧值。
+    const { rerender } = renderSection()
+    expect(screen.getByLabelText('默认值 bank_version')).toHaveValue('v1')
+
+    const strippedYaml = yamlText.replace(
+      '        bank_version:\n          type: string\n          default: v1',
+      '        bank_version:\n          type: integer'
+    )
+    rerender(
+      <WorkflowNodeConfigSchemaSection
+        node={node}
+        definitionYaml={strippedYaml}
+        setDefinitionYaml={() => {}}
+      />
+    )
+
+    expect(screen.getByLabelText('默认值 bank_version')).toHaveValue('')
+  })
+
   it('changes a property type and drops the now-incompatible default', () => {
     const setDefinitionYaml = vi.fn()
     renderSection({ setDefinitionYaml })

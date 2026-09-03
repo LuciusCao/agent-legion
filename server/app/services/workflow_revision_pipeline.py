@@ -13,7 +13,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from server.app.services.agent_service import published_agent_definitions
 from server.app.services.node_code_resolution import freeze_node_code_versions
+from server.app.services.node_config import prune_workspace_node_overrides
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
 from server.app.services.workflow_revision_routes import derive_agent_routes
 from server.app.services.workflow_revision_runtime import embed_node_code_pins
@@ -47,7 +49,7 @@ def publish_workflow_revision(
     version = job_db.next_workflow_revision_version(workspace_id, definition.key)
     revision_id = f"{workspace_id}:{definition.key}:v{version}"
     agent_routes = derive_agent_routes(job_db, workspace_id, definition)
-    return job_db.create_workflow_revision(
+    revision = job_db.create_workflow_revision(
         revision_id=revision_id,
         workspace_id=workspace_id,
         workflow_key=definition.key,
@@ -57,3 +59,13 @@ def publish_workflow_revision(
         definition_hash=definition_hash(definition_json),
         agent_routes=agent_routes,
     )
+    # The new revision's schemas are the live truth for the workspace's
+    # node overrides: prune keys it no longer accepts so intake keeps
+    # working after a schema rename/removal (#428 二轮复审 P2-1).
+    prune_workspace_node_overrides(
+        job_db,
+        workspace_id,
+        definition,
+        published_agent_definitions(job_db, workspace_id),
+    )
+    return revision

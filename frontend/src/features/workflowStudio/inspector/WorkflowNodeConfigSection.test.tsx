@@ -309,6 +309,84 @@ nodes:
     })
   })
 
+  it('flags invalid stored values at render time without blocking display (#428 二轮 P3-1)', () => {
+    renderSection({
+      // YAML 源码塞进来的存量非法值：enum 外的 bank_version、越界的
+      // page_size。渲染即提示（不阻塞显示），提交路径不受影响。
+      definitionYaml: yamlText
+        .replace(
+          '        bank_version:\n          type: string\n          default: v1',
+          '        bank_version:\n          type: string\n          enum: [v1, v2]'
+        )
+        .replace(
+          '        page_size:\n          type: integer\n          default: 50',
+          '        page_size:\n          type: integer\n          default: 50\n          minimum: 1\n          maximum: 50'
+        )
+        .replace(
+          '    config:\n      page_size: 20',
+          '    config:\n      page_size: 99\n      bank_version: v3'
+        ),
+    })
+
+    // enum 外的存量值在下拉中无匹配 option（浏览器 select 的固有
+    // 行为），关键是行内提示指出问题所在，而不是让用户猜为何显空。
+    expect(screen.getAllByRole('alert').map((el) => el.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining('枚举')])
+    )
+
+    // 越界的存量数值同样行内提示。
+    expect(screen.getByText(/值不得大于 50/)).toBeInTheDocument()
+  })
+
+  it('hints that secret overrides become settable only after publishing (#428 二轮 P3-2)', () => {
+    useSettingStore.setState({
+      workspaceId: 'ws1',
+      settings: {
+        entityType: 'question',
+        previewHidden: [],
+        nodeConfig: { generate: { api_key: 'live-secret' } },
+        nodeConfigSchemas: { generate: liveSchema },
+      },
+    })
+    renderSection({
+      definitionYaml: yamlText.replace(
+        '        page_size:\n          type: integer\n          default: 50',
+        '        page_size:\n          type: integer\n          default: 50\n        api_key:\n          type: string\n          secret: true'
+      ),
+    })
+
+    // 提示语限定「发布后」：live 通道的字段来自 active revision，草稿里
+    // 新声明的 secret 属性在发布前不在下方卡片里。
+    expect(
+      screen.getByText(/发布本版本后可通过下方「运行时覆盖」通道设置/)
+    ).toBeInTheDocument()
+  })
+
+  it('does not count secret-only overrides toward the shadowing hint (#428 二轮 NIT-1)', () => {
+    useSettingStore.setState({
+      workspaceId: 'ws1',
+      settings: {
+        entityType: 'question',
+        previewHidden: [],
+        // 只有 secret 键有覆盖：版本值表单没有可见字段被遮蔽，
+        // 提示语不应出现。
+        nodeConfig: { generate: { api_key: 'live-secret' } },
+        nodeConfigSchemas: { generate: liveSchema },
+      },
+    })
+    renderSection({
+      definitionYaml: yamlText.replace(
+        '        page_size:\n          type: integer\n          default: 50',
+        '        page_size:\n          type: integer\n          default: 50\n        api_key:\n          type: string\n          secret: true'
+      ),
+    })
+
+    expect(
+      screen.queryByText(/标注「已被运行时覆盖」的键例外/)
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText('已被运行时覆盖')).not.toBeInTheDocument()
+  })
+
   it('shows the runtime override card labeled as immediately effective', () => {
     renderSection()
 

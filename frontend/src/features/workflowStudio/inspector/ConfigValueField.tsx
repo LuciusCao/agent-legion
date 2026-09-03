@@ -14,8 +14,11 @@ export type ConfigValueOverride = { value: unknown } | undefined
 // 单个版本值字段（#428 codex 二轮拆分，从 WorkflowNodeConfigValues 拆出
 // 守单文件预算）：enum 用下拉（选项 = enum 值，P1-B）；boolean 用下拉
 // （Schema 默认/true/false）；其余用失焦提交的文本输入（独立复审 P2-3）。
-// 提交前过 configValueConstraintError（enum/minimum/maximum，P1-B），
-// 非法值不落草稿并行内报错；被运行时覆盖遮蔽的键加徽标（P2-2）。
+// 提交前过 configValueConstraintError（enum/minimum/maximum + integer
+// 整数性，P1-B），非法值不落草稿并行内报错；被运行时覆盖遮蔽的键加徽标
+// （P2-2）。存量值也在渲染时校验（二轮复审 P3-1）：YAML 源码塞进来的
+// enum 外/越界/小数值在表单行内提示（不阻塞显示），enum 下拉不再因无
+// 匹配选项而静默显空。
 export function ConfigValueField({
   fieldKey,
   prop,
@@ -32,6 +35,13 @@ export function ConfigValueField({
   onCommit: (next: string) => void
 }) {
   const [error, setError] = useState('')
+  // 存量值（config 落盘值 → 表单串 → 解析回类型值）跑同一约束校验：
+  // 只提示不阻塞，提交路径仍以 error 状态优先。
+  const storedError = configValueConstraintError(
+    prop,
+    parseConfigValue(raw, prop)
+  )
+  const displayedError = error || storedError || ''
   const label = (
     <ConfigValueFieldLabel
       fieldKey={fieldKey}
@@ -64,9 +74,9 @@ export function ConfigValueField({
           <option value="true">true</option>
           <option value="false">false</option>
         </select>
-        {error && (
+        {displayedError && (
           <span className={styles.fieldHint} role="alert">
-            {error}
+            {displayedError}
           </span>
         )}
       </label>
@@ -90,9 +100,9 @@ export function ConfigValueField({
             </option>
           ))}
         </select>
-        {error && (
+        {displayedError && (
           <span className={styles.fieldHint} role="alert">
-            {error}
+            {displayedError}
           </span>
         )}
       </label>
@@ -105,7 +115,7 @@ export function ConfigValueField({
       raw={raw}
       readOnly={readOnly}
       onCommit={commit}
-      error={error}
+      error={displayedError}
     />
   )
 }

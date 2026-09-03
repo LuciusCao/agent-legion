@@ -4,7 +4,8 @@ import { defaultValueMatchesType } from './workflowStudioYamlDraft.configSchema.
 // code 节点 config_schema 的约束语义（enum/minimum/maximum/secret，#428
 // codex 二轮），从 configSchema.helpers 拆出守单文件预算。三类消费方：
 // - schema 编辑器：类型切换时清理不再可信的约束（P2-B）；
-// - 版本值表单：secret 属性排除出表单（P1-A）、enum/边界值校验（P1-B）。
+// - 版本值表单：secret 属性排除出表单（P1-A）、enum/边界值校验（P1-B）；
+// - 存量值渲染：YAML 塞进来的非法值行内提示不阻塞显示（二轮复审 P3-1）。
 
 /** 类型切换的连带清理（P2-B）：enum/minimum/maximum 的值类型与旧
  * type 绑定，切换后不再可信（number→string 留 numeric minimum 会被

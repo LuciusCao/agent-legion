@@ -12,6 +12,7 @@ import {
   configValueConstraintError,
   isSecretConfigProperty,
 } from './workflowStudioYamlDraft.configSchema.constraints'
+import { isConfigValueOfType } from './workflowStudioYamlDraft.configSchema.configLink'
 import {
   addWorkflowNodeSchemaProperty,
   patchWorkflowNodeSchemaProperty,
@@ -252,6 +253,72 @@ describe('schema property patches', () => {
     })
   })
 
+  it('drops the config value when the new type rejects it (#428 二轮 P2-2)', () => {
+    // number→string：config 里既有 42 与 string 类型失配，连带删除
+    // ——intake 的类型校验对失配值与孤儿键同样 raise。
+    const numericConfig = [
+      'key: demo',
+      'nodes:',
+      '  generate:',
+      '    capability: generate_questions',
+      '    config_schema:',
+      '      type: object',
+      '      properties:',
+      '        page_size:',
+      '          type: number',
+      '    config:',
+      '      page_size: 42',
+      '',
+    ].join('\n')
+    const next = patchWorkflowNodeSchemaProperty(
+      numericConfig,
+      'generate',
+      'page_size',
+      { type: 'string' }
+    )
+    expect(schemaOf(next)).toMatchObject({
+      properties: { page_size: { type: 'string' } },
+    })
+    expect(configOf(next)).toEqual({})
+    expectNoOrphanConfigKeys(next)
+  })
+
+  it('keeps the config value when it stays compatible with the new type (#428 二轮 P2-2)', () => {
+    // integer→number：42 恰好兼容 number，config 键保留。
+    const integerConfig = [
+      'key: demo',
+      'nodes:',
+      '  generate:',
+      '    capability: generate_questions',
+      '    config_schema:',
+      '      type: object',
+      '      properties:',
+      '        page_size:',
+      '          type: integer',
+      '    config:',
+      '      page_size: 42',
+      '',
+    ].join('\n')
+    const next = patchWorkflowNodeSchemaProperty(
+      integerConfig,
+      'generate',
+      'page_size',
+      { type: 'number' }
+    )
+    expect(configOf(next)).toEqual({ page_size: 42 })
+    expectNoOrphanConfigKeys(next)
+  })
+
+  it('keeps the config value when the type does not change', () => {
+    const next = patchWorkflowNodeSchemaProperty(
+      dagYamlWithConfig,
+      'generate',
+      'bank_version',
+      { type: 'string', description: '版本' }
+    )
+    expect(configOf(next)).toEqual({ bank_version: 'v2', dry_run: true })
+  })
+
   it('unchecking runtime_mutable deletes the key instead of writing false', () => {
     const mutable = patchWorkflowNodeSchemaProperty(
       dagYaml,
@@ -454,6 +521,21 @@ describe('default value coercion', () => {
     expect(defaultValueMatchesType(1.5, 'integer')).toBe(false)
     expect(defaultValueMatchesType(true, 'boolean')).toBe(true)
     expect(defaultValueMatchesType(1, 'boolean')).toBe(false)
+  })
+
+  it('checks stored config values against the new type (#428 二轮 P2-2)', () => {
+    // 与后端 config_schema._type_matches 对齐：integer 只收真整数，
+    // number 不收 boolean，string 只收 string。
+    expect(isConfigValueOfType(42, 'integer')).toBe(true)
+    expect(isConfigValueOfType(42, 'number')).toBe(true)
+    expect(isConfigValueOfType(1.5, 'integer')).toBe(false)
+    expect(isConfigValueOfType(1.5, 'number')).toBe(true)
+    expect(isConfigValueOfType('42', 'integer')).toBe(false)
+    expect(isConfigValueOfType('v1', 'string')).toBe(true)
+    expect(isConfigValueOfType(42, 'string')).toBe(false)
+    expect(isConfigValueOfType(true, 'boolean')).toBe(true)
+    expect(isConfigValueOfType(true, 'integer')).toBe(false)
+    expect(isConfigValueOfType(true, 'number')).toBe(false)
   })
 
   it('exposes the backend type subset', () => {

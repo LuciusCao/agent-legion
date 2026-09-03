@@ -15,7 +15,7 @@ schema-whitelisted, non-secret keys (CONFIG-MANIFEST-001). Keys declared
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.config_schema import (
@@ -26,8 +26,11 @@ from server.app.config_schema import (
 from server.app.services.node_config_batch import frozen_node_config
 from server.app.services.node_config_runtime import runtime_mutable_keys
 from server.app.services.node_execution_config import merge_reserved_execution_schema
-from server.app.services.node_secrets import strip_secret_fields
+from server.app.services.node_secrets import secret_config_fields, strip_secret_fields
 from server.app.workflows.schema import WorkflowDefinition, WorkflowNode
+
+if TYPE_CHECKING:
+    from server.app.jobs import JobQueries
 
 
 def _agent_schemas(
@@ -102,6 +105,93 @@ def workspace_node_overrides(
         str(node_key): dict(values)
         for node_key, values in workflow_overrides.items()
         if isinstance(values, Mapping)
+    }
+
+
+def prune_workspace_node_overrides(
+    job_db: JobQueries,
+    workspace_id: str,
+    definition: WorkflowDefinition,
+    agent_definitions: Mapping[str, AgentDefinition],
+) -> bool:
+    """Strip override entries the (newly published) revision no longer accepts.
+
+    Publish only validates the schema, never the stored workspace overrides
+    (#428 二轮复审 P2-1): a renamed/removed schema property (or a dropped
+    node) leaves stale keys in ``workspaces.node_config_json``. The very next
+    intake would then fail ``resolve_workflow_node_configs`` →
+    ``validate_config_values`` whitelist validation for every new job, and
+    the override card's PATCH-everything save would 400 on unknown keys —
+    with 「清除覆盖」 as the only exit, discarding legitimate overrides too.
+
+    Stale *keys* (not in the node's effective schema properties) are pruned;
+    values that no longer match the property type are pruned as well (the
+    intake type check raises on them the same way). Secret fields count as
+    valid keys (their stored ``{"secret_ref": ...}`` markers bypass value
+    validation). Overrides of nodes the new revision dropped are left alone —
+    resolve skips them, and the settings PATCH already rejects them. Returns
+    True when anything was pruned.
+    """
+    workspace = job_db.get_workspace(workspace_id)
+    overrides = workspace_node_overrides(workspace, definition.key)
+    if workspace is None or not overrides:
+        return False
+    schemas = workflow_node_config_schemas(definition, agent_definitions)
+    pruned = False
+    for node_key in list(overrides):
+        values = overrides[node_key]
+        if node_key not in schemas:
+            continue  # unknown node: PATCH rejects it, but keep hands off here
+        cleaned = _prune_stale_override_keys(values, schemas[node_key].get("properties") or {})
+        if cleaned == values:
+            continue
+        pruned = True
+        if cleaned:
+            overrides[node_key] = cleaned
+        else:
+            overrides.pop(node_key, None)
+    if not pruned:
+        return False
+    node_config = dict(workspace.get("node_config") or {})
+    node_config[definition.key] = overrides
+    job_db.update_workspace(workspace_id, node_config=node_config)
+    return True
+
+
+def _value_is_type(prop: Mapping[str, Any], value: Any) -> bool:
+    """Type check mirroring ``config_schema._type_matches``; non-scalars pass.
+
+    Vault ``{"secret_ref": ...}`` markers only occur on secret fields, which
+    the pruner already treats as key-valid without a value check; other
+    non-scalar shapes stay for intake validation to report rather than being
+    silently pruned.
+    """
+    expected = prop.get("type")
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return True
+
+
+def _prune_stale_override_keys(
+    values: Mapping[str, Any],
+    properties: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Copy of one node's override without stale keys (see the prune docstring).
+
+    Secret fields store ``{"secret_ref": ...}`` vault markers rather than the
+    declared scalar type, so key validity is enough for them.
+    """
+    secret_fields = secret_config_fields(dict(properties=properties))
+    return {
+        key: value
+        for key, value in values.items()
+        if key in properties and (key in secret_fields or _value_is_type(properties[key], value))
     }
 
 

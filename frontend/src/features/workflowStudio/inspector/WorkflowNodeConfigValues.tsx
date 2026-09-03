@@ -61,9 +61,13 @@ export function WorkflowNodeConfigValues({
     }
   }
 
-  const hasOverride = keys.some((key) => key in (liveOverrides ?? {}))
   const secretKeys = keys.filter((key) =>
     isSecretConfigProperty(schema.properties![key])
+  )
+  // 遮蔽徽标只看非 secret 键：secret 属性不渲染输入框，覆盖与否在
+  // 版本值表单里无从体现（#428 二轮复审 NIT-1）。
+  const hasOverride = keys.some(
+    (key) => !secretKeys.includes(key) && key in (liveOverrides ?? {})
   )
   return (
     <>
@@ -77,7 +81,8 @@ export function WorkflowNodeConfigValues({
       {secretKeys.length > 0 && (
         <p className={styles.fieldHint}>
           敏感属性（{secretKeys.join('、')}）不在此编辑：secret 值必须经 vault
-          加密落库，请通过下方「运行时覆盖」通道设置。
+          加密落库，发布本版本后可通过下方「运行时覆盖」通道设置（该通道的
+          字段来自已发布的 active 版本）。
         </p>
       )}
       <div className={styles.fieldStack}>
