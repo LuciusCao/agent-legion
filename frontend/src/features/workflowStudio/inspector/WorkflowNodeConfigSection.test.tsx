@@ -309,6 +309,29 @@ nodes:
     })
   })
 
+  it('rejects fractional input for integer properties with an inline error (#428 codex 二轮 P1)', () => {
+    const setDefinitionYaml = vi.fn()
+    renderSection({ setDefinitionYaml })
+
+    const input = screen.getByLabelText('版本值 page_size')
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: '1.5' } })
+    fireEvent.blur(input)
+
+    // integer 输 1.5：Number() 得 1.5，但后端要求真整数——不落草稿，
+    // 行内报错，否则 revision 激活后新 job 在 intake 失败。
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent('整数')
+
+    // 改回整数 1：正常落盘。
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: '1' } })
+    fireEvent.blur(input)
+    expect(patchedConfig(setDefinitionYaml.mock.calls[0][0])).toEqual({
+      page_size: 1,
+    })
+  })
+
   it('flags invalid stored values at render time without blocking display (#428 二轮 P3-1)', () => {
     renderSection({
       // YAML 源码塞进来的存量非法值：enum 外的 bank_version、越界的

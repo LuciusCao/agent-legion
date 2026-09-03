@@ -251,6 +251,77 @@ describe('WorkflowNodeConfigSchemaSection (#418 structured editor)', () => {
     expect(setDefinitionYaml).not.toHaveBeenCalled()
   })
 
+  it('flags unparseable numeric defaults instead of silently treating them as unset (#428 二轮 NIT-2b)', () => {
+    const setDefinitionYaml = vi.fn()
+    renderSection({
+      definitionYaml: yamlText.replace(
+        '        bank_version:\n          type: string',
+        '        bank_version:\n          type: integer'
+      ),
+      setDefinitionYaml,
+    })
+
+    fireEvent.change(screen.getByLabelText('默认值 bank_version'), {
+      target: { value: 'abc' },
+    })
+    fireEvent.blur(screen.getByLabelText('默认值 bank_version'))
+
+    // 'abc' 不是整数：行内报错，不落草稿——静默当「删除键」处理会
+    // 掩盖输入错误。
+    expect(screen.getByRole('alert')).toHaveTextContent('无法解析为 integer')
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+  })
+
+  it('rejects defaults outside the enum with an inline error (#428 codex 二轮 P2)', () => {
+    const setDefinitionYaml = vi.fn()
+    renderSection({
+      definitionYaml: yamlText.replace(
+        '        bank_version:\n          type: string\n          default: v1',
+        '        bank_version:\n          type: string\n          enum: [v1, v2]'
+      ),
+      setDefinitionYaml,
+    })
+
+    fireEvent.change(screen.getByLabelText('默认值 bank_version'), {
+      target: { value: 'v3' },
+    })
+    fireEvent.blur(screen.getByLabelText('默认值 bank_version'))
+
+    // enum 外默认值会被 loader 拒绝整份草稿：不落草稿，行内报错。
+    expect(screen.getByRole('alert')).toHaveTextContent('默认值必须在枚举')
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+
+    // 改回 enum 内的值：正常落盘。
+    fireEvent.focus(screen.getByLabelText('默认值 bank_version'))
+    fireEvent.change(screen.getByLabelText('默认值 bank_version'), {
+      target: { value: 'v2' },
+    })
+    fireEvent.blur(screen.getByLabelText('默认值 bank_version'))
+    const schema = patchedSchema(setDefinitionYaml.mock.calls[0][0])
+    expect(schema).toMatchObject({
+      properties: { bank_version: { type: 'string', default: 'v2' } },
+    })
+  })
+
+  it('rejects out-of-bounds numeric defaults with an inline error (#428 codex 二轮 P2)', () => {
+    const setDefinitionYaml = vi.fn()
+    renderSection({
+      definitionYaml: yamlText.replace(
+        '        bank_version:\n          type: string\n          default: v1',
+        '        bank_version:\n          type: integer\n          minimum: 1\n          maximum: 10'
+      ),
+      setDefinitionYaml,
+    })
+
+    fireEvent.change(screen.getByLabelText('默认值 bank_version'), {
+      target: { value: '99' },
+    })
+    fireEvent.blur(screen.getByLabelText('默认值 bank_version'))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('默认值不得大于 10')
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+  })
+
   it('clears the displayed default when a type switch strips it (#428 二轮 NIT-2a)', () => {
     // 类型切换 strip 掉 default 后，输入框显示随之清空，不再残留旧值。
     const { rerender } = renderSection()

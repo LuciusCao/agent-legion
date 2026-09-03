@@ -511,7 +511,13 @@ describe('default value coercion', () => {
     expect(parseSchemaDefaultValue('42', 'integer')).toBe(42)
     expect(parseSchemaDefaultValue('1.5', 'number')).toBe(1.5)
     expect(parseSchemaDefaultValue('true', 'boolean')).toBe(true)
-    expect(parseSchemaDefaultValue('abc', 'integer')).toBeUndefined()
+  })
+
+  it('reports unparseable numeric defaults as null instead of silently dropping them (#428 二轮 NIT-2b)', () => {
+    // null = 行内报错信号：'abc' 不是任何数字，静默当「删除键」处理
+    // 会掩盖用户的输入错误。
+    expect(parseSchemaDefaultValue('abc', 'integer')).toBeNull()
+    expect(parseSchemaDefaultValue('abc', 'number')).toBeNull()
   })
 
   it('checks value/type compatibility', () => {
@@ -560,6 +566,33 @@ describe('config value constraints (#428 codex round 2)', () => {
     expect(configValueConstraintError(bounded, 5)).toBeNull()
     expect(configValueConstraintError(bounded, 0)).toContain('不得小于 1')
     expect(configValueConstraintError(bounded, 11)).toContain('不得大于 10')
+  })
+
+  it('rejects non-integer values for integer properties (#428 codex 二轮 P1)', () => {
+    // '1.5' 经 parseConfigValue 的 Number() 得到 1.5：不查整数性会写入
+    // 草稿，revision 激活后新 job 在 intake 因后端要求真整数而失败。
+    const integerProp = { type: 'integer' as const }
+    expect(configValueConstraintError(integerProp, 1)).toBeNull()
+    expect(configValueConstraintError(integerProp, 1.5)).toContain('整数')
+    expect(configValueConstraintError(integerProp, -0.5)).toContain('整数')
+    // number 类型照收小数；字符串/布尔走各自的控件不经此处。
+    const numberProp = { type: 'number' as const }
+    expect(configValueConstraintError(numberProp, 1.5)).toBeNull()
+  })
+
+  it('validates default values against the full constraint set (#428 codex 二轮 P2)', () => {
+    // 默认值提交路径复用同一判定：enum 外默认值会让 loader 拒绝整份草稿。
+    const enumProp = { type: 'string' as const, enum: ['v1', 'v2'] }
+    expect(configValueConstraintError(enumProp, 'v1')).toBeNull()
+    expect(configValueConstraintError(enumProp, 'v3')).toContain('枚举')
+
+    const bounded = { type: 'integer' as const, minimum: 1, maximum: 10 }
+    expect(configValueConstraintError(bounded, 5)).toBeNull()
+    expect(configValueConstraintError(bounded, 0)).toContain('不得小于 1')
+    expect(configValueConstraintError(bounded, 11)).toContain('不得大于 10')
+
+    const fractional = { type: 'integer' as const, default: 1 }
+    expect(configValueConstraintError(fractional, 1.5)).toContain('整数')
   })
 
   it('identifies secret properties for form exclusion', () => {

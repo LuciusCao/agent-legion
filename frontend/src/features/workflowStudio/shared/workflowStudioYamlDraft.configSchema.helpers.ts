@@ -58,16 +58,17 @@ export function defaultValueMatchesType(
   }
 }
 
-/** 输入框字符串 → schema default 值；空串返回 undefined（= 删除键）。 */
+/** 输入框字符串 → schema default 值；空串返回 undefined（= 删除键），
+ * 数字类型不可解析时返回 null（行内报错用，NIT-2b）。 */
 export function parseSchemaDefaultValue(
   raw: string,
   type: SchemaPropertyType
-): string | number | boolean | undefined {
+): string | number | boolean | null | undefined {
   const trimmed = raw.trim()
   if (!trimmed) return undefined
   if (type === 'string') return raw
   if (type === 'boolean') return trimmed === 'true'
   const num = Number(trimmed)
-  if (Number.isNaN(num)) return undefined
+  if (Number.isNaN(num)) return null
   return num
 }

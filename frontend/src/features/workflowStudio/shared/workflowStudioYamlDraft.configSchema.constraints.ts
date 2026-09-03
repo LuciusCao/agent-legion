@@ -2,9 +2,12 @@ import type { ConfigSchemaProperty } from '../../../types'
 import { defaultValueMatchesType } from './workflowStudioYamlDraft.configSchema.helpers'
 
 // code 节点 config_schema 的约束语义（enum/minimum/maximum/secret，#428
-// codex 二轮），从 configSchema.helpers 拆出守单文件预算。三类消费方：
+// codex 二轮），从 configSchema.helpers 拆出守单文件预算。四类消费方：
 // - schema 编辑器：类型切换时清理不再可信的约束（P2-B）；
-// - 版本值表单：secret 属性排除出表单（P1-A）、enum/边界值校验（P1-B）；
+// - 版本值表单：secret 属性排除出表单（P1-A）、约束值校验（P1-B，
+//   含 integer 整数性，codex 二轮 P1）；
+// - 默认值编辑器：提交默认值前复用同一约束判定（codex 二轮 P2——
+//   enum 外/越界的默认值会让 loader 拒绝整份草稿）；
 // - 存量值渲染：YAML 塞进来的非法值行内提示不阻塞显示（二轮复审 P3-1）。
 
 /** 类型切换的连带清理（P2-B）：enum/minimum/maximum 的值类型与旧
@@ -40,16 +43,24 @@ export function isSecretConfigProperty(prop: ConfigSchemaProperty): boolean {
 }
 
 /**
- * 版本值提交前的 enum/边界校验（P1-B）：发布只校验 schema 不校验
+ * 版本值提交前的约束校验（P1-B）：发布只校验 schema 不校验
  * config，enum 外值或越界值一旦进入 active revision，之后所有新 job
- * 的 intake 都会失败。返回错误文案（null = 通过）；类型匹配由上游
- * parseConfigValue 保证，这里只看 enum/minimum/maximum。
+ * 的 intake 都会失败。返回错误文案（null = 通过）；基础类型之外的
+ * integer 整数性也在这里把关（codex 二轮 P1：'1.5' 经 Number() 解析
+ * 成 1.5，只查 enum/边界会放行浮点数，后端要求真整数）。类型匹配
+ * 由上游 parseConfigValue 保证，这里补 integer 的整数性。
  */
 export function configValueConstraintError(
   prop: ConfigSchemaProperty,
   value: string | number | boolean | undefined
 ): string | null {
   if (value === undefined) return null
+  if (
+    prop.type === 'integer' &&
+    typeof value === 'number' &&
+    !Number.isInteger(value)
+  )
+    return '值必须是整数'
   if (prop.enum !== undefined && !prop.enum.includes(value as string | number))
     return `值必须在枚举 ${JSON.stringify(prop.enum)} 内`
   if (typeof value === 'number') {

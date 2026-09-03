@@ -493,6 +493,7 @@
     "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.approvalConfig.ts": 52,
     "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.configSchema.configLink.ts": 33,
     "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.configSchema.constraints.ts": 49,
+    "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.configSchema.defaultCommit.ts": 36,
     "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.configSchema.helpers.ts": 65,
     "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.configSchema.properties.ts": 128,
     "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.configSchema.ts": 30,
