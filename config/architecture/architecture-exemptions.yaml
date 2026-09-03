@@ -656,17 +656,8 @@ exemptions:
 - check: architecture.file_budget
   path: server/app/services/workflow_draft_compare.py
   reason: >-
-    Issue 418 closes the compare blind spot for node config/config_schema
-    changes (10 effective lines past the baseline ceiling 483). The growth
-    is two comparison branches in _node_change_fields plus their
-    warning-tier entries in _node_field_risks, fed by two normalization
-    helpers (None -> {}): the fields list and the risk map are the paired
-    halves of every field the compare reports — a new field must edit
-    both in lockstep, so relocating one half to the support module would
-    split that invariant across files. The second half of #418 (code node
-    config panel redesign) is the natural moment to fold the per-field
-    comparison into a shared structure; the exemption goes stale with
-    that refactor or whenever the file otherwise shrinks under 483.
+    超出基线的比对分支与风险档；#418 关闭后经 ratchet
+    下调基线退出（compare 剩余字段的收编见 #431）
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/418
   ceiling: 493
