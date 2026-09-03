@@ -21,6 +21,9 @@ type Props = {
   summary: ChangeSummaryViewModel | null
   onConfirm: () => void
   onCancel: () => void
+  /** 提交进行中（#429 NIT：agent 请求确认期间禁用按钮防双击重放——第二击
+   * 会 404，用户看到假失败 toast）。手动发布对话框不传，行为不变。 */
+  confirming?: boolean
 }
 
 export function WorkflowPublishReviewDialog({
@@ -33,6 +36,7 @@ export function WorkflowPublishReviewDialog({
   summary,
   onConfirm,
   onCancel,
+  confirming = false,
 }: Props) {
   const hasChanges = hasCompareSummaryChanges(summary)
 
@@ -59,7 +63,7 @@ export function WorkflowPublishReviewDialog({
           onClick={onConfirm}
           variant="contained"
           color="primary"
-          disabled={!hasChanges}
+          disabled={!hasChanges || confirming}
         >
           {createsRevision ? '确认发布' : '确认保存'}
         </Button>

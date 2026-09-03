@@ -17,12 +17,15 @@ apply fn on upgrade, so both paths are covered; the parity test pins
 fresh == upgraded).
 
 State machine (single row per workspace while pending):
-``pending`` → ``superseded`` (a newer agent request displaced it),
+``pending`` → ``superseded`` (a newer agent request or a manual human
+             publish displaced it — the manual publish path supersedes the
+             workspace's pending rows, #429),
            → ``confirmed`` (human confirmed; result_revision_id records the
-             revision the publish produced, or NULL for runtime-only saves),
+             revision the publish created, or NULL when the publish was a
+             runtime-only in-place save),
            → ``rejected`` (human cancelled in the review dialog),
            → ``expired`` (older than ``expires_at``; the sweep happens
-             lazily on the next read/write, no background timer).
+             lazily on the next read, no background timer).
 """
 
 from __future__ import annotations

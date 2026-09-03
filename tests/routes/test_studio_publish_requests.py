@@ -277,6 +277,211 @@ def test_expired_request_cannot_be_confirmed(client, job_db) -> None:
     assert confirmed.status_code == 404
 
 
+def test_confirm_survives_ttl_expiry_mid_publish(client, job_db, monkeypatch) -> None:
+    """#429 TOCTOU: the TTL lapses while the publish executes — the revision
+    landed, so the request MUST resolve confirmed (never 404/expired). The
+    resolve predicate drops expires_at; only the pre-publish claim checks
+    TTL."""
+    workspace_id = _seed_workspace(client, job_db)
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 调整后的节点\n")
+    scoped = _scoped_client(client, job_db, workspace_id)
+    request = _request_publish(scoped, workspace_id).json()["request"]
+    request_id = request["id"]
+
+    # Make the workspace's pending row look like its TTL expired between the
+    # claim and the resolve (the publish runs in between): rewrite expires_at
+    # to the past inside publish_workflow_draft.
+    from server.app.services import studio_publish_requests as service_module
+
+    real_publish = service_module.publish_workflow_draft
+
+    def publish_then_expire(job_db, workspace_id_, yaml, enabled):
+        with job_db.connect() as conn:
+            conn.execute(
+                "update studio_publish_requests set expires_at = current_timestamp - interval '1 second'"
+                " where id=%s",
+                (request_id,),
+            )
+        return real_publish(job_db, workspace_id_, yaml, enabled)
+
+    monkeypatch.setattr(service_module, "publish_workflow_draft", publish_then_expire)
+
+    confirmed = client.post(
+        f"/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/confirm"
+    )
+
+    assert confirmed.status_code == 200, confirmed.text
+    resolved = confirmed.json()["request"]
+    # The effect is real and the state machine says so.
+    assert resolved["status"] == "confirmed"
+    assert resolved["result_revision_id"]
+    active = client.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
+    assert active.json()["revision"]["version"] == 2
+    # The agent polling the status tool sees the same truth (the status read
+    # no longer flips a resolved row).
+    status = scoped.get(f"/api/studio-agent/tools/publish-requests/{request_id}")
+    assert status.json()["request"]["status"] == "confirmed"
+
+
+def test_confirm_resolve_loses_supersede_race_reports_final_state(
+    client, job_db, monkeypatch
+) -> None:
+    """#429: a NEWER agent request supersedes this row while its publish is
+    in flight. The publish effect happened, so the honest answer is the
+    row's final state (superseded by the newer request) — not a 404 toast
+    for a revision that actually exists."""
+    workspace_id = _seed_workspace(client, job_db)
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 调整后的节点\n")
+    scoped = _scoped_client(client, job_db, workspace_id)
+    first = _request_publish(scoped, workspace_id).json()["request"]
+
+    from server.app.services import studio_publish_requests as service_module
+
+    real_publish = service_module.publish_workflow_draft
+
+    def publish_then_supersede(job_db, workspace_id_, yaml, enabled):
+        result = real_publish(job_db, workspace_id_, yaml, enabled)
+        # The agent fires a second request while the human's confirm is
+        # mid-publish: the INSERT supersedes the first row.
+        _request_publish(scoped, workspace_id_)
+        return result
+
+    monkeypatch.setattr(service_module, "publish_workflow_draft", publish_then_supersede)
+
+    confirmed = client.post(
+        f"/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{first['id']}/confirm"
+    )
+
+    # 200 with the truthful final state (superseded), not 404.
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["request"]["status"] == "superseded"
+    # The publish effect is on disk: v2 is live.
+    active = client.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
+    assert active.json()["revision"]["version"] == 2
+    # The second request owns the pending slot.
+    assert _pending(client, workspace_id).json()["request"]["id"] != first["id"]
+
+
+def test_manual_publish_supersedes_pending_request(client, job_db) -> None:
+    """#429 P2-3: the human publishes through the toolbar button while an
+    agent request is pending. The pending request is displaced (superseded),
+    NOT left pending (dead-end dialog) and NOT rejected (nothing was
+    refused — the content went live)."""
+    workspace_id = _seed_workspace(client, job_db)
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 手动后的节点\n")
+    scoped = _scoped_client(client, job_db, workspace_id)
+    request = _request_publish(scoped, workspace_id).json()["request"]
+
+    manual = client.post(
+        f"/api/workspaces/{workspace_id}/workflow-drafts/publish",
+        json={"definition_yaml": _DRAFT_YAML + "    label: 手动后的节点\n"},
+    )
+    assert manual.status_code == 200 and manual.json()["valid"], manual.text
+
+    # The pending poll no longer surfaces the request: no dead-end dialog.
+    assert _pending(client, workspace_id).json()["request"] is None
+    # The agent's status tool sees superseded — a publish happened, just not
+    # through this request (vs rejected, which would claim a refusal).
+    status = scoped.get(f"/api/studio-agent/tools/publish-requests/{request['id']}")
+    assert status.json()["request"]["status"] == "superseded"
+    # And the manual publish really landed.
+    active = client.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
+    assert active.json()["revision"]["version"] == 2
+
+
+def test_manual_publish_failure_leaves_pending_request(client, job_db) -> None:
+    """The supersede only happens on a successful manual publish: a refused
+    one (invalid draft) must not displace the pending request."""
+    workspace_id = _seed_workspace(client, job_db)
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 调整后的节点\n")
+    scoped = _scoped_client(client, job_db, workspace_id)
+    request = _request_publish(scoped, workspace_id).json()["request"]
+
+    manual = client.post(
+        f"/api/workspaces/{workspace_id}/workflow-drafts/publish",
+        json={"definition_yaml": _DRAFT_YAML + "  brand_new_node:\n    capability: nope\n"},
+    )
+    assert manual.status_code == 200 and not manual.json()["valid"]
+
+    assert _pending(client, workspace_id).json()["request"]["id"] == request["id"]
+
+
+def test_confirm_runtime_only_save_keeps_result_revision_null(client, job_db) -> None:
+    """#429 P3-2: a confirm whose draft differs from the active revision only
+    in runtime settings saves in place (no new version). result_revision_id
+    must stay null — echoing the unchanged revision id would read as "a new
+    revision exists"."""
+    workspace_id = _seed_workspace(client, job_db)
+    # The agent's change: runtime-only (node execution config), no
+    # structural diff vs the published v1 (label etc. untouched — a label
+    # change would be structural and create v2).
+    _put_draft(
+        client,
+        workspace_id,
+        _DRAFT_YAML + "    execution:\n      model: glm-4.7\n",
+    )
+    scoped = _scoped_client(client, job_db, workspace_id)
+    request = _request_publish(scoped, workspace_id).json()["request"]
+
+    confirmed = client.post(
+        f"/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{request['id']}/confirm"
+    )
+
+    assert confirmed.status_code == 200, confirmed.text
+    resolved = confirmed.json()["request"]
+    assert resolved["status"] == "confirmed"
+    # No new revision: still v1, and the row says so with a null id.
+    active = client.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
+    assert active.json()["revision"]["version"] == 1
+    assert resolved["result_revision_id"] is None
+
+
+def test_pending_poll_is_read_only_until_a_row_actually_expires(
+    client, job_db, monkeypatch
+) -> None:
+    """#429 P3-1: the 5s poll's publish-request path must open no write
+    connections while the pending row is healthy (auth's sliding session
+    update is unrelated and always-on). Expired rows still land their
+    terminal state through the poll (the route observes the expiry and only
+    then writes)."""
+    workspace_id = _seed_workspace(client, job_db)
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 调整后的节点\n")
+    scoped = _scoped_client(client, job_db, workspace_id)
+    request = _request_publish(scoped, workspace_id).json()["request"]
+
+    # Healthy poll: the write-capable publish-request queries must not run.
+    job_db = client.app.state.job_db
+    write_calls: list[str] = []
+    real_expire = job_db.expire_pending_publish_request
+    real_resolve = job_db.resolve_publish_request
+
+    monkeypatch.setattr(
+        job_db,
+        "expire_pending_publish_request",
+        lambda ws: (write_calls.append("expire"), real_expire(ws))[1],
+    )
+    monkeypatch.setattr(
+        job_db,
+        "resolve_publish_request",
+        lambda *a, **k: (write_calls.append("resolve"), real_resolve(*a, **k))[1],
+    )
+    response = _pending(client, workspace_id)
+    assert response.json()["request"]["id"] == request["id"]
+    assert write_calls == []  # healthy poll: pure read, zero publish-request writes
+
+    # Expired row: the poll observes it and records the terminal state.
+    with job_db.connect() as conn:
+        conn.execute(
+            "update studio_publish_requests set expires_at = current_timestamp - interval '1 second'"
+            " where id=%s",
+            (request["id"],),
+        )
+    assert _pending(client, workspace_id).json()["request"] is None
+    assert write_calls == ["expire"]  # observed expiry → exactly one write
+    status = scoped.get(f"/api/studio-agent/tools/publish-requests/{request['id']}")
+    assert status.json()["request"]["status"] == "expired"
+
+
 # -- security matrix ------------------------------------------------------
 
 
