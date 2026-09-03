@@ -24,10 +24,13 @@ export function useAgentDefinitions(workspaceId: string | undefined) {
     agents: query.data?.agents ?? [],
     settled: !query.isPending,
     // #426 review P2：除本文件内 useCapabilityAgent 的 settled 语义外，
-    // 额外暴露查询原始状态供 useAgentCatalog 组合「capability→Agent 绑定
-    // 解析」的门控——pending = 首次在途（isPending 恰为「无数据且未失败」）；
-    // failed = 失败且无数据（后台刷新失败但缓存数据还在时绑定仍可解析，
-    // 不算 failed）；loadError/retry 供聚合层并入 Studio 的目录错误横幅。
+    // 额外暴露查询原始状态供 useAgentCatalog 组合——pending = 首次在途
+    // （isPending 恰为「无数据且未失败」）；failed = 失败且无数据（后台
+    // 刷新失败但缓存数据还在时绑定仍可解析，不算 failed）；loadError/
+    // retry 供聚合层并入 Studio 的目录错误横幅。#426 codex P2 修正后
+    // bindingStatus 只按 published 目录 settle 计算，pending/failed 不再
+    // 参与门控（draft 回落场景 definitions 必已返回），loadError/retry
+    // 仍并入横幅与重试。
     pending: query.isPending,
     failed: query.isError && !query.data,
     loadError: query.isError,
