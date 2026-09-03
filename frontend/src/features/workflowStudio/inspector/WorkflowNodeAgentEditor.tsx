@@ -27,15 +27,10 @@ type Props = {
  * #426 review：渲染前先过绑定解析门控（bindingStatus），解析未 settle 时
  * 只给加载占位（失败给错误提示，均不落回可操作表单）。
  */
-export function WorkflowNodeAgentEditor({
-  agentId,
-  capability,
-  readOnly,
-  bindingStatus,
-}: Props) {
+export function WorkflowNodeAgentEditor(props: Props) {
   const queryClient = useQueryClient()
   const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined
-  if (readOnly || !workspaceId) return null
+  if (props.readOnly || !workspaceId) return null
 
   function refresh() {
     void queryClient.invalidateQueries({
@@ -47,22 +42,24 @@ export function WorkflowNodeAgentEditor({
     })
   }
 
-  if (bindingStatus !== 'ready') {
+  if (props.bindingStatus !== 'ready') {
+    const pending = props.bindingStatus === 'pending'
     return (
-      <div className={inspectorStyles.empty} role="status">
-        {bindingStatus === 'pending'
-          ? 'Agent 绑定解析中...'
-          : 'Agent 目录加载失败'}
+      <div
+        className={inspectorStyles.empty}
+        role={pending ? 'status' : 'alert'}
+      >
+        {pending ? 'Agent 绑定解析中...' : 'Agent 目录加载失败'}
       </div>
     )
   }
 
   return (
     <WorkflowNodeAgentEditorPanel
-      key={capability}
+      key={props.capability}
       workspaceId={workspaceId}
-      agentId={agentId}
-      capability={capability}
+      agentId={props.agentId}
+      capability={props.capability}
       onRefresh={refresh}
     />
   )

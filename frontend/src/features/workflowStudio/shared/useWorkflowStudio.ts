@@ -46,7 +46,6 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     workspaceId,
     nodes
   )
-  const revisionActions = buildStudioRevisionActions(draft, setSelectedNodeKey)
   return {
     loadState,
     actionState: actions.actionState,
@@ -91,6 +90,6 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     hasPreservedDraft: draft.hasPreservedDraft,
     isLoadingRevision: draft.isLoadingRevision,
     revisionLoadError: draft.revisionLoadError,
-    ...revisionActions,
+    ...buildStudioRevisionActions(draft, setSelectedNodeKey),
   }
 }
