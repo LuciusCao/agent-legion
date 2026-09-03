@@ -229,7 +229,10 @@ def test_delete_job_cascades_and_returns_deleted_id(tmp_path):
     assert not (log_dir / f"{job_id}-intake_knowledge_points.log").exists()
 
 
-def test_list_workspace_runs_returns_joined_job_metadata(tmp_path):
+def test_list_workspace_runs_returns_job_scoped_run_records(tmp_path):
+    # #410 review: node-runs validates against NodeRunResponse, so the payload
+    # is node_runs columns only; workspace scoping is the query's job (the
+    # legacy job join fields live on the job APIs, codex P1 on #427).
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
@@ -259,13 +262,16 @@ def test_list_workspace_runs_returns_joined_job_metadata(tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert len(body["runs"]) == 1
-    assert body["runs"][0]["workspace_id"] == ws_id
     assert body["runs"][0]["job_id"] == job_id
-    assert body["runs"][0]["job_title"] == "Question Q001"
-    assert body["runs"][0]["source_id"] == "Q001"
-    assert body["runs"][0]["source_type"] == "question"
+    # #410 review: node-runs now validates against NodeRunResponse — the
+    # projection is node_runs columns only (job fields stay on the job APIs).
+    assert "workspace_id" not in body["runs"][0]
+    assert "job_title" not in body["runs"][0]
+    assert "source_id" not in body["runs"][0]
+    assert "source_type" not in body["runs"][0]
     assert body["runs"][0]["node_key"] == "intake_knowledge_points"
     assert body["runs"][0]["status"] == "completed"
+    assert body["runs"][0]["skill_version"] == ""
 
 
 def test_list_workspace_runs_filters_by_status_and_node(tmp_path):

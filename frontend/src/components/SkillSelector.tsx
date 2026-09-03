@@ -1,11 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
-import { useRef, useState } from 'react'
-import { validateSkillPath } from '../api'
 import { getSkillDetail } from '../api/agentCatalogApi'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
-import type { SkillValidateResponse } from '../types'
 import { SkillDirectoryInput } from './SkillDirectoryInput'
 import { SkillVersionSelect } from './SkillVersionSelect'
+import { useSkillValidation } from './useSkillValidation'
 import {
   FALLBACK_SKILLS_ROOT,
   useSkillsRootPrefix,
@@ -28,19 +26,17 @@ type Props = {
  * Skill 回显字段；版本经 SkillVersionSelect 选择。tag 数据源有两路：校验
  * 响应的 tags，或回显既有绑定时经技能详情端点拉取（与
  * WorkflowSkillVersionSelect 同源同缓存）；已锁定版本（lock 唯一 pin）沿
- * 既有展示。The skills root comes from the read-only `skills_root` field of
- * GET /api/admin/instance-settings; on load failure it falls back to the
+ * 既有展示。校验状态机在 useSkillValidation（结果按 skill key 归属，codex
+ * P1 on #427）。The skills root comes from the read-only `skills_root` field
+ * of GET /api/admin/instance-settings; on load failure it falls back to the
  * default root with a hint. The validator expands `~` server-side, so the
- * composed path is sent with the tilde prefix as-is. Consecutive picks can
- * overlap in flight: a monotonic sequence number makes every response after a
- * newer request a no-op. */
+ * composed path is sent with the tilde prefix as-is. */
 export function SkillSelector(props: Props) {
   const { prefix, rootReady, rootLoadFailed } = useSkillsRootPrefix(
     props.workspaceId
   )
-  const [validating, setValidating] = useState(false)
-  const [result, setResult] = useState<SkillValidateResponse | null>(null)
-  const validateSeq = useRef(0)
+  const { validating, validate, invalidateInFlight, resultFor } =
+    useSkillValidation(prefix, props.onChange)
 
   // 回显既有绑定时版本下拉的 tag 数据源：技能详情端点（不带 ref = 工作区
   // HEAD）与预览面板同一查询缓存（extraQueryKeys.studioSkillDetail）。
@@ -50,30 +46,14 @@ export function SkillSelector(props: Props) {
     enabled: Boolean(props.value),
   })
 
-  async function handleValidate(rawName: string) {
-    const relative = rawName.trim().replace(/^\/+/, '')
-    if (!relative) return
-    const seq = ++validateSeq.current
-    const fullPath = `${prefix}${relative}`
-    setValidating(true)
-    try {
-      const next = await validateSkillPath(fullPath)
-      // 已有更新的校验在飞：丢弃过期响应，不覆盖最终结果（codex P1 on #336）。
-      if (seq !== validateSeq.current) return
-      setResult(next)
-      if (next.valid && next.skill_key) props.onChange(next.skill_key)
-    } catch (err) {
-      if (seq !== validateSeq.current) return
-      const message = err instanceof Error ? err.message : String(err)
-      setResult({ valid: false, path: fullPath, error: message })
-    } finally {
-      if (seq === validateSeq.current) setValidating(false)
-    }
-  }
-
+  // 校验结果仅在 key 匹配当前绑定时可用（codex P1 on #427）：检查器不卸载
+  // 直接切换节点时，上一个节点的结果对当前 props.value 是过期数据——视为
+  // 无结果，tags 回落到当前绑定自己的详情端点，错误提示/锁定回显同理不
+  // 跨节点泄漏（invalid 结果只属于尚未回填 key 的输入）。
+  const result = resultFor(props.value)
+  const validated = result?.valid ? result : null
   // 校验响应优先（刚选定的 skill），回显绑定回落详情端点的 tags。两路的
   // latest_tag 语义一致（tags 版本倒序，首项即最新）。
-  const validated = result?.valid ? result : null
   const tags = validated
     ? (validated.tags ?? [])
     : (boundDetailQuery.data?.tags ?? [])
@@ -86,11 +66,9 @@ export function SkillSelector(props: Props) {
         workspaceId={props.workspaceId}
         rootReady={rootReady}
         validating={validating}
-        onValidate={(name) => void handleValidate(name)}
+        onValidate={(name) => void validate(name)}
         // 输入一旦变化，在飞的校验结果即过期（codex P1 on #341）。
-        onEdit={() => {
-          validateSeq.current += 1
-        }}
+        onEdit={invalidateInFlight}
       />
       {rootLoadFailed && (
         <p style={{ color: '#ed6c02', fontSize: 12 }}>

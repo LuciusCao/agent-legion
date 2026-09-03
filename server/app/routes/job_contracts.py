@@ -2,6 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from server.app.routes.job_view_contracts import NodeRunResponse
 from server.app.routes.workspace_contracts import WorkspaceRecord
 
 # #211 Phase 2: request-param deprecation wording (server-side default).
@@ -84,7 +85,10 @@ class ArtifactResponse(BaseModel):
 
 
 class WorkspaceRunsResponse(BaseModel):
-    runs: list[dict[str, Any]]
+    # #410 review: typed like JobDetailResponse.runs — node-runs is the same
+    # node_runs projection (path-resolved) and must carry skill_version; the
+    # loose dict list let the contract drift (codex P1 on #427).
+    runs: list[NodeRunResponse]
 
 
 class WorkspaceDagResponse(BaseModel):

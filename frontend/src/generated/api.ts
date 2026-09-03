@@ -7006,9 +7006,7 @@ export interface components {
     /** WorkspaceRunsResponse */
     WorkspaceRunsResponse: {
       /** Runs */
-      runs: {
-        [key: string]: unknown
-      }[]
+      runs: components['schemas']['NodeRunResponse'][]
     }
     /** WorkspaceRuntimeModelsResponse */
     WorkspaceRuntimeModelsResponse: {
