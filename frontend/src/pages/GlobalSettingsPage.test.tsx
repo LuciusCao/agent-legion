@@ -44,6 +44,8 @@ vi.mock('../api/connections', () => ({
   updateConnection: vi.fn(),
   deleteConnection: vi.fn(),
   testConnection: vi.fn(),
+  // key-only 端点（#419）：本页不消费，但 mock 必须完整覆盖模块导出。
+  getConnectionKeys: vi.fn().mockResolvedValue({ keys: [] }),
 }))
 
 vi.mock('../api/infraConnections', () => ({

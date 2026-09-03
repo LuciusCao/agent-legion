@@ -417,3 +417,23 @@ def test_list_jobs_clamps_limit_into_valid_range(tmp_path: Path) -> None:
     assert len(db.list_jobs(workspace_id=workspace["id"], limit=0)) == 1
     assert len(db.list_jobs(workspace_id=workspace["id"], limit=-7)) == 1
     assert len(db.list_jobs(workspace_id=workspace["id"], limit=10_000)) == 3
+
+
+def test_external_connection_enabled_distinguishes_missing_and_disabled(tmp_path: Path) -> None:
+    """#425 review: the facade read behind run creation's fail-fast gate.
+
+    The None/False/True triple is the whole contract — RunService maps None
+    to "unknown key" and False to "disabled" without a second query, so the
+    three cases must stay distinguishable here.
+    """
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    with db.connect() as conn:
+        conn.execute(
+            "insert into external_connections(key, type, display_name, config_json, enabled)"
+            " values ('conn-on', 'hmac_token', 'On', '{}', 1),"
+            " ('conn-off', 'hmac_token', 'Off', '{}', 0)"
+        )
+
+    assert db.external_connection_enabled("conn-on") is True
+    assert db.external_connection_enabled("conn-off") is False
+    assert db.external_connection_enabled("no-such-conn") is None
