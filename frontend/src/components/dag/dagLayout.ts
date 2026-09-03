@@ -31,12 +31,11 @@ export function isolatedNodeKeys(
 
 // #417 无边图的退化布局治理：dagre 对没有任何边的图按传入数组顺序竖排，
 // 而字母序的 published 节点数组会把 expand_analysis 之类排在首位冒充拓扑
-// 入口（「部分节点丢失」的观感来源）。改为：孤立节点（无边图 = 全部节点）
-// 按 key 稳定排序铺进网格（列数 clamp(⌈√n⌉,2,5)，n=1 单列；行内右进、
-// 行满换行），铺在连通分量的 dagre 实际底部之下（隔离带 ISOLATED_GAP）。
-// 有边图里 dagre 本就把孤立分量排在连通分量下方——网格只替换孤立节点的
-// 占位坐标，连通分量的 dagre 布局不受影响；任何输入都得到稳定、可预期的
-// 排布。
+// 入口（「部分节点丢失」的观感来源）。孤立节点（无边图 = 全部节点）按 key
+// 稳定排序铺进网格（列数 clamp(⌈√n⌉,2,5)，n=1 单列；行内右进、行满换行），
+// 铺在连通分量的 dagre 实际底部之下（隔离带 ISOLATED_GAP）。#424 codex
+// 三轮起 dagre 只布局连通子图（见 computeLayout），孤立节点不再进入
+// dagre 坐标系，任何输入都得到稳定、可预期的排布。
 const ISOLATED_GAP = 120
 const ISOLATED_NODESEP = 60
 
@@ -91,27 +90,42 @@ export function computeLayout(
   g.setGraph({ rankdir: 'LR', nodesep: 60, ranksep: 100 })
   g.setDefaultEdgeLabel(() => ({}))
 
+  // #424 codex 三轮 P2：dagre 只喂连通节点子图。原实现把全部节点交给
+  // dagre，孤立节点（尤其排在数组前面时）会占据层内纵向位置、把连通分量
+  // 整体向下推移，随后孤立节点虽被移走，连通分量却不重新布局，留下大片
+  // 空白并让 fitView 过度缩小。只喂连通子图后，连通分量的坐标与「无孤立
+  // 节点时单独布局」完全一致。纯无边图 → 子图为空，dagre 直接空布局，
+  // 全部节点走网格；纯连通图 → 子图即全图，行为不变。
   const heightMap = new Map<string, number>()
+  const isolated = isolatedNodeKeys(nodes, edges)
+  const nodeKeys = new Set(nodes.map((n) => n.key))
   for (const node of nodes) {
     const height = estimateDagNodeHeight(node)
     heightMap.set(node.key, height)
-    g.setNode(node.key, { width: DAG_NODE_WIDTH, height })
+    if (!isolated.has(node.key)) {
+      g.setNode(node.key, { width: DAG_NODE_WIDTH, height })
+    }
   }
   for (const edge of edges) {
-    g.setEdge(edge.from, edge.to)
+    // 悬空边（端点不在节点表里）跳过：另一端可能仍是被引用的连通节点，
+    // 这类节点的孤立判定不变（见 isolatedNodeKeys 测试），但缺失端点
+    // 进不了子图，dagre 0.8.5 对 setEdge 到不存在节点会自动补一个
+    // 意外占位，污染布局。
+    if (nodeKeys.has(edge.from) && nodeKeys.has(edge.to)) {
+      g.setEdge(edge.from, edge.to)
+    }
   }
 
   dagre.layout(g)
 
-  const isolated = isolatedNodeKeys(nodes, edges)
-  // 连通分量在 dagre 坐标系里的实际底部（节点中心 y + 半高）。
+  // 连通分量在 dagre 坐标系里的实际底部（节点中心 y + 半高）。连通节点必
+  // 在子图内，g.node() 兜底 0 仅满足类型（子图为空时循环体不执行）。
   let connectedBottom = 0
   for (const node of nodes) {
     if (isolated.has(node.key)) continue
-    const gNode = g.node(node.key)
     connectedBottom = Math.max(
       connectedBottom,
-      gNode.y + heightMap.get(node.key)! / 2
+      (g.node(node.key)?.y ?? 0) + heightMap.get(node.key)! / 2
     )
   }
   const isolatedPositions = isolatedGridPositions(
@@ -122,15 +136,19 @@ export function computeLayout(
 
   const rfNodes: Node<DagNodeData>[] = nodes.map((node) => {
     const height = heightMap.get(node.key)!
-    // 孤立节点：丢弃 dagre 的数组序占位坐标，换稳定网格坐标（#417）。
+    // 孤立节点：不在 dagre 子图里（#424 codex 三轮），直接用稳定网格坐标。
     const grid = isolatedPositions.get(node.key)
-    const gNode = g.node(node.key)
+    const gNode = grid ? { x: 0, y: 0 } : g.node(node.key)!
     return {
       id: node.key,
       type: 'dagNode',
       position: grid
         ? { x: grid.x, y: grid.y }
-        : { x: gNode.x - DAG_NODE_WIDTH / 2, y: gNode.y - height / 2 },
+        : {
+            // 连通节点必在子图内（与 connectedBottom 同理）。
+            x: gNode.x - DAG_NODE_WIDTH / 2,
+            y: gNode.y - height / 2,
+          },
       data: {
         label: node.label,
         status: node.status,
