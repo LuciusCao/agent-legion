@@ -3,11 +3,7 @@ import { useSettingStore } from '../../../stores/settingStore'
 import { parseConfigValue } from '../shared/workflowStudioYamlDraft.nodeConfig'
 import { patchWorkflowNodeConfigValue } from '../shared/workflowStudioYamlDraft.nodeConfig'
 import { isSecretConfigProperty } from '../shared/workflowStudioYamlDraft.configSchema.constraints'
-import {
-  ConfigValueField,
-  configOverrideValueOf,
-  configFieldRaw,
-} from './ConfigValueField'
+import { ConfigValueField, configOverrideValueOf } from './ConfigValueField'
 import styles from './WorkflowStructuredEditor.module.css'
 
 type Props = {
@@ -22,9 +18,9 @@ type Props = {
 // code 节点 revision 作用域的 config 版本值表单（#418 后半）：按草稿
 // config_schema 的属性生成控件，值写 draft YAML 的 node config，随发布
 // 进入新版本。未填写的键沿用 Schema 默认值。从 WorkflowNodeConfigSection
-// 拆出守单文件预算；单字段控件拆在 ConfigValueField（含 enum/边界
-// 校验），遮蔽徽标拆在 ConfigValueFieldLabel，失焦提交输入框拆在
-// NumberOrTextValueField。
+// 拆出守单文件预算；单字段控件拆在 ConfigValueField（提交与存量校验拆在
+// configValueValidation），遮蔽徽标拆在 ConfigValueFieldLabel，失焦提交
+// 输入框拆在 NumberOrTextValueField。
 // - secret 属性（#428 codex P1-A）永不渲染输入框：draft 保存不经过
 //   settings PATCH 的脱敏通道，明文会进 revision 与 intake 冻结数据
 //   （VAULT-SECRET-001）；改走下方运行时覆盖通道（vault 落库）。
@@ -47,14 +43,13 @@ export function WorkflowNodeConfigValues({
   const patchValue = (key: string, raw: string) => {
     const prop = schema.properties?.[key]
     if (!prop) return
+    const value = parseConfigValue(raw, prop)
+    // null = 不可解析的数字输入：字段级提交校验已拦（三轮 P3-3），这里
+    // 兜底防止 null 走 patchWorkflowNodeConfigValue 的删键分支。
+    if (value === null) return
     try {
       setDefinitionYaml(
-        patchWorkflowNodeConfigValue(
-          definitionYaml,
-          nodeKey,
-          key,
-          parseConfigValue(raw, prop)
-        )
+        patchWorkflowNodeConfigValue(definitionYaml, nodeKey, key, value)
       )
     } catch {
       // 非法输入不落草稿；受控输入回弹。
@@ -94,7 +89,7 @@ export function WorkflowNodeConfigValues({
               key={key}
               fieldKey={key}
               prop={prop}
-              raw={configFieldRaw(config, key)}
+              storedValue={config[key]}
               overrideValue={configOverrideValueOf(liveOverrides, key)}
               readOnly={readOnly}
               onCommit={(next) => patchValue(key, next)}

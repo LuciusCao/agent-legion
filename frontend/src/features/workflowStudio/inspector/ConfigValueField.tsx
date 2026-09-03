@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import type { ConfigSchemaProperty } from '../../../types'
+import { formatConfigValue } from '../shared/workflowStudioYamlDraft.nodeConfig'
 import {
-  parseConfigValue,
-  formatConfigValue,
-} from '../shared/workflowStudioYamlDraft.nodeConfig'
-import { configValueConstraintError } from '../shared/workflowStudioYamlDraft.configSchema.constraints'
+  configValueCommitError,
+  storedConfigValueError,
+} from '../shared/workflowStudioYamlDraft.configValueValidation'
 import { ConfigValueFieldLabel } from './ConfigValueFieldLabel'
 import { NumberOrTextValueField } from './NumberOrTextValueField'
 import styles from './WorkflowStructuredEditor.module.css'
@@ -14,33 +14,33 @@ export type ConfigValueOverride = { value: unknown } | undefined
 // 单个版本值字段（#428 codex 二轮拆分，从 WorkflowNodeConfigValues 拆出
 // 守单文件预算）：enum 用下拉（选项 = enum 值，P1-B）；boolean 用下拉
 // （Schema 默认/true/false）；其余用失焦提交的文本输入（独立复审 P2-3）。
-// 提交前过 configValueConstraintError（enum/minimum/maximum + integer
-// 整数性，P1-B），非法值不落草稿并行内报错；被运行时覆盖遮蔽的键加徽标
-// （P2-2）。存量值也在渲染时校验（二轮复审 P3-1）：YAML 源码塞进来的
-// enum 外/越界/小数值在表单行内提示（不阻塞显示），enum 下拉不再因无
-// 匹配选项而静默显空。
+// 提交与存量校验拆在 configValueValidation（三轮复审 P3-3/P3-4 拆出守
+// 预算）：不可解析的数字输入行内报错不删键（对齐默认值编辑器 NIT-2b，
+// 显式清空才是删键路径）；存量值按落盘类型值判定——经表单串往返会抹掉
+// 类型信息（string 属性塞 42 / number 属性塞 '20' 显示正常无提示，发布
+// 后 intake 的 _type_matches 才 raise）。enum/边界/整数性与存量非法值
+// 行内提示（codex 二轮 P1 + 二轮复审 P3-1）；被运行时覆盖遮蔽的键加
+// 徽标（P2-2）。
 export function ConfigValueField({
   fieldKey,
   prop,
-  raw,
+  storedValue,
   overrideValue,
   readOnly,
   onCommit,
 }: {
   fieldKey: string
   prop: ConfigSchemaProperty
-  raw: string
+  storedValue: unknown
   overrideValue: ConfigValueOverride
   readOnly?: boolean
   onCommit: (next: string) => void
 }) {
   const [error, setError] = useState('')
-  // 存量值（config 落盘值 → 表单串 → 解析回类型值）跑同一约束校验：
-  // 只提示不阻塞，提交路径仍以 error 状态优先。
-  const storedError = configValueConstraintError(
-    prop,
-    parseConfigValue(raw, prop)
-  )
+  const raw = formatConfigValue(storedValue)
+  // 存量值（config 落盘值）跑同一约束校验：只提示不阻塞，提交路径仍以
+  // error 状态优先。
+  const storedError = storedConfigValueError(prop, storedValue)
   const displayedError = error || storedError || ''
   const label = (
     <ConfigValueFieldLabel
@@ -50,10 +50,9 @@ export function ConfigValueField({
     />
   )
   const commit = (next: string) => {
-    const value = parseConfigValue(next, prop)
-    const constraintError = configValueConstraintError(prop, value)
-    if (constraintError) {
-      setError(constraintError)
+    const commitError = configValueCommitError(next, prop)
+    if (commitError) {
+      setError(commitError)
       return
     }
     setError('')
@@ -128,12 +127,4 @@ export function configOverrideValueOf(
   return liveOverrides != null && key in liveOverrides
     ? { value: liveOverrides[key] }
     : undefined
-}
-
-/** 字段当前展示串（config 落盘值 → 表单文本）。 */
-export function configFieldRaw(
-  config: Record<string, unknown>,
-  key: string
-): string {
-  return formatConfigValue(config[key])
 }

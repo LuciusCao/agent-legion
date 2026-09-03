@@ -1,6 +1,10 @@
 import yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
 import {
+  configValueCommitError,
+  storedConfigValueError,
+} from './workflowStudioYamlDraft.configValueValidation'
+import {
   formatConfigValue,
   parseConfigValue,
   patchWorkflowNodeConfigValue,
@@ -105,7 +109,11 @@ describe('value coercion helpers', () => {
     expect(parseConfigValue('42', { type: 'integer' })).toBe(42)
     expect(parseConfigValue('1.5', { type: 'number' })).toBe(1.5)
     expect(parseConfigValue('true', { type: 'boolean' })).toBe(true)
-    expect(parseConfigValue('abc', { type: 'integer' })).toBeUndefined()
+    // 垃圾数字输入返回 null 而非 undefined（三轮复审 P3-3，对齐默认值
+    // 编辑器 NIT-2b 的 parseSchemaDefaultValue）：undefined 是显式清空
+    // 的删键信号，null = 不可解析，提交路径据此行内报错不删键。
+    expect(parseConfigValue('abc', { type: 'integer' })).toBeNull()
+    expect(parseConfigValue('abc', { type: 'number' })).toBeNull()
   })
 
   it('formats values back for form display', () => {
@@ -113,5 +121,46 @@ describe('value coercion helpers', () => {
     expect(formatConfigValue('v1')).toBe('v1')
     expect(formatConfigValue(20)).toBe('20')
     expect(formatConfigValue(true)).toBe('true')
+  })
+})
+
+describe('config value validation (#428 三轮 P3-3/P3-4)', () => {
+  it('flags unparseable numeric commits instead of treating them as unset', () => {
+    expect(configValueCommitError('abc', { type: 'integer' })).toContain(
+      '无法解析为 integer'
+    )
+    expect(configValueCommitError('abc', { type: 'number' })).toContain(
+      '无法解析为 number'
+    )
+    // 显式清空是合法的删键路径，不是错误。
+    expect(configValueCommitError('', { type: 'integer' })).toBeNull()
+    expect(configValueCommitError('  ', { type: 'number' })).toBeNull()
+    // 合法值照常通过约束，非法值仍被 enum/边界拦截。
+    const bounded = { type: 'integer' as const, minimum: 1, maximum: 50 }
+    expect(configValueCommitError('25', bounded)).toBeNull()
+    expect(configValueCommitError('99', bounded)).toContain('不得大于 50')
+  })
+
+  it('flags stored values that mismatch the property type (#428 三轮 P3-4)', () => {
+    // 落盘类型值直接判定：经表单串往返会抹掉类型信息，这些值在
+    // 表单里显示正常，发布后 intake 的 _type_matches 才 raise。
+    expect(storedConfigValueError({ type: 'string' }, 42)).toContain(
+      '存量值与类型 string 不匹配'
+    )
+    expect(storedConfigValueError({ type: 'number' }, '20')).toContain(
+      '存量值与类型 number 不匹配'
+    )
+    expect(storedConfigValueError({ type: 'integer' }, 1.5)).toContain(
+      '存量值与类型 integer 不匹配'
+    )
+    expect(storedConfigValueError({ type: 'boolean' }, 42)).toContain(
+      '存量值与类型 boolean 不匹配'
+    )
+    // 未存值不误报；类型匹配后照常跑约束（P3-1 行为保留）。
+    expect(storedConfigValueError({ type: 'integer' }, undefined)).toBeNull()
+    expect(storedConfigValueError({ type: 'integer' }, 99)).toBeNull()
+    expect(
+      storedConfigValueError({ type: 'integer', maximum: 50 }, 99)
+    ).toContain('不得大于 50')
   })
 })

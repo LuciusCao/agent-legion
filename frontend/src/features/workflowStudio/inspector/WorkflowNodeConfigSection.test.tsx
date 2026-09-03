@@ -90,6 +90,8 @@ describe('WorkflowNodeConfigSection dual-channel (#418)', () => {
     const dryRun = screen.getByLabelText('版本值 dry_run') as HTMLSelectElement
     expect(dryRun.value).toBe('')
     expect(screen.getByText(/版本值：写入 workflow 定义/)).toBeInTheDocument()
+    // 类型匹配的存量值 / 未存值的键无误报（三轮 P3-4 回归）。
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('writes a value change into the draft YAML (revision channel)', () => {
@@ -179,18 +181,52 @@ nodes:
     expect(next.nodes?.generate).not.toHaveProperty('config')
   })
 
-  it('falls back to the schema default when a numeric field is cleared or invalid', () => {
+  it('flags unparseable numeric input instead of silently deleting the key (#428 三轮 P3-3)', () => {
     const setDefinitionYaml = vi.fn()
     renderSection({ setDefinitionYaml })
 
-    // 非数字输入解析为「未填」：键从 config 删除，回退 Schema 默认值。
-    fireEvent.change(screen.getByLabelText('版本值 page_size'), {
-      target: { value: 'abc' },
-    })
-    fireEvent.blur(screen.getByLabelText('版本值 page_size'))
+    const input = screen.getByLabelText('版本值 page_size')
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'abc' } })
+    fireEvent.blur(input)
 
+    // 'abc' 不是整数：行内报错且不提交——静默按「未填」删键会把用户
+    // 已存的 20 弹回「（Schema 默认）」且无提示。受控输入失焦后回弹
+    // 既有值（与默认值编辑器 NIT-2b 的处理对齐）。
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent('无法解析为 integer')
+    expect(input).toHaveValue('20')
+
+    // 显式清空才是合法的删键路径：'' 照常提交，键从 config 删除。
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: '' } })
+    fireEvent.blur(input)
     expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
     expect(patchedConfig(setDefinitionYaml.mock.calls[0][0])).toEqual({})
+  })
+
+  it('flags stored values whose type mismatches the property (#428 三轮 P3-4)', () => {
+    renderSection({
+      // YAML 源码塞进来的类型失配存量值：string 属性塞数字 42、number
+      // 属性塞带引号字符串 '20'。经表单串往返（format → parse）类型信息
+      // 丢失，表单显示正常无提示；发布后 intake 的 _type_matches 才
+      // raise。存量校验必须对落盘类型值直接判定。
+      definitionYaml: yamlText
+        .replace(
+          '        page_size:\n          type: integer',
+          '        page_size:\n          type: number'
+        )
+        .replace(
+          '    config:\n      page_size: 20',
+          "    config:\n      page_size: '20'\n      bank_version: 42"
+        ),
+    })
+
+    // 类型失配行内提示（不阻塞显示：值仍按落盘串显示，可改对后提交修复）。
+    expect(screen.getByText(/存量值与类型 string 不匹配/)).toBeInTheDocument()
+    expect(screen.getByText(/存量值与类型 number 不匹配/)).toBeInTheDocument()
+    expect(screen.getByLabelText('版本值 bank_version')).toHaveValue('42')
+    expect(screen.getByLabelText('版本值 page_size')).toHaveValue('20')
   })
 
   it('badges keys shadowed by runtime overrides and corrects the freeze hint (#428 P2-2)', () => {

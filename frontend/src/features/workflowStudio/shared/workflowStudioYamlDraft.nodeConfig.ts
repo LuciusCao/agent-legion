@@ -57,11 +57,14 @@ export function patchWorkflowNodeConfigValue(
   return dumpWorkflowYaml(draft)
 }
 
-/** 表单输入串 → schema 类型的值；空串 = 未填（undefined）。 */
+/** 表单输入串 → schema 类型的值；空串 = 未填（undefined，删键信号）；
+ * 数字类型不可解析返回 null（行内报错用，三轮复审 P3-3——对齐默认值
+ * 编辑器 NIT-2b 的 parseSchemaDefaultValue：垃圾输入静默按「未填」处理
+ * 会让提交路径删掉用户已存的值）。 */
 export function parseConfigValue(
   raw: string,
   prop: ConfigSchemaProperty
-): string | number | boolean | undefined {
+): string | number | boolean | null | undefined {
   const trimmed = raw.trim()
   if (!trimmed) return undefined
   switch (prop.type) {
@@ -70,7 +73,7 @@ export function parseConfigValue(
     case 'integer':
     case 'number': {
       const num = Number(trimmed)
-      return Number.isNaN(num) ? undefined : num
+      return Number.isNaN(num) ? null : num
     }
     default:
       return raw
