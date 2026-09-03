@@ -532,13 +532,16 @@ def test_workspace_dag_after_derives_from_top_level_edges_schema_v2(query_servic
     payload = query_service.workspace_dag(workspace["id"])
 
     nodes = {node["key"]: node for node in payload["nodes"]}
-    # 与 job 详情同源（effective_after）：_start 边隐藏，业务链路完整；
-    # 直读原始 node.after 会得到三张无边图（issue #417 的 workspace 侧症状）。
-    assert nodes["intake"]["after"] == []
+    # 与 job 详情同源（effective_after 派生），业务链路完整；直读原始
+    # node.after 会得到三张无边图（issue #417 的 workspace 侧症状）。
     assert nodes["expand_analysis"]["after"] == ["intake"]
     assert nodes["publish"]["after"] == ["expand_analysis"]
+    # 差异点（#424 review P2-1）：workspace 视图保留 _start 节点且响应
+    # 无独立 edges 字段，客户端只能从 nodes[].after 重建拓扑——
+    # _start -> root 入口边必须保留，否则入口节点永远孤立。
+    assert nodes["intake"]["after"] == ["_start"]
     # start 节点本身保留在 workspace 视图（definition-level 概念），
-    # 但它的 after 不含派生入口边。
+    # 但它没有前驱。
     assert nodes["_start"]["after"] == []
 
 

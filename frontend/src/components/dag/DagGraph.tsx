@@ -209,7 +209,10 @@ export function DagGraph({
   // #417：图有节点但没有边时布局退化为稳定网格（见 dagLayout.ts），用户
   // 观感是「节点离散/疑似丢失」。这里给一个不遮挡画布的轻量提示，指明是
   // 边数据缺失而非节点缺失；有部分边的图（个别孤立节点）不打扰。
-  const showMissingEdgesHint = nodes.length > 0 && edges.length === 0
+  // 单个可见节点除外（#424 review P2-2）：单节点 workflow 本来就没有边
+  // ——job 视图按设计不收 start 节点及其入口边，边数恒为 0，属健康形态，
+  // 不应误报；无边 studio 草稿单节点时也带 _start 入口边，不会走到这里。
+  const showMissingEdgesHint = nodes.length > 1 && edges.length === 0
 
   const selectedData = useMemo(() => {
     if (!selectedNode) return null
