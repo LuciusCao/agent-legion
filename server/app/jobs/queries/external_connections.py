@@ -11,9 +11,14 @@ from __future__ import annotations
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
-# Includes disabled connections: the picker is a reference list, and run
-# creation fails fast on a disabled key either way.
-_KEYS_SQL = "select key from external_connections order by key"
+# Enabled connections only (#425 review): the picker offers keys a run can
+# actually use, so a disabled connection — even the sole one — is never
+# auto-selected into ConnectionKeyField, and RunService._ref_candidate
+# rejects a disabled key at run creation (true fail-fast; the old claim
+# that "run creation fails fast on a disabled key either way" only held at
+# execution time, in connection_tokens). Admin views still list disabled
+# connections (server/app/services/connections.py::list).
+_KEYS_SQL = "select key from external_connections where enabled=1 order by key"
 
 
 class ExternalConnectionKeyQueriesMixin(ConnectionQueriesMixin):
