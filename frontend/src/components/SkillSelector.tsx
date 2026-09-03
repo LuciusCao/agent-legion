@@ -4,14 +4,17 @@ import { getSkillDetail } from '../api/agentCatalogApi'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { SkillDirectoryInput } from './SkillDirectoryInput'
 import { SkillVersionSelect } from './SkillVersionSelect'
-import { useSkillValidation } from './useSkillValidation'
+import { sameContext, useSkillValidation } from './useSkillValidation'
 import {
   FALLBACK_SKILLS_ROOT,
   useSkillsRootPrefix,
 } from './useSkillsRootPrefix'
 type Props = {
-  /** 当前 workspace（workspace 技能默认目录 ~/.agents/skills/<workspaceId>/）。 */
+  /** 当前 workspace（技能默认目录 ~/.agents/skills/<workspaceId>/）；
+   * nodeKey：发起校验的检查器节点身份，入校验上下文——A、B 都未绑定
+   * （value 同为空串）时切换节点仍作废在飞校验（codex 三轮 P1 on #427）。 */
   workspaceId: string
+  nodeKey: string
   /** Currently selected skill key (filled by a successful validation). */
   value: string
   onChange: (skillKey: string) => void
@@ -19,39 +22,44 @@ type Props = {
   skillRef: string
   onSkillRefChange: (ref: string) => void
 }
-/** key（如 ws-a/skill-x 或 group 形态 education-video-problems-generation/
- * write-script）→ 目录输入回显值：输入恒是「技能根下的完整相对路径」
- * （#427 二轮复审 P3-3）——validator 的 base_dir 是技能根、key 即根下
- * 全段相对路径（前端发起时由 <skills_root>/<workspaceId>/ 前缀 + 输入
- * 拼出，group 形态只会来自 YAML 手写/历史数据）；不再假设首段是
- * workspaceId 而截断 key。key 为空（未绑定）回空串。 */
-function directoryNameFromKey(key: string): string {
-  return key.trim().replace(/^\/+/, '')
+/** key → 目录输入回显值（codex 三轮 P2 on #427）：目录输入恒以
+ * 「<skills_root>/<workspaceId>/」只读前缀展示，常规 workspace 绑定
+ * （如 ws-1/write-script）首段与前缀重复，只回显余段——回显全段会让
+ * 用户点「校验」拼出 ws-1/ws-1/write-script，把有效绑定报成目录不
+ * 存在；group 形态（首段是技能根下的 group 名，如 demo 的
+ * education-video-problems-generation/write-script）回显全段——剥掉首段
+ * 就不再是技能根下的原相对路径。key 为空（未绑定）回空串。 */
+function directoryNameFromKey(key: string, workspaceId: string): string {
+  const relative = key.trim().replace(/^\/+/, '')
+  const ws = `${workspaceId}/`
+  return relative.startsWith(ws) ? relative.slice(ws.length) : relative
 }
 /** Skill picker for the Agent editor (#410 选择链路合一)：目录名行
  * (SkillDirectoryInput) 提供候选与校验，选中即绑定；版本经
  * SkillVersionSelect 选择。tag 数据源有两路：校验响应的 tags，或回显既有
  * 绑定时经技能详情端点拉取（与 WorkflowSkillVersionSelect 同源同缓存）；
  * 已锁定版本（lock 唯一 pin）沿既有展示。校验状态机在 useSkillValidation
- * （结果按 key 归属 + 上下文作废，codex P1 on #427）。skills root 取
- * 实例设置只读字段，加载失败回退默认根并提示。 */
+ * （结果按 key 归属 + 按 value/nodeKey 上下文作废，codex P1 on #427）。
+ * skills root 取实例设置只读字段，加载失败回退默认根并提示。 */
 export function SkillSelector(props: Props) {
-  const { workspaceId, value, skillRef } = props
+  const { workspaceId, nodeKey, value, skillRef } = props
   const { prefix, rootReady, rootLoadFailed } = useSkillsRootPrefix(workspaceId)
+  // 校验上下文 = 绑定 key + 节点身份（codex 三轮 P1 on #427）。
   const { validating, validate, invalidateInFlight, resultFor } =
-    useSkillValidation(prefix, props.onChange, value)
-  // 绑定上下文（节点切换/换绑）变化即作废在飞校验（codex 二轮 P1 on
-  // #427）：节点 A 的迟到请求不得再触发 A 版 onChange 覆盖 B 的草稿。
-  // useLayoutEffect：commit 时同步作废，不留提交窗口竞态（二轮复审 P2
-  // on #427——useEffect 在 commit 后的宏任务里执行，studio 节点切换提交
-  // 期间 settle 的响应恰好绕过两道保险）。作废不影响 invalid 结果展示
-  // ——换绑输错时 value 未变（P2），快照归属仍命中。
-  const prevValue = useRef(value)
+    useSkillValidation(prefix, props.onChange, { value, nodeKey })
+  // 绑定上下文（节点切换/换绑）变化即作废在飞校验（codex 二轮 P1 /
+  // 三轮 P1 on #427）：节点 A 的迟到请求不得再触发 A 版 onChange 覆盖 B
+  // 的草稿。上下文含 nodeKey——A、B 都未绑定（value 都为空串）时切换节点
+  // 也作废。useLayoutEffect：commit 时同步作废，不留提交窗口竞态（二轮
+  // 复审 P2 on #427——useEffect 在 commit 后的宏任务里执行，studio 节点
+  // 切换提交期间 settle 的响应恰好绕过两道保险）。作废不影响 invalid
+  // 结果展示——换绑输错时 value 未变（P2），快照归属仍命中。
+  const prevContext = useRef({ value, nodeKey })
   useLayoutEffect(() => {
-    if (prevValue.current === value) return
-    prevValue.current = value
+    if (sameContext(prevContext.current, { value, nodeKey })) return
+    prevContext.current = { value, nodeKey }
     invalidateInFlight()
-  }, [value, invalidateInFlight])
+  }, [value, nodeKey, invalidateInFlight])
   // 回显绑定时的 tag 数据源：技能详情端点（不带 ref = 工作区 HEAD），
   // 与预览面板同一查询缓存（extraQueryKeys.studioSkillDetail）。
   const boundDetailQuery = useQuery({
@@ -65,7 +73,6 @@ export function SkillSelector(props: Props) {
   const result = resultFor(value)
   const validated = result?.valid ? result : null
   const tags: string[] = validated?.tags ?? boundDetailQuery.data?.tags ?? []
-  const latestTag = tags[0] ?? null
   return (
     <div>
       <SkillDirectoryInput
@@ -75,7 +82,7 @@ export function SkillSelector(props: Props) {
         validating={validating}
         onValidate={(name) => void validate(name)}
         onEdit={invalidateInFlight}
-        name={directoryNameFromKey(value)}
+        name={directoryNameFromKey(value, workspaceId)}
       />
       {rootLoadFailed && (
         <p style={{ color: '#ed6c02', fontSize: 12 }}>
@@ -91,7 +98,7 @@ export function SkillSelector(props: Props) {
         value={skillRef}
         onChange={props.onSkillRefChange}
         tags={tags}
-        latestTag={latestTag}
+        latestTag={tags[0] ?? null}
         disabled={!value}
       />
       {validated?.locked_ref && (
