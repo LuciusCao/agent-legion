@@ -89,7 +89,16 @@ const navStub: StudioNav = {
 }
 
 function renderSection(
-  props: React.ComponentProps<typeof WorkflowNodeExecutionSection>,
+  props: Omit<
+    React.ComponentProps<typeof WorkflowNodeExecutionSection>,
+    'agentBindingStatus'
+  > &
+    Partial<
+      Pick<
+        React.ComponentProps<typeof WorkflowNodeExecutionSection>,
+        'agentBindingStatus'
+      >
+    >,
   nav: StudioNav = navStub
 ) {
   return render(
@@ -99,7 +108,12 @@ function renderSection(
           path="/workspaces/:workspaceId/studio"
           element={
             <StudioNavContext.Provider value={nav}>
-              <WorkflowNodeExecutionSection {...props} />
+              {/* #426 review P2：默认按 ready 注入（本套件聚焦 section 分发，
+                  加载/错误占位由 WorkflowNodeAgentEditor.test.tsx 覆盖）。 */}
+              <WorkflowNodeExecutionSection
+                agentBindingStatus="ready"
+                {...props}
+              />
             </StudioNavContext.Provider>
           }
         />
@@ -185,6 +199,7 @@ describe('WorkflowNodeExecutionSection', () => {
             element={
               <StudioNavContext.Provider value={navStub}>
                 <WorkflowNodeExecutionSection
+                  agentBindingStatus="ready"
                   node={nodeWithProvider}
                   agentCatalog={agentCatalog}
                   definitionYaml={nextYaml}

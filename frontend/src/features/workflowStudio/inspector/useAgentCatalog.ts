@@ -9,17 +9,38 @@ import { useAgentDefinitions } from './useAgentDefinitions'
 // catalog 只剩 agents。agent 半区是 workspace 作用域（schema v46）：无
 // workspaceId 时不发请求。#387：同时取 agent-definitions（含 draft）——
 // draft-only Agent 的节点解析与导航回落靠它（useAgentDefinitions）。
+// #426 review P2：聚合 bindingStatus——绑定解析 = published 目录（本查询）
+// + 含 draft 的 agent-definitions，任一尚无数据时节点详情里的 agentId=null
+// 只是「未知」而非「未绑定」，内联 Agent 编辑器必须等 settle 再渲染表单。
+
+/** capability→Agent 绑定解析状态：pending=任一查询首次在途；error=任一
+ * 查询失败且无数据（不退回可操作表单）；ready=两条查询都有数据，绑定
+ * 结果（含 agentId=null 的「确认未绑定」）可信。 */
+export type AgentBindingStatus = 'pending' | 'error' | 'ready'
+
 export function useAgentCatalog(workspaceId: string | undefined) {
   const query = useQuery({
     queryKey: extraQueryKeys.studioAgentCatalog(workspaceId ?? ''),
     queryFn: () => getAgentCatalog(workspaceId!),
     enabled: Boolean(workspaceId),
   })
-  const { agents: definitions } = useAgentDefinitions(workspaceId)
+  const definitions = useAgentDefinitions(workspaceId)
+  const bindingError = (query.isError && !query.data) || definitions.failed
+  const bindingStatus: AgentBindingStatus = bindingError
+    ? 'error'
+    : query.isPending || definitions.pending
+      ? 'pending'
+      : 'ready'
   return {
     agents: query.data?.agents ?? [],
-    definitions,
-    loadError: query.isError,
-    retry: query.refetch,
+    definitions: definitions.agents,
+    bindingStatus,
+    // 错误横幅覆盖两条查询（目录或定义任一失败都让绑定信息不可信），重试
+    // 也一起重取；有缓存数据的后台刷新失败仍计入 loadError（与既有语义
+    // 一致），但 bindingStatus 保持 ready——绑定仍可解析。
+    loadError: query.isError || definitions.loadError,
+    retry: async () => {
+      await Promise.all([query.refetch(), definitions.retry()])
+    },
   }
 }
