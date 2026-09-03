@@ -156,4 +156,15 @@ describe('WorkflowStudioWorkspace', () => {
     expect(setSelectedNodeKey).toHaveBeenCalledWith(null)
     await screen.findByText(/出厂版本/)
   })
+
+  // #426 独立复审 P3-2：目录加载失败横幅统一为 Agent 措辞（executor
+  // 术语已随 P-0.5 退役；本 PR 起 definitions 失败也并入该横幅）。
+  it('shows the catalog load-error banner with agent wording', () => {
+    renderWorkspace({ agentCatalogError: true })
+
+    expect(
+      screen.getByText('Agent 目录加载失败，绑定信息不可用。')
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+  })
 })

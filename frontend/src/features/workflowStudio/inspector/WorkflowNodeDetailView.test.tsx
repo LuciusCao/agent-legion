@@ -67,6 +67,15 @@ const workflow: WorkflowDefinitionRecord = {
       inputs: ['key_info.json'],
       outputs: ['review.json'],
     },
+    {
+      key: 'generate_key_info_v2',
+      label: '生成关键信息（复算）',
+      capability: 'generate_key_info',
+      node_type: 'agent',
+      after: ['review'],
+      inputs: ['review.json'],
+      outputs: ['key_info_v2.json'],
+    },
   ],
   edges: [{ source: 'generate_key_info', target: 'review', condition: null }],
 }
@@ -93,9 +102,15 @@ const definitionYaml = [
   '  generate_key_info:',
   '    type: agent',
   '    capability: generate_key_info',
+  '    label: 生成关键信息',
   '  review:',
   '    type: agent',
   '    capability: review',
+  '    label: 评审',
+  '  generate_key_info_v2:',
+  '    type: agent',
+  '    capability: generate_key_info',
+  '    label: 生成关键信息（复算）',
   '',
 ].join('\n')
 
@@ -311,7 +326,9 @@ describe('WorkflowNodeDetailView', () => {
       '1'
     )
 
-    rerender(viewFor('generate_key_info'))
+    // 同 capability 的另一节点（不同 nodeKey）：若 key 误用 node.key，
+    // 这里会重挂（挂载序号 +1）——用例即红。
+    rerender(viewFor('generate_key_info_v2'))
 
     expect(screen.getByTestId('agent-editor-stub')).toHaveAttribute(
       'data-mount',
