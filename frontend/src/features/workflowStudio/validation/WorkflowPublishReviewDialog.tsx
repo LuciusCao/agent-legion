@@ -22,7 +22,8 @@ type Props = {
   onConfirm: () => void
   onCancel: () => void
   /** 提交进行中（#429 NIT：agent 请求确认期间禁用按钮防双击重放——第二击
-   * 会 404，用户看到假失败 toast）。手动发布对话框不传，行为不变。 */
+   * 会 404，用户看到假失败 toast；#429 二轮复审 P3：confirming 期间关闭
+   * 渠道也全部静默，见 requestClose）。手动发布对话框不传，行为不变。 */
   confirming?: boolean
 }
 
@@ -39,9 +40,16 @@ export function WorkflowPublishReviewDialog({
   confirming = false,
 }: Props) {
   const hasChanges = hasCompareSummaryChanges(summary)
+  // #429 二轮复审 P3：confirm 进行中，关闭渠道（返回编辑/ESC/backdrop）
+  // 全部不触发 cancel——发布已在途，此时 cancel 会让 revision 实际上线但
+  // 回执/agent 状态显示被拒（误导）。回调早退一处守卫，覆盖三个入口。
+  const requestClose = () => {
+    if (confirming) return
+    onCancel()
+  }
 
   return (
-    <Dialog open={open} onClose={onCancel} maxWidth="sm" fullWidth>
+    <Dialog open={open} onClose={requestClose} maxWidth="sm" fullWidth>
       <DialogTitle>
         {createsRevision ? '发布 workflow revision' : '保存节点运行配置'}
       </DialogTitle>
@@ -56,7 +64,7 @@ export function WorkflowPublishReviewDialog({
         <WorkflowPublishReviewDialogChanges summary={summary} />
       </DialogContent>
       <DialogActions>
-        <Button onClick={onCancel} variant="outlined">
+        <Button onClick={requestClose} variant="outlined" disabled={confirming}>
           返回编辑
         </Button>
         <Button

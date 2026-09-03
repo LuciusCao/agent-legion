@@ -37,7 +37,10 @@ export type AgentPublishRequestState = {
  * 后端被 reject_studio_agent_scope 挡在门外。多个组件（对话框/对话栏）各自
  * 调用本 hook：相同 queryKey 的 useQuery 自动合并为一次轮询；落定回执走
  * agentPublishNoticeStore（zustand store，#429 复审修复：原 useState 每个实
- * 例一份，对话框写入的回执对话栏永远读不到）。 */
+ * 例一份，对话框写入的回执对话栏永远读不到）。resolve 归属（二轮复审）同样
+ * 存 store：invalidate 后所有实例同时看到 pending→null，旁观实例的观测
+ * effect 靠 store 的 lastResolvedRequestId 识别「已被主动 resolve」，不再拿
+ * 「已消解」覆盖操作实例着陆的正确回执。 */
 export function useAgentPublishRequest(
   workspaceId: string | undefined
 ): AgentPublishRequestState {
@@ -46,11 +49,8 @@ export function useAgentPublishRequest(
   const landNotice = useAgentPublishNoticeStore((s) => s.landNotice)
   const clearNotice = useAgentPublishNoticeStore((s) => s.clearNotice)
   const resolvedNotice = useAgentPublishNoticeStore((s) => s.resolvedNotice)
+  const markResolved = useAgentPublishNoticeStore((s) => s.markResolved)
   const [confirming, setConfirming] = useState(false)
-  /** 本 hook 实例自己 resolve 掉的请求 id（confirm/cancel 成功路径）：
-   * pending→null 的跳变若源于自己的操作，回执已由操作响应着陆，观测 effect
-   * 不得覆盖；否则（agent 重发 / 手动发布在后端顶替）补一轮回执。 */
-  const selfResolvedId = useRef<string | null>(null)
   /** 上一轮见过的 pending id：观测 pending→null 跳变用。 */
   const lastSeenPendingId = useRef<string | null>(null)
 
@@ -74,23 +74,24 @@ export function useAgentPublishRequest(
     ])
   }, [queryClient, workspaceId])
 
-  // 观测 pending→null 的跳变：自己 resolve 的（selfResolvedId 命中）回执已
-  // 着陆；否则是后端被顶替（agent 重发新请求 / 手动发布取代，后端 #429 落
-  // 地 supersede）或 TTL 过期，弹窗无声关闭——这里补一轮回执而非静默。
+  // 观测 pending→null 的跳变：跳变的请求若已被本 app 内任一实例主动
+  // resolve（store 的 lastResolvedRequestId 命中——#429 二轮复审：per-
+  // instance ref 挡不住旁观者，对话框与栏顶共享 QueryClient，invalidate
+  // 后双方同时收到跳变，旁观实例会拿「已消解」覆盖操作实例刚着陆的正确
+  // 回执），则回执已由操作响应着陆，这里不动；否则是后端被顶替（agent
+  // 重发新请求 / 手动发布取代）或 TTL 过期，弹窗无声关闭——补一轮回执。
   useEffect(() => {
     if (pendingRequest) {
       lastSeenPendingId.current = pendingRequest.id
-      if (selfResolvedId.current === pendingRequest.id)
-        selfResolvedId.current = null
       return
     }
     const lastId = lastSeenPendingId.current
     if (!lastId) return
     lastSeenPendingId.current = null
-    if (selfResolvedId.current !== lastId) {
+    if (
+      useAgentPublishNoticeStore.getState().lastResolvedRequestId !== lastId
+    ) {
       landNotice('Agent 的发布请求已消解（被新请求或手动发布取代，或已过期）')
-    } else {
-      selfResolvedId.current = null
     }
   }, [pendingRequest, landNotice])
 
@@ -99,7 +100,7 @@ export function useAgentPublishRequest(
     setConfirming(true)
     try {
       const resolved = await confirmPublishRequest(workspaceId, requestId)
-      selfResolvedId.current = requestId
+      markResolved(requestId)
       const notice = agentPublishStatusNotice(resolved)
       if (notice) landNotice(notice)
       await invalidate()
@@ -122,13 +123,14 @@ export function useAgentPublishRequest(
     showToast,
     refetchPending,
     landNotice,
+    markResolved,
   ])
 
   const cancel = useCallback(async () => {
     if (!workspaceId || !requestId) return
     try {
       const resolved = await cancelPublishRequest(workspaceId, requestId)
-      selfResolvedId.current = requestId
+      markResolved(requestId)
       const notice = agentPublishStatusNotice(resolved)
       if (notice) landNotice(notice)
       await invalidate()
@@ -146,6 +148,7 @@ export function useAgentPublishRequest(
     showToast,
     refetchPending,
     landNotice,
+    markResolved,
   ])
 
   return {

@@ -6,8 +6,9 @@ the INSERT, so the "new request displaces the old" policy is atomic against
 concurrent tool calls; the manual publish path displaces pending rows the
 same way (``supersede_pending_publish_requests``, #429). Expiry is lazy —
 the pending read is pure (no sweep on the 5s poll path), and the terminal
-``expired`` row is recorded by the write-side sweeps (status read by id /
-the poll route's observed-expiry path). Resolution NEVER checks
+``expired`` row is recorded by the write-side observed-expiry path
+(``expire_pending_publish_request``; status read by id sweeps in the same
+statement it reads with). Resolution NEVER checks
 ``expires_at``: the claim step already checked TTL, and a resolve whose
 underlying publish already landed must record the effect truthfully (a TTL
 expiring mid-publish must not deny a revision that exists — TOCTOU, #429).
@@ -67,18 +68,6 @@ class StudioPublishRequestQueriesMixin(ConnectionQueriesMixin):
             raise RuntimeError("publish request insert did not return a row")
         return dict(row)
 
-    def _sweep_expired_publish_requests(self, workspace_id: str) -> int:
-        """Lazily expire overdue pending rows; returns the swept count."""
-        with self.connect() as conn:
-            cursor = conn.execute(
-                "update studio_publish_requests set status='expired',"
-                " resolved_at=current_timestamp"
-                " where workspace_id=%s and status='pending'"
-                " and expires_at < current_timestamp",
-                (workspace_id,),
-            )
-            return cursor.rowcount
-
     def expire_pending_publish_request(self, workspace_id: str) -> dict[str, Any] | None:
         """Write-side lazy expiry for a workspace: if the pending row is past
         its TTL, flip it to ``expired`` and return it; None when there is no
@@ -106,7 +95,9 @@ class StudioPublishRequestQueriesMixin(ConnectionQueriesMixin):
         ``expires_at`` still surfaces here; the service layer decides
         whether the row is expired (and only then writes, via
         ``expire_pending_publish_request``), so a healthy workspace polls
-        with exactly one read connection and zero writes.
+        with exactly one read connection and this read itself issues zero
+        writes (#429 二轮复审 NIT：措辞限定为「本读零写」——认证 session
+        的滑动过期仍会写，不在本路径的断言范围内).
         """
         with self._connect_read() as conn:
             row = conn.execute(
