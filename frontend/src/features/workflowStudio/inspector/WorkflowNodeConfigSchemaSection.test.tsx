@@ -148,12 +148,11 @@ nodes:
     ).not.toBeInTheDocument()
   })
 
-  it('points agent-typed nodes to the Agent definition instead of editing', () => {
+  it('does not render a node-owned schema section for agent nodes (#406)', () => {
     renderSection({ node: { ...node, node_type: 'agent' } })
 
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
     expect(
-      screen.getByText(/生效的配置 Schema 以 Agent 定义为准/)
-    ).toBeInTheDocument()
+      screen.queryByLabelText('配置 Schema generate')
+    ).not.toBeInTheDocument()
   })
 })
