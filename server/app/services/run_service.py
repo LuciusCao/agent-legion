@@ -280,14 +280,13 @@ class RunService:
         # (CONNECT-DIRECTION-001) is a later slice. Existence AND enabled
         # state are checked here (#425 review): a disabled connection would
         # otherwise pass creation and only fail at execution time
-        # (connection_tokens), so this is the actual fail-fast gate.
-        with self.job_db.read() as conn:
-            row = conn.execute(
-                "select enabled from external_connections where key=%s", (connection_key,)
-            ).fetchone()
-        if row is None:
+        # (connection_tokens), so this is the actual fail-fast gate. The
+        # read goes through the JobQueries facade (BOUNDARY-DATA-001) —
+        # services hold no SQL of their own.
+        enabled = self.job_db.external_connection_enabled(connection_key)
+        if enabled is None:
             raise InvalidOperationError(f"Unknown connection key: {connection_key}")
-        if not row["enabled"]:
+        if not enabled:
             raise InvalidOperationError(f"Connection is disabled: {connection_key}")
         # Ref identity is connection-scoped: the same external_id reachable
         # through two connections denotes two distinct items, so the dedup
