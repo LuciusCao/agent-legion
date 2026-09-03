@@ -24,6 +24,10 @@ export type AgentPublishRequestState = {
    * agentPublishNoticeStore——栏顶 StudioChatAside 与对话框读同一份）。 */
   resolvedNotice: string | null
   confirming: boolean
+  /** cancel 在途（#429 三轮复审 P3）：双击「返回编辑」或 cancel 在途按
+   * ESC 会二次调 cancel → 404 → 红色假失败 toast 与正确回执同现。与
+   * confirming 同款在途守卫：canceling 期间重复 cancel 早退。 */
+  canceling: boolean
   /** 用户确认：走后端确认端点（与手动发布同门禁），成功后失效相关查询。 */
   confirm: () => Promise<void>
   /** 用户取消：请求落 rejected，agent 可继续修改草稿再发起。 */
@@ -51,6 +55,8 @@ export function useAgentPublishRequest(
   const resolvedNotice = useAgentPublishNoticeStore((s) => s.resolvedNotice)
   const markResolved = useAgentPublishNoticeStore((s) => s.markResolved)
   const [confirming, setConfirming] = useState(false)
+  // 三轮复审 P3：cancel 的在途守卫，与 confirming 对称（见类型注释）。
+  const [canceling, setCanceling] = useState(false)
   /** 上一轮见过的 pending id：观测 pending→null 跳变用。 */
   const lastSeenPendingId = useRef<string | null>(null)
 
@@ -127,7 +133,8 @@ export function useAgentPublishRequest(
   ])
 
   const cancel = useCallback(async () => {
-    if (!workspaceId || !requestId) return
+    if (!workspaceId || !requestId || canceling) return
+    setCanceling(true)
     try {
       const resolved = await cancelPublishRequest(workspaceId, requestId)
       markResolved(requestId)
@@ -140,10 +147,13 @@ export function useAgentPublishRequest(
         'error'
       )
       await refetchPending()
+    } finally {
+      setCanceling(false)
     }
   }, [
     workspaceId,
     requestId,
+    canceling,
     invalidate,
     showToast,
     refetchPending,
@@ -155,6 +165,7 @@ export function useAgentPublishRequest(
     pendingRequest: pendingRequest ?? null,
     resolvedNotice: resolvedNotice?.message ?? null,
     confirming,
+    canceling,
     confirm,
     cancel,
     clearNotice,

@@ -147,6 +147,51 @@ describe('useAgentPublishRequest', () => {
     expect(result.current.resolvedNotice).toContain('已拒绝')
   })
 
+  it('a second cancel while one is in flight is a no-op (no 404 fake-failure toast)', async () => {
+    // #429 三轮复审 P3 回归钉：cancel 不设守卫时，双击「返回编辑」或
+    // cancel 在途按 ESC 会二次调 cancel——第一击已 resolve 掉请求，第二
+    // 击必 404，红色「取消失败」toast 与正确的「已拒绝」回执同现。现在
+    // cancel 在途（canceling）期间重复调用必须早退：端点只打一次、无
+    // 错误 toast、成功后 canceling 复位。
+    mocks.fetchPendingPublishRequest.mockResolvedValue(requestRecord())
+    let releaseCancel: ((record: StudioPublishRequestRecord) => void) | null =
+      null
+    mocks.cancelPublishRequest.mockImplementation(
+      () =>
+        new Promise<StudioPublishRequestRecord>((resolve) => {
+          releaseCancel = resolve
+        })
+    )
+    const { result } = renderHookWithProviders()
+    await waitFor(() => expect(result.current.pendingRequest?.id).toBe('req-1'))
+
+    let firstCancel: Promise<void> | null = null
+    act(() => {
+      firstCancel = result.current.cancel()
+    })
+    // 在途：canceling 已置位，第二击（双击/ESC 同源）是 no-op。
+    expect(result.current.canceling).toBe(true)
+    await act(async () => {
+      await result.current.cancel()
+    })
+    expect(mocks.cancelPublishRequest).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      releaseCancel?.(
+        requestRecord({
+          status: 'rejected',
+          resolved_at: '2026-09-03T10:02:00Z',
+        })
+      )
+      await firstCancel
+    })
+
+    expect(mocks.cancelPublishRequest).toHaveBeenCalledTimes(1)
+    expect(result.current.canceling).toBe(false)
+    expect(result.current.resolvedNotice).toContain('已拒绝')
+    expect(useUiStore.getState().toast).toBeNull()
+  })
+
   it('notice is shared across hook instances (dialog action visible in the aside)', async () => {
     // #429 P2-1 回归钉：回执是跨实例共享状态（zustand store），不是每实例
     // 一份的 useState——对话框实例 resolve 后，另一个实例（栏顶）同轮可读。
