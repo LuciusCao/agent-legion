@@ -3,6 +3,7 @@ from dataclasses import asdict
 
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import NotFoundError
+from server.app.services.job_node_ordering import effective_after
 from server.app.workflows.definition import workflow_definition_from_dict
 
 
@@ -32,7 +33,10 @@ def build_workspace_dag(
                 "key": node.key,
                 "label": node.label,
                 "capability": node.capability,
-                "after": node.after,
+                # #417：after 与 job 详情视图同源（effective_after：顶层
+                # edges 优先派生、隐藏 _start 边）——schema v2 的 YAML 只写
+                # 顶层 edges 时节点 after 为空，直读原始字段会把边丢掉。
+                "after": effective_after(definition, node.key),
                 "inputs": node.inputs,
                 "outputs": node.outputs,
                 "execution": asdict(node.execution),
