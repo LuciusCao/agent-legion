@@ -8,6 +8,7 @@ from cryptography.fernet import Fernet
 CSRF = {"x-agent-legion-request": "1"}
 CONNECTIONS_URL = "/api/admin/connections"
 TYPES_URL = "/api/admin/connection-types"
+KEYS_URL = "/api/connections/keys"
 
 
 @pytest.fixture(autouse=True)
@@ -68,6 +69,41 @@ def test_member_forbidden(client) -> None:
     )
     assert member.delete(f"{CONNECTIONS_URL}/cms-internal", headers=CSRF).status_code == 403
     assert member.post(f"{CONNECTIONS_URL}/cms-internal/test", headers=CSRF).status_code == 403
+
+
+def test_keys_requires_auth(anon_client) -> None:
+    # #419: the key-only listing is a signed-in-user surface; anonymous 401.
+    assert anon_client.get(KEYS_URL).status_code == 401
+
+
+def test_keys_listed_for_admin_without_sensitive_fields(client) -> None:
+    assert client.post(CONNECTIONS_URL, json=_payload(), headers=CSRF).status_code == 200
+    response = client.get(KEYS_URL)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body == {"keys": ["cms-internal"]}
+    # The response is key strings only: no config/display/token surface at all.
+    assert set(body) == {"keys"}
+
+
+def test_keys_listed_for_member_without_sensitive_fields(client) -> None:
+    # #419: members can read the key list (they must pick one for ref items),
+    # while the full admin views stay 403 (verified by test_member_forbidden).
+    assert client.post(CONNECTIONS_URL, json=_payload(), headers=CSRF).status_code == 200
+    member = _member_client(client)
+    response = member.get(KEYS_URL)
+    assert response.status_code == 200, response.text
+    assert response.json() == {"keys": ["cms-internal"]}
+
+
+def test_keys_empty_and_multiple(client) -> None:
+    assert client.get(KEYS_URL).json() == {"keys": []}
+    for key in ("cms-a", "cms-b"):
+        assert (
+            client.post(CONNECTIONS_URL, json={**_payload(), "key": key}, headers=CSRF).status_code
+            == 200
+        )
+    assert client.get(KEYS_URL).json() == {"keys": ["cms-a", "cms-b"]}
 
 
 def test_types_listed(client) -> None:
