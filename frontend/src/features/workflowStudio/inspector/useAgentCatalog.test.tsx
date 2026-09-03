@@ -58,6 +58,9 @@ describe('useAgentCatalog', () => {
 
     await waitFor(() => expect(result.current.loadError).toBe(true))
     expect(result.current.agents).toEqual([])
+    // #426 review P2：失败期绑定解析同样不可信——bindingStatus 走 error
+    // 而非 ready（不渲染可操作表单）。
+    expect(result.current.bindingStatus).toBe('error')
 
     mockGetCatalog.mockResolvedValue({ agents: [agent] })
     await act(async () => {
@@ -66,6 +69,8 @@ describe('useAgentCatalog', () => {
 
     await waitFor(() => expect(result.current.loadError).toBe(false))
     expect(result.current.agents).toHaveLength(1)
+    // retry 成功取回数据后回到 ready——门控放行。
+    await waitFor(() => expect(result.current.bindingStatus).toBe('ready'))
     expect(mockGetCatalog).toHaveBeenCalledTimes(2)
   })
 

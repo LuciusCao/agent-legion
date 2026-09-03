@@ -264,6 +264,51 @@ describe('WorkflowNodeAgentEditor', () => {
     expect(screen.getByDisplayValue('review')).toBeInTheDocument()
   })
 
+  // #426 独立复审 P2：面板内创建的草稿归档后（#409 无收合重置入口），
+  // createdAgentId 必须清空——回落新建表单，不残留已归档 Agent 的编辑态。
+  it('returns to the create form after archiving the draft created in the panel', async () => {
+    mocks.createAgentDefinition.mockResolvedValue({ agent_id: 'agent-new' })
+    mocks.fetchAgentDefinition.mockResolvedValue({
+      latest: {
+        status: 'draft',
+        definition: {
+          capability: 'generate_key_info',
+          runtime: 'pi',
+          skill: 'demo/skill',
+          tools: ['read'],
+        },
+      },
+      published: null,
+    })
+    mocks.archiveAgent.mockResolvedValue({})
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderEditor({ agentId: null, capability: 'generate_key_info' })
+
+    // 面板内创建草稿 → 留在编辑/发布模式（绑定 agent-new）。
+    fireEvent.change(await screen.findByLabelText('Agent ID'), {
+      target: { value: 'agent-new' },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
+    })
+    await screen.findByRole('button', { name: '发布' })
+
+    // 归档该草稿：面板回落新建表单（key 重挂成 '__new__'），不残留
+    // 已归档 Agent 的可编辑态。
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    })
+
+    expect(confirmSpy).toHaveBeenCalledWith('确定要归档 Agent「agent-new」吗？')
+    expect(mocks.archiveAgent).toHaveBeenCalledWith('ws1', 'agent-new')
+    await screen.findByLabelText('Agent ID')
+    expect(
+      screen.queryByRole('button', { name: '发布' })
+    ).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Agent ID')).toHaveValue('')
+    confirmSpy.mockRestore()
+  })
+
   // #426 review P2：目录/定义查询未 settle 时 agentId=null 是「未知」而非
   // 「未绑定」——只渲染加载占位，不出可操作的新建表单；settle 后按绑定
   // 结果正常出表单。
@@ -298,6 +343,8 @@ describe('WorkflowNodeAgentEditor', () => {
     renderEditor({ agentId: null, capability: 'cap', bindingStatus: 'error' })
 
     expect(screen.getByText('Agent 目录加载失败')).toBeInTheDocument()
+    // 失败提示用 alert 语义（对齐 AgentEditor 错误条先例）。
+    expect(screen.getByRole('alert')).toBeInTheDocument()
     expect(screen.queryByLabelText('Agent ID')).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: '创建草稿' })

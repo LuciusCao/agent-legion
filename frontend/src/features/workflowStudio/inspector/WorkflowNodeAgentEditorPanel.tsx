@@ -35,6 +35,13 @@ export function WorkflowNodeAgentEditorPanel(props: Props) {
     setCreatedAgentId(newAgentId)
   }
 
+  // 归档清空草稿身份：面板内创建的草稿归档后（#409 无收合重置入口）回落
+  // 新建表单，不残留已归档 Agent 的编辑态。
+  function handleArchived() {
+    props.onRefresh()
+    setCreatedAgentId(null)
+  }
+
   return (
     <AgentEditor
       key={editingAgentId ?? '__new__'}
@@ -43,7 +50,7 @@ export function WorkflowNodeAgentEditorPanel(props: Props) {
       initialCapability={editingAgentId ? undefined : props.capability}
       onSaved={handleSaved}
       onChanged={props.onRefresh}
-      onArchived={props.onRefresh}
+      onArchived={handleArchived}
     />
   )
 }
