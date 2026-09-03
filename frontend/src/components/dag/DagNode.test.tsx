@@ -48,6 +48,19 @@ describe('DagNode', () => {
     expect(screen.getByText(/耗时 12.4s/)).toBeInTheDocument()
   })
 
+  // #415：label 不再单行省略——两行 line-clamp 由 CSS（.label 的
+  // -webkit-line-clamp: 2）承担，jsdom 测不了布局，这里兜底断言完整文本
+  // 仍渲染在 DOM 里且 title 属性携带全文（tooltip 兜底），换行/裁剪交给
+  // CSS 消费者验证。
+  it('keeps the full label text in the DOM with a title tooltip', () => {
+    renderWithProvider({
+      ...baseData,
+      label: '生成审题关键信息汇总摘要',
+    })
+    const label = screen.getByTitle('生成审题关键信息汇总摘要')
+    expect(label).toHaveTextContent('生成审题关键信息汇总摘要')
+  })
+
   it('renders input and output chips', () => {
     renderWithProvider(baseData)
     expect(screen.getByText('transcription.json')).toBeInTheDocument()

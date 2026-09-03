@@ -83,7 +83,9 @@ interface DagGraphProps {
   hideNodeDetails?: boolean
 }
 
-const NODE_WIDTH = 240
+// #415：与 DagNode.module.css 的 .node 宽度同步（240→280）——dagre 拿它
+// 布点，CSS 卡片宽于该值时相邻列会重叠。只动尺寸，布局逻辑归 #417。
+const NODE_WIDTH = 280
 const FIT_VIEW_OPTIONS = { padding: 0.18, minZoom: 0.35, maxZoom: 1.2 }
 const nodeTypes = { dagNode: DagNodeComponent }
 const edgeTypes = { dagEdge: DagEdgeComponent }
