@@ -48,21 +48,31 @@ describe('DagGraph', () => {
     expect(container.querySelector('.react-flow')).toBeInTheDocument()
   })
 
-  it('shows the missing-edges hint badge when nodes exist but edges do not (#417)', () => {
+  it('shows the edgeless hint badge when nodes exist but edges do not (#417)', () => {
     // 无边图布局退化为稳定网格（dagLayout.ts），必须伴随轻量提示，
-    // 让「边数据缺失」可被识别而不是被误读为节点丢失。
+    // 说明当前视图无边、节点按网格排列，而不是被误读为节点丢失。
     render(<DagGraph nodes={nodes} edges={[]} />)
-    expect(screen.getByRole('status')).toHaveTextContent('边数据缺失')
+    expect(screen.getByRole('status')).toHaveTextContent('当前视图无边')
   })
 
-  it('does not show the missing-edges hint for a single-node workflow (#424 review P2-2)', () => {
+  it('uses neutral copy for the edgeless hint instead of asserting data loss (#424 独立复审)', () => {
+    // 多根并行 workflow（_start→a、_start→b，节点间无边）经 job 视图
+    // 隐藏 start 边后就是 2 节点 0 边的合法形态，studio 草稿合法删光全部
+    // 边时同理。提示必须描述现状，不得宣称「边数据缺失」。
+    render(<DagGraph nodes={[nodes[0], nodes[1]]} edges={[]} />)
+    const badge = screen.getByRole('status')
+    expect(badge).toHaveTextContent('当前视图无边：节点按网格排列')
+    expect(badge).not.toHaveTextContent('缺失')
+  })
+
+  it('does not show the edgeless hint for a single-node workflow (#424 review P2-2)', () => {
     // 单节点 workflow 本来就没有边（job 视图按设计不收 start 节点及其
-    // 入口边），属健康形态，不得误报「边数据缺失」。
+    // 入口边），属健康形态，不需要提示。
     render(<DagGraph nodes={[nodes[0]]} edges={[]} />)
     expect(screen.queryByRole('status')).toBeNull()
   })
 
-  it('does not show the missing-edges hint when the graph has edges', () => {
+  it('does not show the edgeless hint when the graph has edges', () => {
     render(<DagGraph nodes={nodes} edges={edges} />)
     expect(screen.queryByRole('status')).toBeNull()
   })

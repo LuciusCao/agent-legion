@@ -51,9 +51,14 @@ function isolatedGridPositions(
     5,
     Math.max(1, Math.floor(Math.sqrt(isolated.length)))
   )
-  // 无边图时 connectedBottom 为 0，网格从画布顶部开始。
+  // 网格首行顶 = 连通分量实际底边 + ISOLATED_GAP（无边图时 connectedBottom
+  // 为 0，网格从画布顶部隔一个 ISOLATED_GAP 开始）。
   const gridTop = connectedBottom + ISOLATED_GAP
-  let rowBottom = gridTop
+  // rowBottom 的语义是「上一行底边」；首行没有上一行，预置 gridTop -
+  // ISOLATED_NODESEP，让首个换行分支恰好落在 gridTop——隔离带严格等于
+  // ISOLATED_GAP，而不是多叠一次 ISOLATED_NODESEP（#424 独立复审：原实现
+  // 首行实际偏移 180，与注释宣称的 120 隔离带不符）。
+  let rowBottom = gridTop - ISOLATED_NODESEP
   let rowStart = gridTop
   isolated.forEach((key, index) => {
     const column = index % columns

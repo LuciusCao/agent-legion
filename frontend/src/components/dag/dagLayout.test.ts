@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { computeLayout, isolatedNodeKeys } from './dagLayout'
+import { estimateDagNodeHeight } from '../dagNodeHeight'
 import type { DagGraphEdge, DagGraphNode } from './DagGraph'
 
 function node(
@@ -97,6 +98,44 @@ describe('computeLayout (#417 edgeless degenerate layout)', () => {
     // 孤立节点铺在连通分量下方（y 更大），不再挤在链旁。
     expect(byKey.get('iso')!.y).toBeGreaterThan(byKey.get('a')!.y)
     expect(byKey.get('iso')!.y).toBeGreaterThan(byKey.get('c')!.y)
+  })
+
+  it('places the first isolated row exactly ISOLATED_GAP below the connected bottom (#424 独立复审)', () => {
+    // 首行间距钉死：换行分支对首行也生效，曾把首行实际推到
+    // ISOLATED_GAP + ISOLATED_NODESEP（180），与「隔离带 ISOLATED_GAP」
+    // 的注释/常量语义不符。连通分量实际底边 = 各连通节点顶边 + 高度的
+    // 最大值（position.y 是顶边，顶边 + 高度 = dagre 中心 y + 半高）。
+    const nodes = [node('a'), node('b'), node('iso')]
+    const edges: DagGraphEdge[] = [{ from: 'a', to: 'b' }]
+    const { rfNodes } = computeLayout(nodes, edges, normalize)
+    const byKey = new Map(rfNodes.map((n) => [n.id, n.position]))
+    const connectedBottom = Math.max(
+      ...nodes
+        .filter((n) => n.key !== 'iso')
+        .map((n) => byKey.get(n.key)!.y + estimateDagNodeHeight(n))
+    )
+    // 120 = ISOLATED_GAP（dagLayout 模块内常量，未导出）。
+    expect(byKey.get('iso')!.y).toBeCloseTo(connectedBottom + 120, 6)
+  })
+
+  it('keeps isolated nodes clear of a tall connected node by its real bottom (#424 独立复审)', () => {
+    // connectedBottom 必须按「节点中心 y + 半高」取 max。连通节点全是
+    // 66px 矮节点时，漏加半高或误用 min 只差几十像素，宽松的 y 比较
+    // 抓不住；这里放一个 200+ 的连通高节点（capability + 多 inputs）把
+    // 防重叠间距钉死：孤立首行必须落在高节点实际底边 + ISOLATED_GAP 之下。
+    const tall = node('tall', {
+      capability: 'files.read',
+      inputs: ['in1.json', 'in2.json', 'in3.json', 'in4.json'],
+    })
+    const nodes = [tall, node('sink'), node('iso')]
+    const edges: DagGraphEdge[] = [{ from: 'tall', to: 'sink' }]
+    const { rfNodes } = computeLayout(nodes, edges, normalize)
+    const byKey = new Map(rfNodes.map((n) => [n.id, n.position]))
+    const tallHeight = estimateDagNodeHeight(tall)
+    expect(tallHeight).toBeGreaterThanOrEqual(200)
+    // position.y 是顶边；顶边 + 高度 = 底边（即 dagre 中心 y + 半高）。
+    const tallBottom = byKey.get('tall')!.y + tallHeight
+    expect(byKey.get('iso')!.y).toBeGreaterThanOrEqual(tallBottom + 120)
   })
 
   it('places every node (none dropped by the layout)', () => {
