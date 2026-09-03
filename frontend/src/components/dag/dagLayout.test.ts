@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeLayout, isolatedNodeKeys } from './dagLayout'
+import { computeLayout, DAG_NODE_WIDTH, isolatedNodeKeys } from './dagLayout'
 import { estimateDagNodeHeight } from '../dagNodeHeight'
 import type { DagGraphEdge, DagGraphNode } from './DagGraph'
 
@@ -126,6 +126,94 @@ describe('computeLayout (#417 edgeless degenerate layout)', () => {
     // 孤立节点铺在连通分量下方（y 更大），不再挤在链旁。
     expect(byKey.get('iso')!.y).toBeGreaterThan(byKey.get('a')!.y)
     expect(byKey.get('iso')!.y).toBeGreaterThan(byKey.get('c')!.y)
+  })
+
+  it('gives connected components their standalone coordinates when isolated nodes precede them (#424 codex 三轮)', () => {
+    // 症状复现：孤立节点排在连通节点之前时，旧实现把全部节点交给
+    // dagre——孤立节点先占层内纵向位置，把连通分量整体向下推移（y 从
+    // 33 被推到 285 量级），移走孤立节点后不重排，留下大片空白并让
+    // fitView 过度缩小。dagre 只喂连通子图后，同样的连通子图在
+    // 有/无孤立节点两种输入下的 x/y 必须完全相等（不被推移）。
+    const chain: DagGraphEdge[] = [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'c' },
+    ]
+    const mixed = computeLayout(
+      [node('iso1'), node('iso2'), node('a'), node('b'), node('c')],
+      chain,
+      normalize
+    ).rfNodes
+    const standalone = computeLayout(
+      [node('a'), node('b'), node('c')],
+      chain,
+      normalize
+    ).rfNodes
+    const mixedPos = new Map(mixed.map((n) => [n.id, n.position]))
+    const standalonePos = new Map(standalone.map((n) => [n.id, n.position]))
+    for (const key of ['a', 'b', 'c']) {
+      expect(mixedPos.get(key)).toEqual(standalonePos.get(key))
+    }
+    // 不被推移的具象下界：position.y 是顶边，顶边 + 半高 = dagre 中心 y。
+    // 连通链首节点中心仍居 dagre 首层（33 = 66/2），而不是被两个前置
+    // 孤立节点下推两个 nodesep（旧实现约 285）。
+    const heightA = estimateDagNodeHeight(node('a'))
+    expect(mixedPos.get('a')!.y + heightA / 2).toBe(heightA / 2)
+  })
+
+  it('still lays preceding isolated nodes below the connected bottom in a mixed graph', () => {
+    // 孤立节点在数组前面也不得改变网格定位规则：首行仍严格落在连通分量
+    // 实际底边 + ISOLATED_GAP（120）之下。
+    const tall = node('tall', {
+      capability: 'files.read',
+      inputs: ['in1.json', 'in2.json', 'in3.json', 'in4.json'],
+    })
+    const nodes = [node('iso1'), node('iso2'), tall, node('sink')]
+    const edges: DagGraphEdge[] = [{ from: 'tall', to: 'sink' }]
+    const { rfNodes } = computeLayout(nodes, edges, normalize)
+    const byKey = new Map(rfNodes.map((n) => [n.id, n.position]))
+    const connectedBottom = Math.max(
+      ...nodes
+        .filter((n) => n.key !== 'iso1' && n.key !== 'iso2')
+        .map((n) => byKey.get(n.key)!.y + estimateDagNodeHeight(n))
+    )
+    expect(byKey.get('iso1')!.y).toBeGreaterThanOrEqual(connectedBottom + 120)
+    expect(byKey.get('iso2')!.y).toBeGreaterThanOrEqual(connectedBottom + 120)
+  })
+
+  it('leaves no node overlap in a mixed graph with isolated nodes first', () => {
+    // 整图防重叠：连通链 + 高节点 + 前置孤立节点混排，任意两个节点矩形
+    // （宽 DAG_NODE_WIDTH、高 estimateDagNodeHeight）不得相交（贴边允许）。
+    const tall = node('tall', {
+      capability: 'files.read',
+      inputs: ['in1.json', 'in2.json', 'in3.json'],
+    })
+    const nodes = [
+      node('iso1'),
+      node('iso2'),
+      node('iso3'),
+      tall,
+      node('mid'),
+      node('sink'),
+    ]
+    const edges: DagGraphEdge[] = [
+      { from: 'tall', to: 'mid' },
+      { from: 'mid', to: 'sink' },
+    ]
+    const { rfNodes } = computeLayout(nodes, edges, normalize)
+    for (let i = 0; i < rfNodes.length; i++) {
+      for (let j = i + 1; j < rfNodes.length; j++) {
+        const a = rfNodes[i]
+        const b = rfNodes[j]
+        const ha = estimateDagNodeHeight(nodes.find((n) => n.key === a.id)!)
+        const hb = estimateDagNodeHeight(nodes.find((n) => n.key === b.id)!)
+        const overlapX =
+          a.position.x < b.position.x + DAG_NODE_WIDTH &&
+          b.position.x < a.position.x + DAG_NODE_WIDTH
+        const overlapY =
+          a.position.y < b.position.y + hb && b.position.y < a.position.y + ha
+        expect(overlapX && overlapY).toBe(false)
+      }
+    }
   })
 
   it('places the first isolated row exactly ISOLATED_GAP below the connected bottom (#424 独立复审)', () => {
