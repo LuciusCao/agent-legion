@@ -11,6 +11,7 @@ const mocks = {
   fetchPendingPublishRequest: vi.fn(),
   confirmPublishRequest: vi.fn(),
   cancelPublishRequest: vi.fn(),
+  fetchWorkflowDraft: vi.fn(),
 }
 
 vi.mock('../../../api/studioPublishRequestApi', () => ({
@@ -20,6 +21,12 @@ vi.mock('../../../api/studioPublishRequestApi', () => ({
     mocks.confirmPublishRequest(...args),
   cancelPublishRequest: (...args: unknown[]) =>
     mocks.cancelPublishRequest(...args),
+}))
+
+// #429 三轮 P1-3：confirm 前的重读服务端草稿（对话框传入 flushDraftSave
+// 后的审阅-确认一致性链路）。
+vi.mock('../../../api/workflowDraft', () => ({
+  fetchWorkflowDraft: (...args: unknown[]) => mocks.fetchWorkflowDraft(...args),
 }))
 
 const workflow = {
@@ -72,6 +79,9 @@ const studioState = {
   publishDraft: vi.fn(),
   createsRevision: true,
   compareSummary: summaryWithChange,
+  // #429 三轮 P1-3：确认前 flush 画布草稿保存（对话框经
+  // useAgentPublishRequest 传入；flushNow 是 DraftSaveController 的方法）。
+  flushDraftSave: vi.fn(),
 }
 
 function pendingRecord(): StudioPublishRequestRecord {
@@ -82,6 +92,7 @@ function pendingRecord(): StudioPublishRequestRecord {
     status: 'pending',
     created_by: 'studio-agent:u1',
     result_revision_id: null,
+    draft_hash: '9f8a'.repeat(16),
     created_at: '2026-09-03T10:00:00Z',
     expires_at: '2026-09-03T10:10:00Z',
     resolved_at: null,
@@ -143,6 +154,7 @@ describe('AgentPublishRequestDialog', () => {
 
   it('confirm calls the confirm endpoint, not the manual publishDraft action', async () => {
     mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: 'key: w\n' })
     mocks.confirmPublishRequest.mockResolvedValue({
       ...pendingRecord(),
       status: 'confirmed',
@@ -160,6 +172,41 @@ describe('AgentPublishRequestDialog', () => {
     )
     // 确认走后端确认端点（与手动发布同门禁），不是前端直接 publishDraft。
     expect(studioState.publishDraft).not.toHaveBeenCalled()
+  })
+
+  it('confirm flushes the canvas draft save and re-reads the server draft first', async () => {
+    // #429 三轮 P1-3 回归钉：画布草稿 800ms debounce 在途时，点确认必须先
+    // flush 本页保存（studio.flushDraftSave）再重读服务端草稿，最后才调确
+    // 认端点——审阅的 compare summary 与确认发布的 YAML 是同一份（后端
+    // hash 校验兜底）。
+    const order: string[] = []
+    studioState.flushDraftSave = vi.fn(() => order.push('flush'))
+    mocks.fetchWorkflowDraft.mockImplementation(async () => {
+      order.push('read-draft')
+      return { definition_yaml: 'key: w\n' }
+    })
+    mocks.confirmPublishRequest.mockImplementation(async () => {
+      order.push('confirm')
+      return {
+        ...pendingRecord(),
+        status: 'confirmed',
+        result_revision_id: 'ws1:demo_video_workflow:v2',
+        resolved_at: '2026-09-03T10:02:00Z',
+      }
+    })
+    mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    renderDialog()
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '确认发布' })
+    )
+
+    await waitFor(() =>
+      expect(mocks.confirmPublishRequest).toHaveBeenCalledWith('ws1', 'req-1')
+    )
+    expect(studioState.flushDraftSave).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchWorkflowDraft).toHaveBeenCalledWith('ws1')
+    expect(order).toEqual(['flush', 'read-draft', 'confirm'])
   })
 
   it('cancel calls the cancel endpoint and closes the dialog', async () => {

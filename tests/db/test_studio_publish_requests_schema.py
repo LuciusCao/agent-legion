@@ -2,8 +2,10 @@
 
 Route-level behavior (auth matrix, publish gates) lives in
 tests/routes/test_studio_publish_requests.py; this file pins the migration
-record, the table shape, and the queries-layer state machine (supersede /
-lazy expiry / atomic resolve) against real Postgres.
+record, the table shape (including the #429 三轮 P1 hardening: the
+draft_hash column and the partial unique index that makes one-pending-per-
+workspace a database invariant), and the queries-layer state machine
+(supersede / lazy expiry / atomic claim + resolve) against real Postgres.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ def test_publish_requests_columns() -> None:
         "status",
         "created_by",
         "result_revision_id",
+        "draft_hash",
         "created_at",
         "expires_at",
         "resolved_at",
@@ -50,3 +53,71 @@ def test_status_check_rejects_unknown_states() -> None:
             "insert into studio_publish_requests(workspace_id, status, expires_at)"
             " values ('demo_workflow', 'bogus', now() + interval '1 minute')"
         )
+
+
+def test_one_pending_row_per_workspace_enforced_by_index() -> None:
+    """#429 三轮 P1-1: the partial unique index is the boundary — a second
+    pending row for one workspace is rejected by the database itself, no
+    matter which code path (or direct SQL) attempts it. The index exists as
+    a partial unique index on both the fresh and the upgraded paths (the
+    parity test pins the two shapes together)."""
+    with pytest.raises(IntegrityError), write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into studio_publish_requests(workspace_id, expires_at)"
+            " values ('demo_workflow', now() + interval '1 minute'),"
+            " ('demo_workflow', now() + interval '1 minute')"
+        )
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute(
+            "select indexdef from pg_indexes"
+            " where schemaname=current_schema()"
+            " and indexname='idx_studio_publish_requests_pending_workspace'"
+        ).fetchone()
+    assert row is not None
+    assert "unique" in str(row["indexdef"]).lower()
+    assert "status = 'pending'" in str(row["indexdef"])
+
+
+def test_claim_moves_pending_to_confirming_and_back() -> None:
+    """#429 三轮 P1-2/P1-3 at the queries layer: the claim is one atomic
+    UPDATE (pending → confirming) that also re-checks TTL and the draft
+    hash; a refused publish resets the row to pending through the same
+    resolve entry point."""
+    from server.app.jobs.queries.studio_publish_requests import (
+        StudioPublishRequestQueriesMixin,
+    )
+
+    job_db = StudioPublishRequestQueriesMixin.__new__(StudioPublishRequestQueriesMixin)
+    job_db._path = TEST_DATABASE_URL  # noqa: SLF001 — test wiring
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into workspaces(id, name, default_workflow_key)"
+            " values ('claim_ws', 'Claim WS', 'claim_ws') on conflict (id) do nothing"
+        )
+    request = job_db.create_pending_publish_request(
+        "claim_ws", "studio-agent:test", draft_hash="hash-a"
+    )
+    request_id = str(request["id"])
+
+    # Hash mismatch: the claim refuses (None) and the row stays pending.
+    assert job_db.claim_pending_publish_request("claim_ws", request_id, "hash-b") is None
+    assert job_db.get_pending_publish_request("claim_ws")["status"] == "pending"
+
+    # Matching hash: the row moves to confirming — and while confirming, it
+    # is invisible to the pending read (cancel/new-request predicates).
+    claimed = job_db.claim_pending_publish_request("claim_ws", request_id, "hash-a")
+    assert claimed is not None and claimed["status"] == "confirming"
+    assert job_db.get_pending_publish_request("claim_ws") is None
+
+    # A refused publish rolls the row back to pending (retryable).
+    rolled_back = job_db.resolve_publish_request(request_id, status="pending")
+    assert rolled_back is not None and rolled_back["status"] == "pending"
+    assert job_db.get_pending_publish_request("claim_ws")["id"] == request_id
+
+    # Success path: claim again, then confirm records the revision.
+    assert job_db.claim_pending_publish_request("claim_ws", request_id, "hash-a") is not None
+    resolved = job_db.resolve_publish_request(
+        request_id, status="confirmed", result_revision_id="rev-1"
+    )
+    assert resolved is not None and resolved["status"] == "confirmed"
+    assert resolved["result_revision_id"] == "rev-1"

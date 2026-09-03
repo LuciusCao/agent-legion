@@ -12,11 +12,17 @@ from pydantic import BaseModel, ConfigDict
 class StudioPublishRequestRecord(BaseModel):
     """One row of the agent→human publish handshake.
 
-    ``status`` lifecycle: pending → superseded (a newer agent request or a
-    manual publish displaced it) | confirmed (human confirmed;
-    ``result_revision_id`` set only when the publish created a NEW revision
-    — runtime-only config updates keep it null) | rejected (human
-    cancelled) | expired (past ``expires_at``; swept lazily on read).
+    ``status`` lifecycle: pending → confirming (the human confirm claimed
+    the row; its publish is in flight — cancel and new agent requests
+    cannot touch it) → confirmed (``result_revision_id`` set only when the
+    publish created a NEW revision — runtime-only config updates keep it
+    null) | back to pending (the claimed publish was refused — the draft
+    drifted; fixable and retryable) | rejected (human cancelled) | expired
+    (past ``expires_at``; swept lazily on read). ``superseded``: displaced
+    by a newer agent request or a manual publish.
+
+    ``draft_hash``: sha256 of the server draft YAML at request time
+    (#429 三轮 P1-3) — the confirm publishes exactly that draft or refuses.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -27,6 +33,7 @@ class StudioPublishRequestRecord(BaseModel):
     status: str
     created_by: str
     result_revision_id: str | None = None
+    draft_hash: str | None = None
     created_at: str
     expires_at: str
     resolved_at: str | None = None

@@ -24,9 +24,8 @@ export type AgentPublishRequestState = {
    * agentPublishNoticeStore——栏顶 StudioChatAside 与对话框读同一份）。 */
   resolvedNotice: string | null
   confirming: boolean
-  /** cancel 在途（#429 三轮复审 P3）：双击「返回编辑」或 cancel 在途按
-   * ESC 会二次调 cancel → 404 → 红色假失败 toast 与正确回执同现。与
-   * confirming 同款在途守卫：canceling 期间重复 cancel 早退。 */
+  /** cancel 在途（#429 三轮复审 P3）：在途期间重复 cancel 早退——二次
+   * cancel 必 404，红 toast 与正确回执同现是假失败。 */
   canceling: boolean
   /** 用户确认：走后端确认端点（与手动发布同门禁），成功后失效相关查询。 */
   confirm: () => Promise<void>
@@ -39,12 +38,11 @@ export type AgentPublishRequestState = {
  * 有则由 AgentPublishRequestDialog 弹出发布确认对话框（复用 compare
  * summary 数据流）。确认/取消只由用户会话触发——agent 的 scoped token 在
  * 后端被 reject_studio_agent_scope 挡在门外。多个组件（对话框/对话栏）各自
- * 调用本 hook：相同 queryKey 的 useQuery 自动合并为一次轮询；落定回执走
- * agentPublishNoticeStore（zustand store，#429 复审修复：原 useState 每个实
- * 例一份，对话框写入的回执对话栏永远读不到）。resolve 归属（二轮复审）同样
- * 存 store：invalidate 后所有实例同时看到 pending→null，旁观实例的观测
- * effect 靠 store 的 lastResolvedRequestId 识别「已被主动 resolve」，不再拿
- * 「已消解」覆盖操作实例着陆的正确回执。 */
+ * 调用本 hook：相同 queryKey 的 useQuery 自动合并为一次轮询；落定回执与
+ * resolve 归属（#429 复审）都走 agentPublishNoticeStore（zustand store，
+ * 跨实例共享），invalidate 后所有实例同时看到 pending→null，旁观实例的
+ * 观测 effect 靠 store 的 lastResolvedRequestId 识别「已被主动 resolve」，
+ * 不再拿「已消解」覆盖操作实例着陆的正确回执。 */
 export function useAgentPublishRequest(
   workspaceId: string | undefined
 ): AgentPublishRequestState {
