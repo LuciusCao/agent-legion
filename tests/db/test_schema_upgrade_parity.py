@@ -43,19 +43,23 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v75, node_runs_skill_key, #410) must
+# Effects the newest migration (v76, studio_publish_requests, #416) must
 # leave behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v75 adds the node_runs skill-key column (DDL-only,
-# schema-file replay): the undo drops it; the v72-v74 effects stay in place
-# — they belong to the SCHEMA_VERSION-1 shape after the rewind.
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (("node_runs", "skill", "text"),)
+# SCHEMA_VERSION-1. v76 creates the studio_publish_requests table (the DDL
+# lives ONLY in the migration apply fn — postgres_schema.sql does not create
+# it, at its line ceiling; fresh databases run every migration after the
+# file replay, so fresh and upgraded databases still share the shape); the
+# undo drops it (indexes included — plain and partial unique alike); the
+# v72-v75 effects stay in place — they belong to the SCHEMA_VERSION-1 shape
+# after the rewind.
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("studio_publish_requests",)
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "node_runs_skill_key"
+_NEWEST_MIGRATION_NAME = "studio_publish_requests"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v73 (no extra DDL: v74 is purely additive columns).
+# faithful v75 (no extra DDL: v74/v75 are purely additive columns).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.
