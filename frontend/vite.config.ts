@@ -26,7 +26,6 @@ const browserTestFiles = [
   'src/lib/sanitizeHtml.test.ts',
   'src/hooks/useJobFilterRefetch.test.ts',
   'src/pages/jobDetail/useUpgradeWorkflowAction.test.ts',
-  'src/features/workflowStudio/shared/useAgentPublishRequest.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudio.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudio.draft.test.ts',
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.test.ts',
