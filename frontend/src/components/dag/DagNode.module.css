@@ -1,5 +1,7 @@
 .node {
-  width: 240px;
+  /* #415：240→280px。宽度必须与 DagGraph.tsx 的 NODE_WIDTH 同步——dagre
+     以该常量布点，卡片 CSS 宽于它时相邻列的卡片会重叠。 */
+  width: 280px;
   border-radius: 12px;
   padding: 12px;
   background: #f9fafb;
@@ -40,13 +42,9 @@
   border-color: #b91c1c;
 }
 
-.node.stale,
-.node.pending,
-.node.not_applicable {
-  background: #f9fafb;
-  border-color: #d1d5db;
-}
-
+/* 中性态（stale/pending/not_applicable）曾有一条例外规则，但取值与 .node
+   基础规则完全相同（#f9fafb / #d1d5db），属机械 no-op——#415/#423 的徽标
+   收缩修复需要预算行数，按豁免 ceiling（只降不升）纪律删除该冗余规则。 */
 .node.awaiting_approval {
   background: var(--status-approval-bg);
 }
@@ -59,6 +57,7 @@
 }
 
 .icon {
+  flex-shrink: 0;
   font-family: 'Material Symbols Outlined', sans-serif;
   font-size: 18px;
 }
@@ -81,18 +80,35 @@
 .iconnot_applicable {
   color: #9ca3af;
 }
+/* #415：label 从单行省略改为最多两行（-webkit-line-clamp，主流浏览器均
+   支持该前缀形式），超长 token（如 review_key_info_a 这类 node key 作
+   label）用 overflow-wrap 断行，避免一整段不可断内容把自身挤出 flex 行
+   被左侧裁掉；完整文本由 DagNodeHeader 的 title 兜底。
+   #423 codex P2——最坏徽标组合的布局推演（280 卡片 − 24 padding − 4
+   border = 252 内容宽；gap 8×5）：icon 18 + workerTag ≤88 + terminalTag
+   ≤88 + 固定徽标（executionWarning「缺执行」/change/executor 枚举取最
+   宽 ≈40-52）+ label 96 = 290-302 > 252，flex 溢出由带 min-width:0 的
+   两个动态徽标收缩吸收（88→约 38-50，省略号截断），label 保住 96px
+   下限（252 的 1/3 强）始终可读——保底优于让 flex 把 label 挤到 0。 */
 .label {
   flex: 1;
+  min-width: 96px;
   font-weight: 600;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
+/* #423 review P2：固定短徽标（executorKind 枚举/警告文案）内容可控，
+   flex-shrink: 0 不收缩；terminalTag/workerTag 是动态内容徽标
+   （terminal.outcome 只校验非空、排队中 agentId 任意长），整体搬去
+   DagNodeBadges.module.css 做可收缩 + max-width + 单行省略——本文件已到
+   #276 豁免 ceiling（只降不升），搬出后基线从四类收敛为两类。 */
 .executorTag,
-.terminalTag,
-.workerTag,
 .executionWarningTag {
+  flex-shrink: 0;
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 10px;
@@ -104,18 +120,8 @@
   text-transform: uppercase;
 }
 
-.workerTag {
-  background: #dbeafe;
-  color: #1e40af;
-  font-family: ui-monospace, monospace;
-}
-
-.terminalTag {
-  background: #dcfce7;
-  color: #166534;
-}
-
 .unboundTag {
+  flex-shrink: 0;
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 10px;
