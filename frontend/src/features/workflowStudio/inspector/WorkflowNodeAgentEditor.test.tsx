@@ -101,9 +101,15 @@ describe('WorkflowNodeAgentEditor', () => {
       fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
     })
 
+    // #421 独立复审回归：新建默认 runtime 是 velites（AgentEditor useState
+    // 默认值），无意改回 'pi' 时这里必须变红。
     expect(mocks.createAgentDefinition).toHaveBeenCalledWith(
       'ws1',
-      expect.objectContaining({ agent_id: 'agent-new', skill: '' })
+      expect.objectContaining({
+        agent_id: 'agent-new',
+        skill: '',
+        runtime: 'velites',
+      })
     )
   })
 
