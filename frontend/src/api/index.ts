@@ -30,6 +30,10 @@ export {
 } from './workspacePackages'
 // prettier-ignore
 export { compareWorkflowDraft, fetchActiveWorkflowRevision, fetchWorkflowRevisionDetail, fetchWorkflowRevisions } from './workflowRevisions'
+// prettier-ignore
+export { cancelPublishRequest, confirmPublishRequest, fetchPendingPublishRequest } from './studioPublishRequestApi'
+// prettier-ignore
+export type { StudioPublishRequestRecord } from './studioPublishRequestApi'
 export { publishWorkflowDraft, validateWorkflowDraft } from './workflows'
 export { fetchWorkflowDraft, putWorkflowDraft } from './workflowDraft'
 export { fetchOpsMetrics } from './metrics'

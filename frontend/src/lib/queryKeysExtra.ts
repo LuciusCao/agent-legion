@@ -91,4 +91,6 @@ export const extraQueryKeys = {
     ['qualityReplays', workspaceId, itemId] as const,
   qualityReplayDetail: (workspaceId: string, replayId: string) =>
     ['qualityReplayDetail', workspaceId, replayId] as const,
+  // Agent 发起的 workflow 发布请求（#416）：轮询 pending 弹确认对话框。
+  studioPublishRequest: (ws: string) => k('studioPublishRequest', ws),
 }
