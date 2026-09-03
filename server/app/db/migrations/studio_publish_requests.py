@@ -17,22 +17,13 @@ apply fn on upgrade, so both paths are covered; the parity test pins
 fresh == upgraded).
 
 State machine (single row per workspace while pending):
-
-``pending`` → ``confirming`` (the human confirm claimed the row — the
-             publish is in flight; cancel and new agent requests cannot
-             touch a confirming row, #429 三轮 P1),
-           → ``confirmed`` (publish succeeded; result_revision_id records
-             the revision the publish created, or NULL when the publish
-             was a runtime-only in-place save),
-           → back to ``pending`` (the claimed publish was refused — the
-             draft drifted after the agent's request; the human can fix
-             and re-confirm, or cancel),
-``pending`` → ``superseded`` (a newer agent request or a manual human
-             publish displaced it — the manual publish path supersedes the
-             workspace's pending rows, #429),
-           → ``rejected`` (human cancelled in the review dialog),
-           → ``expired`` (older than ``expires_at``; the sweep happens
-             lazily on the next read, no background timer).
+``pending`` → ``confirming`` (the human confirm's claim; cancel/new agent
+requests cannot touch it, #429 三轮 P1) → ``confirmed`` (publish succeeded;
+result_revision_id records the new revision, NULL for a runtime-only
+in-place save) | back to ``pending`` (the claimed publish was refused —
+fixable, retryable) | ``rejected`` (human cancelled);
+``pending`` → ``superseded`` (a newer agent request or a manual publish
+displaced it) | ``expired`` (past ``expires_at``, lazily swept on read).
 
 Two #429 三轮 P1 hardening pieces live in the DDL itself:
 
@@ -44,11 +35,18 @@ Two #429 三轮 P1 hardening pieces live in the DDL itself:
   ``confirming`` rows are deliberately NOT in the index — the claim is an
   UPDATE, and indexing it would break the pending→confirming→pending
   retry loop; the "no new pending while confirming" rule is enforced by
-  the create path rejecting with 409 (#429 三轮 P1-2).
+  the create transaction's guard (#429 三轮 P1-2, in-transaction since
+  四轮 codex P1).
 - ``draft_hash``: the sha256 of the server draft YAML at request time.
   The confirm replays it against the current server draft and refuses
   with 409 on a mismatch — the human confirms exactly the draft the agent
   asked about, never a newer one that silently appeared (#429 三轮 P1-3).
+- ``claimed_at`` (#429 四轮 P1): stamped on claim, the TTL clock for a
+  process that died between claim and resolve — a confirming row older
+  than CONFIRMING_STALE_SECONDS (5 min; a healthy publish takes seconds)
+  is swept to ``expired`` (the create transaction does it in-line under
+  the claim-shared advisory lock). See
+  studio_publish_request_support.CONFIRMING_STALE_SECONDS.
 """
 
 from __future__ import annotations
@@ -67,7 +65,8 @@ create table if not exists studio_publish_requests (
   draft_hash text,
   created_at timestamptz not null default current_timestamp,
   expires_at timestamptz not null,
-  resolved_at timestamptz
+  resolved_at timestamptz,
+  claimed_at timestamptz
 );
 create index if not exists idx_studio_publish_requests_workspace_status
   on studio_publish_requests(workspace_id, status, created_at desc);

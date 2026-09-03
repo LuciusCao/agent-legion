@@ -45,7 +45,8 @@ export function WorkflowPublishReviewDialog({
   canceling = false,
 }: Props) {
   const hasChanges = hasCompareSummaryChanges(summary)
-  // 任一操作在途即禁止二次触发关闭（见下）。
+  // 任一操作在途即禁止二次触发关闭与确认（#429 四轮 codex P2：cancel 在途
+  // 时确认按钮不禁会并发 cancel+confirm，终态由后端竞态决定）。
   const resolving = confirming || canceling
   // #429 二轮复审 P3：confirm 进行中，关闭渠道（返回编辑/ESC/backdrop）
   // 全部不触发 cancel——发布已在途，此时 cancel 会让 revision 实际上线但
@@ -79,7 +80,7 @@ export function WorkflowPublishReviewDialog({
           onClick={onConfirm}
           variant="contained"
           color="primary"
-          disabled={!hasChanges || confirming}
+          disabled={!hasChanges || resolving}
         >
           {createsRevision ? '确认发布' : '确认保存'}
         </Button>

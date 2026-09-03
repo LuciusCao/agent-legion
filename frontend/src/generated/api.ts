@@ -6253,10 +6253,15 @@ export interface components {
      *
      *     ``draft_hash``: sha256 of the server draft YAML at request time
      *     (#429 三轮 P1-3) — the confirm publishes exactly that draft or refuses.
+     *
+     *     ``claimed_at``: stamped when the row moved to ``confirming``; null on
+     *     every other state (#429 四轮 P1 — the stale-claim sweep's clock).
      */
     StudioPublishRequestRecord: {
       /** Chat Session Id */
       chat_session_id?: string | null
+      /** Claimed At */
+      claimed_at?: string | null
       /** Created At */
       created_at: string
       /** Created By */

@@ -23,6 +23,9 @@ class StudioPublishRequestRecord(BaseModel):
 
     ``draft_hash``: sha256 of the server draft YAML at request time
     (#429 三轮 P1-3) — the confirm publishes exactly that draft or refuses.
+
+    ``claimed_at``: stamped when the row moved to ``confirming``; null on
+    every other state (#429 四轮 P1 — the stale-claim sweep's clock).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -37,6 +40,7 @@ class StudioPublishRequestRecord(BaseModel):
     created_at: str
     expires_at: str
     resolved_at: str | None = None
+    claimed_at: str | None = None
 
 
 class StudioAgentPublishRequestResponse(BaseModel):

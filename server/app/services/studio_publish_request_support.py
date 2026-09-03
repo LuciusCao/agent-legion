@@ -9,7 +9,7 @@ their own.
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from server.app.services.job_errors import ConflictError
@@ -17,13 +17,17 @@ from server.app.services.job_errors import ConflictError
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
 
+# #429 四轮 P1: how long a ``confirming`` row may sit before readers treat
+# it as a dead process's claim (the confirm died between claim and resolve).
+# A healthy publish completes in seconds; 5 minutes absorbs slow disk/
+# pagination without ever sweeping a live claim.
+CONFIRMING_STALE_SECONDS = 300
+
 
 def workspace_draft_yaml(job_db: JobQueries, workspace_id: str) -> str:
-    """The workspace's unpublished draft YAML (schema v61 draft store).
-
-    This is the same YAML the Studio canvas edits and the review dialog's
-    compare runs against — confirm publishes what the human reviewed.
-    """
+    """The workspace's unpublished draft YAML (schema v61 draft store) — the
+    same YAML the Studio canvas edits and the review dialog's compare runs
+    against; confirm publishes what the human reviewed."""
     draft = job_db.get_workspace_workflow_draft(workspace_id)
     if draft is None:
         raise ConflictError("No unpublished workflow draft to publish")
@@ -65,7 +69,7 @@ def iso_payload(request: dict[str, Any]) -> dict[str, Any]:
     """The wire payload: timestamps as ISO strings (datetimes otherwise leak
     Postgres-specific formatting into the MCP tool text)."""
     payload = dict(request)
-    for field in ("created_at", "expires_at", "resolved_at"):
+    for field in ("created_at", "expires_at", "resolved_at", "claimed_at"):
         value = payload.get(field)
         if value is not None and not isinstance(value, str):
             payload[field] = value.isoformat()
@@ -74,15 +78,27 @@ def iso_payload(request: dict[str, Any]) -> dict[str, Any]:
 
 def is_past_expiry(request: dict[str, Any]) -> bool:
     """Whether a pending row is past its ``expires_at``. The driver hands
-    timestamptz back as an ISO string in this deployment, so parse (the
-    string is always self-produced UTC ISO format; ``fromisoformat``
-    round-trips it)."""
+    timestamptz back as an ISO string in this deployment, so parse (always
+    self-produced UTC ISO; ``fromisoformat`` round-trips it)."""
     expires_at = request.get("expires_at")
     if expires_at is None:
         return False
     if isinstance(expires_at, str):
         expires_at = datetime.fromisoformat(expires_at)
     return expires_at <= datetime.now(UTC)
+
+
+def is_stale_claim(request: dict[str, Any]) -> bool:
+    """Whether a ``confirming`` row's claim is past the stale threshold
+    (#429 四轮 P1): the claiming process is presumed dead. String-tolerant
+    like ``is_past_expiry``. A row without ``claimed_at`` reads as NOT
+    stale — the safe default never risks expiring a live claim."""
+    claimed_at = request.get("claimed_at")
+    if claimed_at is None:
+        return False
+    if isinstance(claimed_at, str):
+        claimed_at = datetime.fromisoformat(claimed_at)
+    return claimed_at <= datetime.now(UTC) - timedelta(seconds=CONFIRMING_STALE_SECONDS)
 
 
 def may_read_request(job_db: JobQueries, request: dict[str, Any], user: dict[str, Any]) -> bool:

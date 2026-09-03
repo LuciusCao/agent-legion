@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentPublishRequestDialog } from './AgentPublishRequestDialog'
 import { makeStudioView, withStudioProviders } from './testStudioProviders'
 import { useSettingStore } from '../../../stores/settingStore'
+import { useUiStore } from '../../../stores/uiStore'
 import { TestQueryProvider } from '../../../testing/testQueryClient'
 import type { StudioPublishRequestRecord } from '../../../api/studioPublishRequestApi'
 
@@ -27,6 +28,11 @@ vi.mock('../../../api/studioPublishRequestApi', () => ({
 // 后的审阅-确认一致性链路）。
 vi.mock('../../../api/workflowDraft', () => ({
   fetchWorkflowDraft: (...args: unknown[]) => mocks.fetchWorkflowDraft(...args),
+}))
+
+// #429 四轮 P2-1：toast 经 useUiStore（flush/read-draft 失败中止 confirm）。
+vi.mock('../../../stores/uiStore', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../stores/uiStore')>()),
 }))
 
 const workflow = {
@@ -84,7 +90,9 @@ const studioState = {
   flushDraftSave: vi.fn(),
 }
 
-function pendingRecord(): StudioPublishRequestRecord {
+function pendingRecord(
+  overrides: Partial<StudioPublishRequestRecord> = {}
+): StudioPublishRequestRecord {
   return {
     id: 'req-1',
     workspace_id: 'ws1',
@@ -96,6 +104,8 @@ function pendingRecord(): StudioPublishRequestRecord {
     created_at: '2026-09-03T10:00:00Z',
     expires_at: '2026-09-03T10:10:00Z',
     resolved_at: null,
+    claimed_at: null,
+    ...overrides,
   }
 }
 
@@ -115,6 +125,7 @@ describe('AgentPublishRequestDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useSettingStore.setState({ workspaceId: 'ws1' })
+    useUiStore.setState({ toast: null })
     mocks.fetchPendingPublishRequest.mockResolvedValue(null)
   })
 
@@ -155,6 +166,7 @@ describe('AgentPublishRequestDialog', () => {
   it('confirm calls the confirm endpoint, not the manual publishDraft action', async () => {
     mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
     mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: 'key: w\n' })
+    studioState.flushDraftSave = vi.fn().mockResolvedValue(undefined)
     mocks.confirmPublishRequest.mockResolvedValue({
       ...pendingRecord(),
       status: 'confirmed',
@@ -174,13 +186,23 @@ describe('AgentPublishRequestDialog', () => {
     expect(studioState.publishDraft).not.toHaveBeenCalled()
   })
 
-  it('confirm flushes the canvas draft save and re-reads the server draft first', async () => {
-    // #429 三轮 P1-3 回归钉：画布草稿 800ms debounce 在途时，点确认必须先
-    // flush 本页保存（studio.flushDraftSave）再重读服务端草稿，最后才调确
-    // 认端点——审阅的 compare summary 与确认发布的 YAML 是同一份（后端
-    // hash 校验兜底）。
+  it('confirm awaits the flush PUT before reading the server draft (completion order)', async () => {
+    // #429 四轮 P2-1 回归钉：旧实现 flush 不等待（先发优势），flush 的
+    // PUT 迟于 confirm 的服务端读落地时会发布旧草稿且 hash 恰好匹配。
+    // 现在 read-draft 必须在 flush 的 PUT **resolve 之后**才发出（完成
+    // 序），最后才调确认端点。
     const order: string[] = []
-    studioState.flushDraftSave = vi.fn(() => order.push('flush'))
+    let releasePut: (() => void) | null = null
+    studioState.flushDraftSave = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          order.push('flush-put-sent')
+          releasePut = () => {
+            order.push('flush-put-done')
+            resolve()
+          }
+        })
+    )
     mocks.fetchWorkflowDraft.mockImplementation(async () => {
       order.push('read-draft')
       return { definition_yaml: 'key: w\n' }
@@ -201,12 +223,88 @@ describe('AgentPublishRequestDialog', () => {
       await screen.findByRole('button', { name: '确认发布' })
     )
 
+    // PUT 在途：read-draft 尚未发出（完成序，不是先发优势）。
+    await waitFor(() => expect(order).toEqual(['flush-put-sent']))
+    expect(mocks.fetchWorkflowDraft).not.toHaveBeenCalled()
+    expect(mocks.confirmPublishRequest).not.toHaveBeenCalled()
+
+    const release = releasePut as unknown as () => void
+    release()
     await waitFor(() =>
       expect(mocks.confirmPublishRequest).toHaveBeenCalledWith('ws1', 'req-1')
     )
     expect(studioState.flushDraftSave).toHaveBeenCalledTimes(1)
     expect(mocks.fetchWorkflowDraft).toHaveBeenCalledWith('ws1')
-    expect(order).toEqual(['flush', 'read-draft', 'confirm'])
+    expect(order).toEqual([
+      'flush-put-sent',
+      'flush-put-done',
+      'read-draft',
+      'confirm',
+    ])
+  })
+
+  it('confirm does not proceed when the server draft re-read fails', async () => {
+    // #429 四轮 P2-1：fetchWorkflowDraft reject 时旧实现 confirm 静默不发
+    // 生。现在必须提示错误且绝不调确认端点（不发布未确认落盘的内容）。
+    studioState.flushDraftSave = vi.fn().mockResolvedValue(undefined)
+    mocks.fetchWorkflowDraft.mockRejectedValue(new Error('draft read failed'))
+    mocks.confirmPublishRequest.mockResolvedValue({
+      ...pendingRecord(),
+      status: 'confirmed',
+      result_revision_id: 'ws1:demo_video_workflow:v2',
+      resolved_at: '2026-09-03T10:02:00Z',
+    })
+    mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    renderDialog()
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '确认发布' })
+    )
+
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toContain('草稿尚未保存成功')
+    )
+    expect(mocks.confirmPublishRequest).not.toHaveBeenCalled()
+  })
+
+  it('confirm does not proceed when the flush save fails', async () => {
+    // #429 四轮 P2-1 的另一半：flush 的保存链失败（如网络错误）同样中止
+    // confirm——宁可让用户重试，不发布未确认落盘的草稿。
+    studioState.flushDraftSave = vi.fn().mockRejectedValue(new Error('network'))
+    mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: 'key: w\n' })
+    mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    renderDialog()
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '确认发布' })
+    )
+
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toContain('草稿尚未保存成功')
+    )
+    expect(mocks.fetchWorkflowDraft).not.toHaveBeenCalled()
+    expect(mocks.confirmPublishRequest).not.toHaveBeenCalled()
+  })
+
+  it('stays open showing the publish in progress while the request is confirming', async () => {
+    // #429 四轮 P3-2 回归钉：confirm 在途超过一个轮询周期时，轮询返回
+    // status='confirming' 的行——对话框不消失，确认按钮呈进行中（disabled）。
+    mocks.fetchPendingPublishRequest.mockResolvedValue(
+      pendingRecord({
+        status: 'confirming',
+        claimed_at: '2026-09-03T10:01:30Z',
+      })
+    )
+    renderDialog()
+
+    const confirmButton = await screen.findByRole('button', {
+      name: '确认发布',
+    })
+    expect(
+      screen.getByRole('dialog', { name: '发布 workflow revision' })
+    ).toBeInTheDocument()
+    // confirming 状态下按钮禁用（发布进行中，不可重复触发）。
+    await waitFor(() => expect(confirmButton).toBeDisabled())
   })
 
   it('cancel calls the cancel endpoint and closes the dialog', async () => {
@@ -225,5 +323,32 @@ describe('AgentPublishRequestDialog', () => {
     await waitFor(() =>
       expect(mocks.cancelPublishRequest).toHaveBeenCalledWith('ws1', 'req-1')
     )
+  })
+
+  it('disables the confirm button while a cancel is in flight', async () => {
+    // #429 四轮 codex P2 回归钉：cancel 在途（canceling）时确认按钮必须
+    // disabled——否则快速再点确认会并发 cancel+confirm，终态由后端竞态
+    // 决定，可能同时出现成功回执和失败 toast。
+    mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    let releaseCancel: (() => void) | null = null
+    mocks.cancelPublishRequest.mockImplementation(
+      () =>
+        new Promise((resolve: (value: unknown) => void) => {
+          releaseCancel = () => resolve(undefined)
+        })
+    )
+    renderDialog()
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '返回编辑' })
+    )
+
+    const confirmButton = screen.getByRole('button', { name: '确认发布' })
+    await waitFor(() => expect(confirmButton).toBeDisabled())
+    // cancel 落地后按钮恢复可用。
+    await act(async () => {
+      releaseCancel?.()
+    })
+    await waitFor(() => expect(confirmButton).toBeEnabled())
   })
 })
