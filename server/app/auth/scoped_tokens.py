@@ -77,7 +77,7 @@ def renew_scoped_token(
     ttl: timedelta = SCOPED_TOKEN_TTL,
     threshold: timedelta = SCOPED_TOKEN_RENEW_THRESHOLD,
     now: datetime | None = None,
-) -> None:
+) -> bool:
     """Slide a live token's expiry a full TTL forward when close to expiry.
 
     Called at studio chat turn start (#158): chat sessions outlive the fixed
@@ -85,7 +85,10 @@ def renew_scoped_token(
     same token is kept alive while the human keeps prompting. No-op for
     revoked tokens, tokens with more than ``threshold`` life left, and —
     deliberately — already-expired tokens: an idle session's leaked token
-    must not spring back to life on the next prompt.
+    must not spring back to life on the next prompt. Mid-turn keepalive for
+    in-flight agents lives in studio_chat.token_keepalive (#411). Returns
+    whether the expiry row was actually updated (False = no-op, or the token
+    died between the caller's liveness check and this UPDATE).
     """
     current = now or datetime.now(UTC)
-    queries.extend_scoped_token_expiry(hash_token(token), current + ttl, current + threshold)
+    return queries.extend_scoped_token_expiry(hash_token(token), current + ttl, current + threshold)
