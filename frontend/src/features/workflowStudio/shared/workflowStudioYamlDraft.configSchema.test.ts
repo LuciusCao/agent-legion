@@ -9,6 +9,10 @@ import {
   validateSchemaPropertyRename,
 } from './workflowStudioYamlDraft.configSchema.helpers'
 import {
+  configValueConstraintError,
+  isSecretConfigProperty,
+} from './workflowStudioYamlDraft.configSchema.constraints'
+import {
   addWorkflowNodeSchemaProperty,
   patchWorkflowNodeSchemaProperty,
   removeWorkflowNodeSchemaProperty,
@@ -34,11 +38,52 @@ const dagYaml = [
   '',
 ].join('\n')
 
+// 带 node config 的变体：rename/remove 的连带迁移（#428 复审 P1）
+// 断言基础。
+const dagYamlWithConfig = [
+  'key: demo',
+  'nodes:',
+  '  generate:',
+  '    type: code',
+  '    capability: generate_questions',
+  '    config_schema:',
+  '      type: object',
+  '      required: [bank_version]',
+  '      properties:',
+  '        bank_version:',
+  '          type: string',
+  '          default: v1',
+  '        dry_run:',
+  '          type: boolean',
+  '          default: false',
+  '    config:',
+  '      bank_version: v2',
+  '      dry_run: true',
+  '',
+].join('\n')
+
 function schemaOf(raw: string): Record<string, unknown> {
   const node = ((
     yaml.load(raw) as { nodes?: Record<string, Record<string, unknown>> }
   ).nodes?.generate ?? {}) as { config_schema?: Record<string, unknown> }
   return node.config_schema ?? {}
+}
+
+function configOf(raw: string): Record<string, unknown> {
+  const node = ((
+    yaml.load(raw) as { nodes?: Record<string, Record<string, unknown>> }
+  ).nodes?.generate ?? {}) as { config?: Record<string, unknown> }
+  return node.config ?? {}
+}
+
+/** #428 复审 P1 通用断言：config 的键必须 ⊆ schema properties 的键。
+ * 后端 intake 对 config 未知键直接 raise（validate_config_values 白名单），
+ * 留孤儿键 = 发布后新 job 创建失败。 */
+function expectNoOrphanConfigKeys(raw: string): void {
+  const properties = (schemaOf(raw).properties ?? {}) as Record<string, unknown>
+  const configKeys = Object.keys(configOf(raw))
+  const orphans = configKeys.filter((key) => !(key in properties))
+  expect(orphans).toEqual([])
 }
 
 describe('validateSchemaPropertyName', () => {
@@ -136,6 +181,54 @@ describe('schema property patches', () => {
     ).not.toHaveProperty('default')
   })
 
+  it('deletes an existing default when the patch carries default: undefined (#428 codex P2-A)', () => {
+    // { default: undefined } 是显式删除，不是「未提供」。
+    const next = patchWorkflowNodeSchemaProperty(
+      dagYaml,
+      'generate',
+      'bank_version',
+      { default: undefined }
+    )
+    expect(
+      (schemaOf(next).properties as Record<string, Record<string, unknown>>)
+        .bank_version
+    ).not.toHaveProperty('default')
+  })
+
+  it('clears enum/minimum/maximum when the type changes (#428 codex P2-B)', () => {
+    // number + minimum/maximum 改 string：numeric 约束不再可信，全清。
+    const constrained = [
+      'key: demo',
+      'nodes:',
+      '  generate:',
+      '    capability: generate_questions',
+      '    config_schema:',
+      '      type: object',
+      '      properties:',
+      '        page_size:',
+      '          type: number',
+      '          default: 1.5',
+      '          minimum: 1',
+      '          maximum: 100',
+      '          enum: [1.5, 2.5]',
+      '',
+    ].join('\n')
+    const next = patchWorkflowNodeSchemaProperty(
+      constrained,
+      'generate',
+      'page_size',
+      { type: 'string' }
+    )
+    const prop = (
+      schemaOf(next).properties as Record<string, Record<string, unknown>>
+    ).page_size
+    expect(prop).toMatchObject({ type: 'string' })
+    expect(prop).not.toHaveProperty('minimum')
+    expect(prop).not.toHaveProperty('maximum')
+    expect(prop).not.toHaveProperty('enum')
+    expect(prop).not.toHaveProperty('default')
+  })
+
   it('keeps a compatible default across a number→integer type change', () => {
     const withNumber = patchWorkflowNodeSchemaProperty(
       dagYaml,
@@ -222,6 +315,18 @@ describe('add/rename/remove schema properties', () => {
     })
   })
 
+  it('migrates the node config key along with a rename (#428 P1)', () => {
+    const next = renameWorkflowNodeSchemaProperty(
+      dagYamlWithConfig,
+      'generate',
+      'bank_version',
+      'bank'
+    )
+    // config 旧键迁移为新键，值保留；不产生孤儿键。
+    expect(configOf(next)).toEqual({ bank: 'v2', dry_run: true })
+    expectNoOrphanConfigKeys(next)
+  })
+
   it('removes a property and its required reference', () => {
     const next = removeWorkflowNodeSchemaProperty(
       dagYaml,
@@ -232,6 +337,41 @@ describe('add/rename/remove schema properties', () => {
       properties: { dry_run: { type: 'boolean' } },
     })
     expect(schemaOf(next)).not.toHaveProperty('required')
+  })
+
+  it('deletes the node config key along with the property (#428 P1)', () => {
+    const next = removeWorkflowNodeSchemaProperty(
+      dagYamlWithConfig,
+      'generate',
+      'dry_run'
+    )
+    // 被删属性的 config 键一并消失，其余键保留。
+    expect(configOf(next)).toEqual({ bank_version: 'v2' })
+    expectNoOrphanConfigKeys(next)
+  })
+
+  it('drops config entirely when the last property and its value go', () => {
+    const single = [
+      'key: demo',
+      'nodes:',
+      '  generate:',
+      '    capability: c',
+      '    config_schema:',
+      '      type: object',
+      '      properties:',
+      '        dry_run:',
+      '          type: boolean',
+      '    config:',
+      '      dry_run: true',
+      '',
+    ].join('\n')
+    const next = removeWorkflowNodeSchemaProperty(single, 'generate', 'dry_run')
+    const node =
+      (yaml.load(next) as { nodes?: Record<string, Record<string, unknown>> })
+        .nodes?.generate ?? {}
+    // schema 与 config 同步清空：整段 config 不留空壳。
+    expect(node).not.toHaveProperty('config_schema')
+    expect(node).not.toHaveProperty('config')
   })
 
   it('drops the whole config_schema when the last property goes', () => {
@@ -277,6 +417,23 @@ describe('patchWorkflowNodeConfigSchema (whole-block replace)', () => {
       ).nodes?.generate ?? {}
     expect(node).not.toHaveProperty('config_schema')
   })
+
+  it('clears node config when the whole schema block is deleted (#428 P1)', () => {
+    const removed = patchWorkflowNodeConfigSchema(
+      dagYamlWithConfig,
+      'generate',
+      undefined
+    )
+    const node =
+      (
+        yaml.load(removed) as {
+          nodes?: Record<string, Record<string, unknown>>
+        }
+      ).nodes?.generate ?? {}
+    // 整段 schema 删除 = 节点回到无 config 状态，config 全量清空。
+    expect(node).not.toHaveProperty('config_schema')
+    expect(node).not.toHaveProperty('config')
+  })
 })
 
 describe('default value coercion', () => {
@@ -307,5 +464,27 @@ describe('default value coercion', () => {
       'number',
       'boolean',
     ])
+  })
+})
+
+describe('config value constraints (#428 codex round 2)', () => {
+  it('flags values outside enum / below minimum / above maximum', () => {
+    const enumProp = { type: 'string' as const, enum: ['a', 'b'] }
+    expect(configValueConstraintError(enumProp, 'a')).toBeNull()
+    expect(configValueConstraintError(enumProp, 'c')).toContain('枚举')
+    expect(configValueConstraintError(enumProp, undefined)).toBeNull()
+
+    const bounded = { type: 'integer' as const, minimum: 1, maximum: 10 }
+    expect(configValueConstraintError(bounded, 5)).toBeNull()
+    expect(configValueConstraintError(bounded, 0)).toContain('不得小于 1')
+    expect(configValueConstraintError(bounded, 11)).toContain('不得大于 10')
+  })
+
+  it('identifies secret properties for form exclusion', () => {
+    expect(isSecretConfigProperty({ type: 'string' })).toBe(false)
+    expect(isSecretConfigProperty({ type: 'string', secret: true })).toBe(true)
+    expect(isSecretConfigProperty({ type: 'string', secret_ref: true })).toBe(
+      false
+    )
   })
 })

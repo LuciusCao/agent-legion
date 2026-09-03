@@ -50,6 +50,7 @@ export function WorkflowNodeConfigSchemaProperties({
           key={propKey}
           propKey={propKey}
           prop={properties[propKey]}
+          otherKeys={propKeys.filter((key) => key !== propKey)}
           readOnly={readOnly}
           onPatch={patch}
           onRename={onRename}

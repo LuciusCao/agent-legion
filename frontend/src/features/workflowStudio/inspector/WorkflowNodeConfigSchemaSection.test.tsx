@@ -179,6 +179,78 @@ describe('WorkflowNodeConfigSchemaSection (#418 structured editor)', () => {
     ).toBeUndefined()
   })
 
+  it('migrates the node config key along with the rename (#428 P1)', () => {
+    const setDefinitionYaml = vi.fn()
+    renderSection({
+      definitionYaml: `${yamlText}    config:
+      dry_run: true
+`,
+      setDefinitionYaml,
+    })
+
+    fireEvent.change(screen.getByLabelText('属性名 dry_run'), {
+      target: { value: 'preview_mode' },
+    })
+    fireEvent.blur(screen.getByLabelText('属性名 dry_run'))
+
+    const next = yaml.load(String(setDefinitionYaml.mock.calls[0][0])) as {
+      nodes?: Record<string, Record<string, unknown>>
+    }
+    expect(next.nodes?.generate?.config).toEqual({ preview_mode: true })
+  })
+
+  it('rejects renames to duplicate, reserved, or whitespace names (#428 P2-1)', () => {
+    const setDefinitionYaml = vi.fn()
+    renderSection({ setDefinitionYaml })
+
+    // 重名：不落草稿，行内报错，输入回弹原名。
+    fireEvent.change(screen.getByLabelText('属性名 dry_run'), {
+      target: { value: 'bank_version' },
+    })
+    fireEvent.blur(screen.getByLabelText('属性名 dry_run'))
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '属性 bank_version 已存在'
+    )
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('属性名 dry_run')).toHaveValue('dry_run')
+
+    // 平台保留执行键。
+    fireEvent.change(screen.getByLabelText('属性名 dry_run'), {
+      target: { value: 'timeout_seconds' },
+    })
+    fireEvent.blur(screen.getByLabelText('属性名 dry_run'))
+    expect(screen.getByRole('alert')).toHaveTextContent('平台保留执行键')
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+
+    // 含空格名。
+    fireEvent.change(screen.getByLabelText('属性名 dry_run'), {
+      target: { value: 'dry run' },
+    })
+    fireEvent.blur(screen.getByLabelText('属性名 dry_run'))
+    expect(screen.getByRole('alert')).toHaveTextContent('不能包含空格')
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+  })
+
+  it('flags an integer default that does not match the type instead of dropping it silently', () => {
+    const setDefinitionYaml = vi.fn()
+    renderSection({
+      definitionYaml: yamlText.replace(
+        '        bank_version:\n          type: string',
+        '        bank_version:\n          type: integer'
+      ),
+      setDefinitionYaml,
+    })
+
+    fireEvent.change(screen.getByLabelText('默认值 bank_version'), {
+      target: { value: '1.5' },
+    })
+    fireEvent.blur(screen.getByLabelText('默认值 bank_version'))
+
+    // integer 输 1.5：行内报错，不落草稿（#428 复审 NIT）。
+    expect(screen.getByRole('alert')).toHaveTextContent('与类型 integer 不匹配')
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+  })
+
   it('changes a property type and drops the now-incompatible default', () => {
     const setDefinitionYaml = vi.fn()
     renderSection({ setDefinitionYaml })
@@ -234,6 +306,25 @@ describe('WorkflowNodeConfigSchemaSection (#418 structured editor)', () => {
     expect(schema).toMatchObject({
       properties: { bank_version: { type: 'string' } },
     })
+  })
+
+  it('deletes the node config key along with the removed property (#428 P1)', () => {
+    const setDefinitionYaml = vi.fn()
+    renderSection({
+      definitionYaml: `${yamlText}    config:
+      bank_version: v2
+      dry_run: true
+`,
+      setDefinitionYaml,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '删除属性 dry_run' }))
+
+    const next = yaml.load(String(setDefinitionYaml.mock.calls[0][0])) as {
+      nodes?: Record<string, Record<string, unknown>>
+    }
+    // 被删属性的 config 键一并清理，其余保留。
+    expect(next.nodes?.generate?.config).toEqual({ bank_version: 'v2' })
   })
 
   it('drops the whole config_schema block when the last property is removed', () => {
@@ -292,6 +383,25 @@ nodes:
       nodes?: Record<string, Record<string, unknown>>
     }
     expect(next.nodes?.generate).not.toHaveProperty('config_schema')
+  })
+
+  it('clears node config when the whole schema is removed (#428 P1)', () => {
+    const setDefinitionYaml = vi.fn()
+    renderSection({
+      definitionYaml: `${yamlText}    config:
+      bank_version: v2
+`,
+      setDefinitionYaml,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '删除整段 Schema' }))
+
+    const next = yaml.load(String(setDefinitionYaml.mock.calls[0][0])) as {
+      nodes?: Record<string, Record<string, unknown>>
+    }
+    // 删整段 schema = 节点回到无 config 状态，config 全量清空。
+    expect(next.nodes?.generate).not.toHaveProperty('config_schema')
+    expect(next.nodes?.generate).not.toHaveProperty('config')
   })
 
   it('locks all editors in readOnly mode and explains why', () => {
