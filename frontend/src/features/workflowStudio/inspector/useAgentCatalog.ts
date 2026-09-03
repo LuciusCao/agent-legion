@@ -11,7 +11,8 @@ import { useAgentDefinitions } from './useAgentDefinitions'
 // draft-only Agent 的节点解析与导航回落靠它（useAgentDefinitions）。
 // #426 review P2：聚合 bindingStatus——绑定解析 = published 目录（本查询）
 // + 含 draft 的 agent-definitions，任一尚无数据时节点详情里的 agentId=null
-// 只是「未知」而非「未绑定」，内联 Agent 编辑器必须等 settle 再渲染表单。
+// 只是「未知」而非「未绑定」，内联编辑器要等 settle 才出新建表单；agentId
+// 已解析时编辑器不经该门控（#426 codex P2，门控在 Editor 侧按 agentId 收窄）。
 
 /** capability→Agent 绑定解析状态：pending=任一查询首次在途；error=任一
  * 查询失败且无数据（不退回可操作表单）；ready=两条查询都有数据，绑定

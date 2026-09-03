@@ -10,9 +10,12 @@ type Props = {
   capability: string
   readOnly?: boolean
   /**
-   * 绑定解析状态（目录+定义查询的聚合，#426 review P2）：agentId=null 在
-   * pending/error 下只是「未知」，不是「未绑定」——此时不渲染可操作的
-   * 新建表单，避免查询 settle 后表单被替换丢输入、甚至先提交重复草稿。
+   * 绑定解析状态（目录+定义查询的聚合，#426 review P2）：仅约束 agentId=null
+   * 的「确认未绑定」——查询未 settle 时 agentId=null 只是「未知」，不渲染
+   * 可操作的新建表单，避免 settle 后表单被替换丢输入、先提交重复草稿。
+   * agentId 已解析（published 目录或 draft 回落命中，相关查询必有数据）时
+   * 绑定目标已可信，不经此门控（#426 codex P2：另一目录在途/失败不挡
+   * 编辑器，错误仍由全局横幅暴露）。
    */
   bindingStatus: 'pending' | 'error' | 'ready'
 }
@@ -24,8 +27,10 @@ type Props = {
  * UI 承载；保存/发布/归档后失效 Agent 目录与 Studio capability 路由缓存。
  * #409：去掉「编辑 Agent」开合按钮——Agent 区块直接内联展开编辑面板，
  * 只读/无 workspace 时整块隐藏。
- * #426 review：渲染前先过绑定解析门控（bindingStatus），解析未 settle 时
- * 只给加载占位（失败给错误提示，均不落回可操作表单）。
+ * #426 review：agentId=null（待双目录确认「未绑定」）时先过绑定解析门控
+ * （bindingStatus），未 settle 只给加载占位（失败给错误提示，均不落回
+ * 可操作表单）；#426 codex P2：agentId 非空即绑定目标已解析，跳过门控
+ * 直接渲染编辑器（其内部按该 ID 加载详情，自带加载态）。
  */
 export function WorkflowNodeAgentEditor(props: Props) {
   const queryClient = useQueryClient()
@@ -42,7 +47,7 @@ export function WorkflowNodeAgentEditor(props: Props) {
     })
   }
 
-  if (props.bindingStatus !== 'ready') {
+  if (props.agentId === null && props.bindingStatus !== 'ready') {
     const pending = props.bindingStatus === 'pending'
     return (
       <div
