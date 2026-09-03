@@ -18,7 +18,8 @@ export function useNodeDetailPreview(nodeKey: string) {
   }
   return {
     activeKind: kind,
-    activeLabel: kind ? PREVIEW_KIND_LABELS[kind] : null,
+    // 面包屑后缀（自带「 / 」分隔符），无预览时空串，调用方直接拼接。
+    crumbs: kind ? ` / ${PREVIEW_KIND_LABELS[kind]}` : '',
     showPreview: (next: NodeDetailPreviewKind) => setKind(next),
     closePreview: () => setKind(null),
   }

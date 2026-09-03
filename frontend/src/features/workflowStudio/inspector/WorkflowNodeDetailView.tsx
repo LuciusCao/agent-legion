@@ -42,8 +42,7 @@ export function WorkflowNodeDetailView(props: Props) {
           ← 返回
         </button>
         <span className={styles.breadcrumb}>
-          {workflowLabel} / {node?.label ?? props.nodeKey}
-          {preview.activeLabel ? ` / ${preview.activeLabel}` : ''}
+          {`${workflowLabel} / ${node?.label ?? props.nodeKey}${preview.crumbs}`}
         </span>
         <StudioAgentPanelToggle
           open={props.agentOpen}
