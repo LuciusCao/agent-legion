@@ -37,7 +37,13 @@ test('主流程：添加条目 → 节点真实执行 → job 完成 → 产物�
   await page.getByRole('button', { name: '添加', exact: true }).click()
   const addItemsDialog = page.getByRole('dialog', { name: '添加条目' })
   await addItemsDialog.getByRole('tab', { name: '粘贴 ID' }).click()
-  await addItemsDialog.getByLabel('连接 Key').fill('cms-internal')
+  // MUI Select 的载体是 div[role=combobox]（不是 <input>，fill 会报错）；
+  // toHaveValue 只认 input，改断言 combobox 文本。cms-internal 是实例唯一
+  // enabled 连接，打开即默认选中；请求未返回前的文本框形态由 expect 自动
+  // 重试覆盖（等待 combobox 出现并显示默认值）。
+  await expect(
+    addItemsDialog.getByRole('combobox', { name: /连接 Key/ })
+  ).toHaveText('cms-internal')
   await addItemsDialog.getByLabel('外部 ID').fill(externalId)
   await addItemsDialog.getByRole('button', { name: '创建运行' }).click()
   // Wait for the close: the modal overlay intercepts pointer events while it

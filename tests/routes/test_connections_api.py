@@ -106,6 +106,38 @@ def test_keys_empty_and_multiple(client) -> None:
     assert client.get(KEYS_URL).json() == {"keys": ["cms-a", "cms-b"]}
 
 
+def test_keys_exclude_disabled_connections(client) -> None:
+    # #425 review P1: a disabled connection must not be offered as a picker
+    # candidate (a sole disabled key would be auto-selected by the frontend
+    # and only fail at execution time); the admin list still shows it.
+    assert (
+        client.post(CONNECTIONS_URL, json={**_payload(), "key": "cms-on"}, headers=CSRF).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            CONNECTIONS_URL, json={**_payload(), "key": "cms-off"}, headers=CSRF
+        ).status_code
+        == 200
+    )
+    assert (
+        client.put(f"{CONNECTIONS_URL}/cms-off", json={"enabled": False}, headers=CSRF).status_code
+        == 200
+    )
+
+    assert client.get(KEYS_URL).json() == {"keys": ["cms-on"]}
+
+    # The sole disabled connection: an empty picker, not a preselected key.
+    assert (
+        client.put(f"{CONNECTIONS_URL}/cms-on", json={"enabled": False}, headers=CSRF).status_code
+        == 200
+    )
+    assert client.get(KEYS_URL).json() == {"keys": []}
+    # Admin management still sees disabled connections to re-enable them.
+    listing = client.get(CONNECTIONS_URL).json()["connections"]
+    assert {c["key"]: c["enabled"] for c in listing} == {"cms-on": False, "cms-off": False}
+
+
 def test_types_listed(client) -> None:
     response = client.get(TYPES_URL)
     assert response.status_code == 200

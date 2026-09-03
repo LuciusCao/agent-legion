@@ -51,12 +51,12 @@ def _insert_material(job_db, workspace_id: str, material_id: str, *, status: str
         )
 
 
-def _insert_connection(job_db, key: str) -> None:
+def _insert_connection(job_db, key: str, *, enabled: bool = True) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into external_connections(key, type, display_name, config_json)"
-            " values (%s, 'hmac_token', %s, '{}')",
-            (key, key),
+            "insert into external_connections(key, type, display_name, config_json, enabled)"
+            " values (%s, 'hmac_token', %s, '{}', %s)",
+            (key, key, 1 if enabled else 0),
         )
 
 
@@ -244,6 +244,22 @@ def test_ref_validation_errors(client, job_db) -> None:
         json={"workflow_key": WORKFLOW_KEY, "items": []},
     )
     assert response.status_code == 422
+
+
+def test_ref_disabled_connection_rejected(client, job_db) -> None:
+    """#425 review P1: a disabled connection fails at run creation (400), not
+    at execution time."""
+    workspace_id = _create_workspace(client)
+    _accept_all_item_types(job_db, workspace_id)
+    _insert_connection(job_db, "cms-off", enabled=False)
+
+    response = _create_run(
+        client,
+        workspace_id,
+        [{"type": "ref", "connection_key": "cms-off", "external_id": "Q-1"}],
+    )
+    assert response.status_code == 400
+    assert "disabled" in response.json()["detail"]
 
 
 def test_duplicate_items_return_400(client, job_db) -> None:

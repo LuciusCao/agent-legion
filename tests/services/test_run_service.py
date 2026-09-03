@@ -69,12 +69,12 @@ def _insert_material(
         )
 
 
-def _insert_connection(job_db, key: str) -> None:
+def _insert_connection(job_db, key: str, *, enabled: bool = True) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into external_connections(key, type, display_name, config_json)"
-            " values (%s, 'hmac_token', %s, '{}')",
-            (key, key),
+            "insert into external_connections(key, type, display_name, config_json, enabled)"
+            " values (%s, 'hmac_token', %s, '{}', %s)",
+            (key, key, 1 if enabled else 0),
         )
 
 
@@ -231,6 +231,22 @@ def test_unknown_connection_key_is_rejected(service_all_types) -> None:
             workflow_key=WORKFLOW_KEY,
             items=[_ref_item("missing-conn", "Q-1")],
         )
+
+
+def test_disabled_connection_key_is_rejected_at_creation(service_all_types, job_db) -> None:
+    # #425 review P1: a disabled connection must fail at run creation (true
+    # fail-fast), not surface only at execution time in connection_tokens.
+    _insert_connection(job_db, "cms-off", enabled=False)
+
+    with pytest.raises(InvalidOperationError, match="disabled"):
+        service_all_types.create_run(
+            WORKSPACE_ID,
+            workflow_key=WORKFLOW_KEY,
+            items=[_ref_item("cms-off", "Q-1")],
+        )
+
+    # Creation failures leave no run behind (same invariant as unknown keys).
+    assert service_all_types.list_runs(WORKSPACE_ID) == []
 
 
 def test_duplicate_items_are_filtered(service, job_db) -> None:
