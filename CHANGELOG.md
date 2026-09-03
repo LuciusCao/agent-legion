@@ -109,6 +109,26 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   openclaw 条目与模型发现 adapter。未来需要时按 adapter 机制重新接入
   （指南见 `docs/architecture/velites-harness.md`）。
 
+### Fixed
+
+- Studio 对话 run token 连锁失效与静默死亡（issue #411）：单轮 prompt 可
+  跑满 1 小时，而 run token 续期只在轮首（30 分钟阈值）——长对话的 token
+  会在 turn 进行中过期，agent 的全部 MCP 工具调用 401（"Studio agent
+  scoped token required" → 客户端 "Not connected"），且界面无任何提示。
+  修复三处：① 每次 `tool_call` 事件触发保活（`studio_chat/token_keepalive.py`）——
+  token 活着则以「整轮时长 + 5 分钟」的专用阈值顺带续期（检查过存活的
+  token 必然活过当前轮，防泄漏语义不变：已吊销/已过期不复活），token 已死
+  （吊销/过期/用户被禁用）则向会话时间线追加一条 `run_token_invalidated`
+  状态消息，前端以警示样式提示「关闭当前会话后点『继续对话』恢复」；
+  ② `list_studio_chat_messages` 的 500 条上限从「取最早 500 条」改为
+  「取最新 500 条」（`order by seq desc` + 反转，返回值仍为升序）——
+  超长会话重进界面不再只看到远古记录而丢失进行中的对话（即 issue 报告的
+  「聊天记录消失」）；③ 保活与提示的 DB 操作全部带异常保护，失败不阻断
+  tool_call 消息落库且下次 tool_call 自动重试；续期 UPDATE 的 rowcount
+  闭合「查活→续期」间隙内 token 被吊销/过期的竞态（未命中即重验存活，
+  最后一次工具调用也不会漏报失效）。已知取舍：掉线超过 500 条的增量补齐
+  会在新旧窗口间留缝隙（API 无 before_seq），重新进入会话即全量替换自愈。
+
 ## [0.4.0-alpha] - 2026-08-29
 
 ### Added
