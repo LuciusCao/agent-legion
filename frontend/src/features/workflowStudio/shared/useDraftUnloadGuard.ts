@@ -2,8 +2,9 @@ import { useEffect } from 'react'
 
 type DraftUnloadGuardOptions = {
   /** 尽力把未落盘编辑立即 PUT；keepalive=true 用于 pagehide（请求可存活于
-   * 页面销毁之后）。 */
-  flush: (keepalive: boolean) => void
+   * 页面销毁之后）。返回 promise（#429 四轮 P2-1），但本护栏是 fire-and-
+   * forget：页面正在离开，没有人能 await 它。 */
+  flush: (keepalive: boolean) => void | Promise<void>
   hasUnsavedChanges: () => boolean
 }
 

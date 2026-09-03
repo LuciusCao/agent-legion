@@ -18,12 +18,17 @@ import {
 const POLL_INTERVAL_MS = 5_000
 
 export type AgentPublishRequestState = {
-  /** 当前 pending 的 agent 发布请求；null 表示没有。 */
+  /** 当前 pending/confirming 的 agent 发布请求；null 表示没有。confirming
+   * 行也返回（#429 四轮 P3-2）：confirm 在途时轮询不再返回 null——对话框
+   * 保持打开显示「发布进行中」，而不是中途消失。 */
   pendingRequest: StudioPublishRequestRecord | null
   /** 用户已交互（确认/取消）或请求被顶替后的落地回执（跨实例共享：见
    * agentPublishNoticeStore——栏顶 StudioChatAside 与对话框读同一份）。 */
   resolvedNotice: string | null
-  confirming: boolean
+  /** confirm 整体在途（#429 四轮 P2-1/P3-2）：覆盖 flush + 重读 + 端点
+   * 调用整窗——期间轮询可能先送来 confirming 行，对话框据它显示「发布
+   * 进行中」而非消失；替代旧 confirming（仅端点段）。 */
+  publishInFlight: boolean
   /** cancel 在途（#429 三轮复审 P3）：在途期间重复 cancel 早退——二次
    * cancel 必 404，红 toast 与正确回执同现是假失败。 */
   canceling: boolean
@@ -84,8 +89,12 @@ export function useAgentPublishRequest(
   // 后双方同时收到跳变，旁观实例会拿「已消解」覆盖操作实例刚着陆的正确
   // 回执），则回执已由操作响应着陆，这里不动；否则是后端被顶替（agent
   // 重发新请求 / 手动发布取代）或 TTL 过期，弹窗无声关闭——补一轮回执。
+  // confirming 行不算跳变（#429 四轮 P3-2）：confirm 在途时轮询会送来
+  // status='confirming' 的同一请求——它是「发布进行中」，不是「已消解」，
+  // 着陆回执的必须是真正终态的 null 跳变。
   useEffect(() => {
     if (pendingRequest) {
+      if (pendingRequest.status === 'confirming') return
       lastSeenPendingId.current = pendingRequest.id
       return
     }
@@ -162,7 +171,7 @@ export function useAgentPublishRequest(
   return {
     pendingRequest: pendingRequest ?? null,
     resolvedNotice: resolvedNotice?.message ?? null,
-    confirming,
+    publishInFlight: confirming,
     canceling,
     confirm,
     cancel,

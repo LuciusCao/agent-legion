@@ -10,8 +10,11 @@ export { draftSaveText } from './draftSaveController'
 
 export type DraftSaveControls = {
   state: DraftSaveState
-  /** 取消 pending 的 debounce 立即 PUT；keepalive 仅用于 pagehide。 */
-  flushNow: (keepalive?: boolean) => void
+  /** 取消 pending 的 debounce 立即 PUT 并返回其 promise（含重试链的终
+   * 态）；keepalive 仅用于 pagehide。#429 四轮 P2-1：返回 promise 让
+   * agent 发布确认可以 await 落盘完成后再读服务端草稿。失败也 resolve
+   * （错误态由 state 承载）。 */
+  flushNow: (keepalive?: boolean) => Promise<void>
   hasUnsavedChanges: () => boolean
 }
 
@@ -88,12 +91,12 @@ export function useWorkflowDraftPersistence(
     controllerRef.current?.schedule(draftYaml)
   }, [workspaceId, draftYaml, hydrated])
 
-  const flushNow = useCallback((keepalive = false) => {
+  const flushNow = useCallback((keepalive = false): Promise<void> => {
     const controller = controllerRef.current
-    if (!controller || !hydratedRef.current) return
+    if (!controller || !hydratedRef.current) return Promise.resolve()
     // error 态无 pending（重试已耗尽）：重新调度当前草稿让 flush 有内容可发。
     controller.schedule(draftYamlRef.current)
-    controller.flushNow({ keepalive })
+    return controller.flushNow({ keepalive })
   }, [])
 
   const hasUnsavedChanges = useCallback(() => {

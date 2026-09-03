@@ -112,15 +112,21 @@ export class DraftSaveController {
 
   /** 立即落盘：取消 pending 的 debounce 直接 PUT；无 pending 时是 no-op
    * （在途写入会自然完成；error 重试由上层先重新 schedule）。keepalive 用于
-   * pagehide 场景，此时不重试（页面即将销毁）。 */
-  flushNow(options?: { keepalive?: boolean }) {
+   * pagehide 场景，此时不重试（页面即将销毁）。
+   * #429 四轮 P2-1：返回本次 PUT 的 promise（含内部重试链）——调用方可以
+   * await 到「落盘完成」再发起依赖服务端草稿的操作（agent 发布确认）。
+   * no-op（无 pending）返回已 resolve 的 promise；PUT 被后续编辑作废
+   * （requestId 过期）时也 resolve——该次保存已不代表最新内容，等待方应
+   * 继续走自己的重读校准。keepalive 模式（页面即将销毁）无有意义的完成
+   * 时序，同样返回 promise 但调用方不该依赖它。 */
+  flushNow(options?: { keepalive?: boolean }): Promise<void> {
     const pending = this.pendingSave
-    if (!pending) return
+    if (!pending) return Promise.resolve()
     this.clearTimer()
     this.pendingSave = null
     const keepalive =
       options?.keepalive === true && withinKeepaliveLimit(pending.yaml)
-    this.save(
+    return this.save(
       pending.yaml,
       pending.requestId,
       keepalive ? 0 : MAX_PUT_RETRIES,
@@ -145,34 +151,45 @@ export class DraftSaveController {
     this.pendingSave = null
   }
 
+  /** 发起一次 PUT 并跟踪其终态。#429 四轮 P2-1：返回 promise 供 flushNow
+   * 的调用方 await——失败同样 resolve（错误态已进 state，UI 有可见警示；
+   * 等待方据此走重读校准/放弃后续操作，而不是把保存错误混进自己的错误
+   * 流）。迟到的响应/重试发现 requestId 过期时 resolve（该次保存已被更新
+   * 的编辑取代，不构成对等待方的失败信号）。 */
   private save(
     yaml: string,
     requestId: number,
     retriesLeft: number,
     keepalive: boolean
-  ) {
+  ): Promise<void> {
     this.inFlight = requestId
     this.setState({ ...this.state, status: 'saving' })
-    this.put(yaml, keepalive)
-      .then((response) => {
-        if (this.inFlight === requestId) this.inFlight = 0
-        if (this.requestCounter !== requestId) return
-        this.lastPersisted = yaml
-        this.setState({ status: 'saved', savedAt: response.updated_at ?? null })
-      })
-      .catch(() => {
-        if (this.inFlight === requestId) this.inFlight = 0
-        if (this.requestCounter !== requestId) return
-        this.setState({ ...this.state, status: 'error' })
-        if (retriesLeft > 0) {
-          const attempt = MAX_PUT_RETRIES - retriesLeft + 1
-          this.retryTimer = setTimeout(() => {
-            this.retryTimer = null
-            if (this.requestCounter !== requestId) return
-            this.save(yaml, requestId, retriesLeft - 1, false)
-          }, RETRY_BASE_MS * attempt)
-        }
-      })
+    return new Promise<void>((resolve) => {
+      this.put(yaml, keepalive)
+        .then((response) => {
+          if (this.inFlight === requestId) this.inFlight = 0
+          if (this.requestCounter !== requestId) return resolve()
+          this.lastPersisted = yaml
+          this.setState({
+            status: 'saved',
+            savedAt: response.updated_at ?? null,
+          })
+          resolve()
+        })
+        .catch(() => {
+          if (this.inFlight === requestId) this.inFlight = 0
+          if (this.requestCounter !== requestId) return resolve()
+          this.setState({ ...this.state, status: 'error' })
+          if (retriesLeft > 0) {
+            const attempt = MAX_PUT_RETRIES - retriesLeft + 1
+            this.retryTimer = setTimeout(() => {
+              this.retryTimer = null
+              if (this.requestCounter !== requestId) return resolve()
+              this.save(yaml, requestId, retriesLeft - 1, false).then(resolve)
+            }, RETRY_BASE_MS * attempt)
+          } else resolve()
+        })
+    })
   }
 
   private setState(next: DraftSaveState) {

@@ -1,4 +1,4 @@
-"""Persistence for agent-initiated workflow publish requests (schema v75).
+"""Persistence for agent-initiated workflow publish requests (schema v76).
 
 The per-workspace single-pending invariant is a partial unique index
 (``workspace_id where status='pending'``, #429 三轮 P1-1), not a
@@ -10,20 +10,41 @@ pending row survives and the loser's request takes over the slot (the same
 supersede semantics as sequential calls). The manual publish path displaces
 pending rows the same way (``supersede_pending_publish_requests``, #429).
 
+The CREATE-side confirming guard is IN the create transaction
+(#429 四轮 codex P1): the guard, the supersede, and the INSERT share one
+transaction held under a per-workspace advisory lock (``_lock_workspace``)
+that the CLAIM also takes — so a create can never observe "no confirming"
+while a claim is concurrently turning the old pending row INTO confirming
+(the old two-transaction guard allowed exactly that: a second request
+parked during the publish window, and after the first publish resolved the
+user got a second dialog on the same stale draft). The claim
+(``claim_pending_publish_request``, claims module) takes the same lock,
+closing the window from both sides.
+
 ``confirming`` (#429 三轮 P1-2) is the claim state: the confirm endpoint
 atomically moves pending→confirming before it publishes, so a cancel racing
 the publish can no longer land ``rejected`` on a row whose revision is about
 to go live. The claim/resolve transitions live in
-studio_publish_request_claims.py (split for file budget); this module keeps
-create / supersede / lazy expiry / reads.
+studio_publish_request_claims.py; the pure reads in
+studio_publish_request_reads.py; the lazy-expiry and manual-supersede
+writes in studio_publish_request_writes.py (all split for file budget);
+this module keeps create and the shared advisory lock.
 
 Expiry is lazy — the pending read is pure (no sweep on the 5s poll path),
 and the terminal ``expired`` row is recorded by the write-side
-observed-expiry path (``expire_pending_publish_request``; status read by id
-sweeps in the same statement it reads with). Resolution NEVER checks
-``expires_at``: the claim step already checked TTL, and a resolve whose
-underlying publish already landed must record the effect truthfully (a TTL
-expiring mid-publish must not deny a revision that exists — TOCTOU, #429).
+observed-expiry path (``expire_pending_publish_request`` in
+studio_publish_request_writes.py; status read by id sweeps in the same
+statement it reads with). Resolution NEVER checks ``expires_at``: the claim
+step already checked TTL, and a resolve whose underlying publish already
+landed must record the effect truthfully (a TTL expiring mid-publish must
+not deny a revision that exists — TOCTOU, #429).
+
+``confirming`` has its OWN recovery TTL (#429 四轮 P1): the claim stamps
+``claimed_at``, and a confirming row older than
+``CONFIRMING_STALE_SECONDS`` is a dead process's claim (deploy restart
+between claim and resolve) — the create transaction sweeps it to
+``expired`` in the same statement sequence (under the lock), so the
+workspace is never wedged. The healthy poll stays write-free.
 """
 
 from __future__ import annotations
@@ -36,7 +57,18 @@ from psycopg.errors import UniqueViolation
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 from server.app.jobs.queries.studio_publish_request_claims import (
+    _REQUEST_COLUMNS,
     StudioPublishRequestClaimQueriesMixin,
+)
+from server.app.jobs.queries.studio_publish_request_reads import (
+    StudioPublishRequestReadQueriesMixin,
+)
+from server.app.jobs.queries.studio_publish_request_writes import (
+    StudioPublishRequestWriteQueriesMixin,
+)
+from server.app.services.job_errors import ConflictError
+from server.app.services.studio_publish_request_support import (
+    CONFIRMING_STALE_SECONDS,
 )
 
 # 10 minutes, mirroring the studio chat permission timeout's "human is
@@ -50,18 +82,25 @@ PUBLISH_REQUEST_TTL_SECONDS = 600
 # the second attempt succeeds barring pathological interleavings.
 _CREATE_PENDING_MAX_ATTEMPTS = 3
 
-_REQUEST_COLUMNS = (
-    "id, workspace_id, chat_session_id, status, created_by,"
-    " result_revision_id, draft_hash, created_at, expires_at, resolved_at"
-)
+# Advisory-lock key namespace for the handshake's per-workspace critical
+# section: create (guard + supersede + INSERT) and claim (pending→confirming)
+# serialize on it (#429 四轮 codex P1). Any 63-bit constant works as long as
+# it is unique to this table; hashtext(workspace_id) spreads the keys.
+_PUBLISH_REQUEST_LOCK_NAMESPACE = 416429
 
 
 class StudioPublishRequestQueriesMixin(
-    StudioPublishRequestClaimQueriesMixin, ConnectionQueriesMixin
+    StudioPublishRequestClaimQueriesMixin,
+    StudioPublishRequestWriteQueriesMixin,
+    StudioPublishRequestReadQueriesMixin,
+    ConnectionQueriesMixin,
 ):
-    """Create / supersede / lazy expiry / reads for the handshake. The
-    confirm-race transitions (claim / resolve / reject / confirming read)
-    arrive via the claims mixin (#429 三轮 P1 split, file budget)."""
+    """Create (with the in-transaction confirming guard, under the
+    claim-shared advisory lock) for the handshake. The confirm-race
+    transitions (claim / resolve / reject) arrive via the claims mixin, the
+    lazy-expiry/supersede writes via the writes mixin, the pure reads via
+    the reads mixin (#429 splits, file budget) — groups.py composes this
+    one facade class."""
 
     def create_pending_publish_request(
         self,
@@ -74,24 +113,52 @@ class StudioPublishRequestQueriesMixin(
     ) -> dict[str, Any]:
         """Supersede any pending request and insert a fresh pending row.
 
-        The supersede and the INSERT share one transaction; when a concurrent
-        create wins the race for the workspace's single pending slot (partial
-        unique index, #429 三轮 P1-1), this transaction's INSERT raises
-        UniqueViolation and the whole thing re-runs — on the retry the
-        supersede UPDATE matches the winner's row, so this request displaces
-        it exactly like a sequential re-request would.
+        One transaction, three statements, one advisory lock
+        (#429 四轮 codex P1): (1) the confirming guard — a STALE confirming
+        row (claim past the recovery TTL) is swept to ``expired`` so a dead
+        process's claim cannot wedge the workspace, while a LIVE one refuses
+        the create (the claim's publish is in flight; superseding it would
+        recreate the cancel race in supersede form, #429 三轮 P1-2); (2) the
+        supersede of the current pending row; (3) the INSERT. The lock is
+        shared with ``claim_pending_publish_request``, so the guard's view of
+        "is there a live confirming row" cannot change between the check and
+        the INSERT — the two-transaction version let a claim interleave,
+        parking a second request during the publish window. Concurrent
+        creates still race on the pending unique index (#429 三轮 P1-1) and
+        retry with supersede-matching semantics.
         """
         request_id = uuid4().hex
         expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
         for _attempt in range(_CREATE_PENDING_MAX_ATTEMPTS):
             try:
                 with self.connect() as conn:
+                    _lock_workspace(conn, workspace_id)
+                    # (1) The confirming guard, inside the transaction and
+                    # under the claim-shared lock (#429 四轮 codex P1 + the
+                    # stale-claim TTL recovery, #429 四轮 P1).
+                    conn.execute(
+                        "update studio_publish_requests set status='expired',"
+                        " resolved_at=current_timestamp"
+                        " where workspace_id=%s and status='confirming'"
+                        " and claimed_at < current_timestamp"
+                        f" - interval '{int(CONFIRMING_STALE_SECONDS)} seconds'",
+                        (workspace_id,),
+                    )
+                    live = conn.execute(
+                        "select 1 from studio_publish_requests"
+                        " where workspace_id=%s and status='confirming' limit 1",
+                        (workspace_id,),
+                    ).fetchone()
+                    if live is not None:
+                        raise _LiveConfirmingRequestError()
+                    # (2) Supersede the current pending row.
                     conn.execute(
                         "update studio_publish_requests set status='superseded',"
                         " resolved_at=current_timestamp"
                         " where workspace_id=%s and status='pending'",
                         (workspace_id,),
                     )
+                    # (3) Insert the new pending row.
                     row = conn.execute(
                         "insert into studio_publish_requests"
                         "(id, workspace_id, chat_session_id, created_by, draft_hash,"
@@ -108,107 +175,44 @@ class StudioPublishRequestQueriesMixin(
                     ).fetchone()
                 if row is not None:
                     return dict(row)
-                raise RuntimeError("publish request insert did not return a row")
+                raise ConflictError("publish request insert did not return a row")
             except UniqueViolation:
                 # A concurrent create landed its pending row between this
                 # transaction's supersede (matched zero rows) and its INSERT.
                 # Retry: the supersede now matches that row (#429 三轮 P1-1).
                 continue
-        raise RuntimeError(
+        # #429 四轮 P3-1: JobServiceError, not a bare RuntimeError — the tool
+        # route maps it to a 409 (the same "retry in a moment" semantics as
+        # the confirming-window refusal), instead of an unhandled 500.
+        raise ConflictError(
             "publish request create lost the pending-slot race "
-            f"{_CREATE_PENDING_MAX_ATTEMPTS} times for workspace {workspace_id}"
+            f"{_CREATE_PENDING_MAX_ATTEMPTS} times for workspace {workspace_id};"
+            " retry the request"
         )
 
-    def expire_pending_publish_request(self, workspace_id: str) -> dict[str, Any] | None:
-        """Write-side lazy expiry for a workspace: if the pending row is past
-        its TTL, flip it to ``expired`` and return it; None when there is no
-        pending row or it is still within its TTL. The write-side
-        counterpart of the pure pending read (#429: the 5s poll must not
-        generate write transactions, so the read no longer sweeps)."""
-        with self.connect() as conn:
-            row = conn.execute(
-                "update studio_publish_requests set status='expired',"
-                " resolved_at=current_timestamp"
-                " where workspace_id=%s and status='pending'"
-                " and expires_at < current_timestamp"
-                " returning " + _REQUEST_COLUMNS,
-                (workspace_id,),
-            ).fetchone()
-        return dict(row) if row is not None else None
 
-    def get_pending_publish_request(self, workspace_id: str) -> dict[str, Any] | None:
-        """The workspace's pending request, None when there is none.
+class _LiveConfirmingRequestError(ConflictError):
+    """Raised INSIDE create's transaction when a live confirming row blocks
+    the insert (#429 四轮 codex P1). Subclassing ConflictError keeps the
+    route's 409 mapping; the dedicated type lets the retry loop distinguish
+    "refused by a live claim" (do not retry — re-raise) from
+    UniqueViolation (retry). Aborting through an exception rolls the
+    transaction back, leaving the confirming row exactly as it was."""
 
-        A pure read (pooled connection, no write transaction, no TTL filter):
-        the Studio frontend polls this every 5s, and the read must not turn
-        the poll into write load — the old read-then-sweep design opened a
-        write connection on EVERY poll (#429). A pending row past its
-        ``expires_at`` still surfaces here; the service layer decides
-        whether the row is expired (and only then writes, via
-        ``expire_pending_publish_request``), so this read itself issues zero
-        writes (#429 二轮复审 NIT：认证 session 的滑动过期仍会写，不在本
-        路径的断言范围内).
-        """
-        with self._connect_read() as conn:
-            row = conn.execute(
-                f"select {_REQUEST_COLUMNS} from studio_publish_requests"
-                " where workspace_id=%s and status='pending'"
-                " order by created_at desc limit 1",
-                (workspace_id,),
-            ).fetchone()
-        return dict(row) if row is not None else None
+    def __init__(self) -> None:
+        super().__init__(
+            "The previous publish request is being confirmed right now;"
+            " re-request after it resolves"
+        )
 
-    def get_publish_request(self, request_id: str) -> dict[str, Any] | None:
-        """One request by id (any status); a pending row past expiry is
-        lazily flipped to ``expired`` by the read itself (the UPDATE's
-        expires_at predicate rides the statement, so no Python-side datetime
-        parsing of the driver's serialized value)."""
-        with self.connect() as conn:
-            row = conn.execute(
-                "update studio_publish_requests set status='expired',"
-                " resolved_at=current_timestamp"
-                " where id=%s and status='pending' and expires_at < current_timestamp"
-                " returning " + _REQUEST_COLUMNS,
-                (request_id,),
-            ).fetchone()
-            if row is None:
-                row = conn.execute(
-                    f"select {_REQUEST_COLUMNS} from studio_publish_requests where id=%s",
-                    (request_id,),
-                ).fetchone()
-        return dict(row) if row is not None else None
 
-    def get_publish_request_current_state(self, request_id: str) -> dict[str, Any] | None:
-        """One request by id as it stands right now — pure read, no expiry
-        write. The losing side of the confirm race uses this to report the
-        request's real terminal state (#429): when a confirm's publish
-        landed but the resolve lost a race (superseded mid-publish), the
-        row still reads back with its final status for the response."""
-        with self._connect_read() as conn:
-            row = conn.execute(
-                f"select {_REQUEST_COLUMNS} from studio_publish_requests where id=%s",
-                (request_id,),
-            ).fetchone()
-        return dict(row) if row is not None else None
-
-    def supersede_pending_publish_requests(self, workspace_id: str) -> int:
-        """Move the workspace's pending rows to ``superseded``; returns the
-        displaced count. Used by the manual publish path (#429): once a
-        human publishes through the toolbar button, any pending agent
-        request for the same workspace is moot — its content went live, and
-        the agent polling the status tool should see ``superseded`` (a
-        publish happened, just not through this request) instead of a
-        dead-end pending whose review dialog can never be usefully
-        confirmed again. A row in ``confirming`` is deliberately left
-        alone: its publish is in flight and will record its own outcome
-        (#429 三轮 P1-2 — superseding it would recreate the cancel race in
-        supersede form).
-        """
-        with self.connect() as conn:
-            cursor = conn.execute(
-                "update studio_publish_requests set status='superseded',"
-                " resolved_at=current_timestamp"
-                " where workspace_id=%s and status='pending'",
-                (workspace_id,),
-            )
-            return cursor.rowcount
+def _lock_workspace(conn: Any, workspace_id: str) -> None:
+    """Take the handshake's per-workspace advisory lock (transaction-scoped:
+    released at COMMIT/ROLLBACK). Serializes create's guard+supersede+INSERT
+    against the claim's pending→confirming transition (#429 四轮 codex P1).
+    The namespace constant keeps the key disjoint from the schema-migration
+    advisory lock (schema.py) and any other lock in the deployment."""
+    conn.execute(
+        "select pg_advisory_xact_lock(%s, hashtext(%s))",
+        (_PUBLISH_REQUEST_LOCK_NAMESPACE, workspace_id),
+    )

@@ -5,10 +5,15 @@ claim/resolve half outgrew the shared module's committed ceiling): the
 transitions here are the ones the confirm endpoint drives — the atomic
 ``confirming`` claim (with TTL + draft-hash predicates in the same update
 statement), the confirming-only resolve (success, refused-publish rollback,
-and cancel's pending-only reject), and the confirm-window read the create
-path refuses new requests with. The create/supersede/expiry/read halves stay
-in the original module; both mixins compose into the same JobQueries facade
-(groups.py).
+and cancel's pending-only reject). The create/supersede/expiry halves stay
+in the original module, the reads in studio_publish_request_reads.py; the
+mixins compose into the same JobQueries facade (groups.py).
+
+The CLAIM takes the handshake's per-workspace advisory lock
+(``_lock_workspace`` from the create module, #429 四轮 codex P1): create's
+confirming guard + supersede + INSERT and the claim serialize on it, so a
+create can never insert a second pending row into a publish window the
+claim just opened.
 """
 
 from __future__ import annotations
@@ -17,9 +22,16 @@ from typing import Any
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
+# The table's wire column list (#429 四轮 NIT: the claims split used to
+# carry a duplicate of the main module's constant). It lives HERE — claims
+# is the leaf of the module family: main imports claims (for the mixin
+# composition) and reads imports claims (for this constant), while claims'
+# only cross-module dependency (the shared advisory lock, #429 四轮 codex
+# P1) is imported inside the method body to keep the import graph acyclic.
 _REQUEST_COLUMNS = (
     "id, workspace_id, chat_session_id, status, created_by,"
-    " result_revision_id, draft_hash, created_at, expires_at, resolved_at"
+    " result_revision_id, draft_hash, created_at, expires_at, resolved_at,"
+    " claimed_at"
 )
 
 
@@ -38,27 +50,27 @@ class StudioPublishRequestClaimQueriesMixin(ConnectionQueriesMixin):
         server draft is still the one the agent requested (hash mismatch →
         None, the confirm surfaces a 409 instead of publishing a draft the
         human never reviewed). None when the row is missing, not pending,
-        not the named request, past its TTL, or the draft drifted."""
+        not the named request, past its TTL, or the draft drifted.
+
+        The claim runs under the handshake's per-workspace advisory lock
+        (#429 四轮 codex P1, shared with create's guard+supersede+INSERT):
+        without it, a create could observe "no confirming" between the
+        claim's UPDATE and its commit, then insert a fresh pending row into
+        the publish window — the user would get a second review dialog on
+        the same stale draft the moment the first publish resolved."""
+        from server.app.jobs.queries.studio_publish_requests import (
+            _lock_workspace as lock_workspace,
+        )
+
         with self.connect() as conn:
+            lock_workspace(conn, workspace_id)
             row = conn.execute(
-                "update studio_publish_requests set status='confirming'"
+                "update studio_publish_requests set status='confirming',"
+                " claimed_at=current_timestamp"
                 " where id=%s and workspace_id=%s and status='pending'"
                 " and expires_at >= current_timestamp and draft_hash is not distinct from %s"
                 " returning " + _REQUEST_COLUMNS,
                 (request_id, workspace_id, draft_hash),
-            ).fetchone()
-        return dict(row) if row is not None else None
-
-    def get_confirming_publish_request(self, workspace_id: str) -> dict[str, Any] | None:
-        """The workspace's confirming row, None when there is none. The create
-        path's re-request refusal (#429 三轮 P1-2): a new pending row must
-        not displace a row whose publish is in flight."""
-        with self._connect_read() as conn:
-            row = conn.execute(
-                f"select {_REQUEST_COLUMNS} from studio_publish_requests"
-                " where workspace_id=%s and status='confirming'"
-                " order by created_at desc limit 1",
-                (workspace_id,),
             ).fetchone()
         return dict(row) if row is not None else None
 
@@ -95,13 +107,15 @@ class StudioPublishRequestClaimQueriesMixin(ConnectionQueriesMixin):
             row = conn.execute(
                 # pending (retry loop) re-opens the request: resolved_at must
                 # not keep the refused attempt's timestamp — CASE keeps the
-                # reset in the same single-statement atomicity.
+                # reset in the same single-statement atomicity. claimed_at is
+                # likewise cleared (a re-claim stamps it fresh).
                 "update studio_publish_requests set status=%s,"
                 " result_revision_id=%s,"
-                " resolved_at=case when %s='pending' then null else current_timestamp end"
+                " resolved_at=case when %s='pending' then null else current_timestamp end,"
+                " claimed_at=case when %s='pending' then null else claimed_at end"
                 " where id=%s and status='confirming'"
                 " returning " + _REQUEST_COLUMNS,
-                (status, result_revision_id, status, request_id),
+                (status, result_revision_id, status, status, request_id),
             ).fetchone()
         return dict(row) if row is not None else None
 

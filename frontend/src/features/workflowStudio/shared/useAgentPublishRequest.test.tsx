@@ -40,6 +40,7 @@ function requestRecord(
     created_at: '2026-09-03T10:00:00Z',
     expires_at: '2026-09-03T10:10:00Z',
     resolved_at: null,
+    claimed_at: null,
     ...overrides,
   }
 }
@@ -357,5 +358,72 @@ describe('useAgentPublishRequest', () => {
       '确认发布失败：Publish validation failed'
     )
     expect(result.current.resolvedNotice).toBeNull()
+  })
+
+  it('surfaces a confirming row from the poll without landing a receipt', async () => {
+    // #429 四轮 P3-2 回归钉：confirm 在途超过一个轮询周期时，轮询返回
+    // status='confirming' 的行。pendingRequest 仍非 null（对话框保持打开、
+    // 显示发布进行中），且观测 effect 不把它当 pending→null 跳变——不落
+    // 「已消解」假回执；只有真正终态的 null 跳变才处理。
+    let calls = 0
+    mocks.fetchPendingPublishRequest.mockImplementation(async () => {
+      calls += 1
+      // 第 1 轮 pending；confirm 在途的第 2 轮 confirming；之后保持
+      // confirming（后端 resolve 前的中间态）。
+      return calls === 1
+        ? requestRecord()
+        : requestRecord({
+            status: 'confirming',
+            claimed_at: '2026-09-03T10:01:30Z',
+          })
+    })
+    const { result } = renderHookWithProviders()
+    await waitFor(() => expect(result.current.pendingRequest?.id).toBe('req-1'))
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5_300))
+    })
+
+    // confirming 行被透出：对话框据此保持打开（pendingRequest 非 null）。
+    await waitFor(() =>
+      expect(result.current.pendingRequest?.status).toBe('confirming')
+    )
+    // 观测 effect 未把 confirming 当跳变：没有假「已消解」回执。
+    expect(result.current.resolvedNotice).toBeNull()
+  })
+
+  it('publishInFlight is set for the whole confirm window and cleared after', async () => {
+    // #429 四轮 P2-1/P3-2：confirm 前置（flush/read-draft 由对话框处理，
+    // hook 侧覆盖端点调用段）期间 publishInFlight 置位——对话框用它对轮询
+    // 送来的 confirming 行显示「发布进行中」；响应落地后复位。
+    mocks.fetchPendingPublishRequest.mockResolvedValue(requestRecord())
+    let releaseConfirm: ((record: StudioPublishRequestRecord) => void) | null =
+      null
+    mocks.confirmPublishRequest.mockImplementation(
+      () =>
+        new Promise<StudioPublishRequestRecord>((resolve) => {
+          releaseConfirm = resolve
+        })
+    )
+    const { result } = renderHookWithProviders()
+    await waitFor(() => expect(result.current.pendingRequest?.id).toBe('req-1'))
+
+    let confirmPromise: Promise<void> | null = null
+    act(() => {
+      confirmPromise = result.current.confirm()
+    })
+    expect(result.current.publishInFlight).toBe(true)
+
+    await act(async () => {
+      releaseConfirm?.(
+        requestRecord({
+          status: 'confirmed',
+          result_revision_id: 'ws1:publish_flow_ws:v2',
+          resolved_at: '2026-09-03T10:02:00Z',
+        })
+      )
+      await confirmPromise
+    })
+    expect(result.current.publishInFlight).toBe(false)
   })
 })
