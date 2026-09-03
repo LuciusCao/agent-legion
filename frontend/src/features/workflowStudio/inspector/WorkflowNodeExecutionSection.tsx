@@ -9,7 +9,7 @@ import inspectorStyles from './WorkflowNodeInspector.module.css'
 type Props = {
   node: WorkflowNodeRecord
   agentCatalog: AgentDefinition[]
-  /** capability→Agent 绑定解析状态（useAgentCatalog 聚合，#426 review P2）。 */
+  /** capability→Agent 绑定的目录 settle 状态（useAgentCatalog，#426 review P2）。 */
   agentBindingStatus: AgentBindingStatus
   definitionYaml: string
   setDefinitionYaml: (value: string) => void

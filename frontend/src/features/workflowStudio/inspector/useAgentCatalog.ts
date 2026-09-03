@@ -9,18 +9,22 @@ import { useAgentDefinitions } from './useAgentDefinitions'
 // catalog 只剩 agents。agent 半区是 workspace 作用域（schema v46）：无
 // workspaceId 时不发请求。#387：同时取 agent-definitions（含 draft）——
 // draft-only Agent 的节点解析与导航回落靠它（useAgentDefinitions）。
-// #426 review P2：聚合 bindingStatus——绑定解析 = published 目录（本查询）
-// + 含 draft 的 agent-definitions，任一尚无数据时节点详情里的 agentId=null
-// 只是「未知」而非「未绑定」，内联编辑器要等 settle 才出新建表单；agentId
-// 已解析时编辑器不经该门控（#426 codex P2，门控在 Editor 侧按 agentId 收窄）。
+// #426 review P2 → codex P2 修正：bindingStatus 只按 published 目录
+// （本查询）的 settle 态计算——settle 后「published ?? draft」是终态
+// （命中 published 或确认无 published 后的 draft 回落），编辑目标不会再
+// 漂移；未 settle 时 agentId 可能只是 draft 回落先行（definitions 先回，
+// catalog 尚在途），settle 后可能被同 capability 的 published Agent 替换，
+// 故门控等待。definitions 的 pending 与门控无关：published 命中场景
+// AgentEditor 按 ID 加载详情不依赖列表；draft 回落场景 definitions 已
+// 返回（agentId 有值的前提），失败由 loadError 横幅兜底。
 
-/** capability→Agent 绑定解析状态：pending=任一查询首次在途；error=任一
- * 查询失败且无数据（不退回可操作表单）；ready=两条查询都有数据，绑定
- * 结果（含 agentId=null 的「确认未绑定」）可信。 */
+/** capability→Agent 绑定解析状态：pending=published 目录首次在途；error=
+ * 目录失败且无数据（不退回可操作表单）；ready=目录已返回，「published ??
+ * draft」的绑定结果（含 agentId=null 的「确认无 published」）为终态。 */
 export type AgentBindingStatus = 'pending' | 'error' | 'ready'
 
-/** 聚合两查询的 settle 态成绑定解析状态：pending=任一首次在途；
- * error=任一失败且无数据；否则 ready。显式返回类型保持字面量联合。 */
+/** 目录查询的 settle 态成绑定解析状态：pending=首次在途；error=失败且
+ * 无数据；否则 ready。显式返回类型保持字面量联合。 */
 function settleBinding(failed: boolean, pending: boolean): AgentBindingStatus {
   return failed ? 'error' : pending ? 'pending' : 'ready'
 }
@@ -32,8 +36,8 @@ export function useAgentCatalog(workspaceId: string | undefined) {
     enabled: Boolean(workspaceId),
   })
   const definitions = useAgentDefinitions(workspaceId)
-  const pending = query.isPending || definitions.pending
-  const failed = (query.isError && !query.data) || definitions.failed
+  const pending = query.isPending
+  const failed = query.isError && !query.data
   return {
     agents: query.data?.agents ?? [],
     definitions: definitions.agents,

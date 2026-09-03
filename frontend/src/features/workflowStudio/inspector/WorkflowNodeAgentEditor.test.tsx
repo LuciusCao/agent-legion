@@ -351,15 +351,16 @@ describe('WorkflowNodeAgentEditor', () => {
     ).not.toBeInTheDocument()
   })
 
-  // #426 codex P2：agentId 已解析（catalog 命中 published Agent）时，另一份
-  // 目录（agent-definitions）在途/失败只让聚合 bindingStatus 非 ready——门控
-  // 不再挡编辑器：绑定目标已可信，AgentEditor 自身按该 ID 加载详情；只有
-  // agentId=null（需双目录确认「未绑定」出新建表单）才维持 pending/error 门控。
-  it('renders the editor for a resolved agentId even while the other catalog query is unsettled or failed', async () => {
-    const view = (bindingStatus: 'pending' | 'error') => (
+  // #426 codex P2 修正：agentId 非空不再无条件放行——目录未 settle 时它
+  // 可能只是 draft 回落先行（definitions 先返回同 capability 草稿，catalog
+  // 仍在途）。若立即放行，settle 后同 capability 的 published Agent 会把
+  // 编辑目标切走并重挂 AgentEditor，丢掉用户已输入的内容、提前发布还会撞
+  // 冲突。占位直到目录 ready（「published ?? draft」终态）才放行。
+  it('keeps the placeholder for a draft-fallback agentId until the catalog settles, then renders the editor', async () => {
+    const view = (bindingStatus: 'pending' | 'error' | 'ready') => (
       <TestQueryProvider>
         <WorkflowNodeAgentEditor
-          agentId="agent-a"
+          agentId="draft-agent"
           capability="generate_key_info"
           bindingStatus={bindingStatus}
         />
@@ -367,12 +368,34 @@ describe('WorkflowNodeAgentEditor', () => {
     )
     const { rerender } = render(view('pending'))
 
+    // 目录在途：draft 回落的 agentId 也只渲染占位，不挂编辑器。
+    expect(screen.getByText('Agent 绑定解析中...')).toBeInTheDocument()
+    expect(mocks.fetchAgentDefinition).not.toHaveBeenCalled()
+
+    // 目录失败且无数据：错误占位（同样不放行）。
+    rerender(view('error'))
+    expect(screen.getByText('Agent 目录加载失败')).toBeInTheDocument()
+    expect(mocks.fetchAgentDefinition).not.toHaveBeenCalled()
+
+    // 目录 ready：绑定已是终态（published 命中或确认无 published 的
+    // draft 回落），放行渲染编辑器。
+    rerender(view('ready'))
+    expect(await screen.findByDisplayValue('draft-agent')).toBeInTheDocument()
+    expect(mocks.fetchAgentDefinition).toHaveBeenCalledWith(
+      'ws1',
+      'draft-agent'
+    )
+  })
+
+  // #426 codex P2（上一轮语义的 published 命中侧）：目录已 settle（ready）
+  // 且 published 命中 agentId 时，另一份查询（agent-definitions）在途/失败
+  // 不再影响门控——AgentEditor 按 ID 加载详情不依赖列表，错误由全局横幅
+  // 暴露（bindingStatus 现只按目录 settle 计算，本用例即回归该放行语义）。
+  it('renders the editor for a published-catalog agentId once the catalog has settled', async () => {
+    renderEditor({ agentId: 'agent-a', capability: 'generate_key_info' })
+
     expect(screen.queryByText('Agent 绑定解析中...')).not.toBeInTheDocument()
     expect(mocks.fetchAgentDefinition).toHaveBeenCalledWith('ws1', 'agent-a')
-
-    rerender(view('error'))
-
-    expect(screen.queryByText('Agent 目录加载失败')).not.toBeInTheDocument()
     expect(await screen.findByDisplayValue('agent-a')).toBeInTheDocument()
     expect(screen.getByDisplayValue('generate_key_info')).toBeInTheDocument()
   })

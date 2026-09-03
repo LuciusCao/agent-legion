@@ -7,8 +7,8 @@ import type { AgentBindingStatus } from './useAgentCatalog'
 export type InspectorSectionProps = {
   details: SelectedWorkflowNodeDetails
   agentCatalog: AgentDefinition[]
-  /** capability→Agent 绑定解析状态（useAgentCatalog 聚合，#426 review P2）：
-   * 内联 Agent 编辑器在查询 settle 前不渲染可操作的表单。 */
+  /** capability→Agent 绑定的目录 settle 状态（useAgentCatalog，#426 review P2）：
+   * 内联 Agent 编辑器在目录 settle 前不渲染可操作的表单。 */
   agentBindingStatus: AgentBindingStatus
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
