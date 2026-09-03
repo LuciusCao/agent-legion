@@ -43,9 +43,8 @@
 }
 
 /* 中性态（stale/pending/not_applicable）曾有一条例外规则，但取值与 .node
-   基础规则完全相同（#f9fafb / #d1d5db），属机械 no-op——#415 加宽/换行
-   修复需要预算行数，按豁免 ceiling（只降不升）纪律删除该冗余规则。 */
-
+   基础规则完全相同（#f9fafb / #d1d5db），属机械 no-op——#415/#423 的徽标
+   收缩修复需要预算行数，按豁免 ceiling（只降不升）纪律删除该冗余规则。 */
 .node.awaiting_approval {
   background: var(--status-approval-bg);
 }
@@ -97,9 +96,12 @@
   -webkit-line-clamp: 2;
 }
 
+/* #423 review P2：固定短徽标（executorKind 枚举/警告文案）内容可控，
+   flex-shrink: 0 不收缩；terminalTag/workerTag 是动态内容徽标
+   （terminal.outcome 只校验非空、排队中 agentId 任意长），整体搬去
+   DagNodeBadges.module.css 做可收缩 + max-width + 单行省略——本文件已到
+   #276 豁免 ceiling（只降不升），搬出后基线从四类收敛为两类。 */
 .executorTag,
-.terminalTag,
-.workerTag,
 .executionWarningTag {
   flex-shrink: 0;
   font-size: 10px;
@@ -113,19 +115,7 @@
   text-transform: uppercase;
 }
 
-.workerTag {
-  background: #dbeafe;
-  color: #1e40af;
-  font-family: ui-monospace, monospace;
-}
-
-.terminalTag {
-  background: #dcfce7;
-  color: #166534;
-}
-
 .unboundTag {
-  flex-shrink: 0;
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 10px;
