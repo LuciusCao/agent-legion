@@ -12,7 +12,9 @@ import { useUiStore } from '../../../stores/uiStore'
 import { AgentVersionsDialog } from './AgentVersionsDialog'
 import styles from './AgentsPanel.module.css'
 
-const runtimes: AgentRuntime[] = ['pi', 'velites']
+// #408：velites（自研 harness，流式事件 + token 计量）是默认且优先级
+// 更高的 runtime，排在选项首位；pi 是外部 runtime，仅作备选。
+const runtimes: AgentRuntime[] = ['velites', 'pi']
 const toolOptions = ['read', 'write', 'bash']
 
 type Props = {
@@ -46,7 +48,7 @@ export function AgentEditor({
   const creating = agentId === null
   const [agentIdInput, setAgentIdInput] = useState('')
   const [capability, setCapability] = useState(initialCapability ?? '')
-  const [runtime, setRuntime] = useState<AgentRuntime>('pi')
+  const [runtime, setRuntime] = useState<AgentRuntime>('velites')
   // #76：skill 不是表单字段（绑定在节点级）；这里只缓存已加载定义的现值，
   // 保存草稿时原样保留（legacy 兜底），新建 Agent 才传空。
   const [skill, setSkill] = useState('')
@@ -71,7 +73,7 @@ export function AgentEditor({
         setHasDraft(draft !== null)
         const definition = (source?.definition ?? {}) as Record<string, unknown>
         setCapability(String(definition.capability ?? ''))
-        setRuntime((definition.runtime as AgentRuntime) ?? 'pi')
+        setRuntime((definition.runtime as AgentRuntime) ?? 'velites')
         setSkill(String(definition.skill ?? ''))
         setTools(
           Array.isArray(definition.tools) ? definition.tools.map(String) : []
