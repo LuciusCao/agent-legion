@@ -70,6 +70,10 @@ def _node_change_fields(base: WorkflowNode, draft: WorkflowNode) -> list[str]:
         fields.append("execution")
     if base.skill != draft.skill:
         fields.append("skill")
+    if _normalized_config(base) != _normalized_config(draft):
+        fields.append("config")
+    if _normalized_config_schema(base) != _normalized_config_schema(draft):
+        fields.append("config_schema")
     base_terminal = base.terminal.outcome if base.terminal else None
     draft_terminal = draft.terminal.outcome if draft.terminal else None
     if base_terminal != draft_terminal:
@@ -77,6 +81,22 @@ def _node_change_fields(base: WorkflowNode, draft: WorkflowNode) -> list[str]:
     if base.accepted_item_types != draft.accepted_item_types:
         fields.append("accepted_item_types")
     return fields
+
+
+# Issue #418: ``config`` / ``config_schema`` are structural — they version with
+# the revision (the publish path diffs them via ``_structural_payload``), so
+# the compare must see them too or a config-only draft shows "no changes"
+# while publishing still bumps the version. The loader already normalizes a
+# missing/``None`` block to ``{}``; the compare cannot assume the model objects
+# both came through the loader (``replace()`` can hand it ``None``), so the
+# same normalization applies before the dict equality (which is already
+# key-order independent).
+def _normalized_config(node: WorkflowNode) -> dict[str, Any]:
+    return node.config if node.config is not None else {}
+
+
+def _normalized_config_schema(node: WorkflowNode) -> dict[str, Any]:
+    return node.config_schema if node.config_schema is not None else {}
 
 
 def _node_field_risks(base: WorkflowNode, draft: WorkflowNode) -> dict[str, str]:
@@ -108,6 +128,13 @@ def _node_field_risks(base: WorkflowNode, draft: WorkflowNode) -> dict[str, str]
     # execution overrides.
     if base.skill != draft.skill:
         risks["skill"] = "warning"
+    # Tunable node settings (#418): structural (they version with the
+    # revision) and they change what the node actually runs — same tier as
+    # execution overrides, not a routing break.
+    if _normalized_config(base) != _normalized_config(draft):
+        risks["config"] = "warning"
+    if _normalized_config_schema(base) != _normalized_config_schema(draft):
+        risks["config_schema"] = "warning"
 
     base_terminal = base.terminal.outcome if base.terminal else None
     draft_terminal = draft.terminal.outcome if draft.terminal else None
