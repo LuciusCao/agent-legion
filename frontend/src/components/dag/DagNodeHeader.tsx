@@ -1,6 +1,7 @@
 import { MaterialIcon } from '../MaterialIcon'
 import { DagNodeChangeBadge } from './DagNodeChangeBadge'
 import { DagNodeExecutionBadge } from './DagNodeExecutionBadge'
+import { DagNodeTerminalBadge } from './DagNodeTerminalBadge'
 import type { DagNodeData } from './dagNodeTypes'
 import styles from './DagNode.module.css'
 import { STATUS_ICON } from '../dagNodeStatus'
@@ -42,7 +43,7 @@ export function DagNodeHeader({ data }: { data: DagNodeData }) {
         </span>
       )}
       {data.terminalOutcome && (
-        <span className={styles.terminalTag}>{data.terminalOutcome}</span>
+        <DagNodeTerminalBadge outcome={data.terminalOutcome} />
       )}
     </div>
   )

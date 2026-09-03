@@ -2,6 +2,9 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { DagNode, DagNodeData } from './DagNode'
 import { describe, it, expect } from 'vitest'
 import { ReactFlowProvider } from '@xyflow/react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import badgeStyles from './DagNodeBadges.module.css'
 
 const TestDagNode = DagNode as unknown as React.FC<{
   id: string
@@ -108,6 +111,72 @@ describe('DagNode', () => {
       'title',
       'key-info-generator / worker-abc123def456'
     )
+  })
+
+  // #423 review P2：动态徽标（terminalTag/workerTag）内容来自用户数据/运行
+  // 时，长值不能挤压 label 或伸出卡片。jsdom 测不了布局，这里三层断言：
+  // 1) 长文本完整保留在 DOM 且 title 携带全文（截断只交给 CSS）；
+  // 2) 徽标确实挂在可收缩截断的 class 上（组件契约——terminalTag 由
+  //    DagNodeTerminalBadge、workerTag 由 DagNodeExecutionBadge 渲染）；
+  // 3) 该 class 在 DagNodeBadges.module.css 里具备「可收缩 + max-width +
+  //    单行省略」完整策略（读源文件断言，防止选择器被改错对象）。固定短
+  //    徽标（executorTag 等）则断言保持 flex-shrink: 0 不收缩。
+  it('keeps a long terminal outcome truncatable without crowding out the label', () => {
+    renderWithProvider({
+      ...baseData,
+      terminalOutcome:
+        'a-very-long-terminal-outcome-that-exceeds-the-badge-budget',
+    })
+    const terminalTag = screen.getByTitle(
+      'a-very-long-terminal-outcome-that-exceeds-the-badge-budget'
+    )
+    expect(terminalTag.className).toContain(badgeStyles.terminalTag)
+    // label 仍完整渲染在同一个 header 行里（不被徽标顶掉）
+    expect(screen.getByTitle(baseData.label)).toBeInTheDocument()
+  })
+
+  it('keeps a long unassigned agentId truncatable without crowding out the label', () => {
+    renderWithProvider({
+      ...baseData,
+      agentId: 'an-extremely-long-queued-agent-id-without-a-worker-assignment',
+    })
+    const badge = screen.getByTestId('dag-node-execution-badge')
+    expect(badge.className).toContain(badgeStyles.workerTag)
+    expect(badge).toHaveAttribute(
+      'title',
+      'an-extremely-long-queued-agent-id-without-a-worker-assignment'
+    )
+    expect(screen.getByTitle(baseData.label)).toBeInTheDocument()
+  })
+
+  it('gives dynamic badges a shrink-and-ellipsis CSS strategy while fixed badges stay rigid', () => {
+    const css = readFileSync(
+      resolve(__dirname, 'DagNodeBadges.module.css'),
+      'utf-8'
+    )
+    const dynamicRule = css.match(
+      /\.terminalTag,\s*\n\.workerTag\s*\{([^}]*)\}/
+    )
+    expect(dynamicRule).not.toBeNull()
+    const declarations = dynamicRule![1]
+    // 可收缩 + max-width 上限 + 单行省略 + 允许收缩到内容以下
+    expect(declarations).toContain('flex-shrink: 1')
+    expect(declarations).toMatch(/max-width: \d+px/)
+    expect(declarations).toContain('overflow: hidden')
+    expect(declarations).toContain('white-space: nowrap')
+    expect(declarations).toContain('text-overflow: ellipsis')
+    expect(declarations).toContain('min-width: 0')
+    // 固定短徽标不收缩：DagNode.module.css 的共享基线
+    // （executorTag/executionWarningTag）保持 flex-shrink: 0
+    const nodeCss = readFileSync(
+      resolve(__dirname, 'DagNode.module.css'),
+      'utf-8'
+    )
+    const baselineRule = nodeCss.match(
+      /\.executorTag,\s*\n\.executionWarningTag\s*\{([^}]*)\}/
+    )
+    expect(baselineRule).not.toBeNull()
+    expect(baselineRule![1]).toContain('flex-shrink: 0')
   })
 
   it('falls back to executorId when workerId is missing', () => {
