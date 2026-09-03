@@ -210,6 +210,55 @@ describe('WorkflowPublishReviewDialog', () => {
     expect(onConfirm).not.toHaveBeenCalled()
   })
 
+  it('does not trigger cancel while confirming (return-to-edit is disabled)', async () => {
+    // #429 二轮复审 P3：confirm 的 publish 进行中，用户点「返回编辑」（或
+    // ESC/backdrop——同一 onClose 通道）不得触发 cancel：revision 实际上线
+    // 却落 rejected 回执是误导。按钮 disabled，onClose 回调也早退（双保险，
+    // 键盘/点击穿透同一守卫）。
+    const onConfirm = vi.fn()
+    const onCancel = vi.fn()
+    const summary = buildChangeSummary(
+      makeSummaryResponse({
+        summary: {
+          risk_level: 'info',
+          node_changes: [
+            {
+              type: 'added',
+              node_key: 'new_node',
+              label: '新节点',
+              node_type: 'code',
+              fields: [],
+              risk: 'info',
+            },
+          ],
+          edge_changes: [],
+          intake_changes: [],
+          metadata_changes: [],
+          risk_flags: [],
+        },
+      })
+    )
+
+    render(
+      <WorkflowPublishReviewDialog
+        open
+        workflowKey="demo"
+        activeRevision={revision}
+        nextVersion={2}
+        definitionHash="abcdef1234567890"
+        summary={summary}
+        confirming
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: '返回编辑' })).toBeDisabled()
+    // ESC 走 Dialog 的 onClose，confirming 期间同样不得触发 cancel。
+    await userEvent.keyboard('{Escape}')
+    expect(onCancel).not.toHaveBeenCalled()
+  })
+
   it('keeps breaking risk publishable after explicit confirmation', async () => {
     const onConfirm = vi.fn()
     const summary = buildChangeSummary(

@@ -133,8 +133,10 @@ class StudioPublishRequestService:
         the agent's status tool and any later confirm see a terminal row,
         not a zombie pending) and the poll answers None — the dialog's
         "request is gone, close" signal. A healthy workspace polls with one
-        read connection and zero write connections; the old design opened a
-        write on every 5s poll.
+        read connection and this path itself opens zero write connections
+        (the auth session's sliding expiry still writes — that is outside
+        this path, not a claim about the request store); the old design
+        opened a write on every 5s poll.
         """
         request = self._job_db.get_pending_publish_request(workspace_id)
         if request is None:
@@ -182,6 +184,14 @@ class StudioPublishRequestService:
             raise ConflictError("Publish validation failed: " + "; ".join(errors[:5]))
         active_after = self._active_revision_id(workspace_id)
         produced_revision = active_after is not None and active_after != active_before
+        # Known limitation (#429 二轮复审，不修，注释记录): the before/after
+        # double probe can misattribute a revision that a concurrent manual
+        # publish created between the two probes — this request would record
+        # that foreign revision as its own result_revision_id. The window is
+        # the publish call's duration and requires a concurrent human publish
+        # of the same workspace; the effect is a mislabeled receipt, not data
+        # corruption. Fixing it needs a publish call that returns the revision
+        # it created, which is the deferred follow-up.
         resolved = self._job_db.resolve_publish_request(
             request_id,
             status="confirmed",

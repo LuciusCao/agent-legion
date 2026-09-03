@@ -1,7 +1,12 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { QueryClientProvider } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
 import { useAgentPublishRequest } from './useAgentPublishRequest'
-import { TestQueryProvider } from '../../../testing/testQueryClient'
+import {
+  createTestQueryClient,
+  TestQueryProvider,
+} from '../../../testing/testQueryClient'
 import { useUiStore } from '../../../stores/uiStore'
 import { useAgentPublishNoticeStore } from './agentPublishNoticeStore'
 import type { StudioPublishRequestRecord } from '../../../api/studioPublishRequestApi'
@@ -44,11 +49,29 @@ function renderHookWithProviders(workspaceId = 'ws1') {
   })
 }
 
+/** 共享 QueryClient 渲染多个 hook 实例：复刻生产拓扑（对话框与栏顶各自
+ * 挂载 useAgentPublishRequest，同一 QueryClient、同一 queryKey，invalidate
+ * 后双方同时收到同一次重取结果）。#429 二轮复审的回归正发生在双实例
+ * 设置下——独立 QueryClient + 永远 pending 的 mock 让 pending→null 跳变
+ * 从未在双实例下发生。 */
+function renderTwoHooksSharingOneQueryClient() {
+  const client = createTestQueryClient()
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  )
+  const dialog = renderHook(() => useAgentPublishRequest('ws1'), { wrapper })
+  const aside = renderHook(() => useAgentPublishRequest('ws1'), { wrapper })
+  return { dialog, aside }
+}
+
 describe('useAgentPublishRequest', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useUiStore.setState({ toast: null })
-    useAgentPublishNoticeStore.setState({ resolvedNotice: null })
+    useAgentPublishNoticeStore.setState({
+      resolvedNotice: null,
+      lastResolvedRequestId: null,
+    })
     mocks.fetchPendingPublishRequest.mockResolvedValue(null)
   })
 
@@ -150,9 +173,107 @@ describe('useAgentPublishRequest', () => {
     expect(dialog.result.current.resolvedNotice).toBeNull()
   })
 
+  it('a bystander instance does not overwrite the receipt after confirm (shared QueryClient, pending→null)', async () => {
+    // #429 二轮复审 P2 回归钉（生产拓扑的最小复刻）：对话框与栏顶共享
+    // QueryClient 和 queryKey。确认后 dialog 实例着陆正确回执并 invalidate；
+    // 随后轮询重取返回 null，两个实例先后看到 pending→null。旧实现的
+    // resolve 归属是 per-instance ref——旁观实例（selfResolvedId 恒 null）
+    // 会拿「已消解」覆盖「已按 Agent 请求发布」。现在归属存共享 store，
+    // 旁观者必须沉默。mock 前两轮 pending、之后 null：确认路径的
+    // invalidate 消费第 2 轮，第 3 轮由轮询定时器触发——invalidate 与轮询
+    // 两个通道都会推来 null，任一通道都必须被归属守卫拦下。
+    let calls = 0
+    mocks.fetchPendingPublishRequest.mockImplementation(async () => {
+      calls += 1
+      return calls <= 2 ? requestRecord() : null
+    })
+    mocks.confirmPublishRequest.mockResolvedValue(
+      requestRecord({
+        status: 'confirmed',
+        result_revision_id: 'ws1:publish_flow_ws:v2',
+        resolved_at: '2026-09-03T10:02:00Z',
+      })
+    )
+    const { dialog, aside } = renderTwoHooksSharingOneQueryClient()
+    await waitFor(() =>
+      expect(dialog.result.current.pendingRequest?.id).toBe('req-1')
+    )
+
+    await act(async () => {
+      await dialog.result.current.confirm()
+    })
+
+    // 第 3 轮轮询返回 null：双方都看到 pending 消失。
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5_300))
+    })
+    expect(dialog.result.current.pendingRequest).toBeNull()
+    expect(aside.result.current.pendingRequest).toBeNull()
+    // 正确回执未被旁观实例覆盖成「已消解」。
+    expect(aside.result.current.resolvedNotice).toContain(
+      '已按 Agent 请求发布（revision ws1:publish_flow_ws:v2）'
+    )
+    expect(dialog.result.current.resolvedNotice).toContain(
+      '已按 Agent 请求发布（revision ws1:publish_flow_ws:v2）'
+    )
+  })
+
+  it('a bystander instance does not overwrite the receipt after cancel (shared QueryClient, pending→null)', async () => {
+    // 同上，但走取消路径：取消后的「已拒绝」回执同样不得被旁观者的
+    // pending→null 观测覆盖。
+    let calls = 0
+    mocks.fetchPendingPublishRequest.mockImplementation(async () => {
+      calls += 1
+      return calls <= 2 ? requestRecord() : null
+    })
+    mocks.cancelPublishRequest.mockResolvedValue(
+      requestRecord({ status: 'rejected', resolved_at: '2026-09-03T10:02:00Z' })
+    )
+    const { dialog, aside } = renderTwoHooksSharingOneQueryClient()
+    await waitFor(() =>
+      expect(dialog.result.current.pendingRequest?.id).toBe('req-1')
+    )
+
+    await act(async () => {
+      await dialog.result.current.cancel()
+    })
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5_300))
+    })
+    expect(dialog.result.current.pendingRequest).toBeNull()
+    expect(aside.result.current.pendingRequest).toBeNull()
+    expect(aside.result.current.resolvedNotice).toContain('已拒绝')
+    expect(dialog.result.current.resolvedNotice).toContain('已拒绝')
+  })
+
+  it('still lands the resolved-away notice when nobody resolved the request (external supersede)', async () => {
+    // 守卫的另一面：无人主动 resolve（agent 重发 / 手动发布顶替 / TTL 过
+    // 期）时，pending→null 必须照旧着陆「已消解」——共享 store 里没有该
+    // id 的 resolve 记录。双实例设置下验证，确保归属检查没有误伤。
+    let calls = 0
+    mocks.fetchPendingPublishRequest.mockImplementation(async () => {
+      calls += 1
+      return calls <= 1 ? requestRecord() : null
+    })
+    const { dialog, aside } = renderTwoHooksSharingOneQueryClient()
+    await waitFor(() =>
+      expect(dialog.result.current.pendingRequest?.id).toBe('req-1')
+    )
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5_300))
+    })
+    await waitFor(() => {
+      expect(dialog.result.current.pendingRequest).toBeNull()
+      expect(aside.result.current.pendingRequest).toBeNull()
+    })
+    expect(aside.result.current.resolvedNotice).toContain('已消解')
+  })
+
   it('lands a superseded notice when the pending request vanishes externally', async () => {
     // #429 P2-3 前端：手动发布/新请求在后端顶替 pending → 轮询返回 null →
-    // 弹窗无声关闭是不可接受的：这里必须补一轮回执。
+    // 弹窗无声关闭是不可接受的：这里必须补一轮回执（单实例，无人 resolve）。
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
       mocks.fetchPendingPublishRequest.mockResolvedValueOnce(requestRecord())
