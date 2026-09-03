@@ -27,6 +27,9 @@ export const extraQueryKeys = {
   skillDirectories: (workspaceId: string) => k('skillDirectories', workspaceId),
   studioAgents: () => ['studioAgents'] as const,
   connections: () => ['connections'] as const,
+  // key-only 连接 key 列表（任意登录用户可读，#419）：ConnectionsSection
+  // 的增删改成功后一并 invalidate（见 applyMutation）。
+  connectionKeys: () => ['connectionKeys'] as const,
   // 全局设置「基础设施连接」只读展示（#335）。
   infraConnections: () => ['infraConnections'] as const,
   connectionTypes: () => ['connectionTypes'] as const,

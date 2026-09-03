@@ -123,6 +123,7 @@ server/app/
 | GET | `/artifacts/{hash}` | `download_artifact` | routes/artifacts.py |
 | GET | `/health` | `health` | routes/common.py |
 | GET | `/admin/connections` | `list_connections` | routes/connections.py |
+| GET | `/connections/keys` | `list_connection_keys` | routes/connections.py |
 | GET | `/admin/connection-types` | `list_connection_types` | routes/connections.py |
 | POST | `/admin/connections` | `create_connection` | routes/connections.py |
 | PUT | `/admin/connections/{key}` | `update_connection` | routes/connections.py |
@@ -352,6 +353,7 @@ server/app/
 | ConnectionTokenStatus | BaseModel | expires_at: str | None, refreshed_at: str | None | app/routes/connections_contracts.py |
 | ConnectionView | BaseModel | key: str, type: str, display_name: str, config: dict[str, Any], enabled: bool... | app/routes/connections_contracts.py |
 | ConnectionListResponse | BaseModel | connections: list[ConnectionView] | app/routes/connections_contracts.py |
+| ConnectionKeysResponse | BaseModel | keys: list[str] | app/routes/connections_contracts.py |
 | ConnectionTypeView | BaseModel | type: str, description: str, required_config_keys: list[str], secret_keys: li... | app/routes/connections_contracts.py |
 | ConnectionTypesResponse | BaseModel | types: list[ConnectionTypeView] | app/routes/connections_contracts.py |
 | ConnectionTestResponse | BaseModel | ok: bool, message: str | app/routes/connections_contracts.py |

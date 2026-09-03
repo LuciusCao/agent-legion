@@ -685,6 +685,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/connections/keys': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Connection Keys */
+    get: operations['list_connection_keys_api_connections_keys_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/dashboard/events': {
     parameters: {
       query?: never
@@ -3579,6 +3596,16 @@ export interface components {
       key: string
       /** Type */
       type: string
+    }
+    /**
+     * ConnectionKeysResponse
+     * @description Key-only listing for non-admin UIs (#419): keys are the reference
+     *     users must type into ref items and node configs; they carry no
+     *     credentials (config/secret material never appears in this view).
+     */
+    ConnectionKeysResponse: {
+      /** Keys */
+      keys: string[]
     }
     /** ConnectionListResponse */
     ConnectionListResponse: {
@@ -8479,6 +8506,26 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['MeResponse']
+        }
+      }
+    }
+  }
+  list_connection_keys_api_connections_keys_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConnectionKeysResponse']
         }
       }
     }

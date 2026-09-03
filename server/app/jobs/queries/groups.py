@@ -15,8 +15,8 @@ from server.app.jobs.execution_control import JobExecutionControlMixin
 from server.app.jobs.queries.approval_decisions import ApprovalDecisionQueriesMixin
 from server.app.jobs.queries.auth import AuthQueriesMixin
 from server.app.jobs.queries.batch import RunQueriesMixin
-from server.app.jobs.queries.connection import ConnectionQueriesMixin
 from server.app.jobs.queries.execution_retention import ExecutionRetentionQueriesMixin
+from server.app.jobs.queries.external_connections import ExternalConnectionKeyQueriesMixin
 from server.app.jobs.queries.failed_node_runs import FailedNodeRunQueriesMixin
 from server.app.jobs.queries.global_settings import GlobalSettingsKVQueriesMixin
 from server.app.jobs.queries.job_artifact_keys import JobArtifactKeyQueriesMixin
@@ -53,7 +53,8 @@ class WorkspaceDomainQueriesMixin(
     WorkflowDraftQueriesMixin,
     WorkspacePackageQueriesMixin,
     WorkspaceQueriesMixin,
-    ConnectionQueriesMixin,
+    # Subclasses ConnectionQueriesMixin, so it need not be listed separately.
+    ExternalConnectionKeyQueriesMixin,
 ):
     """Workspace lifecycle, packages, agent routes, drafts, and connections."""
 
