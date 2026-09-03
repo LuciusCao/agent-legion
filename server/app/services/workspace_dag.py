@@ -34,9 +34,13 @@ def build_workspace_dag(
                 "label": node.label,
                 "capability": node.capability,
                 # #417：after 与 job 详情视图同源（effective_after：顶层
-                # edges 优先派生、隐藏 _start 边）——schema v2 的 YAML 只写
-                # 顶层 edges 时节点 after 为空，直读原始字段会把边丢掉。
-                "after": effective_after(definition, node.key),
+                # edges 优先派生）——schema v2 的 YAML 只写顶层 edges 时
+                # 节点 after 为空，直读原始字段会把边丢掉。
+                # 与 job 详情的差异（#424 review P2-1）：本视图保留
+                # _start 节点且响应没有独立 edges 字段，客户端只能从
+                # nodes[].after 重建拓扑，_start -> root 入口边必须保留
+                # （exclude_start=False），否则入口节点永远孤立。
+                "after": effective_after(definition, node.key, exclude_start=False),
                 "inputs": node.inputs,
                 "outputs": node.outputs,
                 "execution": asdict(node.execution),

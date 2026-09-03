@@ -55,6 +55,13 @@ describe('DagGraph', () => {
     expect(screen.getByRole('status')).toHaveTextContent('边数据缺失')
   })
 
+  it('does not show the missing-edges hint for a single-node workflow (#424 review P2-2)', () => {
+    // 单节点 workflow 本来就没有边（job 视图按设计不收 start 节点及其
+    // 入口边），属健康形态，不得误报「边数据缺失」。
+    render(<DagGraph nodes={[nodes[0]]} edges={[]} />)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
   it('does not show the missing-edges hint when the graph has edges', () => {
     render(<DagGraph nodes={nodes} edges={edges} />)
     expect(screen.queryByRole('status')).toBeNull()
