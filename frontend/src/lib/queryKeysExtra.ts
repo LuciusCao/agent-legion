@@ -64,6 +64,9 @@ export const extraQueryKeys = {
   // turn_end 按首段 'studioSkillDetail' 前缀整体失效（useStudioChat）。
   studioSkillDetail: (skillKey: string, ref: string | null) =>
     ['studioSkillDetail', skillKey, ref] as const,
+  // #410：节点检查器 Skill 区块 latest 绑定的实际执行版本回显（最近 run
+  // 的 skill_version）。
+  nodeRuns: (ws: string, nodeKey: string) => ['nodeRuns', ws, nodeKey] as const,
   // Studio 节点运行 Prompt 预览；草稿 YAML 进 key（编辑 debounce 后重取）。
   studioNodePromptPreview: (ws: string, nodeKey: string, yaml: string) =>
     ['studioNodePromptPreview', ws, nodeKey, yaml] as const,

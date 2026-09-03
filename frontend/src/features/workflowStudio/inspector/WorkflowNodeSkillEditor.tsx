@@ -7,6 +7,7 @@ import {
   normalizeNodeSkill,
   patchWorkflowNodeSkill,
 } from '../shared/workflowStudioYamlDraft.skill'
+import { useLatestSkillRunVersion } from './useLatestSkillRunVersion'
 
 type Props = {
   node: WorkflowNodeRecord
@@ -16,11 +17,11 @@ type Props = {
 }
 
 /** #76：节点级 skill 内容绑定编辑（仅 Agent 路由节点渲染，由调用方判定）。
- * 编辑真相源是草稿 YAML——key 经 SkillSelector 校验填入；ref #322 起显式化：
- * 新绑定默认填 latest（跟随仓库 HEAD，不冻结），填具体 tag 即首次 dispatch
- * 冻结进 skill_lock；response 的 node.skill 只作已发布状态的回显兜底。回写经
- * patchWorkflowNodeSkill（恒 mapping 形态，对齐后端 echo），草稿持久化走既有
- * 的 debounce PUT raw yaml 流（字段无关）。 */
+ * #410 起选择链路合一为两控件：SkillSelector 一个组件承载「目录名（校验
+ * 后绑定 key）+ 版本下拉（latest 跟随 HEAD / 具体 tag 首次 dispatch 冻结进
+ * skill_lock）」，不再有只读 Skill 回显字段、参考 tag 下拉或独立 Skill ref
+ * 输入。编辑真相源是草稿 YAML，回写经 patchWorkflowNodeSkill（恒 mapping
+ * 形态，对齐后端 echo），response 的 node.skill 只作已发布状态的回显兜底。 */
 export function WorkflowNodeSkillEditor(props: Props) {
   const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined
   // 区分「草稿里没有这个节点」（回显 published 绑定）与「草稿节点存在但无
@@ -32,6 +33,11 @@ export function WorkflowNodeSkillEditor(props: Props) {
     ? { key: props.node.skill.key, ref: props.node.skill.ref }
     : null
   const bound = draftNode === undefined ? published : draftSkill
+  const latestEcho = useLatestSkillRunVersion(
+    workspaceId,
+    props.node.key,
+    bound?.ref === 'latest' || bound?.ref === ''
+  )
 
   function patch(skill: { key: string; ref: string } | null) {
     props.setDefinitionYaml(
@@ -58,26 +64,18 @@ export function WorkflowNodeSkillEditor(props: Props) {
           workspaceId={workspaceId}
           value={bound?.key ?? ''}
           onChange={(key) => patch({ key, ref: bound?.ref ?? 'latest' })}
+          skillRef={bound?.ref ?? ''}
+          onSkillRefChange={(ref) => {
+            if (!bound) return
+            patch({ key: bound.key, ref })
+          }}
         />
       )}
-      <TextField
-        label="Skill ref"
-        variant="outlined"
-        value={bound?.ref ?? ''}
-        onChange={(event) => {
-          if (!bound) return
-          patch({ key: bound.key, ref: event.target.value })
-        }}
-        fullWidth
-        disabled={!bound}
-        placeholder="latest"
-        helperText={
-          bound
-            ? 'latest = 跟随仓库最新提交；填 tag 锁定版本'
-            : '先经上方校验选择 skill'
-        }
-        sx={{ mt: 1.5 }}
-      />
+      {latestEcho && (
+        <p style={{ fontSize: 12, color: '#616161', marginTop: 8 }}>
+          实际执行：{latestEcho}
+        </p>
+      )}
       {bound && (
         <Button size="small" sx={{ mt: 0.5 }} onClick={() => patch(null)}>
           清除 skill 绑定

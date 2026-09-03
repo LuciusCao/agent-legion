@@ -145,6 +145,15 @@ export function JobProgressPanelNode({
               {executorLabel}
             </span>
           )}
+          {run?.skill_version && (
+            // #410：该 run 实际执行的 skill 版本（latest 解析结果或冻结 tag）。
+            <span
+              className={styles.executorBadge}
+              title={`Skill 版本: ${run.skill_version}`}
+            >
+              {run.skill_version}
+            </span>
+          )}
         </div>
 
         {run?.log_path && (

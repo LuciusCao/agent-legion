@@ -15,6 +15,7 @@ from server.app.routes.job_view_contracts import (
     JobNodeSummaryResponse,
     JobsResponse,
     JobSummaryResponse,
+    NodeRunResponse,
 )
 from tests.helpers import publish_legacy_intake_revision
 
@@ -190,6 +191,44 @@ def test_get_job_detail_returns_typed_job_summary(client):
     assert isinstance(body.nodes, list)
     assert isinstance(body.runs, list)
     assert isinstance(body.artifacts, list)
+
+
+def test_get_job_detail_run_carries_skill_version(client):
+    # #410: the runs list echoes the resolved skill version so the studio can
+    # show what a `latest` binding actually executed.
+    workspace_id, job_id = _create_test_job(client)
+    client.app.state.job_db.start_node_run(
+        job_id,
+        "intake_knowledge_points",
+        ["local"],
+        "logs/skill.log",
+        skill_version="latest@abc123def456",
+    )
+    response = client.get(f"/api/jobs/{job_id}")
+    assert response.status_code == 200
+    body = JobDetailResponse.model_validate(response.json())
+    assert len(body.runs) == 1
+    run = NodeRunResponse.model_validate(body.runs[0].model_dump())
+    assert run.skill_version == "latest@abc123def456"
+
+
+def test_list_workspace_node_runs_carries_skill_version(client):
+    # #410: same column via the workspace node-runs listing (the inspector's
+    # latest-run data source).
+    workspace_id, job_id = _create_test_job(client)
+    client.app.state.job_db.start_node_run(
+        job_id,
+        "intake_knowledge_points",
+        ["local"],
+        "logs/skill.log",
+        skill_version="v1.2.0",
+    )
+    response = client.get(f"/api/workspaces/{workspace_id}/node-runs")
+    assert response.status_code == 200
+    runs = response.json()["runs"]
+    assert len(runs) == 1
+    run = NodeRunResponse.model_validate(runs[0])
+    assert run.skill_version == "v1.2.0"
 
 
 def test_get_jobs_returns_absolute_storage_dir(client):

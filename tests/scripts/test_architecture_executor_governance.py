@@ -40,6 +40,9 @@ WHITELIST: set[str] = {
     str(ROOT / "frontend" / "src" / "lib" / "agentsWsMessages.ts"),
     # Job detail panel picks the new NodeRunResponse.runner API field (run provenance).
     str(ROOT / "frontend" / "src" / "components" / "NodeDetailsPanel.tsx"),
+    # Same run-provenance field, rendered by the card NodeDetailsPanel was split
+    # into for file budget (#410).
+    str(ROOT / "frontend" / "src" / "components" / "NodeRunCard.tsx"),
 }
 
 FORBIDDEN_PATTERNS = {
