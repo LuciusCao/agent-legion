@@ -66,18 +66,22 @@ class ScopedTokenQueriesMixin(ConnectionQueriesMixin):
 
     def extend_scoped_token_expiry(
         self, token_hash: str, new_expires_at: datetime, if_expiring_before: datetime
-    ) -> None:
+    ) -> bool:
         """Slide a live token's expiry forward, only when it is close to expiry.
 
         Single conditional UPDATE: a revoked token stays revoked, a token with
         more life than ``if_expiring_before`` is left untouched, and an
         already-expired token is NOT revived — a leaked token that died while
-        the session sat idle must stay dead (#158 review).
+        the session sat idle must stay dead (#158 review). Returns whether a
+        row was updated: False covers the no-op (plenty of life left) AND the
+        died-between-check-and-update race (revoked/expired under us), which
+        lets the #411 keepalive distinguish them by re-checking liveness.
         """
         with self.connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 "update auth_scoped_tokens set expires_at=%s"
                 " where token_hash=%s and revoked_at is null"
                 " and expires_at > current_timestamp and expires_at < %s",
                 (new_expires_at, token_hash, if_expiring_before),
             )
+            return bool(cursor.rowcount)

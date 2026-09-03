@@ -124,9 +124,10 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   「取最新 500 条」（`order by seq desc` + 反转，返回值仍为升序）——
   超长会话重进界面不再只看到远古记录而丢失进行中的对话（即 issue 报告的
   「聊天记录消失」）；③ 保活与提示的 DB 操作全部带异常保护，失败不阻断
-  tool_call 消息落库且下次 tool_call 自动重试。已知取舍：掉线超过 500 条
-  的增量补齐会在新旧窗口间留缝隙（API 无 before_seq），重新进入会话即
-  全量替换自愈。
+  tool_call 消息落库且下次 tool_call 自动重试；续期 UPDATE 的 rowcount
+  闭合「查活→续期」间隙内 token 被吊销/过期的竞态（未命中即重验存活，
+  最后一次工具调用也不会漏报失效）。已知取舍：掉线超过 500 条的增量补齐
+  会在新旧窗口间留缝隙（API 无 before_seq），重新进入会话即全量替换自愈。
 
 ## [0.4.0-alpha] - 2026-08-29
 
