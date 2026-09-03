@@ -51,7 +51,7 @@ from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SC
 # file replay, so fresh and upgraded databases still share the shape); the
 # undo drops it (indexes included — plain and partial unique alike); the
 # v72-v75 effects stay in place — they belong to the SCHEMA_VERSION-1 shape
-# after the rewind.
+# after the rewind.)
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("studio_publish_requests",)
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()

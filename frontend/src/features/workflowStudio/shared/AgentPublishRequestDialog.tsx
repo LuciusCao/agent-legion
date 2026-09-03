@@ -24,6 +24,7 @@ export function AgentPublishRequestDialog() {
     <WorkflowPublishReviewDialog
       open={open}
       {...reviewDialogProps(studio)}
+      confirming={agentRequest.confirming}
       onConfirm={async () => {
         await agentRequest.confirm()
         view.setChangesPanelOpen(true)

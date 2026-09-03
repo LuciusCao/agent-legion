@@ -72,7 +72,10 @@ def register_workflow_tools(mcp: FastMCP, client_factory: ClientFactory) -> None
         """Poll the outcome of a request_workflow_publish call: the request's
         status (pending/confirmed/rejected/expired/superseded), expires_at,
         and result_revision_id when the human confirmed and the publish
-        produced a revision. A confirmed request means the draft is live;
-        rejected or expired means you may revise the draft and re-request."""
+        created a NEW revision (null for runtime-only config updates). A
+        confirmed request means the draft is live; rejected or expired means
+        you may revise the draft and re-request; superseded means displaced
+        by a newer request or a manual human publish (check the active
+        revision — a manual publish still means live)."""
         _, client = await client_factory()
         return await client.call("GET", f"/publish-requests/{request_id}")

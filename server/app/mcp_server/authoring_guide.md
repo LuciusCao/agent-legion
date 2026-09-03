@@ -29,8 +29,11 @@ Studio. Nothing you do takes effect in production by itself.
   the human to review the dialog.
 - `get_publish_request_status(request_id)` — poll the outcome of a publish
   request: `pending` until the human decides; `confirmed`
-  (`result_revision_id` set when a revision was produced) or `rejected`
-  afterwards; `expired` when nobody answered within the TTL.
+  (`result_revision_id` set only when the publish created a new revision —
+  a runtime-only config update keeps it null), `rejected`, `superseded`
+  (a newer request of yours or a manual human publish displaced it), or
+  `expired` (nobody answered within the TTL). `superseded` by a manual
+  publish still means the draft went live — check the active revision.
 - `save_node_code_draft(workspace_id, node_key, code, ...)` —
   draft Python source for a code node.
 - `get_node_code(workspace_id, node_key)` — effective code plus
@@ -85,7 +88,9 @@ publish, agent definition publish, and skill release actions stay human-only).
 6. Present the change summary to the human, then call
    `request_workflow_publish` — the publish review dialog pops in Studio with
    the same compare data. Poll `get_publish_request_status`: confirmed means
-   live, rejected/expired means revise the draft and re-request. The final
+   live, rejected/expired means revise the draft and re-request, superseded
+   means the request was displaced (a newer one of yours, or the human
+   published manually — check the active revision to tell which). The final
    publish decision is never yours.
 
 ## 3. Workflow definition YAML

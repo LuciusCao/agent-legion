@@ -6242,10 +6242,11 @@ export interface components {
      * StudioPublishRequestRecord
      * @description One row of the agent→human publish handshake.
      *
-     *     ``status`` lifecycle: pending → superseded (a newer agent request
-     *     displaced it) | confirmed (human confirmed; ``result_revision_id`` set
-     *     when the publish produced a revision) | rejected (human cancelled) |
-     *     expired (past ``expires_at``; swept lazily on read).
+     *     ``status`` lifecycle: pending → superseded (a newer agent request or a
+     *     manual publish displaced it) | confirmed (human confirmed;
+     *     ``result_revision_id`` set only when the publish created a NEW revision
+     *     — runtime-only config updates keep it null) | rejected (human
+     *     cancelled) | expired (past ``expires_at``; swept lazily on read).
      */
     StudioPublishRequestRecord: {
       /** Chat Session Id */
