@@ -14,6 +14,17 @@ import { useAgentDefinitions } from './useAgentDefinitions'
 // agentBindingStatus.AgentCatalogSettle，消费方经该模块的门控函数按
 // capability 组合）下发，不在这里预折叠成单一 bindingStatus。类型与门控
 // 计算都在 agentBindingStatus.ts。
+// #426 codex 终轮复审 P2：settle = !isFetching（不是 !isPending）——
+// invalidate 触发的后台重取期间 isPending 仍 false（有缓存），旧缓存里
+// 已归档/已变更的 Agent 若继续放行，编辑器可操作已归档条目；空 catalog
+// 旧缓存还会抢先放出新建表单、重取后切换真实 draft 重挂丢输入。备选的
+// setQueryData 在调用方同步改写缓存需为归档/发布/草稿保存各猜一个列表
+// 终态，猜错即静默漂移，且聊天的 turn_end 失效（studioChatInvalidation）
+// 无对应事件负载可同步——isFetching 让「缓存值可能过期」这一事实本身
+// 驱动门控，语义正确且改动集中在数据源。refetchOnWindowFocus 默认开启
+// （queryClient.ts）+ staleTime 30s：聚焦重取只在数据过期时发生，
+// 编辑器占位不频繁闪烁；归档等 mutation 后的重取会短暂出占位，正是
+// 「旧值不可信」的窗口。
 
 export function useAgentCatalog(workspaceId: string | undefined) {
   const query = useQuery({
@@ -26,7 +37,7 @@ export function useAgentCatalog(workspaceId: string | undefined) {
     agents: query.data?.agents ?? [],
     definitions: definitions.agents,
     settle: {
-      catalogSettled: !query.isPending,
+      catalogSettled: !query.isFetching,
       catalogFailed: query.isError && !query.data,
       definitionsSettled: !definitions.pending,
       definitionsFailed: definitions.failed,
