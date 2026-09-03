@@ -10,7 +10,7 @@ import { WorkflowNodeCodePreview } from './WorkflowNodeCodePreview'
 import { WorkflowNodeCodeVersions } from './WorkflowNodeCodeVersions'
 import inspectorStyles from '../inspector/WorkflowNodeInspector.module.css'
 import styles from './WorkflowNodeCodeSection.module.css'
-import { fetchNodeCodeTemplate, isCodeNode } from './workflowNodeCodeLookup'
+import { fetchNodeCodeTemplate } from './workflowNodeCodeLookup'
 
 type NodeCodeResponse = components['schemas']['WorkflowNodeCodeResponse']
 
@@ -27,7 +27,10 @@ export function WorkflowNodeCodeSection(props: {
   readOnly?: boolean
 }) {
   const workspaceId = useSettingStore((s) => s.workspaceId)
-  const codeBound = isCodeNode(props.node)
+  // 防御门控（nodeTypeSections 注册表之外的独立保证）：节点代码是
+  // code 池专属，非 code 类型一律不渲染——组件被直接渲染时也不得
+  // 对 agent/approval 节点发节点代码请求。
+  const codeBound = (props.node.node_type ?? 'code') === 'code'
 
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [data, setData] = useState<NodeCodeResponse | null>(null)

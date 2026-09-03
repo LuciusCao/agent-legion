@@ -1,7 +1,7 @@
 # Studio 节点类型抽象落地：类型选择器 + 按类型注册设置区块
 
-状态：**Phase 1 已实施**（PR #395，2026-09-02；经 codex 与 subagent
-两轮评审修正）。Phase 2/3 未实施。承接 issue #392；本文档给出问题
+状态：**Phase 1/2 已实施**（Phase 1 = PR #395；Phase 2 = 本 PR，
+2026-09-02）。Phase 3 未实施。承接 issue #392；本文档给出问题
 分析、目标形态、分阶段实施方案与取舍记录，`path:line` 证据以
 develop@e4e4590c 为准。
 
@@ -131,25 +131,29 @@ Agent 的内联引导」。
 ### Phase 2：按类型注册 section 集（结构重构）
 
 新文件
-`frontend/src/features/workflowStudio/inspector/nodeTypeRegistry.ts`：
+`frontend/src/features/workflowStudio/inspector/nodeTypeSections.tsx`：
 
 ```ts
-type NodeTypeSectionSpec = {
+type SectionSpec = {
   sections: ComponentType<InspectorSectionProps>[]   // 该类型渲染的 section 序列
 }
-const REGISTRY: Record<'code'|'agent'|'approval', NodeTypeSectionSpec>
+export const NODE_TYPE_SECTIONS: Record<'code'|'agent'|'approval', SectionSpec>
 ```
 
 - section 组件全部复用现有组件（Editor/Execution/Code/ConfigSchema/
   Config/DataContract/Dependency/Start），只是组合关系从「渲染全部 +
-  内部分叉」改为「按类型挑序列」。各 section 内部的 node_type 分叉
-  （如 ExecutionSection 的 approval 早退、`isCodeNode` 门控）随之删除
-  ——类型已由注册表保证。
+  内部分叉」改为「按类型挑序列」。**实施取舍（subagent review）**：
+  各 section 的防御性门控保留两层——ExecutionSection 对 approval 早退
+  空渲染（hooks 之后）、CodeSection 保留 code 类型门控——注册表之外的
+  独立防线，组件被直接渲染时也不得越类型发请求；`isCodeNode` 独立
+  helper 退役（判定内联）。
 - `WorkflowNodeInspectorSections.tsx` 变为查表分发，start 分支保留。
 - 审批配置升级：approval 类型给专属 section（`rework_target` 下拉
-  [上游节点] + `feedback_artifact` 输入），替换现在的只读说明块
-  （`WorkflowNodeAgentConfigBody.tsx:49` `WorkflowNodeApprovalSection`）。
-  写路径走 `patchNode` 系（config 白名单键）。
+  [祖先闭包内的上游节点，镜像 approval_rework 的 ancestor_closure
+  资格校验] + `feedback_artifact` 输入），替换只读说明块。写路径走
+  专用 `patchWorkflowNodeApprovalConfig`（只覆写传入键，白名单键，
+  裸文件名校验镜像 loader，非 approval 拒写）；候选计算抽 shared 纯
+  函数 `workflowStudioApprovalRework.ts`（after ∪ edges 判定源）。
 
 ### Phase 3：approval 的画布可见性 + 节点创建入口（补齐体验）
 
@@ -224,7 +228,7 @@ const REGISTRY: Record<'code'|'agent'|'approval', NodeTypeSectionSpec>
     `tests/workflows/test_approval_node_definition.py`；
     `WorkflowNodeInspector.test.tsx` 组件级断言（选择器渲染、切换清洗
     传递、code 节点无 Agent 入口回归线、确认弹窗、前置校验 toast）。
-  - Phase 2：`nodeTypeRegistry` 的类型→section 组合表测试 + 各 section
+  - Phase 2：`nodeTypeSections` 的类型→section 组合表测试 + 各 section
     卸载后的负向断言。
   - Phase 3：`appendWorkflowNode` 的 YAML 追加单测 + approval 徽标渲染。
 - **质量门**：前端 lane（vitest + tsc + eslint）全绿是合入前提；本 PR
