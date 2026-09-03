@@ -129,6 +129,73 @@ def test_runtime_only_save_updates_active_revision_without_new_version(
     assert second["id"] != first["id"]
 
 
+def test_config_only_save_creates_new_revision(tmp_path: Path) -> None:
+    """Issue #418: node ``config`` / ``config_schema`` are structural — a
+    config-only save publishes a new revision (the same fact compare now
+    reports via creates_revision; the two must stay aligned)."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("runtime-ws", default_workflow_key="runtime-flow")
+    service = WorkflowRevisionService(queries)
+    original = workflow_definition_from_mapping(
+        {
+            "key": "runtime-flow",
+            "label": "Runtime Flow",
+            "nodes": {
+                "generate": {
+                    "capability": "generate",
+                    "outputs": ["result.json"],
+                }
+            },
+        }
+    )
+    first = service.publish_workspace_revision(workspace["id"], original)
+
+    # config-only change (e.g. a code node gaining sandbox_network).
+    config_only = workflow_definition_from_mapping(
+        {
+            "key": "runtime-flow",
+            "label": "Runtime Flow",
+            "nodes": {
+                "generate": {
+                    "capability": "generate",
+                    "outputs": ["result.json"],
+                    "config": {"sandbox_network": True},
+                }
+            },
+        }
+    )
+    second = service.save_workspace_revision(workspace["id"], config_only)
+    assert second["version"] == 2
+    assert second["id"] != first["id"]
+    assert json.loads(second["definition_json"])["nodes"]["generate"]["config"] == {
+        "sandbox_network": True
+    }
+
+    # config_schema-only change (declare a tunable property with a default).
+    schema_only = workflow_definition_from_mapping(
+        {
+            "key": "runtime-flow",
+            "label": "Runtime Flow",
+            "nodes": {
+                "generate": {
+                    "capability": "generate",
+                    "outputs": ["result.json"],
+                    "config": {"sandbox_network": True},
+                    "config_schema": {
+                        "type": "object",
+                        "properties": {
+                            "max_words": {"type": "integer", "default": 800},
+                        },
+                    },
+                }
+            },
+        }
+    )
+    third = service.save_workspace_revision(workspace["id"], schema_only)
+    assert third["version"] == 3
+    assert third["id"] != second["id"]
+
+
 def _agent_nodes_definition(*, review_as_local: bool) -> WorkflowDefinition:
     # Explicit node types (#284): write_script always runs as an Agent node;
     # review_as_local flips the review node to a code node with a capability
