@@ -2,24 +2,24 @@ from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.start_node import START_NODE_TYPE
 
 
-def effective_after(
-    definition: WorkflowDefinition, node_key: str, *, exclude_start: bool = True
-) -> list[str]:
+def effective_after(definition: WorkflowDefinition, node_key: str) -> list[str]:
     # Start nodes are a definition-level concept and never enter job_nodes;
     # hide their derived `_start -> root` edges from the job view so the
     # frontend does not render phantom nodes for them. The workspace DAG view
-    # keeps the start node, so it passes exclude_start=False — the response
-    # has no separate edges field and the client rebuilds topology from
-    # nodes[].after; dropping the start edge there would strand the entry
-    # node (#424 review P2-1).
+    # no longer shares this helper: it derives predecessors straight from
+    # definition.edges, because the fallback below would resurrect deleted
+    # edges from the stale schema-v2 ``after`` echo (#424).
     edge_sources = [
         edge.source
         for edge in definition.edges
-        if edge.target == node_key
-        and (not exclude_start or definition.nodes[edge.source].node_type != START_NODE_TYPE)
+        if edge.target == node_key and definition.nodes[edge.source].node_type != START_NODE_TYPE
     ]
     if edge_sources:
         return edge_sources
+    # v1 legacy fallback（保留，job 视图历史行为）：经 loader 解析的 v1
+    # definition 在 _load_edges 里已把 after 回填进 definition.edges，故本臂
+    # 并非 v1 遗留数据的唯一边来源，仅作防御兼容——schema v2 下 after 只是
+    # 旧 echo，workspace DAG 不得回退（见上），job 视图维持原行为。
     if node_key in definition.nodes:
         return definition.nodes[node_key].after
     return []
