@@ -300,6 +300,9 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
         job_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
+        # #410 review: the endpoint response is NodeRunResponse (was a loose
+        # dict list, codex P1 on #427), so project node_runs columns only —
+        # join fields the contract does not declare would fail validation.
         clauses = ["jobs.workspace_id = %s"]
         params: list[Any] = [workspace_id]
         if status:
@@ -316,15 +319,7 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
         with self._connect_read() as conn:
             rows = conn.execute(
                 f"""
-                select
-                  node_runs.*,
-                  jobs.workspace_id,
-                  jobs.title as job_title,
-                  jobs.source_id,
-                  jobs.source_type,
-                  -- #211 M2: jobs lost workflow_key (v70); the deprecated
-                  -- response field carries the identity value instead.
-                  jobs.workspace_id as workflow_key
+                select node_runs.*
                 from node_runs
                 join jobs on jobs.id = node_runs.job_id
                 where {where}

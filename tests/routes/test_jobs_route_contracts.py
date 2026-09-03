@@ -214,7 +214,10 @@ def test_get_job_detail_run_carries_skill_version(client):
 
 def test_list_workspace_node_runs_carries_skill_version(client):
     # #410: same column via the workspace node-runs listing (the inspector's
-    # latest-run data source).
+    # latest-run data source). #410 review: the endpoint response validates
+    # against NodeRunResponse (was a loose dict list, codex P1 on #427) — the
+    # strict model already rejects missing/extra fields, and the schema pins
+    # the typed item shape for the generated frontend contract.
     workspace_id, job_id = _create_test_job(client)
     client.app.state.job_db.start_node_run(
         job_id,
@@ -229,6 +232,19 @@ def test_list_workspace_node_runs_carries_skill_version(client):
     assert len(runs) == 1
     run = NodeRunResponse.model_validate(runs[0])
     assert run.skill_version == "v1.2.0"
+
+
+def test_workspace_runs_response_schema_is_typed_node_run_list(tmp_path):
+    # #410 review: WorkspaceRunsResponse.runs must reference NodeRunResponse
+    # (like JobDetailResponse.runs), not a loose dict list — the frontend
+    # derives its transport type from this contract.
+    schema = build_openapi_schema(tmp_path)
+    runs_schema = schema["components"]["schemas"]["WorkspaceRunsResponse"]["properties"]["runs"]
+    assert runs_schema == {
+        "items": {"$ref": "#/components/schemas/NodeRunResponse"},
+        "title": "Runs",
+        "type": "array",
+    }
 
 
 def test_get_jobs_returns_absolute_storage_dir(client):

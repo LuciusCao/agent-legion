@@ -114,9 +114,10 @@ describe('SkillSelector', () => {
     expect(mockValidate).toHaveBeenCalledWith(
       '~/.agents/skills/ws-1/write-script'
     )
-    expect(screen.getByText('已锁定版本：abc123')).toBeInTheDocument()
     // 宿主回填 key 后版本下拉可用：latest + 全部 tag（替代旧「可用 tag（参考）」）。
+    // #427：校验结果按 key 生效，锁定回显等回填后再断言。
     view.rerenderWith({ value: 'ns/skill', skillRef: '' })
+    expect(await screen.findByText('已锁定版本：abc123')).toBeInTheDocument()
     const versionSelect = await screen.findByLabelText('版本')
     await waitFor(() => expect(versionSelect).toBeEnabled())
     fireEvent.mouseDown(versionSelect)
@@ -317,6 +318,8 @@ describe('SkillSelector', () => {
   })
 
   it('shows the validation error when the path is invalid', async () => {
+    // #427：invalid 结果（key 为 null）仅在节点尚未绑定 skill（value 空）时
+    // 展示——与「按 key 关联」规则一致，无绑定的输入错误不跨节点泄漏。
     mockValidate.mockResolvedValue({
       valid: false,
       path: '/abs/nope',
@@ -415,6 +418,88 @@ describe('SkillSelector', () => {
     fireEvent.change(input, { target: { value: 'write' } })
 
     expect(mockValidate).not.toHaveBeenCalled()
+  })
+
+  it("ignores the previous node's validation result after the bound key changes (#427)", async () => {
+    // codex P1 on #427：检查器不卸载、直接切换到另一个 Agent 节点——节点 A
+    // 校验过的 result 会跨节点残留。版本下拉的选项必须来自 B 自己的详情
+    // （不走 A 的 tags），选版本写入的也是 B 的绑定回调。
+    mockValidate.mockResolvedValue({
+      valid: true,
+      path: '/abs/node-a-skill',
+      skill_key: 'ws-1/skill-a',
+      tags: ['v9.9.9'],
+      latest_tag: 'v9.9.9',
+      locked_ref: 'aaabbb',
+    })
+    mockGetSkillDetail.mockResolvedValue({
+      available: true,
+      commit: 'def456',
+      files: [],
+      key: 'ws-1/skill-b',
+      ref: 'main',
+      tags: ['v2.0.0', 'v1.0.0'],
+    } as SkillDetail)
+    const onSkillRefChange = vi.fn()
+    const view = renderSelector({ onSkillRefChange })
+
+    // 节点 A：校验成功，tags 来自校验响应。
+    const input = screen.getByLabelText('Skill 目录名')
+    await waitFor(() => expect(input).toBeEnabled())
+    fireEvent.change(input, { target: { value: 'skill-a' } })
+    fireEvent.click(screen.getByRole('button', { name: '校验' }))
+    await waitFor(() =>
+      expect(mockValidate).toHaveBeenCalledWith('~/.agents/skills/ws-1/skill-a')
+    )
+    view.rerenderWith({ value: 'ws-1/skill-a', skillRef: '' })
+    let versionSelect = await screen.findByLabelText('版本')
+    await waitFor(() => expect(versionSelect).toBeEnabled())
+    expect(screen.getByText('已锁定版本：aaabbb')).toBeInTheDocument()
+
+    // 切换到节点 B（不同 skill key，检查器不卸载）：A 的校验结果按 key 失效。
+    view.rerenderWith({ value: 'ws-1/skill-b', skillRef: '' })
+    await waitFor(() =>
+      expect(mockGetSkillDetail).toHaveBeenCalledWith('ws-1/skill-b')
+    )
+    expect(screen.queryByText('已锁定版本：aaabbb')).not.toBeInTheDocument()
+    versionSelect = screen.getByLabelText('版本')
+    fireEvent.mouseDown(versionSelect)
+    // 版本选项来自 B 自己的详情端点，A 的 v9.9.9 不得出现。
+    expect(
+      await screen.findByRole('option', { name: 'v2.0.0（最新）' })
+    ).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'v1.0.0' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('option', { name: /v9\.9\.9/ })
+    ).not.toBeInTheDocument()
+
+    // 选择版本写入的是 B 的绑定回调（值本身是 B 的 tag）。
+    fireEvent.click(await screen.findByRole('option', { name: 'v1.0.0' }))
+    expect(onSkillRefChange).toHaveBeenCalledWith('v1.0.0')
+    expect(onSkillRefChange).not.toHaveBeenCalledWith('v9.9.9')
+  })
+
+  it('keeps an invalid result visible only while the node has no bound skill (#427)', async () => {
+    // codex P1 on #427 的另一面：无效输入的错误提示属于未绑定状态；切到
+    // 已绑定其他 key 的节点后，旧错误不得继续展示（B 的绑定不受 A 的
+    // 校验失败影响）。
+    mockValidate.mockResolvedValue({
+      valid: false,
+      path: '/abs/nope',
+      error: 'SKILL.md 不存在',
+    })
+    const view = renderSelector()
+
+    const input = screen.getByLabelText('Skill 目录名')
+    await waitFor(() => expect(input).toBeEnabled())
+    fireEvent.change(input, { target: { value: 'nope' } })
+    fireEvent.click(screen.getByRole('button', { name: '校验' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'SKILL.md 不存在'
+    )
+
+    view.rerenderWith({ value: 'ws-1/skill-b', skillRef: '' })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('ignores a stale validation response when a newer pick is in flight', async () => {
