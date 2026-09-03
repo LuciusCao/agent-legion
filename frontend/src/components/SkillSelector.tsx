@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getSkillDetail } from '../api/agentCatalogApi'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
@@ -19,13 +19,14 @@ type Props = {
   skillRef: string
   onSkillRefChange: (ref: string) => void
 }
-/** key（如 ws-a/skill-x）→ 目录输入回显值（codex 二轮 P1 on #427）：
- * key = <workspaceId>/<校验时输入的相对路径>（validator 的 base_dir 是
- * 技能根），剥离首段即回显；key 为空（未绑定）回空串。 */
+/** key（如 ws-a/skill-x 或 group 形态 education-video-problems-generation/
+ * write-script）→ 目录输入回显值：输入恒是「技能根下的完整相对路径」
+ * （#427 二轮复审 P3-3）——validator 的 base_dir 是技能根、key 即根下
+ * 全段相对路径（前端发起时由 <skills_root>/<workspaceId>/ 前缀 + 输入
+ * 拼出，group 形态只会来自 YAML 手写/历史数据）；不再假设首段是
+ * workspaceId 而截断 key。key 为空（未绑定）回空串。 */
 function directoryNameFromKey(key: string): string {
-  const relative = key.trim().replace(/^\/+/, '')
-  const slash = relative.indexOf('/')
-  return slash === -1 ? '' : relative.slice(slash + 1)
+  return key.trim().replace(/^\/+/, '')
 }
 /** Skill picker for the Agent editor (#410 选择链路合一)：目录名行
  * (SkillDirectoryInput) 提供候选与校验，选中即绑定；版本经
@@ -39,11 +40,14 @@ export function SkillSelector(props: Props) {
   const { prefix, rootReady, rootLoadFailed } = useSkillsRootPrefix(workspaceId)
   const { validating, validate, invalidateInFlight, resultFor } =
     useSkillValidation(prefix, props.onChange, value)
-  // 绑定上下文（节点切换/换绑）变化即作废在飞校验（codex 二轮 P1 on #427）：
-  // 节点 A 的迟到请求不得再触发 A 版 onChange 覆盖 B 的草稿；作废不影响
-  // invalid 结果展示——换绑输错时 value 未变（P2），快照归属仍命中。
+  // 绑定上下文（节点切换/换绑）变化即作废在飞校验（codex 二轮 P1 on
+  // #427）：节点 A 的迟到请求不得再触发 A 版 onChange 覆盖 B 的草稿。
+  // useLayoutEffect：commit 时同步作废，不留提交窗口竞态（二轮复审 P2
+  // on #427——useEffect 在 commit 后的宏任务里执行，studio 节点切换提交
+  // 期间 settle 的响应恰好绕过两道保险）。作废不影响 invalid 结果展示
+  // ——换绑输错时 value 未变（P2），快照归属仍命中。
   const prevValue = useRef(value)
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (prevValue.current === value) return
     prevValue.current = value
     invalidateInFlight()
@@ -56,8 +60,8 @@ export function SkillSelector(props: Props) {
     enabled: Boolean(value),
   })
   // 结果按 key 归属（codex P1 on #427）：节点切换后旧结果视为无结果，tags
-  // 回落到当前绑定自己的详情端点；invalid 结果属于「未绑定」或「绑定未变
-  // 的换绑输错」（独立复审 P2）。
+  // 回落到当前绑定自己的详情端点；invalid 结果属于「校验发起时的绑定」
+  // （同 key 才命中，独立复审 P3-1 on #427）。
   const result = resultFor(value)
   const validated = result?.valid ? result : null
   const tags: string[] = validated?.tags ?? boundDetailQuery.data?.tags ?? []
