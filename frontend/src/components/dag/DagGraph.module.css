@@ -19,10 +19,12 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-/* #417：无边图的轻量提示（非阻塞 badge，不遮挡画布交互）。 */
-.missingEdgesBadge {
+/* #417：无边图的轻量提示（非阻塞 badge，不遮挡画布交互）。右上角：
+   Controls 在左上、attribution 左下、MiniMap 默认右下（原右下定位与
+   MiniMap 视觉重叠，#424 独立复审 P3），右上空闲。 */
+.edgelessBadge {
   position: absolute;
-  bottom: 12px;
+  top: 12px;
   right: 16px;
   background: rgba(255, 244, 229, 0.95);
   color: #7b341e;
