@@ -496,16 +496,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/340
   ceiling: 47
 - check: architecture.file_budget
-  path: server/app/mcp_server/server.py
-  reason: Issue 329 adds the job observation tool group registration
-    (job_tools.register_job_tools) to the shared MCP assembly, one effective
-    line past the baseline ceiling (155). The assembly already stitches four
-    tool modules inline; the durable fix is moving the register calls into a
-    single registry/assembly module, at which point this exemption goes stale.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/329
-  ceiling: 156
-- check: architecture.file_budget
   path: server/app/agent_broker/agent_result_commit.py
   reason: >-
     Issue #359 adds the execute-done counter at the terminal-commit point
