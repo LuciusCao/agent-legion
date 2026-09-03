@@ -43,6 +43,7 @@ function renderSections(
     <WorkflowNodeInspectorSections
       details={{ node, incoming: [], outgoing: [] }}
       agentCatalog={[]}
+      agentBindingStatus="ready"
       definitionYaml={options?.definitionYaml ?? startYaml}
       setDefinitionYaml={options?.setDefinitionYaml ?? (() => {})}
       readOnly={options?.readOnly}

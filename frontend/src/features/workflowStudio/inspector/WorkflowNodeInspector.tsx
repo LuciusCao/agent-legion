@@ -4,10 +4,12 @@ import { WorkflowInspectorEmptyState } from './WorkflowInspectorOverviewFallback
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
 import { inspectorNodeDetails } from './workflowStudioInspectorDetails'
 import { WorkflowNodeInspectorBody } from './WorkflowNodeInspectorBody'
+import type { AgentBindingStatus } from './useAgentCatalog'
 
 type Props = {
   workflow: WorkflowDefinitionRecord | null
   agentCatalog: AgentDefinition[]
+  agentBindingStatus: AgentBindingStatus
   selectedNodeKey: string | null
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
@@ -28,6 +30,7 @@ export function WorkflowNodeInspector(props: Props) {
     <WorkflowNodeInspectorBody
       details={details}
       agentCatalog={props.agentCatalog}
+      agentBindingStatus={props.agentBindingStatus}
       definitionYaml={props.definitionYaml}
       setDefinitionYaml={props.setDefinitionYaml}
       readOnly={props.readOnly}

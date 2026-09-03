@@ -48,6 +48,7 @@ function renderInspector(nodeKey: string) {
     <WorkflowNodeInspector
       workflow={null}
       agentCatalog={[]}
+      agentBindingStatus="ready"
       selectedNodeKey={nodeKey}
       definitionYaml={dagYaml}
       setDefinitionYaml={() => {}}
@@ -150,6 +151,7 @@ describe('WorkflowNodeInspector for approval nodes (#392 Phase 2)', () => {
       <WorkflowNodeInspector
         workflow={null}
         agentCatalog={[]}
+        agentBindingStatus="ready"
         selectedNodeKey="gate"
         definitionYaml={yamlWithBranches}
         setDefinitionYaml={() => {}}
@@ -179,6 +181,7 @@ describe('WorkflowNodeInspector for approval nodes (#392 Phase 2)', () => {
       <WorkflowNodeInspector
         workflow={null}
         agentCatalog={[]}
+        agentBindingStatus="ready"
         selectedNodeKey="gate"
         definitionYaml={dagYaml}
         setDefinitionYaml={setDefinitionYaml}
@@ -239,6 +242,7 @@ describe('WorkflowNodeInspector for approval nodes (#392 Phase 2)', () => {
       <WorkflowNodeInspector
         workflow={publishedWorkflow as never}
         agentCatalog={[]}
+        agentBindingStatus="ready"
         selectedNodeKey="gate"
         definitionYaml={brokenYaml}
         setDefinitionYaml={() => {}}

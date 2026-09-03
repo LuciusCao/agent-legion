@@ -115,6 +115,7 @@ const definitionYaml = [
 function renderBody(options?: {
   nodeKey?: string
   activeKind?: NodeDetailPreviewKind | null
+  agentBindingStatus?: 'pending' | 'error' | 'ready'
   onShowPreview?: (kind: NodeDetailPreviewKind) => void
 }) {
   return render(
@@ -123,6 +124,7 @@ function renderBody(options?: {
         workflow={workflow}
         nodeKey={options?.nodeKey ?? 'generate_key_info'}
         agentCatalog={agentCatalog}
+        agentBindingStatus={options?.agentBindingStatus ?? 'ready'}
         definitionYaml={definitionYaml}
         setDefinitionYaml={() => {}}
         readOnly={false}

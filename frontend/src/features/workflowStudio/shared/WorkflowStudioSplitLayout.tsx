@@ -52,6 +52,7 @@ export function WorkflowStudioSplitLayout({
           workflow={studio.workflow}
           nodeKey={studio.selectedNodeKey}
           agentCatalog={studio.agentCatalog}
+          agentBindingStatus={studio.agentBindingStatus}
           definitionYaml={studio.definitionYaml}
           setDefinitionYaml={studio.setDefinitionYaml}
           compareSummary={studio.compareSummary}

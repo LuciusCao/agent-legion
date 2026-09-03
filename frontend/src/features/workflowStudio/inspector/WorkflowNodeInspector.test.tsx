@@ -49,6 +49,7 @@ function renderInspector(
     <WorkflowNodeInspector
       workflow={null}
       agentCatalog={[]}
+      agentBindingStatus="ready"
       selectedNodeKey={selectedNodeKey}
       definitionYaml={options?.definitionYaml ?? draftYaml}
       setDefinitionYaml={() => {}}
@@ -129,6 +130,7 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
       <WorkflowNodeInspector
         workflow={null}
         agentCatalog={[]}
+        agentBindingStatus="ready"
         selectedNodeKey="intake"
         definitionYaml={yamlWithAgentFields}
         setDefinitionYaml={setDefinitionYaml}
@@ -167,6 +169,7 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
       <WorkflowNodeInspector
         workflow={null}
         agentCatalog={[]}
+        agentBindingStatus="ready"
         selectedNodeKey="intake"
         definitionYaml={draftYaml}
         setDefinitionYaml={setDefinitionYaml}
@@ -191,6 +194,7 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
       <WorkflowNodeInspector
         workflow={null}
         agentCatalog={[]}
+        agentBindingStatus="ready"
         selectedNodeKey="intake"
         definitionYaml={draftYaml}
         setDefinitionYaml={setDefinitionYaml}

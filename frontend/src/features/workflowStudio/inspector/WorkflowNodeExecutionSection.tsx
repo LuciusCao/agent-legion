@@ -2,12 +2,15 @@ import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { WorkflowNodeRecord } from '../../../types'
 import { WorkflowNodeAgentConfigBody } from './WorkflowNodeAgentConfigBody'
 import { WorkflowNodeAgentEditor } from './WorkflowNodeAgentEditor'
+import type { AgentBindingStatus } from './useAgentCatalog'
 import { useCapabilityAgent } from './useAgentDefinitions'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
 
 type Props = {
   node: WorkflowNodeRecord
   agentCatalog: AgentDefinition[]
+  /** capability→Agent 绑定解析状态（useAgentCatalog 聚合，#426 review P2）。 */
+  agentBindingStatus: AgentBindingStatus
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
@@ -46,6 +49,7 @@ export function WorkflowNodeExecutionSection(props: Props) {
           <WorkflowNodeAgentEditor
             agentId={agent?.id ?? null}
             capability={node.capability}
+            bindingStatus={props.agentBindingStatus}
             readOnly={props.readOnly}
           />
         </>

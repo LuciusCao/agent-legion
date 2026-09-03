@@ -23,11 +23,15 @@ vi.mock('../../../api', () => ({
 }))
 
 function renderEditor(
-  props: React.ComponentProps<typeof WorkflowNodeAgentEditor>
+  props: Partial<React.ComponentProps<typeof WorkflowNodeAgentEditor>> &
+    Pick<
+      React.ComponentProps<typeof WorkflowNodeAgentEditor>,
+      'agentId' | 'capability'
+    >
 ) {
   return render(
     <TestQueryProvider>
-      <WorkflowNodeAgentEditor {...props} />
+      <WorkflowNodeAgentEditor bindingStatus="ready" {...props} />
     </TestQueryProvider>
   )
 }
@@ -206,5 +210,97 @@ describe('WorkflowNodeAgentEditor', () => {
       capability: 'cap',
     })
     expect(noWorkspace).toBeEmptyDOMElement()
+  })
+
+  // #426 review P1：未绑定节点上创建草稿后切到另一个未绑定节点（agentId
+  // 仍为 null）——面板必须以新 capability 全新挂载（key={capability}），不
+  // 带着 A 的 createdAgentId 继续编辑 A 的草稿；#409 去掉开合按钮后已无
+  // 「收起重置」入口。同 capability 切换不重挂（编辑目标不变，表单不丢）。
+  it('resets the draft state when switching to a different unbound capability', async () => {
+    mocks.createAgentDefinition.mockResolvedValue({ agent_id: 'agent-new' })
+    mocks.fetchAgentDefinition.mockResolvedValue({
+      latest: {
+        status: 'draft',
+        definition: {
+          capability: 'generate_key_info',
+          runtime: 'pi',
+          skill: 'demo/skill',
+          tools: ['read'],
+        },
+      },
+      published: null,
+    })
+    const view = (capability: string) => (
+      <TestQueryProvider>
+        <WorkflowNodeAgentEditor
+          agentId={null}
+          capability={capability}
+          bindingStatus="ready"
+        />
+      </TestQueryProvider>
+    )
+    const { rerender } = render(view('generate_key_info'))
+
+    // 节点 A：填 ID 创建草稿，面板留在 A 草稿的编辑/发布模式。
+    fireEvent.change(await screen.findByLabelText('Agent ID'), {
+      target: { value: 'agent-new' },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
+    })
+    await screen.findByRole('button', { name: '发布' })
+
+    // 切到节点 B（capability 变化，agentId 仍 null）：面板重挂成 B 的新建
+    // 表单——A 的创建按钮/发布模式不再出现，表单 capability 是 B 的。
+    rerender(view('review'))
+
+    expect(
+      screen.queryByRole('button', { name: '发布' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '版本历史' })
+    ).not.toBeInTheDocument()
+    expect(await screen.findByLabelText('Agent ID')).toHaveValue('')
+    expect(screen.getByDisplayValue('review')).toBeInTheDocument()
+  })
+
+  // #426 review P2：目录/定义查询未 settle 时 agentId=null 是「未知」而非
+  // 「未绑定」——只渲染加载占位，不出可操作的新建表单；settle 后按绑定
+  // 结果正常出表单。
+  it('shows a loading placeholder instead of the create form until the binding query settles', async () => {
+    const view = (bindingStatus: 'pending' | 'ready') => (
+      <TestQueryProvider>
+        <WorkflowNodeAgentEditor
+          agentId={null}
+          capability="generate_key_info"
+          bindingStatus={bindingStatus}
+        />
+      </TestQueryProvider>
+    )
+    const { rerender } = render(view('pending'))
+
+    expect(screen.getByText('Agent 绑定解析中...')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Agent ID')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '创建草稿' })
+    ).not.toBeInTheDocument()
+
+    rerender(view('ready'))
+
+    expect(screen.queryByText('Agent 绑定解析中...')).not.toBeInTheDocument()
+    expect(await screen.findByLabelText('Agent ID')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('generate_key_info')).toBeInTheDocument()
+  })
+
+  // #426 review P2：查询失败 ≠ 确认未绑定——错误提示而非可操作表单（顶部
+  // 有全局重试横幅），否则失败场景等于回到 P2。
+  it('shows an error placeholder instead of the create form when the binding query failed', () => {
+    renderEditor({ agentId: null, capability: 'cap', bindingStatus: 'error' })
+
+    expect(screen.getByText('Agent 目录加载失败')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Agent ID')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '创建草稿' })
+    ).not.toBeInTheDocument()
   })
 })

@@ -20,7 +20,19 @@ export function useAgentDefinitions(workspaceId: string | undefined) {
     queryFn: () => fetchAgentDefinitions(workspaceId!),
     enabled: Boolean(workspaceId),
   })
-  return { agents: query.data?.agents ?? [], settled: !query.isPending }
+  return {
+    agents: query.data?.agents ?? [],
+    settled: !query.isPending,
+    // #426 review P2：除本文件内 useCapabilityAgent 的 settled 语义外，
+    // 额外暴露查询原始状态供 useAgentCatalog 组合「capability→Agent 绑定
+    // 解析」的门控——pending = 首次在途（isPending 恰为「无数据且未失败」）；
+    // failed = 失败且无数据（后台刷新失败但缓存数据还在时绑定仍可解析，
+    // 不算 failed）；loadError/retry 供聚合层并入 Studio 的目录错误横幅。
+    pending: query.isPending,
+    failed: query.isError && !query.data,
+    loadError: query.isError,
+    retry: query.refetch,
+  }
 }
 
 // #387：draft-only Agent（MCP save_agent_definition_draft 建的草稿）不在
