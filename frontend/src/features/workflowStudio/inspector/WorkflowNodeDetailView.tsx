@@ -5,14 +5,14 @@ import { WorkflowNodeDetailBody } from './WorkflowNodeDetailBody'
 import { useNodeDetailPreview } from './useNodeDetailPreview'
 import { selectedNodeDetails } from '../shared/workflowStudioModel'
 import { StudioAgentPanelToggle } from './StudioAgentPanelToggle'
-import type { AgentBindingStatus } from './useAgentCatalog'
+import type { AgentCatalogSettle } from './agentBindingStatus'
 import styles from './WorkflowNodeDetailView.module.css'
 
 type Props = {
   workflow: WorkflowDefinitionRecord | null
   nodeKey: string
   agentCatalog: AgentDefinition[]
-  agentBindingStatus: AgentBindingStatus
+  agentCatalogSettle: AgentCatalogSettle
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   compareSummary?: ChangeSummaryViewModel | null
@@ -54,7 +54,7 @@ export function WorkflowNodeDetailView(props: Props) {
           workflow={props.workflow}
           nodeKey={props.nodeKey}
           agentCatalog={props.agentCatalog}
-          agentBindingStatus={props.agentBindingStatus}
+          agentCatalogSettle={props.agentCatalogSettle}
           definitionYaml={props.definitionYaml}
           setDefinitionYaml={props.setDefinitionYaml}
           compareSummary={props.compareSummary}

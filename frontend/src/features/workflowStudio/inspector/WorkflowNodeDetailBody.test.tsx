@@ -112,10 +112,19 @@ const definitionYaml = [
   '',
 ].join('\n')
 
+// #426 codex 终轮 P2：settle 信号基线（两份查询均 settle；本套件的
+// agentCatalog 命中 generate_key_info/review 的 published Agent，节点级
+// 门控据此 ready）。门控组合逻辑由 agentBindingStatus.test.tsx 覆盖。
+const settledSettle = {
+  catalogSettled: true,
+  catalogFailed: false,
+  definitionsSettled: true,
+  definitionsFailed: false,
+}
+
 function renderBody(options?: {
   nodeKey?: string
   activeKind?: NodeDetailPreviewKind | null
-  agentBindingStatus?: 'pending' | 'error' | 'ready'
   onShowPreview?: (kind: NodeDetailPreviewKind) => void
 }) {
   return render(
@@ -124,7 +133,7 @@ function renderBody(options?: {
         workflow={workflow}
         nodeKey={options?.nodeKey ?? 'generate_key_info'}
         agentCatalog={agentCatalog}
-        agentBindingStatus={options?.agentBindingStatus ?? 'ready'}
+        agentCatalogSettle={settledSettle}
         definitionYaml={definitionYaml}
         setDefinitionYaml={() => {}}
         readOnly={false}

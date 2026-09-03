@@ -58,9 +58,9 @@ describe('useAgentCatalog', () => {
 
     await waitFor(() => expect(result.current.loadError).toBe(true))
     expect(result.current.agents).toEqual([])
-    // #426 review P2：失败期绑定解析同样不可信——bindingStatus 走 error
-    // 而非 ready（不渲染可操作表单）。
-    expect(result.current.bindingStatus).toBe('error')
+    // #426 review P2：失败且无数据的查询让绑定解析不可信——settle 信号
+    // 标记 catalogFailed（下游门控走 error 而非 ready，不出可操作表单）。
+    expect(result.current.settle.catalogFailed).toBe(true)
 
     mockGetCatalog.mockResolvedValue({ agents: [agent] })
     await act(async () => {
@@ -69,8 +69,8 @@ describe('useAgentCatalog', () => {
 
     await waitFor(() => expect(result.current.loadError).toBe(false))
     expect(result.current.agents).toHaveLength(1)
-    // retry 成功取回数据后回到 ready——门控放行。
-    await waitFor(() => expect(result.current.bindingStatus).toBe('ready'))
+    // retry 成功取回数据后 settle 回到干净态——门控放行。
+    await waitFor(() => expect(result.current.settle.catalogFailed).toBe(false))
     expect(mockGetCatalog).toHaveBeenCalledTimes(2)
   })
 
@@ -93,11 +93,12 @@ describe('useAgentCatalog', () => {
     expect(mockGetCatalog).toHaveBeenCalledTimes(2)
   })
 
-  // #426 review P2 → codex P2 修正：bindingStatus 是内联 Agent 编辑器的
-  // 渲染门控，只按 published 目录的 settle 态计算——目录在途时 agentId
-  // 可能只是 draft 回落先行（settle 后会被同 capability 的 published
-  // Agent 替换），门控不放行。
-  it('reports pending until the catalog settles, then ready', async () => {
+  // #426 review P2 → codex 终轮 P2：本 hook 是 workspace 级，不再预折叠
+  // bindingStatus，而是把两份查询的 settle 信号（settle 嵌套对象）下发，
+  // 由节点级（agentBindingStatus.bindingStatus + useCapabilityAgent 命中）
+  // 组合出门控。目录在途时无论 definitions 是否已返回，catalogSettled
+  // 都是 false——节点级据此保持 pending（draft 回落先行不放行）。
+  it('reports catalogSettled=false while the catalog is loading even if definitions returned', async () => {
     let resolveCatalog: (value: {
       agents: AgentDefinition[]
     }) => void = () => {}
@@ -110,18 +111,24 @@ describe('useAgentCatalog', () => {
       wrapper: wrapper(createTestQueryClient()),
     })
 
-    // 目录在途：即使定义列表已返回，绑定解析仍不可信（draft 回落先行）。
-    await waitFor(() => expect(result.current.bindingStatus).toBe('pending'))
+    await waitFor(() =>
+      expect(result.current.settle.catalogSettled).toBe(false)
+    )
+    // definitions 的 mock 已 resolve：等它的 settle 标志翻转（agents 字段
+    // 在 pending 期就是 []，不能拿它当 settle 信号）。
+    await waitFor(() =>
+      expect(result.current.settle.definitionsSettled).toBe(true)
+    )
 
     resolveCatalog({ agents: [agent] })
-    await waitFor(() => expect(result.current.bindingStatus).toBe('ready'))
+    await waitFor(() => expect(result.current.settle.catalogSettled).toBe(true))
   })
 
-  // #426 codex P2 修正：definitions 在途不再拖住 bindingStatus——门控关心
-  // 的是「published ?? draft」何时成为终态，这只取决于目录；published 命中
-  // 时 AgentEditor 按 ID 加载详情不依赖 definitions 列表，draft 回落场景
-  // definitions 必已返回（agentId 有值的前提），其失败走 loadError 横幅。
-  it('reports ready once the catalog returns even while the definitions query is still in flight', async () => {
+  // #426 codex 终轮 P2（命中侧）：catalog 已返回即 catalogSettled=true，与
+  // definitions 在途无关——节点级对 published 命中的 capability 据此直接
+  // ready（AgentEditor 按 ID 加载详情不依赖列表，definitions 失败走
+  // loadError 横幅）。settle 只反映查询状态，不含 capability 语义。
+  it('reports catalogSettled=true once the catalog returns even while definitions are in flight', async () => {
     mockGetCatalog.mockResolvedValue({ agents: [agent] })
     let resolveDefinitions: (value: { agents: never[] }) => void = () => {}
     mockFetchDefinitions.mockReturnValue(
@@ -134,28 +141,32 @@ describe('useAgentCatalog', () => {
     })
 
     await waitFor(() => expect(result.current.agents).toHaveLength(1))
-    // 目录已 settle：published 命中即终态，门控放行（不等待定义列表）。
-    expect(result.current.bindingStatus).toBe('ready')
+    expect(result.current.settle.catalogSettled).toBe(true)
+    expect(result.current.settle.definitionsSettled).toBe(false)
 
     resolveDefinitions({ agents: [] })
-    await waitFor(() => expect(result.current.definitions).toEqual([]))
-    expect(result.current.bindingStatus).toBe('ready')
+    // agents 字段 pending 期就是 []，settle 以查询状态为准。
+    await waitFor(() =>
+      expect(result.current.settle.definitionsSettled).toBe(true)
+    )
+    expect(result.current.definitions).toEqual([])
   })
 
-  // 目录失败与「确认无 published」必须区分：失败 → error（不落回可操作
-  // 表单）；definitions 失败不改变目录 settle 结论，走 loadError 横幅。
-  it('reports error only when the catalog itself fails without data', async () => {
+  // 目录失败与「已返回」必须区分：失败且无数据 → catalogFailed=true（下游
+  // 门控走 error，不落回可操作表单）；definitions 失败只并入 loadError
+  // 横幅，是否阻断门控由节点级按 capability 命中决定。
+  it('marks catalogFailed only when the catalog itself fails without data', async () => {
     mockGetCatalog.mockRejectedValue(new Error('catalog boom'))
     mockFetchDefinitions.mockResolvedValue({ agents: [] })
     const { result } = renderHook(() => useAgentCatalog('ws1'), {
       wrapper: wrapper(createTestQueryClient()),
     })
 
-    await waitFor(() => expect(result.current.bindingStatus).toBe('error'))
+    await waitFor(() => expect(result.current.settle.catalogFailed).toBe(true))
     expect(result.current.loadError).toBe(true)
   })
 
-  it('stays ready when only the definitions query fails (catalog error surfaces via loadError)', async () => {
+  it('keeps settle clean when only the definitions query fails (error surfaces via loadError)', async () => {
     mockGetCatalog.mockResolvedValue({ agents: [agent] })
     mockFetchDefinitions.mockRejectedValue(new Error('definitions boom'))
     const { result } = renderHook(() => useAgentCatalog('ws1'), {
@@ -163,8 +174,8 @@ describe('useAgentCatalog', () => {
     })
 
     await waitFor(() => expect(result.current.agents).toHaveLength(1))
-    // 目录 settle 结论不受 definitions 失败影响；失败由 loadError 暴露。
-    expect(result.current.bindingStatus).toBe('ready')
+    expect(result.current.settle.catalogFailed).toBe(false)
+    expect(result.current.settle.definitionsFailed).toBe(true)
     expect(result.current.loadError).toBe(true)
   })
 })

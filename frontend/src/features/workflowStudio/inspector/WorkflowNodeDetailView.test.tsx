@@ -114,6 +114,16 @@ const definitionYaml = [
   '',
 ].join('\n')
 
+// #426 codex 终轮 P2：settle 信号基线（两份查询均 settle）。本套件默认
+// catalog 命中 generate_key_info 的 published Agent；未命中场景（空 catalog）
+// 由节点级门控按 definitions settle 组合，加载/错误占位用例按需覆盖信号。
+const settledSettle = {
+  catalogSettled: true,
+  catalogFailed: false,
+  definitionsSettled: true,
+  definitionsFailed: false,
+}
+
 function renderView(
   onBack: () => void = () => {},
   nodeKey = 'generate_key_info'
@@ -124,7 +134,7 @@ function renderView(
         workflow={workflow}
         nodeKey={nodeKey}
         agentCatalog={agentCatalog}
-        agentBindingStatus="ready"
+        agentCatalogSettle={settledSettle}
         definitionYaml={definitionYaml}
         setDefinitionYaml={() => {}}
         readOnly={false}
@@ -138,14 +148,18 @@ function renderView(
 
 // rerender 用的纯元素工厂（默认参数与 renderView 一致；catalog 可覆盖——
 // P1 用例需要两个 capability 都未绑定 Agent 的场景）。
-function viewFor(nodeKey: string, catalog: AgentDefinition[] = agentCatalog) {
+function viewFor(
+  nodeKey: string,
+  catalog: AgentDefinition[] = agentCatalog,
+  settle = settledSettle
+) {
   return (
     <TestQueryProvider>
       <WorkflowNodeDetailView
         workflow={workflow}
         nodeKey={nodeKey}
         agentCatalog={catalog}
-        agentBindingStatus="ready"
+        agentCatalogSettle={settle}
         definitionYaml={definitionYaml}
         setDefinitionYaml={() => {}}
         readOnly={false}
@@ -250,7 +264,7 @@ describe('WorkflowNodeDetailView', () => {
           workflow={workflow}
           nodeKey={key}
           agentCatalog={agentCatalog}
-          agentBindingStatus="ready"
+          agentCatalogSettle={settledSettle}
           definitionYaml={definitionYaml}
           setDefinitionYaml={() => {}}
           readOnly={false}
@@ -346,7 +360,7 @@ describe('WorkflowNodeDetailView', () => {
           workflow={workflow}
           nodeKey="generate_key_info"
           agentCatalog={[]}
-          agentBindingStatus="pending"
+          agentCatalogSettle={{ ...settledSettle, catalogSettled: false }}
           definitionYaml={definitionYaml}
           setDefinitionYaml={() => {}}
           readOnly={false}
@@ -372,7 +386,7 @@ describe('WorkflowNodeDetailView', () => {
           workflow={workflow}
           nodeKey="generate_key_info"
           agentCatalog={[]}
-          agentBindingStatus="error"
+          agentCatalogSettle={{ ...settledSettle, catalogFailed: true }}
           definitionYaml={definitionYaml}
           setDefinitionYaml={() => {}}
           readOnly={false}

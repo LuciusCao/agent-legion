@@ -58,10 +58,10 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     retryAgentCatalog: catalog.retry,
     // #387：draft-only Agent 的解析/导航回落（useAgentDefinitions）。
     agentDefinitions: catalog.definitions,
-    // #426 review P2：capability→Agent 绑定的目录 settle 状态（published
-    // 目录返回后「published ?? draft」为终态），下发到节点详情内联 Agent
-    // 编辑器做渲染门控。
-    agentBindingStatus: catalog.bindingStatus,
+    // #426 review P2 → codex 终轮 P2：两份目录查询的 settle 信号下发到
+    // 节点详情，由节点级按 capability 组合出内联 Agent 编辑器的门控状态
+    // （catalog 命中 published 即 ready，未命中须等 definitions settle）。
+    agentCatalogSettle: catalog.settle,
     definitionYaml: draft.definitionYaml,
     setDefinitionYaml: draft.setDraftYaml,
     selectedNodeKey,

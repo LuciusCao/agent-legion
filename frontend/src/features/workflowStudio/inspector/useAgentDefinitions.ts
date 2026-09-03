@@ -27,9 +27,9 @@ export function useAgentDefinitions(workspaceId: string | undefined) {
     // 额外暴露查询原始状态供 useAgentCatalog 组合——pending = 首次在途
     // （isPending 恰为「无数据且未失败」）；failed = 失败且无数据（后台
     // 刷新失败但缓存数据还在时绑定仍可解析，不算 failed）；loadError/
-    // retry 供聚合层并入 Studio 的目录错误横幅。#426 codex P2 修正后
-    // bindingStatus 只按 published 目录 settle 计算，pending/failed 不再
-    // 参与门控（draft 回落场景 definitions 必已返回），loadError/retry
+    // retry 供聚合层并入 Studio 的目录错误横幅。#426 codex 终轮 P2 后
+    // settle 信号下放节点级与 catalog 命中组合成 bindingStatus（未命中
+    // published 时必须等本查询 settle 才能断定未绑定），loadError/retry
     // 仍并入横幅与重试。
     pending: query.isPending,
     failed: query.isError && !query.data,

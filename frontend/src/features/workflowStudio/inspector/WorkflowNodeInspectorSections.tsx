@@ -2,14 +2,15 @@ import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { SelectedWorkflowNodeDetails } from '../shared/workflowStudioModel'
 import { NODE_TYPE_SECTIONS } from './nodeTypeSections'
 import { WorkflowNodeStartSection } from './WorkflowNodeStartSection'
-import type { AgentBindingStatus } from './useAgentCatalog'
+import type { AgentCatalogSettle } from './agentBindingStatus'
 
 export type InspectorSectionProps = {
   details: SelectedWorkflowNodeDetails
   agentCatalog: AgentDefinition[]
-  /** capability→Agent 绑定的目录 settle 状态（useAgentCatalog，#426 review P2）：
-   * 内联 Agent 编辑器在目录 settle 前不渲染可操作的表单。 */
-  agentBindingStatus: AgentBindingStatus
+  /** #426 review P2：workspace 级两份目录查询（published catalog +
+   * agent-definitions）的 settle 信号，节点级组合出内联 Agent 编辑器的
+   * 渲染门控（agentBindingStatus.bindingStatus）。 */
+  agentCatalogSettle: AgentCatalogSettle
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
