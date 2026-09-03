@@ -4,11 +4,20 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.app.main import create_app
-from server.app.services.workflow_draft_compare import compare_workflow_draft
+from server.app.services.workflow_draft_compare import (
+    _node_change_fields,
+    compare_workflow_draft,
+)
+from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
+from server.app.services.workflow_revision_change import structural_revision_changed
 from server.app.services.workflow_revision_format import definition_to_yaml
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import WorkflowCondition
-from server.app.workflows.schema import WorkflowNodeExecution, WorkflowNodeSkill
+from server.app.workflows.schema import (
+    WorkflowNode,
+    WorkflowNodeExecution,
+    WorkflowNodeSkill,
+)
 from tests.helpers import load_builtin_definition
 from tests.helpers.auth import authenticate_client
 
@@ -33,6 +42,66 @@ def _compare(client: TestClient, workspace_id: str, definition_yaml: str) -> dic
     )
     assert response.status_code == 200
     return response.json()
+
+
+def _bare_node(key: str = "demo") -> WorkflowNode:
+    return WorkflowNode(key=key, label=key, capability="demo")
+
+
+# ---------------------------------------------------------------------------
+# Issue #418: config / config_schema field comparison semantics (unit level).
+# ---------------------------------------------------------------------------
+
+
+def test_node_change_fields_config_none_vs_empty_is_no_change():
+    """None 与 {} 等价：删掉一个空 config 块不误报变更。loader 本就把
+    缺失/None 归一化为 {}，compare 面对绕过 loader 构造的模型对象
+    （replace() 可以塞 None）遵循同一语义。"""
+    assert _node_change_fields(_bare_node(), _bare_node()) == []
+    assert _node_change_fields(_bare_node(), replace(_bare_node(), config=None)) == []
+    assert _node_change_fields(_bare_node(), replace(_bare_node(), config={})) == []
+    assert _node_change_fields(_bare_node(), replace(_bare_node(), config_schema=None)) == []
+    assert _node_change_fields(_bare_node(), replace(_bare_node(), config_schema={})) == []
+    # Both directions: a None/{} draft against a None/{} base.
+    assert _node_change_fields(replace(_bare_node(), config=None), _bare_node()) == []
+
+
+def test_node_change_fields_config_value_change_is_change():
+    base = _bare_node()
+    draft = replace(base, config={"sandbox_network": True})
+    assert _node_change_fields(base, draft) == ["config"]
+    # Key-order independence comes from dict equality.
+    draft_reordered = replace(base, config={"max_words": 800, "sandbox_network": True})
+    draft_reversed = replace(base, config={"sandbox_network": True, "max_words": 800})
+    assert _node_change_fields(draft_reordered, draft_reversed) == []
+
+
+def test_node_change_fields_config_schema_value_change_is_change():
+    base = _bare_node()
+    draft = replace(
+        base,
+        config_schema={
+            "type": "object",
+            "properties": {"max_words": {"type": "integer", "default": 800}},
+        },
+    )
+    assert _node_change_fields(base, draft) == ["config_schema"]
+
+
+def test_structural_revision_changed_for_config_fields():
+    """Issue #418 传导链：_node_change_fields 产出的 config/config_schema
+    变更记录必须让 structural_revision_changed 判定为真（creates_revision
+    的数据源），对齐后端 publish 的实际行为。"""
+    for field in ("config", "config_schema"):
+        node_change = {"type": "modified", "fields": [field]}
+        assert structural_revision_changed([node_change], [], [], []) is True
+    # execution-only stays the runtime exception (regression guard).
+    assert (
+        structural_revision_changed([{"type": "modified", "fields": ["execution"]}], [], [], [])
+        is False
+    )
+    # No node changes at all: unchanged.
+    assert structural_revision_changed([], [], [], []) is False
 
 
 def test_compare_no_op_draft_returns_none_risk(app_with_workspace):
@@ -119,6 +188,126 @@ def test_compare_skill_change_creates_revision(app_with_workspace):
     change = next(c for c in result["summary"]["node_changes"] if c["node_key"] == "write_script")
     assert change["fields"] == ["skill"]
     assert change["risk"] == "warning"
+
+
+def test_compare_config_only_change_creates_revision(app_with_workspace):
+    """Issue #418: config-only 草稿（如 code 节点加 sandbox_network）是结构性
+    变更——publish 路径会产出新 revision，compare 必须看到同样的事，否则
+    canPublish 的 hasCompareChanges 闸门让纯配置草稿无法发布。"""
+    app, workspace_id = app_with_workspace
+    definition = load_builtin_definition("education_video_problems_generation")
+    node = definition.nodes["write_script"]
+    definition.nodes["write_script"] = replace(node, config={"sandbox_network": True})
+
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, definition_to_yaml(definition))
+
+    assert result["valid"] is True
+    assert result["creates_revision"] is True
+    change = next(c for c in result["summary"]["node_changes"] if c["node_key"] == "write_script")
+    assert change["type"] == "modified"
+    assert change["fields"] == ["config"]
+    assert change["risk"] == "warning"
+
+
+def test_compare_config_removal_creates_revision(app_with_workspace):
+    """Issue #418: 删掉非空 config（整块或单个键）同样是结构性变更。"""
+    app, workspace_id = app_with_workspace
+    definition = load_builtin_definition("education_video_problems_generation")
+    node = definition.nodes["write_script"]
+    definition.nodes["write_script"] = replace(node, config={"sandbox_network": True})
+    with authenticate_client(TestClient(app)) as client:
+        _compare(client, workspace_id, definition_to_yaml(definition))
+
+    # Re-publish so the baseline carries the config, then strip it in a draft.
+    WorkflowRevisionService(app.state.job_db).publish_workspace_revision(workspace_id, definition)
+    definition.nodes["write_script"] = replace(definition.nodes["write_script"], config={})
+
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, definition_to_yaml(definition))
+
+    assert result["valid"] is True
+    assert result["creates_revision"] is True
+    change = next(c for c in result["summary"]["node_changes"] if c["node_key"] == "write_script")
+    assert change["fields"] == ["config"]
+
+
+def test_compare_config_schema_only_change_creates_revision(app_with_workspace):
+    """Issue #418: 增删 config_schema 属性及默认值也是结构性变更（声明随
+    revision 快照冻结），compare 必须反映。"""
+    import yaml as _yaml
+
+    app, workspace_id = app_with_workspace
+    definition = load_builtin_definition("education_video_problems_generation")
+    raw_doc = _yaml.safe_load(definition_to_yaml(definition))
+    raw_doc["nodes"]["write_script"]["config_schema"] = {
+        "type": "object",
+        "properties": {
+            "max_words": {"type": "integer", "default": 800, "minimum": 0},
+        },
+    }
+    raw = _yaml.safe_dump(raw_doc, allow_unicode=True, sort_keys=False)
+
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, raw)
+
+    assert result["valid"] is True
+    assert result["creates_revision"] is True
+    change = next(c for c in result["summary"]["node_changes"] if c["node_key"] == "write_script")
+    assert change["type"] == "modified"
+    assert change["fields"] == ["config_schema"]
+    assert change["risk"] == "warning"
+
+
+def test_compare_config_and_config_schema_change_lists_both_fields(app_with_workspace):
+    """Issue #418: config 与 config_schema 同改时两个字段都进变更列表。"""
+    app, workspace_id = app_with_workspace
+    definition = load_builtin_definition("education_video_problems_generation")
+    node = definition.nodes["write_script"]
+    definition.nodes["write_script"] = replace(
+        node,
+        config={"sandbox_network": True},
+        config_schema={
+            "type": "object",
+            "properties": {"max_words": {"type": "integer", "default": 800}},
+        },
+    )
+
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, definition_to_yaml(definition))
+
+    assert result["valid"] is True
+    change = next(c for c in result["summary"]["node_changes"] if c["node_key"] == "write_script")
+    assert change["fields"] == ["config", "config_schema"]
+    assert result["creates_revision"] is True
+
+
+def test_compare_unchanged_config_reports_no_node_change(app_with_workspace):
+    """Issue #418 回归护栏：YAML 序列化只保留非空 config/config_schema，
+    round-trip 后无变化必须保持 node_changes 为空（不误报）。"""
+    import yaml as _yaml
+
+    app, workspace_id = app_with_workspace
+    definition = load_builtin_definition("education_video_problems_generation")
+    raw_doc = _yaml.safe_load(definition_to_yaml(definition))
+    raw_doc["nodes"]["write_script"]["config"] = {"sandbox_network": True}
+    raw_doc["nodes"]["write_script"]["config_schema"] = {
+        "type": "object",
+        "properties": {"max_words": {"type": "integer", "default": 800}},
+    }
+    raw = _yaml.safe_dump(raw_doc, allow_unicode=True, sort_keys=False)
+    WorkflowRevisionService(app.state.job_db).publish_workspace_revision(
+        workspace_id, workflow_definition_from_yaml_string(raw)
+    )
+
+    # Same YAML against the now-config-carrying baseline: no changes.
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, raw)
+
+    assert result["valid"] is True
+    assert result["creates_revision"] is False
+    assert result["summary"]["node_changes"] == []
+    assert result["summary"]["risk_level"] == "none"
 
 
 def test_compare_node_removed_returns_breaking_change(app_with_workspace):
