@@ -1,6 +1,6 @@
 import { useId } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getConnections } from '../../api/connections'
+import { getConnectionKeys } from '../../api/connections'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import type { ConfigSchemaProperty } from '../../types'
 
@@ -10,12 +10,25 @@ export function connectionListProp(key: string, datalistId: string) {
 }
 
 /**
- * 拉取外部服务连接 key 列表，供节点配置中名为 `connection` 的 string 字段做
- * datalist 候选。与 ConnectionsSection 共享同一 query key 缓存：连接变更
- * invalidate 后已打开的表单候选自动刷新，多表单实例合并为一次请求。
- * connections API 是 admin-only，非 admin（403）或任何失败都静默降级为空
- * 候选（字段保持普通文本框）。datalistId 经 useId 按表单实例生成，避免
- * 多个表单并存时 datalist id 重复。
+ * 拉取外部服务连接 key 列表（key-only 端点，任意登录用户可读，#419）。
+ * 与 ConnectionsSection 共享同一 query key 缓存：admin 在全局设置增删连接
+ * 后 invalidate，已打开表单的候选自动刷新，多实例合并为一次请求。
+ * 端点失败（未登录等）静默降级为空候选，调用方自行回退手写输入。
+ */
+export function useConnectionKeys(): { options: string[]; ready: boolean } {
+  const { data, isError } = useQuery({
+    queryKey: extraQueryKeys.connectionKeys(),
+    queryFn: getConnectionKeys,
+    retry: false,
+  })
+  // ready：请求成功完成（含空列表）；失败返回 false 让调用方降级手写。
+  return { options: data?.keys ?? [], ready: data !== undefined && !isError }
+}
+
+/**
+ * 节点配置中名为 `connection` 的 string 字段做 datalist 候选（#419 起改用
+ * key-only 端点：非 admin 也能拿到候选）。datalistId 经 useId 按表单实例
+ * 生成，避免多个表单并存时 datalist id 重复。
  */
 export function useConnectionOptions(
   connectionProp: ConfigSchemaProperty | undefined
@@ -23,12 +36,12 @@ export function useConnectionOptions(
   const datalistId = useId()
   const enabled = connectionProp?.type === 'string' && !connectionProp.enum
   const { data } = useQuery({
-    queryKey: extraQueryKeys.connections(),
-    queryFn: getConnections,
+    queryKey: extraQueryKeys.connectionKeys(),
+    queryFn: getConnectionKeys,
     retry: false,
     enabled,
   })
-  const options = enabled ? (data?.connections.map((c) => c.key) ?? []) : []
+  const options = enabled ? (data?.keys ?? []) : []
   return { datalistId, options }
 }
 
