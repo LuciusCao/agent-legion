@@ -10,14 +10,16 @@ type Props = {
   capability: string
   readOnly?: boolean
   /**
-   * 目录 settle 状态（published catalog 查询，#426 review P2→codex P2）：
-   * 门控条件。pending=目录在途（agentId 可能只是 draft 回落先行——
-   * definitions 先返回时 useCapabilityAgent 已给出非空 agentId，但目录
-   * settle 后同 capability 的 published Agent 会替换它，编辑目标会漂移、
-   * 输入会丢）→ 只渲染加载占位；error=目录失败且无数据 → 错误占位；
-   * ready=目录已返回，「published ?? draft」是终态——agentId 非空
-   * （published 命中或 draft 回落）或 null（确认无 published）都不会再
-   * 变，放行渲染编辑器/新建表单。
+   * 绑定解析门控（#426 review P2 → codex 终轮 P2，节点级按 capability
+   * 计算，见 agentBindingStatus.bindingStatus，调用方为
+   * WorkflowNodeExecutionSection）：pending=目录在途、或未命中 published
+   * 且 definitions 在途（agentId 可能只是 draft 回落先行，settle 后同
+   * capability 的 published Agent 会替换它；或 agentId=null 只是「未知」
+   * 而非「未绑定」）→ 只渲染加载占位；error=catalog 失败且无数据、或
+   * 未命中 published 且 definitions 失败无数据 → 错误占位；ready=catalog
+   * 已返回且（命中 published 或 definitions 已返回）——「published ??
+   * draft」是终态，agentId 非空（published 命中或 draft 回落）或 null
+   * （确认无绑定）都不会再变，放行渲染编辑器/新建表单。
    */
   bindingStatus: 'pending' | 'error' | 'ready'
 }
@@ -35,6 +37,10 @@ type Props = {
  * 途时 draft 回落的非空 agentId 同样等待（settle 后可能被同 capability
  * 的 published Agent 替换，先放行会丢输入/撞发布冲突）；目录已返回
  * （ready）则「published ?? draft」为终态，编辑目标不再漂移，直接放行。
+ * codex 终轮 P2：catalog 空列表/未命中 published 时 ready 还需 definitions
+ * settle（未命中时 useCapabilityAgent 的空 draft 列表会误判未绑定，
+ * definitions 返回后切换真实 draft 重挂丢输入），计算见
+ * agentBindingStatus.bindingStatus。
  */
 export function WorkflowNodeAgentEditor(props: Props) {
   const queryClient = useQueryClient()

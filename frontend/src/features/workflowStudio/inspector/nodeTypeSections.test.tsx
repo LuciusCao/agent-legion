@@ -43,12 +43,21 @@ const dagYaml = [
   '',
 ].join('\n')
 
+// #426 codex 终轮 P2：settle 信号基线（两份查询均 settle）——本套件聚焦
+// 注册表分发，门控组合逻辑由 agentBindingStatus.test.tsx 覆盖。
+const settledSettle = {
+  catalogSettled: true,
+  catalogFailed: false,
+  definitionsSettled: true,
+  definitionsFailed: false,
+}
+
 function renderInspector(nodeKey: string) {
   return render(
     <WorkflowNodeInspector
       workflow={null}
       agentCatalog={[]}
-      agentBindingStatus="ready"
+      agentCatalogSettle={settledSettle}
       selectedNodeKey={nodeKey}
       definitionYaml={dagYaml}
       setDefinitionYaml={() => {}}
@@ -151,7 +160,7 @@ describe('WorkflowNodeInspector for approval nodes (#392 Phase 2)', () => {
       <WorkflowNodeInspector
         workflow={null}
         agentCatalog={[]}
-        agentBindingStatus="ready"
+        agentCatalogSettle={settledSettle}
         selectedNodeKey="gate"
         definitionYaml={yamlWithBranches}
         setDefinitionYaml={() => {}}
@@ -181,7 +190,7 @@ describe('WorkflowNodeInspector for approval nodes (#392 Phase 2)', () => {
       <WorkflowNodeInspector
         workflow={null}
         agentCatalog={[]}
-        agentBindingStatus="ready"
+        agentCatalogSettle={settledSettle}
         selectedNodeKey="gate"
         definitionYaml={dagYaml}
         setDefinitionYaml={setDefinitionYaml}
@@ -242,7 +251,7 @@ describe('WorkflowNodeInspector for approval nodes (#392 Phase 2)', () => {
       <WorkflowNodeInspector
         workflow={publishedWorkflow as never}
         agentCatalog={[]}
-        agentBindingStatus="ready"
+        agentCatalogSettle={settledSettle}
         selectedNodeKey="gate"
         definitionYaml={brokenYaml}
         setDefinitionYaml={() => {}}

@@ -2,7 +2,7 @@ import type { WorkflowDefinitionRecord } from '../../../types'
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
 import { WorkflowNodeDetailView } from './WorkflowNodeDetailView'
-import type { AgentBindingStatus } from './useAgentCatalog'
+import type { AgentCatalogSettle } from './agentBindingStatus'
 import pageStyles from '../../../pages/WorkflowStudioPageResponsive.module.css'
 import sidePanelStyles from '../../../pages/WorkflowStudioPageSidePanel.module.css'
 import splitStyles from '../shared/WorkflowStudioSplitLayout.module.css'
@@ -11,7 +11,7 @@ type Props = {
   workflow: WorkflowDefinitionRecord | null
   nodeKey: string
   agentCatalog: AgentDefinition[]
-  agentBindingStatus: AgentBindingStatus
+  agentCatalogSettle: AgentCatalogSettle
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   compareSummary?: ChangeSummaryViewModel | null
@@ -45,7 +45,7 @@ export function WorkflowStudioDetailSection(props: Props) {
         workflow={props.workflow}
         nodeKey={props.nodeKey}
         agentCatalog={props.agentCatalog}
-        agentBindingStatus={props.agentBindingStatus}
+        agentCatalogSettle={props.agentCatalogSettle}
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}
         compareSummary={props.compareSummary}

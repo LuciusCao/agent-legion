@@ -81,6 +81,15 @@ const editorProps = {
   agentCatalog,
 }
 
+// #426 codex 终轮 P2：settle 信号的工厂——两份查询均 settle 的基线，各
+// 门控用例按场景覆盖（catalog 在途/失败、definitions 在途/失败）。
+const settledSettle = {
+  catalogSettled: true,
+  catalogFailed: false,
+  definitionsSettled: true,
+  definitionsFailed: false,
+}
+
 // 组件经 useStudioNav 读 openAgent 的目标草稿身份：默认无 pending。
 const navStub: StudioNav = {
   openAgent: () => {},
@@ -91,12 +100,12 @@ const navStub: StudioNav = {
 function renderSection(
   props: Omit<
     React.ComponentProps<typeof WorkflowNodeExecutionSection>,
-    'agentBindingStatus'
+    'agentCatalogSettle'
   > &
     Partial<
       Pick<
         React.ComponentProps<typeof WorkflowNodeExecutionSection>,
-        'agentBindingStatus'
+        'agentCatalogSettle'
       >
     >,
   nav: StudioNav = navStub
@@ -108,10 +117,11 @@ function renderSection(
           path="/workspaces/:workspaceId/studio"
           element={
             <StudioNavContext.Provider value={nav}>
-              {/* #426 review P2：默认按 ready 注入（本套件聚焦 section 分发，
-                  加载/错误占位由 WorkflowNodeAgentEditor.test.tsx 覆盖）。 */}
+              {/* #426 review P2：默认两份查询均 settle（本套件聚焦 section
+                  分发，加载/错误占位的组合逻辑由 agentBindingStatus.test.ts
+                  与 WorkflowNodeAgentEditor.test.tsx 覆盖）。 */}
               <WorkflowNodeExecutionSection
-                agentBindingStatus="ready"
+                agentCatalogSettle={settledSettle}
                 {...props}
               />
             </StudioNavContext.Provider>
@@ -199,7 +209,7 @@ describe('WorkflowNodeExecutionSection', () => {
             element={
               <StudioNavContext.Provider value={navStub}>
                 <WorkflowNodeExecutionSection
-                  agentBindingStatus="ready"
+                  agentCatalogSettle={settledSettle}
                   node={nodeWithProvider}
                   agentCatalog={agentCatalog}
                   definitionYaml={nextYaml}
@@ -488,5 +498,94 @@ describe('WorkflowNodeExecutionSection', () => {
     expect(screen.getByText('pi')).toBeInTheDocument()
     expect(screen.getByText('read, write, bash')).toBeInTheDocument()
     expect(screen.getByText('v1.3.8 · 5c5eae7')).toBeInTheDocument()
+  })
+
+  // —— #426 codex 终轮 P2：门控组合（capability 命中 × 两份查询 settle）——
+
+  // 场景 1：catalog 空/未命中 + definitions 在途 → 占位——agentId=null 只是
+  // 「未知」（draft 可能仍在途），不能放出可操作的新建表单（codex 指出的
+  // 空列表竞态：先建表单后切真实 draft 会重挂丢输入、甚至先建出多余草稿）。
+  it('keeps the placeholder when the catalog settles empty while definitions are loading', () => {
+    renderSection({
+      node: { ...node, capability: 'missing' },
+      ...editorProps,
+      agentCatalog: [],
+      agentCatalogSettle: { ...settledSettle, definitionsSettled: false },
+    })
+
+    expect(screen.getByText('Agent 绑定解析中...')).toBeInTheDocument()
+    expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Agent ID')).not.toBeInTheDocument()
+  })
+
+  // 场景 2：catalog 空 + definitions settle（无 draft）→ ready，新建表单。
+  it('renders the create form once both queries settle with no binding', () => {
+    renderSection({
+      node: { ...node, capability: 'missing' },
+      ...editorProps,
+      agentCatalog: [],
+      agentCatalogSettle: settledSettle,
+    })
+
+    expect(screen.queryByText('Agent 绑定解析中...')).not.toBeInTheDocument()
+    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
+  })
+
+  // 场景 3：catalog 空 + definitions settle（有 draft）→ ready，编辑该 draft。
+  // definitions 经 react-query 真实解析（本套件未 mock hook 本体）。
+  it('renders the draft editor once both queries settle with a draft fallback', async () => {
+    vi.mocked(fetchAgentDefinitions).mockResolvedValue({
+      agents: [
+        {
+          agent_id: 'draft-agent',
+          capability: 'generate_key_info',
+          runtime: 'pi',
+          skill: '',
+          version: 1,
+          status: 'draft',
+          has_draft: true,
+          published_at: null,
+        },
+      ],
+    })
+    renderSection({
+      node,
+      ...editorProps,
+      agentCatalog: [],
+      agentCatalogSettle: settledSettle,
+    })
+
+    expect(await screen.findByTestId('agent-editor-stub')).toBeInTheDocument()
+    expect(screen.queryByText('Agent 绑定解析中...')).not.toBeInTheDocument()
+  })
+
+  // 场景 4：catalog 命中 published → 不等 definitions 直接放行（编辑器按 ID
+  // 加载详情不依赖列表；definitions 在途只影响 loadError 横幅）。
+  it('renders the editor on a published hit without waiting for definitions', () => {
+    renderSection({
+      node,
+      ...editorProps,
+      agentCatalogSettle: { ...settledSettle, definitionsSettled: false },
+    })
+
+    expect(screen.queryByText('Agent 绑定解析中...')).not.toBeInTheDocument()
+    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
+  })
+
+  // 未命中 published + definitions 失败无数据 → 错误占位（不落回可操作表单）。
+  it('shows the error placeholder when an unhit capability loses the definitions query', () => {
+    renderSection({
+      node: { ...node, capability: 'missing' },
+      ...editorProps,
+      agentCatalog: [],
+      agentCatalogSettle: {
+        ...settledSettle,
+        definitionsSettled: true,
+        definitionsFailed: true,
+      },
+    })
+
+    expect(screen.getByText('Agent 目录加载失败')).toBeInTheDocument()
+    expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
   })
 })

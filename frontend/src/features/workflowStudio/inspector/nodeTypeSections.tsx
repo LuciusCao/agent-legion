@@ -85,7 +85,7 @@ function ConfigSchemaSection(props: InspectorSectionProps) {
     />
   )
 }
-// agent/code 的执行能力区。#426 review P2：bindingStatus 经
+// agent/code 的执行能力区。#426 review P2：目录查询 settle 信号经
 // InspectorSectionProps 透传给 ExecutionSection 的专属 prop（本文件的注册表
 // 组件按 name 拿 key，专属 prop 放在 spread 之后防同名覆盖）。
 function ExecutionSection(props: InspectorSectionProps) {
@@ -93,7 +93,7 @@ function ExecutionSection(props: InspectorSectionProps) {
     <WorkflowNodeExecutionSection
       {...props}
       node={props.details.node}
-      agentBindingStatus={props.agentBindingStatus}
+      agentCatalogSettle={props.agentCatalogSettle}
     />
   )
 }
