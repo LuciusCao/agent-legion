@@ -7,21 +7,37 @@ Two actors, one handshake:
   publish validation set and parks a pending request. It never publishes —
   no code path from the tool surface reaches the revision pipeline.
 - **Human** (full session, via the Studio confirm endpoint): the confirm
-  action replays the exact ``publish_workflow_draft`` gates the Studio
-  publish button uses (key-match guard included) against the workspace's
-  draft-store YAML, then records the resulting revision on the request row.
+  action claims the row (pending → ``confirming``), replays the exact
+  ``publish_workflow_draft`` gates the Studio publish button uses
+  (key-match guard included) against the workspace's draft-store YAML, then
+  records the resulting revision on the request row.
   A draft that drifted (edited or invalidated after the agent's request)
-  fails the same gates and raises — the request stays pending so the human
-  can fix the draft and confirm again, or cancel.
+  fails the same gates and raises — the request returns to pending so the
+  human can fix the draft and confirm again, or cancel.
+
+Shared helpers (wire payload, expiry comparison, the draft-version token)
+live in studio_publish_request_support.py (#429 三轮 split, file budget).
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from server.app.services.job_errors import ConflictError, NotFoundError
+from server.app.services.job_errors import (
+    ConflictError,
+    JobServiceError,
+    NotFoundError,
+)
 from server.app.services.studio_agent_tools import studio_agent_created_by
+from server.app.services.studio_publish_request_support import (
+    active_revision_id,
+    draft_yaml_hash,
+    is_past_expiry,
+    iso_payload,
+    may_read_request,
+    refuse_stale_draft_claim,
+    workspace_draft_yaml,
+)
 from server.app.services.workflow_draft_key import require_draft_workflow_key_match
 from server.app.services.workflow_draft_publish import (
     publish_workflow_draft,
@@ -31,42 +47,6 @@ from server.app.services.workflow_draft_publish import (
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
     from server.app.settings import Settings
-
-
-def workspace_draft_yaml(job_db: JobQueries, workspace_id: str) -> str:
-    """The workspace's unpublished draft YAML (schema v61 draft store).
-
-    This is the same YAML the Studio canvas edits and the review dialog's
-    compare runs against — confirm publishes what the human reviewed.
-    """
-    draft = job_db.get_workspace_workflow_draft(workspace_id)
-    if draft is None:
-        raise ConflictError("No unpublished workflow draft to publish")
-    return str(draft["definition_yaml"])
-
-
-def _iso_payload(request: dict[str, Any]) -> dict[str, Any]:
-    """The wire payload: timestamps as ISO strings (datetimes otherwise leak
-    Postgres-specific formatting into the MCP tool text)."""
-    payload = dict(request)
-    for field in ("created_at", "expires_at", "resolved_at"):
-        value = payload.get(field)
-        if value is not None and not isinstance(value, str):
-            payload[field] = value.isoformat()
-    return payload
-
-
-def _is_past_expiry(request: dict[str, Any]) -> bool:
-    """Whether a pending row is past its ``expires_at``. The driver hands
-    timestamptz back as an ISO string in this deployment, so parse (the
-    string is always self-produced UTC ISO format; ``fromisoformat``
-    round-trips it)."""
-    expires_at = request.get("expires_at")
-    if expires_at is None:
-        return False
-    if isinstance(expires_at, str):
-        expires_at = datetime.fromisoformat(expires_at)
-    return expires_at <= datetime.now(UTC)
 
 
 class StudioPublishRequestService:
@@ -88,7 +68,9 @@ class StudioPublishRequestService:
 
         The draft must pass the full publish validation set — an invalid
         draft creates no request (the agent fixes it first, same loop as
-        validate_workflow). Never produces a revision.
+        validate_workflow). Never produces a revision. The request binds
+        the CURRENT server draft's hash (#429 三轮 P1-3): the human's
+        confirm publishes that exact draft or refuses with 409.
         """
         if self._job_db.get_workspace(workspace_id) is None:
             raise NotFoundError("Workspace not found")
@@ -104,23 +86,33 @@ class StudioPublishRequestService:
                 "Draft has validation errors; fix them before requesting publish: "
                 + "; ".join(errors[:5])
             )
+        # A confirm in flight owns the workspace's request slot: a new
+        # pending row here would supersede a ``confirming`` row whose
+        # publish is about to land — the exact race the claim state exists
+        # to close (#429 三轮 P1-2). Refuse; the window is one publish call.
+        if self._job_db.get_confirming_publish_request(workspace_id) is not None:
+            raise ConflictError(
+                "The previous publish request is being confirmed right now;"
+                " re-request after it resolves"
+            )
         # Attribution mirrors the draft tools: the run's initiating user
         # behind the studio-agent prefix (STUDIO-AGENT-001 §0.4).
         request = self._job_db.create_pending_publish_request(
             workspace_id,
             studio_agent_created_by(str(user["id"])),
             chat_session_id,
+            draft_hash=draft_yaml_hash(draft_yaml),
         )
-        return _iso_payload(request)
+        return iso_payload(request)
 
     def get_request_status(self, request_id: str, user: dict[str, Any]) -> dict[str, Any]:
         """One request by id for the agent; authorization mirrors
         build_session_context (bound token → workspace match, unbound →
         workspace membership; mismatches 404 so foreign ids cannot probe)."""
         request = self._job_db.get_publish_request(request_id)
-        if request is None or not self._may_read(request, user):
+        if request is None or not may_read_request(self._job_db, request, user):
             raise NotFoundError("Publish request not found")
-        return _iso_payload(request)
+        return iso_payload(request)
 
     # -- human side (Studio endpoints) ------------------------------------
 
@@ -141,48 +133,80 @@ class StudioPublishRequestService:
         request = self._job_db.get_pending_publish_request(workspace_id)
         if request is None:
             return None
-        if _is_past_expiry(request):
+        if is_past_expiry(request):
             # Best effort: a racing resolution just means the row is already
             # terminal. Either way the poll's answer is "no pending request".
             self._job_db.expire_pending_publish_request(workspace_id)
             return None
-        return _iso_payload(request)
+        return iso_payload(request)
 
     def confirm(self, workspace_id: str, request_id: str) -> dict[str, Any]:
         """Human confirm: publish the draft through the manual-publish gates.
 
+        #429 三轮 P1-2 (cancel race): the FIRST step is the atomic claim —
+        the row moves pending → ``confirming`` atomically (TTL and draft
+        hash re-checked in the same statement (#429 三轮 P1-3). From that
+        moment cancel cannot touch the row (its predicate matches pending
+        only), so "user cancelled but the revision still went live" is
+        impossible: either the cancel landed first (the claim finds no
+        pending row and the confirm 404s) or the claim landed first (the
+        cancel 404s and the publish proceeds). A new agent request in the
+        window is refused instead of superseding the confirming row.
+
         The publish itself is the same ``publish_workflow_draft`` call the
-        Studio publish endpoint makes; the request row moves to ``confirmed``
-        only after that call succeeded, recording the resulting revision.
+        Studio publish endpoint makes; the request row moves to
+        ``confirmed`` only after that call succeeded, recording the
+        resulting revision. A refused publish rolls the row back to
+        ``pending`` (retryable, cancellable) — never resolves it.
 
         TOCTOU hardening (#429): the resolve step no longer checks
         ``expires_at``. The claim already checked the TTL, and the publish
         between them may legitimately outlive the remaining TTL — a revision
         that landed must be recorded as confirmed, never denied by a TTL
-        that expired mid-publish. The ``status='pending'`` predicate alone
-        still guards double-resolution: a confirm whose publish landed but
-        whose row was superseded meanwhile resolves it anyway (the publish
-        effect is real, and the superseding request reads as its own
-        pending/terminal state) — see ``_resolve_or_read_final``.
+        that expired mid-publish. The ``status='confirming'`` predicate
+        alone still guards double-resolution.
         """
-        self._claim_pending(workspace_id, request_id)
-        draft_yaml = workspace_draft_yaml(self._job_db, workspace_id)
-        # The key-match guard is a publish gate (422): replay it here so the
-        # confirm action is gate-equivalent to the manual publish button.
-        require_draft_workflow_key_match(self._job_db, workspace_id, draft_yaml)
-        active_before = self._active_revision_id(workspace_id)
-        valid, errors = publish_workflow_draft(
-            self._job_db,
-            workspace_id,
-            draft_yaml,
-            self._settings.executor_runtime.workflows.custom_nodes_enabled,
+        draft = self._job_db.get_workspace_workflow_draft(workspace_id)
+        if draft is None:
+            # No draft store: nothing to publish — the request cannot be
+            # confirmed regardless (404 keeps the unknown/missing-request
+            # answers uniform; a live pending request with no draft is the
+            # same dead end, and the poll/claim state stays coherent).
+            raise NotFoundError("Publish request not found or already resolved")
+        draft_yaml = str(draft["definition_yaml"])
+        claimed = self._job_db.claim_pending_publish_request(
+            workspace_id, request_id, draft_yaml_hash(draft_yaml)
         )
+        if claimed is None:
+            # Not pending / not this request / past TTL: surface the truth
+            # for the drifted-draft case (P1-3) and 404 otherwise.
+            refuse_stale_draft_claim(self._job_db, workspace_id, request_id, draft_yaml)
+            raise NotFoundError("Publish request not found or already resolved")
+        try:
+            # The key-match guard is a publish gate (422): replay it here so
+            # the confirm action is gate-equivalent to the manual publish
+            # button.
+            require_draft_workflow_key_match(self._job_db, workspace_id, draft_yaml)
+            active_before = active_revision_id(self._job_db, workspace_id)
+            valid, errors = publish_workflow_draft(
+                self._job_db,
+                workspace_id,
+                draft_yaml,
+                self._settings.executor_runtime.workflows.custom_nodes_enabled,
+            )
+        except JobServiceError:
+            # Gate refusal (e.g. the key guard's 422): same rollback as a
+            # refused publish — the row must not stay ``confirming`` (an
+            # uncancellable dead end), it re-opens as pending.
+            self._job_db.resolve_publish_request(request_id, status="pending")
+            raise
         if not valid:
             # Publish refused (draft drifted after the agent's request): the
-            # request STAYS pending — the human can fix the draft and confirm
-            # again, or cancel. Never resolve on a failed publish.
+            # request returns to pending — the human can fix the draft and
+            # confirm again, or cancel. Never resolve on a failed publish.
+            self._job_db.resolve_publish_request(request_id, status="pending")
             raise ConflictError("Publish validation failed: " + "; ".join(errors[:5]))
-        active_after = self._active_revision_id(workspace_id)
+        active_after = active_revision_id(self._job_db, workspace_id)
         produced_revision = active_after is not None and active_after != active_before
         # Known limitation (#429 二轮复审，不修，注释记录): the before/after
         # double probe can misattribute a revision that a concurrent manual
@@ -203,67 +227,48 @@ class StudioPublishRequestService:
         )
         if resolved is None:
             resolved = self._resolve_lost_race(request_id)
-        return _iso_payload(resolved)
+        return iso_payload(resolved)
 
     def cancel(self, workspace_id: str, request_id: str) -> dict[str, Any]:
         """Human cancel: the request lands ``rejected``; the agent keeps its
-        draft and can revise + re-request."""
-        self._claim_pending(workspace_id, request_id)
-        resolved = self._job_db.resolve_publish_request(request_id, status="rejected")
+        draft and can revise + re-request.
+
+        The claim predicate (#429 三轮 P1-2): cancel only moves ``pending``
+        rows. A row being confirmed (``confirming``) is untouchable — its
+        publish is in flight and will record its own outcome; the cancel
+        404s instead of writing ``rejected`` over a revision that is about
+        to be live. The Studio dialog guards this client-side (confirming
+        disables the close channels); this is the backend boundary that
+        holds for cross-tab calls and direct API use."""
+        pending = self._job_db.get_pending_publish_request(workspace_id)
+        if pending is None or pending["id"] != request_id:
+            raise NotFoundError("Publish request not found or already resolved")
+        if is_past_expiry(pending):
+            # Record the terminal state (best effort — a racing resolution
+            # just means the row is already terminal) and refuse.
+            self._job_db.expire_pending_publish_request(workspace_id)
+            raise NotFoundError("Publish request not found or already resolved")
+        resolved = self._job_db.reject_pending_publish_request(
+            workspace_id, request_id, status="rejected"
+        )
         if resolved is None:
             # Cancel resolves nothing (no publish effect) — losing the race
             # means someone else resolved it first; report that final state.
             resolved = self._job_db.get_publish_request_current_state(request_id)
         if resolved is None:
             raise NotFoundError("Publish request not found or already resolved")
-        return _iso_payload(resolved)
+        return iso_payload(resolved)
 
     # -- internals ---------------------------------------------------------
 
     def _resolve_lost_race(self, request_id: str) -> dict[str, Any]:
-        """The confirm's publish landed but its resolve matched no pending
-        row (#429): the row was concurrently resolved by someone else (e.g.
-        superseded by a newer agent request mid-publish). The publish effect
-        is real, so the truthful answer is the row's final state — which a
-        concurrent supersede leaves as ``superseded`` (the newer request
-        owns the pending slot) — NOT a 404 pretending nothing happened."""
+        """The confirm's publish landed but its resolve matched no
+        confirming row (#429): the row was concurrently resolved by someone
+        else. The publish effect is real, so the truthful answer is the
+        row's final state — NOT a 404 pretending nothing happened."""
         final = self._job_db.get_publish_request_current_state(request_id)
         if final is None:
             # The row vanished outright (deleted workspace cascade): the
             # honest answer for a request that no longer exists.
             raise NotFoundError("Publish request not found or already resolved")
         return final
-
-    def _claim_pending(self, workspace_id: str, request_id: str) -> None:
-        """The pre-action gate: the named request must be the workspace's
-        pending row AND still within its TTL. This is the ONLY TTL check on
-        the confirm/cancel path (#429): the later resolve intentionally
-        drops the expiry predicate so a publish that outlives the remaining
-        TTL still records its effect."""
-        pending = self._job_db.get_pending_publish_request(workspace_id)
-        if pending is None or pending["id"] != request_id:
-            raise NotFoundError("Publish request not found or already resolved")
-        if _is_past_expiry(pending):
-            # Record the terminal state (best effort — a racing resolution
-            # just means the row is already terminal) and refuse.
-            self._job_db.expire_pending_publish_request(workspace_id)
-            raise NotFoundError("Publish request not found or already resolved")
-
-    def _may_read(self, request: dict[str, Any], user: dict[str, Any]) -> bool:
-        bound = user.get("scoped_workspace_id")
-        if bound is not None:
-            return bool(request["workspace_id"] == bound)
-        if user.get("role") == "admin":
-            return True
-        return (
-            self._job_db.get_workspace_role(str(request["workspace_id"]), str(user["id"]))
-            is not None
-        )
-
-    def _active_revision_id(self, workspace_id: str) -> str | None:
-        workspace = self._job_db.get_workspace(workspace_id)
-        if workspace is None:
-            return None
-        workflow_key = str(workspace.get("default_workflow_key") or "")
-        revision = self._job_db.get_active_workflow_revision(workspace_id, workflow_key)
-        return str(revision["id"]) if revision is not None else None

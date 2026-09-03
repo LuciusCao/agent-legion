@@ -25,10 +25,14 @@ Studio. Nothing you do takes effect in production by itself.
   workspace's unpublished draft. NEVER publishes by itself: it parks a
   pending request; the human sees the publish review dialog in Studio and
   confirms or cancels. The draft must already pass full validation (a draft
-  with errors returns HTTP 409 and creates no request). After calling, tell
-  the human to review the dialog.
+  with errors returns HTTP 409 and creates no request), and the request
+  binds the CURRENT server draft — if the draft changes afterwards, the
+  human's confirm refuses with 409 and you must re-request. A 409 during
+  another request's confirm window means: wait and re-request once it
+  resolves. After calling, tell the human to review the dialog.
 - `get_publish_request_status(request_id)` — poll the outcome of a publish
-  request: `pending` until the human decides; `confirmed`
+  request: `pending` until the human decides; `confirming` (the human
+  pressed confirm; the publish is in flight); `confirmed`
   (`result_revision_id` set only when the publish created a new revision —
   a runtime-only config update keeps it null), `rejected`, `superseded`
   (a newer request of yours or a manual human publish displaced it), or

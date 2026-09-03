@@ -36,6 +36,7 @@ function requestRecord(
     status: 'pending',
     created_by: 'studio-agent:u1',
     result_revision_id: null,
+    draft_hash: null,
     created_at: '2026-09-03T10:00:00Z',
     expires_at: '2026-09-03T10:10:00Z',
     resolved_at: null,
