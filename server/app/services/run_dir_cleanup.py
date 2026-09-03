@@ -36,7 +36,9 @@ def find_extra_run_dirs(data_dir: Path, job_dir: Path, node_key: str) -> list[tu
     token_dirs = [d for d in run_parent.iterdir() if d.is_dir()]
     if len(token_dirs) <= 1:
         return []
-    token_dirs.sort(key=_birthtime, reverse=True)
+    # Newest first. Coarse filesystem clocks can stamp two dirs identically;
+    # the name tie-break keeps the survivor independent of iterdir order.
+    token_dirs.sort(key=lambda d: (_birthtime(d), d.name), reverse=True)
     extra: list[tuple[Path, str]] = []
     for old in token_dirs[1:]:
         try:
