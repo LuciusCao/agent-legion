@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { toDagNodes } from './jobNodeHelpers'
+import { toDagEdges, toDagNodes } from './jobNodeHelpers'
 import { toNodeCatalog } from './deriveJobDetailPresentation'
 import type { JobDetail } from '../../types/jobTypes'
 
@@ -144,5 +144,45 @@ describe('toDagNodes', () => {
     expect(nodes[0].executorId).toBeNull()
     expect(nodes[0].agentId).toBeNull()
     expect(nodes[0].workerId).toBeNull()
+  })
+})
+
+describe('toDagEdges (#417 job 详情边完整性)', () => {
+  it('rebuilds the full DAG from a schema v2 multi-node job detail', () => {
+    // 后端 job_nodes_with_definition → effective_after：schema v2 的边由
+    // 顶层 edges 派生（_start 边隐藏）。该形状下 toDagEdges 必须产出完整
+    // 拓扑链——缺一条边，DagGraph 就退化为无边图（#417 的直接症状）。
+    const detail = makeDetail([
+      makeNode('intake', 'completed', { after: [] }),
+      makeNode('expand_analysis', 'completed', { after: ['intake'] }),
+      makeNode('review_a', 'running', { after: ['expand_analysis'] }),
+      makeNode('review_b', 'pending', { after: ['expand_analysis'] }),
+      makeNode('publish', 'pending', {
+        after: ['review_a', 'review_b'],
+      }),
+    ])
+
+    const edges = toDagEdges(detail.nodes)
+
+    expect(edges).toEqual([
+      { from: 'intake', to: 'expand_analysis' },
+      { from: 'expand_analysis', to: 'review_a' },
+      { from: 'expand_analysis', to: 'review_b' },
+      { from: 'review_a', to: 'publish' },
+      { from: 'review_b', to: 'publish' },
+    ])
+  })
+
+  it('derives an edgeless graph when the backend sends empty after lists', () => {
+    // 后端侧已由 tests/services/test_job_query_service.py 的 schema v2
+    // 回归钉锁死（effective_after 派生完整链路）；这里钉住前端语义：
+    // after 全空时 toDagEdges 老实返回空数组（配合 DagGraph 的无边
+    // 网格布局 + 提示，而不是渲染假边）。
+    const detail = makeDetail([
+      makeNode('intake', 'completed'),
+      makeNode('expand_analysis', 'pending'),
+    ])
+
+    expect(toDagEdges(detail.nodes)).toEqual([])
   })
 })

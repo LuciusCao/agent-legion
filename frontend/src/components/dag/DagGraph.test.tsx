@@ -48,6 +48,18 @@ describe('DagGraph', () => {
     expect(container.querySelector('.react-flow')).toBeInTheDocument()
   })
 
+  it('shows the missing-edges hint badge when nodes exist but edges do not (#417)', () => {
+    // 无边图布局退化为稳定网格（dagLayout.ts），必须伴随轻量提示，
+    // 让「边数据缺失」可被识别而不是被误读为节点丢失。
+    render(<DagGraph nodes={nodes} edges={[]} />)
+    expect(screen.getByRole('status')).toHaveTextContent('边数据缺失')
+  })
+
+  it('does not show the missing-edges hint when the graph has edges', () => {
+    render(<DagGraph nodes={nodes} edges={edges} />)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
   it('shows details panel when a node is clicked', () => {
     render(<DagGraph nodes={nodes} edges={edges} />)
     fireEvent.click(screen.getByText('提取'))
@@ -130,8 +142,9 @@ describe('DagGraph', () => {
   // 拿不到 handleBounds 就连边都不渲染。stub 出固定几何，再手动调一次
   // updateNodeInternals（真实环境由 ResizeObserver 完成同一件事），才能让
   // EdgeWrapper 走到自定义 DagEdge 的渲染，断言 stroke/opacity 内联样式。
-  // 必须与 DagGraph.tsx 的 NODE_WIDTH / DagNode.module.css 的 .node 宽度
-  // 保持一致（#415 起为 280）——handle 位置由该几何推导。
+  // 必须与 dagLayout.ts 的 DAG_NODE_WIDTH / DagNode.module.css 的 .node
+  // 宽度保持一致（#415 起为 280；常量由 DagGraph.tsx 迁至 dagLayout.ts）——
+  // handle 位置由该几何推导。
   const STUB_WIDTH = 280
   function stubDomGeometry() {
     const rect = {
