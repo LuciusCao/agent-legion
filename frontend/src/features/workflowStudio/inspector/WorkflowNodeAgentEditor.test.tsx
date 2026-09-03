@@ -350,4 +350,30 @@ describe('WorkflowNodeAgentEditor', () => {
       screen.queryByRole('button', { name: '创建草稿' })
     ).not.toBeInTheDocument()
   })
+
+  // #426 codex P2：agentId 已解析（catalog 命中 published Agent）时，另一份
+  // 目录（agent-definitions）在途/失败只让聚合 bindingStatus 非 ready——门控
+  // 不再挡编辑器：绑定目标已可信，AgentEditor 自身按该 ID 加载详情；只有
+  // agentId=null（需双目录确认「未绑定」出新建表单）才维持 pending/error 门控。
+  it('renders the editor for a resolved agentId even while the other catalog query is unsettled or failed', async () => {
+    const view = (bindingStatus: 'pending' | 'error') => (
+      <TestQueryProvider>
+        <WorkflowNodeAgentEditor
+          agentId="agent-a"
+          capability="generate_key_info"
+          bindingStatus={bindingStatus}
+        />
+      </TestQueryProvider>
+    )
+    const { rerender } = render(view('pending'))
+
+    expect(screen.queryByText('Agent 绑定解析中...')).not.toBeInTheDocument()
+    expect(mocks.fetchAgentDefinition).toHaveBeenCalledWith('ws1', 'agent-a')
+
+    rerender(view('error'))
+
+    expect(screen.queryByText('Agent 目录加载失败')).not.toBeInTheDocument()
+    expect(await screen.findByDisplayValue('agent-a')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('generate_key_info')).toBeInTheDocument()
+  })
 })
