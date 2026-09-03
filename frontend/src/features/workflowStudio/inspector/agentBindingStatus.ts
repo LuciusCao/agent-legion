@@ -15,8 +15,10 @@
 export type AgentBindingStatus = 'pending' | 'error' | 'ready'
 
 /** 两份目录查询的 settle 信号（workspace 级，无 capability 语义）：
- * *Settled = 首次查询已返回（后台刷新失败但缓存数据还在时绑定仍可按
- * 缓存解析，不算 failed）；*Failed = 失败且无数据（绑定不可解析）。 */
+ * *Settled = 查询在本次数据版本上已返回（#426 codex 终轮复审 P2：
+ * !isFetching——invalidate 触发的后台重取期间旧缓存可操作是 bug，故
+ * 在途也算未 settle；后台刷新失败但缓存数据还在时绑定仍可按缓存解
+ * 析，不算 failed）；*Failed = 失败且无数据（绑定不可解析）。 */
 export type AgentCatalogSettle = {
   catalogSettled: boolean
   catalogFailed: boolean
@@ -25,12 +27,13 @@ export type AgentCatalogSettle = {
 }
 
 /** 门控语义（#426 codex 终轮 P2，调用方为 WorkflowNodeExecutionSection）：
- * catalog 在途 → pending；catalog 失败无数据 → error；catalog 已返回且
- * 命中 published（useCapabilityAgent 的解析结果：agent 已解析且非 draft
- * 回落，即来自 published 目录）→ ready（不等 definitions——编辑器按 ID
- * 加载详情）；未命中 published → 看 definitions：在途 → pending，失败
- * 无数据 → error，已返回 → ready（有无 draft 都已是终态）。显式返回类型
- * 保持字面量联合（单行三元会被 TS 拓宽成 string 击穿下游类型）。 */
+ * catalog 在途（含失效后台重取）→ pending；catalog 失败无数据 → error；
+ * catalog 已返回且命中 published（useCapabilityAgent 的解析结果：agent
+ * 已解析且非 draft 回落，即来自 published 目录）→ ready（不等
+ * definitions——编辑器按 ID 加载详情）；未命中 published → 看
+ * definitions：在途 → pending，失败无数据 → error，已返回 → ready（有无
+ * draft 都已是终态）。显式返回类型保持字面量联合（单行三元会被 TS 拓宽
+ * 成 string 击穿下游类型）。 */
 export function bindingStatus(
   resolved: { agent?: unknown; isDraft?: boolean },
   settle: AgentCatalogSettle

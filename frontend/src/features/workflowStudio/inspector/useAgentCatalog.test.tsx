@@ -152,6 +152,47 @@ describe('useAgentCatalog', () => {
     expect(result.current.definitions).toEqual([])
   })
 
+  // #426 codex 终轮复审 P2：invalidate 触发的后台重取（有缓存，isPending
+  // 仍 false）期间旧缓存里的条目可能已被归档/变更，settle 必须回退
+  // （catalogSettled=false → 节点级 bindingStatus=pending，不放行编辑器/
+  // 新建表单），重取返回后恢复。这也是 isFetching 信号的存在意义：
+  // isPending 在有缓存的后台重取期间始终为 false，挡不住这个窗口。
+  // invalidate 的 promise 要等重取完成才 settle（v5 语义），悬挂的重取
+  // 不能 await 它——fire-and-forget 后用 waitFor 观察 query 状态翻转。
+  it('flips catalogSettled back to false during an invalidate-triggered background refetch', async () => {
+    mockGetCatalog.mockResolvedValue({ agents: [agent] })
+    const client = createTestQueryClient()
+    const { result } = renderHook(() => useAgentCatalog('ws1'), {
+      wrapper: wrapper(client),
+    })
+
+    // 首次取回：settle。
+    await waitFor(() => expect(result.current.settle.catalogSettled).toBe(true))
+    expect(mockGetCatalog).toHaveBeenCalledTimes(1)
+
+    let resolveSecondFetch: (value: {
+      agents: AgentDefinition[]
+    }) => void = () => {}
+    mockGetCatalog.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSecondFetch = resolve
+      }) as ReturnType<typeof mockGetCatalog>
+    )
+    void client.invalidateQueries({
+      queryKey: extraQueryKeys.studioAgentCatalog('ws1'),
+    })
+    // 后台重取在途（缓存里的旧 agents 仍可读，但 settle 信号已回退）。
+    await waitFor(() =>
+      expect(result.current.settle.catalogSettled).toBe(false)
+    )
+    expect(mockGetCatalog).toHaveBeenCalledTimes(2)
+    expect(result.current.agents).toHaveLength(1)
+
+    resolveSecondFetch({ agents: [] })
+    await waitFor(() => expect(result.current.settle.catalogSettled).toBe(true))
+    expect(result.current.agents).toEqual([])
+  })
+
   // 目录失败与「已返回」必须区分：失败且无数据 → catalogFailed=true（下游
   // 门控走 error，不落回可操作表单）；definitions 失败只并入 loadError
   // 横幅，是否阻断门控由节点级按 capability 命中决定。
