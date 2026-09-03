@@ -52,11 +52,13 @@ describe('WorkflowNodeAgentEditor', () => {
     })
   })
 
-  it('opens the embedded editor for the bound agent and loads its definition', async () => {
+  // #409：开合按钮已移除——编辑面板在 Agent 区块里直接内联展开。
+  it('renders the embedded editor inline without a toggle button and loads the bound agent', async () => {
     renderEditor({ agentId: 'agent-a', capability: 'generate_key_info' })
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑 Agent' }))
-
+    expect(
+      screen.queryByRole('button', { name: '编辑 Agent' })
+    ).not.toBeInTheDocument()
     expect(mocks.fetchAgentDefinition).toHaveBeenCalledWith('ws1', 'agent-a')
     expect(await screen.findByDisplayValue('generate_key_info'))
     expect(screen.getByDisplayValue('agent-a')).toBeInTheDocument()
@@ -66,7 +68,6 @@ describe('WorkflowNodeAgentEditor', () => {
     mocks.saveAgentDraft.mockResolvedValue({})
     renderEditor({ agentId: 'agent-a', capability: 'generate_key_info' })
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑 Agent' }))
     await screen.findByDisplayValue('generate_key_info')
     // 定义加载自带 skill 的存量 Agent：编辑器不展示 skill，但保存时原样保留
     // （节点未绑 skill 的 workflow 仍靠 AgentDefinition.skill 兜底）。
@@ -91,9 +92,6 @@ describe('WorkflowNodeAgentEditor', () => {
     mocks.createAgentDefinition.mockResolvedValue({ agent_id: 'agent-new' })
     renderEditor({ agentId: null, capability: 'generate_key_info' })
 
-    fireEvent.click(
-      screen.getByRole('button', { name: '为此 capability 新建 Agent' })
-    )
     fireEvent.change(await screen.findByLabelText('Agent ID'), {
       target: { value: 'agent-new' },
     })
@@ -110,7 +108,7 @@ describe('WorkflowNodeAgentEditor', () => {
   // #387：普通新建（非 switchToAgent）创建的是 draft-only Agent，目录里
   // 查不到；关面板会让「发布」按钮永远不可达——创建后面板必须留在编辑/
   // 发布模式。
-  it('stays open in publish mode after a plain create (not just switchToAgent)', async () => {
+  it('stays in publish mode after a plain create (not just switchToAgent)', async () => {
     mocks.createAgentDefinition.mockResolvedValue({ agent_id: 'agent-new' })
     mocks.fetchAgentDefinition.mockResolvedValue({
       latest: {
@@ -126,9 +124,6 @@ describe('WorkflowNodeAgentEditor', () => {
     })
     renderEditor({ agentId: null, capability: 'generate_key_info' })
 
-    fireEvent.click(
-      screen.getByRole('button', { name: '为此 capability 新建 Agent' })
-    )
     fireEvent.change(await screen.findByLabelText('Agent ID'), {
       target: { value: 'agent-new' },
     })
@@ -143,7 +138,7 @@ describe('WorkflowNodeAgentEditor', () => {
         'Agent「agent-new」草稿已创建'
       )
     )
-    // 面板不关：切到编辑/发布模式加载新草稿，「发布」按钮可达。
+    // 面板切到编辑/发布模式加载新草稿，「发布」按钮可达。
     await vi.waitFor(() =>
       expect(mocks.fetchAgentDefinition).toHaveBeenCalledWith(
         'ws1',
@@ -151,24 +146,16 @@ describe('WorkflowNodeAgentEditor', () => {
       )
     )
     expect(await screen.findByRole('button', { name: '发布' })).toBeEnabled()
-    // 入口按钮同步切到编辑态文案。
-    expect(
-      screen.getByRole('button', { name: '收起 Agent 编辑' })
-    ).toBeInTheDocument()
   })
 
-  it('opens the create form prefilled with the node capability', async () => {
+  it('shows the create form prefilled with the node capability', async () => {
     renderEditor({ agentId: null, capability: 'generate_key_info' })
-
-    fireEvent.click(
-      screen.getByRole('button', { name: '为此 capability 新建 Agent' })
-    )
 
     expect(await screen.findByDisplayValue('generate_key_info'))
     expect(mocks.fetchAgentDefinition).not.toHaveBeenCalled()
   })
 
-  it('stays open in publish mode after creating a draft agent (agent node entry, #392)', async () => {
+  it('stays in publish mode after creating a draft agent (agent node entry, #392)', async () => {
     mocks.createAgentDefinition.mockResolvedValue({ agent_id: 'agent-new' })
     mocks.fetchAgentDefinition.mockResolvedValue({
       latest: {
@@ -184,9 +171,6 @@ describe('WorkflowNodeAgentEditor', () => {
     })
     renderEditor({ agentId: null, capability: 'generate_key_info' })
 
-    fireEvent.click(
-      screen.getByRole('button', { name: '为此 capability 新建 Agent' })
-    )
     fireEvent.change(await screen.findByLabelText('Agent ID'), {
       target: { value: 'agent-new' },
     })
@@ -195,8 +179,8 @@ describe('WorkflowNodeAgentEditor', () => {
     })
 
     expect(mocks.createAgentDefinition).toHaveBeenCalled()
-    // 面板不关：切到编辑/发布模式加载新草稿（/api/agent-catalog 只回
-    // published，直接关面板会让用户无法从该入口发布它）。
+    // 面板切到编辑/发布模式加载新草稿（/api/agent-catalog 只回
+    // published，面板关闭会让用户无法从该入口发布它）。
     await vi.waitFor(() =>
       expect(mocks.fetchAgentDefinition).toHaveBeenCalledWith(
         'ws1',

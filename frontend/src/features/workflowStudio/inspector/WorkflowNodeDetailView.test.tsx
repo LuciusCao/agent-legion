@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../../api'
 import { getSkillDetail } from '../../../api/agentCatalogApi'
 import { TestQueryProvider } from '../../../testing/testQueryClient'
+import { useSettingStore } from '../../../stores/settingStore'
 import type { WorkflowDefinitionRecord } from '../../../types'
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import { WorkflowNodeDetailView } from './WorkflowNodeDetailView'
@@ -102,6 +103,8 @@ function renderView(
 describe('WorkflowNodeDetailView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // #409：内联 Agent 编辑面板的渲染依赖 workspace（无 workspace 时隐藏）。
+    useSettingStore.setState({ workspaceId: 'ws1' })
     mockApi.mockResolvedValue({})
     mockGetSkillDetail.mockResolvedValue({
       key: 'demo/review',
@@ -159,6 +162,21 @@ describe('WorkflowNodeDetailView', () => {
     fireEvent.click(screen.getByRole('button', { name: '返回节点详情' }))
     expect(screen.queryByLabelText('技能文件预览')).not.toBeInTheDocument()
     expect(screen.getByText('Demo DAG / 生成关键信息')).toBeInTheDocument()
+  })
+
+  // #409：Agent 区块结构简化——无「编辑 Agent」开合按钮，编辑面板默认
+  // 内联展开；可编辑态不再渲染重复的只读汇总卡片（agent id 汇总行）。
+  it('renders the agent editor inline without a toggle button or summary card', () => {
+    renderView()
+
+    expect(
+      screen.queryByRole('button', { name: '编辑 Agent' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '为此 capability 新建 Agent' })
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
+    expect(screen.queryByText('agent-key-info')).not.toBeInTheDocument()
   })
 
   it('resets the preview when the selected node changes', () => {

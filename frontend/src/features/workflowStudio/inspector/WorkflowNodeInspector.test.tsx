@@ -213,11 +213,12 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     )
   })
 
-  it('renders no agent entry on a code node (#392 regression)', async () => {
+  it('renders no agent editor on a code node (#392 regression)', async () => {
     renderInspector('intake')
 
     await screen.findByLabelText('节点执行能力')
-    // code 节点不再长出 Agent 编辑/新建入口（类型变更走头部选择器）。
+    // code 节点不再长出 Agent 编辑区（类型变更走头部选择器；#409 起该
+    // 编辑区在 agent 节点内内联展开，无开合按钮）。
     expect(
       screen.queryByRole('button', { name: '为此 capability 新建 Agent' })
     ).not.toBeInTheDocument()
