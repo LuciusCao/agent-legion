@@ -4,6 +4,9 @@ from fastapi import APIRouter, HTTPException
 
 import server.app.routes.workflow_contracts as workflow_contracts
 from server.app.jobs import JobQueries
+from server.app.routes.studio_publish_requests import (
+    create_studio_publish_request_router,
+)
 from server.app.routes.workflow_draft_compare import create_workflow_draft_compare_router
 from server.app.routes.workflow_draft_publish import create_workflow_draft_publish_router
 from server.app.routes.workflow_draft_store import create_workflow_draft_store_router
@@ -92,6 +95,10 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         )
 
     router.include_router(create_workflow_draft_publish_router(job_db, settings))
+    # Agent-initiated publish handshake (#416): pending read + confirm/cancel
+    # (confirm replays the manual publish gates; reject_studio_agent_scope
+    # inside the router keeps scoped tokens off all three).
+    router.include_router(create_studio_publish_request_router(job_db, settings))
     router.include_router(create_workflow_draft_compare_router(job_db))
     router.include_router(create_workflow_draft_store_router(job_db))
     router.include_router(create_workflow_node_prompt_router(job_db))

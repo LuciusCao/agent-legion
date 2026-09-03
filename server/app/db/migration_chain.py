@@ -1,12 +1,9 @@
-"""Chronological registry of versioned schema migrations.
-
-Split from ``schema.py`` for the file-size budget (and from
-``migration_registry.py``, which re-exports this chain, when the import
-list itself outgrew the ceiling). DDL-only versions have no Python
-function — their DDL lives in ``postgres_schema.sql`` — but they still get
-a registry entry so ``max(version)`` stays meaningful for upgrade gating.
-migrate_runs (v53) must run after every migration that still reads
-job_batches; the version-sorted registry guarantees it.
+"""Chronological registry of versioned schema migrations (the schema.py /
+migration_registry.py re-export splits are file-budget moves). DDL-only
+versions carry no Python function — DDL lives in ``postgres_schema.sql``
+(v76's table is the exception: the file is at its ceiling, the migration
+covers fresh + upgrade paths). migrate_runs (v53) must run after every
+migration that still reads job_batches; the sorted registry guarantees it.
 """
 
 from __future__ import annotations
@@ -37,6 +34,7 @@ from server.app.db.migrations import (
     migrate_studio_chat_context,
     migrate_studio_chat_draft,
     migrate_studio_chat_tables,
+    migrate_studio_publish_requests,
     migrate_versioned_entities,
     migrate_workflow_catalog_retirement,
     migrate_workflow_node_explicit_types,
@@ -175,6 +173,11 @@ MIGRATIONS: list[SchemaMigration] = [
     # the binding (studio latest-run echo filters by key). Schema-file replay
     # covers pre-v75 tables, no data backfill.
     SchemaMigration(75, "node_runs_skill_key"),
+    # v76 (#416): agent-initiated workflow publish requests — the table is
+    # carried as an apply fn (the schema file sits at its budget ceiling, and
+    # fresh + v75-upgrade paths both run this migration). #434: born as this
+    # branch's v75, bumped to 76 when #427's node_runs_skill_key claimed 75.
+    SchemaMigration(76, "studio_publish_requests", migrate_studio_publish_requests),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]

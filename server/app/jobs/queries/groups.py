@@ -3,9 +3,8 @@
 JobQueries previously declared 18 flat mixins; this module groups them into
 five domain facades so the composition reads by domain. The linearization
 order is adjusted by the grouping, but method resolution is unaffected in
-practice: the mixins have zero attribute-name collisions and never use
-``super()`` (non-cooperative inheritance), so every public method resolves
-to the same function object as before the regrouping.
+practice: zero attribute-name collisions, no ``super()`` — every public
+method resolves to the same function object as before the regrouping.
 """
 
 from __future__ import annotations
@@ -34,6 +33,9 @@ from server.app.jobs.queries.scoped_token_management import (
 from server.app.jobs.queries.scoped_tokens import ScopedTokenQueriesMixin
 from server.app.jobs.queries.status import JobStatusQueriesMixin
 from server.app.jobs.queries.studio_chat import StudioChatQueriesMixin
+from server.app.jobs.queries.studio_publish_requests import (  # #416
+    StudioPublishRequestQueriesMixin,
+)
 from server.app.jobs.queries.workflow_drafts import WorkflowDraftQueriesMixin
 from server.app.jobs.queries.workflow_revisions import WorkflowRevisionQueriesMixin
 from server.app.jobs.queries.workspace import WorkspaceQueriesMixin
@@ -80,8 +82,8 @@ class RunDomainQueriesMixin(
     """Runs, jobs, nodes, scans, reruns, quality replays, approvals, retention, and execution control."""
 
 
-class StudioChatDomainQueriesMixin(StudioChatQueriesMixin):
-    """Studio chat sessions and messages."""
+class StudioChatDomainQueriesMixin(StudioChatQueriesMixin, StudioPublishRequestQueriesMixin):
+    """Studio chat sessions/messages + agent publish requests (#416)."""
 
 
 class WorkflowRevisionDomainQueriesMixin(WorkflowRevisionQueriesMixin):
