@@ -48,7 +48,7 @@ vi.mock('./routes/pages', () => {
     MonitoringPage: stub('monitoring'),
     QualityPage: stub('quality'),
     GlobalSettingsPage: stub('global-settings'),
-    GlobalOnboardingPage: stub('全局初始化清单'),
+    GlobalOnboardingPage: stub('agent-onboarding'),
   }
 })
 
@@ -111,7 +111,7 @@ describe('AppRoutes auth guard', () => {
     renderRoutes('/admin/onboarding')
 
     expect(
-      await screen.findByText('全局初始化清单', undefined, { timeout: 5000 })
+      await screen.findByText('agent-onboarding', undefined, { timeout: 5000 })
     ).toBeInTheDocument()
   })
 })

@@ -20,7 +20,8 @@
 skill 内容绑定在节点上（#76）：示例 DAG 的 4 个 agent 节点在定义里声明
 `skill: {key: education-video-problems-generation/<name>, ref: v1.0.0}`
 （随 revision 版本化、随 intake 冻结进 job 快照），内置 demo Agent 定义
-自身不再携带 skill。升级 skill 的流程：在外部 skill 仓库改内容并打新 tag
+自身不再携带 skill。升级 skill 的流程：在 skill root 下的本地 skill 仓库
+（`~/.agents/skills/education-video-problems-generation`）改内容并打新 tag
 → 把节点 `skill.ref` 指向新 tag（Studio 编辑草稿并发布）→ 首次 dispatch
 自动解析该 ref 并把 commit 冻结进锁。节点 ref 为 `latest`（空 ref 归一为
 它）时跟随仓库 HEAD：每次 dispatch 现场解析、永不入锁。重解析已 pin 的

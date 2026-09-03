@@ -20,7 +20,6 @@ def test_workspace_batch_delete_removes_jobs(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
@@ -56,7 +55,6 @@ def test_workspace_default_entity_is_used_when_batch_omits_entity(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         workspace_response = c.post(
             "/api/workspaces",
@@ -92,7 +90,6 @@ def test_batch_with_entity_question(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
@@ -121,7 +118,6 @@ def test_batch_unsupported_entity_mode(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
@@ -146,7 +142,6 @@ def test_batch_video_entity_direct_ids_is_resolver_driven(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
@@ -170,7 +165,6 @@ def test_batch_unregistered_entity_mode_combination_rejected(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
@@ -193,7 +187,6 @@ def test_batch_with_entity_question_direct_ids(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
@@ -223,7 +216,6 @@ def test_workflow_response_no_task_entity(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         created = c.post("/api/workspaces", json={"id": "test", "name": "Intake Shape"})
         assert created.status_code == 200, created.text
@@ -248,7 +240,6 @@ def test_batch_delete_skips_not_found_and_running_jobs(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
@@ -282,7 +273,6 @@ def test_batch_delete_skips_running_job(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
@@ -324,7 +314,6 @@ def test_batch_run_to_returns_results_in_order(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(

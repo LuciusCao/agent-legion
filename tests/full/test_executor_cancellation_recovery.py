@@ -78,7 +78,7 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     binary = velites_binary()
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(
-        "server.app.executors._code_sandbox.shutil.which", lambda _name: str(binary)
+        "server.app.executors._code_sandbox.resolve_sandbox_binary", lambda: str(binary)
     )
 
     local_executor = _local_executor(tmp_path)

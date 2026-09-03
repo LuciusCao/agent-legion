@@ -52,7 +52,6 @@ def _app(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     return app
 
 

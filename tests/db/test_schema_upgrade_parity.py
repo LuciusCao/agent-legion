@@ -43,30 +43,24 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v71, preview_panels, #328) must leave behind
-# so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v71 only widens the versioned_entities entity_type CHECK
-# (drop + re-add, same pattern as v30/v47): no table/column/index delta, so
-# the catalog inventories stay empty and the constraint rewind rides the DDL
-# hook below; the v70 (retire_workflow_key_columns) effects stay in place —
-# they belong to the SCHEMA_VERSION-1 shape after the rewind.
+# Effects the newest migration (v74, studio_chat_agent_config, #368) must
+# leave behind so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. v74 adds the studio_chat_sessions agent config mirror
+# columns (DDL-only, schema-file replay): the undo drops both; the v72/v73
+# effects stay in place — they belong to the SCHEMA_VERSION-1 shape after
+# the rewind.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("studio_chat_sessions", "session_modes_json", "text"),
+    ("studio_chat_sessions", "config_options_json", "text"),
+)
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "preview_panels"
+_NEWEST_MIGRATION_NAME = "studio_chat_agent_config"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v70: the pre-v71 entity_type CHECK (without 'preview_panel').
-_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = (
-    """
-    alter table versioned_entities
-      drop constraint if exists versioned_entities_entity_type_check;
-    alter table versioned_entities
-      add constraint versioned_entities_entity_type_check
-      check(entity_type in ('node_code', 'agent'))
-    """,
-)
+# faithful v73 (no extra DDL: v74 is purely additive columns).
+_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]

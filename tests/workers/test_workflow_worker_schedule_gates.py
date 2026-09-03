@@ -45,6 +45,8 @@ def _definition(node: WorkflowNode) -> WorkflowDefinition:
 def _worker(tmp_path: Path, route: NodeRoute, node: WorkflowNode) -> MagicMock:
     worker = MagicMock()
     worker.settings.logs_dir = tmp_path
+    # Pure-remote gate (#389) reads the raw int; MagicMock would not compare.
+    worker.settings.executor_runtime.code_capacity = 2
     worker.code_dispatch = None
     worker.state.batch_payload_cache = {}
     worker.state.pass_claim_counts = {}

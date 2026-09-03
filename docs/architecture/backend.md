@@ -191,6 +191,7 @@ server/app/
 | POST | `/workspaces/{workspace_id}/runs` | `create_run` | routes/runs.py |
 | GET | `/workspaces/{workspace_id}/runs` | `list_runs` | routes/runs.py |
 | GET | `/workspaces/{workspace_id}/runs/{run_id}` | `get_run` | routes/runs.py |
+| GET | `/metrics/runtime-profile` | `get_runtime_profile` | routes/runtime_profile.py |
 | GET | `/agent-catalog/skills/{skill_key:path}` | `get_skill` | routes/skill_catalog_route.py |
 | GET | `/skills/directories` | `list_skill_directories` | routes/skill_directories.py |
 | POST | `/skills/validate` | `validate_skill` | routes/skills.py |
@@ -233,8 +234,10 @@ server/app/
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `list_messages` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `send_message` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/cancel` | `cancel_turn` | routes/studio_chat.py |
-| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/allow-all` | `set_allow_all` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/{request_id}` | `answer_permission` | routes/studio_chat.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/allow-all` | `set_allow_all` | routes/studio_chat_config.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/mode` | `set_mode` | routes/studio_chat_config.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/config-options` | `set_config_option` | routes/studio_chat_config.py |
 | PUT | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/context` | `update_context` | routes/studio_chat_context.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/events` | `session_events` | routes/studio_chat_events.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/token-usage` | `get_run_token_usage` | routes/token_usage.py |
@@ -297,7 +300,7 @@ server/app/
 | AgentEnqueueConfig | BaseModel | workers: int, max_pending: int | app/configuration/executor_knobs.py |
 | AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/configuration/executor_knobs.py |
 | CodeStockConfig | BaseModel | enabled: bool, factor: float, min_stock: int, max_stock: int, refresh_seconds... | app/configuration/executor_knobs.py |
-| WorkflowsRuntimeConfig | BaseModel | enabled: bool, custom_nodes_enabled: bool | app/configuration/executor_runtime.py |
+| WorkflowsRuntimeConfig | BaseModel | custom_nodes_enabled: bool, max_items_per_run: int | app/configuration/executor_runtime.py |
 | AgentWorkersRuntimeConfig | BaseModel | max_archive_bytes: int, min_protocol_version: int | app/configuration/executor_runtime.py |
 | ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/configuration/executor_runtime.py |
 | CodeCapabilityConfig | BaseModel | timeout_seconds: int, sandbox_network: bool, config_schema: dict[str, Any] | app/executors/contracts.py |
@@ -355,13 +358,13 @@ server/app/
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
 | DatabaseConnectionView | BaseModel | engine: str, host: str, port: int | None, name: str, user: str, password_set:... | app/routes/infra_connections_contracts.py |
-| StorageConnectionView | BaseModel | configured: bool, endpoint_url: str, public_endpoint_url: str, bucket: str, r... | app/routes/infra_connections_contracts.py |
+| StorageConnectionView | BaseModel | configured: bool, backend: str, endpoint_url: str, public_endpoint_url: str, ... | app/routes/infra_connections_contracts.py |
 | InfraConnectionsResponse | BaseModel | database: DatabaseConnectionView, storage: StorageConnectionView | app/routes/infra_connections_contracts.py |
 | InfraConnectionTestRequest | BaseModel | target: Literal['database', 'storage'] | app/routes/infra_connections_contracts.py |
 | InfraConnectionTestResponse | BaseModel | target: Literal['database', 'storage'], ok: bool, reason: str | None | app/routes/infra_connections_contracts.py |
 | InstanceCleanupSettings | BaseModel | log_retention_days: int, run_dir_retention_days: int, interval_seconds: int | app/routes/instance_settings_contracts.py |
 | InstanceMonitoringSettings | BaseModel | sample_interval_seconds: float, retention_days: int | app/routes/instance_settings_contracts.py |
-| InstanceWorkflowsSettings | BaseModel | enabled: bool | app/routes/instance_settings_contracts.py |
+| InstanceWorkflowsSettings | BaseModel | max_items_per_run: int | app/routes/instance_settings_contracts.py |
 | InstanceAgentWorkersSettings | BaseModel | max_archive_bytes: int, min_protocol_version: int | app/routes/instance_settings_contracts.py |
 | InstanceSettingsDocument | BaseModel | cleanup: InstanceCleanupSettings, monitoring: InstanceMonitoringSettings, hea... | app/routes/instance_settings_contracts.py |
 | ApprovalDecisionCreateRequest | BaseModel | verdict: ApprovalVerdict, note: str, rework_target: str | app/routes/job_approval_contracts.py |
@@ -462,6 +465,9 @@ server/app/
 | RunListResponse | BaseModel | runs: list[RunRecord] | app/routes/run_contracts.py |
 | RunJobStats | BaseModel | total: int, by_status: dict[str, int] | app/routes/run_contracts.py |
 | RunDetailResponse | BaseModel | run: RunRecord, job_stats: RunJobStats | app/routes/run_contracts.py |
+| ProfileBucket | BaseModel | bucket_start: str, intake_runs: int, intake_items: int, pass_count: int, pass... | app/routes/runtime_profile_contracts.py |
+| ProfileVerdict | BaseModel | stage: str, conclusion: str, evidence: dict[str, object] | app/routes/runtime_profile_contracts.py |
+| RuntimeProfileResponse | BaseModel | buckets: list[ProfileBucket], verdict: ProfileVerdict | app/routes/runtime_profile_contracts.py |
 | SkillFileResponse | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/skill_contracts.py |
 | SkillDetailResponse | BaseModel | key: str, ref: str, commit: str, available: bool, tags: list[str], files: lis... | app/routes/skill_contracts.py |
 | SkillValidateRequest | BaseModel | path: str | app/routes/skill_contracts.py |
@@ -506,6 +512,9 @@ server/app/
 | StudioAgentRegistryEntry | BaseModel | id: str, label: str, command: str, args: list[str], source: Literal['manual',... | app/routes/studio_agents_admin_contracts.py |
 | StudioAgentRegistryDocument | BaseModel | api_base: str, agents: list[StudioAgentRegistryEntry] | app/routes/studio_agents_admin_contracts.py |
 | StudioAgentDetection | BaseModel | detected: bool, path: str | None, version: str | None | app/routes/studio_agents_admin_contracts.py |
+| StudioChatAllowAllRequest | BaseModel | enabled: bool | app/routes/studio_chat_config.py |
+| StudioChatSetModeRequest | BaseModel | mode_id: str | app/routes/studio_chat_config.py |
+| StudioChatSetConfigOptionRequest | BaseModel | config_id: str, value: str | app/routes/studio_chat_config.py |
 | StudioChatAgentOption | BaseModel | id: str, label: str | app/routes/studio_chat_contracts.py |
 | StudioChatAgentsResponse | BaseModel | agents: list[StudioChatAgentOption] | app/routes/studio_chat_contracts.py |
 | StudioChatSessionCreateRequest | BaseModel | agent_id: str, title: str | app/routes/studio_chat_contracts.py |
@@ -516,7 +525,6 @@ server/app/
 | StudioChatMessageRecord | BaseModel | id: str, session_id: str, kind: MessageKind, role: MessageRole, content: dict... | app/routes/studio_chat_contracts.py |
 | StudioChatMessageResponse | BaseModel | message: StudioChatMessageRecord | app/routes/studio_chat_contracts.py |
 | StudioChatMessagesResponse | BaseModel | messages: list[StudioChatMessageRecord] | app/routes/studio_chat_contracts.py |
-| StudioChatAllowAllRequest | BaseModel | enabled: bool | app/routes/studio_chat_contracts.py |
 | StudioChatContextUpdateRequest | BaseModel | selected_node_key: str | None, draft_yaml: str | None | app/routes/studio_chat_contracts.py |
 | StudioChatPermissionAnswerRequest | BaseModel | option_id: str | None, deny: bool | app/routes/studio_chat_contracts.py |
 | StudioChatPermissionAnswerResponse | BaseModel | resolved: str | app/routes/studio_chat_contracts.py |
@@ -693,8 +701,8 @@ server/app/
   配置保持无 secret（明文 secret 启动被拒，secret 只进 vault/env）；
   `owned_keys.py` 是「哪个文件拥有哪个顶层段」的权威。
 - 当 `start_worker=True` 时，生命周期内启动 `WorkflowWorkerThread`：
-  - 在 DB 实例设置 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
-  - 节点按 capability 分发：DB 中按 workspace 发布的 code 节点（EXEC-CODE-002/003，demo 节点在 workspace 初始化时注入）进入本地 code 池或 Worker code 池；agent 节点（pi / velites runtime）经 broker 派发给 Worker。
+  - `workflows.enabled` 已退役（#385/#389）：调度线程总是启动（API 面无门禁）；部署形态由实例设置 `code_capacity` 表达——0 = 纯控制面模式（本进程不组装本地执行栈，code 节点 100% 依赖远程 code Worker，`/api/health` 报在线 code Worker 数）。
+  - 节点按 capability 分发：DB 中按 workspace 发布的 code 节点（EXEC-CODE-002/003，demo 节点在 workspace 初始化时注入）优先派发远程 code Worker（在线且 payload 合格），否则回落本地 code 池（纯远程模式下无回落，任务挂起等待 Worker）；agent 节点（pi / velites runtime）经 broker 派发给 Worker；shard 节点的分片执行同样先远程后本地（#389）——分片身份随 kind='code' manifest 持久化，broker claim 事务经 `try_start_shard` 绑定 `node_shards` 行（受 `(job_id, node_key)` 单活跃请求索引约束，远程分片逐片串行），分片输出以 `shard_output-<index>.json` 常规 expected_output 随结果归档回传。
 - 调度暂停是 **workspace 级**状态：每个 workspace 默认暂停，恢复经
   `POST /api/worker/resume?workspace_id=<id>`（或对应控制台开关）开始处理。
 - 后端每次启动会把全部 workspace 重置为暂停（刻意设计，防失控自跑）；恢复调度走
@@ -801,15 +809,15 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 `config/app.yaml` 已整体退役：bootstrap/安全类键转 env-only，实例级可调配置迁入 DB：
 
 - env-only：`database.url` → `AGENT_LEGION_DATABASE_URL`（唯一权威变量，G4；缺省 `postgresql://127.0.0.1:5432/agent_legion`）；`data_dir` → `AGENT_LEGION_DATA_DIR`（缺省 `data`）；`server.cors` → `AGENT_LEGION_CORS_ALLOW_ORIGINS`（逗号分隔）/ `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`；`agent_workers` 的全局 register token 已随 issue #35 退役（遗留的 `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]` 或 yaml `register_token[_file]` 会让启动直接报错）。
-- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`workflows.enabled`（是否启用 Agent Legion DAG workflow worker）、`agent_workers.max_archive_bytes` / `min_protocol_version`。`openclaw` 块已随 openclaw runtime 一并退役（#75）：存量 DB 文档读取时整块剥离、写入返回 422，explicit 单文件配置里的残留块被忽略。
+- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`code_capacity`（本地兜底执行并发上限，0 = 纯控制面模式，#389）、`workflows.max_items_per_run`、`agent_workers.max_archive_bytes` / `min_protocol_version`。`openclaw` 块已随 openclaw runtime 一并退役（#75）：存量 DB 文档读取时整块剥离、写入返回 422，explicit 单文件配置里的残留块被忽略；`workflows.enabled` 已随 #385/#389 退役：存量文档读取时键级剥离（`workflows` 块的 `max_items_per_run` 活跃保留）。
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 
 外部服务集成走实例级外部服务连接（EXTERNAL-CONNECTION-001），不经全局 yaml 段配置（全局 `cms:` 段已退役，写进任何 split yaml 会撞退役文件校验报错）：连接由 admin 在全局设置「外部服务连接」或 admin API（`GET/POST /api/admin/connections`、`PUT/DELETE /api/admin/connections/{key}`、`POST /api/admin/connections/{key}/test`、`GET /api/admin/connection-types`）维护，存 DB `external_connections`（只存非敏感配置）；敏感字段转入实例 vault（`instance_secrets`，Fernet 加密，连接配置里只留 `conn:<key>:<field>` 引用），鉴权换来的 token 加密缓存在 `connection_tokens`，过期在父连接行锁下单飞刷新（`server/app/services/connection_tokens.py`）。平台内置 `static_bearer` 与通用 `hmac_token`（HMAC 签名换 token）adapter（`server/app/services/connection_adapters.py` / `connection_adapter_hmac.py`）；业务专属鉴权协议随业务节点迁出，不再由平台携带。节点 config 只写 `connection: "<key>"` 引用连接 + 业务参数（出厂默认值声明在 capability 的 `config_schema`，沿「schema defaults → 节点 config → workspace 覆盖」链解析，Settings UI 可改）。env `CMS_*` / `AGENT_LEGION_CMS_TOKEN` 运行时通道已退役：升级后首次启动由 schema v34 迁移（`server/app/db/migrations/external_connections.py`）把 env 凭据与 workspace 节点旧配置收编进连接，此后 env 不再被读取。explicit 单文件配置里出现 `cms.token` / `cms.token_gen` 启动即报错（config 治理 G2）。
 
-`config/workflow.yaml` 的 `executors` 段已随 executor 概念整体退役（P-0.5，schema v47 drop 定义/allocation 两表，EXEC-CODE-POOL-001）：非 Agent 路由节点一律进隐含 code 池，池容量 = 实例设置 `code_capacity`，lease 行写常量 `'code'`；节点级并发经 `workspace_node_limits` 声明。code 节点的可调参数只剩一个声明层——节点 `config_schema:` 块（随 revision 快照版本化），平台保留执行键 `timeout_seconds` / `sandbox_network` 自动合并进每个 code 路由节点的有效 schema。
+`config/workflow.yaml` 的 `executors` 段已随 executor 概念整体退役（P-0.5，schema v47 drop 定义/allocation 两表，EXEC-CODE-POOL-001）：非 Agent 路由节点一律进隐含 code 池，池容量 = 实例设置 `code_capacity`（#389 改述：本地兜底执行并发上限——远程 code Worker 在线时任务优先远程执行，此值只约束宿主本地回落的并发；0 = 纯控制面模式，本地执行栈不组装），lease 行写常量 `'code'`；节点级并发经 `workspace_node_limits` 声明（远程 code claim 同样按节点计数）。code 节点的可调参数只剩一个声明层——节点 `config_schema:` 块（随 revision 快照版本化），平台保留执行键 `timeout_seconds` / `sandbox_network` 自动合并进每个 code 路由节点的有效 schema。
 
-实例级运行时设置（`agent_workers` 限额、`workflows.enabled`、lease/heartbeat/sweeper 时序）不再出现在 yaml，见上文「DB 实例设置」。
+实例级运行时设置（`agent_workers` 限额、`workflows.max_items_per_run`、lease/heartbeat/sweeper 时序、`code_capacity`）不再出现在 yaml，见上文「DB 实例设置」。
 
 token 用量计价已产品化：定价存于 `global_settings` 表（`token_usage` 文档），由 admin 在「全局设置」页（`GET/PUT /api/admin/token-usage-pricing`）维护，成本按每条 run 的 provider + model 匹配定价逐行计算；不再有任何 yaml 侧配置。
 

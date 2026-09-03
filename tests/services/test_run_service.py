@@ -378,6 +378,50 @@ def test_empty_items_are_rejected(service) -> None:
         service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[])
 
 
+def test_items_over_limit_are_rejected(service, job_db, settings) -> None:
+    """#358: oversized single-run submissions fail before any write."""
+    _insert_material(job_db, WORKSPACE_ID, "mat-1")
+    settings.executor_runtime.workflows.max_items_per_run = 2
+    # Pad with duplicates of the same material: dedup would drop them, but
+    # the limit check fires before any resolution or write.
+    items = [_material_item("mat-1")] * 3
+    with pytest.raises(InvalidOperationError, match="exceed the per-run limit: 3 > 2"):
+        service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=items)
+    # Rejected before the first write: no run row, no jobs.
+    assert service.list_runs(WORKSPACE_ID) == []
+    with job_db.connect() as conn:
+        jobs = conn.execute(
+            "select count(*) as n from jobs where workspace_id=%s", (WORKSPACE_ID,)
+        ).fetchone()
+    assert jobs["n"] == 0
+
+
+def test_items_at_exactly_the_limit_are_allowed(service, job_db, settings) -> None:
+    """Boundary: exactly max_items_per_run items pass the check."""
+    _insert_material(job_db, WORKSPACE_ID, "mat-1")
+    _insert_material(job_db, WORKSPACE_ID, "mat-2")
+    settings.executor_runtime.workflows.max_items_per_run = 2
+    created = service.create_run(
+        WORKSPACE_ID,
+        workflow_key=WORKFLOW_KEY,
+        items=[_material_item("mat-1"), _material_item("mat-2")],
+    )
+    assert created["created_count"] == 2
+
+
+def test_items_limit_zero_disables_the_cap(service, job_db, settings) -> None:
+    """0 disables the cap: legacy operators can opt out explicitly."""
+    for i in range(3):
+        _insert_material(job_db, WORKSPACE_ID, f"mat-{i}")
+    settings.executor_runtime.workflows.max_items_per_run = 0
+    created = service.create_run(
+        WORKSPACE_ID,
+        workflow_key=WORKFLOW_KEY,
+        items=[_material_item(f"mat-{i}") for i in range(3)],
+    )
+    assert created["created_count"] == 3
+
+
 def test_list_and_get_run(service, job_db) -> None:
     _insert_material(job_db, WORKSPACE_ID, "mat-1")
     created = service.create_run(

@@ -10,6 +10,10 @@ from server.app.jobs.queries.batch_queue import (
 )
 from server.app.jobs.queries.batch_queue_sql import RUN_UPSERT_CONFLICT
 
+# Shared with the plan-shape pin test (tests/db/test_run_job_status_counts_migration.py):
+# a copy of the SQL there would silently drift if this one changes (#358 review).
+RUN_STATUS_COUNTS_SQL = "select status, cnt from run_job_status_counts where run_id=%s and cnt<>0"
+
 
 class RunQueriesMixin(RunQueueQueriesMixin):
     def create_run(
@@ -87,9 +91,10 @@ class RunQueriesMixin(RunQueueQueriesMixin):
         return [dict(row) for row in rows]
 
     def count_jobs_by_status_in_run(self, run_id: str) -> dict[str, int]:
+        # Reads the trigger-maintained counter table
+        # (DB-RUN-JOB-STATUS-COUNTS-001) instead of a group-by over the
+        # run's whole jobs slice — the run detail endpoint polls this per
+        # refresh, which scanned every job of 10^6-item runs (#358).
         with self._connect_read() as conn:
-            rows = conn.execute(
-                "select status, count(*) as count from jobs where run_id=%s group by status",
-                (run_id,),
-            ).fetchall()
-        return {str(row["status"]): int(row["count"]) for row in rows}
+            rows = conn.execute(RUN_STATUS_COUNTS_SQL, (run_id,)).fetchall()
+        return {str(row["status"]): int(row["cnt"]) for row in rows}

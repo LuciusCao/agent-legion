@@ -525,6 +525,15 @@ drop trigger if exists jobs_status_counts_sync on jobs;
 create trigger jobs_status_counts_sync
   after insert or delete or update of status, workspace_id on jobs
   for each row execute function sync_workspace_job_status_counts();
+-- RUN job status counters (schema v73, DB-RUN-JOB-STATUS-COUNTS-001):
+-- trigger-maintained counter table replacing the run-detail group-by
+-- (#358; data source for the #350 progress view). run_id='' skipped; no
+-- FK (jobs.run_id unconstrained); vanished runs linger at cnt=0 which the
+-- cnt<>0 read skips. The jobs sync trigger lives in the v73 MIGRATION, not
+-- here — it references NEW.run_id, absent until v53's rename (same
+-- replay-order rule as idx_jobs_run_id, v59).
+create table if not exists run_job_status_counts (run_id text not null, status text not null,
+  cnt bigint not null, primary key(run_id, status));
 -- Workspace job NODE status counters (schema v56, DB-JOB-NODE-STATUS-COUNTS-001):
 -- count_workspace_job_nodes_by_status serves the workspace DAG endpoint; as a
 -- join+group-by over job_nodes ⋈ jobs it is O(workspace job_nodes) per call
@@ -652,6 +661,7 @@ create index if not exists idx_executor_leases_workspace_active on executor_leas
 create index if not exists idx_executor_leases_workspace_node_active
   on executor_leases(workspace_id, node_key, status, expires_at);
 create index if not exists idx_executor_leases_status_expires_at on executor_leases(status, expires_at);
+
 create index if not exists idx_executor_leases_job_status on executor_leases(job_id, status);
 
 drop table if exists remote_executions;
@@ -739,6 +749,41 @@ create table if not exists agent_queue_signals (
   reasons_json text not null default '{}',
   updated_at timestamptz not null default current_timestamp
 );
+
+-- Runtime profile samples (schema v72, #359 L1): one row per minute bucket
+-- with the six-stage pipeline gauges (depth/rate/latency) plus DB-pool
+-- waits. Retention shares monitoring.retention_days; latency null = the
+-- stage saw no traffic ("no signal", never 0).
+create table if not exists ops_runtime_profile_samples (
+  bucket_start timestamptz primary key,
+  intake_runs integer not null default 0,
+  intake_items integer not null default 0,
+  pass_count integer not null default 0,
+  pass_seconds_total double precision not null default 0,
+  pass_scan_seconds_max double precision not null default 0,
+  pass_slow_count integer not null default 0,
+  enqueue_submitted integer not null default 0,
+  enqueue_pool_skipped integer not null default 0,
+  enqueue_pending integer not null default 0,
+  enqueue_stock_gated integer not null default 0,
+  claim_count integer not null default 0,
+  claim_empty_count integer not null default 0,
+  claim_seconds_total double precision not null default 0,
+  claim_seconds_max double precision not null default 0,
+  -- reached a terminal state in the bucket.
+  execute_active integer not null default 0,
+  execute_done integer not null default 0,
+  execute_requeued integer not null default 0,
+  result_count integer not null default 0,
+  result_seconds_total double precision not null default 0,
+  result_seconds_max double precision not null default 0,
+  db_pool_waiting integer not null default 0,
+  db_pool_wait_seconds_total double precision not null default 0,
+  created_at timestamptz not null default current_timestamp
+);
+create index if not exists idx_ops_runtime_profile_bucket
+  on ops_runtime_profile_samples(bucket_start);
+
 
 -- Auth (schema v13): local users, revocable server-side sessions, and
 -- per-workspace membership for the B-end self-hosted rollout. Session rows
@@ -1041,13 +1086,20 @@ create index if not exists idx_studio_chat_sessions_workspace
 alter table studio_chat_sessions add column if not exists selected_node_key text;
 -- Upgrade path for pre-v57 databases.
 alter table studio_chat_sessions add column if not exists draft_yaml text;
+-- Agent-advertised session mode state / config options (v74, #368): JSON
+-- mirrors of the ACP session/new (or session/load) response, kept current by
+-- current_mode_update / config_option_update notifications. NULL means the
+-- agent does not advertise the capability (UI hides the control). The ALTER
+-- covers fresh AND pre-v74 databases alike (the create-table block above
+-- deliberately omits both columns: the schema file's growth budget is one
+-- effective line per column, and this single statement is that line).
+alter table studio_chat_sessions add column if not exists session_modes_json text, add column if not exists config_options_json text;
 
 create table if not exists studio_chat_messages (
   id text primary key,
   seq bigint generated always as identity,
   session_id text not null references studio_chat_sessions(id) on delete cascade,
-  kind text not null
-    check(kind in ('text', 'tool_call', 'plan', 'permission', 'status', 'thought')),
+  kind text not null check(kind in ('text', 'tool_call', 'plan', 'permission', 'status', 'thought')),
   role text not null check(role in ('user', 'agent', 'system')),
   content_json text not null default '{}',
   created_at timestamptz not null default current_timestamp

@@ -44,6 +44,10 @@ def claim_executor_node(
     # Single implicit code pool (P-0.5): the capacity comes from the instance
     # settings code_capacity, never from a caller-chosen executor definition.
     global_capacity = worker.settings.executor_runtime.code_capacity
+    if global_capacity <= 0:
+        # Pure-remote mode (#389): schedule.py already gates this path, the
+        # early return is a tripwire against future call-site drift.
+        return False
     if not snapshot.has_capacity(workspace_id, node.key):
         return False
 
@@ -58,7 +62,7 @@ def claim_executor_node(
                 node_key=node.key,
                 capability=node.capability,
                 local_node_limit=local_node_limit,
-                lease_ttl_seconds=worker.runtime.lease_ttl_seconds,
+                lease_ttl_seconds=worker.settings.executor_runtime.lease_ttl_seconds,
                 log_path=str(log_path),
                 execution_mode=control_snapshot.get("execution_mode", "full")
                 if control_snapshot

@@ -12,7 +12,7 @@ def _create_workspace(client, name="default"):
 
 
 def test_settings_payload_defaults_to_empty_preview_hidden(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws_id = _create_workspace(c)
         response = c.get(f"/api/workspaces/{ws_id}/settings")
 
@@ -21,7 +21,7 @@ def test_settings_payload_defaults_to_empty_preview_hidden(client_factory):
 
 
 def test_patch_preview_section_round_trips(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws_id = _create_workspace(c)
         saved = c.patch(
             f"/api/workspaces/{ws_id}/settings/preview",
@@ -41,7 +41,7 @@ def test_patch_preview_section_round_trips(client_factory):
 
 
 def test_patch_preview_section_requires_payload(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws_id = _create_workspace(c)
         response = c.patch(f"/api/workspaces/{ws_id}/settings/preview", json={})
 
@@ -50,7 +50,7 @@ def test_patch_preview_section_requires_payload(client_factory):
 
 def test_patch_preview_section_rejects_non_string_entries(client_factory):
     # pydantic list[str] 注解在契约层即拒绝（422），早于 service 层校验。
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws_id = _create_workspace(c)
         response = c.patch(
             f"/api/workspaces/{ws_id}/settings/preview",
@@ -61,7 +61,7 @@ def test_patch_preview_section_rejects_non_string_entries(client_factory):
 
 
 def test_patch_preview_section_unknown_workspace_is_404(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         response = c.patch(
             "/api/workspaces/missing/settings/preview",
             json={"previewHidden": ["a.json"]},
@@ -72,7 +72,7 @@ def test_patch_preview_section_unknown_workspace_is_404(client_factory):
 
 def test_put_configuration_without_preview_keeps_saved_hidden(client_factory):
     """PUT 全量保存缺省 previewHidden = 未改：不抹掉已有勾选（旧客户端兼容）。"""
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws_id = _create_workspace(c)
         patched = c.patch(
             f"/api/workspaces/{ws_id}/settings/preview",
@@ -103,7 +103,7 @@ def test_settings_get_put_round_trip_accepted(client_factory):
         "workflowKey",
         "previewHidden",
     }
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws_id = _create_workspace(c)
         settings = c.get(f"/api/workspaces/{ws_id}/settings").json()["settings"]
 
@@ -123,7 +123,7 @@ def test_settings_get_put_round_trip_accepted(client_factory):
 
 
 def test_put_configuration_with_preview_overwrites_hidden(client_factory):
-    with client_factory(workflows_enabled=True) as c:
+    with client_factory() as c:
         ws_id = _create_workspace(c)
         patched = c.patch(
             f"/api/workspaces/{ws_id}/settings/preview",

@@ -21,7 +21,7 @@ from server.app.auth.dependencies import (
     require_studio_agent_workspace,
 )
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_agent_job_tool_contracts import (
     StudioAgentArtifactResponse,
     StudioAgentJobCompareResponse,
@@ -56,7 +56,6 @@ def create_studio_agent_job_tools_router(
         user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
         node_key: str | None = None,
     ) -> StudioAgentJobContextResponse:
-        require_workflows_enabled(settings)
         try:
             context = _service().get_job_context(session_id, user, job_id, node_key)
         except JobServiceError as exc:
@@ -70,7 +69,6 @@ def create_studio_agent_job_tools_router(
     def list_jobs(
         workspace_id: str, status: str | None = None, limit: int = 20
     ) -> StudioAgentJobListResponse:
-        require_workflows_enabled(settings)
         try:
             result = _service().list_jobs(workspace_id, status=status, limit=limit)
         except JobServiceError as exc:
@@ -85,7 +83,6 @@ def create_studio_agent_job_tools_router(
     def compare_jobs(
         workspace_id: str, job_id_a: str, job_id_b: str
     ) -> StudioAgentJobCompareResponse:
-        require_workflows_enabled(settings)
         try:
             result = _service().compare_jobs(workspace_id, job_id_a, job_id_b)
         except JobServiceError as exc:
@@ -97,7 +94,6 @@ def create_studio_agent_job_tools_router(
         response_model=StudioAgentJobDetail,
     )
     def get_job_detail(workspace_id: str, job_id: str) -> StudioAgentJobDetail:
-        require_workflows_enabled(settings)
         try:
             detail = _service().get_job_detail(workspace_id, job_id)
         except JobServiceError as exc:
@@ -114,7 +110,6 @@ def create_studio_agent_job_tools_router(
         node_key: str | None = None,
         run_id: int | None = None,
     ) -> StudioAgentJobLogsResponse:
-        require_workflows_enabled(settings)
         try:
             logs = _service().get_node_logs(workspace_id, job_id, node_key, run_id)
         except JobServiceError as exc:
@@ -128,7 +123,6 @@ def create_studio_agent_job_tools_router(
     def read_artifact(
         workspace_id: str, job_id: str, artifact_name: str
     ) -> StudioAgentArtifactResponse:
-        require_workflows_enabled(settings)
         try:
             artifact = _service().read_artifact(workspace_id, job_id, artifact_name)
         except JobServiceError as exc:

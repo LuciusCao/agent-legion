@@ -2,6 +2,7 @@ import type {
   StudioChatAgentOption,
   StudioChatSessionRecord,
 } from './studioChatApi'
+import { formatDateTime } from '../../../lib/formatters'
 import styles from './StudioChatPanel.module.css'
 
 type Props = {
@@ -17,7 +18,7 @@ type Props = {
 
 function sessionLabel(session: StudioChatSessionRecord): string {
   if (session.title) return session.title
-  return `对话 ${session.created_at.slice(0, 16).replace('T', ' ')}`
+  return `对话 ${formatDateTime(session.created_at)}`
 }
 
 export function StudioChatSessionBar(props: Props) {

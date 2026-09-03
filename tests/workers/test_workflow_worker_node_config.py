@@ -55,7 +55,6 @@ def _make_worker(
     )
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
-            "workflows": {"enabled": True},
             "code_capacity": 2,
         }
     )

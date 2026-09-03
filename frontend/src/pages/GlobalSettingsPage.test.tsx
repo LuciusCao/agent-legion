@@ -7,7 +7,6 @@ import {
   within,
 } from '@testing-library/react'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
-import { Routes, Route } from 'react-router-dom'
 import GlobalSettingsPage from './GlobalSettingsPage'
 import { useAuthStore } from '../stores/authStore'
 import type { UserResponse } from '../api/authApi'
@@ -61,6 +60,7 @@ vi.mock('../api/infraConnections', () => ({
     storage: {
       bucket: 'agent-legion',
       configured: true,
+      backend: 'RustFS',
       credentials: 'static',
       endpoint_url: 'http://rustfs:9000',
       public_endpoint_url: 'http://127.0.0.1:9000',
@@ -116,14 +116,17 @@ const instanceSettings: InstanceSettingsResponse = {
   sweeper_interval_seconds: 60,
   code_capacity: 16,
   materials_ttl_days: 0,
-  workflows: { enabled: true },
+  execution_retention_days: 0,
+  workflows: { max_items_per_run: 20000 },
   agent_workers: { max_archive_bytes: 104857600, min_protocol_version: 2 },
   skills_root: '~/.agents/skills',
 }
 
-function renderPage() {
+function renderPage(hash?: string) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter
+      initialEntries={hash ? [`/admin/settings${hash}`] : undefined}
+    >
       <GlobalSettingsPage />
     </MemoryRouter>
   )
@@ -153,21 +156,18 @@ describe('GlobalSettingsPage', () => {
     ).toBeInTheDocument()
   })
 
-  it('renders the sidebar nav grouped by layering with entries for each section', async () => {
+  it('renders the sidebar nav with entries for each section only', async () => {
     vi.mocked(getTokenUsagePricing).mockResolvedValue(pricingConfig)
 
     renderPage()
 
     const nav = await screen.findByRole('navigation')
-    // #333 两层心智：全局（实例级）分组 + workspace 级指引 + 清单回补入口。
-    expect(within(nav).getByText('全局（实例级）')).toBeInTheDocument()
-    expect(within(nav).getByText('Workspace 级')).toBeInTheDocument()
-    expect(
-      within(nav).getByRole('button', { name: '全局初始化清单' })
-    ).toBeInTheDocument()
+    // 侧栏只保留五个区块锚点：分组标题、onboarding 入口与 workspace
+    // 指引均已退役。
     for (const label of [
       'Studio Agent 管理',
       '外部服务连接',
+      '基础设施连接',
       '实例设置',
       '模型定价',
     ]) {
@@ -175,31 +175,44 @@ describe('GlobalSettingsPage', () => {
         within(nav).getByRole('button', { name: label })
       ).toBeInTheDocument()
     }
-    // 默认高亮第一节（Studio Agent 管理，与全局 onboarding 清单同序）
+    expect(within(nav).queryByText('全局（实例级）')).not.toBeInTheDocument()
+    expect(within(nav).queryByText('Workspace 级')).not.toBeInTheDocument()
+    expect(
+      within(nav).queryByRole('button', { name: '全局初始化清单' })
+    ).not.toBeInTheDocument()
+    // 默认高亮第一节（Studio Agent 管理）
     expect(
       within(nav).getByRole('button', { name: 'Studio Agent 管理' })
     ).toHaveAttribute('aria-current', 'true')
   })
 
-  it('navigates to the global onboarding checklist from the sidebar', async () => {
+  it('scrolls to the section named by the URL hash on mount', async () => {
     vi.mocked(getTokenUsagePricing).mockResolvedValue(pricingConfig)
+    // jsdom 未实现 scrollIntoView，stub 掉以观察锚点滚动
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
 
-    render(
-      <MemoryRouter initialEntries={['/admin/settings']}>
-        <Routes>
-          <Route path="/admin/settings" element={<GlobalSettingsPage />} />
-          <Route
-            path="/admin/onboarding"
-            element={<div>全局初始化清单页</div>}
-          />
-        </Routes>
-      </MemoryRouter>
-    )
+    renderPage('#instance-settings')
+    await screen.findByRole('navigation')
 
-    const nav = await screen.findByRole('navigation')
-    fireEvent.click(within(nav).getByRole('button', { name: '全局初始化清单' }))
+    const target = document.getElementById('instance-settings')
+    expect(target).not.toBeNull()
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(scrollIntoView).toHaveBeenCalledWith()
+    // 只滚目标 section，不把所有 section 各滚一遍。
+    const callsOnSections = scrollIntoView.mock.instances.length
+    expect(callsOnSections).toBeLessThanOrEqual(1)
+  })
 
-    expect(await screen.findByText('全局初始化清单页')).toBeInTheDocument()
+  it('ignores hashes that do not name a settings section', async () => {
+    vi.mocked(getTokenUsagePricing).mockResolvedValue(pricingConfig)
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+
+    renderPage('#not-a-section')
+    await screen.findByRole('navigation')
+
+    expect(scrollIntoView).not.toHaveBeenCalled()
   })
 
   it('moves the active nav item on click', async () => {
@@ -222,38 +235,21 @@ describe('GlobalSettingsPage', () => {
     ).not.toHaveAttribute('aria-current')
   })
 
-  it('renders the instance settings section', async () => {
+  it('renders the instance settings section with advanced groups collapsed', async () => {
     vi.mocked(getTokenUsagePricing).mockResolvedValue(pricingConfig)
 
     renderPage()
 
     expect(await screen.findByText('实例设置')).toBeInTheDocument()
-    // 实例设置表单异步加载，label 需等待（导航按钮会提前匹配标题文本）
-    expect(await screen.findByLabelText('日志保留天数')).toHaveValue(30)
-    expect(screen.getByText(/需重启服务才能生效/)).toBeInTheDocument()
-    // 材料 TTL 字段级 hint：保存即生效，且 input 带 max 上界。
-    expect(screen.getByText('保存后立即生效，无需重启')).toBeInTheDocument()
-    expect(screen.getByLabelText('材料保留天数（0 关闭）')).toHaveAttribute(
-      'max',
-      '36500'
+    // 材料组（业务参数）直接可见；调优组默认折叠。
+    expect(await screen.findByLabelText('材料保留天数（0 关闭）')).toHaveValue(
+      0
     )
+    expect(screen.queryByLabelText('日志保留天数')).not.toBeInTheDocument()
+    expect(screen.getByText('保存后立即生效，无需重启')).toBeInTheDocument()
   })
 
-  it('keeps the save button disabled until the form is dirty', async () => {
-    vi.mocked(getTokenUsagePricing).mockResolvedValue(pricingConfig)
-
-    renderPage()
-    await screen.findByDisplayValue('model-a')
-
-    expect(screen.getByLabelText('保存')).toBeDisabled()
-
-    fireEvent.change(screen.getByLabelText('output-rate-0'), {
-      target: { value: '20' },
-    })
-    expect(screen.getByLabelText('保存')).toBeEnabled()
-  })
-
-  it('saves edited pricing via the AppBar save button', async () => {
+  it('saves edited pricing via the card-local save button', async () => {
     vi.mocked(getTokenUsagePricing).mockResolvedValue(pricingConfig)
     vi.mocked(updateTokenUsagePricing).mockImplementation(async (payload) => ({
       currency: payload.currency,
@@ -266,7 +262,7 @@ describe('GlobalSettingsPage', () => {
     fireEvent.change(screen.getByLabelText('output-rate-0'), {
       target: { value: '20' },
     })
-    fireEvent.click(screen.getByLabelText('保存'))
+    fireEvent.click(screen.getByRole('button', { name: '保存模型定价' }))
 
     await waitFor(() => {
       expect(updateTokenUsagePricing).toHaveBeenCalledWith({
@@ -282,25 +278,12 @@ describe('GlobalSettingsPage', () => {
         ],
       })
     })
-    // Baseline updated: the form is clean again after a successful save.
+    // Baseline updated: the card-local save button is disabled again.
     await waitFor(() => {
-      expect(screen.getByLabelText('保存')).toBeDisabled()
+      expect(
+        screen.getByRole('button', { name: '保存模型定价' })
+      ).toBeDisabled()
     })
-  })
-
-  it('adds and removes rows', async () => {
-    vi.mocked(getTokenUsagePricing).mockResolvedValue(pricingConfig)
-
-    renderPage()
-    await screen.findByDisplayValue('model-a')
-
-    fireEvent.click(screen.getByText('添加一行'))
-    expect(screen.getByTestId('pricing-row-1')).toBeInTheDocument()
-
-    fireEvent.click(
-      screen.getByTestId('pricing-row-1').querySelector('button') as HTMLElement
-    )
-    expect(screen.queryByTestId('pricing-row-1')).not.toBeInTheDocument()
   })
 
   it('rejects invalid rates before saving', async () => {
@@ -312,7 +295,7 @@ describe('GlobalSettingsPage', () => {
     fireEvent.change(screen.getByLabelText('input-rate-0'), {
       target: { value: '-1' },
     })
-    fireEvent.click(screen.getByLabelText('保存'))
+    fireEvent.click(screen.getByRole('button', { name: '保存模型定价' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       '费率必须是不小于 0 的数字'

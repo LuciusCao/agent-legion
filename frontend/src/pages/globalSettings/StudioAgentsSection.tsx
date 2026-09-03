@@ -127,16 +127,21 @@ function StudioAgentsEditor({
       )}
       <div className={styles.row}>
         <label className={styles.label} htmlFor="studio-agents-api-base">
-          api_base
+          平台回调地址（api_base）
         </label>
         <input
           id="studio-agents-api-base"
           className={styles.input}
-          aria-label="api_base"
           value={apiBase}
           onChange={(e) => setApiBase(e.target.value)}
         />
       </div>
+      <p className={styles.hint}>
+        agent 启动后通过该地址回呼平台获取工具（会话上下文、材料读写等）。 agent
+        与服务端同机时保持默认值即可；仅当 agent 运行在其他机器或容器时， 改为
+        agent 可达的平台地址。该地址会收到仅本次会话有效的临时 token，
+        指向外部网络前请确认安全。
+      </p>
       <table className={`${styles.table} ${styles.tableBreak}`}>
         <thead>
           <tr>
@@ -251,8 +256,9 @@ export function StudioAgentsSection() {
     <div className={styles.card}>
       <h3 className={styles.heading}>Studio Agent 管理</h3>
       <p className={styles.hint}>
-        Studio chat 的 ACP agent 注册表，整文档保存；「重新检测」自动补入
-        内置目录中已安装的 agent（标记「自动检测」），手工条目永远优先。
+        在这里管理 Studio 对话可启动的 AI agent（需支持 ACP 协议，如 Claude
+        Code、Codex、Kimi）。点击「重新检测」会自动发现服务器上已安装的
+        agent；也可以手动添加，手动条目不会被检测覆盖。
       </p>
       {loadError && (
         <p className={styles.error} role="alert">

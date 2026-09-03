@@ -5,7 +5,7 @@ API) carries the instance-level tunables retired from yaml. Hydration runs
 once at startup (``create_app``, right after ``JobQueries`` is constructed)
 and takes effect on restart; there is no runtime hot-reload:
 
-- executor runtime scalars plus ``workflows.enabled`` /
+- executor runtime scalars plus ``workflows.max_items_per_run`` /
   ``agent_workers.{max_archive_bytes,min_protocol_version}`` and
   ``code_capacity`` are merged onto the loaded ``ExecutorRuntimeConfig`` and
   re-validated;
@@ -24,6 +24,7 @@ from server.app.configuration.instance_defaults import (
 )
 from server.app.db.dialect import ConnectSource
 from server.app.services.instance_settings_store import InstanceSettingsStore
+from server.app.services.instance_settings_strip import strip_retired
 from server.app.settings import Settings
 
 # Top-level ExecutorRuntimeConfig scalars managed by the instance document.
@@ -43,7 +44,9 @@ def default_instance_document() -> dict[str, Any]:
     document: dict[str, Any] = {
         "cleanup": dict(DEFAULT_CLEANUP_CONFIG),
         "monitoring": dict(DEFAULT_MONITORING_CONFIG),
-        "workflows": {"enabled": runtime.workflows.enabled},
+        "workflows": {
+            "max_items_per_run": runtime.workflows.max_items_per_run,
+        },
         "agent_workers": {
             "max_archive_bytes": runtime.agent_workers.max_archive_bytes,
             "min_protocol_version": runtime.agent_workers.min_protocol_version,
@@ -51,6 +54,9 @@ def default_instance_document() -> dict[str, Any]:
         # Materials TTL (design §10): 0 = disabled; read fresh from the DB at
         # material completion/sweep time, never hydrated into Settings.
         "materials_ttl_days": 0,
+        # Execution-plane row retention (#354): 0 = disabled (safe default);
+        # read fresh from the DB at sweep time, never hydrated into Settings.
+        "execution_retention_days": 0,
     }
     for key in _EXECUTOR_SCALAR_KEYS:
         document[key] = getattr(runtime, key)
@@ -68,25 +74,17 @@ def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-def _strip_retired_blocks(stored: dict[str, Any]) -> dict[str, Any]:
-    """Remove retired top-level blocks from a stored document copy.
-
-    The ``openclaw`` block retired with the openclaw runtime (#75): stored
-    documents from older deployments still carry it; it is stripped at read
-    time (before response validation — InstanceSettingsDocument is
-    extra=forbid) so the effective document matches the current shape without
-    a data migration.
-    """
-    if "openclaw" not in stored:
-        return stored
-    return {key: value for key, value in stored.items() if key != "openclaw"}
+# Host-private state blocks and retired nested keys (#385/#389) are stripped
+# at read time by ``instance_settings_strip.strip_retired`` — before response
+# validation, so stored documents from older deployments keep validating
+# without a data migration.
 
 
 def effective_instance_document(stored: dict[str, Any] | None) -> dict[str, Any]:
     """Return the effective document: stored values over code defaults."""
     if stored is None:
         return default_instance_document()
-    return _merge(default_instance_document(), _strip_retired_blocks(stored))
+    return _merge(default_instance_document(), strip_retired(stored))
 
 
 def apply_instance_settings(settings: Settings, database_dsn: ConnectSource) -> None:
@@ -102,7 +100,7 @@ def apply_instance_settings(settings: Settings, database_dsn: ConnectSource) -> 
     base = settings.executor_runtime.model_dump()
     for key in _EXECUTOR_SCALAR_KEYS:
         base[key] = effective[key]
-    base["workflows"]["enabled"] = effective["workflows"]["enabled"]
+    base["workflows"]["max_items_per_run"] = effective["workflows"]["max_items_per_run"]
     base["agent_workers"]["max_archive_bytes"] = effective["agent_workers"]["max_archive_bytes"]
     base["agent_workers"]["min_protocol_version"] = effective["agent_workers"][
         "min_protocol_version"

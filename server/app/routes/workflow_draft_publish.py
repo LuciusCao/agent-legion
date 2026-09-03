@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Request
 
 from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.workflow_revisions_contracts import (
     WorkflowDraftRequest,
     WorkflowDraftValidationResponse,
@@ -28,7 +28,6 @@ def create_workflow_draft_publish_router(job_db: JobQueries, settings: Settings)
         workspace_id: str,
         request: WorkflowDraftRequest,
     ) -> WorkflowDraftValidationResponse:
-        require_workflows_enabled(settings)
         # Same validation set as publish (structure + node code resolvability),
         # so config errors surface here instead of only at publish time.
         errors = validate_workflow_draft_for_publish(
@@ -49,7 +48,6 @@ def create_workflow_draft_publish_router(job_db: JobQueries, settings: Settings)
         request: WorkflowDraftRequest,
         http_request: Request,
     ) -> WorkflowDraftValidationResponse:
-        require_workflows_enabled(settings)
         try:
             require_draft_workflow_key_match(job_db, workspace_id, request.definition_yaml)
         except JobServiceError as exc:

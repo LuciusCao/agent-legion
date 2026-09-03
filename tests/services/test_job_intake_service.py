@@ -59,6 +59,26 @@ def test_job_intake_creates_direct_id_jobs(job_db, settings):
         assert job_storage_dir(settings.jobs_dir, "default", job["id"]).is_dir()
 
 
+def test_job_intake_rejects_items_over_per_run_limit(job_db, settings):
+    """The per-run cap covers the intake path too (P1 on #374): an unbounded
+    question_ids list would hit the same memory / transaction-length wall
+    the /runs cap exists for, before the first job executes."""
+    _create_workspace_with_revision(job_db, settings)
+    settings.executor_runtime.workflows.max_items_per_run = 2
+    service = JobIntakeService(job_db, settings)
+
+    with pytest.raises(InvalidOperationError, match="exceed the per-run limit: 3 > 2"):
+        service.create_batch(
+            "default",
+            {
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "entity": "question",
+                "knowledge_point_ids": ["Q1", "Q2", "Q3"],
+            },
+        )
+
+
 def test_job_intake_rejects_missing_workspace(intake_service):
     with pytest.raises(NotFoundError, match="Workspace not found"):
         intake_service.create_batch(

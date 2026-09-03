@@ -1,42 +1,52 @@
 #!/usr/bin/env bash
-# 本地 RustFS（材料对象存储）启停决策，供所有 prod-up/stack 入口共用：
+# 本地材料对象存储（S3 兼容）启停决策，供所有 prod-up/stack 入口共用：
 #   - scripts/native-prod-up.sh（原生形态）
 #   - scripts/stack-prod-up.sh（make prod-up docker）
 #   - Makefile stack-host-up（--compose-flags 内联形态）
+#
+# 后端选择 AGENT_LEGION_LOCAL_S3_BACKEND=seaweedfs|rustfs（默认 seaweedfs，
+# #340 调研后切换默认：SeaweedFS 结构性不存在 RustFS 的全量巡检空转问题）：
+#   seaweedfs  compose 的 seaweedfs 服务，profile materials-local（S3 口 8333）
+#   rustfs     compose 的 rustfs 服务（逃生舱，存量卷迁移期使用），profile
+#              materials-local-rustfs（S3 口 9000）
 #
 # 三态开关 AGENT_LEGION_LOCAL_S3=auto|always|never（默认 auto）：
 #   always  无条件 start（旧版行为）
 #   never   无条件 skip（用户使用外部对象存储）
 #   auto    按 S3 配置判断：
 #             - endpoint 指向本机（127.0.0.1 / localhost / ::1 / compose 内部
-#               名 rustfs）→ start
+#               名 seaweedfs / rustfs）→ start
 #             - endpoint 指向外部地址 → skip
 #             - endpoint 键出现但显式置空（AGENT_LEGION_S3_ENDPOINT=，AWS S3
 #               默认端点写法，与 compose ${VAR-default} 语义一致）→ skip，
 #               不再套用编排层注入的 --default-endpoint
 #             - 未配 endpoint 但配了 bucket 或凭据（AWS S3 默认端点写法）→ skip
 #             - 完全未配置 S3 → start（零配置默认后端；此时凭据缺失不做硬校验，
-#               RustFS 只绑 loopback、后端未配 bucket 时材料 API 降级 503，
+#               容器只绑 loopback、后端未配 bucket 时材料 API 降级 503，
 #               补齐 AGENT_LEGION_S3_* 后重启即启用）
 #
 # stdout 只输出决策词（start / skip；--compose-flags 时分别为
-# "--profile materials-local" 与空行），判断原因一律写 stderr。
+# "--profile <backend 的 profile>" 与空行），判断原因一律写 stderr。
 # 退出码：0 决策完成；2 用法或开关值非法；3 决策为 start 但
 # AGENT_LEGION_S3_ACCESS_KEY/SECRET_KEY 未配齐（已显式配置本地存储意图时
-# 缺凭据视为配置错误；RustFS 留空凭据会回落镜像默认的公开凭据，必须拦住）。
+# 缺凭据视为配置错误；两个后端留空凭据都会回落镜像默认的公开凭据，必须拦住）。
 # auto 误判不会静默失败：后端启动自检（server/app/storage/probe.py 的
 # DEGRADED 日志）与 /api/health 的 storage.reachable 会暴露。
 #
-# 用法: local-s3-decide.sh [--default-endpoint URL] [--compose-flags] [ENV_FILE...]
+# 用法: local-s3-decide.sh [--default-endpoint URL] [--compose-flags] [--service-name] [ENV_FILE...]
 #   ENV_FILE 按优先级从高到低传入（同一键先出现的文件生效，与 dotenv 一致）；
 #   进程环境变量优先于所有文件；文件不存在按空处理。
 #   --default-endpoint 模拟编排层注入的 endpoint：docker stack 形态下
-#   compose.host.yaml 给 host 默认注入 http://rustfs:9000，调用方需如实传入。
+#   compose.host.yaml 给 host 默认注入 http://seaweedfs:8333，调用方需如实传入。
+#   --service-name 只输出所选后端的 compose 服务名（seaweedfs/rustfs），
+#   不做启停决策——供 native-prod-up 等入口直接 up -d <服务名>。
 set -euo pipefail
 
-PROFILE="materials-local"
+PROFILE_RUSTFS="materials-local-rustfs"
+PROFILE_SEAWEEDFS="materials-local"
 DEFAULT_ENDPOINT=""
 COMPOSE_FLAGS=false
+SERVICE_NAME_ONLY=false
 ENV_FILES=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -47,6 +57,12 @@ while [[ $# -gt 0 ]]; do
             ;;
         --compose-flags)
             COMPOSE_FLAGS=true
+            shift
+            ;;
+        --service-name)
+            # 只输出所选后端的 compose 服务名（seaweedfs / rustfs）后退出，
+            # 供 native-prod-up 等入口直接 up -d <服务名>；不输出决策。
+            SERVICE_NAME_ONLY=true
             shift
             ;;
         -*)
@@ -128,14 +144,74 @@ endpoint_is_local() {
     fi
     host="$(printf '%s' "$host" | tr 'A-Z' 'a-z')"
     case "$host" in
-        127.0.0.1 | localhost | ::1 | rustfs) return 0 ;;
+        127.0.0.1 | localhost | ::1 | seaweedfs | rustfs) return 0 ;;
         *) return 1 ;;
     esac
 }
 
+# backend/endpoint 指向不一致时给明确指引（不阻断：老配置里 endpoint 指向
+# rustfs/:9000 而 BACKEND 默认已是 seaweedfs 的存量用户，正是要被提示引导）。
+# host 提取与 endpoint_is_local 同款（去 scheme/path/userinfo/IPv6 括号），
+# 端口参与判断——127.0.0.1:9000 与 rustfs:9000 都指向 rustfs 形态的端口。
+warn_backend_mismatch() {
+    local hostport="$1" host port
+    hostport="${hostport#*://}"; hostport="${hostport%%/*}"
+    hostport="${hostport##*@}"
+    if [[ "$hostport" == \[* ]]; then
+        host="${hostport#\[}"; host="${host%%]*}"
+        port="${hostport##*:}"
+    else
+        host="${hostport%%:*}"
+        port="${hostport##*:}"
+        [[ "$port" == "$hostport" ]] && port=""
+    fi
+    host="$(printf '%s' "$host" | tr 'A-Z' 'a-z')"
+    local points_at=""
+    case "$host" in
+        rustfs) points_at=rustfs ;;
+        seaweedfs) points_at=seaweedfs ;;
+        127.0.0.1 | localhost | ::1)
+            case "$port" in
+                9000) points_at=rustfs ;;
+                8333) points_at=seaweedfs ;;
+            esac
+            ;;
+    esac
+    if [[ "$points_at" == "rustfs" && "$BACKEND" == "seaweedfs" ]]; then
+        echo "提示: AGENT_LEGION_S3_ENDPOINT 指向 rustfs 形态地址（${hostport}）但 BACKEND=seaweedfs——" >&2
+        echo "      存量 rustfs 用户请显式配 AGENT_LEGION_LOCAL_S3_BACKEND=rustfs（endpoint 保持 :9000）" >&2
+        echo "      （或迁移到 seaweedfs 并把 endpoint 改为 :8333，见 docs/materials-storage-deployment.md）" >&2
+    elif [[ "$points_at" == "seaweedfs" && "$BACKEND" == "rustfs" ]]; then
+        echo "提示: AGENT_LEGION_S3_ENDPOINT 指向 seaweedfs 形态地址（${hostport}）但 BACKEND=rustfs——" >&2
+        echo "      请修正 AGENT_LEGION_LOCAL_S3_BACKEND 或 endpoint 之一" >&2
+    fi
+}
+
+# 解析后端选择（默认 seaweedfs）。LOCAL_S3=never 时无需校验——外部对象
+# 存储形态下本地后端不启动，backend 值无意义（非法值也不该 fail-fast 一个
+# 与用户无关的开关，系统性评审 #346）。--service-name 始终校验：它的唯一
+# 使命就是输出合法服务名。
+BACKEND="$(lookup AGENT_LEGION_LOCAL_S3_BACKEND)"
+BACKEND="${BACKEND:-seaweedfs}"
+validate_backend() {
+    case "$BACKEND" in
+        seaweedfs) PROFILE="$PROFILE_SEAWEEDFS" ;;
+        rustfs) PROFILE="$PROFILE_RUSTFS" ;;
+        *)
+            echo "错误: AGENT_LEGION_LOCAL_S3_BACKEND=${BACKEND} 非法，只支持 seaweedfs|rustfs" >&2
+            exit 2
+            ;;
+    esac
+}
+if $SERVICE_NAME_ONLY; then
+    validate_backend
+    printf '%s\n' "$BACKEND"
+    exit 0
+fi
+
 emit() {
     local decision="$1" reason="$2"
-    echo "本地 RustFS: ${decision} — ${reason}" >&2
+    echo "本地对象存储(${BACKEND}): ${decision} — ${reason}" >&2
     if $COMPOSE_FLAGS; then
         if [[ "$decision" == "start" ]]; then
             printf -- '--profile %s\n' "$PROFILE"
@@ -153,8 +229,8 @@ require_keys() {
     access_key="$(lookup AGENT_LEGION_S3_ACCESS_KEY)"
     secret_key="$(lookup AGENT_LEGION_S3_SECRET_KEY)"
     if [[ -z "$access_key" || -z "$secret_key" ]]; then
-        echo "错误: 决策为启动本地 RustFS，但 AGENT_LEGION_S3_ACCESS_KEY/SECRET_KEY 未配齐。" >&2
-        echo "RustFS 容器需要 root 凭据（留空会回落镜像默认的公开凭据）。请在" >&2
+        echo "错误: 决策为启动本地 ${BACKEND}，但 AGENT_LEGION_S3_ACCESS_KEY/SECRET_KEY 未配齐。" >&2
+        echo "本地后端容器需要 root 凭据（留空会回落镜像默认的公开凭据）。请在" >&2
         echo "deploy/.env（docker 形态，compose 只读它）与 .env（原生形态后端读取）配置，" >&2
         echo "或改用外部对象存储（远程 AGENT_LEGION_S3_ENDPOINT 或 AGENT_LEGION_LOCAL_S3=never）。" >&2
         exit 3
@@ -165,13 +241,17 @@ MODE="$(lookup AGENT_LEGION_LOCAL_S3)"
 MODE="${MODE:-auto}"
 case "$MODE" in
     always)
+        validate_backend
         require_keys
         emit start "AGENT_LEGION_LOCAL_S3=always"
         ;;
     never)
+        # 不校验 backend（见上）；skip 输出也无 profile。
+        PROFILE=""
         emit skip "AGENT_LEGION_LOCAL_S3=never（使用外部对象存储）"
         ;;
     auto)
+        validate_backend
         endpoint_present=false
         if endpoint="$(lookup_first AGENT_LEGION_S3_ENDPOINT)"; then
             endpoint_present=true
@@ -182,6 +262,7 @@ case "$MODE" in
         if [[ -n "$endpoint" ]]; then
             if endpoint_is_local "$endpoint"; then
                 require_keys
+                warn_backend_mismatch "$endpoint"
                 emit start "AGENT_LEGION_S3_ENDPOINT=${endpoint} 指向本机"
             else
                 emit skip "AGENT_LEGION_S3_ENDPOINT=${endpoint} 指向外部地址，使用外部对象存储"
@@ -195,7 +276,7 @@ case "$MODE" in
             if [[ -n "$bucket" || -n "$access_key" || -n "$secret_key" ]]; then
                 emit skip "已配置 AGENT_LEGION_S3_BUCKET/凭据但未配置 endpoint（AWS S3 默认端点写法），使用外部对象存储"
             else
-                emit start "未配置外部 S3，使用本地 RustFS（AGENT_LEGION_S3_* 未配齐前材料 API 降级 503）"
+                emit start "未配置外部 S3，使用本地 ${BACKEND}（AGENT_LEGION_S3_* 未配齐前材料 API 降级 503）"
             fi
         fi
         ;;

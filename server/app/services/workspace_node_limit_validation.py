@@ -18,7 +18,10 @@ def validate_workspace_node_limits(
     Node limits cap concurrency inside the implicit code pool, so a limit may
     never exceed the instance code_capacity. ``type: agent`` nodes run on
     Agent workers, not the code pool, and cannot carry a node limit (the
-    explicit node type decides, #284).
+    explicit node type decides, #284). In pure-remote mode (#389,
+    ``code_capacity == 0``) there is no local pool to bound against — node
+    limits still apply to the global lease count (remote code claims are
+    node-counted too), so they are accepted without the ceiling check.
     """
     seen_limits: set[tuple[str, str]] = set()
     for node_limit in node_limits:
@@ -26,7 +29,7 @@ def validate_workspace_node_limits(
         if key in seen_limits:
             raise InvalidOperationError(f"Duplicate Node limit {key[0]}.{key[1]}")
         seen_limits.add(key)
-        if int(node_limit["concurrency_limit"]) > code_capacity:
+        if code_capacity > 0 and int(node_limit["concurrency_limit"]) > code_capacity:
             raise InvalidOperationError(
                 f"Node limit for {key[0]}.{key[1]} exceeds the code pool capacity {code_capacity}"
             )

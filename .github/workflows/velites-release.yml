@@ -1,0 +1,143 @@
+# velites 二进制发布管道（issue #381）：worker 镜像不再内置任何 agent runtime
+# 执行器后，velites 以平台匹配的独立二进制分发——docker worker 经 compose
+# bind mount 挂到 /app/data/bin/velites，裸机部署经 scripts/ensure-velites.sh
+# --dest data/bin 安置。本 workflow 在 velites-v* tag push 时构建三平台产物
+# 并创建 GitHub Release。
+#
+# tag 命名：velites-v<Cargo.toml version>（如 velites-v0.4.0-alpha）。版本线
+# 独立于仓库版本（scripts/check_versions.py 强制解耦纪律），所以不能用仓库
+# 的 v* tag 蹭发；validate job 会核对 tag 与 velites/Cargo.toml 一致，防手滑。
+#
+# 平台与 glibc：linux 产物在 rust:1-bookworm 容器内构建（glibc 2.36，与
+# worker 镜像的 python:*-slim-bookworm 基础一致），可运行于 Debian 12+ /
+# Ubuntu 24.04+；更老的用户态需自行从源码构建。macos 产物在 arm64 runner
+# 上原生构建。只发布主二进制 velites；velites-schema 是开发期工具，不进
+# Release。
+name: velites-release
+
+on:
+  push:
+    tags:
+      - "velites-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: validate tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag must match velites/Cargo.toml version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#velites-v}"
+          version="$(python3 -c "import tomllib; print(tomllib.load(open('velites/Cargo.toml','rb'))['package']['version'])")"
+          if [ "$tag" != "$version" ]; then
+            echo "tag velites-v${tag} 与 velites/Cargo.toml version=${version} 不一致" >&2
+            exit 1
+          fi
+
+  build-linux:
+    name: build ${{ matrix.triple }}
+    needs: validate
+    runs-on: ${{ matrix.runs-on }}
+    container: rust:1-bookworm
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - triple: x86_64-unknown-linux-gnu
+            runs-on: ubuntu-latest
+          - triple: aarch64-unknown-linux-gnu
+            runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      # container job 的默认 shell 是 sh（dash，无 pipefail）；脚本步骤统一
+      # bash——首次触发即踩坑（sh: Illegal option -o pipefail）。
+      - name: Build release binary
+        shell: bash
+        run: cargo build --release --locked --manifest-path velites/Cargo.toml
+
+      # 构建即冒烟：产物必须能在目标平台上跑起来（--version 走 clap 的
+      # version 属性，不需要配置与网络）。
+      - name: Smoke test
+        shell: bash
+        run: ./velites/target/release/velites --version
+
+      # 版本号直接取自 tag（validate job 已核对与 Cargo.toml 一致），避免在
+      # rust 容器里引入 python3 依赖。
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="velites-${GITHUB_REF_NAME#velites-v}-${{ matrix.triple }}"
+          mkdir -p "dist/${name}"
+          cp velites/target/release/velites "dist/${name}/velites"
+          tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: velites-${{ matrix.triple }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  build-macos:
+    name: build aarch64-apple-darwin
+    needs: validate
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release --locked --manifest-path velites/Cargo.toml
+
+      - name: Smoke test
+        run: ./velites/target/release/velites --version
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          name="velites-${GITHUB_REF_NAME#velites-v}-aarch64-apple-darwin"
+          mkdir -p "dist/${name}"
+          cp velites/target/release/velites "dist/${name}/velites"
+          tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: velites-aarch64-apple-darwin
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: create release
+    needs: [build-linux, build-macos]
+    # fork 防护：公开仓库的 fork 打 tag 也会触发本 workflow，但 fork 没有
+    # contents:write 权限写回本仓库——显式限定只在本仓库发版，避免 fork 上
+    # 白跑三个构建矩阵。
+    if: github.repository == 'LuciusCao/agent-legion'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Consolidate checksums
+        run: cd dist && sha256sum *.tar.gz > sha256.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/sha256.txt
+          generate_release_notes: true

@@ -16,10 +16,10 @@ from server.app.auth.dependencies import enforce_scoped_workspace_binding, rejec
 from server.app.auth.workspace_access import require_workspace_access
 from server.app.events import JobEventManager
 from server.app.routes.job_http import raise_job_http_error
+from server.app.routes.studio_chat_config import create_studio_chat_config_router
 from server.app.routes.studio_chat_context import create_studio_chat_context_router
 from server.app.routes.studio_chat_contracts import (
     StudioChatAgentsResponse,
-    StudioChatAllowAllRequest,
     StudioChatMessageCreateRequest,
     StudioChatMessageRecord,
     StudioChatMessageResponse,
@@ -164,19 +164,6 @@ def create_studio_chat_router(
         return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))
 
     @guarded.post(
-        "/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/allow-all",
-        response_model=StudioChatSessionResponse,
-    )
-    def set_allow_all(
-        workspace_id: str, session_id: str, payload: StudioChatAllowAllRequest
-    ) -> StudioChatSessionResponse:
-        try:
-            session = service.set_allow_all_permissions(session_id, workspace_id, payload.enabled)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
-        return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))
-
-    @guarded.post(
         "/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/{request_id}",
         response_model=StudioChatPermissionAnswerResponse,
     )
@@ -200,6 +187,11 @@ def create_studio_chat_router(
             raise_job_http_error(exc)
         return StudioChatPermissionAnswerResponse(resolved=request_id)
 
+    # Order matters: the config router's fixed permissions/allow-all path
+    # must register before guarded's permissions/{request_id} template, or
+    # FastAPI would swallow the toggle as request_id="allow-all" (pinned by
+    # test_allow_all_route_registers_before_permission_answer).
+    router.include_router(create_studio_chat_config_router(service))
     router.include_router(create_studio_chat_context_router(service))
     router.include_router(create_studio_chat_events_router(service, job_event_manager))
     router.include_router(guarded)

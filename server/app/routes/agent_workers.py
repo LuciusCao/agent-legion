@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Annotated, Any
 
@@ -28,6 +29,8 @@ from server.app.routes.agent_workers_contracts import (
 )
 from server.app.services.ops_metrics import OpsMetricsService
 from server.app.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 _LEASE_HEADER = "x-agent-lease-id"
@@ -133,6 +136,19 @@ def create_agent_workers_router(
             raise HTTPException(status_code=401, detail=detail) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # #381 版本握手：外挂后 velites 版本由运维方独立管理，把「worker 代码
+        # × runtime 版本」矩阵打进注册日志——漂移排障的第一现场，不落库。
+        # 记在注册事务成功之后（codex P2 on #384）：runtimes 值非法（400）或
+        # key 并发删除（401）不应留下「已注册」的观测记录——版本信息不落库，
+        # 这条日志就是唯一现场，失败的注册不该进兼容矩阵。
+        if payload.runtime_versions:
+            logger.info(
+                "agent worker registered: worker_id=%s protocol=%s runtimes=%s versions=%s",
+                payload.worker_id,
+                payload.protocol_version,
+                payload.runtimes,
+                payload.runtime_versions,
+            )
         return RegisterAgentWorkerResponse(
             worker_token=token,
             allowed_workspaces=[row["workspace_id"] for row in scope],
@@ -238,26 +254,34 @@ def create_agent_workers_router(
         )
         if payload is None or str(payload["lease_id"]) != lease_id:
             raise HTTPException(status_code=409, detail="execution is not owned by this Worker")
-        staged = await spool_result_body(request, broker.bundle_dir, config.max_archive_bytes)
+        # Runtime profile (#359): result-submit latency spans spool + commit
+        # (the artifact verify cost the issue calls out lives inside commit).
+        from server.app.services.runtime_profile import profile
+
+        result_timer = profile.result_timer()
         try:
-            # The blocking DB/disk commit runs in the threadpool: at agent scale
-            # (multiple reports per second) holding the event loop here stalls
-            # every heartbeat, claim, and dashboard stream behind it.
-            await concurrency.run_in_threadpool(
-                commit_agent_result,
-                broker,
-                completion,
-                execution_id,
-                worker_id,
-                lease_id,
-                outcome,
-                record,
-                staged,
-            )
+            staged = await spool_result_body(request, broker.bundle_dir, config.max_archive_bytes)
+            try:
+                # The blocking DB/disk commit runs in the threadpool: at agent scale
+                # (multiple reports per second) holding the event loop here stalls
+                # every heartbeat, claim, and dashboard stream behind it.
+                await concurrency.run_in_threadpool(
+                    commit_agent_result,
+                    broker,
+                    completion,
+                    execution_id,
+                    worker_id,
+                    lease_id,
+                    outcome,
+                    record,
+                    staged,
+                )
+            finally:
+                # A successful commit atomically renamed the staging file into
+                # place; on any failure it is reclaimed here.
+                discard_staged_result(staged)
         finally:
-            # A successful commit atomically renamed the staging file into
-            # place; on any failure it is reclaimed here.
-            discard_staged_result(staged)
+            profile.note_result(result_timer.stop())
         return Response(status_code=204)
 
     # The /agent-register-tokens management surface lives in its own module

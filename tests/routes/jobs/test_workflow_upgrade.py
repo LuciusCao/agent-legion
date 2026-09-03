@@ -37,12 +37,10 @@ def _publish_next_revision(app, workspace_id):
     )
 
 
-def _build_app(tmp_path, *, workflows_enabled=True):
+def _build_app(tmp_path):
     from server.app.main import create_app
 
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = workflows_enabled
-    return app
+    return create_app(data_dir=tmp_path, start_worker=False)
 
 
 def test_upgrade_workflow_route_upgrades_stale_job(tmp_path):
@@ -89,20 +87,6 @@ def test_upgrade_workflow_route_returns_404_for_missing_job(tmp_path):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Job not found"
-
-
-def test_upgrade_workflow_route_requires_workflows_enabled(tmp_path):
-    from fastapi.testclient import TestClient
-
-    app = _build_app(tmp_path)
-    with authenticate_client(TestClient(app)) as c:
-        ws_id = _create_workspace(c)
-        job_id = _create_job(c, ws_id)
-        app.state.settings.executor_runtime.workflows.enabled = False
-        response = c.post(f"/api/jobs/{job_id}/upgrade-workflow")
-
-    assert response.status_code == 404
-    assert response.json()["detail"] == "Workflows are disabled"
 
 
 def test_upgrade_workflow_route_maps_service_not_found_to_404(tmp_path, monkeypatch):
@@ -205,20 +189,3 @@ def test_batch_upgrade_workflow_route_validates_selection_shape(tmp_path):
 
     assert missing.status_code == 422
     assert both.status_code == 422
-
-
-def test_batch_upgrade_workflow_route_requires_workflows_enabled(tmp_path):
-    from fastapi.testclient import TestClient
-
-    app = _build_app(tmp_path)
-    with authenticate_client(TestClient(app)) as c:
-        ws_id = _create_workspace(c)
-        job_id = _create_job(c, ws_id)
-        app.state.settings.executor_runtime.workflows.enabled = False
-        response = c.post(
-            f"/api/workspaces/{ws_id}/jobs/batch-upgrade-workflow",
-            json={"job_ids": [job_id]},
-        )
-
-    assert response.status_code == 404
-    assert response.json()["detail"] == "Workflows are disabled"

@@ -12,11 +12,11 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from server.app.agent_broker.code_dispatch import (
+from server.app.agent_broker.code_eligibility import is_worker_eligible
+from server.app.agent_broker.code_manifest_config import (
     PlaintextSecretError,
     split_manifest_config,
 )
-from server.app.agent_broker.code_eligibility import is_worker_eligible
 from server.app.services.connection_tokens import (
     ConnectionTokenService,
     inject_connection_config,
@@ -49,24 +49,36 @@ def try_claim_code_worker_node(
     log_path: Path,
     inputs: tuple[str, ...],
     workflow_key: str,
+    *,
+    shard_runtime: dict[str, Any] | None = None,
 ) -> bool:
     """Route a code-pool candidate to a remote code Worker when possible.
 
     True = handled (enqueued, already queued/in flight, or failed as a
     configuration error); False = not Worker-routable right now, the caller
-    falls back to local execution.
+    falls back to local execution. ``shard_runtime`` (#389) carries a shard
+    execution's ``shard_index`` / ``shard_input`` payload so shard rows ride
+    the same remote path; the runtime keys mirror the local executor's.
     """
     dispatch = worker.code_dispatch
     if dispatch is None:
         return False
     workspace_id = str(workspace["id"])
     job_id = str(job["id"])
-    if dispatch.is_in_flight(job_id, node.key):
+    # Shard identity keys the in-flight marker per shard (#389): the broker's
+    # one-active-request index ((job_id, node_key)) still serializes remote
+    # shards to one in flight per node — a finished shard frees the slot for
+    # the next pass to enqueue the following shard.
+    in_flight_key = node.key
+    if shard_runtime is not None:
+        in_flight_key = f"{node.key}#shard{shard_runtime['shard_index']}"
+    if dispatch.is_in_flight(job_id, in_flight_key):
         return True
     if dispatch.broker.has_active_request(job_id, node.key):
         # Already queued/claimed for a Worker: never double-execute locally,
         # even if the last code Worker went away (no queued-timeout fallback,
-        # batch-2 decision 3).
+        # batch-2 decision 3). For shard nodes this also throttles to one
+        # remote shard at a time (see above).
         return True
     if not dispatch.online_code_worker_available(node.capability, workspace_id):
         return False
@@ -134,7 +146,7 @@ def try_claim_code_worker_node(
     # unchanged): the Worker never consults an executor definition (P-0.5).
     effective_capability = resolved_code_capability(schema, unresolved, reserved_defaults)
 
-    if not dispatch.try_mark_in_flight(job_id, node.key):
+    if not dispatch.try_mark_in_flight(job_id, in_flight_key):
         return True
 
     def _enqueue() -> None:
@@ -155,6 +167,7 @@ def try_claim_code_worker_node(
                 custom_code=True,
                 config=config,
                 secret_config=secret_config,
+                shard_runtime=shard_runtime,
             )
         except (ValueError, VaultError, JobServiceError) as exc:
             # Same trade-off as the agent enqueue pool: a configuration error
@@ -173,13 +186,13 @@ def try_claim_code_worker_node(
             # abort the whole claim pass.
             logger.exception("code enqueue failed for %s.%s", job_id, node.key)
         finally:
-            dispatch.discard_in_flight(job_id, node.key)
+            dispatch.discard_in_flight(job_id, in_flight_key)
 
     # Staging + bundling run off the poll thread; the in-flight marker above
     # dedups until the closure finishes (the broker's unique index stays the
     # authoritative dedup).
     if not dispatch.enqueue_pool.submit(_enqueue):
-        dispatch.discard_in_flight(job_id, node.key)
+        dispatch.discard_in_flight(job_id, in_flight_key)
         return False
     key = f"code:{node.capability}"
     worker.state.pass_claim_counts[key] = worker.state.pass_claim_counts.get(key, 0) + 1

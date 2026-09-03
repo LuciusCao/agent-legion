@@ -18,7 +18,6 @@ from __future__ import annotations
 import contextlib
 import os
 import pickle
-import shutil
 import subprocess
 import threading
 import time
@@ -38,6 +37,7 @@ from shared.code_sandbox import (
     child_env,
     read_result_error,
     read_roots,
+    resolve_sandbox_binary,
 )
 from shared.material_cache import MaterializeError
 
@@ -66,13 +66,23 @@ _RESULT_BASENAME = ".custom_node_result.json"
 
 
 def _velites_binary(executor: CodeExecutor) -> str | None:
-    """PATH probe for the velites sandbox wrapper, cached per executor."""
+    """PATH probe for the sandbox wrapper, cached per executor.
+
+    #383: candidates are velites-sandbox (the standalone bin, preferred) then
+    velites (the full binary's ``sandbox wrap`` subcommand — bare-metal host
+    deployments). Docker host images ship neither: code local fallback is
+    disabled in that form (a bwrap-capable backend would require
+    seccomp:unconfined + CAP_SYS_ADMIN on the container holding DB
+    credentials and the vault master key — deliberately not granted; see
+    docs/agent-worker-deployment.md §5). Production execution rides workers
+    anyway; the fail-closed error below points deployers there.
+    """
     if not executor._velites_probed:
         # Assign the path before flipping the flag: concurrent first probes
         # (a fresh executor's first parallel dispatch batch after a backend
         # reload) must never observe probed=True with the path still unset,
-        # which would fail-closed with a spurious "no velites binary" error.
-        executor._velites_path = shutil.which("velites")
+        # which would fail-closed with a spurious "no sandbox wrapper" error.
+        executor._velites_path = resolve_sandbox_binary()
         executor._velites_probed = True
     return executor._velites_path
 
@@ -123,7 +133,11 @@ def execute_custom_sandboxed(
             error_message=(
                 "custom node code requires the velites OS sandbox "
                 "(sandbox-exec/bwrap via `velites sandbox wrap`) but no "
-                "velites binary is on PATH; refusing to run unsandboxed"
+                "sandbox wrapper (velites-sandbox or velites) is on PATH; "
+                "refusing to run unsandboxed. Docker host images ship "
+                "neither (code local fallback is disabled in that form — "
+                "run code nodes on a Worker); bare-metal hosts build the "
+                "wrapper via scripts/ensure-velites.sh"
             ),
             log_path=str(context.log_path),
         )

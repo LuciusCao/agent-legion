@@ -86,7 +86,21 @@ class RunService:
         definition = workflow_definition_from_dict(json.loads(active_revision["definition_json"]))
         if not items:
             raise InvalidOperationError("At least one item is required")
+        max_items = self.settings.executor_runtime.workflows.max_items_per_run
+        if max_items and len(items) > max_items:
+            raise InvalidOperationError(
+                f"Run items exceed the per-run limit: {len(items)} > {max_items}."
+                " Split the submission into smaller runs (the limit is"
+                " workflows.max_items_per_run in instance settings)."
+            )
         validate_run_item_types(definition, items)
+        # Runtime profile (#359): intake-stage rate gauges. Counted after the
+        # cheap contract checks but before the heavy resolution/insert path,
+        # so the gauge measures submitted load (what a campaign operator
+        # pacing batches cares about), not just accepted load.
+        from server.app.services.runtime_profile import profile
+
+        profile.note_run_intake(len(items))
 
         # Validate everything (items, node config, pins) before the first
         # write so a rejected request leaves no half-created run behind.

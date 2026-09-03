@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
-from server.app.agent_broker.sweepers import fail_stale_definition_requests
+from server.app.agent_broker.sweeper_definitions import fail_stale_definition_requests
 from server.app.agent_catalog import AgentDefinition
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.db.transaction import read_connection

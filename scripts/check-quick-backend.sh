@@ -14,6 +14,11 @@ run_static_checks() {
   echo "=== Architecture Invariant Registry ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_invariants
 
+  echo "=== Version Manifests ==="
+  # 清单 ↔ lock 一致 + 发版解耦纪律（velites/frontend 版本线独立于仓库版本，
+  # 禁止锁步 bump——无谓的版本前进会击穿 velites 二进制指纹与 Docker 缓存层）。
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_versions
+
   # The business skill shared-assets check (scripts/check-skills-shared.py)
   # retired with the business skill sources; the script itself leaves with the
   # business runtime code in P4.
@@ -134,9 +139,9 @@ run_tests() {
         -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \
-        "${telemetry_args[@]}" \
-        "${cov_args[@]}" \
-        "${split_cov_floor_args[@]}"
+        ${telemetry_args[@]+"${telemetry_args[@]}"} \
+        ${cov_args[@]+"${cov_args[@]}"} \
+        ${split_cov_floor_args[@]+"${split_cov_floor_args[@]}"}
       ;;
     aff)
       # Agent inner-loop tier: affected-test selection over the unit layer.
@@ -187,9 +192,9 @@ run_tests() {
           -n "$workers" --dist worksteal \
           --reruns 1 \
           --reruns-delay 2 \
-          "${telemetry_args[@]}" \
-          "${cov_args[@]}" \
-          "${split_cov_floor_args[@]}"
+          ${telemetry_args[@]+"${telemetry_args[@]}"} \
+          ${cov_args[@]+"${cov_args[@]}"} \
+          ${split_cov_floor_args[@]+"${split_cov_floor_args[@]}"}
       fi
       ;;
     aff-index)
@@ -237,10 +242,10 @@ run_tests() {
         -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \
-        "${shard_args[@]}" \
-        "${telemetry_args[@]}" \
-        "${cov_args[@]}" \
-        "${split_cov_floor_args[@]}"
+        ${shard_args[@]+"${shard_args[@]}"} \
+        ${telemetry_args[@]+"${telemetry_args[@]}"} \
+        ${cov_args[@]+"${cov_args[@]}"} \
+        ${split_cov_floor_args[@]+"${split_cov_floor_args[@]}"}
       ;;
     full)
       # The local full tier is the unit layer — same selection as GATE_TIER=unit.
@@ -266,9 +271,9 @@ run_tests() {
         -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \
-        "${telemetry_args[@]}" \
-        "${cov_args[@]}" \
-        "${split_cov_floor_args[@]}"
+        ${telemetry_args[@]+"${telemetry_args[@]}"} \
+        ${cov_args[@]+"${cov_args[@]}"} \
+        ${split_cov_floor_args[@]+"${split_cov_floor_args[@]}"}
       ;;
     *)
       echo "Unsupported GATE_TIER: ${GATE_TIER}" >&2

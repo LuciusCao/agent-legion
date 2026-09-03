@@ -4,7 +4,6 @@ from fastapi import APIRouter, HTTPException
 
 import server.app.routes.workflow_contracts as workflow_contracts
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import require_workflows_enabled
 from server.app.routes.workflow_draft_compare import create_workflow_draft_compare_router
 from server.app.routes.workflow_draft_publish import create_workflow_draft_publish_router
 from server.app.routes.workflow_draft_store import create_workflow_draft_store_router
@@ -31,7 +30,6 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         response_model=WorkflowRevisionsResponse,
     )
     def list_workflow_revisions(workspace_id: str) -> WorkflowRevisionsResponse:
-        require_workflows_enabled(settings)
         workspace = job_db.get_workspace(workspace_id)
         if workspace is None:
             return WorkflowRevisionsResponse(revisions=[])
@@ -49,7 +47,6 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         response_model=ActiveWorkflowRevisionResponse,
     )
     def get_active_workflow_revision(workspace_id: str) -> ActiveWorkflowRevisionResponse:
-        require_workflows_enabled(settings)
         workspace = job_db.get_workspace(workspace_id)
         if workspace is None:
             raise HTTPException(status_code=404, detail="Workspace not found")
@@ -76,7 +73,6 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         workspace_id: str,
         revision_id: str,
     ) -> WorkflowRevisionDetailResponse:
-        require_workflows_enabled(settings)
         workspace = job_db.get_workspace(workspace_id)
         if workspace is None:
             raise HTTPException(status_code=404, detail="Workspace not found")
@@ -96,7 +92,7 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         )
 
     router.include_router(create_workflow_draft_publish_router(job_db, settings))
-    router.include_router(create_workflow_draft_compare_router(job_db, settings))
-    router.include_router(create_workflow_draft_store_router(job_db, settings))
-    router.include_router(create_workflow_node_prompt_router(job_db, settings))
+    router.include_router(create_workflow_draft_compare_router(job_db))
+    router.include_router(create_workflow_draft_store_router(job_db))
+    router.include_router(create_workflow_node_prompt_router(job_db))
     return router

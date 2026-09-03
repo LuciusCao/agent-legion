@@ -142,22 +142,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 56
 - check: architecture.file_budget
-  path: server/app/routes/failed_node_runs.py
-  reason: Same issue-211 Phase 3 read-binding guard as job_http.py — this
-    route adds it on the GET query face (the redundant jobs.workflow_key
-    predicate was removed in the same batch).
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 87
-- check: architecture.file_budget
-  path: server/app/routes/job_batches.py
-  reason: Same issue-211 Phase 3 read-binding guard as job_http.py — this
-    route adds it because a mismatched key would flow verbatim into jobs rows
-    (Codex P1 on PR 307).
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 34
-- check: architecture.file_budget
   path: velites/src/agent.rs
   reason: >-
     Issue #297 added the first inline unit tests to the agent loop module
@@ -265,10 +249,67 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 242
 - check: architecture.file_budget
+  path: server/app/db/migrations/run_job_status_counts.py
+  reason: >-
+    Issue #358's review round (P2 on #374) adds the dead-row recycle
+    trigger (runs delete purges the counter rows): the counter table is
+    deliberately FK-free because jobs.run_id is unconstrained text, so the
+    recycle cannot ride a cascade like the v36 workspace twin. Both
+    triggers and the backfill are one migration's cohesive DDL; splitting
+    the file would separate the sync function from its recycle pair.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/358
+  ceiling: 74
+
+- check: architecture.file_budget
+  path: server/app/services/job_list_count_cache.py
+  reason: >-
+    Issue #358's review round (Codex P2 on #374) adds keyed single-flight
+    locking to the TTL cache: sync handlers share one service across the
+    FastAPI threadpool, so a cold key under a refresh storm ran one
+    full-scan compute per thread. The lock map lives with the entries it
+    guards; splitting it out would separate the eviction bound from the
+    map it bounds.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/358
+  ceiling: 74
+
+- check: architecture.file_budget
+  path: server/app/services/job_intake.py
+  reason: >-
+    Issue #358's review round (P1 on #374) extends the per-run items cap
+    to the intake path — the same check-and-raise the /runs service carries,
+    placed right after candidate resolution and before the run/jobs writes.
+    Duplicating the cap constant away from the resolve gate would invite the
+    two paths to drift; revisit when the creation paths converge on one
+    service.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/358
+  ceiling: 178
+
+- check: architecture.file_budget
+  path: server/app/db/migrations/__init__.py
+  reason: >-
+    The #358/#359 merge round registers two new migration functions
+    (ops_runtime_profile_samples, run_job_status_counts); ruff's isort
+    normalizes each single-name import with a noqa marker to the
+    parenthesized form, so the file grew by two lines against its baseline.
+    The file is a pure re-export index whose growth model is one entry per
+    migration module; revisit if the migrations package gains a programmatic
+    registry.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/358
+  ceiling: 67
+
+- check: architecture.file_budget
   path: server/app/db/migration_chain.py
-  reason: The issue-211 M2 batch registers v70 (retire_workflow_key_columns) —
-    one registry entry plus its comment; the chain only grows one entry per
-    schema version. Stale after the M3 cleanup collapses the chain comments.
+  reason: >-
+    Re-filed (#358 merge round): the chain now carries v72
+    (ops_runtime_profile_samples, from #359) and v73 (run_job_status_counts,
+    this PR) — one import plus one entry each on top of the v70 growth the
+    original exemption described. The chain only grows one entry per schema
+    version and cannot shrink; stale after the issue-211 M3 cleanup
+    collapses the chain comments.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 108
@@ -302,15 +343,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 91
 - check: architecture.file_budget
-  path: server/app/jobs/queries/batch.py
-  reason: The issue-211 M2 batch centralizes the deprecated workflow_key
-    identity backfill in create_run (the runs column dropped at v70; the
-    wire field equals workspace_id since v62, removal window 2026-10-31).
-    Stale when M3 retires the deprecated contract field.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 83
-- check: architecture.file_budget
   path: server/app/jobs/queries/batch_queue.py
   reason: The issue-211 M2 batch applies the same deprecated workflow_key
     identity backfill to the remaining runs-row write paths (intake claim,
@@ -319,6 +351,178 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
   ceiling: 82
+- check: architecture.file_budget
+  path: frontend/src/features/previewPanel/PreviewPanelHost.tsx
+  reason: The Codex P1 review on PR 345 added the host-injected CSP (the
+    outbound-network red line (sandbox allow-scripts does not block
+    fetch/sendBeacon/img to external origins)). The policy constant, the
+    srcDoc head-injection helper and its documentation grow the security
+    surface in place -- splitting them out would separate the CSP from the
+    iframe that enforces it.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/328
+  ceiling: 199
+- check: architecture.file_budget
+  path: frontend/src/features/previewPanel/PreviewPanelSection.tsx
+  reason: The Codex P2 review on PR 345 added bundle content into the
+    PreviewPanelHost remount key plus the hashBundle helper -- a
+    cross-navigation bridge-request isolation fix that must stay at the
+    composition site to keep the in-flight-window reasoning local.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/328
+  ceiling: 79
+- check: architecture.file_budget
+  path: server/app/executors/_code_sandbox.py
+  reason: >-
+    #383: the Host-side sandbox probe switched from shutil.which("velites")
+    to the shared resolve_sandbox_binary primitive (velites-sandbox ->
+    velites candidates) and the fail-closed error text now names the docker
+    host form's semantics (code local fallback disabled — running code nodes
+    on a Worker is the supported path) and the bare-metal remedy.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/383
+  ceiling: 207
+- check: architecture.file_budget
+  path: server/app/routes/agent_workers.py
+  reason: >-
+    #381 version handshake: the register endpoint logs the reported
+    runtime_versions mapping (worker code x velites version matrix) at
+    registration time. Drift diagnostics for externally-mounted runtimes;
+    informational only, no admission change.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  ceiling: 236
+- check: architecture.file_budget
+  path: server/app/routes/agent_workers_contracts.py
+  reason: >-
+    #381 version handshake: RegisterAgentWorkerRequest gained the
+    informational runtime_versions mapping (default empty for older
+    Workers). One field on the request contract.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  ceiling: 92
+- check: architecture.file_budget
+  path: shared/code_sandbox.py
+  reason: >-
+    #383 added the sandbox-binary resolution primitive here (candidates
+    velites-sandbox -> velites; bundled data/bin dir then PATH) because the
+    module is already the stdlib-only shared home both the Host executor and
+    the Worker code runner import. The primitive keeps one probe surface for
+    both sides so "preflight passes = runtime resolves the same wrapper";
+    BUNDLED_SANDBOX_DIR is re-exported by worker/binary_resolution.py as the
+    single source of truth for the shared directory.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/383
+  ceiling: 141
+- check: architecture.file_budget
+  path: worker/host/client.py
+  reason: >-
+    #381 version handshake: the registration payload gained one
+    informational runtime_versions mapping (effective runtimes' --version
+    outputs). Single line addition to an existing payload builder.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  ceiling: 164
+- check: architecture.file_budget
+  path: worker/runtime/catalog.py
+  reason: >-
+    #381 version handshake: probe_runtime_versions asks each effective
+    runtime for its --version output so the registration payload carries
+    the "worker code x velites version" compatibility matrix (velites is
+    independently versioned once externally mounted; drift becomes
+    observable instead of a human upgrade discipline). Purely additive
+    function beside the detection code it complements; unknown results
+    record "<unknown>" by design (observability, not a fail-closed guard).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  ceiling: 90
+- check: architecture.file_budget
+  path: worker/runtime/controls.py
+  reason: >-
+    #383 rewired hot_code_concurrency's fail-closed guard from
+    resolve_binary("velites") to the shared sandbox resolver
+    (velites-sandbox -> velites, bundled dir then PATH) so hot-opening the
+    code pool matches the startup preflight's probe surface. One-line
+    semantic change on an existing function; no split warranted.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/383
+  ceiling: 51
+- check: architecture.file_budget
+  path: worker/runtime/preflight.py
+  reason: >-
+    #381 moved velites/pi out of the worker image (runtime executors are
+    externally-mounted binaries now), which turned "forgot to mount" from a
+    rare deployment accident into a routine mistake with a silent failure
+    mode — auto-detection yields an empty set and the worker registers with
+    zero capacity. The expect-runtimes guard added here (env parsing,
+    missing-detection against the runtime catalog, actionable error text
+    covering the bundled dir and PATH) doubles the file past its first
+    ceiling. The module stays a single cohesive concern (startup
+    preconditions for the executor); splitting the guard into its own
+    module was rejected because preflight_error would reduce to a shell
+    over two helpers. Revisit the split if preflight grows a third guard.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  ceiling: 80
+- check: architecture.file_budget
+  path: worker/runtime/setup.py
+  reason: >-
+    #381 wired AGENT_WORKER_EXPECT_RUNTIMES through prepare_runtime_models
+    (env read + ValueError mapping into the shared startup-error string)
+    alongside the existing resolve_config_runtimes handling, and the codex
+    review on #384 extended it: model-discovery failures for an *expected*
+    runtime now hard-fail startup (a wrong-arch binary passes the
+    existence probe and only breaks at exec time), while unexpected
+    runtimes keep the soft warning. This module is the composition point
+    between config parsing, preflight, and model discovery; there is no
+    meaningful split for the guard wiring.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  ceiling: 62
+- check: architecture.file_budget
+  path: server/app/services/preview_panels.py
+  reason: The Codex P2 review on PR 345 unified the artifact inventory on
+    _merged_artifact_names so every recent job merges the object-store
+    manifest like the selected job does (the object store is the
+    authoritative copy, the local dir an evictable cache). Single-purpose
+    helper next to its only consumer.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/328
+  ceiling: 190
+- check: architecture.file_budget
+  path: server/app/services/s3_jobs_gc.py
+  reason: >-
+    Re-filed (systematic review round, PR #344): the S3 jobs GC service
+    (#340) is a single scan-decide-delete pipeline. It grew past its first
+    exemption (167) on two correctness rounds that both belong with the
+    pipeline they protect: the TOCTOU fix (per-batch fresh DB
+    revalidation before deletes — a concurrent promote can recreate a
+    scanned orphan key between scan and delete, and deleting it would
+    leave the manifest pointing at missing content) and the
+    materials-collision fix (material keys of a workspace literally named
+    jobs / jobs-staging fall inside both GC prefixes; the staging pass
+    originally had no DB check at all, so both passes now go through the
+    key-existence seam and staging gained its own orphan filter).
+    Splitting either fix out would separate the batch-boundary discipline
+    from the delete batching it guards; revisit if a second consumer of
+    the revalidate seam appears.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/340
+  ceiling: 200
+- check: architecture.file_budget
+  path: server/app/jobs/queries/job_artifact_keys.py
+  reason: >-
+    Re-filed (systematic review round, PR #344): the GC storage-key query
+    surface for job_artifacts and materials lives in one mixin (#340) —
+    the systematic review found that material keys of a workspace
+    literally named jobs / jobs-staging land inside the GC prefixes, so
+    both the scan-time loader and the delete-time revalidation lookup had
+    to union materials.storage_key; splitting the two tables across
+    mixins would separate one reference set into two call sites that must
+    stay in lockstep.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/340
+  ceiling: 47
 - check: architecture.file_budget
   path: server/app/mcp_server/server.py
   reason: Issue 329 adds the job observation tool group registration
@@ -330,6 +534,87 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/329
   ceiling: 156
 - check: architecture.file_budget
+  path: server/app/agent_broker/agent_result_commit.py
+  reason: >-
+    Issue #359 adds the execute-done counter at the terminal-commit point
+    (two effective lines). The counter must fire exactly where the lease
+    and request both reach their terminal state — moving it out would
+    separate the gauge from the state transition it measures.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 72
+- check: architecture.file_budget
+  path: server/app/agent_broker/broker.py
+  reason: >-
+    Issue #359 wraps the claim path with the latency/204 gauge (timer plus
+    a finally that covers every return path). The timer must bracket the
+    whole broker.claim body — including the empty-claim signal and the
+    worker-poll notify — so the gauge measures what a Worker experiences;
+    extracting it would split the claim protocol from its measurement.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 246
+- check: architecture.file_budget
+  path: server/app/agent_broker/dispatch_pool.py
+  reason: >-
+    Issue #359 counts submissions and saturation skips in submit() plus a
+    pending_depth() reader for the sampler. The counters must sit at the
+    queue boundary they observe; the pool module is already the smallest
+    unit that owns the backlog semantics.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 60
+- check: architecture.file_budget
+  path: server/app/db/postgres_schema.sql
+  reason: >-
+    Issue #359 adds the ops_runtime_profile_samples gauge table (schema
+    v72): the six-stage pipeline columns are one cohesive block in the
+    declarative schema file whose growth model is one block per schema
+    version. Splitting a create-table block out of the replay schema would
+    fork the single source of truth for fresh databases; revisit only if
+    the schema file needs a structural split of its own.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 851
+
+- check: architecture.file_budget
+  path: server/app/services/runtime_profile/classifier.py
+  reason: >-
+    Issue #359's P1 review round added the blocked-claim branch (the #351
+    discrimination table's blocked row: deep queue + workers claiming +
+    every candidate skipped). The branch shares the evidence dict and the
+    verdict helpers with its sibling rules; splitting the classifier by
+    rule family would separate the priority order (documented in the
+    module docstring) from the code that implements it.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 145
+
+- check: architecture.file_budget
+  path: server/app/services/runtime_profile/sampling.py
+  reason: >-
+    Issue #359's P0/P1 review round grew the sampler: per-bucket DB-pool
+    wait DELTAS (cumulative-counter memo) and the wide-window bin rollup
+    both belong with the values they prepare, next to the facade calls
+    they feed. Splitting either into the queries layer would move value
+    marshalling away from the only caller; revisit if a second gauge
+    family joins the sampler.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 108
+
+- check: architecture.file_budget
+  path: server/app/services/ops_metrics/service.py
+  reason: >-
+    Issue #359 extends the sampling pass to persist the runtime-profile
+    gauge row (one call plus the pool/pool-backlog gauge readers kept next
+    to their only consumer). The sampler stays one cohesive write surface;
+    the durable split is a sampling-dispatch module if more gauge families
+    join, at which point this exemption goes stale.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  ceiling: 230
+- check: architecture.file_budget
   path: server/app/routes/__init__.py
   reason: Issue 329 mounts the job diagnosis observation router in the route
     assembly (one import + one secured() call, three effective lines past the
@@ -339,3 +624,32 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/329
   ceiling: 140
+- check: architecture.file_budget
+  path: server/app/events/buffer.py
+  reason: Issue 353 swaps the per-event job_event_seq bump for segmented
+    allocation (one UPDATE grants SEGMENT_SIZE revisions, spent from an
+    in-process counter). The growth is a module-level constant with its
+    trade-off docstring (segment size rationale, watermark-not-dense-index
+    consumer contract, multi-replica reorder window) plus the segment
+    window arithmetic in _next_revision_locked — all of it must stay next
+    to the issuer it governs; splitting the allocator out would separate
+    the deque-order invariant from the lock that enforces it. Revisit when
+    the events package grows a second revision consumer.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/349
+  ceiling: 130
+- check: architecture.file_budget
+  path: server/app/agent_broker/reaper.py
+  reason: >-
+    Issue 357 persists the reap watermark: the first pass after a
+    restart restores it from global_settings (ReapWatermarkStore) instead
+    of rescanning all terminal rows, and every completed pass saves the
+    advance (5 effective lines past the baseline ceiling 66). The restore
+    and the save sit exactly at the watermark's two transition points, so
+    moving them to a helper would separate the cursor semantics from the
+    scan they gate; the durable fix is merging the two query branches into
+    the shared store module when the next reaper change touches it, at
+    which point this exemption goes stale.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/357
+  ceiling: 81

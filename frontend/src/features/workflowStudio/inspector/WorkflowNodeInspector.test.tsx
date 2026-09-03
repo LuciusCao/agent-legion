@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { createElement, type ReactNode } from 'react'
+import yaml from 'js-yaml'
 import { WorkflowNodeInspector } from './WorkflowNodeInspector'
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
 import { api } from '../../../api'
@@ -32,8 +33,8 @@ const draftYaml = [
   '    capability: intake',
   '    after: [_start]',
   'edges:',
-  '  - source: _start',
-  '    target: intake',
+  '  - from: _start',
+  '    to: intake',
   '',
 ].join('\n')
 
@@ -83,6 +84,146 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     expect(screen.getByText('依赖关系')).toBeInTheDocument()
     // 不再是「选择一个节点」空态。
     expect(screen.queryByText('选择一个节点')).not.toBeInTheDocument()
+  })
+
+  it('shows the node type selector on the header (#392)', async () => {
+    renderInspector('intake')
+
+    // code 节点头部有类型选择器（原生 select），三选一；start 不在选项里。
+    const selector = await screen.findByLabelText('节点类型')
+    expect(selector).toHaveValue('code')
+    expect(screen.getByRole('option', { name: 'Code' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Agent' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '审批门' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('option', { name: 'start' })
+    ).not.toBeInTheDocument()
+  })
+
+  it('switches the node type via the selector and sanitizes fields', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const setDefinitionYaml = vi.fn()
+    // intake 有可执行上游 draft_gen（approval 入边前置校验要求）。
+    const yamlWithAgentFields = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  draft_gen:',
+      '    type: code',
+      '    label: 起草',
+      '    capability: draft_gen',
+      '    after: [_start]',
+      '  intake:',
+      '    type: agent',
+      '    label: 读取知识点',
+      '    capability: intake',
+      '    skill: demo/skill',
+      '    after: [draft_gen]',
+      'edges:',
+      '  - from: _start',
+      '    to: draft_gen',
+      '',
+    ].join('\n')
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        agentCatalog={[]}
+        selectedNodeKey="intake"
+        definitionYaml={yamlWithAgentFields}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    await screen.findByLabelText('节点执行能力')
+    fireEvent.change(await screen.findByLabelText('节点类型'), {
+      target: { value: 'approval' },
+    })
+
+    // 切 approval 是破坏性清洗：先确认（取消路径见下个用例）。
+    expect(window.confirm).toHaveBeenCalledWith(
+      expect.stringContaining('切换为审批门将清除')
+    )
+    expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
+    // 节点级断言（js-yaml 解析，避免 toContain 被其他节点的 type 行命中）。
+    const nextYaml = setDefinitionYaml.mock.calls[0][0] as string
+    const node = (
+      yaml.load(nextYaml) as {
+        nodes?: Record<string, Record<string, unknown>>
+      }
+    ).nodes?.intake
+    expect(node?.type).toBe('approval')
+    // capability/skill 按目标类型清洗剥除。
+    expect(node).not.toHaveProperty('capability')
+    expect(node).not.toHaveProperty('skill')
+  })
+
+  it('keeps the draft untouched when the approval-switch confirm is dismissed', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const setDefinitionYaml = vi.fn()
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        agentCatalog={[]}
+        selectedNodeKey="intake"
+        definitionYaml={draftYaml}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    await screen.findByLabelText('节点执行能力')
+    fireEvent.change(await screen.findByLabelText('节点类型'), {
+      target: { value: 'approval' },
+    })
+
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+  })
+
+  it('blocks →approval without an executable upstream and toasts the reason', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const setDefinitionYaml = vi.fn()
+    // intake 只有 start 上游：validate_approval_edges 同语义，前置校验拦下。
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        agentCatalog={[]}
+        selectedNodeKey="intake"
+        definitionYaml={draftYaml}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    await screen.findByLabelText('节点执行能力')
+    fireEvent.change(await screen.findByLabelText('节点类型'), {
+      target: { value: 'approval' },
+    })
+
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+    // 校验先于确认：前置校验都没过，就不该弹破坏性确认（P3 review）。
+    expect(confirmSpy).not.toHaveBeenCalled()
+    const { useUiStore } = await import('../../../stores/uiStore')
+    await vi.waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toContain('可执行节点的入边')
+    )
+  })
+
+  it('renders no agent entry on a code node (#392 regression)', async () => {
+    renderInspector('intake')
+
+    await screen.findByLabelText('节点执行能力')
+    // code 节点不再长出 Agent 编辑/新建入口（类型变更走头部选择器）。
+    expect(
+      screen.queryByRole('button', { name: '为此 capability 新建 Agent' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '编辑 Agent' })
+    ).not.toBeInTheDocument()
   })
 
   it('keeps the read-only entry contract for a ghost start node', () => {

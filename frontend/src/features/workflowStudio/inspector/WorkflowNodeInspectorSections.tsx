@@ -1,12 +1,6 @@
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { SelectedWorkflowNodeDetails } from '../shared/workflowStudioModel'
-import { WorkflowNodeCodeSection } from '../code-editor/WorkflowNodeCodeSection'
-import { WorkflowNodeConfigSchemaSection } from './WorkflowNodeConfigSchemaSection'
-import { WorkflowNodeConfigSection } from './WorkflowNodeConfigSection'
-import { WorkflowNodeDataContractSection } from './WorkflowNodeDataContractSection'
-import { WorkflowNodeDependencySection } from './WorkflowNodeDependencySection'
-import { WorkflowNodeEditorSection } from './WorkflowNodeEditorSection'
-import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
+import { NODE_TYPE_SECTIONS } from './nodeTypeSections'
 import { WorkflowNodeStartSection } from './WorkflowNodeStartSection'
 
 export type InspectorSectionProps = {
@@ -14,57 +8,27 @@ export type InspectorSectionProps = {
   agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
-  /** type=code 节点「切换为 Agent 执行」（改写草稿 YAML type；Body 注入）。 */
-  onSwitchToAgent?: () => boolean
   readOnly?: boolean
 }
 
-// Composition of the inspector sections: revision-scoped YAML editors first,
-// then workspace-scoped node state (code module + node config, both applied
-// immediately outside the draft/publish flow), then read-only structure.
+// section 组合的唯一事实源是 nodeTypeSections 的类型注册表（#392
+// Phase 2）：非 start 类型查表渲染该类型声明的 section 序列；start
+// 节点携带入口契约、永不执行，只渲染契约段（后端会 404 其节点代码
+// 端点）。遗留 `type: node` / 缺省在 record/ghost 解析层已归一化 code。
 export function WorkflowNodeInspectorSections(props: InspectorSectionProps) {
   const { node } = props.details
-  // Start nodes carry the entry contract (type: start) and never execute:
-  // the capability/execution/code editors do not apply (the backend 404s
-  // their node-code endpoints), so only the entry-contract section applies.
   if (node.node_type === 'start') {
     return <WorkflowNodeStartSection {...props} />
   }
+  const spec =
+    node.node_type === 'agent' || node.node_type === 'approval'
+      ? NODE_TYPE_SECTIONS[node.node_type]
+      : NODE_TYPE_SECTIONS.code
   return (
     <>
-      <WorkflowNodeEditorSection
-        node={node}
-        definitionYaml={props.definitionYaml}
-        setDefinitionYaml={props.setDefinitionYaml}
-        readOnly={props.readOnly}
-      />
-      <WorkflowNodeConfigSchemaSection
-        key={`config-schema-${node.key}`}
-        node={node}
-        {...props}
-      />
-      <WorkflowNodeExecutionSection node={node} {...props} />
-      <WorkflowNodeCodeSection
-        key={`code-${node.key}`}
-        node={node}
-        readOnly={props.readOnly}
-      />
-      <WorkflowNodeConfigSection
-        key={`config-${node.key}`}
-        node={node}
-        readOnly={props.readOnly}
-      />
-      <WorkflowNodeDataContractSection
-        key={`data-contract-${node.key}`}
-        node={node}
-        definitionYaml={props.definitionYaml}
-        setDefinitionYaml={props.setDefinitionYaml}
-        readOnly={props.readOnly}
-      />
-      <WorkflowNodeDependencySection
-        key={`dependencies-${node.key}`}
-        details={props.details}
-      />
+      {spec.sections.map((Section) => (
+        <Section key={Section.name} {...props} />
+      ))}
     </>
   )
 }

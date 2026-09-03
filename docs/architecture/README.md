@@ -10,18 +10,18 @@ Browser (React SPA)
    ▼
 FastAPI Host ─────────────────────────────────────────┐
    │ routes → services → workflows (DAG scheduler)    │
-   │                       │ executor leases          │
+   │                       │ capacity leases          │
    ▼                       ▼                          ▼
 PostgreSQL          Implicit code pool       Agent Workers (remote)
-(control plane)     pipeline nodes           claim → run → artifacts
+(control plane)     workflow code nodes      claim → run → artifacts
    │                       │                          │
    ▼                       ▼                          ▼
 data/  (videos, logs, packages, jobs, run traces)
-        agent nodes → Pi CLI / velites → external skills (git, locked)
+        agent nodes → Pi CLI / velites → skills (local in-place git, pins in DB skill_lock)
 ```
 
 - **Backend**: Python 3.11+, FastAPI, Uvicorn, PostgreSQL
-- **Frontend**: React 18, TypeScript, Vite, Zustand, MUI v6, React Flow
+- **Frontend**: React 18, TypeScript, Vite, TanStack Query, Zustand, MUI v6, XYFlow
 - **Agent harness**: velites (Rust, `velites/`) or Pi CLI (Node)
 - **Tooling**: `uv` + Ruff + mypy (Python), npm + ESLint + Prettier (frontend),
   pytest + Vitest + cargo test
@@ -32,7 +32,8 @@ data/  (videos, logs, packages, jobs, run traces)
 - Workflow 节点声明 `capability`（agent 路由节点另可声明 `skill` 内容绑定，
   `key` + 可选 `ref`，#76）—— agent 接线在 Agent 定义里，code
   节点解析到已发布的 `node_code`。
-- Route 是薄 HTTP 适配层；业务逻辑在 service；executor 一律经 lease 申请容量。
+- Route 是薄 HTTP 适配层；业务逻辑在 service；执行容量一律经 lease 申请
+  （`server/app/executors/leases.py`；executor 定义/绑定概念已随 schema v47 退役）。
 - 前端 transport 类型从后端 OpenAPI schema 生成
   （`frontend/src/generated/api.ts`），禁止手写。
 - Secret 只进 vault 或 env —— tracked 配置 yaml 在启动时拒绝 secret 值。
@@ -51,6 +52,8 @@ data/  (videos, logs, packages, jobs, run traces)
 | 节点 SDK / Worker 执行 | [node-sdk-and-worker-execution-design.md](node-sdk-and-worker-execution-design.md) | 节点 SDK（NodeContext）与 code 节点执行迁移 Worker 的合并设计（Issue #30/#82） |
 | 材料与 runs | [materials-and-runs-design.md](materials-and-runs-design.md) | runs / 材料 / bundle 文件夹条目 / 产物对象存储的输入模型与治理设计 |
 | velites 模型注册 | [velites-model-registry.md](velites-model-registry.md) | runtime-owned 模型发现与 velites provider registry（Worker 侧发现、Host 侧三元组路由） |
+| 文档治理 | [docs-governance-proposal.md](docs-governance-proposal.md) | 现行文档退役术语基线检查（`docs_retired_terms`）的机制说明与维护指引 |
+| 实例设置旧概念治理 | [instance-settings-legacy-concepts-governance.md](instance-settings-legacy-concepts-governance.md) | `workflows.enabled` 退役与 `code_capacity` 改述（0 = 纯控制面模式）的实施定稿（#385/#386/#389） |
 
 ## 历史设计记录（时点快照，仅供溯源）
 
@@ -66,6 +69,7 @@ banner 标注了后续演进对其中结论的修订。
 | [agent-config-implementation-plan.md](agent-config-implementation-plan.md) | 上述治理的详细实施计划（已完成） |
 | [workflow-studio-evolution-design.md](workflow-studio-evolution-design.md) | Studio 定位（agent authoring + 可视化调优发布台）与阶段路线 |
 | [studio-phase3-implementation-plan.md](studio-phase3-implementation-plan.md) | Studio 内置 agent 实施计划（MCP/ACP 三层分离，已落地） |
+| [studio-node-type-selector-design.md](studio-node-type-selector-design.md) | Studio 节点类型抽象落地设计：inspector 类型选择器 + 按类型注册 section 集（#392，设计稿） |
 | [velites-runtime-promotion.md](velites-runtime-promotion.md) | velites 升格为一级 runtime 的实施计划（已落地） |
 | [velites-poc-report.md](velites-poc-report.md) | 时点报告（2026-07-31）：pi_agent_rust 替换 Node Pi CLI 的 PoC 验证 |
 | [velites-m2-validation.md](velites-m2-validation.md) | 时点报告（2026-07-31）：velites 与 Node pi 真 gateway 对照验证 |

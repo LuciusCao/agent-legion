@@ -12,6 +12,7 @@ carries a window-independent ``summary`` (see ``ops_metrics.summary``).
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -33,6 +34,60 @@ Granularity = Literal["6h", "24h", "30d"]
 _DEFAULT_SAMPLE_INTERVAL_SECONDS = 60
 # 30d 窗口需要至少 30 天的采样保留，否则长尾段永远为空。
 _DEFAULT_RETENTION_DAYS = 30
+
+logger = logging.getLogger(__name__)
+
+# Last-read cumulative pool counters (module state: one sampler per process).
+# psycopg-pool reports lifetime cumulatives (requests_queued /
+# requests_wait_ms count every getconn since pool creation); the profile
+# buckets need the per-minute DELTA, so each read remembers the previous
+# value. Empirically verified against psycopg-pool 3.3: the getconn/putconn
+# path this repo uses (server/app/db/connection.py) accumulates both keys —
+# usage_ms does NOT grow on this path (only the `pool.connection()` context
+# manager updates it), so it must not be used as the wait signal.
+_DB_POOL_LAST_STATS: dict[str, int] = {}
+
+
+def _db_pool_wait_gauges(database_dsn: ConnectSource) -> tuple[int, float]:
+    """Per-bucket pool-wait deltas (best-effort; never raises).
+
+    Keyed by ``resolve_dsn`` — a facade's ``str()`` is an object repr that
+    would mint a fresh never-used pool reporting zeros (P0 on #367).
+    """
+    try:
+        from server.app.db.dialect import resolve_dsn
+        from server.app.db.pools import pool_for
+
+        stats = pool_for(resolve_dsn(database_dsn)).get_stats()
+        queued = int(stats.get("requests_queued", 0) or 0)
+        wait_ms = int(stats.get("requests_wait_ms", 0) or 0)
+        delta_queued = max(queued - _DB_POOL_LAST_STATS.get("queued", 0), 0)
+        delta_wait_ms = max(wait_ms - _DB_POOL_LAST_STATS.get("wait_ms", 0), 0)
+        _DB_POOL_LAST_STATS["queued"] = queued
+        _DB_POOL_LAST_STATS["wait_ms"] = wait_ms
+        return delta_queued, delta_wait_ms / 1000.0
+    except Exception:
+        # #204 broad-except audit: gauge reader, not a pipeline component.
+        # A failure means "no DB-pool signal this bucket", never a sampling
+        # abort; the traceback is not actionable beyond the log line.
+        return 0, 0.0
+
+
+def _enqueue_pending_depth() -> int:
+    """Momentary combined enqueue backlog (0 when unwired).
+
+    Both pools count (agent bundling + code bundling; P1 on #367) — the
+    worker thread registers them on the profile at startup.
+    """
+    try:
+        from server.app.services.runtime_profile.counters import profile
+
+        return sum(int(pool.pending_depth()) for pool in profile.enqueue_pools)
+    except Exception:
+        # #204 broad-except audit: same gauge-reader contract as above —
+        # the dispatch is registered by the worker thread and may not exist
+        # in test/embedded shapes; absence reads as depth 0.
+        return 0
 
 
 def _fetch_one(conn: DatabaseConnection, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any]:
@@ -57,6 +112,11 @@ class OpsMetricsService:
     def sample_interval_seconds(self) -> float:
         return self._sample_interval_seconds
 
+    @property
+    def database_dsn(self) -> ConnectSource:
+        """Read accessor for co-sampling surfaces (runtime profile, #359)."""
+        return self._database_dsn
+
     def sample_once(self, now: datetime | None = None) -> None:
         """Persist samples for the last completed UTC minute bucket.
 
@@ -71,6 +131,12 @@ class OpsMetricsService:
         that goes idle simply stops appearing in later buckets, and buckets
         already written are never revised (upserts only refresh rows for the
         current active set).
+
+        The same pass also persists one runtime-profile gauge row (#359):
+        the six-stage pipeline counters are process deltas over the bucket,
+        the depth gauges reuse the queries already run here (queued,
+        active_executions) plus the enqueue pool backlog, and the DB-pool
+        wait gauges come from the psycopg pool stats.
         """
         sampled_at = now or datetime.now(UTC)
         bucket_start = sampled_at.replace(second=0, microsecond=0) - timedelta(minutes=1)
@@ -160,6 +226,37 @@ class OpsMetricsService:
                     tokens=tokens_by_worker.get(worker_id, _EMPTY_TOKENS),
                 )
             upsert_workspace_samples(conn, bucket_start, workspace_samples)
+        self._sample_runtime_profile(bucket_start, queued=int(queued), active=active_executions)
+
+    def _sample_runtime_profile(self, bucket_start: datetime, *, queued: int, active: int) -> None:
+        """Persist the #359 runtime-profile gauge row; failures degrade to a
+        missing profile row (the ops series must not depend on it)."""
+        try:
+            from server.app.services.runtime_profile import persist_profile_sample, profile
+
+            pool_waiting, pool_wait_seconds = _db_pool_wait_gauges(self._database_dsn)
+            persist_profile_sample(
+                self._database_dsn,
+                bucket_start,
+                profile,
+                queued_depth=queued,
+                active_executions=active,
+                enqueue_pending=_enqueue_pending_depth(),
+                db_pool_waiting=pool_waiting,
+                db_pool_wait_seconds=pool_wait_seconds,
+            )
+        except Exception:
+            # #204 broad-except audit: metrics-side best-effort. The profile
+            # row shares the ops sampling transaction boundary but not its
+            # success contract: a missing profile bucket only thins the
+            # series (the classifier reads whatever rows exist), while
+            # letting this raise would kill the ops samples that already
+            # committed in the caller and abort the sampling loop's
+            # catch-up. The outcome space is the profile write surface plus
+            # the pool-stat readers (attribute shapes differ across
+            # psycopg-pool versions); logger.exception keeps the traceback
+            # so a persistent failure is visible in logs.
+            logger.exception("runtime profile sample failed for bucket %s", bucket_start)
 
     def sample_catch_up(self, now: datetime | None = None) -> int:
         """Persist every missing minute bucket since the last written sample."""
@@ -171,7 +268,17 @@ class OpsMetricsService:
             result = conn.execute(
                 "delete from ops_metric_samples where bucket_start < %s", (cutoff,)
             )
-            return result.rowcount
+        # Runtime-profile rows share the same retention window (#359), via the
+        # JobQueries facade (BOUNDARY-DATA-001; new SQL does not join the
+        # grandfathered baseline of this file).
+        from server.app.jobs.queries.runtime_profile import (
+            runtime_profile_queries_from_dsn,
+        )
+
+        runtime_profile_queries_from_dsn(self._database_dsn).delete_runtime_profile_samples_before(
+            cutoff
+        )
+        return result.rowcount
 
     def query_summary(
         self, worker_id: str | None = None, workspace_id: str | None = None

@@ -19,7 +19,6 @@ def test_rerun_node_marks_downstream_stale(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
@@ -55,7 +54,6 @@ def test_workspace_batch_rerun_marks_jobs_queued(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
@@ -97,7 +95,6 @@ def test_batch_rerun_skips_not_found_and_running_jobs(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
@@ -129,7 +126,6 @@ def test_batch_rerun_from_failed_node(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
@@ -173,7 +169,6 @@ def test_batch_rerun_from_failed_node_skips_non_failed(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
@@ -203,7 +198,6 @@ def test_batch_rerun_requires_node_key_or_from_failed(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
@@ -220,7 +214,6 @@ def test_rerun_node_errors(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
@@ -253,7 +246,6 @@ def test_rerun_node_rejects_running_job(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
@@ -290,7 +282,6 @@ def test_rerun_node_cleanup_failed(tmp_path, monkeypatch):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
@@ -325,7 +316,6 @@ def test_rerun_node_mark_for_rerun_value_error(tmp_path, monkeypatch):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
@@ -362,7 +352,6 @@ def test_rerun_node_preserves_ancestors(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
@@ -389,7 +378,6 @@ def test_batch_rerun_node_not_found_for_one_job(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
@@ -430,7 +418,6 @@ def test_batch_rerun_mixed_node_availability(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
@@ -482,7 +469,6 @@ def test_batch_rerun_request_order_preserved(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
@@ -522,7 +508,6 @@ def test_rerun_node_rejects_active_lease(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
@@ -574,7 +559,6 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
@@ -627,7 +611,6 @@ def test_rerun_node_rollback_on_db_failure(tmp_path, monkeypatch):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
@@ -701,7 +684,6 @@ def test_batch_rerun_preview_node_mode_counts_eligible(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         job_a = _create_failed_job(c, app, ws_id, "Q801")
@@ -731,7 +713,6 @@ def test_batch_rerun_preview_from_failed_node_skips_non_failed(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         failed_job = _create_failed_job(c, app, ws_id, "Q803")
@@ -761,7 +742,6 @@ def test_batch_rerun_preview_failure_category_counts_matching(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         technical_job = _create_failed_job(c, app, ws_id, "Q805")
@@ -784,7 +764,6 @@ def test_batch_rerun_preview_validates_mode(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         no_mode = c.post(

@@ -23,7 +23,6 @@ from tests.helpers.agent_worker_api import (
 
 def test_runtime_models_aggregates_online_workspace_workers(tmp_path: Path) -> None:
     app = make_app(tmp_path)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as client:
         authenticate_admin(client)
         register(
@@ -70,7 +69,6 @@ def test_runtime_models_aggregates_online_workspace_workers(tmp_path: Path) -> N
 
 def test_runtime_models_empty_without_workers(tmp_path: Path) -> None:
     app = make_app(tmp_path)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as client:
         authenticate_admin(client)
         issue_scoped_token(client)  # creates test-workspace
@@ -83,7 +81,6 @@ def test_runtime_models_empty_without_workers(tmp_path: Path) -> None:
 
 def test_runtime_models_requires_auth(tmp_path: Path) -> None:
     app = make_app(tmp_path)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as client:
         response = client.get("/api/workspaces/test-workspace/runtime-models")
 

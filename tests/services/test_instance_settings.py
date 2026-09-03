@@ -32,7 +32,7 @@ def test_apply_overrides_executor_runtime_and_writes_back_config(settings, job_d
             "lease_ttl_seconds": 120,
             "heartbeat_interval_seconds": 2.5,
             "sweeper_enabled": False,
-            "workflows": {"enabled": False},
+            "workflows": {"enabled": False, "max_items_per_run": 500},
             "agent_workers": {"max_archive_bytes": 1024},
             "cleanup": {"log_retention_days": 30, "interval_seconds": 60},
             "monitoring": {"sample_interval_seconds": 15},
@@ -45,7 +45,10 @@ def test_apply_overrides_executor_runtime_and_writes_back_config(settings, job_d
     assert runtime.lease_ttl_seconds == 120
     assert runtime.heartbeat_interval_seconds == 2.5
     assert runtime.sweeper_enabled is False
-    assert runtime.workflows.enabled is False
+    # The stored workflows.enabled key is retired (#385/#389): stripped at
+    # read time; max_items_per_run still hydrates.
+    assert runtime.workflows.max_items_per_run == 500
+    assert not hasattr(runtime.workflows, "enabled")
     assert runtime.agent_workers.max_archive_bytes == 1024
     # Keys absent from the stored document keep the loaded/default values.
     assert runtime.heartbeat_failure_threshold == 3
@@ -90,7 +93,7 @@ def test_effective_document_strips_retired_openclaw_block_from_stored_document()
         "openclaw": {
             "cwd": "/tmp/openclaw-db",
             "command_template": ["openclaw", "agent"],
-            "skill_safety": {"enabled": True, "repos": [{"path": "~/.skills/s1"}]},
+            "skill_safety": {"repos": [{"path": "~/.skills/s1"}]},
         }
     }
 
@@ -101,3 +104,24 @@ def test_effective_document_strips_retired_openclaw_block_from_stored_document()
     InstanceSettingsResponse.model_validate(document)
     # The caller's stored document is not mutated.
     assert "command_template" in stored["openclaw"]
+
+
+def test_effective_document_strips_retention_cursor_block() -> None:
+    """The retention sweep's persisted keyset cursors (#354) ride the stored
+    instance document but are host-private state: the effective document must
+    drop them so the extra=forbid response model validates."""
+    from server.app.routes.instance_settings_contracts import InstanceSettingsResponse
+    from server.app.services.instance_settings import effective_instance_document
+
+    stored = {
+        "execution_retention_days": 30,
+        "execution_retention_cursor": {
+            "requests:done": {"at": "2026-01-01T00:00:00+00:00", "id": "exec-1"}
+        },
+    }
+
+    document = effective_instance_document(stored)
+
+    assert "execution_retention_cursor" not in document
+    assert document["execution_retention_days"] == 30
+    InstanceSettingsResponse.model_validate(document)

@@ -57,6 +57,8 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     agentCatalog: catalog.agents,
     agentCatalogError: catalog.loadError,
     retryAgentCatalog: catalog.retry,
+    // #387：draft-only Agent 的解析/导航回落（useAgentDefinitions）。
+    agentDefinitions: catalog.definitions,
     definitionYaml: draft.definitionYaml,
     setDefinitionYaml: draft.setDraftYaml,
     selectedNodeKey,

@@ -40,10 +40,10 @@ from shared.code_sandbox import (
     build_sandbox_argv,
     child_env,
     read_result_error,
+    resolve_sandbox_binary,
 )
 from shared.material_cache import MATERIALS_CACHE_DIRNAME
 from worker._atomic import atomic_write
-from worker.binary_resolution import resolve_binary
 from worker.bundle_io import download_input_artifacts, safe_extract_tree
 from worker.execution.pending import refuse_if_pending_upload
 from worker.material_fetch import materialize_claim_material
@@ -190,6 +190,10 @@ def build_child_payload(
         runtime["job_batch"] = context["job_batch"]
     if materials is not None:
         runtime["materials"] = materials
+    # Shard executions (#389): the manifest carries the shard payload the
+    # Host-side local executor would inject via context.runtime; the child
+    # runtime dict is the same loose contract surface either way.
+    runtime.update({k: manifest[k] for k in ("shard_index", "shard_input") if k in manifest})
     return {
         "code": code_text,
         "job": runtime["job"],
@@ -228,7 +232,12 @@ def _outcome(
     timeout: float,
     write_error: list[BaseException],
 ) -> dict[str, str]:
-    """Map (exit code, result file, outputs) to the reported status/error."""
+    """Map (exit code, result file, outputs) to the reported status/error.
+
+    Shard runs (#389) carry their per-shard payload as a REGULAR expected
+    output (``shard_output-<index>.json``, added Host-side at enqueue): the
+    missing-outputs check below enforces it and the archive ships it back —
+    no size-capped metadata channel."""
     if exit_code == 130:
         # Shutdown or Host-driven cancel: wait_for_exit SIGTERMs the group and
         # reports 130 in both cases (same convention as the agent path).
@@ -294,14 +303,13 @@ def execute_code(
     try:
         prepared = prepare_code_execution(client, claim, execution_dir, download_slots)
         manifest = prepared.manifest
-        velites = resolve_binary("velites")
+        velites = resolve_sandbox_binary()
         if velites is None:
-            # Startup preflight normally catches this; the bundled copy or PATH
-            # can still change under a long-running Worker — fail closed
-            # (EXEC-CODE-003).
+            # Startup preflight normally catches this; PATH contents can still
+            # change under a long-running Worker — fail closed (EXEC-CODE-003).
             raise RuntimeError(
-                "code execution requires the velites binary (velites sandbox wrap) "
-                "in data/bin or on PATH; refusing to run unsandboxed"
+                "code execution requires the sandbox wrapper (velites-sandbox or "
+                "velites) on PATH; refusing to run unsandboxed"
             )
         result_path = job_dir / RESULT_BASENAME
         # A leftover result/marker from a previous attempt must never fake a

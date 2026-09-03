@@ -25,6 +25,7 @@ const data: InfraConnectionsResponse = {
   },
   storage: {
     configured: true,
+    backend: 'RustFS',
     endpoint_url: 'http://rustfs:9000',
     public_endpoint_url: '',
     bucket: 'agent-legion-materials',
@@ -60,6 +61,7 @@ describe('InfraConnectionsSection', () => {
     expect(screen.getByText('已设置（不回显）')).toBeInTheDocument()
     expect(screen.getByText('agent-legion-materials')).toBeInTheDocument()
     expect(screen.getByText('http://rustfs:9000')).toBeInTheDocument()
+    expect(screen.getByText('RustFS')).toBeInTheDocument()
     expect(screen.getByText('静态凭据（已设置，不回显）')).toBeInTheDocument()
     expect(screen.getByText('正常')).toBeInTheDocument()
   })
@@ -69,6 +71,7 @@ describe('InfraConnectionsSection', () => {
       ...data,
       storage: {
         configured: false,
+        backend: '',
         endpoint_url: '',
         public_endpoint_url: '',
         bucket: '',

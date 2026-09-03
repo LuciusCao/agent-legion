@@ -6,10 +6,60 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Changed
+- host 纯控制面模式：workflow 执行与宿主进程解耦（#389，收编 #385/#386）。
+  `code_capacity` 合法化 0 值（契约 `gt=0→ge=0`，UI「代码池」组改述为
+  「本地执行」——本地兜底执行并发上限，0 = 纯远程模式）：宿主容量为 0 时
+  不再组装本地执行栈（CodeExecutor/ExecutionRuntime/线程池/velites 沙箱
+  依赖全部消失），code 节点 100% 由远程 code Worker 执行；shard 分片执行
+  远程化——分片身份（`shard_index`/`shard_input`）写入持久化 manifest，
+  broker claim 事务经 `try_start_shard` 绑定 `node_shards` 行（行级去重），
+  分片输出以 `shard_output-<index>.json` 作为常规 expected_output 随归档
+  回传（不走尺寸受限的 metadata 通道）；调度线程 pass 级早退修复（纯远程
+  部署不再被饿死，且保留审批门等免 dispatch 工作的处理机会）；
+  `/api/health` 在纯远程模式下实时报告在线 code Worker 数（启动为 0 打
+  WARNING），防静默停摆。
+- `workflows.enabled` 退役（#385，由 #389 第 3 步收编）：该开关已从灰度
+  开关漂移为事实上的产品总开关，单机部署无合理关闭场景。404 门禁
+  `require_workflows_enabled` 整体移除（38 个路由文件、约 150 处调用，
+  API 面永远可用）；`worker_startup.is_enabled` 分支删除（worker 总是
+  启动，部署形态改由 `code_capacity` 表达）；实例设置契约删除该键，
+  存量 DB 文档读取时键级剥离（`workflows.max_items_per_run` 活跃保留），
+  无数据迁移。升级窗口内旧前端整文档 PUT 携带该键会 422（破坏性契约
+  变更，刷新前端即恢复）。
+- worker 镜像与 agent runtime 解耦（#381/#383，PR #384）：velites/pi 移出
+  worker 镜像——镜像收敛为纯执行服务（Python worker + bwrap + 内置的
+  `velites-sandbox` code 沙箱包装器），velites agent runtime 以平台匹配的
+  外挂二进制提供（compose bind mount 到 `/app/data/bin/velites`，long
+  syntax 缺源拒启）。新增 `AGENT_WORKER_EXPECT_RUNTIMES` 期望 runtime 守卫
+  （探测不到/被停用/模型发现失败均 fail-fast，退出码 2）；注册 payload 携带
+  生效 runtime 的 `--version`（版本握手可观测，外挂后的漂移排障依据）。
+  pi 在 docker 镜像内不可用（npm 入口依赖 node），部署走裸机。新增
+  `velites-v*` tag 触发的三平台 release workflow（linux amd64/arm64、
+  macos arm64）；host 容器的 code 本地兜底禁用（避免为兜底路径给后端
+  容器加 seccomp/cap 特权）。
+
 ### Deprecated
 - workflow_key 兼容窗口期公告（issue #211）：全部 deprecated 契约面的迁移文案统一标注移除时间 **2026-10-31**——27 个请求/响应字段、10 条 URL 别名、claim 协议字段将在终态批移除。显式发送恒等值（=workspace id）继续放行至该日期；不匹配值已由守卫拒绝（400）。所有部署实例须在窗口期内升级至 ≥ schema v68（存量 workflow_key 已对齐）。
 
 ### Added
+- 预览面板安全与正确性修复（PR #345 codex 评审 P1/P2）：宿主在 srcDoc 的
+  `<head>` 注入 CSP（`default-src 'none'` + 平台资源白名单 + `connect-src` 限
+  平台 origin），堵死沙箱 bundle 的出站网络通道（`sandbox="allow-scripts"` 不
+  阻 `fetch`/`sendBeacon`/`<img>` 外传——恶意草稿可先经桥读任务数据再外发）；
+  `PreviewPanelSection` 的 remount key 加入 bundle 内容指纹，草稿轮询更新时
+  整树重挂 iframe，旧文档在途桥请求的响应不再可能错误应答新文档的同编号请求；
+  authoring context 的 `recent_jobs` 产物清单统一走本地目录 ∪ 对象存储
+  manifest（此前仅 selected job 合并，worker 执行任务的 recent 清单会报空）。
+  preview_guide.md 运行时契约同步（出站网络由宿主强制而非编写约定）。
+- 发版解耦纪律 + 版本清单一致性检查（`scripts/check_versions.py`，挂 backend
+  静态轮）：velites（`velites/Cargo.toml`）与 frontend（`frontend/package.json`）
+  持有独立版本线，禁止随仓库版本（`pyproject.toml`）锁步 bump——无谓的版本前进
+  会改变 velites 子树 tree hash（`ensure-velites.sh` 的二进制新鲜度指纹）与
+  Docker 缓存键，触发全量 `cargo build` / 镜像层重建。检查两条规则：清单 ↔
+  lock 版本一致；独立组件的版本前进必须伴随锚点以来的源码改动（仓库发版顺手
+  bump 无源码改动的组件会被拒绝）。规则详见 `scripts/check_versions.py`
+  模块 docstring 与 CONTRIBUTING「House rules」。
 - Workflow nodes declare an explicit execution type `type: code | agent`
   (issue #284 phase 2, schema v66): the publish gate branches on it
   (agent nodes require exactly one published Agent for the capability,

@@ -34,6 +34,16 @@
   font-weight: 600;
   text-transform: uppercase;
 }
+.typeSelect {
+  flex: 0 0 auto;
+  padding: 2px 4px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  background: #fff;
+  color: #43474e;
+  font-size: 11px;
+  font-weight: 600;
+}
 .key {
   grid-column: 1 / -1;
   overflow: hidden;

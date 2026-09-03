@@ -7,7 +7,6 @@ from fastapi import APIRouter, Query
 from server.app.routes.job_http import (
     raise_job_http_error,
     reject_mismatched_workflow_key,
-    require_workflows_enabled,
 )
 from server.app.routes.job_view_contracts import (
     JobDetailResponse,
@@ -16,7 +15,6 @@ from server.app.routes.job_view_contracts import (
 )
 from server.app.services.job_errors import JobServiceError
 from server.app.services.job_queries import JobQueryService
-from server.app.settings import Settings
 
 # #211 Phase 2: query-param deprecation wording (server-side default).
 _DEPRECATED_QUERY = (
@@ -27,7 +25,6 @@ _DEPRECATED_QUERY = (
 
 def create_jobs_router(
     job_queries: JobQueryService,
-    settings: Settings,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -48,7 +45,6 @@ def create_jobs_router(
         ] = None,
         status: str | None = None,
     ) -> JobsResponse:
-        require_workflows_enabled(settings)
         # Subagent review P3-1 on #307: guard parity with failed-node-runs —
         # a mismatched key can no longer narrow (the column filter is the
         # next read-binding batch); reject instead of silently widening.
@@ -65,7 +61,6 @@ def create_jobs_router(
 
     @router.get("/jobs/{job_id}", response_model=JobDetailResponse)
     def get_job(job_id: str) -> JobDetailResponse:
-        require_workflows_enabled(settings)
         try:
             return JobDetailResponse(**job_queries.detail(job_id))
         except JobServiceError as exc:

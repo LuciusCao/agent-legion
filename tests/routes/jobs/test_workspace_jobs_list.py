@@ -14,7 +14,6 @@ def test_list_jobs_rejects_mismatched_workflow_key(tmp_path, job_db):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as client:
         job_db.create_workspace("ws-jobs-key", default_workflow_key="ws-jobs-key")
 

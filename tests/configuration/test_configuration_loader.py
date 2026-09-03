@@ -80,7 +80,7 @@ def test_yaml_root_must_be_mapping(tmp_path: Path, text: str):
 
 def test_explicit_path_accepts_flat_legacy_keys(tmp_path: Path):
     path = tmp_path / "custom.yaml"
-    _write(path, "data_dir: custom\ncms: {token: value}\nworkflows: {enabled: false}\n")
+    _write(path, "data_dir: custom\ncms: {token: value}\n")
     loaded = load_application_config(tmp_path, config_path=path)
     assert loaded.layout is ConfigLayout.EXPLICIT
     assert loaded.config["cms"]["token"] == "value"

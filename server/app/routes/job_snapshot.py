@@ -19,4 +19,4 @@ def create_job_snapshot_router(
         settings,
         job_event_buffer=job_patch_queries._job_event_buffer,
     )
-    return create_job_list_router(job_list_queries, settings)
+    return create_job_list_router(job_list_queries)

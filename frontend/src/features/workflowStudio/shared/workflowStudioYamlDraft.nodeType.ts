@@ -2,41 +2,34 @@ import {
   dumpWorkflowYaml,
   parseWorkflowYaml,
 } from './workflowStudioYamlDraft.parse'
+import {
+  sanitizeNodeForType,
+  validateNodeTypeSwitch,
+} from './workflowStudioYamlDraft.nodeTypeSwitch'
 
-// Inspector 头部徽标：type=agent 无徽标，approval 专属徽标，其余 code。
-export function workflowNodeKindBadge(nodeType: string | undefined): string {
-  if (nodeType === 'agent') return ''
-  if (nodeType === 'approval') return 'approval'
-  return 'code'
-}
+// 可切换的节点显式类型（#392）。start 是契约入口（每 DAG 恰一个、由
+// loader 保证），不进选择器也不可切入/切出；读侧遗留 `node` 已在 parse
+// 层归一化为 code。
+export type SwitchableNodeType = 'code' | 'agent' | 'approval'
 
-// 改写节点的显式执行类型（#284）：type=code 节点「切换为 Agent 执行」时
-// 把草稿 YAML 的 type 改为 agent。start 节点的类型不可改写。
+export { WorkflowNodeTypeSwitchError } from './workflowStudioYamlDraft.nodeTypeSwitch'
+
+// 改写节点的显式执行类型（#284 → #392 通用化）：先做目标类型的前置
+// 校验（capability / 入边，见 nodeTypeSwitch），再切换 type 并按目标类型
+// 清洗字段，保证改写后的草稿不违反 loader 的类型禁令（否则下一次
+// validate/publish 即被拒）。start 节点的类型不可改写。
 export function patchWorkflowNodeType(
   rawYaml: string,
   nodeKey: string,
-  nodeType: 'code' | 'agent'
+  nodeType: SwitchableNodeType
 ): string {
   const draft = parseWorkflowYaml(rawYaml)
   const node = draft.nodes?.[nodeKey]
   if (!node) throw new Error(`Node ${nodeKey} not found`)
   if (node.type === 'start') throw new Error(`Node ${nodeKey} is a start node`)
+  validateNodeTypeSwitch(draft, node, nodeType)
+  const sourceType = node.type ?? 'code'
   node.type = nodeType
+  sanitizeNodeForType(node, sourceType, nodeType)
   return dumpWorkflowYaml(draft)
-}
-
-// 「切换为 Agent 执行」：改写草稿 YAML 的节点 type 并经 setDefinitionYaml
-// 落草稿状态（自动持久化走 workflow-draft API）；改写失败返回 false，由
-// 按钮侧降级提示用户手动改 YAML。
-export function switchWorkflowNodeToAgent(
-  rawYaml: string,
-  nodeKey: string,
-  setDefinitionYaml: (value: string) => void
-): boolean {
-  try {
-    setDefinitionYaml(patchWorkflowNodeType(rawYaml, nodeKey, 'agent'))
-    return true
-  } catch {
-    return false
-  }
 }

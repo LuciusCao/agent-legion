@@ -61,7 +61,7 @@ def _make_worker(
     )
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
-            "workflows": {"enabled": True, "custom_nodes_enabled": custom_nodes_enabled},
+            "workflows": {"custom_nodes_enabled": custom_nodes_enabled},
             "code_capacity": 2,
         }
     )

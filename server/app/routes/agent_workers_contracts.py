@@ -25,6 +25,10 @@ class RegisterAgentWorkerRequest(BaseModel):
     protocol_version: int = Field(default=1, ge=1)
     # Informational only: no agent_workers column stores it yet.
     image_version: str = Field(default="", max_length=128)
+    # #381 版本握手：生效 runtime 的 --version 输出（{runtime: version 字符串}）。
+    # Informational——外挂后 velites 版本独立管理，注册日志据此可查「worker 代码
+    # × velites 版本」兼容矩阵；不参与 claim 准入，旧 Worker 缺省为空。
+    runtime_versions: dict[str, str] = Field(default_factory=dict)
 
 
 class AgentWorkerWorkspace(BaseModel):

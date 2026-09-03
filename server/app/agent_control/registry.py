@@ -66,11 +66,13 @@ class AgentWorkerRegistry(AgentRegisterTokenStore):
         labels: Mapping[str, Any] | None = None,
         protocol_version: int = 1,
         image_version: str = "",
+        runtime_versions: Mapping[str, str] | None = None,
         allowed_workspaces: Sequence[str] | None = None,
         register_token_ids: Sequence[str] | None = None,
     ) -> str:
-        # image_version is accepted for forward compatibility but not stored:
-        # the agent_workers table has no column for it yet.
+        # image_version / runtime_versions are accepted for forward
+        # compatibility but not stored: the agent_workers table has no column
+        # for either yet (the handshake fields live in the register log only).
         if not _WORKER_ID.fullmatch(worker_id):
             raise ValueError("worker_id must be 1-64 chars of [A-Za-z0-9_-] starting alphanumeric")
         if len(name) > _MAX_NAME_LENGTH:
@@ -197,6 +199,15 @@ class AgentWorkerRegistry(AgentRegisterTokenStore):
                     (workspace_id,),
                 ).fetchall()
         return [_worker_payload(row) for row in rows]
+
+    def count_online_code_workers(self) -> int:
+        """Online code-capable Worker count (#389, /api/health signal); same
+        predicate as code_dispatch's online probes: non-revoked, code capacity,
+        protocol v2, fresh heartbeat."""
+        sql = "select count(*) as n from agent_workers where revoked_at is null and max_code_concurrency > 0 and protocol_version >= %s and last_seen_at > now() - make_interval(secs => %s)"
+        with read_connection(self.database_dsn) as conn:
+            row = conn.execute(sql, (CODE_PROTOCOL_VERSION, ONLINE_THRESHOLD_SECONDS)).fetchone()
+        return int(row["n"]) if row is not None else 0
 
     def delete_worker(self, worker_id: str) -> str:
         """Hard-delete a worker registration; blocked while a bound key lives.

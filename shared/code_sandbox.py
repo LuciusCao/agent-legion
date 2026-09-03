@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import site
 import sys
 from pathlib import Path
@@ -37,6 +38,38 @@ from shared.code_contract import CODE_BUNDLE_NODE_FILE as CODE_BUNDLE_NODE_FILE
 from shared.code_contract import CODE_RESULT_LOG_MEMBER as CODE_RESULT_LOG_MEMBER
 from shared.code_contract import CODE_RESULT_METADATA_KEYS as CODE_RESULT_METADATA_KEYS
 from shared.code_contract import MAX_CONNECTION_KEY_CHARS as MAX_CONNECTION_KEY_CHARS
+
+#: 沙箱包装器的候选二进制名（#383）：优先 velites-sandbox（独立 bin，烤进
+#: worker 镜像的沙箱基础设施），兜底 velites（全量二进制的 sandbox wrap
+#: 子命令，裸机形态）。两形态 argv 完全兼容（velites-sandbox 吞掉前导
+#: sandbox wrap token），调用方不需要知道解析到的是哪个。
+SANDBOX_BINARY_CANDIDATES: tuple[str, ...] = ("velites-sandbox", "velites")
+
+#: 自带二进制目录（仓库根 data/bin）：Worker 裸机部署经
+#: ``ensure-velites.sh --dest data/bin`` 安置的产物落点，沙箱解析与
+#: worker/binary_resolution.py 的 runtime 解析共用（该模块 re-export 本
+#: 常量为 BUNDLED_BINARY_DIR——单一事实源，mock 任一侧改变同一目录）。
+#: Docker 镜像内此目录不存在（runtime 二进制经 compose 挂载、沙箱包装器
+#: 在 /usr/local/bin），探测自然跳过；Host 侧同理。
+BUNDLED_SANDBOX_DIR = Path(__file__).resolve().parents[1] / "data" / "bin"
+
+
+def resolve_sandbox_binary() -> str | None:
+    """Resolve the sandbox wrapper; None when no candidate exists.
+
+    解析面（Host 与 Worker 共用）：候选名按序探测「自带副本目录 → PATH」；
+    裸机 Worker 的 data/bin 自带副本（ensure-velites.sh 安置）与 PATH 上的
+    全量二进制都命中。与 agent runtime 解析（worker/binary_resolution.py
+    的 runtime 目录语义）刻意分开：沙箱是基础设施、不是 runtime。
+    """
+    for name in SANDBOX_BINARY_CANDIDATES:
+        bundled = BUNDLED_SANDBOX_DIR / name
+        if bundled.is_file() and os.access(bundled, os.X_OK):
+            return str(bundled)
+        resolved = shutil.which(name)
+        if resolved:
+            return resolved
+    return None
 
 
 def child_env(import_root: Path) -> dict[str, str]:

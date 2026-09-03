@@ -66,7 +66,7 @@ describe('StudioAgentsSection', () => {
     expect(screen.getByLabelText('agent-command-0')).toHaveValue('kimi')
     expect(screen.getByLabelText('agent-args-0')).toHaveValue('acp')
     expect(screen.getByLabelText('agent-id-1')).toHaveValue('claude')
-    expect(screen.getByLabelText('api_base')).toHaveValue(
+    expect(screen.getByLabelText('平台回调地址（api_base）')).toHaveValue(
       'http://127.0.0.1:8000'
     )
     expect(screen.getByText('可用')).toBeInTheDocument()
@@ -121,7 +121,7 @@ describe('StudioAgentsSection', () => {
     fireEvent.change(screen.getByLabelText('agent-args-0'), {
       target: { value: 'acp --verbose' },
     })
-    fireEvent.change(screen.getByLabelText('api_base'), {
+    fireEvent.change(screen.getByLabelText('平台回调地址（api_base）'), {
       target: { value: 'http://127.0.0.1:9000' },
     })
     fireEvent.click(screen.getByText('保存'))

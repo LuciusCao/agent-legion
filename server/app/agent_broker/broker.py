@@ -22,9 +22,9 @@ from server.app.agent_broker.claim import (
     ClaimRacedError,
     claim_in_transaction,
 )
-from server.app.agent_broker.code_manifest import CODE_MANIFEST_TRIM
 from server.app.agent_broker.empty import EmptyClaimTrigger
 from server.app.agent_broker.enqueue import enqueue_request
+from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
@@ -123,23 +123,36 @@ class AgentExecutionBroker:
         declared_max_concurrency: int | None = None,
         declared_max_code_concurrency: int | None = None,
     ) -> AgentClaim | None:
+        from server.app.services.runtime_profile import profile
+
+        timer = profile.claim_timer()
+        claimed: AgentClaim | None = None
         try:
-            with write_transaction(self.database_dsn) as conn:
-                claimed, skip_reasons = claim_in_transaction(
-                    self, conn, worker_id, declared_max_concurrency, declared_max_code_concurrency
-                )
-        except ClaimRacedError:
-            return None
-        if claimed is None:
-            # Demand signal: a Worker found no work; restock immediately when
-            # the queue is truly empty, or surface the skip-reason histogram
-            # when unclaimable stock blocked the claim (debounced, see empty).
-            self.empty_claim.note_empty_claim(self.database_dsn, skip_reasons=skip_reasons)
-        # Record only after the commit has succeeded, never inside the tx.
-        if claimed is not None:
-            record_job_update(self.job_db, self.job_event_buffer, claimed.job_id)
-        self._notify_worker_poll(worker_id, claimed)
-        return claimed
+            try:
+                with write_transaction(self.database_dsn) as conn:
+                    claimed, skip_reasons = claim_in_transaction(
+                        self,
+                        conn,
+                        worker_id,
+                        declared_max_concurrency,
+                        declared_max_code_concurrency,
+                    )
+            except ClaimRacedError:
+                return None
+            if claimed is None:
+                # Demand signal: a Worker found no work; restock immediately when
+                # the queue is truly empty, or surface the skip-reason histogram
+                # when unclaimable stock blocked the claim (debounced, see empty).
+                self.empty_claim.note_empty_claim(self.database_dsn, skip_reasons=skip_reasons)
+            # Record only after the commit has succeeded, never inside the tx.
+            if claimed is not None:
+                record_job_update(self.job_db, self.job_event_buffer, claimed.job_id)
+            self._notify_worker_poll(worker_id, claimed)
+            return claimed
+        finally:
+            # Runtime profile (#359): server-side claim latency + 204 share.
+            # The finally covers every return path, including ClaimRacedError's.
+            profile.note_claim(timer.stop(), empty=claimed is None)
 
     def _notify_worker_poll(self, worker_id: str, claimed: AgentClaim | None) -> None:
         """Mirror Worker presence/capacity into the status panel: every idle
@@ -251,7 +264,7 @@ class AgentExecutionBroker:
             conn.execute(
                 "update agent_execution_requests set state='done', outcome_json=%s,"
                 " finished_at=current_timestamp, manifest_json="
-                + CODE_MANIFEST_TRIM
+                + MANIFEST_TRIM
                 + " where execution_id=%s",
                 (json.dumps(dict(outcome), ensure_ascii=False), execution_id),
             )
@@ -265,7 +278,9 @@ class AgentExecutionBroker:
 
     def fail_stale_definition_requests(self) -> list[str]:
         """Fail queued requests whose pinned Agent definition is gone or disabled."""
-        return sweepers.fail_stale_definition_requests(self)
+        from server.app.agent_broker.sweeper_definitions import fail_stale_definition_requests
+
+        return fail_stale_definition_requests(self)
 
     def discard_result_archive(self, archive_name: str) -> None:
         """Reclaim a per-attempt result archive; names are unique per attempt."""

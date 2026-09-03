@@ -161,7 +161,7 @@ def _make_worker(
         logs_dir=tmp_path / "logs",
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
-        config={"workflows": {"enabled": True}},
+        config={},
         database_url=str(queries.dsn_identity),
     )
     worker = WorkflowWorkerThread(

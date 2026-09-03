@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query
 
 from server.app.jobs import JobQueries
 from server.app.routes.agent_catalog_contracts import AgentCatalogResponse
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.skill_catalog_route import create_skill_catalog_router
 from server.app.routes.workspace_execution_contracts import (
     WorkspaceExecutionConfigurationResponse,
@@ -30,7 +30,6 @@ def create_workspace_agent_catalog_router(
         # The Agent half of the catalog is workspace-scoped (schema v46), so
         # the required workspace_id query parameter doubles as the membership
         # scope enforced by the router-level workspace-access dependency.
-        require_workflows_enabled(settings)
         return AgentCatalogResponse(**catalog.catalog(workspace_id))
 
     @router.get(
@@ -40,7 +39,6 @@ def create_workspace_agent_catalog_router(
     def get_workspace_execution_configuration(
         workspace_id: str,
     ) -> WorkspaceExecutionConfigurationResponse:
-        require_workflows_enabled(settings)
         try:
             return WorkspaceExecutionConfigurationResponse(
                 **workspace_configuration.get(workspace_id)

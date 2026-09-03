@@ -1,14 +1,28 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { TestQueryProvider } from '../../../testing/testQueryClient'
+import { MemoryRouter } from '../../../testing/TestMemoryRouter'
 import { useSettingStore } from '../../../stores/settingStore'
+import { fetchAgentDefinitions } from '../../../api/agentDefinitions'
+import type { AgentListResponse, WorkflowNodeRecord } from '../../../types'
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
-import type { WorkflowNodeRecord } from '../../../types'
+import type { StudioNav } from '../shared/workflowStudioNav'
+import { StudioNavContext } from '../shared/useStudioNavState'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
 
 vi.mock('../../../api/agentCatalogApi', () => ({
   getAgentCatalog: vi.fn().mockResolvedValue({ agents: [] }),
 }))
+
+// #387：draft-only Agent 的节点解析回落 agent-definitions（含 draft）。
+vi.mock('../../../api/agentDefinitions', () => ({
+  fetchAgentDefinitions: vi.fn(),
+}))
+vi.mock('../../../stores/settingStore', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../stores/settingStore')>()
+  return actual
+})
 
 // 内嵌编辑器的完整行为由 WorkflowNodeAgentEditor.test.tsx 覆盖。
 vi.mock('./AgentEditor', () => ({
@@ -67,19 +81,37 @@ const editorProps = {
   agentCatalog,
 }
 
+// 组件经 useStudioNav 读 openAgent 的目标草稿身份：默认无 pending。
+const navStub: StudioNav = {
+  openAgent: () => {},
+  pendingAgentId: null,
+  clearPendingAgentId: () => {},
+}
+
 function renderSection(
-  props: React.ComponentProps<typeof WorkflowNodeExecutionSection>
+  props: React.ComponentProps<typeof WorkflowNodeExecutionSection>,
+  nav: StudioNav = navStub
 ) {
   return render(
-    <TestQueryProvider>
-      {<WorkflowNodeExecutionSection {...props} />}
-    </TestQueryProvider>
+    <MemoryRouter initialEntries={['/workspaces/ws1/studio']}>
+      <Routes>
+        <Route
+          path="/workspaces/:workspaceId/studio"
+          element={
+            <StudioNavContext.Provider value={nav}>
+              <WorkflowNodeExecutionSection {...props} />
+            </StudioNavContext.Provider>
+          }
+        />
+      </Routes>
+    </MemoryRouter>
   )
 }
 
 describe('WorkflowNodeExecutionSection', () => {
   beforeEach(() => {
     useSettingStore.setState({ workspaceId: 'ws1' })
+    vi.mocked(fetchAgentDefinitions).mockResolvedValue({ agents: [] })
   })
 
   it('shows the executor binding for the selected node capability', () => {
@@ -148,16 +180,25 @@ describe('WorkflowNodeExecutionSection', () => {
     // 顶层 execution 默认保留在 YAML，节点级 provider（6 空格缩进）必须被移除。
     expect(nextYaml).not.toContain('      provider:')
     rerender(
-      <TestQueryProvider>
-        <WorkflowNodeExecutionSection
-          node={nodeWithProvider}
-          agentCatalog={agentCatalog}
-          definitionYaml={nextYaml}
-          setDefinitionYaml={(value) => {
-            nextYaml = value
-          }}
-        />
-      </TestQueryProvider>
+      <MemoryRouter initialEntries={['/workspaces/ws1/studio']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/studio"
+            element={
+              <StudioNavContext.Provider value={navStub}>
+                <WorkflowNodeExecutionSection
+                  node={nodeWithProvider}
+                  agentCatalog={agentCatalog}
+                  definitionYaml={nextYaml}
+                  setDefinitionYaml={(value) => {
+                    nextYaml = value
+                  }}
+                />
+              </StudioNavContext.Provider>
+            }
+          />
+        </Routes>
+      </MemoryRouter>
     )
     expect(screen.getByLabelText('Provider')).toHaveValue('')
     expect(screen.getByText('继承 workflow 默认：deepseek')).toBeInTheDocument()
@@ -196,16 +237,23 @@ describe('WorkflowNodeExecutionSection', () => {
     )
   })
 
-  it('shows the code-pool state and the switch-to-agent entry for a code node', () => {
+  it('shows the code-pool state without any agent entry for a code node (#392)', () => {
     renderSection({
       node: { ...node, node_type: 'code', capability: 'missing' },
       ...editorProps,
     })
 
     expect(screen.getByText('内置 code 池执行')).toBeInTheDocument()
+    // code 节点不再长出 Agent 入口（类型变更走头部类型选择器）。
     expect(
-      screen.getByRole('button', { name: '切换为 Agent 执行' })
-    ).toBeInTheDocument()
+      screen.queryByRole('button', { name: '切换为 Agent 执行' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '为此 capability 新建 Agent' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '编辑 Agent' })
+    ).not.toBeInTheDocument()
   })
 
   it('points an agent node without a published Agent to the create entry', () => {
@@ -218,6 +266,154 @@ describe('WorkflowNodeExecutionSection', () => {
     expect(
       screen.getByRole('button', { name: '为此 capability 新建 Agent' })
     ).toBeInTheDocument()
+  })
+
+  // #387：MCP 建的 draft-only Agent 不在 published 目录里，但节点详情要能
+  // 解析到它（编辑/发布入口可达），并明确提示「未发布」。
+  it('resolves a draft-only agent from agent-definitions and flags it unpublished', async () => {
+    vi.mocked(fetchAgentDefinitions).mockResolvedValue({
+      agents: [
+        {
+          agent_id: 'draft-agent',
+          capability: 'generate_key_info',
+          runtime: 'pi',
+          skill: 'demo_workflow/generate_key_info',
+          version: 1,
+          status: 'draft',
+          has_draft: true,
+          published_at: null,
+        },
+      ],
+    })
+    renderSection({ node, ...editorProps, agentCatalog: [] })
+
+    expect(await screen.findByText('draft-agent')).toBeInTheDocument()
+    expect(screen.getByText(/草稿 Agent 未发布/)).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '编辑 Agent' })
+    ).toBeInTheDocument()
+  })
+
+  it('prefers the published catalog agent over a same-capability draft', async () => {
+    vi.mocked(fetchAgentDefinitions).mockResolvedValue({
+      agents: [
+        {
+          agent_id: 'draft-agent',
+          capability: 'generate_key_info',
+          runtime: 'pi',
+          skill: '',
+          version: 1,
+          status: 'draft',
+          has_draft: true,
+          published_at: null,
+        },
+      ],
+    })
+    renderSection({ node, ...editorProps })
+
+    // published 版本渲染后草稿提示不出现。
+    await waitFor(() =>
+      expect(screen.getByText('question-key-info-v1')).toBeInTheDocument()
+    )
+    expect(screen.queryByText(/草稿 Agent 未发布/)).not.toBeInTheDocument()
+  })
+
+  // codex P1 on #391：同 capability 允许存在多个未发布草稿（服务端只在
+  // publish 时校验冲突）——保留 openAgent 点击的草稿身份，不总取第一个。
+  it('honors the pending agent id when several drafts share the capability', async () => {
+    vi.mocked(fetchAgentDefinitions).mockResolvedValue({
+      agents: [
+        {
+          agent_id: 'first-draft',
+          capability: 'generate_key_info',
+          runtime: 'pi',
+          skill: '',
+          version: 1,
+          status: 'draft',
+          has_draft: true,
+          published_at: null,
+        },
+        {
+          agent_id: 'clicked-draft',
+          capability: 'generate_key_info',
+          runtime: 'pi',
+          skill: '',
+          version: 1,
+          status: 'draft',
+          has_draft: true,
+          published_at: null,
+        },
+      ],
+    })
+    const clearPending = vi.fn()
+    renderSection(
+      { node, ...editorProps, agentCatalog: [] },
+      {
+        ...navStub,
+        pendingAgentId: 'clicked-draft',
+        clearPendingAgentId: clearPending,
+      }
+    )
+
+    // 命中点击的草稿（而非列表第一个），解析后清除 pending。
+    expect(await screen.findByText('clicked-draft')).toBeInTheDocument()
+    expect(screen.queryByText('first-draft')).not.toBeInTheDocument()
+    await waitFor(() => expect(clearPending).toHaveBeenCalled())
+  })
+
+  // subagent review P2-1 on #391：pending 的清除绑定「数据 settle + 命中
+  // 确认」——列表还在加载（缓存滞后于 turn_end 失效重取）时保留 pending，
+  // 不能在未命中的首次渲染就清掉导致身份丢失、回落到列表第一个。
+  it('keeps the pending agent id while the definitions query is still loading', async () => {
+    let resolveDefinitions: (value: AgentListResponse) => void = () => {}
+    vi.mocked(fetchAgentDefinitions).mockReturnValue(
+      new Promise((resolve) => {
+        resolveDefinitions = resolve
+      }) as ReturnType<typeof fetchAgentDefinitions>
+    )
+    const clearPending = vi.fn()
+    renderSection(
+      { node, ...editorProps, agentCatalog: [] },
+      {
+        ...navStub,
+        pendingAgentId: 'clicked-draft',
+        clearPendingAgentId: clearPending,
+      }
+    )
+
+    // 未 settle：pending 不清除，草稿解析暂缺（显示暂无指引）。
+    expect(screen.getByText(/暂无 published Agent/)).toBeInTheDocument()
+    expect(clearPending).not.toHaveBeenCalled()
+
+    resolveDefinitions({
+      agents: [
+        {
+          agent_id: 'first-draft',
+          capability: 'generate_key_info',
+          runtime: 'pi',
+          skill: '',
+          version: 1,
+          status: 'draft',
+          has_draft: true,
+          published_at: null,
+        },
+        {
+          agent_id: 'clicked-draft',
+          capability: 'generate_key_info',
+          runtime: 'pi',
+          skill: '',
+          version: 1,
+          status: 'draft',
+          has_draft: true,
+          published_at: null,
+        },
+      ],
+    })
+
+    // settle 后命中点击的草稿并清除 pending。
+    expect(await screen.findByText('clicked-draft')).toBeInTheDocument()
+    expect(screen.queryByText('first-draft')).not.toBeInTheDocument()
+    await waitFor(() => expect(clearPending).toHaveBeenCalled())
   })
 
   it('renders the node skill editor for agent-routed nodes only', () => {
@@ -252,20 +448,15 @@ describe('WorkflowNodeExecutionSection', () => {
     expect(screen.queryByText(/5c5eae7/)).not.toBeInTheDocument()
   })
 
-  it('shows the approval-gate hint and hides the agent editor for approval nodes', () => {
-    renderSection({
+  it('renders nothing for approval nodes (#392 Phase 2: registry gates the section)', () => {
+    const { container } = renderSection({
       node: { ...node, node_type: 'approval', capability: '' },
       ...editorProps,
     })
 
-    expect(screen.getByText('审批门')).toBeInTheDocument()
-    expect(screen.getByText(/awaiting_approval/)).toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: '切换为 Agent 执行' })
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: '为此 capability 新建 Agent' })
-    ).not.toBeInTheDocument()
+    // 审批门由 WorkflowNodeApprovalConfigSection 承载；本 section 挂在
+    // code/agent 类型（nodeTypeSections 注册表），直接喂 approval 渲染空。
+    expect(container).toBeEmptyDOMElement()
   })
 
   it('toggles the embedded agent editor for the bound agent', () => {

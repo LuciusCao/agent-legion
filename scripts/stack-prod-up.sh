@@ -14,14 +14,17 @@ if [[ -f deploy/compose.local.yaml ]]; then
     COMPOSE+=(-f deploy/compose.local.yaml)
 fi
 
-# 本地 RustFS 三态开关（AGENT_LEGION_LOCAL_S3=auto|always|never，默认 auto；
+# 本地对象存储三态开关（AGENT_LEGION_LOCAL_S3=auto|always|never，默认 auto；
 # 判断逻辑见 scripts/local-s3-decide.sh）。compose 插值只读 deploy/.env，
-# 且 host 的 endpoint 默认注入 http://rustfs:9000（--default-endpoint 如实
-# 反映该注入）；决策为 start 时经 --profile materials-local 启用 rustfs
-# 服务。决策失败（开关值非法 / 决策启动但凭据未配齐）fail fast，原因由
-# 脚本写到 stderr——与旧版 compose 的 :? 强校验同级。
-if [[ "$(scripts/local-s3-decide.sh --default-endpoint http://rustfs:9000 deploy/.env)" == "start" ]]; then
-    COMPOSE+=(--profile materials-local)
+# 且 host 的 endpoint 默认注入 http://seaweedfs:8333（--default-endpoint 如实
+# 反映该注入）；决策为 start 时经 --profile materials-local 启用所选后端
+# 服务（默认 seaweedfs；BACKEND=rustfs 时 decide 脚本会分派到对应 profile，
+# 此处取其 --compose-flags 输出）。决策失败（开关值非法 / 决策启动但凭据
+# 未配齐）fail fast，原因由脚本写到 stderr——与旧版 compose 的 :? 强校验同级。
+LOCAL_S3_FLAGS="$(scripts/local-s3-decide.sh --compose-flags --default-endpoint http://seaweedfs:8333 deploy/.env)"
+if [[ -n "$LOCAL_S3_FLAGS" ]]; then
+    # shellcheck disable=SC2206  # decide 脚本输出固定为单元素 "--profile <name>"
+    COMPOSE+=(${LOCAL_S3_FLAGS})
 fi
 
 # 1. secrets（worker 注册走 scoped token（Host UI 签发），不再需要全局 secret）

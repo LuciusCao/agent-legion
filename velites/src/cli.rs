@@ -137,6 +137,7 @@ pub fn expand_instruction(parts: &[String]) -> anyhow::Result<String> {
 #[derive(Debug, Parser)]
 #[command(
     name = "velites-sandbox-wrap",
+    version,
     about = "Run a command inside the velites OS sandbox (fail-closed)."
 )]
 pub struct SandboxWrapCli {
