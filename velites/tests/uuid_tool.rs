@@ -97,7 +97,9 @@ async fn validate_flags_fake_uuids() {
         "values": [
             "123456abcdef",                                  // not even UUID-shaped
             "f47ac10b-58cc-4372-a567-0e02b2c3d47",           // one char short
-            "g47ac10b-58cc-4372-a567-0e02b2c3d479"           // non-hex digit
+            "g47ac10b-58cc-4372-a567-0e02b2c3d479",          // non-hex digit
+            "00000000-0000-0000-0000-000000000000",          // nil: parses, wrong variant
+            "ffffffff-ffff-ffff-ffff-ffffffffffff"           // max: parses, wrong variant
         ]
     }))
     .await;
@@ -105,9 +107,10 @@ async fn validate_flags_fake_uuids() {
     let text = result_text(&output);
     assert_eq!(
         text.lines().filter(|l| l.contains(": invalid")).count(),
-        3,
+        5,
         "{text}"
     );
+    assert!(text.contains("non-RFC4122 variant"), "{text}");
 }
 
 #[tokio::test]
@@ -134,4 +137,34 @@ async fn validate_rejects_bad_args() {
         let output = run_uuid(args).await;
         assert!(output.is_error, "args must be rejected: {output:?}");
     }
+}
+
+#[tokio::test]
+async fn validate_rejects_oversized_or_control_char_values() {
+    // A value longer than any real UUID representation (a URN is 45 chars;
+    // the cap is a generous 512) is a caller bug, and a newline would break
+    // the one-verdict-per-line output protocol — both are arg errors.
+    for value in ["x".repeat(513), "abc\ndef".to_string()] {
+        let output = run_uuid(serde_json::json!({"op": "validate", "values": [value]})).await;
+        assert!(output.is_error, "value must be rejected: {output:?}");
+    }
+}
+
+#[tokio::test]
+async fn validate_output_is_head_truncated_with_note() {
+    // 1000 valid v4s with non-canonical notes ≈ 66KB — over the 50KB
+    // tool-output budget (design §8); truncation must kick in with a
+    // batching hint, and output_bytes keeps the pre-truncation volume.
+    let values: Vec<String> = (0..1000)
+        .map(|_| uuid::Uuid::new_v4().to_string().to_uppercase())
+        .collect();
+    let output = run_uuid(serde_json::json!({"op": "validate", "values": values})).await;
+    assert!(
+        !output.is_error,
+        "uppercase v4s are valid, just non-canonical"
+    );
+    let text = result_text(&output);
+    assert!(text.contains("[Showing "), "{text}");
+    assert!(text.contains("verdicts"), "{text}");
+    assert!(output.output_bytes as usize > text.len());
 }

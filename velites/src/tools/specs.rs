@@ -64,15 +64,16 @@ pub fn spec(kind: ToolKind) -> ToolSpec {
              `generate` returns fresh random UUIDs: every call produces \
              different values (replay included), so persist generated \
              values into your output files instead of expecting \
-             reproducibility. `validate` checks each value and reports \
-             format, version, and variant problems.",
+             reproducibility. `validate` checks each value and fails on \
+             format, version, and variant problems (parseable-but-anomalous \
+             values like nil/max UUIDs fail as non-RFC4122 variants).",
             serde_json::json!({
                 "type": "object",
                 "properties": {
                     "op": {"type": "string", "enum": ["generate", "validate"], "description": "Operation to perform."},
                     "count": {"type": "integer", "description": "generate: how many UUIDs to mint (default 1, max 100)."},
                     "version": {"type": "string", "enum": ["v4", "v7"], "description": "generate: UUID version — v4 random (default); v7 time-ordered, friendlier for database keys."},
-                    "values": {"type": "array", "items": {"type": "string"}, "description": "validate: UUID strings to check (max 1000)."}
+                    "values": {"type": "array", "items": {"type": "string"}, "description": "validate: UUID strings to check (max 1000 entries, each max 512 chars, no control characters)."}
                 },
                 "required": ["op"]
             }),

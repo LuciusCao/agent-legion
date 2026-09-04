@@ -1551,7 +1551,7 @@
     "velites/src/tools/read.rs": 98,
     "velites/src/tools/specs.rs": 89,
     "velites/src/tools/truncate.rs": 313,
-    "velites/src/tools/uuid.rs": 134,
+    "velites/src/tools/uuid.rs": 128,
     "velites/src/tools/write.rs": 71,
     "worker/__init__.py": 11,
     "worker/_atomic.py": 32,

@@ -1,4 +1,4 @@
-//! The velites tools: `read`, `write`, `bash`, plus deterministic utility
+//! The velites tools: `read`, `write`, `bash`, plus opt-in utility
 //! tools like `uuid` (design §8; #442).
 //!
 //! Sandbox invariant: every path a tool touches must canonicalize to a
