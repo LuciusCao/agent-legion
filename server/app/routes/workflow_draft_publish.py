@@ -59,6 +59,13 @@ def create_workflow_draft_publish_router(job_db: JobQueries, settings: Settings)
             settings.executor_runtime.workflows.custom_nodes_enabled,
         )
         if valid:
+            # The publish effect is real: any pending agent publish request
+            # for this workspace is moot — its draft went live through the
+            # manual button. Supersede (not reject) so the polling agent
+            # sees "displaced by a manual publish" instead of a dead-end
+            # pending whose review dialog can never confirm usefully
+            # (#416/#429).
+            job_db.supersede_pending_publish_requests(workspace_id)
             # The first publish of a blank-canvas workspace adopts the draft
             # key, making the workspace a new worker scan target (schema
             # v50): reload the scan list and wake the poll loop.

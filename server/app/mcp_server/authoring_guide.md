@@ -21,6 +21,23 @@ Studio. Nothing you do takes effect in production by itself.
   (everything reported as added, `base_revision: null`, and the returned
   `draft_workflow.version` is the synthetic placeholder `0`, not a real
   revision number).
+- `request_workflow_publish(workspace_id)` — ask the human to publish the
+  workspace's unpublished draft. NEVER publishes by itself: it parks a
+  pending request; the human sees the publish review dialog in Studio and
+  confirms or cancels. The draft must already pass full validation (a draft
+  with errors returns HTTP 409 and creates no request), and the request
+  binds the CURRENT server draft — if the draft changes afterwards, the
+  human's confirm refuses with 409 and you must re-request. A 409 during
+  another request's confirm window means: wait and re-request once it
+  resolves. After calling, tell the human to review the dialog.
+- `get_publish_request_status(request_id)` — poll the outcome of a publish
+  request: `pending` until the human decides; `confirming` (the human
+  pressed confirm; the publish is in flight); `confirmed`
+  (`result_revision_id` set only when the publish created a new revision —
+  a runtime-only config update keeps it null), `rejected`, `superseded`
+  (a newer request of yours or a manual human publish displaced it), or
+  `expired` (nobody answered within the TTL). `superseded` by a manual
+  publish still means the draft went live — check the active revision.
 - `save_node_code_draft(workspace_id, node_key, code, ...)` —
   draft Python source for a code node.
 - `get_node_code(workspace_id, node_key)` — effective code plus
@@ -45,11 +62,12 @@ Studio. Nothing you do takes effect in production by itself.
 - `save_skill_version(skill_key, files, new_tag, message)` — commit + tag a
   new version in the skill's LOCAL source repo (section 6). Lock untouched.
 
-There is NO tool to create workspaces or to publish anything, and no workflow
-registry anymore (schema v50): a workflow is simply the DAG inside one
-workspace. The human creates the workspace in Studio (blank canvas, or
-initialized from the sample template) and publishes workflow revisions, node
-code, agent definitions, and skill releases.
+There is NO tool to create workspaces, and no workflow registry anymore
+(schema v50): a workflow is simply the DAG inside one workspace. The human
+creates the workspace in Studio (blank canvas, or initialized from the sample
+template) and owns every publish decision: your `request_workflow_publish`
+only asks — the human confirms in the review dialog (the publish, node code
+publish, agent definition publish, and skill release actions stay human-only).
 
 ## 2. From-scratch flow (empty workspace)
 
@@ -71,8 +89,13 @@ code, agent definitions, and skill releases.
 5. For each code node, `save_node_code_draft` with `expected_capability` set
    (section 4). For each agent-backed capability without a published Agent,
    `save_agent_definition_draft` (section 5).
-6. Present the draft YAML + validation result to the human and ask them to
-   publish in Studio. Publish is never your job.
+6. Present the change summary to the human, then call
+   `request_workflow_publish` — the publish review dialog pops in Studio with
+   the same compare data. Poll `get_publish_request_status`: confirmed means
+   live, rejected/expired means revise the draft and re-request, superseded
+   means the request was displaced (a newer one of yours, or the human
+   published manually — check the active revision to tell which). The final
+   publish decision is never yours.
 
 ## 3. Workflow definition YAML
 
@@ -219,5 +242,5 @@ publish: a human reviews the git diff and re-pins.
   `errors` list — fix the reported paths or missing contract files.
 - `HTTP 401` — token expired/revoked; ask the human to mint a new one.
 
-Golden rule: validate first, compare second, present third — and let the
-human publish.
+Golden rule: validate first, compare second, present third — then request
+the publish and let the human decide.
