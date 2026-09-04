@@ -75,10 +75,6 @@ class ClaimStageTimer:
         self.stages[name] = self.stages.get(name, 0.0) + (now - self._start)
         self._start = now
 
-    def note(self, name: str, seconds: float) -> None:
-        """Add an externally measured duration to a stage (e.g. commit)."""
-        self.stages[name] = self.stages.get(name, 0.0) + seconds
-
 
 def log_claim_stages(
     stages: dict[str, float], *, worker_id: str, claimed: bool, attempts: int, skipped: int

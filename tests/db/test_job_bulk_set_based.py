@@ -10,7 +10,7 @@ The unnest rewrite batches a whole run's inserts into one statement per
   (run + workspace) exactly equal to the group-by truth, across the
   batching boundary (1000-row chunks);
 - return-value equivalence: the returned rows keep the executemany
-  contract (one row per candidate, in candidate order, with the
+  contract (one row per unique id, in first-seen order, with the
   workflow_key identity shim);
 - re-submission semantics: the ON CONFLICT update arm still rebinds
   run_id/title/input/frozen config on existing rows;
@@ -248,14 +248,13 @@ def test_bulk_insert_fires_statement_trigger_once_per_batch(tmp_path: Path) -> N
     # behind the writer's commit locally), so poll until the expected
     # firings appear instead of trusting one fixed sleep; and the counter
     # row for this run must not pre-exist, or every batch takes the update
-    # arm and the insert delta reads 0.
+    # arm and the insert delta reads 0. The per-test TRUNCATE isolation
+    # (conftest _isolate_postgres_database) already guarantees an empty
+    # jobs/run_job_status_counts here — jobs is not a seeded table.
     import time
 
     db = _make_db(tmp_path)
     _seed_workspace(db, "ws-sb2")
-    with db.connect() as conn:
-        conn.execute("delete from jobs where run_id='run-sb-1'")
-        conn.execute("delete from run_job_status_counts where run_id='run-sb-1'")
     with read_connection(TEST_DATABASE_URL) as conn:
         before = conn.execute(
             "select n_tup_ins, n_tup_upd from pg_stat_user_tables"

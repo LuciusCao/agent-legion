@@ -37,6 +37,10 @@ _JOBS_BATCH_ROWS = 1000
 # executemany's N separate statements let the later row's DO UPDATE win over
 # the earlier one. The dict below keeps the LAST row per id, restoring that
 # later-row-wins semantics before the rows reach SQL (#461 review).
+# Residual difference vs the executemany shape (accepted): the old shape
+# fired the v77 statement trigger TWICE for a duplicated id (earlier row's
+# INSERT followed by the later row's UPDATE, bumping updated_at); the dedup
+# emits it once as a single INSERT.
 _JOBS_BULK_INSERT_SQL = """
 insert into jobs(
   id, workspace_id, source_type, source_id, run_id, title, storage_dir, stem,

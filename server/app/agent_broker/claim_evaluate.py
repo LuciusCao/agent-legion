@@ -173,7 +173,11 @@ def evaluate_candidate(
     # (locks + admission checks); from here on the claim only writes — the
     # node flip, node_runs/executor_leases inserts, request claim and jobs
     # promote. Close evaluate so the two segments split here, not inside
-    # claim_windows's loop close.
+    # claim_windows's loop close. Known noise (#461 review): the two
+    # post-boundary skips below (shard_not_pending / node_not_pending) run
+    # their cancel_request write on the evaluate side of the NEXT candidate's
+    # boundary — one rare terminal-write leak per raced node, accepted rather
+    # than pre-boundary-guessing which candidate will race.
     if timer is not None:
         timer.stage("evaluate")
 

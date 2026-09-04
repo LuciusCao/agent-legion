@@ -63,7 +63,9 @@ def scan_kind(
     attempts; ``state.skip_reasons`` keeps accumulating across kinds.
     ``timer`` (#448) closes the scan/evaluate stages around the scan query
     and the evaluate loop; None keeps this importable from tests that
-    predate the instrumentation.
+    predate the instrumentation. On success NO evaluate close happens here:
+    evaluate_candidate already closed it at its promote-write boundary —
+    closing again would re-add the promote writes into evaluate (#461).
     """
     for per_workspace, window in SCAN_ROUNDS:
         candidates = fetch_candidates(conn, per_workspace, window, kind)
@@ -76,10 +78,6 @@ def scan_kind(
                 break
             claimed = evaluate_candidate(broker, conn, worker_id, selected, view, state, timer)
             if claimed is not None:
-                if timer is not None:
-                    # Close evaluate before returning: the claim succeeded
-                    # mid-loop; the caller's writes close must not absorb it.
-                    timer.stage("evaluate")
                 return claimed
         if timer is not None:
             timer.stage("evaluate")

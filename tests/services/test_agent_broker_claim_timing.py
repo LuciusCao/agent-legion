@@ -13,7 +13,12 @@ deliberately unmeasured, see claim_timing's docstring). These tests pin:
   owner of claim_empty_count — the #461 review caught note_claim_stages
   double-counting them, doubling the classifier's empty_claim_ratio);
 - a successful claim's writes segment carries the promote-write sequence
-  (the #461 review's stage-attribution fix), not just touch_worker;
+  (the #461 review's stage-attribution fix), not just touch_worker — and
+  the #461终局复审 variant: the promote writes must land in writes, NOT
+  leak back into evaluate through a second evaluate close on the success
+  path (ClaimStageTimer.stage accumulates; the旧 >0 assertions could not
+  catch that shape, so this pins writes > evaluate under an injected
+  promote-write delay);
 - the profile counters round-trip into the per-minute bucket row.
 """
 
@@ -142,6 +147,8 @@ def test_slow_claim_escalates_to_warning(job_db, caplog, monkeypatch) -> None:
 def test_stage_timings_fold_into_runtime_profile(job_db, monkeypatch) -> None:
     # The claim path must feed the #359 counters: claim_through the module
     # singleton (the profile.note_claim_stages call inside claim_timing).
+    # Attribution is pinned by the writes-dominance test below; this one
+    # pins wiring only (every stage lands in its gauge at all).
     broker = _seed_one(job_db, "stage-job-3")
     test_profile = RuntimeProfile()
     monkeypatch.setattr("server.app.services.runtime_profile.profile", test_profile, raising=False)
@@ -150,17 +157,50 @@ def test_stage_timings_fold_into_runtime_profile(job_db, monkeypatch) -> None:
     counters = test_profile.counters
     assert counters.claim_scan_seconds_total > 0.0
     assert counters.claim_scan_seconds_max > 0.0
-    # The writes stage covers the promote-write sequence (node flip, run/
-    # lease inserts, request claim, jobs promote) — the #461 stage-attribution
-    # fix moved the boundary inside evaluate_candidate. Both segments are
-    # real measurements, not constants.
     assert counters.claim_writes_seconds_total > 0.0
     assert counters.claim_evaluate_seconds_total > 0.0
-    assert counters.claim_scan_seconds_total + counters.claim_evaluate_seconds_total > 0.0
     # note_claim (broker.claim's own finally) still runs on the module-level
     # singleton replaced above: claim_count must count this claim exactly once.
     assert counters.claim_count == 1
     assert counters.claim_empty_count == 0
+
+
+def test_successful_claim_promote_writes_land_in_writes_not_evaluate(job_db, monkeypatch) -> None:
+    # #461终局复审 P1 regression: ClaimStageTimer.stage ACCUMULATES
+    # (stages[name] += delta), so a second evaluate close on the success path
+    # (claim_windows's old "close evaluate before returning") folded the
+    # whole promote write sequence back into evaluate — the writes-dominant
+    # branch of the phase-2 triage was unreachable. Inject a controlled
+    # delay into the promote write sequence (the node_runs INSERT, first
+    # write past evaluate_candidate's stage boundary) and assert it lands in
+    # writes, not evaluate: 200ms ≫ the un-delayed evaluate segment
+    # (~sub-ms locally), so the constant is not load-bearing — the
+    # inequality is, and it flips exactly when the redundant close returns.
+    import time
+
+    from server.app.db.connection import DatabaseConnection
+
+    broker = _seed_one(job_db, "stage-job-4")
+    real_db_execute = DatabaseConnection.execute
+
+    def _slow_promote_execute(conn, sql, params=None):
+        query = sql if isinstance(sql, str) else str(sql)
+        if query.lstrip().startswith("insert into node_runs"):
+            time.sleep(0.2)
+        return real_db_execute(conn, sql, params)
+
+    monkeypatch.setattr(DatabaseConnection, "execute", _slow_promote_execute)
+
+    test_profile = RuntimeProfile()
+    monkeypatch.setattr("server.app.services.runtime_profile.profile", test_profile, raising=False)
+    claimed = broker.claim(_WORKER_ID)
+    assert claimed is not None
+    counters = test_profile.counters
+    # The controlled delay landed in writes (≥200ms was injected into the
+    # promote sequence) and evaluate stayed small: with the redundant close
+    # present, evaluate would absorb the promote writes and exceed 0.2s.
+    assert counters.claim_writes_seconds_total >= 0.2, counters.claim_writes_seconds_total
+    assert counters.claim_evaluate_seconds_total < 0.2, counters.claim_evaluate_seconds_total
 
 
 def test_empty_claim_counts_exactly_once(job_db, monkeypatch) -> None:
@@ -190,13 +230,17 @@ def test_empty_claim_counts_exactly_once(job_db, monkeypatch) -> None:
 # unit tier (pure timer objects)
 
 
-def test_stage_timer_accumulates_and_notes() -> None:
+def test_stage_timer_accumulates() -> None:
+    # stage() is accumulate-close semantics: each call adds the elapsed time
+    # since the PREVIOUS stage call into the named bucket — the property the
+    # redundant-close bug abused (a repeated close re-adds the same span into
+    # the old bucket).
     timer = ClaimStageTimer()
     timer.stage("worker_setup")
     timer.stage("scan")
-    timer.note("commit", 0.001)
+    timer.stage("worker_setup")
     stages = timer.stages
-    assert set(stages) == {"worker_setup", "scan", "commit"}
+    assert set(stages) == {"worker_setup", "scan"}
     assert all(value >= 0.0 for value in stages.values())
 
 
