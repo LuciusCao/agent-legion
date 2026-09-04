@@ -25,9 +25,16 @@ applies each delta exactly once in a FIXED global order — sorted by
   planner is free to reorder subquery scans, verified experimentally on
   PG 17.11: set-based ORDER BY still deadlocked, the ordered FOR loop did
   not across the same probe grid).
-- Batching: create_jobs_bulk's executemany insert of a 10^4-item run
-  aggregates to one counter upsert per (run_id, status) per statement
-  instead of one hot-row increment per jobs row.
+
+What this does NOT change: the trigger count on the bulk-insert path.
+create_jobs_bulk goes through psycopg executemany, which the server still
+executes as N independent INSERT statements — each one fires the statement
+trigger once with a one-row transition table, exactly one counter upsert
+per jobs row, same as the old row trigger's per-row increments. The win is
+the fixed lock order above (deadlock elimination), not fewer trigger
+firings. A single multi-row INSERT (INSERT ... SELECT) would aggregate a
+whole batch into one firing — no such statement shape exists in the code
+base today.
 
 Trigger shape notes (PG 17.11 verified): transition tables cannot be
 combined with column lists nor with multi-event triggers, so each family is
@@ -58,9 +65,18 @@ from typing import Any
 # The UPDATE arm aggregates the union of the two transition tables into one
 # net delta per (key, status) and applies the deltas in (key, status) order
 # — the fixed global lock order is the deadlock fix itself (see module
-# docstring). A negative net delta on a counter row that does not exist is
-# dropped by the ON CONFLICT DO UPDATE shape (update branch matches
-# nothing) exactly like the old row trigger's bare UPDATE did.
+# docstring). Delta application is sign-split to preserve the old row
+# trigger's missing-row semantics exactly: a POSITIVE net delta upserts
+# (creates the counter row if absent, increments if present), a NEGATIVE
+# net delta is a bare UPDATE — a no-op when the (key, status) row is
+# missing. A single upsert would be wrong on both ends: INSERT ... ON
+# CONFLICT DO UPDATE falls back to the insert branch for a negative delta
+# on a missing row and CREATES a cnt=-1 row (verified on PG 17.11), and a
+# WHERE-guarded DO UPDATE that skips negative deltas also skips the
+# decrement of EXISTING rows (verified likewise) — the sign split is the
+# only shape that matches the v36/v73 row triggers' bare-UPDATE no-op.
+# The loop order still imposes the global (key, status) lock order on both
+# arms: each iteration is a single (key, status)-targeted write.
 _BODY_TEMPLATE = """
 create or replace function {fn}() returns trigger as $$
 declare
@@ -95,10 +111,14 @@ begin
         from new_table where {key} <> '' group by 1, 2
       ) u group by key, status order by key, status
     loop
-      insert into {table}({key}, status, cnt)
-      values (k, st, delta)
-      on conflict ({key}, status)
-      do update set cnt = {table}.cnt + excluded.cnt;
+      if delta < 0 then
+        update {table} set cnt = cnt + delta where {key} = k and status = st;
+      else
+        insert into {table}({key}, status, cnt)
+        values (k, st, delta)
+        on conflict ({key}, status)
+        do update set cnt = {table}.cnt + excluded.cnt;
+      end if;
     end loop;
   end if;
   return null;

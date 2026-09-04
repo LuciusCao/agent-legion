@@ -6,13 +6,22 @@ run/workspace status-counter rows and come back as SQLSTATE 40P01. One
 immediate retry absorbs the blip without burning a Worker poll cycle; a
 second failure propagates to the route's 500 (the Worker's own backoff
 loop then takes over).
+
+Why this does not reuse ``server.app.db.retry.retry_on_database_conflict``
+(the two stay parallel, deliberately): the generic helper is a 5-attempt
+exponential-backoff loop (0.05s doubling to 1s) matching both 40P01 and
+SerializationFailure by exception TYPE — the right shape for low-frequency
+background writers. The claim path is the fleet's highest-frequency call:
+one immediate retry, no sleep, and a strict 40P01-only sqlstate match (a
+SerializationFailure on claim is a real bug to surface, not a blip to
+absorb, and the sqlstate read also covers Error subclasses the type match
+would miss). Merging the two would force one of those contracts to lie.
 """
 
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 
 from psycopg import Error
 
@@ -22,8 +31,6 @@ from server.app.db.transaction import write_transaction
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
-
-T = TypeVar("T")
 
 # One retry, then the 500 stands.
 _CLAIM_DEADLOCK_RETRIES = 1
@@ -59,19 +66,3 @@ def claim_with_retry(
             if getattr(exc, "sqlstate", None) != "40P01" or attempt >= _CLAIM_DEADLOCK_RETRIES:
                 raise
     raise RuntimeError("unreachable: claim retry loop exhausted")
-
-
-def run_claim_with_deadlock_retry(operation: Callable[[], T]) -> T:
-    """Generic single-retry wrapper for the 40P01 sqlstate (test surface).
-
-    The production path is ``claim_with_retry``; this helper exists so tests
-    can pin the retry contract (one retry, sqlstate-matched, never type-
-    matched) without a database.
-    """
-    for attempt in range(1 + _CLAIM_DEADLOCK_RETRIES):
-        try:
-            return operation()
-        except Error as exc:
-            if getattr(exc, "sqlstate", None) != "40P01" or attempt >= _CLAIM_DEADLOCK_RETRIES:
-                raise
-    raise RuntimeError("unreachable: retry loop exhausted")
