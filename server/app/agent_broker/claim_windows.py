@@ -28,6 +28,7 @@ from server.app.agent_control.registry import CODE_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
+    from server.app.agent_broker.claim_timing import ClaimStageTimer
 
 
 def needed_claim_kinds(view: WorkerView) -> list[str]:
@@ -53,15 +54,20 @@ def scan_kind(
     state: ScanState,
     kind: str,
     cursor: int,
+    timer: ClaimStageTimer | None = None,
 ) -> AgentClaim | None:
     """Run the bounded SCAN_ROUNDS ladder for one kind.
 
     ``state.attempts`` is the per-kind budget — the caller resets it before
     each kind so an unclaimable flood in one kind never consumes the other's
     attempts; ``state.skip_reasons`` keeps accumulating across kinds.
+    ``timer`` (#448) closes the scan/evaluate stages; None keeps this
+    importable from tests that predate the instrumentation.
     """
     for per_workspace, window in SCAN_ROUNDS:
         candidates = fetch_candidates(conn, per_workspace, window, kind)
+        if timer is not None:
+            timer.stage("scan")
         if not candidates:
             break
         for selected in fair_candidate_order(candidates, cursor):
@@ -69,7 +75,13 @@ def scan_kind(
                 break
             claimed = evaluate_candidate(broker, conn, worker_id, selected, view, state)
             if claimed is not None:
+                if timer is not None:
+                    # Close evaluate before returning: the claim succeeded
+                    # mid-loop; the caller's writes close must not absorb it.
+                    timer.stage("evaluate")
                 return claimed
+        if timer is not None:
+            timer.stage("evaluate")
         if state.attempts >= MAX_CLAIM_ATTEMPTS or not window_saturated(
             candidates, per_workspace, window
         ):

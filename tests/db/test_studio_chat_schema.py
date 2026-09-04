@@ -24,13 +24,13 @@ def test_schema_v57_recorded() -> None:
     """Latest-migration record pin (moved from
     tests/db/test_job_node_status_counts_migration.py, v56)."""
     # The pin narrative now lives in tests/db/test_workspace_id_key_binding.py;
-    # v77 (job_status_counts_statement_triggers, #437) is the current chain tail.
+    # v78 (claim_stage_profile, #448) is the current chain tail.
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "job_status_counts_statement_triggers"
+    assert row["name"] == "claim_stage_profile"
 
 
 def test_studio_chat_tables_exist() -> None:
@@ -79,7 +79,7 @@ def test_v56_database_gains_draft_yaml_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
         assert migration is not None
-        assert migration["name"] == "job_status_counts_statement_triggers"
+        assert migration["name"] == "claim_stage_profile"
 
 
 @pytest.mark.fresh_schema
@@ -112,7 +112,7 @@ def test_v42_database_upgrades_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
         assert migration is not None
-        assert migration["name"] == "job_status_counts_statement_triggers"
+        assert migration["name"] == "claim_stage_profile"
 
     # Rows written through the new tables survive a replay (init_db runs at
     # every backend startup).

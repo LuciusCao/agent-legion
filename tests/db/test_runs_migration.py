@@ -269,8 +269,8 @@ def test_v52_database_upgrades_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert migration is not None
-    # The registry tail at the CURRENT schema version (v77, #437).
-    assert migration["name"] == "job_status_counts_statement_triggers"
+    # The registry tail at the CURRENT schema version (v78, #448).
+    assert migration["name"] == "claim_stage_profile"
 
 
 @pytest.mark.fresh_schema

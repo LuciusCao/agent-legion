@@ -335,11 +335,11 @@ def test_net_negative_delta_decrements_existing_row() -> None:
 
 
 def test_migration_recorded_as_v77() -> None:
-    # The chain tail pin lives with the newest migration's module (v77).
-    assert SCHEMA_VERSION == 77
+    # The chain-tail pin moved to the v78 module
+    # (tests/db/test_claim_stage_profile_migration.py); this file keeps its
+    # own v77 row pin.
+    assert SCHEMA_VERSION >= 77
     with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute(
-            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
-        ).fetchone()
+        row = conn.execute("select name from schema_migrations where version=77").fetchone()
     assert row is not None
     assert row["name"] == "job_status_counts_statement_triggers"

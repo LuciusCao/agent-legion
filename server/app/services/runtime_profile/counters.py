@@ -28,7 +28,13 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Mapping
 from typing import Any
+
+# Claim-stage gauges (#448): for each stage a (total, max) float pair, set
+# from ``claim_timing`` stage names. Kept as one tuple so reset/snapshot stay
+# single-source loops instead of 12 hand-written lines drifting apart.
+_CLAIM_STAGES = ("scan", "evaluate", "writes")
 
 
 class RuntimeProfileCounters:
@@ -53,6 +59,9 @@ class RuntimeProfileCounters:
         self.claim_empty_count = 0
         self.claim_seconds_total = 0.0
         self.claim_seconds_max = 0.0
+        for stage in _CLAIM_STAGES:
+            setattr(self, f"claim_{stage}_seconds_total", 0.0)
+            setattr(self, f"claim_{stage}_seconds_max", 0.0)
         self.result_count = 0
         self.result_seconds_total = 0.0
         self.result_seconds_max = 0.0
@@ -67,7 +76,7 @@ class RuntimeProfileCounters:
         sampler merges them into the returned dict separately.
         """
         with self._lock:
-            values = {
+            values: dict[str, Any] = {
                 "intake_runs": self.intake_runs,
                 "intake_items": self.intake_items,
                 "pass_count": self.pass_count,
@@ -87,6 +96,11 @@ class RuntimeProfileCounters:
                 "execute_done": self.execute_done,
                 "execute_requeued": self.execute_requeued,
             }
+            for stage in _CLAIM_STAGES:
+                values[f"claim_{stage}_seconds_total"] = getattr(
+                    self, f"claim_{stage}_seconds_total"
+                )
+                values[f"claim_{stage}_seconds_max"] = getattr(self, f"claim_{stage}_seconds_max")
             self.reset()
         return values
 
@@ -149,6 +163,30 @@ class RuntimeProfile:
         if seconds > self.counters.claim_seconds_max:
             self.counters.claim_seconds_max = seconds
         if empty:
+            self.counters.claim_empty_count += 1
+
+    def note_claim_stages(self, stages: Mapping[str, float], *, claimed: bool) -> None:
+        """Fold one claim's per-stage timings into the claim gauges (#448).
+
+        Unknown keys are ignored (worker_setup/commit fold into nothing — the
+        claim-wide totals above already carry them); same undercount
+        discipline as the sibling counters.
+        """
+        for stage in _CLAIM_STAGES:
+            seconds = stages.get(stage, 0.0)
+            if not seconds:
+                continue
+            setattr(
+                self.counters,
+                f"claim_{stage}_seconds_total",
+                getattr(self.counters, f"claim_{stage}_seconds_total") + seconds,
+            )
+            setattr(
+                self.counters,
+                f"claim_{stage}_seconds_max",
+                max(getattr(self.counters, f"claim_{stage}_seconds_max"), seconds),
+            )
+        if not claimed:
             self.counters.claim_empty_count += 1
 
     # --- execute ------------------------------------------------------------

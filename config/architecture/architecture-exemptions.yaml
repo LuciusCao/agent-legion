@@ -40,6 +40,37 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/452
   ceiling: 68
 - check: architecture.file_budget
+  path: server/app/agent_broker/claim.py
+  reason: >-
+    Issue #448 phase 1 wires the claim-stage timer into the claim
+    transaction: the worker claim loop is single-threaded serial (claim
+    throughput = 1 / one claim round-trip), so the transaction now carries
+    a ClaimStageTimer whose worker_setup/scan/evaluate/writes closes ride
+    the existing statements, plus one _report_claim_stages helper shared by
+    all three return paths. The alternative — moving the orchestration out
+    to a new module — would split the claim transaction's single flow
+    across files for ~20 lines of instrumentation. Remove when #448's
+    phase-2 rework (transaction slimming or claim concurrency) restructures
+    the claim path and re-budgets the module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
+  ceiling: 122
+- check: architecture.file_budget
+  path: server/app/services/runtime_profile/counters.py
+  reason: >-
+    Issue #448 phase 1 adds the claim-stage gauge family to the #359
+    runtime profile: note_claim_stages (one fold per claim) plus the six
+    (scan/evaluate/writes total+max) counters kept single-source through
+    the _CLAIM_STAGES loop in reset/snapshot/note — the loop is what keeps
+    twelve hand-written counter lines from drifting apart. Splitting the
+    claim gauges into a sibling module would fork the one undercount
+    discipline the whole registry documents. Remove when the runtime
+    profile gains a structural split of its own or the claim-stage gauges
+    retire.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
+  ceiling: 185
+- check: architecture.file_budget
   path: server/app/db/migration_chain.py
   reason: >-
     Issue #437 registers schema v77 (job_status_counts_statement_triggers):

@@ -18,6 +18,11 @@ from typing import TYPE_CHECKING, Any
 from server.app.agent_broker import agent_claim_compatibility
 from server.app.agent_broker.agent_worker_capacity import sync_declared_capacity, touch_worker
 from server.app.agent_broker.claim_scan import AgentClaim, ClaimRacedError, ScanState, WorkerView
+from server.app.agent_broker.claim_timing import (
+    ClaimStageTimer,
+    log_claim_stages,
+    note_claim_stages,
+)
 from server.app.agent_broker.claim_windows import needed_claim_kinds, scan_kind
 from server.app.agent_broker.manifest_trim import cancel_request
 
@@ -32,6 +37,15 @@ __all__ = [
     "claim_in_transaction",
 ]
 
+# Claim-stage accounting (#448 phase 1): the worker claim loop is serial, so
+# one claim's round-trip is the throughput ceiling; the timer splits it into
+# worker_setup / scan / evaluate / writes (see claim_timing.py).
+_WORKER_SELECT_SQL = "select * from agent_workers where worker_id=%s for update"
+_ACTIVE_COUNT_SQL = (
+    "select kind, count(*) as cnt from agent_execution_requests"
+    " where worker_id=%s and state='claimed' group by kind"
+)
+
 
 def claim_in_transaction(
     broker: AgentExecutionBroker,
@@ -44,22 +58,20 @@ def claim_in_transaction(
 
     The skip-reason counter separates "queue truly empty" from "queue head
     blocked by unclaimable requests" for the empty-claim signal (see
-    ``empty.py``); it accumulates across every scan round.
+    ``empty.py``); it accumulates across every scan round. The #448 stage
+    timer is best-effort instrumentation (dict stores only, never raises).
     """
-    worker = conn.execute(
-        "select * from agent_workers where worker_id=%s for update", (worker_id,)
-    ).fetchone()
+    timer = ClaimStageTimer()
+    worker = conn.execute(_WORKER_SELECT_SQL, (worker_id,)).fetchone()
+    timer.stage("worker_setup")
     if worker is None or worker["revoked_at"] is not None:
         raise ValueError("unknown or revoked Agent Worker")
     max_concurrency, max_code_concurrency = sync_declared_capacity(
         conn, worker, declared_max_concurrency, declared_max_code_concurrency
     )
     models = agent_claim_compatibility.worker_model_declarations(worker)
-    active_rows = conn.execute(
-        "select kind, count(*) as cnt from agent_execution_requests"
-        " where worker_id=%s and state='claimed' group by kind",
-        (worker_id,),
-    ).fetchall()
+    active_rows = conn.execute(_ACTIVE_COUNT_SQL, (worker_id,)).fetchall()
+    timer.stage("worker_setup")
     active_by_kind = {str(row["kind"]): int(row["cnt"]) for row in active_rows}
     agent_active = active_by_kind.get("agent", 0)
     code_active = active_by_kind.get("code", 0)
@@ -79,6 +91,8 @@ def claim_in_transaction(
     kinds = needed_claim_kinds(view)
     if not kinds:
         touch_worker(conn, worker_id)
+        timer.stage("writes")
+        _report_claim_stages(timer, worker_id, claimed=None, state=ScanState())
         return None, Counter()
     cursor = next(broker._fairness_counter)
     # Alternate the leading kind per pass so neither kind is systemically
@@ -90,9 +104,31 @@ def claim_in_transaction(
         # Per-kind attempt budget (issue #125): an unclaimable flood in one
         # kind never consumes the other kind's attempts.
         state.attempts = 0
-        claimed = scan_kind(broker, conn, worker_id, view, state, kind, cursor)
+        claimed = scan_kind(broker, conn, worker_id, view, state, kind, cursor, timer)
         if claimed is not None:
             touch_worker(conn, worker_id)
+            timer.stage("writes")
+            _report_claim_stages(timer, worker_id, claimed=claimed, state=state)
             return claimed, state.skip_reasons
     touch_worker(conn, worker_id)
+    timer.stage("writes")
+    _report_claim_stages(timer, worker_id, claimed=None, state=state)
     return None, state.skip_reasons
+
+
+def _report_claim_stages(
+    timer: ClaimStageTimer,
+    worker_id: str,
+    *,
+    claimed: AgentClaim | None,
+    state: ScanState,
+) -> None:
+    """Log + profile one claim attempt's stage timings (best-effort)."""
+    log_claim_stages(
+        timer.stages,
+        worker_id=worker_id,
+        claimed=claimed is not None,
+        attempts=state.attempts,
+        skipped=sum(state.skip_reasons.values()),
+    )
+    note_claim_stages(timer.stages, claimed=claimed is not None)

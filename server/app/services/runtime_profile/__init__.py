@@ -3,6 +3,10 @@
 L1 — six-stage pipeline gauges (intake / pass / enqueue / claim / execute /
 result: depth + rate + latency) sampled into ``ops_runtime_profile_samples``
 by the ops-metrics loop, plus DB-pool / advisory-lock cross-cutting waits.
+#448 phase 1 adds the claim-transaction stage split (scan / evaluate /
+writes totals + maxes, schema v78) — the worker claim loop is serial, so
+one claim's round-trip is the throughput ceiling and the split orders the
+follow-up work.
 
 L2 — the bottleneck classifier (``classifier.py``) turns the latest gauges
 plus the existing queue-alert signal (blocked/stalled, passed in as context
