@@ -263,7 +263,10 @@ def test_v52_database_upgrades_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "node_runs_skill_key"
+    assert migration is not None
+    # The registry tail at the CURRENT schema version (#434 renumber: v76 is
+    # studio_publish_requests).
+    assert migration["name"] == "studio_publish_requests"
 
 
 @pytest.mark.fresh_schema

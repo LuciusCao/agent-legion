@@ -25,6 +25,9 @@ from server.app.routes.agent_definition_contracts import (
 from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_agent_preview_tools import create_studio_agent_preview_tools_router
 from server.app.routes.studio_agent_prompt_tools import create_studio_agent_prompt_tools_router
+from server.app.routes.studio_agent_publish_tools import (
+    create_studio_agent_publish_tools_router,
+)
 from server.app.routes.studio_agent_skill_tools import create_studio_agent_skill_tools_router
 from server.app.routes.studio_agent_tool_contracts import (
     StudioAgentActiveWorkflowResponse,
@@ -209,5 +212,9 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
     # Preview panel tools (issue #328): context/panel reads + draft write —
     # workspace-bound like the prompt tools (scoped token + workspace binding).
     workspace_scoped.include_router(create_studio_agent_preview_tools_router(job_db, settings))
+    # Publish-request tools (issue #416): request parks a pending publish (a
+    # scoped-only write — the human confirm/cancel endpoints live on the
+    # guarded Studio surface), status is a plain scoped read.
+    router.include_router(create_studio_agent_publish_tools_router(job_db, settings))
     router.include_router(workspace_scoped)
     return router

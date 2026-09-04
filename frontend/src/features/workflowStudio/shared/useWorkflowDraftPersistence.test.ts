@@ -416,15 +416,18 @@ describe('useWorkflowDraftPersistence flushNow', () => {
       serverDraft: NO_DRAFT,
     })
 
+    let flushed: { ok: boolean } | undefined
     await act(async () => {
-      result.current.flushNow()
+      flushed = await result.current.flushNow()
     })
 
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED)
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
+    // #429 收尾 P2-1：resolve 值携带本次落盘的终态（成功 → ok=true）。
+    expect(flushed?.ok).toBe(true)
   })
 
-  it('is a no-op when there is nothing unsaved', () => {
+  it('is a no-op when there is nothing unsaved', async () => {
     const { result } = renderPersistence({
       workspaceId: 'ws1',
       draftYaml: BASE,
@@ -432,11 +435,46 @@ describe('useWorkflowDraftPersistence flushNow', () => {
       serverDraft: NO_DRAFT,
     })
 
-    act(() => {
-      result.current.flushNow()
+    let flushed: { ok: boolean } | undefined
+    await act(async () => {
+      flushed = await result.current.flushNow()
     })
 
     expect(mocks.putWorkflowDraft).not.toHaveBeenCalled()
+    // no-op（无 pending）的 resolve 值：无内容需要落盘 = 无失败。
+    expect(flushed?.ok).toBe(true)
+  })
+
+  it('flushNow resolves {ok: false} when the PUT fails through all retries (live terminal result)', async () => {
+    // #429 收尾 P2-1 契约钉：DraftSaveController 全路径 resolve 不 reject，
+    // 失败的终态只能经返回值传递（controller 的 live state 同步携带）——
+    // 调用方（发布确认守卫）读 result.ok，不读 React useState 快照（闭包
+    // 捕获的是调用前的值，await 期间落定的 error 态快照链路看不见）。
+    mocks.putWorkflowDraft.mockRejectedValue(new Error('network down'))
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: NO_DRAFT,
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: NO_DRAFT,
+    })
+
+    let flushed: { ok: boolean; state: { status: string } } | undefined
+    await act(async () => {
+      // 初次（debounce 立即发）+ 两次重试（2s/4s）全部失败。
+      vi.advanceTimersByTime(850)
+      vi.advanceTimersByTime(2000)
+      vi.advanceTimersByTime(4000)
+      flushed = await result.current.flushNow()
+    })
+
+    expect(flushed?.ok).toBe(false)
+    expect(flushed?.state.status).toBe('error')
   })
 
   it('re-saves the current draft when clicked after retries ran out', async () => {

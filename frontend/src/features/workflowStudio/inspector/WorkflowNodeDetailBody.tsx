@@ -8,11 +8,13 @@ import {
 import { inspectorNodeDetails } from './workflowStudioInspectorDetails'
 import { WorkflowNodeInspector } from './WorkflowNodeInspector'
 import { WorkflowNodePreview } from './WorkflowNodePreview'
+import type { AgentCatalogSettle } from './agentBindingStatus'
 
 type Props = {
   workflow: WorkflowDefinitionRecord | null
   nodeKey: string
   agentCatalog: AgentDefinition[]
+  agentCatalogSettle: AgentCatalogSettle
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   compareSummary?: ChangeSummaryViewModel | null
@@ -43,6 +45,7 @@ export function WorkflowNodeDetailBody(props: Props) {
         <WorkflowNodeInspector
           workflow={props.workflow}
           agentCatalog={props.agentCatalog}
+          agentCatalogSettle={props.agentCatalogSettle}
           selectedNodeKey={props.nodeKey}
           definitionYaml={props.definitionYaml}
           setDefinitionYaml={props.setDefinitionYaml}
