@@ -33,13 +33,14 @@ def _definition(*, runtime: str = "pi", skill: str = "question/generate") -> Age
     )
 
 
-def _node(*, skill: WorkflowNodeSkill | None = None) -> WorkflowNode:
+def _node(*, skill: WorkflowNodeSkill | None = None, tools: tuple[str, ...] = ()) -> WorkflowNode:
     return WorkflowNode(
         key="generate",
         label="Generate",
         capability="generate",
         outputs=["answer.json"],
         skill=skill,
+        tools=tools,
         execution=WorkflowNodeExecution(
             provider="node-provider",
             model="node-model",
@@ -298,3 +299,23 @@ def test_enqueue_fails_when_neither_side_binds_a_skill(harness: SimpleNamespace)
         _enqueue(harness, definition=_definition(skill=""))
 
     harness.broker.enqueue.assert_not_called()
+
+
+def test_manifest_tools_inherit_the_agent_definition(harness: SimpleNamespace) -> None:
+    """#443: a node without a tools declaration runs with the definition's."""
+    assert _enqueue(harness) is True
+
+    manifest = dict(harness.broker.enqueue.call_args.args[0].manifest)
+    assert manifest["tools"] == ["read", "write"]
+
+
+def test_manifest_tools_node_declaration_overrides_the_definition(
+    harness: SimpleNamespace,
+) -> None:
+    """#443: node-declared tools win over the Agent definition's whitelist."""
+    node = _node(tools=("read",))
+
+    assert _enqueue(harness, node=node) is True
+
+    manifest = dict(harness.broker.enqueue.call_args.args[0].manifest)
+    assert manifest["tools"] == ["read"]

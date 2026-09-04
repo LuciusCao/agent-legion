@@ -271,6 +271,69 @@ def test_require_output_still_missing_reports_validation(
     assert _event_types(events).count("turn_start") == 2
 
 
+def test_require_output_contract_mode_gate(tmp_path: Path, velites_binary: Path) -> None:
+    """EXEC-HARNESS-VALIDATE-001: with a machine-readable contract block in
+    the skill, the --require-output gate upgrades to contract mode — content
+    violations join missing artifacts (one remediation turn, then exit 1);
+    the harness never runs the skill's python validator itself."""
+    skill = tmp_path / "skill"
+    (skill / "references").mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# Demo skill\n", encoding="utf-8")
+    (skill / "references" / "output-contract.md").write_text(
+        "# Contract\n\n```yaml contract\n"
+        "files:\n"
+        "  - path: result.txt\n"
+        "    format: text\n"
+        "    min_chars: 100\n"
+        "```\n",
+        encoding="utf-8",
+    )
+    workdir = tmp_path / "job"
+    workdir.mkdir()
+    (workdir / "prompt.md").write_text("Produce result.txt.", encoding="utf-8")
+    fixture = _write_fixture(
+        workdir,
+        [
+            # Turn 1: writes a contract-violating artifact (too short).
+            {
+                "content": [
+                    {
+                        "type": "toolCall",
+                        "name": "write",
+                        "arguments": {"path": "result.txt", "content": "short"},
+                    }
+                ]
+            },
+            # Turn 2 (after the tool round): plain stop — the gate sees the
+            # violation and injects the single remediation turn.
+            {"content": [{"type": "text", "text": "done"}]},
+            # Remediation turn: still violating.
+            {"content": [{"type": "text", "text": "still short"}]},
+        ],
+    )
+    proc = _run(
+        velites_binary,
+        workdir,
+        [
+            *_base_args(workdir, fixture),
+            "--skill",
+            str(skill),
+            "--require-output",
+            "result.txt",
+        ],
+    )
+    assert proc.returncode == 1, proc.stderr
+    events = _events(proc)
+    validations = [e for e in events if e["type"] == "outputs_validation"]
+    assert len(validations) == 1
+    assert validations[0]["mode"] == "contract"
+    assert validations[0]["missing"] == []
+    assert any("too short" in v for v in validations[0]["violations"])
+    # Content violations trigger the same single remediation turn as missing:
+    # write turn + stop turn + remediation turn = 3 turns total.
+    assert _event_types(events).count("turn_start") == 3
+
+
 class _MockSseHandler(BaseHTTPRequestHandler):
     """One-shot OpenAI-compatible SSE responder; records request bodies."""
 

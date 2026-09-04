@@ -1,5 +1,5 @@
-//! The velites tools: `read`, `write`, `bash`, plus opt-in utility
-//! tools like `uuid` (design §8; #442).
+//! The velites tools: `read`, `write`, `bash` by default, plus the opt-in
+//! utility tools `uuid` (#442) and `validate` (#443) (design §8).
 //!
 //! Sandbox invariant: every path a tool touches must canonicalize to a
 //! location inside the process working directory (the job dir the worker
@@ -15,6 +15,7 @@ pub mod read;
 mod specs;
 pub mod truncate;
 pub mod uuid;
+pub mod validate;
 pub mod write;
 
 use std::path::{Path, PathBuf};
@@ -44,6 +45,9 @@ pub struct ToolContext {
     /// dir (design §5; mirrors the OS sandbox's read allowlist). The `write`
     /// tool never consults this list — writes stay cwd-only.
     pub read_roots: Vec<PathBuf>,
+    /// Canonicalized `--skill` directories the `validate` tool resolves the
+    /// output contract from (subset of `read_roots`, first declarer wins).
+    pub skill_dirs: Vec<PathBuf>,
 }
 
 /// Outcome of one tool execution. Tool failures are reported as
@@ -84,13 +88,15 @@ pub enum ToolError {
     Io(#[from] std::io::Error),
 }
 
-/// The tool kinds, keyed by their wire name.
+/// The tool kinds, keyed by their wire name. `Uuid` and `Validate` are
+/// opt-in only (never in the default `--tools` set).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolKind {
     Read,
     Write,
     Bash,
     Uuid,
+    Validate,
 }
 
 impl ToolKind {
@@ -100,6 +106,7 @@ impl ToolKind {
             "write" => Some(Self::Write),
             "bash" => Some(Self::Bash),
             "uuid" => Some(Self::Uuid),
+            "validate" => Some(Self::Validate),
             _ => None,
         }
     }
@@ -110,6 +117,7 @@ impl ToolKind {
             Self::Write => "write",
             Self::Bash => "bash",
             Self::Uuid => "uuid",
+            Self::Validate => "validate",
         }
     }
 
@@ -124,6 +132,7 @@ impl ToolKind {
             Self::Write => write::run(args, ctx).await,
             Self::Bash => bash::run(args, ctx).await,
             Self::Uuid => uuid::run(args, ctx).await,
+            Self::Validate => validate::run(args, ctx).await,
         }
     }
 }

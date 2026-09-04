@@ -6895,6 +6895,8 @@ export interface components {
       outputs: string[]
       skill?: components['schemas']['WorkflowNodeSkillResponse'] | null
       terminal?: components['schemas']['WorkflowTerminalResponse'] | null
+      /** Tools */
+      tools?: string[]
     }
     /** WorkflowNodeSkillResponse */
     WorkflowNodeSkillResponse: {

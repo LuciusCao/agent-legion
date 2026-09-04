@@ -391,7 +391,7 @@ invariants:
         gate: quick
 
   - id: EXEC-VALIDATION-001
-    statement: "A node run may complete only after the node skill's deterministic scripts/validate_output.py passes against the job directory: the Host validates Agent Worker results server-side after unpacking the result archive (Worker-reported success is untrusted); validation failure marks the run failed with the validator message (e.g. review rejections classify as business/review_rejected)."
+    statement: "A node run may complete only after the node skill's declared output contract passes against the job directory: validation is engine-first — the machine-readable ```yaml contract block embedded in the skill's references/output-contract.md is checked by the harness's built-in contract engine (existence, text min_chars/required_headings, JSON Schema), with the skill's deterministic scripts/validate_output.py as the legacy fallback when no contract block is present and as the backstop for cross-file/business rules the engine does not express; the Host remains the authoritative rechecker of Agent Worker results server-side after unpacking the result archive (Worker-reported success is untrusted) regardless of which path ran; validation failure marks the run failed with the validator message (e.g. review rejections classify as business/review_rejected)."
     owner: workspace-executor
     risk: high
     evidence:
@@ -822,6 +822,15 @@ invariants:
     evidence:
       - kind: integration
         target: tests/executors/test_velites_controllability.py::test_require_output_still_missing_reports_validation
+        gate: quick
+
+  - id: EXEC-HARNESS-VALIDATE-001
+    statement: "When a velites run declares --require-output artifacts, the harness performs a closing contract self-check before exit: when the skill's references/output-contract.md embeds a machine-readable ```yaml contract block the built-in engine checks every declared file (existence; UTF-8 text with min_chars/required_headings; JSON parse + JSON Schema for format: json), and without a contract block the check degrades to existence-only mode. Any contract violation exits 1. The harness never executes python scripts itself — the skill's scripts/validate_output.py is the Host-side legacy fallback (EXEC-VALIDATION-001), not a harness responsibility."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_velites_controllability.py::test_require_output_contract_mode_gate
         gate: quick
 
   - id: EXEC-SKILL-HERMETIC-001

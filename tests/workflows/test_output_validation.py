@@ -3,6 +3,10 @@
 The validator script must come from the same (key, ref) pin the execution
 used; legacy manifests without ``skill_ref`` resolve to ``latest`` (the
 repo's live HEAD), matching the #322 dispatch semantics.
+
+Since #443 the contract engine (``velites-sandbox validate``) runs first and
+fails fast on generic contract violations; the legacy ``validate_output.py``
+still runs afterwards for business rules the engine does not express.
 """
 
 from __future__ import annotations
@@ -12,13 +16,23 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import server.app.workflows.output_contract_engine as output_contract_engine
 from server.app.skills.errors import SkillRepoError
-from server.app.workflows.output_validation import validate_worker_outputs
+from server.app.workflows.output_validation import run_output_validator
+from server.app.workflows.worker_output_validation import validate_worker_outputs
 
 pytestmark = pytest.mark.no_db
 
 _KEY = "group/name"
 _REF = "v1.2.3"
+
+
+@pytest.fixture(autouse=True)
+def _no_real_engine_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hermetic default: no velites binary — the legacy script path alone
+    decides, whatever happens to be on this machine's PATH. Engine-layer
+    tests override this via ``_use_engine``."""
+    monkeypatch.setattr(output_contract_engine, "resolve_sandbox_binary", lambda: None)
 
 
 def _manager(tmp_path: Path, validator_body: str) -> MagicMock:
@@ -161,3 +175,160 @@ def test_manifest_without_skill_skips_validation(tmp_path: Path) -> None:
     assert validate_worker_outputs(manager, {}, tmp_path / "job") is None
 
     manager.checkout_skill.assert_not_called()
+
+
+# --- #443: contract engine layer (velites-sandbox validate) ---
+
+
+def _skill_dir(tmp_path: Path, legacy_body: str | None) -> Path:
+    skill_dir = tmp_path / "skill"
+    (skill_dir / "references").mkdir(parents=True)
+    (skill_dir / "references" / "output-contract.md").write_text("contract\n")
+    if legacy_body is not None:
+        (skill_dir / "scripts").mkdir()
+        (skill_dir / "scripts" / "validate_output.py").write_text(legacy_body)
+    return skill_dir
+
+
+def _fake_engine(tmp_path: Path, *, stdout: str = "", stderr: str = "", rc: int = 0) -> str:
+    script = tmp_path / "fake-engine.sh"
+    script.write_text(
+        f"#!/bin/sh\nprintf '%s' '{stdout}'\nprintf '%s' '{stderr}' 1>&2\nexit {rc}\n"
+    )
+    script.chmod(0o755)
+    return str(script)
+
+
+def _use_engine(monkeypatch: pytest.MonkeyPatch, binary: str | None) -> None:
+    monkeypatch.setattr(output_contract_engine, "resolve_sandbox_binary", lambda: binary)
+
+
+def test_engine_violation_fails_fast_without_running_legacy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = tmp_path / "legacy-ran"
+    legacy = f"import pathlib; pathlib.Path({str(marker)!r}).write_text('x')\n"
+    skill_dir = _skill_dir(tmp_path, legacy)
+    _use_engine(
+        monkeypatch,
+        _fake_engine(tmp_path, stderr="script.md: missing required file", rc=1),
+    )
+
+    error = run_output_validator(skill_dir, tmp_path / "job")
+
+    assert error is not None
+    assert error.startswith("Output validation failed:")
+    assert "missing required file" in error
+    assert not marker.exists(), "engine failure must short-circuit the legacy script"
+
+
+def test_engine_pass_still_runs_legacy_business_rules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mode=contract means the generic checks passed; the legacy script then
+    enforces the business rules the engine deliberately does not express."""
+    skill_dir = _skill_dir(
+        tmp_path, "import sys; sys.stderr.write('id mismatch\\n'); sys.exit(1)\n"
+    )
+    _use_engine(monkeypatch, _fake_engine(tmp_path, stdout="mode=contract", rc=0))
+
+    error = run_output_validator(skill_dir, tmp_path / "job")
+
+    assert error is not None
+    assert error.startswith("Output validation failed:")
+    assert "id mismatch" in error
+
+
+def test_engine_existence_mode_falls_back_to_legacy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    skill_dir = _skill_dir(
+        tmp_path, "import sys; sys.stderr.write('legacy says no\\n'); sys.exit(1)\n"
+    )
+    _use_engine(monkeypatch, _fake_engine(tmp_path, stdout="mode=existence", rc=0))
+
+    error = run_output_validator(skill_dir, tmp_path / "job")
+
+    assert error is not None
+    assert "legacy says no" in error
+
+
+def test_engine_broken_is_a_validator_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    skill_dir = _skill_dir(tmp_path, "import sys; sys.exit(0)\n")
+    _use_engine(monkeypatch, _fake_engine(tmp_path, stderr="bad contract block", rc=2))
+
+    error = run_output_validator(skill_dir, tmp_path / "job")
+
+    assert error is not None
+    assert error.startswith("Validator error:")
+    assert "bad contract block" in error
+
+
+def test_engine_spawn_failure_is_a_validator_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    skill_dir = _skill_dir(tmp_path, "import sys; sys.exit(0)\n")
+    _use_engine(monkeypatch, str(tmp_path / "nonexistent-binary"))
+
+    error = run_output_validator(skill_dir, tmp_path / "job")
+
+    assert error is not None
+    assert error.startswith("Validator error:")
+
+
+def test_missing_engine_binary_keeps_legacy_only_behavior(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    skill_dir = _skill_dir(
+        tmp_path, "import sys; sys.stderr.write('legacy only\\n'); sys.exit(1)\n"
+    )
+    _use_engine(monkeypatch, None)
+
+    error = run_output_validator(skill_dir, tmp_path / "job")
+
+    assert error is not None
+    assert "legacy only" in error
+
+
+def test_pre_443_binary_without_validate_subcommand_falls_back_to_legacy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rollout shim: an old binary's clap front parser rejects the call —
+    every clap usage error carries a "Usage:" line, which the current
+    engine's own error output never prints. Both pre-#443 shapes fall back
+    to legacy: old `velites` (unexpected argument) and old `velites-sandbox`
+    (its trailing-arg parser swallows our flags, leaving --cwd missing)."""
+    skill_dir = _skill_dir(
+        tmp_path, "import sys; sys.stderr.write('legacy verdict\\n'); sys.exit(1)\n"
+    )
+    old_shapes = [
+        "error: unexpected argument '--job-dir' found\n\nUsage: velites --provider <PROVIDER> <INSTRUCTION>...\n",
+        "error: the following required arguments were not provided:\n  --cwd <CWD>\n\nUsage: velites-sandbox --cwd <CWD> <COMMAND>...\n",
+    ]
+    for shape in old_shapes:
+        _use_engine(monkeypatch, _fake_engine(tmp_path, stderr=shape, rc=2))
+
+        error = run_output_validator(skill_dir, tmp_path / "job")
+
+        assert error is not None
+        assert "legacy verdict" in error, shape
+
+
+def test_current_broken_engine_stays_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A current binary's exit-2 failure (bad contract block etc.) prints no
+    "Usage:" line — it must NOT be mistaken for an old binary."""
+    skill_dir = _skill_dir(tmp_path, "import sys; sys.exit(0)\n")
+    _use_engine(
+        monkeypatch,
+        _fake_engine(tmp_path, stderr="contract parse error: invalid contract YAML", rc=2),
+    )
+
+    error = run_output_validator(skill_dir, tmp_path / "job")
+
+    assert error is not None
+    assert error.startswith("Validator error:")
+    assert "contract parse error" in error

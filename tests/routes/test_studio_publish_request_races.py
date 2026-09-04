@@ -64,22 +64,18 @@ def test_concurrent_creates_leave_exactly_one_pending(client, job_db) -> None:
     assert requests[0]["id"] != requests[1]["id"]
     # Exactly one pending row: the loser's retry superseded the winner's row
     # and took over the slot (sequential-supersede semantics preserved).
-    # Either request may win the race, and concurrent rows can share a
-    # created_at — assert order-agnostically (#453: the created_at-desc
-    # ordering made this flake under CI load).
     with client.app.state.job_db.connect() as conn:
         rows = conn.execute(
-            "select id, status from studio_publish_requests where workspace_id=%s",
+            "select id, status from studio_publish_requests where workspace_id=%s"
+            " order by created_at desc",
             (workspace_id,),
         ).fetchall()
-    by_status = {row["status"]: row["id"] for row in rows}
-    assert len(rows) == 2
-    assert sorted(by_status) == ["pending", "superseded"]
-    pending_id = by_status["pending"]
-    assert pending_id in {request["id"] for request in requests}
-    assert _pending(client, workspace_id).json()["request"]["id"] == pending_id
+    assert [row["status"] for row in rows] == ["pending", "superseded"]
+    assert rows[0]["id"] in {request["id"] for request in requests}
+    assert _pending(client, workspace_id).json()["request"]["id"] == rows[0]["id"]
     # The superseded request reads back superseded through the status tool.
-    status = scoped.get(f"/api/studio-agent/tools/publish-requests/{by_status['superseded']}")
+    superseded_id = rows[1]["id"]
+    status = scoped.get(f"/api/studio-agent/tools/publish-requests/{superseded_id}")
     assert status.json()["request"]["status"] == "superseded"
 
 

@@ -194,6 +194,14 @@ def _load_nodes(
         ):
             raise WorkflowDefinitionError(f"Node {node_key} capability must be a non-empty string")
 
+        # Tool whitelist (#443): only Agent-routed nodes may declare one;
+        # code nodes run in the implicit code pool where tools are meaningless.
+        # Tool names are not validated here — runtimes differ, and velites
+        # fails loud on an unknown tool at startup.
+        tools = _string_list(raw_node.get("tools"), "tools", node_key)
+        if tools and node_type != "agent":
+            raise WorkflowDefinitionError(f"Node {node_key}.tools is only valid on an agent node")
+
         inputs = _string_list(raw_node.get("inputs"), "inputs", node_key)
         if "resources" in raw_node:
             raise WorkflowDefinitionError(
@@ -219,6 +227,7 @@ def _load_nodes(
             config=dict(raw_config),
             config_schema=load_node_config_schema(raw_node, node_key),
             skill=load_node_skill(raw_node, node_key),
+            tools=tuple(tools),
             shard=_load_shard(raw_node, node_key, inputs),
             reduce=_load_reduce(raw_node, node_key),
             node_type=node_type,

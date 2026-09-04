@@ -41,6 +41,7 @@ fn base_config(cwd: PathBuf) -> AgentConfig {
         session: None,
         cwd,
         read_roots: Vec::new(),
+        skill_dirs: Vec::new(),
         sandbox: None,
         cancel: CancelToken::new(),
     }

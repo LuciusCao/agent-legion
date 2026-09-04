@@ -9,6 +9,8 @@ pub mod budget;
 pub mod cancel;
 pub mod cli;
 pub mod config;
+pub mod contract;
+pub mod contract_gate;
 pub mod events;
 pub mod models;
 pub mod provider;
@@ -43,7 +45,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
             Some(_) => {}
             None => {
                 return Err(anyhow!(
-                    "unknown tool `{name}` in --tools (available: read,write,bash,uuid)"
+                    "unknown tool `{name}` in --tools (available: read,write,bash,uuid,validate)"
                 ))
             }
         }
@@ -71,13 +73,17 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
     // and the session dir — the same locations the OS sandbox allows reads
     // from. Both exist by now (each skill's SKILL.md was loaded above and
     // SessionLog::open created the session dir), so canonicalization matches
-    // the sandbox allowlist exactly.
+    // the sandbox allowlist exactly. The canonicalized --skill dirs alone
+    // also feed the output-contract engine (#443): the `validate` tool and
+    // the end-of-run gate resolve the contract from them.
     let mut read_roots = Vec::new();
+    let mut skill_dirs = Vec::new();
     for dir in &cli.skill {
-        read_roots
-            .push(dir.canonicalize().with_context(|| {
-                format!("failed to canonicalize skill dir `{}`", dir.display())
-            })?);
+        let canonical = dir
+            .canonicalize()
+            .with_context(|| format!("failed to canonicalize skill dir `{}`", dir.display()))?;
+        read_roots.push(canonical.clone());
+        skill_dirs.push(canonical);
     }
     if let Some(dir) = &cli.session_dir {
         read_roots.push(
@@ -130,6 +136,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
         session,
         cwd,
         read_roots,
+        skill_dirs,
         sandbox,
         cancel: cancel::CancelToken::install_sigterm_handler(),
     };

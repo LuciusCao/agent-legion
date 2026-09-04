@@ -15,6 +15,7 @@ fn ctx_with_read_roots(cwd: &std::path::Path, read_roots: &[std::path::PathBuf])
         // read/write tools, which is independent of the OS-level bash sandbox.
         sandbox: None,
         read_roots: read_roots.to_vec(),
+        skill_dirs: Vec::new(),
     }
 }
 

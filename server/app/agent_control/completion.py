@@ -21,7 +21,7 @@ from server.app.services.connection_tokens import ConnectionTokenService
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.skills.manager import SkillManager
 from server.app.storage_paths import resolve_job_dir
-from server.app.workflows.output_validation import validate_worker_outputs
+from server.app.workflows.worker_output_validation import validate_worker_outputs
 
 logger = logging.getLogger(__name__)
 

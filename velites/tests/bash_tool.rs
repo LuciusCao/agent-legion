@@ -15,6 +15,7 @@ fn ctx(cwd: &std::path::Path) -> ToolContext {
         // has no bwrap.
         sandbox: None,
         read_roots: Vec::new(),
+        skill_dirs: Vec::new(),
     }
 }
 
