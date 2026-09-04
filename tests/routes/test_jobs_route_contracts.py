@@ -15,6 +15,7 @@ from server.app.routes.job_view_contracts import (
     JobNodeSummaryResponse,
     JobsResponse,
     JobSummaryResponse,
+    NodeRunResponse,
 )
 from tests.helpers import publish_legacy_intake_revision
 
@@ -190,6 +191,115 @@ def test_get_job_detail_returns_typed_job_summary(client):
     assert isinstance(body.nodes, list)
     assert isinstance(body.runs, list)
     assert isinstance(body.artifacts, list)
+
+
+def test_get_job_detail_run_carries_skill_version(client):
+    # #410: the runs list echoes the resolved skill version so the studio can
+    # show what a `latest` binding actually executed.
+    workspace_id, job_id = _create_test_job(client)
+    client.app.state.job_db.start_node_run(
+        job_id,
+        "intake_knowledge_points",
+        ["local"],
+        "logs/skill.log",
+        skill_version="latest@abc123def456",
+    )
+    response = client.get(f"/api/jobs/{job_id}")
+    assert response.status_code == 200
+    body = JobDetailResponse.model_validate(response.json())
+    assert len(body.runs) == 1
+    run = NodeRunResponse.model_validate(body.runs[0].model_dump())
+    assert run.skill_version == "latest@abc123def456"
+
+
+def test_list_workspace_node_runs_carries_skill_version(client):
+    # #410: same column via the workspace node-runs listing (the inspector's
+    # latest-run data source). #410 review: the endpoint response validates
+    # against NodeRunResponse (was a loose dict list, codex P1 on #427) —
+    # pydantic v2 default is extra='ignore': extra fields are stripped, not
+    # rejected, and missing fields with defaults (skill_version) pass too
+    # (independent review P3 on #427). The real backstops are the generated
+    # frontend types and the schema assertions pinning the typed item shape.
+    workspace_id, job_id = _create_test_job(client)
+    client.app.state.job_db.start_node_run(
+        job_id,
+        "intake_knowledge_points",
+        ["local"],
+        "logs/skill.log",
+        skill_version="v1.2.0",
+    )
+    response = client.get(f"/api/workspaces/{workspace_id}/node-runs")
+    assert response.status_code == 200
+    runs = response.json()["runs"]
+    assert len(runs) == 1
+    run = NodeRunResponse.model_validate(runs[0])
+    assert run.skill_version == "v1.2.0"
+
+
+def test_list_workspace_node_runs_filters_by_skill_key(client):
+    # #410 codex four-pass P1: the studio latest-run echo scopes its query to
+    # the current binding — a node rebound from skill-a to skill-b must not
+    # receive a's run (skill_version would masquerade as b's execution). The
+    # skill column (schema v75) is the filter key. The a-run is finished and
+    # the node re-queued via the rerun route between the two runs — the
+    # claim guard (start_node_run only claims pending/ready/stale nodes)
+    # mirrors what a real rebind-and-rerun does.
+    workspace_id, job_id = _create_test_job(client)
+    run_a = client.app.state.job_db.start_node_run(
+        job_id,
+        "intake_knowledge_points",
+        ["local"],
+        "logs/skill.log",
+        skill_version="latest@111111111111",
+        skill="ws-1/skill-a",
+    )
+    client.app.state.job_db.finish_node_run(run_a["id"], "completed", 0, "")
+    rerun = client.post(f"/api/jobs/{job_id}/nodes/intake_knowledge_points/rerun")
+    assert rerun.status_code == 200
+    client.app.state.job_db.start_node_run(
+        job_id,
+        "intake_knowledge_points",
+        ["local"],
+        "logs/skill.log",
+        skill_version="latest@222222222222",
+        skill="ws-1/skill-b",
+    )
+    unfiltered = client.get(
+        f"/api/workspaces/{workspace_id}/node-runs",
+        params={"node_key": "intake_knowledge_points"},
+    )
+    assert unfiltered.status_code == 200
+    assert [r["skill"] for r in unfiltered.json()["runs"]] == [
+        "ws-1/skill-b",
+        "ws-1/skill-a",
+    ]
+    filtered = client.get(
+        f"/api/workspaces/{workspace_id}/node-runs",
+        params={"node_key": "intake_knowledge_points", "skill": "ws-1/skill-b"},
+    )
+    assert filtered.status_code == 200
+    runs = [NodeRunResponse.model_validate(r) for r in filtered.json()["runs"]]
+    assert [r.skill for r in runs] == ["ws-1/skill-b"]
+    assert runs[0].skill_version == "latest@222222222222"
+    # The previous binding's run must not leak through the other direction.
+    stale = client.get(
+        f"/api/workspaces/{workspace_id}/node-runs",
+        params={"node_key": "intake_knowledge_points", "skill": "ws-1/skill-a"},
+    )
+    assert [r["skill"] for r in stale.json()["runs"]] == ["ws-1/skill-a"]
+
+
+def test_workspace_runs_response_schema_is_typed_node_run_list(tmp_path):
+    # #410 review: WorkspaceRunsResponse.runs must reference NodeRunResponse
+    # (like JobDetailResponse.runs), not a loose dict list — the frontend
+    # derives its transport type from this contract.
+    schema = build_openapi_schema(tmp_path)
+    runs_schema = schema["components"]["schemas"]["WorkspaceRunsResponse"]["properties"]["runs"]
+    assert runs_schema == {
+        "items": {"$ref": "#/components/schemas/NodeRunResponse"},
+        "title": "Runs",
+        "type": "array",
+    }
 
 
 def test_get_jobs_returns_absolute_storage_dir(client):

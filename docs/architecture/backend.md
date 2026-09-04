@@ -384,7 +384,7 @@ server/app/
 | WorkspacesResponse | BaseModel | workspaces: list[WorkspaceRecord] | app/routes/job_contracts.py |
 | DeleteJobResponse | BaseModel | deleted: str | app/routes/job_contracts.py |
 | ArtifactResponse | BaseModel | name: str, content: str | app/routes/job_contracts.py |
-| WorkspaceRunsResponse | BaseModel | runs: list[dict[str, Any]] | app/routes/job_contracts.py |
+| WorkspaceRunsResponse | BaseModel | runs: list[NodeRunResponse] | app/routes/job_contracts.py |
 | WorkspaceDagResponse | BaseModel | workflow: dict[str, Any], nodes: list[dict[str, Any]] | app/routes/job_contracts.py |
 | CodePoolStatus | BaseModel | capacity: int, running: int, available: int | app/routes/job_contracts.py |
 | WorkspaceStatsResponse | BaseModel | workspace_id: str, name: str, workflow_key: str, workflow_label: str, job_sta... | app/routes/job_contracts.py |

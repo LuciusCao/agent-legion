@@ -96,6 +96,15 @@ class NodeRunResponse(BaseModel):
     run_dir: str
     session_dir: str
     runner: str = ""
+    # #410: the version the run actually executed (skill repo HEAD commit or
+    # the frozen tag). Empty for runs that predate skill binding; surfaced so
+    # the studio can echo the resolved version for `latest` bindings.
+    skill_version: str = ""
+    # #410 (schema v75): the dispatched skill key (manifest pin ``skill``).
+    # skill_version is ``ref@commit12`` — its prefix is a ref, not the key, so
+    # the studio latest-run echo filters runs by this column to avoid echoing
+    # the previous binding's version after a rebind.
+    skill: str = ""
 
 
 class LogEventResponse(BaseModel):

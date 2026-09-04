@@ -284,6 +284,39 @@ describe('useWorkspaceEvents', () => {
     expect(invalidateCallsFor(invalidateSpy, 'workspaceStats')).toHaveLength(1)
   })
 
+  it('invalidates nodeRuns on job updates so the inspector echo stays fresh (codex r4 P2 on #427)', async () => {
+    // 检查器在节点运行前已挂载时 nodeRuns 查询缓存空记录——job 更新
+    // 事件（运行开始/结束）必须失效该前缀，节点完成运行时「实际执行」
+    // 才能即时刷新，而不是等窗口聚焦或重挂载。
+    vi.useFakeTimers()
+    const invalidateSpy = vi.spyOn(testClient, 'invalidateQueries')
+    renderEvents('ws1')
+    const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onopen?.()
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    await act(async () => {
+      source.onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'job_updated',
+            workspace_id: 'ws1',
+            job_id: 'job1',
+          }),
+        })
+      )
+    })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750)
+    })
+
+    expect(invalidateCallsFor(invalidateSpy, 'nodeRuns')).toHaveLength(1)
+  })
+
   it('updates workspace stats from payload stats', async () => {
     renderEvents('ws1')
     const source = EventSourceMock.instances[0]
