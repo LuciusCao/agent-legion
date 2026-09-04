@@ -47,13 +47,9 @@ from server.app.db.migrations import (
     migrate_workspace_secrets,
 )
 from server.app.db.migrations.job_status_counts import migrate_workspace_job_status_counts
-from server.app.db.migrations.jobs_workflow_key_alignment import (
-    migrate_jobs_workflow_key_alignment,
-)
+from server.app.db.migrations.jobs_workflow_key_alignment import migrate_jobs_workflow_key_alignment
 from server.app.db.migrations.preview_panels import migrate_preview_panels
-from server.app.db.migrations.retire_workflow_key_columns import (
-    migrate_retire_workflow_key_columns,
-)
+from server.app.db.migrations.retire_workflow_key_columns import migrate_retire_workflow_key_columns
 
 MigrationFn = Callable[[Any], None]
 
@@ -174,6 +170,11 @@ MIGRATIONS: list[SchemaMigration] = [
     # config_options_json mirrors come from the schema-file replay (its
     # alter-if-not-exists covers pre-v74 tables), no data migration.
     SchemaMigration(74, "studio_chat_agent_config"),
+    # v75 is DDL-only (#410): node_runs.skill — the dispatched skill key
+    # (manifest pin); skill_version's ``ref@commit12`` prefix cannot identify
+    # the binding (studio latest-run echo filters by key). Schema-file replay
+    # covers pre-v75 tables, no data backfill.
+    SchemaMigration(75, "node_runs_skill_key"),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]

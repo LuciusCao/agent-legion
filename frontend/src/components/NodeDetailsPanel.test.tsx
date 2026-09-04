@@ -26,6 +26,8 @@ const baseRun: components['schemas']['NodeRunResponse'] = {
   run_dir: '/tmp/run',
   session_dir: '/tmp/session',
   runner: '',
+  skill_version: '',
+  skill: '',
 }
 
 describe('NodeDetailsPanel', () => {
@@ -122,6 +124,7 @@ describe('NodeDetailsPanel', () => {
           exit_code: 0,
           error_message: '',
           runner: 'mac-mini-3',
+          skill_version: '',
         }}
         onViewLogs={vi.fn()}
       />
@@ -141,11 +144,41 @@ describe('NodeDetailsPanel', () => {
           exit_code: 0,
           error_message: '',
           runner: '',
+          skill_version: '',
         }}
         onViewLogs={vi.fn()}
       />
     )
     expect(screen.queryByText(/Runner/)).not.toBeInTheDocument()
+  })
+
+  it('shows the skill version in the latest run card when present (#410)', () => {
+    render(
+      <NodeDetailsPanel
+        nodeKey="generate_summary"
+        data={baseData}
+        latestRun={{
+          ...baseRun,
+          skill_version: 'latest@abc123def456',
+        }}
+        onViewLogs={vi.fn()}
+      />
+    )
+    expect(
+      screen.getByText('Skill 版本：latest@abc123def456')
+    ).toBeInTheDocument()
+  })
+
+  it('omits the skill version when empty (#410)', () => {
+    render(
+      <NodeDetailsPanel
+        nodeKey="generate_summary"
+        data={baseData}
+        latestRun={{ ...baseRun, skill_version: '' }}
+        onViewLogs={vi.fn()}
+      />
+    )
+    expect(screen.queryByText(/Skill 版本/)).not.toBeInTheDocument()
   })
 
   it('renders error_message when latestRun has one', () => {

@@ -70,6 +70,8 @@ export interface NodeRunSummary {
   exit_code?: number | null
   error_message?: string | null
   runner?: string
+  /** #410: 该 run 实际执行的 skill 版本（latest 解析结果或冻结 tag）。 */
+  skill_version?: string
 }
 
 interface DagGraphProps {
@@ -235,6 +237,7 @@ export function DagGraph({
             ...latestRun,
             error_message: latestRun.error_message ?? '',
             runner: latestRun.runner ?? '',
+            skill_version: latestRun.skill_version ?? '',
           }
         : null,
     }

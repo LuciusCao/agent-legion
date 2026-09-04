@@ -36,10 +36,8 @@ export const extraQueryKeys = {
   // SettingsPage 与 WorkspaceMainPage 经同一 key 共享工作流定义缓存。
   workflowDefinition: (key: string) => k('workflowDefinition', key),
   workspaceSettings: (ws: string) => k('workspaceSettings', ws),
-  failedNodeRuns: (
-    workspaceId: string,
-    workflowKey: string | null | undefined
-  ) => ['failedNodeRuns', workspaceId, workflowKey ?? null] as const,
+  failedNodeRuns: (ws: string, workflowKey: string | null | undefined) =>
+    ['failedNodeRuns', ws, workflowKey ?? null] as const,
   workspaceTokenUsage: (
     workspaceId: string,
     filters: {
@@ -67,6 +65,15 @@ export const extraQueryKeys = {
   // turn_end 按首段 'studioSkillDetail' 前缀整体失效（useStudioChat）。
   studioSkillDetail: (skillKey: string, ref: string | null) =>
     ['studioSkillDetail', skillKey, ref] as const,
+  // #410：节点检查器 Skill 区块 latest 绑定的实际执行版本回显（最近 run
+  // 的 skill_version）。
+  // #410：节点检查器 Skill 区块 latest 绑定的实际执行版本回显（最近 run
+  // 的 skill_version）。skill 进 key（codex 四轮 P1 on #427）：换绑后绑定
+  // key 变化即重新查询，不复用旧 key 的缓存；查询本身也按该列过滤
+  // （schema v75 的 node_runs.skill）。运行完成路径按 'nodeRuns' 前缀整体
+  // 失效（useWorkspaceEvents 的 job 更新事件，codex 四轮 P2 on #427）。
+  nodeRuns: (ws: string, nodeKey: string, skill: string) =>
+    ['nodeRuns', ws, nodeKey, skill] as const,
   // Studio 节点运行 Prompt 预览；草稿 YAML 进 key（编辑 debounce 后重取）。
   studioNodePromptPreview: (ws: string, nodeKey: string, yaml: string) =>
     ['studioNodePromptPreview', ws, nodeKey, yaml] as const,
