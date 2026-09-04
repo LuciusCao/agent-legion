@@ -111,6 +111,24 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ### Fixed
 
+- 高并发档位 job 状态计数触发器热点行死锁（issue #437）：高并发、
+  单 run 大规模 items 下 claim 间歇 500（psycopg DeadlockDetected，落点
+  claim 事务内 jobs promote UPDATE），并发呈锯齿式波动。根因
+  是 v73/v36 的 run/workspace 级行级计数触发器把同一 run 全部状态迁移
+  汇聚到寥寥几行 (run_id, status) 计数行——先扣旧 status 行再加新
+  status 行的两步锁足迹，与 claim 的 queued→running、收尾的
+  running→completed 以不同顺序触碰交叠成锁环。三层修复：① 根治
+  （schema v77）：两组计数触发器改为 statement-level + transition
+  tables——单语句内按 (key, status) 聚合净增量、按固定字典序一次性
+  apply，所有并发写方锁序全局一致，锁环不再成立。收益在固定锁序与
+  死锁消除，不在触发次数：psycopg executemany 服务端仍是 N 条独立
+  INSERT（每条触发一次 statement 触发器、transition table 1 行），
+  与旧行级触发器逐行加计数同量级；多行单语句（INSERT...SELECT）才
+  会一次聚合，当前代码库无该形状；
+  ② 缓解：claim 端点对 SQLSTATE 40P01 立即整体重试一次（干净连接
+  重进事务，再失败放行 500）；③ 缓解：Worker claim 退避改「首次 1s
+  固定 → 之后指数翻倍 ±20% jitter，上限 60s 不变」——瞬时抖动不再
+  烧掉完整 poll 周期，fleet 恢复不再同步对齐（锯齿根因之一）。
 - Studio 对话 run token 连锁失效与静默死亡（issue #411）：单轮 prompt 可
   跑满 1 小时，而 run token 续期只在轮首（30 分钟阈值）——长对话的 token
   会在 turn 进行中过期，agent 的全部 MCP 工具调用 401（"Studio agent

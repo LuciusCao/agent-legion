@@ -44,17 +44,19 @@ def test_schema_version_pin() -> None:
     # run_job_status_counts counter table (#358); v74 is DDL-only
     # (studio_chat_agent_config, #368) and owns
     # tests/db/test_studio_chat_schema.py; v75 is DDL-only
-    # (node_runs_skill_key, #410); v76 adds the
-    # studio_publish_requests table (#416) and owns
-    # tests/db/test_studio_publish_requests.py — this copy stays as
+    # (node_runs_skill_key, #410); v76 is studio_publish_requests (#416,
+    # claimed 76 after the #434 renumber) and owns
+    # tests/db/test_studio_publish_requests.py; v77
+    # (job_status_counts_statement_triggers, #437) owns
+    # tests/db/test_schema_upgrade_parity.py — this copy stays as
     # a backstop that the chain tail stays in sync.
-    assert SCHEMA_VERSION == 76
+    assert SCHEMA_VERSION == 77
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "studio_publish_requests"
+    assert row["name"] == "job_status_counts_statement_triggers"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:
