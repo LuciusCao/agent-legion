@@ -945,6 +945,7 @@
     "server/app/db/migrations/workspace_id_key_binding.py": 168,
     "server/app/db/migrations/workspace_secrets.py": 29,
     "server/app/db/migrations/workspace_settings_retirement.py": 19,
+    "server/app/db/pool_reset.py": 98,
     "server/app/db/pools.py": 49,
     "server/app/db/postgres_schema.sql": 831,
     "server/app/db/retry.py": 42,

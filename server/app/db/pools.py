@@ -8,6 +8,7 @@ from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from server.app.db.dialect import DatabaseDsn
+from server.app.db.pool_reset import reset_connection
 from server.app.db.rows import configure_connection, string_dict_row
 
 _POOLS: dict[tuple[int, str], ConnectionPool[Connection[dict[str, Any]]]] = {}
@@ -53,6 +54,11 @@ def pool_for(dsn: DatabaseDsn) -> ConnectionPool[Connection[dict[str, Any]]]:
                 open=True,
                 kwargs={"row_factory": string_dict_row},
                 configure=configure_connection,
+                # #438: defensive rollback on return. psycopg_pool already
+                # rolls back INTRANS returns; this reset hook additionally
+                # attributes the leak to its checkout call site (see
+                # pool_reset.reset_connection) and verifies IDLE afterwards.
+                reset=reset_connection,
             )
             _POOLS[key] = pool
         return pool

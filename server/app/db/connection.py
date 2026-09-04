@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
@@ -10,6 +11,7 @@ from psycopg_pool import ConnectionPool
 from server.app.db.cursor import Cursor
 from server.app.db.dialect import ConnectSource, postgres_sql, resolve_dsn
 from server.app.db.dialect import DatabaseDsn as DatabaseDsn  # noqa: F401 (re-export)
+from server.app.db.pool_reset import note_return, record_checkout_origin
 from server.app.db.pools import close_database_pools as close_database_pools
 from server.app.db.pools import pool_for
 
@@ -59,16 +61,30 @@ class DatabaseConnection:
         if self._closed:
             return
         self._closed = True
+        # #438: observe BEFORE the pool's async reset — this is the only
+        # synchronous point where a dirty return can be attributed to its
+        # checkout site. The pool rolls the transaction back either way.
+        note_return(self._raw)
         self._pool.putconn(self._raw)
 
     def __enter__(self) -> DatabaseConnection:
         return self
 
     def __exit__(self, exc_type: Any, exc: BaseException | None, traceback: Any) -> None:
-        if exc_type is None:
-            self.commit()
-        else:
-            self.rollback()
+        # close() is guaranteed (#438): when commit/rollback itself raises
+        # (deadlock at commit, connection reset), the old order skipped
+        # close() entirely — one stranded checkout per failed commit, and a
+        # pool slot lost while the connection may still hold its
+        # transaction open server-side. The pool's reset hook cleans
+        # whatever state the connection is left in; a commit failure still
+        # propagates to the caller after the checkout is released.
+        try:
+            if exc_type is None:
+                self.commit()
+            else:
+                self.rollback()
+        finally:
+            self.close()
 
 
 def connect_database(dsn: ConnectSource) -> DatabaseConnection:
@@ -79,4 +95,9 @@ def connect_database(dsn: ConnectSource) -> DatabaseConnection:
     # A failed checkout must not tear down any pool: ConnectionPool recovers
     # on its own, and other threads may still hold healthy connections.
     pool = pool_for(dsn)
-    return DatabaseConnection(pool.getconn(), pool, dsn)
+    raw = pool.getconn()
+    # Leak telemetry for the pool reset hook (#438): remember the checkout
+    # site so a dirty return can be attributed. Bounded frame walk, no
+    # formatting until a leak actually hits the reset hook.
+    record_checkout_origin(raw, sys._getframe())
+    return DatabaseConnection(raw, pool, dsn)
