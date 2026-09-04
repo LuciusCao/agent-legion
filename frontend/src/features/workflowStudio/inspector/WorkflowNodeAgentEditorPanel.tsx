@@ -6,38 +6,40 @@ type Props = {
   agentId: string | null
   capability: string
   onRefresh: () => void
-  onClose: () => void
 }
 
-// 入口按钮文案：收起/编辑/新建。
-export function agentEditorButtonLabel(
-  open: boolean,
-  agentId: string | null
-): string {
-  if (open) return '收起 Agent 编辑'
-  if (agentId) return '编辑 Agent'
-  return '为此 capability 新建 Agent'
-}
-
-// 内嵌 AgentEditor 的接线层：保存/发布/归档后刷新目录并收起。新建路径
-// 是例外——新建的是 draft-only Agent，若直接关面板，用户无法再从这里
-// 发布它（发布门禁会挡住 workflow），所以创建后保留新 Agent ID 并留在
+// 内嵌 AgentEditor 的接线层：保存/发布/归档后刷新目录。新建路径保留
+// 新 Agent ID——新建的是 draft-only Agent，目录里查不到，若回落 null
+// 用户无法再从这里发布它（发布门禁会挡住 workflow），所以创建后留在
 // 面板里切到编辑/发布模式，让「创建草稿 → 发布」在面板内闭环
 // （switchToAgent 先例：codex P2 on PR #288；#387 扩展到普通新建；
-// #392 起入口只在 agent 节点上）。
+// #392 起入口只在 agent 节点上；#409 起面板在 Agent 区块内联展开，
+// 无开合按钮，也就没有「收起」回调）。
+//
+// #426 review P1：createdAgentId 只应在「capability 的草稿」这一编辑目标
+// 的生命周期内有效。绑定解析（useCapabilityAgent）与编辑目标都是
+// capability 作用域——Agent 是 workspace 级共享实体（一 capability 一
+// published，同 capability 多节点共享），所以父层用 key={capability}
+// 挂载本组件：切换到不同 capability 的节点时整层重挂、草稿状态清零；
+// 同 capability 的节点间切换编辑目标不变（解析回落同一条草稿），保留
+// 在途表单状态不丢。#409 移除开合按钮后不再有「收起重置」的兜底入口。
 export function WorkflowNodeAgentEditorPanel(props: Props) {
   const [createdAgentId, setCreatedAgentId] = useState<string | null>(null)
   const editingAgentId = props.agentId ?? createdAgentId
 
   function handleSaved(newAgentId: string) {
     props.onRefresh()
-    if (props.agentId) {
-      props.onClose()
-      return
-    }
+    if (props.agentId) return
     // 不另弹 toast：AgentEditor 的「草稿已创建」已可见（双 toast 会互相
     // 顶掉，subagent review P3 on #391），留面板本身就是发布引导。
     setCreatedAgentId(newAgentId)
+  }
+
+  // 归档清空草稿身份：面板内创建的草稿归档后（#409 无收合重置入口）回落
+  // 新建表单，不残留已归档 Agent 的编辑态。
+  function handleArchived() {
+    props.onRefresh()
+    setCreatedAgentId(null)
   }
 
   return (
@@ -48,10 +50,7 @@ export function WorkflowNodeAgentEditorPanel(props: Props) {
       initialCapability={editingAgentId ? undefined : props.capability}
       onSaved={handleSaved}
       onChanged={props.onRefresh}
-      onArchived={() => {
-        props.onRefresh()
-        props.onClose()
-      }}
+      onArchived={handleArchived}
     />
   )
 }

@@ -20,7 +20,27 @@ export function useAgentDefinitions(workspaceId: string | undefined) {
     queryFn: () => fetchAgentDefinitions(workspaceId!),
     enabled: Boolean(workspaceId),
   })
-  return { agents: query.data?.agents ?? [], settled: !query.isPending }
+  return {
+    agents: query.data?.agents ?? [],
+    settled: !query.isFetching,
+    // #426 review P2：除本文件内 useCapabilityAgent 的 settled 语义外，
+    // 额外暴露查询原始状态供 useAgentCatalog 组合。#426 codex 终轮复审
+    // P2：pending 覆盖 invalidate 触发的后台重取（isPending 在有缓存时
+    // 保持 false，TanStack Query 后台刷新由 isFetching 表达）——保存/
+    // 发布/归档后旧缓存里的 published 条目可能已被编辑/归档，此时放行
+    // 编辑器等于让用户操作已归档 Agent，故取 settle = !isFetching（含
+    // 首次在途与后台重取）。窗口聚焦的 refetchOnWindowFocus 默认开启
+    // （queryClient.ts）且 staleTime 30s——聚焦仅当数据过期才重取，无
+    // 频繁闪烁。failed = 失败且无数据（后台刷新失败但缓存数据还在时
+    // 绑定仍可解析，不算 failed）；loadError/retry 供聚合层并入 Studio
+    // 的目录错误横幅。#426 codex 终轮 P2 后 settle 信号下放节点级与
+    // catalog 命中组合成 bindingStatus（未命中 published 时必须等本查询
+    // settle 才能断定未绑定），loadError/retry 仍并入横幅与重试。
+    pending: query.isFetching,
+    failed: query.isError && !query.data,
+    loadError: query.isError,
+    retry: query.refetch,
+  }
 }
 
 // #387：draft-only Agent（MCP save_agent_definition_draft 建的草稿）不在

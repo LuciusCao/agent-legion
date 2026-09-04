@@ -3,11 +3,13 @@ import type { SelectedWorkflowNodeDetails } from '../shared/workflowStudioModel'
 import { useNodeTypeSwitch } from './useNodeTypeSwitch'
 import { WorkflowNodeInspectorHeader } from './WorkflowNodeInspectorHeader'
 import { WorkflowNodeInspectorSections } from './WorkflowNodeInspectorSections'
+import type { AgentCatalogSettle } from './agentBindingStatus'
 import styles from './WorkflowNodeInspector.module.css'
 
 type Props = {
   details: SelectedWorkflowNodeDetails
   agentCatalog: AgentDefinition[]
+  agentCatalogSettle: AgentCatalogSettle
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
