@@ -53,6 +53,45 @@ def test_create_draft_publish_flow(client, ws) -> None:
     assert detail["published"]["version"] == 1
 
 
+# #407：创建表单不再收集 agent_id——省略时服务端按 capability 生成实体键。
+def test_create_without_agent_id_uses_capability(client, ws) -> None:
+    created = client.post(BASE, params=ws, json=PAYLOAD_V1)
+    assert created.status_code == 200
+    assert created.json()["agent_id"] == "review_keywords"
+    assert created.json()["definition"]["capability"] == "review_keywords"
+
+    # agent_id: null 与省略等价（契约层 Optional）——用别的 capability 验证
+    # （同 capability 再建会撞占用检查，见下个测试）。
+    other_cap = {
+        "capability": "generate_questions",
+        "runtime": "velites",
+        "skill": "demo_workflow/generate_questions",
+    }
+    explicit_null = client.post(BASE, params=ws, json={"agent_id": None, **other_cap})
+    assert explicit_null.status_code == 200
+    assert explicit_null.json()["agent_id"] == "generate_questions"
+
+
+def test_create_without_agent_id_conflicts_on_existing_entity(client, ws) -> None:
+    """同 capability 已有实体（草稿或归档）时拒绝隐式创建，引导直接编辑。"""
+    client.post(BASE, params=ws, json=PAYLOAD_V1)  # capability review_keywords → 草稿
+
+    conflict = client.post(BASE, params=ws, json=PAYLOAD_V1)
+    assert conflict.status_code == 409
+    assert "review_keywords" in conflict.json()["detail"]
+    assert "请直接编辑" in conflict.json()["detail"]
+
+    # 归档后实体仍存在：隐式创建同样 409（不复活、不加后缀）。
+    client.delete(f"{BASE}/review_keywords", params=ws)
+    archived_conflict = client.post(BASE, params=ws, json=PAYLOAD_V1)
+    assert archived_conflict.status_code == 409
+
+    # 显式 agent_id 不走冲突检查，保持旧语义（另建变体草稿的逃生口）。
+    variant = client.post(BASE, params=ws, json={"agent_id": "agent-b", **PAYLOAD_V1})
+    assert variant.status_code == 200
+    assert variant.json()["agent_id"] == "agent-b"
+
+
 def test_workspace_id_required(client) -> None:
     assert client.get(BASE).status_code == 422
     assert client.post(BASE, json={"agent_id": "agent-a", **PAYLOAD_V1}).status_code == 422

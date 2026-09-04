@@ -7,6 +7,7 @@ import json
 import pytest
 
 from server.app.agent_catalog import AgentDefinition
+from server.app.services.agent_definition_create import create_agent_draft
 from server.app.services.agent_service import AgentService
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 
@@ -62,6 +63,41 @@ def test_get_published_definition_enforces_hash(service) -> None:
 def test_save_draft_rejects_empty_agent_id(service) -> None:
     with pytest.raises(InvalidOperationError):
         service.save_draft("", DEFINITION_V1, "user:u1")
+
+
+# #407：创建入口缺省 agent_id——按 capability 生成，占用即冲突
+# （create-entry policy 在 agent_definition_create.py，这里经服务对象验证）。
+def test_create_draft_derives_agent_id_from_capability(service) -> None:
+    entity = create_agent_draft(service, None, DEFINITION_V1, "user:u1")
+
+    assert entity.entity_key == "review_keywords"
+    assert entity.status == "draft"
+    assert service.get_published_definition("review_keywords") is None
+
+
+def test_create_draft_derivation_conflicts_with_any_existing_entity(service) -> None:
+    create_agent_draft(service, None, DEFINITION_V1, "user:u1")  # → review_keywords 草稿
+
+    with pytest.raises(ConflictError, match="review_keywords"):
+        create_agent_draft(service, None, DEFINITION_V2, "user:u1")
+
+    # 归档后实体仍在：隐式创建不复活、不加后缀。
+    service.archive_all("review_keywords")
+    with pytest.raises(ConflictError):
+        create_agent_draft(service, None, DEFINITION_V1, "user:u1")
+
+
+def test_create_draft_explicit_agent_id_keeps_legacy_semantics(service) -> None:
+    """显式 agent_id 不做占用检查：同 key 覆盖草稿（save_draft 旧语义，
+    原地覆盖既有草稿行，version 不前进）。"""
+    create_agent_draft(service, None, DEFINITION_V1, "user:u1")
+
+    entity = create_agent_draft(service, "review_keywords", DEFINITION_V2, "user:u2")
+
+    assert entity.entity_key == "review_keywords"
+    assert entity.version == 1  # 覆盖草稿而不是报错，也不另开新版本
+    assert entity.definition["tools"] == ["read"]
+    assert entity.created_by == "user:u2"
 
 
 def test_publish_without_draft_raises(service) -> None:
