@@ -3,7 +3,7 @@
 The worker claim loop is single-threaded serial: claim throughput equals
 1 / (one claim round-trip), so the forensic question #448 must answer is
 WHERE inside the claim transaction the round-trip goes (worker setup,
-candidate scan, per-candidate lock/evaluate, promote writes, commit). This
+candidate scan, per-candidate lock/evaluate, promote writes). This
 module measures those stages with ``time.perf_counter`` at the claim call
 sites and reports them two ways:
 
@@ -16,10 +16,14 @@ sites and reports them two ways:
   that decides phase 2's priority (transaction slimming vs concurrency vs
   event-driven wakeups).
 
+The transaction COMMIT is deliberately not a measured stage: the commit
+point (write_transaction's with-block exit) sits after claim_in_transaction
+returns, and the claim-wide totals ``note_claim`` records already bound it
+as the round-trip residual.
+
 Cost discipline (this runs on the fleet's highest-frequency call): the
 timer is one dict of floats; ``stage`` does a ``perf_counter`` call and one
-dict store; no log record is built below the fired level and no formatting
-happens when neither level is enabled.
+dict store; no log record or formatting below the fired level.
 """
 
 from __future__ import annotations
@@ -33,8 +37,10 @@ logger = logging.getLogger(__name__)
 _DEFAULT_SLOW_CLAIM_MS = 5000.0
 _SLOW_CLAIM_MS_ENV = "AGENT_LEGION_SLOW_CLAIM_MS"
 
-# Fixed output order of the log line's stage segments.
-_STAGE_ORDER = ("worker_setup", "scan", "evaluate", "writes", "commit")
+# Fixed output order of the log line's stage segments — every stage the
+# claim path actually measures (see the module docstring for why commit is
+# not among them).
+_STAGE_ORDER = ("worker_setup", "scan", "evaluate", "writes")
 
 
 def slow_claim_threshold_ms() -> float:
@@ -99,17 +105,20 @@ def log_claim_stages(
         logger.debug(*message)
 
 
-def note_claim_stages(stages: dict[str, float], *, claimed: bool) -> None:
+def note_claim_stages(stages: dict[str, float]) -> None:
     """Fold one claim's stage timings into the #359 runtime profile.
 
     The runtime-profile discipline (counters.py): best-effort, never raises,
     undercount is acceptable. Imported lazily so a profile wiring failure
-    cannot take the claim path down.
+    cannot take the claim path down. Claim counting (claim_count /
+    claim_empty_count) is note_claim's exclusive job on the broker's claim
+    lifecycle — this side also counting empties doubled the classifier's
+    empty_claim_ratio (#461 review).
     """
     try:
         from server.app.services.runtime_profile import profile
 
-        profile.note_claim_stages(stages, claimed=claimed)
+        profile.note_claim_stages(stages)
     except Exception:
         # #204 broad-except audit: instrumentation must never break the
         # claim it observes. The outcome space is any import/attribute

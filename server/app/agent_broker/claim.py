@@ -39,7 +39,8 @@ __all__ = [
 
 # Claim-stage accounting (#448 phase 1): the worker claim loop is serial, so
 # one claim's round-trip is the throughput ceiling; the timer splits it into
-# worker_setup / scan / evaluate / writes (see claim_timing.py).
+# worker_setup / scan / evaluate / writes (see claim_timing.py; the commit is
+# deliberately unmeasured there — it sits past this function's return).
 _WORKER_SELECT_SQL = "select * from agent_workers where worker_id=%s for update"
 _ACTIVE_COUNT_SQL = (
     "select kind, count(*) as cnt from agent_execution_requests"
@@ -131,4 +132,4 @@ def _report_claim_stages(
         attempts=state.attempts,
         skipped=sum(state.skip_reasons.values()),
     )
-    note_claim_stages(timer.stages, claimed=claimed is not None)
+    note_claim_stages(timer.stages)

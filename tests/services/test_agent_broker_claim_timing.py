@@ -2,12 +2,18 @@
 
 The worker claim loop is single-threaded serial — claim throughput equals
 1 / (one claim round-trip) — so the claim transaction carries a stage timer
-(worker_setup / scan / evaluate / writes / commit). These tests pin:
+(worker_setup / scan / evaluate / writes; the transaction commit is
+deliberately unmeasured, see claim_timing's docstring). These tests pin:
 
 - the stage split reaches the log line (DEBUG per claim, WARNING past the
   threshold) with the claim verdict and attempt/skip counts;
 - the stage timings fold into the #359 runtime profile (scan/evaluate/
-  writes totals + maxes, empty-claim counting);
+  writes totals + maxes);
+- empty claims count exactly once (the broker's note_claim is the single
+  owner of claim_empty_count — the #461 review caught note_claim_stages
+  double-counting them, doubling the classifier's empty_claim_ratio);
+- a successful claim's writes segment carries the promote-write sequence
+  (the #461 review's stage-attribution fix), not just touch_worker;
 - the profile counters round-trip into the per-minute bucket row.
 """
 
@@ -144,10 +150,40 @@ def test_stage_timings_fold_into_runtime_profile(job_db, monkeypatch) -> None:
     counters = test_profile.counters
     assert counters.claim_scan_seconds_total > 0.0
     assert counters.claim_scan_seconds_max > 0.0
-    assert counters.claim_writes_seconds_max >= 0.0
+    # The writes stage covers the promote-write sequence (node flip, run/
+    # lease inserts, request claim, jobs promote) — the #461 stage-attribution
+    # fix moved the boundary inside evaluate_candidate. Both segments are
+    # real measurements, not constants.
+    assert counters.claim_writes_seconds_total > 0.0
+    assert counters.claim_evaluate_seconds_total > 0.0
+    assert counters.claim_scan_seconds_total + counters.claim_evaluate_seconds_total > 0.0
     # note_claim (broker.claim's own finally) still runs on the module-level
     # singleton replaced above: claim_count must count this claim exactly once.
     assert counters.claim_count == 1
+    assert counters.claim_empty_count == 0
+
+
+def test_empty_claim_counts_exactly_once(job_db, monkeypatch) -> None:
+    # End-to-end empty claim (#461 P1): both note_claim (broker.claim's
+    # finally) and note_claim_stages (claim.py's report helper) fire on the
+    # same empty claim; only note_claim may bump claim_empty_count, or the
+    # classifier's empty_claim_ratio doubles and drives false
+    # intake/schedule/claim verdicts.
+    AgentWorkerRegistry(TEST_DATABASE_URL).issue_token(
+        worker_id=_WORKER_ID,
+        name=_WORKER_ID,
+        runtimes=["pi"],
+        max_concurrency=10,
+        labels={"arch": "arm64"},
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+    test_profile = RuntimeProfile()
+    monkeypatch.setattr("server.app.services.runtime_profile.profile", test_profile, raising=False)
+    assert broker.claim(_WORKER_ID) is None
+    counters = test_profile.counters
+    assert counters.claim_count == 1
+    # The load-bearing assertion: exactly 1, not 2 (the double-count bug).
+    assert counters.claim_empty_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -190,22 +226,27 @@ def test_slow_claim_threshold_ignores_malformed_env(monkeypatch) -> None:
     assert slow_claim_threshold_ms() == 250.0
 
 
-def test_counters_claim_stages_split_and_empty_counting() -> None:
+def test_counters_claim_stages_do_not_count_empty_claims() -> None:
+    # #461 P1: note_claim_stages only folds timings — claim counting
+    # (claim_count / claim_empty_count) is note_claim's exclusive job on the
+    # broker's claim lifecycle; folding stages for an empty claim must leave
+    # the empty counter untouched.
     profile = RuntimeProfile()
-    profile.note_claim_stages({"scan": 0.1, "evaluate": 0.05, "writes": 0.02}, claimed=True)
-    profile.note_claim_stages({"scan": 0.3, "evaluate": 0.01, "writes": 0.0}, claimed=False)
+    profile.note_claim_stages({"scan": 0.1, "evaluate": 0.05, "writes": 0.02})
+    profile.note_claim_stages({"scan": 0.3, "evaluate": 0.01, "writes": 0.0})
     counters = profile.counters
     assert counters.claim_scan_seconds_total == pytest.approx(0.4)
     assert counters.claim_scan_seconds_max == pytest.approx(0.3)
     assert counters.claim_evaluate_seconds_total == pytest.approx(0.06)
     assert counters.claim_evaluate_seconds_max == pytest.approx(0.05)
     assert counters.claim_writes_seconds_total == pytest.approx(0.02)
-    assert counters.claim_empty_count == 1
+    assert counters.claim_empty_count == 0
+    assert counters.claim_count == 0
 
 
 def test_counters_snapshot_carries_stage_deltas() -> None:
     profile = RuntimeProfile()
-    profile.note_claim_stages({"scan": 0.2, "evaluate": 0.1, "writes": 0.05}, claimed=True)
+    profile.note_claim_stages({"scan": 0.2, "evaluate": 0.1, "writes": 0.05})
     snapshot = profile.counters.snapshot_and_reset()
     assert snapshot["claim_scan_seconds_total"] == 0.2
     assert snapshot["claim_scan_seconds_max"] == 0.2

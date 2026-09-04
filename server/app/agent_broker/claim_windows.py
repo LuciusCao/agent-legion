@@ -61,8 +61,9 @@ def scan_kind(
     ``state.attempts`` is the per-kind budget — the caller resets it before
     each kind so an unclaimable flood in one kind never consumes the other's
     attempts; ``state.skip_reasons`` keeps accumulating across kinds.
-    ``timer`` (#448) closes the scan/evaluate stages; None keeps this
-    importable from tests that predate the instrumentation.
+    ``timer`` (#448) closes the scan/evaluate stages around the scan query
+    and the evaluate loop; None keeps this importable from tests that
+    predate the instrumentation.
     """
     for per_workspace, window in SCAN_ROUNDS:
         candidates = fetch_candidates(conn, per_workspace, window, kind)
@@ -73,7 +74,7 @@ def scan_kind(
         for selected in fair_candidate_order(candidates, cursor):
             if state.attempts >= MAX_CLAIM_ATTEMPTS:
                 break
-            claimed = evaluate_candidate(broker, conn, worker_id, selected, view, state)
+            claimed = evaluate_candidate(broker, conn, worker_id, selected, view, state, timer)
             if claimed is not None:
                 if timer is not None:
                     # Close evaluate before returning: the claim succeeded

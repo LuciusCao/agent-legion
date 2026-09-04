@@ -23,13 +23,20 @@ _BUNDLE_LOCK_SQL = "select id from material_bundles where id=%s and workspace_id
 # batch instead of psycopg's executemany (still N independent statements
 # server-side). The v77 statement triggers then aggregate a whole batch into
 # ONE counter upsert per (key, status) — the per-row trigger firings of the
-# executemany shape were the remaining bulk-intake cost after #437. Batch
-# size bounds PG's per-statement parameter limit (65535 via the extended
-# protocol; 28 params per jobs row here) and the server-side memory the
-# unnest arrays plus a batch's transition tables occupy; one transaction
-# still wraps every batch, same as the executemany shape.
+# executemany shape were the remaining bulk-intake cost after #437. psycopg
+# adapts each column list as ONE array parameter (14 params per statement,
+# regardless of row count), so the 65535 extended-protocol parameter limit
+# is never in play; batch size bounds the server-side memory the unnest
+# arrays plus a batch's transition tables occupy; one transaction still
+# wraps every batch, same as the executemany shape.
 _JOBS_BATCH_ROWS = 1000
 
+# Duplicate job ids inside one call (same source_id listed twice, or two
+# entity_ids normalizing onto one id): ``on conflict do update`` is set-based
+# — two same-id rows in one unnest batch are a CardinalityViolation, where
+# executemany's N separate statements let the later row's DO UPDATE win over
+# the earlier one. The dict below keeps the LAST row per id, restoring that
+# later-row-wins semantics before the rows reach SQL (#461 review).
 _JOBS_BULK_INSERT_SQL = """
 insert into jobs(
   id, workspace_id, source_type, source_id, run_id, title, storage_dir, stem,
@@ -96,7 +103,7 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
             if frozen_config
             else None
         )
-        rows: list[tuple[Any, ...]] = []
+        rows: dict[str, tuple[Any, ...]] = {}
         job_ids: list[str] = []
         identities: dict[str, tuple[str, str]] = {}
         storage_dirs: dict[str, Path] = {}
@@ -115,30 +122,33 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
             # that blocks the one-shot flat→sharded migration as a conflict.
             storage_dir = job_storage_dir(self.jobs_dir, workspace_id, job_id)
             storage_dirs[job_id] = storage_dir
-            job_ids.append(job_id)
+            if job_id not in rows:
+                job_ids.append(job_id)
             input_doc = candidate_input(candidate)
             if input_doc.get("type") == "material":
                 material_ids.append(str(input_doc.get("material_id") or ""))
             elif input_doc.get("type") == "bundle":
                 bundle_ids.append(str(input_doc.get("bundle_id") or ""))
-            rows.append(
-                (
-                    job_id,
-                    workspace_id,
-                    str(candidate["entity_type"]),
-                    source_id,
-                    run_id,
-                    str(candidate["title"]),
-                    make_data_relative(storage_dir, self.jobs_dir.parent),
-                    str(candidate.get("stem", "")),
-                    revision["id"],
-                    int(revision["version"]),
-                    revision["definition_hash"],
-                    revision["definition_json"],
-                    json.dumps(input_doc, ensure_ascii=False),
-                    frozen_config_json,
-                )
+            # dict-keyed insert = dedup by job id, last row wins (the
+            # executemany shape's later-DO-UPDATE-wins semantics — see
+            # _JOBS_BULK_INSERT_SQL's comment).
+            rows[job_id] = (
+                job_id,
+                workspace_id,
+                str(candidate["entity_type"]),
+                source_id,
+                run_id,
+                str(candidate["title"]),
+                make_data_relative(storage_dir, self.jobs_dir.parent),
+                str(candidate.get("stem", "")),
+                revision["id"],
+                int(revision["version"]),
+                revision["definition_hash"],
+                revision["definition_json"],
+                json.dumps(input_doc, ensure_ascii=False),
+                frozen_config_json,
             )
+        row_list = list(rows.values())
 
         with self.connect() as conn:
             # Material inputs FOR KEY SHARE their materials row so a concurrent
@@ -162,7 +172,7 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                 f"select * from jobs where id in ({placeholders})", job_ids
             ).fetchall()
             by_id = {str(row["id"]): row for row in existing}
-            for row in rows:
+            for row in row_list:
                 current = by_id.get(str(row[0]))
                 if current is not None and (
                     current["workspace_id"] != row[1]
@@ -170,14 +180,16 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                     or current["source_id"] != row[3]
                 ):
                     raise ValueError(f"Job identity collision for {row[0]}")
-            for row in rows:
+            for row in row_list:
                 job_id = str(row[0])
                 if job_id not in by_id:
                     storage_dirs[job_id].mkdir(parents=True, exist_ok=True)
             # Set-based INSERT: ON CONFLICT arm and column values are
             # byte-identical to the old executemany shape — only the
-            # statement granularity changes (see _JOBS_BATCH_ROWS).
-            _insert_jobs_batched(conn, rows)
+            # statement granularity changes (see _JOBS_BATCH_ROWS). Batch-
+            # internal duplicate ids were deduplicated above (executemany's
+            # later-row-wins semantics preserved).
+            _insert_jobs_batched(conn, row_list)
             _insert_job_nodes_batched(
                 conn, [(job_id, node_key) for job_id in job_ids for node_key in node_keys]
             )

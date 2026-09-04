@@ -62,8 +62,7 @@ def test_stage_columns_round_trip_through_the_sampler() -> None:
     # places a new column can be dropped silently).
     profile = RuntimeProfile()
     profile.note_claim_stages(
-        {"worker_setup": 0.01, "scan": 0.2, "evaluate": 0.05, "writes": 0.02, "commit": 0.005},
-        claimed=True,
+        {"worker_setup": 0.01, "scan": 0.2, "evaluate": 0.05, "writes": 0.02, "commit": 0.005}
     )
     persist_profile_sample(
         TEST_DATABASE_URL,

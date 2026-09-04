@@ -165,12 +165,16 @@ class RuntimeProfile:
         if empty:
             self.counters.claim_empty_count += 1
 
-    def note_claim_stages(self, stages: Mapping[str, float], *, claimed: bool) -> None:
+    def note_claim_stages(self, stages: Mapping[str, float]) -> None:
         """Fold one claim's per-stage timings into the claim gauges (#448).
 
         Unknown keys are ignored (worker_setup/commit fold into nothing — the
         claim-wide totals above already carry them); same undercount
-        discipline as the sibling counters.
+        discipline as the sibling counters. Claim COUNTING lives only in
+        ``note_claim`` — the broker's claim lifecycle owns it; an earlier
+        variant also bumped ``claim_empty_count`` here, double-counting every
+        empty claim and doubling the classifier's empty_claim_ratio
+        (#461 review).
         """
         for stage in _CLAIM_STAGES:
             seconds = stages.get(stage, 0.0)
@@ -186,8 +190,6 @@ class RuntimeProfile:
                 f"claim_{stage}_seconds_max",
                 max(getattr(self.counters, f"claim_{stage}_seconds_max"), seconds),
             )
-        if not claimed:
-            self.counters.claim_empty_count += 1
 
     # --- execute ------------------------------------------------------------
 

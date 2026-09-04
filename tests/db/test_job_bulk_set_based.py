@@ -191,30 +191,79 @@ def test_bulk_resubmit_rebinds_run_and_freeze(tmp_path: Path) -> None:
     # No duplicate node rows from the double submit.
     assert int(nodes["cnt"]) == len(_NODE_KEYS)
     # The rebind moved the row from run 1 to run 2 in the counters.
-    assert int(run1["cnt"]) == 0 if run1 is not None else True
+    assert run1 is None or int(run1["cnt"]) == 0
     assert run2 is not None and int(run2["cnt"]) == 1
+
+
+def test_bulk_duplicate_ids_in_one_call_take_the_last_row(tmp_path: Path) -> None:
+    # #461 review: two rows with the same job id inside ONE unnest batch are
+    # a CardinalityViolation (set-based ON CONFLICT), where the old
+    # executemany shape let the later row's DO UPDATE win over the earlier
+    # one. create_jobs_bulk must dedup by id before the SQL — last row wins
+    # — restoring those semantics.
+    db = _make_db(tmp_path)
+    _seed_workspace(db, "ws-sb")
+
+    first = dict(_candidate(0), title="First Title")
+    second = dict(_candidate(0), title="Second Title")
+    jobs = db.create_jobs_bulk(
+        candidates=[_candidate(1), first, second],
+        workflow_key="wf",
+        run_id="run-sb-1",
+        node_keys=_NODE_KEYS,
+        workspace_id="ws-sb",
+        revision=_REVISION,
+        frozen_config={},
+    )
+
+    # One row per unique id, in first-seen order; the duplicate carries the
+    # LATER row's values (executemany's later-DO-UPDATE-wins semantics).
+    assert [str(job["id"]) for job in jobs] == [
+        "ws-sb_wf_item-00001",
+        "ws-sb_wf_item-00000",
+    ]
+    assert str(jobs[1]["title"]) == "Second Title"
+    with read_connection(TEST_DATABASE_URL) as conn:
+        rows = conn.execute(
+            "select count(*) as cnt from jobs where run_id=%s", ("run-sb-1",)
+        ).fetchone()
+        nodes = conn.execute(
+            "select count(*) as cnt from job_nodes where job_id=%s",
+            ("ws-sb_wf_item-00000",),
+        ).fetchone()
+    assert int(rows["cnt"]) == 2
+    # The duplicate id did not double-insert its node rows either.
+    assert int(nodes["cnt"]) == len(_NODE_KEYS)
 
 
 def test_bulk_insert_fires_statement_trigger_once_per_batch(tmp_path: Path) -> None:
     # The #441 review's point: with executemany each jobs row was its own
     # statement and its own trigger firing. The unnest shape must fire the
     # v77 INSERT trigger once per batch. Measured via pg_stat_user_tables
-    # delta around a 2500-row create (3 batches: 1000+1000+500): 2500 row
-    # INSERTs + 3 statement INSERTs... the trigger row on pg_stat tracks
-    # statement firings; the assertion is the batch count, not the row
-    # count, so it holds on both executemany (would read 2500) and the
-    # set-based shape (reads 3).
+    # delta around a 2500-row create (3 batches: 1000+1000+500) on a fresh
+    # run so the first batch INSERTS the counter row (n_tup_ins) and the
+    # later batches take the ON CONFLICT UPDATE arm (n_tup_upd) — the
+    # firing count is the ins+upd delta, not upd alone. Two measurement
+    # realities (#461 review): pg_stat counters land asynchronously (~1s
+    # behind the writer's commit locally), so poll until the expected
+    # firings appear instead of trusting one fixed sleep; and the counter
+    # row for this run must not pre-exist, or every batch takes the update
+    # arm and the insert delta reads 0.
     import time
 
     db = _make_db(tmp_path)
     _seed_workspace(db, "ws-sb2")
+    with db.connect() as conn:
+        conn.execute("delete from jobs where run_id='run-sb-1'")
+        conn.execute("delete from run_job_status_counts where run_id='run-sb-1'")
     with read_connection(TEST_DATABASE_URL) as conn:
         before = conn.execute(
-            "select n_tup_upd from pg_stat_user_tables"
+            "select n_tup_ins, n_tup_upd from pg_stat_user_tables"
             " where schemaname=current_schema() and relname='run_job_status_counts'"
         ).fetchone()
     assert before is not None
-    baseline = int(before["n_tup_upd"])
+    base_ins = int(before["n_tup_ins"])
+    base_upd = int(before["n_tup_upd"])
 
     db.create_jobs_bulk(
         candidates=[_candidate(i) for i in range(2500)],
@@ -225,20 +274,28 @@ def test_bulk_insert_fires_statement_trigger_once_per_batch(tmp_path: Path) -> N
         revision=_REVISION,
     )
 
-    # Stats are async; give the collector a moment without depending on it
-    # for correctness (the counter-equality test above is the hard check).
-    time.sleep(0.2)
-    with read_connection(TEST_DATABASE_URL) as conn:
-        conn.execute("select pg_stat_force_next_flush()")
-        after = conn.execute(
-            "select n_tup_upd from pg_stat_user_tables"
-            " where schemaname=current_schema() and relname='run_job_status_counts'"
-        ).fetchone()
-    assert after is not None
-    firings = int(after["n_tup_upd"]) - baseline
+    # Stats are async: pg_stat_force_next_flush from this backend asks the
+    # writer's collector to flush, and the counters land up to ~1s later
+    # (measured locally) — poll for the firings instead of trusting one
+    # fixed read. The counter-equality test above remains the hard
+    # correctness check; this is the trigger-economics pin.
+    firings = 0
+    for _ in range(30):
+        time.sleep(0.1)
+        with read_connection(TEST_DATABASE_URL) as conn:
+            conn.execute("select pg_stat_force_next_flush()")
+            after = conn.execute(
+                "select n_tup_ins, n_tup_upd from pg_stat_user_tables"
+                " where schemaname=current_schema() and relname='run_job_status_counts'"
+            ).fetchone()
+        assert after is not None
+        firings = (int(after["n_tup_ins"]) - base_ins) + (int(after["n_tup_upd"]) - base_upd)
+        if firings >= 3:
+            break
     # 2500 rows in 1000-row batches = 3 statement firings (1000+1000+500),
     # each upserting one counter row for this run — nowhere near the
-    # per-row count the executemany shape produced. The upper bound keeps
-    # the assertion robust against concurrent stats noise from other
-    # tests' writes to the same shared stats table.
-    assert firings <= 3 + 10, firings
+    # per-row count the executemany shape produced. The lower bound pins
+    # that every batch actually fired (at least one counter write per
+    # batch); the upper bound keeps the assertion robust against concurrent
+    # stats noise from other tests' writes to the same shared stats table.
+    assert 3 <= firings <= 3 + 10, firings
