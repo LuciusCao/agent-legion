@@ -1231,6 +1231,7 @@
     "server/app/services/__init__.py": 11,
     "server/app/services/agent_catalog_projection.py": 48,
     "server/app/services/agent_definition_create.py": 46,
+    "server/app/services/agent_publish_prune.py": 178,
     "server/app/services/agent_service.py": 114,
     "server/app/services/agent_version_pins.py": 64,
     "server/app/services/approval_decisions.py": 192,
