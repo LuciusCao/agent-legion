@@ -279,6 +279,58 @@ def test_close_failure_does_not_mask_original_exception(
     assert conn._closed is True
 
 
+def test_close_failure_in_generator_release_does_not_mask_original(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#439 final review: the __exit__ twin of this scenario is covered
+    (test_close_failure_does_not_mask_original_exception), but the generator
+    finallys were not — ``write_transaction`` releases through
+    ``_release_quietly``, and an unguarded close() raise there would REPLACE
+    the caller's original error at the with-statement. Same technique as the
+    __exit__ twin, through the generator path: commit fails in the else-arm,
+    close fails in the finally — the caller must still see the commit error,
+    with the close failure only a debug breadcrumb."""
+
+    def exploding_commit(self: Any) -> None:
+        raise RuntimeError("commit failed")
+
+    def exploding_close(self: Any) -> None:
+        # Same failure shape as the __exit__ twin: the real close marks
+        # _closed before the putconn round trip can raise, so the flag flip
+        # must survive even though the release itself is swallowed.
+        self._closed = True
+        raise RuntimeError("close also failed")
+
+    monkeypatch.setattr("server.app.db.connection.DatabaseConnection.commit", exploding_commit)
+    monkeypatch.setattr("server.app.db.connection.DatabaseConnection.close", exploding_close)
+    caplog.set_level(logging.DEBUG, logger="server.app.db.transaction")
+    with (
+        pytest.raises(RuntimeError, match="commit failed") as excinfo,
+        write_transaction(TEST_DATABASE_URL) as conn,
+    ):
+        conn.execute("select 1")
+    # The caller sees the ORIGINAL commit failure: the finally's close()
+    # raise was swallowed by _release_quietly — it never replaces the
+    # propagating error, and being caught inside the helper it does not
+    # even attach as a __context__ footnote (finally raises chain, caught
+    # ones vanish).
+    assert "close also failed" not in str(excinfo.value)
+    assert excinfo.value.__context__ is None
+    assert conn._closed is True  # close() did run (and flip the flag) before raising
+    # The swallowed close failure stays observable: exactly one debug
+    # breadcrumb from the transaction module, traceback attached.
+    release_debugs = [
+        record
+        for record in caplog.records
+        if record.levelno == logging.DEBUG
+        and "close() failed during release" in record.getMessage()
+    ]
+    assert len(release_debugs) == 1
+    assert release_debugs[0].name == "server.app.db.transaction"
+    assert release_debugs[0].exc_info is not None
+
+
 def test_suppressed_leak_hits_are_counted(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
