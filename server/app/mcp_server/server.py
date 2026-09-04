@@ -26,7 +26,16 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from server.app.mcp_server import job_tools, preview_tools, prompt_tools, skill_tools
+# Workflow read/validate/compare/publish-request tools (issue #416 grouped
+# them with their draft lifecycle) live in workflow_tools; skill/prompt/
+# preview/job tools in their sibling modules (file-size budget).
+from server.app.mcp_server import (
+    job_tools,
+    preview_tools,
+    prompt_tools,
+    skill_tools,
+    workflow_tools,
+)
 from server.app.mcp_server.authoring_guide import AUTHORING_GUIDE
 from server.app.mcp_server.config import McpConfigError, McpServerConfig
 from server.app.mcp_server.tool_client import ToolClient
@@ -72,41 +81,6 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         if config.session_id is None:
             return "get_studio_context is unavailable: no chat session bound"
         return await client.call("GET", f"/chat-sessions/{config.session_id}/context")
-
-    @mcp.tool()
-    async def get_active_workflow(workspace_id: str) -> str:
-        """Get the active workflow revision of a workspace, including the full
-        definition YAML. Read this before drafting changes so the draft builds
-        on what is actually live. No published workflow yet yields a structured
-        empty state ({"state": "empty"}) instead of an error — the signal to
-        start the from-scratch flow (see get_authoring_guide)."""
-        _, client = await _client()
-        return await client.call("GET", f"/workspaces/{workspace_id}/workflow/active")
-
-    @mcp.tool()
-    async def validate_workflow(workspace_id: str, definition_yaml: str) -> str:
-        """Validate a workflow definition YAML draft against the publish
-        validation set. Persists nothing. Always validate a draft before
-        asking the human to review or apply it."""
-        _, client = await _client()
-        return await client.call(
-            "POST",
-            f"/workspaces/{workspace_id}/workflow/validate",
-            {"definition_yaml": definition_yaml},
-        )
-
-    @mcp.tool()
-    async def compare_workflow(workspace_id: str, definition_yaml: str) -> str:
-        """Diff a workflow definition YAML draft against the workspace's active
-        revision: per-node changes, risk summary, whether it would create a new
-        revision. With no published baseline the result is a full-draft preview
-        (everything added, base_revision null). Persists nothing."""
-        _, client = await _client()
-        return await client.call(
-            "POST",
-            f"/workspaces/{workspace_id}/workflow/compare",
-            {"definition_yaml": definition_yaml},
-        )
 
     @mcp.tool()
     async def save_node_code_draft(
@@ -172,6 +146,10 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
     # preview/save tools, both split into sibling modules for the budget.
     skill_tools.register_skill_tools(mcp, _client)
     prompt_tools.register_prompt_tools(mcp, _client)
+    # Workflow tools (active read / validate / compare / publish-request,
+    # issue #416): the publish request parks a pending publish for the human
+    # to confirm in Studio — never publishes directly.
+    workflow_tools.register_workflow_tools(mcp, _client)
     # Preview panel tools (issue #328): context/panel reads + draft save,
     # draft-only like the rest of the surface.
     preview_tools.register_preview_tools(mcp, _client)

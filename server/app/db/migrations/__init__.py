@@ -42,6 +42,9 @@ from server.app.db.migrations.scoped_token_origin import migrate_scoped_token_or
 from server.app.db.migrations.studio_chat import migrate_studio_chat_tables  # noqa: F401
 from server.app.db.migrations.studio_chat_context import migrate_studio_chat_context  # noqa: F401
 from server.app.db.migrations.studio_chat_draft import migrate_studio_chat_draft  # noqa: F401
+from server.app.db.migrations.studio_publish_requests import (  # noqa: F401
+    migrate_studio_publish_requests,
+)
 from server.app.db.migrations.versioned_entities import migrate_versioned_entities  # noqa: F401
 from server.app.db.migrations.workflow_catalog_retirement import (  # noqa: F401
     migrate_workflow_catalog_retirement,

@@ -23,6 +23,13 @@ vi.mock('../chat/StudioChatPanel', () => ({
   StudioChatPanel: () => <div>chat panel stub</div>,
 }))
 
+// #416：StudioChatAside 轮询 agent 发布请求（react-query）。
+vi.mock('../../../api/studioPublishRequestApi', () => ({
+  fetchPendingPublishRequest: vi.fn().mockResolvedValue(null),
+  confirmPublishRequest: vi.fn(),
+  cancelPublishRequest: vi.fn(),
+}))
+
 const mockApi = vi.mocked(api)
 
 const workflow = {

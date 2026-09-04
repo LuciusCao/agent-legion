@@ -1087,12 +1087,9 @@ alter table studio_chat_sessions add column if not exists selected_node_key text
 -- Upgrade path for pre-v57 databases.
 alter table studio_chat_sessions add column if not exists draft_yaml text;
 -- Agent-advertised session mode state / config options (v74, #368): JSON
--- mirrors of the ACP session/new (or session/load) response, kept current by
--- current_mode_update / config_option_update notifications. NULL means the
--- agent does not advertise the capability (UI hides the control). The ALTER
--- covers fresh AND pre-v74 databases alike (the create-table block above
--- deliberately omits both columns: the schema file's growth budget is one
--- effective line per column, and this single statement is that line).
+-- mirrors of the ACP session handshake response (NULL = capability not
+-- advertised; UI hides the control). The ALTER covers fresh + pre-v74
+-- databases; the create-table block omits both columns (one line each).
 alter table studio_chat_sessions add column if not exists session_modes_json text, add column if not exists config_options_json text;
 
 create table if not exists studio_chat_messages (
@@ -1113,6 +1110,9 @@ create unique index if not exists idx_studio_chat_messages_seq
 create index if not exists idx_studio_chat_messages_session
   on studio_chat_messages(session_id, seq);
 
+-- Agent-initiated workflow publish requests (schema v76, #416):
+-- studio_publish_requests is created by its migration module, not here
+-- (schema file at its line ceiling; fresh + v75-upgrade both run v76).
 -- Materials (schema v52, materials-and-runs design §5.1): browser-uploaded
 -- files. Bytes live in the instance S3-compatible object store under
 -- storage_key; this row is the metadata. content_hash is '' when the client
