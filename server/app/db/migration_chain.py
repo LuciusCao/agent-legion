@@ -45,6 +45,9 @@ from server.app.db.migrations import (
     migrate_workspace_secrets,
 )
 from server.app.db.migrations.job_status_counts import migrate_workspace_job_status_counts
+from server.app.db.migrations.job_status_counts_statement_triggers import (
+    migrate_job_status_counts_statement_triggers,
+)
 from server.app.db.migrations.jobs_workflow_key_alignment import migrate_jobs_workflow_key_alignment
 from server.app.db.migrations.preview_panels import migrate_preview_panels
 from server.app.db.migrations.retire_workflow_key_columns import migrate_retire_workflow_key_columns
@@ -178,6 +181,20 @@ MIGRATIONS: list[SchemaMigration] = [
     # fresh + v75-upgrade paths both run this migration). #434: born as this
     # branch's v75, bumped to 76 when #427's node_runs_skill_key claimed 75.
     SchemaMigration(76, "studio_publish_requests", migrate_studio_publish_requests),
+    # v77 (#437): the run/workspace job status count triggers become
+    # statement-level with transition tables. The v36/v73 row triggers
+    # serialised every job status transition of one run onto a handful of
+    # (key, status) counter rows; at high claim concurrency the promote
+    # (queued→running) and completion (running→completed) UPDATEs took those
+    # rows in different orders and deadlocked (psycopg 40P01 on the claim
+    # path). The replacement aggregates the net delta per (key, status) from
+    # the transition tables and applies it once per statement — one globally
+    # consistent lock order per statement. Born as this branch's v76, bumped
+    # to 77 when develop's #429 claimed v76 for studio_publish_requests (#434
+    # collision protocol: the later merge renumbers).
+    SchemaMigration(
+        77, "job_status_counts_statement_triggers", migrate_job_status_counts_statement_triggers
+    ),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]
