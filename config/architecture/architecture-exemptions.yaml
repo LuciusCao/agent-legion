@@ -615,12 +615,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 81
 - check: architecture.file_budget
-  path: server/app/services/workflow_draft_compare.py
-  reason: '超出基线的比对分支与风险档；#418 关闭后经 ratchet 下调基线退出（compare 剩余字段的收编见 #431）'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/431
-  ceiling: 493
-- check: architecture.file_budget
   path: server/app/services/studio_publish_requests.py
   reason: 'The #429 review rounds harden the confirm path: resolve drops the expires_at predicate (a publish
     that outlives the remaining TTL must still record confirmed — TOCTOU), a losing resolve race reports

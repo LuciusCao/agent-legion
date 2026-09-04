@@ -5,11 +5,13 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from server.app.services.workflow_draft_compare_conditions import (
-    condition_identity as _condition_identity,
+from server.app.services.workflow_draft_compare_edges import (
+    _detect_duplicate_source_target,
+    _edge_identity,
+    _should_use_full_edge_identity,
 )
-from server.app.services.workflow_draft_compare_conditions import (
-    format_condition as _format_condition,
+from server.app.services.workflow_draft_compare_edges import (
+    diff_edges as _diff_edges,
 )
 from server.app.services.workflow_draft_compare_metadata import (
     diff_metadata as _diff_metadata,
@@ -24,7 +26,6 @@ from server.app.services.workflow_revision_change import structural_revision_cha
 from server.app.workflows.definition import WorkflowDefinitionError, workflow_definition_from_dict
 from server.app.workflows.schema import (
     WorkflowDefinition,
-    WorkflowEdge,
     WorkflowIntake,
     WorkflowIntakeMode,
     WorkflowNode,
@@ -33,27 +34,17 @@ from server.app.workflows.schema import (
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
 
-
-def _edge_identity(edge: WorkflowEdge, use_full: bool) -> str:
-    if use_full:
-        return f"{edge.source}|{edge.target}|{_condition_identity(edge.condition)}"
-    return f"{edge.source}|{edge.target}"
-
-
-def _detect_duplicate_source_target(edges: list[WorkflowEdge]) -> bool:
-    seen: set[str] = set()
-    for edge in edges:
-        key = f"{edge.source}|{edge.target}"
-        if key in seen:
-            return True
-        seen.add(key)
-    return False
-
-
-def _should_use_full_edge_identity(base: WorkflowDefinition, draft: WorkflowDefinition) -> bool:
-    return _detect_duplicate_source_target(base.edges) or _detect_duplicate_source_target(
-        draft.edges
-    )
+# #431: the edge diff (identity set + order fingerprint) lives in
+# workflow_draft_compare_edges; the underscore helpers stay importable from
+# here for the existing sibling/test import sites.
+__all__ = [
+    "_detect_duplicate_source_target",
+    "_edge_identity",
+    "_should_use_full_edge_identity",
+    "compare_workflow_draft",
+    "_node_change_fields",
+    "_node_field_risks",
+]
 
 
 def _node_change_fields(base: WorkflowNode, draft: WorkflowNode) -> list[str]:
@@ -80,6 +71,20 @@ def _node_change_fields(base: WorkflowNode, draft: WorkflowNode) -> list[str]:
         fields.append("terminal")
     if base.accepted_item_types != draft.accepted_item_types:
         fields.append("accepted_item_types")
+    # Issue #431: the remaining structural fields. Each of these version with
+    # the revision via ``_structural_payload`` (asdict + ``==``), so the
+    # compare must see them too or a same-set-different-order draft shows
+    # "no changes" while publishing still bumps the version. ``after`` is a
+    # plain ordered list — list equality is order-sensitive on purpose, the
+    # same alignment as the publish path.
+    if base.node_type != draft.node_type:
+        fields.append("node_type")
+    if base.after != draft.after:
+        fields.append("after")
+    if base.shard != draft.shard:
+        fields.append("shard")
+    if base.reduce != draft.reduce:
+        fields.append("reduce")
     return fields
 
 
@@ -142,6 +147,21 @@ def _node_field_risks(base: WorkflowNode, draft: WorkflowNode) -> dict[str, str]
         risks["terminal"] = "breaking"
     if base.accepted_item_types != draft.accepted_item_types:
         risks["accepted_item_types"] = "breaking"
+
+    # Issue #431: the remaining structural fields keep compare and publish
+    # aligned. A node_type switch (code→agent) changes what executes the
+    # node, so it is a breaking change like capability; shard/reduce alter
+    # the fan-out/fan-in execution shape (structural, but not a routing
+    # break — same tier as execution overrides); an after reorder keeps the
+    # same dependency set while changing the serialized structure.
+    if base.node_type != draft.node_type:
+        risks["node_type"] = "breaking"
+    if base.after != draft.after:
+        risks["after"] = "warning"
+    if base.shard != draft.shard:
+        risks["shard"] = "warning"
+    if base.reduce != draft.reduce:
+        risks["reduce"] = "warning"
 
     return risks
 
@@ -286,84 +306,6 @@ def _diff_nodes(
                         "code": "label_changed",
                         "severity": "info",
                         "message": f"节点 {key} 的显示名称从 {base_node.label} 改为 {draft_node.label}。",
-                    }
-                )
-
-
-def _diff_edges(
-    base: WorkflowDefinition,
-    draft: WorkflowDefinition,
-    edge_changes: list[dict[str, Any]],
-    risk_flags: list[dict[str, Any]],
-) -> None:
-    use_full = _should_use_full_edge_identity(base, draft)
-    base_edges = {_edge_identity(edge, use_full): edge for edge in base.edges}
-    draft_edges = {_edge_identity(edge, use_full): edge for edge in draft.edges}
-    all_keys = set(base_edges) | set(draft_edges)
-
-    for key in sorted(all_keys):
-        base_edge = base_edges.get(key)
-        draft_edge = draft_edges.get(key)
-
-        if base_edge is None and draft_edge is not None:
-            edge_changes.append(
-                {
-                    "type": "added",
-                    "source": draft_edge.source,
-                    "target": draft_edge.target,
-                    "before_condition": None,
-                    "after_condition": _format_condition(draft_edge.condition),
-                    "risk": "warning",
-                }
-            )
-            risk_flags.append(
-                {
-                    "code": "edge_added",
-                    "severity": "warning",
-                    "message": f"新增边 {draft_edge.source} -> {draft_edge.target}。",
-                }
-            )
-            continue
-
-        if base_edge is not None and draft_edge is None:
-            edge_changes.append(
-                {
-                    "type": "removed",
-                    "source": base_edge.source,
-                    "target": base_edge.target,
-                    "before_condition": _format_condition(base_edge.condition),
-                    "after_condition": None,
-                    "risk": "breaking",
-                }
-            )
-            risk_flags.append(
-                {
-                    "code": "edge_removed",
-                    "severity": "breaking",
-                    "message": f"边 {base_edge.source} -> {base_edge.target} 被删除。",
-                }
-            )
-            continue
-
-        if base_edge is not None and draft_edge is not None and not use_full:
-            base_condition = _format_condition(base_edge.condition)
-            draft_condition = _format_condition(draft_edge.condition)
-            if base_condition != draft_condition:
-                edge_changes.append(
-                    {
-                        "type": "condition_changed",
-                        "source": base_edge.source,
-                        "target": base_edge.target,
-                        "before_condition": base_condition,
-                        "after_condition": draft_condition,
-                        "risk": "breaking",
-                    }
-                )
-                risk_flags.append(
-                    {
-                        "code": "edge_condition_changed",
-                        "severity": "breaking",
-                        "message": "分支条件变化会改变运行路径。",
                     }
                 )
 
