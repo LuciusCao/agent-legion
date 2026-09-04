@@ -342,7 +342,7 @@ exemptions:
     the hashBundle helper -- a cross-navigation bridge-request isolation fix that must stay at the composition
     site to keep the in-flight-window reasoning local.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/347
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 79
 - check: architecture.file_budget
   path: server/app/executors/_code_sandbox.py
@@ -434,7 +434,7 @@ exemptions:
     recent job merges the object-store manifest like the selected job does (the object store is the authoritative
     copy, the local dir an evictable cache). Single-purpose helper next to its only consumer.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/347
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 190
 - check: architecture.file_budget
   path: server/app/services/s3_jobs_gc.py
