@@ -15,8 +15,8 @@ import {
   useNodesState,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import * as dagre from 'dagre'
 import { buildRfEdges, DagEdgeLabels } from './DagEdgeLabels'
+import { computeLayout } from './dagLayout'
 import { DagEdge as DagEdgeComponent } from './DagEdge'
 import { DagNode as DagNodeComponent } from './DagNode'
 import type { DagNodeData } from './DagNode'
@@ -25,7 +25,6 @@ import type { DagNodeStatus } from '../dagNodeStatus'
 import type { ExecutorKind } from '../../types/jobTypes'
 import { NodeDetailsPanel } from '../NodeDetailsPanel'
 import { filterRelevantRuns } from '../../lib/jobRuns'
-import { estimateDagNodeHeight } from '../dagNodeHeight'
 import { applyHighlight, hoverReducer } from '../dagHighlight'
 import type { TopologyBadge } from './dagNodeTypes'
 import styles from './DagGraph.module.css'
@@ -83,9 +82,6 @@ interface DagGraphProps {
   hideNodeDetails?: boolean
 }
 
-// #415：与 DagNode.module.css 的 .node 宽度同步（240→280）——dagre 拿它
-// 布点，CSS 卡片宽于该值时相邻列会重叠。只动尺寸，布局逻辑归 #417。
-const NODE_WIDTH = 280
 const FIT_VIEW_OPTIONS = { padding: 0.18, minZoom: 0.35, maxZoom: 1.2 }
 const nodeTypes = { dagNode: DagNodeComponent }
 const edgeTypes = { dagEdge: DagEdgeComponent }
@@ -99,57 +95,12 @@ function normalizeExecutorKind(
   return kind as NormalizedExecutorKind
 }
 
-function computeLayout(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
-  const g = new dagre.graphlib.Graph()
-  g.setGraph({ rankdir: 'LR', nodesep: 60, ranksep: 100 })
-  g.setDefaultEdgeLabel(() => ({}))
-
-  const heightMap = new Map<string, number>()
-  for (const node of nodes) {
-    const height = estimateDagNodeHeight(node)
-    heightMap.set(node.key, height)
-    g.setNode(node.key, { width: NODE_WIDTH, height })
+// 布局计算在 dagLayout.ts（#417 拆出：无边 dagre 退化布局治理 + 体积预算）。
+function layoutGraph(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
+  return {
+    ...computeLayout(nodes, edges, normalizeExecutorKind),
+    rfEdges: buildRfEdges(edges),
   }
-  for (const edge of edges) {
-    g.setEdge(edge.from, edge.to)
-  }
-
-  dagre.layout(g)
-
-  const rfNodes: Node<DagNodeData>[] = nodes.map((node) => {
-    const gNode = g.node(node.key)
-    const height = heightMap.get(node.key)!
-    return {
-      id: node.key,
-      type: 'dagNode',
-      position: { x: gNode.x - NODE_WIDTH / 2, y: gNode.y - height / 2 },
-      data: {
-        label: node.label,
-        status: node.status,
-        duration: node.duration,
-        executorKind: normalizeExecutorKind(node.executorKind),
-        executorId: node.executorId ?? null,
-        agentId: node.agentId ?? null,
-        workerId: node.workerId ?? null,
-        nodeKey: node.capability ? node.key : undefined,
-        capability: node.capability,
-        executorUnbound: node.executorUnbound ?? false,
-        executionWarning: node.executionWarning,
-        topologyBadges: node.topologyBadges,
-        terminalOutcome: node.terminalOutcome,
-        inputs: node.inputs || [],
-        outputs: node.outputs || [],
-        changeType: node.changeType,
-        ghost: node.ghost ?? false,
-        // #276：高亮/置灰态放 data 而非 node.style/className，让 hover 时
-        // 未受影响节点能保持 data 引用稳定（见下方 highlightMemo 的注释）。
-        active: false,
-        dimmed: false,
-      },
-    }
-  })
-
-  return { rfNodes, rfEdges: buildRfEdges(edges) }
 }
 
 export function DagGraph({
@@ -162,7 +113,7 @@ export function DagGraph({
   hideNodeDetails = false,
 }: DagGraphProps) {
   const { rfNodes: initialNodes, rfEdges: initialEdges } = useMemo(
-    () => computeLayout(nodes, edges),
+    () => layoutGraph(nodes, edges),
     [nodes, edges]
   )
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(initialNodes)
@@ -255,6 +206,17 @@ export function DagGraph({
     [runs, nodes]
   )
 
+  // #417：图有节点但没有边时布局退化为稳定网格（见 dagLayout.ts），用户
+  // 观感是「节点离散/疑似丢失」。这里给一个不遮挡画布的轻量提示。文案只
+  // 描述现状、不断言数据缺损（#424 独立复审 P2）：无边不必然是缺数据——
+  // 多根并行 workflow（_start→a、_start→b，节点间无边）经 job 视图隐藏
+  // start 边后就是 2 节点 0 边的合法形态，studio 草稿合法删光全部边时
+  // 同理。有部分边的图（个别孤立节点）不打扰。
+  // 单个可见节点也不提示（#424 review P2-2）：单节点 workflow 本来就没有
+  // 边——job 视图按设计不收 start 节点及其入口边，边数恒为 0，属健康形态；
+  // 无边 studio 草稿单节点时也带 _start 入口边，不会走到这里。
+  const showEdgelessHint = nodes.length > 1 && edges.length === 0
+
   const selectedData = useMemo(() => {
     if (!selectedNode) return null
     const node = rfNodes.find((n) => n.id === selectedNode)
@@ -309,6 +271,11 @@ export function DagGraph({
             className={styles.miniMap}
           />
         </ReactFlow>
+        {showEdgelessHint && (
+          <span className={styles.edgelessBadge} role="status">
+            当前视图无边：节点按网格排列
+          </span>
+        )}
       </div>
       <DagEdgeLabels edges={edges} />
       {selectedData && !hideNodeDetails && (

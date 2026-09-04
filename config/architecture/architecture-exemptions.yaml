@@ -77,14 +77,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
   ceiling: 121
 - check: architecture.file_budget
-  path: frontend/src/components/dag/DagGraph.tsx
-  reason: The same Codex P2 batch on PR 285 as dagHighlight -- the chained
-    highlight call site plus the reducer wiring grow the composition
-    component past the split-era baseline.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
-  ceiling: 286
-- check: architecture.file_budget
   path: server/app/jobs/queries/groups.py
   reason: The JobQueries facade gained two new domain mixins from both
     sides of the PR 285 merge -- GlobalSettingsKVQueriesMixin (KV

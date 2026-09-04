@@ -449,6 +449,10 @@ def test_workspace_dag_preserves_status_buckets(query_service, job_db):
     }
 
 
+# #417 回归钉（schema v2 顶层 edges 派生 after）已按被测主题拆至姊妹文件
+# test_job_query_service_dag.py（本文件超 800 行拆分纪律，#424 codex 复审）。
+
+
 def _create_job_with_node_run(job_db, settings, workspace_id: str = "default") -> dict[str, Any]:
     workspace = job_db.create_workspace(
         workspace_id, default_workflow_key="education_video_problems_generation"
