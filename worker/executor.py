@@ -21,6 +21,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]  # worker/ 包根
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from worker.claim_backoff import CLAIM_BACKOFF_CAP_SECONDS, ClaimBackoffSequence
 from worker.cleanup import clean_work_root
 from worker.execution.run import agent_subprocess_env as agent_subprocess_env
 from worker.execution.run import run_execution
@@ -35,8 +36,6 @@ from worker.stale_sweep import SWEEP_INTERVAL_SECONDS, sweep_stale_executions
 from worker.status import ExecutionStatusReporter
 from worker.transfer_controls import claim_availability, load_transfer_controls
 from worker.upload.queue import UploadQueue
-
-CLAIM_BACKOFF_CAP_SECONDS = 60.0
 
 
 def main() -> int:
@@ -101,7 +100,10 @@ def main() -> int:
     # 双池跟踪（批次 2）：agent/code 各自计数，本地预算避免过度 claim；
     # Host 侧在 claim 事务里再强制一次。
     active_kinds: dict[Future[None], str] = {}
-    backoff = poll_interval
+    # #437: 退避序列改为「首次 1s 固定 → 指数翻倍 ±20% jitter → 上限 60s」。
+    # 旧版以 poll_interval 为基数且无 jitter：Host 一次抖动让整条领料线同步
+    # 退避对齐（锯齿并发）；首退避短固定让瞬时抖动不烧掉一个完整 poll 周期。
+    backoff = ClaimBackoffSequence(cap_seconds=CLAIM_BACKOFF_CAP_SECONDS)
     pool = ThreadPoolExecutor(
         runtime_controls.MAX_DYNAMIC_CONCURRENCY, thread_name_prefix="agent-execution"
     )
@@ -237,12 +239,13 @@ def main() -> int:
                 # WorkerAuthError 是终态，已在上一臂单独 return 2。吞是对的：
                 # 主循环死亡 = worker 停摆。结果空间是本轮 claim 空转一次，
                 # 已提交的 future 不受影响。日志保全：print 记录异常与退避
-                # 时长。
-                print(f"Agent claim error: {exc}; retrying in {backoff:.1f}s", flush=True)
-                stop.wait(backoff)
-                backoff = min(backoff * 2, CLAIM_BACKOFF_CAP_SECONDS)
+                # 时长。#437：等待时长经 ClaimBackoffSequence（首 1s 固定、
+                # 之后指数翻倍 ±20% jitter、上限 60s），fleet 不同步对齐。
+                wait = backoff.next_wait()
+                print(f"Agent claim error: {exc}; retrying in {wait:.1f}s", flush=True)
+                stop.wait(wait)
                 continue
-            backoff = poll_interval
+            backoff.reset()
             stop.wait(0.2 if claimed else poll_interval)
     finally:
         stop.set()
