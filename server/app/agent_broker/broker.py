@@ -17,11 +17,8 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.agent_broker import reaper, release, sweepers
 from server.app.agent_broker.agent_worker_capacity import touch_worker
-from server.app.agent_broker.claim import (
-    AgentClaim,
-    ClaimRacedError,
-    claim_in_transaction,
-)
+from server.app.agent_broker.claim import AgentClaim, ClaimRacedError
+from server.app.agent_broker.claim_retry import claim_with_retry
 from server.app.agent_broker.empty import EmptyClaimTrigger
 from server.app.agent_broker.enqueue import enqueue_request
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
@@ -128,17 +125,12 @@ class AgentExecutionBroker:
         timer = profile.claim_timer()
         claimed: AgentClaim | None = None
         try:
-            try:
-                with write_transaction(self.database_dsn) as conn:
-                    claimed, skip_reasons = claim_in_transaction(
-                        self,
-                        conn,
-                        worker_id,
-                        declared_max_concurrency,
-                        declared_max_code_concurrency,
-                    )
-            except ClaimRacedError:
-                return None
+            # #437: one immediate retry on SQLSTATE 40P01 (claim_retry.py);
+            # write_transaction rolled the deadlocked connection back and
+            # closed it, so the retry re-evaluates on a clean connection.
+            claimed, skip_reasons = claim_with_retry(
+                self, worker_id, declared_max_concurrency, declared_max_code_concurrency
+            )
             if claimed is None:
                 # Demand signal: a Worker found no work; restock immediately when
                 # the queue is truly empty, or surface the skip-reason histogram
@@ -149,6 +141,8 @@ class AgentExecutionBroker:
                 record_job_update(self.job_db, self.job_event_buffer, claimed.job_id)
             self._notify_worker_poll(worker_id, claimed)
             return claimed
+        except ClaimRacedError:
+            return None
         finally:
             # Runtime profile (#359): server-side claim latency + 204 share.
             # The finally covers every return path, including ClaimRacedError's.

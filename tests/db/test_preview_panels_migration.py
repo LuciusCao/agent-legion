@@ -71,11 +71,12 @@ def test_migration_widens_legacy_check_and_is_idempotent() -> None:
 def test_upgrade_from_v70_applies_the_widening() -> None:
     # Upgrade path: a database recorded at v70 replays the schema file (a no-op
     # for the existing table) and runs the v71+ migrations. At SCHEMA_VERSION
-    # 74 the chain tail is studio_chat_agent_config: init_db's high-water skip
-    # means the test must drop v71 AND every later version (74 included) to
-    # force the replay; the extra migrations' applies are idempotent.
-    assert SCHEMA_VERSION == 74
-    assert MIGRATIONS[-1].name == "studio_chat_agent_config"
+    # 77 the chain tail is job_status_counts_statement_triggers: init_db's
+    # high-water skip means the test must drop v71 AND every later version
+    # (77 included) to force the replay; the extra migrations' applies are
+    # idempotent.
+    assert SCHEMA_VERSION == 77
+    assert MIGRATIONS[-1].name == "job_status_counts_statement_triggers"
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("delete from schema_migrations where version >= 71")
         conn.execute(_LEGACY_CHECK_DDL)

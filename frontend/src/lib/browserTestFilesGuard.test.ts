@@ -101,6 +101,7 @@ const NODE_SAFE_TEST_EXEMPTIONS = [
   'src/pages/jobDetail/jobNodeHelpers.test.ts: DagGraph imports are type-only; runtime stays pure',
   'src/features/workflowStudio/canvas/workflowStudioDag.test.ts: DagGraph imports are type-only; runtime stays pure',
   'src/features/workflowStudio/canvas/workflowStudioDagChanges.test.ts: DagGraph imports are type-only; runtime stays pure',
+  'src/components/dag/dagLayout.test.ts: dagLayout.ts imports DagGraph types only; runtime deps are dagre + dagNodeHeight, pure',
   'src/stores/job/actions/batchAllMatching.test.ts: fixtures.ts only types the WebSocket mock shape',
   'src/stores/job/derivedStateInvariant.test.ts: fixtures.ts only types the WebSocket mock shape',
   'src/stores/jobStore.rerunByFailure.test.ts: fixtures.ts only types the WebSocket mock shape',

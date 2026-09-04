@@ -47,6 +47,14 @@ class SessionRuntime:
         # Whether the one-time advisory mcp_unverified hint was already
         # posted for this session (per-session, not per-turn).
         self.mcp_hint_shown = False
+        # Mid-turn token keepalive bookkeeping (#411): set only AFTER the
+        # run_token_invalidated notice was successfully appended — later
+        # tool_call updates then skip re-emitting it (one warning is enough;
+        # a resume builds a fresh runtime with a fresh token and its own
+        # flag). Live-token checks and failed notices do NOT set it, so
+        # death is always detected on the first tool_call after it happens.
+        # Guarded by ``lock`` like every notification-path field.
+        self.token_keepalive_done = False
         # Agent config switching (#368, PR #393 review): config_lock
         # serializes the whole validate→forward→write-back span of a switch
         # (held across the RPC — never take it on the notification path);

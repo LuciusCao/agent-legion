@@ -4,10 +4,12 @@ import type { ReactElement } from 'react'
 import { TestQueryProvider } from '../../testing/testQueryClient'
 import { SchemaConfigForm } from './SchemaConfigForm'
 import type { ConfigSchema } from '../../types'
-import { getConnections } from '../../api/connections'
+import { getConnectionKeys } from '../../api/connections'
 
 vi.mock('../../api/connections', () => ({
   getConnections: vi.fn().mockResolvedValue({ connections: [] }),
+  // #419 起 SchemaConfigForm 的候选改走 key-only 端点（非 admin 也可读）。
+  getConnectionKeys: vi.fn().mockResolvedValue({ keys: [] }),
 }))
 
 beforeEach(() => {
@@ -224,19 +226,8 @@ describe('SchemaConfigForm connection datalist', () => {
     properties: { connection: { type: 'string' } },
   }
 
-  const connectionView = {
-    key: 'lark-main',
-    type: 'static_bearer',
-    display_name: '飞书主租户',
-    config: {},
-    enabled: true,
-    token: null,
-  }
-
   it('offers connection key candidates via datalist', async () => {
-    vi.mocked(getConnections).mockResolvedValue({
-      connections: [connectionView],
-    })
+    vi.mocked(getConnectionKeys).mockResolvedValue({ keys: ['lark-main'] })
     const { container } = renderForm(
       <SchemaConfigForm
         schema={connectionSchema}
@@ -256,9 +247,7 @@ describe('SchemaConfigForm connection datalist', () => {
   })
 
   it('shares one fetch and unique datalist ids across form instances', async () => {
-    vi.mocked(getConnections).mockResolvedValue({
-      connections: [connectionView],
-    })
+    vi.mocked(getConnectionKeys).mockResolvedValue({ keys: ['lark-main'] })
     const { container } = renderForm(
       <>
         <SchemaConfigForm
@@ -278,13 +267,13 @@ describe('SchemaConfigForm connection datalist', () => {
     await waitFor(() => {
       expect(container.querySelectorAll('datalist')).toHaveLength(2)
     })
-    expect(getConnections).toHaveBeenCalledTimes(1)
+    expect(getConnectionKeys).toHaveBeenCalledTimes(1)
     const ids = [...container.querySelectorAll('datalist')].map((d) => d.id)
     expect(new Set(ids).size).toBe(2)
   })
 
   it('degrades to a plain text field when the connections API fails', async () => {
-    vi.mocked(getConnections).mockRejectedValue(new Error('HTTP 403'))
+    vi.mocked(getConnectionKeys).mockRejectedValue(new Error('HTTP 403'))
     const { container } = renderForm(
       <SchemaConfigForm
         schema={connectionSchema}
@@ -294,7 +283,7 @@ describe('SchemaConfigForm connection datalist', () => {
     )
 
     await waitFor(() => {
-      expect(getConnections).toHaveBeenCalled()
+      expect(getConnectionKeys).toHaveBeenCalled()
     })
     expect(container.querySelector('datalist')).toBeNull()
   })

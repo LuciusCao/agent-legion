@@ -1,10 +1,10 @@
 """Tail read of studio chat messages for the resume transcript rebuild.
 
-Split from studio_chat_messages.py (file budget): the incremental
-pagination read (after_seq, oldest-first) serves the chat panel and keeps
-its semantics untouched; the resume transcript needs the most recent
-messages instead, walked backwards from a seq watermark so a long session
-injects recent context rather than the stale opening.
+Split from studio_chat_messages.py (file budget): the panel's pagination read
+(after_seq) now also caps on the newest window (#411); the resume transcript
+reads the most recent messages instead, walked backwards from a seq
+watermark so a long session injects recent context rather than the stale
+opening.
 """
 
 from __future__ import annotations

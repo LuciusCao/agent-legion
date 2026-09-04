@@ -339,8 +339,7 @@ alter table agent_execution_requests drop constraint if exists agent_execution_r
 alter table agent_execution_requests add constraint agent_execution_requests_state_check
   check(state in ('queued', 'claimed', 'reporting', 'done', 'cancelled'));
 
-create index if not exists idx_agent_requests_claim
-  on agent_execution_requests(state, queued_at, execution_id);
+create index if not exists idx_agent_requests_claim on agent_execution_requests(state, queued_at, execution_id);
 -- Claim candidate lookup walks only the per-workspace queued head (schema
 -- v18); a full queued scan priced every row and made claims O(queue depth).
 -- kind joined the key at schema v51 (issue #125): the claim scan is per
@@ -348,10 +347,8 @@ create index if not exists idx_agent_requests_claim
 create index if not exists idx_agent_requests_queued_head
   on agent_execution_requests(workspace_id, kind, queued_at, execution_id)
   where state = 'queued';
-create index if not exists idx_agent_requests_node_active
-  on agent_execution_requests(workspace_id, node_key, state);
-create index if not exists idx_agent_requests_worker_active
-  on agent_execution_requests(worker_id, state);
+create index if not exists idx_agent_requests_node_active on agent_execution_requests(workspace_id, node_key, state);
+create index if not exists idx_agent_requests_worker_active on agent_execution_requests(worker_id, state);
 -- One active request per node; 'reporting' still owns the node until the
 -- result commits, so it must block re-enqueue too.
 drop index if exists idx_agent_requests_one_active_node;
@@ -374,8 +371,7 @@ create index if not exists idx_agent_requests_cancelled_recent
 -- an Agent execution matches on r.node_run_id; without this index Postgres
 -- hashes the whole requests table (660k rows, ~0.9s measured) on every
 -- /api/metrics/overview poll.
-create index if not exists idx_agent_requests_node_run
-  on agent_execution_requests(node_run_id);
+create index if not exists idx_agent_requests_node_run on agent_execution_requests(node_run_id);
 
 create table if not exists job_event_seq (
   id integer primary key check(id = 1),
@@ -481,57 +477,30 @@ drop index if exists idx_node_runs_status_finished_at;
 create index if not exists idx_node_runs_status_finished_at_id
   on node_runs(status, finished_at, id);
 create index if not exists idx_jobs_status on jobs(status);
--- Workspace job status counters (schema v36, DB-JOB-STATUS-COUNTS-001):
--- count_jobs_by_status serves the event aggregator flush (every 0.5s per
--- dirty workspace), job list snapshots, intake and deletion broadcasts; as a
--- group-by over the whole workspace slice of jobs it is O(workspace jobs) per
--- call (0.3~1.1s measured at 130k rows under load). Row triggers keep this
--- table transactionally in sync so the read is a PK lookup of a few rows.
--- Backfill lives in migrate_workspace_job_status_counts.
+-- Workspace job status counters (v36, DB-JOB-STATUS-COUNTS-001): count_jobs_
+-- by_status serves the aggregator flush, job snapshots and broadcasts; a
+-- group-by is O(workspace jobs) (0.3~1.1s at 130k rows). Triggers keep the
+-- read a PK lookup. Backfill: migrate_workspace_job_status_counts.
+-- RUN job status counters (v73, DB-RUN-JOB-STATUS-COUNTS-001): same shape
+-- keyed by run_id, replacing the run-detail group-by (#358; feeds the #350
+-- progress view). run_id='' rows never reach the counter; no FK (jobs.run_id
+-- unconstrained text), vanished runs linger at cnt=0 which the cnt<>0 read
+-- skips.
+-- v77 (#437): both counter trigger families are STATEMENT-LEVEL with
+-- transition tables, aggregated net delta per (key, status) applied once
+-- per statement — the v36/v73 row triggers serialised every transition of
+-- one run/workspace onto a few counter rows and deadlocked under high claim
+-- concurrency. The trigger DDL lives in the v77 MIGRATION
+-- (job_status_counts_statement_triggers.py): the schema file's raw-line
+-- budget forced the same move as v73's round, and the migration replays on
+-- both the fresh path and every upgrade path (v36 < v73 < v77 in the
+-- version-sorted chain).
 create table if not exists workspace_job_status_counts (
   workspace_id text not null references workspaces(id) on delete cascade,
   status text not null,
   cnt bigint not null,
   primary key(workspace_id, status)
 );
-create or replace function sync_workspace_job_status_counts() returns trigger as $$
-begin
-  if TG_OP = 'INSERT' then
-    insert into workspace_job_status_counts(workspace_id, status, cnt)
-    values (NEW.workspace_id, NEW.status, 1)
-    on conflict (workspace_id, status)
-    do update set cnt = workspace_job_status_counts.cnt + 1;
-    return NEW;
-  elsif TG_OP = 'DELETE' then
-    update workspace_job_status_counts set cnt = cnt - 1
-    where workspace_id = OLD.workspace_id and status = OLD.status;
-    return OLD;
-  else
-    if NEW.workspace_id is distinct from OLD.workspace_id
-       or NEW.status is distinct from OLD.status then
-      update workspace_job_status_counts set cnt = cnt - 1
-      where workspace_id = OLD.workspace_id and status = OLD.status;
-      insert into workspace_job_status_counts(workspace_id, status, cnt)
-      values (NEW.workspace_id, NEW.status, 1)
-      on conflict (workspace_id, status)
-      do update set cnt = workspace_job_status_counts.cnt + 1;
-    end if;
-    return NEW;
-  end if;
-end;
-$$ language plpgsql;
--- drop-then-create keeps the whole-file replay idempotent across upgrades.
-drop trigger if exists jobs_status_counts_sync on jobs;
-create trigger jobs_status_counts_sync
-  after insert or delete or update of status, workspace_id on jobs
-  for each row execute function sync_workspace_job_status_counts();
--- RUN job status counters (schema v73, DB-RUN-JOB-STATUS-COUNTS-001):
--- trigger-maintained counter table replacing the run-detail group-by
--- (#358; data source for the #350 progress view). run_id='' skipped; no
--- FK (jobs.run_id unconstrained); vanished runs linger at cnt=0 which the
--- cnt<>0 read skips. The jobs sync trigger lives in the v73 MIGRATION, not
--- here — it references NEW.run_id, absent until v53's rename (same
--- replay-order rule as idx_jobs_run_id, v59).
 create table if not exists run_job_status_counts (run_id text not null, status text not null,
   cnt bigint not null, primary key(run_id, status));
 -- Workspace job NODE status counters (schema v56, DB-JOB-NODE-STATUS-COUNTS-001):
@@ -687,18 +656,23 @@ alter table node_runs add column if not exists failure_detail text not null defa
 alter table job_nodes add column if not exists failure_category text not null default '';
 alter table job_nodes add column if not exists failure_detail text not null default '';
 create index if not exists idx_node_runs_failure on node_runs(status, failure_category);
+-- Run's dispatched skill key (schema v75, #410, manifest pin ``skill``):
+-- skill_version's ``ref@commit12`` prefix is a ref, not the key, so the
+-- studio latest-run echo filters runs by this binding column. Like v74's
+-- mirrors, the ALTER alone covers fresh and pre-v75 databases (the
+-- create-table block omits the column to stay within the file budget).
+alter table node_runs add column if not exists skill text not null default '';
 -- Dispatch-time config audit (schema v49, CONFIG-RUNTIME-MUTABLE-001): the
 -- non-secret resolved node config actually used for this run. Frozen keys
 -- repeat the intake snapshot; runtime_mutable keys carry the dispatch-time
 -- re-resolution, so a mid-job switch change stays auditable per attempt.
 alter table node_runs add column if not exists config_snapshot_json text not null default '';
 -- Ops metrics queue summary (schema v48, issue #106): the unclaimable_model
--- sweep counter filters job_nodes by failure_detail plus a finished_at
--- range; without an index every collection seq-scans the whole
--- (multi-million-row) table. Partial so only the tiny unclaimable slice is
--- indexed — finished rows overwhelmingly carry other failure_detail values
--- or none. Serves both the fleet count and the workspace-scoped variant
--- (the exists probe into jobs resolves by primary key per matching row).
+-- sweep counter filters by failure_detail + finished_at range; the partial
+-- index avoids a whole-table (multi-million-row) seq-scan per collection —
+-- finished rows overwhelmingly carry other failure_detail values or none —
+-- serving both fleet and workspace-scoped counts (the jobs exists probe
+-- resolves by primary key per matching row).
 create index if not exists idx_job_nodes_unclaimable_finished
   on job_nodes(finished_at)
   where failure_detail = 'unclaimable_model';
@@ -783,7 +757,6 @@ create table if not exists ops_runtime_profile_samples (
 );
 create index if not exists idx_ops_runtime_profile_bucket
   on ops_runtime_profile_samples(bucket_start);
-
 
 -- Auth (schema v13): local users, revocable server-side sessions, and
 -- per-workspace membership for the B-end self-hosted rollout. Session rows
@@ -1087,12 +1060,9 @@ alter table studio_chat_sessions add column if not exists selected_node_key text
 -- Upgrade path for pre-v57 databases.
 alter table studio_chat_sessions add column if not exists draft_yaml text;
 -- Agent-advertised session mode state / config options (v74, #368): JSON
--- mirrors of the ACP session/new (or session/load) response, kept current by
--- current_mode_update / config_option_update notifications. NULL means the
--- agent does not advertise the capability (UI hides the control). The ALTER
--- covers fresh AND pre-v74 databases alike (the create-table block above
--- deliberately omits both columns: the schema file's growth budget is one
--- effective line per column, and this single statement is that line).
+-- mirrors of the ACP session handshake response (NULL = capability not
+-- advertised; UI hides the control). The ALTER covers fresh + pre-v74
+-- databases; the create-table block omits both columns (one line each).
 alter table studio_chat_sessions add column if not exists session_modes_json text, add column if not exists config_options_json text;
 
 create table if not exists studio_chat_messages (
@@ -1113,6 +1083,9 @@ create unique index if not exists idx_studio_chat_messages_seq
 create index if not exists idx_studio_chat_messages_session
   on studio_chat_messages(session_id, seq);
 
+-- Agent-initiated workflow publish requests (schema v76, #416):
+-- studio_publish_requests is created by its migration module, not here
+-- (schema file at its line ceiling; fresh + v75-upgrade both run v76).
 -- Materials (schema v52, materials-and-runs design §5.1): browser-uploaded
 -- files. Bytes live in the instance S3-compatible object store under
 -- storage_key; this row is the metadata. content_hash is '' when the client

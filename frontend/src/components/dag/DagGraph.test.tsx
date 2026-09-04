@@ -48,6 +48,35 @@ describe('DagGraph', () => {
     expect(container.querySelector('.react-flow')).toBeInTheDocument()
   })
 
+  it('shows the edgeless hint badge when nodes exist but edges do not (#417)', () => {
+    // 无边图布局退化为稳定网格（dagLayout.ts），必须伴随轻量提示，
+    // 说明当前视图无边、节点按网格排列，而不是被误读为节点丢失。
+    render(<DagGraph nodes={nodes} edges={[]} />)
+    expect(screen.getByRole('status')).toHaveTextContent('当前视图无边')
+  })
+
+  it('uses neutral copy for the edgeless hint instead of asserting data loss (#424 独立复审)', () => {
+    // 多根并行 workflow（_start→a、_start→b，节点间无边）经 job 视图
+    // 隐藏 start 边后就是 2 节点 0 边的合法形态，studio 草稿合法删光全部
+    // 边时同理。提示必须描述现状，不得宣称「边数据缺失」。
+    render(<DagGraph nodes={[nodes[0], nodes[1]]} edges={[]} />)
+    const badge = screen.getByRole('status')
+    expect(badge).toHaveTextContent('当前视图无边：节点按网格排列')
+    expect(badge).not.toHaveTextContent('缺失')
+  })
+
+  it('does not show the edgeless hint for a single-node workflow (#424 review P2-2)', () => {
+    // 单节点 workflow 本来就没有边（job 视图按设计不收 start 节点及其
+    // 入口边），属健康形态，不需要提示。
+    render(<DagGraph nodes={[nodes[0]]} edges={[]} />)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('does not show the edgeless hint when the graph has edges', () => {
+    render(<DagGraph nodes={nodes} edges={edges} />)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
   it('shows details panel when a node is clicked', () => {
     render(<DagGraph nodes={nodes} edges={edges} />)
     fireEvent.click(screen.getByText('提取'))
@@ -130,22 +159,26 @@ describe('DagGraph', () => {
   // 拿不到 handleBounds 就连边都不渲染。stub 出固定几何，再手动调一次
   // updateNodeInternals（真实环境由 ResizeObserver 完成同一件事），才能让
   // EdgeWrapper 走到自定义 DagEdge 的渲染，断言 stroke/opacity 内联样式。
+  // 必须与 dagLayout.ts 的 DAG_NODE_WIDTH / DagNode.module.css 的 .node
+  // 宽度保持一致（#415 起为 280；常量由 DagGraph.tsx 迁至 dagLayout.ts）——
+  // handle 位置由该几何推导。
+  const STUB_WIDTH = 280
   function stubDomGeometry() {
     const rect = {
       x: 0,
       y: 0,
       top: 0,
       left: 0,
-      right: 240,
+      right: STUB_WIDTH,
       bottom: 100,
-      width: 240,
+      width: STUB_WIDTH,
       height: 100,
       toJSON: () => ({}),
     } as DOMRect
     Element.prototype.getBoundingClientRect = () => rect
     Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
       configurable: true,
-      get: () => 240,
+      get: () => STUB_WIDTH,
     })
     Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
       configurable: true,

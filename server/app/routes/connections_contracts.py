@@ -38,6 +38,14 @@ class ConnectionListResponse(BaseModel):
     connections: list[ConnectionView]
 
 
+class ConnectionKeysResponse(BaseModel):
+    """Key-only listing for non-admin UIs (#419): keys are the reference
+    users must type into ref items and node configs; they carry no
+    credentials (config/secret material never appears in this view)."""
+
+    keys: list[str]
+
+
 class ConnectionTypeView(BaseModel):
     type: str
     description: str

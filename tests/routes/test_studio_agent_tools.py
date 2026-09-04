@@ -69,6 +69,11 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
     return [
         ("POST", f"{base}/workflow/validate", {"definition_yaml": ""}),
         ("POST", f"{base}/workflow/compare", {"definition_yaml": ""}),
+        # Publish handshake (#416): request parks a pending row (409 here —
+        # the empty draft has validation errors, which proves the scope guard
+        # let the token through); status is a plain read (404 unknown id).
+        ("POST", f"{base}/workflow/publish-request", None),
+        ("GET", "/api/studio-agent/tools/publish-requests/req-x", None),
         (
             "PUT",
             f"{base}/workflows/wf/nodes/node/code/draft",

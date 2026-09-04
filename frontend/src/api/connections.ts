@@ -11,12 +11,19 @@ export type ConnectionTestResponse =
 export type ConnectionTypeView = components['schemas']['ConnectionTypeView']
 export type ConnectionTypesResponse =
   components['schemas']['ConnectionTypesResponse']
+export type ConnectionKeysResponse =
+  components['schemas']['ConnectionKeysResponse']
 
 const CONNECTIONS_URL = '/api/admin/connections'
 const CONNECTION_TYPES_URL = '/api/admin/connection-types'
+const CONNECTION_KEYS_URL = '/api/connections/keys'
 
 export async function getConnections(): Promise<ConnectionListResponse> {
   return api<ConnectionListResponse>(CONNECTIONS_URL)
+}
+
+export async function getConnectionKeys(): Promise<ConnectionKeysResponse> {
+  return api<ConnectionKeysResponse>(CONNECTION_KEYS_URL)
 }
 
 export async function getConnectionTypes(): Promise<ConnectionTypesResponse> {

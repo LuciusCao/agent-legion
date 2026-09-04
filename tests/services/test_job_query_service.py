@@ -449,6 +449,10 @@ def test_workspace_dag_preserves_status_buckets(query_service, job_db):
     }
 
 
+# #417 回归钉（schema v2 顶层 edges 派生 after）已按被测主题拆至姊妹文件
+# test_job_query_service_dag.py（本文件超 800 行拆分纪律，#424 codex 复审）。
+
+
 def _create_job_with_node_run(job_db, settings, workspace_id: str = "default") -> dict[str, Any]:
     workspace = job_db.create_workspace(
         workspace_id, default_workflow_key="education_video_problems_generation"
@@ -569,6 +573,31 @@ def test_detail_preserves_empty_optional_run_dirs(query_service, job_db, setting
     assert run["log_path"] == str(settings.data_dir / "logs" / "jobs" / "empty.log")
     assert run["run_dir"] == ""
     assert run["session_dir"] == ""
+
+
+def test_detail_and_workspace_runs_carry_skill_version(query_service, job_db, settings):
+    # #410: node_runs.skill_version must flow through both read paths so the
+    # studio can echo the resolved version for `latest` bindings.
+    job = _create_job_with_node_run(job_db, settings)
+    job_db.update_job_node(job["id"], "assemble_package", status="stale")
+    job_db.start_node_run(
+        job["id"],
+        "assemble_package",
+        ["cmd"],
+        "logs/another.log",
+        skill_version="latest@abc123def456",
+    )
+
+    detail = query_service.detail(job["id"])
+    assert len(detail["runs"]) == 2
+    assert detail["runs"][0]["skill_version"] == ""
+    assert detail["runs"][1]["skill_version"] == "latest@abc123def456"
+
+    runs = query_service.workspace_runs(job["workspace_id"])
+    assert [run["skill_version"] for run in runs] == [
+        "latest@abc123def456",
+        "",
+    ]
 
 
 def test_query_service_does_not_mutate_repository_records(query_service, job_db, settings):

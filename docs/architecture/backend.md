@@ -123,6 +123,7 @@ server/app/
 | GET | `/artifacts/{hash}` | `download_artifact` | routes/artifacts.py |
 | GET | `/health` | `health` | routes/common.py |
 | GET | `/admin/connections` | `list_connections` | routes/connections.py |
+| GET | `/connections/keys` | `list_connection_keys` | routes/connections.py |
 | GET | `/admin/connection-types` | `list_connection_types` | routes/connections.py |
 | POST | `/admin/connections` | `create_connection` | routes/connections.py |
 | PUT | `/admin/connections/{key}` | `update_connection` | routes/connections.py |
@@ -208,6 +209,8 @@ server/app/
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/preview/panel/draft` | `save_preview_panel_draft` | routes/studio_agent_preview_tools.py |
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/node-prompt` | `get_node_prompt` | routes/studio_agent_prompt_tools.py |
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/node-prompt` | `save_node_prompt_route` | routes/studio_agent_prompt_tools.py |
+| POST | `/studio-agent/tools/workspaces/{workspace_id}/workflow/publish-request` | `request_workflow_publish` | routes/studio_agent_publish_tools.py |
+| GET | `/studio-agent/tools/publish-requests/{request_id}` | `get_publish_request_status` | routes/studio_agent_publish_tools.py |
 | GET | `/studio-agent/tools/skills/{skill_key:path}` | `get_skill` | routes/studio_agent_skill_tools.py |
 | POST | `/studio-agent/tools/skills/{skill_key:path}/validate` | `validate_skill` | routes/studio_agent_skill_tools.py |
 | POST | `/studio-agent/tools/skills/{skill_key:path}/versions` | `save_skill_version` | routes/studio_agent_skill_tools.py |
@@ -240,6 +243,9 @@ server/app/
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/config-options` | `set_config_option` | routes/studio_chat_config.py |
 | PUT | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/context` | `update_context` | routes/studio_chat_context.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/events` | `session_events` | routes/studio_chat_events.py |
+| GET | `/workspaces/{workspace_id}/workflow-drafts/publish-request` | `get_pending_publish_request` | routes/studio_publish_requests.py |
+| POST | `/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/confirm` | `confirm_publish_request` | routes/studio_publish_requests.py |
+| POST | `/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/cancel` | `cancel_publish_request` | routes/studio_publish_requests.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/token-usage` | `get_run_token_usage` | routes/token_usage.py |
 | GET | `/jobs/{job_id}/token-usage` | `get_job_token_usage` | routes/token_usage.py |
 | GET | `/workspaces/{workspace_id}/token-usage` | `get_workspace_token_usage` | routes/token_usage.py |
@@ -352,6 +358,7 @@ server/app/
 | ConnectionTokenStatus | BaseModel | expires_at: str | None, refreshed_at: str | None | app/routes/connections_contracts.py |
 | ConnectionView | BaseModel | key: str, type: str, display_name: str, config: dict[str, Any], enabled: bool... | app/routes/connections_contracts.py |
 | ConnectionListResponse | BaseModel | connections: list[ConnectionView] | app/routes/connections_contracts.py |
+| ConnectionKeysResponse | BaseModel | keys: list[str] | app/routes/connections_contracts.py |
 | ConnectionTypeView | BaseModel | type: str, description: str, required_config_keys: list[str], secret_keys: li... | app/routes/connections_contracts.py |
 | ConnectionTypesResponse | BaseModel | types: list[ConnectionTypeView] | app/routes/connections_contracts.py |
 | ConnectionTestResponse | BaseModel | ok: bool, message: str | app/routes/connections_contracts.py |
@@ -382,7 +389,7 @@ server/app/
 | WorkspacesResponse | BaseModel | workspaces: list[WorkspaceRecord] | app/routes/job_contracts.py |
 | DeleteJobResponse | BaseModel | deleted: str | app/routes/job_contracts.py |
 | ArtifactResponse | BaseModel | name: str, content: str | app/routes/job_contracts.py |
-| WorkspaceRunsResponse | BaseModel | runs: list[dict[str, Any]] | app/routes/job_contracts.py |
+| WorkspaceRunsResponse | BaseModel | runs: list[NodeRunResponse] | app/routes/job_contracts.py |
 | WorkspaceDagResponse | BaseModel | workflow: dict[str, Any], nodes: list[dict[str, Any]] | app/routes/job_contracts.py |
 | CodePoolStatus | BaseModel | capacity: int, running: int, available: int | app/routes/job_contracts.py |
 | WorkspaceStatsResponse | BaseModel | workspace_id: str, name: str, workflow_key: str, workflow_label: str, job_sta... | app/routes/job_contracts.py |
@@ -528,6 +535,11 @@ server/app/
 | StudioChatContextUpdateRequest | BaseModel | selected_node_key: str | None, draft_yaml: str | None | app/routes/studio_chat_contracts.py |
 | StudioChatPermissionAnswerRequest | BaseModel | option_id: str | None, deny: bool | app/routes/studio_chat_contracts.py |
 | StudioChatPermissionAnswerResponse | BaseModel | resolved: str | app/routes/studio_chat_contracts.py |
+| StudioPublishRequestRecord | BaseModel | id: str, workspace_id: str, chat_session_id: str | None, status: str, created... | app/routes/studio_publish_request_contracts.py |
+| StudioAgentPublishRequestResponse | BaseModel | request: StudioPublishRequestRecord | app/routes/studio_publish_request_contracts.py |
+| StudioAgentPublishRequestStatusResponse | BaseModel | request: StudioPublishRequestRecord | app/routes/studio_publish_request_contracts.py |
+| StudioPublishRequestPendingResponse | BaseModel | request: StudioPublishRequestRecord | None | app/routes/studio_publish_request_contracts.py |
+| StudioPublishRequestResolveResponse | BaseModel | request: StudioPublishRequestRecord | app/routes/studio_publish_request_contracts.py |
 | TokenUsageRunItem | BaseModel | run_id: int, node_key: str, status: str, usage: RunUsage | None, reason: str ... | app/routes/token_usage_contracts.py |
 | TokenUsageTotal | BaseModel | message_count: int, input_tokens: int, output_tokens: int, cache_read_tokens:... | app/routes/token_usage_contracts.py |
 | TokenUsageJobResponse | BaseModel | job_id: str, runs: list[TokenUsageRunItem], total: TokenUsageTotal, runs_with... | app/routes/token_usage_contracts.py |

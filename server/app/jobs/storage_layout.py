@@ -18,6 +18,16 @@ import hashlib
 from pathlib import Path
 
 
+def _run_dir_timestamp(path: Path) -> float:
+    stat = path.stat()
+    return getattr(stat, "st_birthtime", stat.st_mtime)
+
+
+def run_dir_recency_key(path: Path) -> tuple[float, str]:
+    """Return the shared deterministic ordering key for run-token dirs."""
+    return _run_dir_timestamp(path), path.name
+
+
 def job_shard(job_id: str) -> str:
     """Deterministic 2-hex-char shard for a job id (sha1 prefix)."""
     return hashlib.sha1(job_id.encode("utf-8")).hexdigest()[:2]

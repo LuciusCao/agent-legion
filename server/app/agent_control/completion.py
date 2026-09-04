@@ -203,6 +203,9 @@ class AgentCompletionHandler:
                 run_dir=self._stored_run_dir(job_dir, outcome.run_dir),
                 session_dir="",
                 skill_version=str(manifest.get("skill_version", "")),
+                # #410 (v75): the binding identity for the studio latest-run
+                # echo — skill_version's ref prefix is not the skill key.
+                skill=str(manifest.get("skill", "")),
                 produced_artifacts=produced,
                 runner=worker_id,
                 # Shard runs (#389): the per-shard payload rides the archive

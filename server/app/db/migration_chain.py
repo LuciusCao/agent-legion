@@ -1,12 +1,9 @@
-"""Chronological registry of versioned schema migrations.
-
-Split from ``schema.py`` for the file-size budget (and from
-``migration_registry.py``, which re-exports this chain, when the import
-list itself outgrew the ceiling). DDL-only versions have no Python
-function — their DDL lives in ``postgres_schema.sql`` — but they still get
-a registry entry so ``max(version)`` stays meaningful for upgrade gating.
-migrate_runs (v53) must run after every migration that still reads
-job_batches; the version-sorted registry guarantees it.
+"""Chronological registry of versioned schema migrations (the schema.py /
+migration_registry.py re-export splits are file-budget moves). DDL-only
+versions carry no Python function — DDL lives in ``postgres_schema.sql``
+(v76's table is the exception: the file is at its ceiling, the migration
+covers fresh + upgrade paths). migrate_runs (v53) must run after every
+migration that still reads job_batches; the sorted registry guarantees it.
 """
 
 from __future__ import annotations
@@ -37,6 +34,7 @@ from server.app.db.migrations import (
     migrate_studio_chat_context,
     migrate_studio_chat_draft,
     migrate_studio_chat_tables,
+    migrate_studio_publish_requests,
     migrate_versioned_entities,
     migrate_workflow_catalog_retirement,
     migrate_workflow_node_explicit_types,
@@ -47,13 +45,12 @@ from server.app.db.migrations import (
     migrate_workspace_secrets,
 )
 from server.app.db.migrations.job_status_counts import migrate_workspace_job_status_counts
-from server.app.db.migrations.jobs_workflow_key_alignment import (
-    migrate_jobs_workflow_key_alignment,
+from server.app.db.migrations.job_status_counts_statement_triggers import (
+    migrate_job_status_counts_statement_triggers,
 )
+from server.app.db.migrations.jobs_workflow_key_alignment import migrate_jobs_workflow_key_alignment
 from server.app.db.migrations.preview_panels import migrate_preview_panels
-from server.app.db.migrations.retire_workflow_key_columns import (
-    migrate_retire_workflow_key_columns,
-)
+from server.app.db.migrations.retire_workflow_key_columns import migrate_retire_workflow_key_columns
 
 MigrationFn = Callable[[Any], None]
 
@@ -174,6 +171,30 @@ MIGRATIONS: list[SchemaMigration] = [
     # config_options_json mirrors come from the schema-file replay (its
     # alter-if-not-exists covers pre-v74 tables), no data migration.
     SchemaMigration(74, "studio_chat_agent_config"),
+    # v75 is DDL-only (#410): node_runs.skill — the dispatched skill key
+    # (manifest pin); skill_version's ``ref@commit12`` prefix cannot identify
+    # the binding (studio latest-run echo filters by key). Schema-file replay
+    # covers pre-v75 tables, no data backfill.
+    SchemaMigration(75, "node_runs_skill_key"),
+    # v76 (#416): agent-initiated workflow publish requests — the table is
+    # carried as an apply fn (the schema file sits at its budget ceiling, and
+    # fresh + v75-upgrade paths both run this migration). #434: born as this
+    # branch's v75, bumped to 76 when #427's node_runs_skill_key claimed 75.
+    SchemaMigration(76, "studio_publish_requests", migrate_studio_publish_requests),
+    # v77 (#437): the run/workspace job status count triggers become
+    # statement-level with transition tables. The v36/v73 row triggers
+    # serialised every job status transition of one run onto a handful of
+    # (key, status) counter rows; at high claim concurrency the promote
+    # (queued→running) and completion (running→completed) UPDATEs took those
+    # rows in different orders and deadlocked (psycopg 40P01 on the claim
+    # path). The replacement aggregates the net delta per (key, status) from
+    # the transition tables and applies it once per statement — one globally
+    # consistent lock order per statement. Born as this branch's v76, bumped
+    # to 77 when develop's #429 claimed v76 for studio_publish_requests (#434
+    # collision protocol: the later merge renumbers).
+    SchemaMigration(
+        77, "job_status_counts_statement_triggers", migrate_job_status_counts_statement_triggers
+    ),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]

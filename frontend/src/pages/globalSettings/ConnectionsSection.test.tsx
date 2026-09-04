@@ -23,6 +23,8 @@ vi.mock('../../api/connections', () => ({
   updateConnection: vi.fn(),
   deleteConnection: vi.fn(),
   testConnection: vi.fn(),
+  // key-only 端点（#419）：本组件不消费，但 mock 必须完整覆盖模块导出。
+  getConnectionKeys: vi.fn(),
 }))
 
 // 类型名对齐后端 registry（server/app/services/connection_adapters.py）。
