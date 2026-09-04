@@ -8,8 +8,8 @@ row, so the claim transaction's queued->running promote and the completion
 path's running->completed flip touched the same few hot rows in different
 orders at high frequency — a lock footprint that closed into deadlock rings
 (psql DeadlockDetected / SQLSTATE 40P01 on the claim path's jobs promote)
-under the high-concurrency tier: hundreds of workers claiming from single
-runs with 10^4-scale items.
+under the high-concurrency tier: many workers claiming from single
+large-scale runs.
 
 The v77 replacement is statement-level with transition tables: the trigger
 fires once per statement, aggregates the NET delta per (key, status) from
