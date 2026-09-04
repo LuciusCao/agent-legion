@@ -240,12 +240,12 @@ class StudioPublishRequestService:
         draft and can revise + re-request.
 
         The claim predicate (#429 三轮 P1-2): cancel only moves ``pending``
-        rows. A row being confirmed (``confirming``) is untouchable — its
-        publish is in flight and will record its own outcome; the cancel
-        404s instead of writing ``rejected`` over a revision that is about
-        to be live. The Studio dialog guards this client-side (confirming
-        disables the close channels); this is the backend boundary that
-        holds for cross-tab calls and direct API use."""
+        rows; a confirming row is untouchable — its publish is in flight
+        and records its own outcome, so the cancel 404s instead of writing
+        ``rejected`` over a soon-live revision. This holds across the FULL
+        interleave (#429 终局 P3): even when the pre-read saw pending but
+        the claim landed first, the read-back 404s on the live confirming
+        row — never a 200 on a non-terminal row (cross-tab/direct-API)."""
         pending = self._job_db.get_pending_publish_request(workspace_id)
         if pending is None or pending["id"] != request_id:
             raise NotFoundError("Publish request not found or already resolved")
@@ -259,9 +259,19 @@ class StudioPublishRequestService:
         )
         if resolved is None:
             # Cancel resolves nothing (no publish effect) — losing the race
-            # means someone else resolved it first; report that final state.
+            # means someone else moved the row first. The read-back answers
+            # ONLY for a terminal state our own predicate missed racing to
+            # (e.g. it expired between our read and UPDATE); a row that now
+            # reads ``confirming`` lost to the confirm's claim instead: its
+            # publish is in flight and will record its own outcome — the
+            # honest answer is the docstring's 404, never a 200 parading a
+            # non-terminal row as if it had been cancelled (#429 终局 P3).
             resolved = self._job_db.get_publish_request_current_state(request_id)
-        if resolved is None:
+        if resolved is None or resolved["status"] != "rejected":
+            # None (vanished) or a non-rejected final state (confirming —
+            # the claim won; terminal states cannot read back here because
+            # only a ``rejected`` row would have matched our own intent).
+            # Either way: not cancelled — 404, per the docstring contract.
             raise NotFoundError("Publish request not found or already resolved")
         return iso_payload(resolved)
 
