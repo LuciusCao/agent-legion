@@ -5,7 +5,9 @@ already named the prune as the split seam). The prune strips override
 entries the newly published revision no longer accepts — unknown keys, and
 values failing the *full* partial validation (type + enum + minimum/
 maximum, not just a type mirror), so a tightened constraint cannot strand a
-value that every later intake would reject (P1-2).
+value that every later intake would reject (P1-2). The section-wide
+computation lives in ``node_config_prune_logic`` (shared by the plan and
+the in-transaction apply); this module owns the read/plan/apply plumbing.
 
 Secret semantics (P1-1): a field that flips to ``secret: true`` in the new
 revision keeps only genuine vault markers (``{"secret_ref": ...}``) written
@@ -15,13 +17,25 @@ deleted, never migrated: pushing existing plaintext through the vault would
 bless data that never passed the vault's write path, and the settings API
 would mask it as 「已设置」 while the raw string sat in the workspace row
 and job snapshots. The user re-enters the secret through the vault-backed
-channel.
+channel. The marker exemption is bound to the field still being secret in
+the published schema (终轮 P1-3): once the field flips back to plain, the
+marker is an ordinary value and faces the generic validation — otherwise
+intake rejects the dict-under-string long after the prune had its chance.
 
 Transaction boundary (P1-3): the prune is PLANNED as a pure read before the
-revision transaction and APPLIED inside it (``override_prune_commit_hook``
-+ the ``on_commit`` hook of ``create_workflow_revision``), so a prune
-failure rolls the whole publish back instead of stranding an active
-revision whose stale overrides keep blocking intake.
+revision transaction (a cheap 「does anything need pruning」 check) and
+APPLIED inside it (``override_prune_commit_hook`` + the ``on_commit`` hook
+of ``create_workflow_revision``), so a prune failure rolls the whole
+publish back instead of stranding an active revision whose stale overrides
+keep blocking intake. Inside the transaction the section is RE-computed
+from a workspace re-read taken on the same connection under the same row
+lock the section write takes (both via the JobQueries facade —
+``read/write_workspace_node_config_section``): the plan's snapshot read can
+race a concurrent settings PATCH, and writing that snapshot back under the
+lock would clobber the PATCH's committed values — or let a PATCH built on
+the pre-prune override resurrect a just-pruned key after the publish.
+Recomputing under the lock means the PATCH commits either fully before the
+prune (its fresh values are re-judged by the new schema) or fully after it.
 """
 
 from __future__ import annotations
@@ -29,9 +43,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from server.app.config_schema import ConfigSchemaError, validate_config_values
 from server.app.services.node_config import workflow_node_config_schemas
-from server.app.services.node_secrets import is_secret_ref_marker, secret_config_fields
+from server.app.services.node_config_prune_logic import prune_workflow_override_section
 
 if TYPE_CHECKING:
     from server.app.agent_catalog import AgentDefinition
@@ -60,23 +73,32 @@ def override_prune_commit_hook(
     """Plan the override prune and wrap it as a revision-transaction hook.
 
     The publish pipeline passes the result to
-    ``create_workflow_revision(on_commit=...)``: None when the workspace is
-    already clean (no workspace write is warranted), otherwise a hook that
-    rewrites the workflow's override section on the caller's connection.
+    ``create_workflow_revision(on_commit=...)``: None when the plan read saw
+    a workspace needing no prune (no workspace write is warranted),
+    otherwise a hook that re-reads the workflow's override section on the
+    caller's connection, RE-computes the prune there under the section
+    write's row lock, and rewrites the section — the plan's snapshot is
+    never written back, so a settings PATCH that committed between the plan
+    and the lock keeps its values when they satisfy the new schema (and has
+    its violations pruned like any other) instead of being flattened by a
+    stale pre-lock snapshot (codex 终轮 P1-1).
     """
-    section = plan_workspace_node_override_prune(
-        job_db, workspace_id, definition, agent_definitions
-    )
-    if section is None:
+    if not plan_workspace_node_override_prune(job_db, workspace_id, definition, agent_definitions):
         return None
     workflow_key = definition.key
+    schemas = workflow_node_config_schemas(definition, agent_definitions)
+    node_keys = frozenset(definition.nodes)
 
     def _apply(conn: _RevisionConnection) -> None:
         # cast(Any): the concrete connection type must not be imported
         # (BOUNDARY-DATA-001 counts even TYPE_CHECKING imports); the
         # revision transaction only ever hands over the facade's connection.
+        section = job_db.read_workspace_node_config_section(
+            cast(Any, conn), workspace_id, workflow_key
+        )
+        pruned = prune_workflow_override_section(section, schemas, node_keys)
         job_db.write_workspace_node_config_section(
-            cast(Any, conn), workspace_id, workflow_key, section
+            cast(Any, conn), workspace_id, workflow_key, pruned
         )
 
     return _apply
@@ -87,46 +109,43 @@ def plan_workspace_node_override_prune(
     workspace_id: str,
     definition: WorkflowDefinition,
     agent_definitions: Mapping[str, AgentDefinition],
-) -> dict[str, dict[str, Any]] | None:
-    """The workflow's post-prune override section, or None when already clean.
+) -> bool:
+    """Would the newly published revision prune anything in this workspace?
 
     Pure computation on a read (no writes): the publish pipeline runs this
-    BEFORE creating the revision and applies the result inside the revision's
-    own transaction, so a prune failure rolls the whole publish back instead
-    of stranding an active revision whose stale overrides still block intake
-    (codex 终轮 P1-3). Overrides of nodes the new revision dropped are left
-    alone — resolve skips them, and the settings PATCH already rejects them.
+    BEFORE creating the revision and applies the actual prune inside the
+    revision's own transaction, so a prune failure rolls the whole publish
+    back instead of stranding an active revision whose stale overrides still
+    block intake (codex 终轮 P1-3). The plan runs the same pure section
+    pruner as the in-transaction apply, so a False verdict only skips the
+    hook while the section still matches the new schema — a racing write
+    landing between plan and lock is judged under the lock regardless (the
+    publish itself does not owe that race a prune).
     """
     workspace = job_db.get_workspace(workspace_id)
+    if workspace is None:
+        return False
     overrides = _workflow_overrides(workspace, definition.key)
-    if workspace is None or not overrides:
-        return None
-    schemas = workflow_node_config_schemas(definition, agent_definitions)
-    pruned = False
-    for node_key in list(overrides):
-        values = overrides[node_key]
-        if node_key not in schemas:
-            continue  # unknown node: PATCH rejects it, but keep hands off here
-        cleaned = _prune_stale_override_values(values, schemas[node_key])
-        if cleaned == values:
-            continue
-        pruned = True
-        if cleaned:
-            overrides[node_key] = cleaned
-        else:
-            overrides.pop(node_key, None)
-    return overrides if pruned else None
+    if not overrides:
+        return False
+    return (
+        prune_workflow_override_section(
+            overrides,
+            workflow_node_config_schemas(definition, agent_definitions),
+            frozenset(definition.nodes),
+        )
+        != overrides
+    )
 
 
 def _workflow_overrides(
     workspace: Mapping[str, Any] | None,
     workflow_key: str,
 ) -> dict[str, dict[str, Any]]:
-    """The workspace's override mapping for one workflow, in mutated copy form.
+    """The workspace's override mapping for one workflow, in copy form.
 
-    The caller mutates this mapping in place (prune keys / replace values)
-    and writes it back as the workflow's whole override section, so every
-    level is copied away from the cached record.
+    The pruner returns a fresh mapping without touching its input; the
+    result becomes the workflow's whole override section.
     """
     if not isinstance(workspace, Mapping):
         return {}
@@ -140,57 +159,4 @@ def _workflow_overrides(
         str(node_key): dict(values)
         for node_key, values in workflow_overrides.items()
         if isinstance(values, Mapping)
-    }
-
-
-def _value_survives(
-    prop: Mapping[str, Any],
-    key: str,
-    value: Any,
-) -> bool:
-    """Does one override value pass the property's full constraint set?
-
-    The intake chain (``resolve_node_config``) validates overrides with
-    ``validate_config_values(partial=True)``; the prune must prune by the same
-    bar — a value surviving only the type check (enum tightened from
-    ``[v1, v2]`` to ``[v2]`` while the override still says ``v1``) would
-    block every new job at intake (codex 终轮 P1-2). Vault
-    ``{"secret_ref": ...}`` markers never reach that validation (secret
-    fields are stripped first), so they are checked by shape here; a
-    plaintext value under a newly-secret field is deleted rather than
-    migrated (P1-1).
-    """
-    if is_secret_ref_marker(value):
-        return True
-    try:
-        validate_config_values({"properties": {key: dict(prop)}}, {key: value}, partial=True)
-    except ConfigSchemaError:
-        return False
-    return True
-
-
-def _prune_stale_override_values(
-    values: Mapping[str, Any],
-    schema: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Copy of one node's override without entries the schema rejects.
-
-    Keys absent from the declared properties go (rename/removal); values must
-    pass the full partial validation; secret fields keep only
-    ``{"secret_ref": ...}`` vault markers — the settings PATCH stores markers
-    there (``apply_node_secret_fields``), so anything else under a secret
-    field is stale plaintext from before the field flipped secret and gets
-    deleted rather than migrated into the vault (codex 终轮 P1-1). The
-    platform-reserved execution keys are part of the node's effective schema
-    (merged upstream), so overrides of them are judged by the same rules as
-    any declared key.
-    """
-    properties = schema.get("properties") or {}
-    secret_fields = secret_config_fields(dict(properties=properties))
-    return {
-        key: value
-        for key, value in values.items()
-        if key in properties
-        and (key not in secret_fields or is_secret_ref_marker(value))
-        and _value_survives(properties[key], key, value)
     }

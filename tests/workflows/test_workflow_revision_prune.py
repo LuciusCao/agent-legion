@@ -287,3 +287,209 @@ def test_publish_prune_preserves_sibling_workflow_sections(tmp_path: Path) -> No
     assert "intake_knowledge_points" not in stored["education_video_problems_generation"]
     # …while the sibling workflow's section is untouched.
     assert stored["unrelated_workflow"] == {"some_node": {"other": "kept"}}
+
+
+def test_locked_prune_recomputes_from_concurrent_patch_values(tmp_path: Path) -> None:
+    """codex 终轮 P1-1: the in-transaction prune must RE-compute under the
+    section write's row lock, not write the plan-era snapshot back. A
+    settings PATCH that lands after the plan read but before the lock would
+    be flattened by a snapshot write-back: its legal fresh key vanishes and
+    its schema-violating fresh key survives to block intake. Recomputation
+    judges the PATCH's committed values by the new schema: legal keys stay,
+    violating keys go."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "prune-race-ws", default_workflow_key="education_video_problems_generation"
+    )
+    # v1 gives the node a schema so a stale override exists to plan a prune.
+    _publish_with_node_schema(
+        queries,
+        workspace["id"],
+        {"stale_key": {"type": "integer"}, "kept": {"type": "string"}},
+    )
+    queries.update_workspace(
+        workspace["id"],
+        node_config={
+            "education_video_problems_generation": {
+                "intake_knowledge_points": {"stale_key": 5, "kept": "v"}
+            }
+        },
+    )
+
+    # The concurrent PATCH commits between the plan read and the lock: the
+    # plan has already decided a prune is needed, then the PATCH replaces
+    # the section — stale_key gone, a legal fresh key plus a schema-violating
+    # fresh key in. A snapshot write-back would restore stale_key AND drop
+    # legal_key; recomputation keeps legal_key and drops bad_type_key.
+    from server.app.services.node_config_prune import override_prune_commit_hook
+
+    original_hook = override_prune_commit_hook
+
+    def _hook_with_mid_flight_patch(job_db, workspace_id, definition, agent_definitions):
+        hook = original_hook(job_db, workspace_id, definition, agent_definitions)
+        queries.update_workspace(
+            workspace["id"],
+            node_config={
+                "education_video_problems_generation": {
+                    "intake_knowledge_points": {
+                        "legal_key": "fresh",
+                        "bad_type_key": {"not": "a string"},
+                    }
+                }
+            },
+        )
+        return hook
+
+    patched_definition = dc_replace(
+        load_builtin_definition("education_video_problems_generation"),
+        nodes={
+            **load_builtin_definition("education_video_problems_generation").nodes,
+            "intake_knowledge_points": dc_replace(
+                load_builtin_definition("education_video_problems_generation").nodes[
+                    "intake_knowledge_points"
+                ],
+                config_schema={
+                    "type": "object",
+                    "properties": {
+                        "legal_key": {"type": "string"},
+                        "bad_type_key": {"type": "string"},
+                    },
+                },
+            ),
+        },
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            "server.app.services.workflow_revision_pipeline.override_prune_commit_hook",
+            _hook_with_mid_flight_patch,
+        )
+        WorkflowRevisionService(queries).publish_workspace_revision(
+            workspace["id"], patched_definition
+        )
+
+    stored = queries.get_workspace(workspace["id"])["node_config"]
+    assert stored["education_video_problems_generation"]["intake_knowledge_points"] == {
+        "legal_key": "fresh"
+    }
+
+
+def test_publish_prunes_override_of_node_left_without_schema(tmp_path: Path) -> None:
+    """codex 终轮 P1-2: a node that STAYS in the revision while its schema
+    goes (published Agent drops its config_schema) must have its override
+    cleared — the empty schema / non-empty override state is exactly what
+    resolve_node_config rejects at intake. A node the revision DROPPED keeps
+    its override: resolve skips it and a later re-add still finds the tuning."""
+    from server.app.agent_catalog import AgentDefinition
+    from tests.helpers import replace_agent_catalog
+
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "prune-schemaless-ws", default_workflow_key="agent_nodes_flow"
+    )
+    agent = AgentDefinition(capability="review_script", runtime="velites")
+    replace_agent_catalog(workspace["id"], {"review-script-v1": agent})
+
+    def _definition(*, with_extra: bool) -> WorkflowDefinition:
+        from server.app.workflows.definition import workflow_definition_from_mapping
+
+        nodes: dict[str, dict] = {
+            "write_script": {"type": "agent", "capability": "write_script"},
+            "review_script": {"type": "agent", "capability": "review_script"},
+        }
+        if with_extra:
+            nodes["temp_helper"] = {
+                "type": "code",
+                "capability": "temp_helper",
+                "after": ["write_script"],
+            }
+        return workflow_definition_from_mapping(
+            {
+                "key": "agent_nodes_flow",
+                "label": "Agent Nodes Flow",
+                "nodes": nodes,
+            }
+        )
+
+    # v1: the Agent carries a config_schema; overrides exist for the node and
+    # (planted raw) for a node the next revision drops.
+    agent_with_schema = AgentDefinition(
+        capability="review_script",
+        runtime="velites",
+        config_schema={"type": "object", "properties": {"kept": {"type": "string"}}},
+    )
+    replace_agent_catalog(workspace["id"], {"review-script-v1": agent_with_schema})
+    service = WorkflowRevisionService(queries)
+    service.publish_workspace_revision(workspace["id"], _definition(with_extra=True))
+    queries.update_workspace(
+        workspace["id"],
+        node_config={
+            "agent_nodes_flow": {
+                "review_script": {"kept": "v"},
+                "temp_helper": {"timeout_seconds": 60},
+            }
+        },
+    )
+
+    # v2: the Agent drops its config_schema (review_script loses its surface),
+    # and temp_helper leaves the revision — the override must be cleared for
+    # the former and kept for the latter.
+    replace_agent_catalog(workspace["id"], {"review-script-v1": agent})
+    service.publish_workspace_revision(workspace["id"], _definition(with_extra=False))
+
+    stored = queries.get_workspace(workspace["id"])["node_config"]["agent_nodes_flow"]
+    assert "review_script" not in stored
+    assert stored["temp_helper"] == {"timeout_seconds": 60}
+
+
+def test_publish_prunes_secret_ref_marker_when_field_flips_plain(tmp_path: Path) -> None:
+    """codex 终轮 P1-3: the {"secret_ref": ...} marker exemption is bound to
+    the field STILL being secret in the published schema. When the field
+    flips back to a plain string, the marker is an ordinary value — the
+    generic validation (which the secret strip no longer shields it from)
+    rejects the dict-under-string, so the prune removes it there instead of
+    leaving it to block intake."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "prune-unsecret-ws", default_workflow_key="education_video_problems_generation"
+    )
+    marker = {"secret_ref": "node:wf:intake_knowledge_points:token"}
+    secret_schema = {"token": {"type": "string", "secret": True}, "kept": {"type": "string"}}
+    _publish_with_node_schema(queries, workspace["id"], secret_schema)
+    queries.update_workspace(
+        workspace["id"],
+        node_config={
+            "education_video_problems_generation": {
+                "intake_knowledge_points": {"token": marker, "kept": "v"}
+            }
+        },
+    )
+
+    # v2 drops the secret flag: the leftover marker must go while the sibling
+    # key survives the same publish.
+    v2 = _publish_with_node_schema(
+        queries,
+        workspace["id"],
+        {"token": {"type": "string"}, "kept": {"type": "string"}},
+    )
+
+    stored = queries.get_workspace(workspace["id"])["node_config"]
+    assert stored["education_video_problems_generation"]["intake_knowledge_points"] == {"kept": "v"}
+    resolved = resolve_workflow_node_configs(v2, {}, queries.get_workspace(workspace["id"]))
+    assert "token" not in resolved["intake_knowledge_points"]
+
+    # The companion face: still secret in v3 → the marker keeps its vault wiring.
+    _publish_with_node_schema(queries, workspace["id"], secret_schema)
+    queries.update_workspace(
+        workspace["id"],
+        node_config={
+            "education_video_problems_generation": {
+                "intake_knowledge_points": {"token": marker, "kept": "v"}
+            }
+        },
+    )
+    _publish_with_node_schema(queries, workspace["id"], secret_schema)
+    stored = queries.get_workspace(workspace["id"])["node_config"]
+    assert stored["education_video_problems_generation"]["intake_knowledge_points"] == {
+        "token": marker,
+        "kept": "v",
+    }
