@@ -152,8 +152,16 @@ def test_status_swap_in_one_statement_nets_to_zero() -> None:
 
 def test_noop_and_cross_dimension_updates_leave_counters_untouched() -> None:
     # UPDATE of an unrelated column fires the statement trigger (plain AFTER
-    # UPDATE, no column list) but the net-delta aggregation must filter the
-    # unchanged (key, status) pairs to zero.
+    # UPDATE, no column lists — transition tables forbid them) but the net-
+    # delta aggregation must filter the unchanged (key, status) pairs:
+    # ``having sum(cnt) <> 0`` drops zero-net pairs BEFORE the loop. The
+    # old ``update of status, run_id`` shape skipped the trigger body
+    # outright for these statements; the naive statement shape without the
+    # HAVING still walked the loop with delta=0 — the positive-delta upsert
+    # arm created phantom cnt=0 rows when a counter row was missing and
+    # re-locked existing rows for a cnt+0 write (the completion flow's
+    # outcome/packed updates, job_nodes.py:151 / workspace_packages.py:106,
+    # fire this shape on every finished stream).
     with write_transaction(TEST_DATABASE_URL) as conn:
         ids = _seed(conn, "sc76-ws-noop", "sc76-run-noop")
         conn.execute("update jobs set status='running' where id=%s", (ids[0],))
@@ -161,10 +169,51 @@ def test_noop_and_cross_dimension_updates_leave_counters_untouched() -> None:
         before_ws = _workspace_counts(conn, "sc76-ws-noop")
         # Unrelated column only.
         conn.execute("update jobs set title='x' where run_id='sc76-run-noop'")
-        # Same status re-set.
+        # Same status re-set (statement carries the status column but the
+        # value is unchanged — same net-zero pair, must be filtered too).
         conn.execute("update jobs set status='running' where id=%s", (ids[0],))
+        # And the raw row content: no phantom rows, no counter churn.
+        before_run_rows = conn.execute(
+            "select status, cnt from run_job_status_counts"
+            " where run_id='sc76-run-noop' order by status"
+        ).fetchall()
+        before_ws_rows = conn.execute(
+            "select status, cnt from workspace_job_status_counts"
+            " where workspace_id='sc76-ws-noop' order by status"
+        ).fetchall()
     assert _run_counts_safe("sc76-run-noop") == before_run
     assert _workspace_counts_safe("sc76-ws-noop") == before_ws
+    assert [(str(r["status"]), int(r["cnt"])) for r in before_run_rows] == [
+        ("queued", 5),
+        ("running", 1),
+    ]
+    assert [(str(r["status"]), int(r["cnt"])) for r in before_ws_rows] == [
+        ("queued", 5),
+        ("running", 1),
+    ]
+
+
+def test_noop_update_creates_no_phantom_row_when_counter_missing() -> None:
+    # The zero-net filter's missing-row half: a title/updated_at-only UPDATE
+    # against a (run_id, status) whose counter row does NOT exist must not
+    # create one. Without ``having sum(cnt) <> 0`` the delta=0 pair fell
+    # into the positive-delta upsert arm (delta<0 is false) and INSERTed a
+    # phantom cnt=0 row — the old column-filter shape never ran the body at
+    # all, so no row may appear. Checked via raw rows, not the cnt<>0 read
+    # helpers, because a phantom cnt=0 row hides behind exactly that filter.
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        _seed(conn, "sc76-ws-phantom", "sc76-run-phantom")
+        # Drop the run counter rows entirely, then run a completion-flow
+        # shaped UPDATE (outcome + updated_at, no status/run_id column).
+        conn.execute("delete from run_job_status_counts where run_id='sc76-run-phantom'")
+        conn.execute(
+            "update jobs set outcome='done', updated_at=current_timestamp"
+            " where run_id='sc76-run-phantom'"
+        )
+        run_rows = conn.execute(
+            "select status, cnt from run_job_status_counts where run_id='sc76-run-phantom'"
+        ).fetchall()
+    assert run_rows == []
 
 
 def _run_counts_safe(run_id: str) -> dict[str, int]:

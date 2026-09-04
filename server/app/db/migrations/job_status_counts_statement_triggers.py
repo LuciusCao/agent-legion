@@ -39,10 +39,10 @@ base today.
 Trigger shape notes (PG 17.11 verified): transition tables cannot be
 combined with column lists nor with multi-event triggers, so each family is
 three single-event AFTER triggers (INSERT / UPDATE / DELETE), and the
-UPDATE arm is a plain ``after update`` — the net-delta arithmetic makes the
-old ``update of status, run_id`` column filter redundant: a row whose
-(key, status) did not change nets to zero and is filtered out of the delta
-aggregation, so title/updated_at-only updates never touch the counters.
+UPDATE arm is a plain ``after update``: an unchanged (key, status) pair
+nets to zero and ``having sum(cnt) <> 0`` drops it from the delta loop,
+so title/updated_at-only updates never touch the counters — no phantom
+cnt=0 row on a missing counter, no cnt+0 write/lock on an existing one.
 
 The trigger DDL lives HERE, not in postgres_schema.sql: the schema file's
 raw-line budget (the same squeeze the v73 round resolved by moving DDL into
@@ -65,8 +65,12 @@ from typing import Any
 # The UPDATE arm aggregates the union of the two transition tables into one
 # net delta per (key, status) and applies the deltas in (key, status) order
 # — the fixed global lock order is the deadlock fix itself (see module
-# docstring). Delta application is sign-split to preserve the old row
-# trigger's missing-row semantics exactly: a POSITIVE net delta upserts
+# docstring). Zero-net pairs — (key, status) unchanged by the statement —
+# are dropped by ``having sum(cnt) <> 0`` BEFORE the loop: they must not
+# upsert a phantom cnt=0 row on a missing counter nor take a counter row
+# lock for a cnt+0 write on an existing one (both would fire on every
+# title/updated_at-only completion-flow update). Delta application is
+# sign-split to preserve the old row trigger's missing-row semantics exactly: a POSITIVE net delta upserts
 # (creates the counter row if absent, increments if present), a NEGATIVE
 # net delta is a bare UPDATE — a no-op when the (key, status) row is
 # missing. A single upsert would be wrong on both ends: INSERT ... ON
@@ -109,7 +113,7 @@ begin
         union all
         select {key}, status, count(*)::bigint
         from new_table where {key} <> '' group by 1, 2
-      ) u group by key, status order by key, status
+      ) u group by key, status having sum(cnt) <> 0 order by key, status
     loop
       if delta < 0 then
         update {table} set cnt = cnt + delta where {key} = k and status = st;
