@@ -185,6 +185,23 @@ warning，建议删除）。`models` 是可选的 runtime-scoped allowlist，不
 allowlist 条目时允许其全部发现结果。Agent 任务的准入条件：workspace token 授权、
 runtime 匹配、provider/model 命中 allowlist、labels 满足 `requires_labels`。
 
+### 出网代理（#444）
+
+Worker 默认**直连出网**：service 入口会剥离启动 shell 继承的代理环境变量
+（`http_proxy` / `https_proxy` / `all_proxy` 及大写变体）。这是刻意的——生产机上
+常见的本机代理进程（Clash/mihomo 等）在订阅刷新或配置重载时会整批掐断在途长连接，
+数百路并发的 LLM 流量全挂在同一个代理进程上时，一次重载就是一次分钟级的整段
+执行失败（velites 表现为 `unexpected EOF during chunk size line`）。**生产 Worker
+不应在本机代理进程之后运行**；开发机上带着代理 shell 启动的 worker.service
+会在日志里看到一行「已剥离继承的代理环境变量」。
+
+确需代理出口的部署（例如 provider 只能经网关访问）在控制台「配置 → 高级参数 →
+出网代理」或 `worker.yaml` 的 `proxy:` 字段显式声明，支持 `http://` / `https://` /
+`socks5://` / `socks5h://` URL（可含认证信息）。填写后 executor 与全部 agent
+子进程的出网流量（backend 上传 + LLM）统一经该代理；留空或删除即回直连。该字段
+是进程级配置，修改后随执行进程重启生效，不做热更新。
+
+
 ### code 节点执行池（协议 v2）
 
 自足的 workflow code 节点（静态 import 闭包 ⊆ `workspace_libs` + stdlib + `requests`；repo 内置的示例节点全部满足）可以被分派到 Worker：Host 把节点代码文本 + sha256 `code_hash` 与 `workspace_libs` 快照打进 bundle 下发，Worker 在 `velites sandbox wrap` OS 沙箱内执行（内置与自定义节点同一条沙箱路径）。接入方式：

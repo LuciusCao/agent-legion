@@ -96,6 +96,18 @@ def test_configure_accepts_disable_runtime() -> None:
     assert configure_payload(args) == {"disabled_runtimes": ["pi", "velites"]}
 
 
+def test_configure_proxy_set_and_clear() -> None:
+    """--proxy 三态：传 URL 设置、传空串清除回直连、未传不动现值（#444）。"""
+    set_args = build_parser().parse_args(["configure", "--proxy", "http://gw:8080"])
+    assert configure_payload(set_args) == {"proxy": "http://gw:8080"}
+
+    clear_args = build_parser().parse_args(["configure", "--proxy", ""])
+    assert configure_payload(clear_args) == {"proxy": ""}
+
+    untouched_args = build_parser().parse_args(["configure", "--worker-id", "w1"])
+    assert configure_payload(untouched_args) == {"worker_id": "w1"}
+
+
 def test_container_style_standalone_workerctl_can_import_companion_modules(
     tmp_path: Path,
 ) -> None:

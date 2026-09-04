@@ -60,6 +60,10 @@ def build_parser() -> argparse.ArgumentParser:
     configure.add_argument("--upload-concurrency", type=int)
     configure.add_argument("--claim-enabled", action=argparse.BooleanOptionalAction, default=None)
     configure.add_argument("--capability", action="append", help="已退役（issue #284）：值被忽略")
+    configure.add_argument(
+        "--proxy",
+        help="出网代理 URL（http(s)/socks5(h)，可含认证）；传空串清除回直连，缺省不动现值",
+    )
     configure.add_argument("--model", action="append", default=[])
     configure.add_argument("--label", action="append", default=[])
     configure.add_argument(
@@ -81,6 +85,7 @@ def configure_payload(args: argparse.Namespace) -> dict[str, Any]:
         ("upload_concurrency", "upload_max_concurrency"),
         ("claim_enabled", "claim_enabled"),
         ("capability", "capabilities"),
+        ("proxy", "proxy"),
     ):
         value = getattr(args, argument)
         if value is not None:

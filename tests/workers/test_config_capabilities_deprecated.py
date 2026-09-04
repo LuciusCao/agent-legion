@@ -26,7 +26,7 @@ def _base_config(**overrides):
 
 @pytest.mark.no_db
 def test_capabilities_wildcard_and_arbitrary_values_accepted(caplog) -> None:
-    with caplog.at_level(logging.WARNING, logger="worker.config_validation"):
+    with caplog.at_level(logging.WARNING, logger="worker.worker_declarations"):
         config = validate_config(_base_config(capabilities=["*", "anything", ""]))
 
     assert config["capabilities"] == ["*", "anything"]
@@ -35,7 +35,7 @@ def test_capabilities_wildcard_and_arbitrary_values_accepted(caplog) -> None:
 
 @pytest.mark.no_db
 def test_absent_or_empty_capabilities_stays_silent(caplog) -> None:
-    with caplog.at_level(logging.WARNING, logger="worker.config_validation"):
+    with caplog.at_level(logging.WARNING, logger="worker.worker_declarations"):
         assert validate_config(_base_config())["capabilities"] == []
         assert validate_config(_base_config(capabilities=[]))["capabilities"] == []
 
