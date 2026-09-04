@@ -35,7 +35,9 @@ pub struct Cli {
     #[arg(long)]
     pub skill: Vec<PathBuf>,
 
-    /// Enabled tools: comma-separated subset of read,write,bash.
+    /// Enabled tools: comma-separated subset of read,write,bash,uuid.
+    /// The default stays the core triple; utility tools like `uuid` are
+    /// opt-in via the workflow's tool selection (#442).
     #[arg(long, value_delimiter = ',', default_value = "read,write,bash")]
     pub tools: Vec<String>,
 
