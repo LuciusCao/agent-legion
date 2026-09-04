@@ -25,7 +25,10 @@ export type WorkflowYamlNode = {
   outputs?: string[]
   terminal?: { outcome?: string }
   config_schema?: import('../../../types').ConfigSchema
-  config?: { rework_target?: string; feedback_artifact?: string }
+  // config 值是自由 mapping：code 节点承载 schema 声明的参数值（#418
+  // 面板结构化编辑），approval 节点限 rework_target/feedback_artifact
+  // 白名单（后端 loader 校验，写路径 patchWorkflowNodeApprovalConfig）。
+  config?: Record<string, unknown>
   // prettier-ignore
   execution?: { provider?: string; model?: string; thinking?: string; prompt?: string }
 }

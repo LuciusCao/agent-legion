@@ -1,46 +1,57 @@
-import { NodeConfigCard } from '../../../components/settings/NodeConfigCard'
-import { useSettingStore } from '../../../stores/settingStore'
 import type { WorkflowNodeRecord } from '../../../types'
+import { parseWorkflowNode } from '../shared/workflowStudioYamlDraft'
+import { readNodeConfig } from '../shared/workflowStudioYamlDraft.nodeConfig'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
+import { WorkflowNodeConfigValues } from './WorkflowNodeConfigValues'
+import { WorkflowNodeRuntimeOverrideCard } from './WorkflowNodeRuntimeOverrideCard'
 
-// Per-node config editing lives in the studio inspector (in context) instead
-// of the settings page; the section renders only when the node declares a
-// config schema (agent config_schema or executor capability fallback).
+// code 节点配置值的双通道区块（#418 后半）：
+// - 版本值（draft YAML 的 node config，表单在 WorkflowNodeConfigValues）：
+//   随发布进入新 revision，job intake 时按「schema 默认 → 节点 config →
+//   运行时覆盖」解析后冻结进 job 快照；
+// - 运行时覆盖（workspace node_config，卡片在
+//   WorkflowNodeRuntimeOverrideCard）：立即生效、不产生新版本——非
+//   runtime_mutable 键影响之后 intake 的新 job，runtime_mutable 键对已在
+//   跑的 job 下一次 dispatch 即生效（CONFIG-RUNTIME-MUTABLE-001）。
+// registry 只挂 code/agent；agent 节点无节点 YAML schema 编辑区（#406），
+// 但 live 覆盖通道对 agent 同样有效（Agent Definition 的 config_schema）。
 export function WorkflowNodeConfigSection(props: {
   node: WorkflowNodeRecord
+  definitionYaml: string
+  setDefinitionYaml: (value: string) => void
   readOnly?: boolean
 }) {
-  const workspaceId = useSettingStore((s) => s.workspaceId)
-  const schema = useSettingStore(
-    (s) => s.settings.nodeConfigSchemas?.[props.node.key]
-  )
-  const initialValues = useSettingStore(
-    (s) => s.settings.nodeConfig?.[props.node.key]
-  )
-  if (!workspaceId || !schema) return null
+  const { node, definitionYaml, setDefinitionYaml, readOnly } = props
+  // code 节点：版本值表单按草稿 YAML 的 config_schema 生成；agent 节点
+  // 的 schema 归 Agent Definition（不在节点 YAML），无版本值通道。
+  const isCodeNode = !node.node_type || node.node_type === 'code'
+  const draftSchema = isCodeNode
+    ? parseWorkflowNode(definitionYaml, node.key)?.config_schema
+    : undefined
+  const hasSchemaKeys = Object.keys(draftSchema?.properties ?? {}).length > 0
+
   return (
     <section
       className={inspectorStyles.section}
-      aria-label={`节点配置 ${props.node.key}`}
+      aria-label={`节点配置 ${node.key}`}
     >
       <div className={inspectorStyles.sectionTitle}>节点配置</div>
-      {props.readOnly ? (
-        // 历史版本查看模式：配置不属于 revision，但保存会直接写 live 设置
-        // ——只读视图锁死（与 code 段的 writable = !readOnly 对齐）。
-        <div className={inspectorStyles.empty}>
-          历史版本查看模式下节点配置不可编辑；配置不属于
-          revision，请切回草稿视图修改。
-        </div>
-      ) : (
-        <NodeConfigCard
-          key={props.node.key}
-          workspaceId={workspaceId}
-          nodeKey={props.node.key}
-          label={props.node.label}
-          schema={schema}
-          initialValues={initialValues ?? {}}
+      {isCodeNode && hasSchemaKeys ? (
+        <WorkflowNodeConfigValues
+          nodeKey={node.key}
+          schema={draftSchema!}
+          config={readNodeConfig(definitionYaml, node.key)}
+          definitionYaml={definitionYaml}
+          setDefinitionYaml={setDefinitionYaml}
+          readOnly={readOnly}
         />
-      )}
+      ) : isCodeNode ? (
+        <div className={inspectorStyles.empty}>
+          未声明 config_schema 的节点没有可配置参数；如需参数请先在 「配置
+          Schema」区块声明。
+        </div>
+      ) : null}
+      <WorkflowNodeRuntimeOverrideCard node={node} readOnly={readOnly} />
     </section>
   )
 }

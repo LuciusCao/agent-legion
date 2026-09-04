@@ -9,6 +9,7 @@ from typing import Any
 from server.app.agent_control.register_token_workspace_removal import (
     cascade_delete_workspace_register_tokens,
 )
+from server.app.db.connection import DatabaseConnection
 from server.app.jobs.node_limits import (
     get_workspace_node_limits,
     replace_workspace_node_limits,
@@ -26,6 +27,26 @@ def _safe_identifier(value: str, fallback: str) -> str:
 
 def _workspace_id(name: str) -> str:
     return _safe_identifier(name.lower(), "workspace")
+
+
+def _json_column(value: Any) -> str:
+    """Canonical JSON for a jsonb column write (stable keys, readable unicode)."""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _locked_node_config(conn: DatabaseConnection, workspace_id: str) -> dict[str, Any]:
+    """The workspace's whole node_config mapping, re-read under the row lock.
+
+    Shared by the node-config section read/write pair: the ``for update``
+    row lock serializes a racing settings PATCH to either fully before or
+    fully after the section rewrite.
+    """
+    row = conn.execute(
+        "select node_config_json from workspaces where id=%s for update",
+        (workspace_id,),
+    ).fetchone()
+    node_config = json.loads(row["node_config_json"]) if row and row["node_config_json"] else {}
+    return node_config if isinstance(node_config, dict) else {}
 
 
 class WorkspaceQueriesMixin(ConnectionQueriesMixin):
@@ -58,11 +79,7 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
                 raise ValueError("Workspace id must equal default_workflow_key (schema v62)")
             if not _ID_PATTERN.match(workspace_id):
                 raise ValueError("Workspace id must match ^[a-z0-9][a-z0-9_-]{0,63}$ (schema v62)")
-        resource_config_json = json.dumps(
-            resource_config or {},
-            ensure_ascii=False,
-            sort_keys=True,
-        )
+        resource_config_json = _json_column(resource_config or {})
         clean_entity = (default_entity or "question").strip() or "question"
         clean_description = (description or "").strip()
 
@@ -136,26 +153,14 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
         if default_workflow_key is not None:
             fields["default_workflow_key"] = default_workflow_key
         if resource_config is not None:
-            fields["resource_config_json"] = json.dumps(
-                resource_config,
-                ensure_ascii=False,
-                sort_keys=True,
-            )
+            fields["resource_config_json"] = _json_column(resource_config)
         if default_entity is not None:
             clean_entity = (default_entity or "question").strip() or "question"
             fields["default_entity"] = clean_entity
         if node_config is not None:
-            fields["node_config_json"] = json.dumps(
-                node_config,
-                ensure_ascii=False,
-                sort_keys=True,
-            )
+            fields["node_config_json"] = _json_column(node_config)
         if preview_config is not None:
-            fields["preview_config_json"] = json.dumps(
-                preview_config,
-                ensure_ascii=False,
-                sort_keys=True,
-            )
+            fields["preview_config_json"] = _json_column(preview_config)
         if not fields:
             workspace = self.get_workspace(workspace_id)
             if workspace is None:
@@ -217,12 +222,8 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
                     description.strip(),
                     default_workflow_key,
                     default_entity,
-                    json.dumps(resource_config, ensure_ascii=False, sort_keys=True),
-                    (
-                        json.dumps(preview_config, ensure_ascii=False, sort_keys=True)
-                        if preview_config is not None
-                        else None
-                    ),
+                    _json_column(resource_config),
+                    _json_column(preview_config) if preview_config is not None else None,
                     workspace_id,
                 ),
             )
@@ -235,6 +236,50 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
         if row is None:
             raise RuntimeError("workspace configuration update did not return a row")
         return _workspace_record(row)
+
+    def read_workspace_node_config_section(
+        self,
+        conn: DatabaseConnection,
+        workspace_id: str,
+        workflow_key: str,
+    ) -> dict[str, dict[str, Any]]:
+        """One workflow's override section, copied out under the write's lock.
+
+        The prune hook reads here BEFORE ``write_workspace_node_config_section``
+        rewrites the section — same ``for update`` lock, same transaction
+        connection — so a racing settings PATCH commits either fully before
+        this read (pruned on the spot) or fully after the write. Returns
+        copied mappings; never commits on its own.
+        """
+        overrides = _locked_node_config(conn, workspace_id).get(workflow_key)
+        if not isinstance(overrides, dict):
+            return {}
+        return {str(k): dict(v) for k, v in overrides.items() if isinstance(v, Mapping)}
+
+    def write_workspace_node_config_section(
+        self,
+        conn: DatabaseConnection,
+        workspace_id: str,
+        workflow_key: str,
+        section: Mapping[str, Any],
+    ) -> None:
+        """Replace one workflow's override section inside a caller transaction.
+
+        The publish pipeline applies the override prune atomically with the
+        revision insert that publishes it (codex 终轮 P1-3): only *this*
+        workflow's section is replaced — sibling workflow sections are
+        re-read under the row lock and preserved, so the column rewrite
+        never discards concurrent settings writes for other workflows. The
+        row read takes ``for update`` so a racing settings PATCH commits
+        either fully before or fully after the prune; ``conn`` never commits
+        here on its own.
+        """
+        node_config = _locked_node_config(conn, workspace_id)
+        node_config[workflow_key] = dict(section)
+        conn.execute(
+            "update workspaces set node_config_json=%s, updated_at=current_timestamp where id=%s",
+            (_json_column(node_config), workspace_id),
+        )
 
     def delete_workspace(self, workspace_id: str) -> None:
         with self.connect() as conn:

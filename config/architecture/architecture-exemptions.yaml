@@ -68,6 +68,24 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
   ceiling: 143
 - check: architecture.file_budget
+  path: server/app/jobs/queries/workspace.py
+  reason: >-
+    The publish pipeline's override prune had to land inside the revision
+    transaction (codex 终轮 P1-3 on #428), and the section-scoped
+    node_config_json write (FOR UPDATE re-read, replace only the publishing
+    workflow's section) lives on this mixin because every other workspace
+    column write already does — a service-layer helper would need the raw
+    connection this mixin owns. The durable resolution is splitting the
+    workspace-node-override writes (node config + node limits) into their
+    own queries mixin when the next workspace write arrives; the exemption
+    goes stale with that split or whenever the file shrinks under 301. The
+    original anchor (#418) closed with the panel work stranded on its
+    stacked base branch instead of develop; re-anchored to #456 by the
+    backport that finally lands the code-node panel and the override prune.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
+  ceiling: 332
+- check: architecture.file_budget
   path: server/app/routes/artifacts.py
   reason: Artifact routes authenticate the per-Worker token used by Agent execution transport, and the
     per-file upload path grew past the plain baseline with the scoped-token work (#35). Deletion was re-assessed

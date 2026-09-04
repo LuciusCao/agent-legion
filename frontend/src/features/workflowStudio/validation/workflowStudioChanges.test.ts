@@ -208,6 +208,29 @@ describe('workflowStudioChanges', () => {
     expect(categoryLabelForError('unknown')).toBe('unknown')
   })
 
+  it('labels config/config_schema changes in Chinese (#418)', () => {
+    // #422 起 compare 对 config/config_schema 产出字段级变更；展示层
+    // 必须给中文标签，不能在变更列表里裸字段名。
+    const change = buildChangeSummary(
+      makeResponse({
+        summary: {
+          risk_level: 'warning',
+          node_changes: [
+            makeNodeChange({
+              fields: ['config', 'config_schema'],
+              risk: 'warning',
+            }),
+          ],
+          edge_changes: [],
+          intake_changes: [],
+          metadata_changes: [],
+          risk_flags: [],
+        },
+      })
+    ).nodeChanges[0]
+    expect(formatNodeChange(change)).toBe('节点 A: 节点配置值、配置 Schema')
+  })
+
   it('formats node change text', () => {
     const added: NodeChange = {
       type: 'added',
