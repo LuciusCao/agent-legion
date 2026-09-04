@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
@@ -14,6 +15,8 @@ from server.app.db.dialect import DatabaseDsn as DatabaseDsn  # noqa: F401 (re-e
 from server.app.db.pool_reset import note_return, record_checkout_origin
 from server.app.db.pools import close_database_pools as close_database_pools
 from server.app.db.pools import pool_for
+
+logger = logging.getLogger(__name__)
 
 _Params = Sequence[Any] | Mapping[str, Any] | None
 
@@ -64,7 +67,20 @@ class DatabaseConnection:
         # #438: observe BEFORE the pool's async reset — this is the only
         # synchronous point where a dirty return can be attributed to its
         # checkout site. The pool rolls the transaction back either way.
-        note_return(self._raw)
+        # #439: observability must never block the return — if note_return
+        # raises (broken connection, unexpected info error) the checkout
+        # would leak all over again. Observability failure loses the
+        # observation only, not the connection.
+        try:
+            note_return(self._raw)
+        except Exception:
+            # #204 broad-except audit: observability must not gain a leak
+            # path (#439). note_return's failures are a broken connection
+            # or an unexpected info error — un-narrowable here, and any
+            # raise would skip putconn and strand the checkout all over
+            # again. Losing the observation is strictly cheaper than losing
+            # the return; the pool reset hook is the independent backstop.
+            logger.debug("note_return failed during close (#439)", exc_info=True)
         self._pool.putconn(self._raw)
 
     def __enter__(self) -> DatabaseConnection:
@@ -84,7 +100,21 @@ class DatabaseConnection:
             else:
                 self.rollback()
         finally:
-            self.close()
+            # #439: a raise from this finally would replace the original
+            # commit/rollback exception at the caller — the deadlock/reset
+            # error the caller actually needs. close() failures are demoted
+            # to a debug breadcrumb; the pool reset/discard path reports
+            # the connection.
+            try:
+                self.close()
+            except Exception:
+                # #204 broad-except audit: must-run release path (finally)
+                # — close() fails on a broken connection or pool shutdown,
+                # un-narrowable from here, and the raise would both mask
+                # the caller's original exception (#439) and risk the
+                # checkout. The pool's reset/discard path still reports the
+                # connection.
+                logger.debug("connection close() failed in __exit__ (#439)", exc_info=True)
 
 
 def connect_database(dsn: ConnectSource) -> DatabaseConnection:
