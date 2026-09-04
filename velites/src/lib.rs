@@ -43,7 +43,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
             Some(_) => {}
             None => {
                 return Err(anyhow!(
-                    "unknown tool `{name}` in --tools (available: read,write,bash)"
+                    "unknown tool `{name}` in --tools (available: read,write,bash,uuid)"
                 ))
             }
         }
