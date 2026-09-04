@@ -23,6 +23,9 @@ from server.app.db.migrations.job_artifacts import migrate_job_artifacts  # noqa
 from server.app.db.migrations.job_node_status_counts import (  # noqa: F401
     migrate_workspace_job_node_status_counts,
 )
+from server.app.db.migrations.job_status_counts_statement_triggers import (  # noqa: F401
+    migrate_job_status_counts_statement_triggers,
+)
 from server.app.db.migrations.jobs_run_id_index import migrate_jobs_run_id_index  # noqa: F401
 from server.app.db.migrations.local_executor_removal import (
     migrate_local_executor_removal,  # noqa: F401
