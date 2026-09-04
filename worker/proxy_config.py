@@ -23,3 +23,14 @@ def validate_proxy(value: object) -> str:
                 "proxy 必须是 http/https/socks5(h) URL（可含认证信息，不能带查询参数或锚点）"
             )
     return url
+
+
+def redact_proxy_url(url: str) -> str:
+    """脱敏代理 URL：认证信息（userinfo）不落日志/控制台。"""
+    if "@" in url:
+        scheme, sep, rest = url.partition("://")
+        if sep:
+            _, at, host = rest.rpartition("@")
+            if at:
+                return f"{scheme}://{host}"
+    return url

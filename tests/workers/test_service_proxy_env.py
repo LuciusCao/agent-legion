@@ -42,6 +42,28 @@ def test_strip_proxy_env_is_idempotent_without_proxy(monkeypatch: pytest.MonkeyP
     service_env.strip_proxy_env()
 
 
+def test_strip_and_inject_markers_print_to_stdout(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """剥离/注入标记必须走 stdout 而非 logging：剥离发生在 uvicorn 之前，
+    root logger 未配置时 INFO 会被静默丢弃——这是 runbook 给运维的排障标记。"""
+    for name in PROXY_ENV_VARS:
+        monkeypatch.setenv(name, "http://127.0.0.1:7897")
+
+    service_env.strip_proxy_env()
+
+    assert "已剥离继承的代理环境变量" in capsys.readouterr().out
+
+    overrides = proxy_env_overrides("http://user:secret@gateway:8080")
+
+    assert overrides
+    out = capsys.readouterr().out
+    assert "按配置注入出网代理" in out
+    # 凭证（userinfo）不落日志。
+    assert "user:secret" not in out
+    assert "gateway:8080" in out
+
+
 def test_validate_proxy_accepts_http_https_socks_and_empty() -> None:
     assert validate_proxy("") == ""
     assert validate_proxy(None) == ""
@@ -170,6 +192,35 @@ def test_supervisor_injects_configured_proxy_into_executor_env(
     )
 
 
+def test_supervisor_configured_proxy_overrides_inherited_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """配置 proxy 时压过 shell 遗留的继承值：配置是唯一事实源（#444 codex P1）。"""
+    captured: dict[str, Any] = {}
+
+    class _RecordingPopen(_FakePopen):
+        def __init__(self, argv: list[str], **kwargs: object) -> None:
+            captured["env"] = kwargs.get("env")
+            super().__init__(argv, **kwargs)
+
+    # 直跑/异常场景：shell 遗留的代理 env 仍在（未经 service 入口剥离）。
+    for name in PROXY_ENV_VARS:
+        monkeypatch.setenv(name, "http://shell-leftover:1")
+    monkeypatch.setattr(supervisor_module.subprocess, "Popen", _RecordingPopen)
+    monkeypatch.setattr(WorkerSupervisor, "_reap_orphans", lambda self: None)
+    monkeypatch.setattr(WorkerSupervisor, "_collect_logs", lambda self, *a: None)
+    store = _proxy_store(tmp_path, "http://gateway:8080")
+    supervisor = WorkerSupervisor(store, tmp_path / "worker.py")
+
+    supervisor._start()
+
+    env = captured["env"]
+    assert env is not None
+    assert {name: env[name] for name in PROXY_ENV_VARS} == dict.fromkeys(
+        PROXY_ENV_VARS, "http://gateway:8080"
+    )
+
+
 def test_put_config_proxy_change_triggers_restart(tmp_path: Path) -> None:
     """proxy 是进程级配置：PUT 修改后走重启路径，而不是热更新。"""
     from fastapi.testclient import TestClient
@@ -210,6 +261,48 @@ def test_put_config_proxy_change_triggers_restart(tmp_path: Path) -> None:
     assert response.json()["restarted"] is True
     assert response.json()["config"]["proxy"] == "http://gateway:8080"
     assert store.read()["proxy"] == "http://gateway:8080"
+
+
+def test_put_config_proxy_clear_returns_to_direct(tmp_path: Path) -> None:
+    """反向清除：已配置代理 → PUT 空串，落盘回直连且触发重启。"""
+    from fastapi.testclient import TestClient
+
+    from worker.service import create_app
+
+    class _FakeSupervisor:
+        def __init__(self, store: WorkerConfigStore) -> None:
+            self.store = store
+            self.restarts = 0
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def restart(self) -> None:
+            self.restarts += 1
+
+        def status(self) -> dict[str, Any]:
+            return {"configured": True}
+
+        def logs(self, limit: int = 200) -> list[str]:
+            return []
+
+        def token_status(self) -> dict[str, str]:
+            return {}
+
+    store = _proxy_store(tmp_path, "http://gateway:8080")
+    app = create_app(_FakeSupervisor(store), tmp_path, embed_token=False)
+    headers = {"Authorization": f"Bearer {store.control_token()}"}
+
+    with TestClient(app) as client:
+        response = client.put("/api/config", json={"proxy": ""}, headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["restarted"] is True
+    assert response.json()["config"]["proxy"] == ""
+    assert store.read()["proxy"] == ""
 
 
 def test_supervisor_default_keeps_stripped_env_clean(

@@ -1,5 +1,19 @@
 exemptions:
 - check: architecture.file_budget
+  path: worker/cli_args.py
+  reason: >-
+    The workerctl --proxy flag (#444 rework) gives headless workers (Docker
+    form, console behind an ssh tunnel) the same config surface the UI
+    already has: the console path needs a tunnel and hand-editing the
+    mounted yaml triggers the supervisor divergence warning without taking
+    effect. Five lines of honest cost (one argparse declaration with its
+    help text, one payload mapping entry); the file is a flat argv table
+    where each line IS a flag — nothing to split without forking the
+    parser. Remove together with the supervisor spawn split (#451).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/451
+  ceiling: 105
+- check: architecture.file_budget
   path: worker/supervisor.py
   reason: >-
     The proxy config injection (#444) adds the env override dict at the
@@ -10,7 +24,7 @@ exemptions:
     supervision state (_process/_generation) across modules; revisit when
     supervisor grows its next feature, not for this.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/444
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/451
   ceiling: 237
 - check: architecture.file_budget
   path: worker/worker_declarations.py
@@ -20,9 +34,10 @@ exemptions:
     the proxy field; labels/models/capabilities are one family of
     scheduling declarations and share this validation module. The move is
     net-zero for the package; remove this exemption together with the
-    capabilities compat key itself (issue #284) instead of re-splitting.
+    capabilities compat key itself (tracked separately from the #284
+    mechanism retirement) instead of re-splitting.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/284
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/452
   ceiling: 68
 - check: architecture.file_budget
   path: server/app/db/migration_chain.py
