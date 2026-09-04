@@ -23,7 +23,13 @@ import { useUiStore } from '../../../stores/uiStore'
  * confirm 的服务端读落地，会发布旧草稿且 hash 恰好匹配（用户看的是新
  * 版、发布的是旧版）。read-draft 仍只作重读校准（结果丢弃）；flush/重读
  * 失败时提示错误并中止 confirm（不发布未确认落盘的内容），后端 hash 校验
- * 仍是最终兜底。 */
+ * 仍是最终兜底。
+ * #429 终局 P2-2（flush 失败的真实形态）：DraftSaveController.flushNow 全
+ * 路径 resolve 不 reject——保存失败只进 state（status='error'），旧守卫的
+ * catch 永远等不到 flush 的 reject，是死代码。失败的真实形态是 resolve-
+ * but-failed：flush 返回后必须查 studio.draftSave.status，error 即中止
+ * confirm（重读草稿读到的仍是旧值，发布的会是用户没审过的旧草稿——hash
+ * 只闭合「服务端≠请求」方向，挡不住这条）。 */
 export function AgentPublishRequestDialog() {
   const studio = useStudioState()
   const view = useStudioView()
@@ -36,6 +42,10 @@ export function AgentPublishRequestDialog() {
     try {
       // 完成序：flush 的 PUT resolve 之后才重读服务端草稿、才调确认端点。
       await studio.flushDraftSave?.()
+      // flush 失败不 reject（终局 P2-2）：失败态只进 draftSave.state——
+      // resolve 之后显式查 status，error 即按失败处理。
+      if (studio.draftSave?.status === 'error')
+        throw new Error('draft save failed')
       await fetchWorkflowDraft(workspaceId)
     } catch {
       // flush/重读失败：中止 confirm（宁可让用户重试，不发布未确认落盘

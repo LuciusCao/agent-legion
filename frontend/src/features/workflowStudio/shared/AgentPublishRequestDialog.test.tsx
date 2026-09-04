@@ -88,6 +88,9 @@ const studioState = {
   // #429 三轮 P1-3：确认前 flush 画布草稿保存（对话框经
   // useAgentPublishRequest 传入；flushNow 是 DraftSaveController 的方法）。
   flushDraftSave: vi.fn(),
+  // #429 终局 P2-2：flush 失败不 reject（DraftSaveController 全路径
+  // resolve，失败态进 state.status）——confirm 链改查这里。
+  draftSave: { status: 'saved' as const, savedAt: null },
 }
 
 function pendingRecord(
@@ -268,12 +271,17 @@ describe('AgentPublishRequestDialog', () => {
   })
 
   it('confirm does not proceed when the flush save fails', async () => {
-    // #429 四轮 P2-1 的另一半：flush 的保存链失败（如网络错误）同样中止
-    // confirm——宁可让用户重试，不发布未确认落盘的草稿。
-    studioState.flushDraftSave = vi.fn().mockRejectedValue(new Error('network'))
-    mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: 'key: w\n' })
+    // #429 终局 P2-2（真实失败语义）：flush 的保存链失败不 reject——
+    // DraftSaveController.flushNow/save 全路径 resolve，失败态只进 state
+    // （status='error'，见 draftSaveController.ts 的注释契约）。旧的
+    // rejecting mock 钉的是生产中不存在的契约（catch 守卫不可达）。现在
+    // flush resolve + state.status='error' 必须中止 confirm：否则重读到的
+    // 是旧草稿，confirm 会发布用户没审过的版本（hash 只闭合「服务端≠
+    // 请求」方向）。
+    studioState.flushDraftSave = vi.fn().mockResolvedValue(undefined)
     mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
-    renderDialog()
+    mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: 'key: w\n' })
+    renderDialog({ draftSave: { status: 'error', savedAt: null } })
 
     await userEvent.click(
       await screen.findByRole('button', { name: '确认发布' })
@@ -284,6 +292,32 @@ describe('AgentPublishRequestDialog', () => {
     )
     expect(mocks.fetchWorkflowDraft).not.toHaveBeenCalled()
     expect(mocks.confirmPublishRequest).not.toHaveBeenCalled()
+  })
+
+  it('confirm proceeds when the flush save resolves and the state is healthy', async () => {
+    // #429 终局 P2-2 的另一半：flush resolve + state 非 error（saved）——
+    // 落盘成功，confirm 正常继续（重读草稿 → 确认端点）。
+    studioState.flushDraftSave = vi.fn().mockResolvedValue(undefined)
+    mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: 'key: w\n' })
+    mocks.confirmPublishRequest.mockResolvedValue({
+      ...pendingRecord(),
+      status: 'confirmed',
+      result_revision_id: 'ws1:demo_video_workflow:v2',
+      resolved_at: '2026-09-03T10:02:00Z',
+    })
+    mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    renderDialog()
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '确认发布' })
+    )
+
+    await waitFor(() =>
+      expect(mocks.confirmPublishRequest).toHaveBeenCalledWith('ws1', 'req-1')
+    )
+    expect(useUiStore.getState().toast?.message ?? '').not.toContain(
+      '草稿尚未保存成功'
+    )
   })
 
   it('stays open showing the publish in progress while the request is confirming', async () => {

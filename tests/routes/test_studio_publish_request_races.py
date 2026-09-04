@@ -139,6 +139,46 @@ def test_cancel_during_confirm_cannot_reject_a_live_revision(client, job_db, mon
     assert status.json()["request"]["status"] == "confirmed"
 
 
+def test_cancel_landing_after_the_claim_404s_not_a_200_confirming_row(
+    client, job_db, monkeypatch
+) -> None:
+    """#429 终局 P3: the interleave the docstring promised but the old code
+    missed — cancel's pre-read saw the row ``pending``, then the confirm's
+    claim landed before cancel's UPDATE. The rejected-write matches no row;
+    the old read-back answered the LIVE ``confirming`` row as a 200, a
+    non-terminal response masquerading as a resolution (and the frontend's
+    markResolved would suppress the real receipt). The contract answer is
+    404: the publish is in flight and will record its own outcome."""
+    workspace_id = _seed_workspace(client, job_db)
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 调整后的节点\n")
+    scoped = _scoped_client(client, job_db, workspace_id)
+    request = _request_publish(scoped, workspace_id).json()["request"]
+    request_id = request["id"]
+
+    from server.app.services import studio_publish_requests as service_module
+
+    real_publish = service_module.publish_workflow_draft
+
+    def claim_then_delayed_cancel(job_db_, workspace_id_, yaml, enabled):
+        # The claim has landed (the row is ``confirming``) when the cancel
+        # fires: it hits the read-back path, not the expiry pre-check —
+        # exactly the interleave the fix targets. Old behavior answered
+        # this 200 with a confirming row; the contract says 404.
+        cancelled = client.post(
+            f"/api/workspaces/{workspace_id_}/workflow-drafts/publish-request/{request_id}/cancel"
+        )
+        assert cancelled.status_code == 404, cancelled.text
+        return real_publish(job_db_, workspace_id_, yaml, enabled)
+
+    monkeypatch.setattr(service_module, "publish_workflow_draft", claim_then_delayed_cancel)
+
+    confirmed = client.post(
+        f"/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/confirm"
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["request"]["status"] == "confirmed"
+
+
 def test_new_request_during_confirm_window_is_refused(client, job_db, monkeypatch) -> None:
     """P1-2 (re-request semantics): a new agent request while the row is
     ``confirming`` gets 409 — superseding a confirming row would recreate the

@@ -97,6 +97,11 @@ class StudioPublishRequestClaimQueriesMixin(ConnectionQueriesMixin):
         If the publish landed, the state machine must say ``confirmed`` —
         an expiry that fires mid-publish must not deny a revision that
         exists on disk.
+        The pending reset likewise does NOT reset ``expires_at`` (deliberate,
+        #429 终局 NIT): the TTL bounds the request's TOTAL wait for the
+        human, not per-attempt — a failed confirm near expiry leaves only
+        a narrow retry window (the agent re-requests when it lapses; a
+        rolling expiry could keep a stale request alive indefinitely).
         """
         if status not in ("confirmed", "rejected", "pending"):
             raise ValueError(f"unsupported resolve status: {status}")
