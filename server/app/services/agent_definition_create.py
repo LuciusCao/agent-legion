@@ -3,12 +3,16 @@
 The studio form for a new Agent no longer collects an agent_id: the
 capability names the Agent (one capability, one main draft per workspace),
 so this entry derives the entity key from the capability and rejects a
-derived id that collides with any existing entity (draft or archived) —
-auto-suffixing ids would confuse more than help, and quietly versioning a
-published entity or resurrecting an archived one under a fresh save would
-be surprising. An explicit agent_id keeps the legacy
-``AgentService.save_draft`` semantics (draft overwrite), so old clients and
-the MCP path stay source-compatible.
+derived id that collides with any existing entity (any status: draft,
+published, or archived) — auto-suffixing ids would confuse more than help,
+and quietly versioning a published entity or resurrecting an archived one
+under a fresh save would be surprising. An explicit agent_id keeps the
+legacy ``AgentService.save_draft`` semantics (draft overwrite), so old
+clients and the MCP path stay source-compatible. Concurrency note: two
+simultaneous creations converge safely through save_draft's unique
+constraint (last write overwrites or 409s), but first-writer protection is
+not guaranteed under concurrency — a partial unique index is an entity
+mechanism change, tracked in the #407 endgame epic.
 
 Lives beside AgentService rather than inside it: that service sits exactly
 at its file-budget exemption ceiling, and this policy is a save-entry-only
@@ -32,12 +36,19 @@ def create_agent_draft(
 ) -> VersionedEntity:
     """Save a new draft, deriving agent_id from capability when omitted."""
     if agent_id is None:
-        versions = service.list_versions(definition.capability)
-        if versions:
-            latest = versions[0]
+        # An occupant may be keyed differently from the capability (an
+        # explicit-id draft that got published): scan latest rows per entity.
+        occupant = next(
+            (
+                e
+                for e in service.list_latest()
+                if str(e.definition.get("capability") or "") == definition.capability
+            ),
+            None,
+        )
+        if occupant is not None:
             raise ConflictError(
-                f"该 capability 已有 Agent「{latest.entity_key}」（状态：{latest.status}），"
-                "请直接编辑该 Agent；确需另建同 capability 的草稿变体，请显式指定 agent_id"
+                f"该 capability 已有 Agent「{occupant.entity_key}」（状态：{occupant.status}），请直接编辑该 Agent；如确需另建变体，请通过 API 或 MCP 显式指定 agent_id"
             )
         agent_id = definition.capability
     return service.save_draft(agent_id, definition, created_by)

@@ -87,6 +87,19 @@ def test_create_draft_derivation_conflicts_with_any_existing_entity(service) -> 
         create_agent_draft(service, None, DEFINITION_V1, "user:u1")
 
 
+def test_create_draft_derivation_conflicts_with_published_entity(service) -> None:
+    """published 状态同样占用 capability：缺省创建 409 且文案标明状态。"""
+    create_agent_draft(service, "agent-a", DEFINITION_V1, "user:u1")
+    service.publish("agent-a")
+
+    with pytest.raises(ConflictError, match="状态：published") as exc_info:
+        create_agent_draft(service, None, DEFINITION_V1, "user:u1")
+
+    # 占用者实体键是 agent-a（显式 id 创建），capability 是 review_keywords。
+    assert "agent-a" in str(exc_info.value)
+    assert "请直接编辑" in str(exc_info.value)
+
+
 def test_create_draft_explicit_agent_id_keeps_legacy_semantics(service) -> None:
     """显式 agent_id 不做占用检查：同 key 覆盖草稿（save_draft 旧语义，
     原地覆盖既有草稿行，version 不前进）。"""
