@@ -22,7 +22,7 @@ type SectionSpec = {
 
 export const NODE_TYPE_SECTIONS: Record<SwitchableNodeType, SectionSpec> = {
   // code：基本设置 → 生效 schema（code = 声明 schema）→ 执行能力 →
-  // 节点代码 → 节点配置 → 数据契约 → 依赖。
+  // 节点代码 → 节点配置（版本值 + 运行时覆盖双通道，#418）→ 数据契约 → 依赖。
   code: {
     sections: [
       EditorSection,
@@ -35,7 +35,8 @@ export const NODE_TYPE_SECTIONS: Record<SwitchableNodeType, SectionSpec> = {
     ],
   },
   // agent：基本设置 → 执行能力（Agent 配置 + 编辑入口）→
-  // 节点配置 → 数据契约 → 依赖。Agent 的有效 config_schema 归 Agent
+  // 节点配置（仅运行时覆盖通道——schema 归 Agent Definition）→
+  // 数据契约 → 依赖。Agent 的有效 config_schema 归 Agent
   // Definition 管理，不渲染节点 YAML 的 schema 编辑区（#406）。
   agent: {
     sections: [
@@ -102,6 +103,8 @@ function NodeConfigSection(props: InspectorSectionProps) {
     <WorkflowNodeConfigSection
       key={`config-${props.details.node.key}`}
       node={props.details.node}
+      definitionYaml={props.definitionYaml}
+      setDefinitionYaml={props.setDefinitionYaml}
       readOnly={props.readOnly}
     />
   )

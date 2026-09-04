@@ -13,7 +13,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from server.app.services.agent_service import published_agent_definitions
 from server.app.services.node_code_resolution import freeze_node_code_versions
+from server.app.services.node_config_prune import override_prune_commit_hook
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
 from server.app.services.workflow_revision_routes import derive_agent_routes
 from server.app.services.workflow_revision_runtime import embed_node_code_pins
@@ -47,6 +49,16 @@ def publish_workflow_revision(
     version = job_db.next_workflow_revision_version(workspace_id, definition.key)
     revision_id = f"{workspace_id}:{definition.key}:v{version}"
     agent_routes = derive_agent_routes(job_db, workspace_id, definition)
+    # The new revision's schemas are the live truth for the workspace's
+    # node overrides: keys/values it no longer accepts must go so intake
+    # keeps working after a schema rename/removal (#428 二轮复审 P2-1).
+    # The prune is planned here (pure read, no writes) and applied inside
+    # the revision transaction below: a prune failure then rolls the whole
+    # publish back instead of stranding an active revision whose stale
+    # overrides still block every new job's intake (codex 终轮 P1-3).
+    prune_hook = override_prune_commit_hook(
+        job_db, workspace_id, definition, published_agent_definitions(job_db, workspace_id)
+    )
     return job_db.create_workflow_revision(
         revision_id=revision_id,
         workspace_id=workspace_id,
@@ -56,4 +68,5 @@ def publish_workflow_revision(
         definition_json=stored_json,
         definition_hash=definition_hash(definition_json),
         agent_routes=agent_routes,
+        on_commit=prune_hook,
     )

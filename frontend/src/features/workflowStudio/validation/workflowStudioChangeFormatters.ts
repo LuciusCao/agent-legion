@@ -22,6 +22,13 @@ const FIELD_LABELS: Record<string, string> = {
   inputs: '输入',
   outputs: '输出',
   terminal: '终点',
+  // #418：compare 已补 config/config_schema 比对（风险档 warning），
+  // 展示层同步给中文标签，避免变更列表里裸字段名。
+  config: '节点配置值',
+  config_schema: '配置 Schema',
+  execution: '执行配置',
+  skill: 'Skill 绑定',
+  accepted_item_types: '入口条目类型',
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
