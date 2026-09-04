@@ -624,3 +624,40 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
   ceiling: 66
+- check: architecture.file_budget
+  path: server/app/db/connection.py
+  reason: '#438 makes __exit__ leak-proof (close in finally so a failed commit/rollback cannot strand the
+    checkout) and stamps the checkout origin for the pool return-path telemetry. The 8 effective lines are
+    the two documented guards; the attribution logic itself lives in pool_reset.py. Stays until the
+    transaction helpers retire this facade.'
+  owner: database
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/438
+  ceiling: 80
+- check: architecture.file_budget
+  path: server/app/db/pools.py
+  reason: '#438 installs the pool reset callback (reset=reset_connection) so every returned connection is
+    verified IDLE and dirty returns are attributed — one effective line plus wiring comment.'
+  owner: database
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/438
+  ceiling: 60
+- check: architecture.file_budget
+  path: server/app/db/pool_reset.py
+  reason: '#439 hardens the leak telemetry this file exists for: the frame walk gets a 30-frame hard cap
+    (the collected-frames bound alone did not bound the walk over plumbing-only stacks), the 60s rate limit
+    gets a suppressed-hit counter so the next warning reports leak frequency, and past-cap origins degrade
+    to an explicit walk-cap marker. 101 effective lines; revisit when the attribution walk moves to a
+    sampled/only-on-leak model.'
+  owner: database
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/438
+  ceiling: 106
+- check: architecture.file_budget
+  path: server/app/db/transaction.py
+  reason: '#438 removes the double-BEGIN (root cause of the warning storm) and adds _rollback_quietly so a
+    failing rollback on a broken connection cannot skip close() in the finally paths. Growth is the guarded
+    rollback helper plus its rationale comments. #439 splits the guard into _rollback_quietly (now WARNs
+    instead of silencing: a rollback that cannot run means a broken connection nothing else reports) and
+    _release_quietly (close() in finally must not replace the caller''s original exception), inlined within
+    the frozen ceiling.'
+  owner: database
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/438
+  ceiling: 61
