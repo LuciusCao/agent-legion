@@ -18,6 +18,10 @@ type Props = {
   /** 当前绑定回显的目录名（codex 二轮 P1 on #427）：外部 key 变化（含检查
    * 器切换节点）时输入跟随；'' = 未绑定。 */
   name: string
+  /** 检查器节点身份（codex 四轮 P1 on #427）：本地输入的跨节点重置依据。
+   * A、B 都未绑定（或绑定同 key）时 props.name 不变，仅靠 name 同步会让
+   * A 的未校验待选目录残留到 B——在 B 上点「校验」会把 A 的目录绑到 B。 */
+  nodeKey: string
 }
 
 /** Skill 目录名输入行（自 SkillSelector 拆出，文件预算）。候选目录经
@@ -25,7 +29,9 @@ type Props = {
  * 即触发校验回填；其他手打内容仍走「校验」按钮，行为与拆出前一致。
  * 外部绑定变化时输入跟随（codex 二轮 P1 on #427）：校验请求恒经 workspace
  * 前缀发出，回填 key 派生的目录名与发起校验的输入一致，同步不会打断用户
- * 输入；props.value 不变时（普通编辑）本地输入保持不动。 */
+ * 输入；props.value 不变时（普通编辑）本地输入保持不动；节点身份（nodeKey）
+ * 变化时无条件重置（codex 四轮 P1 on #427）——未绑定节点间的切换 props.name
+ * 不变，仅按 name 同步无法清掉上一节点的待选目录。 */
 export function SkillDirectoryInput(props: Props) {
   const [name, setName] = useState(props.name)
   const directories = useSkillDirectories(props.workspaceId)
@@ -33,10 +39,12 @@ export function SkillDirectoryInput(props: Props) {
   useEffect(() => {
     // 外部绑定变化（节点切换/换绑/清除）时接管输入（codex 二轮 P1 on #427，
     // 与 useStudioChatQueue 会话切换重置同一模式）；props.name 不变时本地
-    // 输入保持不动，用户编辑不被同名回显打断。
+    // 输入保持不动，用户编辑不被同名回显打断。nodeKey 变化（检查器切换
+    // 节点）时即便 props.name 相同也重置（codex 四轮 P1 on #427）：setName
+    // 的函数式更新对同值是 no-op，绑定值不变的节点切换不会误清空。
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 外部受控值变化时同步本地回显
-    setName((current) => (current === props.name ? current : props.name))
-  }, [props.name])
+    setName(props.name)
+  }, [props.name, props.nodeKey])
 
   function handleChange(next: string) {
     setName(next)

@@ -4560,6 +4560,11 @@ export interface components {
       /** Session Dir */
       session_dir: string
       /**
+       * Skill
+       * @default
+       */
+      skill: string
+      /**
        * Skill Version
        * @default
        */
@@ -11463,6 +11468,7 @@ export interface operations {
         status?: string | null
         node_key?: string | null
         job_id?: string | null
+        skill?: string | null
         limit?: number
       }
       header?: never

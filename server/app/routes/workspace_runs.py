@@ -16,15 +16,21 @@ def create_workspace_runs_router(service: JobQueryService) -> APIRouter:
         status: str | None = None,
         node_key: str | None = None,
         job_id: str | None = None,
+        skill: str | None = None,
         limit: int = 100,
     ) -> WorkspaceRunsResponse:
         try:
             # #410 review: runs validate against NodeRunResponse now — the
             # service returns model-ready dicts (path-resolved node_runs rows).
+            # #410 codex four-pass P1: the skill filter (schema v75) lets the
+            # studio latest-run echo scope to the current binding — a rebound
+            # node must not echo the previous skill's run version.
             return WorkspaceRunsResponse(
                 runs=[
                     NodeRunResponse.model_validate(run)
-                    for run in service.workspace_runs(workspace_id, status, node_key, job_id, limit)
+                    for run in service.workspace_runs(
+                        workspace_id, status, node_key, job_id, skill, limit
+                    )
                 ]
             )
         except JobServiceError as exc:

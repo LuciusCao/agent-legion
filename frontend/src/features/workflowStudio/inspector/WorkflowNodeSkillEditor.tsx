@@ -34,9 +34,12 @@ export function WorkflowNodeSkillEditor(props: Props) {
     ? { key: props.node.skill.key, ref: props.node.skill.ref }
     : null
   const bound = draftNode === undefined ? published : draftSkill
+  // 回显按绑定 key 过滤（codex 四轮 P1 on #427）：换绑后 A 的最近 run 不
+  // 再被标成 B 的「实际执行」；B 尚无运行记录时无回显。
   const latestEcho = useLatestSkillRunVersion(
     workspaceId,
     props.node.key,
+    bound?.key ?? '',
     bound?.ref === 'latest' || bound?.ref === ''
   )
 

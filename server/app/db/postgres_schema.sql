@@ -339,8 +339,7 @@ alter table agent_execution_requests drop constraint if exists agent_execution_r
 alter table agent_execution_requests add constraint agent_execution_requests_state_check
   check(state in ('queued', 'claimed', 'reporting', 'done', 'cancelled'));
 
-create index if not exists idx_agent_requests_claim
-  on agent_execution_requests(state, queued_at, execution_id);
+create index if not exists idx_agent_requests_claim on agent_execution_requests(state, queued_at, execution_id);
 -- Claim candidate lookup walks only the per-workspace queued head (schema
 -- v18); a full queued scan priced every row and made claims O(queue depth).
 -- kind joined the key at schema v51 (issue #125): the claim scan is per
@@ -348,10 +347,8 @@ create index if not exists idx_agent_requests_claim
 create index if not exists idx_agent_requests_queued_head
   on agent_execution_requests(workspace_id, kind, queued_at, execution_id)
   where state = 'queued';
-create index if not exists idx_agent_requests_node_active
-  on agent_execution_requests(workspace_id, node_key, state);
-create index if not exists idx_agent_requests_worker_active
-  on agent_execution_requests(worker_id, state);
+create index if not exists idx_agent_requests_node_active on agent_execution_requests(workspace_id, node_key, state);
+create index if not exists idx_agent_requests_worker_active on agent_execution_requests(worker_id, state);
 -- One active request per node; 'reporting' still owns the node until the
 -- result commits, so it must block re-enqueue too.
 drop index if exists idx_agent_requests_one_active_node;
@@ -374,8 +371,7 @@ create index if not exists idx_agent_requests_cancelled_recent
 -- an Agent execution matches on r.node_run_id; without this index Postgres
 -- hashes the whole requests table (660k rows, ~0.9s measured) on every
 -- /api/metrics/overview poll.
-create index if not exists idx_agent_requests_node_run
-  on agent_execution_requests(node_run_id);
+create index if not exists idx_agent_requests_node_run on agent_execution_requests(node_run_id);
 
 create table if not exists job_event_seq (
   id integer primary key check(id = 1),
@@ -687,18 +683,23 @@ alter table node_runs add column if not exists failure_detail text not null defa
 alter table job_nodes add column if not exists failure_category text not null default '';
 alter table job_nodes add column if not exists failure_detail text not null default '';
 create index if not exists idx_node_runs_failure on node_runs(status, failure_category);
+-- Run's dispatched skill key (schema v75, #410, manifest pin ``skill``):
+-- skill_version's ``ref@commit12`` prefix is a ref, not the key, so the
+-- studio latest-run echo filters runs by this binding column. Like v74's
+-- mirrors, the ALTER alone covers fresh and pre-v75 databases (the
+-- create-table block omits the column to stay within the file budget).
+alter table node_runs add column if not exists skill text not null default '';
 -- Dispatch-time config audit (schema v49, CONFIG-RUNTIME-MUTABLE-001): the
 -- non-secret resolved node config actually used for this run. Frozen keys
 -- repeat the intake snapshot; runtime_mutable keys carry the dispatch-time
 -- re-resolution, so a mid-job switch change stays auditable per attempt.
 alter table node_runs add column if not exists config_snapshot_json text not null default '';
 -- Ops metrics queue summary (schema v48, issue #106): the unclaimable_model
--- sweep counter filters job_nodes by failure_detail plus a finished_at
--- range; without an index every collection seq-scans the whole
--- (multi-million-row) table. Partial so only the tiny unclaimable slice is
--- indexed — finished rows overwhelmingly carry other failure_detail values
--- or none. Serves both the fleet count and the workspace-scoped variant
--- (the exists probe into jobs resolves by primary key per matching row).
+-- sweep counter filters by failure_detail + finished_at range; the partial
+-- index avoids a whole-table (multi-million-row) seq-scan per collection —
+-- finished rows overwhelmingly carry other failure_detail values or none —
+-- serving both fleet and workspace-scoped counts (the jobs exists probe
+-- resolves by primary key per matching row).
 create index if not exists idx_job_nodes_unclaimable_finished
   on job_nodes(finished_at)
   where failure_detail = 'unclaimable_model';
@@ -783,7 +784,6 @@ create table if not exists ops_runtime_profile_samples (
 );
 create index if not exists idx_ops_runtime_profile_bucket
   on ops_runtime_profile_samples(bucket_start);
-
 
 -- Auth (schema v13): local users, revocable server-side sessions, and
 -- per-workspace membership for the B-end self-hosted rollout. Session rows

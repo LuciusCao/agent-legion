@@ -27,6 +27,7 @@ const baseRun: components['schemas']['NodeRunResponse'] = {
   session_dir: '/tmp/session',
   runner: '',
   skill_version: '',
+  skill: '',
 }
 
 describe('NodeDetailsPanel', () => {
