@@ -1,10 +1,12 @@
 import { useEffect } from 'react'
+import type { DraftSaveFlushResult } from './draftSaveController'
 
 type DraftUnloadGuardOptions = {
   /** 尽力把未落盘编辑立即 PUT；keepalive=true 用于 pagehide（请求可存活于
-   * 页面销毁之后）。返回 promise（#429 四轮 P2-1），但本护栏是 fire-and-
-   * forget：页面正在离开，没有人能 await 它。 */
-  flush: (keepalive: boolean) => void | Promise<void>
+   * 页面销毁之后）。返回 promise（#429 四轮 P2-1；resolve 值为本次 flush
+   * 的终态，#429 收尾 P2-1），但本护栏是 fire-and-forget：页面正在离开，
+   * 没有人能 await 它、也没有人消费它的结果。 */
+  flush: (keepalive: boolean) => void | Promise<DraftSaveFlushResult>
   hasUnsavedChanges: () => boolean
 }
 

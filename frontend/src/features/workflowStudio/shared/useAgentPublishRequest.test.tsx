@@ -194,6 +194,54 @@ describe('useAgentPublishRequest', () => {
     expect(useUiStore.getState().toast).toBeNull()
   })
 
+  it('a 404 on cancel is silent: no error toast, just a refetch (lost to the confirm)', async () => {
+    // #429 收尾 P3 回归钉：cancel 的 404 是后端的「输了给 confirm 的
+    // claim」契约回答（请求已被顶替/过期同形），不是操作失败——红 toast
+    // 「取消失败」对发布进行中的场景是误导。必须静默 refetchPending，
+    // 让 confirming/confirmed 的行态自己呈现。
+    mocks.fetchPendingPublishRequest.mockResolvedValue(requestRecord())
+    mocks.cancelPublishRequest.mockRejectedValue(
+      Object.assign(new Error('HTTP 404: Publish request not found'), {
+        status: 404,
+      })
+    )
+    const { result } = renderHookWithProviders()
+    await waitFor(() => expect(result.current.pendingRequest?.id).toBe('req-1'))
+    const fetchCallsBefore = mocks.fetchPendingPublishRequest.mock.calls.length
+
+    await act(async () => {
+      await result.current.cancel()
+    })
+
+    // 静默：无错误 toast。
+    expect(useUiStore.getState().toast).toBeNull()
+    // 无假回执（没有 markResolved 落地——请求行还活着，轮询继续）。
+    expect(result.current.resolvedNotice).toBeNull()
+    expect(result.current.canceling).toBe(false)
+    // refetchPending 已发生：错误路径主动重取（不坐等下一个轮询周期）。
+    expect(mocks.fetchPendingPublishRequest.mock.calls.length).toBeGreaterThan(
+      fetchCallsBefore
+    )
+  })
+
+  it('a non-404 cancel failure still shows the error toast', async () => {
+    // P3 的另一半：真正的失败（网络/5xx）照旧提示——静默只留给 404。
+    mocks.fetchPendingPublishRequest.mockResolvedValue(requestRecord())
+    mocks.cancelPublishRequest.mockRejectedValue(
+      Object.assign(new Error('HTTP 502: bad gateway'), { status: 502 })
+    )
+    const { result } = renderHookWithProviders()
+    await waitFor(() => expect(result.current.pendingRequest?.id).toBe('req-1'))
+
+    await act(async () => {
+      await result.current.cancel()
+    })
+
+    expect(useUiStore.getState().toast?.message).toContain(
+      '取消失败：HTTP 502: bad gateway'
+    )
+  })
+
   it('notice is shared across hook instances (dialog action visible in the aside)', async () => {
     // #429 P2-1 回归钉：回执是跨实例共享状态（zustand store），不是每实例
     // 一份的 useState——对话框实例 resolve 后，另一个实例（栏顶）同轮可读。

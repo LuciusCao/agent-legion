@@ -34,7 +34,9 @@ export type AgentPublishRequestState = {
   canceling: boolean
   /** 用户确认：走后端确认端点（与手动发布同门禁），成功后失效相关查询。 */
   confirm: () => Promise<void>
-  /** 用户取消：请求落 rejected，agent 可继续修改草稿再发起。 */
+  /** 用户取消：请求落 rejected，agent 可继续修改草稿再发起。404（输给
+   * confirm 的 claim / 已被顶替 / 已过期）静默 refetch——不弹「取消失败」
+   * （#429 收尾 P3：对「输给 confirm」是误导，行态自己说话）。 */
   cancel: () => Promise<void>
   clearNotice: () => void
 }
@@ -149,10 +151,18 @@ export function useAgentPublishRequest(
       if (notice) landNotice(notice)
       await invalidate()
     } catch (error) {
-      showToast(
-        `取消失败：${(error instanceof Error && error.message) || '网络错误'}`,
-        'error'
-      )
+      // #429 收尾 P3：404 = 请求已不在（输了给 confirm 的 claim / 已被顶替
+      // / 已过期）——后端契约故意用 404 回答，不是操作失败。「取消失败」
+      // 的红 toast 对「输给 confirm」是误导（发布正在进行，取消本来就该
+      // 不生效）；静默 refetchPending，行态自己说话（confirming/confirmed
+      // 的回执或对话框状态会自然呈现）。其他错误（网络/5xx）照旧提示。
+      const status = (error as { status?: number }).status
+      if (status !== 404) {
+        showToast(
+          `取消失败：${(error instanceof Error && error.message) || '网络错误'}`,
+          'error'
+        )
+      }
       await refetchPending()
     } finally {
       setCanceling(false)

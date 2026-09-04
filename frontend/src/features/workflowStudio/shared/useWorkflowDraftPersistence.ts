@@ -2,19 +2,25 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { putWorkflowDraft } from '../../../api'
 import type { WorkflowDraftStoreResponse } from '../../../api/workflowDraft'
 import { DraftSaveController, IDLE_DRAFT_SAVE } from './draftSaveController'
-import type { DraftSaveState } from './draftSaveController'
+import type { DraftSaveFlushResult, DraftSaveState } from './draftSaveController'
 import { useDraftUnloadGuard } from './useDraftUnloadGuard'
 
-export type { DraftSaveState, DraftSaveStatus } from './draftSaveController'
+export type {
+  DraftSaveState,
+  DraftSaveStatus,
+  DraftSaveFlushResult,
+} from './draftSaveController'
 export { draftSaveText } from './draftSaveController'
 
 export type DraftSaveControls = {
   state: DraftSaveState
   /** 取消 pending 的 debounce 立即 PUT 并返回其 promise（含重试链的终
    * 态）；keepalive 仅用于 pagehide。#429 四轮 P2-1：返回 promise 让
-   * agent 发布确认可以 await 落盘完成后再读服务端草稿。失败也 resolve
-   * （错误态由 state 承载）。 */
-  flushNow: (keepalive?: boolean) => Promise<void>
+   * agent 发布确认可以 await 落盘完成后再读服务端草稿。#429 收尾 P2-1：
+   * resolve 值是本次 flush 的终态（ok=false 即本次落盘失败——controller
+   * 全路径 resolve 不 reject，失败只进 state；调用方读返回值而不是 React
+   * 快照的 status，否则「await 期间 PUT 失败」会漏过守卫）。 */
+  flushNow: (keepalive?: boolean) => Promise<DraftSaveFlushResult>
   hasUnsavedChanges: () => boolean
 }
 
@@ -91,13 +97,20 @@ export function useWorkflowDraftPersistence(
     controllerRef.current?.schedule(draftYaml)
   }, [workspaceId, draftYaml, hydrated])
 
-  const flushNow = useCallback((keepalive = false): Promise<void> => {
-    const controller = controllerRef.current
-    if (!controller || !hydratedRef.current) return Promise.resolve()
-    // error 态无 pending（重试已耗尽）：重新调度当前草稿让 flush 有内容可发。
-    controller.schedule(draftYamlRef.current)
-    return controller.flushNow({ keepalive })
-  }, [])
+  const flushNow = useCallback(
+    (keepalive = false): Promise<DraftSaveFlushResult> => {
+      const controller = controllerRef.current
+      if (!controller || !hydratedRef.current) {
+        // 未挂载/未 hydrated：无内容可发也无失败可言（与 controller 的
+        // no-op 同语义——等待方继续自己的重读校准）。
+        return Promise.resolve({ ok: true, state: IDLE_DRAFT_SAVE })
+      }
+      // error 态无 pending（重试已耗尽）：重新调度当前草稿让 flush 有内容可发。
+      controller.schedule(draftYamlRef.current)
+      return controller.flushNow({ keepalive })
+    },
+    []
+  )
 
   const hasUnsavedChanges = useCallback(() => {
     const controller = controllerRef.current

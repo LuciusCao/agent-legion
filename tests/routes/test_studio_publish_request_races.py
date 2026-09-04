@@ -142,41 +142,63 @@ def test_cancel_during_confirm_cannot_reject_a_live_revision(client, job_db, mon
 def test_cancel_landing_after_the_claim_404s_not_a_200_confirming_row(
     client, job_db, monkeypatch
 ) -> None:
-    """#429 终局 P3: the interleave the docstring promised but the old code
-    missed — cancel's pre-read saw the row ``pending``, then the confirm's
-    claim landed before cancel's UPDATE. The rejected-write matches no row;
-    the old read-back answered the LIVE ``confirming`` row as a 200, a
-    non-terminal response masquerading as a resolution (and the frontend's
-    markResolved would suppress the real receipt). The contract answer is
-    404: the publish is in flight and will record its own outcome."""
+    """#429 终局 P3: the interleave the docstring promised — cancel's
+    pre-read saw the row ``pending``, then the confirm's claim landed
+    BEFORE cancel's UPDATE ran. The rejected-write matches no row; the old
+    read-back answered the LIVE ``confirming`` row as a 200, a non-terminal
+    response masquerading as a resolution (and the frontend's markResolved
+    would suppress the real receipt). The contract answer is 404: the
+    publish is in flight and will record its own outcome.
+
+    Interleave construction (#429 收尾复审): the previous version fired the
+    cancel while the row was already ``confirming`` — cancel's pending-only
+    PRE-READ missed, the request 404'd before the read-back branch, and the
+    pin passed against the OLD code too (empty pin). The real interleave
+    needs the claim to land BETWEEN cancel's pre-read and cancel's UPDATE:
+    the service's reject call is monkeypatched to run the REAL claim first
+    (the row moves pending → confirming), then the real reject UPDATE
+    matches nothing and the read-back reads ``confirming`` — the exact
+    branch the fix guards."""
     workspace_id = _seed_workspace(client, job_db)
     _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 调整后的节点\n")
     scoped = _scoped_client(client, job_db, workspace_id)
     request = _request_publish(scoped, workspace_id).json()["request"]
     request_id = request["id"]
 
-    from server.app.services import studio_publish_requests as service_module
+    service_job_db = client.app.state.job_db
+    real_reject = service_job_db.reject_pending_publish_request
+    real_claim = service_job_db.claim_pending_publish_request
 
-    real_publish = service_module.publish_workflow_draft
-
-    def claim_then_delayed_cancel(job_db_, workspace_id_, yaml, enabled):
-        # The claim has landed (the row is ``confirming``) when the cancel
-        # fires: it hits the read-back path, not the expiry pre-check —
-        # exactly the interleave the fix targets. Old behavior answered
-        # this 200 with a confirming row; the contract says 404.
-        cancelled = client.post(
-            f"/api/workspaces/{workspace_id_}/workflow-drafts/publish-request/{request_id}/cancel"
+    def claim_then_reject(workspace_id_, request_id_, *, status):
+        # Cancel is mid-flight: its pre-read already saw the row pending
+        # (the service layer read it before calling here). NOW the
+        # confirm's claim lands — pending → confirming — before cancel's
+        # UPDATE runs. The real claim is keyed on the request's bound
+        # draft hash, exactly as the confirm endpoint issues it.
+        service_job_db.claim_pending_publish_request(
+            workspace_id_,
+            request_id_,
+            request["draft_hash"],
         )
-        assert cancelled.status_code == 404, cancelled.text
-        return real_publish(job_db_, workspace_id_, yaml, enabled)
+        return real_reject(workspace_id_, request_id_, status=status)
 
-    monkeypatch.setattr(service_module, "publish_workflow_draft", claim_then_delayed_cancel)
+    monkeypatch.setattr(service_job_db, "reject_pending_publish_request", claim_then_reject)
+    assert real_claim is not None  # keep the reference meaningful
 
-    confirmed = client.post(
-        f"/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/confirm"
+    cancelled = client.post(
+        f"/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/cancel"
     )
-    assert confirmed.status_code == 200, confirmed.text
-    assert confirmed.json()["request"]["status"] == "confirmed"
+    assert cancelled.status_code == 404, cancelled.text
+
+    # The row was claimed mid-cancel (the confirming state the read-back
+    # saw) and stays recoverable: the publish never ran, so this asserting
+    # client exercises only the cancel side of the race. The confirming
+    # row's own outcome is the stale-sweep contract elsewhere (tests above).
+    with service_job_db.connect() as conn:
+        row = conn.execute(
+            "select status from studio_publish_requests where id=%s", (request_id,)
+        ).fetchone()
+    assert row["status"] == "confirming"
 
 
 def test_new_request_during_confirm_window_is_refused(client, job_db, monkeypatch) -> None:
