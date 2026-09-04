@@ -4,9 +4,9 @@ The mock suite cannot see connection transaction state — exactly how the
 #438 bug slipped through: every ``write_transaction`` opened a transaction
 implicitly (autocommit is off) and then issued a second explicit ``begin``,
 so Postgres answered every checkout with
-``WARNING: there is already a transaction in progress`` (~10^3/min under
-load), while broken cleanup paths left connections checked out or dirty in
-the pool (20-minute idle-in-transaction sightings).
+``WARNING: there is already a transaction in progress`` (a high-frequency
+storm under load), while broken cleanup paths left connections checked out
+or dirty in the pool (long-lived idle-in-transaction sightings).
 
 These tests run against the real per-worktree test database and assert the
 connection-level invariants:
@@ -27,6 +27,7 @@ import logging
 import time
 from typing import Any
 
+import psycopg
 import pytest
 from psycopg.pq import TransactionStatus
 
@@ -208,31 +209,38 @@ def test_failing_rollback_still_releases_read_checkout(
 def test_no_idle_in_transaction_backend_after_failure() -> None:
     """Server-side view of the hygiene: after a failed write transaction,
     pg_stat_activity must show no idle-in-transaction backend from this
-    process's pool (the production symptom: a 20-minute idle-in-transaction
+    process's pool (the production symptom: a long-lived idle-in-transaction
     connection pinning xmin and holding locks)."""
     with pytest.raises(RuntimeError), write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("select 1")
         pid = conn.execute("select pg_backend_pid() as pid").fetchone()["pid"]
         raise RuntimeError("boom")
 
-    with read_connection(TEST_DATABASE_URL) as observer:
-        row = observer.execute(
-            "select state from pg_stat_activity where pid = %s", (pid,)
-        ).fetchone()
+    # #439 codex review: the observer must NOT borrow from the pool under
+    # test. Once the pool's reset worker has returned the target connection,
+    # a pooled observer can check out that very backend — and a backend
+    # querying its own pg_stat_activity row always reports 'active', so the
+    # poll below would never see it settle and fail at random. A direct
+    # autocommit connection has its own backend and cannot collide with
+    # the target pid.
+    def backend_state() -> str | None:
+        with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as observer:
+            row = observer.execute(
+                "select state from pg_stat_activity where pid = %s", (pid,)
+            ).fetchone()
+        return None if row is None else row[0]
+
     # The backend must never be 'idle in transaction'. 'active' can race
     # with the pool's asynchronous maintenance (the rollback query itself
     # in flight); a gone backend (recycled) is fine too. To rule out a
     # slow leak, poll until the backend settles to idle or disappears.
-    if row is not None and row["state"] == "active":
-        for _ in range(20):
-            time.sleep(0.05)
-            with read_connection(TEST_DATABASE_URL) as poller:
-                row = poller.execute(
-                    "select state from pg_stat_activity where pid = %s", (pid,)
-                ).fetchone()
-            if row is None or row["state"] != "active":
-                break
-    assert row is None or row["state"] == "idle"
+    state = backend_state()
+    for _ in range(20):
+        if state is None or state != "active":
+            break
+        time.sleep(0.05)
+        state = backend_state()
+    assert state is None or state == "idle"
 
 
 def test_pool_reset_callback_installed() -> None:

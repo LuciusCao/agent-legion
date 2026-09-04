@@ -8,7 +8,7 @@ callback — importing either from the other would close an import cycle.
 The pool is the last line of defense against dirty returns: psycopg_pool
 rolls back INTRANS/INERROR connections on ``putconn`` (asynchronously, on
 its maintenance workers). What the stock behavior lacks is attribution —
-the rollback logs an anonymous connection repr, so #438's 20-minute
+the rollback logs an anonymous connection repr, so #438's long-lived
 idle-in-transaction sightings could not be traced to a call site. This
 module adds that attribution without touching the rollback itself.
 """
@@ -26,7 +26,7 @@ from psycopg.pq import TransactionStatus
 logger = logging.getLogger(__name__)
 
 # One warning line per leak signature per interval: production saw the
-# underlying WARNING storm at ~10^3 lines/min, so the diagnostic must be
+# underlying WARNING storm at a high rate, so the diagnostic must be
 # deduplicated per checkout-site signature and rate-limited — a systemic
 # leak must surface as a steady, greppable trickle, not join the storm.
 _RESET_WARN_EVERY_SECONDS = 60.0
