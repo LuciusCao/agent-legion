@@ -211,6 +211,80 @@ def test_interleaved_updates_neither_deadlock_nor_drift() -> None:
         assert _workspace_counts(conn, "sc76-ws-race") == _workspace_group_by(conn, "sc76-ws-race")
 
 
+def test_net_negative_delta_on_missing_row_creates_no_row() -> None:
+    # Old-shape parity (#441 review P2): a negative net delta on a (key,
+    # status) pair whose counter row does not exist must be a NO-OP — the
+    # v36/v73 row triggers applied negative deltas as bare UPDATEs, which
+    # match nothing on a missing row. The naive single-upsert shape (INSERT
+    # ... ON CONFLICT DO UPDATE) would take the insert branch and CREATE a
+    # cnt=-1 row (verified on PG 17.11); the sign-split apply keeps the
+    # old semantics. Unreachable through normal writes (the INSERT arm
+    # always creates the row when the job is inserted) but pinned anyway —
+    # the trigger must not invent counter rows.
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        ids = _seed(conn, "sc76-ws-neg", "sc76-run-neg")
+        # Remove the counter rows so the status flip below produces a net
+        # -1 on ('queued', missing) and a net +1 on ('running', missing).
+        # Only the run rows are deleted — the workspace rows (5 remaining
+        # queued + 1 running) stay, so the workspace arm is a mixed
+        # net-negative-on-existing check.
+        conn.execute("delete from run_job_status_counts where run_id='sc76-run-neg'")
+        conn.execute("update jobs set status='running' where id=%s", (ids[0],))
+        run_rows = conn.execute(
+            "select status, cnt from run_job_status_counts where run_id='sc76-run-neg'"
+        ).fetchall()
+        ws_rows = conn.execute(
+            "select status, cnt from workspace_job_status_counts where workspace_id='sc76-ws-neg'"
+        ).fetchall()
+    # The missing negative side created no row: exactly one run counter row
+    # exists (the positive side), no phantom queued=-1.
+    assert [(str(r["status"]), int(r["cnt"])) for r in run_rows] == [("running", 1)]
+    # Workspace rows were never deleted: queued went 6 -> 5 (existing-row
+    # decrement), running 0 -> 1 (positive upsert on existing zero row).
+    assert [(str(r["status"]), int(r["cnt"])) for r in ws_rows] == [
+        ("queued", 5),
+        ("running", 1),
+    ]
+    # The deleted run rows are NOT rebuilt by later writes (no INSERT
+    # happened for the still-queued jobs) — the run counts read shows only
+    # the statuses whose rows exist with cnt<>0. Parity holds for the
+    # statuses that were re-created; the missing queued row is the exact
+    # old-shape behavior being pinned (bare UPDATE on missing = no-op).
+    with read_connection(TEST_DATABASE_URL) as conn:
+        assert _run_counts(conn, "sc76-run-neg") == {"running": 1}
+        assert _workspace_counts(conn, "sc76-ws-neg") == _workspace_group_by(conn, "sc76-ws-neg")
+
+
+def test_net_negative_delta_decrements_existing_row() -> None:
+    # The sign-split's other half: a negative net delta on an EXISTING
+    # counter row must still decrement it (a WHERE-guarded DO UPDATE that
+    # skips negative deltas would silently drop the decrement — verified
+    # wrong on PG 17.11 — so the guard is a bare UPDATE, not an upsert
+    # condition).
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        ids = _seed(conn, "sc76-ws-neg2", "sc76-run-neg2")
+        conn.execute(
+            "update jobs set status='running' where run_id='sc76-run-neg2' and id in (%s, %s)",
+            (ids[0], ids[1]),
+        )
+        # 2 running; now flip both back: net -2 on running, +2 on queued.
+        conn.execute(
+            "update jobs set status='queued' where run_id='sc76-run-neg2' and status='running'"
+        )
+    with read_connection(TEST_DATABASE_URL) as conn:
+        # cnt<>0-inclusive check: the running row legitimately sits at 0
+        # and must not go negative.
+        rows = conn.execute(
+            "select status, cnt from run_job_status_counts where run_id='sc76-run-neg2'"
+        ).fetchall()
+        assert {(str(r["status"]), int(r["cnt"])) for r in rows} == {
+            ("queued", 6),
+            ("running", 0),
+        }
+        assert _run_counts(conn, "sc76-run-neg2") == _group_by(conn, "sc76-run-neg2")
+        assert _workspace_counts(conn, "sc76-ws-neg2") == _workspace_group_by(conn, "sc76-ws-neg2")
+
+
 def test_migration_recorded_as_v77() -> None:
     # The chain tail pin lives with the newest migration's module (v77).
     assert SCHEMA_VERSION == 77

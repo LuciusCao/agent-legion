@@ -118,10 +118,13 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   汇聚到寥寥几行 (run_id, status) 计数行——先扣旧 status 行再加新
   status 行的两步锁足迹，与 claim 的 queued→running、收尾的
   running→completed 以不同顺序触碰交叠成锁环。三层修复：① 根治
-  （schema v76）：两组计数触发器改为 statement-level + transition
+  （schema v77）：两组计数触发器改为 statement-level + transition
   tables——单语句内按 (key, status) 聚合净增量、按固定字典序一次性
-  apply，所有并发写方锁序全局一致，锁环不再成立，
-  `create_jobs_bulk` 万级 executemany 从逐行热点变为每语句一次聚合；
+  apply，所有并发写方锁序全局一致，锁环不再成立。收益在固定锁序与
+  死锁消除，不在触发次数：psycopg executemany 服务端仍是 N 条独立
+  INSERT（每条触发一次 statement 触发器、transition table 1 行），
+  与旧行级触发器逐行加计数同量级；万行单语句（INSERT...SELECT）才
+  会一次聚合，当前代码库无该形状；
   ② 缓解：claim 端点对 SQLSTATE 40P01 立即整体重试一次（干净连接
   重进事务，再失败放行 500）；③ 缓解：Worker claim 退避改「首次 1s
   固定 → 之后指数翻倍 ±20% jitter，上限 60s 不变」——瞬时抖动不再
