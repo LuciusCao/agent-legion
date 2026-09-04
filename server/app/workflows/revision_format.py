@@ -78,6 +78,8 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
                 "outputs": node.outputs,
                 "execution": asdict(node.execution),
                 "skill": asdict(node.skill) if node.skill is not None else None,
+                # Omitted when undeclared (empty) so payload/yaml stay clean.
+                **({"tools": list(node.tools)} if node.tools else {}),
                 "config": node.config,
                 "terminal": (
                     {"outcome": node.terminal.outcome} if node.terminal is not None else None
@@ -89,15 +91,7 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
             {
                 "source": edge.source,
                 "target": edge.target,
-                "condition": (
-                    {
-                        "artifact": edge.condition.artifact,
-                        "path": edge.condition.path,
-                        "equals": edge.condition.equals,
-                    }
-                    if edge.condition is not None
-                    else None
-                ),
+                "condition": asdict(edge.condition) if edge.condition is not None else None,
             }
             for edge in definition.edges
         ],
@@ -157,6 +151,8 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
             raw_node["config"] = node.config
         if node.config_schema:
             raw_node["config_schema"] = node.config_schema
+        if node.tools:
+            raw_node["tools"] = list(node.tools)
         apply_skill_echo(raw_node, node)
         payload["nodes"][key] = raw_node
     for edge in definition.edges:

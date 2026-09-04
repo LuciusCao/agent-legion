@@ -394,7 +394,7 @@
       ]
     },
     "OutputsValidationEvent": {
-      "description": "`outputs_validation` event (velites extension, design §5 输出自检):\nemitted right before `agent_end` whenever `--require-output` was given and\nthe run ended normally or by budget exhaustion — always emitted in that\ncase so the Host can decide explicitly, with `missing` listing the\ndeclared artifacts (relative paths as passed on the CLI) that still do not\nexist after the single remediation turn. Not emitted on cancellation or\nunrecovered model error.",
+      "description": "`outputs_validation` event (velites extension, design §5 输出自检):\nemitted right before `agent_end` whenever `--require-output` was given and\nthe run ended normally or by budget exhaustion — always emitted in that\ncase so the Host can decide explicitly, with `missing` listing the\ndeclared artifacts (relative paths as passed on the CLI) that still do not\nexist after the single remediation turn. Not emitted on cancellation or\nunrecovered model error.\n\n#443: `mode` distinguishes the check that ran — `contract` when a skill's\n`references/output-contract.md` contract block drove content validation,\n`existence` when none was parseable (legacy semantics). `violations`\ncarries the contract violations (empty in existence mode or when all\nrules hold); both fields are always present to keep the wire shape\nstable.",
       "type": "object",
       "properties": {
         "missing": {
@@ -402,10 +402,21 @@
           "items": {
             "type": "string"
           }
+        },
+        "mode": {
+          "type": "string"
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
-        "missing"
+        "missing",
+        "mode",
+        "violations"
       ]
     },
     "RequestTiming": {

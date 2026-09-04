@@ -31,8 +31,8 @@ PoC（pi_agent_rust 替换验证）同时证明了两件事：
 - 完整复刻 Host 侧消费的事件流契约（见 §4），Host 三处消费方（日志渲染、token 计量、
   失败判定）零改动切换；
 - skill 注入（显式 `--skill` 目录）+ `read`/`write`/`bash` 核心三工具，外加少量
-  opt-in 的通用工具原语（§8，#442 起：`uuid`）——只收跨 skill 通用能力，不收业务逻辑，
-  不演变为插件机制（非目标不变）；
+  opt-in 的通用工具原语（§8，`uuid` #442、`validate` #443，均不进默认 `--tools`
+  集合）——只收跨 skill 通用能力，不收业务逻辑，不演变为插件机制（非目标不变）；
 - OpenAI-compatible Chat Completions 与 Anthropic Messages streaming；
 - **可控性内建**（§5）：预算、优雅取消、输出自检、零自动发现；
 - 单进程单执行，进程模型与现状一致（worker 隔离语义不变）。
@@ -60,7 +60,9 @@ velites/                 # Cargo crate（本仓库根下新目录）
     models.rs            # ~/.velites/models.json provider/model registry
     config.rs            # 旧 gateway 凭据迁移桥
     session.rs           # session.jsonl 镜像落盘（--session-dir）
-    tools/{mod,read,write,bash,uuid,command_guard,truncate}.rs
+    tools/{mod,read,write,bash,uuid,validate,specs,command_guard,truncate}.rs
+    contract.rs          # 输出契约引擎（#443）
+    contract_gate.rs     # 契约关卡/validate 子命令 glue（#443，自 contract.rs 预算拆分）
     provider/{mod,openai_compat,anthropic,retry,stub}.rs
     skill.rs             # SKILL.md 加载
     budget.rs            # 预算治理
@@ -108,7 +110,7 @@ token 计量依据、失败判定依据。砍 delta 不影响预览：预览渲�
 | `message_end` | **token 计量 + 失败判定** | `message.usage.{input,output,cacheRead}`、`provider`、`model`、`stopReason`、`content[]`（`text`/`thinking`/`toolCall`）、`errorMessage`、可选 `timing`（见下） |
 | `auto_retry_start` | 重试可观测性（pi 兼容，无渲染） | `attempt`（1 起）、`maxAttempts`、`delayMs`、`error` |
 | `tool_execution_start` / `tool_execution_end` | 日志渲染 | `toolCallId`、`toolName`、`args`、`result.content`、`isError` |
-| `outputs_validation` | 输出自检结果（velites 扩展，无渲染） | `missing`（字符串数组）；只要给了 `--require-output` 且运行正常结束/预算耗尽结束就**总是**发出（含 `missing: []`），便于 Host 明确判定；取消或未恢复的模型错误路径不发；收尾仍缺失的非取消运行 exit 1（输出契约违约，EXEC-HARNESS-OUTPUTS-001） |
+| `outputs_validation` | 输出自检结果（velites 扩展，无渲染） | `missing`（字符串数组）；#443 起增加 `mode`（`contract` = skill 契约段驱动内容校验 / `existence` = 无可解析契约段的 legacy 存在性语义）与 `violations`（契约违约清单，无契约或全过时为空数组；两字段 wire 上总是出现以保持形状稳定）；只要给了 `--require-output` 且运行正常结束/预算耗尽结束就**总是**发出（含 `missing: []`），便于 Host 明确判定；取消或未恢复的模型错误路径不发；收尾仍缺失或仍有违约的非取消运行 exit 1（输出契约违约，EXEC-HARNESS-OUTPUTS-001） |
 
 ### 请求级计时（velites 扩展，Pi 无对应能力）
 
@@ -147,7 +149,8 @@ TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计�
 - 取消（SIGTERM 优雅收尾，§5）：`agent_end{reason: "cancelled"}`，**exit 0**——
   取消是 Host 主动行为而非 harness 故障（M3 已决）；
 - 输出契约违约（EXEC-HARNESS-OUTPUTS-001）：`--require-output` 声明件在非取消
-  运行收尾时仍缺失 → **exit 1**，不给调用方留"exit 0 假完成"的口子；
+  运行收尾时仍缺失，或 skill 契约段（§8）仍有违约 → **exit 1**，不给调用方留
+  "exit 0 假完成"的口子；
 - 其余 exit ≠ 0 仅用于 harness 自身故障（参数错误、缺网关凭据、内部 panic、
   被信号硬终止；exit 2）。
 
@@ -168,7 +171,7 @@ TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计�
 |---|---|---|
 | 预算内建 | `--max-turns`、`--max-tokens`（按 usage 累计）、wall-clock deadline（复用 `--timeout-seconds`，M3 起该 flag 界定整个 run 的墙钟上限；**不再**兼任单次 provider HTTP 总超时——总超时会掐断长生成流，HTTP 层改为 connect 超时 + chunk 间 idle 超时，见 §7）；每次模型调用**前**检查，耗尽时注入一条收尾消息给模型**一个**收尾轮写出已声明产物，然后结束，`agent_end{reason: "budget_exceeded"}`（M3 实现为可选 `reason` 字段，取 `budget_exceeded` / `cancelled` 两值，替代布尔 flag 方案）；预算值走 `AgentDefinition.config_schema` 解析链成为节点标准可调参数 | 现在只有外层 wall-clock 强杀 |
 | 优雅取消 | SIGTERM 被 loop 捕获：检查点在 turn 边界与每次工具执行完成后（模型调用也可被中断）；bash 工具正在跑时走既有 TERM→grace→KILL 进程组清理；收尾发出 `agent_end{reason:"cancelled"}` 再退出，**exit 0**（取消是 Host 主动行为，非 harness 故障；M3 已决）；SIGKILL 兜底语义不变 | 现在 cancel = 进程组强杀，无事件收尾 |
-| 输出自检 | `--require-output <file>`（可多次）；loop 正常结束前自检缺失项（路径走工具同款 cwd 沙箱校验，逃逸路径启动即报错），有缺失则注入系统消息给**一次**补救轮；最终**总是**发 `outputs_validation{missing:[...]}` 事件（`missing` 可为空，M3 已决：显式事件便于 Host 判定）；补救后仍缺失的非取消运行 **exit 1**（EXEC-HARNESS-OUTPUTS-001） | 现在 Host 事后扫 job_dir 才发现缺失 |
+| 输出自检 | `--require-output <file>`（可多次）；loop 正常结束前自检缺失项（路径走工具同款 cwd 沙箱校验，逃逸路径启动即报错），有缺失则注入系统消息给**一次**补救轮；最终**总是**发 `outputs_validation{missing:[...]}` 事件（`missing` 可为空，M3 已决：显式事件便于 Host 判定）；补救后仍缺失的非取消运行 **exit 1**（EXEC-HARNESS-OUTPUTS-001）。#443 起升级为**契约模式**：任一 `--skill` 目录的 `references/output-contract.md` 声明了机器可读契约段（见 §8）时，引擎同时校验文件**内容**（text 长度/必备标题、JSON Schema draft 2020-12），违约与缺失一样触发补救轮与 exit 1，事件带 `mode: contract` + `violations`；契约段解析失败按一条违约处理（fail-closed，不静默降级；未闭合 fence 同此），且因契约段位于只读 skill 目录、模型无法修复而**跳过补救轮直接失败**（不烧徒劳的 token）；无可解析契约段时保持 legacy 存在性语义，事件带 `mode: existence`（给 skill 作者补契约的信号） | 现在 Host 事后扫 job_dir 才发现缺失 |
 | 零自动发现 | 不读 AGENTS.md/CLAUDE.md、不扫描 skill/扩展/模板目录、不读用户级配置；上下文 = `--system-prompt` + `--skill` + `@prompt.md`，无第三个来源（代码层不存在发现逻辑，而非"有逻辑加开关"） | Pi 靠 4 个 `--no-*` flag 维持；pi_agent_rust 无开关（PoC 的 P0 阻断项） |
 | 无 delta | 见 §4 | 现在 99% 的 stdout 体积是被丢弃的 delta |
 
@@ -352,6 +355,39 @@ fail-closed 报错，内置节点不受影响。
   不触碰文件系统与沙箱；默认不进 `--tools`（核心三件套之外按需启用，避免把
   runtime 不认识的工具名透传给 pi——pi 定义请勿声明 `uuid`，dispatch 期的
   per-runtime 工具名校验在后续 issue 收口）；
+- **validate**（#443，opt-in，不进默认 `--tools`）：无参数，对 cwd 跑输出契约检查，供
+  agent 跑中自查、就地修复。三态：全过返回 `contract ok (N files checked)`；有违约返回
+  编号违约清单（`is_error`，文案面向模型可行动）；skill 目录都没有可解析契约段时返回
+  信息性错误（"nothing to validate against"），不静默成功。引擎与关卡、Host 复核共用
+  `src/contract.rs` 一份实现；
+- **输出契约段（受控接口，权威定义）**：skill 仓库的 `references/output-contract.md`
+  中嵌入一个 fenced block（**第一个** ```` ```yaml contract ```` 块生效，其余视为 prose）：
+
+  ```yaml contract
+  files:
+    - path: script.md              # 相对 job_dir，必填；拒绝绝对路径与 `..`
+      format: text                 # text | json，必填
+      min_chars: 200               # 可选，仅 text：去首尾空白后字符数下限
+      required_headings: ["## 目标"]  # 可选，仅 text：每个串必须作为子串出现在内容中
+    - path: questions.json
+      format: json
+      schema:                      # format=json 时必填：JSON Schema 对象（draft 2020-12）
+        type: object
+        required: [exercises]
+  ```
+
+  规则与降级语义：无 `output-contract.md` 或无契约段 → 降级信号（`Ok(None)`，关卡回落
+  existence 模式）；段存在但 YAML/结构非法（json 缺 schema、format 取值非法、path 为空、
+  text 文件配 schema 等）→ 显式错误，关卡上按违约处理（fail-closed）。逐文件检查：文件
+  缺失/为空/非 UTF-8 各一条违约；text 按 `min_chars`、`required_headings` 逐项；json 解析
+  失败一条违约，schema 每个错误一条（带 JSON path）。
+  两条边界规则：**跨文件一致性与业务规则不在契约段表达**，留在同文件的 prose 里供模型阅读
+  （引擎只做单文件结构校验）；**契约段格式向后兼容**——只允许新增可选键，变更必填键或语义
+  必须显式升版本（格式本身是受控接口）。
+  Host 侧复核与离线检查走同形子命令：`velites validate --job-dir <dir> [--skill <dir>]...`
+  （`velites-sandbox validate` 相同入口）——全过打 `mode=contract` exit 0；无契约段打
+  `mode=existence` exit 0（Host 据此回落 legacy 校验）；违约逐行 stderr + exit 1；契约段
+  解析错误/参数错误/IO 错误 stderr + exit 2。多个 `--skill` 时取第一个含契约段的；
 - **输出截断（pi 对齐）**：工具输出按双阈值截断——2000 行 或 50KB
   （50×1024 字节），任一先到即截，语义与 pi `truncate.js` 完全一致
   （实现集中在 `velites/src/tools/truncate.rs`）：

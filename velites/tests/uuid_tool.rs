@@ -10,6 +10,7 @@ fn ctx(cwd: &std::path::Path) -> ToolContext {
         // The uuid tool touches no filesystem; the sandbox is irrelevant.
         sandbox: None,
         read_roots: Vec::new(),
+        skill_dirs: Vec::new(),
     }
 }
 

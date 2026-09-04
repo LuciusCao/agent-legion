@@ -346,9 +346,18 @@ pub struct ToolExecutionEndEvent {
 /// declared artifacts (relative paths as passed on the CLI) that still do not
 /// exist after the single remediation turn. Not emitted on cancellation or
 /// unrecovered model error.
+///
+/// #443: `mode` distinguishes the check that ran — `contract` when a skill's
+/// `references/output-contract.md` contract block drove content validation,
+/// `existence` when none was parseable (legacy semantics). `violations`
+/// carries the contract violations (empty in existence mode or when all
+/// rules hold); both fields are always present to keep the wire shape
+/// stable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct OutputsValidationEvent {
     pub missing: Vec<String>,
+    pub mode: String,
+    pub violations: Vec<String>,
 }
 
 /// The velites/json1 event stream: exactly these eleven event types, NDJSON
@@ -614,10 +623,15 @@ mod tests {
 
         let event = Event::OutputsValidation(OutputsValidationEvent {
             missing: vec!["out/result.json".into()],
+            mode: "contract".into(),
+            violations: vec![],
         });
         let value = serde_json::to_value(&event).unwrap();
         assert_eq!(value["type"], "outputs_validation");
         assert_eq!(value["missing"][0], "out/result.json");
+        assert_eq!(value["mode"], "contract");
+        // Empty violation list stays on the wire (stable shape).
+        assert_eq!(value["violations"], serde_json::json!([]));
     }
 
     #[test]

@@ -91,7 +91,7 @@ class AgentDispatchService:
                 "additional_prompt": node.execution.prompt,
                 # CONFIG-MANIFEST-001: only schema-whitelisted, non-secret keys.
                 "config": manifest_safe_config(definition.config_schema, node_config or {}),
-                "tools": list(definition.tools),
+                "tools": list(node.tools or definition.tools),
                 **skill.manifest_pins(),
                 "log_path": str(log_path),
                 "execution": execution,

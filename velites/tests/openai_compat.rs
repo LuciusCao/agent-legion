@@ -362,6 +362,7 @@ async fn unrecovered_error_ends_run_with_exit_0() {
         session: None,
         cwd: dir.path().to_path_buf(),
         read_roots: Vec::new(),
+        skill_dirs: Vec::new(),
         sandbox: None,
         cancel: velites::cancel::CancelToken::default(),
     };
@@ -439,6 +440,7 @@ async fn full_tool_round_over_gateway() {
         session: None,
         cwd,
         read_roots: Vec::new(),
+        skill_dirs: Vec::new(),
         sandbox: None,
         cancel: velites::cancel::CancelToken::default(),
     };
@@ -646,6 +648,7 @@ fn agent_config(dir: &tempfile::TempDir) -> velites::agent::AgentConfig {
         session: None,
         cwd: dir.path().to_path_buf(),
         read_roots: Vec::new(),
+        skill_dirs: Vec::new(),
         sandbox: None,
         cancel: velites::cancel::CancelToken::default(),
     }

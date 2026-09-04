@@ -59,14 +59,12 @@ pub fn spec(kind: ToolKind) -> ToolSpec {
             }),
         ),
         ToolKind::Uuid => (
-            "Generate or validate UUIDs. NEVER hand-write UUIDs — models \
-             produce invalid ones; always mint them here. \
-             `generate` returns fresh random UUIDs: every call produces \
-             different values (replay included), so persist generated \
-             values into your output files instead of expecting \
-             reproducibility. `validate` checks each value and fails on \
-             format, version, and variant problems (parseable-but-anomalous \
-             values like nil/max UUIDs fail as non-RFC4122 variants).",
+            "Generate or validate UUIDs. NEVER hand-write UUIDs — models produce \
+             invalid ones; always mint them here. `generate` returns fresh random \
+             UUIDs: every call differs (replay included), so persist generated \
+             values into your output files instead of expecting reproducibility. \
+             `validate` fails on format, version, and variant problems (parseable \
+             but anomalous values like nil/max UUIDs fail as non-RFC4122 variants).",
             serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -76,6 +74,17 @@ pub fn spec(kind: ToolKind) -> ToolSpec {
                     "values": {"type": "array", "items": {"type": "string"}, "description": "validate: UUID strings to check (max 1000 entries, each max 512 chars, no control characters)."}
                 },
                 "required": ["op"]
+            }),
+        ),
+        ToolKind::Validate => (
+            "Check working-directory outputs against the skill's output contract \
+             (the ```yaml contract block in its references/output-contract.md). \
+             No arguments. On failure returns a numbered violation list to fix; \
+             when no skill declares a contract block, returns an informational \
+             error. Use it to self-check outputs mid-run before stopping.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {}
             }),
         ),
     };

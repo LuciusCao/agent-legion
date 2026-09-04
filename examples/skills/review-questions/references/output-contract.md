@@ -27,7 +27,38 @@
 
 ## 校验
 
-`scripts/validate_output.py` 检查：文件存在、JSON 可解析、上述结构与
-取值约束满足，且 `exercise_reviews` 的 id 集合与 `exercises.json` 完全
-一致。任一不满足则以非零退出码退出并在 stderr 打印原因，节点判失败。
+运行时优先按下面的机器可读契约段经 harness 内置引擎校验（存在性、
+JSON Schema）：
+
+```yaml contract
+files:
+  - path: exercises_review.json
+    format: json
+    schema:
+      type: object
+      required: [verdict, exercise_reviews, summary]
+      properties:
+        verdict: {enum: [pass, revise]}
+        summary: {type: string, minLength: 1}
+        exercise_reviews:
+          type: array
+          items:
+            type: object
+            required: [id, verdict, issues]
+            properties:
+              id: {type: string, minLength: 1}
+              verdict: {enum: [pass, fail]}
+              issues:
+                type: array
+                items: {type: string}
+```
+
+引擎不表达的部分由 `scripts/validate_output.py` legacy 脚本兜底
+（`python validate_output.py <job_dir>`，退出码 0 为通过）：
+
+- `exercise_reviews` 的 id 集合与输入 `exercises.json` 完全一致——
+  跨文件业务规则，引擎不表达，仅 legacy 脚本检查；
+- 空白-only 字符串的严格判定（同上，引擎 `minLength: 1` 只挡空串）。
+
+任一不满足则以非零退出码退出并在 stderr 打印原因，节点判失败。
 校验只管结构，不代 agent 判断评审内容本身是否合理。

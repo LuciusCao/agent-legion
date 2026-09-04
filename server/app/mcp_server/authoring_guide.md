@@ -226,6 +226,34 @@ publish: a human reviews the git diff and re-pins.
    (`make skills-lock`, or let the first dispatch auto-lock). NEVER ask for
    a relock before the human has seen the diff.
 
+### Machine-readable output contract block
+
+Beyond the prose contract, `references/output-contract.md` may embed ONE
+machine-readable contract block — a fenced code block whose info string is
+`yaml contract`. At run time the harness's built-in contract engine checks it
+first (existence, then the checks below); cross-file rules and business
+semantics stay in prose — the engine does not express them — and
+`scripts/validate_output.py` remains the legacy fallback channel for
+everything the engine cannot say:
+
+```yaml contract
+files:
+  - path: script.md              # relative to the job dir, required
+    format: text                 # text | json, required
+    min_chars: 200               # optional, text only: char count after trimming
+    required_headings: ["## 目标"]  # optional, text only: each must appear as a substring
+  - path: questions.json
+    format: json
+    schema:                      # required when format=json: a JSON Schema object
+      type: object
+      required: [exercises]
+```
+
+Engine v1 expresses exactly these four check classes: existence, text length
+(`min_chars`), required headings, and JSON Schema. Before asking the human to
+release a tag, call `validate_skill` and fix every contract-block error it
+reports — a malformed block fails validation just like a missing file.
+
 ## 7. Common errors and what to do
 
 - `Draft workflow key '...' does not match workspace default workflow key
