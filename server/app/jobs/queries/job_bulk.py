@@ -19,6 +19,54 @@ def _job_id(workspace_id: str, workflow_key: str, source_id: str) -> str:
 _MATERIAL_LOCK_SQL = "select id from materials where id=%s and workspace_id=%s for key share"
 _BUNDLE_LOCK_SQL = "select id from material_bundles where id=%s and workspace_id=%s for key share"
 
+# Set-based bulk INSERT (issue #448 phase 1): one unnest-driven INSERT per
+# batch instead of psycopg's executemany (still N independent statements
+# server-side). The v77 statement triggers then aggregate a whole batch into
+# ONE counter upsert per (key, status) — the per-row trigger firings of the
+# executemany shape were the remaining bulk-intake cost after #437. Batch
+# size bounds PG's per-statement parameter limit (65535 via the extended
+# protocol; 28 params per jobs row here) and the server-side memory the
+# unnest arrays plus a batch's transition tables occupy; one transaction
+# still wraps every batch, same as the executemany shape.
+_JOBS_BATCH_ROWS = 1000
+
+_JOBS_BULK_INSERT_SQL = """
+insert into jobs(
+  id, workspace_id, source_type, source_id, run_id, title, storage_dir, stem,
+  workflow_revision_id, workflow_version, workflow_definition_hash,
+  workflow_definition_snapshot_json, input_json, frozen_config_json
+)
+select * from unnest(
+  %s::text[], %s::text[], %s::text[], %s::text[], %s::text[], %s::text[], %s::text[],
+  %s::text[], %s::text[], %s::int[], %s::text[], %s::text[], %s::text[], %s::text[]
+)
+on conflict(id) do update set
+  title=excluded.title, stem=excluded.stem, run_id=excluded.run_id,
+  input_json=excluded.input_json, frozen_config_json=excluded.frozen_config_json, updated_at=current_timestamp
+"""
+
+_JOB_NODES_BULK_INSERT_SQL = """
+insert into job_nodes(job_id, node_key, status, created_at)
+select c, k, 'pending', current_timestamp from unnest(%s::text[], %s::text[]) as t(c, k)
+on conflict(job_id, node_key) do nothing
+"""
+
+
+def _insert_jobs_batched(conn: Any, rows: list[tuple[Any, ...]]) -> None:
+    # list per column (not tuple): psycopg adapts a tuple as one record value
+    # and a list as a 1-D array — unnest needs the arrays (same arity rows,
+    # so the strict zip cannot fail).
+    for start in range(0, len(rows), _JOBS_BATCH_ROWS):
+        chunk = rows[start : start + _JOBS_BATCH_ROWS]
+        conn.execute(_JOBS_BULK_INSERT_SQL, [list(column) for column in zip(*chunk, strict=True)])
+
+
+def _insert_job_nodes_batched(conn: Any, pairs: list[tuple[str, str]]) -> None:
+    for start in range(0, len(pairs), _JOBS_BATCH_ROWS):
+        chunk = pairs[start : start + _JOBS_BATCH_ROWS]
+        columns = [list(column) for column in zip(*chunk, strict=True)]
+        conn.execute(_JOB_NODES_BULK_INSERT_SQL, columns)
+
 
 class JobBulkQueriesMixin(ConnectionQueriesMixin):
     jobs_dir: Path
@@ -126,28 +174,12 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                 job_id = str(row[0])
                 if job_id not in by_id:
                     storage_dirs[job_id].mkdir(parents=True, exist_ok=True)
-            conn.executemany(
-                """
-                insert into jobs(
-                  id, workspace_id, source_type, source_id, run_id, title,
-                  storage_dir, stem, workflow_revision_id, workflow_version,
-                  workflow_definition_hash, workflow_definition_snapshot_json,
-                  input_json, frozen_config_json
-                ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                on conflict(id) do update set
-                  title=excluded.title, stem=excluded.stem, run_id=excluded.run_id,
-                  input_json=excluded.input_json, frozen_config_json=excluded.frozen_config_json,
-                  updated_at=current_timestamp
-                """,
-                rows,
-            )
-            conn.executemany(
-                """
-                insert into job_nodes(job_id, node_key, status, created_at)
-                values (%s, %s, 'pending', current_timestamp)
-                on conflict(job_id, node_key) do nothing
-                """,
-                [(job_id, node_key) for job_id in job_ids for node_key in node_keys],
+            # Set-based INSERT: ON CONFLICT arm and column values are
+            # byte-identical to the old executemany shape — only the
+            # statement granularity changes (see _JOBS_BATCH_ROWS).
+            _insert_jobs_batched(conn, rows)
+            _insert_job_nodes_batched(
+                conn, [(job_id, node_key) for job_id in job_ids for node_key in node_keys]
             )
             created = conn.execute(
                 f"select * from jobs where id in ({placeholders})", job_ids
