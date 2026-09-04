@@ -10,6 +10,17 @@ import {
   createLoadSnapshot,
   enqueuePendingEvent,
 } from './workspaceSnapshotLoader'
+
+/** #410（codex 四轮 P2 on #427）：node 更新事件（job_patch_batch /
+ * job_updated）→ 失效 nodeRuns 前缀。检查器在节点运行前已挂载时查询缓存
+ * 空记录，没有任何运行完成路径失效该 key——节点完成运行时「实际执行」
+ * 仍为空，只能等窗口聚焦或重挂载。与 stats/facets 同一防抖层合并
+ * （invalidateQueries 只对有活跃观察者的查询触发 refetch，无观察者时不
+ * 发请求）。 */
+function invalidateNodeRuns(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: ['nodeRuns'] })
+}
+
 export function useWorkspaceEvents(
   workspaceId: string | undefined,
   enabled = true,
@@ -41,6 +52,9 @@ export function useWorkspaceEvents(
         void refreshJobFacets(workspaceId, statsOnly, () => stale || closed)
         // Worker assignment may change with job updates (same debounce tier).
         invalidateAgentWorkers(queryClient)
+        // Node runs (inspector latest-version echo) change with job updates
+        // too (codex four-pass P2 on #427); same debounce tier.
+        invalidateNodeRuns(queryClient)
       }, jobUpdateRefreshDelay)
     }
 

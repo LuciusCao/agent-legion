@@ -302,18 +302,6 @@ exemptions:
   ceiling: 67
 
 - check: architecture.file_budget
-  path: server/app/db/migration_chain.py
-  reason: >-
-    Re-filed (#358 merge round): the chain now carries v72
-    (ops_runtime_profile_samples, from #359) and v73 (run_job_status_counts,
-    this PR) — one import plus one entry each on top of the v70 growth the
-    original exemption described. The chain only grows one entry per schema
-    version and cannot shrink; stale after the issue-211 M3 cleanup
-    collapses the chain comments.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 108
-- check: architecture.file_budget
   path: server/app/db/migrations/runs_sql.py
   reason: The issue-211 M2 batch adds _INSERT_RUNS_SQL_V70 — the
     column-less twin of the job_batches cutover (without it a pre-v53
@@ -572,7 +560,9 @@ exemptions:
     declarative schema file whose growth model is one block per schema
     version. Splitting a create-table block out of the replay schema would
     fork the single source of truth for fresh databases; revisit only if
-    the schema file needs a structural split of its own.
+    the schema file needs a structural split of its own. Re-filed (#410):
+    schema v75 adds the node_runs skill-key ALTER (one column plus comment)
+    — same one-block-per-version growth model.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
   ceiling: 851

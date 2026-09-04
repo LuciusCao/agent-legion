@@ -53,6 +53,11 @@ class ExecutionResult:
     session_dir: str = ""
     session_reference: str = ""
     skill_version: str = ""
+    # #410 (schema v75): the dispatched skill key this run executed (manifest
+    # pin ``skill``). Mirrors skill_version onto node_runs so the studio
+    # latest-run echo can filter by binding — version's ref prefix is not the
+    # skill key. Empty on failure results built before dispatch resolution.
+    skill: str = ""
     produced_artifacts: tuple[str, ...] = ()
     runner: str = ""
     # Explicit failure classification; the lease finish path falls back to

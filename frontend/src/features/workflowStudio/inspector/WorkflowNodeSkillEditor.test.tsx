@@ -56,7 +56,10 @@ const node: WorkflowNodeRecord = {
 
 const baseYaml = 'nodes:\n  n1:\n    capability: cap\n'
 
-function runWithSkillVersion(skillVersion: string): NodeRun {
+function runWithSkillVersion(
+  skillVersion: string,
+  skill = 'demo/review'
+): NodeRun {
   return {
     id: 7,
     job_id: 'j1',
@@ -72,6 +75,7 @@ function runWithSkillVersion(skillVersion: string): NodeRun {
     session_dir: '',
     runner: '',
     skill_version: skillVersion,
+    skill,
   }
 }
 
@@ -242,8 +246,45 @@ describe('WorkflowNodeSkillEditor', () => {
     ).toBeInTheDocument()
     expect(mockFetchNodeRuns).toHaveBeenCalledWith('ws1', {
       nodeKey: 'n1',
+      skill: 'demo/review',
       limit: 1,
     })
+  })
+
+  it('filters the latest-run echo by the bound skill key (codex r4 P1 on #427)', async () => {
+    // 节点从 demo/review 换绑 demo/other 且 other 尚未运行：按 node_key
+    // 取最近 run 会把 review 的 skill_version 标成 other 的「实际执行」。
+    // 换绑后查询按绑定 key 过滤，服务端返回空 → 不显示回执行行。
+    mockFetchNodeRuns.mockResolvedValue([])
+    renderEditor({
+      definitionYaml:
+        'nodes:\n  n1:\n    capability: cap\n    skill:\n      key: demo/other\n      ref: latest\n',
+    })
+
+    await waitFor(() =>
+      expect(mockFetchNodeRuns).toHaveBeenCalledWith('ws1', {
+        nodeKey: 'n1',
+        skill: 'demo/other',
+        limit: 1,
+      })
+    )
+    expect(screen.queryByText(/实际执行/)).not.toBeInTheDocument()
+  })
+
+  it('echoes the new binding run once the rebound skill has run (codex r4 P1 on #427)', async () => {
+    // 换绑后的 skill 已有运行记录（服务端按 skill 列过滤后返回 other 的
+    // run）：回显示 other 自己的版本。
+    mockFetchNodeRuns.mockResolvedValue([
+      runWithSkillVersion('latest@fff000fff000', 'demo/other'),
+    ])
+    renderEditor({
+      definitionYaml:
+        'nodes:\n  n1:\n    capability: cap\n    skill:\n      key: demo/other\n      ref: latest\n',
+    })
+
+    expect(
+      await screen.findByText('实际执行：latest@fff000fff000')
+    ).toBeInTheDocument()
   })
 
   it('does not query run history for a pinned tag binding (#410)', () => {

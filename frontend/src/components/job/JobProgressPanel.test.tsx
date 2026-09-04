@@ -84,6 +84,7 @@ const mockRuns: NodeRun[] = [
     session_dir: '',
     runner: '',
     skill_version: '',
+    skill: '',
   },
 ]
 
@@ -275,6 +276,7 @@ describe('JobProgressPanel', () => {
           {
             ...mockRuns[0],
             skill_version: 'latest@abc123def456',
+            skill: '',
           },
         ]}
         onOpenDagDialog={vi.fn()}

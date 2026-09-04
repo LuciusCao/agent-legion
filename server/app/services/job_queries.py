@@ -180,14 +180,13 @@ class JobQueryService:
         status: str | None = None,
         node_key: str | None = None,
         job_id: str | None = None,
+        skill: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
+        # skill 透传（schema v75，#410 codex 四轮 P1）：latest 回显按绑定
+        # key 过滤，避免换绑节点的旧 run 冒充新绑定的执行版本。
         runs = self.job_db.list_workspace_node_runs(
-            workspace_id,
-            status=status,
-            node_key=node_key,
-            job_id=job_id,
-            limit=limit,
+            workspace_id, status=status, node_key=node_key, job_id=job_id, skill=skill, limit=limit
         )
         return [resolve_record_paths(run, self.settings.data_dir, _RUN_PATH_FIELDS) for run in runs]
 
