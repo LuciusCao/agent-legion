@@ -2,7 +2,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useSettingStore } from '../../../stores/settingStore'
 import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import { WorkflowNodeAgentEditorPanel } from './WorkflowNodeAgentEditorPanel'
-import inspectorStyles from './WorkflowNodeInspector.module.css'
+import { WorkflowNodeAgentGate } from './WorkflowNodeAgentGate'
+import type { AgentBindingStatus } from './agentBindingStatus'
 
 type Props = {
   /** 已绑定该 capability 的 Agent id；null = 新建模式（capability 预填）。 */
@@ -15,13 +16,11 @@ type Props = {
    * WorkflowNodeExecutionSection）：pending=目录在途、或未命中 published
    * 且 definitions 在途（agentId 可能只是 draft 回落先行，settle 后同
    * capability 的 published Agent 会替换它；或 agentId=null 只是「未知」
-   * 而非「未绑定」）→ 只渲染加载占位；error=catalog 失败且无数据、或
-   * 未命中 published 且 definitions 失败无数据 → 错误占位；ready=catalog
-   * 已返回且（命中 published 或 definitions 已返回）——「published ??
-   * draft」是终态，agentId 非空（published 命中或 draft 回落）或 null
-   * （确认无绑定）都不会再变，放行渲染编辑器/新建表单。
+   * 而非「未绑定」）→ 首次出加载占位；error=catalog 失败且无数据、或未
+   * 命中 published 且 definitions 失败无数据 → 错误占位；ready=「published
+   * ?? draft」已是终态，放行渲染编辑器/新建表单。
    */
-  bindingStatus: 'pending' | 'error' | 'ready'
+  bindingStatus: AgentBindingStatus
 }
 
 /**
@@ -41,6 +40,12 @@ type Props = {
  * settle（未命中时 useCapabilityAgent 的空 draft 列表会误判未绑定，
  * definitions 返回后切换真实 draft 重挂丢输入），计算见
  * agentBindingStatus.bindingStatus。
+ * #426 终局复审 P1：settle=!isFetching（第四轮正确性）使 ready→pending
+ * 翻转发生在每次失效重取（聊天 turn_end 的双查询失效、staleTime 30s 后
+ * 的聚焦重取）——翻转即卸载会丢未保存输入，故 ready 后的重取期改由
+ * WorkflowNodeAgentGate 保挂载 + 冻结遮罩（输入保留，settle 后恢复可
+ * 编辑），仅首次 settle 前渲染占位；P3-2：编辑器自身保存/发布/回滚触发
+ * 的 refresh 同属此路径，不再卸载闪烁/重复拉详情。
  */
 export function WorkflowNodeAgentEditor(props: Props) {
   const queryClient = useQueryClient()
@@ -57,25 +62,17 @@ export function WorkflowNodeAgentEditor(props: Props) {
     })
   }
 
-  if (props.bindingStatus !== 'ready') {
-    const pending = props.bindingStatus === 'pending'
-    return (
-      <div
-        className={inspectorStyles.empty}
-        role={pending ? 'status' : 'alert'}
-      >
-        {pending ? 'Agent 绑定解析中...' : 'Agent 目录加载失败'}
-      </div>
-    )
-  }
-
   return (
-    <WorkflowNodeAgentEditorPanel
-      key={props.capability}
-      workspaceId={workspaceId}
-      agentId={props.agentId}
-      capability={props.capability}
-      onRefresh={refresh}
-    />
+    <WorkflowNodeAgentGate status={props.bindingStatus}>
+      {() => (
+        <WorkflowNodeAgentEditorPanel
+          key={props.capability}
+          workspaceId={workspaceId}
+          agentId={props.agentId}
+          capability={props.capability}
+          onRefresh={refresh}
+        />
+      )}
+    </WorkflowNodeAgentGate>
   )
 }
