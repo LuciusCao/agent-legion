@@ -775,3 +775,15 @@ exemptions:
   owner: database
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 61
+- check: architecture.file_budget
+  path: server/app/workflows/revision_format.py
+  reason: '#458 grows definition_to_yaml past its 131 ceiling: the echo must carry the shard/reduce
+    declarations (previously dropped — the studio''s initial draft YAML showed a ghost change against
+    its own baseline and publishing it silently stripped fan-out) plus the apply_shard_echo helper
+    extracted to keep the non-default-keys spelling next to its loader counterpart. The alternative,
+    splitting the echo out of the revision format module, would fork the one serializer every
+    revision/job-snapshot path shares. Remove when the revision echo moves to a schema-driven
+    serializer or the file gets a structural split of its own.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/458
+  ceiling: 161

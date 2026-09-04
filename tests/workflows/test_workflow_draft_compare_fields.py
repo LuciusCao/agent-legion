@@ -39,15 +39,21 @@ def _app_with_baseline(tmp_path):
     return app, workspace_id, definition
 
 
-def _sharded_draft_yaml(definition) -> str:
-    """Demo DAG + review_questions 分片其 exercises 输入（合法 shard 形态）。
+def _sharded_reduce_draft_yaml(definition) -> str:
+    """Demo DAG + review_questions 分片其 exercises 输入、publish_content 聚合。
 
-    reduce 无法走 HTTP 路径做「基线→草稿」对比：asdict 快照里 WorkflowReduceSpec
-    序列化为 ``from_node``，而 loader 的 yaml 拼写是 ``from``，含 reduce 的基线
-    在 compare 的基线解析臂直接报 schema 错误（独立的快照往返缺陷，不在 #431
-    范围）；shard 不经拼写映射，可正常往返，故 reduce 的 only 变更用单元级
-    _node_change_fields + structural_revision_changed 覆盖。
+    #458 修复后（loader 翻译快照的 from_node→from、definition_to_yaml 回显
+    shard/reduce），含 reduce 的基线可以走 HTTP 路径做「基线→草稿」对比，
+    不再被迫降级为单元级测试。
     """
+    raw = yaml.safe_load(definition_to_yaml(definition))
+    raw["nodes"]["review_questions"]["shard"] = {"over": "inputs.exercises.json"}
+    raw["nodes"]["publish_content"]["reduce"] = {"from": "review_questions"}
+    return yaml.safe_dump(raw, allow_unicode=True)
+
+
+def _sharded_draft_yaml(definition) -> str:
+    """Demo DAG + review_questions 分片其 exercises 输入（合法 shard 形态）。"""
     raw = yaml.safe_load(definition_to_yaml(definition))
     raw["nodes"]["review_questions"]["shard"] = {"over": "inputs.exercises.json"}
     return yaml.safe_dump(raw, allow_unicode=True)
@@ -189,10 +195,9 @@ def test_compare_shard_only_change_creates_revision(tmp_path):
 def test_compare_sharded_baseline_roundtrip_reports_no_change(tmp_path):
     """带 shard 的基线做无变更 round-trip：不得误报（回归护栏）。
 
-    注：definition_to_yaml 的回显不落 shard（YAML 拼写缺失，同 reduce 的
-    from/from_node——独立的回显缺陷，不在 #431 范围），所以草稿用同一份
-    原始 YAML 而非回显：基线与草稿两侧都过 loader，fields 比对必须稳定
-    为空。
+    #458 修复后 definition_to_yaml 会回显 shard/reduce，所以这里的基线与
+    草稿同用一份原始 YAML（基线侧经 asdict 快照、草稿侧经 YAML，两侧都过
+    loader），fields 比对必须稳定为空。
     """
     app, workspace_id, definition = _app_with_baseline(tmp_path)
     raw_yaml = _sharded_draft_yaml(definition)
@@ -205,6 +210,60 @@ def test_compare_sharded_baseline_roundtrip_reports_no_change(tmp_path):
     assert result["valid"] is True
     assert result["creates_revision"] is False
     assert result["summary"]["node_changes"] == []
+    assert result["summary"]["risk_level"] == "none"
+
+
+def test_compare_reduce_only_change_creates_revision(tmp_path):
+    """reduce-only 变更走 HTTP 路径：基线含 shard+reduce 配对，草稿只删聚合。
+
+    #458 修复前含 reduce 的基线在 compare 的基线解析臂必报 schema 错误
+    （from_node 拼写不被 loader 接受），本测试被迫降级为单元级；修复后
+    补上完整的 HTTP 级覆盖。
+    """
+    app, workspace_id, definition = _app_with_baseline(tmp_path)
+    baseline_yaml = _sharded_reduce_draft_yaml(definition)
+    baseline = workflow_definition_from_yaml_string(baseline_yaml)
+    WorkflowRevisionService(app.state.job_db).publish_workspace_revision(workspace_id, baseline)
+
+    raw = yaml.safe_load(baseline_yaml)
+    del raw["nodes"]["review_questions"]["shard"]
+    del raw["nodes"]["publish_content"]["reduce"]
+    raw_yaml = yaml.safe_dump(raw, allow_unicode=True)
+
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, raw_yaml)
+
+    assert result["valid"] is True
+    assert result["creates_revision"] is True
+    change = _modified_change(result, "publish_content")
+    assert change["fields"] == ["reduce"]
+    assert change["risk"] == "warning"
+
+
+def test_compare_sharded_baseline_echo_yaml_reports_no_change(tmp_path):
+    """#458 端到端：studio 幽灵变更消除。
+
+    studio 草稿初始 YAML 来自 active revision 的 definition_yaml 回显——
+    修复前含 shard 基线的工作区一打开，对这份「未改动」的回显 compare 就
+    报 shard modified（幽灵变更、reset 清不掉，照此发布会静默删分片）；
+    修复后回显携带 shard/reduce，等值 round-trip 必须报零变更。
+    """
+    app, workspace_id, definition = _app_with_baseline(tmp_path)
+    baseline_yaml = _sharded_reduce_draft_yaml(definition)
+    baseline = workflow_definition_from_yaml_string(baseline_yaml)
+    WorkflowRevisionService(app.state.job_db).publish_workspace_revision(workspace_id, baseline)
+
+    # The studio's initial draft is the echo of the just-published revision.
+    echo_yaml = definition_to_yaml(baseline)
+    assert "shard:" in echo_yaml and "reduce:" in echo_yaml
+
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, echo_yaml)
+
+    assert result["valid"] is True
+    assert result["creates_revision"] is False
+    assert result["summary"]["node_changes"] == []
+    assert result["summary"]["edge_changes"] == []
     assert result["summary"]["risk_level"] == "none"
 
 
@@ -240,6 +299,46 @@ def test_compare_edges_reordered_creates_revision(tmp_path):
     assert result["summary"]["node_changes"] == []  # 节点本身无变化
     assert any(flag["code"] == "edges_reordered" for flag in result["summary"]["risk_flags"])
     assert result["summary"]["risk_level"] == "info"
+
+
+def test_compare_edges_set_and_order_changed_reports_no_reorder(tmp_path):
+    """去重护栏：集合与顺序同时变化时只报 added/removed，不报 reordered。
+
+    reorder 检测的前提是集合不变（sorted 相等）——集合变了就轮不到顺序
+    说话，身份 diff 的 added/removed 已完整表达差异；混报 reordered 会
+    让无序的 reorder 语义污染有身份语义的变更列表。
+    """
+    app, workspace_id, definition = _app_with_baseline(tmp_path)
+    raw = yaml.safe_load(definition_to_yaml(definition))
+    # Keep the start edge (loader requires one outgoing edge from _start) but
+    # swap a mid-list edge for a new identity — the set changes *and* the
+    # surviving edges all sit at different list positions.
+    raw["edges"] = (
+        [
+            {"from": "_start", "to": "intake_knowledge_points"},
+        ]
+        + [
+            edge
+            for edge in raw["edges"]
+            if edge
+            not in (
+                {"from": "_start", "to": "intake_knowledge_points"},
+                {"from": "intake_knowledge_points", "to": "write_script"},
+            )
+        ]
+        + [{"from": "write_script", "to": "generate_questions"}]
+    )
+    raw_yaml = yaml.safe_dump(raw, allow_unicode=True)
+
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, raw_yaml)
+
+    assert result["valid"] is True
+    assert result["creates_revision"] is True
+    types = [c["type"] for c in result["summary"]["edge_changes"]]
+    assert sorted(types) == ["added", "removed"]
+    assert "reordered" not in types
+    assert not any(flag["code"] == "edges_reordered" for flag in result["summary"]["risk_flags"])
 
 
 def test_compare_no_change_roundtrip_stays_empty(tmp_path):

@@ -310,6 +310,16 @@ def workflow_definition_from_dict(
         # Snapshots store the dataclass field name; the yaml spelling is ``type``.
         if "node_type" in raw_node:
             raw_node["type"] = raw_node.pop("node_type")
+        # #458: ``WorkflowReduceSpec.from_node`` serializes as ``from_node``
+        # in asdict snapshots, but the yaml spelling the loader reads is
+        # ``from`` (mirrors the node_type translation above). Existing
+        # snapshots all carry ``from_node``; a ``from`` key passes through
+        # unchanged (and wins if both ever appear).
+        raw_reduce = raw_node.get("reduce")
+        if isinstance(raw_reduce, dict) and "from_node" in raw_reduce:
+            translated = dict(raw_reduce)
+            translated.setdefault("from", translated.pop("from_node"))
+            raw_node["reduce"] = translated
         # asdict snapshots carry every field on every node: strip the
         # per-type placeholders a start/approval node must not declare, and
         # the default contract copy on non-start nodes.
