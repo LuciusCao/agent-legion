@@ -59,7 +59,7 @@ def _table_counts(conn, run_id: str) -> dict[str, int]:
 
 def test_counts_table_and_trigger_exist() -> None:
     # The autouse fixture already ran init_db at the current SCHEMA_VERSION.
-    # v76 (#437) split the row trigger into three single-event STATEMENT
+    # v77 (#437) split the row trigger into three single-event STATEMENT
     # triggers (transition tables disallow column lists and multi-event
     # triggers); the legacy row-level name must be gone.
     with read_connection(TEST_DATABASE_URL) as conn:

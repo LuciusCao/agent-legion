@@ -68,8 +68,8 @@ def test_runs_baseline_shape() -> None:
 
 def _rebuild_v52_shape(conn) -> None:
     """Undo v53 so init_db replays the upgrade: v52 jobs + job_batches."""
-    # The v73/v76 run-status triggers read run_id (the v73 row trigger via
-    # NEW, the v76 statement triggers via the transition tables); a real
+    # The v73/v77 run-status triggers read run_id (the v73 row trigger via
+    # NEW, the v77 statement triggers via the transition tables); a real
     # v52 database never had the column, and leaving them attached through
     # the rename below breaks every jobs write of the fixture with
     # UndefinedColumn. Drop them like any other post-v52 artifact before

@@ -1,8 +1,8 @@
-"""Schema v76: statement-level job status count triggers (#437).
+"""Schema v77: statement-level job status count triggers (#437).
 
 The v36/v73 row-level triggers serialised every job status transition of one
 run (or workspace) onto a few hot counter rows and deadlocked the claim path
-under high concurrency. The v76 replacement is statement-level with
+under high concurrency. The v77 replacement is statement-level with
 transition tables: one trigger per statement per event, aggregating the net
 delta per (key, status) and applying it in fixed sorted order.
 
@@ -85,7 +85,7 @@ def _workspace_group_by(conn, workspace_id: str) -> dict[str, int]:
 
 
 def test_statement_triggers_are_statement_level() -> None:
-    # The v76 shape: three single-event STATEMENT triggers per family; the
+    # The v77 shape: three single-event STATEMENT triggers per family; the
     # legacy row-level trigger names must be gone.
     with read_connection(TEST_DATABASE_URL) as conn:
         rows = conn.execute(
@@ -109,7 +109,7 @@ def test_statement_triggers_are_statement_level() -> None:
 
 def test_single_statement_multi_row_net_delta() -> None:
     # One UPDATE flipping many rows across statuses is ONE trigger fire with
-    # one aggregated delta per (run_id, status) — the v76 batching property.
+    # one aggregated delta per (run_id, status) — the v77 batching property.
     with write_transaction(TEST_DATABASE_URL) as conn:
         ids = _seed(conn, "sc76-ws-net", "sc76-run-net")
         conn.execute(
@@ -181,7 +181,7 @@ def test_interleaved_updates_neither_deadlock_nor_drift() -> None:
     # The #437 reproduction: two connections flip the SAME run's jobs between
     # opposite status directions with opposite scan orders — the exact shape
     # that deadlocked the v73 row trigger's two-step (subtract old, add new)
-    # lock order. The v76 fixed-order delta application must complete without
+    # lock order. The v77 fixed-order delta application must complete without
     # 40P01 and leave counters == group-by.
     run_id = "sc76-run-race"
     with write_transaction(TEST_DATABASE_URL) as conn:
@@ -205,15 +205,15 @@ def test_interleaved_updates_neither_deadlock_nor_drift() -> None:
         thread.start()
     for thread in threads:
         thread.join()
-    assert errors == [], f"deadlock under the v76 statement triggers: {errors}"
+    assert errors == [], f"deadlock under the v77 statement triggers: {errors}"
     with read_connection(TEST_DATABASE_URL) as conn:
         assert _run_counts(conn, run_id) == _group_by(conn, run_id)
         assert _workspace_counts(conn, "sc76-ws-race") == _workspace_group_by(conn, "sc76-ws-race")
 
 
-def test_migration_recorded_as_v76() -> None:
-    # The chain tail pin lives with the newest migration's module (v76).
-    assert SCHEMA_VERSION == 76
+def test_migration_recorded_as_v77() -> None:
+    # The chain tail pin lives with the newest migration's module (v77).
+    assert SCHEMA_VERSION == 77
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
