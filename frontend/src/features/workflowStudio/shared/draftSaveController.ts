@@ -29,6 +29,18 @@ export type PutWorkflowDraftFn = (
   keepalive: boolean
 ) => Promise<WorkflowDraftStoreResponse>
 
+/** #429 收尾 P2-1：flushNow 的结果——本次 flush 是否把最新内容落到了服务端。
+ * controller 全路径 resolve 不 reject（失败态进 state），调用方（agent 发布
+ * 确认）必须在 await 之后读这个终态，不能读 React useState 快照的
+ * studio.draftSave——闭包捕获的是点击那一刻的 state，await 期间 PUT 失败
+ * 落定的 error 态快照链路看不见，守卫会漏过并发布旧草稿。 */
+export type DraftSaveFlushResult = {
+  /** true：本次 flush 的 PUT 成功（最新内容已落盘）。 */
+  ok: boolean
+  /** 落定后的 controller 终态（live 引用，非 React 快照）。 */
+  state: DraftSaveState
+}
+
 /** 保存状态的一句话提示（顶栏状态文本）：saving/error/pending 与 GET 失败
  * 警示优先，否则带最近保存时间（HH:MM，本地时区）。 */
 export function draftSaveText(save: DraftSaveState | undefined): string | null {
@@ -115,13 +127,17 @@ export class DraftSaveController {
    * pagehide 场景，此时不重试（页面即将销毁）。
    * #429 四轮 P2-1：返回本次 PUT 的 promise（含内部重试链）——调用方可以
    * await 到「落盘完成」再发起依赖服务端草稿的操作（agent 发布确认）。
-   * no-op（无 pending）返回已 resolve 的 promise；PUT 被后续编辑作废
-   * （requestId 过期）时也 resolve——该次保存已不代表最新内容，等待方应
-   * 继续走自己的重读校准。keepalive 模式（页面即将销毁）无有意义的完成
-   * 时序，同样返回 promise 但调用方不该依赖它。 */
-  flushNow(options?: { keepalive?: boolean }): Promise<void> {
+   * #429 收尾 P2-1：promise 携带本次 flush 的终态（ok + controller 的 live
+   * state）——失败不 reject（错误态已进 state，UI 有可见警示），等待方据
+   * result.ok 决定是否继续，而不是读 React 快照里的 status（闭包捕获的是
+   * 调用前的值，await 期间落定的 error 态快照链路看不见——守卫会漏过）。
+   * no-op（无 pending）返回 ok:true（无内容需要落盘 = 无失败）；PUT 被后续
+   * 编辑作废（requestId 过期）时 ok:true——该次保存已不代表最新内容，等待
+   * 方应继续走自己的重读校准。keepalive 模式（页面即将销毁）无有意义的完成
+   * 时序，同样返回结果但调用方不该依赖它。 */
+  flushNow(options?: { keepalive?: boolean }): Promise<DraftSaveFlushResult> {
     const pending = this.pendingSave
-    if (!pending) return Promise.resolve()
+    if (!pending) return Promise.resolve(this.successResult())
     this.clearTimer()
     this.pendingSave = null
     const keepalive =
@@ -155,41 +171,52 @@ export class DraftSaveController {
    * 的调用方 await——失败同样 resolve（错误态已进 state，UI 有可见警示；
    * 等待方据此走重读校准/放弃后续操作，而不是把保存错误混进自己的错误
    * 流）。迟到的响应/重试发现 requestId 过期时 resolve（该次保存已被更新
-   * 的编辑取代，不构成对等待方的失败信号）。 */
+   * 的编辑取代，不构成对等待方的失败信号）。#429 收尾 P2-1：resolve 值是
+   * 本次 flush 的终态结果（ok + live state），见 DraftSaveFlushResult。 */
   private save(
     yaml: string,
     requestId: number,
     retriesLeft: number,
     keepalive: boolean
-  ): Promise<void> {
+  ): Promise<DraftSaveFlushResult> {
     this.inFlight = requestId
     this.setState({ ...this.state, status: 'saving' })
-    return new Promise<void>((resolve) => {
+    return new Promise<DraftSaveFlushResult>((resolve) => {
       this.put(yaml, keepalive)
         .then((response) => {
           if (this.inFlight === requestId) this.inFlight = 0
-          if (this.requestCounter !== requestId) return resolve()
+          if (this.requestCounter !== requestId) return resolve(this.successResult())
           this.lastPersisted = yaml
           this.setState({
             status: 'saved',
             savedAt: response.updated_at ?? null,
           })
-          resolve()
+          resolve(this.successResult())
         })
         .catch(() => {
           if (this.inFlight === requestId) this.inFlight = 0
-          if (this.requestCounter !== requestId) return resolve()
+          if (this.requestCounter !== requestId) return resolve(this.successResult())
           this.setState({ ...this.state, status: 'error' })
           if (retriesLeft > 0) {
             const attempt = MAX_PUT_RETRIES - retriesLeft + 1
             this.retryTimer = setTimeout(() => {
               this.retryTimer = null
-              if (this.requestCounter !== requestId) return resolve()
+              if (this.requestCounter !== requestId) return resolve(this.successResult())
               this.save(yaml, requestId, retriesLeft - 1, false).then(resolve)
             }, RETRY_BASE_MS * attempt)
-          } else resolve()
+          } else resolve(this.failureResult())
         })
     })
+  }
+
+  /** no-op / 过期作废：等待方继续自己的重读校准（不构成失败信号）。 */
+  private successResult(): DraftSaveFlushResult {
+    return { ok: true, state: this.state }
+  }
+
+  /** 重试耗尽仍失败：等待方（发布确认）必须中止，不发布未落盘的旧草稿。 */
+  private failureResult(): DraftSaveFlushResult {
+    return { ok: false, state: this.state }
   }
 
   private setState(next: DraftSaveState) {

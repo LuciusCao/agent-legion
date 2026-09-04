@@ -3,6 +3,7 @@ import type {
   WorkflowRevisionDetailResponse,
   WorkflowRevisionSummary,
 } from '../../../types'
+import type { DraftSaveFlushResult, DraftSaveState } from './draftSaveController'
 import { useServerDraftApply } from './useServerDraftApply'
 import { useWorkflowDraftPersistence } from './useWorkflowDraftPersistence'
 import { useWorkflowDraftQuery } from './useWorkflowDraftQuery'
@@ -10,6 +11,13 @@ import { useWorkflowStudioDraft } from './useWorkflowStudioDraft'
 
 /** 草稿组合：useWorkflowStudioDraft（内存草稿）+ 服务端草稿查询/应用 +
  * 自动持久化。useWorkflowStudio 只与本 hook 对接，保持各自文件的体积预算。 */
+export type DraftStoreControls = {
+  draftSave: DraftSaveState
+  /** #429 收尾 P2-1：flush 的返回值携带本次落盘的终态（ok=false 即失败），
+   * 发布确认的守卫读它——不读 React useState 快照的 draftSave.status。 */
+  flushDraftSave: (keepalive?: boolean) => Promise<DraftSaveFlushResult>
+}
+
 export function useWorkflowStudioDraftStore(
   workspaceId: string | undefined,
   originalYaml: string,

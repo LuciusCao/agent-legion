@@ -27,9 +27,17 @@ import { useUiStore } from '../../../stores/uiStore'
  * #429 终局 P2-2（flush 失败的真实形态）：DraftSaveController.flushNow 全
  * 路径 resolve 不 reject——保存失败只进 state（status='error'），旧守卫的
  * catch 永远等不到 flush 的 reject，是死代码。失败的真实形态是 resolve-
- * but-failed：flush 返回后必须查 studio.draftSave.status，error 即中止
- * confirm（重读草稿读到的仍是旧值，发布的会是用户没审过的旧草稿——hash
- * 只闭合「服务端≠请求」方向，挡不住这条）。 */
+ * but-failed：flush 返回后必须查终态，error 即中止 confirm（重读草稿读到
+ * 的仍是旧值，发布的会是用户没审过的旧草稿——hash 只闭合「服务端≠请求」
+ * 方向，挡不住这条）。
+ * #429 收尾 P2-1（终态的读法）：上一轮查的是 studio.draftSave.status——
+ * 那是 React useState 快照链路（controller.subscribe → setState），
+ * confirmAgentRequest 闭包捕获的是点击那一刻的 state 对象，await flush
+ * 期间落定的 error 态不会出现在闭包里——守卫只对「点击前已 error」生效，
+ * 「本次 flush 的 PUT 在 await 期间失败」会漏过（发布旧草稿，且请求 hash
+ * 绑的就是旧草稿、后端 hash 挡不住）。现在 flushDraftSave 的 resolve 值
+ * 携带本次 flush 的终态（DraftSaveFlushResult，controller 的 live 状态），
+ * 守卫读 result.ok。 */
 export function AgentPublishRequestDialog() {
   const studio = useStudioState()
   const view = useStudioView()
@@ -41,10 +49,10 @@ export function AgentPublishRequestDialog() {
     if (!workspaceId) return
     try {
       // 完成序：flush 的 PUT resolve 之后才重读服务端草稿、才调确认端点。
-      await studio.flushDraftSave?.()
-      // flush 失败不 reject（终局 P2-2）：失败态只进 draftSave.state——
-      // resolve 之后显式查 status，error 即按失败处理。
-      if (studio.draftSave?.status === 'error')
+      // 收尾 P2-1：resolve 值是本次 flush 的终态（ok=false 即本次落盘失败）
+      // ——不读 studio.draftSave 快照（闭包捕获的是点击前的值）。
+      const flushed = await studio.flushDraftSave?.()
+      if (flushed && !flushed.ok)
         throw new Error('draft save failed')
       await fetchWorkflowDraft(workspaceId)
     } catch {

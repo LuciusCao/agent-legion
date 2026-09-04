@@ -87,9 +87,10 @@ const studioState = {
   compareSummary: summaryWithChange,
   // #429 三轮 P1-3：确认前 flush 画布草稿保存（对话框经
   // useAgentPublishRequest 传入；flushNow 是 DraftSaveController 的方法）。
-  flushDraftSave: vi.fn(),
-  // #429 终局 P2-2：flush 失败不 reject（DraftSaveController 全路径
-  // resolve，失败态进 state.status）——confirm 链改查这里。
+  // #429 收尾 P2-1：flush 的 resolve 值携带本次落盘终态
+  // （DraftSaveFlushResult）——默认「无内容可发」的 no-op 形态。
+  flushDraftSave: vi.fn().mockResolvedValue({ ok: true, state: null }),
+  // 顶栏状态文本的展示位（守卫不再读它——React 快照在 await 期间不更新）。
   draftSave: { status: 'saved' as const, savedAt: null },
 }
 
@@ -169,7 +170,10 @@ describe('AgentPublishRequestDialog', () => {
   it('confirm calls the confirm endpoint, not the manual publishDraft action', async () => {
     mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
     mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: 'key: w\n' })
-    studioState.flushDraftSave = vi.fn().mockResolvedValue(undefined)
+    studioState.flushDraftSave = vi.fn().mockResolvedValue({
+      ok: true,
+      state: { status: 'saved', savedAt: null },
+    })
     mocks.confirmPublishRequest.mockResolvedValue({
       ...pendingRecord(),
       status: 'confirmed',
@@ -198,11 +202,11 @@ describe('AgentPublishRequestDialog', () => {
     let releasePut: (() => void) | null = null
     studioState.flushDraftSave = vi.fn(
       () =>
-        new Promise<void>((resolve) => {
+        new Promise<{ ok: boolean; state: null }>((resolve) => {
           order.push('flush-put-sent')
           releasePut = () => {
             order.push('flush-put-done')
-            resolve()
+            resolve({ ok: true, state: null })
           }
         })
     )
@@ -249,7 +253,10 @@ describe('AgentPublishRequestDialog', () => {
   it('confirm does not proceed when the server draft re-read fails', async () => {
     // #429 四轮 P2-1：fetchWorkflowDraft reject 时旧实现 confirm 静默不发
     // 生。现在必须提示错误且绝不调确认端点（不发布未确认落盘的内容）。
-    studioState.flushDraftSave = vi.fn().mockResolvedValue(undefined)
+    studioState.flushDraftSave = vi.fn().mockResolvedValue({
+      ok: true,
+      state: { status: 'saved', savedAt: null },
+    })
     mocks.fetchWorkflowDraft.mockRejectedValue(new Error('draft read failed'))
     mocks.confirmPublishRequest.mockResolvedValue({
       ...pendingRecord(),
@@ -277,8 +284,11 @@ describe('AgentPublishRequestDialog', () => {
     // rejecting mock 钉的是生产中不存在的契约（catch 守卫不可达）。现在
     // flush resolve + state.status='error' 必须中止 confirm：否则重读到的
     // 是旧草稿，confirm 会发布用户没审过的版本（hash 只闭合「服务端≠
-    // 请求」方向）。
-    studioState.flushDraftSave = vi.fn().mockResolvedValue(undefined)
+    // 请求」方向）。这是「点击前已 error」的既有形态（收尾 P2-1 后仍被
+    // 覆盖：flush 对 error 态重新调度后仍失败，result.ok=false）。
+    studioState.flushDraftSave = vi
+      .fn()
+      .mockResolvedValue({ ok: false, state: { status: 'error', savedAt: null } })
     mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
     mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: 'key: w\n' })
     renderDialog({ draftSave: { status: 'error', savedAt: null } })
@@ -294,10 +304,40 @@ describe('AgentPublishRequestDialog', () => {
     expect(mocks.confirmPublishRequest).not.toHaveBeenCalled()
   })
 
+  it('confirm does not proceed when the flush PUT fails DURING the await (live result, not snapshot)', async () => {
+    // #429 收尾 P2-1 回归钉：点击那一刻 studio.draftSave.status 还是
+    // 'pending'（React useState 快照），本次 flush 的 PUT 在 await 期间
+    // 失败——resolve-but-failed（DraftSaveController 全路径 resolve，失败
+    // 只进 controller state）。旧守卫读闭包里的快照（pending/saving），
+    // error 永远不出现，守卫漏过 → confirm 发布旧草稿。现在守卫读
+    // flush 的 resolve 值（live 终态）：ok=false 必须中止 confirm。
+    studioState.flushDraftSave = vi
+      .fn()
+      .mockResolvedValue({ ok: false, state: { status: 'error', savedAt: null } })
+    mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: 'key: w\n' })
+    // 快照链路的起点：点击前状态健康（saved）——不是 error。快照在
+    // await 期间不会更新（React setState 不改闭包捕获的对象）。
+    renderDialog({ draftSave: { status: 'saved', savedAt: null } })
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '确认发布' })
+    )
+
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toContain('草稿尚未保存成功')
+    )
+    expect(mocks.fetchWorkflowDraft).not.toHaveBeenCalled()
+    expect(mocks.confirmPublishRequest).not.toHaveBeenCalled()
+  })
+
   it('confirm proceeds when the flush save resolves and the state is healthy', async () => {
-    // #429 终局 P2-2 的另一半：flush resolve + state 非 error（saved）——
-    // 落盘成功，confirm 正常继续（重读草稿 → 确认端点）。
-    studioState.flushDraftSave = vi.fn().mockResolvedValue(undefined)
+    // #429 终局 P2-2 的另一半：flush resolve + ok=true——落盘成功，
+    // confirm 正常继续（重读草稿 → 确认端点）。
+    studioState.flushDraftSave = vi.fn().mockResolvedValue({
+      ok: true,
+      state: { status: 'saved', savedAt: null },
+    })
     mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: 'key: w\n' })
     mocks.confirmPublishRequest.mockResolvedValue({
       ...pendingRecord(),
