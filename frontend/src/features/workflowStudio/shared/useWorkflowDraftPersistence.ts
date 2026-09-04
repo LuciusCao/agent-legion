@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { putWorkflowDraft } from '../../../api'
 import type { WorkflowDraftStoreResponse } from '../../../api/workflowDraft'
 import { DraftSaveController, IDLE_DRAFT_SAVE } from './draftSaveController'
-import type { DraftSaveFlushResult, DraftSaveState } from './draftSaveController'
+import type {
+  DraftSaveFlushResult,
+  DraftSaveState,
+} from './draftSaveController'
 import { useDraftUnloadGuard } from './useDraftUnloadGuard'
 
 export type {

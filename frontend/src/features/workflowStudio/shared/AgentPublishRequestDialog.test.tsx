@@ -286,9 +286,10 @@ describe('AgentPublishRequestDialog', () => {
     // 是旧草稿，confirm 会发布用户没审过的版本（hash 只闭合「服务端≠
     // 请求」方向）。这是「点击前已 error」的既有形态（收尾 P2-1 后仍被
     // 覆盖：flush 对 error 态重新调度后仍失败，result.ok=false）。
-    studioState.flushDraftSave = vi
-      .fn()
-      .mockResolvedValue({ ok: false, state: { status: 'error', savedAt: null } })
+    studioState.flushDraftSave = vi.fn().mockResolvedValue({
+      ok: false,
+      state: { status: 'error', savedAt: null },
+    })
     mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
     mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: 'key: w\n' })
     renderDialog({ draftSave: { status: 'error', savedAt: null } })
@@ -311,9 +312,10 @@ describe('AgentPublishRequestDialog', () => {
     // 只进 controller state）。旧守卫读闭包里的快照（pending/saving），
     // error 永远不出现，守卫漏过 → confirm 发布旧草稿。现在守卫读
     // flush 的 resolve 值（live 终态）：ok=false 必须中止 confirm。
-    studioState.flushDraftSave = vi
-      .fn()
-      .mockResolvedValue({ ok: false, state: { status: 'error', savedAt: null } })
+    studioState.flushDraftSave = vi.fn().mockResolvedValue({
+      ok: false,
+      state: { status: 'error', savedAt: null },
+    })
     mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
     mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: 'key: w\n' })
     // 快照链路的起点：点击前状态健康（saved）——不是 error。快照在

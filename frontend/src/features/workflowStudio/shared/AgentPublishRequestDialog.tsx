@@ -52,8 +52,7 @@ export function AgentPublishRequestDialog() {
       // 收尾 P2-1：resolve 值是本次 flush 的终态（ok=false 即本次落盘失败）
       // ——不读 studio.draftSave 快照（闭包捕获的是点击前的值）。
       const flushed = await studio.flushDraftSave?.()
-      if (flushed && !flushed.ok)
-        throw new Error('draft save failed')
+      if (flushed && !flushed.ok) throw new Error('draft save failed')
       await fetchWorkflowDraft(workspaceId)
     } catch {
       // flush/重读失败：中止 confirm（宁可让用户重试，不发布未确认落盘

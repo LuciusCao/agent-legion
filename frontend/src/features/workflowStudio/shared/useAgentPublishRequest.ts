@@ -156,8 +156,7 @@ export function useAgentPublishRequest(
       // 的红 toast 对「输给 confirm」是误导（发布正在进行，取消本来就该
       // 不生效）；静默 refetchPending，行态自己说话（confirming/confirmed
       // 的回执或对话框状态会自然呈现）。其他错误（网络/5xx）照旧提示。
-      const status = (error as { status?: number }).status
-      if (status !== 404) {
+      if ((error as { status?: number }).status !== 404) {
         showToast(
           `取消失败：${(error instanceof Error && error.message) || '网络错误'}`,
           'error'
