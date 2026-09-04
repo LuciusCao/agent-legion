@@ -36,6 +36,7 @@ class FakeConnection:
         self.acquired = acquired
         self.fail = fail
         self.executed: list[str] = []
+        self.commits = 0
         self.closed = False
 
     def execute(self, sql: str, params: object = None) -> FakeResult:
@@ -45,6 +46,9 @@ class FakeConnection:
         if "pg_try_advisory_lock" in sql:
             return FakeResult(self.acquired)
         return FakeResult(True)
+
+    def commit(self) -> None:
+        self.commits += 1
 
     def close(self) -> None:
         self.closed = True
@@ -71,10 +75,23 @@ def test_probe_acquires_lock_and_holds_connection(fake_connect) -> None:
     # The connection must stay checked out for the probe's lifetime.
     assert fake.closed is False
     assert "pg_try_advisory_lock" in fake.executed[0]
+    # #433: the try-lock SELECT opened a transaction on the held-forever
+    # connection; leaving it open pins backend_xmin for the process lifetime.
+    assert fake.commits == 1
 
     probe.close()
     assert fake.closed is True
     assert "pg_advisory_unlock" in fake.executed[-1]
+
+
+def test_probe_commits_the_try_lock_transaction_on_conflict(fake_connect) -> None:
+    """The conflict loser also holds its connection for the process lifetime
+    (#433 applies to it just the same), so its transaction must be closed."""
+    fake = fake_connect(acquired=False)
+    probe = SingleReplicaProbe(_DSN)
+
+    assert probe.probe() is False
+    assert fake.commits == 1
 
 
 def test_probe_conflict_logs_warning(fake_connect, caplog: pytest.LogCaptureFixture) -> None:
