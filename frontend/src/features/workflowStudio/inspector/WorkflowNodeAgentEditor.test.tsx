@@ -385,12 +385,14 @@ describe('WorkflowNodeAgentEditor', () => {
     })
 
     expect(
-      screen.getByText('Agent 目录刷新中，编辑暂不可用（输入已保留）...')
+      screen.getByText('Agent 目录刷新中，编辑暂缓...')
     ).toBeInTheDocument()
     // 表单仍挂载：输入值未丢，也没有重复拉详情（AgentEditor 未重挂）。
-    expect(screen.getByLabelText('config_schema（JSON，可空）')).toHaveValue(
-      '{"x":1}'
-    )
+    // 终局收尾 P3-1：冻结容器带 inert（键盘焦点/读屏与指针一起阻断，
+    // CSS pointer-events 只挡指针）——编辑器在 inert 子树内且值未丢。
+    const frozenField = screen.getByLabelText('config_schema（JSON，可空）')
+    expect(frozenField).toHaveValue('{"x":1}')
+    expect(frozenField.closest('[inert]')).not.toBeNull()
     expect(mocks.fetchAgentDefinition).toHaveBeenCalledTimes(1)
 
     // 重取完成（ready 恢复）：提示消失，输入保留，可继续编辑。
@@ -398,8 +400,12 @@ describe('WorkflowNodeAgentEditor', () => {
       rerender(view('ready'))
     })
     expect(
-      screen.queryByText('Agent 目录刷新中，编辑暂不可用（输入已保留）...')
+      screen.queryByText('Agent 目录刷新中，编辑暂缓...')
     ).not.toBeInTheDocument()
+    // inert 随冻结移除，键盘路径恢复可达。
+    expect(
+      screen.getByLabelText('config_schema（JSON，可空）').closest('[inert]')
+    ).toBeNull()
     fireEvent.change(screen.getByLabelText('config_schema（JSON，可空）'), {
       target: { value: '{"x":2}' },
     })
@@ -434,12 +440,13 @@ describe('WorkflowNodeAgentEditor', () => {
     })
 
     expect(
-      screen.getByText('Agent 目录刷新失败，重试前编辑暂不可用（输入已保留）。')
+      screen.getByText('Agent 目录刷新失败，重试前编辑暂缓。')
     ).toBeInTheDocument()
     expect(screen.getByRole('alert')).toBeInTheDocument()
-    expect(screen.getByLabelText('config_schema（JSON，可空）')).toHaveValue(
-      '{"x":1}'
-    )
+    // 终局收尾 P3-1：error 侧冻结同样带 inert（提示条在 inert 区外仍可读）。
+    const frozenField = screen.getByLabelText('config_schema（JSON，可空）')
+    expect(frozenField).toHaveValue('{"x":1}')
+    expect(frozenField.closest('[inert]')).not.toBeNull()
     expect(mocks.fetchAgentDefinition).toHaveBeenCalledTimes(1)
 
     act(() => {
@@ -484,7 +491,7 @@ describe('WorkflowNodeAgentEditor', () => {
       rerender(view('pending'))
     })
     expect(
-      screen.getByText('Agent 目录刷新中，编辑暂不可用（输入已保留）...')
+      screen.getByText('Agent 目录刷新中，编辑暂缓...')
     ).toBeInTheDocument()
     expect(screen.getByLabelText('config_schema（JSON，可空）')).toHaveValue(
       '{"x":1}'

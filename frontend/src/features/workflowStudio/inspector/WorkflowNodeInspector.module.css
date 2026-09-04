@@ -48,11 +48,17 @@
   color: #43474e;
 }
 /* #426 终局复审 P1：ready 后的重取期不卸载编辑器（未保存输入会随
- * useState 销毁），保挂载 + 提示条 + 冻结遮罩；首次 settle 前用 .empty。 */
-.refetchNotice,
-.frozen {
+ * useState 销毁），保挂载 + 提示条 + 冻结遮罩；首次 settle 前用 .empty。
+ * 终局收尾 NIT：共享规则拆开——提示条是纯文字状态条（视觉沿用 .empty），
+ * 冻结容器只管交互阻断与视觉弱化，不再互相捎带声明。 */
+.refetchNotice {
   font-size: 12px;
   color: #43474e;
+}
+/* 终局收尾 P3-1：inert 属性为主（指针/键盘焦点/读屏一起断，现代浏览器
+ * 均支持）；CSS pointer-events:none 为不支持 inert 的老浏览器兜底，
+ * opacity 是「旧值不可信」的降不透明度弱化。 */
+.frozen {
   pointer-events: none;
   opacity: 0.6;
 }

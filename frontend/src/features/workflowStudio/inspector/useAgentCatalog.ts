@@ -26,7 +26,8 @@ import { useAgentDefinitions } from './useAgentDefinitions'
 // 聊天每轮 turn_end 都失效 studioAgentCatalog + agentDefinitions 两条查询
 //（Studio 支持边聊边改），即一次会话内翻转与对话轮数同频；另有
 // refetchOnWindowFocus（staleTime 30s，数据过期才触发）与编辑器自身
-// 保存/发布/回滚的 refresh。翻转后 bindingStatus 回 pending 的代价不是
+// 保存/发布/回滚/归档的 refresh（handleArchived 同走 onRefresh
+// invalidate）。翻转后 bindingStatus 回 pending 的代价不是
 // 「占位闪烁」——是 WorkflowNodeAgentEditor 条件卸载整个编辑器、丢掉
 // 未保存的表单输入（AgentEditor 用本地 useState，无持久化）。修复后
 // 翻转语义保留（堵住旧缓存可操作窗口），消费端（WorkflowNodeAgentGate）
