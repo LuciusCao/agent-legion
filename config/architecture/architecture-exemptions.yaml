@@ -1,5 +1,28 @@
 exemptions:
 - check: architecture.file_budget
+  path: worker/supervisor.py
+  reason: The proxy config injection (#444) adds the env override dict at
+    the single executor spawn site — the one place where os.environ is
+    snapshotted into the child — so proxy semantics (configured proxy vs
+    stripped default) apply to the executor and all agent subprocesses in
+    one hop. Moving the Popen call out just to dodge 2 lines would split
+    supervision state (_process/_generation) across modules; revisit when
+    supervisor grows its next feature, not for this.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/444
+  ceiling: 237
+- check: architecture.file_budget
+  path: worker/worker_declarations.py
+  reason: The deprecated-capabilities normalization moved here from
+    config_validation (#444 rework) to free that file's zero headroom for
+    the proxy field; labels/models/capabilities are one family of
+    scheduling declarations and share this validation module. The move is
+    net-zero for the package; remove this exemption together with the
+    capabilities compat key itself (issue #284) instead of re-splitting.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/284
+  ceiling: 68
+- check: architecture.file_budget
   path: server/app/routes/artifacts.py
   reason: Artifact routes authenticate the per-Worker token used by Agent
     execution transport, and the per-file upload path grew past the plain

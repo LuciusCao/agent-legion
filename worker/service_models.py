@@ -29,6 +29,9 @@ class WorkerConfigPayload(BaseModel):
     poll_interval_seconds: float | None = None
     heartbeat_interval_seconds: float | None = None
     shutdown_grace_seconds: float | None = None
+    # 出网代理（#444）：空串/未填 = 直连（默认）；http(s)/socks5(h) URL =
+    # executor 与 agent 子进程出网经代理。变更走重启路径生效。
+    proxy: str | None = None
     # 兼容通道：等价于向 /api/register-tokens 添加一个 token（老客户端/脚本）。
     register_token: str | None = None
 

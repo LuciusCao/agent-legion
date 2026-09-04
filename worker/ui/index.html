@@ -204,6 +204,7 @@
                     <label>拉取间隔（秒）<input name="poll_interval_seconds" type="number" min="0.2" step="0.1" /></label>
                     <label>心跳间隔（秒）<input name="heartbeat_interval_seconds" type="number" min="0.2" step="0.1" /></label>
                     <label>停止宽限（秒）<input name="shutdown_grace_seconds" type="number" min="0.2" step="0.1" /></label>
+                    <label class="wide">出网代理 <span class="hint">http(s)/socks5(h) URL，可含认证；留空 = 直连（默认，忽略继承的代理环境变量）；填写后执行进程与 agent 子进程出网经代理，保存后重启生效</span><input name="proxy" type="text" placeholder="http://127.0.0.1:7897" /></label>
                   </div>
                 </details>
                 <div id="form-error" class="error" role="alert"></div>

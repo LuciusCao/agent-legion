@@ -791,6 +791,7 @@ if (hasDom) {
         poll_interval_seconds: numberField(data, "poll_interval_seconds"),
         heartbeat_interval_seconds: numberField(data, "heartbeat_interval_seconds"),
         shutdown_grace_seconds: numberField(data, "shutdown_grace_seconds"),
+        proxy: (data.get("proxy") || "").trim(),
       };
       const result = await api("/api/config", { method: "PUT", body: JSON.stringify(payload) });
       renderStatus(result.status);

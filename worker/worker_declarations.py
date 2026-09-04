@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_labels(labels: Any) -> dict[str, str]:
@@ -49,3 +52,19 @@ def normalize_models(values: Any, runtimes: Iterable[str]) -> list[dict[str, str
         {"runtime": runtime, "provider": provider, "model": model}
         for runtime, provider, model in sorted(models)
     ]
+
+
+def normalize_deprecated_capabilities(values: Any) -> list[str]:
+    """capabilities 已退役（issue #284）：deprecated no-op。
+
+    claim 准入不再按 capability 匹配——任意内容（含 "*"）都接受、不再
+    上报 Host，非空时打 deprecated warning；只保留形状校验防明显笔误。"""
+    if not isinstance(values, list):
+        raise ValueError("capabilities 必须是列表（该键已退役，建议整条删除）")
+    capabilities = sorted({str(value).strip() for value in values if str(value).strip()})
+    if capabilities:
+        logger.warning(
+            "config key 'capabilities' is deprecated and ignored (issue #284): "
+            "claim admission no longer matches capabilities; remove the key"
+        )
+    return capabilities
