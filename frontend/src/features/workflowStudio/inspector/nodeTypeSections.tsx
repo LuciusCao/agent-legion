@@ -34,7 +34,7 @@ export const NODE_TYPE_SECTIONS: Record<SwitchableNodeType, SectionSpec> = {
       DependencySection,
     ],
   },
-  // agent：基本设置 → 执行能力（Agent 配置 + 编辑入口）→
+  // agent：基本设置 → 执行能力（Agent 配置 + 内联编辑面板，#409）→
   // 节点配置 → 数据契约 → 依赖。Agent 的有效 config_schema 归 Agent
   // Definition 管理，不渲染节点 YAML 的 schema 编辑区（#406）。
   agent: {
@@ -85,8 +85,17 @@ function ConfigSchemaSection(props: InspectorSectionProps) {
     />
   )
 }
+// agent/code 的执行能力区。#426 review P2：目录查询 settle 信号经
+// InspectorSectionProps 透传给 ExecutionSection 的专属 prop（本文件的注册表
+// 组件按 name 拿 key，专属 prop 放在 spread 之后防同名覆盖）。
 function ExecutionSection(props: InspectorSectionProps) {
-  return <WorkflowNodeExecutionSection node={props.details.node} {...props} />
+  return (
+    <WorkflowNodeExecutionSection
+      {...props}
+      node={props.details.node}
+      agentCatalogSettle={props.agentCatalogSettle}
+    />
+  )
 }
 function CodeSection(props: InspectorSectionProps) {
   return (
