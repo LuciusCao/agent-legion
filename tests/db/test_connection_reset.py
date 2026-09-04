@@ -41,8 +41,10 @@ from tests.postgres_support import TEST_DATABASE_URL
 def _reset_leak_telemetry():
     """Isolate the dedup window between tests (state is process-global)."""
     pool_reset._reset_warn_last.clear()
+    pool_reset._reset_warn_suppressed.clear()
     yield
     pool_reset._reset_warn_last.clear()
+    pool_reset._reset_warn_suppressed.clear()
 
 
 def _capture_leak_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
@@ -127,6 +129,11 @@ def test_dirty_return_is_attributed_and_rolled_back(
     assert "INTRANS" in warnings[0]
     assert "leak origin:" in warnings[0]
     assert "unknown" not in warnings[0]  # origin was recorded at checkout
+    # Attribution quality (#439 review): the origin must name the business
+    # frame that borrowed the connection — here this very test function —
+    # not just any non-unknown plumbing path (verified against generator
+    # paths too: contextmanager frames are skipped, the caller is reached).
+    assert "test_dirty_return_is_attributed_and_rolled_back" in warnings[0]
 
 
 def test_dirty_return_warning_is_deduplicated_per_origin(
@@ -171,19 +178,31 @@ def test_failing_commit_still_releases_checkout(
 
 
 def test_failing_rollback_still_releases_read_checkout(
+    caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """read_connection's finally must not skip close() when the rollback
+    """read_connection's finally must not skip the release when the rollback
     itself fails on a broken connection — the exception would otherwise
-    strand the checkout (#438)."""
+    strand the checkout (#438). The rollback failure is observed, not
+    silenced (#439): a rollback that cannot run means the connection is
+    almost certainly broken, and nothing else reports it if the pool
+    return succeeds."""
 
     def exploding_rollback(self: Any) -> None:
         raise RuntimeError("rollback failed")
 
     monkeypatch.setattr("server.app.db.connection.DatabaseConnection.rollback", exploding_rollback)
+    caplog.set_level(logging.WARNING, logger="server.app.db.transaction")
     with read_connection(TEST_DATABASE_URL) as conn:
         conn.execute("select 1").fetchone()
     assert conn._closed is True
+    rollback_warnings = [
+        record
+        for record in caplog.records
+        if record.levelno == logging.WARNING and "rollback failed" in record.getMessage()
+    ]
+    assert len(rollback_warnings) == 1
+    assert rollback_warnings[0].exc_info is not None  # traceback kept
 
 
 def test_no_idle_in_transaction_backend_after_failure() -> None:
@@ -231,3 +250,91 @@ def test_pool_reset_callback_installed() -> None:
         assert pool._reset is pool_reset.reset_connection
     finally:
         close_database_pools()
+
+
+def test_close_failure_does_not_mask_original_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#439: a raise from a finally-block close() replaces the original
+    exception at the caller — the deadlock/commit error the caller actually
+    needs. The release path must protect close() so the original propagates."""
+
+    def exploding_commit(self: Any) -> None:
+        raise RuntimeError("commit failed")
+
+    def exploding_close(self: Any) -> None:
+        # Simulates a close that fails AFTER flipping the closed flag (the
+        # real close marks _closed before the putconn round trip can raise).
+        self._closed = True
+        raise RuntimeError("close also failed")
+
+    monkeypatch.setattr("server.app.db.connection.DatabaseConnection.commit", exploding_commit)
+    monkeypatch.setattr("server.app.db.connection.DatabaseConnection.close", exploding_close)
+    conn = connect_database(TEST_DATABASE_URL)
+    with pytest.raises(RuntimeError, match="commit failed"), conn:
+        conn.execute("select 1")
+    # The exception the caller sees is the ORIGINAL commit failure, not the
+    # close() failure that fired in the finally block (#439: finally raises
+    # replace, they do not chain).
+    assert conn._closed is True
+
+
+def test_suppressed_leak_hits_are_counted(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#439: rate-limiting must not erase leak frequency — after a suppressed
+    burst, the next emitted warning reports how many hits it swallowed, so
+    "one leak" and "leaking all minute" stay distinguishable."""
+    caplog.set_level(logging.WARNING, logger="server.app.db.pool_reset")
+    # Shrink the dedup window so the second burst is outside it without a
+    # real 60s sleep.
+    monkeypatch.setattr(pool_reset, "_RESET_WARN_EVERY_SECONDS", 0.05)
+    try:
+        for _ in range(3):  # first hit warns, next two are suppressed
+            conn = connect_database(TEST_DATABASE_URL)
+            conn.execute("select 1")
+            conn.close()
+        time.sleep(0.06)
+        conn = connect_database(TEST_DATABASE_URL)  # outside the window now
+        conn.execute("select 1")
+        conn.close()
+    finally:
+        monkeypatch.setattr(pool_reset, "_RESET_WARN_EVERY_SECONDS", 60.0)
+
+    warnings = _capture_leak_warnings(caplog)
+    assert len(warnings) == 2
+    # "(suppressed" — parenthesized suffix, not the origin text (which
+    # contains this test's own name).
+    assert "(suppressed" not in warnings[0]
+    assert "(suppressed 2 hits in the last interval)" in warnings[1]
+
+
+def test_origin_walk_is_hard_capped() -> None:
+    """#439: the collected-frames bound did not bound the walk itself — a
+    stack of only plumbing frames walked the entire call chain. Past the
+    walk cap the origin must degrade to an explicit unknown marker."""
+
+    class FakeFrame:
+        def __init__(self, code: Any, module: str) -> None:
+            self.f_code = code
+            self.f_globals = {"__name__": module}
+            self.f_back: Any = None
+
+    def make_plumbing_stack(depth: int) -> Any:
+        """A chain of plumbing frames — skipped, so never collected."""
+        code = compile("pass", "<plumbing>", "exec")
+        head: Any = None
+        for _ in range(depth):
+            frame = FakeFrame(code, "server.app.db.plumbing")
+            frame.f_back = head
+            head = frame
+        return head
+
+    origin = pool_reset._checkout_origin(make_plumbing_stack(50))
+    assert origin.startswith("unknown")
+    assert "walk cap" in origin
+
+    # A shallow plumbing-only stack stays under the cap and resolves to the
+    # plain unknown marker.
+    assert pool_reset._checkout_origin(make_plumbing_stack(3)) == "unknown"

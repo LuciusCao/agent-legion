@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 # leak must surface as a steady, greppable trickle, not join the storm.
 _RESET_WARN_EVERY_SECONDS = 60.0
 _MAX_ORIGIN_FRAMES = 5
+# Hard cap on the frame walk (#439): the collected-frames bound above does
+# not bound the walk itself — a checkout buried under deep plumbing (or a
+# stack with no business frames at all) would traverse the entire call
+# stack. Give up past this many walked frames and mark the origin unknown.
+_MAX_ORIGIN_WALK = 30
 # Skip the connection plumbing itself when attributing a leak: this
 # package's helpers, the JobQueries facade methods, contextlib's
 # @contextmanager machinery, psycopg, and tests.
@@ -44,6 +49,10 @@ _ORIGIN_SKIP_MODULES = (
 
 _reset_warn_lock = Lock()
 _reset_warn_last: dict[str, float] = {}
+# Suppressed-hit counts per signature (#439): rate-limiting must not erase
+# frequency — the next emitted warning carries how many hits it swallowed,
+# so "one leak" and "leaking every second for a minute" stay distinguishable.
+_reset_warn_suppressed: dict[str, int] = {}
 
 
 def note_return(conn: Connection[dict[str, Any]]) -> None:
@@ -85,13 +94,16 @@ def _warn_reset_leak(status: TransactionStatus, conn: Connection[dict[str, Any]]
     with _reset_warn_lock:
         last = _reset_warn_last.get(key)
         if last is not None and now - last < _RESET_WARN_EVERY_SECONDS:
+            _reset_warn_suppressed[key] = _reset_warn_suppressed.get(key, 0) + 1
             return
         _reset_warn_last[key] = now
+        suppressed = _reset_warn_suppressed.pop(key, 0)
     logger.warning(
         "db connection returned %s with an open transaction (#438): rolled back by the "
-        "pool. leak origin: %s",
+        "pool. leak origin: %s%s",
         status.name,
         origin,
+        f" (suppressed {suppressed} hits in the last interval)" if suppressed else "",
     )
 
 
@@ -105,12 +117,20 @@ def _checkout_origin(frame: Any) -> str:
 
     Walks outward from the checkout, skipping connection plumbing frames;
     the first frames that remain are the business call site that borrowed
-    the connection. Bounded depth: a signature, not a full traceback.
+    the connection. Bounded twice over (#439): at most 5 collected frames,
+    and at most 30 walked frames total — the collected-frames bound alone
+    did not bound the walk, because skipped plumbing frames never count
+    toward it, so a deep stack (or one with no business frames at all)
+    walked the entire call chain.
     """
     names: list[str] = []
-    while frame is not None and len(names) < _MAX_ORIGIN_FRAMES:
+    walked = 0
+    while frame is not None and len(names) < _MAX_ORIGIN_FRAMES and walked < _MAX_ORIGIN_WALK:
+        walked += 1
         module = frame.f_globals.get("__name__", "?")
         if not module.startswith(_ORIGIN_SKIP_MODULES):
             names.append(f"{module.rsplit('.', 1)[-1]}.{frame.f_code.co_name}")
         frame = frame.f_back
+    if not names and walked >= _MAX_ORIGIN_WALK:
+        return "unknown (walk cap hit: no non-plumbing frame within 30)"
     return "/".join(names) or "unknown"
