@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TestQueryProvider } from '../../../testing/testQueryClient'
 import { useSettingStore } from '../../../stores/settingStore'
+import { AgentEditor } from './AgentEditor'
 import { WorkflowNodeAgentEditor } from './WorkflowNodeAgentEditor'
 
 const mocks = {
@@ -120,9 +121,13 @@ describe('WorkflowNodeAgentEditor', () => {
 
   it('surfaces the server conflict message when the capability is taken (#407)', async () => {
     // 同 capability 已有 Agent 时后端 409，detail 原文进错误框引导直接编辑。
+    // #436 独立复审：另建变体的指引只面向 API/MCP（表单已无 agent_id 输入）。
     mocks.createAgentDefinition.mockRejectedValue(
-      new Error(
-        '该 capability 已有 Agent「generate_key_info」（状态：draft），请直接编辑该 Agent'
+      Object.assign(
+        new Error(
+          '该 capability 已有 Agent「generate_key_info」（状态：draft），请直接编辑该 Agent；如确需另建变体，请通过 API 或 MCP 显式指定 agent_id'
+        ),
+        { status: 409 }
       )
     )
     renderEditor({ agentId: null, capability: 'generate_key_info' })
@@ -135,6 +140,44 @@ describe('WorkflowNodeAgentEditor', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       '请直接编辑该 Agent'
     )
+  })
+
+  // #436 独立复审 P3：创建 409 后错误引导「请直接编辑」，但列表缓存里
+  // 占用者可能尚未出现——catch 对 409 同样触发 onChanged 失效重取，
+  // 让引导入口一键可达。
+  it('refreshes the agent list after a 409 conflict on create (#436)', async () => {
+    mocks.createAgentDefinition.mockRejectedValue(
+      Object.assign(
+        new Error(
+          '该 capability 已有 Agent「generate_key_info」（状态：draft），请直接编辑该 Agent'
+        ),
+        { status: 409 }
+      )
+    )
+    const onChanged = vi.fn()
+    const onSaved = vi.fn()
+    render(
+      <TestQueryProvider>
+        <AgentEditor
+          workspaceId="ws1"
+          agentId={null}
+          initialCapability="generate_key_info"
+          onSaved={onSaved}
+          onChanged={onChanged}
+          onArchived={vi.fn()}
+        />
+      </TestQueryProvider>
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
+    })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '请直接编辑该 Agent'
+    )
+    expect(onChanged).toHaveBeenCalledTimes(1)
+    expect(onSaved).not.toHaveBeenCalled()
   })
 
   // #387：普通新建（非 switchToAgent）创建的是 draft-only Agent，目录里

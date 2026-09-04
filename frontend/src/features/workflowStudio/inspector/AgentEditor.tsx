@@ -33,6 +33,10 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+// api() 给非 2xx 错误挂 status（409 = capability 被占用）。
+const isConflictError = (err: unknown) =>
+  (err as { status?: number } | null)?.status === 409
+
 /**
  * Agent 定义编辑器。发布后的 definition 不可变：编辑已发布 Agent 就是
  * 保存一份新草稿再发布。#407：创建表单不再收集 agent_id——服务端按
@@ -161,6 +165,9 @@ export function AgentEditor({
       }
     } catch (err) {
       setError(errorMessage(err))
+      // #436 独立复审：创建 409 引导「请直接编辑」，但占用者可能还没进
+      // 列表缓存——对 409 同样触发 onChanged 失效重取，引导入口一键可达。
+      if (creating && isConflictError(err)) onChanged()
     } finally {
       setBusy(false)
     }
