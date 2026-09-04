@@ -111,9 +111,9 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ### Fixed
 
-- 高并发档位 job 状态计数触发器热点行死锁（issue #437）：数百并发、
-  单 run 万级 items 下 claim 间歇 500（psycopg DeadlockDetected，落点
-  claim 事务内 jobs promote UPDATE），并发呈锯齿式低于配置容量。根因
+- 高并发档位 job 状态计数触发器热点行死锁（issue #437）：高并发、
+  单 run 大规模 items 下 claim 间歇 500（psycopg DeadlockDetected，落点
+  claim 事务内 jobs promote UPDATE），并发呈锯齿式波动。根因
   是 v73/v36 的 run/workspace 级行级计数触发器把同一 run 全部状态迁移
   汇聚到寥寥几行 (run_id, status) 计数行——先扣旧 status 行再加新
   status 行的两步锁足迹，与 claim 的 queued→running、收尾的
@@ -123,7 +123,7 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   apply，所有并发写方锁序全局一致，锁环不再成立。收益在固定锁序与
   死锁消除，不在触发次数：psycopg executemany 服务端仍是 N 条独立
   INSERT（每条触发一次 statement 触发器、transition table 1 行），
-  与旧行级触发器逐行加计数同量级；万行单语句（INSERT...SELECT）才
+  与旧行级触发器逐行加计数同量级；多行单语句（INSERT...SELECT）才
   会一次聚合，当前代码库无该形状；
   ② 缓解：claim 端点对 SQLSTATE 40P01 立即整体重试一次（干净连接
   重进事务，再失败放行 500）；③ 缓解：Worker claim 退避改「首次 1s
