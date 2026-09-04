@@ -477,57 +477,30 @@ drop index if exists idx_node_runs_status_finished_at;
 create index if not exists idx_node_runs_status_finished_at_id
   on node_runs(status, finished_at, id);
 create index if not exists idx_jobs_status on jobs(status);
--- Workspace job status counters (schema v36, DB-JOB-STATUS-COUNTS-001):
--- count_jobs_by_status serves the event aggregator flush (every 0.5s per
--- dirty workspace), job list snapshots, intake and deletion broadcasts; as a
--- group-by over the whole workspace slice of jobs it is O(workspace jobs) per
--- call (0.3~1.1s measured at 130k rows under load). Row triggers keep this
--- table transactionally in sync so the read is a PK lookup of a few rows.
--- Backfill lives in migrate_workspace_job_status_counts.
+-- Workspace job status counters (v36, DB-JOB-STATUS-COUNTS-001): count_jobs_
+-- by_status serves the aggregator flush, job snapshots and broadcasts; a
+-- group-by is O(workspace jobs) (0.3~1.1s at 130k rows). Triggers keep the
+-- read a PK lookup. Backfill: migrate_workspace_job_status_counts.
+-- RUN job status counters (v73, DB-RUN-JOB-STATUS-COUNTS-001): same shape
+-- keyed by run_id, replacing the run-detail group-by (#358; feeds the #350
+-- progress view). run_id='' rows never reach the counter; no FK (jobs.run_id
+-- unconstrained text), vanished runs linger at cnt=0 which the cnt<>0 read
+-- skips.
+-- v76 (#437): both counter trigger families are STATEMENT-LEVEL with
+-- transition tables, aggregated net delta per (key, status) applied once
+-- per statement — the v36/v73 row triggers serialised every transition of
+-- one run/workspace onto a few counter rows and deadlocked under high claim
+-- concurrency. The trigger DDL lives in the v76 MIGRATION
+-- (job_status_counts_statement_triggers.py): the schema file's raw-line
+-- budget forced the same move as v73's round, and the migration replays on
+-- both the fresh path and every upgrade path (v36 < v73 < v76 in the
+-- version-sorted chain).
 create table if not exists workspace_job_status_counts (
   workspace_id text not null references workspaces(id) on delete cascade,
   status text not null,
   cnt bigint not null,
   primary key(workspace_id, status)
 );
-create or replace function sync_workspace_job_status_counts() returns trigger as $$
-begin
-  if TG_OP = 'INSERT' then
-    insert into workspace_job_status_counts(workspace_id, status, cnt)
-    values (NEW.workspace_id, NEW.status, 1)
-    on conflict (workspace_id, status)
-    do update set cnt = workspace_job_status_counts.cnt + 1;
-    return NEW;
-  elsif TG_OP = 'DELETE' then
-    update workspace_job_status_counts set cnt = cnt - 1
-    where workspace_id = OLD.workspace_id and status = OLD.status;
-    return OLD;
-  else
-    if NEW.workspace_id is distinct from OLD.workspace_id
-       or NEW.status is distinct from OLD.status then
-      update workspace_job_status_counts set cnt = cnt - 1
-      where workspace_id = OLD.workspace_id and status = OLD.status;
-      insert into workspace_job_status_counts(workspace_id, status, cnt)
-      values (NEW.workspace_id, NEW.status, 1)
-      on conflict (workspace_id, status)
-      do update set cnt = workspace_job_status_counts.cnt + 1;
-    end if;
-    return NEW;
-  end if;
-end;
-$$ language plpgsql;
--- drop-then-create keeps the whole-file replay idempotent across upgrades.
-drop trigger if exists jobs_status_counts_sync on jobs;
-create trigger jobs_status_counts_sync
-  after insert or delete or update of status, workspace_id on jobs
-  for each row execute function sync_workspace_job_status_counts();
--- RUN job status counters (schema v73, DB-RUN-JOB-STATUS-COUNTS-001):
--- trigger-maintained counter table replacing the run-detail group-by
--- (#358; data source for the #350 progress view). run_id='' skipped; no
--- FK (jobs.run_id unconstrained); vanished runs linger at cnt=0 which the
--- cnt<>0 read skips. The jobs sync trigger lives in the v73 MIGRATION, not
--- here — it references NEW.run_id, absent until v53's rename (same
--- replay-order rule as idx_jobs_run_id, v59).
 create table if not exists run_job_status_counts (run_id text not null, status text not null,
   cnt bigint not null, primary key(run_id, status));
 -- Workspace job NODE status counters (schema v56, DB-JOB-NODE-STATUS-COUNTS-001):

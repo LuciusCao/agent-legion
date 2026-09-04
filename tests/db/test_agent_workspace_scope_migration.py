@@ -244,6 +244,5 @@ def test_upgrade_from_v45_with_legacy_global_index() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert migration is not None
-    # The registry tail at the CURRENT schema version (#434 renumber: v76 is
-    # studio_publish_requests).
-    assert migration["name"] == "studio_publish_requests"
+    # The registry tail at the CURRENT schema version (v77, #437).
+    assert migration["name"] == "job_status_counts_statement_triggers"
