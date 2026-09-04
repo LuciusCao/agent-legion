@@ -486,14 +486,14 @@ create index if not exists idx_jobs_status on jobs(status);
 -- progress view). run_id='' rows never reach the counter; no FK (jobs.run_id
 -- unconstrained text), vanished runs linger at cnt=0 which the cnt<>0 read
 -- skips.
--- v76 (#437): both counter trigger families are STATEMENT-LEVEL with
+-- v77 (#437): both counter trigger families are STATEMENT-LEVEL with
 -- transition tables, aggregated net delta per (key, status) applied once
 -- per statement — the v36/v73 row triggers serialised every transition of
 -- one run/workspace onto a few counter rows and deadlocked under high claim
--- concurrency. The trigger DDL lives in the v76 MIGRATION
+-- concurrency. The trigger DDL lives in the v77 MIGRATION
 -- (job_status_counts_statement_triggers.py): the schema file's raw-line
 -- budget forced the same move as v73's round, and the migration replays on
--- both the fresh path and every upgrade path (v36 < v73 < v76 in the
+-- both the fresh path and every upgrade path (v36 < v73 < v77 in the
 -- version-sorted chain).
 create table if not exists workspace_job_status_counts (
   workspace_id text not null references workspaces(id) on delete cascade,

@@ -1,4 +1,4 @@
-"""Schema v76: statement-level aggregation for the job status counters (#437).
+"""Schema v77: statement-level aggregation for the job status counters (#437).
 
 The v36/v73 row triggers kept the counter tables transactionally in sync but
 converged every job status transition of one run (or workspace) onto a
@@ -11,7 +11,7 @@ orders at high frequency — a lock footprint that closed into deadlock rings
 under the high-concurrency tier: hundreds of workers claiming from single
 runs with 10^4-scale items.
 
-The v76 replacement is statement-level with transition tables: the trigger
+The v77 replacement is statement-level with transition tables: the trigger
 fires once per statement, aggregates the NET delta per (key, status) from
 the old/new transition tables (old side negative, new side positive), and
 applies each delta exactly once in a FIXED global order — sorted by
@@ -40,7 +40,7 @@ aggregation, so title/updated_at-only updates never touch the counters.
 The trigger DDL lives HERE, not in postgres_schema.sql: the schema file's
 raw-line budget (the same squeeze the v73 round resolved by moving DDL into
 its migration, see 044d5cf2), and this shape must only run after the v73
-run counters exist — which the version-sorted chain guarantees (v73 < v76)
+run counters exist — which the version-sorted chain guarantees (v73 < v77)
 on both the fresh path (every migration replays) and every upgrade path
 (version > max(applied) replays). The schema file keeps only the counter
 tables.
@@ -161,6 +161,6 @@ _WORKSPACE_DDL = _trigger_ddl(
 
 def migrate_job_status_counts_statement_triggers(conn: Any) -> None:
     """Replace the row-level job status count triggers (v36/v73) with
-    statement-level transition-table aggregation (v76, #437)."""
+    statement-level transition-table aggregation (v77, #437)."""
     conn.execute(_RUN_DDL)
     conn.execute(_WORKSPACE_DDL)
