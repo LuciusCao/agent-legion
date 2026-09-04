@@ -92,26 +92,48 @@ describe('WorkflowNodeAgentEditor', () => {
     )
   })
 
-  it('creates a new agent with an empty skill (node-level binding)', async () => {
-    mocks.createAgentDefinition.mockResolvedValue({ agent_id: 'agent-new' })
+  it('creates a new agent without an agent_id field (#407)', async () => {
+    mocks.createAgentDefinition.mockResolvedValue({
+      agent_id: 'generate_key_info',
+    })
     renderEditor({ agentId: null, capability: 'generate_key_info' })
 
-    fireEvent.change(await screen.findByLabelText('Agent ID'), {
-      target: { value: 'agent-new' },
-    })
+    // #407：创建表单不再渲染 Agent ID 输入（#426 后创建表单直接内联
+    // 展示，无需开合按钮）。
+    expect(screen.queryByLabelText('Agent ID')).not.toBeInTheDocument()
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
     })
 
     // #421 独立复审回归：新建默认 runtime 是 velites（AgentEditor useState
     // 默认值），无意改回 'pi' 时这里必须变红。
-    expect(mocks.createAgentDefinition).toHaveBeenCalledWith(
-      'ws1',
-      expect.objectContaining({
-        agent_id: 'agent-new',
-        skill: '',
-        runtime: 'velites',
-      })
+    // #407：payload 不带 agent_id——服务端按 capability 生成实体键。
+    expect(mocks.createAgentDefinition).toHaveBeenCalledTimes(1)
+    const [, createBody] = mocks.createAgentDefinition.mock.calls[0]
+    expect(createBody).not.toHaveProperty('agent_id')
+    expect(createBody).toMatchObject({
+      capability: 'generate_key_info',
+      skill: '',
+      runtime: 'velites',
+    })
+  })
+
+  it('surfaces the server conflict message when the capability is taken (#407)', async () => {
+    // 同 capability 已有 Agent 时后端 409，detail 原文进错误框引导直接编辑。
+    mocks.createAgentDefinition.mockRejectedValue(
+      new Error(
+        '该 capability 已有 Agent「generate_key_info」（状态：draft），请直接编辑该 Agent'
+      )
+    )
+    renderEditor({ agentId: null, capability: 'generate_key_info' })
+
+    // #426 后创建表单内联直出，无开合按钮。
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
+    })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '请直接编辑该 Agent'
     )
   })
 
@@ -134,9 +156,6 @@ describe('WorkflowNodeAgentEditor', () => {
     })
     renderEditor({ agentId: null, capability: 'generate_key_info' })
 
-    fireEvent.change(await screen.findByLabelText('Agent ID'), {
-      target: { value: 'agent-new' },
-    })
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
     })
@@ -144,6 +163,8 @@ describe('WorkflowNodeAgentEditor', () => {
     const { useUiStore } = await import('../../../stores/uiStore')
     await vi.waitFor(() =>
       // AgentEditor 的创建 toast（Panel 不再叠加第二条，subagent P3）。
+      // #407：表单已无 Agent ID 输入，toast 里的 id 只能来自服务端响应
+      // （capability 是 generate_key_info，返回的 agent_id 是 agent-new）。
       expect(useUiStore.getState().toast?.message).toBe(
         'Agent「agent-new」草稿已创建'
       )
@@ -181,9 +202,6 @@ describe('WorkflowNodeAgentEditor', () => {
     })
     renderEditor({ agentId: null, capability: 'generate_key_info' })
 
-    fireEvent.change(await screen.findByLabelText('Agent ID'), {
-      target: { value: 'agent-new' },
-    })
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
     })
@@ -247,12 +265,10 @@ describe('WorkflowNodeAgentEditor', () => {
     )
     const { rerender } = render(view('generate_key_info'))
 
-    // 节点 A：填 ID 创建草稿，面板留在 A 草稿的编辑/发布模式。
-    fireEvent.change(await screen.findByLabelText('Agent ID'), {
-      target: { value: 'agent-new' },
-    })
+    // 节点 A：直接创建草稿（#407 后无 ID 输入，服务端按 capability 生成），
+    // 面板留在 A 草稿的编辑/发布模式。
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
+      fireEvent.click(await screen.findByRole('button', { name: '创建草稿' }))
     })
     await screen.findByRole('button', { name: '发布' })
 
@@ -266,7 +282,10 @@ describe('WorkflowNodeAgentEditor', () => {
     expect(
       screen.queryByRole('button', { name: '版本历史' })
     ).not.toBeInTheDocument()
-    expect(await screen.findByLabelText('Agent ID')).toHaveValue('')
+    // #407 后新建表单无 ID 输入：以创建按钮回来作「全新新建表单」信号。
+    expect(
+      await screen.findByRole('button', { name: '创建草稿' })
+    ).toBeInTheDocument()
     expect(screen.getByDisplayValue('review')).toBeInTheDocument()
   })
 
@@ -290,12 +309,9 @@ describe('WorkflowNodeAgentEditor', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     renderEditor({ agentId: null, capability: 'generate_key_info' })
 
-    // 面板内创建草稿 → 留在编辑/发布模式（绑定 agent-new）。
-    fireEvent.change(await screen.findByLabelText('Agent ID'), {
-      target: { value: 'agent-new' },
-    })
+    // 面板内创建草稿（#407 后无 ID 输入）→ 留在编辑/发布模式（绑定 agent-new）。
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '创建草稿' }))
+      fireEvent.click(await screen.findByRole('button', { name: '创建草稿' }))
     })
     await screen.findByRole('button', { name: '发布' })
 
@@ -307,11 +323,15 @@ describe('WorkflowNodeAgentEditor', () => {
 
     expect(confirmSpy).toHaveBeenCalledWith('确定要归档 Agent「agent-new」吗？')
     expect(mocks.archiveAgent).toHaveBeenCalledWith('ws1', 'agent-new')
-    await screen.findByLabelText('Agent ID')
+    // 回落全新新建表单（#407 后无 ID 输入）：创建按钮回来，capability
+    // 重新预填节点值。
+    expect(
+      await screen.findByRole('button', { name: '创建草稿' })
+    ).toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: '发布' })
     ).not.toBeInTheDocument()
-    expect(screen.getByLabelText('Agent ID')).toHaveValue('')
+    expect(screen.getByDisplayValue('generate_key_info')).toBeInTheDocument()
     confirmSpy.mockRestore()
   })
 
@@ -331,7 +351,6 @@ describe('WorkflowNodeAgentEditor', () => {
     const { rerender } = render(view('pending'))
 
     expect(screen.getByText('Agent 绑定解析中...')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Agent ID')).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: '创建草稿' })
     ).not.toBeInTheDocument()
@@ -339,7 +358,10 @@ describe('WorkflowNodeAgentEditor', () => {
     rerender(view('ready'))
 
     expect(screen.queryByText('Agent 绑定解析中...')).not.toBeInTheDocument()
-    expect(await screen.findByLabelText('Agent ID')).toBeInTheDocument()
+    // #407 后新建表单无 ID 输入，以创建按钮作表单已渲染的信号。
+    expect(
+      await screen.findByRole('button', { name: '创建草稿' })
+    ).toBeInTheDocument()
     expect(screen.getByDisplayValue('generate_key_info')).toBeInTheDocument()
   })
 
@@ -352,7 +374,6 @@ describe('WorkflowNodeAgentEditor', () => {
     expect(screen.getByText('Agent 目录加载失败')).toBeInTheDocument()
     // 失败提示用 alert 语义（对齐 AgentEditor 错误条先例）。
     expect(screen.getByRole('alert')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Agent ID')).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: '创建草稿' })
     ).not.toBeInTheDocument()
