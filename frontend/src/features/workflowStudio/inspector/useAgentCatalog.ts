@@ -21,10 +21,16 @@ import { useAgentDefinitions } from './useAgentDefinitions'
 // setQueryData 在调用方同步改写缓存需为归档/发布/草稿保存各猜一个列表
 // 终态，猜错即静默漂移，且聊天的 turn_end 失效（studioChatInvalidation）
 // 无对应事件负载可同步——isFetching 让「缓存值可能过期」这一事实本身
-// 驱动门控，语义正确且改动集中在数据源。refetchOnWindowFocus 默认开启
-// （queryClient.ts）+ staleTime 30s：聚焦重取只在数据过期时发生，
-// 编辑器占位不频繁闪烁；归档等 mutation 后的重取会短暂出占位，正是
-// 「旧值不可信」的窗口。
+// 驱动门控，语义正确且改动集中在数据源。
+// #426 终局复审 P1（频率与代价的准确框定）：本信号翻转不止聚焦重取——
+// 聊天每轮 turn_end 都失效 studioAgentCatalog + agentDefinitions 两条查询
+//（Studio 支持边聊边改），即一次会话内翻转与对话轮数同频；另有
+// refetchOnWindowFocus（staleTime 30s，数据过期才触发）与编辑器自身
+// 保存/发布/回滚的 refresh。翻转后 bindingStatus 回 pending 的代价不是
+// 「占位闪烁」——是 WorkflowNodeAgentEditor 条件卸载整个编辑器、丢掉
+// 未保存的表单输入（AgentEditor 用本地 useState，无持久化）。修复后
+// 翻转语义保留（堵住旧缓存可操作窗口），消费端（WorkflowNodeAgentGate）
+// 在曾 ready 后保挂载 + 冻结遮罩，不再卸载：首次 settle 前才出占位。
 
 export function useAgentCatalog(workspaceId: string | undefined) {
   const query = useQuery({

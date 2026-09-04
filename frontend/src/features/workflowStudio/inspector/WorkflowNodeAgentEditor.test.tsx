@@ -338,7 +338,8 @@ describe('WorkflowNodeAgentEditor', () => {
   })
 
   // #426 review P2：查询失败 ≠ 确认未绑定——错误提示而非可操作表单（顶部
-  // 有全局重试横幅），否则失败场景等于回到 P2。
+  // 有全局重试横幅），否则失败场景等于回到 P2。#426 终局复审 P1 起首次
+  // 失败（从未 ready）仍渲染纯占位。
   it('shows an error placeholder instead of the create form when the binding query failed', () => {
     renderEditor({ agentId: null, capability: 'cap', bindingStatus: 'error' })
 
@@ -349,6 +350,146 @@ describe('WorkflowNodeAgentEditor', () => {
     expect(
       screen.queryByRole('button', { name: '创建草稿' })
     ).not.toBeInTheDocument()
+  })
+
+  // #426 终局复审 P1（turn_end 失效路径）：ready 后 invalidate 触发的
+  // 后台重取把 bindingStatus 翻回 pending——编辑器不再卸载（表单是本地
+  // useState，卸载即丢未保存输入），改为保挂载 + 冻结提示条；重取完成
+  // （ready 恢复）后提示消失、输入保留、可继续编辑。
+  it('keeps the mounted editor with inputs intact when a ready binding flips back to pending', async () => {
+    const view = (bindingStatus: 'pending' | 'ready') => (
+      <TestQueryProvider>
+        <WorkflowNodeAgentEditor
+          agentId="agent-a"
+          capability="generate_key_info"
+          bindingStatus={bindingStatus}
+        />
+      </TestQueryProvider>
+    )
+    const { rerender } = render(view('ready'))
+
+    // 编辑器已挂载并加载详情。
+    expect(
+      await screen.findByDisplayValue('generate_key_info')
+    ).toBeInTheDocument()
+    // 模拟用户在 config_schema 输入未保存内容。
+    const schemaField = await screen.findByLabelText(
+      'config_schema（JSON，可空）'
+    )
+    fireEvent.change(schemaField, { target: { value: '{"x":1}' } })
+    expect(schemaField).toHaveValue('{"x":1}')
+
+    // turn_end 失效 → 后台重取在途 → bindingStatus 翻回 pending。
+    act(() => {
+      rerender(view('pending'))
+    })
+
+    expect(
+      screen.getByText('Agent 目录刷新中，编辑暂不可用（输入已保留）...')
+    ).toBeInTheDocument()
+    // 表单仍挂载：输入值未丢，也没有重复拉详情（AgentEditor 未重挂）。
+    expect(screen.getByLabelText('config_schema（JSON，可空）')).toHaveValue(
+      '{"x":1}'
+    )
+    expect(mocks.fetchAgentDefinition).toHaveBeenCalledTimes(1)
+
+    // 重取完成（ready 恢复）：提示消失，输入保留，可继续编辑。
+    act(() => {
+      rerender(view('ready'))
+    })
+    expect(
+      screen.queryByText('Agent 目录刷新中，编辑暂不可用（输入已保留）...')
+    ).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('config_schema（JSON，可空）'), {
+      target: { value: '{"x":2}' },
+    })
+    expect(screen.getByLabelText('config_schema（JSON，可空）')).toHaveValue(
+      '{"x":2}'
+    )
+    expect(mocks.fetchAgentDefinition).toHaveBeenCalledTimes(1)
+  })
+
+  // #426 终局复审 P1（error 侧）：曾 ready 后重取失败（bindingStatus=
+  // error）——输入保留 + 错误提示 + 不放可操作编辑（重试走全局横幅）；
+  // 恢复 ready 后输入仍在。
+  it('keeps the inputs and shows the error notice when a refetch fails after ready', async () => {
+    const view = (bindingStatus: 'ready' | 'error') => (
+      <TestQueryProvider>
+        <WorkflowNodeAgentEditor
+          agentId="agent-a"
+          capability="generate_key_info"
+          bindingStatus={bindingStatus}
+        />
+      </TestQueryProvider>
+    )
+    const { rerender } = render(view('ready'))
+
+    const schemaField = await screen.findByLabelText(
+      'config_schema（JSON，可空）'
+    )
+    fireEvent.change(schemaField, { target: { value: '{"x":1}' } })
+
+    act(() => {
+      rerender(view('error'))
+    })
+
+    expect(
+      screen.getByText('Agent 目录刷新失败，重试前编辑暂不可用（输入已保留）。')
+    ).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    expect(screen.getByLabelText('config_schema（JSON，可空）')).toHaveValue(
+      '{"x":1}'
+    )
+    expect(mocks.fetchAgentDefinition).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      rerender(view('ready'))
+    })
+    expect(screen.getByLabelText('config_schema（JSON，可空）')).toHaveValue(
+      '{"x":1}'
+    )
+  })
+
+  // #426 终局复审 P3-2：编辑器自身保存草稿触发 refresh（invalidate 双查
+  // 询）→ bindingStatus 短暂翻回 pending——面板不重挂（无卸载闪烁、不
+  // 重复拉详情），已编辑的表单值保留。
+  it('does not remount the editor after saving a draft triggers the catalog refresh', async () => {
+    mocks.saveAgentDraft.mockResolvedValue({})
+    const view = (bindingStatus: 'ready' | 'pending') => (
+      <TestQueryProvider>
+        <WorkflowNodeAgentEditor
+          agentId="agent-a"
+          capability="generate_key_info"
+          bindingStatus={bindingStatus}
+        />
+      </TestQueryProvider>
+    )
+    const { rerender } = render(view('ready'))
+
+    const schemaField = await screen.findByLabelText(
+      'config_schema（JSON，可空）'
+    )
+    fireEvent.change(schemaField, { target: { value: '{"x":1}' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    })
+    expect(mocks.saveAgentDraft).toHaveBeenCalledWith(
+      'ws1',
+      'agent-a',
+      expect.objectContaining({ config_schema: { x: 1 } })
+    )
+
+    // 保存后的 invalidate 窗口：pending 期面板保挂载，表单值不丢。
+    act(() => {
+      rerender(view('pending'))
+    })
+    expect(
+      screen.getByText('Agent 目录刷新中，编辑暂不可用（输入已保留）...')
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('config_schema（JSON，可空）')).toHaveValue(
+      '{"x":1}'
+    )
+    expect(mocks.fetchAgentDefinition).toHaveBeenCalledTimes(1)
   })
 
   // #426 codex P2 修正：agentId 非空不再无条件放行——目录未 settle 时它
