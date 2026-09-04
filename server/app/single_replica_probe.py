@@ -16,7 +16,12 @@ that is held until shutdown:
   checkout/return cycle, and a transaction-scoped lock would be released
   the moment the owning transaction commits. db/schema.py's migration lock
   only needs to serialize one transaction, so it can use the xact variant;
-  this one cannot.
+  this one cannot. Precisely because the session lock survives commit,
+  ``probe()`` commits the transaction the try-lock SELECT opened (#433):
+  leaving it open holds the startup snapshot (backend_xmin) for the
+  process lifetime and blocks autovacuum from reclaiming dead tuples
+  anywhere — commit and lock-keeping are not in conflict, the missing
+  commit was the bug.
 - Held on a dedicated checked-out connection, not per query: a pooled
   connection released back to the pool drops its session locks, so the
   probe checks out one connection in the lifespan and keeps it until
@@ -95,6 +100,15 @@ class SingleReplicaProbe:
         conn = connect_database(self._db_source)
         try:
             row = conn.execute(_TRY_LOCK_SQL, (_REPLICA_LOCK_KEY,)).fetchone()
+            # The try-lock SELECT opened a transaction on this held-forever
+            # connection, and the pooled connection is not autocommit (#433):
+            # commit it or the connection sits in idle-in-transaction for the
+            # process lifetime, pinning backend_xmin at the startup snapshot
+            # and freezing autovacuum out of every table the app updates
+            # (agent_workers heartbeats et al.) until restart. The
+            # session-level lock survives the commit — that is exactly why
+            # the session variant was chosen over the xact one.
+            conn.commit()
         except Exception:
             # #204 broad-except audit (#277): the probe is an observability
             # nicety, not a dependency — a failing checkout/try-lock (pool
