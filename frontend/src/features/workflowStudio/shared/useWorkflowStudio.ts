@@ -46,7 +46,6 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     workspaceId,
     nodes
   )
-  const revisionActions = buildStudioRevisionActions(draft, setSelectedNodeKey)
   return {
     loadState,
     actionState: actions.actionState,
@@ -59,6 +58,10 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     retryAgentCatalog: catalog.retry,
     // #387：draft-only Agent 的解析/导航回落（useAgentDefinitions）。
     agentDefinitions: catalog.definitions,
+    // #426 review P2 → codex 终轮 P2：两份目录查询的 settle 信号下发到
+    // 节点详情，由节点级按 capability 组合出内联 Agent 编辑器的门控状态
+    // （catalog 命中 published 即 ready，未命中须等 definitions settle）。
+    agentCatalogSettle: catalog.settle,
     definitionYaml: draft.definitionYaml,
     setDefinitionYaml: draft.setDraftYaml,
     selectedNodeKey,
@@ -88,6 +91,6 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     hasPreservedDraft: draft.hasPreservedDraft,
     isLoadingRevision: draft.isLoadingRevision,
     revisionLoadError: draft.revisionLoadError,
-    ...revisionActions,
+    ...buildStudioRevisionActions(draft, setSelectedNodeKey),
   }
 }

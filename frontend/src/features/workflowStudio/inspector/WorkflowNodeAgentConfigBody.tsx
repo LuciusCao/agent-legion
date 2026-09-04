@@ -17,9 +17,10 @@ type Props = {
 }
 
 // type=agent 节点的执行能力主体：有 published Agent（或 #387 的 draft-only
-// 草稿）时给配置卡 + skill 绑定（#76，节点级绑定优先于 Agent 定义兜底）+
-// 执行细节；完全缺失时给指引（发布门禁要求恰好一个 published Agent，会显式
-// 报错）。
+// 草稿）时给 skill 绑定（#76，节点级绑定优先于 Agent 定义兜底）+ 执行细节；
+// 完全缺失时给指引（发布门禁要求恰好一个 published Agent，会显式报错）。
+// #409：编辑态下方内联展开的 Agent 编辑面板已含完整定义信息，只读汇总卡
+// 只在 readOnly（历史版本查看，无编辑面板）下渲染，去掉重复的信息层。
 export function WorkflowNodeAgentConfigBody(props: Props) {
   if (!props.agentDefinition)
     return (
@@ -34,7 +35,9 @@ export function WorkflowNodeAgentConfigBody(props: Props) {
           草稿 Agent 未发布；发布后才能过 workflow 门禁。
         </div>
       )}
-      <WorkflowAgentDefinitionCard definition={props.agentDefinition} />
+      {props.readOnly && (
+        <WorkflowAgentDefinitionCard definition={props.agentDefinition} />
+      )}
       <WorkflowNodeSkillEditor
         node={props.node}
         definitionYaml={props.definitionYaml}

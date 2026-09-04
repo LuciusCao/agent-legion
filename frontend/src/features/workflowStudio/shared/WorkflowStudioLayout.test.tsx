@@ -3,6 +3,7 @@ import { act } from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { useSettingStore } from '../../../stores/settingStore'
 import { WorkflowStudioLayout } from './WorkflowStudioLayout'
+import { TestQueryProvider } from '../../../testing/testQueryClient'
 import { makeStudioView, withStudioProviders } from './testStudioProviders'
 
 vi.mock('../chat/StudioChatPanel', () => ({
@@ -10,6 +11,13 @@ vi.mock('../chat/StudioChatPanel', () => ({
     chatPanelProps(props)
     return <div>chat panel stub</div>
   },
+}))
+
+// #416：StudioChatAside 轮询 agent 发布请求（react-query）。
+vi.mock('../../../api/studioPublishRequestApi', () => ({
+  fetchPendingPublishRequest: vi.fn().mockResolvedValue(null),
+  confirmPublishRequest: vi.fn(),
+  cancelPublishRequest: vi.fn(),
 }))
 
 const chatPanelProps = vi.fn()
@@ -114,7 +122,9 @@ function studioProvidersFor(studio: LayoutStudio) {
 function renderLayout(studio: LayoutStudio) {
   const { studioState, view } = studioProvidersFor(studio)
   return render(
-    withStudioProviders(studioState, view, <WorkflowStudioLayout />)
+    <TestQueryProvider>
+      {withStudioProviders(studioState, view, <WorkflowStudioLayout />)}
+    </TestQueryProvider>
   )
 }
 
@@ -123,7 +133,11 @@ function rerenderLayout(
   studio: LayoutStudio
 ) {
   const { studioState, view } = studioProvidersFor(studio)
-  rerender(withStudioProviders(studioState, view, <WorkflowStudioLayout />))
+  rerender(
+    <TestQueryProvider>
+      {withStudioProviders(studioState, view, <WorkflowStudioLayout />)}
+    </TestQueryProvider>
+  )
 }
 
 describe('WorkflowStudioLayout', () => {
