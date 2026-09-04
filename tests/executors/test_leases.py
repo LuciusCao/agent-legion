@@ -259,7 +259,7 @@ def test_finish_lease_parses_events_outside_write_transaction(lease_repo, monkey
 
     real_parse = token_usage_lease.parse_token_usage_for_lease
     real_persist = token_usage_lease.persist_node_run_usage
-    in_transaction_at = {"parse": None, "persist": None}
+    in_transaction_at = {"parse": None, "persist": None, "persist_after": None}
 
     def spy_parse(conn, lease_id, data_dir_arg):
         in_transaction_at["parse"] = conn.in_transaction
@@ -267,7 +267,17 @@ def test_finish_lease_parses_events_outside_write_transaction(lease_repo, monkey
 
     def spy_persist(conn, summary):
         in_transaction_at["persist"] = conn.in_transaction
-        return real_persist(conn, summary)
+        try:
+            return real_persist(conn, summary)
+        finally:
+            # #438 removed write_transaction's redundant explicit BEGIN, so
+            # the transaction now opens implicitly on the first statement:
+            # before any persist statement the connection is legitimately
+            # IDLE. The invariant this test pins is that the persist's
+            # statements run inside a transaction that write_transaction
+            # commits — sampled after the statements, the connection must
+            # be INTRANS.
+            in_transaction_at["persist_after"] = conn.in_transaction
 
     monkeypatch.setattr(token_usage_lease, "parse_token_usage_for_lease", spy_parse)
     monkeypatch.setattr(token_usage_lease, "persist_node_run_usage", spy_persist)
@@ -285,7 +295,7 @@ def test_finish_lease_parses_events_outside_write_transaction(lease_repo, monkey
     # The events.jsonl parse must run outside any write transaction; only the
     # short persist step may hold the write lock.
     assert in_transaction_at["parse"] is False
-    assert in_transaction_at["persist"] is True
+    assert in_transaction_at["persist_after"] is True
 
     with closing(connect_database(repo.path)) as conn, conn:
         row = conn.execute("select * from node_run_token_usage").fetchone()
