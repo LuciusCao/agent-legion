@@ -30,7 +30,9 @@ PoC（pi_agent_rust 替换验证）同时证明了两件事：
 - 单静态 Rust 二进制，冷启动 <50 ms，稳态 RSS 基线 <30 MB（上下文缓冲除外）；
 - 完整复刻 Host 侧消费的事件流契约（见 §4），Host 三处消费方（日志渲染、token 计量、
   失败判定）零改动切换；
-- skill 注入（显式 `--skill` 目录）+ `read`/`write`/`bash` 三工具；
+- skill 注入（显式 `--skill` 目录）+ `read`/`write`/`bash` 核心三工具，外加少量
+  opt-in 的通用工具原语（§8，#442 起：`uuid`）——只收跨 skill 通用能力，不收业务逻辑，
+  不演变为插件机制（非目标不变）；
 - OpenAI-compatible Chat Completions 与 Anthropic Messages streaming；
 - **可控性内建**（§5）：预算、优雅取消、输出自检、零自动发现；
 - 单进程单执行，进程模型与现状一致（worker 隔离语义不变）。
@@ -58,7 +60,7 @@ velites/                 # Cargo crate（本仓库根下新目录）
     models.rs            # ~/.velites/models.json provider/model registry
     config.rs            # 旧 gateway 凭据迁移桥
     session.rs           # session.jsonl 镜像落盘（--session-dir）
-    tools/{mod,read,write,bash,command_guard,truncate}.rs
+    tools/{mod,read,write,bash,uuid,command_guard,truncate}.rs
     provider/{mod,openai_compat,anthropic,retry,stub}.rs
     skill.rs             # SKILL.md 加载
     budget.rs            # 预算治理
@@ -341,6 +343,15 @@ fail-closed 报错，内置节点不受影响。
   命令守卫（`tools/command_guard.rs`）在 spawn 前拒绝全盘扫描命令
   （`find /` 等从宽泛根递归遍历，并行 job 下会打爆宿主机 fseventsd/Spotlight），
   拒绝时以工具错误返回修正指引（EXEC-HARNESS-GUARD-001）；
+- **uuid（#442，opt-in，仅 velites runtime）**：`generate`（`count` ≤100、`version`
+  v4 随机 / v7 时间有序）与 `validate`（逐值校验格式/版本/variant——parse 成功但
+  非 RFC4122 variant 的 nil/max 一类也判 `invalid`，任一非法即 `is_error`；单值
+  ≤512 字符且不含控制字符，输出同受 §8 双阈值截断）。模型手写 UUID
+  是经典翻车点（假 hex、错误版本位），生成必须走工具。`generate` 每次调用结果不同
+  （replay/重跑亦然），工具描述要求模型把生成的值落进产物文件而非指望可复现。
+  不触碰文件系统与沙箱；默认不进 `--tools`（核心三件套之外按需启用，避免把
+  runtime 不认识的工具名透传给 pi——pi 定义请勿声明 `uuid`，dispatch 期的
+  per-runtime 工具名校验在后续 issue 收口）；
 - **输出截断（pi 对齐）**：工具输出按双阈值截断——2000 行 或 50KB
   （50×1024 字节），任一先到即截，语义与 pi `truncate.js` 完全一致
   （实现集中在 `velites/src/tools/truncate.rs`）：
