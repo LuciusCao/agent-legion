@@ -185,7 +185,8 @@ export class DraftSaveController {
       this.put(yaml, keepalive)
         .then((response) => {
           if (this.inFlight === requestId) this.inFlight = 0
-          if (this.requestCounter !== requestId) return resolve(this.successResult())
+          if (this.requestCounter !== requestId)
+            return resolve(this.successResult())
           this.lastPersisted = yaml
           this.setState({
             status: 'saved',
@@ -195,13 +196,15 @@ export class DraftSaveController {
         })
         .catch(() => {
           if (this.inFlight === requestId) this.inFlight = 0
-          if (this.requestCounter !== requestId) return resolve(this.successResult())
+          if (this.requestCounter !== requestId)
+            return resolve(this.successResult())
           this.setState({ ...this.state, status: 'error' })
           if (retriesLeft > 0) {
             const attempt = MAX_PUT_RETRIES - retriesLeft + 1
             this.retryTimer = setTimeout(() => {
               this.retryTimer = null
-              if (this.requestCounter !== requestId) return resolve(this.successResult())
+              if (this.requestCounter !== requestId)
+                return resolve(this.successResult())
               this.save(yaml, requestId, retriesLeft - 1, false).then(resolve)
             }, RETRY_BASE_MS * attempt)
           } else resolve(this.failureResult())

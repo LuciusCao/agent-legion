@@ -393,15 +393,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/340
   ceiling: 47
 - check: architecture.file_budget
-  path: server/app/mcp_server/server.py
-  reason: Issue 329 adds the job observation tool group registration (job_tools.register_job_tools) to
-    the shared MCP assembly, one effective line past the baseline ceiling (155). The assembly already
-    stitches four tool modules inline; the durable fix is moving the register calls into a single registry/assembly
-    module, at which point this exemption goes stale.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/329
-  ceiling: 156
-- check: architecture.file_budget
   path: server/app/agent_broker/agent_result_commit.py
   reason: 'Issue #359 adds the execute-done counter at the terminal-commit point (two effective lines).
     The counter must fire exactly where the lease and request both reach their terminal state — moving
@@ -502,29 +493,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/418
   ceiling: 493
 - check: architecture.file_budget
-  path: frontend/src/components/dag/DagNode.module.css
-  reason: The active-state styling (box-shadow plus outline rules) moved onto the node card itself with
-    the hover-highlight rework (#276); the two extra rule lines are the visual contract of that rework.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
-  ceiling: 121
-- check: architecture.file_budget
-  path: frontend/src/components/dag/DagGraph.tsx
-  reason: The same Codex P2 batch on PR 285 as dagHighlight -- the chained highlight call site plus the
-    reducer wiring grow the composition component past the split-era baseline.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/300
-  ceiling: 286
-- check: architecture.file_budget
-  path: server/app/db/migration_chain.py
-  reason: 'Re-filed (#358 merge round): the chain now carries v72 (ops_runtime_profile_samples, from #359)
-    and v73 (run_job_status_counts, this PR) — one import plus one entry each on top of the v70 growth
-    the original exemption described. The chain only grows one entry per schema version and cannot shrink;
-    stale after the issue-211 M3 cleanup collapses the chain comments.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 108
-- check: architecture.file_budget
   path: server/app/services/studio_publish_requests.py
   reason: 'The #429 review rounds harden the confirm path: resolve drops the expires_at predicate (a publish
     that outlives the remaining TTL must still record confirmed — TOCTOU), a losing resolve race reports
@@ -566,8 +534,10 @@ exemptions:
     builders already live in agentPublishNoticeStore. The fourth round (#429 四轮) adds publishInFlight
     (the whole-confirm window flag the dialog uses to show "publish in progress" on polled confirming
     rows) and teaches the observation effect to skip confirming rows (a live claim is not a terminal null
-    jump — no bogus receipt). Revisit when issue 416''s deferred follow-ups (buffered rejection, session
-    wiring) rework this hook.'
+    jump — no bogus receipt). The closing round (#429 收尾 P3) makes a cancel 404 silent (the backend''s
+    deliberate lost-to-the-claim answer is not an operation failure; the row state speaks for itself)
+    while non-404 failures keep the toast. Revisit when issue 416''s deferred follow-ups (buffered rejection,
+    session wiring) rework this hook.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
   ceiling: 137
@@ -609,8 +579,40 @@ exemptions:
     the agent requested). The migration is unmerged (#429) so the growth rides the same review; the state-machine
     and index-contract docstrings are the load-bearing part of the change — the DDL without them re-opens
     the exact races they document. The fourth round (#429 四轮) adds the ``claimed_at`` column (the stale-claim
-    sweep''s clock for a process that died between claim and resolve). Revisit when the migration lands
-    or the handshake''s next schema change reworks it.'
+    sweep''s clock for a process that died between claim and resolve). The rebase round (#434) renumbers
+    the module v75→v76 (#427''s node_runs_skill_key claimed 75) — two docstring lines for the renumber
+    provenance. Revisit when the migration lands or the handshake''s next schema change reworks it.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
   ceiling: 70
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/shared/draftSaveController.ts
+  reason: '#429 rounds four and closing: flushNow/save return the PUT promise the agent-publish confirm
+    awaits (completion order — the re-read and the confirm endpoint fire only after the draft lands),
+    and the closing round makes the resolved value carry the flush''s terminal result ({ok, state} — the
+    controller resolves on every path and failure lives only in state, so a React-snapshot guard would
+    miss a PUT that fails during the await). The result type plus its contract docstrings are the load-bearing
+    concurrency narrative; splitting them from the state machine would separate the completion-order rules
+    from the code they govern.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
+  ceiling: 171
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/shared/useWorkflowDraftPersistence.ts
+  reason: '#429 closing P2-1: flushNow now returns the DraftSaveFlushResult (the live terminal state,
+    not the React useState snapshot the dialog''s closure captured at click time — the snapshot guard
+    missed a PUT failing during the await and would publish the stale draft). The unhydrated no-op branch
+    resolves {ok: true, IDLE} so awaiting callers treat it as no-content-no-failure. The typing/return-shape
+    growth rides the same review round; revisit when the draft-save wiring is next reworked.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
+  ceiling: 95
+- check: architecture.file_budget
+  path: frontend/src/lib/queryKeysExtra.ts
+  reason: 'Merge-growth class (PR 317 precedent): develop''s #419 connectionKeys and #427 nodeRuns entries
+    plus this branch''s studioPublishRequest key (the agent publish request poll, #416) union to one effective
+    line past the 65 ceiling each side satisfied alone. The module is a flat key registry; each line is
+    one cache identity. Revisit at the next registry cleanup.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
+  ceiling: 66

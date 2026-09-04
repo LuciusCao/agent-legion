@@ -1,7 +1,5 @@
-"""Schema v76: agent-initiated workflow publish requests (issue #416).
-
-Born as this branch's v75, renumbered to 76 when #427's node_runs_skill_key
-claimed v75 on develop (#434).
+"""Schema v76 (#434 renumber; born v75 until #427's node_runs_skill_key
+claimed 75 on develop): agent-initiated workflow publish requests (#416).
 
 ``studio_publish_requests`` holds the agent→human publish handshake. The
 agent's ``request_workflow_publish`` MCP tool INSERTs a pending row; the row
@@ -11,10 +9,8 @@ which replays the same ``publish_workflow_draft`` gates the Studio button
 uses. The agent never publishes directly: the tool creates no revision.
 
 This module owns the table's DDL — postgres_schema.sql does not create it
-(the schema file sits at its absolute line ceiling; fresh databases run
-every migration after the file replay, and pre-v76 databases run this
-apply fn on upgrade, so both paths are covered; the parity test pins
-fresh == upgraded).
+(the schema file sits at its absolute line ceiling; fresh and pre-v76
+databases both run this apply fn — the parity test pins the shapes equal).
 
 State machine (single row per workspace while pending):
 ``pending`` → ``confirming`` (the human confirm's claim; cancel/new agent
