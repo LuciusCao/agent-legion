@@ -634,14 +634,14 @@ def test_definition_to_yaml_upgrades_v1_to_schema_version_2(tmp_path: Path) -> N
 def _sharded_reduce_definition() -> WorkflowDefinition:
     """Demo DAG + review_questions 分片、publish_content 聚合（合法配对）。"""
     definition = load_builtin_definition("education_video_problems_generation")
-    return replace(
+    return dc_replace(
         definition,
         nodes={
             **definition.nodes,
-            "review_questions": replace(
+            "review_questions": dc_replace(
                 definition.nodes["review_questions"], shard=WorkflowShardSpec(count=4)
             ),
-            "publish_content": replace(
+            "publish_content": dc_replace(
                 definition.nodes["publish_content"],
                 reduce=WorkflowReduceSpec(from_node="review_questions"),
             ),

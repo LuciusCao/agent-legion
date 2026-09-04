@@ -6,11 +6,6 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from server.app.services.workflow_draft_compare_edges import (
-    _detect_duplicate_source_target,
-    _edge_identity,
-    _should_use_full_edge_identity,
-)
-from server.app.services.workflow_draft_compare_edges import (
     diff_edges as _diff_edges,
 )
 from server.app.services.workflow_draft_compare_metadata import (
@@ -33,18 +28,6 @@ from server.app.workflows.schema import (
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
-
-# #431: the edge diff (identity set + order fingerprint) lives in
-# workflow_draft_compare_edges; the underscore helpers stay importable from
-# here for the existing sibling/test import sites.
-__all__ = [
-    "_detect_duplicate_source_target",
-    "_edge_identity",
-    "_should_use_full_edge_identity",
-    "compare_workflow_draft",
-    "_node_change_fields",
-    "_node_field_risks",
-]
 
 
 def _node_change_fields(base: WorkflowNode, draft: WorkflowNode) -> list[str]:
