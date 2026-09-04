@@ -48,7 +48,7 @@ exemptions:
     chain would fork the version-sorted ordering invariant (the file's own
     module docstring) for five lines of registry.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/437
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
   ceiling: 111
 - check: architecture.file_budget
   path: server/app/db/migrations/job_status_counts_statement_triggers.py
@@ -65,7 +65,7 @@ exemptions:
     source of truth. Remove when the counter triggers retire or the
     migration module gets a structural split of its own.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/437
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
   ceiling: 143
 - check: architecture.file_budget
   path: server/app/routes/artifacts.py
@@ -265,7 +265,7 @@ exemptions:
     are one migration''s cohesive DDL; splitting the file would separate the sync function from its recycle
     pair.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/358
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 74
 - check: architecture.file_budget
   path: server/app/services/job_list_count_cache.py
@@ -274,7 +274,7 @@ exemptions:
     ran one full-scan compute per thread. The lock map lives with the entries it guards; splitting it
     out would separate the eviction bound from the map it bounds.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/358
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 74
 - check: architecture.file_budget
   path: server/app/services/job_intake.py
@@ -283,7 +283,7 @@ exemptions:
     the run/jobs writes. Duplicating the cap constant away from the resolve gate would invite the two
     paths to drift; revisit when the creation paths converge on one service.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/358
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 178
 - check: architecture.file_budget
   path: server/app/db/migrations/__init__.py
@@ -293,7 +293,7 @@ exemptions:
     index whose growth model is one entry per migration module; revisit if the migrations package gains
     a programmatic registry.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/358
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 67
 - check: architecture.file_budget
   path: server/app/db/migrations/runs_sql.py
@@ -334,7 +334,7 @@ exemptions:
     srcDoc head-injection helper and its documentation grow the security surface in place -- splitting
     them out would separate the CSP from the iframe that enforces it.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/328
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/347
   ceiling: 199
 - check: architecture.file_budget
   path: frontend/src/features/previewPanel/PreviewPanelSection.tsx
@@ -342,7 +342,7 @@ exemptions:
     the hashBundle helper -- a cross-navigation bridge-request isolation fix that must stay at the composition
     site to keep the in-flight-window reasoning local.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/328
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 79
 - check: architecture.file_budget
   path: server/app/executors/_code_sandbox.py
@@ -351,7 +351,7 @@ exemptions:
     host form''s semantics (code local fallback disabled — running code nodes on a Worker is the supported
     path) and the bare-metal remedy.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/383
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 207
 - check: architecture.file_budget
   path: server/app/routes/agent_workers.py
@@ -359,14 +359,14 @@ exemptions:
     code x velites version matrix) at registration time. Drift diagnostics for externally-mounted runtimes;
     informational only, no admission change.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 236
 - check: architecture.file_budget
   path: server/app/routes/agent_workers_contracts.py
   reason: '#381 version handshake: RegisterAgentWorkerRequest gained the informational runtime_versions
     mapping (default empty for older Workers). One field on the request contract.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 92
 - check: architecture.file_budget
   path: shared/code_sandbox.py
@@ -376,14 +376,14 @@ exemptions:
     so "preflight passes = runtime resolves the same wrapper"; BUNDLED_SANDBOX_DIR is re-exported by worker/binary_resolution.py
     as the single source of truth for the shared directory.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/383
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 141
 - check: architecture.file_budget
   path: worker/host/client.py
   reason: '#381 version handshake: the registration payload gained one informational runtime_versions
     mapping (effective runtimes'' --version outputs). Single line addition to an existing payload builder.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 164
 - check: architecture.file_budget
   path: worker/runtime/catalog.py
@@ -393,7 +393,7 @@ exemptions:
     human upgrade discipline). Purely additive function beside the detection code it complements; unknown
     results record "<unknown>" by design (observability, not a fail-closed guard).'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 90
 - check: architecture.file_budget
   path: worker/runtime/controls.py
@@ -402,7 +402,7 @@ exemptions:
     pool matches the startup preflight''s probe surface. One-line semantic change on an existing function;
     no split warranted.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/383
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 51
 - check: architecture.file_budget
   path: worker/runtime/preflight.py
@@ -415,7 +415,7 @@ exemptions:
     guard into its own module was rejected because preflight_error would reduce to a shell over two helpers.
     Revisit the split if preflight grows a third guard.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 80
 - check: architecture.file_budget
   path: worker/runtime/setup.py
@@ -426,7 +426,7 @@ exemptions:
     runtimes keep the soft warning. This module is the composition point between config parsing, preflight,
     and model discovery; there is no meaningful split for the guard wiring.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/381
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 62
 - check: architecture.file_budget
   path: server/app/services/preview_panels.py
@@ -434,7 +434,7 @@ exemptions:
     recent job merges the object-store manifest like the selected job does (the object store is the authoritative
     copy, the local dir an evictable cache). Single-purpose helper next to its only consumer.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/328
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 190
 - check: architecture.file_budget
   path: server/app/services/s3_jobs_gc.py
@@ -466,7 +466,7 @@ exemptions:
     The counter must fire exactly where the lease and request both reach their terminal state — moving
     it out would separate the gauge from the state transition it measures.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 72
 - check: architecture.file_budget
   path: server/app/agent_broker/dispatch_pool.py
@@ -474,7 +474,7 @@ exemptions:
     for the sampler. The counters must sit at the queue boundary they observe; the pool module is already
     the smallest unit that owns the backlog semantics.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 60
 - check: architecture.file_budget
   path: server/app/services/runtime_profile/classifier.py
@@ -483,7 +483,7 @@ exemptions:
     dict and the verdict helpers with its sibling rules; splitting the classifier by rule family would
     separate the priority order (documented in the module docstring) from the code that implements it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 145
 - check: architecture.file_budget
   path: server/app/services/runtime_profile/sampling.py
@@ -492,7 +492,7 @@ exemptions:
     calls they feed. Splitting either into the queries layer would move value marshalling away from the
     only caller; revisit if a second gauge family joins the sampler.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 108
 - check: architecture.file_budget
   path: server/app/services/ops_metrics/service.py
@@ -501,7 +501,7 @@ exemptions:
     write surface; the durable split is a sampling-dispatch module if more gauge families join, at which
     point this exemption goes stale.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/359
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 230
 - check: architecture.file_budget
   path: server/app/routes/__init__.py
@@ -510,7 +510,7 @@ exemptions:
     point for every feature router; the durable fix is splitting the assembly per domain, at which point
     this exemption goes stale.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/329
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 140
 - check: architecture.file_budget
   path: server/app/events/buffer.py
@@ -532,13 +532,13 @@ exemptions:
     they gate; the durable fix is merging the two query branches into the shared store module when the
     next reaper change touches it, at which point this exemption goes stale.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/357
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 81
 - check: architecture.file_budget
   path: server/app/services/workflow_draft_compare.py
   reason: '超出基线的比对分支与风险档；#418 关闭后经 ratchet 下调基线退出（compare 剩余字段的收编见 #431）'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/418
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/431
   ceiling: 493
 - check: architecture.file_budget
   path: server/app/services/studio_publish_requests.py
@@ -554,7 +554,7 @@ exemptions:
     surfacing, the stale-claim sweep) into studio_publish_request_poll.py to stay within the ceiling.
     Revisit when the handshake grows its next change (e.g. the deferred chat_session_id wiring).'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 199
 - check: architecture.file_budget
   path: server/app/jobs/queries/studio_publish_requests.py
@@ -570,7 +570,7 @@ exemptions:
     into create''s transaction (advisory-lock-serialized against the claim, so the guard-supersede-INSERT
     triple is atomic). Revisit when issue 416''s follow-ups (chat_session_id wiring) touch it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 184
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/useAgentPublishRequest.ts
@@ -587,7 +587,7 @@ exemptions:
     while non-404 failures keep the toast. Revisit when issue 416''s deferred follow-ups (buffered rejection,
     session wiring) rework this hook.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 137
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/AgentPublishRequestDialog.tsx
@@ -599,7 +599,7 @@ exemptions:
     the flush/read-draft chain plus the error toast the review asked for. Revisit when the deferred follow-ups
     (a shared useConfirmPublish hook) rework the dialog''s action wiring.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 59
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/StudioChatAside.tsx
@@ -608,7 +608,7 @@ exemptions:
     the single place the receipt is displayed. Revisit when issue 416''s deferred follow-ups rework the
     aside layout.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 56
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/chat/StudioChatPanel.module.css
@@ -616,7 +616,7 @@ exemptions:
     to host it; the module is a flat stylesheet at the repo''s per-root CSS limit policy, and the 7-line
     growth is one rule plus its comment. Revisit at the next stylesheet cleanup pass.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 362
 - check: architecture.file_budget
   path: server/app/db/migrations/studio_publish_requests.py
@@ -631,7 +631,7 @@ exemptions:
     the module v75→v76 (#427''s node_runs_skill_key claimed 75) — two docstring lines for the renumber
     provenance. Revisit when the migration lands or the handshake''s next schema change reworks it.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 70
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/draftSaveController.ts
@@ -643,7 +643,7 @@ exemptions:
     concurrency narrative; splitting them from the state machine would separate the completion-order rules
     from the code they govern.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 171
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/useWorkflowDraftPersistence.ts
@@ -653,7 +653,7 @@ exemptions:
     resolves {ok: true, IDLE} so awaiting callers treat it as no-content-no-failure. The typing/return-shape
     growth rides the same review round; revisit when the draft-save wiring is next reworked.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 95
 - check: architecture.file_budget
   path: frontend/src/lib/queryKeysExtra.ts
@@ -662,7 +662,7 @@ exemptions:
     line past the 65 ceiling each side satisfied alone. The module is a flat key registry; each line is
     one cache identity. Revisit at the next registry cleanup.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/416
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 66
 - check: architecture.file_budget
   path: server/app/db/connection.py
@@ -671,14 +671,14 @@ exemptions:
     the two documented guards; the attribution logic itself lives in pool_reset.py. Stays until the
     transaction helpers retire this facade.'
   owner: database
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/438
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 80
 - check: architecture.file_budget
   path: server/app/db/pools.py
   reason: '#438 installs the pool reset callback (reset=reset_connection) so every returned connection is
     verified IDLE and dirty returns are attributed — one effective line plus wiring comment.'
   owner: database
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/438
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 60
 - check: architecture.file_budget
   path: server/app/db/pool_reset.py
@@ -688,7 +688,7 @@ exemptions:
     to an explicit walk-cap marker. 101 effective lines; revisit when the attribution walk moves to a
     sampled/only-on-leak model.'
   owner: database
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/438
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 106
 - check: architecture.file_budget
   path: server/app/db/transaction.py
@@ -699,5 +699,5 @@ exemptions:
     _release_quietly (close() in finally must not replace the caller''s original exception), inlined within
     the frozen ceiling.'
   owner: database
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/438
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 61
