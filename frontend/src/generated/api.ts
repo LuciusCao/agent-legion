@@ -3219,7 +3219,7 @@ export interface components {
     /** AgentCreateRequest */
     AgentCreateRequest: {
       /** Agent Id */
-      agent_id: string
+      agent_id?: string | null
       /** Capability */
       capability: string
       /** Config Schema */

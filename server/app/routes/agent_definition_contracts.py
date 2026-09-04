@@ -17,7 +17,9 @@ class AgentDefinitionPayload(BaseModel):
 
 
 class AgentCreateRequest(AgentDefinitionPayload):
-    agent_id: str = Field(min_length=1)
+    # #407：agent_id 可选——省略（或 null）时服务端按 capability 生成（一个
+    # capability 一个主草稿）；显式传值保持旧客户端契约不变。
+    agent_id: str | None = Field(default=None, min_length=1)
 
 
 class AgentCopyRequest(BaseModel):

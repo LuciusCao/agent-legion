@@ -20,6 +20,7 @@ from server.app.routes.agent_definition_contracts import (
     AgentVersionSummary,
 )
 from server.app.routes.job_http import raise_job_http_error
+from server.app.services.agent_definition_create import create_agent_draft
 from server.app.services.agent_service import AgentService
 from server.app.services.job_errors import JobServiceError
 from server.app.services.versioned_entities import VersionedEntity
@@ -106,8 +107,10 @@ def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
     ) -> AgentVersionResponse:
         definition = _parse_definition(request)
         try:
-            entity = _service(workspace_id).save_draft(
-                request.agent_id, definition, f"user:{user['id']}"
+            # #407：agent_id 省略时按 capability 生成，同 capability 已有
+            # Agent 则 409 引导直接编辑（create-entry policy 见 service 层）。
+            entity = create_agent_draft(
+                _service(workspace_id), request.agent_id, definition, f"user:{user['id']}"
             )
         except JobServiceError as exc:
             raise_job_http_error(exc)

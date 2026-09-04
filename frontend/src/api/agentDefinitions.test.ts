@@ -80,11 +80,31 @@ describe('agentDefinitions api', () => {
     global.fetch = fetchMock
 
     const body = {
-      agent_id: 'agent-1',
       capability: 'generate_key_info',
       runtime: 'pi' as const,
       skill: 'demo_workflow/generate_key_info',
       tools: ['read'],
+    }
+    const result = await createAgentDefinition(WS, body)
+
+    expect(result).toEqual(payload)
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/agent-definitions${WS_QUERY}`,
+      expect.objectContaining({ method: 'POST', body: JSON.stringify(body) })
+    )
+  })
+
+  it('creates an agent definition with an explicit agent_id (legacy payload)', async () => {
+    const payload = { id: 'v1', agent_id: 'agent-1', version: 1 }
+    const fetchMock = mockFetchJson(payload)
+    global.fetch = fetchMock
+
+    // #407：契约里 agent_id 变 Optional——显式传值的旧客户端照常工作。
+    const body = {
+      agent_id: 'agent-1',
+      capability: 'generate_key_info',
+      runtime: 'pi' as const,
+      skill: '',
     }
     const result = await createAgentDefinition(WS, body)
 
