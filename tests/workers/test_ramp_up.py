@@ -119,6 +119,16 @@ def test_pause_does_not_burn_the_ramp() -> None:
     assert view is not None and view.effective == 128  # 累计活跃 120s → 升档
 
 
+def test_paused_before_first_observe_reports_zero_tier() -> None:
+    """#493 P3-2：首观察前暂停（启用爬坡但从未领取过）快照是 0 档——控制台
+    对 effective=0 隐藏爬坡行（app.js rampUpLine），不显示「0/640」噪音。"""
+    ramp = RampUpState(controls=EXAMPLE)
+    view, paused = ramp_pass(ramp, None, 640, 10.0, claim_enabled=False)
+    assert view is not None and view.effective == 0 and view.target == 640
+    assert view.next_tier_seconds is None
+    assert ramp.active is True  # 窗口未关：首次领取才起步
+
+
 def test_target_resize_mid_ramp_clamps_to_new_target() -> None:
     # 目标热缩（max_concurrency 调小）：生效容量立即被新目标钳住。
     views = _ladder(EXAMPLE, target=128)
@@ -127,18 +137,31 @@ def test_target_resize_mid_ramp_clamps_to_new_target() -> None:
 
 
 def test_only_up_during_window_smaller_initial_does_not_pull_back() -> None:
-    # 爬坡期只升不降：热更到更小的 initial 不把在途档位拉回。
+    """#493 P2-2：窗口内热更到更小的 initial/step 不把在途档位拉回。
+
+    reviewer 复现形态：64/64 爬到 192 后热更 initial=1/step=1——未修复的
+    实现下一 pass 算出 1+240×1=241？不：interval 同时变 1s 时 tiers 只按
+    新 interval 计（240/1=240 档）反而虚高；关键是 initial/step 远小于
+    在途档位且 tiers 不大的组合（如 interval=600 使 tiers=0）会算出
+    1+0=1，直接回撤到 1。这里用能暴露回撤的参数钉住三处容量面共享的
+    effective 恒不下降。"""
     ramp = RampUpState(controls=EXAMPLE)
     paused: float | None = None
     view, paused = ramp_pass(ramp, paused, 640, 120.0, claim_enabled=True)  # 基准
     view, paused = ramp_pass(ramp, paused, 640, 360.0, claim_enabled=True)  # 活跃 240s
     assert view is not None and view.effective == 192
+    # 热更 1/1/600：按新参数计算 1+0×1=1（远低于在途 192）——不得回撤。
     reloaded = apply_ramp_hot_reload(
-        ramp, RampUpControls(enabled=True, initial=32, step=32, interval_seconds=60), print
+        ramp, RampUpControls(enabled=True, initial=1, step=1, interval_seconds=600), print
     )
     assert reloaded is ramp
     view, paused = ramp_pass(ramp, paused, 640, 420.0, claim_enabled=True)
-    assert view is not None and view.effective >= 192  # 不回撤
+    assert view is not None and view.effective == 192, "热更更小参数不得回撤在途档位"
+    # 新参数从当前档位起按新节奏继续：1/1/600 下计算档位要 191 档才追上
+    # 在途 192——中短期内档位保持 192（floor 兜底），不会以旧节奏虚涨。
+    for now in (1200.0, 3600.0):
+        view, paused = ramp_pass(ramp, paused, 640, now, claim_enabled=True)
+        assert view is not None and view.effective == 192, "新节奏生效：档位不虚涨也不回撤"
 
 
 def test_completed_window_stays_closed() -> None:

@@ -12,13 +12,13 @@ from typing import Any
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse
 
 from worker.config_response import public_config_response
 from worker.metrics_proxy import create_metrics_proxy_router
 from worker.service_bind import embed_control_token
 from worker.service_env import strip_proxy_env
 from worker.service_models import WorkerConfigPayload
+from worker.service_static import create_static_router
 from worker.service_tokens import create_register_token_router
 from worker.supervisor import WorkerConfigStore, WorkerSupervisor
 
@@ -37,8 +37,8 @@ _HOT_CONFIG_FIELDS = {
     "claim_enabled",
     "max_concurrency",
     "max_code_concurrency",
-    "upload_max_concurrency",
     "ramp_up",
+    "upload_max_concurrency",
 }
 
 
@@ -46,8 +46,7 @@ def _forget_previous_worker(config: dict[str, Any]) -> None:
     """改 worker_id 前的提示：Host 侧删除注册记录是 admin-only 操作。
 
     这里只记录一条日志，旧 worker_id 依赖 Host 的离线超时自然消失。"""
-    worker_id = str(config.get("worker_id", ""))
-    if worker_id:
+    if worker_id := str(config.get("worker_id", "")):
         logger.info(
             "worker_id 已从 %s 变更；旧注册记录需管理员在 Host UI 删除（离线后自然不再领取）",
             worker_id,
@@ -73,31 +72,9 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool 
             supervisor.stop()
 
     app = FastAPI(title="Agent Legion Worker Service", version="1.0", lifespan=lifespan)
-
-    # 本地控制面不需要浏览器长缓存：no-cache 强制每次校验，ETag 未变则 304。
-    ui_assets = (
-        "app.js",
-        "styles.css",
-        "icons.svg",
-        "vendor/uPlot.iife.min.js",
-        "vendor/uPlot.min.css",
-    )
-    media_types = {".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml"}
-    no_cache = {"Cache-Control": "no-cache"}
-
-    @app.get("/", include_in_schema=False)
-    def index() -> HTMLResponse:
-        html = (ui_dir / "index.html").read_text(encoding="utf-8")
-        if embed_token:
-            html = html.replace('= "__WORKER_CONTROL_TOKEN__"', f'= "{token}"')
-        return HTMLResponse(html, headers=no_cache)
-
-    @app.get("/assets/{name:path}", include_in_schema=False)
-    def asset(name: str) -> FileResponse:
-        if name not in ui_assets:
-            raise HTTPException(status_code=404, detail="asset not found")
-        media_type = media_types[Path(name).suffix]
-        return FileResponse(ui_dir / name, media_type=media_type, headers=no_cache)
+    # 静态资产面（index + 白名单 /assets，含 #493 P1-1 的 ui_assets 全等
+    # 钉子）拆在 service_static；token 内嵌与否在此传参。
+    app.include_router(create_static_router(ui_dir, token, embed_token=embed_token))
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -116,10 +93,14 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool 
     def put_config(payload: WorkerConfigPayload) -> dict[str, Any]:
         try:
             fields = payload.model_dump(exclude_none=True)
+            # #493 P2-1：exclude_none 吞显式 null——fields_set 区分缺省
+            # （partial update 不触碰）与显式 null（写入禁用态），可空
+            # 字段（ramp_up）的「禁用」才在 wire 上可表达。
+            if "ramp_up" in payload.model_fields_set and payload.ramp_up is None:
+                fields["ramp_up"] = None
             registration_token = fields.pop("register_token", None)
             previous = supervisor.store.read(require_identity=False)
-            new_worker_id = fields.get("worker_id")
-            if new_worker_id is not None and new_worker_id != previous["worker_id"]:
+            if fields.get("worker_id") not in (None, previous["worker_id"]):
                 _forget_previous_worker(previous)
             config = supervisor.store.update_public(fields, registration_token=registration_token)
             changed = {field for field in fields if previous.get(field) != config.get(field)}

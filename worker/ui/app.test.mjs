@@ -280,12 +280,14 @@ test("rampUpLine 爬坡中给出进度行与下一档倒计时（issue #471）",
   assert.equal(rampUpLine({ effective: 64, target: 640, next_tier_seconds: 0 }), "容量爬坡中 64 / 640 · 0s 后 +1 档");
 });
 
-test("rampUpLine 不在爬坡时返回空串（null/到顶/坏值）", () => {
+test("rampUpLine 不在爬坡时返回空串（null/到顶/坏值/未首观察）", () => {
   assert.equal(rampUpLine(null), "");
   assert.equal(rampUpLine(undefined), "");
   assert.equal(rampUpLine({ effective: 640, target: 640, next_tier_seconds: null }), "");
   assert.equal(rampUpLine({ effective: Number.NaN, target: 640 }), "");
   assert.equal(rampUpLine({}), "");
+  // #493 P3-2：首观察前（暂停保持档）的 0 档不显示——「容量爬坡中 0/640」是噪音。
+  assert.equal(rampUpLine({ effective: 0, target: 640, next_tier_seconds: null }), "");
 });
 
 test("rampUpFromForm 未勾选提交 null（禁用 = 一次性全量）", () => {

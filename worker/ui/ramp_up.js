@@ -5,10 +5,11 @@
 // 爬坡表单默认值：initial/step/interval_seconds 三键。
 export const RAMP_UP_DEFAULTS = { initial: 1, step: 1, interval_seconds: 60 };
 
-// 概览进度行文本：不在爬坡（null、已到顶）返回空串，调用方据此隐藏。
+// 概览进度行文本：不在爬坡（null、已到顶、未首观察的 0 档）返回空串，
+// 调用方据此隐藏。
 export function rampUpLine(ramp) {
   if (!ramp || !Number.isFinite(ramp.effective) || !Number.isFinite(ramp.target)) return "";
-  if (ramp.effective >= ramp.target) return "";
+  if (ramp.effective >= ramp.target || ramp.effective <= 0) return "";
   const next = Number.isFinite(ramp.next_tier_seconds)
     ? ` · ${Math.max(0, Math.round(ramp.next_tier_seconds))}s 后 +1 档`
     : "";
