@@ -898,3 +898,18 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/401
   ceiling: 246
+- check: architecture.file_budget
+  path: server/app/workflow_worker/code_stock.py
+  reason: >-
+    Issue #401 review P1-1 adds pass_budget to the code stock gate: the
+    v79 shard-aware index removed the accidental one-in-flight backpressure
+    on shard fan-outs, and within one poll pass the gate's queued count
+    cannot see the shards just submitted to the asynchronous enqueue pool
+    (it counts only committed rows). The shard fan-out loop now caps its
+    own submissions at the gate's remaining budget — same target, clamps
+    and TTL as allows(), extracted into a shared _ensure_fresh so the two
+    entry points cannot drift. ~5 effective lines; splitting the gate
+    module for one accessor would fork the single stockpile discipline.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/401
+  ceiling: 75

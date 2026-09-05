@@ -541,8 +541,8 @@ def test_claim_runtime_context_material_none_for_ref_input(job_db, monkeypatch) 
 def test_enqueue_persists_shard_identity_and_output_contract(job_db, tmp_path) -> None:
     """#389 (codex P1-1/P2-2): a shard dispatch writes shard_index/shard_input
     into the PERSISTED manifest top level (the claim transaction binds the
-    node_shards row off it) and appends the shard output file to
-    expected_outputs (archive channel — no size-capped metadata)."""
+    node_shards row off it) and carries the shard output file as its only
+    expected output (archive channel — no size-capped metadata)."""
     _insert_job(job_db)
     service = _service(job_db, tmp_path)
 
@@ -573,3 +573,33 @@ def test_enqueue_persists_shard_identity_and_output_contract(job_db, tmp_path) -
     # P2-2: the shard payload ships as a regular expected output.
     assert "shard_output-3.json" in manifest["expected_outputs"]
     assert "output_json" not in manifest
+    # #401 review P1-2: the node's ordinary outputs are EXCLUDED — a
+    # shard's product contract is only the per-index file. Concurrent
+    # shards share one job dir and one object-storage authority key per
+    # (job, node, name); sibling shards declaring the same ordinary output
+    # would clobber each other's artifacts.
+    assert "out.json" not in manifest["expected_outputs"]
+    assert manifest["expected_outputs"] == ["shard_output-3.json"]
+    # The non-shard contract keeps the node's ordinary outputs.
+    _insert_job(job_db, job_id="job-plain")
+    queued_plain = service.enqueue(
+        capability="package",
+        capability_config=CodeCapabilityConfig(),
+        workspace={"id": "test-workspace"},
+        job={"id": "job-plain"},
+        workflow_key="questions",
+        node=_node(),
+        job_dir=tmp_path / "job",
+        log_path=tmp_path / "logs" / "jobs" / "job-plain-package.log",
+        inputs=(),
+        code_text=_CODE,
+        custom_code=False,
+        config={},
+        secret_config={},
+    )
+    assert queued_plain is True
+    with job_db._connect_read() as conn:
+        plain = conn.execute(
+            "select manifest_json from agent_execution_requests where job_id='job-plain'"
+        ).fetchone()
+    assert json.loads(plain["manifest_json"])["expected_outputs"] == ["out.json"]

@@ -228,8 +228,18 @@ class CodeDispatchService:
             # output (same filename contract as the local executor,
             # _shard_contract.shard_output_name): no size-capped metadata
             # channel; completion reads it from the unpacked job_dir.
+            # #401 review P1-2: the node's ordinary outputs are EXCLUDED —
+            # a shard's product contract is only the per-index file.
+            # Concurrent shards share one job dir and one object-storage
+            # authority key per (job, node, name); with v79 letting many
+            # shards of a node run at once, sibling shards writing the same
+            # ordinary output name would clobber each other's artifacts
+            # (last-writer-wins upsert + same-key object overwrite) and
+            # race the per-shard result validation. Undeclared files are
+            # ignored by every consumer: the Worker packs/uploads only
+            # expected members, the Host unpack promotes only expected
+            # names, and object-storage refs are declared-only.
             manifest["expected_outputs"] = [
-                *manifest["expected_outputs"],
                 f"shard_output-{shard_runtime['shard_index']}.json",
             ]
         context = ExecutionContext(
