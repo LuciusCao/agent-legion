@@ -44,6 +44,9 @@ class AgentClaim:
     manifest: dict[str, Any]
     # 'agent' (default) or 'code' (batch 2 self-contained code payload).
     kind: str = "agent"
+    # Resolved runtime ('code' for code claims): the scan row carries it;
+    # #490's claim.granted reads it here instead of re-parsing the manifest.
+    runtime: str = ""
 
 
 @dataclass(frozen=True)

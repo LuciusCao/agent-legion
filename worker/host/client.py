@@ -15,6 +15,7 @@ from typing import Any, BinaryIO
 import requests
 
 from shared.protocol import PROTOCOL_VERSION
+from worker import events
 from worker.host.errors import TransientHostError, WorkerAuthError
 from worker.host.heartbeat_ops import HeartbeatOperations
 from worker.host.transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
@@ -55,17 +56,23 @@ class Client(HeartbeatOperations, TransferOperations):
         timeout: float | None = None,
         stream_to: Path | None = None,
     ) -> tuple[int, bytes]:
-        response = self.session.request(
-            method,
-            f"{self.host}{path}",
-            data=data,
-            headers={
-                **({"X-Agent-Worker-Token": self.token} if self.token else {}),
-                **(headers or {}),
-            },
-            timeout=self.timeout if timeout is None else timeout,
-            stream=stream_to is not None,
-        )
+        # #490: both error arms emit http.error with the target URL (the
+        # middle-502 blind spot); healthy answers stay silent.
+        token_header = {"X-Agent-Worker-Token": self.token} if self.token else {}
+        try:
+            response = self.session.request(
+                method,
+                f"{self.host}{path}",
+                data=data,
+                headers={**token_header, **(headers or {})},
+                timeout=self.timeout if timeout is None else timeout,
+                stream=stream_to is not None,
+            )
+        except requests.RequestException as exc:
+            events.note_http_transport_error(self.host, path, method, exc)
+            raise
+        if response.status_code >= 400:
+            events.note_http_error_response(self.host, path, response.status_code, response.content)
         # 大文件下载：流式写同目录临时文件再原子 rename，避免全量入内存；
         # 出错（4xx/5xx 小 body）仍读 content 供上层判断。iter_content 会把
         # urllib3 的断连/读超时包装成 RequestException，进入重试路径；重试时

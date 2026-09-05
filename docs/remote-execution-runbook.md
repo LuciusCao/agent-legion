@@ -324,6 +324,48 @@ flipping the field:
 | Batched agent failures with `unexpected EOF during chunk size line` while other apps on the same machine also lose connectivity | Worker egress silently routed through a local proxy process (Clash/mihomo) inherited from the launch shell; the proxy's config reload/subscription refresh cuts every in-flight stream at once (#444) | The service strips inherited proxy env at startup (a one-line INFO log marks it). Production workers must not run behind a local proxy process; if egress through a proxy is genuinely required, declare it explicitly in the worker config (`proxy:` field / console 高级参数 → 出网代理) so the choice is visible and owned |
 | Everything idle, nothing failing | Laptop asleep or offline | Workers recover on their own; enforce §2 item 5 |
 
+### 7.1 Structured event codes (#490)
+
+The Worker data plane emits single-line JSON lifecycle events on both sides
+(`event` / `ts` + per-event payload). Host-side events go to stderr on the
+`agent_legion.worker_events` logger (INFO for transitions, DEBUG for the
+normal rhythm — enable debug when hunting); Worker-side events ride the
+supervisor console stream. Align the two sides by `execution_id` /
+`worker_id`.
+
+| Event | Side | Meaning / key fields |
+| --- | --- | --- |
+| `worker.registered` | Host | Registration committed: runtime version matrix, concurrency declarations, resolved workspace scope |
+| `worker.offline` | Host | A previously-online worker crossed the `last_seen` threshold (30 s); `last_seen_at` + `threshold_seconds`; fires once per transition |
+| `claim.granted` | Host | A claim succeeded: `runtime`, `model`, pool occupancy (`agent_active`/`code_active`) |
+| `claim.empty` | Host | 204 — queue drained for this worker's pools; `reasons` when the queue head was skipped (paused workspace, lock races…) |
+| `claim.rejected` | Host | Stock present but this worker was not admitted — see the reason codes below |
+| `execution.started` | Host | Reserved name in the event namespace (the claim→run start is covered by `claim.granted` + Worker-side `execution.claimed`) |
+| `execution.finished` | Host | Terminal commit: `outcome` (`completed`/`failed`/… or `rejected` with `reason: not_owned`), `exit_code`, `wall_seconds` (claim → committed result) |
+| `execution.heartbeat_rejected` | Host | Heartbeat refused: `reason: not_owned` or `lease_not_active` — the worker must stop beating |
+| `execution.lease_expired` | Host | The sweeper deleted an expired lease: `attempt`, `requeue_limit` (will it rerun here?) |
+| `claim.attempt` | Worker | One claim poll's local budget snapshot (`agent_budget`/`code_budget`/`upload_backlog`/`claim_enabled`) |
+| `claim.backoff` | Worker | The #437 backoff sequence's position: `failures`, `wait_seconds`, `error` |
+| `execution.claimed` | Worker | A claim arrived — the Worker-side view of the Host's `claim.granted` |
+| `execution.completed` | Worker | Local process/code exit: `exit_code`, `wall_seconds`; Host acceptance is its `execution.finished` |
+| `execution.failed` | Worker | Local containment boundary fired (download/spawn/wait raised): `error` summary |
+| `http.error` | Worker | Upstream error response (`status_code` + `url` + bounded `body`) or transport failure (`url` + `error`) — the middle-502 blind spot, since the Host never sees the response |
+
+`claim.rejected` reason codes (claim-path decision-point naming):
+
+| Reason code | Meaning |
+| --- | --- |
+| `capacity_full` / `code_capacity_full` / `capacity_raced` | 并发池满 — the agent/code pool is at its declared cap (or lost the last-slot race) |
+| `runtime_mismatch` | The definition's runtime is not in this worker's declared runtimes |
+| `model_mismatch` | model 未声明 — the required provider/model is not in this worker's model declarations |
+| `workspace_not_allowed` | scope 拒绝 — the request's workspace is outside this worker's admission scope |
+
+Direct mappings for the common complaints: 「并发下来了」→ check the
+`claim.rejected` reason distribution; 「本机拿不到任务」→ `claim.empty`
+vs `claim.rejected` distinguishes drained queue from admission mismatch;
+「worker 静默」→ `worker.offline` names the moment; 「502 类中间层错误」→
+the Worker-side `http.error` carries the code and the target URL.
+
 ## 8. Security notes
 
 - **Tailnet ACLs:** restrict device-to-device traffic so workers can reach only
