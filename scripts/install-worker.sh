@@ -228,26 +228,46 @@ fi
 
 # ---- 6. 启动（models.json 未就绪或 --no-up 时跳过，输出指引）----
 start_worker() {
-  if ! docker compose pull; then
+  if ! docker compose pull 2>"$TMPDIR_/pull.err"; then
     cat >&2 <<EOF
-错误: 拉取 ${IMAGE_REPO} 失败。GHCR 包默认 private：
-  - docker login ghcr.io（用户名 + 具 read:packages 权限的 PAT），或
-  - 在 GitHub package 设置中把 agent-legion-worker 改为 public。
+错误: 拉取 ${IMAGE_REPO}:${WORKER_VERSION} 失败（$(tail -1 "$TMPDIR_/pull.err")）。
+两种常见原因：
+  - manifest unknown：该版本未发布——检查 worker-v${WORKER_VERSION} tag
+    是否存在（发布管道：worker-image-release workflow）；
+  - authentication required：GHCR 包默认 private——docker login ghcr.io
+    （用户名 + 具 read:packages 权限的 PAT），或在 GitHub package 设置中
+    把 agent-legion-worker 改为 public。
 EOF
     exit 1
   fi
-  docker compose up -d
+  # || true：up 失败（如端口绑定）不让 set -e 在此杀掉脚本——真实错误在
+  # up.log 里，由下面的状态检查统一解读输出。
+  docker compose up -d >"$TMPDIR_/up.log" 2>&1 || true
   # 不用 up --wait：全新安装尚未粘贴 scoped token 时 executor 处于「配置
   # 等待中」（刻意设计，supervisor 不启动执行进程），healthcheck 按定义
   # 报 unhealthy——--wait 会白等超时并把正常状态误报为失败。这里只验证
-  # 容器进程活着（能挡住期望 runtime 守卫的 exit 2 crash loop）。
+  # 容器进程活着（能挡住期望 runtime 守卫的 exit 2 crash loop 与端口
+  # 绑定失败——后者容器停在 created 而非 running）。注意不做 nc/lsof
+  # 端口预检：macOS 上 IPv6 通配监听（node dev server 常态）会接走 IPv4
+  # 探测造成假阳性，而 Docker 的 tcp4 绑定实际能与之共存——预测不如
+  # 解读 up 的真实输出。
   sleep 10
-  state="$(docker compose ps --format '{{.State}}' worker)"
-  if [ "$state" != "running" ]; then
-    echo "错误: 容器状态 ${state}（常见原因：期望 runtime 守卫 fail-fast）。日志：" >&2
-    docker compose logs --tail 30 worker >&2 || true
-    exit 1
-  fi
+  state="$(docker compose ps -a --format '{{.State}}' worker)"
+  case "$state" in
+    running) ;;
+    *)
+      cat >&2 <<EOF
+错误: 容器状态 ${state}（up 输出与日志如下）。常见原因：
+  - ports are not available / address already in use：宿主机端口被占——
+    在 ${TARGET}/.env 加 AGENT_WORKER_UI_PORT=<其它端口> 后重跑本脚本；
+  - 期望 runtime 守卫 fail-fast（velites 缺失/架构错配）——exit 2 crash
+    loop，检查 velites-bin/velites 与宿主架构。
+EOF
+      cat >&2 "$TMPDIR_/up.log"
+      docker compose logs --tail 30 worker >&2 || true
+      exit 1
+      ;;
+  esac
   echo "==> Worker 容器已启动（粘贴 scoped token 前显示 unhealthy 属预期，见下方步骤 2）"
 }
 
