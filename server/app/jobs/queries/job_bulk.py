@@ -6,13 +6,17 @@ from pathlib import Path
 from typing import Any
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.job_bulk_rows import (
+    chunk_ref_ids,
+    fetch_identity_map,
+    job_row_tuple,
+)
 from server.app.jobs.queries.job_bulk_sql import (
     BUNDLE_LOCK_IN_SQL,
     CHUNK_ROWS,
     MATERIAL_LOCK_IN_SQL,
     insert_job_nodes_batched,
     insert_jobs_batched,
-    job_row_tuple,
     lock_rows_for_key_share,
 )
 from server.app.jobs.run_freeze import candidate_input
@@ -28,10 +32,8 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
     jobs_dir: Path
 
     def fetch_jobs_by_ids(self, job_ids: list[str]) -> list[dict[str, Any]]:
-        """Full job rows for ``job_ids``, input order (chunked IN reads).
-
-        Legacy job-batches wire shape still materializes rows (#467 A4).
-        """
+        """Full job rows for ``job_ids``, input order (chunked IN reads;
+        the legacy job-batches wire shape still materializes rows)."""
         rows: list[dict[str, Any]] = []
         for start in range(0, len(job_ids), CHUNK_ROWS):
             chunk = job_ids[start : start + CHUNK_ROWS]
@@ -63,14 +65,19 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         Each job carries the run's frozen config + its own input doc
         (RUN-FREEZE-001); a re-submitted job takes the new freeze.
 
-        #467 A3 — chunked-commit protocol: ≤1000-row chunks, one transaction
-        each; a mid-run failure leaves earlier chunks committed (the run
-        service marks the partial run failed, and resubmitting the same
-        items resumes through the dedup filter — the intake queue's
-        chunk-error contract). Normalize collisions (``a/b`` vs ``a_w``) and
+        #467 A3 — chunked-commit protocol: ≤CHUNK_ROWS-row chunks, one
+        transaction each. Every chunk FOR KEY SHARE-locks exactly its own
+        material/bundle refs before inserting (per-chunk lock-before-insert,
+        review P1-1; the delete-serialization argument lives on
+        ``job_bulk_sql.lock_rows_for_key_share``). A mid-run failure leaves
+        earlier chunks committed: the run service marks the partial run
+        failed (operator legibility) and a resubmission of the same items
+        resumes through the dedup filter — the async intake queue's
+        chunk-error contract. Normalize collisions (``a/b`` vs ``a_w``) and
         identity mismatches are detected over the WHOLE candidate set before
-        the first chunk commits, so a collision inserts nothing. Returns job
-        ids (first-seen order); row materialization moved to read paths (A4).
+        the first chunk commits (chunked identity precheck, review P2-2), so
+        a collision inserts nothing. Returns job ids (first-seen order); row
+        materialization moved to read paths (#467 A4).
         """
         if not candidates:
             return []
@@ -82,8 +89,7 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         rows: dict[str, tuple[Any, ...]] = {}
         job_ids: list[str] = []
         identities: dict[str, tuple[str, str]] = {}
-        material_ids: list[str] = []
-        bundle_ids: list[str] = []
+        job_refs: dict[str, tuple[str, str]] = {}
         for candidate in candidates:
             source_id = str(candidate["entity_id"])
             job_id = _job_id(workspace_id, workflow_key, source_id)
@@ -92,10 +98,9 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                 raise ValueError(f"Job identity collision for {job_id}")
             identities[job_id] = identity
             input_doc = candidate_input(candidate)
-            if input_doc.get("type") == "material":
-                material_ids.append(str(input_doc.get("material_id") or ""))
-            elif input_doc.get("type") == "bundle":
-                bundle_ids.append(str(input_doc.get("bundle_id") or ""))
+            input_type = str(input_doc.get("type") or "")
+            if input_type in ("material", "bundle"):
+                job_refs[job_id] = (input_type, str(input_doc.get(f"{input_type}_id") or ""))
             # dict-keyed insert = dedup by job id, last row wins (the
             # executemany shape's later-DO-UPDATE-wins semantics — see
             # job_bulk_sql's JOBS_BULK_INSERT_SQL comment).
@@ -115,36 +120,10 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         row_list = list(rows.values())
 
         with self.connect() as conn:
-            # Material inputs FOR KEY SHARE their materials row: a concurrent
-            # material delete (FOR UPDATE) either blocks until these jobs
-            # commit (its reference check then rejects with 409) or commits
-            # first and the row is gone here. #467 A3: the lock covers the
-            # WHOLE call up front, not per chunk (lock_rows_for_key_share);
-            # a missing row fails before the first chunk (400 + compensation).
-            lock_rows_for_key_share(
-                conn,
-                MATERIAL_LOCK_IN_SQL,
-                list(dict.fromkeys(material_ids)),
-                workspace_id,
-                kind="Material",
-            )
-            # Bundle rows lock the same way against the bundle delete guard (#156).
-            lock_rows_for_key_share(
-                conn,
-                BUNDLE_LOCK_IN_SQL,
-                list(dict.fromkeys(bundle_ids)),
-                workspace_id,
-                kind="Material bundle",
-            )
-            placeholders = ",".join("%s" for _ in job_ids)
-            existing = conn.execute(
-                # identity columns only — select * would drag
-                # workflow_definition_snapshot_json through for every row
-                "select id, workspace_id, source_type, source_id from jobs"
-                f" where id in ({placeholders})",
-                job_ids,
-            ).fetchall()
-            by_id = {str(row["id"]): row for row in existing}
+            # Identity precheck over the WHOLE call, in chunked statements:
+            # a collision against an existing row rejects the request before
+            # the first chunk commits (nothing inserted).
+            by_id = fetch_identity_map(conn, job_ids)
             for row in row_list:
                 current = by_id.get(str(row[0]))
                 if current is not None and (
@@ -153,15 +132,28 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                     or current["source_id"] != row[3]
                 ):
                     raise ValueError(f"Job identity collision for {row[0]}")
-            # One commit per ≤CHUNK_ROWS jobs+nodes: a mid-run failure leaves
-            # whole chunks behind (resumable via dedup — docstring), and the
-            # lock window per transaction is bounded by one chunk. Storage
-            # dirs are created per chunk AFTER the existing-row check: for a
-            # resubmitted job the on-conflict update keeps the stored
-            # storage_dir, and a stray shard dir would block the one-shot
-            # flat→sharded migration as a conflict.
+            # One commit per ≤CHUNK_ROWS jobs+nodes; each chunk locks its own
+            # refs FOR KEY SHARE before its INSERT (P1-1) — a between-chunks
+            # delete makes the next chunk's probe fail on the missing row
+            # instead of letting a dangling reference in. Storage dirs are
+            # created AFTER the precheck (stray shard dirs would block the
+            # flat→sharded migration; resubmits keep the stored dir).
             for start in range(0, len(row_list), CHUNK_ROWS):
                 chunk = row_list[start : start + CHUNK_ROWS]
+                lock_rows_for_key_share(
+                    conn,
+                    MATERIAL_LOCK_IN_SQL,
+                    chunk_ref_ids(job_refs, chunk, "material"),
+                    workspace_id,
+                    kind="Material",
+                )
+                lock_rows_for_key_share(
+                    conn,
+                    BUNDLE_LOCK_IN_SQL,
+                    chunk_ref_ids(job_refs, chunk, "bundle"),
+                    workspace_id,
+                    kind="Material bundle",
+                )
                 for row in chunk:
                     if str(row[0]) not in by_id:
                         job_storage_dir(self.jobs_dir, workspace_id, str(row[0])).mkdir(

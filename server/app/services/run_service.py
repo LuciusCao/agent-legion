@@ -211,13 +211,19 @@ class RunService:
                 committed = 0
             if committed > 0:
                 self._mark_partial_run_failed(str(run["id"]), committed, exc)
-                if isinstance(exc, ValueError):
-                    raise PartialRunCreationError(
-                        self._partial_failure_message(committed, exc),
-                        run_id=str(run["id"]),
-                        created_so_far=committed,
-                    ) from exc
-                raise
+                # #467 review P1-2/P2-1: EVERY failure mode after a committed
+                # chunk maps to the structured partial-failure error — the
+                # operator legibility requirement (created_so_far in the 400
+                # detail) does not depend on the exception family. The
+                # original exception rides along as __cause__; with no
+                # committed chunk the branches below keep the pre-chunking
+                # semantics verbatim (ValueError → 400, anything else →
+                # bare re-raise → 500).
+                raise PartialRunCreationError(
+                    self._partial_failure_message(committed, exc),
+                    run_id=str(run["id"]),
+                    created_so_far=committed,
+                ) from exc
             self._discard_empty_run(str(run["id"]))
             if isinstance(exc, ValueError):
                 raise InvalidOperationError(str(exc)) from exc
@@ -226,8 +232,15 @@ class RunService:
             notify_schedulable_work()
         # Persist the final creation progress so the run row alone answers
         # the detail endpoint (legacy sync intake kept this only in memory).
+        # #467 review P1-2: created_count is the run's WHOLE job slice
+        # (count_jobs_in_run, accumulating — the intake queue's semantics),
+        # not this request's inserts: a resubmission that resumes a
+        # partially-failed run must heal the row (failed→created via the
+        # upsert, count back to the run total, error_message cleared).
         run = self.job_db.update_intake_run(
-            str(run["id"]), created_count=len(job_ids), status=str(run["status"])
+            str(run["id"]),
+            created_count=self.job_db.count_jobs_in_run(str(run["id"])),
+            status=str(run["status"]),
         )
 
         if self.job_event_buffer is not None:

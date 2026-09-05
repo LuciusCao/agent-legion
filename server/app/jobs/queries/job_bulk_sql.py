@@ -6,18 +6,12 @@ Split out of ``job_bulk.py`` for the file-size budget (same precedent as
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
-from server.app.jobs.run_freeze import candidate_input
-from server.app.jobs.storage_layout import job_storage_dir
-from server.app.storage_paths import make_data_relative
-
-# Chunk = one committed transaction (insert + node rows + FOR KEY SHARE
-# locks); a mid-run failure leaves whole committed chunks behind (recovery:
-# see create_jobs_bulk). 1000 rows = the pre-chunking statement batch, so
-# each chunk's unnest INSERT still fires the v77 trigger once (#448).
+# Chunk = one committed transaction (lock probe + insert + node rows); a
+# mid-run failure leaves whole committed chunks behind (see create_jobs_bulk).
+# 1000 = the pre-chunking statement batch: each chunk's unnest INSERT still
+# fires the v77 trigger once (#448).
 CHUNK_ROWS = 1000
 
 MATERIAL_LOCK_IN_SQL = (
@@ -28,10 +22,9 @@ BUNDLE_LOCK_IN_SQL = (
     " order by id for key share"
 )
 
-# Set-based bulk INSERT (#448 phase 1): one unnest-driven INSERT per batch
-# (executemany's N statements fired the v77 trigger per row); psycopg adapts
-# each column list as ONE array parameter, so the extended-protocol
-# parameter limit is never in play.
+# Set-based bulk INSERT (#448): one unnest statement per batch (executemany's
+# N statements fired the v77 trigger per row); each column list is ONE array
+# parameter, so the extended-protocol parameter limit is never in play.
 JOBS_BULK_INSERT_SQL = """
 insert into jobs(
   id, workspace_id, source_type, source_id, run_id, title, storage_dir, stem,
@@ -73,17 +66,19 @@ def insert_job_nodes_batched(conn: Any, pairs: list[tuple[str, str]]) -> None:
 def lock_rows_for_key_share(
     conn: Any, sql_template: str, ids: list[str], workspace_id: str, *, kind: str
 ) -> None:
-    """FOR KEY SHARE-lock the referenced rows, in chunked IN probes.
+    """FOR KEY SHARE-lock a chunk's referenced rows, inside that chunk's own
+    transaction and before its INSERT (per-chunk lock-before-insert, review
+    P1-1; the lock is released by that chunk's commit — the next chunk
+    re-probes its own refs).
 
-    All referenced ids of the whole call are locked in ONE statement per
-    source table (id list chunked to bound placeholder count), *before* any
-    INSERT runs — the pre-chunking protocol serialized delete against the
-    whole insert, and per-chunk locking would open a window where a delete
-    interleaves between two chunks: the earlier chunk's jobs would already
-    reference the deleted row. The ORDER BY id makes lock acquisition order
-    deterministic across every caller, so two concurrent runs cannot
-    deadlock on the same material set. Rows are locked one table at a time
-    in the fixed order materials → bundles → jobs.
+    Delete orderings against a chunk, all safe: (a) committed before the
+    probe → row missing → ValueError → the run service's partial-failure
+    path — no job references a deleted row; (b) holding FOR UPDATE → the
+    probe blocks, then sees (a); (c) probe locks first → the delete blocks
+    until the chunk commits, then its reference check rejects it (409).
+    ORDER BY id keeps multi-row acquisition deterministic (protects bulk
+    FOR UPDATE deleters from lock inversion); cross-run FOR KEY SHARE probes
+    are mutually compatible — no cross-run deadlock surface.
     """
     for start in range(0, len(ids), CHUNK_ROWS):
         chunk = ids[start : start + CHUNK_ROWS]
@@ -95,34 +90,3 @@ def lock_rows_for_key_share(
             found = {str(row["id"]) for row in rows}
             missing = sorted(set(chunk) - found)
             raise ValueError(f"{kind} not found: {', '.join(missing[:3])}")
-
-
-def job_row_tuple(
-    jobs_dir: Path,
-    workspace_id: str,
-    workflow_key: str,
-    run_id: str,
-    revision: dict[str, Any],
-    candidate: dict[str, Any],
-    source_id: str,
-    job_id: str,
-    frozen_config_json: str | None,
-) -> tuple[Any, ...]:
-    """The jobs-row insert tuple for one candidate (column order = the
-    unnest INSERT's column list)."""
-    return (
-        job_id,
-        workspace_id,
-        str(candidate["entity_type"]),
-        source_id,
-        run_id,
-        str(candidate["title"]),
-        make_data_relative(job_storage_dir(jobs_dir, workspace_id, job_id), jobs_dir.parent),
-        str(candidate.get("stem", "")),
-        revision["id"],
-        int(revision["version"]),
-        revision["definition_hash"],
-        revision["definition_json"],
-        json.dumps(candidate_input(candidate), ensure_ascii=False),
-        frozen_config_json,
-    )
