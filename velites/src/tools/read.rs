@@ -14,7 +14,11 @@ use crate::events::ContentBlock;
 pub async fn run(args: &Value, ctx: &ToolContext) -> ToolOutput {
     match run_inner(args, ctx) {
         Ok(output) => output,
-        Err(err) => ToolOutput::error(err.to_string()),
+        // Argument-shape failures (missing `path`) reject before any
+        // filesystem work and stay timing-free; resolution/read failures
+        // happen mid-measurement and keep their totalMs (#469).
+        Err(err @ ToolError::InvalidArgs(_)) => ToolOutput::error(err.to_string()),
+        Err(err) => ToolOutput::error(err.to_string()).measured(),
     }
 }
 
