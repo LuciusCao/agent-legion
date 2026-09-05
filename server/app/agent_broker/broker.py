@@ -207,6 +207,16 @@ class AgentExecutionBroker:
             touch_worker(conn, worker_id)
             return True
 
+    def heartbeat_batch(self, worker_id: str, items: list[dict[str, str]]) -> dict[str, Any]:
+        """Renew every lease of this Worker in one write transaction (#352).
+
+        The transaction lives in ``heartbeat_batch.py`` (file-size budget);
+        per-item semantics mirror ``heartbeat`` — unknown/expired items are
+        reported as lost instead of failing the batch."""
+        from server.app.agent_broker.heartbeat_batch import batch_heartbeat
+
+        return batch_heartbeat(self, worker_id, items)
+
     def claimed_payload(self, execution_id: str, worker_id: str) -> dict[str, Any] | None:
         with read_connection(self.database_dsn) as conn:
             row = conn.execute(

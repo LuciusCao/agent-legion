@@ -2,7 +2,8 @@
 
 Split from ``agent_worker_claims`` for the file-size budget (mirrors the
 original ``agent_workers.py`` → claims split): the claim factory mounts this
-registration on the shared router.
+registration on the shared router. The per-Worker batch heartbeat (protocol
+v5, #352) lives in ``agent_worker_heartbeat_batch``.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_control.registry import CODE_PROTOCOL_VERSION
+from server.app.routes.agent_worker_heartbeat_batch import register_batch_heartbeat_route
 from server.app.routes.agent_workers_contracts import AgentHeartbeatResponse
 
 
@@ -39,3 +41,5 @@ def register_heartbeat_route(
             cancelled = broker.cancelled_code_executions(str(worker["worker_id"]))
             return AgentHeartbeatResponse(cancelled_execution_ids=cancelled)
         return Response(status_code=204)
+
+    register_batch_heartbeat_route(router, broker, authorize_worker)

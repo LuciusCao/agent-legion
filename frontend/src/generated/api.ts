@@ -351,6 +351,31 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/agent-executions/heartbeats': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Heartbeat Batch
+     * @description Per-Worker batch heartbeat: one write transaction renews every
+     *     listed lease of the authenticated Worker.
+     *
+     *     Unknown/expired items come back in ``lost`` (not 5xx) so a stale item
+     *     never blocks the renewal of its batch siblings; the cancel body
+     *     mirrors the single heartbeat's protocol-v2 shape.
+     */
+    post: operations['heartbeat_batch_api_agent_executions_heartbeats_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/agent-executions/{execution_id}/bundle': {
     parameters: {
       query?: never
@@ -3313,7 +3338,7 @@ export interface components {
      * @description Protocol v2 heartbeat body: explicit cancellations for this Worker.
      *
      *     Only kind='code' executions are listed (batch 2 decision 6); v1 Workers
-     *     get the legacy empty 204 instead.
+     *     get the legacy empty 204. Protocol-v5 batch contracts: ``agent_worker_heartbeat_batch``.
      */
     AgentHeartbeatResponse: {
       /** Cancelled Execution Ids */
@@ -3576,6 +3601,45 @@ export interface components {
     ArtifactUploadResponse: {
       /** Hash */
       hash: string
+    }
+    /**
+     * BatchHeartbeatItem
+     * @description One execution of a per-Worker batch heartbeat.
+     */
+    BatchHeartbeatItem: {
+      /** Execution Id */
+      execution_id: string
+      /** Lease Id */
+      lease_id: string
+    }
+    /**
+     * BatchHeartbeatRequest
+     * @description Body of ``POST /api/agent-executions/heartbeats``: every lease the
+     *     sending Worker wants renewed in one transaction. Empty is legal (a Worker
+     *     between two claims), answered with empty result lists.
+     */
+    BatchHeartbeatRequest: {
+      /** Executions */
+      executions?: components['schemas']['BatchHeartbeatItem'][]
+    }
+    /**
+     * BatchHeartbeatResponse
+     * @description Per-execution verdict of a batch heartbeat.
+     *
+     *     ``renewed``/``lost`` partition the request items; ``lost`` carries the
+     *     409 family (unknown id, swept lease, foreign worker) so the Worker can
+     *     prune those leases locally instead of retrying them forever. The cancel
+     *     body mirrors the single heartbeat's protocol-v2 shape: batch beats carry
+     *     the same explicit cancellation list for this Worker's claimed code
+     *     executions.
+     */
+    BatchHeartbeatResponse: {
+      /** Cancelled Execution Ids */
+      cancelled_execution_ids: string[]
+      /** Lost */
+      lost: string[]
+      /** Renewed */
+      renewed: string[]
     }
     /** BatchJobIdsRequest */
     BatchJobIdsRequest: {
@@ -5305,7 +5369,7 @@ export interface components {
       allowed_workspaces: string[]
       /**
        * Host Protocol Version
-       * @default 4
+       * @default 5
        */
       host_protocol_version: number
       /** Worker Token */
@@ -8141,6 +8205,39 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['AgentClaimResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  heartbeat_batch_api_agent_executions_heartbeats_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['BatchHeartbeatRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['BatchHeartbeatResponse']
         }
       }
       /** @description Validation Error */

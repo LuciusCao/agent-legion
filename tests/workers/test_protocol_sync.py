@@ -25,8 +25,8 @@ from pydantic import BaseModel
 
 from shared.code_sandbox import CODE_RESULT_METADATA_KEYS
 from shared.protocol import (
-    ARTIFACT_GZIP_PROTOCOL_VERSION,
     CODE_PROTOCOL_VERSION,
+    HEARTBEAT_BATCH_PROTOCOL_VERSION,
     MODEL_RUNTIME_PROTOCOL_VERSION,
     PROTOCOL_VERSION,
 )
@@ -40,7 +40,20 @@ def test_worker_declared_version_is_latest_shared() -> None:
     from worker.host.client import PROTOCOL_VERSION as worker_declared
 
     assert worker_declared is PROTOCOL_VERSION
-    assert PROTOCOL_VERSION == ARTIFACT_GZIP_PROTOCOL_VERSION
+    assert PROTOCOL_VERSION == HEARTBEAT_BATCH_PROTOCOL_VERSION
+
+
+def test_batch_heartbeat_limit_mirrors_host_contract() -> None:
+    """#352：Worker 侧批量上限镜像 Host 契约上限（MAX_BATCH_HEARTBEATS），
+    两侧漂移会让 Worker 的拒打阈值与 Host 的 422 边界错位。"""
+    from server.app.agent_broker.heartbeat_batch import (
+        MAX_BATCH_HEARTBEATS as host_limit,
+    )
+    from worker.execution.heartbeat_batch import (
+        MAX_BATCH_HEARTBEATS as worker_limit,
+    )
+
+    assert host_limit == worker_limit
 
 
 def test_host_contract_default_matches_shared() -> None:

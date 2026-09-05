@@ -241,7 +241,7 @@ def test_client_registration_declares_latest_protocol_and_code_capacity() -> Non
         headers.update(kwargs["headers"])
         return (
             201,
-            b'{"worker_token": "tok", "host_protocol_version": 4, "allowed_workspaces": []}',
+            b'{"worker_token": "tok", "host_protocol_version": 5, "allowed_workspaces": []}',
         )
 
     client.request = stub  # type: ignore[method-assign]
@@ -260,7 +260,7 @@ def test_client_registration_declares_latest_protocol_and_code_capacity() -> Non
         ["token-a", "token-b"],
     )
 
-    assert seen[0]["protocol_version"] == 4
+    assert seen[0]["protocol_version"] == 5
     assert seen[0]["max_code_concurrency"] == 3
     assert seen[0]["runtime_versions"] == {"velites": "velites 0.4.0-alpha"}
     # issue #35：全部 scoped token 逗号拼进同一个注册请求。
@@ -350,7 +350,7 @@ def test_registration_retries_transient_http_status_errors(
         del args, kwargs
         status = statuses.pop(0)
         if status == 201:
-            return (status, b'{"worker_token": "tok", "host_protocol_version": 4}')
+            return (status, b'{"worker_token": "tok", "host_protocol_version": 5}')
         return (status, b"temporarily unavailable")
 
     client.request = flaky_request  # type: ignore[method-assign]
@@ -378,6 +378,56 @@ def test_client_heartbeat_and_report_send_lease_header() -> None:
     archive = Path(__file__)
     client.report("exec-1", "lease-9", {"status": "completed"}, archive)
     assert [call.get("X-Agent-Lease-Id") for call in seen] == ["lease-9", "lease-9"]
+
+
+# --- #352: 批量心跳 client 面 -------------------------------------------------
+
+
+def test_client_heartbeat_batch_posts_executions_and_parses_body() -> None:
+    client = agent_worker.Client("http://unused")
+    seen: list[dict] = []
+    client.request = lambda *a, **k: (  # type: ignore[method-assign]
+        seen.append({"method": a[0], "path": a[1], "data": json.loads(k["data"])}),
+        (
+            200,
+            b'{"renewed": ["exec-1"], "lost": ["exec-2"], "cancelled_execution_ids": ["exec-3"]}',
+        ),
+    )[1]
+
+    outcome = client.heartbeat_batch([("exec-1", "lease-1"), ("exec-2", "lease-2")])
+
+    assert outcome == (
+        200,
+        {"renewed": ["exec-1"], "lost": ["exec-2"], "cancelled_execution_ids": ["exec-3"]},
+    )
+    assert seen == [
+        {
+            "method": "POST",
+            "path": "/api/agent-executions/heartbeats",
+            "data": {
+                "executions": [
+                    {"execution_id": "exec-1", "lease_id": "lease-1"},
+                    {"execution_id": "exec-2", "lease_id": "lease-2"},
+                ]
+            },
+        }
+    ]
+
+
+def test_client_heartbeat_batch_returns_none_on_missing_endpoint() -> None:
+    """pre-v5 Host 404/405 → None，调用方据此降级为逐执行心跳。"""
+    client = agent_worker.Client("http://unused")
+    client.request = lambda *a, **k: (404, b"not found")  # type: ignore[method-assign]
+    assert client.heartbeat_batch([("exec-1", "lease-1")]) is None
+    client.request = lambda *a, **k: (405, b"method not allowed")  # type: ignore[method-assign]
+    assert client.heartbeat_batch([]) is None
+
+
+def test_client_heartbeat_batch_rejects_error_status() -> None:
+    client = agent_worker.Client("http://unused")
+    client.request = lambda *a, **k: (500, b"boom")  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="batch heartbeat failed: HTTP 500"):
+        client.heartbeat_batch([("exec-1", "lease-1")])
 
 
 def _write_main_config(tmp_path: Path) -> Path:
@@ -609,6 +659,7 @@ def test_main_hot_resizes_capacity_without_cancelling_active_work(
         status,
         uploads,
         download_slots,
+        heartbeat_registry=None,
     ):
         while not stop.is_set() and not releases[claimed["execution_id"]].wait(0.01):
             pass
