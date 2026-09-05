@@ -97,7 +97,9 @@ class FakeClient:
             "online": True,
         }
 
-    def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
+    def heartbeat(
+        self, execution_id: str, lease_id: str, timeout: float | None = None
+    ) -> tuple[int, list[str]]:
         self.heartbeats += 1
         self.heartbeat_lease_ids.append(lease_id)
         return self._heartbeat_status, []

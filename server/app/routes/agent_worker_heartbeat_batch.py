@@ -16,7 +16,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from server.app.agent_broker import AgentExecutionBroker
-from server.app.agent_broker.heartbeat_batch import MAX_BATCH_HEARTBEATS
+from server.app.agent_broker.heartbeat_batch import MAX_BATCH_HEARTBEATS, batch_heartbeat
 
 
 class BatchHeartbeatItem(BaseModel):
@@ -69,8 +69,12 @@ def register_batch_heartbeat_route(
         mirrors the single heartbeat's protocol-v2 shape."""
         worker = authorize_worker(request)
         worker_id = str(worker["worker_id"])
-        outcome = broker.heartbeat_batch(
-            worker_id, [item.model_dump() for item in payload.executions]
+        # #352 rebase onto #491: the batch renewal calls the transaction
+        # module directly — broker.py is at its #401 frozen ceiling and a
+        # broker.heartbeat_batch forward method no longer fits; the route
+        # is the single caller, so the indirection buys nothing.
+        outcome = batch_heartbeat(
+            broker, worker_id, [item.model_dump() for item in payload.executions]
         )
         cancelled = broker.cancelled_code_executions(worker_id)
         return BatchHeartbeatResponse(
