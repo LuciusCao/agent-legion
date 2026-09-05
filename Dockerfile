@@ -42,7 +42,9 @@ COPY . ./
 COPY --from=frontend /src/frontend/dist /app/frontend/dist
 RUN uv sync --frozen --no-dev
 EXPOSE 8000
-CMD ["uvicorn", "server.app.main:create_prod_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "20"]
+# --log-config adds %(asctime)s to the access/error lines (#490): access logs
+# become alignable across workers/machines by wall clock instead of line no.
+CMD ["uvicorn", "server.app.main:create_prod_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "20", "--log-config", "deploy/uvicorn-log-config.json"]
 
 # Worker 镜像是纯执行服务（issue #381）：不含任何 agent runtime 执行器。
 # velites agent runtime 以平台匹配的二进制外挂提供（compose bind mount 挂到

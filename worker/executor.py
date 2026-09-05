@@ -21,6 +21,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]  # worker/ 包根
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from worker import events
 from worker.claim_backoff import CLAIM_BACKOFF_CAP_SECONDS, ClaimBackoffSequence
 from worker.claim_pacing import ClaimPacing
 from worker.cleanup import clean_work_root
@@ -95,8 +96,13 @@ def main() -> int:
     poll_interval, registration = register_from_config(client, config, stop, args.config.parent)
     if registration is not True:
         return 2 if registration is False else 0
+    worker_id = str(config["worker_id"])
     # 首次同步前的兜底视图：get_self 失败时控制台仍有 worker_id 可显示。
-    host_worker: dict[str, Any] | None = {"worker_id": str(config["worker_id"]), "revoked": False}
+    host_worker: dict[str, Any] | None = {
+        "worker_id": worker_id,
+        "name": str(config.get("name", config["worker_id"])),
+        "revoked": False,
+    }
     try:
         host_worker = sync_host_status(client, status, metrics, host_worker)
     except WorkerAuthError as exc:
@@ -234,8 +240,11 @@ def main() -> int:
                 while budget["agent"] + budget["code"] > 0:
                     if stop.is_set():
                         break
+                    # #490 claim.attempt：本轮预算快照（结构化事件）先于
+                    # 发起；#472 的 RTT 打点紧贴 claim 调用。
+                    events.note_claim_attempt(worker_id, budget, uploads.depth, claim_enabled)
                     claim_started = time.monotonic()
-                    claim = client.claim(str(config["worker_id"]), effective, max_code_concurrency)
+                    claim = client.claim(worker_id, effective, max_code_concurrency)
                     if claim is None:
                         break
                     # #472 codex P2：pacing 输入是单次成功 claim 的往返
@@ -243,6 +252,7 @@ def main() -> int:
                     claim_rtt = time.monotonic() - claim_started
                     claimed = True
                     kind = "code" if str(claim.get("kind")) == "code" else "agent"
+                    events.note_claim_received(worker_id, claim)
                     # Host 已在 claim 事务强制分池；竞态超发照单收下（Host 记账）。
                     budget[kind] -= 1
                     # #352：heartbeat_registry 追加在 #471 的 run_args/run_tail
@@ -271,6 +281,9 @@ def main() -> int:
                 # 时长。#437：等待时长经 ClaimBackoffSequence（首 1s 固定、
                 # 之后指数翻倍 ±20% jitter、上限 60s），fleet 不同步对齐。
                 wait = backoff.next_wait()
+                # #490 claim.backoff：#437 序列状态结构化落盘；HTTP 错误码/
+                # URL 已在 client.request 的 http.error 事件里。
+                events.note_claim_backoff(worker_id, exc, wait, backoff.failures)
                 print(f"Agent claim error: {exc}; retrying in {wait:.1f}s", flush=True)
                 stop.wait(wait)
                 continue
