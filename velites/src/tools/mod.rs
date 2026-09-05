@@ -141,16 +141,20 @@ impl ToolKind {
 
     /// Dispatch one tool execution. This is the single #469 timing boundary:
     /// `totalMs` (dispatch start → result ready) is filled here for every
-    /// tool kind, so the in-process tools carry zero instrumentation of
+    /// measured tool, so the in-process tools carry zero instrumentation of
     /// their own. `bash` additionally fills its subprocess phase fields
     /// (spawnMs / firstByteMs / restMs / reapMs) itself; it leaves
     /// `total_ms` untouched so the dispatch layer stays the single source
     /// for the total and the decomposition base stays consistent
-    /// (total = spawn + firstByte + rest + reap on the happy path).
+    /// (total ≈ spawn + firstByte + rest + reap; see `events::ToolTiming`
+    /// for what the residual covers).
     ///
     /// Tool errors raised before any measurement (argument validation, guard
     /// rejection, disabled tools) surface as error content with `timing:
-    /// None` — the same convention as `RequestTiming` on `message_end`.
+    /// None` — the same convention as `RequestTiming` on `message_end`. An
+    /// error output that ALREADY carries phases (bash timeout: is_error
+    /// with spawn/firstByte/rest/reap filled) keeps them and still gets
+    /// its totalMs here.
     pub async fn execute(self, args: &Value, ctx: &ToolContext) -> ToolOutput {
         let started = Instant::now();
         let mut output = match self {
@@ -160,10 +164,14 @@ impl ToolKind {
             Self::Uuid => uuid::run(args, ctx).await,
             Self::Validate => validate::run(args, ctx).await,
         };
-        let timing = output
-            .timing
-            .get_or_insert_with(crate::events::ToolTiming::default);
-        timing.total_ms = Some(elapsed_ms(started));
+        // Unmeasured failures (error + no phases recorded) stay timing-free;
+        // everything else gets its totalMs at this single boundary.
+        if !(output.is_error && output.timing.is_none()) {
+            let timing = output
+                .timing
+                .get_or_insert_with(crate::events::ToolTiming::default);
+            timing.total_ms = Some(elapsed_ms(started));
+        }
         output
     }
 }
