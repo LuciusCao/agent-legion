@@ -18,17 +18,23 @@ export type ApprovalNodeConfig = {
 
 // 读侧在渲染路径被调用：YAML 编辑中途的非法文本（未闭合括号等）会让
 // parse 抛错——此时返回默认值而不是拖垮整个 Studio（仓库纪律：
-// workflowYamlDraftRecord 同款；编辑合法后自然恢复真实值）。
+// workflowYamlDraftRecord 同款；编辑合法后自然恢复真实值）。config 的
+// YAML 类型是自由 mapping（code 节点同键承载任意 schema 参数值，#418），
+// 这里按白名单键读字符串。
+function readStr(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value : fallback
+}
+
 export function readApprovalNodeConfig(
   rawYaml: string,
   nodeKey: string
 ): ApprovalNodeConfig {
   try {
-    const node = parseWorkflowYaml(rawYaml).nodes?.[nodeKey]
+    const config = parseWorkflowYaml(rawYaml).nodes?.[nodeKey]?.config
+    const feedback = readStr(config?.feedback_artifact, 'review_feedback.json')
     return {
-      reworkTarget: node?.config?.rework_target ?? '',
-      feedbackArtifact:
-        node?.config?.feedback_artifact ?? 'review_feedback.json',
+      reworkTarget: readStr(config?.rework_target, ''),
+      feedbackArtifact: feedback,
     }
   } catch {
     return { reworkTarget: '', feedbackArtifact: 'review_feedback.json' }
@@ -55,10 +61,11 @@ export function patchWorkflowNodeApprovalConfig(
     // 后端校验：裸文件名（不得含路径分隔符）。
     throw new Error('feedback_artifact 必须是裸文件名（不含路径）')
   }
-  const next: NonNullable<WorkflowYamlNode['config']> = {}
-  const reworkTarget = config.reworkTarget ?? node.config?.rework_target
-  const feedbackArtifact =
-    config.feedbackArtifact ?? node.config?.feedback_artifact
+  const pick = (next: string | undefined, key: string): string =>
+    next ?? readStr(node.config?.[key], '')
+  const next: Record<string, string> = {}
+  const reworkTarget = pick(config.reworkTarget, 'rework_target')
+  const feedbackArtifact = pick(config.feedbackArtifact, 'feedback_artifact')
   if (reworkTarget) next.rework_target = reworkTarget
   if (feedbackArtifact) next.feedback_artifact = feedbackArtifact
   if (Object.keys(next).length === 0) delete node.config

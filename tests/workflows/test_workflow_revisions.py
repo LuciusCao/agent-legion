@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace as dc_replace
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 from server.app.jobs.queries import JobQueries
 from server.app.main import create_app
 from server.app.services.node_codes import NodeCodeService
+from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.services.workflow_drafts import (
     validate_workflow_definition,
     validate_workflow_for_publish,
@@ -718,8 +720,6 @@ def test_publish_revision_skips_pins_when_gate_disabled(tmp_path: Path) -> None:
 
 def test_runtime_only_update_preserves_node_code_pins(tmp_path: Path) -> None:
     """In-place (runtime settings only) revision updates keep node_code_pins."""
-    from dataclasses import replace as dc_replace
-
     from server.app.workflows.schema import WorkflowNodeExecution
 
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
@@ -796,3 +796,129 @@ def test_publish_validation_skips_approval_gates(tmp_path: Path) -> None:
     # Only the code node is reported; the gate needs neither Agents nor code.
     assert all("gated.gate" not in error for error in errors)
     assert any("gated.write" in error for error in errors)
+
+
+def _publish_with_node_schema(
+    queries: JobQueries,
+    workspace_id: str,
+    properties: dict,
+) -> WorkflowDefinition:
+    """Publish the demo DAG with intake_knowledge_points declaring a schema."""
+    definition = load_builtin_definition("education_video_problems_generation")
+    patched = dc_replace(
+        definition,
+        nodes={
+            **definition.nodes,
+            "intake_knowledge_points": dc_replace(
+                definition.nodes["intake_knowledge_points"],
+                config_schema={"type": "object", "properties": properties},
+            ),
+        },
+    )
+    WorkflowRevisionService(queries).publish_workspace_revision(workspace_id, patched)
+    return patched
+
+
+def test_publish_prunes_stale_override_keys(tmp_path: Path) -> None:
+    """#418 二轮复审 P2-1: publish must prune workspace overrides the new
+    revision no longer accepts. Without the prune, a renamed/removed schema
+    property leaves stale keys that fail every later intake at the whitelist
+    validation, and the override card's PATCH-everything save 400s."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "prune-ws", default_workflow_key="education_video_problems_generation"
+    )
+
+    _publish_with_node_schema(
+        queries,
+        workspace["id"],
+        {"old_key": {"type": "integer", "default": 1}, "kept": {"type": "string"}},
+    )
+    queries.update_workspace(
+        workspace["id"],
+        node_config={
+            "education_video_problems_generation": {
+                "intake_knowledge_points": {"old_key": 5, "kept": "v"}
+            }
+        },
+    )
+
+    # v2 renames old_key → new_key (the studio rename path).
+    v2 = _publish_with_node_schema(
+        queries,
+        workspace["id"],
+        {"new_key": {"type": "integer", "default": 2}, "kept": {"type": "string"}},
+    )
+
+    stored = queries.get_workspace(workspace["id"])["node_config"]
+    assert stored["education_video_problems_generation"]["intake_knowledge_points"] == {"kept": "v"}
+    # And the frozen intake resolution that previously raised now succeeds.
+    resolved = resolve_workflow_node_configs(v2, {}, queries.get_workspace(workspace["id"]))
+    assert resolved["intake_knowledge_points"]["new_key"] == 2
+
+
+def test_publish_prunes_type_mismatched_override_values(tmp_path: Path) -> None:
+    """A type flip (integer → string) leaves the old value behind: the intake
+    type check raises on it exactly like an unknown key, so publish prunes it
+    too (#418 二轮复审 P2-1)."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "prune-type-ws", default_workflow_key="education_video_problems_generation"
+    )
+
+    _publish_with_node_schema(queries, workspace["id"], {"count": {"type": "integer"}})
+    queries.update_workspace(
+        workspace["id"],
+        node_config={
+            "education_video_problems_generation": {"intake_knowledge_points": {"count": 42}}
+        },
+    )
+
+    v2 = _publish_with_node_schema(queries, workspace["id"], {"count": {"type": "string"}})
+
+    # The node's whole override entry is gone (same shape the settings PATCH
+    # leaves behind when a node's values empty out).
+    stored = queries.get_workspace(workspace["id"])["node_config"]
+    assert "intake_knowledge_points" not in stored["education_video_problems_generation"]
+    resolved = resolve_workflow_node_configs(v2, {}, queries.get_workspace(workspace["id"]))
+    assert "count" not in resolved["intake_knowledge_points"]
+
+
+def test_publish_keeps_valid_and_secret_overrides(tmp_path: Path) -> None:
+    """Legitimate overrides survive the prune, secret_ref markers included."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "prune-keep-ws", default_workflow_key="education_video_problems_generation"
+    )
+
+    schema = {"count": {"type": "integer"}, "token": {"type": "string", "secret": True}}
+    _publish_with_node_schema(queries, workspace["id"], schema)
+    overrides = {
+        "education_video_problems_generation": {
+            "intake_knowledge_points": {
+                "count": 7,
+                "token": {"secret_ref": "node:wf:intake_knowledge_points:token"},
+            }
+        }
+    }
+    queries.update_workspace(workspace["id"], node_config=overrides)
+
+    _publish_with_node_schema(queries, workspace["id"], schema)
+
+    stored = queries.get_workspace(workspace["id"])["node_config"]
+    assert stored["education_video_problems_generation"]["intake_knowledge_points"] == {
+        "count": 7,
+        "token": {"secret_ref": "node:wf:intake_knowledge_points:token"},
+    }
+
+
+def test_publish_without_overrides_is_a_noop_prune(tmp_path: Path) -> None:
+    """No stored overrides → publish must not write the workspace row."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "prune-empty-ws", default_workflow_key="education_video_problems_generation"
+    )
+
+    _publish_with_node_schema(queries, workspace["id"], {"count": {"type": "integer"}})
+
+    assert queries.get_workspace(workspace["id"])["node_config"] == {}
