@@ -1,0 +1,209 @@
+# Worker 镜像发布管道：worker-v* tag push 时构建多架构 worker 镜像并推送
+# GHCR（ghcr.io/luciuscao/agent-legion-worker）。
+#
+# tag 命名：worker-v<版本>（如 worker-v0.6.0）。版本线独立于仓库 v* 发版，
+# 不校验 pyproject 版本——v* tag 与 pyproject 本就不同步（2026-09 实况：
+# tag v0.6.0 时 pyproject 仍为 0.4.0a0），镜像内容随 git ref 冻结。惯例是
+# 跟随镜像所基于的仓库发版 tag（v0.6.0 → worker-v0.6.0）；同版重发允许
+# 后缀（worker-v0.6.0-r2）。validate job 只做形态校验（非空、合法 Docker
+# tag 字符集、避开 latest / sha-* 保留字）。
+#
+# 多架构用原生 runner（amd64: ubuntu-latest，arm64: ubuntu-24.04-arm），
+# 与 velites-release 同策略，拒绝 QEMU——worker target 依赖的
+# velites-sandbox Rust 构建在 QEMU 下慢数倍且易超时。per-arch 以 digest
+# 直推（无 tag），merge job 合成 manifest list 后统一打
+# <版本> / sha-<short> / latest 三个 tag。
+#
+# 拉取侧（compose override、GHCR 可见性）见
+# deploy/compose.worker.pull.example.yaml 与
+# docs/agent-worker-deployment.md §5「拉取式部署」。镜像不含 agent runtime
+# 执行器（#381），拉取式部署的 VELITES_BIN 外挂与期望 runtime 守卫等前置
+# 与本地构建形态完全相同。
+#
+# 与 quality-gate 的 docker-build job 分工：那边是 PR 门的构建验证
+# （push: false，仅 amd64）；本 workflow 只在 tag push 时实际发布。
+name: worker-image-release
+
+on:
+  push:
+    tags:
+      - "worker-v*"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY_IMAGE: ghcr.io/luciuscao/agent-legion-worker
+
+jobs:
+  validate:
+    name: validate tag
+    # fork 防护（同 velites-release）：公开仓库的 fork 打 tag 也会触发本
+    # workflow，但 fork 的 GITHUB_TOKEN 没有本仓库命名空间的 packages:write
+    # 权限；限定本仓库让依赖链下游 job 一并跳过，避免白跑两个构建矩阵。
+    if: github.repository == 'LuciusCao/agent-legion'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      # dereference 后的 commit sha：annotated tag 下 GITHUB_SHA 是 tag
+      # 对象而非 commit（push 事件 ref 值），sha-<短哈希> tag 与 revision
+      # label 必须用它才映射得回 git log（subagent P2-2）。
+      commit_sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag version must be a valid Docker tag
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#worker-v}"
+          if [[ ! "$version" =~ ^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$ ]]; then
+            echo "tag ${GITHUB_REF_NAME} 的版本段不是合法 Docker tag：${version}" >&2
+            exit 1
+          fi
+          case "$version" in
+            latest|sha-*)
+              echo "版本段 ${version} 与本 workflow 的保留 tag（latest / sha-*）冲突" >&2
+              exit 1
+              ;;
+          esac
+
+      # 轻量 tag（git tag worker-vX 不带 -a）下 GITHUB_SHA 即 commit，本步
+      # dereference 幂等；annotated tag 则必须剥到 commit。显式 fetch tag
+      # refspec 而不依赖 checkout 的内部 ref（确定性：checkout 不保证在
+      # 本地留下 refs/tags/*）。
+      - name: Resolve commit sha
+        id: commit
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          echo "sha=$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build linux/${{ matrix.arch }}
+    needs: validate
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # amd64 与 quality-gate docker-build 共享 scope=worker（同
+          # context/target 的命名空间一致）。注意 GHA cache 按 ref 可见：
+          # PR run 写的缓存 tag run 恢复不到（默认分支 develop 的 push 不
+          # 跑 docker-build），发布构建预期冷启动——worker target 的
+          # velites-sandbox Rust release 构建约 15 分钟，在 timeout 内；
+          # cache-to 落在 tag ref 下，同 tag 重推可复用。arm64 独立 scope。
+          - arch: amd64
+            runs-on: ubuntu-latest
+            cache-scope: worker
+          - arch: arm64
+            runs-on: ubuntu-24.04-arm
+            cache-scope: worker-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: worker
+          platforms: linux/${{ matrix.arch }}
+          # 多架构 digest 合并模式：per-arch 只推 canonical digest（不打
+          # tag），由 merge job 合成 manifest list 后统一打 tag，避免中间
+          # 出现单架构的版本 tag。
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.cache-scope }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.cache-scope }}
+          # provenance attestation 会让 per-arch 产物混入 unknown/unknown
+          # 条目，digest 合并后干扰 imagetools inspect 的可读性；发布镜像
+          # 不需要，关闭。
+          provenance: false
+          labels: |
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.revision=${{ needs.validate.outputs.commit_sha }}
+
+      - name: Export digest
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: merge manifest and tag
+    # 任一架构腿失败时 build job 整体为 failure，merge 跳过——latest 等移动
+    # tag 永远不会指向单架构镜像。
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # validate 解析的 commit sha（annotated tag 下 GITHUB_SHA 是 tag 对象，
+      # 见 validate job）：sha-<短哈希> tag 从这里取。
+      COMMIT_SHA: ${{ needs.validate.outputs.commit_sha }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#worker-v}"
+          short="${COMMIT_SHA::7}"
+          sources=()
+          for digest in *; do
+            sources+=("${REGISTRY_IMAGE}@sha256:${digest}")
+          done
+          # 数量守卫：期望恰好两架构；artifact 缺失理论不可达
+          # （if-no-files-found: error），但空目录时 for 循环会按字面量
+          # glob 出一个无效 digest，报错位置在 imagetools 而非这里——
+          # 提前钉住「恰好 2」把失败变成自查可读的。
+          if [ "${#sources[@]}" -ne 2 ]; then
+            echo "期望 2 个架构 digest（amd64/arm64），实际 ${#sources[@]}：${sources[*]}" >&2
+            exit 1
+          fi
+          docker buildx imagetools create \
+            -t "${REGISTRY_IMAGE}:${version}" \
+            -t "${REGISTRY_IMAGE}:sha-${short}" \
+            -t "${REGISTRY_IMAGE}:latest" \
+            "${sources[@]}"
+
+      - name: Smoke check merged platforms
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#worker-v}"
+          # --format 的模板上下文是原始 OCI index：平台列表在
+          # .Manifest.Manifests[*].Platform（字段名 OS 大小写敏感，无
+          # .Manifest.Platforms 快捷字段——codex P1，本地以公共多架构镜像
+          # 实测复现过）。provenance: false 保证无 unknown/unknown 干扰条目。
+          platforms="$(docker buildx imagetools inspect "${REGISTRY_IMAGE}:${version}" \
+            --format '{{range .Manifest.Manifests}}{{.Platform.OS}}/{{.Platform.Architecture}} {{end}}')"
+          echo "platforms: ${platforms}"
+          grep -qw linux/amd64 <<<"$platforms"
+          grep -qw linux/arm64 <<<"$platforms"
