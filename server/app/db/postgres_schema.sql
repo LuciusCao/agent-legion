@@ -349,11 +349,17 @@ create index if not exists idx_agent_requests_queued_head
   where state = 'queued';
 create index if not exists idx_agent_requests_node_active on agent_execution_requests(workspace_id, node_key, state);
 create index if not exists idx_agent_requests_worker_active on agent_execution_requests(worker_id, state);
--- One active request per node; 'reporting' still owns the node until the
--- result commits, so it must block re-enqueue too.
+-- One active request per execution identity (#401, schema v79): non-shard
+-- requests stay one-active per (job_id, node_key) — the COALESCE fallback
+-- '-1' is a real value (a bare NULL would NOT participate: Postgres unique
+-- indexes never treat two NULLs as equal). Shard requests (#389 remote
+-- shards) dedup per (job_id, node_key, shard_index), aligning the index
+-- with the node_shards row-level dedup try_start_shard performs at claim —
+-- a multi-shard node no longer serializes to one remote shard in flight.
+-- 'reporting' still owns the identity until the result commits.
 drop index if exists idx_agent_requests_one_active_node;
 create unique index if not exists idx_agent_requests_one_active_node
-  on agent_execution_requests(job_id, node_key)
+  on agent_execution_requests(job_id, node_key, coalesce((manifest_json::jsonb ->> 'shard_index')::integer, -1))
   where state in ('queued', 'claimed', 'reporting');
 -- Stockpile gate's done-rate window scan (schema v20,
 -- server.app.workflow_worker.agent_stock); partial, so only done rows pay for it.
