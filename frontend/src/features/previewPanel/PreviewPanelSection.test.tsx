@@ -298,7 +298,8 @@ describe('PreviewPanelSection', () => {
           .querySelector('iframe')
           ?.getAttribute('srcdoc')
       ).toContain('published panel')
-      expect(screen.getByRole('button', { name: '预览此草稿' })).toBeEnabled()
+      // 授权已失效的真实门控信号：左栏徽标消失（按钮态在 mock 对话框里
+      // 不可见，srcdoc + 徽标已覆盖门控本身）。
 
       // 同一 chat 会话里 agent 写入新草稿 v2（「发布后继续改一版」的核心
       // 工作流）：v2 必须重新显式预览，不得继承 v1 的授权自动执行。
@@ -379,6 +380,96 @@ describe('PreviewPanelSection', () => {
       })
       expect(screen.getByTestId('generic-fallback')).toBeInTheDocument()
       expect(screen.queryByTestId('preview-panel-host')).toBeNull()
+      expect(screen.queryByText('草稿预览中')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('预览中切换 job/workspace 后授权复位：草稿不在新身份的桥上下文里继续执行（review 轮 2 P1）', async () => {
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
+    vi.useFakeTimers()
+    try {
+      mockFetchPublished.mockResolvedValue(
+        makeVersion(PUBLISHED_HTML, 'published')
+      )
+      mockFetchState.mockResolvedValue({
+        published: makeVersion(PUBLISHED_HTML, 'published'),
+        draft: makeVersion(DRAFT_HTML, 'draft'),
+      } satisfies PreviewPanelState)
+      const { rerender } = renderSection()
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+      expect(
+        screen
+          .getByTestId('preview-panel-host')
+          .querySelector('iframe')
+          ?.getAttribute('srcdoc')
+      ).toContain('draft panel')
+
+      // 同 workspace 切 job（jobs/:jobId 参数变化）：react-router 复用组件
+      // 实例，draft 持续非 null、无 null 过渡——授权必须随身份复位，
+      // 否则已授权草稿在新 jobId 的桥上下文（getJobDetail/readArtifact
+      // 绑 jobId）里继续执行。
+      rerender(
+        <PreviewPanelSection
+          jobId="job-2"
+          workspaceId="ws1"
+          fallback={<div data-testid="generic-fallback">通用产物预览</div>}
+        />
+      )
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+      expect(
+        screen
+          .getByTestId('preview-panel-host')
+          .querySelector('iframe')
+          ?.getAttribute('srcdoc')
+      ).toContain('published panel')
+      expect(screen.queryByText('草稿预览中')).toBeNull()
+
+      // 重新显式预览才在（新 jobId 的）草稿上恢复执行。
+      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+      expect(
+        screen
+          .getByTestId('preview-panel-host')
+          .querySelector('iframe')
+          ?.getAttribute('srcdoc')
+      ).toContain('draft panel')
+
+      // 跨 workspace 导航：目标 workspace 的草稿即便在 react-query 缓存内
+      // （draft 全程非 null，无 null 间隙），同样不得无点击自动执行。
+      rerender(
+        <PreviewPanelSection
+          jobId="job-3"
+          workspaceId="ws2"
+          fallback={<div data-testid="generic-fallback">通用产物预览</div>}
+        />
+      )
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+      expect(
+        screen
+          .getByTestId('preview-panel-host')
+          .querySelector('iframe')
+          ?.getAttribute('srcdoc')
+      ).toContain('published panel')
       expect(screen.queryByText('草稿预览中')).toBeNull()
     } finally {
       vi.useRealTimers()
