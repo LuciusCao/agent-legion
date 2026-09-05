@@ -13,11 +13,13 @@
 # 需另加 pull_policy: always，否则本机已有镜像不会更新。
 services:
   worker:
-    # ！reset 清掉基础文件的 build 段（compose v2.24+ 语义）：up 一律使用
+    # !reset 清掉基础文件的 build 段（compose v2.24+ 语义）：up 一律使用
     # registry 镜像，不再本地构建。
     build: !reset null
     image: ghcr.io/luciuscao/agent-legion-worker:0.6.0
     environment:
-      # 注册时上报的 image_version 与实际镜像保持一致（运维可见性）；基础
-      # 文件默认值是 agent-legion-worker:local，本地构建形态才正确。
+      # 与基础文件同构的占位（compose 的 ${VAR-默认值} 默认值是本地构建
+      # 形态的 agent-legion-worker:local）：当前 worker 侧尚未实际上报
+      # image_version（server 端 registry 只做 forward-compat 接收不落库），
+      # 保留它是为了与基础文件对齐、未来接线时此处即生效。
       AGENT_WORKER_IMAGE_VERSION: ghcr.io/luciuscao/agent-legion-worker:0.6.0
