@@ -171,3 +171,61 @@ def test_custom_floor_and_ceil_override() -> None:
     assert pacing.next_wait(0.0) == 0.02
     assert pacing.next_wait(0.3) == 0.08
     assert pacing.next_wait(0.1) == pytest.approx(0.05)
+
+
+def test_jitter_within_display_precision_does_not_log() -> None:
+    """P2-2（codex on #481）：判变按显示精度（整 ms）量化。
+
+    RTT 恒抖（±几 ms）使 wait 每轮微变，但同一条显示值内不重记日志
+    ——否则成功热路径逐轮 print(flush=True)，同步 I/O 税正加在刚提速
+    的循环上。reviewer 复现形态：注入抖动跑 120 pass、显示值恒为同一条。
+    """
+    lines: list[str] = []
+    pacing = ClaimPacing(log=lines.append)
+    # rt∈[50,110ms] 抖动带：wait 落在 25-55ms 区间，显示值在 25/26ms 间
+    # 抖动时逐边界才记，同显示值内的往返抖动不记。
+    pacing.next_wait(0.051)  # 25.5ms → 首次记 "26ms"（round 语义）
+    pacing.next_wait(0.0501)  # 25.05ms → 显示 25ms，跨界 → 记
+    pacing.next_wait(0.0508)  # 25.4ms → 显示 25ms，同显示值 → 不记
+    pacing.next_wait(0.0512)  # 25.6ms → 显示 26ms，跨界 → 记
+    pacing.next_wait(0.0521)  # 26.05ms → 显示 26ms，同显示值 → 不记
+    assert lines == [
+        "worker claim pacing 26ms",
+        "worker claim pacing 25ms",
+        "worker claim pacing 26ms",
+    ]
+
+
+def test_internal_value_follows_last_logged_display_value() -> None:
+    """量化判变的内部值语义：停在最后一次记日志的原始值（与显示值等价）。"""
+    pacing = ClaimPacing(log=None)
+    pacing.next_wait(0.051)  # 25.5ms
+    pacing.next_wait(0.0501)  # 25.05ms → 显示 25ms，跨界，内部值更新
+    assert pacing.current_wait == pytest.approx(0.02505)
+    pacing.next_wait(0.0508)  # 25.4ms → 显示 25ms 同值，内部值不动
+    assert pacing.current_wait == pytest.approx(0.02505)
+
+
+def test_batch_pass_feeds_single_claim_round_trip() -> None:
+    """P2-1（codex on #481）：批量 pass 的 pacing 输入是单次成功 claim
+    的往返，不是批次总墙钟（N 次 claim + N 次 submit）。
+
+    空槽多的爬坡期 N=3~8：批次总耗时会被放大、直接钳死上沿，「成功=
+    往返×0.5」退化为固定 100ms。这里钉住模块侧语义：多次成功 pass 传入
+    单次往返时，pacing 按单次值映射；单次往返 0.06s（慢 RTT）的批次，
+    等待是 30ms 而不是任何更大的值。（executor 侧的逐次重打点接线由
+    test_main_error_pass_waits_via_backoff_not_pacing 的 RecordingPacing
+    同路径覆盖。）
+    """
+    lines: list[str] = []
+    pacing = ClaimPacing(log=lines.append)
+    # 一批 4 次成功 claim，每次单次往返 0.06s（批次总墙钟 ~0.24s+）：
+    # 每次喂给 pacing 的都是 0.06 → 等待恒 30ms（不是批次的一半 120ms
+    # 钳上沿 100ms）。
+    for _ in range(4):
+        wait = pacing.next_wait(0.06)
+        assert wait == pytest.approx(0.03)
+    assert lines == ["worker claim pacing 30ms"]
+    # 对照：如果喂批次总墙钟 0.24s，等待会被钳在上沿 100ms——正是
+    # P2-1 要防的退化形态。
+    assert ClaimPacing(log=None).next_wait(0.24) == CLAIM_PACING_CEIL_SECONDS
