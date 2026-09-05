@@ -16,6 +16,7 @@ from server.app.agent_catalog import AgentDefinition
 from server.app.db.connection import DatabaseDsn
 from server.app.db.dialect import ConnectSource, resolve_dsn
 from server.app.db.transaction import read_connection
+from server.app.services.agent_publish_prune import prune_agent_overrides
 from server.app.services.job_errors import ConflictError, InvalidOperationError
 from server.app.services.versioned_entities import EntityType, VersionedEntity, VersionedEntityStore
 
@@ -43,9 +44,7 @@ def published_agent_definitions(
     if cached is not None and now - cached[0] < PUBLISHED_CACHE_TTL_SECONDS:
         return cached[1]
     entities = VersionedEntityStore(connect_source, _ENTITY_TYPE).list_published(workspace_id)
-    definitions = {
-        entity.entity_key: AgentDefinition.model_validate(entity.definition) for entity in entities
-    }
+    definitions = {e.entity_key: AgentDefinition.model_validate(e.definition) for e in entities}
     _published_cache[cache_key] = (now, definitions)
     return definitions
 
@@ -91,9 +90,7 @@ class AgentService:
     ) -> AgentDefinition | None:
         """Read the published definition, optionally enforcing an exact hash."""
         entity = self._store.get_published(agent_id, self._workspace_id)
-        if entity is None or (
-            definition_hash is not None and entity.definition_hash != definition_hash
-        ):
+        if entity is None or (definition_hash and entity.definition_hash != definition_hash):
             return None
         return AgentDefinition.model_validate(entity.definition)
 
@@ -118,10 +115,8 @@ class AgentService:
 
     def publish(self, agent_id: str) -> VersionedEntity:
         """Publish the current draft; the previously published version archives.
-
         Exactly one published Agent per capability per workspace — routes
-        derive from the capability alone (mirrors the YAML catalog constraint).
-        """
+        derive from the capability alone (mirrors the YAML catalog constraint)."""
         versions = self._store.list_versions(agent_id, self._workspace_id)
         draft = next((v for v in versions if v.status == "draft"), None)
         if draft is not None:
@@ -129,6 +124,10 @@ class AgentService:
         # draft None → the store raises the canonical NotFoundError.
         entity = self._store.publish(agent_id, self._workspace_id)
         _invalidate_published_cache(self._store.dsn, self._workspace_id)
+        # #430: prune overrides by the JUST-published definition (never the
+        # ~5s cache), post-commit, failure-swallowed — agent_publish_prune.
+        published = AgentDefinition.model_validate(entity.definition)
+        prune_agent_overrides(self._store.dsn, self._workspace_id, published)
         return entity
 
     def _require_free_capability(self, agent_id: str, capability: str) -> None:
@@ -138,8 +137,8 @@ class AgentService:
             if other.entity_key != agent_id and other.definition.get("capability") == capability:
                 raise ConflictError(
                     f"capability {capability!r} is already published by Agent"
-                    f" {other.entity_key!r} in this workspace;"
-                    " exactly one published Agent per capability"
+                    f" {other.entity_key!r} in this workspace; exactly one"
+                    " published Agent per capability"
                 )
 
     def rollback(self, agent_id: str, version: int, created_by: str) -> VersionedEntity:
@@ -150,6 +149,9 @@ class AgentService:
             self._require_free_capability(agent_id, str(source.definition.get("capability") or ""))
         entity = self._store.rollback(agent_id, version, self._workspace_id, created_by)
         _invalidate_published_cache(self._store.dsn, self._workspace_id)
+        # #430: rollback re-publishes an old definition — same post-commit prune.
+        rolled = AgentDefinition.model_validate(entity.definition)
+        prune_agent_overrides(self._store.dsn, self._workspace_id, rolled)
         return entity
 
     def archive_all(self, agent_id: str) -> int:
