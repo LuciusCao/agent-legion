@@ -29,12 +29,15 @@ from dataclasses import dataclass, field
 from typing import Any
 
 # Batch size guard, mirroring the Host contract limit
-# (server/app/agent_broker/heartbeat_batch.py). A healthy Worker holds at
-# most max_concurrency + max_code_concurrency leases (registration caps both
-# at 1024), so a live batch stays far below this; exceeding it means a
-# bookkeeping bug (prunes stopped working), and silently renewing a truncated
-# prefix would let the tail's leases expire anyway. Refuse the beat loudly —
-# the sweeper reclaims the leases, which is the honest outcome.
+# (server/app/agent_broker/heartbeat_batch.py). One batch = one write
+# transaction on the Host, so an unbounded batch would recreate the
+# long-transaction problem this split exists to solve; 256 renewals of
+# fixed-size primary-key statements stay in the tens-of-milliseconds range.
+# A Worker may legally hold more leases than this (the registration caps
+# max_concurrency and max_code_concurrency at 1024 each), so an oversized
+# snapshot is SHARDED into sequential per-chunk requests — never truncated
+# (a silently renewed prefix would let the tail's leases expire), never
+# refused (that would reclaim every lease of a healthy high-slot Worker).
 MAX_BATCH_HEARTBEATS = 256
 
 # Lease TTL margin (#349 baseline: 90s TTL, 30s fleet interval). A batch
@@ -57,7 +60,10 @@ class _LeaseEntry:
     )
     adopted: threading.Event = field(default_factory=threading.Event)
     # Beats paused (final result report in flight): a single beat racing the
-    # commit logs a spurious "lost ownership" 409.
+    # commit logs a spurious "lost ownership" 409. Advisory only — the flag
+    # is set outside the registry lock, so a beat already snapshotted may
+    # still race the report; the worst case is that one spurious 409 log
+    # line, never a wrong renewal (the Host-side predicate is authoritative).
     quiesced: bool = False
 
 
@@ -154,9 +160,10 @@ def batch_heartbeat_loop(
     Batch-first: one request renews the whole snapshot. A Host without the
     batch endpoint (404/405) flips the registry to degraded mode and the
     loop beats per execution from then on — identical traffic and semantics
-    to the pre-v5 Worker. Transient errors keep the loop alive (the next
-    tick retries); the real deadline is the Host-side lease TTL, exactly as
-    in the single-beat loop."""
+    to the pre-v5 Worker. Transient errors keep the loop alive AND keep
+    batch mode on (the verdict that degrades is 404/405 only); the next
+    tick retries, and the real deadline is the Host-side lease TTL, exactly
+    as in the single-beat loop."""
     while not stop.wait(interval):
         entries = registry.snapshot()
         if not entries:
@@ -167,16 +174,31 @@ def batch_heartbeat_loop(
 
 
 def _beat_batch(client: Any, registry: BatchHeartbeatRegistry, entries: list[_LeaseEntry]) -> bool:
-    """One batched beat; False when the Host predates the endpoint."""
-    if len(entries) > MAX_BATCH_HEARTBEATS:
-        # Bookkeeping bug, not a scale problem (see MAX_BATCH_HEARTBEATS):
-        # refuse to renew a silent prefix — the sweeper reclaims everything.
-        print(
-            f"batch heartbeat over limit ({len(entries)} > {MAX_BATCH_HEARTBEATS});"
-            " refusing to beat",
-            flush=True,
-        )
-        return True
+    """One batched beat, sharded at MAX_BATCH_HEARTBEATS; False only when
+    the Host predates the endpoint (404/405) — a transient error must NOT
+    degrade: that verdict flips the loop to per-execution beats for the life
+    of the process, and one network blip would then permanently cost the
+    machine the batch endpoint it still has.
+
+    A chunk's transient error aborts the rest of the tick (later chunks are
+    skipped, not retried mid-tick): the next tick resends everything from
+    the top — the Host-side per-item predicate is idempotent, so a fully
+    renewed prefix followed by a full retry cannot double-renew anything."""
+    for start in range(0, len(entries), MAX_BATCH_HEARTBEATS):
+        chunk = entries[start : start + MAX_BATCH_HEARTBEATS]
+        outcome = _beat_batch_chunk(client, registry, chunk)
+        if outcome is None:
+            return False  # 404/405: pre-v5 Host — degrade for good.
+        if not outcome:
+            return True  # transient: this tick is over, batch mode stays on.
+    return True
+
+
+def _beat_batch_chunk(
+    client: Any, registry: BatchHeartbeatRegistry, entries: list[_LeaseEntry]
+) -> bool | None:
+    """One request for one chunk of the snapshot; False on a transient error
+    (abort the tick, retry fully next tick), None on 404/405 (degrade)."""
     try:
         outcome = client.heartbeat_batch(
             [(entry.execution_id, entry.lease_id) for entry in entries]
@@ -186,12 +208,13 @@ def _beat_batch(client: Any, registry: BatchHeartbeatRegistry, entries: list[_Le
         # heartbeat_loop 同一语义钉子）。逃逸族（requests 传输错误、畸形应
         # 答、非 200 状态的 RuntimeError）逐拍独立——失败只意味着这一拍没
         # 送达，interval 后的下一拍重新证明存活，真正的死线是 Host 侧租
-        # 约 TTL。吞掉并继续是对的：让一次失败杀死这个 daemon 线程反而让
-        # 本机全部租约静默过期、执行被 Host 重调度。结果空间是这一批的
-        # 丢拍，无状态残留。日志保全：每次失败都 print（flush=True），持
-        # 续性故障按 interval 反复可见，不会静默。
+        # 约 TTL。吞掉是对的：让一次失败杀死这个 daemon 线程反而让本机全
+        # 部租约静默过期、执行被 Host 重调度。结果空间是这一拍的部分丢拍
+        # ——分片下后续片直接跳过、下一拍全量重来，Host 侧逐项谓词幂等，
+        # 已续期的前缀重复续期无副作用。日志保全：每次失败都 print
+        # （flush=True），持续性故障按 interval 反复可见，不会静默。
         print(f"batch heartbeat error ({len(entries)} leases): {exc}", flush=True)
-        return True
+        return False
     if outcome is None:
         # 404/405: pre-v5 Host — degrade to per-execution beats for the life
         # of the process. Old Hosts see exactly the old Worker's traffic.
@@ -200,7 +223,7 @@ def _beat_batch(client: Any, registry: BatchHeartbeatRegistry, entries: list[_Le
             flush=True,
         )
         registry.degraded_to_single = True
-        return False
+        return None
     _status, body = outcome
     lost = set(str(value) for value in body.get("lost", []))
     for entry in entries:
@@ -222,10 +245,20 @@ def _beat_batch(client: Any, registry: BatchHeartbeatRegistry, entries: list[_Le
 
 
 def _beat_single(client: Any, entries: list[_LeaseEntry]) -> None:
-    """Degraded mode: one single-beat request per entry, old semantics."""
+    """Degraded mode: one single-beat request per entry, old semantics.
+
+    These beats run serially in the single coordinator thread, so each call
+    carries a short timeout cap (heartbeat_ops.SINGLE_BEAT_TIMEOUT_SECONDS):
+    a slow Host response raises at the transport layer and costs one beat of
+    one lease, instead of serially delaying every later lease's renewal past
+    the lease TTL."""
+    from worker.host.heartbeat_ops import SINGLE_BEAT_TIMEOUT_SECONDS
+
     for entry in entries:
         try:
-            status, cancelled = client.heartbeat(entry.execution_id, entry.lease_id)
+            status, cancelled = client.heartbeat(
+                entry.execution_id, entry.lease_id, timeout=SINGLE_BEAT_TIMEOUT_SECONDS
+            )
         except Exception as exc:
             # #204 broad-except audit: 同 _beat_batch 的逐拍存活语义，只是
             # 粒度回到单条——一次逃逸只丢这一拍的这一个租约，其余条目与本

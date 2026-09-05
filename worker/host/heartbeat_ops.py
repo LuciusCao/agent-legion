@@ -2,10 +2,9 @@
 ``worker.host.client`` for the file budget, #352).
 
 The single-execution beat (protocol v2 body) and the per-Worker batch beat
-(protocol v5) live together here: both are lease-renewal control calls on the
-short default timeout, and the batch method's 404/405 contract (None = the
-Host predates the endpoint) is what the coordinator's mixed-fleet fallback
-keys on.
+(protocol v5) live together here: both are lease-renewal control calls. The
+batch method's 404/405 contract (None = the Host predates the endpoint) is
+what the coordinator's mixed-fleet fallback keys on.
 """
 
 from __future__ import annotations
@@ -15,19 +14,34 @@ import json
 
 _BULK_PATH = "/api/agent-executions/heartbeats"
 
+# Degraded per-execution beats (pre-v5 Host) run in the single coordinator
+# thread; each call gets this cap instead of the client default so one slow
+# response cannot serially starve every other lease's renewal — the worst
+# case per tick becomes leases × cap, and the transport-level error it
+# eventually raises is handled by the loop's per-beat error family.
+SINGLE_BEAT_TIMEOUT_SECONDS = 5.0
+
 
 class HeartbeatOperations:
     """Mixin with the heartbeat calls; the concrete client provides ``request``."""
 
-    def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
+    def heartbeat(
+        self,
+        execution_id: str,
+        lease_id: str,
+        timeout: float | None = None,
+    ) -> tuple[int, list[str]]:
         """Beat once; returns (status, cancelled_execution_ids).
 
         Protocol v2 Hosts answer 200 with a body listing this Worker's
-        cancelled kind='code' executions; v1 answers 204 (no body)."""
+        cancelled kind='code' executions; v1 answers 204 (no body).
+        ``timeout`` overrides the client default for callers that beat in a
+        shared thread (the degraded coordinator path)."""
         status, body = self.request(  # type: ignore[attr-defined]
             "POST",
             f"/api/agent-executions/{execution_id}/heartbeat",
             headers={"X-Agent-Lease-Id": lease_id},
+            timeout=timeout,
         )
         cancelled: list[str] = []
         if status == 200:
@@ -73,7 +87,3 @@ class HeartbeatOperations:
                 ],
             }
         return status, document
-
-
-# Re-exported for tests asserting the wire path constant.
-BULK_HEARTBEAT_PATH = _BULK_PATH
