@@ -88,8 +88,10 @@ stack-host-up: ## 部署机：启动 PostgreSQL + Agent Legion Host + 本机 Wor
 	docker compose $(COMPOSE_HOST_FILES) $$(./scripts/local-s3-decide.sh --compose-flags --default-endpoint http://seaweedfs:8333 deploy/.env) up -d --build
 
 # 生产环境启停（仅 prod worktree 使用）：默认本机原生形态（后端 8000 含 SPA +
-# worker 8787）；Docker stack 形态收编为参数 `make prod-up docker` /
-# `make prod-down docker`（PostgreSQL + Host + Worker，secrets 预检 + 健康等待）。
+# worker 8787，绑定地址默认 127.0.0.1，经 NATIVE_BACKEND_BIND /
+# NATIVE_WORKER_BIND 暴露给局域网/overlay 网络）；Docker stack 形态收编为参数
+# `make prod-up docker` / `make prod-down docker`（PostgreSQL + Host + Worker，
+# secrets 预检 + 健康等待）。
 .PHONY: docker
 docker:
 	@:
