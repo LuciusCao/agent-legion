@@ -204,10 +204,11 @@ def test_listener_match_behavior_dual_address() -> None:
 
 
 def test_listener_match_behavior_mixed_family() -> None:
-    """同端口 IPv4 具体监听 + IPv6 通配监听并存：IPv4 目标不得命中仅
-    IPv6 的通配（Codex #482 P1 的核心场景——无族别过滤时 *:port 会把
-    两个族的通配混在一起）；down 的 listener_pids 同样不得误选。真实
-    绑定执行。"""
+    """同端口 IPv4 与 IPv6 监听并存：IPv4 目标不得命中 IPv6 监听
+    （Codex #482 P1 的核心场景——无族别过滤时 *:port 会把两个族的
+    通配混在一起）；down 的 listener_pids 同样不得误选。真实绑定执行
+    （127.0.0.1 + ::1 各自监听；:: 通配 + IPv4 并存仅在 bindv6only=1
+    时可构造，CI runner 默认双栈下 bind 冲突，见测试内注释）。"""
     up_sources = []
     for name in ("listener_display", "listener_family", "port_listening"):
         match = re.search(rf"^{name}\(\) \{{.*?^\}}", NATIVE_PROD_UP, re.MULTILINE | re.DOTALL)
@@ -229,13 +230,17 @@ def test_listener_match_behavior_mixed_family() -> None:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s4.bind(("127.0.0.1", port))
     s4.listen(1)
-    s6.bind(("::", port))
+    # 注意不能用 :: 构造「IPv6 通配 + IPv4 并存」：Linux 默认 bindv6only=0
+    # 时 :: 通配占满整个端口（含 IPv4），与 127.0.0.1 的 bind 冲突（CI
+    # Linux runner 上正是这样失败的）；bindv6only=1 的场景语义用 IPv6
+    # 具体地址等价覆盖——同端口两族各自监听、互不串扰。
+    s6.bind(("::1", port))
     s6.listen(1)
     try:
         cases = [
             ("127.0.0.1", "yes"),  # IPv4 具体：命中自己的监听
-            ("::1", "yes"),  # IPv6：命中 :: 通配
-            ("192.0.2.99", "no"),  # IPv4 无监听：不得命中 IPv6 通配
+            ("::1", "yes"),  # IPv6 具体：命中自己的监听
+            ("192.0.2.99", "no"),  # IPv4 无监听：不得命中 IPv6 监听
         ]
         for bind, expected in cases:
             result = subprocess.run(
@@ -251,7 +256,7 @@ def test_listener_match_behavior_mixed_family() -> None:
             assert result.stdout.strip() == expected, (
                 f"port_listening {bind}: {result.stdout.strip()!r}"
             )
-        # down：IPv4 无监听地址不得选中 IPv6 通配的 pid
+        # down：IPv4 无监听地址不得选中同端口的 IPv6 监听 pid
         result = subprocess.run(
             ["bash", "-c", down_funcs + f'\nlistener_pids "192.0.2.99" "{port}"\n'],
             capture_output=True,
