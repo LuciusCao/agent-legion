@@ -39,23 +39,51 @@ def test_processes_consume_bind_variables() -> None:
 def test_health_checks_derive_probe_host_from_bind() -> None:
     """健康检查经 health_host 派生探测地址；curl 不得再硬编码 127.0.0.1
     （绑定具体网卡时 loopback 无监听，会让就绪等待误判 5 分钟超时）。"""
-    assert "0.0.0.0 | ::) host=127.0.0.1 ;;" in NATIVE_PROD_UP
+    assert "0.0.0.0) host=127.0.0.1 ;;" in NATIVE_PROD_UP
+    assert '::) host="[::1]" ;;' in NATIVE_PROD_UP
     assert "BACKEND_HEALTH_HOST=" in NATIVE_PROD_UP
     assert "WORKER_HEALTH_HOST=" in NATIVE_PROD_UP
-    assert 'curl -sS -m 2 "http://$BACKEND_HEALTH_HOST:$BACKEND_PORT/api/health"' in NATIVE_PROD_UP
-    assert 'curl -sS -m 2 "http://$WORKER_HEALTH_HOST:$WORKER_PORT/api/health"' in NATIVE_PROD_UP
+    assert (
+        "curl -sS -m 2 --noproxy '*' --fail -o /dev/null \"http://$BACKEND_HEALTH_HOST:$BACKEND_PORT/api/health\""
+        in NATIVE_PROD_UP
+    )
+    assert (
+        "curl -sS -m 2 --noproxy '*' --fail -o /dev/null \"http://$WORKER_HEALTH_HOST:$WORKER_PORT/api/health\""
+        in NATIVE_PROD_UP
+    )
     assert "http://127.0.0.1:$BACKEND_PORT" not in NATIVE_PROD_UP
     assert "http://127.0.0.1:$WORKER_PORT" not in NATIVE_PROD_UP
 
 
+def test_health_probe_bypasses_proxy_and_requires_http_success() -> None:
+    """本机健康探测必须绕过环境代理（http_proxy 对局域网地址同样生效，
+    代理不可达会误报失败）且以 HTTP 2xx 为就绪判据（--fail：代理返 403
+    等错误码不得计为就绪）。"""
+    assert "--noproxy '*'" in NATIVE_PROD_UP
+    assert "--fail" in NATIVE_PROD_UP
+
+
 def test_health_host_normalization_behavior() -> None:
-    """health_host 归一语义：全接口监听归一 loopback，具体地址原样，
-    IPv6 字面量补 URL 方括号。提取函数定义后真实执行。"""
+    """health_host 归一语义：0.0.0.0（IPv4 全接口）归一 IPv4 loopback，
+    ::（IPv6 全接口，bindv6only=1 时不收 IPv4）归一 [::1]，具体地址
+    原样，IPv6 字面量补 URL 方括号且已带方括号时幂等。提取函数定义后
+    真实执行。"""
     match = re.search(r"^health_host\(\) \{.*?^\}", NATIVE_PROD_UP, re.MULTILINE | re.DOTALL)
     assert match, "health_host 函数定义缺失"
     code = match.group(0) + '\nfor h in "$@"; do health_host "$h"; done\n'
     result = subprocess.run(
-        ["bash", "-c", code, "health_host", "127.0.0.1", "0.0.0.0", "::", "192.0.2.1", "::1"],
+        [
+            "bash",
+            "-c",
+            code,
+            "health_host",
+            "127.0.0.1",
+            "0.0.0.0",
+            "::",
+            "192.0.2.1",
+            "::1",
+            "[fe80::1]",
+        ],
         capture_output=True,
         text=True,
         check=True,
@@ -63,9 +91,10 @@ def test_health_host_normalization_behavior() -> None:
     assert result.stdout.splitlines() == [
         "127.0.0.1",
         "127.0.0.1",
-        "127.0.0.1",
+        "[::1]",
         "192.0.2.1",
         "[::1]",
+        "[fe80::1]",
     ]
 
 

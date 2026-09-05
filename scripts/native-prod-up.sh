@@ -36,15 +36,18 @@ port_listening() {
     lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
 }
 
-# 健康检查与就绪提示用的探测地址：0.0.0.0 / :: 的全接口监听必然含
-# loopback，归一为 127.0.0.1；绑定具体网卡地址时只有该地址可达（探测
+# 健康检查与就绪提示用的探测地址：0.0.0.0 是 IPv4 全接口监听，必然含
+# IPv4 loopback，归一为 127.0.0.1；:: 是 IPv6 全接口（bindv6only=1 的
+# Linux 上不含 IPv4），必然含 ::1，归一为 [::1]——注意两个通配各自只
+# 保证本族 loopback 可达。绑定具体网卡地址时只有该地址可达（探测
 # loopback 必然失败），原样返回；IPv6 字面量补 URL 要求的方括号。
 health_host() {
     local host="$1"
     case "$host" in
-        0.0.0.0 | ::) host=127.0.0.1 ;;
+        0.0.0.0) host=127.0.0.1 ;;
+        ::) host="[::1]" ;;
     esac
-    if [[ "$host" == *:* ]]; then
+    if [[ "$host" != \[* ]] && [[ "$host" == *:* ]]; then
         host="[$host]"
     fi
     echo "$host"
@@ -142,8 +145,8 @@ fi
 # 仍可能超过 1 分钟；等待期间每 30s 输出一次进度，避免误报启动失败）。
 for i in $(seq 1 150); do
     backend_ok=false; worker_ok=false
-    curl -sS -m 2 "http://$BACKEND_HEALTH_HOST:$BACKEND_PORT/api/health" >/dev/null 2>&1 && backend_ok=true
-    curl -sS -m 2 "http://$WORKER_HEALTH_HOST:$WORKER_PORT/api/health" >/dev/null 2>&1 && worker_ok=true
+    curl -sS -m 2 --noproxy '*' --fail -o /dev/null "http://$BACKEND_HEALTH_HOST:$BACKEND_PORT/api/health" >/dev/null 2>&1 && backend_ok=true
+    curl -sS -m 2 --noproxy '*' --fail -o /dev/null "http://$WORKER_HEALTH_HOST:$WORKER_PORT/api/health" >/dev/null 2>&1 && worker_ok=true
     if $backend_ok && $worker_ok; then
         echo "原生环境已就绪：后端 http://$BACKEND_HEALTH_HOST:$BACKEND_PORT （含前端 SPA），Worker 控制台 http://$WORKER_HEALTH_HOST:$WORKER_PORT"
         exit 0
