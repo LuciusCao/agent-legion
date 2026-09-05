@@ -32,8 +32,29 @@ UV_CACHE_DIR=.uv-cache uv sync --frozen
 echo "检测 velites 二进制新鲜度…"
 ./scripts/ensure-velites.sh
 
+# 幂等判断按「绑定地址 + 端口」匹配已有监听：同端口不同地址是两个
+# 独立监听（127.0.0.1:8000 与 192.0.2.1:8000 可并存），只看端口会把
+# 其它地址的监听误认为本服务而跳过启动，随后按 bind 探测必然失败。
+# 通配监听占满整个端口（*:port；Linux 的 IPv6 通配另显示 [::]:port），
+# 同样视为已监听——此时新进程 bind 也会 EADDRINUSE，且探测可达。
+listener_display() {
+    local host="$1"
+    case "$host" in
+        0.0.0.0 | ::) host="*" ;;
+        *)
+            if [[ "$host" != \[* ]] && [[ "$host" == *:* ]]; then
+                host="[$host]"
+            fi
+            ;;
+    esac
+    echo "$host"
+}
 port_listening() {
-    lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
+    local display port
+    display="$(listener_display "$1")"
+    port="$2"
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN -F n 2>/dev/null | sed -n 's/^n//p' \
+        | grep -Fxq -e "${display}:${port}" -e "*:${port}" -e "[::]:${port}"
 }
 
 # 健康检查与就绪提示用的探测地址：0.0.0.0 是 IPv4 全接口监听，必然含
@@ -71,7 +92,7 @@ binds_specific_interface() {
 if binds_specific_interface "$BACKEND_BIND" \
     && [[ -f data/agent-worker-service/worker.yaml ]] \
     && grep -Eq 'host_url:[[:space:]]*https?://(127\.|localhost)' data/agent-worker-service/worker.yaml; then
-    echo "警告: 后端已绑定 $BACKEND_BIND，但本地 Worker 状态副本的 host_url 仍指向 loopback——请经 Worker 控制台改为 http://$BACKEND_BIND:$BACKEND_PORT，否则本地 Worker 将无法注册（静默退避重试）" >&2
+    echo "警告: 后端已绑定 $BACKEND_BIND，但本地 Worker 状态副本的 host_url 仍指向 loopback——请经 Worker 控制台改为 http://$BACKEND_HEALTH_HOST:$BACKEND_PORT，否则本地 Worker 将无法注册（静默退避重试）" >&2
 fi
 if binds_specific_interface "$WORKER_BIND"; then
     echo "提示: Worker 控制台已绑定 $WORKER_BIND，本机访问地址改为 http://$WORKER_HEALTH_HOST:$WORKER_PORT（127.0.0.1 不再监听）" >&2
@@ -114,7 +135,7 @@ elif [[ "$local_s3_rc" -ne 0 ]]; then
 fi
 
 # 2. 后端
-if port_listening "$BACKEND_PORT"; then
+if port_listening "$BACKEND_BIND" "$BACKEND_PORT"; then
     echo "后端已在 :$BACKEND_PORT 运行，跳过"
 else
     echo "启动后端 $BACKEND_BIND:$BACKEND_PORT …"
@@ -130,7 +151,7 @@ else
 fi
 
 # 3. Worker
-if port_listening "$WORKER_PORT"; then
+if port_listening "$WORKER_BIND" "$WORKER_PORT"; then
     echo "Worker 已在 :$WORKER_PORT 运行，跳过"
 else
     echo "启动 Worker $WORKER_BIND:$WORKER_PORT …"

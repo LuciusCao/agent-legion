@@ -12,8 +12,10 @@ test_dev_stack_local_s3.py 的静态接线检查一致；health_host 的归一
 from __future__ import annotations
 
 import re
+import socket
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -21,6 +23,32 @@ pytestmark = pytest.mark.no_db
 
 ROOT = Path(__file__).resolve().parents[2]
 NATIVE_PROD_UP = (ROOT / "scripts" / "native-prod-up.sh").read_text(encoding="utf-8")
+
+
+def _first_lan_ipv4() -> str:
+    output = subprocess.run(["ifconfig"], capture_output=True, text=True, check=True).stdout
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("inet ") and not line.startswith("inet 127."):
+            return line.split()[1]
+    pytest.skip("no non-loopback IPv4 address available")
+
+
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _bind_listeners(addresses: list[str], port: int) -> list[Any]:
+    sockets = []
+    for addr in addresses:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((addr, port))
+        sock.listen(1)
+        sockets.append(sock)
+    return sockets
 
 
 def test_bind_env_vars_default_to_loopback() -> None:
@@ -98,12 +126,72 @@ def test_health_host_normalization_behavior() -> None:
     ]
 
 
-def test_prod_down_stays_bind_agnostic() -> None:
-    """native-prod-down.sh 按端口定位进程，与 bind 无关——bind 覆盖不需要
-    停机侧配套改动（若未来停机按地址定位，此断言会提醒同步）。"""
+def test_idempotency_matches_bind_address() -> None:
+    """幂等判定按「bind 地址 + 端口」匹配：port_listening 消费两个参数，
+    通配监听（*:port / [::]:port）也算已监听（占满端口，新进程 bind 必然
+    EADDRINUSE 且探测可达）——只看端口会把其它地址的监听误认为本服务
+    而跳过启动，随后按 bind 探测必然失败（同端口不同地址可并存）。"""
+    assert "listener_display" in NATIVE_PROD_UP
+    assert 'port_listening "$BACKEND_BIND" "$BACKEND_PORT"' in NATIVE_PROD_UP
+    assert 'port_listening "$WORKER_BIND" "$WORKER_PORT"' in NATIVE_PROD_UP
+    assert 'grep -Fxq -e "${display}:${port}" -e "*:${port}" -e "[::]:${port}"' in NATIVE_PROD_UP
+
+
+def test_listener_match_behavior_dual_address() -> None:
+    """双地址监听下的 port_listening 判定：同端口两个地址各自监听时，
+    只命中各自的 bind，未监听的地址不误判（Codex #480 P2：127.0.0.1
+    已监听时另一个地址不再被视为已运行）。真实绑定回环 + 本机网卡
+    地址执行，与 test_health_host_normalization_behavior 同一提取手法。"""
+    sources = []
+    for name in ("listener_display", "port_listening"):
+        match = re.search(rf"^{name}\(\) \{{.*?^\}}", NATIVE_PROD_UP, re.MULTILINE | re.DOTALL)
+        assert match, f"{name} 函数定义缺失"
+        sources.append(match.group(0))
+    funcs = "\n".join(sources)
+
+    lan_ip = _first_lan_ipv4()
+    port = _free_port()
+    sockets = _bind_listeners(["127.0.0.1", lan_ip], port)
+    try:
+        checks = [("127.0.0.1", "yes"), (lan_ip, "yes"), ("127.0.0.3", "no"), ("192.0.2.99", "no")]
+        for bind, expected in checks:
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    funcs + f'\nport_listening "{bind}" "{port}" && echo yes || echo no\n',
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            assert result.stdout.strip() == expected, (
+                f"port_listening {bind}: {result.stdout.strip()!r}"
+            )
+    finally:
+        for sock in sockets:
+            sock.close()
+
+
+def test_warning_host_url_uses_bracketed_host() -> None:
+    """host_url 失配警告的 URL 模板用 BACKEND_HEALTH_HOST（括号化 IPv6）
+    而非裸 BACKEND_BIND——http://fd00::1:8000 无法区分地址与端口，按提示
+    配置后 Worker 仍连不上（Codex #480 P2）。"""
+    assert "http://$BACKEND_HEALTH_HOST:$BACKEND_PORT" in NATIVE_PROD_UP
+    assert "http://$BACKEND_BIND:" not in NATIVE_PROD_UP
+
+
+def test_prod_down_locates_by_bind_address() -> None:
+    """down 脚本与 up 同一组 bind 变量、按「地址 + 端口」定位 pid：up 支持
+    同端口多地址并存后，按端口 head -1 会杀错进程；listener_pids 精确
+    匹配 display:port（通配除外），未命中即视为未运行。"""
     down = (ROOT / "scripts" / "native-prod-down.sh").read_text(encoding="utf-8")
-    assert "stop_port" in down
-    assert "NATIVE_BACKEND_BIND" not in down
+    assert 'BACKEND_BIND="${NATIVE_BACKEND_BIND:-127.0.0.1}"' in down
+    assert 'WORKER_BIND="${NATIVE_WORKER_BIND:-127.0.0.1}"' in down
+    assert 'listener_pids "$bind" "$port"' in down
+    assert 'stop_port "$WORKER_BIND" "$WORKER_PORT" "Worker" 35' in down
+    assert 'stop_port "$BACKEND_BIND" "$BACKEND_PORT" "后端" 15' in down
+    assert down.count("lsof -nP -tiTCP") == 0  # 旧式仅按端口取 pid 的调用不得残留
 
 
 def test_local_worker_loopback_mismatch_warns() -> None:
