@@ -39,6 +39,11 @@
       "handlers": ["access"],
       "level": "INFO",
       "propagate": false
+    },
+    "agent_legion": {
+      "handlers": ["default"],
+      "level": "INFO",
+      "propagate": false
     }
   }
 }
