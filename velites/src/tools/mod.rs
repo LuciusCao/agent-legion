@@ -59,6 +59,10 @@ pub struct ToolOutput {
     pub is_error: bool,
     /// Output volume before truncation (design §8).
     pub output_bytes: u64,
+    /// Phase timing (#469) surfaced on `tool_execution_end.timing`;
+    /// `None` for failures raised before any measurement (argument
+    /// validation, guard rejection). In-process tools fill `total_ms` only.
+    pub timing: Option<crate::events::ToolTiming>,
 }
 
 impl ToolOutput {
@@ -68,6 +72,7 @@ impl ToolOutput {
             content: vec![ContentBlock::Text { text }],
             is_error,
             output_bytes,
+            timing: None,
         }
     }
 

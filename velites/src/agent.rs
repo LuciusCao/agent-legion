@@ -282,6 +282,10 @@ pub async fn run<P: Provider>(
                     },
                     is_error: output.is_error,
                     output_bytes: output.output_bytes,
+                    // #469 phase decomposition; `None` on pre-measurement
+                    // errors (disabled tool, validation failure), matching
+                    // the RequestTiming convention on message_end.
+                    timing: output.timing,
                 }));
 
                 let result_message =

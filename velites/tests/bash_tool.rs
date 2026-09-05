@@ -1,5 +1,7 @@
 //! Bash tool tests: timeout terminates the whole process group (no leftover
-//! grandchildren), and normal/exit-code paths behave.
+//! grandchildren), normal/exit-code paths behave, and the #469 phase timing
+//! (spawn / first output byte / steady run / reap) is measured on every
+//! path.
 
 use std::time::Duration;
 
@@ -243,4 +245,174 @@ async fn bash_guard_allows_scoped_find() {
         other => panic!("expected text content, got {other:?}"),
     };
     assert!(text.contains("marker.txt"), "missing find output: {text}");
+}
+
+#[tokio::test]
+async fn bash_timing_covers_spawn_first_byte_rest_on_success() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = ToolKind::Bash
+        .execute(
+            &serde_json::json!({"command": "echo phase-marker"}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(!output.is_error);
+
+    // #469: the happy path decomposes totalMs ≈ spawnMs + firstByteMs +
+    // restMs (reapMs absent on a natural exit). Every phase has a value and
+    // each fits inside the total.
+    let timing = output.timing.expect("bash must always report timing");
+    let total = timing.total_ms.expect("totalMs");
+    let spawn = timing.spawn_ms.expect("spawnMs");
+    let first_byte = timing.first_byte_ms.expect("firstByteMs");
+    let rest = timing.rest_ms.expect("restMs");
+    assert!(timing.reap_ms.is_none(), "no reap on a natural exit");
+    assert!(
+        spawn <= total && first_byte <= total && rest <= total,
+        "phases ({spawn}+{first_byte}+{rest}) must fit inside totalMs ({total})"
+    );
+    assert_eq!(
+        output.output_bytes,
+        "phase-marker\n".len() as u64,
+        "incremental read must collect every output byte"
+    );
+}
+
+#[tokio::test]
+async fn bash_timing_first_byte_separates_prelude_from_steady_run() {
+    // A command that sleeps BEFORE printing stretches the prelude phase
+    // (spawn → first output byte); a command that prints first and sleeps
+    // after stretches the steady-run phase instead. This pins the #469
+    // observation axis: a stall in the child's prelude (bash parsing,
+    // heredoc write, interpreter startup) lands in firstByteMs, not restMs.
+    // restMs is measured from the prelude start to the exit, so both
+    // commands have a large restMs — the discriminator is firstByteMs.
+    let dir = tempfile::tempdir().unwrap();
+    let late_output = ToolKind::Bash
+        .execute(
+            &serde_json::json!({"command": "sleep 1; echo late", "timeout": 30}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(!late_output.is_error);
+    let late = late_output.timing.expect("bash must always report timing");
+    let late_first = late.first_byte_ms.expect("firstByteMs (late output)");
+
+    let early_output = ToolKind::Bash
+        .execute(
+            &serde_json::json!({"command": "echo early; sleep 1", "timeout": 30}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(!early_output.is_error);
+    let early = early_output.timing.expect("bash must always report timing");
+    let early_first = early.first_byte_ms.expect("firstByteMs (early output)");
+    let early_rest = early.rest_ms.expect("restMs (early output)");
+
+    assert!(
+        late_first >= 900,
+        "prelude of sleep-then-print must dominate firstByteMs: {late_first}ms"
+    );
+    assert!(
+        early_first < 900,
+        "print-then-sleep must have a short firstByteMs: {early_first}ms"
+    );
+    // print-then-sleep: the child stays alive ~1s after the first byte, and
+    // restMs (prelude start → exit) covers it.
+    assert!(
+        early_rest >= 900,
+        "print-then-sleep must stretch restMs: {early_rest}ms"
+    );
+}
+
+#[tokio::test]
+async fn bash_timing_no_output_child_skips_first_byte() {
+    // A child that never writes to stdout/stderr has no first byte: the
+    // phase is skipped on the wire (None), restMs covers the whole wait.
+    let dir = tempfile::tempdir().unwrap();
+    let output = ToolKind::Bash
+        .execute(
+            &serde_json::json!({"command": "sleep 0.2"}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(!output.is_error);
+    let timing = output.timing.expect("bash must always report timing");
+    assert!(timing.total_ms.is_some());
+    assert!(timing.spawn_ms.is_some());
+    assert!(
+        timing.first_byte_ms.is_none(),
+        "no-output child must skip firstByteMs"
+    );
+    assert!(timing.rest_ms.is_some());
+    assert!(timing.reap_ms.is_none());
+}
+
+#[tokio::test]
+async fn bash_timeout_path_reports_reap_phase() {
+    // The timeout path must still emit timing, with reapMs present (TERM →
+    // grace → KILL → reaped) and restMs covering the wait up to the timeout.
+    let dir = tempfile::tempdir().unwrap();
+    let output = ToolKind::Bash
+        .execute(
+            &serde_json::json!({"command": "sleep 300", "timeout": 1}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(output.is_error);
+    let timing = output.timing.expect("timing on the timeout path");
+    assert!(timing.total_ms.is_some());
+    assert!(timing.spawn_ms.is_some());
+    assert!(timing.rest_ms.is_some());
+    assert!(
+        timing.reap_ms.is_some(),
+        "timeout path must report the reap phase"
+    );
+    // restMs is bounded by the 1s timeout (plus scheduling slack).
+    assert!(timing.rest_ms.unwrap() < 5_000, "restMs too large");
+}
+
+#[tokio::test]
+async fn bash_timing_heredoc_prelude_is_measured() {
+    // The blocked shape from #469: `python3 - <<'EOF' ... EOF`. The heredoc
+    // write happens inside the child bash BEFORE python3 starts producing
+    // output, so the whole script (heredoc write + interpreter startup +
+    // first print) lands inside firstByteMs. This is the exact observation
+    // point the instrumentation exists for.
+    let dir = tempfile::tempdir().unwrap();
+    let script = "for i in range(1, 6):\n    print(f\"line-{i}\")";
+    let command = format!("python3 - <<'EOF'\n{script}\nEOF");
+    // python3 may not exist on minimal CI hosts; fall back to a pure-bash
+    // heredoc with the same shape.
+    let use_python = std::process::Command::new("bash")
+        .arg("-c")
+        .arg("command -v python3 >/dev/null 2>&1")
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    let command = if use_python {
+        command
+    } else {
+        let bash_script = "for i in $(seq 1 5); do echo line-$i; done";
+        format!("bash -s <<'EOF'\n{bash_script}\nEOF")
+    };
+    let output = ToolKind::Bash
+        .execute(&serde_json::json!({"command": command}), &ctx(dir.path()))
+        .await;
+    assert!(!output.is_error, "command failed: {:?}", output.content);
+    let text = match &output.content[0] {
+        velites::events::ContentBlock::Text { text } => text.clone(),
+        other => panic!("expected text content, got {other:?}"),
+    };
+    for i in 1..=5 {
+        assert!(text.contains(&format!("line-{i}")), "output: {text}");
+    }
+    // Output collection is unchanged: every line survived the incremental
+    // read (no dropped head/tail chunks).
+    let timing = output.timing.expect("bash must always report timing");
+    assert!(
+        timing.first_byte_ms.is_some(),
+        "heredoc shape must report the prelude phase"
+    );
+    assert!(timing.spawn_ms.is_some());
 }

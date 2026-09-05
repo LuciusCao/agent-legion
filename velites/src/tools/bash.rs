@@ -9,8 +9,17 @@
 //! tail to 2000 lines or 50KB, whichever is hit first (pi-aligned, design
 //! §8); when truncated, the full output is written to a temp file and the
 //! notice points at it.
+//!
+//! #469 phase instrumentation: the tool result carries `timing` with the
+//! decomposition `totalMs = spawnMs + firstByteMs + restMs + reapMs` (see
+//! `events::ToolTiming`). `firstByteMs` — spawn returned → first output
+//! byte — covers the child's entire prelude (bash parsing, an internal
+//! `<<EOF` heredoc write, interpreter startup, first side effect), which is
+//! where the sampled #469 stall lives. The output pipes are therefore read
+//! incrementally (first chunk observed, then read to end); collection
+//! semantics (bytes, truncation, timeout) are unchanged.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
@@ -18,6 +27,7 @@ use tokio::io::AsyncReadExt;
 use super::command_guard;
 use super::truncate::{self, TruncatedBy};
 use super::{ToolContext, ToolError, ToolOutput};
+use crate::events::ToolTiming;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 /// Hard ceiling on one bash call's timeout. The model controls the
@@ -68,6 +78,7 @@ async fn terminate(child: &mut tokio::process::Child, pid: Option<u32>) {
 }
 
 async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
+    let started = Instant::now();
     let command = args
         .get("command")
         .and_then(Value::as_str)
@@ -91,6 +102,8 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         cmd.args(wrapped_argv);
         cmd
     };
+    // #469: the child's stdin stays inherited (the command travels as
+    // `bash -c <command>` argv; nothing is written by the harness).
     cmd.current_dir(&ctx.cwd)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -101,21 +114,25 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
     #[cfg(unix)]
     cmd.process_group(0);
 
+    // Phase 1 (#469): process creation — spawn start → child pid returned.
+    let spawn_started = Instant::now();
     let mut child = cmd.spawn()?;
+    let spawn_ms = elapsed_ms(spawn_started);
     let pid = child.id();
 
     let mut stdout_pipe = child.stdout.take().expect("stdout was piped");
     let mut stderr_pipe = child.stderr.take().expect("stderr was piped");
-    let stdout_task = tokio::spawn(async move {
-        let mut buf = Vec::new();
-        let result = stdout_pipe.read_to_end(&mut buf).await;
-        result.map(|_| buf)
-    });
-    let stderr_task = tokio::spawn(async move {
-        let mut buf = Vec::new();
-        let result = stderr_pipe.read_to_end(&mut buf).await;
-        result.map(|_| buf)
-    });
+    // Phase 2 (#469): first output byte — the child's prelude (bash parsing,
+    // an internal `<<EOF` heredoc write, interpreter startup) all happens
+    // before the first byte lands in a pipe. Each reader records its own
+    // first-byte offset; whichever fires first is the phase measurement.
+    // Reading is otherwise identical to the previous read_to_end: bytes,
+    // ordering per stream, and error semantics are unchanged.
+    let output_started = Instant::now();
+    let stdout_task =
+        tokio::spawn(async move { read_with_first_byte(&mut stdout_pipe, output_started).await });
+    let stderr_task =
+        tokio::spawn(async move { read_with_first_byte(&mut stderr_pipe, output_started).await });
 
     let timeout = Duration::from_secs(timeout_secs);
     let mut timed_out = false;
@@ -133,8 +150,16 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
             None
         }
     };
+    // Phase 3 (#469): steady run — first byte → exit observed (the whole
+    // wait on a no-output child). Measured from the prelude start so the
+    // two phases partition the output window without overlap.
+    let exit_offset_ms = elapsed_ms(output_started);
+    let mut reap_ms = None;
     if timed_out || cancelled {
+        // Phase 4 (#469): termination — TERM → grace → KILL → reaped.
+        let reap_started = Instant::now();
         terminate(&mut child, pid).await;
+        reap_ms = Some(elapsed_ms(reap_started));
     }
 
     let stdout = stdout_task
@@ -144,9 +169,9 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         .await
         .map_err(|err| ToolError::Io(std::io::Error::other(err)))??;
 
-    let output_bytes = (stdout.len() + stderr.len()) as u64;
-    let stdout_text = String::from_utf8_lossy(&stdout);
-    let stderr_text = String::from_utf8_lossy(&stderr);
+    let output_bytes = (stdout.0.len() + stderr.0.len()) as u64;
+    let stdout_text = String::from_utf8_lossy(&stdout.0);
+    let stderr_text = String::from_utf8_lossy(&stderr.0);
 
     let mut text = stdout_text.into_owned();
     if !stderr_text.is_empty() {
@@ -222,7 +247,52 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         content: vec![crate::events::ContentBlock::Text { text }],
         is_error,
         output_bytes,
+        timing: Some(ToolTiming {
+            total_ms: Some(elapsed_ms(started)),
+            spawn_ms: Some(spawn_ms),
+            // Phase 2 + 3 partition the output window: whichever stream
+            // produced a byte first sets firstByteMs; restMs covers from the
+            // prelude start to the exit, so firstByteMs + restMs = the whole
+            // output window. A child with no output reports only restMs.
+            first_byte_ms: stdout.1.or(stderr.1),
+            rest_ms: Some(exit_offset_ms),
+            reap_ms,
+        }),
     })
+}
+
+/// Read one output pipe to EOF, recording the elapsed offset of the first
+/// non-empty read (#469). `None` when the stream never produced a byte.
+/// Bytes and error semantics are identical to `read_to_end` — the first
+/// error aborts the read and propagates — only the first-chunk boundary is
+/// additionally observed.
+async fn read_with_first_byte<R: tokio::io::AsyncRead + Unpin>(
+    pipe: &mut R,
+    started: Instant,
+) -> std::io::Result<(Vec<u8>, Option<u64>)> {
+    let mut buf = Vec::new();
+    let mut first_byte_ms = None;
+    let mut chunk = [0u8; 8192];
+    loop {
+        let n = pipe.read(&mut chunk).await?;
+        if n == 0 {
+            break;
+        }
+        if first_byte_ms.is_none() {
+            first_byte_ms = Some(elapsed_ms(started));
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    Ok((buf, first_byte_ms))
+}
+
+/// Wall-clock milliseconds since `started` (monotonic, clamped at 0).
+pub(super) fn elapsed_ms_pub(started: Instant) -> u64 {
+    elapsed_ms(started)
+}
+
+fn elapsed_ms(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
 /// The model-supplied `timeout` argument, clamped into

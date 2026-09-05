@@ -9,6 +9,7 @@
 //! generated values into artifacts rather than expect reproducibility.
 
 use serde_json::Value;
+use std::time::Instant;
 use uuid::{Uuid, Variant};
 
 use super::{truncate, ToolContext, ToolError, ToolOutput};
@@ -25,8 +26,16 @@ const MAX_VALIDATE: usize = 1000;
 const MAX_VALUE_CHARS: usize = 512;
 
 pub async fn run(args: &Value, _ctx: &ToolContext) -> ToolOutput {
+    let started = Instant::now();
     match run_inner(args) {
-        Ok(output) => output,
+        Ok(mut output) => {
+            // In-process tool: only totalMs exists (#469).
+            output.timing = Some(crate::events::ToolTiming {
+                total_ms: Some(super::bash::elapsed_ms_pub(started)),
+                ..crate::events::ToolTiming::default()
+            });
+            output
+        }
         Err(err) => ToolOutput::error(err.to_string()),
     }
 }
@@ -121,6 +130,9 @@ fn validate(args: &Value) -> Result<ToolOutput, ToolError> {
         is_error: any_invalid,
         // Volume semantics: pre-truncation, same as the other tools.
         output_bytes: text.len() as u64,
+        // `timing` is attached by the caller (`run`) once the whole
+        // operation completes.
+        timing: None,
     })
 }
 
