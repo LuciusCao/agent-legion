@@ -5,7 +5,7 @@ name = "velites"
 # 强制；理由：ensure-velites.sh 以 velites/ 子树 tree hash 做二进制新鲜度
 # 指纹、Docker velites-build stage 以 COPY velites/ 为缓存键——无谓的版本
 # bump 会触发全量 cargo build 与镜像层重建。
-version = "0.4.0-alpha"
+version = "0.5.0"
 edition = "2021"
 description = "Agent Legion lightweight agent harness (headless, pi-compatible event stream)"
 license = "MIT"
