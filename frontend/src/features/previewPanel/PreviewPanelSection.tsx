@@ -5,13 +5,14 @@
  * - 「定制预览」按钮唤起 Studio 对话（agent 写草稿）；草稿**不自动执行**
  *   （#347 P1）：agent（或提示注入产物）写入的 HTML 只有在当前用户显式点
  *   「预览此草稿」后才作为 srcDoc 挂载——右栏聊天会给出草稿元信息提示，
- *   点击预览是逐次授权，重新打开对话框回到默认态（不记忆执行态，避免一次
+ *   点击预览是逐次授权：重新打开对话框回到默认态，草稿消失（发布/归档的
+ *   null 过渡）授权同样失效，同一会话内的新草稿不继承旧授权（避免一次
  *   点击永久放行）。预览中的草稿实时跟随轮询更新（仅当前用户可见），发布
  *   永远是人工动作。
  * 定制入口 admin-only（与 WorkflowStudioButton 同一惯例，P4/STUDIO-AGENT-001：
  * 治理面端点本身 admin/scoped-only，非 admin 点开只会收获一串 403）。
  */
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useAuthStore } from '../../stores/authStore'
 import { PreviewPanelHost } from './PreviewPanelHost'
 import { CustomizePreviewDialog } from './CustomizePreviewDialog'
@@ -51,9 +52,21 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
   const draft = stateQuery.data?.draft ?? null
 
   // 对话开着且已显式预览且有草稿 → 左栏渲染草稿（仅自己可见）；否则渲染
-  // 已发布版本。草稿消失（发布/归档）时自动回落，previewDraft 复位。
+  // 已发布版本。草稿经 **null 过渡**消失（发布/归档）时授权失效：下方
+  // effect 把 previewDraft 复位——同一会话内再来的新草稿不继承旧授权
+  // （review P1）。save_draft 覆盖同一草稿（draft 持续非 null，内容更新）
+  // 不受影响，预览继续实时跟随。
   const draftPreview = customizing && isAdmin && previewDraft && draft !== null
   const bundle = draftPreview ? draft.html : published?.html
+
+  // 授权随草稿消失（null 过渡）失效：发布把草稿转为已发布版本、归档清空
+  // 全部版本，都是用户可见的人工动作；此后到达的新草稿必须重新显式预览。
+  // draft 经轮询异步送达，null 过渡只能在 effect 里观察（渲染期不可得）。
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 轮询送达的 draft null 过渡使授权失效（review P1）
+    if (customizing && previewDraft && draft === null) setPreviewDraft(false)
+  }, [customizing, previewDraft, draft])
+
   const closeCustomizing = () => {
     setCustomizing(false)
     setPreviewDraft(false)
