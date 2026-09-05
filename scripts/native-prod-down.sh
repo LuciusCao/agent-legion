@@ -6,7 +6,7 @@
 # 进程按「绑定地址 + 端口」定位（NATIVE_BACKEND_BIND / NATIVE_WORKER_BIND，
 # 默认 127.0.0.1，与 native-prod-up.sh 同一组变量）：同端口不同地址可并存
 # 监听，按端口 head -1 会杀错进程；up 用什么 bind 起的，down 就用同一个
-# bind 停。通配监听（*:port / [::]:port）占满整个端口，同样匹配。
+# bind 停。同族通配监听（*:port / [::]:port）占满所属族，同样匹配。
 set -euo pipefail
 
 BACKEND_PORT="${NATIVE_BACKEND_PORT:-8000}"
@@ -27,12 +27,22 @@ listener_display() {
     echo "$host"
 }
 
-# 输出匹配「display:port 或任一通配」的全部监听 pid（去重）。
+listener_family() {
+    case "$1" in
+        *:*) echo "6" ;;
+        *) echo "4" ;;
+    esac
+}
+
+# 输出匹配「display:port 或同族通配（*:port / [::]:port）」的全部监听
+# pid（去重）。族别经 lsof -i4/-i6 过滤：IPv4 目标不得命中仅 IPv6 的
+# 通配监听（bindv6only=1 时两类通配可在同端口并存），反之亦然。
 listener_pids() {
-    local display port
+    local display port family
     display="$(listener_display "$1")"
     port="$2"
-    lsof -nP -iTCP:"$port" -sTCP:LISTEN -F pn 2>/dev/null | awk \
+    family="$(listener_family "$1")"
+    lsof -nP -a -iTCP:"$port" -i"$family" -sTCP:LISTEN -F pn 2>/dev/null | awk \
         -v target="${display}:${port}" -v wild="*:${port}" -v wild6="[::]:${port}" '
         /^p/ { pid = substr($0, 2) }
         /^n/ {

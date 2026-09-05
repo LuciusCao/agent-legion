@@ -127,14 +127,44 @@ def test_health_host_normalization_behavior() -> None:
 
 
 def test_idempotency_matches_bind_address() -> None:
-    """幂等判定按「bind 地址 + 端口」匹配：port_listening 消费两个参数，
-    通配监听（*:port / [::]:port）也算已监听（占满端口，新进程 bind 必然
-    EADDRINUSE 且探测可达）——只看端口会把其它地址的监听误认为本服务
-    而跳过启动，随后按 bind 探测必然失败（同端口不同地址可并存）。"""
+    """幂等判定按「bind 地址 + 端口 + 地址族」匹配：port_listening 消费
+    两个参数，族别经 lsof -i4/-i6 过滤器带入（-F n 不输出族别）——
+    bindv6only=1 时 IPv6 通配不覆盖 IPv4 目标，IPv4 bind 不得被同端口
+    仅 IPv6 的通配监听误判为已运行（Codex #482 P1），反之亦然。通配
+    监听（*:port / [::]:port）在所属族内视为已监听（占满端口，新进程
+    bind 必然 EADDRINUSE 且探测可达）。"""
     assert "listener_display" in NATIVE_PROD_UP
     assert 'port_listening "$BACKEND_BIND" "$BACKEND_PORT"' in NATIVE_PROD_UP
     assert 'port_listening "$WORKER_BIND" "$WORKER_PORT"' in NATIVE_PROD_UP
+    assert '-iTCP:"$port" -i"$family"' in NATIVE_PROD_UP
     assert 'grep -Fxq -e "${display}:${port}" -e "*:${port}" -e "[::]:${port}"' in NATIVE_PROD_UP
+
+
+def test_listener_family_behavior() -> None:
+    """listener_family 按目标 bind 推地址族：IPv6 字面量（含括号形态）
+    → 6，其余（IPv4 / 主机名）→ 4。提取函数定义后真实执行。"""
+    match = re.search(r"^listener_family\(\) \{.*?^\}", NATIVE_PROD_UP, re.MULTILINE | re.DOTALL)
+    assert match, "listener_family 函数定义缺失"
+    code = match.group(0) + '\nfor h in "$@"; do listener_family "$h"; done\n'
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            code,
+            "listener_family",
+            "127.0.0.1",
+            "0.0.0.0",
+            "::",
+            "::1",
+            "[::1]",
+            "fe80::1",
+            "localhost",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.splitlines() == ["4", "4", "6", "6", "6", "6", "4"]
 
 
 def test_listener_match_behavior_dual_address() -> None:
@@ -143,7 +173,7 @@ def test_listener_match_behavior_dual_address() -> None:
     已监听时另一个地址不再被视为已运行）。真实绑定回环 + 本机网卡
     地址执行，与 test_health_host_normalization_behavior 同一提取手法。"""
     sources = []
-    for name in ("listener_display", "port_listening"):
+    for name in ("listener_display", "listener_family", "port_listening"):
         match = re.search(rf"^{name}\(\) \{{.*?^\}}", NATIVE_PROD_UP, re.MULTILINE | re.DOTALL)
         assert match, f"{name} 函数定义缺失"
         sources.append(match.group(0))
@@ -173,6 +203,67 @@ def test_listener_match_behavior_dual_address() -> None:
             sock.close()
 
 
+def test_listener_match_behavior_mixed_family() -> None:
+    """同端口 IPv4 具体监听 + IPv6 通配监听并存：IPv4 目标不得命中仅
+    IPv6 的通配（Codex #482 P1 的核心场景——无族别过滤时 *:port 会把
+    两个族的通配混在一起）；down 的 listener_pids 同样不得误选。真实
+    绑定执行。"""
+    up_sources = []
+    for name in ("listener_display", "listener_family", "port_listening"):
+        match = re.search(rf"^{name}\(\) \{{.*?^\}}", NATIVE_PROD_UP, re.MULTILINE | re.DOTALL)
+        assert match, f"{name} 函数定义缺失"
+        up_sources.append(match.group(0))
+    up_funcs = "\n".join(up_sources)
+    down = (ROOT / "scripts" / "native-prod-down.sh").read_text(encoding="utf-8")
+    down_sources = []
+    for name in ("listener_display", "listener_family", "listener_pids"):
+        match = re.search(rf"^{name}\(\) \{{.*?^\}}", down, re.MULTILINE | re.DOTALL)
+        assert match, f"down: {name} 函数定义缺失"
+        down_sources.append(match.group(0))
+    down_funcs = "\n".join(down_sources)
+
+    port = _free_port()
+    s4 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s6 = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    for sock in (s4, s6):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s4.bind(("127.0.0.1", port))
+    s4.listen(1)
+    s6.bind(("::", port))
+    s6.listen(1)
+    try:
+        cases = [
+            ("127.0.0.1", "yes"),  # IPv4 具体：命中自己的监听
+            ("::1", "yes"),  # IPv6：命中 :: 通配
+            ("192.0.2.99", "no"),  # IPv4 无监听：不得命中 IPv6 通配
+        ]
+        for bind, expected in cases:
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    up_funcs + f'\nport_listening "{bind}" "{port}" && echo yes || echo no\n',
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            assert result.stdout.strip() == expected, (
+                f"port_listening {bind}: {result.stdout.strip()!r}"
+            )
+        # down：IPv4 无监听地址不得选中 IPv6 通配的 pid
+        result = subprocess.run(
+            ["bash", "-c", down_funcs + f'\nlistener_pids "192.0.2.99" "{port}"\n'],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert result.stdout.strip() == "", f"listener_pids 192.0.2.99: {result.stdout!r}"
+    finally:
+        s4.close()
+        s6.close()
+
+
 def test_warning_host_url_uses_bracketed_host() -> None:
     """host_url 失配警告的 URL 模板用 BACKEND_HEALTH_HOST（括号化 IPv6）
     而非裸 BACKEND_BIND——http://fd00::1:8000 无法区分地址与端口，按提示
@@ -182,13 +273,15 @@ def test_warning_host_url_uses_bracketed_host() -> None:
 
 
 def test_prod_down_locates_by_bind_address() -> None:
-    """down 脚本与 up 同一组 bind 变量、按「地址 + 端口」定位 pid：up 支持
-    同端口多地址并存后，按端口 head -1 会杀错进程；listener_pids 精确
-    匹配 display:port（通配除外），未命中即视为未运行。"""
+    """down 脚本与 up 同一组 bind 变量、按「地址 + 端口 + 族别」定位 pid：
+    up 支持同端口多地址并存后，按端口 head -1 会杀错进程；listener_pids
+    精确匹配 display:port（同族通配除外），未命中即视为未运行——族别
+    过滤防止误杀同端口另一族的无关监听（Codex #482 P1）。"""
     down = (ROOT / "scripts" / "native-prod-down.sh").read_text(encoding="utf-8")
     assert 'BACKEND_BIND="${NATIVE_BACKEND_BIND:-127.0.0.1}"' in down
     assert 'WORKER_BIND="${NATIVE_WORKER_BIND:-127.0.0.1}"' in down
     assert 'listener_pids "$bind" "$port"' in down
+    assert '-iTCP:"$port" -i"$family"' in down
     assert 'stop_port "$WORKER_BIND" "$WORKER_PORT" "Worker" 35' in down
     assert 'stop_port "$BACKEND_BIND" "$BACKEND_PORT" "后端" 15' in down
     assert down.count("lsof -nP -tiTCP") == 0  # 旧式仅按端口取 pid 的调用不得残留

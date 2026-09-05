@@ -35,8 +35,10 @@ echo "检测 velites 二进制新鲜度…"
 # 幂等判断按「绑定地址 + 端口」匹配已有监听：同端口不同地址是两个
 # 独立监听（127.0.0.1:8000 与 192.0.2.1:8000 可并存），只看端口会把
 # 其它地址的监听误认为本服务而跳过启动，随后按 bind 探测必然失败。
-# 通配监听占满整个端口（*:port；Linux 的 IPv6 通配另显示 [::]:port），
-# 同样视为已监听——此时新进程 bind 也会 EADDRINUSE，且探测可达。
+# 通配监听占满所属地址族的整个端口（lsof 均显示 *:port，[::]:port 是
+# Linux 下 IPv6 通配的变体写法）。族别经 lsof -i4/-i6 过滤器带入
+# （-F n 不输出族别）：bindv6only=1 时 IPv6 通配不覆盖 IPv4 目标，
+# 反之亦然——IPv4 bind 不得被同端口仅 IPv6 的通配监听误判为已运行。
 listener_display() {
     local host="$1"
     case "$host" in
@@ -49,12 +51,19 @@ listener_display() {
     esac
     echo "$host"
 }
+listener_family() {
+    case "$1" in
+        *:*) echo "6" ;;
+        *) echo "4" ;;
+    esac
+}
 port_listening() {
-    local display port
+    local display port family
     display="$(listener_display "$1")"
     port="$2"
-    lsof -nP -iTCP:"$port" -sTCP:LISTEN -F n 2>/dev/null | sed -n 's/^n//p' \
-        | grep -Fxq -e "${display}:${port}" -e "*:${port}" -e "[::]:${port}"
+    family="$(listener_family "$1")"
+    lsof -nP -a -iTCP:"$port" -i"$family" -sTCP:LISTEN -F n 2>/dev/null \
+        | sed -n 's/^n//p' | grep -Fxq -e "${display}:${port}" -e "*:${port}" -e "[::]:${port}"
 }
 
 # 健康检查与就绪提示用的探测地址：0.0.0.0 是 IPv4 全接口监听，必然含
