@@ -1,8 +1,10 @@
 /**
  * 「定制预览」对话框（issue #328）：复用 workflowStudio/chat 的
  * useStudioChat + 展示组件的薄封装（不改 chat 现有文件）。agent 经 MCP
- * 预览面板工具写草稿，草稿实时渲染在左栏（PreviewPanelSection 负责）；
- * 发布/恢复默认是这里的人工动作（reject_studio_agent_scope 在后端钉死）。
+ * 预览面板工具写草稿，发布/恢复默认是这里的人工动作（reject_studio_agent_scope
+ * 在后端钉死）。草稿**不自动执行**（#347 P1）：agent（或提示注入产物）写入的
+ * HTML 未经发布即作为 srcDoc 运行是风险放大器——左栏只渲染已发布版本，
+ * 草稿需经「预览此草稿」显式动作逐次放行（重开对话框回到默认态）。
  */
 import { useState } from 'react'
 import { Button, Dialog, DialogContent, DialogTitle } from '@mui/material'
@@ -22,12 +24,17 @@ export interface CustomizePreviewDialogProps {
   workspaceId: string
   /** 当前面板治理状态（published + draft），由父级轮询刷新。 */
   state: PreviewPanelState | null
+  /** 左栏当前是否在执行草稿（#347 P1 显式预览态，父级持有）。 */
+  previewDraft: boolean
+  onPreviewDraft: () => void
   onClose: () => void
 }
 
 export function CustomizePreviewDialog({
   workspaceId,
   state,
+  previewDraft,
+  onPreviewDraft,
   onClose,
 }: CustomizePreviewDialogProps) {
   const chat = useStudioChat(workspaceId)
@@ -60,7 +67,8 @@ export function CustomizePreviewDialog({
       <DialogContent className={styles.dialogBody}>
         <div className={styles.hint}>
           让 agent 先读 get_preview_guide 与 get_preview_context
-          了解桥协议与真实数据形状；agent 只能写草稿，发布后才会对所有人可见。
+          了解桥协议与真实数据形状；agent 只能写草稿，点「预览此草稿」后才会
+          在左栏执行草稿（仅本页可见），发布后才会对所有人可见。
         </div>
         {chat.agentsError ? (
           <div className={styles.error}>Agent 列表加载失败，请稍后重试</div>
@@ -132,6 +140,15 @@ export function CustomizePreviewDialog({
               ? `已发布 v${published.version}`
               : '未发布（当前为默认预览）'}
           </span>
+          <Button
+            size="small"
+            variant={previewDraft ? 'contained' : 'outlined'}
+            color={previewDraft ? 'warning' : 'primary'}
+            disabled={!draft}
+            onClick={onPreviewDraft}
+          >
+            {previewDraft ? '预览草稿中' : '预览此草稿'}
+          </Button>
           <Button
             size="small"
             variant="outlined"
