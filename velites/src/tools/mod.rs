@@ -20,6 +20,7 @@ pub mod write;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde_json::Value;
 
@@ -27,6 +28,13 @@ use crate::cancel::CancelToken;
 use crate::events::ContentBlock;
 use crate::provider::ToolSpec;
 use crate::sandbox::Sandbox;
+
+/// Wall-clock milliseconds since `started` (monotonic; a duration too large
+/// for u64 saturates at u64::MAX). Shared by every tool's #469 timing
+/// measurement.
+pub(crate) fn elapsed_ms(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
 
 /// Execution context shared by all tools.
 pub struct ToolContext {
@@ -59,6 +67,12 @@ pub struct ToolOutput {
     pub is_error: bool,
     /// Output volume before truncation (design §8).
     pub output_bytes: u64,
+    /// Phase timing (#469) surfaced on `tool_execution_end.timing`;
+    /// `None` only for failures raised before any measurement (argument
+    /// validation, guard rejection, disabled tools) — a measured failure
+    /// calls [`ToolOutput::measured`] so the dispatch boundary still
+    /// stamps its `totalMs`. In-process tools carry `total_ms` only.
+    pub timing: Option<crate::events::ToolTiming>,
 }
 
 impl ToolOutput {
@@ -68,11 +82,24 @@ impl ToolOutput {
             content: vec![ContentBlock::Text { text }],
             is_error,
             output_bytes,
+            timing: None,
         }
     }
 
     pub fn error(message: String) -> Self {
         Self::text(message, true)
+    }
+
+    /// Mark this output as measured (#469): the tool already did real work
+    /// before producing this result, so the dispatch boundary must stamp
+    /// its `totalMs` even though `is_error` is set (uuid's invalid-list
+    /// verdicts, validate's contract violations, read/write I/O failures —
+    /// dropping them from per-tool timing would systematically exclude the
+    /// slow/failing samples). Contrast the unmeasured failures (argument
+    /// validation, guard rejection), which stay `timing: None`.
+    pub fn measured(mut self) -> Self {
+        self.timing.get_or_insert_with(Default::default);
+        self
     }
 }
 
@@ -126,14 +153,40 @@ impl ToolKind {
         specs::spec(self)
     }
 
+    /// Dispatch one tool execution. This is the single #469 timing boundary:
+    /// `totalMs` (dispatch start → result ready) is filled here for every
+    /// measured tool, so the in-process tools carry zero instrumentation of
+    /// their own. `bash` additionally fills its subprocess phase fields
+    /// (spawnMs / firstByteMs / restMs / reapMs) itself; it leaves
+    /// `total_ms` untouched so the dispatch layer stays the single source
+    /// for the total and the decomposition base stays consistent
+    /// (total ≈ spawn + firstByte + rest + reap; see `events::ToolTiming`
+    /// for what the residual covers).
+    ///
+    /// Tool errors raised before any measurement (argument validation, guard
+    /// rejection, disabled tools) surface as error content with `timing:
+    /// None` — the same convention as `RequestTiming` on `message_end`. An
+    /// error output that ALREADY carries phases (bash timeout: is_error
+    /// with spawn/firstByte/rest/reap filled) keeps them and still gets
+    /// its totalMs here.
     pub async fn execute(self, args: &Value, ctx: &ToolContext) -> ToolOutput {
-        match self {
+        let started = Instant::now();
+        let mut output = match self {
             Self::Read => read::run(args, ctx).await,
             Self::Write => write::run(args, ctx).await,
             Self::Bash => bash::run(args, ctx).await,
             Self::Uuid => uuid::run(args, ctx).await,
             Self::Validate => validate::run(args, ctx).await,
+        };
+        // Unmeasured failures (error + no phases recorded) stay timing-free;
+        // everything else gets its totalMs at this single boundary.
+        if !(output.is_error && output.timing.is_none()) {
+            let timing = output
+                .timing
+                .get_or_insert_with(crate::events::ToolTiming::default);
+            timing.total_ms = Some(elapsed_ms(started));
         }
+        output
     }
 }
 

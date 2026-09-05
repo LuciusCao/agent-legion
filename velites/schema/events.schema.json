@@ -489,7 +489,7 @@
       ]
     },
     "ToolExecutionEndEvent": {
-      "description": "`tool_execution_end` event. `output_bytes` measures the tool's output\nvolume (stdout+stderr for bash, written/returned bytes for write/read);\nit is a measurement field only — no truncation happens in M1.",
+      "description": "`tool_execution_end` event. `output_bytes` measures the tool's output\nvolume (stdout+stderr for bash, written/returned bytes for write/read);\nit is a measurement field only — no truncation happens in M1. `timing`\ncarries the #469 phase decomposition (`spawnMs` / `firstByteMs` /\n`restMs` / `reapMs`); it is skipped on the wire for tool errors raised\nbefore any measurement (argument validation, guard rejection) — exactly\nthe `RequestTiming` convention on `message_end`.",
       "type": "object",
       "properties": {
         "isError": {
@@ -502,6 +502,16 @@
         },
         "result": {
           "$ref": "#/$defs/ToolResultData"
+        },
+        "timing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolTiming"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "toolCallId": {
           "type": "string"
@@ -550,6 +560,66 @@
       "required": [
         "content"
       ]
+    },
+    "ToolTiming": {
+      "description": "Phase timing of one tool execution (velites extension, #469). Every\nphase is optional: absent phases are skipped on the wire, never null.\nDurations are wall-clock milliseconds. `totalMs` is measured once at\nthe `ToolKind::execute` dispatch boundary — every MEASURED tool gets\nit: in-process tools carry it on success AND on measured failures\n(invalid uuid lists, contract violations, file I/O errors); only\npre-measurement failures (argument validation, guard rejection,\ndisabled tools) stay timing-free. Bash fills its own subprocess phases;\nthe four-signature reading table lives in bash.rs.\n\nPhase boundaries for `bash` (the subprocess phases bash fills itself):\n\n- `totalMs`: dispatch start → result ready. The decomposition base:\n  `total ≈ spawnMs + firstByteMs + restMs + reapMs`, not an exact\n  identity — the residual is harness-side work the phases exclude\n  (pre-spawn parsing + guard, post-exit reader join + truncation +\n  temp-file write) plus millisecond floor-rounding; never a missing\n  phase;\n- `spawnMs`: `Command::spawn` start → child pid returned (process\n  creation, sandbox wrapper exec included);\n- `firstByteMs`: spawn returned → first byte read from the child's\n  stdout/stderr pipes — whichever stream produced a byte first, and\n  only bytes observed BEFORE the exit/timeout boundary (a TERM\n  handler printing late does not retroactively own the prelude). This\n  is when the HARNESS observed the first byte, not when the child\n  wrote it — and the two stall shapes split along that seam: a\n  WRITE-side stall (child stuck before producing output — bash\n  parsing, an internal `<<EOF` heredoc write; #469's\n  spindump-confirmed main shape never wrote to the velites-held\n  pipes) surfaces as `firstByteMs` ABSENT (the whole window lands in\n  `restMs`, then the timeout kill); a READ-side stall (child wrote,\n  harness read parked in a kernel pipe lock — #469's `lck_mtx_sleep`)\n  surfaces as an ELEVATED `firstByteMs`. Sequential tool awaits keep\n  the readers pumping, so the attribution is safe today (see\n  bash.rs's caveat). A silent command (`sleep 60; echo done`) mimics\n  the write-side signature — disambiguate via `tool_execution_start.args`\n  (heredoc × absent = prelude stall);\n- `restMs`: first byte → child exit observed (the steady run). On a\n  child with no pre-boundary first byte this covers the whole output\n  window instead. On the timeout/cancel path it ends where the timeout\n  fired — group reaping is `reapMs`, not the run;\n- `reapMs`: exit/timeout observed → process group reaped (present on\n  the timeout/cancel kill path);\n- `requestedTimeoutMs`: the bash `timeout` argument AFTER clamping into\n  [1s, 1h] (default 120s), in milliseconds — the effective ceiling the\n  harness enforced. Absent for tools without a timeout parameter.\n  Analysis joins it against `totalMs` / `reapMs` to separate \"the\n  model asked for a long ceiling\" from \"the call hung within a normal\n  one\" (#469: models raise `timeout` after consecutive failures).\n\nPermanent capability (like `RequestTiming`): no toggles, no\naggregation — analytics stay on the Host side.",
+      "type": "object",
+      "properties": {
+        "firstByteMs": {
+          "description": "Spawn returned → first output byte observed (earliest of the stdout\nand stderr readers, and only before the exit/timeout boundary);\nabsent when the child produced no pre-boundary output.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "reapMs": {
+          "description": "Group termination + reap phase (kill/TERM → KILL grace → reaped), in\nmilliseconds; absent on a natural exit.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "requestedTimeoutMs": {
+          "description": "The enforced `timeout` ceiling (bash: the clamped model-supplied\nargument), in milliseconds; absent for tools without a timeout.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "restMs": {
+          "description": "First output byte → child exit observed, in milliseconds; on a\nchild with no pre-boundary output this covers the whole output\nwindow instead. On the timeout/cancel path it ends at the timeout;\ngroup termination is accounted as `reapMs`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "spawnMs": {
+          "description": "Process creation phase (`Command::spawn`) duration, in milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "totalMs": {
+          "description": "Tool dispatch start → result ready, in milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      }
     },
     "TurnEndEvent": {
       "description": "`turn_end` event: turn boundary marker only (schema v2). Pi re-serializes\nthe assistant `message` and its `toolResults` here; velites does not — the\nassistant message is already carried by this turn's `message_end`, and the\ntool results by the `tool_execution_end.result.content` events.",

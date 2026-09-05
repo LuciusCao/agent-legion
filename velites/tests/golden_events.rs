@@ -146,6 +146,22 @@ fn golden_event_sequence_with_tool_round() {
     assert_eq!(tool_end["result"]["content"][0]["type"], "text");
     assert_eq!(tool_end["result"]["content"][0]["text"], "hello velites");
     assert!(tool_end["output_bytes"].as_u64().unwrap() > 0);
+    // #469: in-process tools carry totalMs only — the subprocess phases
+    // (spawnMs / firstByteMs / restMs / reapMs) and the bash-only
+    // requestedTimeoutMs are skipped, not null.
+    assert!(tool_end["timing"]["totalMs"].as_u64().is_some());
+    for phase in [
+        "spawnMs",
+        "firstByteMs",
+        "restMs",
+        "reapMs",
+        "requestedTimeoutMs",
+    ] {
+        assert!(
+            tool_end["timing"].get(phase).is_none(),
+            "{phase} must be skipped for in-process tools"
+        );
+    }
 
     // turn_end is a bare turn-boundary marker (schema v2): no redundant
     // message/toolResults copies — content lives in message_end and
