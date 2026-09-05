@@ -1,8 +1,10 @@
 /**
- * PreviewPanelSection 回落路径与草稿预览的组件测试（issue #328）：
+ * PreviewPanelSection 回落路径与草稿显式预览的组件测试（issue #328 / #347 P1）：
  * - 未定制 workspace（published=null）→ 渲染 fallback（现有通用预览）；
  * - 已发布 bundle → bundle host 接管，fallback 不再渲染；
- * - 「定制预览」对话期间左栏实时渲染草稿（仅当前用户可见）。
+ * - 「定制预览」对话期间草稿**不自动执行**（#347 P1）：左栏继续渲染已发布
+ *   版本；显式点「预览此草稿」后才切换到草稿；关闭对话回到已发布版本，
+ *   重开对话框回到默认态（不记忆执行态）。
  *
  * srcdoc 断言一律用「包含」：宿主会在 bundle 头部注入 CSP meta
  * （PreviewPanelHost 的出站网络红线），完整字符串不再等于 bundle 原文。
@@ -26,10 +28,18 @@ vi.mock('./previewPanelApi', () => ({
 }))
 
 // 对话框本体（Studio chat 封装）在 CustomizePreviewDialog 自己的测试覆盖；
-// 这里钉住的是 section 的组装与回落语义。
+// 这里钉住的是 section 的组装与回落语义。mock 透传显式预览动作（#347 P1），
+// 供门控用例点击。
 vi.mock('./CustomizePreviewDialog', () => ({
-  CustomizePreviewDialog: ({ onClose }: { onClose: () => void }) => (
+  CustomizePreviewDialog: ({
+    onPreviewDraft,
+    onClose,
+  }: {
+    onPreviewDraft: () => void
+    onClose: () => void
+  }) => (
     <div data-testid="customize-dialog">
+      <button onClick={onPreviewDraft}>预览此草稿</button>
       <button onClick={onClose}>关闭</button>
     </div>
   ),
@@ -134,7 +144,7 @@ describe('PreviewPanelSection', () => {
     expect(screen.queryByRole('button', { name: '定制预览' })).toBeNull()
   })
 
-  it('定制对话期间左栏实时渲染草稿（仅当前用户可见）', async () => {
+  it('定制对话期间草稿不自动执行：显式「预览此草稿」后执行，重开对话回到默认态（#347 P1）', async () => {
     mockFetchPublished.mockResolvedValue(
       makeVersion(PUBLISHED_HTML, 'published')
     )
@@ -154,10 +164,22 @@ describe('PreviewPanelSection', () => {
         ?.getAttribute('srcdoc')
     ).toContain('published panel')
 
+    // 打开定制对话：草稿已在治理面上可见，但左栏**不**自动切换到草稿——
+    // 未审核 HTML 不得未经显式动作就作为 srcDoc 执行。
     fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
     await waitFor(() =>
       expect(screen.getByTestId('customize-dialog')).toBeInTheDocument()
     )
+    expect(
+      screen
+        .getByTestId('preview-panel-host')
+        .querySelector('iframe')
+        ?.getAttribute('srcdoc')
+    ).toContain('published panel')
+    expect(screen.queryByText('草稿预览中')).toBeNull()
+
+    // 显式动作后才执行草稿（仅当前用户可见）。
+    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
     await waitFor(() => {
       const iframe = screen
         .getByTestId('preview-panel-host')
@@ -177,6 +199,52 @@ describe('PreviewPanelSection', () => {
         .querySelector('iframe')
       expect(iframe?.getAttribute('srcdoc')).toContain('published panel')
     })
+
+    // 重新打开对话框：回到默认态——一次点击不放行后续会话的草稿执行。
+    fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('customize-dialog')).toBeInTheDocument()
+    )
+    expect(
+      screen
+        .getByTestId('preview-panel-host')
+        .querySelector('iframe')
+        ?.getAttribute('srcdoc')
+    ).toContain('published panel')
+    expect(screen.queryByText('草稿预览中')).toBeNull()
+  })
+
+  it('无已发布版本时草稿同样不自动执行：显式预览前渲染 fallback', async () => {
+    mockFetchPublished.mockResolvedValue(null)
+    mockFetchState.mockResolvedValue({
+      published: null,
+      draft: makeVersion(DRAFT_HTML, 'draft'),
+    })
+    renderSection()
+
+    await waitFor(() =>
+      expect(screen.getByTestId('generic-fallback')).toBeInTheDocument()
+    )
+    fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('customize-dialog')).toBeInTheDocument()
+    )
+    // 草稿存在但未显式预览：左栏保持 fallback，不挂草稿 iframe。
+    await waitFor(() => expect(mockFetchState).toHaveBeenCalled())
+    expect(screen.queryByTestId('preview-panel-host')).toBeNull()
+    expect(screen.getByTestId('generic-fallback')).toBeInTheDocument()
+    expect(screen.queryByText('草稿预览中')).toBeNull()
+
+    // 显式动作后草稿接管左栏。
+    fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+    await waitFor(() => {
+      const iframe = screen
+        .getByTestId('preview-panel-host')
+        .querySelector('iframe')
+      expect(iframe?.getAttribute('srcdoc')).toContain('draft panel')
+    })
+    expect(screen.getByText('草稿预览中')).toBeInTheDocument()
+    expect(screen.queryByTestId('generic-fallback')).toBeNull()
   })
 
   it('非 admin 成员不渲染「定制预览」入口（P4 惯例，治理面端点对其 403）', async () => {
@@ -215,8 +283,13 @@ describe('PreviewPanelSection', () => {
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
-      // 打开定制对话启用草稿轮询（3s refetchInterval），左栏切到草稿渲染。
+      // 打开定制对话启用草稿轮询（3s refetchInterval）。草稿不自动执行
+      // （#347 P1）：先显式预览，左栏才会切到草稿渲染。
       fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
