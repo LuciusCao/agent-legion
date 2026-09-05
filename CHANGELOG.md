@@ -6,46 +6,6 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
-### Changed
-- Workflow Studio 按节点类型收口「配置 Schema」归属（#406）：
-  `type: agent` 节点不再渲染节点 YAML 的 `config_schema` 区块，
-  Agent schema 统一归「Agent 配置」内的 Agent Definition 编辑入口；
-  `type: code` 节点的 schema 编辑与 `runtime_mutable` 行为保持不变。
-- host 纯控制面模式：workflow 执行与宿主进程解耦（#389，收编 #385/#386）。
-  `code_capacity` 合法化 0 值（契约 `gt=0→ge=0`，UI「代码池」组改述为
-  「本地执行」——本地兜底执行并发上限，0 = 纯远程模式）：宿主容量为 0 时
-  不再组装本地执行栈（CodeExecutor/ExecutionRuntime/线程池/velites 沙箱
-  依赖全部消失），code 节点 100% 由远程 code Worker 执行；shard 分片执行
-  远程化——分片身份（`shard_index`/`shard_input`）写入持久化 manifest，
-  broker claim 事务经 `try_start_shard` 绑定 `node_shards` 行（行级去重），
-  分片输出以 `shard_output-<index>.json` 作为常规 expected_output 随归档
-  回传（不走尺寸受限的 metadata 通道）；调度线程 pass 级早退修复（纯远程
-  部署不再被饿死，且保留审批门等免 dispatch 工作的处理机会）；
-  `/api/health` 在纯远程模式下实时报告在线 code Worker 数（启动为 0 打
-  WARNING），防静默停摆。
-- `workflows.enabled` 退役（#385，由 #389 第 3 步收编）：该开关已从灰度
-  开关漂移为事实上的产品总开关，单机部署无合理关闭场景。404 门禁
-  `require_workflows_enabled` 整体移除（38 个路由文件、约 150 处调用，
-  API 面永远可用）；`worker_startup.is_enabled` 分支删除（worker 总是
-  启动，部署形态改由 `code_capacity` 表达）；实例设置契约删除该键，
-  存量 DB 文档读取时键级剥离（`workflows.max_items_per_run` 活跃保留），
-  无数据迁移。升级窗口内旧前端整文档 PUT 携带该键会 422（破坏性契约
-  变更，刷新前端即恢复）。
-- worker 镜像与 agent runtime 解耦（#381/#383，PR #384）：velites/pi 移出
-  worker 镜像——镜像收敛为纯执行服务（Python worker + bwrap + 内置的
-  `velites-sandbox` code 沙箱包装器），velites agent runtime 以平台匹配的
-  外挂二进制提供（compose bind mount 到 `/app/data/bin/velites`，long
-  syntax 缺源拒启）。新增 `AGENT_WORKER_EXPECT_RUNTIMES` 期望 runtime 守卫
-  （探测不到/被停用/模型发现失败均 fail-fast，退出码 2）；注册 payload 携带
-  生效 runtime 的 `--version`（版本握手可观测，外挂后的漂移排障依据）。
-  pi 在 docker 镜像内不可用（npm 入口依赖 node），部署走裸机。新增
-  `velites-v*` tag 触发的三平台 release workflow（linux amd64/arm64、
-  macos arm64）；host 容器的 code 本地兜底禁用（避免为兜底路径给后端
-  容器加 seccomp/cap 特权）。
-
-### Deprecated
-- workflow_key 兼容窗口期公告（issue #211）：全部 deprecated 契约面的迁移文案统一标注移除时间 **2026-10-31**——27 个请求/响应字段、10 条 URL 别名、claim 协议字段将在终态批移除。显式发送恒等值（=workspace id）继续放行至该日期；不匹配值已由守卫拒绝（400）。所有部署实例须在窗口期内升级至 ≥ schema v68（存量 workflow_key 已对齐）。
-
 ### Added
 - Worker 一键安装脚本 `scripts/install-worker.sh` + 独立部署编排
   `deploy/compose.worker.standalone.yaml`：无仓库克隆的机器经
@@ -60,70 +20,52 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   示例 `deploy/compose.worker.pull.example.yaml`（`!reset` 清 build 段后
   `make stack-worker-up` 直接用 registry 镜像），部署文档 §5 增补「拉取式
   部署」小节。
-- 预览面板安全与正确性修复（PR #345 codex 评审 P1/P2）：宿主在 srcDoc 的
-  `<head>` 注入 CSP（`default-src 'none'` + 平台资源白名单 + `connect-src` 限
-  平台 origin），堵死沙箱 bundle 的出站网络通道（`sandbox="allow-scripts"` 不
-  阻 `fetch`/`sendBeacon`/`<img>` 外传——恶意草稿可先经桥读任务数据再外发）；
-  `PreviewPanelSection` 的 remount key 加入 bundle 内容指纹，草稿轮询更新时
-  整树重挂 iframe，旧文档在途桥请求的响应不再可能错误应答新文档的同编号请求；
-  authoring context 的 `recent_jobs` 产物清单统一走本地目录 ∪ 对象存储
-  manifest（此前仅 selected job 合并，worker 执行任务的 recent 清单会报空）。
-  preview_guide.md 运行时契约同步（出站网络由宿主强制而非编写约定）。
-- 发版解耦纪律 + 版本清单一致性检查（`scripts/check_versions.py`，挂 backend
-  静态轮）：velites（`velites/Cargo.toml`）与 frontend（`frontend/package.json`）
-  持有独立版本线，禁止随仓库版本（`pyproject.toml`）锁步 bump——无谓的版本前进
-  会改变 velites 子树 tree hash（`ensure-velites.sh` 的二进制新鲜度指纹）与
-  Docker 缓存键，触发全量 `cargo build` / 镜像层重建。检查两条规则：清单 ↔
-  lock 版本一致；独立组件的版本前进必须伴随锚点以来的源码改动（仓库发版顺手
-  bump 无源码改动的组件会被拒绝）。规则详见 `scripts/check_versions.py`
-  模块 docstring 与 CONTRIBUTING「House rules」。
-- Workflow nodes declare an explicit execution type `type: code | agent`
-  (issue #284 phase 2, schema v66): the publish gate branches on it
-  (agent nodes require exactly one published Agent for the capability,
-  code nodes require published node code), revision publication
-  materializes Agent routes only for `type: agent` nodes, and the startup
-  route reconcile is retired — routes now change only at revision
-  publication. Legacy `type: node` and an omitted type normalize to
-  `code`; the v66 migration backfills stored active revisions and Studio
-  drafts from the route projection.
-- 架构盘点：workflow_key 退役 Phase 1 分类清单（`docs/architecture/workflow-key-retirement-inventory.md`，issue #211）——四类穷尽引用 + Phase 2-4 执行依据。
-- Host 侧 agent runtime catalog（`server/app/agent_runtime`，issue #75）：
-  runtime 全集单一事实来源（`AGENT_RUNTIMES`）+ 每 runtime 一个 adapter
-  （argv 构建 + `ExecutionContract`）；「新增 agent runtime 接入指南」见
-  `docs/architecture/velites-harness.md`。
+
+## [0.6.0] - 2026-09-05
+
+### Added
+- agent 发起 workflow 发布的确认回路（issue #416，schema v76）：Studio
+  chat 的 agent 经新 MCP 工具 `request_workflow_publish` 挂起发布请求
+  （pending 状态机，永不自行确认），用户在 Studio 发布确认对话框里
+  审阅 diff 后 confirmed / rejected；`get_publish_request_status` 供
+  agent 轮询结果，同 workspace 后到请求自动 supersede。
+- velites 内置工具扩充（0.6.0 后落版 velites 0.5.0）：`uuid` 工具
+  （生成与校验，校验拒绝未定义版本位，#442/#465）；`validate` 工具 +
+  require-output 契约关卡（#443）——skill 可声明节点必填输出，执行末
+  违约即失败，host 镜像同步烤入 velites-sandbox 包装器。
+- Studio code 节点配置面板重设计（#418）：schema 结构化编辑 + config
+  双通道（revision 快照 vs workspace live 覆盖）明示；workflow compare
+  补 config/config_schema 比对（#418/#422），纯配置变更不再无法发布。
+- Skill 选择链路合一（#410）：节点 skill 选择收敛为「目录 + 版本」
+  两控件，回显实际执行版本（`node_runs.skill` 记录 dispatch 时的
+  skill key，schema v75）。
+- 创建 Agent 表单隐藏 Agent ID（#407）：服务端按 capability 生成
+  agent_id，显式传值保持旧客户端契约不变（MCP copy/save 路径零改动）；
+  Agent 发布触发 workspace override prune（#430），与 revision 发布
+  链路对齐。
+- 外部内容 ref 的连接 Key 改为选择控件（#419）：唯一 key 默认选中。
+- claim 吞吐第一阶段观测与批量化（#448/#461，schema v78）：claim 事务
+  切段计时（worker_setup/scan/evaluate/writes 落 ops profile 采样），
+  `create_jobs_bulk` 改 set-based INSERT（每批 1000 行）——v77 statement
+  触发器从每行一次变为每批一次。
 
 ### Changed
-- 节点 `skill.ref` 语义显式化（issue #322）：`latest`（空 ref 已归一为它）= 跟随 skill 仓库 HEAD，每次 dispatch 现场解析、永不入锁；具体 tag = 首次 dispatch 把解析的 commit 冻结进 `skill_lock`（v2 多值 `{repo, refs}`），唯一 relock 通道为 CLI `make skills-lock`（遍历锁内已有条目重解析 pinned refs）。**行为变化**：存量 published revision 中 ref 为空的节点原先冻结在 skill source 默认 ref 的 commit 上，升级后改为跟随仓库 HEAD；需要复现的节点应在 Studio 草稿中显式 pin tag 并重新发布。
-- Agent execution 契约 runtime 化（issue #75）：Host 侧 runtime catalog
-  （`server/app/agent_runtime`）的每个 adapter 声明自己支持的 manifest
-  execution 键（provider/model/thinking）与必填性；dispatch 与 Worker claim
-  重解析统一按契约校验——配置了 runtime 不支持的键（非空值）或必填键在
-  解析链上不再有来源时 fail-fast。**行为变化**：在飞 job 跨 revision 升级
-  后若节点引入了 runtime 不支持的 execution 键（或必填键不再可解析），
-  claim 从静默下发变为可行动报错（claim 扫描跳过该候选，unclaimable
-  sweeper 将请求判失败并给出指向节点 execution 覆盖的错误信息）。
-
-### Removed
-- 全局 skill_sources 注册表整体退役（issue #322 决策项 1）：skill 收敛为 `~/.agents/skills/<group>/<name>` 下的本地 in-place git 仓库（唯一模式），删除远程 clone 通道、repo 漂移闸门与缓存缺失 re-clone 自愈（缓存缺失改为报错并指引在 skill root 下创建）；admin `/api/admin/skill-sources*` 端点与「Skill 源管理」设置面板一并删除，`skill_lock` 的 `repo` 字段退化为仅审计。启动一次性迁移幂等删除 DB `global_settings` 里残留的 `skill_sources` 文档（保留 `skill_lock`）。
-- dev 侧 worker 配置种子 `config/agent-worker.yaml` 与模板
-  `config/agent-worker.example.yaml` 整体退役（issue #323）：worker 唯一
-  生效配置收敛为状态副本 `data/agent-worker-service/worker.yaml`（控制台/
-  API 驱动），消除「改了种子文件不生效」的双层配置漂移。`init-worktree.sh`
-  / `install-deps.sh` 的种子逻辑改为直写状态副本，`worker.service --config`
-  变为纯可选 bootstrap（仅 docker/远程 headless 部署使用，模板见
-  `deploy/worker.*.example.yaml`），`make dev-up` 的 worker 启动闸门改判
-  状态副本是否存在。
-- openclaw runtime 整体退役（issue #75）：曾短暂经 catalog adapter 接入
-  （`openclaw agent --local --json`），因其 stdout 只有一次性结果
-  envelope——无流式事件、无 token 计量——按用户决策移除；agent runtime
-  回到 pi / velites 两个。连带退役：实例设置 `openclaw` 块（存量 DB 文档
-  读取时整块剥离、写入返回 422）、`AGENT_LEGION_OPENCLAW_CWD` env、
-  `openclaw.cwd` 启动校验、Host 侧 openclaw agents 发现、Worker 侧
-  openclaw 条目与模型发现 adapter。未来需要时按 adapter 机制重新接入
-  （指南见 `docs/architecture/velites-harness.md`）。
+- Workflow Studio 按节点类型收口「配置 Schema」归属（#406）：
+  `type: agent` 节点不再渲染节点 YAML 的 `config_schema` 区块，
+  Agent schema 统一归「Agent 配置」内的 Agent Definition 编辑入口；
+  `type: code` 节点的 schema 编辑与 `runtime_mutable` 行为保持不变。
+- Studio agent 节点的 runtime 默认值改为 velites（#408）；检查器 Agent
+  区块内联展开，去掉开合按钮与重复汇总卡片（#409）。
+- Worker 代理出口产品化（#444）：worker 入口剥离继承的代理 env（LLM
+  流量不再意外经本机代理中转），需要代理时在 worker.yaml 声明显式
+  `proxy` 字段（替代 `WORKER_KEEP_PROXY_ENV` env 逃生门）。
 
 ### Fixed
-
+- workflow compare 快照往返与比对完整性（#431/#454/#458）：compare 补
+  node_type / shard / reduce / after 序 / edges 序比对；reduce 快照
+  `from_node` 不翻译、definition_to_yaml 不回显 shard/reduce 两个往返
+  缺陷修复——含 shard/reduce 基线的工作区不再一打开就有幽灵变更，
+  照此发布会静默删分片的路径已堵死；纯边重排的 DAG 高亮修正。
 - 高并发档位 job 状态计数触发器热点行死锁（issue #437）：高并发、
   单 run 大规模 items 下 claim 间歇 500（psycopg DeadlockDetected，落点
   claim 事务内 jobs promote UPDATE），并发呈锯齿式波动。根因
@@ -159,6 +101,153 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   闭合「查活→续期」间隙内 token 被吊销/过期的竞态（未命中即重验存活，
   最后一次工具调用也不会漏报失效）。已知取舍：掉线超过 500 条的增量补齐
   会在新旧窗口间留缝隙（API 无 before_seq），重新进入会话即全量替换自愈。
+- 事务异常后连接复位（issue #438）：`write_transaction` 在非 autocommit
+  连接上的双重 BEGIN 根治（每次 claim/heartbeat/enqueue 检出一轮就向
+  Postgres 发一次冗余 BEGIN，服务端 WARN 噪声）+ 连接池 reset 防御，
+  事务失败后连接不再带坏状态回池。
+- 单副本探针 idle in transaction（issue #433）：probe() 取锁 SELECT 在
+  池化连接上隐式开事务、fetchone 后未提交即长持——backend_xmin 钉死在
+  进程启动时刻，autovacuum 无法回收死元组；取锁后补 commit 消除。
+- Agent 创建占用检查跨版本缺口（发布 P1，#407 后续）：占用检查补已发布
+  版本行扫描——已发布 capability A v1 后保存 capability B 草稿时，缺省
+  创建 A 不再静默覆盖用户正在编辑的草稿（409 + 指引文案）。
+- DAG 视图缺边回退与无边图布局退化（#417）：dagre 对无边图按字母序竖排
+  造成「节点丢失」观感；workspace_dag 与 job 详情的 after 序同源化。
+
+## [0.5.0] - 2026-09-03
+
+### Added
+- 人工审批节点（issue #266，schema v63，EXEC-APPROVAL-001）：`type: approval`
+  节点是 DAG 内的人工决策关卡——调度器 park 至 `awaiting_approval`
+  （不派发、无租约），决定仅经审批 API 由人类会话作出（studio agent
+  scoped token 一律拒绝），`approval_decisions` 只增不改留痕：approved
+  写 verdict 产物后放行（条件边可按 `$.verdict` 分支）、rework 意见必填
+  并经 rerun 机制重置上游、rejected 节点失败并结束任务。
+- Studio 草稿显性保存与防丢（#331）：保存按钮 + 五态状态文本、
+  DraftSaveController 状态机（flushNow / 失败退避重试）、页面离开防丢
+  （visibilitychange/pagehide flush + beforeunload 拦截）、画布渲染草稿
+  （draft/revision 三态标识，YAML 非法回退 published + 警示）。
+- 运行画像 L1+L2（issue #359，schema v72）：六段管线指标
+  （`ops_runtime_profile_samples`，ops-metrics 采样循环每分钟落一行）+
+  瓶颈归因分类器 + API——批量运行期间实时回答「当前瓶颈在哪个阶段」。
+- run 计数快照与首屏 COUNT 缓存（issue #358，schema v73）：触发器维护的
+  `run_job_status_counts` 把 run 详情读取从全量 group-by 变成 PK 点查，
+  items 上限硬约束同批落地。
+- 执行面 retention 管道（issue #354）：agent manifest trim + 终态行窗口
+  删除 + sweeper 单副本收拢——核心执行面表此前只写不删，单场 campaign
+  后 Postgres 数十 GB 的历史尸体不再拖慢第二场。
+- Studio 节点类型选择器与画布创建入口（#392）：前端对齐后端
+  `start|code|agent|approval` 类型抽象——类型切换前置校验 + 确认弹窗，
+  按类型注册 inspector section 集，approval 画布可见与节点创建入口。
+- Studio 会话面板 agent 配置区（issue #368）：权限模式 / 模型 / 思考档位
+  的可见可切控制面（ACP 会话 modes/configOptions 广告驱动，未知档位
+  保留回退，通用思考档位映射 off<minimal<low<medium<high<xhigh<max<ultra）。
+- draft-only Agent 补齐 Studio 发布入口（#387）：MCP 建的草稿在节点
+  检查器可解析（published 优先、draft 回落），聊天草稿卡片导航空转修复。
+- 预览面板安全与正确性修复（PR #345 codex 评审 P1/P2）：宿主在 srcDoc 的
+  `<head>` 注入 CSP（`default-src 'none'` + 平台资源白名单 + `connect-src` 限
+  平台 origin），堵死沙箱 bundle 的出站网络通道（`sandbox="allow-scripts"` 不
+  阻 `fetch`/`sendBeacon`/`<img>` 外传——恶意草稿可先经桥读任务数据再外发）；
+  `PreviewPanelSection` 的 remount key 加入 bundle 内容指纹，草稿轮询更新时
+  整树重挂 iframe，旧文档在途桥请求的响应不再可能错误应答新文档的同编号请求；
+  authoring context 的 `recent_jobs` 产物清单统一走本地目录 ∪ 对象存储
+  manifest（此前仅 selected job 合并，worker 执行任务的 recent 清单会报空）。
+  preview_guide.md 运行时契约同步（出站网络由宿主强制而非编写约定）。
+- 发版解耦纪律 + 版本清单一致性检查（`scripts/check_versions.py`，挂 backend
+  静态轮）：velites（`velites/Cargo.toml`）与 frontend（`frontend/package.json`）
+  持有独立版本线，禁止随仓库版本（`pyproject.toml`）锁步 bump——无谓的版本前进
+  会改变 velites 子树 tree hash（`ensure-velites.sh` 的二进制新鲜度指纹）与
+  Docker 缓存键，触发全量 `cargo build` / 镜像层重建。检查两条规则：清单 ↔
+  lock 版本一致；独立组件的版本前进必须伴随锚点以来的源码改动（仓库发版顺手
+  bump 无源码改动的组件会被拒绝）。规则详见 `scripts/check_versions.py`
+  模块 docstring 与 CONTRIBUTING「House rules」。
+- Workflow nodes declare an explicit execution type `type: code | agent`
+  (issue #284 phase 2, schema v66): the publish gate branches on it
+  (agent nodes require exactly one published Agent for the capability,
+  code nodes require published node code), revision publication
+  materializes Agent routes only for `type: agent` nodes, and the startup
+  route reconcile is retired — routes now change only at revision
+  publication. Legacy `type: node` and an omitted type normalize to
+  `code`; the v66 migration backfills stored active revisions and Studio
+  drafts from the route projection.
+- 架构盘点：workflow_key 退役 Phase 1 分类清单（`docs/architecture/workflow-key-retirement-inventory.md`，issue #211）——四类穷尽引用 + Phase 2-4 执行依据。
+- Host 侧 agent runtime catalog（`server/app/agent_runtime`，issue #75）：
+  runtime 全集单一事实来源（`AGENT_RUNTIMES`）+ 每 runtime 一个 adapter
+  （argv 构建 + `ExecutionContract`）；「新增 agent runtime 接入指南」见
+  `docs/architecture/velites-harness.md`。
+
+### Changed
+- host 纯控制面模式：workflow 执行与宿主进程解耦（#389，收编 #385/#386）。
+  `code_capacity` 合法化 0 值（契约 `gt=0→ge=0`，UI「代码池」组改述为
+  「本地执行」——本地兜底执行并发上限，0 = 纯远程模式）：宿主容量为 0 时
+  不再组装本地执行栈（CodeExecutor/ExecutionRuntime/线程池/velites 沙箱
+  依赖全部消失），code 节点 100% 由远程 code Worker 执行；shard 分片执行
+  远程化——分片身份（`shard_index`/`shard_input`）写入持久化 manifest，
+  broker claim 事务经 `try_start_shard` 绑定 `node_shards` 行（行级去重），
+  分片输出以 `shard_output-<index>.json` 作为常规 expected_output 随归档
+  回传（不走尺寸受限的 metadata 通道）；调度线程 pass 级早退修复（纯远程
+  部署不再被饿死，且保留审批门等免 dispatch 工作的处理机会）；
+  `/api/health` 在纯远程模式下实时报告在线 code Worker 数（启动为 0 打
+  WARNING），防静默停摆。
+- `workflows.enabled` 退役（#385，由 #389 第 3 步收编）：该开关已从灰度
+  开关漂移为事实上的产品总开关，单机部署无合理关闭场景。404 门禁
+  `require_workflows_enabled` 整体移除（38 个路由文件、约 150 处调用，
+  API 面永远可用）；`worker_startup.is_enabled` 分支删除（worker 总是
+  启动，部署形态改由 `code_capacity` 表达）；实例设置契约删除该键，
+  存量 DB 文档读取时键级剥离（`workflows.max_items_per_run` 活跃保留），
+  无数据迁移。升级窗口内旧前端整文档 PUT 携带该键会 422（破坏性契约
+  变更，刷新前端即恢复）。
+- worker 镜像与 agent runtime 解耦（#381/#383，PR #384）：velites/pi 移出
+  worker 镜像——镜像收敛为纯执行服务（Python worker + bwrap + 内置的
+  `velites-sandbox` code 沙箱包装器），velites agent runtime 以平台匹配的
+  外挂二进制提供（compose bind mount 到 `/app/data/bin/velites`，long
+  syntax 缺源拒启）。新增 `AGENT_WORKER_EXPECT_RUNTIMES` 期望 runtime 守卫
+  （探测不到/被停用/模型发现失败均 fail-fast，退出码 2）；注册 payload 携带
+  生效 runtime 的 `--version`（版本握手可观测，外挂后的漂移排障依据）。
+  pi 在 docker 镜像内不可用（npm 入口依赖 node），部署走裸机。新增
+  `velites-v*` tag 触发的三平台 release workflow（linux amd64/arm64、
+  macos arm64）；host 容器的 code 本地兜底禁用（避免为兜底路径给后端
+  容器加 seccomp/cap 特权）。
+- Worker agent runtime 声明改为自动探测 + 反选停用（issue #254）：Worker
+  控制台的 runtime opt-in checkbox 退役——runtime 选择在 Studio 节点
+  （Agent 定义）上，Worker 侧按本机二进制探测（自带副本 `data/bin`
+  优先、PATH 兜底）默认全部启用，`disabled_runtimes` 反选停用；生效
+  runtimes = 探测 − 停用，每次读取现算（勾了没装 → 预检拒启动；装了
+  没勾 → 任务永远 runtime_mismatch 的配错面消失）。
+- Skill 版本绑定下放到 workflow 节点（issue #76）：节点的 `skill` +
+  `ref` 是版本绑定的权威位置，`skill_lock` 多值化（v2 `{repo, refs}`），
+  `AgentDefinition.skill` 降为节点未声明时的兜底。
+- 节点 `skill.ref` 语义显式化（issue #322）：`latest`（空 ref 已归一为它）= 跟随 skill 仓库 HEAD，每次 dispatch 现场解析、永不入锁；具体 tag = 首次 dispatch 把解析的 commit 冻结进 `skill_lock`（v2 多值 `{repo, refs}`），唯一 relock 通道为 CLI `make skills-lock`（遍历锁内已有条目重解析 pinned refs）。**行为变化**：存量 published revision 中 ref 为空的节点原先冻结在 skill source 默认 ref 的 commit 上，升级后改为跟随仓库 HEAD；需要复现的节点应在 Studio 草稿中显式 pin tag 并重新发布。
+- Agent execution 契约 runtime 化（issue #75）：Host 侧 runtime catalog
+  （`server/app/agent_runtime`）的每个 adapter 声明自己支持的 manifest
+  execution 键（provider/model/thinking）与必填性；dispatch 与 Worker claim
+  重解析统一按契约校验——配置了 runtime 不支持的键（非空值）或必填键在
+  解析链上不再有来源时 fail-fast。**行为变化**：在飞 job 跨 revision 升级
+  后若节点引入了 runtime 不支持的 execution 键（或必填键不再可解析），
+  claim 从静默下发变为可行动报错（claim 扫描跳过该候选，unclaimable
+  sweeper 将请求判失败并给出指向节点 execution 覆盖的错误信息）。
+
+### Deprecated
+- workflow_key 兼容窗口期公告（issue #211）：全部 deprecated 契约面的迁移文案统一标注移除时间 **2026-10-31**——27 个请求/响应字段、10 条 URL 别名、claim 协议字段将在终态批移除。显式发送恒等值（=workspace id）继续放行至该日期；不匹配值已由守卫拒绝（400）。所有部署实例须在窗口期内升级至 ≥ schema v68（存量 workflow_key 已对齐）。
+
+### Removed
+- 全局 skill_sources 注册表整体退役（issue #322 决策项 1）：skill 收敛为 `~/.agents/skills/<group>/<name>` 下的本地 in-place git 仓库（唯一模式），删除远程 clone 通道、repo 漂移闸门与缓存缺失 re-clone 自愈（缓存缺失改为报错并指引在 skill root 下创建）；admin `/api/admin/skill-sources*` 端点与「Skill 源管理」设置面板一并删除，`skill_lock` 的 `repo` 字段退化为仅审计。启动一次性迁移幂等删除 DB `global_settings` 里残留的 `skill_sources` 文档（保留 `skill_lock`）。
+- dev 侧 worker 配置种子 `config/agent-worker.yaml` 与模板
+  `config/agent-worker.example.yaml` 整体退役（issue #323）：worker 唯一
+  生效配置收敛为状态副本 `data/agent-worker-service/worker.yaml`（控制台/
+  API 驱动），消除「改了种子文件不生效」的双层配置漂移。`init-worktree.sh`
+  / `install-deps.sh` 的种子逻辑改为直写状态副本，`worker.service --config`
+  变为纯可选 bootstrap（仅 docker/远程 headless 部署使用，模板见
+  `deploy/worker.*.example.yaml`），`make dev-up` 的 worker 启动闸门改判
+  状态副本是否存在。
+- openclaw runtime 整体退役（issue #75）：曾短暂经 catalog adapter 接入
+  （`openclaw agent --local --json`），因其 stdout 只有一次性结果
+  envelope——无流式事件、无 token 计量——按用户决策移除；agent runtime
+  回到 pi / velites 两个。连带退役：实例设置 `openclaw` 块（存量 DB 文档
+  读取时整块剥离、写入返回 422）、`AGENT_LEGION_OPENCLAW_CWD` env、
+  `openclaw.cwd` 启动校验、Host 侧 openclaw agents 发现、Worker 侧
+  openclaw 条目与模型发现 adapter。未来需要时按 adapter 机制重新接入
+  （指南见 `docs/architecture/velites-harness.md`）。
 
 ## [0.4.0-alpha] - 2026-08-29
 
@@ -514,7 +603,9 @@ Initial open-source release.
   runnable out of the box against a real LLM.
 - Docker deployment stacks (`deploy/`) and remote worker deployment runbook.
 
-[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.4.0-alpha...HEAD
+[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/LuciusCao/agent-legion/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/LuciusCao/agent-legion/compare/v0.4.0-alpha...v0.5.0
 [0.4.0-alpha]: https://github.com/LuciusCao/agent-legion/compare/v0.3.0-alpha...v0.4.0-alpha
 [0.3.0-alpha]: https://github.com/LuciusCao/agent-legion/compare/v0.2.0...v0.3.0-alpha
 [0.2.0]: https://github.com/LuciusCao/agent-legion/compare/v0.1.0...v0.2.0

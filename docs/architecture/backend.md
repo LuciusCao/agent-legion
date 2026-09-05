@@ -751,6 +751,9 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
   - `materials` — 材料（单文件条目）元数据；`material_bundles` / `material_bundle_members` — bundle 文件夹条目的冻结引用式清单（schema v55）
   - `job_artifacts` — Job 产物清单（权威副本在实例对象存储，schema v54）
   - `workflow_revisions` — workflow 版本修订历史
+  - `studio_publish_requests` — agent 发起的 workflow 发布握手（schema v76，#416：pending → superseded/confirmed/rejected/expired 状态机，agent 经 MCP 挂起、用户在 Studio 确认）
+  - `ops_runtime_profile_samples` — 运行画像 L1 指标（schema v72，#359：ops-metrics 采样循环每分钟一行六段管线指标 + 瓶颈分类，retention 共用 `monitoring.retention_days`）
+  - `run_job_status_counts` — run 级 job 状态计数快照（schema v73，#358：触发器维护，run 详情读取从 group-by 变 PK 点查）
   - `workspace_packages` — 已创建 package 路径
 - 初始化器在 PostgreSQL advisory lock 下按版本应用 schema。数据迁移经
   `server/app/db/migration_registry.py` 的 `MIGRATIONS` 注册表按版本有序应用

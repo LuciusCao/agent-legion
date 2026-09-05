@@ -173,8 +173,11 @@ shared its concurrency group, so it could cancel an in-flight push gate for
 the same ref:
 
 - **backend-unit** — static checks (ruff, format, mypy, architecture contracts,
-  invariant registry, spec health) plus the PostgreSQL-offline unit tier
-  (`GATE_TIER=unit`), uploading its coverage data file as a 1-day artifact.
+  invariant registry, spec health, version-manifest consistency via
+  `scripts/check_versions.py` — the decoupled versioning discipline for
+  velites/frontend, see CONTRIBUTING "House rules") plus the
+  PostgreSQL-offline unit tier (`GATE_TIER=unit`), uploading its coverage
+  data file as a 1-day artifact.
 - **api-check** — the api:check OpenAPI contract step (Python + Postgres +
   node_modules) and the worker UI node:test suite. Its own lightweight job
   (issue #193): it runs on the frontend lane too, so frontend-only PRs no
