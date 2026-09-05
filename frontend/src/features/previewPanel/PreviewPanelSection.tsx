@@ -5,10 +5,10 @@
  * - 「定制预览」按钮唤起 Studio 对话（agent 写草稿）；草稿**不自动执行**
  *   （#347 P1）：agent（或提示注入产物）写入的 HTML 只有在当前用户显式点
  *   「预览此草稿」后才作为 srcDoc 挂载——右栏聊天会给出草稿元信息提示，
- *   点击预览是逐次授权：重新打开对话框回到默认态，草稿消失（发布/归档的
- *   null 过渡）授权同样失效，同一会话内的新草稿不继承旧授权（避免一次
- *   点击永久放行）。预览中的草稿实时跟随轮询更新（仅当前用户可见），发布
- *   永远是人工动作。
+ *   点击预览是逐次授权：重开对话框、草稿消失（发布/归档的 null 过渡）、
+ *   切换 job/workspace 三者都使授权失效，新草稿/新上下文不继承旧授权
+ *   （避免一次点击永久放行）。预览中的草稿实时跟随轮询更新（仅当前
+ *   用户可见），发布永远是人工动作。
  * 定制入口 admin-only（与 WorkflowStudioButton 同一惯例，P4/STUDIO-AGENT-001：
  * 治理面端点本身 admin/scoped-only，非 admin 点开只会收获一串 403）。
  */
@@ -42,7 +42,7 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
   const { jobId, workspaceId, fallback } = props
   const [customizing, setCustomizing] = useState(false)
   // #347 P1：草稿执行是逐次授权——仅在显式点击「预览此草稿」后为 true，
-  // 关闭/重开对话框重置（previewDraft 依赖 customizing，回到 false）。
+  // 失效路径（关闭对话框 / 草稿 null 过渡 / 身份参数变化）见下方 effect。
   const [previewDraft, setPreviewDraft] = useState(false)
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
   const publishedQuery = usePublishedPreviewPanel(workspaceId)
@@ -52,25 +52,31 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
   const draft = stateQuery.data?.draft ?? null
 
   // 对话开着且已显式预览且有草稿 → 左栏渲染草稿（仅自己可见）；否则渲染
-  // 已发布版本。草稿经 **null 过渡**消失（发布/归档）时授权失效：下方
-  // effect 把 previewDraft 复位——同一会话内再来的新草稿不继承旧授权
-  // （review P1）。save_draft 覆盖同一草稿（draft 持续非 null，内容更新）
-  // 不受影响，预览继续实时跟随。
+  // 已发布版本。save_draft 覆盖同一草稿（draft 持续非 null，内容更新）
+  // 不受失效路径影响，预览继续实时跟随。
   const draftPreview = customizing && isAdmin && previewDraft && draft !== null
   const bundle = draftPreview ? draft.html : published?.html
 
-  // 授权随草稿消失（null 过渡）失效：发布把草稿转为已发布版本、归档清空
-  // 全部版本，都是用户可见的人工动作；此后到达的新草稿必须重新显式预览。
-  // draft 经轮询异步送达，null 过渡只能在 effect 里观察（渲染期不可得）。
+  // 授权失效的三条路径（review P1 / 轮 2 P1）：
+  // 1. 草稿经 **null 过渡**消失（发布/归档，都是用户可见的人工动作）——
+  //    draft 经轮询异步送达，只能在 effect 里观察；
+  // 2. 对话框关闭（customizing 翻 false）：draftPreview 已因它同步回落，
+  //    这里收尾复位授权，重开对话框即默认态；
+  // 3. 身份参数变化：路由仅参数变化（jobs/:jobId）时 react-router 复用
+  //    组件实例、本地 state 存活，draft 又可能全程非 null（同 workspace
+  //    切 job 查询 key 不变 / 跨 workspace 命中 react-query 缓存）——已
+  //    授权草稿（或另一份从未授权的缓存草稿）会在新 jobId 的桥上下文里
+  //    继续执行，身份一变即复位。
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 轮询送达的 draft null 过渡使授权失效（review P1）
-    if (customizing && previewDraft && draft === null) setPreviewDraft(false)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 轮询送达的 draft null 过渡 / 对话框关闭使授权失效（review P1）
+    if (previewDraft && (draft === null || !customizing)) setPreviewDraft(false)
   }, [customizing, previewDraft, draft])
-
-  const closeCustomizing = () => {
-    setCustomizing(false)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 身份参数（jobId/workspaceId）变化使授权失效（review 轮 2 P1）
     setPreviewDraft(false)
-  }
+  }, [jobId, workspaceId])
+
+  const closeCustomizing = () => setCustomizing(false)
 
   return (
     <section className={styles.root} data-testid="preview-panel-section">
