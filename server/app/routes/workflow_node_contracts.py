@@ -36,4 +36,7 @@ class WorkflowNodeResponse(BaseModel):
     outputs: list[str]
     terminal: WorkflowTerminalResponse | None = None
     skill: WorkflowNodeSkillResponse | None = None
+    # Node-level tool whitelist (#443): agent nodes only; empty = inherit the
+    # Agent definition's tools at dispatch.
+    tools: list[str] = Field(default_factory=list)
     execution: WorkflowNodeExecutionResponse = Field(default_factory=WorkflowNodeExecutionResponse)

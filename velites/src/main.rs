@@ -48,6 +48,14 @@ async fn main() -> ExitCode {
             }
         };
     }
+    if args.get(1).map(String::as_str) == Some("validate") {
+        // `velites validate --job-dir <dir> [--skill <dir>]...`: standalone
+        // output-contract check (#443), dispatched before the agent-run CLI
+        // parse like `sandbox wrap` (that CLI requires a positional).
+        let parse_args = std::iter::once(args[0].clone()).chain(args.into_iter().skip(2));
+        let cli = velites::cli::ValidateCli::parse_from(parse_args);
+        return ExitCode::from(velites::contract_gate::validate_exit_code(cli));
+    }
     let cli = velites::cli::Cli::parse();
     match velites::run(cli).await {
         Ok(code) => ExitCode::from(code),

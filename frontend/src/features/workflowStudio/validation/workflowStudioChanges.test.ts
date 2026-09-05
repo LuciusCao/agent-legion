@@ -116,6 +116,36 @@ describe('workflowStudioChanges', () => {
     )
   })
 
+  it('collects no node keys from a pure edge reorder (#454 review P3)', () => {
+    // The backend's reordered change carries the base's first-edge endpoints
+    // as payload filler — no node actually changed, so the DAG highlight set
+    // must stay empty or two unrelated nodes get a changed badge.
+    const response = makeResponse({
+      summary: {
+        risk_level: 'info',
+        node_changes: [],
+        edge_changes: [
+          makeEdgeChange({
+            type: 'reordered',
+            source: 'base_first_edge_source',
+            target: 'base_first_edge_target',
+            before_condition: null,
+            after_condition: null,
+            risk: 'info',
+          }),
+        ],
+        intake_changes: [],
+        metadata_changes: [],
+        risk_flags: [],
+      },
+    })
+
+    const summary = buildChangeSummary(response)
+
+    expect(summary.edgeChanges).toHaveLength(1)
+    expect(summary.changedNodeKeys).toEqual(new Set())
+  })
+
   it('carries node_type into normalized node changes', () => {
     const response = makeResponse({
       summary: {
@@ -206,6 +236,29 @@ describe('workflowStudioChanges', () => {
     expect(categoryLabelForError('executor')).toBe('执行器')
     expect(categoryLabelForError('revision')).toBe('版本')
     expect(categoryLabelForError('unknown')).toBe('unknown')
+  })
+
+  it('labels config/config_schema changes in Chinese (#418)', () => {
+    // #422 起 compare 对 config/config_schema 产出字段级变更；展示层
+    // 必须给中文标签，不能在变更列表里裸字段名。
+    const change = buildChangeSummary(
+      makeResponse({
+        summary: {
+          risk_level: 'warning',
+          node_changes: [
+            makeNodeChange({
+              fields: ['config', 'config_schema'],
+              risk: 'warning',
+            }),
+          ],
+          edge_changes: [],
+          intake_changes: [],
+          metadata_changes: [],
+          risk_flags: [],
+        },
+      })
+    ).nodeChanges[0]
+    expect(formatNodeChange(change)).toBe('节点 A: 节点配置值、配置 Schema')
   })
 
   it('formats node change text', () => {

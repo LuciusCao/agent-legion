@@ -11,6 +11,7 @@ fn ctx(cwd: &std::path::Path) -> ToolContext {
         // semantics, not confinement.
         sandbox: None,
         read_roots: Vec::new(),
+        skill_dirs: Vec::new(),
     }
 }
 

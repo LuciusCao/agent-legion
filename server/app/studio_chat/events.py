@@ -16,6 +16,7 @@ from server.app.studio_chat.permissions import handle_permission_request
 from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.session_config_state import apply_config_update, session_config_fields
 from server.app.studio_chat.store import StudioChatStore
+from server.app.studio_chat.token_keepalive import keepalive_run_token
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -88,6 +89,13 @@ class AcpEventHandlers:
                         runtime.mcp_observed = True
                 self._backend.store.mark_mcp_verified(session_id)
             self._backend.store.append_message(session_id, "tool_call", "agent", update)
+            # The agent is actively using the tool channel: slide the run
+            # token forward so a long turn cannot outlive it, and surface a
+            # timeline notice when the token is already dead (#411). AFTER
+            # the tool_call append: the message is the durable record, the
+            # keepalive is best-effort health work that never raises.
+            if kind == "tool_call":
+                keepalive_run_token(self._backend, session_id)
             return
         if kind and str(kind).startswith("plan"):
             if runtime is not None:

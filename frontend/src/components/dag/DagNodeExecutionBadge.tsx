@@ -1,5 +1,5 @@
 import type { DagNodeData } from './DagNode'
-import styles from './DagNode.module.css'
+import badgeStyles from './DagNodeBadges.module.css'
 
 // Short chip label for a worker id: strip any "worker-" prefix, keep 8 chars.
 export function shortWorkerId(workerId: string): string {
@@ -14,7 +14,7 @@ export function DagNodeExecutionBadge({ data }: { data: DagNodeData }) {
   return (
     <span
       data-testid="dag-node-execution-badge"
-      className={styles.workerTag}
+      className={badgeStyles.workerTag}
       title={title}
     >
       {label}

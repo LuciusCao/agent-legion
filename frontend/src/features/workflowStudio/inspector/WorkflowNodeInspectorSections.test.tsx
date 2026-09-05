@@ -31,6 +31,15 @@ nodes:
       - ref
 `
 
+// #426 codex 终轮 P2：settle 信号基线（两份查询均 settle）——门控组合
+// 逻辑由 agentBindingStatus.test.tsx 覆盖。
+const settledSettle = {
+  catalogSettled: true,
+  catalogFailed: false,
+  definitionsSettled: true,
+  definitionsFailed: false,
+}
+
 function renderSections(
   node: WorkflowNodeRecord,
   options?: {
@@ -43,6 +52,7 @@ function renderSections(
     <WorkflowNodeInspectorSections
       details={{ node, incoming: [], outgoing: [] }}
       agentCatalog={[]}
+      agentCatalogSettle={settledSettle}
       definitionYaml={options?.definitionYaml ?? startYaml}
       setDefinitionYaml={options?.setDefinitionYaml ?? (() => {})}
       readOnly={options?.readOnly}

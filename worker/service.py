@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from worker.config_response import public_config_response
 from worker.metrics_proxy import create_metrics_proxy_router
 from worker.service_bind import embed_control_token
+from worker.service_env import strip_proxy_env
 from worker.service_models import WorkerConfigPayload
 from worker.service_tokens import create_register_token_router
 from worker.supervisor import WorkerConfigStore, WorkerSupervisor
@@ -158,6 +159,10 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
     args = parser.parse_args()
+    # 必须在任何子进程派生之前：executor 与 agent 子进程继承本进程环境，
+    # 代理 env 一旦漏进来，全部出网流量（LLM + backend 上传）会绕经本机
+    # 代理进程；确需代理出口的部署在 worker.yaml 配置 proxy 字段显式声明。
+    strip_proxy_env()
     worker_dir = Path(__file__).resolve().parent  # worker/ 包根（executor.py 与 ui/ 同级）
     store = WorkerConfigStore(
         args.state_dir.resolve(), args.config.resolve() if args.config is not None else None

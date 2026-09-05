@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { TextField } from '@mui/material'
 
 import { parseRefIds } from '../lib/addItems'
+import { ConnectionKeyField } from './settings/ConnectionKeyField'
 import styles from './AddItemsDialog.module.css'
 
 type AddItemsRefPanelProps = {
@@ -11,7 +12,10 @@ type AddItemsRefPanelProps = {
   onRefTextChange: (value: string) => void
 }
 
-/** Ref item type panel: external connection key plus one external ID per line. */
+/**
+ * Ref item type panel: external connection key plus one external ID per line.
+ * 连接 Key 的选择/唯一默认/降级逻辑见 ConnectionKeyField（#419）。
+ */
 export function AddItemsRefPanel({
   connectionKey,
   refText,
@@ -22,12 +26,9 @@ export function AddItemsRefPanel({
 
   return (
     <>
-      <TextField
-        label="连接 Key"
-        placeholder="workflow 绑定的外部服务连接 key"
-        value={connectionKey}
-        onChange={(event) => onConnectionKeyChange(event.target.value)}
-        fullWidth
+      <ConnectionKeyField
+        connectionKey={connectionKey}
+        onConnectionKeyChange={onConnectionKeyChange}
       />
       <TextField
         multiline

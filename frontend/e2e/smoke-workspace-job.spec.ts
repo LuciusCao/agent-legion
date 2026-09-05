@@ -53,10 +53,18 @@ test('创建 workspace、批量建 job 并查看 job 节点', async ({ page }, t
   await page.getByRole('button', { name: '添加', exact: true }).click()
   // 添加 opens AddItemsDialog; the legacy intake entry is retired (#154), so
   // the smoke path uses the 粘贴 ID tab with the seeded `cms-internal`
-  // external connection (ref items only require the connection to exist).
+  // external connection. The field is a Select (#419): cms-internal is the
+  // instance's sole enabled connection, so it is auto-selected — assert the
+  // default instead of filling text (a Select's combobox is not fillable).
   const addItemsDialog = page.getByRole('dialog', { name: '添加条目' })
   await addItemsDialog.getByRole('tab', { name: '粘贴 ID' }).click()
-  await addItemsDialog.getByLabel('连接 Key').fill('cms-internal')
+  // MUI Select 的载体是 div[role=combobox]（不是 <input>，fill 会报错）；
+  // toHaveValue 只认 input，改断言 combobox 文本。cms-internal 是实例唯一
+  // enabled 连接，打开即默认选中；请求未返回前的文本框形态由 expect 自动
+  // 重试覆盖（等待 combobox 出现并显示默认值）。
+  await expect(
+    addItemsDialog.getByRole('combobox', { name: /连接 Key/ })
+  ).toHaveText('cms-internal')
   await addItemsDialog.getByLabel('外部 ID').fill(externalId)
   await addItemsDialog.getByRole('button', { name: '创建运行' }).click()
   // A successful submit closes the dialog; wait for it (the modal overlay

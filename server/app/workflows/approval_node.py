@@ -45,6 +45,7 @@ _FORBIDDEN_APPROVAL_FIELDS = (
     "reduce",
     "config_schema",
     "skill",
+    "tools",
 )
 
 _ALLOWED_CONFIG_KEYS = ("rework_target", "feedback_artifact")
@@ -134,13 +135,16 @@ def strip_snapshot_placeholders(raw_node: dict[str, Any]) -> None:
             "config",
             "config_schema",
             "skill",
+            "tools",
         ):
             raw_node.pop(placeholder, None)
         return
     raw_node.pop("accepted_item_types", None)
     if node_type != APPROVAL_NODE_TYPE:
         return
-    for placeholder in ("capability", "execution", "shard", "reduce", "config_schema", "skill"):
+    # Same set as the forbidden declaration fields: strip the empty asdict
+    # placeholders so a snapshot of an approval node reloads cleanly.
+    for placeholder in _FORBIDDEN_APPROVAL_FIELDS:
         value = raw_node.get(placeholder)
         if (isinstance(value, dict) and not any(value.values())) or not value:
             raw_node.pop(placeholder, None)

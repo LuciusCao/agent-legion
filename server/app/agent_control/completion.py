@@ -21,7 +21,7 @@ from server.app.services.connection_tokens import ConnectionTokenService
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.skills.manager import SkillManager
 from server.app.storage_paths import resolve_job_dir
-from server.app.workflows.output_validation import validate_worker_outputs
+from server.app.workflows.worker_output_validation import validate_worker_outputs
 
 logger = logging.getLogger(__name__)
 
@@ -203,6 +203,9 @@ class AgentCompletionHandler:
                 run_dir=self._stored_run_dir(job_dir, outcome.run_dir),
                 session_dir="",
                 skill_version=str(manifest.get("skill_version", "")),
+                # #410 (v75): the binding identity for the studio latest-run
+                # echo — skill_version's ref prefix is not the skill key.
+                skill=str(manifest.get("skill", "")),
                 produced_artifacts=produced,
                 runner=worker_id,
                 # Shard runs (#389): the per-shard payload rides the archive

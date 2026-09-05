@@ -33,6 +33,11 @@ RUN apt-get update \
 RUN pip install --no-cache-dir "uv==${UV_VERSION}"
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
+# Host 侧契约复核引擎（#443）：worker 结果回传后 Host 用
+# velites-sandbox 的 validate 子命令跑 skill 契约段（与 worker 的 code 池
+# 沙箱同一个 bin，与 agent runtime 无关）；/usr/local/bin 在 PATH 上，
+# resolve_sandbox_binary 无需挂载即可命中。
+COPY --from=velites-sandbox-build /src/velites/target/release/velites-sandbox /usr/local/bin/velites-sandbox
 COPY . ./
 COPY --from=frontend /src/frontend/dist /app/frontend/dist
 RUN uv sync --frozen --no-dev

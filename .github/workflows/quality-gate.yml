@@ -130,7 +130,11 @@ jobs:
           # run 各撞一次）。进入 main 的合并都已被对应 PR 门覆盖
           # （release train 走本 env，hotfix PR 走严格锚点），push 重跑
           # 锚点只看 HEAD。feature→develop PR 保持 HEAD^ 完整严格性。
-          AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN: ${{ (github.base_ref == 'main' && github.head_ref == 'develop') || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) && '1' || '0' }}
+          # 条件组必须整体括号闭合：GHA 的 && 优先级高于 ||，裸写
+          # `A || B && '1' || '0'` 会让 develop→main PR 一臂短路返回
+          # 布尔 true 而非 '1'，opt-out 静默失效（#460 首撞，守卫按
+          # == "1" 判定）。
+          AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN: ${{ ((github.base_ref == 'main' && github.head_ref == 'develop') || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))) && '1' || '0' }}
 
       - name: Backend unit tests (PostgreSQL offline)
         run: |

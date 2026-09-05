@@ -8,7 +8,9 @@ from server.app.routes.workflow_draft_compare_metadata_contracts import (
 from server.app.routes.workflow_risk_level import WorkflowRiskLevel
 
 WorkflowChangeType = Literal["added", "removed", "modified"]
-WorkflowEdgeChangeType = Literal["added", "removed", "condition_changed", "label_changed"]
+# #431 adds "reordered" (same edge set, different order) — structural to the
+# publish path, invisible to the identity diff.
+WorkflowEdgeChangeType = Literal["added", "removed", "condition_changed", "reordered"]
 WorkflowIntakeChangeType = Literal["mode_changed", "field_added", "field_removed"]
 
 

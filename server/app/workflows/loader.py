@@ -194,6 +194,14 @@ def _load_nodes(
         ):
             raise WorkflowDefinitionError(f"Node {node_key} capability must be a non-empty string")
 
+        # Tool whitelist (#443): only Agent-routed nodes may declare one;
+        # code nodes run in the implicit code pool where tools are meaningless.
+        # Tool names are not validated here — runtimes differ, and velites
+        # fails loud on an unknown tool at startup.
+        tools = _string_list(raw_node.get("tools"), "tools", node_key)
+        if tools and node_type != "agent":
+            raise WorkflowDefinitionError(f"Node {node_key}.tools is only valid on an agent node")
+
         inputs = _string_list(raw_node.get("inputs"), "inputs", node_key)
         if "resources" in raw_node:
             raise WorkflowDefinitionError(
@@ -219,6 +227,7 @@ def _load_nodes(
             config=dict(raw_config),
             config_schema=load_node_config_schema(raw_node, node_key),
             skill=load_node_skill(raw_node, node_key),
+            tools=tuple(tools),
             shard=_load_shard(raw_node, node_key, inputs),
             reduce=_load_reduce(raw_node, node_key),
             node_type=node_type,
@@ -301,6 +310,16 @@ def workflow_definition_from_dict(
         # Snapshots store the dataclass field name; the yaml spelling is ``type``.
         if "node_type" in raw_node:
             raw_node["type"] = raw_node.pop("node_type")
+        # #458: ``WorkflowReduceSpec.from_node`` serializes as ``from_node``
+        # in asdict snapshots, but the yaml spelling the loader reads is
+        # ``from`` (mirrors the node_type translation above). Existing
+        # snapshots all carry ``from_node``; a ``from`` key passes through
+        # unchanged (and wins if both ever appear).
+        raw_reduce = raw_node.get("reduce")
+        if isinstance(raw_reduce, dict) and "from_node" in raw_reduce:
+            translated = dict(raw_reduce)
+            translated.setdefault("from", translated.pop("from_node"))
+            raw_node["reduce"] = translated
         # asdict snapshots carry every field on every node: strip the
         # per-type placeholders a start/approval node must not declare, and
         # the default contract copy on non-start nodes.

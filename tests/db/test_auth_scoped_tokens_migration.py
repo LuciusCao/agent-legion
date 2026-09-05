@@ -77,7 +77,8 @@ def test_v41_database_upgrades_via_init_db() -> None:
     assert row["workspace_id"] is None
     assert "idx_auth_scoped_tokens_id" in indexes
     assert migration is not None
-    assert migration["name"] == "studio_chat_agent_config"
+    # The registry tail at the CURRENT schema version (v78, #448).
+    assert migration["name"] == "claim_stage_profile"
 
     # Idempotent on replay (init_db runs at every backend startup).
     init_db(TEST_DATABASE_URL)

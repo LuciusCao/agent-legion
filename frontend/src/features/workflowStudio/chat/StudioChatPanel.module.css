@@ -49,6 +49,20 @@
   border-radius: 6px;
   font-size: 12px;
   color: #7a5d00;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* #416/#429：发布请求落地回执的关闭按钮（栏顶一轮回执，可关闭）。 */
+.scopeNoteDismiss {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: #7a5d00;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
 }
 .messages {
   flex: 1 1 auto;

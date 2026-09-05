@@ -173,6 +173,10 @@ function ConnectionRow({ connection, onEdit }: RowProps) {
     await queryClient.invalidateQueries({
       queryKey: extraQueryKeys.connections(),
     })
+    // key-only 列表（#419 的选择候选）与完整列表同源，一并失效。
+    await queryClient.invalidateQueries({
+      queryKey: extraQueryKeys.connectionKeys(),
+    })
   }
 
   async function handleToggleEnabled(enabled: boolean) {
@@ -318,6 +322,10 @@ export function ConnectionsSection() {
       await action()
       await queryClient.invalidateQueries({
         queryKey: extraQueryKeys.connections(),
+      })
+      // key-only 列表（#419 的选择候选）与完整列表同源，一并失效。
+      await queryClient.invalidateQueries({
+        queryKey: extraQueryKeys.connectionKeys(),
       })
       setEditing(null)
       setCreating(null)

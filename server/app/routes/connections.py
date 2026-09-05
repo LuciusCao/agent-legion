@@ -4,10 +4,11 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 
-from server.app.auth.dependencies import require_admin
+from server.app.auth.dependencies import require_admin, require_user
 from server.app.jobs import JobQueries
 from server.app.routes.connections_contracts import (
     ConnectionCreate,
+    ConnectionKeysResponse,
     ConnectionListResponse,
     ConnectionTestResponse,
     ConnectionTypesResponse,
@@ -33,6 +34,16 @@ def create_connections_router(job_db: JobQueries, settings: Settings) -> APIRout
         return ConnectionListResponse(
             connections=[ConnectionView(**view) for view in service.list()]
         )
+
+    @router.get("/connections/keys", response_model=ConnectionKeysResponse)
+    def list_connection_keys(
+        _user: Annotated[dict[str, Any], Depends(require_user)],
+    ) -> ConnectionKeysResponse:
+        # #419: any signed-in user may list connection KEYS (users must pick
+        # one for ref items and node configs), but never the full views —
+        # display names and masked config stay admin-only. The key-only read
+        # rides the JobQueries facade (BOUNDARY-DATA-001).
+        return ConnectionKeysResponse(keys=job_db.list_external_connection_keys())
 
     @router.get("/admin/connection-types", response_model=ConnectionTypesResponse)
     def list_connection_types(

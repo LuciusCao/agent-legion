@@ -43,23 +43,27 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v74, studio_chat_agent_config, #368) must
-# leave behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v74 adds the studio_chat_sessions agent config mirror
-# columns (DDL-only, schema-file replay): the undo drops both; the v72/v73
-# effects stay in place — they belong to the SCHEMA_VERSION-1 shape after
-# the rewind.
+# Effects the newest migration (v78, claim_stage_profile, #448) must leave
+# behind so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. v78 adds the six claim-stage gauge columns to
+# ops_runtime_profile_samples (the migration module carries the ALTERs; the
+# schema file stays at its ceiling): the undo drops the columns, nothing
+# else — no tables, indexes, or trigger shapes change at v78.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("studio_chat_sessions", "session_modes_json", "text"),
-    ("studio_chat_sessions", "config_options_json", "text"),
+    ("ops_runtime_profile_samples", "claim_scan_seconds_total", "double precision"),
+    ("ops_runtime_profile_samples", "claim_scan_seconds_max", "double precision"),
+    ("ops_runtime_profile_samples", "claim_evaluate_seconds_total", "double precision"),
+    ("ops_runtime_profile_samples", "claim_evaluate_seconds_max", "double precision"),
+    ("ops_runtime_profile_samples", "claim_writes_seconds_total", "double precision"),
+    ("ops_runtime_profile_samples", "claim_writes_seconds_max", "double precision"),
 )
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "studio_chat_agent_config"
+_NEWEST_MIGRATION_NAME = "claim_stage_profile"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v73 (no extra DDL: v74 is purely additive columns).
+# faithful v77 (the v78 round adds columns only — no DDL to recreate).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.

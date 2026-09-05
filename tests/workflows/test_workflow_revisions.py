@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace as dc_replace
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 from server.app.jobs.queries import JobQueries
 from server.app.main import create_app
 from server.app.services.node_codes import NodeCodeService
+from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.services.workflow_drafts import (
     validate_workflow_definition,
     validate_workflow_for_publish,
@@ -25,6 +27,7 @@ from server.app.workflows.definition import (
     workflow_definition_from_dict,
     workflow_definition_from_mapping,
 )
+from server.app.workflows.schema import WorkflowReduceSpec, WorkflowShardSpec
 from tests.helpers import (
     load_builtin_definition,
     replace_agent_catalog,
@@ -127,6 +130,73 @@ def test_runtime_only_save_updates_active_revision_without_new_version(
     second = service.save_workspace_revision(workspace["id"], structural)
     assert second["version"] == 2
     assert second["id"] != first["id"]
+
+
+def test_config_only_save_creates_new_revision(tmp_path: Path) -> None:
+    """Issue #418: node ``config`` / ``config_schema`` are structural — a
+    config-only save publishes a new revision (the same fact compare now
+    reports via creates_revision; the two must stay aligned)."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("runtime-ws", default_workflow_key="runtime-flow")
+    service = WorkflowRevisionService(queries)
+    original = workflow_definition_from_mapping(
+        {
+            "key": "runtime-flow",
+            "label": "Runtime Flow",
+            "nodes": {
+                "generate": {
+                    "capability": "generate",
+                    "outputs": ["result.json"],
+                }
+            },
+        }
+    )
+    first = service.publish_workspace_revision(workspace["id"], original)
+
+    # config-only change (e.g. a code node gaining sandbox_network).
+    config_only = workflow_definition_from_mapping(
+        {
+            "key": "runtime-flow",
+            "label": "Runtime Flow",
+            "nodes": {
+                "generate": {
+                    "capability": "generate",
+                    "outputs": ["result.json"],
+                    "config": {"sandbox_network": True},
+                }
+            },
+        }
+    )
+    second = service.save_workspace_revision(workspace["id"], config_only)
+    assert second["version"] == 2
+    assert second["id"] != first["id"]
+    assert json.loads(second["definition_json"])["nodes"]["generate"]["config"] == {
+        "sandbox_network": True
+    }
+
+    # config_schema-only change (declare a tunable property with a default).
+    schema_only = workflow_definition_from_mapping(
+        {
+            "key": "runtime-flow",
+            "label": "Runtime Flow",
+            "nodes": {
+                "generate": {
+                    "capability": "generate",
+                    "outputs": ["result.json"],
+                    "config": {"sandbox_network": True},
+                    "config_schema": {
+                        "type": "object",
+                        "properties": {
+                            "max_words": {"type": "integer", "default": 800},
+                        },
+                    },
+                }
+            },
+        }
+    )
+    third = service.save_workspace_revision(workspace["id"], schema_only)
+    assert third["version"] == 3
+    assert third["id"] != second["id"]
 
 
 def _agent_nodes_definition(*, review_as_local: bool) -> WorkflowDefinition:
@@ -561,6 +631,66 @@ def test_definition_to_yaml_upgrades_v1_to_schema_version_2(tmp_path: Path) -> N
     assert parsed.edges
 
 
+def _sharded_reduce_definition() -> WorkflowDefinition:
+    """Demo DAG + review_questions 分片、publish_content 聚合（合法配对）。"""
+    definition = load_builtin_definition("education_video_problems_generation")
+    return dc_replace(
+        definition,
+        nodes={
+            **definition.nodes,
+            "review_questions": dc_replace(
+                definition.nodes["review_questions"], shard=WorkflowShardSpec(count=4)
+            ),
+            "publish_content": dc_replace(
+                definition.nodes["publish_content"],
+                reduce=WorkflowReduceSpec(from_node="review_questions"),
+            ),
+        },
+    )
+
+
+def test_sharded_revision_snapshot_round_trip(tmp_path: Path) -> None:
+    """Issue #458：含 shard/reduce 基线的 definition_json 能被 loader 重读。
+
+    asdict 快照把 ``WorkflowReduceSpec.from_node`` 存成 ``from_node``，而
+    loader 只认 yaml 拼写 ``from``——修复前含 reduce 的快照过
+    ``workflow_definition_from_dict`` 必报 ``reduce.from is required``，
+    ``GET /workflow-revisions/active`` 与 compare 基线解析臂全部失效。
+    """
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
+    revision = WorkflowRevisionService(queries).publish_workspace_revision(
+        workspace["id"], _sharded_reduce_definition()
+    )
+
+    restored = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
+    assert restored.nodes["review_questions"].shard == WorkflowShardSpec(count=4)
+    assert restored.nodes["publish_content"].reduce == WorkflowReduceSpec(
+        from_node="review_questions"
+    )
+
+
+def test_definition_to_yaml_echoes_shard_and_reduce() -> None:
+    """Issue #458：回显 YAML 落 shard/reduce 键且回读等价（studio 初始草稿即此回显）。
+
+    修复前含 shard 基线的工作区一打开就有幽灵变更（compare 报 shard
+    modified）、reset 清不掉，照此发布会静默删掉分片/聚合声明。
+    """
+    definition = _sharded_reduce_definition()
+
+    yaml_text = definition_to_yaml(definition)
+
+    assert "shard:" in yaml_text
+    assert "reduce:" in yaml_text
+    parsed = workflow_definition_from_yaml_string(yaml_text)
+    assert parsed.nodes["review_questions"].shard == WorkflowShardSpec(count=4)
+    assert parsed.nodes["publish_content"].reduce == WorkflowReduceSpec(
+        from_node="review_questions"
+    )
+
+
 def test_response_payload_includes_terminal_outcome(tmp_path: Path) -> None:
     definition = load_builtin_definition("education_video_problems_generation")
 
@@ -651,8 +781,6 @@ def test_publish_revision_skips_pins_when_gate_disabled(tmp_path: Path) -> None:
 
 def test_runtime_only_update_preserves_node_code_pins(tmp_path: Path) -> None:
     """In-place (runtime settings only) revision updates keep node_code_pins."""
-    from dataclasses import replace as dc_replace
-
     from server.app.workflows.schema import WorkflowNodeExecution
 
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
@@ -729,3 +857,129 @@ def test_publish_validation_skips_approval_gates(tmp_path: Path) -> None:
     # Only the code node is reported; the gate needs neither Agents nor code.
     assert all("gated.gate" not in error for error in errors)
     assert any("gated.write" in error for error in errors)
+
+
+def _publish_with_node_schema(
+    queries: JobQueries,
+    workspace_id: str,
+    properties: dict,
+) -> WorkflowDefinition:
+    """Publish the demo DAG with intake_knowledge_points declaring a schema."""
+    definition = load_builtin_definition("education_video_problems_generation")
+    patched = dc_replace(
+        definition,
+        nodes={
+            **definition.nodes,
+            "intake_knowledge_points": dc_replace(
+                definition.nodes["intake_knowledge_points"],
+                config_schema={"type": "object", "properties": properties},
+            ),
+        },
+    )
+    WorkflowRevisionService(queries).publish_workspace_revision(workspace_id, patched)
+    return patched
+
+
+def test_publish_prunes_stale_override_keys(tmp_path: Path) -> None:
+    """#418 二轮复审 P2-1: publish must prune workspace overrides the new
+    revision no longer accepts. Without the prune, a renamed/removed schema
+    property leaves stale keys that fail every later intake at the whitelist
+    validation, and the override card's PATCH-everything save 400s."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "prune-ws", default_workflow_key="education_video_problems_generation"
+    )
+
+    _publish_with_node_schema(
+        queries,
+        workspace["id"],
+        {"old_key": {"type": "integer", "default": 1}, "kept": {"type": "string"}},
+    )
+    queries.update_workspace(
+        workspace["id"],
+        node_config={
+            "education_video_problems_generation": {
+                "intake_knowledge_points": {"old_key": 5, "kept": "v"}
+            }
+        },
+    )
+
+    # v2 renames old_key → new_key (the studio rename path).
+    v2 = _publish_with_node_schema(
+        queries,
+        workspace["id"],
+        {"new_key": {"type": "integer", "default": 2}, "kept": {"type": "string"}},
+    )
+
+    stored = queries.get_workspace(workspace["id"])["node_config"]
+    assert stored["education_video_problems_generation"]["intake_knowledge_points"] == {"kept": "v"}
+    # And the frozen intake resolution that previously raised now succeeds.
+    resolved = resolve_workflow_node_configs(v2, {}, queries.get_workspace(workspace["id"]))
+    assert resolved["intake_knowledge_points"]["new_key"] == 2
+
+
+def test_publish_prunes_type_mismatched_override_values(tmp_path: Path) -> None:
+    """A type flip (integer → string) leaves the old value behind: the intake
+    type check raises on it exactly like an unknown key, so publish prunes it
+    too (#418 二轮复审 P2-1)."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "prune-type-ws", default_workflow_key="education_video_problems_generation"
+    )
+
+    _publish_with_node_schema(queries, workspace["id"], {"count": {"type": "integer"}})
+    queries.update_workspace(
+        workspace["id"],
+        node_config={
+            "education_video_problems_generation": {"intake_knowledge_points": {"count": 42}}
+        },
+    )
+
+    v2 = _publish_with_node_schema(queries, workspace["id"], {"count": {"type": "string"}})
+
+    # The node's whole override entry is gone (same shape the settings PATCH
+    # leaves behind when a node's values empty out).
+    stored = queries.get_workspace(workspace["id"])["node_config"]
+    assert "intake_knowledge_points" not in stored["education_video_problems_generation"]
+    resolved = resolve_workflow_node_configs(v2, {}, queries.get_workspace(workspace["id"]))
+    assert "count" not in resolved["intake_knowledge_points"]
+
+
+def test_publish_keeps_valid_and_secret_overrides(tmp_path: Path) -> None:
+    """Legitimate overrides survive the prune, secret_ref markers included."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "prune-keep-ws", default_workflow_key="education_video_problems_generation"
+    )
+
+    schema = {"count": {"type": "integer"}, "token": {"type": "string", "secret": True}}
+    _publish_with_node_schema(queries, workspace["id"], schema)
+    overrides = {
+        "education_video_problems_generation": {
+            "intake_knowledge_points": {
+                "count": 7,
+                "token": {"secret_ref": "node:wf:intake_knowledge_points:token"},
+            }
+        }
+    }
+    queries.update_workspace(workspace["id"], node_config=overrides)
+
+    _publish_with_node_schema(queries, workspace["id"], schema)
+
+    stored = queries.get_workspace(workspace["id"])["node_config"]
+    assert stored["education_video_problems_generation"]["intake_knowledge_points"] == {
+        "count": 7,
+        "token": {"secret_ref": "node:wf:intake_knowledge_points:token"},
+    }
+
+
+def test_publish_without_overrides_is_a_noop_prune(tmp_path: Path) -> None:
+    """No stored overrides → publish must not write the workspace row."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "prune-empty-ws", default_workflow_key="education_video_problems_generation"
+    )
+
+    _publish_with_node_schema(queries, workspace["id"], {"count": {"type": "integer"}})
+
+    assert queries.get_workspace(workspace["id"])["node_config"] == {}

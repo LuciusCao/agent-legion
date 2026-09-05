@@ -28,6 +28,7 @@ from worker.restart_policy import (
     _STOP_GRACE_MAX,
     restart_delay,
 )
+from worker.service_env import proxy_env_overrides
 from worker.status import ENV_VAR, STATUS_FILENAME, read_runtime_status
 from worker.status.projection import host_view, process_snapshot, status_payload
 from worker.token_status import token_status
@@ -100,11 +101,18 @@ class WorkerSupervisor:
             generation = self._generation
             status_file = self.store.state_dir / STATUS_FILENAME
             self._cleanup_runtime_files()
+            # proxy 配置（#444）在派生点注入：executor 与其 agent 子进程全部
+            # 出网（backend 上传 + LLM 流量）统一走代理或统一直连；配置变更
+            # 经控制台 restart 落到新 executor，与 restarted 语义对齐。
             process = self._process = subprocess.Popen(
                 [sys.executable, str(self.worker_script), "--config", str(self.store.path)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                env={**os.environ, ENV_VAR: str(status_file)},
+                env={
+                    **os.environ,
+                    **proxy_env_overrides(config.get("proxy", "")),
+                    ENV_VAR: str(status_file),
+                },
                 text=True,
                 bufsize=1,
             )

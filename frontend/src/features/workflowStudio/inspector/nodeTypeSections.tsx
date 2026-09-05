@@ -22,7 +22,7 @@ type SectionSpec = {
 
 export const NODE_TYPE_SECTIONS: Record<SwitchableNodeType, SectionSpec> = {
   // code：基本设置 → 生效 schema（code = 声明 schema）→ 执行能力 →
-  // 节点代码 → 节点配置 → 数据契约 → 依赖。
+  // 节点代码 → 节点配置（版本值 + 运行时覆盖双通道，#418）→ 数据契约 → 依赖。
   code: {
     sections: [
       EditorSection,
@@ -34,13 +34,13 @@ export const NODE_TYPE_SECTIONS: Record<SwitchableNodeType, SectionSpec> = {
       DependencySection,
     ],
   },
-  // agent：基本设置 → 生效 schema（agent = 指引）→ 执行能力（Agent
-  // 配置 + 编辑入口）→ 节点配置 → 数据契约 → 依赖。无节点代码段
-  // （code 池专属）。
+  // agent：基本设置 → 执行能力（Agent 配置 + 内联编辑面板，#409）→
+  // 节点配置（仅运行时覆盖通道——schema 归 Agent Definition）→
+  // 数据契约 → 依赖。Agent 的有效 config_schema 归 Agent
+  // Definition 管理，不渲染节点 YAML 的 schema 编辑区（#406）。
   agent: {
     sections: [
       EditorSection,
-      ConfigSchemaSection,
       ExecutionSection,
       NodeConfigSection,
       DataContractSection,
@@ -86,8 +86,17 @@ function ConfigSchemaSection(props: InspectorSectionProps) {
     />
   )
 }
+// agent/code 的执行能力区。#426 review P2：目录查询 settle 信号经
+// InspectorSectionProps 透传给 ExecutionSection 的专属 prop（本文件的注册表
+// 组件按 name 拿 key，专属 prop 放在 spread 之后防同名覆盖）。
 function ExecutionSection(props: InspectorSectionProps) {
-  return <WorkflowNodeExecutionSection node={props.details.node} {...props} />
+  return (
+    <WorkflowNodeExecutionSection
+      {...props}
+      node={props.details.node}
+      agentCatalogSettle={props.agentCatalogSettle}
+    />
+  )
 }
 function CodeSection(props: InspectorSectionProps) {
   return (
@@ -103,6 +112,8 @@ function NodeConfigSection(props: InspectorSectionProps) {
     <WorkflowNodeConfigSection
       key={`config-${props.details.node.key}`}
       node={props.details.node}
+      definitionYaml={props.definitionYaml}
+      setDefinitionYaml={props.setDefinitionYaml}
       readOnly={props.readOnly}
     />
   )

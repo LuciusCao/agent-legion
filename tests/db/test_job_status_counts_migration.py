@@ -43,6 +43,9 @@ def _table_counts(conn, workspace_id: str) -> dict[str, int]:
 
 def test_counts_table_and_trigger_exist() -> None:
     # The autouse fixture already ran init_db at the current SCHEMA_VERSION.
+    # v77 (#437) split the row trigger into three single-event STATEMENT
+    # triggers (transition tables disallow column lists and multi-event
+    # triggers); the legacy row-level name must be gone.
     with read_connection(TEST_DATABASE_URL) as conn:
         columns = {
             row["column_name"]
@@ -55,10 +58,17 @@ def test_counts_table_and_trigger_exist() -> None:
         trigger = conn.execute(
             "select 1 from information_schema.triggers"
             " where trigger_schema=current_schema()"
+            " and trigger_name='jobs_status_counts_sync_update'"
+            " and action_orientation='STATEMENT'"
+        ).fetchone()
+        legacy = conn.execute(
+            "select 1 from information_schema.triggers"
+            " where trigger_schema=current_schema()"
             " and trigger_name='jobs_status_counts_sync'"
         ).fetchone()
     assert columns == {"workspace_id", "status", "cnt"}
     assert trigger is not None
+    assert legacy is None
 
 
 def test_trigger_tracks_insert_update_delete() -> None:

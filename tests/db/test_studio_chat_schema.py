@@ -24,13 +24,13 @@ def test_schema_v57_recorded() -> None:
     """Latest-migration record pin (moved from
     tests/db/test_job_node_status_counts_migration.py, v56)."""
     # The pin narrative now lives in tests/db/test_workspace_id_key_binding.py;
-    # v74 (studio_chat_agent_config, #368) is the current chain tail.
+    # v78 (claim_stage_profile, #448) is the current chain tail.
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "studio_chat_agent_config"
+    assert row["name"] == "claim_stage_profile"
 
 
 def test_studio_chat_tables_exist() -> None:
@@ -79,7 +79,7 @@ def test_v56_database_gains_draft_yaml_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
         assert migration is not None
-        assert migration["name"] == "studio_chat_agent_config"
+        assert migration["name"] == "claim_stage_profile"
 
 
 @pytest.mark.fresh_schema
@@ -91,6 +91,9 @@ def test_v42_database_upgrades_via_init_db() -> None:
     # same DDL as the idempotent fallback).
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
+        # v76's studio_publish_requests references studio_chat_sessions; drop
+        # it before the sessions table (the schema replay recreates all three).
+        conn.execute("drop table if exists studio_publish_requests")
         conn.execute("drop table if exists studio_chat_messages")
         conn.execute("drop table if exists studio_chat_sessions")
         conn.execute("insert into users(id, username) values ('u-legacy', 'legacy-user')")
@@ -109,7 +112,7 @@ def test_v42_database_upgrades_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
         assert migration is not None
-        assert migration["name"] == "studio_chat_agent_config"
+        assert migration["name"] == "claim_stage_profile"
 
     # Rows written through the new tables survive a replay (init_db runs at
     # every backend startup).

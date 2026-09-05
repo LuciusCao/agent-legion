@@ -33,6 +33,56 @@
 
 ## 校验
 
-`scripts/validate_output.py` 检查：文件存在、JSON 可解析、上述结构与
-取值约束全部满足。任一不满足则以非零退出码退出并在 stderr 打印原因，
-节点判失败。校验只管结构，不代 agent 判断评审内容本身是否合理。
+运行时优先按下面的机器可读契约段经 harness 内置引擎校验（存在性、
+JSON Schema）：
+
+```yaml contract
+files:
+  - path: script_review.json
+    format: json
+    schema:
+      type: object
+      required: [verdict, dimensions, issues, summary]
+      properties:
+        verdict: {enum: [pass, revise]}
+        dimensions:
+          type: object
+          required: [teaching_goal, accuracy, pacing]
+          additionalProperties: false
+          properties:
+            teaching_goal:
+              type: object
+              required: [score, comment]
+              properties:
+                score: {type: integer, minimum: 1, maximum: 10}
+                comment: {type: string, minLength: 1}
+            accuracy:
+              type: object
+              required: [score, comment]
+              properties:
+                score: {type: integer, minimum: 1, maximum: 10}
+                comment: {type: string, minLength: 1}
+            pacing:
+              type: object
+              required: [score, comment]
+              properties:
+                score: {type: integer, minimum: 1, maximum: 10}
+                comment: {type: string, minLength: 1}
+        issues:
+          type: array
+          items:
+            type: object
+            required: [section, problem, suggestion]
+            properties:
+              section: {type: string, minLength: 1}
+              problem: {type: string, minLength: 1}
+              suggestion: {type: string, minLength: 1}
+        summary: {type: string, minLength: 1}
+```
+
+`scripts/validate_output.py` 为 legacy 回落通道
+（`python validate_output.py <job_dir>`，退出码 0 为通过），检查项与
+契约段一致（空白-only 字符串的严格判定仅 legacy 脚本检查，引擎
+`minLength: 1` 只挡空串）。任一不满足则以非零退出码退出并在 stderr
+打印原因，节点判失败。校验只管结构，不代 agent 判断评审内容本身是否
+合理。

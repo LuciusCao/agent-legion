@@ -23,6 +23,12 @@
 //!   declared artifacts are checked; missing ones trigger ONE remediation
 //!   turn, and an `outputs_validation{missing: [...]}` event is always
 //!   emitted (on normal/budget endings) so the Host can decide explicitly.
+//!   #443 upgrades the check: when a `--skill` directory declares an output
+//!   contract block (`references/output-contract.md`), the contract engine
+//!   validates file contents too — `outputs_validation` then reports
+//!   `mode: "contract"` with `violations`, and violations join missing
+//!   artifacts in triggering the remediation turn and the exit-1 gate
+//!   (contract parse errors fail closed as one violation).
 //!   Artifacts still missing when a non-cancelled run ends fail the output
 //!   contract: the process exits 1, so an exit-0 run with missing declared
 //!   outputs never reaches the caller.
@@ -34,6 +40,8 @@ use anyhow::anyhow;
 
 use crate::budget::Budget;
 use crate::cancel::CancelToken;
+use crate::contract::{self, Contract, ContractError};
+use crate::contract_gate::{gate_outcome, remediation_message};
 use crate::events::{
     AgentEndEvent, AgentStartEvent, EndReason, Event, EventSink, Message, MessageEndEvent,
     MessageStartEvent, OutputsValidationEvent, Role, SessionEvent, StopReason,
@@ -72,6 +80,10 @@ pub struct AgentConfig {
     /// Canonicalized extra read-only roots for the `read` tool (`--skill`
     /// dirs + session dir, design §5). Writes never use these.
     pub read_roots: Vec<PathBuf>,
+    /// Canonicalized `--skill` directories; the output-contract engine and
+    /// the `validate` tool resolve the contract from the first one that
+    /// declares a block (#443).
+    pub skill_dirs: Vec<PathBuf>,
     /// OS-level filesystem sandbox for the `bash` tool (`None` = --no-sandbox).
     pub sandbox: Option<std::sync::Arc<crate::sandbox::Sandbox>>,
     /// Cancellation flag (SIGTERM-driven in the binary; default/disarmed in
@@ -86,8 +98,9 @@ enum WrapUp {
     /// Budget exhausted: model writes out declared artifacts, then the run
     /// ends with `reason: budget_exceeded`.
     Budget,
-    /// Declared outputs missing: model gets one remediation turn, then the
-    /// run ends normally and `outputs_validation` reports the final state.
+    /// Declared outputs missing or contract violated: model gets one
+    /// remediation turn, then the run ends normally and `outputs_validation`
+    /// reports the final state.
     Outputs,
 }
 
@@ -122,6 +135,10 @@ pub async fn run<P: Provider>(
     // An escaping --require-output path is a caller misconfiguration
     // (harness-side error, non-zero exit), never a runtime "missing" entry.
     let required_outputs = resolve_required_outputs(&config.require_output, &config.cwd)?;
+    // #443: the first --skill directory declaring an output contract block
+    // upgrades the end-of-run gate from existence to contract mode; a
+    // malformed block fails closed (recorded as a violation at emit time).
+    let contract = contract::first_contract(&config.skill_dirs);
 
     let tool_specs: Vec<ToolSpec> = config.tools.iter().map(|kind| kind.spec()).collect();
     let tool_ctx = ToolContext {
@@ -129,6 +146,7 @@ pub async fn run<P: Provider>(
         cancel: config.cancel.clone(),
         sandbox: config.sandbox.clone(),
         read_roots: config.read_roots.clone(),
+        skill_dirs: config.skill_dirs.clone(),
     };
 
     let mut messages = vec![Message::user(config.instruction.clone())];
@@ -155,7 +173,7 @@ pub async fn run<P: Provider>(
             if matches!(wrap_up, Some(WrapUp::Budget)) {
                 end_reason = Some(EndReason::BudgetExceeded);
             }
-            emit_outputs_validation(sink, &required_outputs);
+            emit_outputs_validation(sink, &required_outputs, contract.as_ref(), &config.cwd);
             break;
         }
 
@@ -295,20 +313,34 @@ pub async fn run<P: Provider>(
                     if matches!(wrap_up, Some(WrapUp::Budget)) {
                         end_reason = Some(EndReason::BudgetExceeded);
                     }
-                    emit_outputs_validation(sink, &required_outputs);
+                    emit_outputs_validation(
+                        sink,
+                        &required_outputs,
+                        contract.as_ref(),
+                        &config.cwd,
+                    );
                     break;
                 }
-                // Output self-check: missing declared artifacts get exactly
-                // one remediation turn.
-                let missing = missing_outputs(&required_outputs);
-                if !missing.is_empty() {
-                    let notice = Message::user(outputs_remediation_message(&missing));
-                    messages.push(notice.clone());
-                    append_session(&mut config.session, &notice)?;
-                    wrap_up = Some(WrapUp::Outputs);
-                    continue;
+                // Output self-check: missing declared artifacts or contract
+                // violations get exactly one remediation turn. The gate is
+                // driven by --require-output: without declared artifacts
+                // there is nothing to remediate against (the contract engine
+                // still runs for the emitted event when artifacts exist).
+                // A contract PARSE error lives in the read-only skill dir —
+                // the model can never fix it, so the remediation turn would
+                // be a wasted model call: skip straight to the failed exit.
+                if !required_outputs.is_empty() && !matches!(contract, Some(Err(_))) {
+                    let missing = missing_outputs(&required_outputs);
+                    let (_, violations) = gate_outcome(contract.as_ref(), &config.cwd);
+                    if !missing.is_empty() || !violations.is_empty() {
+                        let notice = Message::user(remediation_message(&missing, &violations));
+                        messages.push(notice.clone());
+                        append_session(&mut config.session, &notice)?;
+                        wrap_up = Some(WrapUp::Outputs);
+                        continue;
+                    }
                 }
-                emit_outputs_validation(sink, &required_outputs);
+                emit_outputs_validation(sink, &required_outputs, contract.as_ref(), &config.cwd);
                 break;
             }
         }
@@ -320,17 +352,18 @@ pub async fn run<P: Provider>(
     }));
 
     // Output contract at exit: a run that declared --require-output
-    // artifacts and ends without them FAILED, whatever the loop ending
-    // looked like (normal stop, budget exhaustion, unrecovered model
-    // error) — say so with a non-zero exit code instead of forcing the
-    // caller to parse the event stream (exit-0 "false completions").
+    // artifacts and ends with them still missing — or with contract
+    // violations outstanding — FAILED, whatever the loop ending looked like
+    // (normal stop, budget exhaustion, unrecovered model error) — say so
+    // with a non-zero exit code instead of forcing the caller to parse the
+    // event stream (exit-0 "false completions").
     // Cancellation is exempt: it is a deliberate Host action, not a
     // failed run.
-    if !required_outputs.is_empty()
-        && !matches!(end_reason, Some(EndReason::Cancelled))
-        && !missing_outputs(&required_outputs).is_empty()
-    {
-        return Ok(EXIT_MISSING_OUTPUTS);
+    if !required_outputs.is_empty() && !matches!(end_reason, Some(EndReason::Cancelled)) {
+        let (_, violations) = gate_outcome(contract.as_ref(), &config.cwd);
+        if !missing_outputs(&required_outputs).is_empty() || !violations.is_empty() {
+            return Ok(EXIT_MISSING_OUTPUTS);
+        }
     }
     Ok(0)
 }
@@ -359,22 +392,24 @@ fn missing_outputs(required: &[RequiredOutput]) -> Vec<String> {
 }
 
 /// Always emit `outputs_validation` when `--require-output` was given (even
-/// with an empty `missing` list) so the Host can decide explicitly.
-fn emit_outputs_validation(sink: &mut dyn EventSink, required: &[RequiredOutput]) {
+/// with an empty `missing` list) so the Host can decide explicitly. `mode`
+/// reports whether the contract engine ran (#443); `violations` is empty in
+/// existence mode or when every contract rule holds.
+fn emit_outputs_validation(
+    sink: &mut dyn EventSink,
+    required: &[RequiredOutput],
+    contract: Option<&Result<Contract, ContractError>>,
+    cwd: &Path,
+) {
     if required.is_empty() {
         return;
     }
+    let (mode, violations) = gate_outcome(contract, cwd);
     sink.emit(&Event::OutputsValidation(OutputsValidationEvent {
         missing: missing_outputs(required),
+        mode: mode.to_string(),
+        violations,
     }));
-}
-
-fn outputs_remediation_message(missing: &[String]) -> String {
-    format!(
-        "SYSTEM NOTICE: the following declared output artifacts are missing: {}. \
-         Write them out now, then stop.",
-        missing.join(", ")
-    )
 }
 
 fn append_session(session: &mut Option<SessionLog>, message: &Message) -> anyhow::Result<()> {
@@ -399,8 +434,8 @@ mod tests {
     // The agent loop itself (`run`) is exercised by the library integration
     // tests in tests/agent_loop.rs (ScriptedProvider + MemorySink); what
     // stays here are the private pure helpers only the same crate/file can
-    // reach: enabled_tool_names, outputs_remediation_message,
-    // resolve_required_outputs / missing_outputs.
+    // reach: enabled_tool_names, resolve_required_outputs / missing_outputs.
+    // The remediation message lives in contract.rs (with its tests).
 
     #[test]
     fn enabled_tool_names_joins_in_order() {
@@ -409,14 +444,6 @@ mod tests {
             enabled_tool_names(&[ToolKind::Read, ToolKind::Write, ToolKind::Bash]),
             "read,write,bash"
         );
-    }
-
-    #[test]
-    fn outputs_remediation_message_lists_every_missing_artifact() {
-        let message = outputs_remediation_message(&["a.txt".to_string(), "b.txt".to_string()]);
-        assert!(message.starts_with("SYSTEM NOTICE:"));
-        assert!(message.contains("a.txt, b.txt"));
-        assert!(message.ends_with("then stop."));
     }
 
     #[test]

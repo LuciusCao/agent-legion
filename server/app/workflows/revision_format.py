@@ -9,6 +9,7 @@ from typing import Any, cast
 import yaml
 
 from server.app.workflows.definition import WorkflowDefinition, workflow_definition_from_dict
+from server.app.workflows.schema import WorkflowNode
 from server.app.workflows.workflow_node_skill import apply_skill_echo
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,8 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
                 "outputs": node.outputs,
                 "execution": asdict(node.execution),
                 "skill": asdict(node.skill) if node.skill is not None else None,
+                # Omitted when undeclared (empty) so payload/yaml stay clean.
+                **({"tools": list(node.tools)} if node.tools else {}),
                 "config": node.config,
                 "terminal": (
                     {"outcome": node.terminal.outcome} if node.terminal is not None else None
@@ -89,19 +92,30 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
             {
                 "source": edge.source,
                 "target": edge.target,
-                "condition": (
-                    {
-                        "artifact": edge.condition.artifact,
-                        "path": edge.condition.path,
-                        "equals": edge.condition.equals,
-                    }
-                    if edge.condition is not None
-                    else None
-                ),
+                "condition": asdict(edge.condition) if edge.condition is not None else None,
             }
             for edge in definition.edges
         ],
     }
+
+
+def apply_shard_echo(raw_node: dict[str, Any], node: WorkflowNode) -> None:
+    """Echo the fan-out declaration; omitted when unset. Only non-default
+    keys are written (the loader re-applies max_shards 1000 and the None
+    optionals), so the echo re-parses to an equal spec (#458).
+    """
+    if node.shard is None:
+        return
+    shard: dict[str, Any] = {}
+    if node.shard.over is not None:
+        shard["over"] = node.shard.over
+    if node.shard.count is not None:
+        shard["count"] = node.shard.count
+    if node.shard.max_concurrency is not None:
+        shard["max_concurrency"] = node.shard.max_concurrency
+    if node.shard.max_shards != 1000:
+        shard["max_shards"] = node.shard.max_shards
+    raw_node["shard"] = shard
 
 
 def definition_to_yaml(definition: WorkflowDefinition) -> str:
@@ -142,6 +156,13 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
         raw_node["outputs"] = node.outputs
         if node.terminal is not None:
             raw_node["terminal"] = {"outcome": node.terminal.outcome}
+        # #458: the fan-out/fan-in declarations must echo or the studio's
+        # initial YAML (built from the active revision) shows a ghost change
+        # against its own baseline — and publishing that echo would silently
+        # drop them.
+        apply_shard_echo(raw_node, node)
+        if node.reduce is not None:
+            raw_node["reduce"] = {"from": node.reduce.from_node}
         # The loader bakes the top-level defaults into every non-start node;
         # subtract them back out key by key so the echo only carries genuine
         # node-level overrides — otherwise a later edit of the top-level
@@ -157,6 +178,8 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
             raw_node["config"] = node.config
         if node.config_schema:
             raw_node["config_schema"] = node.config_schema
+        if node.tools:
+            raw_node["tools"] = list(node.tools)
         apply_skill_echo(raw_node, node)
         payload["nodes"][key] = raw_node
     for edge in definition.edges:

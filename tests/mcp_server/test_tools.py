@@ -105,6 +105,8 @@ def test_loopback_tools_are_async() -> None:
         "get_active_workflow",
         "validate_workflow",
         "compare_workflow",
+        "request_workflow_publish",
+        "get_publish_request_status",
         "save_node_code_draft",
         "get_node_code",
         "save_agent_definition_draft",
@@ -166,6 +168,22 @@ def test_compare_workflow_posts_definition(recorded) -> None:
     assert calls[0]["method"] == "POST"
     assert calls[0]["url"].endswith("/workspaces/ws-1/workflow/compare")
     assert calls[0]["json"] == {"definition_yaml": "k: v"}
+
+
+def test_request_workflow_publish_posts_without_body(recorded) -> None:
+    # #416: the tool parks a pending request on the workspace's draft — no
+    # definition_yaml rides the call (the draft store is the source of truth).
+    server, calls = recorded
+    _run_tool(server, "request_workflow_publish", {"workspace_id": "ws-1"})
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["url"].endswith("/workspaces/ws-1/workflow/publish-request")
+
+
+def test_get_publish_request_status_gets_by_id(recorded) -> None:
+    server, calls = recorded
+    _run_tool(server, "get_publish_request_status", {"request_id": "req-9"})
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/publish-requests/req-9")
 
 
 def test_save_node_code_draft_puts_code(recorded) -> None:

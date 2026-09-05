@@ -33,7 +33,13 @@ fn main() -> ExitCode {
         args.get(1).map(String::as_str),
         Some("--version") | Some("-V") | Some("--help") | Some("-h")
     );
-    let offset = if !clap_flag && args.get(1).map(String::as_str) == Some("sandbox") {
+    let offset = if !clap_flag && args.get(1).map(String::as_str) == Some("validate") {
+        // `velites-sandbox validate --job-dir <dir> [--skill <dir>]...`:
+        // same standalone output-contract check as the main binary (#443).
+        let parse_args = std::iter::once(args[0].clone()).chain(args.into_iter().skip(2));
+        let cli = velites::cli::ValidateCli::parse_from(parse_args);
+        return ExitCode::from(velites::contract_gate::validate_exit_code(cli));
+    } else if !clap_flag && args.get(1).map(String::as_str) == Some("sandbox") {
         if args.get(2).map(String::as_str) != Some("wrap") {
             eprintln!("error: expected `velites-sandbox [sandbox wrap] --cwd <dir> -- <cmd...>`");
             return ExitCode::from(2);

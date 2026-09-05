@@ -47,6 +47,19 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
         "/api/workspaces/{workspace_id}/workflow-drafts/publish",
         {"definition_yaml": _DRAFT_YAML},
     ),
+    # Agent-initiated publish handshake (#416): confirm IS a user publish (the
+    # same gates), cancel resolves the agent's request — both are user-only
+    # decisions, never the agent's own scoped token.
+    (
+        "POST",
+        "/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/confirm",
+        None,
+    ),
+    (
+        "POST",
+        "/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/cancel",
+        None,
+    ),
     # Studio workflow draft store (schema v61): overwrites the human editor's
     # autosaved draft; the scoped tool surface has no draft-store tool.
     (
@@ -235,6 +248,13 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     (
         "PUT",
         "/api/studio-agent/tools/workspaces/{workspace_id}/preview/panel/draft",
+    ): "scoped-only tool surface",
+    # Publish-request tool (#416): parks a pending request — never publishes.
+    # The human-only confirm/cancel endpoints sit on the guarded surface
+    # (_EFFECTING_WRITE_ROUTES above).
+    (
+        "POST",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/workflow/publish-request",
     ): "scoped-only tool surface",
     # Skill read/validate/save-version tools (issue #217): draft-only — the
     # save endpoint commits+tags a local skill repo but never touches the

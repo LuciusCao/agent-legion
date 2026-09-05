@@ -1,56 +1,62 @@
 import type { ConfigSchemaProperty } from '../../../types'
+import { patchWorkflowNodeSchemaProperty } from '../shared/workflowStudioYamlDraft.configSchema.properties'
+import type { SchemaPropertyPatch } from '../shared/workflowStudioYamlDraft.configSchema.properties'
 import styles from './WorkflowStructuredEditor.module.css'
+import { WorkflowNodeSchemaPropertyRow } from './WorkflowNodeSchemaPropertyRow'
 
 type Props = {
   properties: Record<string, ConfigSchemaProperty>
   propKeys: string[]
   readOnly?: boolean
-  onRuntimeMutableChange: (propKey: string, checked: boolean) => void
+  onRename: (propKey: string, nextName: string) => void
+  onRemove: (propKey: string) => void
+  definitionYaml: string
+  nodeKey: string
+  setDefinitionYaml: (value: string) => void
 }
 
-function formatDefault(prop: ConfigSchemaProperty): string {
-  if (prop.default === undefined) return '—'
-  return String(prop.default)
-}
-
-// 节点 config_schema 的属性列表：只读展示 type/默认值，唯一可编辑项是
-// 「运行开关」（runtime_mutable）勾选。从 WorkflowNodeConfigSchemaSection
-// 拆出以控制单文件体积。
+// 节点 config_schema 的属性列表（#418 后半）：每属性一行完整可编辑
+// （行编辑器在 WorkflowNodeSchemaPropertyRow）。patch 直写草稿，失败
+// 静默回弹。从 WorkflowNodeConfigSchemaSection 拆出以守单文件预算。
 export function WorkflowNodeConfigSchemaProperties({
   properties,
   propKeys,
   readOnly,
-  onRuntimeMutableChange,
+  onRename,
+  onRemove,
+  definitionYaml,
+  nodeKey,
+  setDefinitionYaml,
 }: Props) {
+  const patch = (propKey: string, changes: SchemaPropertyPatch) => {
+    try {
+      setDefinitionYaml(
+        patchWorkflowNodeSchemaProperty(
+          definitionYaml,
+          nodeKey,
+          propKey,
+          changes
+        )
+      )
+    } catch {
+      // 非法输入不落草稿；受控输入回弹。
+    }
+  }
+
   return (
     <div className={styles.fieldStack}>
-      {propKeys.map((propKey) => {
-        const prop = properties[propKey]
-        return (
-          <div key={propKey} className={styles.fieldGroup}>
-            <span className={styles.fieldLabel}>
-              {propKey}（{prop.type}，默认 {formatDefault(prop)}）
-            </span>
-            {readOnly ? (
-              prop.runtime_mutable ? (
-                <span className={styles.fieldHint}>运行开关</span>
-              ) : null
-            ) : (
-              <label>
-                <input
-                  type="checkbox"
-                  aria-label={`运行开关 ${propKey}`}
-                  checked={prop.runtime_mutable === true}
-                  onChange={(event) =>
-                    onRuntimeMutableChange(propKey, event.target.checked)
-                  }
-                />{' '}
-                运行开关
-              </label>
-            )}
-          </div>
-        )
-      })}
+      {propKeys.map((propKey) => (
+        <WorkflowNodeSchemaPropertyRow
+          key={propKey}
+          propKey={propKey}
+          prop={properties[propKey]}
+          otherKeys={propKeys.filter((key) => key !== propKey)}
+          readOnly={readOnly}
+          onPatch={patch}
+          onRename={onRename}
+          onRemove={onRemove}
+        />
+      ))}
     </div>
   )
 }

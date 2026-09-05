@@ -81,6 +81,15 @@ const editorProps = {
   agentCatalog,
 }
 
+// #426 codex 终轮 P2：settle 信号的工厂——两份查询均 settle 的基线，各
+// 门控用例按场景覆盖（catalog 在途/失败、definitions 在途/失败）。
+const settledSettle = {
+  catalogSettled: true,
+  catalogFailed: false,
+  definitionsSettled: true,
+  definitionsFailed: false,
+}
+
 // 组件经 useStudioNav 读 openAgent 的目标草稿身份：默认无 pending。
 const navStub: StudioNav = {
   openAgent: () => {},
@@ -89,7 +98,16 @@ const navStub: StudioNav = {
 }
 
 function renderSection(
-  props: React.ComponentProps<typeof WorkflowNodeExecutionSection>,
+  props: Omit<
+    React.ComponentProps<typeof WorkflowNodeExecutionSection>,
+    'agentCatalogSettle'
+  > &
+    Partial<
+      Pick<
+        React.ComponentProps<typeof WorkflowNodeExecutionSection>,
+        'agentCatalogSettle'
+      >
+    >,
   nav: StudioNav = navStub
 ) {
   return render(
@@ -99,7 +117,13 @@ function renderSection(
           path="/workspaces/:workspaceId/studio"
           element={
             <StudioNavContext.Provider value={nav}>
-              <WorkflowNodeExecutionSection {...props} />
+              {/* #426 review P2：默认两份查询均 settle（本套件聚焦 section
+                  分发，加载/错误占位的组合逻辑由 agentBindingStatus.test.ts
+                  与 WorkflowNodeAgentEditor.test.tsx 覆盖）。 */}
+              <WorkflowNodeExecutionSection
+                agentCatalogSettle={settledSettle}
+                {...props}
+              />
             </StudioNavContext.Provider>
           }
         />
@@ -114,16 +138,14 @@ describe('WorkflowNodeExecutionSection', () => {
     vi.mocked(fetchAgentDefinitions).mockResolvedValue({ agents: [] })
   })
 
-  it('shows the executor binding for the selected node capability', () => {
+  // #409：编辑态下汇总卡（Agent id/runtime/tools/skill 版本行）与开合
+  // 按钮一并移除——信息在内联展开的编辑面板里。
+  it('shows the inline editor without the duplicate summary card for the selected node capability', () => {
     renderSection({ node, ...editorProps })
 
-    expect(screen.getByText('question-key-info-v1')).toBeInTheDocument()
-    expect(screen.getByText('pi')).toBeInTheDocument()
-    expect(
-      screen.getByText('demo_workflow/generate_key_info')
-    ).toBeInTheDocument()
-    expect(screen.getByText('read, write, bash')).toBeInTheDocument()
-    expect(screen.getByText('v1.3.8 · 5c5eae7')).toBeInTheDocument()
+    expect(screen.queryByText('question-key-info-v1')).not.toBeInTheDocument()
+    expect(screen.queryByText('v1.3.8 · 5c5eae7')).not.toBeInTheDocument()
+    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: '查看 Prompt' })
     ).toBeInTheDocument()
@@ -187,6 +209,7 @@ describe('WorkflowNodeExecutionSection', () => {
             element={
               <StudioNavContext.Provider value={navStub}>
                 <WorkflowNodeExecutionSection
+                  agentCatalogSettle={settledSettle}
                   node={nodeWithProvider}
                   agentCatalog={agentCatalog}
                   definitionYaml={nextYaml}
@@ -244,32 +267,26 @@ describe('WorkflowNodeExecutionSection', () => {
     })
 
     expect(screen.getByText('内置 code 池执行')).toBeInTheDocument()
-    // code 节点不再长出 Agent 入口（类型变更走头部类型选择器）。
+    // code 节点不再长出 Agent 编辑区（类型变更走头部类型选择器）。
     expect(
       screen.queryByRole('button', { name: '切换为 Agent 执行' })
     ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: '为此 capability 新建 Agent' })
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: '编辑 Agent' })
-    ).not.toBeInTheDocument()
+    expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
   })
 
-  it('points an agent node without a published Agent to the create entry', () => {
+  // #409：未绑定 Agent 的空态提示保留，创建入口即内联编辑面板（新建表单）。
+  it('points an agent node without a published Agent to the inline create form', () => {
     renderSection({
       node: { ...node, node_type: 'agent', capability: 'missing' },
       ...editorProps,
     })
 
     expect(screen.getByText(/暂无 published Agent/)).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: '为此 capability 新建 Agent' })
-    ).toBeInTheDocument()
+    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
   })
 
   // #387：MCP 建的 draft-only Agent 不在 published 目录里，但节点详情要能
-  // 解析到它（编辑/发布入口可达），并明确提示「未发布」。
+  // 解析到它（内联编辑/发布可达），并明确提示「未发布」。
   it('resolves a draft-only agent from agent-definitions and flags it unpublished', async () => {
     vi.mocked(fetchAgentDefinitions).mockResolvedValue({
       agents: [
@@ -287,11 +304,10 @@ describe('WorkflowNodeExecutionSection', () => {
     })
     renderSection({ node, ...editorProps, agentCatalog: [] })
 
-    expect(await screen.findByText('draft-agent')).toBeInTheDocument()
-    expect(screen.getByText(/草稿 Agent 未发布/)).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: '编辑 Agent' })
-    ).toBeInTheDocument()
+    // 无 published 版本：isDraft 提示 + 草稿 Agent 的内联编辑面板
+    // （草稿经 react-query 异步解析，等待 resolve）。
+    expect(await screen.findByText(/草稿 Agent 未发布/)).toBeInTheDocument()
+    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
   })
 
   it('prefers the published catalog agent over a same-capability draft', async () => {
@@ -311,11 +327,11 @@ describe('WorkflowNodeExecutionSection', () => {
     })
     renderSection({ node, ...editorProps })
 
-    // published 版本渲染后草稿提示不出现。
+    // published 版本解析后草稿提示不出现（汇总卡已随 #409 移除，无 id 文本）。
     await waitFor(() =>
-      expect(screen.getByText('question-key-info-v1')).toBeInTheDocument()
+      expect(screen.queryByText(/草稿 Agent 未发布/)).not.toBeInTheDocument()
     )
-    expect(screen.queryByText(/草稿 Agent 未发布/)).not.toBeInTheDocument()
+    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
   })
 
   // codex P1 on #391：同 capability 允许存在多个未发布草稿（服务端只在
@@ -355,9 +371,10 @@ describe('WorkflowNodeExecutionSection', () => {
       }
     )
 
-    // 命中点击的草稿（而非列表第一个），解析后清除 pending。
-    expect(await screen.findByText('clicked-draft')).toBeInTheDocument()
-    expect(screen.queryByText('first-draft')).not.toBeInTheDocument()
+    // 命中点击的草稿（而非列表第一个，汇总卡文本已随 #409 移除，经
+    // isDraft 提示断言解析成功），解析后清除 pending。
+    expect(await screen.findByText(/草稿 Agent 未发布/)).toBeInTheDocument()
+    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
     await waitFor(() => expect(clearPending).toHaveBeenCalled())
   })
 
@@ -411,17 +428,16 @@ describe('WorkflowNodeExecutionSection', () => {
     })
 
     // settle 后命中点击的草稿并清除 pending。
-    expect(await screen.findByText('clicked-draft')).toBeInTheDocument()
-    expect(screen.queryByText('first-draft')).not.toBeInTheDocument()
+    expect(await screen.findByText(/草稿 Agent 未发布/)).toBeInTheDocument()
+    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
     await waitFor(() => expect(clearPending).toHaveBeenCalled())
   })
 
   it('renders the node skill editor for agent-routed nodes only', () => {
     const { unmount } = renderSection({ node, ...editorProps })
 
-    // Agent 路由节点：skill 编辑行（key 选择 + ref 输入）。
+    // Agent 路由节点：skill 编辑区（目录 + 版本两控件合一，#410）。
     expect(screen.getByTestId('skill-selector-stub')).toBeInTheDocument()
-    expect(screen.getByLabelText('Skill ref')).toBeInTheDocument()
     unmount()
 
     renderSection({
@@ -429,7 +445,6 @@ describe('WorkflowNodeExecutionSection', () => {
       ...editorProps,
     })
     expect(screen.queryByTestId('skill-selector-stub')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Skill ref')).not.toBeInTheDocument()
   })
 
   it('omits the skill row and version line when the definition has no skill', () => {
@@ -443,7 +458,7 @@ describe('WorkflowNodeExecutionSection', () => {
     ]
     renderSection({ node, ...editorProps, agentCatalog: skillless })
 
-    expect(screen.getByText('question-key-info-v1')).toBeInTheDocument()
+    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
     expect(screen.queryByText('Skill')).not.toBeInTheDocument()
     expect(screen.queryByText(/5c5eae7/)).not.toBeInTheDocument()
   })
@@ -459,24 +474,116 @@ describe('WorkflowNodeExecutionSection', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('toggles the embedded agent editor for the bound agent', () => {
+  // #409：开合按钮移除——绑定 Agent 的编辑面板随区块内联展开渲染。
+  it('renders the embedded agent editor inline for the bound agent', () => {
     renderSection({ node, ...editorProps })
 
-    expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '编辑 Agent' }))
     expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '收起 Agent 编辑' }))
-    expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
-  })
-
-  it('hides the agent edit and create entries in read-only mode', () => {
-    renderSection({ node, ...editorProps, readOnly: true })
-
     expect(
       screen.queryByRole('button', { name: '编辑 Agent' })
     ).not.toBeInTheDocument()
     expect(
-      screen.queryByRole('button', { name: '为此 capability 新建 Agent' })
+      screen.queryByRole('button', { name: '收起 Agent 编辑' })
     ).not.toBeInTheDocument()
+  })
+
+  // #409：只读（历史版本查看）下编辑面板隐藏，只读汇总卡保留。
+  it('hides the agent editor but keeps the read-only summary card in read-only mode', () => {
+    renderSection({ node, ...editorProps, readOnly: true })
+
+    expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
+    expect(screen.getByText('question-key-info-v1')).toBeInTheDocument()
+    expect(screen.getByText('pi')).toBeInTheDocument()
+    expect(screen.getByText('read, write, bash')).toBeInTheDocument()
+    expect(screen.getByText('v1.3.8 · 5c5eae7')).toBeInTheDocument()
+  })
+
+  // —— #426 codex 终轮 P2：门控组合（capability 命中 × 两份查询 settle）——
+
+  // 场景 1：catalog 空/未命中 + definitions 在途 → 占位——agentId=null 只是
+  // 「未知」（draft 可能仍在途），不能放出可操作的新建表单（codex 指出的
+  // 空列表竞态：先建表单后切真实 draft 会重挂丢输入、甚至先建出多余草稿）。
+  it('keeps the placeholder when the catalog settles empty while definitions are loading', () => {
+    renderSection({
+      node: { ...node, capability: 'missing' },
+      ...editorProps,
+      agentCatalog: [],
+      agentCatalogSettle: { ...settledSettle, definitionsSettled: false },
+    })
+
+    expect(screen.getByText('Agent 绑定解析中...')).toBeInTheDocument()
+    expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Agent ID')).not.toBeInTheDocument()
+  })
+
+  // 场景 2：catalog 空 + definitions settle（无 draft）→ ready，新建表单。
+  it('renders the create form once both queries settle with no binding', () => {
+    renderSection({
+      node: { ...node, capability: 'missing' },
+      ...editorProps,
+      agentCatalog: [],
+      agentCatalogSettle: settledSettle,
+    })
+
+    expect(screen.queryByText('Agent 绑定解析中...')).not.toBeInTheDocument()
+    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
+  })
+
+  // 场景 3：catalog 空 + definitions settle（有 draft）→ ready，编辑该 draft。
+  // definitions 经 react-query 真实解析（本套件未 mock hook 本体）。
+  it('renders the draft editor once both queries settle with a draft fallback', async () => {
+    vi.mocked(fetchAgentDefinitions).mockResolvedValue({
+      agents: [
+        {
+          agent_id: 'draft-agent',
+          capability: 'generate_key_info',
+          runtime: 'pi',
+          skill: '',
+          version: 1,
+          status: 'draft',
+          has_draft: true,
+          published_at: null,
+        },
+      ],
+    })
+    renderSection({
+      node,
+      ...editorProps,
+      agentCatalog: [],
+      agentCatalogSettle: settledSettle,
+    })
+
+    expect(await screen.findByTestId('agent-editor-stub')).toBeInTheDocument()
+    expect(screen.queryByText('Agent 绑定解析中...')).not.toBeInTheDocument()
+  })
+
+  // 场景 4：catalog 命中 published → 不等 definitions 直接放行（编辑器按 ID
+  // 加载详情不依赖列表；definitions 在途只影响 loadError 横幅）。
+  it('renders the editor on a published hit without waiting for definitions', () => {
+    renderSection({
+      node,
+      ...editorProps,
+      agentCatalogSettle: { ...settledSettle, definitionsSettled: false },
+    })
+
+    expect(screen.queryByText('Agent 绑定解析中...')).not.toBeInTheDocument()
+    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
+  })
+
+  // 未命中 published + definitions 失败无数据 → 错误占位（不落回可操作表单）。
+  it('shows the error placeholder when an unhit capability loses the definitions query', () => {
+    renderSection({
+      node: { ...node, capability: 'missing' },
+      ...editorProps,
+      agentCatalog: [],
+      agentCatalogSettle: {
+        ...settledSettle,
+        definitionsSettled: true,
+        definitionsFailed: true,
+      },
+    })
+
+    expect(screen.getByText('Agent 目录加载失败')).toBeInTheDocument()
+    expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
   })
 })

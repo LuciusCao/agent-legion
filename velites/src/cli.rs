@@ -35,7 +35,9 @@ pub struct Cli {
     #[arg(long)]
     pub skill: Vec<PathBuf>,
 
-    /// Enabled tools: comma-separated subset of read,write,bash.
+    /// Enabled tools: comma-separated subset of read,write,bash,uuid,validate.
+    /// The default stays the core triple; `uuid` (#442) and `validate` (#443)
+    /// are opt-in via the workflow's tool selection.
     #[arg(long, value_delimiter = ',', default_value = "read,write,bash")]
     pub tools: Vec<String>,
 
@@ -160,6 +162,25 @@ pub struct SandboxWrapCli {
     /// Command to run inside the sandbox (everything after `--`).
     #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
     pub command: Vec<String>,
+}
+
+/// `velites validate` / `velites-sandbox validate` (issue #443): run the
+/// output-contract engine standalone. Exit 0 prints `mode=contract` (all
+/// rules hold) or `mode=existence` (no contract block declared — the Host
+/// falls back to its legacy check); exit 1 lists violations on stderr;
+/// exit 2 is a parse/argument/I/O error. Kept separate from [`Cli`] like
+/// [`SandboxWrapCli`]; both binaries dispatch on the leading `validate`
+/// token before clap sees the agent-run CLI.
+#[derive(Debug, Parser)]
+#[command(name = "velites-validate", version, about = "Validate job outputs")]
+pub struct ValidateCli {
+    /// Job directory to check (contract paths resolve relative to it).
+    #[arg(long)]
+    pub job_dir: PathBuf,
+    /// Skill directory to read references/output-contract.md from;
+    /// repeatable, the first directory declaring a contract block wins.
+    #[arg(long = "skill")]
+    pub skill: Vec<PathBuf>,
 }
 
 #[cfg(test)]

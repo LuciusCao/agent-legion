@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 ## [Unreleased]
 
 ### Changed
+- Workflow Studio 按节点类型收口「配置 Schema」归属（#406）：
+  `type: agent` 节点不再渲染节点 YAML 的 `config_schema` 区块，
+  Agent schema 统一归「Agent 配置」内的 Agent Definition 编辑入口；
+  `type: code` 节点的 schema 编辑与 `runtime_mutable` 行为保持不变。
 - host 纯控制面模式：workflow 执行与宿主进程解耦（#389，收编 #385/#386）。
   `code_capacity` 合法化 0 值（契约 `gt=0→ge=0`，UI「代码池」组改述为
   「本地执行」——本地兜底执行并发上限，0 = 纯远程模式）：宿主容量为 0 时
@@ -104,6 +108,44 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   `openclaw.cwd` 启动校验、Host 侧 openclaw agents 发现、Worker 侧
   openclaw 条目与模型发现 adapter。未来需要时按 adapter 机制重新接入
   （指南见 `docs/architecture/velites-harness.md`）。
+
+### Fixed
+
+- 高并发档位 job 状态计数触发器热点行死锁（issue #437）：高并发、
+  单 run 大规模 items 下 claim 间歇 500（psycopg DeadlockDetected，落点
+  claim 事务内 jobs promote UPDATE），并发呈锯齿式波动。根因
+  是 v73/v36 的 run/workspace 级行级计数触发器把同一 run 全部状态迁移
+  汇聚到寥寥几行 (run_id, status) 计数行——先扣旧 status 行再加新
+  status 行的两步锁足迹，与 claim 的 queued→running、收尾的
+  running→completed 以不同顺序触碰交叠成锁环。三层修复：① 根治
+  （schema v77）：两组计数触发器改为 statement-level + transition
+  tables——单语句内按 (key, status) 聚合净增量、按固定字典序一次性
+  apply，所有并发写方锁序全局一致，锁环不再成立。收益在固定锁序与
+  死锁消除，不在触发次数：psycopg executemany 服务端仍是 N 条独立
+  INSERT（每条触发一次 statement 触发器、transition table 1 行），
+  与旧行级触发器逐行加计数同量级；多行单语句（INSERT...SELECT）才
+  会一次聚合，当前代码库无该形状；
+  ② 缓解：claim 端点对 SQLSTATE 40P01 立即整体重试一次（干净连接
+  重进事务，再失败放行 500）；③ 缓解：Worker claim 退避改「首次 1s
+  固定 → 之后指数翻倍 ±20% jitter，上限 60s 不变」——瞬时抖动不再
+  烧掉完整 poll 周期，fleet 恢复不再同步对齐（锯齿根因之一）。
+- Studio 对话 run token 连锁失效与静默死亡（issue #411）：单轮 prompt 可
+  跑满 1 小时，而 run token 续期只在轮首（30 分钟阈值）——长对话的 token
+  会在 turn 进行中过期，agent 的全部 MCP 工具调用 401（"Studio agent
+  scoped token required" → 客户端 "Not connected"），且界面无任何提示。
+  修复三处：① 每次 `tool_call` 事件触发保活（`studio_chat/token_keepalive.py`）——
+  token 活着则以「整轮时长 + 5 分钟」的专用阈值顺带续期（检查过存活的
+  token 必然活过当前轮，防泄漏语义不变：已吊销/已过期不复活），token 已死
+  （吊销/过期/用户被禁用）则向会话时间线追加一条 `run_token_invalidated`
+  状态消息，前端以警示样式提示「关闭当前会话后点『继续对话』恢复」；
+  ② `list_studio_chat_messages` 的 500 条上限从「取最早 500 条」改为
+  「取最新 500 条」（`order by seq desc` + 反转，返回值仍为升序）——
+  超长会话重进界面不再只看到远古记录而丢失进行中的对话（即 issue 报告的
+  「聊天记录消失」）；③ 保活与提示的 DB 操作全部带异常保护，失败不阻断
+  tool_call 消息落库且下次 tool_call 自动重试；续期 UPDATE 的 rowcount
+  闭合「查活→续期」间隙内 token 被吊销/过期的竞态（未命中即重验存活，
+  最后一次工具调用也不会漏报失效）。已知取舍：掉线超过 500 条的增量补齐
+  会在新旧窗口间留缝隙（API 无 before_seq），重新进入会话即全量替换自愈。
 
 ## [0.4.0-alpha] - 2026-08-29
 

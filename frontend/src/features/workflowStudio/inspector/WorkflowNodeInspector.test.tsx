@@ -38,6 +38,15 @@ const draftYaml = [
   '',
 ].join('\n')
 
+// #426 codex 终轮 P2：settle 信号基线（两份查询均 settle）——本套件聚焦
+// ghost 节点解析，门控组合逻辑由 agentBindingStatus.test.tsx 覆盖。
+const settledSettle = {
+  catalogSettled: true,
+  catalogFailed: false,
+  definitionsSettled: true,
+  definitionsFailed: false,
+}
+
 function renderInspector(
   selectedNodeKey: string | null,
   options?: {
@@ -49,6 +58,7 @@ function renderInspector(
     <WorkflowNodeInspector
       workflow={null}
       agentCatalog={[]}
+      agentCatalogSettle={settledSettle}
       selectedNodeKey={selectedNodeKey}
       definitionYaml={options?.definitionYaml ?? draftYaml}
       setDefinitionYaml={() => {}}
@@ -129,6 +139,7 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
       <WorkflowNodeInspector
         workflow={null}
         agentCatalog={[]}
+        agentCatalogSettle={settledSettle}
         selectedNodeKey="intake"
         definitionYaml={yamlWithAgentFields}
         setDefinitionYaml={setDefinitionYaml}
@@ -167,6 +178,7 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
       <WorkflowNodeInspector
         workflow={null}
         agentCatalog={[]}
+        agentCatalogSettle={settledSettle}
         selectedNodeKey="intake"
         definitionYaml={draftYaml}
         setDefinitionYaml={setDefinitionYaml}
@@ -191,6 +203,7 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
       <WorkflowNodeInspector
         workflow={null}
         agentCatalog={[]}
+        agentCatalogSettle={settledSettle}
         selectedNodeKey="intake"
         definitionYaml={draftYaml}
         setDefinitionYaml={setDefinitionYaml}
@@ -213,16 +226,45 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     )
   })
 
-  it('renders no agent entry on a code node (#392 regression)', async () => {
+  it('renders no agent editor on a code node (#392 regression)', async () => {
     renderInspector('intake')
 
     await screen.findByLabelText('节点执行能力')
-    // code 节点不再长出 Agent 编辑/新建入口（类型变更走头部选择器）。
+    // code 节点不再长出 Agent 编辑区（类型变更走头部选择器；#409 起该
+    // 编辑区在 agent 节点内内联展开，无开合按钮）。
     expect(
       screen.queryByRole('button', { name: '为此 capability 新建 Agent' })
     ).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: '编辑 Agent' })
+    ).not.toBeInTheDocument()
+  })
+
+  it('keeps Agent schema ownership inside Agent config (#406)', async () => {
+    const agentYaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  intake:',
+      '    type: agent',
+      '    label: 读取知识点',
+      '    capability: intake',
+      '    after: [_start]',
+      '    config_schema:',
+      '      properties:',
+      '        ignored_node_schema:',
+      '          type: boolean',
+      '',
+    ].join('\n')
+
+    renderInspector('intake', { definitionYaml: agentYaml })
+
+    expect(await screen.findByLabelText('节点执行能力')).toHaveTextContent(
+      'Agent 配置'
+    )
+    expect(
+      screen.queryByLabelText('配置 Schema intake')
     ).not.toBeInTheDocument()
   })
 

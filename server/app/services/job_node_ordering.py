@@ -5,7 +5,10 @@ from server.app.workflows.start_node import START_NODE_TYPE
 def effective_after(definition: WorkflowDefinition, node_key: str) -> list[str]:
     # Start nodes are a definition-level concept and never enter job_nodes;
     # hide their derived `_start -> root` edges from the job view so the
-    # frontend does not render phantom nodes for them.
+    # frontend does not render phantom nodes for them. The workspace DAG view
+    # no longer shares this helper: it derives predecessors straight from
+    # definition.edges, because the fallback below would resurrect deleted
+    # edges from the stale schema-v2 ``after`` echo (#424).
     edge_sources = [
         edge.source
         for edge in definition.edges
@@ -13,6 +16,10 @@ def effective_after(definition: WorkflowDefinition, node_key: str) -> list[str]:
     ]
     if edge_sources:
         return edge_sources
+    # v1 legacy fallback（保留，job 视图历史行为）：经 loader 解析的 v1
+    # definition 在 _load_edges 里已把 after 回填进 definition.edges，故本臂
+    # 并非 v1 遗留数据的唯一边来源，仅作防御兼容——schema v2 下 after 只是
+    # 旧 echo，workspace DAG 不得回退（见上），job 视图维持原行为。
     if node_key in definition.nodes:
         return definition.nodes[node_key].after
     return []

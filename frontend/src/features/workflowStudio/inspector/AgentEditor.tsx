@@ -12,7 +12,9 @@ import { useUiStore } from '../../../stores/uiStore'
 import { AgentVersionsDialog } from './AgentVersionsDialog'
 import styles from './AgentsPanel.module.css'
 
-const runtimes: AgentRuntime[] = ['pi', 'velites']
+// #408：velites（自研 harness，流式事件 + token 计量）是默认且优先级
+// 更高的 runtime，排在选项首位；pi 是外部 runtime，仅作备选。
+const runtimes: AgentRuntime[] = ['velites', 'pi']
 const toolOptions = ['read', 'write', 'bash']
 
 type Props = {
@@ -31,9 +33,15 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+// api() 给非 2xx 错误挂 status（409 = capability 被占用）。
+const isConflictError = (err: unknown) =>
+  (err as { status?: number } | null)?.status === 409
+
 /**
  * Agent 定义编辑器。发布后的 definition 不可变：编辑已发布 Agent 就是
- * 保存一份新草稿再发布。
+ * 保存一份新草稿再发布。#407：创建表单不再收集 agent_id——服务端按
+ * capability 生成实体键（一个 capability 一个主草稿，占用时返回 409
+ * 引导直接编辑）；编辑态 agent_id 只读展示。
  */
 export function AgentEditor({
   workspaceId,
@@ -44,9 +52,8 @@ export function AgentEditor({
   onArchived,
 }: Props) {
   const creating = agentId === null
-  const [agentIdInput, setAgentIdInput] = useState('')
   const [capability, setCapability] = useState(initialCapability ?? '')
-  const [runtime, setRuntime] = useState<AgentRuntime>('pi')
+  const [runtime, setRuntime] = useState<AgentRuntime>('velites')
   // #76：skill 不是表单字段（绑定在节点级）；这里只缓存已加载定义的现值，
   // 保存草稿时原样保留（legacy 兜底），新建 Agent 才传空。
   const [skill, setSkill] = useState('')
@@ -71,7 +78,7 @@ export function AgentEditor({
         setHasDraft(draft !== null)
         const definition = (source?.definition ?? {}) as Record<string, unknown>
         setCapability(String(definition.capability ?? ''))
-        setRuntime((definition.runtime as AgentRuntime) ?? 'pi')
+        setRuntime((definition.runtime as AgentRuntime) ?? 'velites')
         setSkill(String(definition.skill ?? ''))
         setTools(
           Array.isArray(definition.tools) ? definition.tools.map(String) : []
@@ -145,11 +152,9 @@ export function AgentEditor({
     setBusy(true)
     try {
       if (creating) {
-        const newAgentId = agentIdInput.trim()
-        const created = await createAgentDefinition(workspaceId, {
-          agent_id: newAgentId,
-          ...payload,
-        })
+        // #407：payload 不带 agent_id——服务端按 capability 生成；toast 与
+        // 后续跳转都用服务端返回的 agent_id。
+        const created = await createAgentDefinition(workspaceId, payload)
         showToast(`Agent「${created.agent_id}」草稿已创建`, 'success')
         onSaved(created.agent_id)
       } else {
@@ -160,6 +165,9 @@ export function AgentEditor({
       }
     } catch (err) {
       setError(errorMessage(err))
+      // #436 独立复审：创建 409 引导「请直接编辑」，但占用者可能还没进
+      // 列表缓存——对 409 同样触发 onChanged 失效重取，引导入口一键可达。
+      if (creating && isConflictError(err)) onChanged()
     } finally {
       setBusy(false)
     }
@@ -206,17 +214,19 @@ export function AgentEditor({
           {error}
         </p>
       )}
-      <div className={styles.field}>
-        <TextField
-          label="Agent ID"
-          variant="outlined"
-          value={creating ? agentIdInput : agentId}
-          onChange={(e) => setAgentIdInput(e.target.value)}
-          fullWidth
-          slotProps={{ input: { readOnly: !creating } }}
-          helperText={creating ? '创建后不可修改' : undefined}
-        />
-      </div>
+      {/* #407：创建表单不再有 Agent ID 输入（服务端按 capability 生成）；
+          编辑态 agent_id 改不了，只读展示留作身份信息。 */}
+      {!creating && (
+        <div className={styles.field}>
+          <TextField
+            label="Agent ID"
+            variant="outlined"
+            value={agentId}
+            fullWidth
+            slotProps={{ input: { readOnly: true } }}
+          />
+        </div>
+      )}
       <div className={styles.field}>
         <TextField
           label="Capability"
@@ -278,11 +288,7 @@ export function AgentEditor({
         <Button
           variant="contained"
           onClick={() => void handleSaveDraft()}
-          disabled={
-            busy ||
-            capability.trim() === '' ||
-            (creating && agentIdInput.trim() === '')
-          }
+          disabled={busy || capability.trim() === ''}
         >
           {creating ? '创建草稿' : '保存草稿'}
         </Button>

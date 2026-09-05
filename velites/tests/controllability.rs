@@ -122,6 +122,9 @@ fn require_output_remediation_then_validation_ok() {
         .collect();
     assert_eq!(validations.len(), 1, "exactly one outputs_validation event");
     assert_eq!(validations[0]["missing"], serde_json::json!([]));
+    // No --skill dir with a contract block: legacy existence mode (#443).
+    assert_eq!(validations[0]["mode"], "existence");
+    assert_eq!(validations[0]["violations"], serde_json::json!([]));
     // The validation event precedes agent_end.
     let agent_end = events.last().unwrap();
     assert_eq!(agent_end["type"], "agent_end");
@@ -163,6 +166,7 @@ fn require_output_still_missing_reports_validation() {
         .find(|e| e["type"] == "outputs_validation")
         .expect("outputs_validation event missing");
     assert_eq!(validation["missing"], serde_json::json!(["result.txt"]));
+    assert_eq!(validation["mode"], "existence");
     // Exactly one remediation turn: 2 turns total.
     assert_eq!(
         events.iter().filter(|e| e["type"] == "turn_start").count(),
@@ -268,4 +272,203 @@ fn read_tool_reads_absolute_path_inside_skill_dir() {
         "read inside --skill dir must succeed: {tool_end}"
     );
     assert_eq!(tool_end["result"]["content"][0]["text"], "{\"k\": 1}");
+}
+
+// #443: the --require-output gate upgrades to contract mode when a --skill
+// directory declares a `yaml contract` block in references/output-contract.md.
+
+/// Skill dir (OUTSIDE the job dir, like production skill roots) whose
+/// contract demands a non-trivial `script.md` text artifact.
+fn contract_skill(dir: &Path) -> std::path::PathBuf {
+    let skill = dir.join("skill");
+    std::fs::create_dir_all(skill.join("references")).unwrap();
+    write(&skill.join("SKILL.md"), "# Demo skill\n");
+    write(
+        &skill.join("references/output-contract.md"),
+        "# Contract\n\n```yaml contract\nfiles:\n  - path: script.md\n    format: text\n    min_chars: 10\n    required_headings: [\"## 目标\"]\n```\n",
+    );
+    skill
+}
+
+fn contract_gate_events(stdout: &[u8]) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
+    let events = parse_events(stdout);
+    let validations: Vec<serde_json::Value> = events
+        .iter()
+        .filter(|e| e["type"] == "outputs_validation")
+        .cloned()
+        .collect();
+    (events, validations)
+}
+
+#[test]
+fn contract_mode_all_rules_pass() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().join("job");
+    std::fs::create_dir(&cwd).unwrap();
+    let skill = contract_skill(dir.path());
+    write(&cwd.join("prompt.md"), "Produce script.md.");
+    write(
+        &cwd.join("fixture.json"),
+        r###"{"responses": [
+  {"content": [{"type": "toolCall", "name": "write", "arguments": {"path": "script.md", "content": "## 目标\nlong enough content"}}]},
+  {"content": [{"type": "text", "text": "written"}]}
+]}"###,
+    );
+
+    let output = run_velites(
+        &cwd,
+        &cwd.join("fixture.json"),
+        &[
+            "--skill",
+            &skill.to_string_lossy(),
+            "--require-output",
+            "script.md",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let (_events, validations) = contract_gate_events(&output.stdout);
+    assert_eq!(validations.len(), 1);
+    assert_eq!(validations[0]["mode"], "contract");
+    assert_eq!(validations[0]["missing"], serde_json::json!([]));
+    assert_eq!(validations[0]["violations"], serde_json::json!([]));
+}
+
+#[test]
+fn contract_violation_triggers_remediation_then_passes() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().join("job");
+    std::fs::create_dir(&cwd).unwrap();
+    let skill = contract_skill(dir.path());
+    write(&cwd.join("prompt.md"), "Produce script.md.");
+    // Turn 1 stops without the artifact (missing + contract violation);
+    // the remediation turn writes a compliant file with the write tool.
+    write(
+        &cwd.join("fixture.json"),
+        r###"{"responses": [
+  {"content": [{"type": "text", "text": "done without writing"}]},
+  {"content": [{"type": "toolCall", "name": "write", "arguments": {"path": "script.md", "content": "## 目标\nlong enough content"}}]}
+]}"###,
+    );
+
+    let output = run_velites(
+        &cwd,
+        &cwd.join("fixture.json"),
+        &[
+            "--skill",
+            &skill.to_string_lossy(),
+            "--require-output",
+            "script.md",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let (events, validations) = contract_gate_events(&output.stdout);
+    assert_eq!(validations.len(), 1);
+    assert_eq!(validations[0]["mode"], "contract");
+    assert_eq!(validations[0]["violations"], serde_json::json!([]));
+    // Exactly one remediation turn ran and the notice names the violation.
+    assert_eq!(
+        events.iter().filter(|e| e["type"] == "turn_start").count(),
+        2
+    );
+    let history = session_messages(&cwd);
+    assert!(history.iter().any(|m| m["role"] == "user"
+        && m["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("script.md: missing required file")));
+}
+
+#[test]
+fn contract_violation_unfixed_exits_nonzero() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().join("job");
+    std::fs::create_dir(&cwd).unwrap();
+    let skill = contract_skill(dir.path());
+    write(&cwd.join("prompt.md"), "Produce script.md.");
+    write(
+        &cwd.join("fixture.json"),
+        r#"{"responses": [
+  {"content": [{"type": "text", "text": "nothing"}]},
+  {"content": [{"type": "text", "text": "still nothing"}]}
+]}"#,
+    );
+
+    let output = run_velites(
+        &cwd,
+        &cwd.join("fixture.json"),
+        &[
+            "--skill",
+            &skill.to_string_lossy(),
+            "--require-output",
+            "script.md",
+        ],
+    );
+    // Contract mode is fail-closed like the existence gate: exit 1.
+    assert_eq!(output.status.code(), Some(1));
+    let (_events, validations) = contract_gate_events(&output.stdout);
+    assert_eq!(validations.len(), 1);
+    assert_eq!(validations[0]["mode"], "contract");
+    assert_eq!(validations[0]["missing"], serde_json::json!(["script.md"]));
+    assert_eq!(
+        validations[0]["violations"],
+        serde_json::json!(["script.md: missing required file"])
+    );
+}
+
+#[test]
+fn contract_parse_error_fails_the_gate_closed() {
+    // A malformed contract block is a violation (mode=contract), never a
+    // silent downgrade to existence mode.
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().join("job");
+    std::fs::create_dir(&cwd).unwrap();
+    let skill = dir.path().join("skill");
+    std::fs::create_dir_all(skill.join("references")).unwrap();
+    write(&skill.join("SKILL.md"), "# Demo skill\n");
+    write(
+        &skill.join("references/output-contract.md"),
+        "```yaml contract\nfiles: []\n```\n",
+    );
+    write(&cwd.join("prompt.md"), "Hi.");
+    write(
+        &cwd.join("fixture.json"),
+        r#"{"responses": [
+  {"content": [{"type": "text", "text": "nothing"}]},
+  {"content": [{"type": "text", "text": "still nothing"}]}
+]}"#,
+    );
+
+    let output = run_velites(
+        &cwd,
+        &cwd.join("fixture.json"),
+        &[
+            "--skill",
+            &skill.to_string_lossy(),
+            "--require-output",
+            "script.md",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let (_events, validations) = contract_gate_events(&output.stdout);
+    assert_eq!(validations[0]["mode"], "contract");
+    let violation = validations[0]["violations"][0].as_str().unwrap();
+    assert!(
+        violation.starts_with("contract parse error:"),
+        "{violation}"
+    );
+    // A parse error lives in the read-only skill dir — the model can never
+    // fix it, so there must be NO remediation turn (a single turn total).
+    assert_eq!(
+        _events.iter().filter(|e| e["type"] == "turn_start").count(),
+        1,
+        "parse-error gate must skip the futile remediation turn"
+    );
 }

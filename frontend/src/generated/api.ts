@@ -685,6 +685,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/connections/keys': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Connection Keys */
+    get: operations['list_connection_keys_api_connections_keys_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/dashboard/events': {
     parameters: {
       query?: never
@@ -1061,6 +1078,29 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent/tools/publish-requests/{request_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Get Publish Request Status
+     * @description Poll the outcome of a request_workflow_publish call: pending until
+     *     the human decides; confirmed (result_revision_id set when a revision
+     *     was produced) or rejected afterwards; expired when nobody answered
+     *     within the TTL. Session-bound authorization lives in the service.
+     */
+    get: operations['get_publish_request_status_api_studio_agent_tools_publish_requests__request_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/skills/{skill_key}': {
     parameters: {
       query?: never
@@ -1345,6 +1385,28 @@ export interface paths {
     put?: never
     /** Compare Workflow */
     post: operations['compare_workflow_api_studio_agent_tools_workspaces__workspace_id__workflow_compare_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/workflow/publish-request': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Request Workflow Publish
+     * @description Park a pending publish request: never publishes — the human
+     *     confirms in Studio's review dialog. The workspace's draft must pass
+     *     the full publish validation set first (a 409 names the errors).
+     */
+    post: operations['request_workflow_publish_api_studio_agent_tools_workspaces__workspace_id__workflow_publish_request_post']
     delete?: never
     options?: never
     head?: never
@@ -2838,6 +2900,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/workflow-drafts/publish-request': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Pending Publish Request */
+    get: operations['get_pending_publish_request_api_workspaces__workspace_id__workflow_drafts_publish_request_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/cancel': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Cancel Publish Request */
+    post: operations['cancel_publish_request_api_workspaces__workspace_id__workflow_drafts_publish_request__request_id__cancel_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/confirm': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Confirm Publish Request */
+    post: operations['confirm_publish_request_api_workspaces__workspace_id__workflow_drafts_publish_request__request_id__confirm_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/workflow-drafts/validate': {
     parameters: {
       query?: never
@@ -3106,7 +3219,7 @@ export interface components {
     /** AgentCreateRequest */
     AgentCreateRequest: {
       /** Agent Id */
-      agent_id: string
+      agent_id?: string | null
       /** Capability */
       capability: string
       /** Config Schema */
@@ -3579,6 +3692,16 @@ export interface components {
       key: string
       /** Type */
       type: string
+    }
+    /**
+     * ConnectionKeysResponse
+     * @description Key-only listing for non-admin UIs (#419): keys are the reference
+     *     users must type into ref items and node configs; they carry no
+     *     credentials (config/secret material never appears in this view).
+     */
+    ConnectionKeysResponse: {
+      /** Keys */
+      keys: string[]
     }
     /** ConnectionListResponse */
     ConnectionListResponse: {
@@ -4559,6 +4682,16 @@ export interface components {
       runner: string
       /** Session Dir */
       session_dir: string
+      /**
+       * Skill
+       * @default
+       */
+      skill: string
+      /**
+       * Skill Version
+       * @default
+       */
+      skill_version: string
       /** Started At */
       started_at: string
       /** Status */
@@ -4689,10 +4822,22 @@ export interface components {
       claim_count: number
       /** Claim Empty Count */
       claim_empty_count: number
+      /** Claim Evaluate Seconds Max */
+      claim_evaluate_seconds_max: number
+      /** Claim Evaluate Seconds Total */
+      claim_evaluate_seconds_total: number
+      /** Claim Scan Seconds Max */
+      claim_scan_seconds_max: number
+      /** Claim Scan Seconds Total */
+      claim_scan_seconds_total: number
       /** Claim Seconds Max */
       claim_seconds_max: number
       /** Claim Seconds Total */
       claim_seconds_total: number
+      /** Claim Writes Seconds Max */
+      claim_writes_seconds_max: number
+      /** Claim Writes Seconds Total */
+      claim_writes_seconds_total: number
       /** Db Pool Wait Seconds Total */
       db_pool_wait_seconds_total: number
       /** Db Pool Waiting */
@@ -5719,6 +5864,21 @@ export interface components {
       /** Expected Capability */
       expected_capability?: string | null
     }
+    /**
+     * StudioAgentPublishRequestResponse
+     * @description What the ``request_workflow_publish`` MCP tool returns: the parked
+     *     request. Never a revision — the human confirms in Studio.
+     */
+    StudioAgentPublishRequestResponse: {
+      request: components['schemas']['StudioPublishRequestRecord']
+    }
+    /**
+     * StudioAgentPublishRequestStatusResponse
+     * @description What the ``get_publish_request_status`` MCP tool returns.
+     */
+    StudioAgentPublishRequestStatusResponse: {
+      request: components['schemas']['StudioPublishRequestRecord']
+    }
     /** StudioAgentRecentFailure */
     StudioAgentRecentFailure: {
       /** Error Message */
@@ -6081,6 +6241,64 @@ export interface components {
       version: number
       /** Workflow Key */
       workflow_key: string
+    }
+    /**
+     * StudioPublishRequestPendingResponse
+     * @description The workspace's live pending request (request=None when there is
+     *     none); polled by the Studio frontend to pop the review dialog.
+     */
+    StudioPublishRequestPendingResponse: {
+      request: components['schemas']['StudioPublishRequestRecord'] | null
+    }
+    /**
+     * StudioPublishRequestRecord
+     * @description One row of the agent→human publish handshake.
+     *
+     *     ``status`` lifecycle: pending → confirming (the human confirm claimed
+     *     the row; its publish is in flight — cancel and new agent requests
+     *     cannot touch it) → confirmed (``result_revision_id`` set only when the
+     *     publish created a NEW revision — runtime-only config updates keep it
+     *     null) | back to pending (the claimed publish was refused — the draft
+     *     drifted; fixable and retryable) | rejected (human cancelled) | expired
+     *     (past ``expires_at``; swept lazily on read). ``superseded``: displaced
+     *     by a newer agent request or a manual publish.
+     *
+     *     ``draft_hash``: sha256 of the server draft YAML at request time
+     *     (#429 三轮 P1-3) — the confirm publishes exactly that draft or refuses.
+     *
+     *     ``claimed_at``: stamped when the row moved to ``confirming``; null on
+     *     every other state (#429 四轮 P1 — the stale-claim sweep's clock).
+     */
+    StudioPublishRequestRecord: {
+      /** Chat Session Id */
+      chat_session_id?: string | null
+      /** Claimed At */
+      claimed_at?: string | null
+      /** Created At */
+      created_at: string
+      /** Created By */
+      created_by: string
+      /** Draft Hash */
+      draft_hash?: string | null
+      /** Expires At */
+      expires_at: string
+      /** Id */
+      id: string
+      /** Resolved At */
+      resolved_at?: string | null
+      /** Result Revision Id */
+      result_revision_id?: string | null
+      /** Status */
+      status: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /**
+     * StudioPublishRequestResolveResponse
+     * @description Confirm/cancel outcome: the resolved request row.
+     */
+    StudioPublishRequestResolveResponse: {
+      request: components['schemas']['StudioPublishRequestRecord']
     }
     /** TokenUsageCostBreakdown */
     TokenUsageCostBreakdown: {
@@ -6472,7 +6690,7 @@ export interface components {
        * Type
        * @enum {string}
        */
-      type: 'added' | 'removed' | 'condition_changed' | 'label_changed'
+      type: 'added' | 'removed' | 'condition_changed' | 'reordered'
     }
     /** WorkflowEdgeResponse */
     WorkflowEdgeResponse: {
@@ -6689,6 +6907,8 @@ export interface components {
       outputs: string[]
       skill?: components['schemas']['WorkflowNodeSkillResponse'] | null
       terminal?: components['schemas']['WorkflowTerminalResponse'] | null
+      /** Tools */
+      tools?: string[]
     }
     /** WorkflowNodeSkillResponse */
     WorkflowNodeSkillResponse: {
@@ -7001,9 +7221,7 @@ export interface components {
     /** WorkspaceRunsResponse */
     WorkspaceRunsResponse: {
       /** Runs */
-      runs: {
-        [key: string]: unknown
-      }[]
+      runs: components['schemas']['NodeRunResponse'][]
     }
     /** WorkspaceRuntimeModelsResponse */
     WorkspaceRuntimeModelsResponse: {
@@ -8483,6 +8701,26 @@ export interface operations {
       }
     }
   }
+  list_connection_keys_api_connections_keys_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConnectionKeysResponse']
+        }
+      }
+    }
+  }
   dashboard_events_api_dashboard_events_get: {
     parameters: {
       query?: never
@@ -9221,6 +9459,37 @@ export interface operations {
       }
     }
   }
+  get_publish_request_status_api_studio_agent_tools_publish_requests__request_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        request_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentPublishRequestStatusResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_skill_api_studio_agent_tools_skills__skill_key__get: {
     parameters: {
       query?: {
@@ -9818,6 +10087,37 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowDraftCompareResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  request_workflow_publish_api_studio_agent_tools_workspaces__workspace_id__workflow_publish_request_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentPublishRequestResponse']
         }
       }
       /** @description Validation Error */
@@ -11460,6 +11760,7 @@ export interface operations {
         status?: string | null
         node_key?: string | null
         job_id?: string | null
+        skill?: string | null
         limit?: number
       }
       header?: never
@@ -13291,6 +13592,101 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowDraftValidationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_pending_publish_request_api_workspaces__workspace_id__workflow_drafts_publish_request_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioPublishRequestPendingResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  cancel_publish_request_api_workspaces__workspace_id__workflow_drafts_publish_request__request_id__cancel_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        request_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioPublishRequestResolveResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  confirm_publish_request_api_workspaces__workspace_id__workflow_drafts_publish_request__request_id__confirm_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        request_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioPublishRequestResolveResponse']
         }
       }
       /** @description Validation Error */

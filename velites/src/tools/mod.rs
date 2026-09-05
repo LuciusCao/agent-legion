@@ -1,4 +1,5 @@
-//! The three velites tools: `read`, `write`, `bash` (design §8).
+//! The velites tools: `read`, `write`, `bash` by default, plus the opt-in
+//! utility tools `uuid` (#442) and `validate` (#443) (design §8).
 //!
 //! Sandbox invariant: every path a tool touches must canonicalize to a
 //! location inside the process working directory (the job dir the worker
@@ -11,7 +12,10 @@ pub mod bash;
 pub mod command_guard;
 pub(super) mod command_paths;
 pub mod read;
+mod specs;
 pub mod truncate;
+pub mod uuid;
+pub mod validate;
 pub mod write;
 
 use std::path::{Path, PathBuf};
@@ -41,6 +45,9 @@ pub struct ToolContext {
     /// dir (design §5; mirrors the OS sandbox's read allowlist). The `write`
     /// tool never consults this list — writes stay cwd-only.
     pub read_roots: Vec<PathBuf>,
+    /// Canonicalized `--skill` directories the `validate` tool resolves the
+    /// output contract from (subset of `read_roots`, first declarer wins).
+    pub skill_dirs: Vec<PathBuf>,
 }
 
 /// Outcome of one tool execution. Tool failures are reported as
@@ -81,12 +88,15 @@ pub enum ToolError {
     Io(#[from] std::io::Error),
 }
 
-/// The three tool kinds, keyed by their wire name.
+/// The tool kinds, keyed by their wire name. `Uuid` and `Validate` are
+/// opt-in only (never in the default `--tools` set).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolKind {
     Read,
     Write,
     Bash,
+    Uuid,
+    Validate,
 }
 
 impl ToolKind {
@@ -95,6 +105,8 @@ impl ToolKind {
             "read" => Some(Self::Read),
             "write" => Some(Self::Write),
             "bash" => Some(Self::Bash),
+            "uuid" => Some(Self::Uuid),
+            "validate" => Some(Self::Validate),
             _ => None,
         }
     }
@@ -104,67 +116,14 @@ impl ToolKind {
             Self::Read => "read",
             Self::Write => "write",
             Self::Bash => "bash",
+            Self::Uuid => "uuid",
+            Self::Validate => "validate",
         }
     }
 
     /// Tool specification handed to the provider.
     pub fn spec(self) -> ToolSpec {
-        let (description, parameters) = match self {
-            Self::Read => (
-                "Read a UTF-8 text file inside the working directory or an \
-                 enabled skill directory (read-only). \
-                 Optional 1-based `offset` and `limit` select a line range. \
-                 Output is truncated to the first 2000 lines or 50KB \
-                 (whichever is hit first). Use offset/limit for large files; \
-                 when you need the full file, continue with offset until \
-                 complete.",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "File path, relative to the working directory."},
-                        "offset": {"type": "integer", "description": "1-based first line to read (default 1)."},
-                        "limit": {"type": "integer", "description": "Maximum number of lines to read (default all)."}
-                    },
-                    "required": ["path"]
-                }),
-            ),
-            Self::Write => (
-                "Write a file inside the working directory (atomic tmp+rename; \
-                 parent directories are created).",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "File path, relative to the working directory."},
-                        "content": {"type": "string", "description": "Full file content."}
-                    },
-                    "required": ["path", "content"]
-                }),
-            ),
-            Self::Bash => (
-                "Run a bash command in the working directory (env inherited). \
-                 Output is truncated to the last 2000 lines or 50KB \
-                 (whichever is hit first); if truncated, the full output is \
-                 saved to a temp file. On timeout the whole process group \
-                 gets SIGTERM, then SIGKILL after a grace period. \
-                 Full-disk scan commands (e.g. `find /`) are rejected; \
-                 search within the working directory or a specific \
-                 subdirectory, and use `command -v <name>` to locate \
-                 executables (python/python3 are on PATH).",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "command": {"type": "string", "description": "Command passed to `bash -c`."},
-                        "timeout": {"type": "integer", "description": "Timeout in seconds (default 120, max 3600)."}
-                    },
-                    "required": ["command"]
-                }),
-            ),
-        };
-        ToolSpec {
-            name: self.name().to_string(),
-            description: description.to_string(),
-            parameters,
-        }
+        specs::spec(self)
     }
 
     pub async fn execute(self, args: &Value, ctx: &ToolContext) -> ToolOutput {
@@ -172,6 +131,8 @@ impl ToolKind {
             Self::Read => read::run(args, ctx).await,
             Self::Write => write::run(args, ctx).await,
             Self::Bash => bash::run(args, ctx).await,
+            Self::Uuid => uuid::run(args, ctx).await,
+            Self::Validate => validate::run(args, ctx).await,
         }
     }
 }

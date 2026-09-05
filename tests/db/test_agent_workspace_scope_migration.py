@@ -243,4 +243,6 @@ def test_upgrade_from_v45_with_legacy_global_index() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "studio_chat_agent_config"
+    assert migration is not None
+    # The registry tail at the CURRENT schema version (v78, #448).
+    assert migration["name"] == "claim_stage_profile"
