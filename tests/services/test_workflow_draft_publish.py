@@ -105,7 +105,7 @@ def _patch_agent_catalog(
     min_length=1 there) — exactly the legacy shape the gate must still reject.
     """
     monkeypatch.setattr(
-        "server.app.services.workflow_drafts.published_agent_definitions",
+        "server.app.services.workflow_draft_publish_gates.published_agent_definitions",
         lambda job_db, workspace_id: agents,
     )
 
@@ -387,3 +387,151 @@ def test_publish_rejects_skill_on_code_routed_node(
 
     assert errors
     assert any("only applies to Agent-routed nodes" in error for error in errors)
+
+
+# --- #432: secret values in draft YAML node.config must fail at publish ---
+
+
+def _node_schema_yaml(config_block: str) -> str:
+    """Draft with a code node declaring a secret field in its config_schema."""
+    return f"""
+key: test_publish_flow
+label: Test Publish Flow
+nodes:
+  do_thing:
+    type: code
+    capability: do_thing
+    config_schema:
+      type: object
+      properties:
+        api_key:
+          type: string
+          secret: true
+        kept:
+          type: string
+    config:
+{config_block}
+"""
+
+
+def _seed_secret_schema_node(queries: JobQueries, workspace_id: str) -> None:
+    """Publish a node whose schema marks api_key secret (no config values)."""
+    _seed_node_code(workspace_id)
+    ok, errors = publish_workflow_draft(queries, workspace_id, _node_schema_yaml("      kept: v"))
+    assert (ok, errors) == (True, [])
+
+
+def test_publish_rejects_plaintext_secret_in_node_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#432: a plaintext secret in draft YAML node.config must fail at
+    publish — never land in the revision and the intake freeze (the draft
+    channel has no vault diversion; the settings nodeConfig PATCH is the
+    only channel that diverts, VAULT-SECRET-001)."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _patch_agent_catalog(monkeypatch, {})
+    _seed_secret_schema_node(queries, workspace["id"])
+
+    ok, errors = publish_workflow_draft(
+        queries,
+        workspace["id"],
+        _node_schema_yaml("      kept: v\n      api_key: sk-live-123"),
+    )
+
+    assert ok is False
+    assert any(
+        "nodes.do_thing.config.api_key" in error and "Secret values" in error for error in errors
+    )
+    # The error must never echo the submitted value back.
+    assert all("sk-live-123" not in error for error in errors)
+    # The active revision keeps the last clean publish.
+    active = queries.get_active_workflow_revision(workspace["id"], "test_publish_flow")
+    assert "sk-live-123" not in str(active["definition_json"])
+
+
+def test_publish_rejects_secret_set_echo_in_node_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#432: the ``{"secret_set": true}`` echo shape under a secret field is
+    rejected the same way — it is a settings-API write-only marker, dead
+    config if frozen (dispatch sends the dict literal to node code)."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _patch_agent_catalog(monkeypatch, {})
+    _seed_secret_schema_node(queries, workspace["id"])
+
+    ok, errors = publish_workflow_draft(
+        queries,
+        workspace["id"],
+        _node_schema_yaml("      kept: v\n      api_key: {secret_set: true}"),
+    )
+
+    assert ok is False
+    assert any(
+        "nodes.do_thing.config.api_key" in error and "Secret values" in error for error in errors
+    )
+
+
+def test_publish_rejects_lookalike_secret_ref_markers_in_node_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the exact single-key ``{"secret_ref": "node:..."}`` vault marker
+    passes; multi-key lookalikes and non-node ref names are rejected."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _patch_agent_catalog(monkeypatch, {})
+    _seed_secret_schema_node(queries, workspace["id"])
+
+    for bad in ("{secret_ref: n, extra: 1}", '{secret_ref: "conn:cms:token"}'):
+        ok, errors = publish_workflow_draft(
+            queries,
+            workspace["id"],
+            _node_schema_yaml(f"      kept: v\n      api_key: {bad}"),
+        )
+        assert ok is False, bad
+        assert any("nodes.do_thing.config.api_key" in error for error in errors), bad
+
+
+def test_validate_surfaces_secret_error_same_as_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The validate endpoint (Studio's pre-publish check) reports the same
+    error, so the user is pointed at the vault channel before publishing."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _patch_agent_catalog(monkeypatch, {})
+    _seed_secret_schema_node(queries, workspace["id"])
+
+    errors = validate_workflow_draft_for_publish(
+        queries,
+        workspace["id"],
+        _node_schema_yaml("      kept: v\n      api_key: sk-live-123"),
+        True,
+    )
+
+    assert any(
+        "nodes.do_thing.config.api_key" in error and "Secret values" in error for error in errors
+    )
+
+
+def test_publish_accepts_exact_vault_marker_in_node_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The exact vault marker written by the settings PATCH round-trips
+    through draft YAML revisions without false positives (a user copying
+    the published revision YAML keeps the vault wiring)."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _patch_agent_catalog(monkeypatch, {})
+    _seed_secret_schema_node(queries, workspace["id"])
+
+    ok, errors = publish_workflow_draft(
+        queries,
+        workspace["id"],
+        _node_schema_yaml(
+            '      kept: v\n      api_key: {secret_ref: "node:test_publish_flow:do_thing:api_key"}'
+        ),
+    )
+
+    assert (ok, errors) == (True, [])

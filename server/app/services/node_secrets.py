@@ -67,7 +67,9 @@ def apply_node_secret_fields(
 
     - non-empty string → vault upsert, config keeps ``{"secret_ref": name}``
     - empty string → vault entry deleted, field removed
-    - ``{"secret_ref": ...}`` → kept as-is (already a reference)
+    - exactly ``{"secret_ref": ...}`` → kept as-is (the same exact shape
+      ``is_secret_ref_marker``, dispatch, and the publish prune accept — #432
+      closed the multi-key lookalike asymmetry here)
     - ``{"secret_set": ...}`` → frontend echo of the write-only marker; the
       stored value is kept (or the field dropped when nothing is stored)
     - field absent → the stored value is inherited so saving other fields
@@ -89,7 +91,7 @@ def apply_node_secret_fields(
             else:
                 vault.delete(workspace_id, name)
                 result.pop(field)
-        elif isinstance(value, dict) and "secret_ref" in value:
+        elif is_secret_ref_marker(value):
             pass
         elif isinstance(value, dict) and set(value) == {"secret_set"}:
             if field in current_values:
