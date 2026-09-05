@@ -1,4 +1,4 @@
-"""Agent 子进程环境构造（worker/executor.py agent_subprocess_env）测试。
+"""Agent 子进程环境构造（worker/execution/run.py agent_subprocess_env）测试。
 
 保证 agent bash 会话里的 `python`/`python3` 解析到 worker 自己的 venv
 解释器——环境缺失时模型会用 `find /` 全盘扫描定位解释器，并行 job 下
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from worker.executor import agent_subprocess_env
+from worker.execution.run import agent_subprocess_env
 
 
 def test_prepends_worker_interpreter_bin_dir(monkeypatch: pytest.MonkeyPatch) -> None:
