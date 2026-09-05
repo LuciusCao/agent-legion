@@ -404,7 +404,7 @@ def test_load_claim_controls_reads_hot_fields_and_validates_types(tmp_path: Path
     config.update({"max_concurrency": 7, "claim_enabled": False})
     config_path.write_text(json.dumps(config), encoding="utf-8")
 
-    assert agent_worker.runtime_controls.load_claim_controls(config_path) == (7, False)
+    assert agent_worker.runtime_controls.load_claim_controls(config_path) == (7, False, None)
 
     config["max_concurrency"] = True
     config_path.write_text(json.dumps(config), encoding="utf-8")
@@ -415,7 +415,7 @@ def test_load_claim_controls_reads_hot_fields_and_validates_types(tmp_path: Path
 def test_load_claim_controls_defaults_to_disabled(tmp_path: Path) -> None:
     config_path = _write_main_config(tmp_path)
 
-    assert agent_worker.runtime_controls.load_claim_controls(config_path) == (1, False)
+    assert agent_worker.runtime_controls.load_claim_controls(config_path) == (1, False, None)
 
 
 def _run_main(
@@ -641,6 +641,223 @@ def test_main_hot_resizes_capacity_without_cancelling_active_work(
     assert result == [0]
 
 
+def test_main_ramp_up_limits_claim_budget_until_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#471 main() 级接线：爬坡期 claim 预算被当前档位钳住，到顶后放开。
+
+    max_concurrency=3、ramp_up initial=1/step=2/interval=10s：首个领取 pass
+    只允许 1 个在跑（第二单在预算耗尽前领不到）；释放执行后容量仍按档位
+    走。到顶（interval 之后的 pass）恢复全量领取语义。"""
+    fake = FakeClient(tmp_path / "unused.tar.gz")
+    claim_calls = 0
+    seen_capacities: list[int] = []
+    release = threading.Event()
+    claimed_first = threading.Event()
+
+    def claim(
+        worker_id: str,
+        max_concurrency: int | None = None,
+        max_code_concurrency: int | None = None,
+    ) -> dict | None:
+        nonlocal claim_calls
+        claim_calls += 1
+        seen_capacities.append(int(max_concurrency or 0))
+        if claim_calls == 1:
+            claimed_first.set()
+            return _claim("exec-1")
+        if not release.is_set():
+            # 预算耗尽的 pass 不该走到这里再领第二单——先挡住，配合外层断言。
+            return None
+        return _claim(f"exec-{claim_calls}")
+
+    def block_execution(  # type: ignore[no-untyped-def]
+        client,
+        claimed,
+        work_root,
+        environment,
+        interval,
+        stop,
+        grace,
+        status,
+        uploads,
+        slots,
+    ):
+        claimed_first.wait(timeout=5)
+        release.wait(timeout=5)
+
+    fake.claim = claim  # type: ignore[attr-defined]
+    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
+    updates = {
+        "claim_enabled": True,
+        "max_concurrency": 3,
+        "ramp_up": {"initial": 1, "step": 2, "interval_seconds": 10},
+    }
+    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, updates)
+    assert claimed_first.wait(timeout=5), "first claim never happened"
+    time.sleep(0.3)
+    # 爬坡首档：exec-1 在跑占满 initial=1，预算归零——没有第二单被领走。
+    assert claim_calls == 1, f"ramp should clamp the pass budget, got {claim_calls} claims"
+    # claim 上报 Host 的容量 = 生效档位（1），不是配置目标（3）。
+    assert seen_capacities[0] == 1
+    # 释放首单；interval=10s 未到，档位不变（仍 1）——还是只有 1 个在跑。
+    release.set()
+    deadline = time.monotonic() + 2
+    while claim_calls < 2 and time.monotonic() < deadline:
+        time.sleep(0.02)
+    handlers[agent_worker.signal.SIGTERM]()
+    thread.join(timeout=10)
+    assert result == [0]
+    assert claim_calls >= 2, "refill after completion must stay allowed within the tier"
+    # 到顶前所有 claim 上报的容量都是档位值（1），从未直通 3。
+    assert all(capacity == 1 for capacity in seen_capacities), seen_capacities
+
+
+def test_main_ramp_up_reaches_target_and_releases_budget(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#471 到顶后放开：interval=0.2s 的短爬坡，几秒内 effective 追上目标，
+    此后 claim 上报与本地预算回到全量语义（与禁用配置一致）。"""
+    fake = FakeClient(tmp_path / "unused.tar.gz")
+    claim_calls = 0
+    seen_capacities: list[int] = []
+    release = threading.Event()
+    released_budget = threading.Event()
+
+    def claim(
+        worker_id: str,
+        max_concurrency: int | None = None,
+        max_code_concurrency: int | None = None,
+    ) -> dict | None:
+        nonlocal claim_calls
+        claim_calls += 1
+        seen_capacities.append(int(max_concurrency or 0))
+        # 到顶后的第一个 pass：预算放开（上报容量=目标 3）即触发断言点。
+        if int(max_concurrency or 0) >= 3:
+            released_budget.set()
+            release.wait(timeout=5)
+        return _claim(f"exec-{claim_calls}")
+
+    def block_execution(  # type: ignore[no-untyped-def]
+        client,
+        claimed,
+        work_root,
+        environment,
+        interval,
+        stop,
+        grace,
+        status,
+        uploads,
+        slots,
+    ):
+        pass
+
+    fake.claim = claim  # type: ignore[attr-defined]
+    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
+    updates = {
+        "claim_enabled": True,
+        "max_concurrency": 3,
+        "ramp_up": {"initial": 1, "step": 2, "interval_seconds": 0.2},
+    }
+    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, updates)
+    # 活跃 ~0.2s 后到顶：某次 claim 开始上报目标容量 3（本地预算同帧放开）。
+    assert released_budget.wait(timeout=5), "reaching the target should release the budget"
+    handlers[agent_worker.signal.SIGTERM]()
+    release.set()
+    thread.join(timeout=10)
+    assert result == [0]
+    # 爬坡期上报档位值 1，到顶后恒为目标 3——单调升，无回退。
+    assert seen_capacities[0] == 1
+    assert seen_capacities[-1] == 3
+    assert all(
+        later >= earlier
+        for earlier, later in zip(seen_capacities, seen_capacities[1:], strict=False)
+    ), seen_capacities
+
+
+def test_main_rejects_invalid_ramp_up_block_with_exit_code_2(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#493 P1-2：非法 ramp_up 块必须退出码 2（supervisor 不自动重启）。
+
+    镜像 prepare_runtime_models 的预检模式：配置错误重试无意义，裸抛
+    ValueError 会变成退出码 1 + traceback → supervisor 无限 crash loop。
+    消息点名非法字段（fail-fast 带指引），且不进主循环（无 claim）。"""
+    fake = FakeClient(tmp_path / "unused.tar.gz")
+    claim_calls = 0
+
+    def claim(*args: object, **kwargs: object) -> dict | None:
+        nonlocal claim_calls
+        claim_calls += 1
+        return None
+
+    fake.claim = claim  # type: ignore[method-assign]
+    thread, _, result = _run_main(
+        monkeypatch,
+        tmp_path,
+        fake,
+        {"claim_enabled": True, "ramp_up": {"initial": 0, "step": 64, "interval_seconds": 120}},
+    )
+    thread.join(timeout=10)
+    assert result == [2]
+    assert claim_calls == 0, "预检失败不得进入主循环发起 claim"
+    output = capsys.readouterr().out
+    assert "ramp_up.initial" in output, "错误消息必须点名非法字段"
+    assert "Traceback" not in output, "配置错误不该以裸 traceback 形态退出"
+
+
+def test_main_ramp_up_disabled_claims_full_budget(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """禁用（无 ramp_up 块）= 一次性全量：首 pass 即按 max_concurrency 领满。"""
+    fake = FakeClient(tmp_path / "unused.tar.gz")
+    claim_calls = 0
+    seen_capacities: list[int] = []
+    release = threading.Event()
+    filled = threading.Event()
+
+    def claim(
+        worker_id: str,
+        max_concurrency: int | None = None,
+        max_code_concurrency: int | None = None,
+    ) -> dict | None:
+        nonlocal claim_calls
+        claim_calls += 1
+        seen_capacities.append(int(max_concurrency or 0))
+        if claim_calls >= 3:
+            filled.set()
+            release.wait(timeout=5)
+        return _claim(f"exec-{claim_calls}")
+
+    def block_execution(  # type: ignore[no-untyped-def]
+        client,
+        claimed,
+        work_root,
+        environment,
+        interval,
+        stop,
+        grace,
+        status,
+        uploads,
+        slots,
+    ):
+        pass
+
+    fake.claim = claim  # type: ignore[attr-defined]
+    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
+    thread, handlers, result = _run_main(
+        monkeypatch, tmp_path, fake, {"claim_enabled": True, "max_concurrency": 3}
+    )
+    assert filled.wait(timeout=5), "full budget should claim 3 in the first pass"
+    handlers[agent_worker.signal.SIGTERM]()
+    release.set()
+    thread.join(timeout=10)
+    assert result == [0]
+    # 无 ramp_up：claim 上报的容量恒为配置目标（3），首 pass 领满 3 单。
+    assert claim_calls == 3
+    assert seen_capacities == [3, 3, 3]
+
+
 def test_main_exits_cleanly_on_revoked_worker(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -733,7 +950,7 @@ def test_read_runtime_status_returns_empty_for_dead_writer(tmp_path: Path) -> No
         json.dumps({"pid": 99999999, "executions": {"exec-1": {"execution_id": "exec-1"}}}),
         encoding="utf-8",
     )
-    assert read_runtime_status(path) == {"executions": [], "remote": {}}
+    assert read_runtime_status(path) == {"executions": [], "remote": {}, "ramp_up": None}
 
 
 def test_read_runtime_status_returns_empty_for_corrupt_or_missing_file(
@@ -741,8 +958,12 @@ def test_read_runtime_status_returns_empty_for_corrupt_or_missing_file(
 ) -> None:
     path = tmp_path / "current_executions.json"
     path.write_text("not json", encoding="utf-8")
-    assert read_runtime_status(path) == {"executions": [], "remote": {}}
-    assert read_runtime_status(tmp_path / "missing.json") == {"executions": [], "remote": {}}
+    assert read_runtime_status(path) == {"executions": [], "remote": {}, "ramp_up": None}
+    assert read_runtime_status(tmp_path / "missing.json") == {
+        "executions": [],
+        "remote": {},
+        "ramp_up": None,
+    }
 
 
 def test_read_runtime_status_sorts_executions_by_started_at(tmp_path: Path) -> None:

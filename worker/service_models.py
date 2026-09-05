@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -32,6 +34,9 @@ class WorkerConfigPayload(BaseModel):
     # 出网代理（#444）：空串/未填 = 直连（默认）；http(s)/socks5(h) URL =
     # executor 与 agent 子进程出网经代理。变更走重启路径生效。
     proxy: str | None = None
+    # 冷启动容量爬坡（#471）：null/缺省 = 禁用；对象形如
+    # {"initial": 64, "step": 64, "interval_seconds": 120}，热更新生效。
+    ramp_up: dict[str, Any] | None = None
     # 兼容通道：等价于向 /api/register-tokens 添加一个 token（老客户端/脚本）。
     register_token: str | None = None
 

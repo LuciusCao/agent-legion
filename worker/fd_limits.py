@@ -25,3 +25,15 @@ def raise_fd_limit(min_nofile: int = MIN_NOFILE) -> tuple[int, int]:
         resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
         soft = target
     return soft, hard
+
+
+def raise_fd_limit_startup() -> None:
+    """Startup wiring: raise the limit, print the result, never fatal.
+
+    #471 预算腾挪：从 executor.main() 移入（单调用点）。失败仅打一行日志
+    继续用默认值——fd 上限是吞吐护栏，不是启动前置条件。"""
+    try:
+        soft, hard = raise_fd_limit()
+        print(f"worker fd limit: soft={soft} hard={hard}", flush=True)
+    except (OSError, ValueError) as exc:
+        print(f"worker fd limit raise failed; continuing with defaults: {exc}", flush=True)

@@ -499,15 +499,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 90
 - check: architecture.file_budget
-  path: worker/runtime/controls.py
-  reason: '#383 rewired hot_code_concurrency''s fail-closed guard from resolve_binary("velites") to the
-    shared sandbox resolver (velites-sandbox -> velites, bundled dir then PATH) so hot-opening the code
-    pool matches the startup preflight''s probe surface. One-line semantic change on an existing function;
-    no split warranted.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 51
-- check: architecture.file_budget
   path: worker/runtime/preflight.py
   reason: '#381 moved velites/pi out of the worker image (runtime executors are externally-mounted binaries
     now), which turned "forgot to mount" from a rare deployment accident into a routine mistake with a

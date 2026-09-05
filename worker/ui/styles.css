@@ -487,6 +487,10 @@ fieldset { margin: 0; padding: 0; border: 0; }
 .advanced-panel summary .icon { transition: transform .18s ease; }
 .advanced-panel[open] summary .icon { transform: rotate(180deg); }
 .advanced-grid { padding: 0 16px 16px; grid-template-columns: repeat(3, 1fr); }
+/* #471 冷启动爬坡：启用勾选与三个档位输入同网格排布 */
+.ramp-toggle { display: flex; align-items: center; gap: 8px; }
+.ramp-toggle input { width: auto; margin: 0; accent-color: var(--mint); }
+.advanced-panel > .hint { display: block; margin: 0 16px 12px; }
 .error { min-height: 17px; margin: 8px 0 0; color: var(--red); font-size: 11px; }
 .muted { color: var(--muted); font-size: 11px; }
 .diagnostic-status-grid {

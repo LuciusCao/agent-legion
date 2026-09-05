@@ -23,12 +23,16 @@ from worker.status.reader import read_runtime_status
 ENV_VAR = "AGENT_WORKER_STATUS_FILE"
 STATUS_FILENAME = "current_executions.json"
 
-__all__ = [
-    "ENV_VAR",
-    "STATUS_FILENAME",
-    "ExecutionStatusReporter",
-    "read_runtime_status",
-]
+__all__ = ["ENV_VAR", "STATUS_FILENAME", "ExecutionStatusReporter", "read_runtime_status"]
+
+
+def _record(execution_id: str, **fields: Any) -> dict[str, Any]:
+    """新建一条执行记录（start / upsert_phase 共用的最小骨架）。"""
+    return {
+        "execution_id": execution_id,
+        **fields,
+        "started_at": datetime.now(UTC).isoformat(),
+    }
 
 
 class ExecutionStatusReporter:
@@ -39,6 +43,7 @@ class ExecutionStatusReporter:
         self._lock = threading.Lock()
         self._executions: dict[str, dict[str, Any]] = {}
         self._remote: dict[str, Any] = {}
+        self._ramp_up: dict[str, Any] | None = None
 
     @classmethod
     def from_env(cls) -> ExecutionStatusReporter:
@@ -47,12 +52,7 @@ class ExecutionStatusReporter:
 
     def start(self, execution_id: str, **fields: Any) -> None:
         with self._lock:
-            self._executions[execution_id] = {
-                "execution_id": execution_id,
-                **fields,
-                "phase": "claimed",
-                "started_at": datetime.now(UTC).isoformat(),
-            }
+            self._executions[execution_id] = {**_record(execution_id, **fields), "phase": "claimed"}
             self._flush()
 
     def set_phase(self, execution_id: str, phase: str) -> None:
@@ -64,11 +64,7 @@ class ExecutionStatusReporter:
     def upsert_phase(self, execution_id: str, phase: str, **fields: Any) -> None:
         with self._lock:
             if execution_id not in self._executions:
-                self._executions[execution_id] = {
-                    "execution_id": execution_id,
-                    **fields,
-                    "started_at": datetime.now(UTC).isoformat(),
-                }
+                self._executions[execution_id] = _record(execution_id, **fields)
             self._executions[execution_id]["phase"] = phase
             self._flush()
 
@@ -84,6 +80,20 @@ class ExecutionStatusReporter:
                 self._remote = remote
                 self._flush()
 
+    def set_ramp_up(self, view: Any, target: int) -> None:
+        """Publish #471 ramp progress（RampUpSnapshot 或 None=不在爬坡，防抖）。"""
+        entry = None
+        if view is not None:
+            entry = {
+                "effective": view.effective,
+                "target": target,
+                "next_tier_seconds": view.next_tier_seconds,
+            }
+        with self._lock:
+            if entry != self._ramp_up:
+                self._ramp_up = entry
+                self._flush()
+
     def _flush(self) -> None:
         if self._path is None:
             return
@@ -91,6 +101,7 @@ class ExecutionStatusReporter:
             "pid": os.getpid(),
             "executions": self._executions,
             "remote": self._remote,
+            "ramp_up": self._ramp_up,
         }
         try:
             atomic_write(self._path, json.dumps(payload, ensure_ascii=False))
