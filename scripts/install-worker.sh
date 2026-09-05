@@ -28,11 +28,9 @@ GITHUB_RELEASE_BASE="https://github.com/LuciusCao/agent-legion/releases/download
 IMAGE_REPO="ghcr.io/luciuscao/agent-legion-worker"
 # 默认钉在已发布版本；--version / --velites-version 或同名环境变量覆盖。
 # 注意 compose 文件按 worker-v<version> tag ref 拉取：自定义版本必须存在
-# 对应 tag（即经过 worker-image-release workflow 发布过）。AGENT_WORKER_
-# COMPOSE_REF 可整体覆盖拉取 ref（如 develop），仅作测试/逃生口。
+# 对应 tag（即经过 worker-image-release workflow 发布过）。
 WORKER_VERSION="${AGENT_WORKER_VERSION:-0.6.1}"
 VELITES_VERSION="${VELITES_VERSION:-0.5.0}"
-COMPOSE_REF="${AGENT_WORKER_COMPOSE_REF:-worker-v${WORKER_VERSION}}"
 TARGET="${AGENT_WORKER_INSTALL_DIR:-$HOME/agent-legion-worker}"
 HOST_URL=""
 WORKER_ID=""
@@ -71,6 +69,13 @@ die() {
   exit 1
 }
 
+# YAML 单引号风格转义（codex P2）：用户可控字符串（--name / --worker-id /
+# --host-url）写入 worker.yaml 前统一处理——值内单引号加倍，整体再包单引号；
+# 否则 "Worker: west" 产生非法 YAML、"Worker #1" 被 # 截断成注释。
+yaml_sq() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --target) TARGET="${2:?--target 缺参数}"; shift 2 ;;
@@ -93,6 +98,11 @@ esac
 case "$VELITES_VERSION" in
   ''|*[!a-zA-Z0-9._-]*) die "非法 --velites-version: ${VELITES_VERSION}" ;;
 esac
+
+# COMPOSE_REF 必须在参数解析后计算（codex P1）：--version 改变镜像版本时
+# compose ref 要同步跟随，否则升级会静默组合「新镜像 × 旧编排文件」。
+# AGENT_WORKER_COMPOSE_REF 可整体覆盖拉取 ref（如 develop），测试/逃生口。
+COMPOSE_REF="${AGENT_WORKER_COMPOSE_REF:-worker-v${WORKER_VERSION}}"
 
 command -v docker >/dev/null 2>&1 || die "docker 未安装"
 docker compose version >/dev/null 2>&1 || die "docker compose 子命令不可用（需 Compose v2.24+）"
@@ -124,6 +134,10 @@ case "$MODELS_JSON" in
   *) [ -z "$MODELS_JSON" ] || MODELS_JSON="${ORIG_PWD}/${MODELS_JSON}" ;;
 esac
 
+# 输入校验（codex P2：发生在任何写入之前——路径写错应在安装目录被触碰
+# 前就失败，而不是留下半应用状态）
+[ -z "$MODELS_JSON" ] || [ -f "$MODELS_JSON" ] || die "--models-json 指向的文件不存在: $MODELS_JSON"
+
 mkdir -p "$TARGET/velites-bin" "$TARGET/velites-config" "$TARGET/pi-config"
 cd "$TARGET"
 
@@ -131,14 +145,17 @@ echo "==> 安装目录: $TARGET"
 echo "==> 镜像: ${IMAGE_REPO}:${WORKER_VERSION}（linux/${WORKER_ARCH}）"
 echo "==> velites: ${VELITES_VERSION}（${VELITES_TRIPLE}）"
 
-# ---- 1. compose 文件（自有资产：刷新到目标版本；拉取失败保留现有）----
-COMPOSE_URL="${REPO_RAW_BASE}/${COMPOSE_REF}/deploy/compose.worker.standalone.yaml"
+# ---- 1. 下载与校验阶段（codex P2：远端资产全部先备妥在临时目录）----
+# 任何一步失败都不触碰安装目录，杜绝「声明为目标版本、实际半应用」的
+# 状态；全部通过后才进入提交阶段统一落位。
 TMPDIR_="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_"' EXIT
+
+# ---- 1a. compose 文件（自有资产：拉取失败时保留现有，不算硬错误）----
+COMPOSE_URL="${REPO_RAW_BASE}/${COMPOSE_REF}/deploy/compose.worker.standalone.yaml"
+compose_new=0
 if curl -fsSL -o "$TMPDIR_/docker-compose.yaml" "$COMPOSE_URL"; then
-  # 原子替换（mv 同盘）；清理 compose 自身插值默认值与 .env 的显式声明保持一致
-  mv -f "$TMPDIR_/docker-compose.yaml" ./docker-compose.yaml
-  echo "==> compose 文件已更新（ref: ${COMPOSE_REF}）"
+  compose_new=1
 else
   if [ -f ./docker-compose.yaml ]; then
     echo "警告: 拉取 ${COMPOSE_URL} 失败，保留现有 docker-compose.yaml" >&2
@@ -147,23 +164,8 @@ else
   fi
 fi
 
-# ---- 2. .env：AGENT_WORKER_IMAGE 由脚本管理，其余内容不动 ----
-if [ ! -f ./.env ]; then
-  cat > ./.env <<'EOF'
-# compose 插值变量（本文件只被 compose 读取，不进容器；chmod 600 保护凭据）
-# LLM_GATEWAY_TOKEN=<gateway-token>   # models.json 中 apiKey 引用 $LLM_GATEWAY_TOKEN 时取消注释
-EOF
-  echo "==> .env 已创建"
-fi
-if grep -q '^AGENT_WORKER_IMAGE=' ./.env 2>/dev/null; then
-  sed -i.bak "s|^AGENT_WORKER_IMAGE=.*|AGENT_WORKER_IMAGE=${IMAGE_REPO}:${WORKER_VERSION}|" ./.env
-  rm -f ./.env.bak
-else
-  printf '\nAGENT_WORKER_IMAGE=%s:%s\n' "$IMAGE_REPO" "$WORKER_VERSION" >> ./.env
-fi
-chmod 600 ./.env
-
-# ---- 3. velites 二进制（版本戳命中即跳过；sha256 校验后原子安置）----
+# ---- 1b. velites 二进制（版本戳命中即跳过；sha256 校验在临时目录完成）----
+velites_new=0
 VELITES_TARBALL="velites-${VELITES_VERSION}-${VELITES_TRIPLE}.tar.gz"
 if [ -x ./velites-bin/velites ] && [ "$(cat ./velites-bin/.velites-version 2>/dev/null || true)" = "$VELITES_VERSION" ]; then
   echo "==> velites ${VELITES_VERSION} 已就位，跳过下载"
@@ -179,19 +181,49 @@ else
   actual="${actual%% *}"
   [ "$actual" = "$expected" ] || die "velites tarball 校验失败（期望 ${expected}，实际 ${actual}）"
   tar -xzf "$TMPDIR_/velites.tar.gz" -C "$TMPDIR_"
+  velites_new=1
+  echo "==> velites ${VELITES_VERSION} 已下载并校验（sha256 通过）"
+fi
+
+# ---- 2. 提交阶段（资产已全部备妥，逐项原子落位）----
+# ---- 2a. compose 文件 ----
+if [ "$compose_new" = 1 ]; then
+  # 原子替换（mv 同盘）；compose 自身插值默认值与 .env 的显式声明保持一致
+  mv -f "$TMPDIR_/docker-compose.yaml" ./docker-compose.yaml
+  echo "==> compose 文件已更新（ref: ${COMPOSE_REF}）"
+fi
+
+# ---- 2b. .env：AGENT_WORKER_IMAGE 由脚本管理，其余内容不动 ----
+if [ ! -f ./.env ]; then
+  cat > ./.env <<'EOF'
+# compose 插值变量（本文件只被 compose 读取，不进容器；chmod 600 保护凭据）
+# LLM_GATEWAY_TOKEN=<gateway-token>   # models.json 中 apiKey 引用 $LLM_GATEWAY_TOKEN 时取消注释
+EOF
+  echo "==> .env 已创建"
+fi
+if grep -q '^AGENT_WORKER_IMAGE=' ./.env 2>/dev/null; then
+  sed -i.bak "s|^AGENT_WORKER_IMAGE=.*|AGENT_WORKER_IMAGE=${IMAGE_REPO}:${WORKER_VERSION}|" ./.env
+  rm -f ./.env.bak
+else
+  printf '\nAGENT_WORKER_IMAGE=%s:%s\n' "$IMAGE_REPO" "$WORKER_VERSION" >> ./.env
+fi
+chmod 600 ./.env
+
+# ---- 2c. velites 二进制原子安置 + 版本戳 ----
+if [ "$velites_new" = 1 ]; then
   cp "$TMPDIR_/velites-${VELITES_VERSION}-${VELITES_TRIPLE}/velites" ./velites-bin/velites.tmp
   chmod +x ./velites-bin/velites.tmp
   mv -f ./velites-bin/velites.tmp ./velites-bin/velites
   echo "$VELITES_VERSION" > ./velites-bin/.velites-version
-  echo "==> velites ${VELITES_VERSION} 已安装（sha256 校验通过）"
+  echo "==> velites ${VELITES_VERSION} 已安装"
 fi
 
-# ---- 4. worker.yaml 引导配置（用户资产：仅缺失时创建）----
+# ---- 2d. worker.yaml 引导配置（用户资产：仅缺失时创建）----
 if [ ! -f ./worker.yaml ]; then
   cat > ./worker.yaml <<EOF
-host_url: ${HOST_URL:-http://<HOST-IP>:8000}
-worker_id: ${WORKER_ID}
-name: ${WORKER_NAME}
+host_url: $(yaml_sq "${HOST_URL:-http://<HOST-IP>:8000}")
+worker_id: $(yaml_sq "$WORKER_ID")
+name: $(yaml_sq "$WORKER_NAME")
 disabled_runtimes: []
 max_concurrency: 10
 labels: {os: linux, arch: ${WORKER_ARCH}, location: remote}
@@ -204,9 +236,8 @@ else
   echo "==> worker.yaml 已存在，跳过（改配置请走 Worker 控制台）"
 fi
 
-# ---- 5. models.json（用户资产：--models-json 显式安装；否则仅缺失时给示例）----
+# ---- 2e. models.json（用户资产：--models-json 显式安装；否则仅缺失时给示例）----
 if [ -n "$MODELS_JSON" ]; then
-  [ -f "$MODELS_JSON" ] || die "--models-json 指向的文件不存在: $MODELS_JSON"
   cp "$MODELS_JSON" ./velites-config/models.json
   chmod 600 ./velites-config/models.json
   echo "==> models.json 已从 ${MODELS_JSON} 安装"
