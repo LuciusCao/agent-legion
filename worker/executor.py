@@ -22,8 +22,8 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from worker.claim_backoff import CLAIM_BACKOFF_CAP_SECONDS, ClaimBackoffSequence
+from worker.claim_pacing import ClaimPacing
 from worker.cleanup import clean_work_root
-from worker.execution.run import agent_subprocess_env as agent_subprocess_env
 from worker.execution.run import run_execution
 from worker.fd_limits import raise_fd_limit
 from worker.host.client import Client, WorkerAuthError
@@ -63,16 +63,13 @@ def main() -> int:
     stop = threading.Event()
     status = ExecutionStatusReporter.from_env()
     metrics = WorkerMetricsCache.from_env()
-    signal.signal(signal.SIGTERM, lambda *_: stop.set())
-    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda *_: stop.set())
     poll_interval, registration = register_from_config(client, config, stop, args.config.parent)
     if registration is not True:
         return 2 if registration is False else 0
-    host_worker: dict[str, Any] | None = {
-        "worker_id": str(config["worker_id"]),
-        "name": str(config.get("name", config["worker_id"])),
-        "revoked": False,
-    }
+    # 首次同步前的兜底视图：get_self 失败时控制台仍有 worker_id 可显示。
+    host_worker: dict[str, Any] | None = {"worker_id": str(config["worker_id"]), "revoked": False}
     try:
         host_worker = sync_host_status(client, status, metrics, host_worker)
     except WorkerAuthError as exc:
@@ -103,7 +100,9 @@ def main() -> int:
     # #437: 退避序列改为「首次 1s 固定 → 指数翻倍 ±20% jitter → 上限 60s」。
     # 旧版以 poll_interval 为基数且无 jitter：Host 一次抖动让整条领料线同步
     # 退避对齐（锯齿并发）；首退避短固定让瞬时抖动不烧掉一个完整 poll 周期。
+    # #472：成功路径 0.2s 固定等待 → 自适应短等待（ClaimPacing 模块）。
     backoff = ClaimBackoffSequence(cap_seconds=CLAIM_BACKOFF_CAP_SECONDS)
+    pacing = ClaimPacing(log=lambda message: print(message, flush=True))
     pool = ThreadPoolExecutor(
         runtime_controls.MAX_DYNAMIC_CONCURRENCY, thread_name_prefix="agent-execution"
     )
@@ -197,19 +196,24 @@ def main() -> int:
                 ),
             }
             claimed = False
+            claim_rtt = 0.0
             try:
                 while budget["agent"] + budget["code"] > 0:
                     if stop.is_set():
                         break
+                    claim_started = time.monotonic()
                     claim = client.claim(
                         str(config["worker_id"]), max_concurrency, max_code_concurrency
                     )
                     if claim is None:
                         break
+                    # #472 codex P2：pacing 输入是单次成功 claim 的往返——
+                    # 批量 pass 里逐次重打点。批次总墙钟（N 次 claim + N 次
+                    # submit）不进 pacing，否则爬坡段输入被放大、直接钳死
+                    # 上沿，「成功=往返×0.5」退化为固定 100ms。
+                    claim_rtt = time.monotonic() - claim_started
                     claimed = True
-                    kind = str(claim.get("kind") or "agent")
-                    if kind != "code":
-                        kind = "agent"
+                    kind = "code" if str(claim.get("kind")) == "code" else "agent"
                     # Host 在 claim 事务里已强制分池；本地预算只防过度
                     # claim，竞态超发时照单收下（Host 已记账）。
                     budget[kind] -= 1
@@ -246,7 +250,10 @@ def main() -> int:
                 stop.wait(wait)
                 continue
             backoff.reset()
-            stop.wait(0.2 if claimed else poll_interval)
+            # #472：三路径收口进 wait_after_pass——成功=自适应短等待
+            # （单次往返），空队列=poll_interval；错误路径在上面 except
+            # 臂走 backoff。
+            stop.wait(pacing.wait_after_pass(claimed, claim_rtt, poll_interval))
     finally:
         stop.set()
         # Bounded: run_execution watches `stop` and kills children within
