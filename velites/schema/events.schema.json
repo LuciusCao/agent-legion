@@ -489,7 +489,7 @@
       ]
     },
     "ToolExecutionEndEvent": {
-      "description": "`tool_execution_end` event. `output_bytes` measures the tool's output\nvolume (stdout+stderr for bash, written/returned bytes for write/read);\nit is a measurement field only — no truncation happens in M1.",
+      "description": "`tool_execution_end` event. `output_bytes` measures the tool's output\nvolume (stdout+stderr for bash, written/returned bytes for write/read);\nit is a measurement field only — no truncation happens in M1. `timing`\ncarries the #469 phase decomposition (`spawnMs` / `firstByteMs` /\n`restMs` / `reapMs`); it is skipped on the wire for tool errors raised\nbefore any measurement (argument validation, guard rejection) — exactly\nthe `RequestTiming` convention on `message_end`.",
       "type": "object",
       "properties": {
         "isError": {
@@ -502,6 +502,16 @@
         },
         "result": {
           "$ref": "#/$defs/ToolResultData"
+        },
+        "timing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolTiming"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "toolCallId": {
           "type": "string"
@@ -550,6 +560,57 @@
       "required": [
         "content"
       ]
+    },
+    "ToolTiming": {
+      "description": "Phase timing of one tool execution (velites extension, #469). The whole\nfield is optional per tool and every phase inside it is optional per\nmeasurement: absent phases are skipped on the wire, never null. All\ndurations are wall-clock milliseconds measured by the harness around the\ntool's own execution path.\n\nPhase boundaries for `bash`:\n\n- `totalMs`: tool dispatch start → result ready (the decomposition base:\n  `total = spawnMs + firstByteMs + restMs + reapMs` on the happy path);\n- `spawnMs`: `Command::spawn` start → child pid returned (process\n  creation, sandbox wrapper exec included);\n- `firstByteMs`: spawn returned → first byte read from the child's\n  stdout/stderr pipes. This phase covers the child's entire prelude —\n  bash parsing, an internal `<<EOF` heredoc write, interpreter startup,\n  the script's first side effect — so a stall inside the child (the #469\n  blocking candidate: bash `heredoc_write` → `write()`) surfaces here\n  exactly. Absent when the child produced no output at all;\n- `restMs`: first byte → child exit observed (the steady run: output\n  streaming, waiting for completion);\n- `reapMs`: exit observed → process group reaped (present on the\n  timeout/cancel kill path).\n\nIn-process tools (`read` / `write` / `uuid` / `validate`) set only\n`totalMs`; the subprocess phases do not exist for them.",
+      "type": "object",
+      "properties": {
+        "firstByteMs": {
+          "description": "Spawn returned → first output byte observed, in milliseconds;\nabsent when the child produced no output.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "reapMs": {
+          "description": "Group termination + reap phase (kill/TERM → KILL grace → reaped), in\nmilliseconds; absent on a natural exit.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "restMs": {
+          "description": "First output byte → child exit observed, in milliseconds; on a\nno-output child this covers the whole wait instead.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "spawnMs": {
+          "description": "Process creation phase (`Command::spawn`) duration, in milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "totalMs": {
+          "description": "Tool dispatch start → result ready, in milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      }
     },
     "TurnEndEvent": {
       "description": "`turn_end` event: turn boundary marker only (schema v2). Pi re-serializes\nthe assistant `message` and its `toolResults` here; velites does not — the\nassistant message is already carried by this turn's `message_end`, and the\ntool results by the `tool_execution_end.result.content` events.",

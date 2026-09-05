@@ -6,6 +6,7 @@
 //! design §8); the notice tells the model which `offset` continues the file.
 
 use serde_json::Value;
+use std::time::Instant;
 
 use super::truncate::{self, TruncatedBy};
 use super::{resolve_readable, ToolContext, ToolError, ToolOutput};
@@ -19,6 +20,7 @@ pub async fn run(args: &Value, ctx: &ToolContext) -> ToolOutput {
 }
 
 fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
+    let started = Instant::now();
     let path = args
         .get("path")
         .and_then(Value::as_str)
@@ -105,5 +107,10 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
         content: vec![ContentBlock::Text { text }],
         is_error: false,
         output_bytes,
+        // In-process tool: only totalMs exists (#469).
+        timing: Some(crate::events::ToolTiming {
+            total_ms: Some(super::bash::elapsed_ms_pub(started)),
+            ..crate::events::ToolTiming::default()
+        }),
     })
 }

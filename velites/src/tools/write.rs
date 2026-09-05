@@ -1,6 +1,7 @@
 //! `write` tool: sandboxed atomic write (tmp file + rename).
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use serde_json::Value;
 
@@ -14,6 +15,7 @@ pub async fn run(args: &Value, ctx: &ToolContext) -> ToolOutput {
 }
 
 fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
+    let started = Instant::now();
     let path = args
         .get("path")
         .and_then(Value::as_str)
@@ -38,13 +40,17 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
     }
 
     // For write, the meaningful volume is the content written, not the
-    // confirmation text.
+    // confirmation text. In-process tool: only totalMs exists (#469).
     Ok(ToolOutput {
         content: vec![crate::events::ContentBlock::Text {
             text: format!("wrote {} bytes to {path}", content.len()),
         }],
         is_error: false,
         output_bytes: content.len() as u64,
+        timing: Some(crate::events::ToolTiming {
+            total_ms: Some(super::bash::elapsed_ms_pub(started)),
+            ..crate::events::ToolTiming::default()
+        }),
     })
 }
 
