@@ -62,7 +62,8 @@ class ClaimBackoffSequence:
         jitter: float = CLAIM_BACKOFF_JITTER,
         rng: Callable[[], float] | None = None,
     ) -> None:
-        self._failures = 0
+        # Consecutive failures so far; #490's claim.backoff event reads it.
+        self.failures = 0
         self._cap_seconds = cap_seconds
         self._first_seconds = first_seconds
         self._jitter = jitter
@@ -70,14 +71,14 @@ class ClaimBackoffSequence:
 
     def next_wait(self) -> float:
         wait = jittered_claim_backoff(
-            self._failures,
+            self.failures,
             first_seconds=self._first_seconds,
             cap_seconds=self._cap_seconds,
             jitter=self._jitter,
             rng=self._rng,
         )
-        self._failures += 1
+        self.failures += 1
         return wait
 
     def reset(self) -> None:
-        self._failures = 0
+        self.failures = 0

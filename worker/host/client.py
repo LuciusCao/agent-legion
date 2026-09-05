@@ -5,7 +5,6 @@ heartbeat/metrics) live here; retried bulk transfers come from the
 
 from __future__ import annotations
 
-import contextlib
 import json
 import urllib.parse
 from pathlib import Path
@@ -14,7 +13,9 @@ from typing import Any, BinaryIO
 import requests
 
 from shared.protocol import PROTOCOL_VERSION
+from worker import events
 from worker.host.errors import TransientHostError, WorkerAuthError
+from worker.host.heartbeat_api import HeartbeatOperations
 from worker.host.transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
 
 # Protocol history lives in shared/protocol.py (shipped in the worker image,
@@ -27,7 +28,7 @@ DEFAULT_TIMEOUT = 30
 __all__ = ["Client", "TransientHostError", "WorkerAuthError"]
 
 
-class Client(TransferOperations):
+class Client(TransferOperations, HeartbeatOperations):
     def __init__(
         self,
         host: str,
@@ -53,17 +54,23 @@ class Client(TransferOperations):
         timeout: float | None = None,
         stream_to: Path | None = None,
     ) -> tuple[int, bytes]:
-        response = self.session.request(
-            method,
-            f"{self.host}{path}",
-            data=data,
-            headers={
-                **({"X-Agent-Worker-Token": self.token} if self.token else {}),
-                **(headers or {}),
-            },
-            timeout=self.timeout if timeout is None else timeout,
-            stream=stream_to is not None,
-        )
+        # #490: both error arms emit http.error with the target URL (the
+        # middle-502 blind spot); healthy answers stay silent.
+        token_header = {"X-Agent-Worker-Token": self.token} if self.token else {}
+        try:
+            response = self.session.request(
+                method,
+                f"{self.host}{path}",
+                data=data,
+                headers={**token_header, **(headers or {})},
+                timeout=self.timeout if timeout is None else timeout,
+                stream=stream_to is not None,
+            )
+        except requests.RequestException as exc:
+            events.note_http_transport_error(self.host, path, method, exc)
+            raise
+        if response.status_code >= 400:
+            events.note_http_error_response(self.host, path, response.status_code, response.content)
         # 大文件下载：流式写同目录临时文件再原子 rename，避免全量入内存；
         # 出错（4xx/5xx 小 body）仍读 content 供上层判断。iter_content 会把
         # urllib3 的断连/读超时包装成 RequestException，进入重试路径；重试时
@@ -179,21 +186,3 @@ class Client(TransferOperations):
             raise RuntimeError(f"ops metrics failed: HTTP {status}: {body[:300]!r}")
         metrics: dict[str, Any] = json.loads(body)
         return metrics
-
-    def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
-        """Beat once; returns (status, cancelled_execution_ids).
-
-        Protocol v2 Hosts answer 200 with a body listing this Worker's
-        cancelled kind='code' executions; v1 answers 204 (no body)."""
-        status, body = self.request(
-            "POST",
-            f"/api/agent-executions/{execution_id}/heartbeat",
-            headers={"X-Agent-Lease-Id": lease_id},
-        )
-        cancelled: list[str] = []
-        if status == 200:
-            with contextlib.suppress(ValueError, TypeError, AttributeError):
-                cancelled = [
-                    str(value) for value in json.loads(body).get("cancelled_execution_ids", [])
-                ]
-        return status, cancelled

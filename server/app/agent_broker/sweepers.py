@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from server.app.agent_broker.claim import cancel_request
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
+from server.app.agent_broker.worker_events import note_lease_expired
 from server.app.db.transaction import write_transaction
 from server.app.workflows.sharding_requeue import (
     fail_shard_for_dead_execution,
@@ -77,6 +78,7 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 f"deleting expired agent lease {lease_id} exec={row['execution_id']}"
                 f" job={row['job_id']} worker={row['worker_id']} attempt={row['attempt']}"
             )
+            note_lease_expired(row, broker.requeue_limit)
             conn.execute("delete from executor_leases where id=%s", (lease_id,))
             conn.execute(
                 "update node_runs set status='failed', finished_at=current_timestamp,"

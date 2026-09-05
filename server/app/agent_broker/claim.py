@@ -25,6 +25,7 @@ from server.app.agent_broker.claim_timing import (
 )
 from server.app.agent_broker.claim_windows import needed_claim_kinds, scan_kind
 from server.app.agent_broker.manifest_trim import cancel_request
+from server.app.agent_broker.worker_events import note_claim_outcome
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
@@ -94,6 +95,7 @@ def claim_in_transaction(
         touch_worker(conn, worker_id)
         timer.stage("writes")
         _report_claim_stages(timer, worker_id, claimed=None, state=ScanState())
+        note_claim_outcome(worker_id, None, view, {})
         return None, Counter()
     cursor = next(broker._fairness_counter)
     # Alternate the leading kind per pass so neither kind is systemically
@@ -110,10 +112,12 @@ def claim_in_transaction(
             touch_worker(conn, worker_id)
             timer.stage("writes")
             _report_claim_stages(timer, worker_id, claimed=claimed, state=state)
+            note_claim_outcome(worker_id, claimed, view, state.skip_reasons)
             return claimed, state.skip_reasons
     touch_worker(conn, worker_id)
     timer.stage("writes")
     _report_claim_stages(timer, worker_id, claimed=None, state=state)
+    note_claim_outcome(worker_id, None, view, state.skip_reasons)
     return None, state.skip_reasons
 
 

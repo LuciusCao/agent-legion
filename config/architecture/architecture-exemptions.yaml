@@ -472,13 +472,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 141
 - check: architecture.file_budget
-  path: worker/host/client.py
-  reason: '#381 version handshake: the registration payload gained one informational runtime_versions
-    mapping (effective runtimes'' --version outputs). Single line addition to an existing payload builder.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 164
-- check: architecture.file_budget
   path: worker/runtime/catalog.py
   reason: '#381 version handshake: probe_runtime_versions asks each effective runtime for its --version
     output so the registration payload carries the "worker code x velites version" compatibility matrix

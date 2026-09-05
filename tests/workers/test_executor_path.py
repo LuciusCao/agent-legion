@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from worker.executor import agent_subprocess_env
+from worker.execution.run import agent_subprocess_env
 
 
 def test_prepends_worker_interpreter_bin_dir(monkeypatch: pytest.MonkeyPatch) -> None:

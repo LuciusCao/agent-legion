@@ -16,6 +16,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
+from server.app.agent_broker import worker_events
 from server.app.agent_control.registry import ONLINE_THRESHOLD_SECONDS as _ONLINE_THRESHOLD_SECONDS
 from server.app.db.connection import DatabaseConnection
 from server.app.db.dialect import ConnectSource
@@ -137,6 +138,8 @@ class OpsMetricsService:
         the depth gauges reuse the queries already run here (queued,
         active_executions) plus the enqueue pool backlog, and the DB-pool
         wait gauges come from the psycopg pool stats.
+
+        #490: the online read also feeds worker_events.note_worker_offline.
         """
         sampled_at = now or datetime.now(UTC)
         bucket_start = sampled_at.replace(second=0, microsecond=0) - timedelta(minutes=1)
@@ -149,14 +152,13 @@ class OpsMetricsService:
                 " where revoked_at is null and last_seen_at >= %s",
                 (online_since,),
             )["c"]
-            online_worker_ids = {
-                row["worker_id"]
-                for row in conn.execute(
-                    "select worker_id from agent_workers"
-                    " where revoked_at is null and last_seen_at >= %s",
-                    (online_since,),
-                ).fetchall()
-            }
+            # #490: one last_seen read serves the online set AND the
+            # offline fold (memo in worker_events).
+            worker_rows = conn.execute(
+                "select worker_id, last_seen_at from agent_workers where revoked_at is null"
+            ).fetchall()
+            worker_last_seen = {str(r["worker_id"]): r["last_seen_at"] for r in worker_rows}
+            online_worker_ids = {k for k, v in worker_last_seen.items() if worker_events.as_utc(v)}
             active_executions = _fetch_one(
                 conn,
                 "select count(*) as c from agent_execution_requests where state = 'claimed'",
@@ -226,6 +228,7 @@ class OpsMetricsService:
                     tokens=tokens_by_worker.get(worker_id, _EMPTY_TOKENS),
                 )
             upsert_workspace_samples(conn, bucket_start, workspace_samples)
+        worker_events.note_worker_offline(sampled_at, worker_last_seen)
         self._sample_runtime_profile(bucket_start, queued=int(queued), active=active_executions)
 
     def _sample_runtime_profile(self, bucket_start: datetime, *, queued: int, active: int) -> None:

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from starlette import concurrency
 
-from server.app.agent_broker import AgentExecutionBroker
+from server.app.agent_broker import AgentExecutionBroker, worker_events
 from server.app.agent_broker.agent_result_commit import commit_agent_result
 from server.app.agent_broker.result_spool import discard_staged_result, spool_result_body
 from server.app.agent_control.completion import AgentCompletionHandler
@@ -123,9 +123,7 @@ def create_agent_workers_router(
                 # inside issue_token's transaction; allowed_workspaces is
                 # not passed here (that legacy parameter only serves direct
                 # registry callers without a key binding).
-                register_token_ids=[
-                    str(token_id) for row in scope for token_id in row["token_ids"]
-                ],
+                register_token_ids=[i for r in scope for i in r["token_ids"]],
             )
         except RegisterKeyDeleted as exc:
             # A bound key was deleted after the read-only resolve (guard
@@ -149,6 +147,7 @@ def create_agent_workers_router(
                 payload.runtimes,
                 payload.runtime_versions,
             )
+        worker_events.note_worker_registered(payload, scope)
         return RegisterAgentWorkerResponse(
             worker_token=token,
             allowed_workspaces=[row["workspace_id"] for row in scope],

@@ -13,10 +13,12 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from pathlib import Path
 from typing import Any
 
+from worker import events
 from worker._atomic import atomic_write
 from worker.code_runner import cancel_executions, execute_code
 from worker.event_filter import spawn_event_pump
@@ -132,6 +134,7 @@ def run_execution(
     execution_id = str(claim["execution_id"])
     lease_id = str(claim["lease_id"])
     node_key = str(claim["node_key"])
+    started_monotonic = time.monotonic()  # #490 wall clock anchor
     # Batch 2: kind='code' claims run the node code sandboxed instead of an
     # Agent runtime; absent kind = agent (old Hosts never send it).
     exec_kind = str(claim.get("kind") or "agent")
@@ -140,13 +143,7 @@ def run_execution(
     run_dir = job_dir / "runs" / node_key / "worker"
     # agent 进程组记录：executor 被 SIGKILL 时 supervisor 按此 killpg 兜底。
     pgid_record = execution_dir / AGENT_PGID_FILENAME
-    status_fields = {
-        "job_id": str(claim.get("job_id", "")),
-        "node_key": node_key,
-        "workspace_id": str(claim.get("workspace_id", "")),
-        "agent_id": str(claim.get("agent_id", "")),
-        "run_dir": "" if exec_kind == "code" else str(run_dir),
-    }
+    status_fields = events.status_fields(claim, run_dir, exec_kind)
     status.start(execution_id, **status_fields)
     ownership_lost = threading.Event()
     heartbeat = start_lease_heartbeat(
@@ -195,10 +192,10 @@ def run_execution(
             prepared = prepare_execution(client, claim, execution_dir, download_slots)
             manifest = prepared.manifest
             command = prepared.command
-            events = run_dir / "events.jsonl"
+            events_file = run_dir / "events.jsonl"
             env = agent_subprocess_env(environment)
             status.set_phase(execution_id, "running")
-            with events.open("wb") as output:
+            with events_file.open("wb") as output:
                 proc = subprocess.Popen(
                     command,
                     cwd=job_dir,
@@ -238,6 +235,9 @@ def run_execution(
                 )
             # else: lease lost mid-run — the Host owns the outcome; nothing
             # to deliver, fall through to the local-discard path below.
+        # #490 execution.completed：exit_code 读 task（agent 分支的局部变量
+        # 在 code 分支未定义，读它会把每个 code claim 炸成 NameError）。
+        events.note_run_outcome(claim, task, started_monotonic)
     except PendingUploadExists:
         # #203：execution_dir 属于本 claim 租约的排队中 pending 上传。上报假
         # failed 会经 submit() 覆盖 marker 丢掉旧结果，所以本次 claim 直接放
@@ -255,6 +255,9 @@ def run_execution(
         # traceback.print_exc() 先行输出完整堆栈。PendingUploadExists 已在
         # 上臂按 #203 语义单独处理，不会落进这里。
         traceback.print_exc()
+        # #490 execution.failed：下载/spawn/等待抛异常（遏制边界），错误
+        # 摘要随事件落盘。
+        events.note_execution_failed(claim, exc, started_monotonic)
         task = UploadTask(
             execution_id=execution_id,
             lease_id=lease_id,

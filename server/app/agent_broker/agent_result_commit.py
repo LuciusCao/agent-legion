@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from server.app.agent_broker import AgentExecutionBroker
+from server.app.agent_broker import AgentExecutionBroker, worker_events
 from server.app.agent_broker.result_spool import publish_staged_result
 from server.app.agent_control.completion import (
     AgentCompletionHandler,
@@ -40,6 +40,7 @@ def commit_agent_result(
     it if this commit never renames it."""
     payload = broker.claimed_payload(execution_id, worker_id)
     if payload is None or str(payload["lease_id"]) != lease_id:
+        worker_events.note_execution_finished_rejected(execution_id, worker_id)
         raise HTTPException(status_code=409, detail="execution is not owned by this Worker")
     if broker.bundle_dir is None:
         raise HTTPException(status_code=500, detail="Agent bundle storage is unavailable")
@@ -64,8 +65,15 @@ def commit_agent_result(
         if not finished:
             raise HTTPException(status_code=409, detail="execution lease is no longer active")
         if broker.mark_done(execution_id, worker_id, lease_id, record) is None:
+            worker_events.note_execution_finished_rejected(execution_id, worker_id, payload)
             raise HTTPException(status_code=409, detail="execution is no longer owned")
         succeeded = True
+        # #490 execution.finished: outcome + wall time (claim → committed
+        # result spans download/run/upload); claimed_at is read post-done,
+        # so the wall time is best-effort.
+        worker_events.note_execution_finished(
+            execution_id, worker_id, payload, outcome, broker.database_dsn
+        )
         # Runtime profile (#359): execute-stage done rate (a worker execution
         # reached its terminal state through the normal result path).
         from server.app.services.runtime_profile import profile

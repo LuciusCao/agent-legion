@@ -23,6 +23,7 @@ from server.app.agent_broker.empty import EmptyClaimTrigger
 from server.app.agent_broker.enqueue import enqueue_request
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
+from server.app.agent_broker.worker_events import note_heartbeat_rejected
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.events.aggregator import record_job_update
@@ -195,6 +196,7 @@ class AgentExecutionBroker:
                 (execution_id, worker_id, lease_id),
             ).fetchone()
             if row is None:
+                note_heartbeat_rejected(execution_id, worker_id, "not_owned")
                 return False
             conn.execute(
                 "update agent_execution_requests set heartbeat_at=current_timestamp"
@@ -203,6 +205,7 @@ class AgentExecutionBroker:
             )
             if not heartbeat_lease(conn, row["lease_id"], self.lease_ttl_seconds):
                 # Released concurrently: success would keep a zombie attempt alive.
+                note_heartbeat_rejected(execution_id, worker_id, "lease_not_active")
                 return False
             touch_worker(conn, worker_id)
             return True

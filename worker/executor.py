@@ -21,9 +21,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]  # worker/ 包根
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from worker import events
 from worker.claim_backoff import CLAIM_BACKOFF_CAP_SECONDS, ClaimBackoffSequence
 from worker.cleanup import clean_work_root
-from worker.execution.run import agent_subprocess_env as agent_subprocess_env
 from worker.execution.run import run_execution
 from worker.fd_limits import raise_fd_limit
 from worker.host.client import Client, WorkerAuthError
@@ -68,8 +68,9 @@ def main() -> int:
     poll_interval, registration = register_from_config(client, config, stop, args.config.parent)
     if registration is not True:
         return 2 if registration is False else 0
+    worker_id = str(config["worker_id"])
     host_worker: dict[str, Any] | None = {
-        "worker_id": str(config["worker_id"]),
+        "worker_id": worker_id,
         "name": str(config.get("name", config["worker_id"])),
         "revoked": False,
     }
@@ -185,15 +186,13 @@ def main() -> int:
             # Backpressure: a deep upload backlog means the Host is not
             # draining results; taper claiming linearly towards zero instead
             # of an all-or-nothing gate, which hysteresis-oscillates.
+            backlog_limit = transfer.upload_backlog_limit
             budget = {
                 "agent": claim_availability(
-                    agent_base, uploads.depth, max_concurrency, transfer.upload_backlog_limit
+                    agent_base, uploads.depth, max_concurrency, backlog_limit
                 ),
                 "code": claim_availability(
-                    code_base,
-                    uploads.depth,
-                    max(max_code_concurrency, 1),
-                    transfer.upload_backlog_limit,
+                    code_base, uploads.depth, max(max_code_concurrency, 1), backlog_limit
                 ),
             }
             claimed = False
@@ -201,15 +200,15 @@ def main() -> int:
                 while budget["agent"] + budget["code"] > 0:
                     if stop.is_set():
                         break
-                    claim = client.claim(
-                        str(config["worker_id"]), max_concurrency, max_code_concurrency
-                    )
+                    events.note_claim_attempt(worker_id, budget, uploads.depth, claim_enabled)
+                    claim = client.claim(worker_id, max_concurrency, max_code_concurrency)
                     if claim is None:
                         break
                     claimed = True
                     kind = str(claim.get("kind") or "agent")
                     if kind != "code":
                         kind = "agent"
+                    events.note_claim_received(worker_id, claim)
                     # Host 在 claim 事务里已强制分池；本地预算只防过度
                     # claim，竞态超发时照单收下（Host 已记账）。
                     budget[kind] -= 1
@@ -242,6 +241,9 @@ def main() -> int:
                 # 时长。#437：等待时长经 ClaimBackoffSequence（首 1s 固定、
                 # 之后指数翻倍 ±20% jitter、上限 60s），fleet 不同步对齐。
                 wait = backoff.next_wait()
+                # #490 claim.backoff：#437 序列状态结构化落盘；HTTP 错误码/
+                # URL 已在 client.request 的 http.error 事件里。
+                events.note_claim_backoff(worker_id, exc, wait, backoff.failures)
                 print(f"Agent claim error: {exc}; retrying in {wait:.1f}s", flush=True)
                 stop.wait(wait)
                 continue
