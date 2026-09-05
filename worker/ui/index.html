@@ -89,6 +89,8 @@
                   <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#share"></use></svg>
                   <span>运行中容量</span>
                   <strong id="capacity-state">—</strong>
+                  <!-- #471 冷启动容量爬坡进度：不在爬坡时隐藏 -->
+                  <small id="ramp-up-state" class="hint" hidden></small>
                   <span class="meter"><i id="capacity-meter"></i></span>
                 </article>
                 <article class="status-item status-item-emphasis status-item-upload">
@@ -205,6 +207,14 @@
                     <label>心跳间隔（秒）<input name="heartbeat_interval_seconds" type="number" min="0.2" step="0.1" /></label>
                     <label>停止宽限（秒）<input name="shutdown_grace_seconds" type="number" min="0.2" step="0.1" /></label>
                     <label class="wide">出网代理 <span class="hint">http(s)/socks5(h) URL，可含认证；留空 = 直连（默认，忽略继承的代理环境变量）；填写后执行进程与 agent 子进程出网经代理，保存后重启生效</span><input name="proxy" type="text" placeholder="http://127.0.0.1:7897" /></label>
+                  </div>
+                  <div class="form-section-heading"><h3>冷启动容量爬坡</h3></div>
+                  <p class="hint">开启后，Worker 启动 / 重新开始领取时生效容量从初始档起步、按步进和间隔逐档放量到最大并发，避免一次性全量并发打满 provider；三项任一留空或勾选禁用即回到一次性全量。热更新生效。</p>
+                  <div class="advanced-grid">
+                    <label class="ramp-toggle"><input type="checkbox" name="ramp_up_enabled" /> 启用爬坡</label>
+                    <label>初始档位 <span class="hint">起步并发</span><input name="ramp_up_initial" type="number" min="1" max="1024" /></label>
+                    <label>步进 <span class="hint">每档增加</span><input name="ramp_up_step" type="number" min="1" max="1024" /></label>
+                    <label>间隔（秒）<span class="hint">每档保持时长</span><input name="ramp_up_interval_seconds" type="number" min="0.2" step="0.1" /></label>
                   </div>
                 </details>
                 <div id="form-error" class="error" role="alert"></div>

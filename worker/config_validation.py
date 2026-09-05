@@ -16,6 +16,7 @@ from typing import Any
 
 from worker import worker_declarations
 from worker.proxy_config import validate_proxy
+from worker.ramp_up import normalized_ramp_up_block, validate_ramp_up
 from worker.runtime.catalog import SUPPORTED_RUNTIMES, resolve_config_runtimes
 from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY, validate_claim_controls
 
@@ -36,6 +37,7 @@ _EDITABLE_FIELDS = {
     "heartbeat_interval_seconds",
     "shutdown_grace_seconds",
     "proxy",
+    "ramp_up",
 }
 _DEFAULTS: dict[str, Any] = {
     "claim_enabled": False,
@@ -60,6 +62,8 @@ _DEFAULTS: dict[str, Any] = {
     # 出网代理（#444）：空 = 直连（默认，service 入口剥离继承的代理 env）；
     # 非空 = supervisor 派生 executor 时注入全部代理 env 变量。
     "proxy": "",
+    # 冷启动容量爬坡（#471）：None = 禁用；块形状见 ramp_up.validate_ramp_up。
+    "ramp_up": None,
 }
 
 
@@ -120,11 +124,7 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     # models allowlist 的 runtime 取值校验对齐支持全集而非生效集合：生效集合
     # 随机器安装状态浮动，持久化校验不该跟着漂（发现阶段仍按生效集合取交集）。
     models = worker_declarations.normalize_models(config.get("models", []), SUPPORTED_RUNTIMES)
-    for field in (
-        "poll_interval_seconds",
-        "heartbeat_interval_seconds",
-        "shutdown_grace_seconds",
-    ):
+    for field in ("poll_interval_seconds", "heartbeat_interval_seconds", "shutdown_grace_seconds"):
         value = config.get(field)
         if (
             isinstance(value, bool)
@@ -136,6 +136,9 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     if not isinstance(environment, dict):
         raise ValueError("environment 必须是对象")
     proxy = validate_proxy(config.get("proxy", ""))
+    # 冷启动爬坡（#471）：None/False = 禁用（一次性全量，行为回到现状）；
+    # 归一化出口（键补齐、int→float）在 ramp_up.normalized_ramp_up_block。
+    ramp_up = normalized_ramp_up_block(validate_ramp_up(config.get("ramp_up")))
     return {
         **config,
         "host_url": host_url,
@@ -151,4 +154,5 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
         "labels": normalized_labels,
         "models": models,
         "proxy": proxy,
+        "ramp_up": ramp_up,
     }
