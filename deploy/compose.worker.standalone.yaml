@@ -24,8 +24,11 @@ services:
     volumes:
       - ./worker.yaml:/etc/agent-legion/worker.yaml:ro
       # velites 二进制外挂（issue #381）：worker 镜像不含任何 agent runtime
-      # 执行器。long syntax + create_host_path: false：源文件缺失时 compose
-      # 拒绝启动而不是静默建目录（fail-fast 提前到部署动作本身）。
+      # 执行器。注意：无 create_host_path 键时 daemon 会在 bind 源缺失时
+      # 自动创建空**目录**并照常启动（实测）——期望 runtime 守卫
+      # （AGENT_WORKER_EXPECT_RUNTIMES）才是真正的 fail-fast 层：空目录
+      # 探测不到二进制 → 容器 fail（安装脚本 install-worker.sh 的落位
+      # 守卫负责不把目录留在原地）。
       - type: bind
         source: ./velites-bin/velites
         target: /app/data/bin/velites

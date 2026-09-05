@@ -52,7 +52,7 @@ usage() {
   --name NAME           显示名（默认 "Worker on <hostname>"）
   --models-json FILE    安装该文件为 velites-config/models.json（已存在则
                         覆盖——显式传入即声明为本次的期望内容）
-  --version TAG         worker 镜像 tag（默认 0.6.0；须存在 worker-v<TAG>
+  --version TAG         worker 镜像 tag（默认 0.6.1；须存在 worker-v<TAG>
                         发布 tag）
   --velites-version VER velites 二进制版本（默认 0.5.0）
   --no-up               只组装文件，不执行 docker compose up
@@ -107,6 +107,12 @@ COMPOSE_REF="${AGENT_WORKER_COMPOSE_REF:-worker-v${WORKER_VERSION}}"
 command -v docker >/dev/null 2>&1 || die "docker 未安装"
 docker compose version >/dev/null 2>&1 || die "docker compose 子命令不可用（需 Compose v2.24+）"
 command -v curl >/dev/null 2>&1 || die "curl 未安装"
+# env_file long syntax（required: false）需要 Compose v2.24+；版本串格式
+# 各发行版不一，匹配不上只警告不阻断（认不出的格式放行，报解析错时先
+# 升级 compose——subagent P3）。
+if ! docker compose version --short 2>/dev/null | grep -qE '^v?(2\.(2[4-9]|[3-9][0-9])|[3-9])\.'; then
+  echo "警告: docker compose 版本可能低于 v2.24（env_file long syntax 需要），up 报解析错时先升级 compose" >&2
+fi
 
 # 容器架构跟随宿主 Docker 的原生架构（Docker Desktop on Apple Silicon 跑
 # linux/arm64 容器）；不要在 arm64 宿主上装 x86_64 二进制（exec format error
@@ -150,11 +156,19 @@ echo "==> velites: ${VELITES_VERSION}（${VELITES_TRIPLE}）"
 # 状态；全部通过后才进入提交阶段统一落位。
 TMPDIR_="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_"' EXIT
+# POSIX sh 不保证 SIGINT/SIGTERM 时触发 EXIT trap（subagent P3）：显式转
+# exit 让 EXIT trap 接管清理，Ctrl-C 中断下载不在 /tmp 留残骸。
+trap 'exit 1' INT TERM HUP
 
 # ---- 1a. compose 文件（自有资产：拉取失败时保留现有，不算硬错误）----
 COMPOSE_URL="${REPO_RAW_BASE}/${COMPOSE_REF}/deploy/compose.worker.standalone.yaml"
 compose_new=0
 if curl -fsSL -o "$TMPDIR_/docker-compose.yaml" "$COMPOSE_URL"; then
+  # 语法/插值预检（subagent P3）：透明代理返回 200 + HTML 时会原样落位，
+  # 失败推迟到 up 才爆且难排查；config 校验把问题提前到下载时刻。
+  if ! docker compose -f "$TMPDIR_/docker-compose.yaml" config --quiet 2>"$TMPDIR_/compose-config.err"; then
+    die "拉取的 compose 文件校验失败（内容异常？透明代理/中间人返回了非 YAML）: $(tail -1 "$TMPDIR_/compose-config.err")"
+  fi
   compose_new=1
 else
   if [ -f ./docker-compose.yaml ]; then
@@ -167,7 +181,9 @@ fi
 # ---- 1b. velites 二进制（版本戳命中即跳过；sha256 校验在临时目录完成）----
 velites_new=0
 VELITES_TARBALL="velites-${VELITES_VERSION}-${VELITES_TRIPLE}.tar.gz"
-if [ -x ./velites-bin/velites ] && [ "$(cat ./velites-bin/.velites-version 2>/dev/null || true)" = "$VELITES_VERSION" ]; then
+# -f 而非 -x：-x 对目录同样放行（subagent P2）——bind 源缺失时 daemon
+# 自动建的空目录会被误认成已安装的二进制，且后续重跑永远命中跳过分支。
+if [ -f ./velites-bin/velites ] && [ "$(cat ./velites-bin/.velites-version 2>/dev/null || true)" = "$VELITES_VERSION" ]; then
   echo "==> velites ${VELITES_VERSION} 已就位，跳过下载"
 else
   curl -fsSL -o "$TMPDIR_/velites.tar.gz" \
@@ -193,7 +209,17 @@ if [ "$compose_new" = 1 ]; then
   echo "==> compose 文件已更新（ref: ${COMPOSE_REF}）"
 fi
 
-# ---- 2b. .env：AGENT_WORKER_IMAGE 由脚本管理，其余内容不动 ----
+# 混合态守卫（subagent P2）：compose 拉取失败保留旧文件时，若本次是版本
+# 变更运行，继续会把 .env 刷成新版本——形成「新镜像声明 × 旧编排文件」
+# 的混合态（正是 codex P1 修复要消灭的组合）。版本变更必须 compose 与
+# 镜像同步切换，拉不到就整体失败。
+env_image_now="$(sed -n 's/^AGENT_WORKER_IMAGE=//p' ./.env 2>/dev/null | tail -1)"
+if [ "$compose_new" = 0 ] && [ -n "$env_image_now" ] && [ "$env_image_now" != "${IMAGE_REPO}:${WORKER_VERSION}" ]; then
+  die "compose 拉取失败（ref ${COMPOSE_REF}）且本次为版本变更（${env_image_now} → ${WORKER_VERSION}）：保留旧编排而刷新 .env 会制造镜像×编排混合态，已中止。确认 worker-v${WORKER_VERSION} tag 已发布后重跑"
+fi
+
+# ---- 2b. .env：自管行（AGENT_WORKER_IMAGE / AGENT_WORKER_UI_BIND /
+# AGENT_WORKER_UI_PORT）由脚本维护，其余内容不动 ----
 if [ ! -f ./.env ]; then
   cat > ./.env <<'EOF'
 # compose 插值变量（本文件只被 compose 读取，不进容器；chmod 600 保护凭据）
@@ -201,16 +227,42 @@ if [ ! -f ./.env ]; then
 EOF
   echo "==> .env 已创建"
 fi
-if grep -q '^AGENT_WORKER_IMAGE=' ./.env 2>/dev/null; then
-  sed -i.bak "s|^AGENT_WORKER_IMAGE=.*|AGENT_WORKER_IMAGE=${IMAGE_REPO}:${WORKER_VERSION}|" ./.env
-  rm -f ./.env.bak
-else
-  printf '\nAGENT_WORKER_IMAGE=%s:%s\n' "$IMAGE_REPO" "$WORKER_VERSION" >> ./.env
+# 尾换行兜底：无尾换行的自建 .env 会把下面的追加行粘进末行
+[ -n "$(tail -c 1 ./.env)" ] && printf '\n' >> ./.env
+
+set_self_managed_line() {
+  # 原位替换或追加一行自管配置。经临时文件 + mv 落位（不用 sed -i.bak：
+  # 那会先覆盖再删除用户可能预先存在的 .env.bak 手工备份，subagent P3）。
+  sm_key="$1"; sm_value="$2"
+  if grep -q "^${sm_key}=" ./.env; then
+    sed "s|^${sm_key}=.*|${sm_key}=${sm_value}|" ./.env > ./.env.staged
+    mv -f ./.env.staged ./.env
+  else
+    printf '%s=%s\n' "$sm_key" "$sm_value" >> ./.env
+  fi
+}
+
+set_self_managed_line AGENT_WORKER_IMAGE "${IMAGE_REPO}:${WORKER_VERSION}"
+# 环境变量携带的 UI 绑定/端口持久化（subagent P2）：只活在本次进程的话，
+# 用户事后按脚本指引手动 up、或升级重跑忘带 env，端口冲突就会复发——
+# 8787 被本机 dev worker 占用恰是最常见的安装期失败。
+if [ -n "${AGENT_WORKER_UI_BIND:-}" ]; then
+  set_self_managed_line AGENT_WORKER_UI_BIND "${AGENT_WORKER_UI_BIND}"
+fi
+if [ -n "${AGENT_WORKER_UI_PORT:-}" ]; then
+  set_self_managed_line AGENT_WORKER_UI_PORT "${AGENT_WORKER_UI_PORT}"
 fi
 chmod 600 ./.env
 
 # ---- 2c. velites 二进制原子安置 + 版本戳 ----
 if [ "$velites_new" = 1 ]; then
+  # mv 目录陷阱守卫（subagent P2）：目标若被 docker bind 自动建成了
+  # **目录**，POSIX mv 会把文件移进目录内部（exit 0），版本戳照写、
+  # 「已安装」照报——静默损坏。先移除再安置。
+  if [ -d ./velites-bin/velites ]; then
+    echo "警告: velites-bin/velites 是目录（疑似 bind 源缺失时 daemon 自动创建的空目录），移除后安置真实二进制" >&2
+    rm -rf ./velites-bin/velites
+  fi
   cp "$TMPDIR_/velites-${VELITES_VERSION}-${VELITES_TRIPLE}/velites" ./velites-bin/velites.tmp
   chmod +x ./velites-bin/velites.tmp
   mv -f ./velites-bin/velites.tmp ./velites-bin/velites
@@ -274,32 +326,43 @@ EOF
   # || true：up 失败（如端口绑定）不让 set -e 在此杀掉脚本——真实错误在
   # up.log 里，由下面的状态检查统一解读输出。
   docker compose up -d >"$TMPDIR_/up.log" 2>&1 || true
-  # 不用 up --wait：全新安装尚未粘贴 scoped token 时 executor 处于「配置
-  # 等待中」（刻意设计，supervisor 不启动执行进程），healthcheck 按定义
-  # 报 unhealthy——--wait 会白等超时并把正常状态误报为失败。这里只验证
-  # 容器进程活着（能挡住期望 runtime 守卫的 exit 2 crash loop 与端口
-  # 绑定失败——后者容器停在 created 而非 running）。注意不做 nc/lsof
-  # 端口预检：macOS 上 IPv6 通配监听（node dev server 常态）会接走 IPv4
-  # 探测造成假阳性，而 Docker 的 tcp4 绑定实际能与之共存——预测不如
-  # 解读 up 的真实输出。
-  sleep 10
-  state="$(docker compose ps -a --format '{{.State}}' worker)"
-  case "$state" in
-    running) ;;
-    *)
-      cat >&2 <<EOF
-错误: 容器状态 ${state}（up 输出与日志如下）。常见原因：
+  # 稳定性采样（subagent P2）：crash loop 容器在 running/restarting 间
+  # 震荡，单次快照会踩在 running 点上误报成功——连采 3 次 × 5s，要求至少
+  # 连续 2 次采样 state=running 且 RestartCount=0。
+  # 检查边界（如实声明）：只覆盖容器进程级失败（端口绑定失败停 created、
+  # 镜像入口崩溃进 restart loop）。期望 runtime 守卫的 exit 2 发生在
+  # executor 子进程（supervisor 置 failed 不自动重启、容器本身恒
+  # running），只能经 healthcheck（unhealthy）与控制台日志暴露，不在此处。
+  stable=0
+  i=0
+  state="?" restarts="?"
+  while [ "$i" -lt 3 ]; do
+    sleep 5
+    i=$((i+1))
+    state="$(docker compose ps -a --format '{{.State}}' worker)"
+    cid="$(docker compose ps -q worker 2>/dev/null || true)"
+    restarts=1
+    if [ -n "$cid" ]; then
+      restarts="$(docker inspect --format '{{.RestartCount}}' "$cid" 2>/dev/null || echo 1)"
+    fi
+    if [ "$state" = "running" ] && [ "$restarts" = "0" ]; then
+      stable=$((stable+1))
+    else
+      stable=0
+    fi
+  done
+  if [ "$stable" -lt 2 ]; then
+    cat >&2 <<EOF
+错误: 容器未稳定运行（最后采样 state=${state} restarts=${restarts}）。常见原因：
   - ports are not available / address already in use：宿主机端口被占——
     在 ${TARGET}/.env 加 AGENT_WORKER_UI_PORT=<其它端口> 后重跑本脚本；
-  - 期望 runtime 守卫 fail-fast（velites 缺失/架构错配）——exit 2 crash
-    loop，检查 velites-bin/velites 与宿主架构。
+  - restarts>0（容器入口崩溃循环）：看下方日志。
 EOF
-      cat >&2 "$TMPDIR_/up.log"
-      docker compose logs --tail 30 worker >&2 || true
-      exit 1
-      ;;
-  esac
-  echo "==> Worker 容器已启动（粘贴 scoped token 前显示 unhealthy 属预期，见下方步骤 2）"
+    cat >&2 "$TMPDIR_/up.log"
+    docker compose logs --tail 30 worker >&2 || true
+    exit 1
+  fi
+  echo "==> Worker 容器已稳定运行（粘贴 scoped token 前显示 unhealthy 属预期，见下方步骤 2）"
 }
 
 if [ "$NO_UP" = "1" ]; then
@@ -315,10 +378,18 @@ else
 EOF
 fi
 
+# 实际生效的 UI 地址（成功消息不再硬编码 8787——subagent P2：端口插值
+# 存在时误导用户去错误地址）。优先级与 compose 插值一致：.env >
+# 默认值（脚本自身的环境变量值已在 .env 持久化，读回即可）。
+ui_host_final="$(sed -n 's/^AGENT_WORKER_UI_BIND=//p' ./.env 2>/dev/null | tail -1)"
+ui_host_final="${ui_host_final:-127.0.0.1}"
+ui_port_final="$(sed -n 's/^AGENT_WORKER_UI_PORT=//p' ./.env 2>/dev/null | tail -1)"
+ui_port_final="${ui_port_final:-8787}"
+
 cat <<EOF
 
 安装完成。后续步骤：
-  1. 打开 Worker 控制台 http://127.0.0.1:8787（本机浏览器）；
+  1. 打开 Worker 控制台 http://${ui_host_final}:${ui_port_final}（本机浏览器）；
   2. 在「Workspace 访问」粘贴 Host 签发的 scoped token（Host Web UI 的
      workspace 设置 → Agent 与 Worker）；
   3. 点「开始领取」（claim_enabled 每次进程启动都重置为关闭，刻意设计）；

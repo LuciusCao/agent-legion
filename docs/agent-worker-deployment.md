@@ -236,7 +236,10 @@ curl -fsSL https://raw.githubusercontent.com/LuciusCao/agent-legion/develop/scri
 
 与拉取式 override 的取舍：仓库克隆 + `compose.worker.local.yaml` 适合开发/
 调试机（能跑 `make stack-*`、随仓库升级）；一键安装适合纯执行节点（只有
-Docker、目录自包含）。两者最终形态等价（同一镜像 + 同一挂载面）。
+Docker、目录自包含）。两者最终形态等价（同一镜像 + 同一挂载面），但
+**共用 compose project name（`agent-legion-worker`），同一台机器上互斥**
+——一键安装的 up 会 recreate 仓库形态的容器并共享同名卷；要换形态先
+`down` 另一边。
 
 ### 出网代理（#444）
 
