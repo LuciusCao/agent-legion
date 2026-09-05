@@ -47,6 +47,13 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 - workflow_key 兼容窗口期公告（issue #211）：全部 deprecated 契约面的迁移文案统一标注移除时间 **2026-10-31**——27 个请求/响应字段、10 条 URL 别名、claim 协议字段将在终态批移除。显式发送恒等值（=workspace id）继续放行至该日期；不匹配值已由守卫拒绝（400）。所有部署实例须在窗口期内升级至 ≥ schema v68（存量 workflow_key 已对齐）。
 
 ### Added
+- Worker 镜像发布管道（worker-image-release workflow）：`worker-v*` tag push
+  时以原生 runner（amd64 / arm64，不用 QEMU）构建 worker 镜像，按 digest
+  合成 manifest list 后推送 GHCR（`ghcr.io/luciuscao/agent-legion-worker`，
+  打版本 / sha-<短哈希> / latest 三个 tag）；新增拉取式 compose override
+  示例 `deploy/compose.worker.pull.example.yaml`（`!reset` 清 build 段后
+  `make stack-worker-up` 直接用 registry 镜像），部署文档 §5 增补「拉取式
+  部署」小节。
 - 预览面板安全与正确性修复（PR #345 codex 评审 P1/P2）：宿主在 srcDoc 的
   `<head>` 注入 CSP（`default-src 'none'` + 平台资源白名单 + `connect-src` 限
   平台 origin），堵死沙箱 bundle 的出站网络通道（`sandbox="allow-scripts"` 不
