@@ -404,8 +404,12 @@ def test_slot_readers_survive_vanishing_between_glob_and_read(repo: Path, tmp_pa
 def test_holder_description_survives_vanishing_between_reads(repo: Path, tmp_path: Path) -> None:
     """The holder announcement reads a slot twice (pid via head, worktree
     via sed); the file can vanish between the two. The second read failing
-    must skip that holder, not fail the announcement (the old sed assignment
-    failure killed the gate mid-wait)."""
+    must skip that holder entirely. Old-code failure form: the announcement
+    only ever runs inside a command substitution, where errexit is stripped,
+    so the failed sed read never killed the gate — it just degraded the
+    holder line to "unknown(pid N)". This test therefore catches the old
+    code by output mismatch (a vanished slot must not be announced at all),
+    not by exit status."""
     holder = subprocess.Popen(["sleep", "60"])
     try:
         _write_slot(repo, "gate-raced", pid=holder.pid, worktree="/raced-wt")
@@ -435,7 +439,12 @@ def test_holder_description_survives_vanishing_between_reads(repo: Path, tmp_pat
 # waiter must keep queueing through the churn and finally acquire. The
 # millisecond window is only hit probabilistically (on the old code this
 # test fails often, not always); the shim tests above pin the semantics
-# deterministically.
+# deterministically. The iteration counter is written atomically (per-writer
+# tmp + mv): the test reads it while the churners still run, and a plain
+# `> file` truncate-then-write could hand the reader an empty file — the
+# very intermittent-failure family this PR removes (review P2). The tmp name
+# carries the writer's pid because both churners write this one counter
+# file; a shared tmp name would re-open the truncate window between them.
 _CHURN_LOOP = r"""end=$((SECONDS + 6))
 i=0
 while (( SECONDS < end )); do
@@ -444,7 +453,7 @@ while (( SECONDS < end )); do
   done
   rm -f .git/gate-slots/gate-churn-$$-$i-*
   i=$((i + 1))
-  echo "$i" > .churn-iterations
+  printf '%s\n' "$i" >".churn-iterations.tmp.$$" && mv ".churn-iterations.tmp.$$" .churn-iterations
 done
 """
 
