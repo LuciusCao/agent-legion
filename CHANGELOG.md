@@ -47,6 +47,12 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 - workflow_key 兼容窗口期公告（issue #211）：全部 deprecated 契约面的迁移文案统一标注移除时间 **2026-10-31**——27 个请求/响应字段、10 条 URL 别名、claim 协议字段将在终态批移除。显式发送恒等值（=workspace id）继续放行至该日期；不匹配值已由守卫拒绝（400）。所有部署实例须在窗口期内升级至 ≥ schema v68（存量 workflow_key 已对齐）。
 
 ### Added
+- Worker 一键安装脚本 `scripts/install-worker.sh` + 独立部署编排
+  `deploy/compose.worker.standalone.yaml`：无仓库克隆的机器经
+  `curl | sh` 组装独立 Worker 部署（拉取发布 compose、sha256 校验下载
+  velites 二进制、生成引导 worker.yaml / models.json），幂等语义分层
+  （自有资产刷新到目标版本，用户资产绝不覆盖）；standalone compose
+  新增 `AGENT_WORKER_UI_BIND` / `AGENT_WORKER_UI_PORT` 端口插值。
 - Worker 镜像发布管道（worker-image-release workflow）：`worker-v*` tag push
   时以原生 runner（amd64 / arm64，不用 QEMU）构建 worker 镜像，按 digest
   合成 manifest list 后推送 GHCR（`ghcr.io/luciuscao/agent-legion-worker`，
