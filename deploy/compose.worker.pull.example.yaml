@@ -1,0 +1,23 @@
+# 拉取式部署 override（worker-image-release workflow 发布 GHCR 镜像后使用）：
+# 复制为 deploy/compose.worker.local.yaml（Makefile 的 stack-worker-* 目标会
+# 自动并入该文件，见 Makefile 的 COMPOSE_WORKER_FILES），并把 image 与
+# AGENT_WORKER_IMAGE_VERSION 改成要固定的版本 tag。
+#
+# 前置不变：镜像不含任何 agent runtime 执行器（#381）——velites 二进制仍需
+# 按 VELITES_BIN 外挂（GitHub Release 的 velites-v* 产物，架构须匹配），
+# AGENT_WORKER_EXPECT_RUNTIMES 守卫、pi/velites 配置挂载全部沿用基础文件。
+# 镜像默认 private：内网机器先 docker login ghcr.io（read:packages 的 PAT），
+# 或在 GitHub package 设置里把包改为 public。
+#
+# 固定版本 tag 时 compose 默认 pull 策略（missing）即可；若固定 latest 追新，
+# 需另加 pull_policy: always，否则本机已有镜像不会更新。
+services:
+  worker:
+    # ！reset 清掉基础文件的 build 段（compose v2.24+ 语义）：up 一律使用
+    # registry 镜像，不再本地构建。
+    build: !reset null
+    image: ghcr.io/luciuscao/agent-legion-worker:0.6.0
+    environment:
+      # 注册时上报的 image_version 与实际镜像保持一致（运维可见性）；基础
+      # 文件默认值是 agent-legion-worker:local，本地构建形态才正确。
+      AGENT_WORKER_IMAGE_VERSION: ghcr.io/luciuscao/agent-legion-worker:0.6.0

@@ -189,6 +189,30 @@ warning，建议删除）。`models` 是可选的 runtime-scoped allowlist，不
 allowlist 条目时允许其全部发现结果。Agent 任务的准入条件：workspace token 授权、
 runtime 匹配、provider/model 命中 allowlist、labels 满足 `requires_labels`。
 
+### 拉取式部署（worker-v* 镜像发布）
+
+`make stack-worker-up` 默认在 Worker 机器现场构建镜像（`agent-legion-worker:local`）。多机部署可改用发布镜像：向仓库 push `worker-v*` tag（如 `worker-v0.6.0`；惯例跟随所基于的仓库发版 tag，同版重发加后缀如 `-r2`）触发
+[worker-image-release](../.github/workflows/worker-image-release.yml)
+workflow——原生 runner 构建 linux/amd64 与 linux/arm64（不使用 QEMU），按
+digest 合成 manifest list 后推送 GHCR
+`ghcr.io/luciuscao/agent-legion-worker`，打 `<版本>` / `sha-<短哈希>` /
+`latest` 三个 tag。
+
+Worker 机器侧：复制 `deploy/compose.worker.pull.example.yaml` 为
+`deploy/compose.worker.local.yaml`（Makefile 的 stack-worker-* 目标自动并入），
+把 `image` 与 `AGENT_WORKER_IMAGE_VERSION` 改成固定版本 tag，之后
+`make stack-worker-up` 即拉取启动（override 用 `!reset` 清除 build 段）。
+**拉取镜像不改变任何前置**：velites 二进制外挂、期望 runtime 守卫与配置
+挂载同本地构建形态完全一致。GHCR 包默认 private——各 Worker 机器先
+`docker login ghcr.io`（具 read:packages 的 PAT），或在 GitHub package
+设置中改为 public。发布走 GitHub 托管 runner，只能推 GitHub 侧 registry；
+需要内网私有 registry 时须自建 runner，不在本管道覆盖范围内。
+
+与 PR 门的分工：quality-gate 的 docker-build job 只做构建验证（push:
+false、仅 amd64）；实际发布只由 `worker-v*` tag 触发。协议升级顺序
+（Host first, Worker second）对镜像形态同样适用——升级即 pull 新版本 tag
+并重启容器。
+
 ### 出网代理（#444）
 
 Worker 默认**直连出网**：service 入口会剥离启动 shell 继承的代理环境变量
