@@ -10,10 +10,10 @@ const TYPE_LABELS: Record<string, string> = {
   removed: '删除',
   modified: '修改',
   condition_changed: '条件变更',
-  label_changed: '标签变更',
   mode_changed: '模式变更',
   field_added: '新增字段',
   field_removed: '删除字段',
+  reordered: '顺序调整',
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -29,6 +29,10 @@ const FIELD_LABELS: Record<string, string> = {
   execution: '执行配置',
   skill: 'Skill 绑定',
   accepted_item_types: '入口条目类型',
+  node_type: '节点类型',
+  after: '依赖顺序',
+  shard: '分片',
+  reduce: '聚合',
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -60,6 +64,9 @@ export function formatEdgeChange(change: EdgeChangeGroup): string {
   const after = change.afterCondition || ''
   if (change.type === 'condition_changed') {
     return `${change.source} → ${change.target}: ${before || '—'} → ${after || '—'}`
+  }
+  if (change.type === 'reordered') {
+    return '边顺序调整（边集合不变）'
   }
   const condition = after || before || ''
   return `${typeLabel}边 ${change.source} → ${change.target}${condition ? ` (${condition})` : ''}`

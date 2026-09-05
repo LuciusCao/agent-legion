@@ -174,6 +174,7 @@
     "tests/workflows/test_sharding_concurrency.py",
     "tests/workflows/test_skill_repo_gate.py",
     "tests/workflows/test_workflow_draft_compare.py",
+    "tests/workflows/test_workflow_draft_compare_fields.py",
     "tests/workflows/test_workflow_execution_control.py",
     "tests/workflows/test_workflow_revision_prune.py",
     "tests/workflows/test_workflow_revisions.py",

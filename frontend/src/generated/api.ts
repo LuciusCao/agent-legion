@@ -6690,7 +6690,7 @@ export interface components {
        * Type
        * @enum {string}
        */
-      type: 'added' | 'removed' | 'condition_changed' | 'label_changed'
+      type: 'added' | 'removed' | 'condition_changed' | 'reordered'
     }
     /** WorkflowEdgeResponse */
     WorkflowEdgeResponse: {

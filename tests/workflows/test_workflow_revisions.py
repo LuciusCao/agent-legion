@@ -27,6 +27,7 @@ from server.app.workflows.definition import (
     workflow_definition_from_dict,
     workflow_definition_from_mapping,
 )
+from server.app.workflows.schema import WorkflowReduceSpec, WorkflowShardSpec
 from tests.helpers import (
     load_builtin_definition,
     replace_agent_catalog,
@@ -628,6 +629,66 @@ def test_definition_to_yaml_upgrades_v1_to_schema_version_2(tmp_path: Path) -> N
     parsed = workflow_definition_from_yaml_string(yaml_text)
     assert parsed.schema_version == 2
     assert parsed.edges
+
+
+def _sharded_reduce_definition() -> WorkflowDefinition:
+    """Demo DAG + review_questions 分片、publish_content 聚合（合法配对）。"""
+    definition = load_builtin_definition("education_video_problems_generation")
+    return dc_replace(
+        definition,
+        nodes={
+            **definition.nodes,
+            "review_questions": dc_replace(
+                definition.nodes["review_questions"], shard=WorkflowShardSpec(count=4)
+            ),
+            "publish_content": dc_replace(
+                definition.nodes["publish_content"],
+                reduce=WorkflowReduceSpec(from_node="review_questions"),
+            ),
+        },
+    )
+
+
+def test_sharded_revision_snapshot_round_trip(tmp_path: Path) -> None:
+    """Issue #458：含 shard/reduce 基线的 definition_json 能被 loader 重读。
+
+    asdict 快照把 ``WorkflowReduceSpec.from_node`` 存成 ``from_node``，而
+    loader 只认 yaml 拼写 ``from``——修复前含 reduce 的快照过
+    ``workflow_definition_from_dict`` 必报 ``reduce.from is required``，
+    ``GET /workflow-revisions/active`` 与 compare 基线解析臂全部失效。
+    """
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
+    revision = WorkflowRevisionService(queries).publish_workspace_revision(
+        workspace["id"], _sharded_reduce_definition()
+    )
+
+    restored = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
+    assert restored.nodes["review_questions"].shard == WorkflowShardSpec(count=4)
+    assert restored.nodes["publish_content"].reduce == WorkflowReduceSpec(
+        from_node="review_questions"
+    )
+
+
+def test_definition_to_yaml_echoes_shard_and_reduce() -> None:
+    """Issue #458：回显 YAML 落 shard/reduce 键且回读等价（studio 初始草稿即此回显）。
+
+    修复前含 shard 基线的工作区一打开就有幽灵变更（compare 报 shard
+    modified）、reset 清不掉，照此发布会静默删掉分片/聚合声明。
+    """
+    definition = _sharded_reduce_definition()
+
+    yaml_text = definition_to_yaml(definition)
+
+    assert "shard:" in yaml_text
+    assert "reduce:" in yaml_text
+    parsed = workflow_definition_from_yaml_string(yaml_text)
+    assert parsed.nodes["review_questions"].shard == WorkflowShardSpec(count=4)
+    assert parsed.nodes["publish_content"].reduce == WorkflowReduceSpec(
+        from_node="review_questions"
+    )
 
 
 def test_response_payload_includes_terminal_outcome(tmp_path: Path) -> None:

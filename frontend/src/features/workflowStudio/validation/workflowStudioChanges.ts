@@ -167,6 +167,10 @@ function collectChangedNodeKeys(
     keys.add(change.node_key)
   }
   for (const change of summary.edge_changes) {
+    // #454 review P3: a reorder change carries the base's first-edge
+    // endpoints only as a payload filler — no node changed. Collecting
+    // them would badge two unrelated nodes on a pure order adjustment.
+    if (change.type === 'reordered') continue
     keys.add(change.source)
     keys.add(change.target)
   }

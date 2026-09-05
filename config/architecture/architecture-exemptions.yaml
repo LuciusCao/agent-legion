@@ -615,12 +615,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 81
 - check: architecture.file_budget
-  path: server/app/services/workflow_draft_compare.py
-  reason: '超出基线的比对分支与风险档；#418 关闭后经 ratchet 下调基线退出（compare 剩余字段的收编见 #431）'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/431
-  ceiling: 493
-- check: architecture.file_budget
   path: server/app/services/studio_publish_requests.py
   reason: 'The #429 review rounds harden the confirm path: resolve drops the expires_at predicate (a publish
     that outlives the remaining TTL must still record confirmed — TOCTOU), a losing resolve race reports
@@ -781,3 +775,39 @@ exemptions:
   owner: database
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 61
+- check: architecture.file_budget
+  path: server/app/workflows/loader.py
+  reason: >-
+    Issue #458 round-trip fix: the asdict snapshot reloader must translate
+    the serialized reduce.from_node spelling back to the yaml from the
+    loader reads (mirroring the existing node_type translation), else every
+    sharded/reduce revision snapshot fails reparse with "reduce.from is
+    required". A ten-line guarded translation at the one dict->definition
+    boundary; moving it out would fork the snapshot normalization the
+    loader already owns. Revisit when snapshot loading gains its own module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/458
+  ceiling: 309
+- check: architecture.file_budget
+  path: server/app/workflows/revision_format.py
+  reason: '#458 grows definition_to_yaml past its 131 ceiling: the echo must carry the shard/reduce
+    declarations (previously dropped — the studio''s initial draft YAML showed a ghost change against
+    its own baseline and publishing it silently stripped fan-out) plus the apply_shard_echo helper
+    extracted to keep the non-default-keys spelling next to its loader counterpart. The alternative,
+    splitting the echo out of the revision format module, would fork the one serializer every
+    revision/job-snapshot path shares. Remove when the revision echo moves to a schema-driven
+    serializer or the file gets a structural split of its own.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/458
+  ceiling: 157
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/validation/workflowStudioChangeFormatters.ts
+  reason: >-
+    Issue #431 adds the remaining compare-field labels (node_type, after,
+    shard, reduce) so the changes drawer never shows raw field names for
+    the fields compare now diffs; the file is a flat label table where
+    every line is a translation. Revisit when the label table moves to the
+    generated change-contract types or gets i18n tooling.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/431
+  ceiling: 88
