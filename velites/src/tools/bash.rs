@@ -11,13 +11,26 @@
 //! notice points at it.
 //!
 //! #469 phase instrumentation: the tool result carries `timing` with the
-//! decomposition `totalMs = spawnMs + firstByteMs + restMs + reapMs` (see
-//! `events::ToolTiming`). `firstByteMs` — spawn returned → first output
-//! byte — covers the child's entire prelude (bash parsing, an internal
-//! `<<EOF` heredoc write, interpreter startup, first side effect), which is
-//! where the sampled #469 stall lives. The output pipes are therefore read
+//! phase decomposition `totalMs = spawnMs + firstByteMs + restMs + reapMs`
+//! (see `events::ToolTiming`; `totalMs` itself is filled by the
+//! `ToolKind::execute` dispatch boundary, this module owns the subprocess
+//! phases). `firstByteMs` — spawn returned → first output byte, whichever
+//! of stdout/stderr lands first — covers the child's entire prelude (bash
+//! parsing, an internal `<<EOF` heredoc write, interpreter startup, first
+//! side effect), which is where the sampled #469 stall lives; `restMs`
+//! spans first byte → exit. The output pipes are therefore read
 //! incrementally (first chunk observed, then read to end); collection
 //! semantics (bytes, truncation, timeout) are unchanged.
+//!
+//! Observation caveat: `firstByteMs` measures when the HARNESS read the
+//! first byte, not when the child wrote it — and that gap is the point:
+//! a kernel pipe-path sleep (#469 spindump: `lck_mtx_sleep` on the pipe
+//! lock) manifests precisely as a scheduler-level interval between the
+//! child's write and the harness's read, which this phase captures. Under
+//! normal load the agent loop's sequential tool awaits keep the reader
+//! tasks pumping while the child runs, bounding benign drift; if tool
+//! dispatch ever becomes concurrent, re-evaluate this metric before
+//! trusting the prelude attribution.
 
 use std::time::{Duration, Instant};
 
@@ -78,7 +91,6 @@ async fn terminate(child: &mut tokio::process::Child, pid: Option<u32>) {
 }
 
 async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
-    let started = Instant::now();
     let command = args
         .get("command")
         .and_then(Value::as_str)
@@ -150,9 +162,11 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
             None
         }
     };
-    // Phase 3 (#469): steady run — first byte → exit observed (the whole
-    // wait on a no-output child). Measured from the prelude start so the
-    // two phases partition the output window without overlap.
+    // Phase 3 (#469): steady run — first output byte → exit observed. On a
+    // no-output child there is no first byte, so restMs covers the whole
+    // output window instead (schema: "the whole wait"). On the timeout/cancel
+    // path restMs ends where the timeout fired; killing and reaping the group
+    // is accounted separately as reapMs.
     let exit_offset_ms = elapsed_ms(output_started);
     let mut reap_ms = None;
     if timed_out || cancelled {
@@ -243,20 +257,40 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         }
     }
 
+    // #469 phase combination: firstByteMs is the EARLIER of the two streams'
+    // first-byte offsets (both readers share the same output_started, so the
+    // offsets are directly comparable — a stdout-first `.or()` would mis-bucket
+    // a stderr-first child's steady-run stall into the prelude). restMs then
+    // spans first byte → exit, so spawnMs + firstByteMs + restMs + reapMs
+    // partitions the total without overlap; a no-output child reports only
+    // restMs (the whole output window). totalMs is NOT set here — the
+    // ToolKind::execute dispatch boundary owns it, keeping one source for
+    // the decomposition base.
+    let first_byte_ms = match (stdout.1, stderr.1) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    };
+    let rest_ms = Some(match first_byte_ms {
+        Some(first_byte) => exit_offset_ms.saturating_sub(first_byte),
+        None => exit_offset_ms,
+    });
+
     Ok(ToolOutput {
         content: vec![crate::events::ContentBlock::Text { text }],
         is_error,
         output_bytes,
         timing: Some(ToolTiming {
-            total_ms: Some(elapsed_ms(started)),
+            total_ms: None,
             spawn_ms: Some(spawn_ms),
-            // Phase 2 + 3 partition the output window: whichever stream
-            // produced a byte first sets firstByteMs; restMs covers from the
-            // prelude start to the exit, so firstByteMs + restMs = the whole
-            // output window. A child with no output reports only restMs.
-            first_byte_ms: stdout.1.or(stderr.1),
-            rest_ms: Some(exit_offset_ms),
+            first_byte_ms,
+            rest_ms,
             reap_ms,
+            // The enforced ceiling (clamped model-supplied `timeout`), so
+            // the analysis side can join "actual duration vs requested
+            // ceiling" — #469: models raise `timeout` after consecutive
+            // failures, turning the 120s default into long self-inflicted
+            // stalls.
+            requested_timeout_ms: Some(timeout_secs.saturating_mul(1000)),
         }),
     })
 }
@@ -286,13 +320,8 @@ async fn read_with_first_byte<R: tokio::io::AsyncRead + Unpin>(
     Ok((buf, first_byte_ms))
 }
 
-/// Wall-clock milliseconds since `started` (monotonic, clamped at 0).
-pub(super) fn elapsed_ms_pub(started: Instant) -> u64 {
-    elapsed_ms(started)
-}
-
 fn elapsed_ms(started: Instant) -> u64 {
-    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+    super::elapsed_ms(started)
 }
 
 /// The model-supplied `timeout` argument, clamped into

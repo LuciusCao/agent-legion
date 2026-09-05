@@ -260,21 +260,68 @@ async fn bash_timing_covers_spawn_first_byte_rest_on_success() {
 
     // #469: the happy path decomposes totalMs ≈ spawnMs + firstByteMs +
     // restMs (reapMs absent on a natural exit). Every phase has a value and
-    // each fits inside the total.
+    // each fits inside the total; the phases partition the output window
+    // without overlap (restMs starts where firstByteMs ended).
     let timing = output.timing.expect("bash must always report timing");
     let total = timing.total_ms.expect("totalMs");
     let spawn = timing.spawn_ms.expect("spawnMs");
     let first_byte = timing.first_byte_ms.expect("firstByteMs");
     let rest = timing.rest_ms.expect("restMs");
     assert!(timing.reap_ms.is_none(), "no reap on a natural exit");
+    // No explicit `timeout` argument → the 120s default ceiling is reported,
+    // so the analysis side can join actual vs requested durations.
+    assert_eq!(
+        timing.requested_timeout_ms,
+        Some(120_000),
+        "default timeout must be reported as requestedTimeoutMs"
+    );
     assert!(
         spawn <= total && first_byte <= total && rest <= total,
         "phases ({spawn}+{first_byte}+{rest}) must fit inside totalMs ({total})"
+    );
+    assert!(
+        spawn + first_byte + rest <= total,
+        "phases ({spawn}+{first_byte}+{rest}) must not overlap within totalMs ({total})"
     );
     assert_eq!(
         output.output_bytes,
         "phase-marker\n".len() as u64,
         "incremental read must collect every output byte"
+    );
+}
+
+#[tokio::test]
+async fn bash_timing_reports_the_requested_timeout_ceiling() {
+    // #469: the enforced (clamped) `timeout` argument surfaces as
+    // requestedTimeoutMs — the analysis side's explanation variable for
+    // long-tail variance (models raise `timeout` after consecutive
+    // failures). Explicit values pass through; the clamp bounds absurd
+    // ones at the 1h ceiling.
+    let dir = tempfile::tempdir().unwrap();
+    let explicit = ToolKind::Bash
+        .execute(
+            &serde_json::json!({"command": "true", "timeout": 30}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(!explicit.is_error);
+    assert_eq!(
+        explicit.timing.as_ref().unwrap().requested_timeout_ms,
+        Some(30_000),
+        "explicit timeout must be reported as requestedTimeoutMs"
+    );
+
+    let clamped = ToolKind::Bash
+        .execute(
+            &serde_json::json!({"command": "true", "timeout": 1_000_000_000}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(!clamped.is_error);
+    assert_eq!(
+        clamped.timing.as_ref().unwrap().requested_timeout_ms,
+        Some(3_600_000),
+        "absurd timeout must report the enforced 1h clamp, not the raw ask"
     );
 }
 
@@ -285,8 +332,6 @@ async fn bash_timing_first_byte_separates_prelude_from_steady_run() {
     // after stretches the steady-run phase instead. This pins the #469
     // observation axis: a stall in the child's prelude (bash parsing,
     // heredoc write, interpreter startup) lands in firstByteMs, not restMs.
-    // restMs is measured from the prelude start to the exit, so both
-    // commands have a large restMs — the discriminator is firstByteMs.
     let dir = tempfile::tempdir().unwrap();
     let late_output = ToolKind::Bash
         .execute(
@@ -297,6 +342,7 @@ async fn bash_timing_first_byte_separates_prelude_from_steady_run() {
     assert!(!late_output.is_error);
     let late = late_output.timing.expect("bash must always report timing");
     let late_first = late.first_byte_ms.expect("firstByteMs (late output)");
+    let late_rest = late.rest_ms.expect("restMs (late output)");
 
     let early_output = ToolKind::Bash
         .execute(
@@ -314,14 +360,60 @@ async fn bash_timing_first_byte_separates_prelude_from_steady_run() {
         "prelude of sleep-then-print must dominate firstByteMs: {late_first}ms"
     );
     assert!(
+        late_rest < 900,
+        "sleep-then-print must have a short restMs (first byte → exit): {late_rest}ms"
+    );
+    assert!(
         early_first < 900,
         "print-then-sleep must have a short firstByteMs: {early_first}ms"
     );
-    // print-then-sleep: the child stays alive ~1s after the first byte, and
-    // restMs (prelude start → exit) covers it.
     assert!(
         early_rest >= 900,
-        "print-then-sleep must stretch restMs: {early_rest}ms"
+        "print-then-sleep must stretch restMs (first byte → exit): {early_rest}ms"
+    );
+}
+
+#[tokio::test]
+async fn bash_timing_first_byte_takes_the_earlier_stream() {
+    // P1 fix: firstByteMs is the EARLIER of the two streams' first bytes, not
+    // stdout's whenever stdout has one. A stderr-first child (echo to stderr,
+    // sleep, then stdout) must attribute the fast prelude to firstByteMs and
+    // the stall to restMs — a stdout-first `.or()` would mis-bucket the
+    // steady-run stall into the prelude and invert the #469 diagnosis.
+    let dir = tempfile::tempdir().unwrap();
+    let output = ToolKind::Bash
+        .execute(
+            &serde_json::json!({
+                "command": "echo warn >&2; sleep 1; echo out",
+                "timeout": 30
+            }),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(!output.is_error);
+    let text = match &output.content[0] {
+        velites::events::ContentBlock::Text { text } => text.clone(),
+        other => panic!("expected text content, got {other:?}"),
+    };
+    assert!(
+        text.contains("[stderr]") && text.contains("warn"),
+        "stderr missing: {text}"
+    );
+    assert!(text.contains("out"), "stdout missing: {text}");
+
+    let timing = output.timing.expect("bash must always report timing");
+    let first_byte = timing
+        .first_byte_ms
+        .expect("firstByteMs (stderr-first child)");
+    let rest = timing.rest_ms.expect("restMs (stderr-first child)");
+    // stderr fires almost immediately: the 1s sleep is the steady run.
+    assert!(
+        first_byte < 900,
+        "stderr-first child must have a short firstByteMs: {first_byte}ms"
+    );
+    assert!(
+        rest >= 900,
+        "the post-first-byte sleep must land in restMs, not firstByteMs: {rest}ms"
     );
 }
 
@@ -344,14 +436,19 @@ async fn bash_timing_no_output_child_skips_first_byte() {
         timing.first_byte_ms.is_none(),
         "no-output child must skip firstByteMs"
     );
-    assert!(timing.rest_ms.is_some());
+    // No first byte: restMs covers the whole output window (the sleep).
+    assert!(
+        timing.rest_ms.unwrap() >= 150,
+        "restMs must cover the whole wait"
+    );
     assert!(timing.reap_ms.is_none());
 }
 
 #[tokio::test]
 async fn bash_timeout_path_reports_reap_phase() {
     // The timeout path must still emit timing, with reapMs present (TERM →
-    // grace → KILL → reaped) and restMs covering the wait up to the timeout.
+    // grace → KILL → reaped) and restMs ending at the timeout: the kill and
+    // reap are accounted as reapMs, never inside restMs.
     let dir = tempfile::tempdir().unwrap();
     let output = ToolKind::Bash
         .execute(
@@ -363,13 +460,26 @@ async fn bash_timeout_path_reports_reap_phase() {
     let timing = output.timing.expect("timing on the timeout path");
     assert!(timing.total_ms.is_some());
     assert!(timing.spawn_ms.is_some());
-    assert!(timing.rest_ms.is_some());
     assert!(
-        timing.reap_ms.is_some(),
-        "timeout path must report the reap phase"
+        timing.first_byte_ms.is_none(),
+        "silent sleeper has no first byte"
     );
-    // restMs is bounded by the 1s timeout (plus scheduling slack).
-    assert!(timing.rest_ms.unwrap() < 5_000, "restMs too large");
+    let rest = timing.rest_ms.expect("restMs on the timeout path");
+    let reap = timing
+        .reap_ms
+        .expect("timeout path must report the reap phase");
+    // restMs ends at the 1s timeout; the TERM → grace(3s) → KILL → reap
+    // sequence lives in reapMs, so each phase stays in its own bucket. The
+    // reap can be sub-millisecond when sleep dies to SIGTERM instantly —
+    // the point is that the ~3s grace window is accounted somewhere.
+    assert!(
+        rest < 5_000,
+        "restMs must be bounded by the timeout: {rest}ms"
+    );
+    assert!(
+        rest + reap < 10_000,
+        "rest ({rest}) + reap ({reap}) must cover the timeout + grace window"
+    );
 }
 
 #[tokio::test]
