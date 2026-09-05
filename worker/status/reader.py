@@ -14,15 +14,17 @@ def read_runtime_status(path: Path) -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
         os.kill(int(payload["pid"]), 0)
     except (OSError, ValueError, KeyError, TypeError):
-        return {"executions": [], "remote": {}}
+        return {"executions": [], "remote": {}, "ramp_up": None}
     executions = payload.get("executions")
     if not isinstance(executions, dict):
         executions = {}
     remote = payload.get("remote")
+    ramp = payload.get("ramp_up")
     return {
         "executions": sorted(
             (entry for entry in executions.values() if isinstance(entry, dict)),
             key=lambda entry: str(entry.get("started_at", "")),
         ),
         "remote": remote if isinstance(remote, dict) else {},
+        "ramp_up": ramp if isinstance(ramp, dict) else None,
     }

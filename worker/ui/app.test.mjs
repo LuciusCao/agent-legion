@@ -270,3 +270,47 @@ test("mergeDisabledRuntimes 去重并排序", () => {
   const rows = [{ runtime: "pi", installed: false }];
   assert.deepEqual(mergeDisabledRuntimes(["pi"], rows, ["velites", "pi"]), ["pi", "velites"]);
 });
+
+// ---- #471 冷启动容量爬坡：worker/ui/ramp_up.js 纯函数 ----
+import { RAMP_UP_DEFAULTS, rampUpFormValues, rampUpFromForm, rampUpLine } from "./ramp_up.js";
+
+test("rampUpLine 爬坡中给出进度行与下一档倒计时（issue #471）", () => {
+  assert.equal(rampUpLine({ effective: 64, target: 640, next_tier_seconds: 90 }), "容量爬坡中 64 / 640 · 90s 后 +1 档");
+  assert.equal(rampUpLine({ effective: 64, target: 640, next_tier_seconds: null }), "容量爬坡中 64 / 640");
+  assert.equal(rampUpLine({ effective: 64, target: 640, next_tier_seconds: 0 }), "容量爬坡中 64 / 640 · 0s 后 +1 档");
+});
+
+test("rampUpLine 不在爬坡时返回空串（null/到顶/坏值）", () => {
+  assert.equal(rampUpLine(null), "");
+  assert.equal(rampUpLine(undefined), "");
+  assert.equal(rampUpLine({ effective: 640, target: 640, next_tier_seconds: null }), "");
+  assert.equal(rampUpLine({ effective: Number.NaN, target: 640 }), "");
+  assert.equal(rampUpLine({}), "");
+});
+
+test("rampUpFromForm 未勾选提交 null（禁用 = 一次性全量）", () => {
+  // 未勾选的 checkbox 不会出现在 FormData 里（get → null）。
+  assert.equal(rampUpFromForm(formDataLike({})), null);
+  assert.equal(rampUpFromForm(formDataLike({ ramp_up_initial: "64" })), null);
+});
+
+test("rampUpFromForm 勾选时组块并回退留空字段默认值", () => {
+  const data = formDataLike({ ramp_up_enabled: "on", ramp_up_initial: "64", ramp_up_step: "64", ramp_up_interval_seconds: "120" });
+  assert.deepEqual(rampUpFromForm(data), { initial: 64, step: 64, interval_seconds: 120 });
+  // 留空 → RAMP_UP_DEFAULTS（1/1/60，与后端 RampUpControls 默认对齐）。
+  const partial = formDataLike({ ramp_up_enabled: "on", ramp_up_initial: "8" });
+  assert.deepEqual(rampUpFromForm(partial), { initial: 8, step: RAMP_UP_DEFAULTS.step, interval_seconds: RAMP_UP_DEFAULTS.interval_seconds });
+});
+
+test("rampUpFormValues 配置块到表单值：禁用态补默认、启用态保留块值", () => {
+  assert.deepEqual(rampUpFormValues(null), { enabled: false, values: { initial: 1, step: 1, interval_seconds: 60 } });
+  assert.deepEqual(
+    rampUpFormValues({ initial: 64, step: 64, interval_seconds: 120 }),
+    { enabled: true, values: { initial: 64, step: 64, interval_seconds: 120 } },
+  );
+  // 部分键：块值优先，缺省键补默认（fillForm 的控件回填不依赖隐式默认）。
+  assert.deepEqual(
+    rampUpFormValues({ initial: 32 }),
+    { enabled: true, values: { initial: 32, step: 1, interval_seconds: 60 } },
+  );
+});
