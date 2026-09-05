@@ -109,6 +109,7 @@ server/app/
 | DELETE | `/agent-register-tokens/{token_id}` | `delete_register_token` | routes/agent_register_tokens.py |
 | POST | `/agent-executions/claim` | `claim` | routes/agent_worker_claims.py |
 | POST | `/agent-executions/{execution_id}/heartbeat` | `heartbeat` | routes/agent_worker_heartbeat.py |
+| POST | `/agent-executions/heartbeats` | `heartbeat_batch` | routes/agent_worker_heartbeat_batch.py |
 | GET | `/agent-workers/self/metrics` | `get_worker_metrics` | routes/agent_worker_metrics.py |
 | POST | `/agent-workers/register` | `register` | routes/agent_workers.py |
 | GET | `/agent-workers/self` | `get_worker_self` | routes/agent_workers.py |
@@ -322,6 +323,9 @@ server/app/
 | AgentDetailResponse | BaseModel | agent_id: str, latest: AgentVersionResponse | None, published: AgentVersionRe... | app/routes/agent_definition_contracts.py |
 | AgentVersionsResponse | BaseModel | versions: list[AgentVersionSummary] | app/routes/agent_definition_contracts.py |
 | AgentArchiveResponse | BaseModel | archived: int | app/routes/agent_definition_contracts.py |
+| BatchHeartbeatItem | BaseModel | execution_id: str, lease_id: str | app/routes/agent_worker_heartbeat_batch.py |
+| BatchHeartbeatRequest | BaseModel | executions: list[BatchHeartbeatItem] | app/routes/agent_worker_heartbeat_batch.py |
+| BatchHeartbeatResponse | BaseModel | renewed: list[str], lost: list[str], cancelled_execution_ids: list[str] | app/routes/agent_worker_heartbeat_batch.py |
 | RegisterAgentWorkerRequest | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
 | AgentWorkerWorkspace | BaseModel | workspace_id: str, workspace_name: str, token_ids: list[str] | app/routes/agent_workers_contracts.py |
 | RegisterAgentWorkerResponse | BaseModel | worker_token: str, host_protocol_version: int, allowed_workspaces: list[str],... | app/routes/agent_workers_contracts.py |

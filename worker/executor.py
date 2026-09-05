@@ -24,6 +24,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 from worker.claim_backoff import CLAIM_BACKOFF_CAP_SECONDS, ClaimBackoffSequence
 from worker.claim_pacing import ClaimPacing
 from worker.cleanup import clean_work_root
+from worker.execution.heartbeat_batch import start_batch_heartbeat
 from worker.execution.run import run_execution
 from worker.fd_limits import raise_fd_limit_startup
 from worker.host.client import Client, WorkerAuthError
@@ -112,6 +113,11 @@ def main() -> int:
         heartbeat_interval=interval,
         stop=stop,
     )
+    # #352：per-Worker 单心跳循环取代每执行一条心跳线程——本机全部在跑
+    # 执行（含排队上传）一次批量续期，写流量按机器数而非槽数；旧 Host
+    # （无批量端点）自动降级回逐执行心跳（heartbeat_batch.py）。
+    heartbeat_registry = start_batch_heartbeat(client, interval, stop)
+    uploads.set_heartbeat_registry(heartbeat_registry)
     # Restore unreported results BEFORE cleaning: their execution dirs carry
     # an upload_pending.json marker and are preserved by clean_work_root.
     if restored := uploads.restore(work_root):
@@ -239,7 +245,16 @@ def main() -> int:
                     kind = "code" if str(claim.get("kind")) == "code" else "agent"
                     # Host 已在 claim 事务强制分池；竞态超发照单收下（Host 记账）。
                     budget[kind] -= 1
-                    future = pool.submit(run_execution, client, claim, *run_args, *run_tail)
+                    # #352：heartbeat_registry 追加在 #471 的 run_args/run_tail
+                    # 拆组之后（registry 仍是 run_execution 的默认参数位）。
+                    future = pool.submit(
+                        run_execution,
+                        client,
+                        claim,
+                        *run_args,
+                        *run_tail,
+                        heartbeat_registry,
+                    )
                     active.add(future)
                     active_kinds[future] = kind
             except WorkerAuthError as exc:

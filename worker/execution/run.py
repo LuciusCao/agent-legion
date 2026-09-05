@@ -85,9 +85,9 @@ def deliver_result(
             if released == 409:
                 task = None
         if task is not None:
-            task.heartbeat_stop = heartbeat.stop
-            task.heartbeat_thread = heartbeat.thread
             heartbeat.adopt()
+            # #352：上传接管后租约由 UploadQueue 在批量 registry 里续期
+            # （deliver_bulk 恢复心跳接管；本线程不再碰该租约）。
             try:
                 uploads.submit(task)
             except Exception:
@@ -95,10 +95,10 @@ def deliver_result(
                 # （#233 模式，同 server/app/agent_broker/agent_bundle.py）。
                 # 宽是因为 submit 的逃逸族混族（marker 原子写的 OSError、
                 # 调度器已关停的 RuntimeError 等），而无论哪种失败都必须先
-                # 停心跳再上抛——否则心跳线程泄漏、租约被一个已失败的
-                # 任务续命。裸 re-raise 保留原始异常类型，由 executor 的
-                # future reap（executor.py）打印 traceback 兜底。
-                heartbeat.stop.set()  # 停止租约心跳线程，避免泄漏
+                # 停心跳再上抛——否则心跳泄漏、租约被一个已失败的任务续命。
+                # 裸 re-raise 保留原始异常类型，由 executor 的 future reap
+                # （executor.py）打印 traceback 兜底。
+                heartbeat.shutdown()
                 heartbeat.adopted.clear()
                 raise
             return
@@ -107,8 +107,7 @@ def deliver_result(
     # #203：带未投递 marker 的目录归 UploadQueue 所有，保留待其投递后自清
     # （skip 分支的 marker 必属当前 lease；孤儿 marker 在 prepare 已随 stale
     # 目录清掉，走不到这里）。
-    heartbeat.stop.set()
-    heartbeat.thread.join(timeout=2)
+    heartbeat.shutdown()
     status.finish(execution_id)
     if not (execution_dir / PENDING_FILENAME).is_file():
         shutil.rmtree(execution_dir, ignore_errors=True)
@@ -125,10 +124,13 @@ def run_execution(
     status: ExecutionStatusReporter,
     uploads: UploadQueue,
     download_slots: threading.Semaphore,
+    heartbeat_registry: Any | None = None,
 ) -> None:
     """Run one claimed execution and hand its result to the upload queue.
     Post-exit work (compression, archive, upload, report) belongs to the
-    UploadQueue; the Host-side slot is released via release-slot right at exit."""
+    UploadQueue; the Host-side slot is released via release-slot right at exit.
+    ``heartbeat_registry`` (#352) is the per-Worker batch heartbeat
+    coordinator; None keeps the legacy inert facade (single-beat tests)."""
     execution_id = str(claim["execution_id"])
     lease_id = str(claim["lease_id"])
     node_key = str(claim["node_key"])
@@ -155,8 +157,9 @@ def run_execution(
         lease_id,
         heartbeat_interval,
         ownership_lost,
-        # 任一心跳线程都可能带回 Host 的 code 取消列表（协议 v2 body）。
+        # 任一心跳拍都可能带回 Host 的 code 取消列表（协议 v2/v5 body）。
         on_cancelled=cancel_executions,
+        registry=heartbeat_registry,
     )
     proc: subprocess.Popen[bytes] | None = None
     task: UploadTask | None = None
