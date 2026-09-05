@@ -274,6 +274,63 @@ def test_claim_switch_and_capacity_are_hot_updated_without_restart(tmp_path: Pat
     assert supervisor.restarts == 0
 
 
+def test_ramp_up_null_disables_and_is_hot_updated(tmp_path: Path) -> None:
+    """#493 P2-1：显式 null 是唯一的 wire 禁用通道，必须落盘为禁用态。
+
+    model_dump(exclude_none=True) 会吞掉 null——不经 fields_set 修复时，
+    「PUT ramp_up: null」等价于没提交该字段，启用过爬坡的 worker 经控制台
+    永远关不掉。这里钉全链路：启用（块落盘+归一化）→ 显式 null（落盘
+    None、热更不重启）→ 未提交（保持禁用，partial update 语义不回退）。"""
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config(_config()))
+    supervisor = FakeSupervisor(store)
+    app = create_app(supervisor, tmp_path)
+
+    with TestClient(app) as client:
+        headers = _auth(store)
+        enabled = client.put(
+            "/api/config",
+            json={"ramp_up": {"initial": 64, "step": 64, "interval_seconds": 120}},
+            headers=headers,
+        )
+        disabled = client.put("/api/config", json={"ramp_up": None}, headers=headers)
+        untouched = client.put("/api/config", json={"max_concurrency": 5}, headers=headers)
+
+    assert enabled.status_code == 200
+    assert enabled.json()["config"]["ramp_up"] == {
+        "initial": 64,
+        "step": 64,
+        "interval_seconds": 120,
+    }
+    assert enabled.json()["restarted"] is False, "ramp_up 是热更字段，不该触发重启"
+    assert disabled.status_code == 200
+    assert disabled.json()["config"]["ramp_up"] is None, "显式 null 必须落盘为禁用"
+    assert disabled.json()["restarted"] is False
+    assert untouched.status_code == 200
+    assert untouched.json()["config"]["ramp_up"] is None, "未提交 ramp_up 保持现状（禁用）"
+    assert supervisor.restarts == 0
+    # 状态副本（executor 热读的 worker.yaml）确认为禁用态。
+    assert yaml.safe_load(store.path.read_text(encoding="utf-8"))["ramp_up"] is None
+
+
+def test_ramp_up_invalid_block_is_rejected_with_422(tmp_path: Path) -> None:
+    """#493：非法 ramp_up 块走既有 422 fail-fast（点名字段），不落盘。"""
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config(_config()))
+    app = create_app(FakeSupervisor(store), tmp_path)
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/config",
+            json={"ramp_up": {"initial": 0}},
+            headers=_auth(store),
+        )
+
+    assert response.status_code == 422
+    assert "ramp_up.initial" in str(response.json()["detail"])
+    assert store.read()["ramp_up"] is None, "校验失败不得半应用"
+
+
 def test_upload_max_concurrency_is_hot_updated_without_restart(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")
     store.write(validate_config(_config()))
@@ -640,6 +697,40 @@ def test_worker_ui_serves_icon_sprite(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/svg+xml")
     assert response.headers["Cache-Control"] == "no-cache"
+
+
+def test_ui_assets_cover_app_js_static_imports() -> None:
+    """#493 P1-1 回归钉子：ui_assets 白名单必须覆盖 app.js 的全部静态 import。
+
+    app.js 以 ES module 顶层 import 加载本地模块（如 ./ramp_up.js），任一
+    名字漏出白名单，asset() 就 404、浏览器中止整个模块图——控制台整页死
+    （状态/表单/按钮全不初始化）。这里直接扫描源码求「静态 import ⊆ 白
+    名单」全等：新增 import 忘记登记时立即红。白名单本身从 service 源码
+    读取（不走运行时闭包，避免测试与实现共读同一变量）。"""
+    import re
+
+    app_js = (ROOT / "worker/ui/app.js").read_text(encoding="utf-8")
+    imports = set(re.findall(r'from\s+"\./([A-Za-z0-9_.-]+)"\s*;', app_js))
+    static_src = (ROOT / "worker/service_static.py").read_text(encoding="utf-8")
+    match = re.search(r"UI_ASSETS = \(([^)]*)\)", static_src)
+    assert match, "UI_ASSETS tuple not found in worker/service_static.py"
+    whitelist = set(re.findall(r'"([^"]+)"', match.group(1)))
+    assert imports, "app.js 静态 import 扫描结果为空——正则或源码结构漂移"
+    missing = imports - whitelist
+    assert not missing, f"app.js 静态 import 未进 UI_ASSETS 白名单: {sorted(missing)}"
+
+
+def test_worker_ui_serves_ramp_up_module(tmp_path: Path) -> None:
+    """#493 P1-1：app.js 顶层 import 的 ./ramp_up.js 必须 200（接线级钉子）。"""
+    ui = ROOT / "worker/ui"
+    store = WorkerConfigStore(tmp_path / "state")
+    app = create_app(FakeSupervisor(store), ui)
+
+    with TestClient(app) as client:
+        response = client.get("/assets/ramp_up.js")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/javascript")
 
 
 def test_index_disables_browser_caching(tmp_path: Path) -> None:

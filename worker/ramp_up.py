@@ -24,13 +24,12 @@ This module throttles the **release rate**, not the claim rate:
 
 Mechanics: the effective capacity starts at ``initial`` and rises by
 ``step`` every ``interval_seconds`` of *claiming time* — a virtual clock
-that only advances while ``claim_enabled`` is on (pause gaps are folded
-back out via ``deduct``). The clock is injectable via ``observe(now)`` for
+that only advances while ``claim_enabled`` is on (``ramp_pass`` folds pause
+gaps back out on resume). ``observe(now)`` takes the caller's clock for
 deterministic tests (pattern of ``claim_pacing.py``). Reaching the target
 closes the window permanently; afterwards the normal capacity semantics
-(hot-read ``max_concurrency``, completion/refill churn) apply unchanged.
-Tier changes log through the caller-supplied ``log`` callable, one line
-per change, aligned with the existing ``worker slots`` style.
+apply unchanged. Tier changes log through the ``log`` callable, one line
+per change, aligned with the ``worker slots`` style.
 """
 
 from __future__ import annotations
@@ -87,11 +86,10 @@ def _require_int(block: dict[str, Any], key: str, default: int) -> int:
 def validate_ramp_up(block: Any) -> RampUpControls:
     """Validate one raw ``ramp_up`` config block into RampUpControls.
 
-    ``None``/``False`` = 禁用（回到现状的一次性全量）。mapping 需整数
+    ``None``/``False`` = 禁用（回到一次性全量）。mapping 需整数
     ``initial``/``step`` ∈ [1,1024]、``interval_seconds`` ∈ [0.2,3600]
-    （键缺省 1/1/60），否则 ``ValueError`` 点名键。``initial`` 超过当前
-    max_concurrency 不报错——首 observe 即到顶（为大档位写的配置不该把
-    中途调小的 worker 变砖）。"""
+    （键缺省 1/1/60），否则 ``ValueError`` 点名键。``initial`` ≥ 目标时
+    首 observe 即到顶、不报错（大档位配置不 brick 调小的 worker）。"""
     if block is None or block is False:
         return RampUpControls(enabled=False)
     if not isinstance(block, dict):
@@ -155,10 +153,12 @@ class RampUpState:
         """Hot-reload parameters without resetting the ramp position.
 
         A running ramp keeps its virtual clock; a smaller new ``initial``
-        cannot pull an in-flight tier back down (#471: 爬坡期只升不降)。
-        Disabling ends the window immediately; re-enabling after a closed
-        window opens a fresh one（新窗口从头爬：操作员重开爬坡的意图就
-        是要节流，而不是继承旧进度直通）。"""
+        cannot pull an in-flight tier back down (#471: 爬坡期只升不降——新
+        参数从当前档位起按新节奏继续). Disabling ends the window
+        immediately; re-enabling after a closed window opens a fresh one
+        （新窗口从头爬：重开爬坡的意图是节流，不是继承旧进度直通）。
+        目标热缩见 ``observe``——关窗后调大目标不自动重爬，需重爬时置
+        null 再重新启用块。"""
         if controls.enabled and not self._active and not self._controls.enabled:
             self._claim_clock = 0.0
             self._last_observed = None
@@ -175,10 +175,10 @@ class RampUpState:
         """One claim pass: fold elapsed time, return the effective capacity.
 
         ``target`` is the current hot-read ``max_concurrency``. Paused passes
-        hold the tier (the caller anchors the resume); once the effective
-        capacity reaches the target the window closes. ``pause_seconds``
-        subtracts a claiming-pause span from this pass's elapsed time (the
-        executor's resume pass passes ``now - paused_since``)."""
+        hold the tier; effective ≥ target 关窗（永久）——目标热缩到 ≤ 当前
+        档位即等效完成，调大目标不重开（见 reconfigure）。``pause_seconds``
+        从本轮 elapsed 折掉暂停跨度（executor 恢复 pass 传
+        ``now - paused_since``）。"""
         if self._last_observed is not None and claim_enabled:
             elapsed = max(0.0, now - self._last_observed - max(pause_seconds, 0.0))
             self._claim_clock += elapsed
@@ -191,7 +191,13 @@ class RampUpState:
             return RampUpSnapshot(self._reported or 0, target, None)
         interval = self._controls.interval_seconds
         tiers = int(self._claim_clock // interval) if interval > 0 else 1 << 30
-        effective = min(target, self._controls.initial + tiers * self._controls.step)
+        # #493 P2-2：窗口内热更到更小的 initial/step 时，按新参数算出的档位
+        # 可能低于已上报档位（192 → 6）——爬坡期只升不降（#471），用已上报
+        # 值兜底：容量面（claim 预算/背压门/Host 声明）不回撤，新参数从
+        # 当前档位起继续生效。
+        effective = max(
+            self._reported or 0, min(target, self._controls.initial + tiers * self._controls.step)
+        )
         if effective >= target:
             self._active = False
             if not self._completed_logged:

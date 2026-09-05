@@ -76,9 +76,14 @@ def main() -> int:
         # velites 沙箱二进制是部署缺口，重试无意义，必须人工修复后重启。
         print(error, flush=True)
         return 2
-    # #471 冷启动爬坡：启动预检 fail-fast（非法 ramp_up 块不进入主循环）；
+    # #471 冷启动爬坡：启动预检 fail-fast——非法 ramp_up 块是配置错误，
+    # 重试无意义（退出码 2，supervisor 不自动重启，人工修配置后重启）；
     # None（未配置）= 禁用，一次性全量——行为与现状完全一致。
-    ramp_controls = validate_ramp_up(raw_ramp_up)
+    try:
+        ramp_controls = validate_ramp_up(raw_ramp_up)
+    except ValueError as exc:
+        print(f"Agent Worker 启动预检失败：{exc}", flush=True)
+        return 2
     transfer = load_transfer_controls(args.config)
     client = Client(str(config["host_url"]), transfer_timeout=transfer.transfer_timeout_seconds)
     stop = threading.Event()
@@ -93,8 +98,8 @@ def main() -> int:
     host_worker: dict[str, Any] | None = {"worker_id": str(config["worker_id"]), "revoked": False}
     try:
         host_worker = sync_host_status(client, status, metrics, host_worker)
-    except WorkerAuthError as exc:  # 启动即被拒：终态退出（重注册需重启）。
-        print(f"Agent Worker rejected by server: {exc}; re-register required", flush=True)
+    except WorkerAuthError as exc:
+        print(f"Agent Worker status authentication rejected: {exc}", flush=True)
         return 2
     work_root = Path(str(config.get("work_root", "/var/lib/agent-legion-worker"))).resolve()
     environment = {str(key): str(value) for key, value in config.get("environment", {}).items()}
@@ -125,18 +130,10 @@ def main() -> int:
     ramp = apply_ramp_hot_reload(None, ramp_controls, _print)
     ramp_view, ramp_paused_since = None, None
     pool = ThreadPoolExecutor(MAX_DYNAMIC_CONCURRENCY, thread_name_prefix="agent-execution")
-    # run_execution 的循环不变参数（claim 为首个参数，逐单变化）；
-    # uploads/status 等实例在本循环内从不被重建，热更只调实例内部状态。
-    run_args = (
-        work_root,
-        environment,
-        interval,
-        stop,
-        shutdown_grace,
-        status,
-        uploads,
-        download_slots,
-    )
+    # run_execution 的循环不变参数（client/claim 逐单在前，其余两组不变）；
+    # uploads/status 实例在本循环内从不重建，热更只调实例内部状态。
+    run_args = (work_root, environment, interval, stop, shutdown_grace)
+    run_tail = (status, uploads, download_slots)
     next_sweep = time.monotonic()
     next_host_status = time.monotonic() + interval
     control_error: str | None = None
@@ -186,7 +183,9 @@ def main() -> int:
                 new_ramp_controls = load_ramp_up_controls(args.config)
             except (OSError, ValueError, YAMLError) as exc:
                 if (message := str(exc)) != control_error:
-                    _print(f"Agent dynamic control reload failed; keep previous: {message}")
+                    _print(
+                        f"Agent dynamic control reload failed; keeping previous values: {message}"
+                    )
                     control_error = message
             else:
                 # 全部加载成功才统一生效：半应用会让 "keeping previous values"
@@ -240,7 +239,7 @@ def main() -> int:
                     kind = "code" if str(claim.get("kind")) == "code" else "agent"
                     # Host 已在 claim 事务强制分池；竞态超发照单收下（Host 记账）。
                     budget[kind] -= 1
-                    future = pool.submit(run_execution, client, claim, *run_args)
+                    future = pool.submit(run_execution, client, claim, *run_args, *run_tail)
                     active.add(future)
                     active_kinds[future] = kind
             except WorkerAuthError as exc:

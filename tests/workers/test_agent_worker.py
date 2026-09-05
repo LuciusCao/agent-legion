@@ -775,6 +775,37 @@ def test_main_ramp_up_reaches_target_and_releases_budget(
     ), seen_capacities
 
 
+def test_main_rejects_invalid_ramp_up_block_with_exit_code_2(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#493 P1-2：非法 ramp_up 块必须退出码 2（supervisor 不自动重启）。
+
+    镜像 prepare_runtime_models 的预检模式：配置错误重试无意义，裸抛
+    ValueError 会变成退出码 1 + traceback → supervisor 无限 crash loop。
+    消息点名非法字段（fail-fast 带指引），且不进主循环（无 claim）。"""
+    fake = FakeClient(tmp_path / "unused.tar.gz")
+    claim_calls = 0
+
+    def claim(*args: object, **kwargs: object) -> dict | None:
+        nonlocal claim_calls
+        claim_calls += 1
+        return None
+
+    fake.claim = claim  # type: ignore[method-assign]
+    thread, _, result = _run_main(
+        monkeypatch,
+        tmp_path,
+        fake,
+        {"claim_enabled": True, "ramp_up": {"initial": 0, "step": 64, "interval_seconds": 120}},
+    )
+    thread.join(timeout=10)
+    assert result == [2]
+    assert claim_calls == 0, "预检失败不得进入主循环发起 claim"
+    output = capsys.readouterr().out
+    assert "ramp_up.initial" in output, "错误消息必须点名非法字段"
+    assert "Traceback" not in output, "配置错误不该以裸 traceback 形态退出"
+
+
 def test_main_ramp_up_disabled_claims_full_budget(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
