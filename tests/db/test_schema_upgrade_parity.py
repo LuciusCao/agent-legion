@@ -43,103 +43,28 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v77, job_status_counts_statement_triggers,
-# #437) must leave behind so the undo step rewinds a current-shape database
-# to exactly SCHEMA_VERSION-1. v77 replaces the v36/v73 row-level status
-# count triggers with statement-level transition-table triggers (no new
-# tables/columns/indexes): the undo drops the six statement triggers and
-# reinstates the v73/v36 row triggers (the migration module carries the
-# new shape; the schema file keeps only the counter tables since v77).
+# Effects the newest migration (v78, claim_stage_profile, #448) must leave
+# behind so the undo step rewinds a current-shape database to exactly
+# SCHEMA_VERSION-1. v78 adds the six claim-stage gauge columns to
+# ops_runtime_profile_samples (the migration module carries the ALTERs; the
+# schema file stays at its ceiling): the undo drops the columns, nothing
+# else — no tables, indexes, or trigger shapes change at v78.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("ops_runtime_profile_samples", "claim_scan_seconds_total", "double precision"),
+    ("ops_runtime_profile_samples", "claim_scan_seconds_max", "double precision"),
+    ("ops_runtime_profile_samples", "claim_evaluate_seconds_total", "double precision"),
+    ("ops_runtime_profile_samples", "claim_evaluate_seconds_max", "double precision"),
+    ("ops_runtime_profile_samples", "claim_writes_seconds_total", "double precision"),
+    ("ops_runtime_profile_samples", "claim_writes_seconds_max", "double precision"),
+)
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "job_status_counts_statement_triggers"
+_NEWEST_MIGRATION_NAME = "claim_stage_profile"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v76: the v36/v73 row-level status count triggers.
-_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = (
-    """
-    create or replace function sync_run_job_status_counts() returns trigger as $$
-    begin
-      if TG_OP = 'INSERT' then
-        if NEW.run_id <> '' then
-          insert into run_job_status_counts(run_id, status, cnt)
-          values (NEW.run_id, NEW.status, 1)
-          on conflict (run_id, status)
-          do update set cnt = run_job_status_counts.cnt + 1;
-        end if;
-        return NEW;
-      elsif TG_OP = 'DELETE' then
-        if OLD.run_id <> '' then
-          update run_job_status_counts set cnt = cnt - 1
-          where run_id = OLD.run_id and status = OLD.status;
-        end if;
-        return OLD;
-      else
-        if NEW.run_id is distinct from OLD.run_id
-           or NEW.status is distinct from OLD.status then
-          if OLD.run_id <> '' then
-            update run_job_status_counts set cnt = cnt - 1
-            where run_id = OLD.run_id and status = OLD.status;
-          end if;
-          if NEW.run_id <> '' then
-            insert into run_job_status_counts(run_id, status, cnt)
-            values (NEW.run_id, NEW.status, 1)
-            on conflict (run_id, status)
-            do update set cnt = run_job_status_counts.cnt + 1;
-          end if;
-        end if;
-        return NEW;
-      end if;
-    end;
-    $$ language plpgsql
-    """,
-    """
-    drop trigger if exists jobs_run_status_counts_sync_insert on jobs;
-    drop trigger if exists jobs_run_status_counts_sync_update on jobs;
-    drop trigger if exists jobs_run_status_counts_sync_delete on jobs;
-    create trigger jobs_run_status_counts_sync
-      after insert or delete or update of status, run_id on jobs
-      for each row execute function sync_run_job_status_counts()
-    """,
-    """
-    create or replace function sync_workspace_job_status_counts() returns trigger as $$
-    begin
-      if TG_OP = 'INSERT' then
-        insert into workspace_job_status_counts(workspace_id, status, cnt)
-        values (NEW.workspace_id, NEW.status, 1)
-        on conflict (workspace_id, status)
-        do update set cnt = workspace_job_status_counts.cnt + 1;
-        return NEW;
-      elsif TG_OP = 'DELETE' then
-        update workspace_job_status_counts set cnt = cnt - 1
-        where workspace_id = OLD.workspace_id and status = OLD.status;
-        return OLD;
-      else
-        if NEW.workspace_id is distinct from OLD.workspace_id
-           or NEW.status is distinct from OLD.status then
-          update workspace_job_status_counts set cnt = cnt - 1
-          where workspace_id = OLD.workspace_id and status = OLD.status;
-          insert into workspace_job_status_counts(workspace_id, status, cnt)
-          values (NEW.workspace_id, NEW.status, 1)
-          on conflict (workspace_id, status)
-          do update set cnt = workspace_job_status_counts.cnt + 1;
-        end if;
-        return NEW;
-      end if;
-    end;
-    $$ language plpgsql
-    """,
-    """
-    drop trigger if exists jobs_status_counts_sync_insert on jobs;
-    drop trigger if exists jobs_status_counts_sync_update on jobs;
-    drop trigger if exists jobs_status_counts_sync_delete on jobs;
-    create trigger jobs_status_counts_sync
-      after insert or delete or update of status, workspace_id on jobs
-      for each row execute function sync_workspace_job_status_counts()
-    """,
-)
+# faithful v77 (the v78 round adds columns only — no DDL to recreate).
+_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]

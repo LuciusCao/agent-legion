@@ -4822,10 +4822,22 @@ export interface components {
       claim_count: number
       /** Claim Empty Count */
       claim_empty_count: number
+      /** Claim Evaluate Seconds Max */
+      claim_evaluate_seconds_max: number
+      /** Claim Evaluate Seconds Total */
+      claim_evaluate_seconds_total: number
+      /** Claim Scan Seconds Max */
+      claim_scan_seconds_max: number
+      /** Claim Scan Seconds Total */
+      claim_scan_seconds_total: number
       /** Claim Seconds Max */
       claim_seconds_max: number
       /** Claim Seconds Total */
       claim_seconds_total: number
+      /** Claim Writes Seconds Max */
+      claim_writes_seconds_max: number
+      /** Claim Writes Seconds Total */
+      claim_writes_seconds_total: number
       /** Db Pool Wait Seconds Total */
       db_pool_wait_seconds_total: number
       /** Db Pool Waiting */

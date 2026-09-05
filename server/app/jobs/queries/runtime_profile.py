@@ -1,11 +1,9 @@
 """Runtime-profile gauge persistence on the JobQueries facade (BOUNDARY-DATA-001, #359).
 
-The ops-metrics service (``services/ops_metrics/service.py``) and the
-runtime-profile package call these facade methods for the
-``ops_runtime_profile_samples`` table; the raw SQL lives here with the rest
-of the queries layer. Upsert semantics mirror ``ops_metric_samples``: a
-sampler restart inside the same minute overwrites the partial bucket instead
-of double-counting.
+The ops-metrics service and the runtime-profile package call these facade
+methods for ``ops_runtime_profile_samples``; the raw SQL lives here with
+the rest of the queries layer. Upsert semantics mirror ``ops_metric_samples``:
+a sampler restart inside the same minute overwrites the partial bucket.
 """
 
 from __future__ import annotations
@@ -22,8 +20,7 @@ class RuntimeProfileQueriesMixin(ConnectionQueriesMixin):
         """Upsert one global gauge row for ``bucket_start`` (#359 L1).
 
         ``values`` carries the full gauge column set keyed by column name;
-        the caller (the ops-metrics sampler) merges process-counter deltas
-        with the depth gauges before calling.
+        the caller merges process-counter deltas with the depth gauges.
         """
         columns = [
             "intake_runs",
@@ -40,6 +37,12 @@ class RuntimeProfileQueriesMixin(ConnectionQueriesMixin):
             "claim_empty_count",
             "claim_seconds_total",
             "claim_seconds_max",
+            # Claim-stage split (schema v78, #448): scan/evaluate/writes.
+            *(
+                f"claim_{stage}_seconds_{kind}"
+                for stage in ("scan", "evaluate", "writes")
+                for kind in ("total", "max")
+            ),
             "execute_active",
             "execute_done",
             "execute_requeued",

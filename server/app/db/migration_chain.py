@@ -44,9 +44,10 @@ from server.app.db.migrations import (
     migrate_workspace_job_node_status_counts,
     migrate_workspace_secrets,
 )
+from server.app.db.migrations.claim_stage_profile import migrate_claim_stage_profile
 from server.app.db.migrations.job_status_counts import migrate_workspace_job_status_counts
 from server.app.db.migrations.job_status_counts_statement_triggers import (
-    migrate_job_status_counts_statement_triggers,
+    migrate_job_status_counts_statement_triggers as _migrate_v77_triggers,
 )
 from server.app.db.migrations.jobs_workflow_key_alignment import migrate_jobs_workflow_key_alignment
 from server.app.db.migrations.preview_panels import migrate_preview_panels
@@ -192,9 +193,11 @@ MIGRATIONS: list[SchemaMigration] = [
     # consistent lock order per statement. Born as this branch's v76, bumped
     # to 77 when develop's #429 claimed v76 for studio_publish_requests (#434
     # collision protocol: the later merge renumbers).
-    SchemaMigration(
-        77, "job_status_counts_statement_triggers", migrate_job_status_counts_statement_triggers
-    ),
+    SchemaMigration(77, "job_status_counts_statement_triggers", _migrate_v77_triggers),
+    # v78 (#448 phase 1): claim-stage gauge columns on
+    # ops_runtime_profile_samples (scan/evaluate/writes totals + maxes) —
+    # the claim-path forensic instrumentation that orders phase 2. DDL-only.
+    SchemaMigration(78, "claim_stage_profile", migrate_claim_stage_profile),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]

@@ -744,6 +744,9 @@ create table if not exists ops_runtime_profile_samples (
   claim_empty_count integer not null default 0,
   claim_seconds_total double precision not null default 0,
   claim_seconds_max double precision not null default 0,
+  -- claim-stage split (v78) lives in the v78 migration's guarded ALTERs,
+  -- not here: the file sits at its budget ceiling and fresh installs run
+  -- every migration anyway (same DDL-home rule as the v77 trigger DDL).
   -- reached a terminal state in the bucket.
   execute_active integer not null default 0,
   execute_done integer not null default 0,

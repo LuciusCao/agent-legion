@@ -27,6 +27,12 @@ class ProfileBucket(BaseModel):
     claim_empty_count: int
     claim_seconds_total: float
     claim_seconds_max: float
+    claim_scan_seconds_total: float
+    claim_scan_seconds_max: float
+    claim_evaluate_seconds_total: float
+    claim_evaluate_seconds_max: float
+    claim_writes_seconds_total: float
+    claim_writes_seconds_max: float
     execute_active: int
     execute_done: int
     execute_requeued: int

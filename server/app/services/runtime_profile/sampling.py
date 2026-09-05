@@ -54,6 +54,12 @@ def persist_profile_sample(
         "claim_empty_count": deltas["claim_empty_count"],
         "claim_seconds_total": deltas["claim_seconds_total"],
         "claim_seconds_max": deltas["claim_seconds_max"],
+        # Claim-stage split (schema v78, #448): scan/evaluate/writes.
+        **{
+            f"claim_{stage}_seconds_{kind}": deltas[f"claim_{stage}_seconds_{kind}"]
+            for stage in ("scan", "evaluate", "writes")
+            for kind in ("total", "max")
+        },
         "execute_active": active_executions,
         "execute_done": deltas["execute_done"],
         "execute_requeued": deltas["execute_requeued"],
@@ -67,7 +73,8 @@ def persist_profile_sample(
 
 
 # Columns aggregated by max when rolling minute rows up into wider bins
-# (latencies and momentary depths); everything else sums.
+# (latencies and momentary depths); everything else sums. The claim-stage
+# maxes (#448) ride the same suffix rule as claim_seconds_max.
 _MAX_AGGREGATED_COLUMNS = frozenset(
     {
         "pass_scan_seconds_max",
@@ -78,6 +85,11 @@ _MAX_AGGREGATED_COLUMNS = frozenset(
         "db_pool_waiting",
     }
 )
+
+
+def _aggregates_by_max(column: str) -> bool:
+    # "_seconds_max" covers claim/result/pass latency peaks alike.
+    return column in _MAX_AGGREGATED_COLUMNS or column.endswith("_seconds_max")
 
 
 def _rollup(rows: list[dict[str, Any]], bin_seconds: int) -> list[dict[str, Any]]:
@@ -99,7 +111,7 @@ def _rollup(rows: list[dict[str, Any]], bin_seconds: int) -> list[dict[str, Any]
         for column, value in row.items():
             if column == "bucket_start" or value is None:
                 continue
-            if column in _MAX_AGGREGATED_COLUMNS:
+            if _aggregates_by_max(column):
                 acc[column] = max(acc[column] or 0, value)
             else:
                 acc[column] = (acc[column] or 0) + value

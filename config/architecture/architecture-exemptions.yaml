@@ -40,6 +40,68 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/452
   ceiling: 68
 - check: architecture.file_budget
+  path: server/app/agent_broker/claim.py
+  reason: >-
+    Issue #448 phase 1 wires the claim-stage timer into the claim
+    transaction: the worker claim loop is single-threaded serial (claim
+    throughput = 1 / one claim round-trip), so the transaction now carries
+    a ClaimStageTimer whose worker_setup/scan/evaluate/writes closes ride
+    the existing statements, plus one _report_claim_stages helper shared by
+    all three return paths. The alternative — moving the orchestration out
+    to a new module — would split the claim transaction's single flow
+    across files for ~20 lines of instrumentation. Remove when #448's
+    phase-2 rework (transaction slimming or claim concurrency) restructures
+    the claim path and re-budgets the module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
+  ceiling: 122
+- check: architecture.file_budget
+  path: server/app/agent_broker/claim_evaluate.py
+  reason: >-
+    Issue #461 review on PR #461: the writes stage split (#448) moves into
+    evaluate_candidate — the promote-write sequence (node flip, node_runs/
+    executor_leases inserts, request claim, jobs promote) is the tail of
+    the per-candidate evaluation that must close the "evaluate" stage where
+    the writes begin, or the whole claim's write cost folds into evaluate
+    and the "writes-dominant" branch of the stage data stays unreachable.
+    The alternative — closing the stage from claim_windows around the whole
+    call — cannot see the skip paths (a skipped candidate has no writes and
+    must not pollute the segment); splitting the promote sequence out to a
+    sibling module would fork the one lock-order invariant this module owns.
+    Remove when #448's phase-2 rework restructures the claim path and
+    re-budgets the module together with claim.py's entry.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
+  ceiling: 217
+- check: architecture.file_budget
+  path: server/app/agent_broker/claim_windows.py
+  reason: >-
+    Issue #461 review on PR #461: scan_kind passes the #448 stage timer
+    through to evaluate_candidate so the promote writes close inside the
+    per-candidate call (see claim_evaluate.py's entry) — one keyword
+    argument threaded through the existing signature plus its docstring
+    line. Splitting the per-kind ladder out for that would fork the
+    SCAN_ROUNDS budget logic the module exists to own. Remove when #448's
+    phase-2 rework restructures the claim path and re-budgets the module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
+  ceiling: 77
+- check: architecture.file_budget
+  path: server/app/services/runtime_profile/counters.py
+  reason: >-
+    Issue #448 phase 1 adds the claim-stage gauge family to the #359
+    runtime profile: note_claim_stages (one fold per claim) plus the six
+    (scan/evaluate/writes total+max) counters kept single-source through
+    the _CLAIM_STAGES loop in reset/snapshot/note — the loop is what keeps
+    twelve hand-written counter lines from drifting apart. Splitting the
+    claim gauges into a sibling module would fork the one undercount
+    discipline the whole registry documents. Remove when the runtime
+    profile gains a structural split of its own or the claim-stage gauges
+    retire.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
+  ceiling: 185
+- check: architecture.file_budget
   path: server/app/db/migration_chain.py
   reason: >-
     Issue #437 registers schema v77 (job_status_counts_statement_triggers):

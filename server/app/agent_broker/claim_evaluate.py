@@ -30,6 +30,7 @@ from server.app.workflows.sharding import try_start_shard
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
+    from server.app.agent_broker.claim_timing import ClaimStageTimer
 
 
 def evaluate_candidate(
@@ -39,8 +40,14 @@ def evaluate_candidate(
     selected: Mapping[str, Any],
     view: WorkerView,
     state: ScanState,
+    timer: ClaimStageTimer | None = None,
 ) -> AgentClaim | None:
-    """Try to claim one candidate; on a skip, record the cause in state.skip_reasons."""
+    """Try to claim one candidate; on a skip, record the cause in state.skip_reasons.
+
+    ``timer`` (#448) closes the promote-write sequence below into the
+    "writes" stage — the lock/validate prefix stays in "evaluate"; None keeps
+    this importable from tests that predate the instrumentation.
+    """
     selected_workspace = str(selected["workspace_id"])
     if selected_workspace not in state.pause_cache:
         check = broker.is_workspace_paused
@@ -161,6 +168,18 @@ def evaluate_candidate(
                 # Lost the race for this workspace's last slot; try the next.
                 state.skip_reasons["capacity_raced"] += 1
                 return None
+
+    # Writes stage boundary (#448, #461 review): everything above is evaluate
+    # (locks + admission checks); from here on the claim only writes — the
+    # node flip, node_runs/executor_leases inserts, request claim and jobs
+    # promote. Close evaluate so the two segments split here, not inside
+    # claim_windows's loop close. Known noise (#461 review): the two
+    # post-boundary skips below (shard_not_pending / node_not_pending) run
+    # their cancel_request write on the evaluate side of the NEXT candidate's
+    # boundary — one rare terminal-write leak per raced node, accepted rather
+    # than pre-boundary-guessing which candidate will race.
+    if timer is not None:
+        timer.stage("evaluate")
 
     # Shard-aware claiming (#389): a kind='code' manifest may carry a shard
     # identity (shard_index top-level key). try_start_shard binds this
