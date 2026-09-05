@@ -824,3 +824,51 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/431
   ceiling: 88
+- check: architecture.file_budget
+  path: velites/src/events.rs
+  reason: >-
+    Issue #469 adds ToolTiming to the event schema module: the phase
+    struct (spawnMs / firstByteMs / restMs / reapMs with per-phase wire
+    docs, including the firstByteMs observation semantics), the
+    tool_execution_end wiring, and the wire-shape tests sit next to every
+    other event type's definition and contract test — the module IS the
+    event schema. The growth is docstring + test lines over a ~50-line
+    struct; dropping the docs to fit would trade the phase semantics
+    (which phase covers what, when absent) for bookkeeping. Ceiling at
+    actual + 10 per the dated-exemption convention (#431 / #458
+    precedents). Remove when the timing fields move into a schema-driven
+    shape or the module gets a dedicated events-tools split.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
+  ceiling: 525
+- check: architecture.file_budget
+  path: velites/src/tools/bash.rs
+  reason: >-
+    Issue #469 instruments the bash tool with the phase decomposition the
+    stall forensics asked for: spawn timing, first-output-byte reading
+    (read_with_first_byte replaces read_to_end with identical byte/error
+    semantics; the first byte is the earlier of the two streams), the
+    reap-phase branch, and the module docstring documenting the
+    observation axes and the harness-read-vs-child-write caveat. The tool
+    is one cohesive spawn/read/terminate flow; splitting instrumentation
+    out would fork the child lifecycle across modules. Ceiling at actual +
+    10 per the dated-exemption convention (#431 / #458 precedents) — the
+    module is in active observation tuning. Remove when #469's follow-up
+    (once the write() stall trigger is pinned) retires or reshapes the
+    instrumentation.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
+  ceiling: 267
+- check: architecture.file_budget
+  path: velites/src/tools/mod.rs
+  reason: >-
+    Issue #469 review fix makes the ToolKind::execute dispatch boundary
+    the single totalMs timing point (every tool kind gets it; the
+    in-process tools carry zero instrumentation of their own — the uuid
+    and validate exemptions retired when their timing code was deleted).
+    mod.rs is the tools facade every tool already imports. Ceiling at
+    actual + 10 per the dated-exemption convention (#431 / #458
+    precedents). Remove when the file shrinks back under its old ceiling.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
+  ceiling: 159

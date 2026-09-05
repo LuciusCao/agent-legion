@@ -23,6 +23,7 @@ pub async fn run(_args: &Value, ctx: &ToolContext) -> ToolOutput {
                     format!("contract ok ({} files checked)", contract.file_count()),
                     false,
                 )
+                .measured()
             } else {
                 let list = violations
                     .iter()
@@ -30,7 +31,9 @@ pub async fn run(_args: &Value, ctx: &ToolContext) -> ToolOutput {
                     .map(|(i, v)| format!("{}) {v}", i + 1))
                     .collect::<Vec<_>>()
                     .join("\n");
-                ToolOutput::error(format!("contract violations:\n{list}"))
+                // `measured` keeps the violation listing (is_error = true)
+                // in the timing set — the files were fully checked (#469).
+                ToolOutput::error(format!("contract violations:\n{list}")).measured()
             }
         }
     }
