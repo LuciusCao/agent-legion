@@ -189,6 +189,19 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/280
   ceiling: 135
 - check: architecture.file_budget
+  path: server/app/services/agent_definition_create.py
+  reason: >-
+    The #460 release-review P1 fix extended the default-id occupancy check from
+    the latest row per entity to three faces (the published rows a renamed draft
+    hides, plus an entity keyed by the capability itself whose draft renamed it)
+    — the scan is one cohesive policy that belongs with the create entry it
+    guards, and each face cites the data-loss or unpublisable-entity branch it
+    closes. Drop together with the #407 endgame (#440), which retires the
+    entity mechanism this policy polices.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/440
+  ceiling: 64
+- check: architecture.file_budget
   path: server/app/storage/s3_client.py
   reason: The job-detail artifact preview (issue 11) added open_range (ranged GET) to the storage protocol
     and the S3 client implementation so object-store-only media can serve browser Range requests (seekable

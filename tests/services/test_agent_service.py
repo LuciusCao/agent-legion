@@ -100,6 +100,76 @@ def test_create_draft_derivation_conflicts_with_published_entity(service) -> Non
     assert "请直接编辑" in str(exc_info.value)
 
 
+def test_create_draft_conflicts_with_published_row_hidden_by_newer_draft(service) -> None:
+    """#460 P1（codex 精确场景）：实体已发布 v1（capability A）后又保存了
+    capability B 的草稿 v2——list_latest 只见 v2，修复前缺省创建 A 会放行，
+    且旧实体 id 恰为 A 时 save_draft 静默覆盖用户正在编辑的 v2 草稿。"""
+    create_agent_draft(service, "review_keywords", DEFINITION_V1, "user:u1")
+    service.publish("review_keywords")  # v1 published：capability review_keywords
+    other_cap = AgentDefinition(capability="other_cap", runtime="velites", skill="q/other")
+    service.save_draft("review_keywords", other_cap, "user:u1")  # v2 草稿：capability 变更
+
+    with pytest.raises(ConflictError, match="状态：published") as exc_info:
+        create_agent_draft(service, None, DEFINITION_V1, "user:u1")
+
+    assert "review_keywords" in str(exc_info.value)
+    assert "请直接编辑" in str(exc_info.value)
+    # 用户正在编辑的 v2 草稿原样保留（修复前此处被静默覆盖）。
+    (draft,) = [e for e in service.list_versions("review_keywords") if e.status == "draft"]
+    assert draft.version == 2
+    assert draft.definition["capability"] == "other_cap"
+
+
+def test_create_draft_hidden_published_row_blocks_legacy_id_entity(service) -> None:
+    """#460 P1（legacy id 变体）：占用 published 行的实体用其他 legacy id——
+    修复前会建出一个因 published-capability 唯一索引而永远无法发布的新实体；
+    修复后 409 且文案指向真实占用者。"""
+    create_agent_draft(service, "agent-a", DEFINITION_V1, "user:u1")
+    service.publish("agent-a")  # v1 published：capability review_keywords
+    renamed = AgentDefinition(capability="renamed_cap", runtime="velites", skill="q/renamed")
+    service.save_draft("agent-a", renamed, "user:u1")  # v2 草稿：capability 变更
+
+    with pytest.raises(ConflictError, match="状态：published") as exc_info:
+        create_agent_draft(service, None, DEFINITION_V1, "user:u1")
+
+    assert "agent-a" in str(exc_info.value)
+    assert "请直接编辑" in str(exc_info.value)
+    # 不建出以 capability 为键、无法发布的新实体。
+    assert all(e.entity_key != "review_keywords" for e in service.list_latest())
+
+
+def test_create_draft_conflicts_with_same_keyed_entity_whose_draft_renamed(service) -> None:
+    """占用检查第三面：实体 id 恰为 capability、最新草稿改成了别的 capability
+    且无 published 行——latest/published 两段扫描都不命中，缺省创建仍会
+    save_draft 到同键实体上静默覆盖该草稿，必须按实体键命中 409。"""
+    other_cap = AgentDefinition(capability="other_cap", runtime="velites", skill="q/other")
+    service.save_draft("review_keywords", other_cap, "user:u1")  # 显式 id + 改 capability
+
+    with pytest.raises(ConflictError, match="状态：draft") as exc_info:
+        create_agent_draft(service, None, DEFINITION_V1, "user:u1")
+
+    assert "review_keywords" in str(exc_info.value)
+    assert "请直接编辑" in str(exc_info.value)
+    # 该草稿原样保留。
+    (draft,) = [e for e in service.list_versions("review_keywords") if e.status == "draft"]
+    assert draft.definition["capability"] == "other_cap"
+
+
+def test_create_draft_ignores_unrelated_capabilities(service) -> None:
+    """占用检查无假阳性：其他实体的 latest 草稿/published 行只按 capability
+    命中，无关 capability 的缺省创建照常放行。"""
+    create_agent_draft(service, "agent-a", DEFINITION_V1, "user:u1")
+    service.publish("agent-a")
+    other_cap = AgentDefinition(capability="other_cap", runtime="velites", skill="q/other")
+    service.save_draft("agent-a", other_cap, "user:u1")
+
+    third = AgentDefinition(capability="third_cap", runtime="velites", skill="q/third")
+    entity = create_agent_draft(service, None, third, "user:u2")
+
+    assert entity.entity_key == "third_cap"
+    assert entity.status == "draft"
+
+
 def test_create_draft_explicit_agent_id_keeps_legacy_semantics(service) -> None:
     """显式 agent_id 不做占用检查：同 key 覆盖草稿（save_draft 旧语义，
     原地覆盖既有草稿行，version 不前进）。"""

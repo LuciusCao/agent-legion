@@ -36,8 +36,8 @@ def reset_published_agent_cache() -> None:
 def published_agent_definitions(
     connect_source: ConnectSource, workspace_id: str
 ) -> dict[str, AgentDefinition]:
-    """Published Agent definitions of one workspace, keyed by agent_id, cached ~5s
-    (``connect_source``: JobQueries facade or bare DSN — BOUNDARY-DATA-001, #187)."""
+    """Published Agent definitions of one workspace, keyed by agent_id, ~5s cache
+    (``connect_source``: facade or DSN — BOUNDARY-DATA-001, #187)."""
     now = time.monotonic()
     cache_key = (resolve_dsn(connect_source), workspace_id)
     cached = _published_cache.get(cache_key)
@@ -76,6 +76,10 @@ class AgentService:
         """Latest version per Agent (a pending draft beats the published row)."""
         return self._store.list_latest(self._workspace_id)
 
+    def list_published(self) -> list[VersionedEntity]:
+        """Published rows (latest rows can hide these; #460 P1)."""
+        return self._store.list_published(self._workspace_id)
+
     def list_published_definitions(self) -> list[AgentDefinition]:
         return [
             AgentDefinition.model_validate(e.definition)
@@ -85,10 +89,9 @@ class AgentService:
     def get_published(self, agent_id: str) -> VersionedEntity | None:
         return self._store.get_published(agent_id, self._workspace_id)
 
-    def get_published_definition(
+    def get_published_definition(  # Optionally enforces an exact definition hash.
         self, agent_id: str, definition_hash: str | None = None
     ) -> AgentDefinition | None:
-        """Read the published definition, optionally enforcing an exact hash."""
         entity = self._store.get_published(agent_id, self._workspace_id)
         if entity is None or (definition_hash and entity.definition_hash != definition_hash):
             return None
@@ -99,8 +102,7 @@ class AgentService:
 
     def save_draft(
         self, agent_id: str, definition: AgentDefinition, created_by: str
-    ) -> VersionedEntity:
-        """Create a draft version, overwriting the existing draft when present."""
+    ) -> VersionedEntity:  # Create/overwrite draft (legacy explicit-id semantics).
         if not agent_id:
             raise InvalidOperationError("agent id must be a non-empty string")
         entity = self._store.save_draft(
@@ -115,8 +117,8 @@ class AgentService:
 
     def publish(self, agent_id: str) -> VersionedEntity:
         """Publish the current draft; the previously published version archives.
-        Exactly one published Agent per capability per workspace — routes
-        derive from the capability alone (mirrors the YAML catalog constraint)."""
+        One published Agent per capability per workspace (routes derive from
+        the capability alone, mirroring the YAML catalog constraint)."""
         versions = self._store.list_versions(agent_id, self._workspace_id)
         draft = next((v for v in versions if v.status == "draft"), None)
         if draft is not None:
@@ -131,8 +133,7 @@ class AgentService:
         return entity
 
     def _require_free_capability(self, agent_id: str, capability: str) -> None:
-        """Service-layer capability conflict check; the DB partial unique index
-        ``versioned_entities_published_capability`` is the real guard."""
+        """Capability conflict check; the DB partial unique index is the guard."""
         for other in self._store.list_published(self._workspace_id):
             if other.entity_key != agent_id and other.definition.get("capability") == capability:
                 raise ConflictError(
