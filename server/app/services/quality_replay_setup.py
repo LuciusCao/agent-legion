@@ -98,15 +98,19 @@ class QualityReplaySetup:
             "stem": str(job["stem"] or ""),
         }
         try:
-            copy_job = self.job_db.create_jobs_bulk(
-                candidates=[candidate],
-                workflow_key=workflow_key,
-                run_id=str(batch["id"]),
-                node_keys=list(definition.executable_nodes),
-                workspace_id=workspace_id,
-                revision=revision,
-                frozen_config={node.key: frozen} if frozen is not None else {},
-            )[0]
+            # create_jobs_bulk returns job ids (#467 A3); the copy job's row
+            # is read back through the facade for the id only.
+            copy_job_id = str(
+                self.job_db.create_jobs_bulk(
+                    candidates=[candidate],
+                    workflow_key=workflow_key,
+                    run_id=str(batch["id"]),
+                    node_keys=list(definition.executable_nodes),
+                    workspace_id=workspace_id,
+                    revision=revision,
+                    frozen_config={node.key: frozen} if frozen is not None else {},
+                )[0]
+            )
         except Exception:
             # #204 broad-except audit: both business rejections (ValueError → 400 in the run
             # service) and programming errors land here; either way the
@@ -116,8 +120,10 @@ class QualityReplaySetup:
             # orphaned run row like the items/sync-intake paths do.
             self.discard_empty_run(str(batch["id"]))
             raise
-        copy_job_id = str(copy_job["id"])
         try:
+            copy_job = self.job_db.get_job(copy_job_id)
+            if copy_job is None:  # pragma: no cover - committed chunk cannot vanish
+                raise RuntimeError(f"quality replay copy job {copy_job_id} vanished after commit")
             self._copy_frozen_inputs(job, copy_job, node)
             self._copy_artifact_refs(str(job["id"]), copy_job_id, definition, node.key)
             # The start node never enters job_nodes (EXEC-WORKFLOW-START-001), so it

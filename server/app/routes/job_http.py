@@ -13,6 +13,7 @@ from server.app.services.job_errors import (
 )
 from server.app.services.job_log_raw import PayloadTooLargeError
 from server.app.services.job_operation_error import JobOperationError
+from server.app.services.run_partial_failure import PartialRunCreationError
 from server.app.services.skill_editing import SkillEditValidationError
 
 
@@ -48,6 +49,10 @@ def raise_job_http_error(error: JobServiceError) -> Never:
         raise HTTPException(status_code=413, detail=str(error)) from error
     if isinstance(error, DraftWorkflowKeyMismatchError):
         raise HTTPException(status_code=422, detail=str(error)) from error
+    if isinstance(error, PartialRunCreationError):
+        # #467 A3：分块提交下失败可能已创建部分 job——进度必须可见。
+        detail = error.partial_detail()  # {message, run_id, created_so_far}
+        raise HTTPException(status_code=400, detail=detail) from error
     if isinstance(error, SkillEditValidationError):
         raise HTTPException(
             status_code=422, detail={"message": str(error), "errors": error.errors}

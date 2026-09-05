@@ -5328,14 +5328,13 @@ export interface components {
        */
       workflow_key?: string | null
     }
-    /** RunCreateResponse */
+    /**
+     * RunCreateResponse
+     * @description #467 A4：run + created_count only；job 行移到读取路径（#420）。
+     */
     RunCreateResponse: {
       /** Created Count */
       created_count: number
-      /** Jobs */
-      jobs: {
-        [key: string]: unknown
-      }[]
       run: components['schemas']['RunRecord']
     }
     /** RunDetailResponse */

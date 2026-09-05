@@ -18,7 +18,10 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     const prefix = `HTTP ${response.status}`
     try {
       const json = JSON.parse(text)
-      message = json.detail || json.message || prefix
+      const d = json.detail as string | { message?: string } | undefined
+      // #467：结构化 detail（部分创建失败）取 message；字符串直传。
+      const inline = typeof d === 'string' ? d : d?.message
+      message = (typeof inline === 'string' && inline) || json.message || prefix
     } catch {
       message = `${prefix}: ${text.slice(0, 200)}`
     }

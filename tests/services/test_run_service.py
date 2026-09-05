@@ -120,12 +120,12 @@ def test_material_item_creates_job_with_frozen_input(service, job_db, settings) 
     # the workspace id (the identity value since v62).
     assert run["workflow_key"] == WORKSPACE_ID
     assert "node_code_versions" in run["frozen_pins"]
-    job = result["jobs"][0]
-    assert job["source_type"] == "material"
-    assert job["source_id"] == "mat-1"
-    assert job["title"] == "notes.pdf"
-    assert job["batch_id"] == run["id"]
-    stored = _fetch_job(job_db, job["id"])
+    assert len(result["job_ids"]) == 1
+    stored = _fetch_job(job_db, result["job_ids"][0])
+    assert stored["source_type"] == "material"
+    assert stored["source_id"] == "mat-1"
+    assert stored["title"] == "notes.pdf"
+    assert stored["run_id"] == run["id"]
     assert json.loads(stored["input_json"]) == {"type": "material", "material_id": "mat-1"}
     # The frozen config is exactly what the intake resolution chain produces.
     definition = load_builtin_definition(WORKFLOW_KEY)
@@ -143,12 +143,12 @@ def test_ref_item_creates_job_with_verbatim_input(service_all_types, job_db) -> 
 
     result = service_all_types.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[item])
 
-    job = result["jobs"][0]
-    assert job["source_type"] == "ref"
+    assert len(result["job_ids"]) == 1
+    stored = _fetch_job(job_db, result["job_ids"][0])
+    assert stored["source_type"] == "ref"
     # Ref identity is connection-scoped: source_id carries the connection key.
-    assert job["source_id"] == "cms-main:Q-42"
-    assert job["title"] == "Q-42"
-    stored = _fetch_job(job_db, job["id"])
+    assert stored["source_id"] == "cms-main:Q-42"
+    assert stored["title"] == "Q-42"
     assert json.loads(stored["input_json"]) == item
 
 
@@ -164,7 +164,10 @@ def test_ref_identity_includes_connection_key(service_all_types, job_db) -> None
     )
 
     assert result["created_count"] == 2
-    assert {job["source_id"] for job in result["jobs"]} == {"cms-a:Q-1", "cms-b:Q-1"}
+    assert {_fetch_job(job_db, job_id)["source_id"] for job_id in result["job_ids"]} == {
+        "cms-a:Q-1",
+        "cms-b:Q-1",
+    }
 
 
 def test_ref_dedup_is_scoped_per_connection(service_all_types, job_db) -> None:
@@ -199,8 +202,13 @@ def test_mixed_items_create_one_job_each(service_all_types, job_db) -> None:
     )
 
     assert result["created_count"] == 2
-    assert {job["source_type"] for job in result["jobs"]} == {"material", "ref"}
-    assert all(job["run_id"] == result["run"]["id"] for job in result["jobs"])
+    assert {_fetch_job(job_db, job_id)["source_type"] for job_id in result["job_ids"]} == {
+        "material",
+        "ref",
+    }
+    assert all(
+        _fetch_job(job_db, job_id)["run_id"] == result["run"]["id"] for job_id in result["job_ids"]
+    )
 
 
 def test_material_not_ready_is_rejected(service, job_db) -> None:
@@ -264,7 +272,7 @@ def test_duplicate_items_are_filtered(service, job_db) -> None:
         items=[_material_item("mat-1"), _material_item("mat-2")],
     )
     assert second["created_count"] == 1
-    assert second["jobs"][0]["source_id"] == "mat-2"
+    assert _fetch_job(job_db, second["job_ids"][0])["source_id"] == "mat-2"
 
     # Nothing fresh left: the whole request is rejected like legacy intake.
     with pytest.raises(InvalidOperationError, match="No tasks were resolved"):
@@ -502,11 +510,11 @@ def test_material_item_accepted_under_material_only_contract(service, job_db) ->
     )
 
     assert result["created_count"] == 1
-    job = result["jobs"][0]
+    job_id = result["job_ids"][0]
     # The start node never enters job_nodes (EXEC-WORKFLOW-START-001).
     with job_db.connect() as conn:
         rows = conn.execute(
-            "select node_key from job_nodes where job_id=%s order by node_key", (job["id"],)
+            "select node_key from job_nodes where job_id=%s order by node_key", (job_id,)
         ).fetchall()
     assert "_start" not in [row["node_key"] for row in rows]
 

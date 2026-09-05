@@ -223,6 +223,12 @@ def test_job_intake_handles_large_batch_across_default_chunks(job_db, settings):
 
     assert result["created_count"] == 1200
     assert len({job["id"] for job in result["jobs"]}) == 1200
+    # #467 A3：1200 条跨 1000 行 chunk 边界，全量落库（DB 真值，非响应回读）。
+    with job_db.connect() as conn:
+        n = conn.execute(
+            "select count(*) as n from jobs where run_id=%s", (result["batch"]["id"],)
+        ).fetchone()
+    assert int(n["n"]) == 1200
 
 
 def test_job_intake_freezes_node_code_versions(job_db, settings):
