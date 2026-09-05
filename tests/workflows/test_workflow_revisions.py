@@ -325,7 +325,7 @@ def test_publish_rejects_ambiguous_agent_capability(
         ),
     }
     monkeypatch.setattr(
-        "server.app.services.workflow_drafts.published_agent_definitions",
+        "server.app.services.workflow_draft_publish_gates.published_agent_definitions",
         lambda _dsn, _workspace_id: ambiguous,
     )
 
