@@ -484,6 +484,51 @@ async fn bash_timeout_path_reports_reap_phase() {
 }
 
 #[tokio::test]
+async fn bash_timing_ignores_first_bytes_after_the_timeout_boundary() {
+    // codex P2: a TERM handler that prints only when killed produces its
+    // first output AFTER the timeout boundary — the reader tasks observe it
+    // while draining the pipes post-exit. Those bytes must NOT own the
+    // prelude: firstByteMs stays absent (the boundary clips it) and restMs
+    // covers the whole window up to the timeout, so the phases never
+    // double-count the termination window.
+    let dir = tempfile::tempdir().unwrap();
+    let output = ToolKind::Bash
+        .execute(
+            &serde_json::json!({
+                // trap prints on TERM; before that the child is silent.
+                "command": "trap 'echo dying-on-term' TERM; sleep 300",
+                "timeout": 1
+            }),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(output.is_error);
+    let text = match &output.content[0] {
+        velites::events::ContentBlock::Text { text } => text.clone(),
+        other => panic!("expected text content, got {other:?}"),
+    };
+    // The handler's output WAS collected (bytes semantics unchanged)...
+    assert!(
+        text.contains("dying-on-term"),
+        "TERM handler output must still be collected: {text}"
+    );
+    let timing = output.timing.expect("timing on the timeout path");
+    // ...but it arrived after the boundary, so it must not claim firstByteMs.
+    assert!(
+        timing.first_byte_ms.is_none(),
+        "post-boundary bytes must not set firstByteMs: {:?}",
+        timing.first_byte_ms
+    );
+    let rest = timing.rest_ms.expect("restMs on the timeout path");
+    // restMs is bounded by the 1s timeout, not stretched by the kill path.
+    assert!(
+        rest < 5_000,
+        "restMs must stay bounded by the timeout: {rest}ms"
+    );
+    assert!(timing.reap_ms.is_some());
+}
+
+#[tokio::test]
 async fn bash_unmeasured_error_paths_carry_no_timing() {
     // The RequestTiming convention: failures raised BEFORE any measurement
     // surface as error content with `timing: None` — the dispatch boundary
@@ -537,6 +582,58 @@ async fn bash_measured_error_paths_keep_their_timing() {
     assert!(timing.rest_ms.is_some());
     assert!(timing.reap_ms.is_some());
     assert_eq!(timing.requested_timeout_ms, Some(1_000));
+}
+
+#[tokio::test]
+async fn in_process_measured_failures_keep_their_total_ms() {
+    // codex P2: per-tool timing must not systematically exclude the
+    // failing/slow samples. In-process tools mark their measured negative
+    // outcomes (uuid's invalid verdicts, read's missing-file I/O error) so
+    // the dispatch boundary stamps totalMs even though is_error is set;
+    // only pre-measurement failures (read's missing `path` argument) stay
+    // timing-free.
+    let dir = tempfile::tempdir().unwrap();
+
+    let invalid_uuids = ToolKind::Uuid
+        .execute(
+            &serde_json::json!({"op": "validate", "values": ["not-a-uuid"]}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(invalid_uuids.is_error);
+    assert!(
+        invalid_uuids
+            .timing
+            .as_ref()
+            .and_then(|t| t.total_ms)
+            .is_some(),
+        "uuid invalid-verdict batch was measured and must carry totalMs"
+    );
+
+    let missing_file = ToolKind::Read
+        .execute(
+            &serde_json::json!({"path": "does-not-exist.txt"}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(missing_file.is_error);
+    assert!(
+        missing_file
+            .timing
+            .as_ref()
+            .and_then(|t| t.total_ms)
+            .is_some(),
+        "read I/O failure was measured and must carry totalMs"
+    );
+
+    let missing_arg = ToolKind::Read
+        .execute(&serde_json::json!({}), &ctx(dir.path()))
+        .await;
+    assert!(missing_arg.is_error);
+    assert!(
+        missing_arg.timing.is_none(),
+        "read argument-validation failure must stay timing-free"
+    );
 }
 
 #[tokio::test]

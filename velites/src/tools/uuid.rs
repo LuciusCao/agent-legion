@@ -121,9 +121,12 @@ fn validate(args: &Value) -> Result<ToolOutput, ToolError> {
         is_error: any_invalid,
         // Volume semantics: pre-truncation, same as the other tools.
         output_bytes: text.len() as u64,
-        // totalMs is filled by the ToolKind::execute dispatch boundary (#469).
+        // totalMs is filled by the ToolKind::execute dispatch boundary
+        // (#469). `measured` keeps invalid-verdict results (is_error =
+        // true) in the timing set — the batch was fully parsed.
         timing: None,
-    })
+    }
+    .measured())
 }
 
 fn verdict(raw: &str, any_invalid: &mut bool) -> String {

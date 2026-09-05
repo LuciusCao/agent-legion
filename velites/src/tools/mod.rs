@@ -68,8 +68,10 @@ pub struct ToolOutput {
     /// Output volume before truncation (design §8).
     pub output_bytes: u64,
     /// Phase timing (#469) surfaced on `tool_execution_end.timing`;
-    /// `None` for failures raised before any measurement (argument
-    /// validation, guard rejection). In-process tools fill `total_ms` only.
+    /// `None` only for failures raised before any measurement (argument
+    /// validation, guard rejection, disabled tools) — a measured failure
+    /// calls [`ToolOutput::measured`] so the dispatch boundary still
+    /// stamps its `totalMs`. In-process tools carry `total_ms` only.
     pub timing: Option<crate::events::ToolTiming>,
 }
 
@@ -86,6 +88,18 @@ impl ToolOutput {
 
     pub fn error(message: String) -> Self {
         Self::text(message, true)
+    }
+
+    /// Mark this output as measured (#469): the tool already did real work
+    /// before producing this result, so the dispatch boundary must stamp
+    /// its `totalMs` even though `is_error` is set (uuid's invalid-list
+    /// verdicts, validate's contract violations, read/write I/O failures —
+    /// dropping them from per-tool timing would systematically exclude the
+    /// slow/failing samples). Contrast the unmeasured failures (argument
+    /// validation, guard rejection), which stay `timing: None`.
+    pub fn measured(mut self) -> Self {
+        self.timing.get_or_insert_with(Default::default);
+        self
     }
 }
 
