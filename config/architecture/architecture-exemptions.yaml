@@ -482,13 +482,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 141
 - check: architecture.file_budget
-  path: worker/host/client.py
-  reason: '#381 version handshake: the registration payload gained one informational runtime_versions
-    mapping (effective runtimes'' --version outputs). Single line addition to an existing payload builder.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 164
-- check: architecture.file_budget
   path: worker/runtime/catalog.py
   reason: '#381 version handshake: probe_runtime_versions asks each effective runtime for its --version
     output so the registration payload carries the "worker code x velites version" compatibility matrix
@@ -882,3 +875,88 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
   ceiling: 159
+- check: architecture.file_budget
+  path: shared/protocol.py
+  reason: >-
+    Issue #352 adds protocol v5 (per-Worker batch heartbeat) to the version
+    history: this module is the single source of truth both sides import (the
+    worker image ships shared/), and each version entry must state its
+    mixed-fleet contract for the next bump. Splitting the history out would
+    fork the one file both sides already share. Revisit when the version
+    history moves to generated docs.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
+  ceiling: 43
+- check: architecture.file_budget
+  path: worker/execution/heartbeat.py
+  reason: >-
+    Issue #352 turns the per-execution heartbeat thread starter into a
+    facade over the per-Worker batch registry: ExecutionHeartbeat keeps the
+    executor/upload call shape (adopt/shutdown/quiesce/resume/proc_ref) so
+    run.py and code_runner.py stay untouched by the threading change, while
+    each method forwards to the registry. The four one-line forwards plus
+    the degraded-mode contract docstring are the honest cost of that
+    compatibility seam. Remove when the no-registry single-beat mode retires
+    and only the batch registry path remains.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
+  ceiling: 75
+- check: architecture.file_budget
+  path: worker/executor.py
+  reason: >-
+    Issue #352 starts the per-Worker batch heartbeat coordinator in main():
+    three lines (import, the coordinator start wiring the upload queue to
+    the same registry, the registry argument on the run_execution submit).
+    The executor main is the single place where the machine-wide stop event
+    and the UploadQueue live together; moving the wiring out would fork
+    lifecycle ownership. Revisit when executor main gets its next split.
+    Ceiling re-dated 226 to 224 after the rebase onto 0.7.0 (#481
+    ClaimPacing): #481's import cleanup (agent_subprocess_env re-export
+    retired, its test consumers import worker.execution.run directly) left
+    214 effective lines with this wiring on top, so the ceiling realigns to
+    actual + 10 per the dated-exemption convention (#431 / #458 precedents).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
+  ceiling: 224
+- check: architecture.file_budget
+  path: worker/upload/heartbeat.py
+  reason: >-
+    Issue #352 routes the upload-side lease heartbeat through the per-Worker
+    batch registry: start_upload_heartbeat takes the task (registry mode
+    registers the lease, no-registry mode keeps the single-beat thread for
+    unit tests), prune/quiesce forward to the registry. The dual-mode
+    docstrings are load-bearing: the single-beat path is the degraded
+    pre-v5-Host contract. Remove when the no-registry single-beat mode
+    retires and only the batch registry path remains.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
+  ceiling: 66
+- check: architecture.file_budget
+  path: worker/upload/queue.py
+  reason: >-
+    Issue #352 threads the batch heartbeat registry through the upload
+    queue: UploadTask carries heartbeat_registry (runtime only, not
+    persisted), the queue accepts/attaches it, and _deliver_bulk/_report
+    register restored and backoff-waiting leases with it. The alternative —
+    a wrapper queue subclass — would fork the two-lane scheduler wiring.
+    Revisit when the upload queue gets its next structural split.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
+  ceiling: 326
+- check: architecture.file_budget
+  path: worker/execution/heartbeat_batch.py
+  reason: >-
+    Issue #352 review fixes grow the per-Worker batch heartbeat coordinator
+    past its first-check-in ceiling: lease sharding at MAX_BATCH_HEARTBEATS
+    (a chunk's transient error aborts the tick — never a degrade; only
+    404/405 flips the mode — and the next tick retries from the top,
+    per-item Host predicates being idempotent), the degraded single-beat
+    path carrying SINGLE_BEAT_TIMEOUT_SECONDS so one slow Host response
+    cannot serially starve every other lease, and the facade-shared
+    proc_ref wiring (zombie stop must read the same dict the executor
+    writes). All three are core loop semantics, not splittable helpers.
+    Revisit when the coordinator gains its own degraded-mode or sharding
+    module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
+  ceiling: 238

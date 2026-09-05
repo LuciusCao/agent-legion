@@ -1,9 +1,12 @@
-"""Lease-heartbeat startup for one agent execution.
+"""Lease-heartbeat facade for one agent execution.
 
 Split out of ``executor.py`` so the executor stays within its size budget.
-The heartbeat outlives the agent process only once an upload task adopts it;
-when the process dies unadopted the loop stops beating so the Host's orphan
-sweeper can reclaim the lease instead of the worker hiding a zombie.
+Since #352 the per-execution heartbeat threads are gone: every claim
+registers its lease with the per-Worker batch coordinator
+(``heartbeat_batch.py``); ``ExecutionHeartbeat`` keeps the executor/upload
+call shape (adopt / stop / proc_ref) and forwards to the registry. A process
+that dies unadopted is pruned by the registry's snapshot so the Host's
+orphan sweeper can reclaim the lease instead of the worker hiding a zombie.
 """
 
 from __future__ import annotations
@@ -11,24 +14,49 @@ from __future__ import annotations
 import subprocess
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 
-from worker.execution.lifecycle import HeartbeatConfig, heartbeat_loop
+from worker.execution.heartbeat_batch import BatchHeartbeatRegistry
 
 
-@dataclass
 class ExecutionHeartbeat:
-    """State shared between the executor and its lease-heartbeat thread."""
+    """Per-execution heartbeat state, now backed by the batch coordinator.
 
-    thread: threading.Thread
-    stop: threading.Event
-    adopted: threading.Event
-    proc_ref: dict[str, subprocess.Popen[bytes] | None]
+    Without a registry (single-beat tests) every method degrades to inert
+    local event handling."""
+
+    def __init__(
+        self,
+        stop: threading.Event,
+        adopted: threading.Event,
+        proc_ref: dict[str, subprocess.Popen[bytes] | None],
+        registry: BatchHeartbeatRegistry | None,
+        execution_id: str,
+    ) -> None:
+        self.stop, self.adopted, self.proc_ref = stop, adopted, proc_ref
+        self.registry, self.execution_id = registry, execution_id
+
+    def _forward(self, method: str) -> None:
+        if self.registry is not None:
+            getattr(self.registry, method)(self.execution_id)
 
     def adopt(self) -> None:
-        """Mark the lease as adopted by an upload task."""
+        """Mark the lease as adopted by an upload task (beats outlive proc)."""
         self.adopted.set()
+        self._forward("set_adopted")
+
+    def shutdown(self) -> None:
+        """Prune the lease from the batch registry (no beat for it anymore)."""
+        self.stop.set()
+        self._forward("prune")
+
+    def quiesce(self) -> None:
+        """Pause this lease's beats (final report in flight)."""
+        self._forward("quiesce")
+
+    def resume(self) -> None:
+        """Resume this lease's beats (transient report failure backing off)."""
+        self._forward("resume")
 
 
 def start_lease_heartbeat(
@@ -38,22 +66,24 @@ def start_lease_heartbeat(
     interval: float,
     ownership_lost: threading.Event,
     on_cancelled: Callable[[list[str]], Any] | None = None,
+    registry: BatchHeartbeatRegistry | None = None,
 ) -> ExecutionHeartbeat:
-    """Start the daemon heartbeat thread for one execution's lease."""
+    """Register one execution's lease with the batch heartbeat coordinator.
+
+    ``interval``/``client`` are accepted for call-shape compatibility; the
+    beat period is the coordinator's (per-Worker), not per-execution. Legacy
+    callers without a registry get inert defaults — single-beat semantics
+    live on in ``lifecycle.py`` and the degraded pre-v5-Host path.
+
+    In registry mode the facade shares the registry entry's ``proc_ref`` and
+    ``adopted`` objects (not its own copies): the executor writes the agent
+    process into ``proc_ref`` and the coordinator's zombie stop reads the
+    very same dict — that identity is what makes a dead, unadopted process
+    stop being batched."""
     stop = threading.Event()
-    adopted = threading.Event()
     proc_ref: dict[str, subprocess.Popen[bytes] | None] = {"proc": None}
-    config = HeartbeatConfig(
-        client=client,
-        execution_id=execution_id,
-        lease_id=lease_id,
-        stop=stop,
-        interval=interval,
-        ownership_lost=ownership_lost,
-        proc_ref=proc_ref,
-        adopted=adopted,
-        on_cancelled=on_cancelled,
-    )
-    thread = threading.Thread(target=heartbeat_loop, args=(config,), daemon=True)
-    thread.start()
-    return ExecutionHeartbeat(thread=thread, stop=stop, adopted=adopted, proc_ref=proc_ref)
+    adopted = threading.Event()
+    if registry is not None:
+        entry = registry.register(execution_id, lease_id, ownership_lost, on_cancelled)
+        proc_ref, adopted = entry.proc_ref, entry.adopted
+    return ExecutionHeartbeat(stop, adopted, proc_ref, registry, execution_id)
