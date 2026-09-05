@@ -137,6 +137,18 @@ fn verdict(raw: &str, any_invalid: &mut bool) -> String {
                     uuid.get_version_num()
                 );
             }
+            // A correct variant is still not validity: RFC4122-variant values
+            // with an undefined version nibble (0, or 9–15 outside the
+            // RFC4122 1–5 / RFC9562 6–8 range) parse fine — e.g.
+            // 00000000-0000-0000-8000-000000000000 — and `get_version`
+            // reports exactly those as None.
+            if uuid.get_version().is_none() {
+                *any_invalid = true;
+                return format!(
+                    "{raw}: invalid (undefined version, v{})",
+                    uuid.get_version_num()
+                );
+            }
             let mut notes = vec![format!("v{}", uuid.get_version_num())];
             if raw != uuid.to_string() {
                 notes.push("non-canonical form".to_string());
