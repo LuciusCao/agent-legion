@@ -27,7 +27,10 @@ def _print_status(status: dict[str, Any]) -> None:
         print(f"故障: {failed}")
     worker = status.get("host_worker") or {}
     if worker:
-        print(f"Host 登记: {worker.get('worker_id')} / {worker.get('name')}")
+        # name 缺失窗口（启动后、首次 get_self 失败）：回退 worker_id，
+        # 不打印字面量 None。
+        worker_id = worker.get("worker_id")
+        print(f"Host 登记: {worker_id} / {worker.get('name') or worker_id}")
         scope = worker.get("allowed_workspaces", [])
         print(f"允许工作区: {', '.join(scope) if scope else '全部'}")
         print(f"最后在线: {worker.get('last_seen_at')}")

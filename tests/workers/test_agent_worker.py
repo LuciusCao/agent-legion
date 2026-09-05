@@ -480,6 +480,75 @@ def test_main_survives_transient_claim_errors(
     assert result == [0]
 
 
+def test_main_error_pass_waits_via_backoff_not_pacing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """P2-3（#481 review）：成功 claim 之后的错误 pass，等待必须来自
+    ClaimBackoffSequence（#437 序列），而不是 pacing 的自适应短等待。
+
+    现有 test_error_path_pacing_untouched 只验证状态机属性持久性；
+    这里在 main() 级钉接线——spy 记录 backoff.next_wait 与
+    pacing.wait_after_pass 的每次返回值（它们就是 stop.wait 的时长
+    来源），断言错误轮的等待是 backoff 首退避（1s 量级）而非 pacing
+    带内值（≤100ms 上沿）。
+    """
+    fake = FakeClient(tmp_path / "unused.tar.gz")
+    claim_calls = 0
+    backoff_waits: list[float] = []
+    pacing_waits: list[float] = []
+
+    def claim_then_error(
+        worker_id: str,
+        max_concurrency: int | None = None,
+        max_code_concurrency: int | None = None,
+    ) -> dict | None:
+        nonlocal claim_calls
+        claim_calls += 1
+        if claim_calls == 1:
+            return _claim("exec-1")
+        if claim_calls == 2:
+            raise urllib.error.URLError("connection refused")
+        return None
+
+    class RecordingBackoff(agent_worker.ClaimBackoffSequence):
+        def next_wait(self) -> float:  # type: ignore[override]
+            wait = super().next_wait()
+            backoff_waits.append(wait)
+            return wait
+
+    class RecordingPacing(agent_worker.ClaimPacing):
+        def wait_after_pass(self, claimed: bool, round_trip: float, empty_wait: float) -> float:
+            wait = super().wait_after_pass(claimed, round_trip, empty_wait)
+            pacing_waits.append(wait)
+            return wait
+
+    fake.claim = claim_then_error  # type: ignore[attr-defined]
+    # 执行生命周期不在本用例范围：no-op 掉 run_execution（FakeClient 的
+    # bundle 路径不存在，真实 run_execution 会在 download 处炸掉）。
+    monkeypatch.setattr(agent_worker, "run_execution", lambda *a, **k: None)
+    monkeypatch.setattr(agent_worker, "ClaimBackoffSequence", RecordingBackoff)
+    monkeypatch.setattr(agent_worker, "ClaimPacing", RecordingPacing)
+
+    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, {"claim_enabled": True})
+    deadline = time.monotonic() + 10
+    while claim_calls < 3 and time.monotonic() < deadline:
+        time.sleep(0.02)
+    handlers[agent_worker.signal.SIGTERM]()
+    thread.join(timeout=10)
+
+    assert claim_calls >= 3, "claim loop stalled before the error pass"
+    assert result == [0]
+    # 第一轮（成功 claim）：等待来自 pacing（自适应短等待，带内 ≤100ms）。
+    assert pacing_waits and pacing_waits[0] <= 0.1 + 1e-9
+    # 第二轮（claim 抛错）：等待来自 backoff（#437 首退避 1s 固定）——
+    # 错误轮 pacing 不被调用，如果误走 pacing 这里会是 ≤100ms。
+    assert backoff_waits and backoff_waits[0] >= 1.0 - 1e-9
+    # 错误轮之后恢复（claim None）：pacing 重新被调用，返回 poll_interval
+    # （0.05s 配置值）——空队列语义回到调用方，未被错误路径污染。
+    assert len(pacing_waits) == 2
+    assert pacing_waits[1] == pytest.approx(0.05)
+
+
 def test_main_hot_reloads_claim_switch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     fake = FakeClient(tmp_path / "unused.tar.gz")
     claim_calls = 0
