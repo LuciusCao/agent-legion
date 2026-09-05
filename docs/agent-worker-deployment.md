@@ -215,6 +215,33 @@ false、仅 amd64）；实际发布只由 `worker-v*` tag 触发。协议升级�
 （Host first, Worker second）对镜像形态同样适用——升级即 pull 新版本 tag
 并重启容器。
 
+### 一键安装（无仓库机器）
+
+没有仓库克隆的 Worker 机器（如个人 Mac、树莓派）用
+[install-worker.sh](../scripts/install-worker.sh) 一键组装独立部署：
+拉取 standalone compose（`deploy/compose.worker.standalone.yaml`，按
+`worker-v<version>` tag ref——镜像与编排文件版本耦合在同一发布 tag）、
+下载 sha256 校验的 velites 二进制（架构自动匹配）、生成引导 `worker.yaml`
+与 `models.json` 示例，最后 `docker compose up`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/LuciusCao/agent-legion/develop/scripts/install-worker.sh \
+  | sh -s -- --host-url http://<部署机IP>:8000 --worker-id my-worker-1
+```
+
+幂等语义分层：脚本自有资产（compose 文件、velites 二进制、`.env` 的
+`AGENT_WORKER_IMAGE` 行）每次刷新到目标版本；**用户资产（`worker.yaml`、
+`models.json`、`.env` 其余内容）已存在即跳过、绝不覆盖**——`worker.yaml`
+首次启动导入控制卷后以控制台为准，覆盖只会制造 `mounted_config_diverged`。
+升级 = 重跑脚本带 `--version <新版本>`（须存在对应的 `worker-v*` 发布 tag）。
+细节约束（模型注册表就绪前不启动、`--models-json` 显式安装、
+`AGENT_WORKER_UI_BIND`/`AGENT_WORKER_UI_PORT` 端口插值、POSIX sh 管道模式）
+见脚本头部注释与 `--help`。
+
+与拉取式 override 的取舍：仓库克隆 + `compose.worker.local.yaml` 适合开发/
+调试机（能跑 `make stack-*`、随仓库升级）；一键安装适合纯执行节点（只有
+Docker、目录自包含）。两者最终形态等价（同一镜像 + 同一挂载面）。
+
 ### 出网代理（#444）
 
 Worker 默认**直连出网**：service 入口会剥离启动 shell 继承的代理环境变量
