@@ -137,9 +137,8 @@ class OpsMetricsService:
         the six-stage pipeline counters are process deltas over the bucket,
         the depth gauges reuse the queries already run here (queued,
         active_executions) plus the enqueue pool backlog, and the DB-pool
-        wait gauges come from the psycopg pool stats.
-
-        #490: the online read also feeds worker_events.note_worker_offline.
+        wait gauges come from the psycopg pool stats. #490: the online read
+        also feeds worker_events.note_worker_offline.
         """
         sampled_at = now or datetime.now(UTC)
         bucket_start = sampled_at.replace(second=0, microsecond=0) - timedelta(minutes=1)
@@ -152,29 +151,33 @@ class OpsMetricsService:
                 " where revoked_at is null and last_seen_at >= %s",
                 (online_since,),
             )["c"]
-            # #490: one last_seen read serves the online set AND the
-            # offline fold (memo in worker_events).
+            # #490: one last_seen read serves the online set AND the offline
+            # fold (dict comprehension — rows are dicts; dict(rows) would
+            # garble them into column-name keys).
             worker_rows = conn.execute(
                 "select worker_id, last_seen_at from agent_workers where revoked_at is null"
             ).fetchall()
             worker_last_seen = {str(r["worker_id"]): r["last_seen_at"] for r in worker_rows}
-            online_worker_ids = {k for k, v in worker_last_seen.items() if worker_events.as_utc(v)}
+            # Same 30s threshold as the count above.
+            online_worker_ids = {
+                k
+                for k, v in worker_last_seen.items()
+                if (t := worker_events.as_utc(v)) is not None and t >= online_since
+            }
             active_executions = _fetch_one(
-                conn,
-                "select count(*) as c from agent_execution_requests where state = 'claimed'",
+                conn, "select count(*) as c from agent_execution_requests where state = 'claimed'"
             )["c"]
             # Queue depth is workspace-dimensioned: sampled on the global row
             # only, per-Worker rows keep the default 0.
             queued = _fetch_one(
-                conn,
-                "select count(*) as c from agent_execution_requests where state = 'queued'",
+                conn, "select count(*) as c from agent_execution_requests where state = 'queued'"
             )["c"]
             claimed_by_worker = {
                 row["worker_id"]: row["c"]
                 for row in conn.execute(
                     "select worker_id, count(*) as c from agent_execution_requests"
                     " where state = 'claimed' and worker_id is not null"
-                    " group by worker_id",
+                    " group by worker_id"
                 ).fetchall()
             }
             tokens = _fetch_one(
@@ -228,7 +231,7 @@ class OpsMetricsService:
                     tokens=tokens_by_worker.get(worker_id, _EMPTY_TOKENS),
                 )
             upsert_workspace_samples(conn, bucket_start, workspace_samples)
-        worker_events.note_worker_offline(sampled_at, worker_last_seen)
+        worker_events.note_worker_offline(worker_last_seen, online_since)
         self._sample_runtime_profile(bucket_start, queued=int(queued), active=active_executions)
 
     def _sample_runtime_profile(self, bucket_start: datetime, *, queued: int, active: int) -> None:
@@ -274,9 +277,7 @@ class OpsMetricsService:
         # Runtime-profile rows share the same retention window (#359), via the
         # JobQueries facade (BOUNDARY-DATA-001; new SQL does not join the
         # grandfathered baseline of this file).
-        from server.app.jobs.queries.runtime_profile import (
-            runtime_profile_queries_from_dsn,
-        )
+        from server.app.jobs.queries.runtime_profile import runtime_profile_queries_from_dsn
 
         runtime_profile_queries_from_dsn(self._database_dsn).delete_runtime_profile_samples_before(
             cutoff

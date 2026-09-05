@@ -21,7 +21,8 @@ volume in place (the on-disk format is not compatible across majors).
 ```bash
 createdb agent_legion_dev
 export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_dev
-uv run uvicorn server.app.main:create_prod_app --factory --reload
+uv run uvicorn server.app.main:create_prod_app --factory --reload \
+  --log-config deploy/uvicorn-log-config.json
 ```
 
 Use a derived database name (as above), not the bare `agent_legion`:
