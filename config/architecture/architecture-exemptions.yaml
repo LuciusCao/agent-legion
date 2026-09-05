@@ -910,9 +910,14 @@ exemptions:
     The executor main is the single place where the machine-wide stop event
     and the UploadQueue live together; moving the wiring out would fork
     lifecycle ownership. Revisit when executor main gets its next split.
+    Ceiling re-dated 226 to 224 after the rebase onto 0.7.0 (#481
+    ClaimPacing): #481's import cleanup (agent_subprocess_env re-export
+    retired, its test consumers import worker.execution.run directly) left
+    214 effective lines with this wiring on top, so the ceiling realigns to
+    actual + 10 per the dated-exemption convention (#431 / #458 precedents).
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
-  ceiling: 226
+  ceiling: 224
 - check: architecture.file_budget
   path: worker/upload/heartbeat.py
   reason: >-
@@ -938,3 +943,20 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
   ceiling: 326
+- check: architecture.file_budget
+  path: worker/execution/heartbeat_batch.py
+  reason: >-
+    Issue #352 review fixes grow the per-Worker batch heartbeat coordinator
+    past its first-check-in ceiling: lease sharding at MAX_BATCH_HEARTBEATS
+    (a chunk's transient error aborts the tick — never a degrade; only
+    404/405 flips the mode — and the next tick retries from the top,
+    per-item Host predicates being idempotent), the degraded single-beat
+    path carrying SINGLE_BEAT_TIMEOUT_SECONDS so one slow Host response
+    cannot serially starve every other lease, and the facade-shared
+    proc_ref wiring (zombie stop must read the same dict the executor
+    writes). All three are core loop semantics, not splittable helpers.
+    Revisit when the coordinator gains its own degraded-mode or sharding
+    module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
+  ceiling: 238

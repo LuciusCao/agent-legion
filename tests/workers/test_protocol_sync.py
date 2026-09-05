@@ -45,7 +45,8 @@ def test_worker_declared_version_is_latest_shared() -> None:
 
 def test_batch_heartbeat_limit_mirrors_host_contract() -> None:
     """#352：Worker 侧批量上限镜像 Host 契约上限（MAX_BATCH_HEARTBEATS），
-    两侧漂移会让 Worker 的拒打阈值与 Host 的 422 边界错位。"""
+    两侧漂移会让 Worker 的分片边界与 Host 的 422 边界错位（Worker 按自己
+    的值分片，一片超过 Host 上限就整片 422）。"""
     from server.app.agent_broker.heartbeat_batch import (
         MAX_BATCH_HEARTBEATS as host_limit,
     )

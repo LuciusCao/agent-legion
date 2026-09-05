@@ -146,7 +146,7 @@ def test_batch_heartbeat_requires_worker_token(tmp_path: Path) -> None:
 
 def test_batch_heartbeat_never_renews_another_workers_execution(tmp_path: Path) -> None:
     """防跨 worker 误续：另一台机器的 execution 对本 Worker 是 lost，且
-    原持有者的租约不受影响。"""
+    原持有者的租约不受影响——其随后仍能正常续期（同一 lease 原样 200）。"""
     app = make_app(tmp_path)
     seed_request(app.state.job_db, job_id="job-1", limit=10)
 
@@ -156,14 +156,32 @@ def test_batch_heartbeat_never_renews_another_workers_execution(tmp_path: Path) 
         claimed = claim(client, owner_token)
         intruder_token = _register_second_worker(client)
 
-        outcome = _heartbeat_ok(
+        intrusion = _heartbeat_ok(
             client,
             intruder_token,
             [{"execution_id": claimed["execution_id"], "lease_id": claimed["lease_id"]}],
         )
+        # The owner renews right after the intrusion attempt: the intruder's
+        # lost verdict must not have touched the owner's lease/heartbeat.
+        owner_renewal = _heartbeat_ok(
+            client,
+            owner_token,
+            [{"execution_id": claimed["execution_id"], "lease_id": claimed["lease_id"]}],
+        )
+        # And the owner's single-beat channel still works for the same lease.
+        single = client.post(
+            f"/api/agent-executions/{claimed['execution_id']}/heartbeat",
+            headers={
+                "X-Agent-Worker-Token": owner_token,
+                "X-Agent-Lease-Id": claimed["lease_id"],
+            },
+        )
+        assert single.status_code == 204
 
-    assert outcome["renewed"] == []
-    assert outcome["lost"] == [claimed["execution_id"]]
+    assert intrusion["renewed"] == []
+    assert intrusion["lost"] == [claimed["execution_id"]]
+    assert owner_renewal["renewed"] == [claimed["execution_id"]]
+    assert owner_renewal["lost"] == []
 
 
 def test_batch_heartbeat_rejects_oversized_batch(tmp_path: Path) -> None:

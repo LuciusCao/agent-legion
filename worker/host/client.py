@@ -1,8 +1,8 @@
-"""HTTP client and control-token resolution for the local Worker Service CLI.
+"""HTTP client for the local Worker Service CLI.
 
-Control calls (register/claim/metrics) live here; the heartbeat family is the
-``HeartbeatOperations`` mixin (``worker.host.heartbeat_ops``), retried bulk
- transfers the ``TransferOperations`` mixin (``worker.host.transfer``).
+Control calls (register/claim/metrics) live here; the heartbeat family is
+the ``HeartbeatOperations`` mixin (``worker.host.heartbeat_ops``), retried
+bulk transfers the ``TransferOperations`` mixin (``worker.host.transfer``).
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import urllib.parse
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 import requests
 
@@ -50,7 +50,7 @@ class Client(HeartbeatOperations, TransferOperations):
         method: str,
         path: str,
         *,
-        data: bytes | Any | None = None,
+        data: bytes | BinaryIO | None = None,
         headers: dict[str, str] | None = None,
         timeout: float | None = None,
         stream_to: Path | None = None,

@@ -66,7 +66,15 @@ def batch_heartbeat(
     lost when this Worker no longer owns the execution under that exact lease
     (unknown id, swept/requeued lease, wrong worker) — the same 409 family the
     single heartbeat reports, surfaced per item so the rest of the batch still
-    renews. Duplicated execution ids are collapsed to the last lease_id."""
+    renews. Duplicated execution ids are collapsed to the last lease_id.
+
+    Lock-order note: this transaction takes multiple unordered
+    ``select ... for update`` row locks on agent_execution_requests (one per
+    batch item). Every lock this transaction can hold is in this one table,
+    so it cannot form a wait cycle with itself; any future edit that adds a
+    second locked table here MUST either lock rows in a deterministic order
+    (order by primary key — repo precedent register_token_deletion.py) or use
+    ``for update skip locked`` to prevent deadlocks."""
     # Collapse duplicates while preserving order: a Worker bug sending the
     # same execution twice must not lock and update one row twice.
     by_execution: dict[str, str] = {}

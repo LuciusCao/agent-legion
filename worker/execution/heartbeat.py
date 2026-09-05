@@ -73,9 +73,17 @@ def start_lease_heartbeat(
     ``interval``/``client`` are accepted for call-shape compatibility; the
     beat period is the coordinator's (per-Worker), not per-execution. Legacy
     callers without a registry get inert defaults — single-beat semantics
-    live on in ``lifecycle.py`` and the degraded pre-v5-Host path."""
-    stop, adopted = threading.Event(), threading.Event()
+    live on in ``lifecycle.py`` and the degraded pre-v5-Host path.
+
+    In registry mode the facade shares the registry entry's ``proc_ref`` and
+    ``adopted`` objects (not its own copies): the executor writes the agent
+    process into ``proc_ref`` and the coordinator's zombie stop reads the
+    very same dict — that identity is what makes a dead, unadopted process
+    stop being batched."""
+    stop = threading.Event()
     proc_ref: dict[str, subprocess.Popen[bytes] | None] = {"proc": None}
+    adopted = threading.Event()
     if registry is not None:
-        registry.register(execution_id, lease_id, ownership_lost, on_cancelled)
+        entry = registry.register(execution_id, lease_id, ownership_lost, on_cancelled)
+        proc_ref, adopted = entry.proc_ref, entry.adopted
     return ExecutionHeartbeat(stop, adopted, proc_ref, registry, execution_id)
