@@ -42,36 +42,41 @@ exemptions:
 - check: architecture.file_budget
   path: server/app/agent_broker/claim.py
   reason: >-
-    Issue #448 phase 1 wires the claim-stage timer into the claim
-    transaction: the worker claim loop is single-threaded serial (claim
-    throughput = 1 / one claim round-trip), so the transaction now carries
-    a ClaimStageTimer whose worker_setup/scan/evaluate/writes closes ride
-    the existing statements, plus one _report_claim_stages helper shared by
-    all three return paths. The alternative — moving the orchestration out
-    to a new module — would split the claim transaction's single flow
-    across files for ~20 lines of instrumentation. Remove when #448's
-    phase-2 rework (transaction slimming or claim concurrency) restructures
-    the claim path and re-budgets the module.
+    The claim transaction module stays one file for two stacked
+    instrumentation generations: the #448 claim-stage timer (one
+    ClaimStageTimer whose worker_setup/scan/evaluate/writes closes ride the
+    existing statements, plus the _report_claim_stages helper shared by all
+    three return paths) and the #490 observation call (one
+    note_claim_outcome per exit, payloads assembled in worker_events.py).
+    The alternative — moving the orchestration out to a new module — would
+    split the claim transaction's single flow across files for ~20 lines of
+    instrumentation. The original anchor (#448) closed with phase 2
+    restructured elsewhere; re-anchored to #490 by the structured-events
+    PR that added the observation calls riding the same exits. Remove when
+    the claim path's next rework re-budgets the module.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/490
   ceiling: 122
 - check: architecture.file_budget
   path: server/app/agent_broker/claim_evaluate.py
   reason: >-
-    Issue #461 review on PR #461: the writes stage split (#448) moves into
+    The writes stage split (#448, reviewed on PR #461) moves into
     evaluate_candidate — the promote-write sequence (node flip, node_runs/
     executor_leases inserts, request claim, jobs promote) is the tail of
     the per-candidate evaluation that must close the "evaluate" stage where
     the writes begin, or the whole claim's write cost folds into evaluate
     and the "writes-dominant" branch of the stage data stays unreachable.
-    The alternative — closing the stage from claim_windows around the whole
-    call — cannot see the skip paths (a skipped candidate has no writes and
-    must not pollute the segment); splitting the promote sequence out to a
-    sibling module would fork the one lock-order invariant this module owns.
-    Remove when #448's phase-2 rework restructures the claim path and
-    re-budgets the module together with claim.py's entry.
+    #490 adds the skip-reason bookkeeping reads the structured claim events
+    fold (decision-point naming, zero judgment change). The alternative —
+    closing the stage from claim_windows around the whole call — cannot see
+    the skip paths (a skipped candidate has no writes and must not pollute
+    the segment); splitting the promote sequence out to a sibling module
+    would fork the one lock-order invariant this module owns. The original
+    anchor (#448) closed with phase 2 restructured elsewhere; re-anchored
+    to #490 by the structured-events PR. Remove when the claim path's next
+    rework re-budgets the module together with claim.py's entry.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/490
   ceiling: 217
 - check: architecture.file_budget
   path: server/app/agent_broker/claim_windows.py
@@ -108,9 +113,11 @@ exemptions:
     one more registry entry with its why-comment, same one-entry-per-version
     growth model the chain has followed since the first split. Splitting the
     chain would fork the version-sorted ordering invariant (the file's own
-    module docstring) for five lines of registry.
+    module docstring) for five lines of registry. The original anchor (#448)
+    closed with phase 2 restructured elsewhere; re-anchored to #490 by the
+    structured-events PR that found the entry (no code change of its own).
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/490
   ceiling: 111
 - check: architecture.file_budget
   path: server/app/db/migrations/job_status_counts_statement_triggers.py
@@ -450,7 +457,9 @@ exemptions:
   path: server/app/routes/agent_workers.py
   reason: '#381 version handshake: the register endpoint logs the reported runtime_versions mapping (worker
     code x velites version matrix) at registration time. Drift diagnostics for externally-mounted runtimes;
-    informational only, no admission change.'
+    informational only, no admission change. #490 adds the structured register events at the same endpoint
+    (worker.registered after the transaction, worker.register_rejected at the 400/401 exits — one call each,
+    payloads built in worker_events.py); the ceiling covers both generations.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 236
@@ -585,7 +594,8 @@ exemptions:
   reason: 'Issue #359 extends the sampling pass to persist the runtime-profile gauge row (one call plus
     the pool/pool-backlog gauge readers kept next to their only consumer). The sampler stays one cohesive
     write surface; the durable split is a sampling-dispatch module if more gauge families join, at which
-    point this exemption goes stale.'
+    point this exemption goes stale. #490 feeds the offline detector from the same last_seen read (one
+    call, threshold restored to match the online count — review P0 on #494).'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 230

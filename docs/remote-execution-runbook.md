@@ -336,7 +336,8 @@ supervisor console stream. Align the two sides by `execution_id` /
 | Event | Side | Meaning / key fields |
 | --- | --- | --- |
 | `worker.registered` | Host | Registration committed: runtime version matrix, concurrency declarations, resolved workspace scope |
-| `worker.offline` | Host | A previously-online worker crossed the `last_seen` threshold (30 s); `last_seen_at` + `threshold_seconds`; fires once per transition |
+| `worker.register_rejected` | Host | Registration refused (400/401): `reason` (`protocol_version_too_old` + `min_protocol_version`, `register_key_deleted`, `invalid_registration`) |
+| `worker.offline` | Host | A previously-online worker crossed the `last_seen` threshold (30 s); `last_seen_at` (the DB-true last seen) + `threshold_seconds`; fires once per transition |
 | `claim.granted` | Host | A claim succeeded: `runtime`, `model`, pool occupancy (`agent_active`/`code_active`) |
 | `claim.empty` | Host | 204 — queue drained for this worker's pools; `reasons` when the queue head was skipped (paused workspace, lock races…) |
 | `claim.rejected` | Host | Stock present but this worker was not admitted — see the reason codes below |

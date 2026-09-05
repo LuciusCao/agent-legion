@@ -106,16 +106,20 @@ def create_agent_workers_router(
     )
 
     @router.post(
-        "/agent-workers/register",
-        status_code=201,
-        response_model=RegisterAgentWorkerResponse,
+        "/agent-workers/register", status_code=201, response_model=RegisterAgentWorkerResponse
     )
     def register(
         payload: RegisterAgentWorkerRequest, request: Request
     ) -> RegisterAgentWorkerResponse:
         scope = resolve_registration_scope(request)
         if payload.protocol_version < config.min_protocol_version:
+            worker_events.note_worker_register_rejected(
+                payload, "protocol_version_too_old", config.min_protocol_version
+            )
             raise HTTPException(status_code=400, detail="unsupported Agent Worker protocol")
+        # #490: registration refusals emit worker.register_rejected (the
+        # pre-claim counterpart of worker.registered — a rejected machine
+        # otherwise shows up only as an HTTP 4xx in the access log).
         try:
             token = registry.issue_token(
                 **payload.model_dump(),
@@ -128,17 +132,17 @@ def create_agent_workers_router(
         except RegisterKeyDeleted as exc:
             # A bound key was deleted after the read-only resolve (guard
             # re-checks under lock): the credential is dead, not malformed.
-            # str() of a KeyError subclass wraps the message in quotes —
-            # args[0] carries the clean text.
+            # str() of a KeyError subclass wraps the message in quotes.
             detail = exc.args[0] if exc.args else str(exc)
+            worker_events.note_worker_register_rejected(payload, "register_key_deleted", None)
             raise HTTPException(status_code=401, detail=detail) from exc
         except ValueError as exc:
+            worker_events.note_worker_register_rejected(payload, "invalid_registration", None)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         # #381 版本握手：外挂后 velites 版本由运维方独立管理，把「worker 代码
         # × runtime 版本」矩阵打进注册日志——漂移排障的第一现场，不落库。
         # 记在注册事务成功之后（codex P2 on #384）：runtimes 值非法（400）或
-        # key 并发删除（401）不应留下「已注册」的观测记录——版本信息不落库，
-        # 这条日志就是唯一现场，失败的注册不该进兼容矩阵。
+        # key 并发删除（401）不应留下「已注册」的观测记录。
         if payload.runtime_versions:
             logger.info(
                 "agent worker registered: worker_id=%s protocol=%s runtimes=%s versions=%s",
@@ -171,8 +175,7 @@ def create_agent_workers_router(
         response_model=AgentWorkerDeleteResponse,
     )
     def delete_worker(
-        worker_id: str,
-        _admin: Annotated[dict[str, Any], Depends(require_admin)],
+        worker_id: str, _admin: Annotated[dict[str, Any], Depends(require_admin)]
     ) -> AgentWorkerDeleteResponse:
         """Hard-delete a worker registration (record cleanup step).
 
@@ -192,8 +195,7 @@ def create_agent_workers_router(
 
     @router.get("/agent-workers", response_model=AgentWorkersResponse)
     def list_workers(
-        _user: Annotated[dict[str, Any], Depends(require_user)],
-        workspace_id: str | None = None,
+        _user: Annotated[dict[str, Any], Depends(require_user)], workspace_id: str | None = None
     ) -> AgentWorkersResponse:
         """List registered workers; workspace_id narrows to that workspace.
 
@@ -286,5 +288,4 @@ def create_agent_workers_router(
     # The /agent-register-tokens management surface lives in its own module
     # (file-size budget) but ships as part of this router.
     router.include_router(create_agent_register_tokens_router(registry))
-
     return router
