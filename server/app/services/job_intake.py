@@ -170,7 +170,7 @@ class JobIntakeService:
             frozen_pins={"node_code_versions": node_code_versions},
         )
         try:
-            jobs = self.job_db.create_jobs_bulk(
+            job_ids = self.job_db.create_jobs_bulk(
                 candidates=candidates,
                 workflow_key=workflow_key,
                 run_id=batch["id"],
@@ -200,8 +200,12 @@ class JobIntakeService:
                     "run %s left orphaned after job creation failed: %s", batch["id"], exc
                 )
             raise
-        if jobs:
+        if job_ids:
             notify_schedulable_work()
+
+        # Legacy wire shape still materializes job rows (the /runs path
+        # dropped them, #467 A4); chunked facade read bounds the query.
+        jobs = self.job_db.fetch_jobs_by_ids(job_ids)
 
         for job in jobs:
             job["storage_dir"] = str(resolve_job_dir(job, self.settings.jobs_dir))
