@@ -1,8 +1,7 @@
 """Chronological registry of versioned schema migrations (the schema.py /
 migration_registry.py re-export splits are file-budget moves). DDL-only
 versions carry no Python function — DDL lives in ``postgres_schema.sql``
-(v76's table is the exception: the file is at its ceiling, the migration
-covers fresh + upgrade paths). migrate_runs (v53) must run after every
+(v76's table is the exception). migrate_runs (v53) must run after every
 migration that still reads job_batches; the sorted registry guarantees it.
 """
 
@@ -52,17 +51,16 @@ from server.app.db.migrations.job_status_counts_statement_triggers import (
 from server.app.db.migrations.jobs_workflow_key_alignment import migrate_jobs_workflow_key_alignment
 from server.app.db.migrations.preview_panels import migrate_preview_panels
 from server.app.db.migrations.retire_workflow_key_columns import migrate_retire_workflow_key_columns
-
-MigrationFn = Callable[[Any], None]
+from server.app.db.migrations.shard_identity_index import migrate_shard_identity_index
 
 
 @dataclass(frozen=True)
 class SchemaMigration:
-    """One versioned entry: the newest migration introduced at this version."""
+    """One versioned entry (the newest migration introduced at this version)."""
 
     version: int
     name: str
-    apply: MigrationFn | None = None
+    apply: Callable[[Any], None] | None = None
 
 
 MIGRATIONS: list[SchemaMigration] = [
@@ -198,6 +196,11 @@ MIGRATIONS: list[SchemaMigration] = [
     # ops_runtime_profile_samples (scan/evaluate/writes totals + maxes) —
     # the claim-path forensic instrumentation that orders phase 2. DDL-only.
     SchemaMigration(78, "claim_stage_profile", migrate_claim_stage_profile),
+    # v79 (#401): the one-active-request index becomes shard-aware — dedup
+    # widens to (job_id, node_key, shard identity), non-shard rows collapse
+    # to -1 via COALESCE (old single-active semantics preserved). Apply fn
+    # (drop + create): upgraded databases carry the two-column index.
+    SchemaMigration(79, "shard_identity_index", migrate_shard_identity_index),
 ]
 
 _VERSIONS = [m.version for m in MIGRATIONS]

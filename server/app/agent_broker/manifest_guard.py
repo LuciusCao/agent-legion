@@ -5,12 +5,21 @@ match a real Worker declaration: it would sit at the queue head forever,
 silently blocking the workspace behind it (2026-08-01 incident, issue #13).
 The broker rejects such manifests at enqueue instead — the producer surfaces
 a node failure with an actionable message rather than a scheduling deadlock.
+
+Also owns the canonical SQL expression for a request's shard identity (#401):
+the one-active-request unique index (schema v79) and the claim side's
+active-request gate share it, so index dedup and business dedup can never
+drift into two conventions.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+
+from server.app.db.migrations.shard_identity_index import SHARD_IDENTITY_SQL
+
+__all__ = ["PLACEHOLDER_MODELS", "SHARD_IDENTITY_SQL", "require_routable_execution"]
 
 # Template placeholders, not routable models: `your-model` is the historical
 # config/workflow.yaml default that deadlocked the production queue.

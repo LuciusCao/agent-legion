@@ -10,6 +10,7 @@
     "tests/db/test_agent_catalog_cutover_migration.py",
     "tests/db/test_agent_request_kind_schema.py",
     "tests/db/test_agent_request_kind_window.py",
+    "tests/db/test_agent_request_shard_index.py",
     "tests/db/test_agent_workspace_scope_migration.py",
     "tests/db/test_auth_queries.py",
     "tests/db/test_auth_scoped_tokens_migration.py",

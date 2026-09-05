@@ -442,3 +442,68 @@ def test_code_worker_claim_keeps_frozen_pin_for_quality_replay(tmp_path: Path) -
     dispatch = _claim_via_code_worker(tmp_path, job_db, ws, job, node)
 
     assert dispatch.enqueue.call_args.kwargs["code_text"] == CUSTOM_V1
+
+
+def test_shard_claim_gate_is_shard_scoped(tmp_path: Path) -> None:
+    """#401: the remote shard claim path passes its shard identity to the
+    single-active gate — other shards' active rows must not throttle this
+    shard (the pre-v79 gate blocked on (job_id, node_key) alone), while a
+    non-shard claim of the same node still sees every active row."""
+    node = _local_node("fetch")
+    job_db, ws = _prepare_job(tmp_path, node)
+    _publish_v1_v2(ws)
+    fat = _attach_snapshot(job_db, ws, node, None)
+    job = {
+        **fat,
+        "workflow_definition_snapshot_json": "",
+        "node_code_pins": node_code_pins_from_job_snapshot(fat),
+    }
+    dispatch = MagicMock()
+    dispatch.is_in_flight.return_value = False
+    dispatch.broker.has_active_request.return_value = False
+    dispatch.online_code_worker_available.return_value = True
+    dispatch.try_mark_in_flight.return_value = True
+    dispatch.enqueue_pool.submit.side_effect = lambda fn: (fn(), True)[1]
+    worker = MagicMock()
+    worker.job_db = job_db
+    worker.code_dispatch = dispatch
+    worker.state.batch_payload_cache = {}
+    worker.state.pass_claim_counts = {}
+    worker.settings.root_dir = tmp_path
+    worker.settings.config = {}
+    worker.settings.executor_runtime.workflows.custom_nodes_enabled = True
+
+    # Shard claim: the gate must be asked for THIS shard's identity.
+    handled = try_claim_code_worker_node(
+        worker,
+        job_db.get_workspace(ws["id"]),
+        job,
+        node,
+        tmp_path,
+        tmp_path / "claim.log",
+        (),
+        "test",
+        shard_runtime={"shard_index": 5, "shard_input": {"q": 5}},
+    )
+    assert handled is True
+    dispatch.broker.has_active_request.assert_called_once_with(
+        str(job["id"]), node.key, shard_index=5
+    )
+
+    # Non-shard claim of the same node: the gate passes shard_index=None —
+    # the node-level query that sees every active row of the node.
+    dispatch.broker.has_active_request.reset_mock()
+    handled = try_claim_code_worker_node(
+        worker,
+        job_db.get_workspace(ws["id"]),
+        job,
+        node,
+        tmp_path,
+        tmp_path / "claim.log",
+        (),
+        "test",
+    )
+    assert handled is True
+    dispatch.broker.has_active_request.assert_called_once_with(
+        str(job["id"]), node.key, shard_index=None
+    )

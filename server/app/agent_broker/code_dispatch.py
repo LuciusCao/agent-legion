@@ -178,8 +178,15 @@ class CodeDispatchService:
         (top-level keys) — the remote Worker reads them from there to rebuild
         the same runtime dict the local executor hands to node code, and the
         claim transaction reads ``shard_index`` to bind the execution to its
-        ``node_shards`` row (dedup + shard-aware completion)."""
-        if self.broker.has_active_request(str(job["id"]), node.key):
+        ``node_shards`` row (dedup + shard-aware completion). #401: the
+        active-request gate below matches the broker index's identity —
+        per-shard for shard rows, plain node-level otherwise."""
+        if shard_runtime is not None:
+            if self.broker.has_active_request(
+                str(job["id"]), node.key, shard_index=int(shard_runtime["shard_index"])
+            ):
+                return False
+        elif self.broker.has_active_request(str(job["id"]), node.key):
             return False
         execution_id = str(uuid.uuid4())
         digest = hashlib.sha256(code_text.encode("utf-8")).hexdigest()
