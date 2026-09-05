@@ -11,16 +11,16 @@
 //! notice points at it.
 //!
 //! #469 phase instrumentation: the tool result carries `timing` with the
-//! phase decomposition `totalMs = spawnMs + firstByteMs + restMs + reapMs`
-//! (see `events::ToolTiming`; `totalMs` itself is filled by the
-//! `ToolKind::execute` dispatch boundary, this module owns the subprocess
-//! phases). `firstByteMs` — spawn returned → first output byte, whichever
-//! of stdout/stderr lands first — covers the child's entire prelude (bash
-//! parsing, an internal `<<EOF` heredoc write, interpreter startup, first
-//! side effect), which is where the sampled #469 stall lives; `restMs`
-//! spans first byte → exit. The output pipes are therefore read
-//! incrementally (first chunk observed, then read to end); collection
-//! semantics (bytes, truncation, timeout) are unchanged.
+//! phase decomposition `totalMs ≈ spawnMs + firstByteMs + restMs + reapMs`
+//! (see `events::ToolTiming` for the residual; `totalMs` itself is filled
+//! by the `ToolKind::execute` dispatch boundary, this module owns the
+//! subprocess phases). `firstByteMs` — spawn returned → first output
+//! byte, whichever of stdout/stderr lands first — covers the child's
+//! entire prelude (bash parsing, an internal `<<EOF` heredoc write,
+//! interpreter startup, first side effect), which is where the sampled
+//! #469 stall lives; `restMs` spans first byte → exit. The output pipes
+//! are therefore read incrementally (first chunk observed, then read to
+//! end); collection semantics (bytes, truncation, timeout) are unchanged.
 //!
 //! Observation caveat: `firstByteMs` measures when the HARNESS read the
 //! first byte, not when the child wrote it — and that gap is the point:
@@ -39,7 +39,7 @@ use tokio::io::AsyncReadExt;
 
 use super::command_guard;
 use super::truncate::{self, TruncatedBy};
-use super::{ToolContext, ToolError, ToolOutput};
+use super::{elapsed_ms, ToolContext, ToolError, ToolOutput};
 use crate::events::ToolTiming;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
@@ -261,11 +261,12 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
     // first-byte offsets (both readers share the same output_started, so the
     // offsets are directly comparable — a stdout-first `.or()` would mis-bucket
     // a stderr-first child's steady-run stall into the prelude). restMs then
-    // spans first byte → exit, so spawnMs + firstByteMs + restMs + reapMs
-    // partitions the total without overlap; a no-output child reports only
-    // restMs (the whole output window). totalMs is NOT set here — the
-    // ToolKind::execute dispatch boundary owns it, keeping one source for
-    // the decomposition base.
+    // spans first byte → exit, so the phases partition the output window
+    // without overlap and total ≈ their sum (the residual is harness-side
+    // work outside the phases — see events::ToolTiming); a no-output child
+    // reports only restMs (the whole output window). totalMs is NOT set
+    // here — the ToolKind::execute dispatch boundary owns it, keeping one
+    // source for the decomposition base.
     let first_byte_ms = match (stdout.1, stderr.1) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
@@ -318,10 +319,6 @@ async fn read_with_first_byte<R: tokio::io::AsyncRead + Unpin>(
         buf.extend_from_slice(&chunk[..n]);
     }
     Ok((buf, first_byte_ms))
-}
-
-fn elapsed_ms(started: Instant) -> u64 {
-    super::elapsed_ms(started)
 }
 
 /// The model-supplied `timeout` argument, clamped into

@@ -858,7 +858,7 @@ exemptions:
     instrumentation.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
-  ceiling: 269
+  ceiling: 267
 - check: architecture.file_budget
   path: velites/src/tools/mod.rs
   reason: >-

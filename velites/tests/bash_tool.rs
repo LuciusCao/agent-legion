@@ -471,15 +471,72 @@ async fn bash_timeout_path_reports_reap_phase() {
     // restMs ends at the 1s timeout; the TERM → grace(3s) → KILL → reap
     // sequence lives in reapMs, so each phase stays in its own bucket. The
     // reap can be sub-millisecond when sleep dies to SIGTERM instantly —
-    // the point is that the ~3s grace window is accounted somewhere.
+    // the point is that the grace window stays bounded, not that it hits
+    // an exact duration.
     assert!(
         rest < 5_000,
-        "restMs must be bounded by the timeout: {rest}ms"
+        "restMs must stay bounded by the timeout: {rest}ms"
     );
     assert!(
         rest + reap < 10_000,
-        "rest ({rest}) + reap ({reap}) must cover the timeout + grace window"
+        "rest ({rest}) + reap ({reap}) must stay bounded by the timeout + grace window"
     );
+}
+
+#[tokio::test]
+async fn bash_unmeasured_error_paths_carry_no_timing() {
+    // The RequestTiming convention: failures raised BEFORE any measurement
+    // surface as error content with `timing: None` — the dispatch boundary
+    // (ToolKind::execute) must not stamp a totalMs onto them. Both guards
+    // here fail before spawn, so nothing was measured.
+    let dir = tempfile::tempdir().unwrap();
+
+    let missing_command = ToolKind::Bash
+        .execute(&serde_json::json!({}), &ctx(dir.path()))
+        .await;
+    assert!(missing_command.is_error);
+    assert!(
+        missing_command.timing.is_none(),
+        "argument-validation failure must not carry timing"
+    );
+
+    let guard_rejected = ToolKind::Bash
+        .execute(
+            &serde_json::json!({"command": "find / -name x 2>/dev/null | head"}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(guard_rejected.is_error, "full-disk scan must be rejected");
+    assert!(
+        guard_rejected.timing.is_none(),
+        "guard rejection must not carry timing"
+    );
+}
+
+#[tokio::test]
+async fn bash_measured_error_paths_keep_their_timing() {
+    // Contrast with the unmeasured guards above: the timeout path IS an
+    // error, but it carries a full phase set (spawn/firstByte/rest/reap +
+    // requestedTimeoutMs) and still receives its totalMs from the dispatch
+    // boundary — the `is_error && timing.is_none()` exemption must not
+    // swallow measured errors.
+    let dir = tempfile::tempdir().unwrap();
+    let output = ToolKind::Bash
+        .execute(
+            &serde_json::json!({"command": "sleep 300", "timeout": 1}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(output.is_error);
+    let timing = output.timing.expect("measured error keeps its timing");
+    assert!(
+        timing.total_ms.is_some(),
+        "dispatch boundary still fills totalMs on measured errors"
+    );
+    assert!(timing.spawn_ms.is_some());
+    assert!(timing.rest_ms.is_some());
+    assert!(timing.reap_ms.is_some());
+    assert_eq!(timing.requested_timeout_ms, Some(1_000));
 }
 
 #[tokio::test]
