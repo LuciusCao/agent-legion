@@ -115,6 +115,61 @@ async fn validate_flags_fake_uuids() {
 }
 
 #[tokio::test]
+async fn validate_rejects_undefined_versions() {
+    // RFC4122-variant values with version nibble 0 or 9–15 parse fine but
+    // have no defined UUID version (RFC 4122 defines 1–5, RFC 9562 adds
+    // 6–8). The uuid crate reports them via `get_version() == None`, and
+    // this tool exists to catch exactly those wrong-version fakes. Note the
+    // v15 case is not the max UUID — its variant bits are 8fff, not ffff.
+    let output = run_uuid(serde_json::json!({
+        "op": "validate",
+        "values": [
+            "00000000-0000-0000-8000-000000000000", // v0
+            "99999999-9999-9999-8999-999999999999", // v9
+            "aaaaaaaa-aaaa-aaaa-8aaa-aaaaaaaaaaaa", // v10
+            "bbbbbbbb-bbbb-bbbb-8bbb-bbbbbbbbbbbb", // v11
+            "cccccccc-cccc-cccc-8ccc-cccccccccccc", // v12
+            "dddddddd-dddd-dddd-8ddd-dddddddddddd", // v13
+            "eeeeeeee-eeee-eeee-8eee-eeeeeeeeeeee", // v14
+            "ffffffff-ffff-ffff-8fff-ffffffffffff"  // v15
+        ]
+    }))
+    .await;
+    assert!(output.is_error, "undefined versions must flag the result");
+    let text = result_text(&output);
+    assert_eq!(
+        text.lines().filter(|l| l.contains(": invalid")).count(),
+        8,
+        "{text}"
+    );
+    assert!(text.contains("undefined version"), "{text}");
+}
+
+#[tokio::test]
+async fn validate_accepts_all_defined_versions() {
+    // v1–v8 are the defined versions and must stay ok: `generate` only mints
+    // v4/v7, but values from other systems (v1/v2 time-based, v3/v5 name
+    // hashes, v6/v8 per RFC 9562) are legitimately valid identifiers.
+    let values: Vec<String> = (1..=8)
+        .map(|n| {
+            let c = std::char::from_digit(n, 16).unwrap();
+            let g = |len: usize| c.to_string().repeat(len);
+            format!("{}-{}-{}{}-8{}-{}", g(8), g(4), c, g(3), g(3), g(12))
+        })
+        .collect();
+    let output = run_uuid(serde_json::json!({"op": "validate", "values": values})).await;
+    assert!(!output.is_error, "defined versions must be ok: {output:?}");
+    let text = result_text(&output);
+    for n in 1..=8 {
+        let expected = format!(": ok (v{})", n);
+        assert!(
+            text.lines().any(|l| l.ends_with(&expected)),
+            "expected a v{n} ok verdict: {text}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn validate_notes_non_canonical_but_well_formed() {
     // Uppercase parses fine but is not the canonical lowercase form; the note
     // exists so a model checking its own output learns the canonical spelling.
