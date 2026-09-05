@@ -142,9 +142,14 @@ def test_create_list_and_detail(client, job_db) -> None:
     assert run["source_kind"] == "items"
     assert run["status"] == "created"
     assert run["created_count"] == 2
-    titles = {job["title"] for job in body["jobs"]}
-    assert titles == {"doc.txt", "Q-1"}
-    assert all(job["batch_id"] == run["id"] for job in body["jobs"])
+    # #467 A4: the create response no longer materializes job rows; the
+    # job list endpoint (and run detail counters) is the read path.
+    assert "jobs" not in body
+    jobs_response = client.get(f"/api/workspaces/{workspace_id}/jobs")
+    assert jobs_response.status_code == 200, jobs_response.text
+    jobs = jobs_response.json()["jobs"]
+    assert {job["title"] for job in jobs} == {"doc.txt", "Q-1"}
+    assert all(job["batch_id"] == run["id"] for job in jobs)
 
     listing = client.get(f"/api/workspaces/{workspace_id}/runs")
     assert listing.status_code == 200, listing.text
@@ -329,3 +334,51 @@ def test_create_run_rejects_items_over_limit(client, job_db, monkeypatch) -> Non
     assert "exceed the per-run limit: 3 > 2" in response.json()["detail"]
     assert "Split the submission" in response.json()["detail"]
     assert client.get(f"/api/workspaces/{workspace_id}/runs").json()["runs"] == []
+
+
+def test_partial_run_failure_returns_structured_progress(client, job_db, monkeypatch) -> None:
+    """#467 A3：分块提交中途失败 → 400 携带已创建进度（操作者可见性）。
+
+    错误 detail 是结构化对象：message（含恢复指引文案）、run_id、
+    created_so_far；run 行落 failed 态（intake chunk-error 同款状态值），
+    详情端点可见部分进度。
+    """
+    workspace_id = _create_workspace(client)
+    _insert_material(job_db, workspace_id, "mat-part-1")
+    _insert_material(job_db, workspace_id, "mat-part-2")
+
+    app_job_db = client.app.state.job_db
+    original = app_job_db.create_jobs_bulk
+
+    def _partial_bulk(**kwargs):
+        # 模拟 chunk 1 已提交（只插第一条）后 chunk 2 失败。
+        truncated = dict(kwargs, candidates=kwargs["candidates"][:1])
+        original(**truncated)
+        raise ValueError("simulated later-chunk failure")
+
+    monkeypatch.setattr(app_job_db, "create_jobs_bulk", _partial_bulk)
+    response = _create_run(
+        client,
+        workspace_id,
+        [
+            {"type": "material", "material_id": "mat-part-1"},
+            {"type": "material", "material_id": "mat-part-2"},
+        ],
+    )
+    monkeypatch.undo()
+
+    assert response.status_code == 400, response.text
+    detail = response.json()["detail"]
+    assert isinstance(detail, dict)
+    assert "1 job(s) were already created" in detail["message"]
+    assert "Resubmitting the SAME item list" in detail["message"]
+    assert detail["created_so_far"] == 1
+    assert detail["run_id"]
+
+    # run 行 failed 态 + 部分进度，详情端点可见。
+    detail_resp = client.get(f"/api/workspaces/{workspace_id}/runs/{detail['run_id']}")
+    assert detail_resp.status_code == 200, detail_resp.text
+    body = detail_resp.json()
+    assert body["run"]["status"] == "failed"
+    assert body["run"]["created_count"] == 1
+    assert "already created" in body["run"]["error_message"]

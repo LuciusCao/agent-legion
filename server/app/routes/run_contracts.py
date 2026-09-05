@@ -63,9 +63,10 @@ class RunRecord(BaseModel):
 
 
 class RunCreateResponse(BaseModel):
+    """#467 A4：run + created_count only；job 行移到读取路径（#420）。"""
+
     run: RunRecord
     created_count: int
-    jobs: list[dict[str, Any]]
 
 
 class RunListResponse(BaseModel):

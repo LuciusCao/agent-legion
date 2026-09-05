@@ -7,6 +7,13 @@ pins, dedup against existing jobs, deterministic run id digest, one job per
 item. The legacy ``/job-batches`` path keeps flowing through
 ``JobIntakeService``; both creation paths stay fully usable until the intake
 retirement slice.
+
+#467 A1–A5 (chunked submit): the per-item DB round trips of the old
+``_resolve_items`` (one SELECT per material/bundle/ref item) are replaced by
+chunked set-based existence probes, the dedup scan loads only this request's
+keys, job insertion commits in bounded chunks, and the create response no
+longer materializes job rows (run id + created_count; the detail endpoint and
+#358's counter tables carry the rest).
 """
 
 from __future__ import annotations
@@ -17,7 +24,7 @@ from typing import Any
 
 import psycopg
 
-from server.app.db.rowmap import iso_optional, parse_object, wire_batch_id
+from server.app.db.rowmap import iso_optional, parse_object
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
@@ -26,10 +33,13 @@ from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_intake_workspace import get_workspace
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
-from server.app.services.run_bundle_candidate import bundle_candidate
+from server.app.services.run_item_resolution import resolve_run_items
 from server.app.services.run_item_types import validate_run_item_types
+from server.app.services.run_partial_failure import (
+    PartialRunCreationError,
+    partial_failure_message,
+)
 from server.app.settings import Settings
-from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import workflow_definition_from_dict
 
 logger = logging.getLogger(__name__)
@@ -37,6 +47,10 @@ logger = logging.getLogger(__name__)
 # Runs created from items carry this marker in source_kind; legacy rows keep
 # their intake source_kind for display (design §5.2).
 ITEMS_SOURCE_KIND = "items"
+
+# Event-record chunk (#467 A5): the buffer itself batches revisions; this
+# only bounds the transient id list per record call.
+_EVENT_RECORD_CHUNK = 500
 
 
 def _run_record(row: dict[str, Any]) -> dict[str, Any]:
@@ -104,7 +118,7 @@ class RunService:
 
         # Validate everything (items, node config, pins) before the first
         # write so a rejected request leaves no half-created run behind.
-        candidates = self._resolve_items(workspace_id, items)
+        candidates = resolve_run_items(self.job_db, workspace_id, items)
         try:
             node_config = resolve_workflow_node_configs(
                 definition,
@@ -124,7 +138,16 @@ class RunService:
         # Same dedup contract as intake: items whose (source_type, source_id)
         # already has a job in this workflow drop out; accepted keys grow the
         # set so intra-request duplicates filter exactly like pre-existing jobs.
-        existing_keys = self.job_db.list_job_dedup_keys(workspace_id, workflow_key)
+        # #467 A2: point lookups over this request's keys (indexed IN probes)
+        # instead of loading the whole workspace's keys — same workspace-
+        # scoped semantics, cost tracks the submission size.
+        existing_keys = self.job_db.filter_existing_dedup_keys(
+            workspace_id,
+            (
+                (str(candidate["entity_type"]), str(candidate["entity_id"]))
+                for candidate in candidates
+            ),
+        )
         fresh: list[dict[str, Any]] = []
         for candidate in candidates:
             key = (str(candidate["entity_type"]), str(candidate["entity_id"]))
@@ -149,7 +172,7 @@ class RunService:
             frozen_pins={"node_code_versions": node_code_versions},
         )
         try:
-            jobs = self.job_db.create_jobs_bulk(
+            job_ids = self.job_db.create_jobs_bulk(
                 candidates=fresh,
                 workflow_key=workflow_key,
                 run_id=run["id"],
@@ -160,48 +183,111 @@ class RunService:
             )
         except Exception as exc:
             # #204 broad-except audit: compensate-then-re-raise after the
-            # run row committed (create_jobs_bulk runs in its own
-            # transaction, so the failure space is the bulk-insert's mixed
-            # psycopg/dedup surface). The width is required because the
-            # compensation must run on EVERY failure mode — ValueError
-            # (normalize-collision, converted to the user-facing
-            # InvalidOperationError) and unexpected errors alike — or a
-            # half-created run row would linger; nothing is masked: the
-            # non-ValueError branch is a bare re-raise preserving type and
-            # traceback, and _discard_empty_run is itself #204-audited to
-            # never mask this error.
+            # run row committed (create_jobs_bulk commits in chunks, so the
+            # failure space is the bulk-insert's mixed psycopg/dedup
+            # surface). The width is required because the compensation must
+            # run on EVERY failure mode — ValueError (normalize-collision,
+            # converted to the user-facing InvalidOperationError) and
+            # unexpected errors alike — or a run row would linger; nothing is
+            # masked: the non-ValueError branch is a bare re-raise preserving
+            # type and traceback, and the failure bookkeeping below is
+            # itself #204-audited to never mask this error.
             # A fresh item can still collide at insert time: two items can
             # normalize to the same job id (``a/b`` vs ``a_w``), or an item
             # can hit a legacy-path job with a different source_type but the
-            # same source_id. The run row already committed (create_jobs_bulk
-            # runs in its own transaction), so compensate instead of leaving
-            # a half-created run behind.
+            # same source_id. Chunked commits (#467 A3) change the outcome
+            # only when a chunk already committed: the partial run STAYS
+            # (delete_run_without_jobs's not-exists guard is a no-op) and is
+            # marked failed with its progress so the operator sees what was
+            # created; a resubmission resumes through the dedup filter.
+            # With no committed chunk the compensation removes the run row
+            # exactly like the pre-chunking shape.
+            try:
+                committed = self.job_db.count_jobs_in_run(str(run["id"]))
+            except Exception:
+                # #204 broad-except audit: progress bookkeeping inside the
+                # compensate-then-re-raise path — a failure here must not
+                # mask the original creation error, so it degrades to 0
+                # (the empty-run compensation branch) and logs. Nothing is
+                # swallowed downstream: the original exception still raises.
+                logger.exception("run %s progress count failed", run["id"])
+                committed = 0
+            if committed > 0:
+                self._mark_partial_run_failed(str(run["id"]), committed, exc)
+                # #467 review P1-2/P2-1: EVERY failure mode after a committed
+                # chunk maps to the structured partial-failure error — the
+                # operator legibility requirement (created_so_far in the 400
+                # detail) does not depend on the exception family. The
+                # original exception rides along as __cause__; with no
+                # committed chunk the branches below keep the pre-chunking
+                # semantics verbatim (ValueError → 400, anything else →
+                # bare re-raise → 500).
+                raise PartialRunCreationError(
+                    partial_failure_message(committed, exc),
+                    run_id=str(run["id"]),
+                    created_so_far=committed,
+                ) from exc
             self._discard_empty_run(str(run["id"]))
             if isinstance(exc, ValueError):
                 raise InvalidOperationError(str(exc)) from exc
             raise
-        if jobs:
+        if job_ids:
             notify_schedulable_work()
         # Persist the final creation progress so the run row alone answers
         # the detail endpoint (legacy sync intake kept this only in memory).
+        # #467 review P1-2: created_count is the run's WHOLE job slice
+        # (count_jobs_in_run, accumulating — the intake queue's semantics),
+        # not this request's inserts: a resubmission that resumes a
+        # partially-failed run must heal the row (failed→created via the
+        # upsert, count back to the run total, error_message cleared).
         run = self.job_db.update_intake_run(
-            str(run["id"]), created_count=len(jobs), status=str(run["status"])
+            str(run["id"]),
+            created_count=self.job_db.count_jobs_in_run(str(run["id"])),
+            status=str(run["status"]),
         )
 
-        for job in jobs:
-            job["storage_dir"] = str(resolve_job_dir(job, self.settings.jobs_dir))
-            # Wire compatibility: API/SSE consumers still read ``batch_id``
-            # (route renames are a later slice); the value is the run id.
-            job["batch_id"] = wire_batch_id(job)
-
         if self.job_event_buffer is not None:
-            self.job_event_buffer.record_jobs_created(
-                workspace_id, [str(job["id"]) for job in jobs]
-            )
+            # #467 A5: chunked record — the buffer is the batching layer (one
+            # lock acquisition + one revision per call, SSE payloads
+            # aggregated by the drain loop), so recording per insert chunk
+            # keeps memory bounded for very large runs while the wire stays
+            # on the compacted batch path.
+            for start in range(0, len(job_ids), _EVENT_RECORD_CHUNK):
+                self.job_event_buffer.record_jobs_created(
+                    workspace_id, job_ids[start : start + _EVENT_RECORD_CHUNK]
+                )
         elif self.job_event_manager is not None:
-            stats = self.job_db.count_jobs_by_status(workspace_id)
-            self.job_event_manager.broadcast_jobs_created(workspace_id, jobs, stats)
-        return {"run": _run_record(run), "created_count": len(jobs), "jobs": jobs}
+            # Bufferless fallback (tests/legacy wiring): broadcast ids only —
+            # the create response no longer carries job rows (#467 A4), and
+            # the manager's job_patch_batch consumers key off ids. Stats stay
+            # empty: the aggregator's periodic flush owns the numbers on the
+            # buffered path, and this fallback's SSE consumers re-read them.
+            self.job_event_manager.broadcast_jobs_created(
+                workspace_id, [{"id": job_id} for job_id in job_ids], {}
+            )
+        # #467 A4: the response carries run + created_count only; job rows
+        # moved to the read paths (run detail + paginated job list), so a
+        # 万级-items run no longer serializes a proportional JSON payload
+        # inside the request thread.
+        return {"run": _run_record(run), "created_count": len(job_ids), "job_ids": job_ids}
+
+    def _mark_partial_run_failed(self, run_id: str, committed: int, exc: Exception) -> None:
+        """Record the partial outcome on the run row (operator legibility).
+
+        Mirrors the async intake queue's chunk-error bookkeeping (status
+        "failed" + error_message), no new state values. Best-effort: a DB
+        failure here must not mask the original creation error.
+        """
+        try:
+            self.job_db.update_intake_run(
+                run_id,
+                created_count=committed,
+                status="failed",
+                error_message=partial_failure_message(committed, exc),
+            )
+        except (OSError, psycopg.Error) as exc2:
+            # #204: same compensation-only catch as _discard_empty_run.
+            logger.warning("run %s partial-failure marking failed: %s", run_id, exc2)
 
     def _discard_empty_run(self, run_id: str) -> None:
         # Best-effort cleanup of the run row after job creation failed;
@@ -227,76 +313,4 @@ class RunService:
         return {
             "run": _run_record(row),
             "job_stats": {"total": sum(by_status.values()), "by_status": by_status},
-        }
-
-    def _resolve_items(
-        self, workspace_id: str, items: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
-        candidates: list[dict[str, Any]] = []
-        for item in items:
-            if not isinstance(item, dict):
-                raise InvalidOperationError("Each item must be an object")
-            item_type = item.get("type")
-            if item_type == "material":
-                candidates.append(self._material_candidate(workspace_id, item))
-            elif item_type == "bundle":
-                candidates.append(bundle_candidate(self.job_db, workspace_id, item))
-            elif item_type == "ref":
-                candidates.append(self._ref_candidate(item))
-            else:
-                raise InvalidOperationError(f"Unsupported item type: {item_type!r}")
-        return candidates
-
-    def _material_candidate(self, workspace_id: str, item: dict[str, Any]) -> dict[str, Any]:
-        material_id = str(item.get("material_id") or "").strip()
-        if not material_id:
-            raise InvalidOperationError("material item requires material_id")
-        with self.job_db.read() as conn:
-            row = conn.execute(
-                "select id, status, filename from materials where id=%s and workspace_id=%s",
-                (material_id, workspace_id),
-            ).fetchone()
-        if row is None:
-            raise NotFoundError(f"Material not found: {material_id}")
-        if str(row["status"]) != "ready":
-            raise InvalidOperationError(
-                f"Material is not ready: {material_id} (status: {row['status']})"
-            )
-        return {
-            "entity_type": "material",
-            "entity_id": material_id,
-            "title": str(row["filename"]),
-            "stem": "",
-            "input": dict(item),
-        }
-
-    def _ref_candidate(self, item: dict[str, Any]) -> dict[str, Any]:
-        connection_key = str(item.get("connection_key") or "").strip()
-        external_id = str(item.get("external_id") or "").strip()
-        if not connection_key or not external_id:
-            raise InvalidOperationError("ref item requires connection_key and external_id")
-        # Instance-level connections shared across workspaces
-        # (SECURITY-EXTERNAL-CONNECTION-001); direction validation
-        # (CONNECT-DIRECTION-001) is a later slice. Existence AND enabled
-        # state are checked here (#425 review): a disabled connection would
-        # otherwise pass creation and only fail at execution time
-        # (connection_tokens), so this is the actual fail-fast gate. The
-        # read goes through the JobQueries facade (BOUNDARY-DATA-001) —
-        # services hold no SQL of their own.
-        enabled = self.job_db.external_connection_enabled(connection_key)
-        if enabled is None:
-            raise InvalidOperationError(f"Unknown connection key: {connection_key}")
-        if not enabled:
-            raise InvalidOperationError(f"Connection is disabled: {connection_key}")
-        # Ref identity is connection-scoped: the same external_id reachable
-        # through two connections denotes two distinct items, so the dedup
-        # key, the job id and cross-request dedup all derive from
-        # connection_key + external_id (a bare external_id would silently
-        # drop the second connection's item as a duplicate).
-        return {
-            "entity_type": "ref",
-            "entity_id": f"{connection_key}:{external_id}",
-            "title": external_id,
-            "stem": "",
-            "input": dict(item),
         }

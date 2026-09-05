@@ -160,7 +160,6 @@ describe('AddItemsDialog', () => {
     mockCreateRun.mockResolvedValue({
       run: { id: 'r1' },
       created_count: 2,
-      jobs: [],
     } as never)
     renderWithClient(
       <AddItemsDialog open={true} onClose={onClose} workspaceId="ws1" />
@@ -278,7 +277,6 @@ describe('AddItemsDialog', () => {
     mockCreateRun.mockResolvedValue({
       run: { id: 'r1' },
       created_count: 3,
-      jobs: [],
     } as never)
     renderWithClient(
       <AddItemsDialog open={true} onClose={onClose} workspaceId="ws1" />
@@ -388,7 +386,6 @@ describe('AddItemsDialog', () => {
     mockCreateRun.mockResolvedValue({
       run: { id: 'r1' },
       created_count: 1,
-      jobs: [],
     } as never)
     renderWithClient(
       <AddItemsDialog open={true} onClose={vi.fn()} workspaceId="ws1" />
@@ -454,7 +451,6 @@ describe('AddItemsDialog', () => {
     mockCreateRun.mockResolvedValue({
       run: { id: 'r1' },
       created_count: 1,
-      jobs: [],
     } as never)
     renderWithClient(
       <AddItemsDialog open={true} onClose={onClose} workspaceId="ws1" />
