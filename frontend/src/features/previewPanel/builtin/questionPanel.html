@@ -1186,6 +1186,13 @@
         }
 
         // ---- 启动 ----
+        // init 会随节点状态翻转重发（宿主契约：每次 init 都重新取数渲染）。
+        // boot 竞态守卫（#347 P2）：每次 boot 的取数是异步的，慢的旧 boot
+        // 返回后不得无条件覆盖 state.context——首次 init 慢、第二次先完成时，
+        // 旧数据/404 回落会把面板覆盖回过期内容且不再自愈。只有「最新一次
+        // boot」的结果允许提交，其余在途结果直接丢弃。
+        var bootGeneration = 0
+
         function applyTheme(theme) {
           if (!theme) return
           Object.keys(theme).forEach(function (key) {
@@ -1195,7 +1202,9 @@
 
         function boot(init) {
           applyTheme(init.theme)
+          var generation = ++bootGeneration
           loadKatex(init.assets).then(function () {
+            if (generation !== bootGeneration) return
             var detailPromise = callBridge('getJobDetail').catch(function () {
               return null
             })
@@ -1206,6 +1215,7 @@
             var comprehensionPromise = loadComprehension()
 
             detailPromise.then(function (detail) {
+              if (generation !== bootGeneration) return
               var gates = {
                 keyInfo: gateVisible(detail, GATES.keyInfo),
                 possibleErrors: gateVisible(detail, GATES.possibleErrors),
@@ -1228,6 +1238,7 @@
                 keyInfoReviewPromise,
                 possibleErrorsReviewPromise,
               ]).then(function (results) {
+                if (generation !== bootGeneration) return
                 state.context = {
                   question: results[0],
                   comprehension: results[1] || {
