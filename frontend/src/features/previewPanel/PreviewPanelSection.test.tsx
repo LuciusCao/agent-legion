@@ -247,6 +247,144 @@ describe('PreviewPanelSection', () => {
     expect(screen.queryByTestId('generic-fallback')).toBeNull()
   })
 
+  it('预览中草稿经 null 过渡消失后，同会话新草稿不继承旧授权自动执行（review P1）', async () => {
+    // 草稿 null→v2 的过渡要经 3s 轮询送达，走 fake timers（同 codex P2
+    // 用例的 known noise 声明）。
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
+    vi.useFakeTimers()
+    try {
+      mockFetchPublished.mockResolvedValue(
+        makeVersion(PUBLISHED_HTML, 'published')
+      )
+      // 首轮：草稿 v1 就位。
+      mockFetchState.mockResolvedValue({
+        published: makeVersion(PUBLISHED_HTML, 'published'),
+        draft: makeVersion(DRAFT_HTML, 'draft'),
+      } satisfies PreviewPanelState)
+      renderSection()
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+      // 显式预览 v1。
+      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+      expect(
+        screen
+          .getByTestId('preview-panel-host')
+          .querySelector('iframe')
+          ?.getAttribute('srcdoc')
+      ).toContain('draft panel')
+
+      // 发布草稿（对话框不关）：draft 变 null，左栏回落已发布版本，
+      // 按钮回到「预览此草稿」——授权已失效，不能悬空成「预览草稿中」。
+      mockFetchState.mockResolvedValue({
+        published: makeVersion(PUBLISHED_HTML, 'published'),
+        draft: null,
+      } satisfies PreviewPanelState)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3100)
+      })
+      expect(
+        screen
+          .getByTestId('preview-panel-host')
+          .querySelector('iframe')
+          ?.getAttribute('srcdoc')
+      ).toContain('published panel')
+      expect(screen.getByRole('button', { name: '预览此草稿' })).toBeEnabled()
+
+      // 同一 chat 会话里 agent 写入新草稿 v2（「发布后继续改一版」的核心
+      // 工作流）：v2 必须重新显式预览，不得继承 v1 的授权自动执行。
+      mockFetchState.mockResolvedValue({
+        published: makeVersion(PUBLISHED_HTML, 'published'),
+        draft: makeVersion(
+          '<!doctype html><html><body>draft v2 panel</body></html>',
+          'draft'
+        ),
+      } satisfies PreviewPanelState)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3100)
+      })
+      expect(
+        screen
+          .getByTestId('preview-panel-host')
+          .querySelector('iframe')
+          ?.getAttribute('srcdoc')
+      ).toContain('published panel')
+      expect(screen.queryByText('草稿预览中')).toBeNull()
+
+      // 再次显式预览才执行 v2。
+      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+      expect(
+        screen
+          .getByTestId('preview-panel-host')
+          .querySelector('iframe')
+          ?.getAttribute('srcdoc')
+      ).toContain('draft v2 panel')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('预览中归档（恢复默认）后回落 fallback（review P2）', async () => {
+    expectConsoleWarning(/not wrapped in act/)
+    expectConsoleError(/not wrapped in act/)
+    vi.useFakeTimers()
+    try {
+      mockFetchPublished.mockResolvedValue(null)
+      mockFetchState.mockResolvedValue({
+        published: null,
+        draft: makeVersion(DRAFT_HTML, 'draft'),
+      } satisfies PreviewPanelState)
+      renderSection()
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+      fireEvent.click(screen.getByRole('button', { name: '预览此草稿' }))
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync()
+      })
+      expect(
+        screen
+          .getByTestId('preview-panel-host')
+          .querySelector('iframe')
+          ?.getAttribute('srcdoc')
+      ).toContain('draft panel')
+      expect(screen.getByText('草稿预览中')).toBeInTheDocument()
+
+      // 恢复默认（归档）：draft 变 null 且无已发布版本 → 回落 fallback，
+      // 草稿 iframe 卸载、徽标消失（授权随 null 过渡失效）。
+      mockFetchPublished.mockResolvedValue(null)
+      mockFetchState.mockResolvedValue({
+        published: null,
+        draft: null,
+      } satisfies PreviewPanelState)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3100)
+      })
+      expect(screen.getByTestId('generic-fallback')).toBeInTheDocument()
+      expect(screen.queryByTestId('preview-panel-host')).toBeNull()
+      expect(screen.queryByText('草稿预览中')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('非 admin 成员不渲染「定制预览」入口（P4 惯例，治理面端点对其 403）', async () => {
     act(() => {
       useAuthStore.setState({ user: { role: 'member' } as never })
@@ -274,17 +412,17 @@ describe('PreviewPanelSection', () => {
       mockFetchPublished.mockResolvedValue(
         makeVersion(PUBLISHED_HTML, 'published')
       )
-      // 首轮 state：无草稿。
+      // 首轮 state：草稿 v1（bundle-v1）就位。
       mockFetchState.mockResolvedValue({
         published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: null,
+        draft: makeVersion(DRAFT_HTML, 'draft'),
       } satisfies PreviewPanelState)
       renderSection()
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
       })
       // 打开定制对话启用草稿轮询（3s refetchInterval）。草稿不自动执行
-      // （#347 P1）：先显式预览，左栏才会切到草稿渲染。
+      // （#347 P1）：显式预览后左栏才切到草稿 v1 渲染。
       fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
       await act(async () => {
         await vi.runOnlyPendingTimersAsync()
@@ -296,14 +434,18 @@ describe('PreviewPanelSection', () => {
       const firstFrame = screen
         .getByTestId('preview-panel-host')
         .querySelector('iframe')
-      expect(firstFrame?.getAttribute('srcdoc')).toContain('published panel')
+      expect(firstFrame?.getAttribute('srcdoc')).toContain('draft panel')
 
-      // 轮询推进：agent 保存了新草稿（bundle 内容更新）。key 含 bundle
-      // 内容 → iframe 元素必须被替换——沿用同一 contentWindow 做 srcDoc
-      // 导航会让旧文档在途请求的响应错误应答新文档的同编号请求。
+      // 轮询推进：agent 保存了新草稿（bundle 内容更新，draft 持续非
+      // null——save_draft 覆盖同一草稿，授权保持）。key 含 bundle 内容
+      // → iframe 元素必须被替换——沿用同一 contentWindow 做 srcDoc 导航
+      // 会让旧文档在途请求的响应错误应答新文档的同编号请求。
       mockFetchState.mockResolvedValue({
         published: makeVersion(PUBLISHED_HTML, 'published'),
-        draft: makeVersion(DRAFT_HTML, 'draft'),
+        draft: makeVersion(
+          '<!doctype html><html><body>draft v2 panel</body></html>',
+          'draft'
+        ),
       } satisfies PreviewPanelState)
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3100)
@@ -312,7 +454,7 @@ describe('PreviewPanelSection', () => {
       const secondFrame = screen
         .getByTestId('preview-panel-host')
         .querySelector('iframe')
-      expect(secondFrame?.getAttribute('srcdoc')).toContain('draft panel')
+      expect(secondFrame?.getAttribute('srcdoc')).toContain('draft v2 panel')
       expect(secondFrame).not.toBe(firstFrame)
     } finally {
       vi.useRealTimers()
