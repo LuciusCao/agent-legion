@@ -64,6 +64,32 @@ def test_validate_config_schema_rejects_bad_default() -> None:
         )
 
 
+def test_validate_config_schema_rejects_secret_property_default() -> None:
+    """codex P1 on #432: a ``secret: true`` property declaring a ``default``
+    is rejected on every declaration channel — the plaintext default flows
+    through ``config_schema_defaults`` into the effective/frozen config even
+    when no layer ever sets the field (VAULT-SECRET-001)."""
+    with pytest.raises(ConfigSchemaError, match="secret property cannot declare a default"):
+        validate_config_schema(
+            {"properties": {"api_key": {"type": "string", "secret": True, "default": "cred"}}}
+        )
+    # The error names the property; the value is never echoed.
+    with pytest.raises(ConfigSchemaError, match="properties.api_key"):
+        validate_config_schema(
+            {"properties": {"api_key": {"type": "string", "secret": True, "default": "cred"}}}
+        )
+    # Non-secret defaults and secret properties without defaults stay legal
+    # (SCHEMA itself carries both shapes and is accepted above).
+    validate_config_schema(
+        {
+            "properties": {
+                "kept": {"type": "string", "default": "ok"},
+                "api_key": {"type": "string", "secret": True},
+            }
+        }
+    )
+
+
 def test_config_schema_defaults_extracts_declared_defaults() -> None:
     assert config_schema_defaults(SCHEMA) == {"subject_id": "math", "page_size": 50}
     assert config_schema_defaults({}) == {}

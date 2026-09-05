@@ -80,6 +80,10 @@ def _validate_property(path: str, prop: Any) -> None:
         raise ConfigSchemaError(f"{path}.minimum must not exceed maximum")
     if "default" in prop:
         _check_value(f"{path}.default", prop, prop["default"])
+    # codex P1 on #432: a secret property's default is a plaintext credential
+    # the schema-default merge freezes verbatim; no channel may declare one.
+    if prop.get("secret") and "default" in prop:
+        raise ConfigSchemaError(f"{path}: a secret property cannot declare a default")
 
 
 def validate_config_schema(schema: Any, *, path: str = "config_schema") -> None:
