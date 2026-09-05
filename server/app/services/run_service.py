@@ -35,7 +35,10 @@ from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.services.run_item_resolution import resolve_run_items
 from server.app.services.run_item_types import validate_run_item_types
-from server.app.services.run_partial_failure import PartialRunCreationError
+from server.app.services.run_partial_failure import (
+    PartialRunCreationError,
+    partial_failure_message,
+)
 from server.app.settings import Settings
 from server.app.workflows.definition import workflow_definition_from_dict
 
@@ -220,7 +223,7 @@ class RunService:
                 # semantics verbatim (ValueError → 400, anything else →
                 # bare re-raise → 500).
                 raise PartialRunCreationError(
-                    self._partial_failure_message(committed, exc),
+                    partial_failure_message(committed, exc),
                     run_id=str(run["id"]),
                     created_so_far=committed,
                 ) from exc
@@ -280,20 +283,11 @@ class RunService:
                 run_id,
                 created_count=committed,
                 status="failed",
-                error_message=self._partial_failure_message(committed, exc),
+                error_message=partial_failure_message(committed, exc),
             )
         except (OSError, psycopg.Error) as exc2:
             # #204: same compensation-only catch as _discard_empty_run.
             logger.warning("run %s partial-failure marking failed: %s", run_id, exc2)
-
-    @staticmethod
-    def _partial_failure_message(committed: int, exc: Exception) -> str:
-        return (
-            f"Run creation failed partway ({exc}); {committed} job(s) were already"
-            " created and stay in this run. Resubmitting the SAME item list"
-            " resumes automatically (already-created items are skipped);"
-            " removing bad items creates a new run."
-        )
 
     def _discard_empty_run(self, run_id: str) -> None:
         # Best-effort cleanup of the run row after job creation failed;

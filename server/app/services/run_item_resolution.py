@@ -105,9 +105,12 @@ def _resolve_refs(
     # Instance-level connections shared across workspaces
     # (SECURITY-EXTERNAL-CONNECTION-001). Existence AND enabled state are
     # checked here (#425 review) in one chunked probe over the distinct
-    # keys (key/enabled only — no config material).
+    # keys (key/enabled only — no config material). Probe keys are stripped
+    # the same way as the lookup keys below (codex round-1 #4: a key with
+    # surrounding whitespace used to resolve fine per-item and became a
+    # spurious 400 after the probe batching).
     enabled_by_key = job_db.external_connection_enabled_map(
-        list(dict.fromkeys(str(item.get("connection_key")) for _, item in specs))
+        list(dict.fromkeys(str(item.get("connection_key") or "").strip() for _, item in specs))
     )
     for index, item in specs:
         connection_key = str(item.get("connection_key") or "").strip()
