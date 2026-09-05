@@ -536,4 +536,138 @@ describe('官方内置 question 面板 bundle', () => {
     })
     await waitForText(doc, '题目数据尚未生成')
   })
+
+  it('init 重发竞态：慢的旧 boot 结果不得覆盖新 boot 已渲染的内容（#347 P2）', async () => {
+    // 宿主扣住桥响应，手工控制两次 boot 的完成顺序：
+    // boot2（新数据）先提交渲染，boot1（旧数据）慢返回——旧结果必须被
+    // generation 守卫丢弃，面板不得回退到过期内容。
+    const requests: BootedPanel['requests'] = []
+    const respond = (
+      win: Window,
+      message: { id: number; method: string; params?: { name?: string } },
+      payload: unknown
+    ) => {
+      win.postMessage(
+        {
+          source: HOST_SOURCE,
+          type: 'response',
+          id: message.id,
+          ok: true,
+          payload,
+        },
+        '*'
+      )
+    }
+    const questionFor = (stem: string) =>
+      JSON.stringify({ questions: [{ normalized: { stem } }] })
+    const COMPREHENSION = JSON.stringify({
+      comprehension_data: { key_info_list: [], possible_error_list: [] },
+    })
+    // detail 不含任何节点 → gates 关、评审报告不拉取（若拉取，竞态路径会
+    // 挂起在无应答的评审报告请求上，测不到 bug）。
+    const DETAIL = makeDetail([])
+
+    const dom = new JSDOM(QUESTION_PANEL_BUNDLE, {
+      runScripts: 'dangerously',
+      beforeParse(win) {
+        win.addEventListener('message', (event) => {
+          const data = event.data as Record<string, unknown> | null
+          if (!data || data.source !== PANEL_SOURCE) return
+          if (data.type === 'ready') {
+            win.postMessage(
+              {
+                source: HOST_SOURCE,
+                type: 'init',
+                jobId: 'j1',
+                theme: {},
+                assets: {},
+              },
+              '*'
+            )
+          } else if (data.type === 'request') {
+            requests.push(data as unknown as BootedPanel['requests'][number])
+          }
+        })
+      },
+    })
+    const panelWin = dom.window as unknown as Window
+    const doc = panelWin.document
+
+    // boot1 的三笔在途请求就位（getJobDetail / questions.json /
+    // comprehension_info.json），宿主一概扣住不回。
+    await expect.poll(() => requests.length, { timeout: 2000 }).toBe(3)
+    const staleRequests = [...requests]
+
+    // 节点状态翻转 → 宿主重发 init（boot2 重新取数）。
+    panelWin.postMessage(
+      { source: HOST_SOURCE, type: 'init', jobId: 'j1', theme: {}, assets: {} },
+      '*'
+    )
+    await expect.poll(() => requests.length, { timeout: 2000 }).toBe(6)
+
+    // boot2 先完成：新题干渲染上屏（comprehension 空列表会让
+    // loadComprehension 走 reviewed→raw 回落，宿主对回落请求回 404 null）。
+    const drainFallbacks = async () => {
+      for (let i = 0; i < 4; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 60))
+        for (const message of requests.slice(6)) {
+          if (message.method === 'readArtifact') {
+            panelWin.postMessage(
+              {
+                source: HOST_SOURCE,
+                type: 'response',
+                id: message.id,
+                ok: false,
+                error: 'not found',
+              },
+              '*'
+            )
+          }
+        }
+      }
+    }
+    for (const message of requests.slice(3)) {
+      if (message.method === 'getJobDetail') {
+        respond(panelWin, message, DETAIL)
+      } else {
+        const content =
+          message.params?.name === 'questions.json'
+            ? questionFor('<p>第二次的题干</p>')
+            : COMPREHENSION
+        respond(panelWin, message, {
+          name: message.params?.name ?? '',
+          content,
+        })
+      }
+    }
+    // 回落链（reviewed→raw 各 404）驱动 loadComprehension 归空，
+    // boot2 的 Promise.all 才能落定、渲染新题干。
+    await drainFallbacks()
+    await waitForText(doc, '第二次的题干')
+
+    // boot1 慢返回：旧数据此刻才回包。若无 generation 守卫，boot1 的
+    // 回落链（11-14 号请求）会被宿主继续 404 驱动到落定，旧题干随即
+    // 覆盖新内容——这正是要钉住的 bug。
+    for (const message of staleRequests) {
+      if (message.method === 'getJobDetail') {
+        respond(panelWin, message, DETAIL)
+      } else {
+        const content =
+          message.params?.name === 'questions.json'
+            ? questionFor('<p>第一次的题干</p>')
+            : COMPREHENSION
+        respond(panelWin, message, {
+          name: message.params?.name ?? '',
+          content,
+        })
+      }
+    }
+    await drainFallbacks()
+
+    // 旧 boot 的结果被丢弃：面板停留在新内容，不回退也不闪旧题干。
+    await expect
+      .poll(() => appText(doc).includes('第一次的题干'), { timeout: 400 })
+      .toBe(false)
+    expect(appText(doc)).toContain('第二次的题干')
+  })
 })
