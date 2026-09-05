@@ -69,6 +69,8 @@ export VELITES_PROVIDER_ENV_FILE="$PWD/deploy/velites-provider.env"
 export AGENT_LEGION_HOST_BIND=192.0.2.1
 ```
 
+原生形态（`make prod-up` 不带 `docker` 参数）没有 compose 端口发布层，对应开关是 `NATIVE_BACKEND_BIND` / `NATIVE_WORKER_BIND`（默认 `127.0.0.1`），设为部署机局域网/overlay 网络 IP 即对其他设备暴露 Host API 与 Worker 控制台。对象存储的端口发布仍由 compose 托管，`AGENT_LEGION_S3_BIND` 对两种形态同样生效：绑定为具体 IP 时 `127.0.0.1` 映射消失，原生后端进程访问 S3 的 `AGENT_LEGION_S3_ENDPOINT`（根 `.env`，默认 `http://127.0.0.1:8333`）需同步指向该地址，或把 `AGENT_LEGION_S3_BIND` 设为 `0.0.0.0` 保住 loopback；远程客户端的 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 一并指向可达地址（完整说明见 [materials-storage-deployment.md](materials-storage-deployment.md)）。
+
 如果 LLM gateway 绑定了 Tailnet 地址并设置了 `LLM_GATEWAY_TOKEN`（绑定非 loopback 地址时必须设置），Worker 容器也需要同一个 token 才能调用 gateway。Compose 通过环境变量透传它，把 token 写进 `deploy/.env`（该文件已被 `.gitignore` 与 `.dockerignore` 排除）或导出到 shell：
 
 ```bash

@@ -3,6 +3,10 @@
 # 前端无独立进程：后端直接服务 frontend/dist（本脚本会先构建）。
 # 幂等：端口已被监听时跳过对应进程的启动。进程经 nohup + caffeinate
 # 脱离终端并防睡眠，日志在 data/logs/prod-{backend,worker}.log。
+# 端口与绑定地址可分别用 NATIVE_BACKEND_PORT / NATIVE_WORKER_PORT 与
+# NATIVE_BACKEND_BIND / NATIVE_WORKER_BIND 覆盖（默认 8000/8787 与 127.0.0.1；
+# 暴露给局域网/overlay 网络时把 bind 设为对应网卡地址，S3 联动配置见
+# docs/agent-worker-deployment.md）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,6 +14,8 @@ cd "$ROOT"
 
 BACKEND_PORT="${NATIVE_BACKEND_PORT:-8000}"
 WORKER_PORT="${NATIVE_WORKER_PORT:-8787}"
+BACKEND_BIND="${NATIVE_BACKEND_BIND:-127.0.0.1}"
+WORKER_BIND="${NATIVE_WORKER_BIND:-127.0.0.1}"
 CAFFEINATE="$(command -v caffeinate || true)"
 
 mkdir -p data/logs
@@ -29,6 +35,22 @@ echo "检测 velites 二进制新鲜度…"
 port_listening() {
     lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
 }
+
+# 健康检查与就绪提示用的探测地址：0.0.0.0 / :: 的全接口监听必然含
+# loopback，归一为 127.0.0.1；绑定具体网卡地址时只有该地址可达（探测
+# loopback 必然失败），原样返回；IPv6 字面量补 URL 要求的方括号。
+health_host() {
+    local host="$1"
+    case "$host" in
+        0.0.0.0 | ::) host=127.0.0.1 ;;
+    esac
+    if [[ "$host" == *:* ]]; then
+        host="[$host]"
+    fi
+    echo "$host"
+}
+BACKEND_HEALTH_HOST="$(health_host "$BACKEND_BIND")"
+WORKER_HEALTH_HOST="$(health_host "$WORKER_BIND")"
 
 # 1.5 材料对象存储：原生形态下后端/worker 是本机进程，对象存储仍由 docker
 # compose 托管（compose.host.yaml 里 seaweedfs/rustfs 各挂自己的 profile，
@@ -70,14 +92,14 @@ fi
 if port_listening "$BACKEND_PORT"; then
     echo "后端已在 :$BACKEND_PORT 运行，跳过"
 else
-    echo "启动后端 :$BACKEND_PORT …"
+    echo "启动后端 $BACKEND_BIND:$BACKEND_PORT …"
     ulimit -n 65535
     # 共享库 schema 门（server/app/db/schema.py）：prod 是有意迁移裸
     # agent_legion 库的操作者，显式授予 opt-in；误连该库的工具脚本
     # （缺 .env 的 worktree export_openapi 等）则被硬拦。
     AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1 \
     nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m uvicorn \
-        server.app.main:create_prod_app --factory --host 127.0.0.1 --port "$BACKEND_PORT" \
+        server.app.main:create_prod_app --factory --host "$BACKEND_BIND" --port "$BACKEND_PORT" \
         --timeout-graceful-shutdown 3 \
         > data/logs/prod-backend.log 2>&1 &
 fi
@@ -86,11 +108,11 @@ fi
 if port_listening "$WORKER_PORT"; then
     echo "Worker 已在 :$WORKER_PORT 运行，跳过"
 else
-    echo "启动 Worker :$WORKER_PORT …"
+    echo "启动 Worker $WORKER_BIND:$WORKER_PORT …"
     ulimit -n 65535
     nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m worker.service \
         --state-dir data/agent-worker-service \
-        --host 127.0.0.1 --port "$WORKER_PORT" \
+        --host "$WORKER_BIND" --port "$WORKER_PORT" \
         > data/logs/prod-worker.log 2>&1 &
 fi
 
@@ -98,10 +120,10 @@ fi
 # 仍可能超过 1 分钟；等待期间每 30s 输出一次进度，避免误报启动失败）。
 for i in $(seq 1 150); do
     backend_ok=false; worker_ok=false
-    curl -sS -m 2 "http://127.0.0.1:$BACKEND_PORT/api/health" >/dev/null 2>&1 && backend_ok=true
-    curl -sS -m 2 "http://127.0.0.1:$WORKER_PORT/api/health" >/dev/null 2>&1 && worker_ok=true
+    curl -sS -m 2 "http://$BACKEND_HEALTH_HOST:$BACKEND_PORT/api/health" >/dev/null 2>&1 && backend_ok=true
+    curl -sS -m 2 "http://$WORKER_HEALTH_HOST:$WORKER_PORT/api/health" >/dev/null 2>&1 && worker_ok=true
     if $backend_ok && $worker_ok; then
-        echo "原生环境已就绪：后端 http://127.0.0.1:$BACKEND_PORT （含前端 SPA），Worker 控制台 http://127.0.0.1:$WORKER_PORT"
+        echo "原生环境已就绪：后端 http://$BACKEND_HEALTH_HOST:$BACKEND_PORT （含前端 SPA），Worker 控制台 http://$WORKER_HEALTH_HOST:$WORKER_PORT"
         exit 0
     fi
     if (( i % 15 == 0 )); then
