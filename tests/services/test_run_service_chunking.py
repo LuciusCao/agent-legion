@@ -606,3 +606,31 @@ def test_material_delete_holding_for_update_blocks_chunk_probe(service, job_db) 
             "select count(*) as n from runs where workspace_id=%s", (WORKSPACE_ID,)
         ).fetchone()
     assert int(runs["n"]) == 0
+
+
+def test_ref_connection_key_with_whitespace_still_resolves(service, job_db) -> None:
+    """codex 轮 1 #4：带空白字符的 connection key 回归。
+
+    批量探测的键与逐项回查的键 strip 策略必须一致——原实现探测用原始
+    值、回查用 strip 后值，带空白的 key 从可用退化为 400。"""
+    # widen the entry contract: publish a new revision (ensure_active is a
+    # no-op once the builtin one exists).
+    WorkflowRevisionService(job_db).publish_workspace_revision(
+        WORKSPACE_ID, _definition_accepting_refs()
+    )
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into external_connections(key, type, display_name, config_json, enabled)"
+            " values ('cms-main', 'hmac_token', 'cms-main', '{}', 1)"
+        )
+    item = {"type": "ref", "connection_key": " cms-main ", "external_id": "Q-1"}
+
+    result = service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[item])
+
+    assert result["created_count"] == 1
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select source_id from jobs where run_id=%s", (result["run"]["id"],)
+        ).fetchone()
+    # entity_id 归一为 strip 后的键（探测与回查一致）。
+    assert str(row["source_id"]) == "cms-main:Q-1"

@@ -370,14 +370,15 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 74
 - check: architecture.file_budget
-  path: server/app/services/job_intake.py
-  reason: 'Issue #358''s review round (P1 on #374) extends the per-run items cap to the intake path —
-    the same check-and-raise the /runs service carries, placed right after candidate resolution and before
-    the run/jobs writes. Duplicating the cap constant away from the resolve gate would invite the two
-    paths to drift; revisit when the creation paths converge on one service.'
+  path: server/app/services/run_partial_failure.py
+  reason: 'codex round-1 #2 on PR #479: the two-branch chunked-creation compensation (empty-run
+    removal vs partial-run failed-marking) moved into this module so the /runs items path and
+    the /job-batches intake share ONE implementation and cannot drift. The error type,
+    the operator message, and the compensation protocol are one concern; splitting them across
+    modules would separate the failure protocol from its error contract.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 178
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/467
+  ceiling: 90
 - check: architecture.file_budget
   path: server/app/db/migrations/__init__.py
   reason: 'The #358/#359 merge round registers two new migration functions (ops_runtime_profile_samples,
