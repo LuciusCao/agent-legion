@@ -473,3 +473,42 @@ def test_resolve_node_config_keeps_workspace_override_secret_channel() -> None:
     assert resolve_node_config(SCHEMA, {}, {"api_key": marker})["api_key"] == marker
     # The test_node_config_manifest full-gate test pins the pre-#432
     # plaintext-override face; resolution stays permissive on that layer.
+
+
+# --- codex P1 on #432: the plaintext secret schema-default bypass ---
+
+
+def test_resolve_node_config_rejects_secret_schema_default() -> None:
+    """A secret property declaring a plaintext default is rejected at
+    resolution: the value gate never sees it (node config may be empty),
+    yet ``config_schema_defaults`` would merge the credential verbatim into
+    the effective/frozen config (codex P1 on #432)."""
+    bad = {
+        "type": "object",
+        "properties": {
+            "api_key": {"type": "string", "secret": True, "default": "plaintext-cred"},
+            "kept": {"type": "string", "default": "ok"},
+        },
+    }
+    with pytest.raises(ConfigSchemaError, match="config_schema.properties.api_key"):
+        resolve_node_config(bad, {}, {})
+    with pytest.raises(ConfigSchemaError, match="cannot declare a default"):
+        resolve_node_config(bad, {"kept": "x"}, {})
+
+
+def test_resolve_node_config_accepts_non_secret_defaults_and_clean_secrets() -> None:
+    """Non-secret defaults keep flowing; a secret property without a
+    default resolves fine (marker chain intact)."""
+    clean = {
+        "type": "object",
+        "properties": {
+            "kept": {"type": "string", "default": "ok"},
+            "api_key": {"type": "string", "secret": True},
+        },
+    }
+    assert resolve_node_config(clean, {}, {}) == {"kept": "ok"}
+    marker = {"secret_ref": "node:wf:generate:api_key"}
+    assert resolve_node_config(clean, {"api_key": marker}, {}) == {
+        "kept": "ok",
+        "api_key": marker,
+    }

@@ -535,3 +535,64 @@ def test_publish_accepts_exact_vault_marker_in_node_config(
     )
 
     assert (ok, errors) == (True, [])
+
+
+# --- codex P1 on #432: plaintext secret schema defaults must fail at publish ---
+
+
+def _secret_default_yaml(*, with_config: bool) -> str:
+    """Draft whose node declares api_key secret WITH a plaintext default."""
+    config_block = "      kept: v\n" if with_config else ""
+    return f"""
+key: test_publish_flow
+label: Test Publish Flow
+nodes:
+  do_thing:
+    type: code
+    capability: do_thing
+    config_schema:
+      type: object
+      properties:
+        api_key:
+          type: string
+          secret: true
+          default: schema-default-cred
+        kept:
+          type: string
+    config:
+{config_block}      kept: v
+"""
+
+
+def test_publish_rejects_secret_schema_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex P1 on #432: a secret property with a plaintext schema default
+    fails at publish/validate — the value gate cannot see it (node config
+    may not set the field), but the schema-default merge would freeze the
+    credential verbatim into every intake snapshot."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _patch_agent_catalog(monkeypatch, {})
+    _seed_node_code(workspace["id"])
+
+    for with_config in (False, True):
+        errors = validate_workflow_draft_for_publish(
+            queries, workspace["id"], _secret_default_yaml(with_config=with_config), True
+        )
+        # Either gate may fire first: the parse-time channel check
+        # (``Node do_thing.config_schema: …`` — every declaration channel
+        # rejects secret+default) or the publish-gate copy carrying the
+        # vault-channel guide. Both name the field and never echo the value.
+        assert any(
+            "config_schema.properties.api_key" in error and "cannot declare a default" in error
+            for error in errors
+        ), with_config
+
+    ok, errors = publish_workflow_draft(
+        queries, workspace["id"], _secret_default_yaml(with_config=False)
+    )
+    assert ok is False
+    # The error never echoes the default's value; nothing was published.
+    assert all("schema-default-cred" not in error for error in errors)
+    assert queries.get_active_workflow_revision(workspace["id"], "test_publish_flow") is None

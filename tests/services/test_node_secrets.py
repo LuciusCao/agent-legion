@@ -5,7 +5,10 @@ from __future__ import annotations
 import pytest
 
 from server.app.config_schema import ConfigSchemaError
-from server.app.services.node_config_secret_guard import reject_node_secret_fields
+from server.app.services.node_config_secret_guard import (
+    reject_secret_schema_defaults,
+    reject_secret_violations,
+)
 from server.app.services.node_secrets import (
     apply_node_secret_fields,
     mask_node_config_secrets,
@@ -176,26 +179,71 @@ def test_reject_node_secret_fields_rejects_plaintext_and_echo() -> None:
     and the vault channel without echoing the value."""
     for bad in ("sk-live-123", {"secret_set": True}, {"secret_set": False}, 123, None):
         with pytest.raises(ConfigSchemaError, match="config.api_key.*Secret values"):
-            reject_node_secret_fields(SCHEMA, {"api_key": bad}, "config")
+            reject_secret_violations(SCHEMA, {"api_key": bad}, "config")
         # Sibling non-secret fields are not the trigger.
         with pytest.raises(ConfigSchemaError, match="api_key"):
-            reject_node_secret_fields(SCHEMA, {"api_url": "http://x", "api_key": bad}, "config")
+            reject_secret_violations(SCHEMA, {"api_url": "http://x", "api_key": bad}, "config")
 
 
 def test_reject_node_secret_fields_rejects_non_node_secret_refs() -> None:
     """Only the exact ``{"secret_ref": "node:..."}`` marker passes — instance
     connection refs and multi-key lookalikes are for other channels."""
     with pytest.raises(ConfigSchemaError, match="api_key"):
-        reject_node_secret_fields(SCHEMA, {"api_key": {"secret_ref": "conn:cms:token"}}, "config")
+        reject_secret_violations(SCHEMA, {"api_key": {"secret_ref": "conn:cms:token"}}, "config")
     with pytest.raises(ConfigSchemaError, match="api_key"):
-        reject_node_secret_fields(SCHEMA, {"api_key": {"secret_ref": "n", "x": 1}}, "config")
+        reject_secret_violations(SCHEMA, {"api_key": {"secret_ref": "n", "x": 1}}, "config")
 
 
 def test_reject_node_secret_fields_accepts_exact_vault_marker_and_absent() -> None:
     """The exact vault marker passes; absent fields and non-secret fields
     are not this gate's business."""
     marker = {"secret_ref": "node:wf:fetch:api_key"}
-    reject_node_secret_fields(SCHEMA, {"api_key": marker}, "config")
-    reject_node_secret_fields(SCHEMA, {"api_url": "http://x"}, "config")
-    reject_node_secret_fields(SCHEMA, {}, "config")
-    reject_node_secret_fields({}, {"api_key": "plain"}, "config")
+    reject_secret_violations(SCHEMA, {"api_key": marker}, "config")
+    reject_secret_violations(SCHEMA, {"api_url": "http://x"}, "config")
+    reject_secret_violations(SCHEMA, {}, "config")
+    reject_secret_violations({}, {"api_key": "plain"}, "config")
+
+
+# --- codex P1 on #432: plaintext secret schema defaults must not bypass ---
+
+
+def test_reject_secret_schema_defaults_rejects_secret_default() -> None:
+    """A ``secret: true`` property declaring a ``default`` is rejected: the
+    default is a plaintext credential that the schema-default merge would
+    freeze verbatim into the effective config even when node config never
+    sets the field (the value gate cannot see it)."""
+    bad = {
+        "type": "object",
+        "properties": {"api_key": {"type": "string", "secret": True, "default": "cred"}},
+    }
+    with pytest.raises(ConfigSchemaError, match="config_schema.properties.api_key"):
+        reject_secret_schema_defaults(bad, "config_schema")
+    # The combined gate catches it too, with node_config empty (the bypass face).
+    with pytest.raises(ConfigSchemaError, match="cannot declare a default"):
+        reject_secret_violations(bad, {}, "node config")
+    # A non-bool default value (e.g. None) still counts: "default" key present.
+    null_default = {
+        "type": "object",
+        "properties": {"api_key": {"type": "string", "secret": True, "default": None}},
+    }
+    with pytest.raises(ConfigSchemaError, match="api_key"):
+        reject_secret_schema_defaults(null_default, "config_schema")
+
+
+def test_reject_secret_schema_defaults_passes_clean_schemas() -> None:
+    """Non-secret defaults and secret properties without defaults are
+    legitimate schema shapes and pass both gates."""
+    clean = {
+        "type": "object",
+        "properties": {
+            "kept": {"type": "string", "default": "ok"},
+            "api_key": {"type": "string", "secret": True},
+        },
+    }
+    reject_secret_schema_defaults(clean, "config_schema")
+    marker = {"secret_ref": "node:wf:fetch:api_key"}
+    reject_secret_violations(clean, {"api_key": marker, "kept": "x"}, "node config")
+    reject_secret_violations(clean, {}, "node config")
+    # Missing/malformed properties mapping is not this gate's business.
+    reject_secret_schema_defaults({}, "config_schema")
+    reject_secret_schema_defaults({"properties": "not-a-dict"}, "config_schema")
