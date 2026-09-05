@@ -25,6 +25,7 @@ from server.app.config_schema import (
 )
 from server.app.services.node_config_batch import frozen_node_config
 from server.app.services.node_config_runtime import runtime_mutable_keys
+from server.app.services.node_config_secret_guard import reject_node_secret_fields
 from server.app.services.node_execution_config import merge_reserved_execution_schema
 from server.app.services.node_secrets import strip_secret_fields
 from server.app.workflows.schema import WorkflowDefinition, WorkflowNode
@@ -112,12 +113,13 @@ def resolve_node_config(
 ) -> dict[str, Any]:
     """Merge defaults → node config → workspace override, validating each layer.
 
-    Secret fields are vault-managed markers; they bypass validation (VAULT-SECRET-001).
+    Secret fields are vault-managed markers; they bypass generic validation (VAULT-SECRET-001). #432: secret values in the node config layer must be the exact vault marker.
     """
     if not config_schema:
         if node_config or workspace_override:
             raise ConfigSchemaError("node declares config but its capability has no config_schema")
         return {}
+    reject_node_secret_fields(config_schema, node_config, "node config")
     plain_node = strip_secret_fields(config_schema, dict(node_config))
     plain_override = strip_secret_fields(config_schema, dict(workspace_override))
     validate_config_values(config_schema, plain_node, partial=True, path="node config")

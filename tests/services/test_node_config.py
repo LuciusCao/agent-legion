@@ -407,3 +407,69 @@ def test_resolve_workflow_node_configs_skips_approval_gates() -> None:
     resolved = resolve_workflow_node_configs(definition, {}, None)
 
     assert "gate" not in resolved
+
+
+# --- #432: the draft YAML node.config channel must not bypass the vault ---
+
+
+def test_resolve_node_config_rejects_plaintext_secret_in_node_config() -> None:
+    """A plaintext secret value in the node config layer (draft YAML
+    ``node.config``) is rejected at resolution: it never passes the settings
+    PATCH's vault chain, so freezing it would leak the plaintext into the
+    revision and every job snapshot (VAULT-SECRET-001)."""
+    with pytest.raises(ConfigSchemaError, match="api_key"):
+        resolve_node_config(SCHEMA, {"api_key": "sk-live-123"}, {})
+    # Non-secret keys keep validating as before; the error names the field.
+    with pytest.raises(ConfigSchemaError, match="api_key.*Secret values"):
+        resolve_node_config(SCHEMA, {"page_size": 5, "api_key": "sk-live-123"}, {})
+
+
+def test_resolve_node_config_rejects_secret_set_echo_in_node_config() -> None:
+    """The ``{"secret_set": true}`` echo shape is a settings-API write-only
+    marker: under a secret field in the node config layer it is dead config
+    (dispatch sends the dict literal to node code), so intake rejects it."""
+    with pytest.raises(ConfigSchemaError, match="api_key.*Secret values"):
+        resolve_node_config(SCHEMA, {"api_key": {"secret_set": True}}, {})
+    with pytest.raises(ConfigSchemaError, match="api_key.*Secret values"):
+        resolve_node_config(SCHEMA, {"api_key": {"secret_set": False}}, {})
+
+
+def test_resolve_node_config_rejects_fake_secret_ref_marker_in_node_config() -> None:
+    """Only the exact ``{"secret_ref": "node:..."}`` vault marker shape is
+    accepted; multi-key lookalikes and non-vault ref names are rejected."""
+    with pytest.raises(ConfigSchemaError, match="api_key.*Secret values"):
+        resolve_node_config(SCHEMA, {"api_key": {"secret_ref": "n", "x": 1}}, {})
+    with pytest.raises(ConfigSchemaError, match="api_key.*Secret values"):
+        resolve_node_config(SCHEMA, {"api_key": {"secret_ref": "conn:cms:token"}}, {})
+    with pytest.raises(ConfigSchemaError, match="api_key.*Secret values"):
+        resolve_node_config(SCHEMA, {"api_key": 123}, {})
+
+
+def test_resolve_node_config_accepts_vault_marker_in_node_config() -> None:
+    """The exact vault marker passes through and freezes like the workspace
+    override channel's markers do (dispatch resolves it in memory)."""
+    marker = {"secret_ref": "node:wf:generate:api_key"}
+    assert resolve_node_config(SCHEMA, {"api_key": marker}, {}) == {
+        "page_size": 50,
+        "api_key": marker,
+    }
+
+
+def test_resolve_workflow_node_configs_wraps_secret_rejection_with_node_key() -> None:
+    """The full-chain wrapper keeps its ``node '<key>':`` prefix so the
+    intake error names the offending node."""
+    definition = _definition({"api_key": "sk-live-123"})
+    with pytest.raises(ConfigSchemaError, match="node 'generate'.*api_key"):
+        resolve_workflow_node_configs(definition, {"a": _agent("generate", SCHEMA)}, None)
+
+
+def test_resolve_node_config_keeps_workspace_override_secret_channel() -> None:
+    """#428 semantics intact: the settings PATCH channel stores vault markers
+    in the workspace override; resolution must keep passing them through
+    (plaintext overrides of secret fields remain masked by the settings API
+    and pruned by the next publish — the #432 fix only gates the node config
+    layer)."""
+    marker = {"secret_ref": "node:wf:generate:api_key"}
+    assert resolve_node_config(SCHEMA, {}, {"api_key": marker})["api_key"] == marker
+    # The test_node_config_manifest full-gate test pins the pre-#432
+    # plaintext-override face; resolution stays permissive on that layer.
