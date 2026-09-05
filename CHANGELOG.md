@@ -134,8 +134,8 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   `run_job_status_counts` 把 run 详情读取从全量 group-by 变成 PK 点查，
   items 上限硬约束同批落地。
 - 执行面 retention 管道（issue #354）：agent manifest trim + 终态行窗口
-  删除 + sweeper 单副本收拢——核心执行面表此前只写不删，单场 campaign
-  后 Postgres 数十 GB 的历史尸体不再拖慢第二场。
+  删除 + sweeper 单副本收拢——核心执行面表此前只写不删，长期运行后
+  累积的终态行不再拖慢后续批次（大表场景收益显著）。
 - Studio 节点类型选择器与画布创建入口（#392）：前端对齐后端
   `start|code|agent|approval` 类型抽象——类型切换前置校验 + 确认弹窗，
   按类型注册 inspector section 集，approval 画布可见与节点创建入口。
