@@ -882,3 +882,34 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
   ceiling: 159
+- check: architecture.file_budget
+  path: server/app/agent_broker/broker.py
+  reason: >-
+    Issue #401 makes has_active_request shard-aware: the one-active-request
+    gate gains a shard_index parameter whose query mirrors the v79 unique
+    index's identity expression (manifest_guard.SHARD_IDENTITY_SQL), so
+    business dedup and index dedup stay one convention instead of drifting
+    into two spellings. The ~16 effective lines are the signature, the
+    semantics docstring (the NULL/identity nuance is the part a future
+    editor must not "simplify" away), and the parameterized predicate.
+    Moving the method out would split the broker's queue protocol surface
+    for one query; revisit when the broker module gets its next structural
+    split.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/401
+  ceiling: 246
+- check: architecture.file_budget
+  path: server/app/workflow_worker/code_stock.py
+  reason: >-
+    Issue #401 review P1-1 adds pass_budget to the code stock gate: the
+    v79 shard-aware index removed the accidental one-in-flight backpressure
+    on shard fan-outs, and within one poll pass the gate's queued count
+    cannot see the shards just submitted to the asynchronous enqueue pool
+    (it counts only committed rows). The shard fan-out loop now caps its
+    own submissions at the gate's remaining budget — same target, clamps
+    and TTL as allows(), extracted into a shared _ensure_fresh so the two
+    entry points cannot drift. ~5 effective lines; splitting the gate
+    module for one accessor would fork the single stockpile discipline.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/401
+  ceiling: 75

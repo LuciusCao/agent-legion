@@ -97,11 +97,22 @@ def claim_shard_node(
 
     running = sum(1 for row in rows if row["status"] == "running")
     claimed_any = False
+    # #401 review P1-1: within one pass the stock gate only sees COMMITTED
+    # queued rows, but the just-submitted shards sit in the enqueue pool
+    # (asynchronous) — a fan-out could pour the whole node's shards into the
+    # queue before the gate's snapshot catches up. Cap this pass's remote
+    # submissions at the gate's remaining budget (same config basis as
+    # allows()); the next pass continues where this one stopped. The local
+    # pool keeps its own authoritative capacity enforcement.
+    stock_budget = worker.code_stock.pass_budget()
+    submitted = 0
     for row in rows:
         if row["status"] != "pending":
             continue
         if shard.max_concurrency is not None and running >= shard.max_concurrency:
             break
+        if stock_budget is not None and submitted >= stock_budget:
+            break  # this pass's remote budget is spent; the next pass continues
         shard_index = int(row["shard_index"])
         shard_log_path = log_path.with_name(f"{job['id']}-{node_key}-shard-{shard_index}.log")
         shard_input = json.loads(row["input_json"])
@@ -122,6 +133,8 @@ def claim_shard_node(
         ):
             running += 1
             claimed_any = True
+            if stock_budget is not None:
+                submitted += 1
             continue
         if worker.settings.executor_runtime.code_capacity <= 0:
             # Pure-remote mode: no local fallback exists; leave the shard

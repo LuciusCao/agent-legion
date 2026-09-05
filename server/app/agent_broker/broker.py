@@ -21,6 +21,7 @@ from server.app.agent_broker.claim import AgentClaim, ClaimRacedError
 from server.app.agent_broker.claim_retry import claim_with_retry
 from server.app.agent_broker.empty import EmptyClaimTrigger
 from server.app.agent_broker.enqueue import enqueue_request
+from server.app.agent_broker.manifest_guard import SHARD_IDENTITY_SQL
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
 from server.app.db.dialect import ConnectSource
@@ -98,12 +99,28 @@ class AgentExecutionBroker:
         # Debounced empty-claim restock signal, see empty.
         self.empty_claim = EmptyClaimTrigger()
 
-    def has_active_request(self, job_id: str, node_key: str) -> bool:
+    def has_active_request(
+        self, job_id: str, node_key: str, shard_index: int | None = None
+    ) -> bool:
+        """True when the node (or that shard of it, #401) has an active request.
+
+        A shard query matches the one-active index's identity and ignores
+        OTHER shards' rows; a non-shard query keeps the ordinary-node
+        single-active semantics (it sees every active row of the node — the
+        non-shard re-enqueue of a sharded node would pass the index's
+        identity -1, so the gate is what blocks it).
+        """
+        predicate = f" and {SHARD_IDENTITY_SQL}=%s" if shard_index is not None else ""
+        params: tuple[str | int, ...] = (
+            (job_id, node_key, shard_index) if shard_index is not None else (job_id, node_key)
+        )
         with read_connection(self.database_dsn) as conn:
             row = conn.execute(
                 "select 1 from agent_execution_requests"
-                " where job_id=%s and node_key=%s and state in ('queued', 'claimed', 'reporting') limit 1",
-                (job_id, node_key),
+                " where job_id=%s and node_key=%s"
+                + predicate
+                + " and state in ('queued', 'claimed', 'reporting') limit 1",
+                params,
             ).fetchone()
         return row is not None
 
