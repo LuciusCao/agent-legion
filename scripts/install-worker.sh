@@ -236,10 +236,19 @@ start_worker() {
 EOF
     exit 1
   fi
-  # --wait：等待 healthcheck 变 healthy（Host 不可达不阻塞——worker 进程
-  # 会带退避重试注册，属健康状态）。
-  docker compose up -d --wait --wait-timeout 180
-  echo "==> Worker 已启动"
+  docker compose up -d
+  # 不用 up --wait：全新安装尚未粘贴 scoped token 时 executor 处于「配置
+  # 等待中」（刻意设计，supervisor 不启动执行进程），healthcheck 按定义
+  # 报 unhealthy——--wait 会白等超时并把正常状态误报为失败。这里只验证
+  # 容器进程活着（能挡住期望 runtime 守卫的 exit 2 crash loop）。
+  sleep 10
+  state="$(docker compose ps --format '{{.State}}' worker)"
+  if [ "$state" != "running" ]; then
+    echo "错误: 容器状态 ${state}（常见原因：期望 runtime 守卫 fail-fast）。日志：" >&2
+    docker compose logs --tail 30 worker >&2 || true
+    exit 1
+  fi
+  echo "==> Worker 容器已启动（粘贴 scoped token 前显示 unhealthy 属预期，见下方步骤 2）"
 }
 
 if [ "$NO_UP" = "1" ]; then
