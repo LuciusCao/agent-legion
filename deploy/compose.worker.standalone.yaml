@@ -37,7 +37,9 @@ services:
       - worker-data:/var/lib/agent-legion-worker
       - worker-control:/var/lib/agent-legion-worker-control
     ports:
-      - ${AGENT_WORKER_UI_BIND:-127.0.0.1}:8787:8787
+      # 端口可插值：宿主机已有服务占用 8787（如本机 dev worker）时，经 .env
+      # 设 AGENT_WORKER_UI_BIND / AGENT_WORKER_UI_PORT 换绑定地址或宿主端口。
+      - ${AGENT_WORKER_UI_BIND:-127.0.0.1}:${AGENT_WORKER_UI_PORT:-8787}:8787
     # models.json 中 $ENV 引用的凭据变量经此文件注入（0600）；缺失不阻塞
     # 启动（字面 apiKey / 无引用的部署合法）。
     env_file:
