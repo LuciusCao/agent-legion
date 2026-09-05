@@ -29,6 +29,13 @@
 # Re-entrancy: check-quick.sh exports AGENT_LEGION_GATE_SLOT_HELD=1 while it
 # holds a slot; a nested invocation (none today, insurance for check.sh-style
 # wrappers) inherits the parent's slot instead of waiting on it.
+#
+# Vanishing slots: a contender that yields deletes the slot file it just
+# created, so any slot globbed by another process can disappear before it is
+# read. Every slot read therefore treats ENOENT as "slot gone" (skip it / do
+# not count it / fall back on mtime) rather than an error — under the
+# caller's set -e, a bare failed read would kill the whole gate (issue #488:
+# a queued pre-push lost its 42-minute wait to exactly that).
 
 gate_slot_dir() {
   local dir
@@ -50,7 +57,9 @@ count_live_gate_slots() {
   dir="$(gate_slot_dir)" || { echo 0; return; }
   for slot in "$dir"/gate-*; do
     [[ -f "$slot" ]] || continue
-    pid="$(head -n1 "$slot" 2>/dev/null)"
+    # Vanished between the glob and this read (a yielding contender removed
+    # its own slot): it does not count — its owner conceded, not holds.
+    pid="$(head -n1 "$slot" 2>/dev/null)" || continue
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
       count=$((count + 1))
     fi
@@ -66,7 +75,9 @@ _reclaim_stale_gate_slots() {
   dir="$(gate_slot_dir)" || return 0
   for slot in "$dir"/gate-*; do
     [[ -f "$slot" ]] || continue
-    pid="$(head -n1 "$slot" 2>/dev/null)"
+    # Vanished between the glob and this read: already gone, nothing to
+    # reclaim — the yielding contender deleted its own slot.
+    pid="$(head -n1 "$slot" 2>/dev/null)" || continue
     if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
       rm -rf "$slot"
     fi
@@ -88,6 +99,8 @@ _reclaim_aged_gate_slots() {
   now="$(date +%s)"
   for slot in "$dir"/gate-*; do
     [[ -f "$slot" ]] || continue
+    # A slot that vanished mid-read yields the fallback (= now): age 0, not
+    # reclaimed this round — _slot_mtime never fails on a vanished slot.
     mtime="$(_slot_mtime "$slot" "$now")"
     age=$((now - mtime))
     if [[ "$age" -gt "$max_age" ]]; then
@@ -99,15 +112,20 @@ _reclaim_aged_gate_slots() {
 
 # File mtime as epoch seconds, platform-portable. BSD/macOS stat needs
 # `-f %m`; GNU/Linux `stat -f` is the filesystem-status switch that would
-# swallow the file argument as part of the format string, so probe once
-# which syntax works instead of chaining fallbacks (a failed chain leaks
-# multi-line output into arithmetic).
+# swallow the file argument as part of the format string, so try one syntax
+# then the other. Each try is a single captured call (stderr swallowed, a
+# failure just falls through) — never a probe-then-query pair: a slot file
+# can vanish between the two (a yielding contender removed it after our
+# glob), and that must read as "no mtime" (the caller's fallback: age 0, not
+# reclaimed, re-checked next poll), never as a failed command substitution
+# that set -e escalates into killing the whole gate (issue #488). Capturing
+# also keeps a failed chain from leaking output into the age arithmetic.
 _slot_mtime() {
-  local file="$1" fallback="$2"
-  if stat -f %m "$file" >/dev/null 2>&1; then
-    stat -f %m "$file"
-  elif stat -c %Y "$file" >/dev/null 2>&1; then
-    stat -c %Y "$file"
+  local file="$1" fallback="$2" mtime
+  if mtime="$(stat -f %m "$file" 2>/dev/null)"; then
+    echo "$mtime"
+  elif mtime="$(stat -c %Y "$file" 2>/dev/null)"; then
+    echo "$mtime"
   else
     echo "$fallback"
   fi
@@ -195,9 +213,11 @@ _describe_gate_slot_holders() {
   local -a names=()
   for slot in "$dir"/gate-*; do
     [[ -f "$slot" ]] || continue
-    pid="$(head -n1 "$slot" 2>/dev/null)"
+    # Vanished mid-description (a yielding contender removed it): no longer a
+    # holder — skip it; a failed read must never kill the announcement.
+    pid="$(head -n1 "$slot" 2>/dev/null)" || continue
     [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null || continue
-    line2="$(sed -n '2p' "$slot" 2>/dev/null)"
+    line2="$(sed -n '2p' "$slot" 2>/dev/null)" || continue
     names+=("$(basename "${line2:-unknown}" 2>/dev/null || echo unknown)(pid ${pid})")
   done
   local IFS=','
