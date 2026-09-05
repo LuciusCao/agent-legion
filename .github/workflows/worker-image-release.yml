@@ -165,8 +165,12 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#worker-v}"
+          # --format 的模板上下文是原始 OCI index：平台列表在
+          # .Manifest.Manifests[*].Platform（字段名 OS 大小写敏感，无
+          # .Manifest.Platforms 快捷字段——codex P1，本地以公共多架构镜像
+          # 实测复现过）。provenance: false 保证无 unknown/unknown 干扰条目。
           platforms="$(docker buildx imagetools inspect "${REGISTRY_IMAGE}:${version}" \
-            --format '{{range .Manifest.Platforms}}{{.Os}}/{{.Architecture}} {{end}}')"
+            --format '{{range .Manifest.Manifests}}{{.Platform.OS}}/{{.Platform.Architecture}} {{end}}')"
           echo "platforms: ${platforms}"
           grep -qw linux/amd64 <<<"$platforms"
           grep -qw linux/arm64 <<<"$platforms"
