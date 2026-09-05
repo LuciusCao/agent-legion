@@ -66,6 +66,24 @@ def test_capacity_command_reads_and_hot_updates_limit(
     assert client.calls == [("PUT", "/api/config", {"max_concurrency": 8}, cli.MUTATE_TIMEOUT)]
 
 
+def test_status_prints_worker_id_fallback_when_name_missing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """P2-4（#481 review）：executor 启动兜底视图删 name 键后，首次
+    get_self 失败窗口内的 status 打印回退 worker_id，不出现字面量 None。"""
+    status = {
+        "connected": True,
+        "host_worker": {"worker_id": "w-1", "revoked": False},
+    }
+    code, _ = _run(monkeypatch, ["status"], [status])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    # 只钉 Host 登记行：last_seen_at 等字段的 None 打印是既有行为，不在本断言范围。
+    registration_line = next(line for line in out.splitlines() if line.startswith("Host 登记"))
+    assert registration_line == "Host 登记: w-1 / w-1"
+
+
 def test_configure_accepts_models_capabilities_and_token_file(tmp_path: Path) -> None:
     token_file = tmp_path / "register-token"
     token_file.write_text("host-issued-token\n", encoding="utf-8")

@@ -78,8 +78,8 @@ class ClaimPacing:
     still drives ``ClaimBackoffSequence``.
 
     ``log`` (optional) receives one line per *change* of the effective
-    wait (``Callable[[str], None]``); pacing is reported on change only
-    so a steady state costs no log volume.
+    wait, judged at display precision (whole ms): round-trip jitter
+    inside one displayed value costs no log volume.
     """
 
     def __init__(
@@ -142,7 +142,11 @@ class ClaimPacing:
         return min(max(target, self._floor_seconds), self._ceil_seconds)
 
     def _set(self, wait: float) -> None:
-        if wait == self._current and self._opened:
+        # 判变按显示精度（ms）量化：RTT 恒抖使 wait 每轮微变，精确相等
+        # 判变会让成功热路径逐轮打日志（同步 print(flush=True) 的 I/O 税，
+        # 正加在刚提速的循环上）；同显示值不重记，跨显示边界才记。
+        # 内部值随之停在最后一次记日志的原始值上（与显示值等价）。
+        if self._opened and round(wait * 1000) == round(self._current * 1000):
             return
         self._current = wait
         self._opened = True

@@ -196,16 +196,22 @@ def main() -> int:
                 ),
             }
             claimed = False
-            claim_started = time.monotonic()
+            claim_rtt = 0.0
             try:
                 while budget["agent"] + budget["code"] > 0:
                     if stop.is_set():
                         break
+                    claim_started = time.monotonic()
                     claim = client.claim(
                         str(config["worker_id"]), max_concurrency, max_code_concurrency
                     )
                     if claim is None:
                         break
+                    # #472 codex P2：pacing 输入是单次成功 claim 的往返——
+                    # 批量 pass 里逐次重打点。批次总墙钟（N 次 claim + N 次
+                    # submit）不进 pacing，否则爬坡段输入被放大、直接钳死
+                    # 上沿，「成功=往返×0.5」退化为固定 100ms。
+                    claim_rtt = time.monotonic() - claim_started
                     claimed = True
                     kind = "code" if str(claim.get("kind")) == "code" else "agent"
                     # Host 在 claim 事务里已强制分池；本地预算只防过度
@@ -244,11 +250,10 @@ def main() -> int:
                 stop.wait(wait)
                 continue
             backoff.reset()
-            # #472：三路径收口进 wait_after_pass——成功=自适应短等待，
-            # 空队列=poll_interval；错误路径在上面 except 臂走 backoff。
-            stop.wait(
-                pacing.wait_after_pass(claimed, time.monotonic() - claim_started, poll_interval)
-            )
+            # #472：三路径收口进 wait_after_pass——成功=自适应短等待
+            # （单次往返），空队列=poll_interval；错误路径在上面 except
+            # 臂走 backoff。
+            stop.wait(pacing.wait_after_pass(claimed, claim_rtt, poll_interval))
     finally:
         stop.set()
         # Bounded: run_execution watches `stop` and kills children within
