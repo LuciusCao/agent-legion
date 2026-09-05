@@ -430,6 +430,16 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/347
   ceiling: 199
 - check: architecture.file_budget
+  path: frontend/src/features/previewPanel/CustomizePreviewDialog.tsx
+  reason: '#347 P1: draft execution became an explicit per-session action (preview-draft gating). The
+    dialog footer gained the "预览此草稿" button with its previewing state plus the previewDraft/onPreviewDraft
+    contract toward PreviewPanelSection; the gating state itself lives in the section (single source,
+    dialog stays the thin chat wrapper). The added lines are the honest cost of the explicit consent
+    UI; re-evaluate when the preview-panel governance UI is next restructured (#347 follow-up).'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/347
+  ceiling: 173
+- check: architecture.file_budget
   path: frontend/src/features/previewPanel/PreviewPanelSection.tsx
   reason: The Codex P2 review on PR 345 added bundle content into the PreviewPanelHost remount key plus
     the hashBundle helper -- a cross-navigation bridge-request isolation fix that must stay at the composition
