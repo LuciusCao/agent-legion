@@ -45,7 +45,14 @@ jobs:
     if: github.repository == 'LuciusCao/agent-legion'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      # dereference 后的 commit sha：annotated tag 下 GITHUB_SHA 是 tag
+      # 对象而非 commit（push 事件 ref 值），sha-<短哈希> tag 与 revision
+      # label 必须用它才映射得回 git log（subagent P2-2）。
+      commit_sha: ${{ steps.commit.outputs.sha }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Tag version must be a valid Docker tag
         run: |
           set -euo pipefail
@@ -61,6 +68,17 @@ jobs:
               ;;
           esac
 
+      # 轻量 tag（git tag worker-vX 不带 -a）下 GITHUB_SHA 即 commit，本步
+      # dereference 幂等；annotated tag 则必须剥到 commit。显式 fetch tag
+      # refspec 而不依赖 checkout 的内部 ref（确定性：checkout 不保证在
+      # 本地留下 refs/tags/*）。
+      - name: Resolve commit sha
+        id: commit
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          echo "sha=$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")" >> "$GITHUB_OUTPUT"
+
   build:
     name: build linux/${{ matrix.arch }}
     needs: validate
@@ -70,9 +88,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # amd64 的 cache scope 与 quality-gate docker-build 共享（同
-          # context/target，PR 门留下的层缓存直接复用）；arm64 无既有缓存，
-          # 独立 scope。
+          # amd64 与 quality-gate docker-build 共享 scope=worker（同
+          # context/target 的命名空间一致）。注意 GHA cache 按 ref 可见：
+          # PR run 写的缓存 tag run 恢复不到（默认分支 develop 的 push 不
+          # 跑 docker-build），发布构建预期冷启动——worker target 的
+          # velites-sandbox Rust release 构建约 15 分钟，在 timeout 内；
+          # cache-to 落在 tag ref 下，同 tag 重推可复用。arm64 独立 scope。
           - arch: amd64
             runs-on: ubuntu-latest
             cache-scope: worker
@@ -109,7 +130,7 @@ jobs:
           provenance: false
           labels: |
             org.opencontainers.image.version=${{ github.ref_name }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ needs.validate.outputs.commit_sha }}
 
       - name: Export digest
         run: |
@@ -129,9 +150,13 @@ jobs:
     name: merge manifest and tag
     # 任一架构腿失败时 build job 整体为 failure，merge 跳过——latest 等移动
     # tag 永远不会指向单架构镜像。
-    needs: build
+    needs: [validate, build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      # validate 解析的 commit sha（annotated tag 下 GITHUB_SHA 是 tag 对象，
+      # 见 validate job）：sha-<短哈希> tag 从这里取。
+      COMMIT_SHA: ${{ needs.validate.outputs.commit_sha }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -150,11 +175,19 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#worker-v}"
-          short="${GITHUB_SHA::7}"
+          short="${COMMIT_SHA::7}"
           sources=()
           for digest in *; do
             sources+=("${REGISTRY_IMAGE}@sha256:${digest}")
           done
+          # 数量守卫：期望恰好两架构；artifact 缺失理论不可达
+          # （if-no-files-found: error），但空目录时 for 循环会按字面量
+          # glob 出一个无效 digest，报错位置在 imagetools 而非这里——
+          # 提前钉住「恰好 2」把失败变成自查可读的。
+          if [ "${#sources[@]}" -ne 2 ]; then
+            echo "期望 2 个架构 digest（amd64/arm64），实际 ${#sources[@]}：${sources[*]}" >&2
+            exit 1
+          fi
           docker buildx imagetools create \
             -t "${REGISTRY_IMAGE}:${version}" \
             -t "${REGISTRY_IMAGE}:sha-${short}" \

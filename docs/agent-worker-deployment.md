@@ -187,12 +187,14 @@ runtime 匹配、provider/model 命中 allowlist、labels 满足 `requires_label
 
 ### 拉取式部署（worker-v* 镜像发布）
 
-`make stack-worker-up` 默认在 Worker 机器现场构建镜像（`agent-legion-worker:local`）。多机部署可改用发布镜像：向仓库 push `worker-v*` tag（如 `worker-v0.6.0`；惯例跟随所基于的仓库发版 tag，同版重发加后缀如 `-r2`）触发
-[worker-image-release](../.github/workflows/worker-image-release.yml)
-workflow——原生 runner 构建 linux/amd64 与 linux/arm64（不使用 QEMU），按
-digest 合成 manifest list 后推送 GHCR
-`ghcr.io/luciuscao/agent-legion-worker`，打 `<版本>` / `sha-<短哈希>` /
-`latest` 三个 tag。
+`make stack-worker-up` 默认在 Worker 机器现场构建镜像（`agent-legion-worker:local`）。
+多机部署可改用发布镜像：向仓库 push `worker-v*` tag（如 `worker-v0.6.0`；
+惯例跟随所基于的仓库发版 tag，同版重发加后缀如 `-r2`）触发
+[worker-image-release](../.github/workflows/worker-image-release.yml) workflow——
+原生 runner 构建 linux/amd64 与 linux/arm64（不使用 QEMU），按 digest 合成
+manifest list 后推送 GHCR `ghcr.io/luciuscao/agent-legion-worker`，打 `<版本>` /
+`sha-<短哈希>` / `latest` 三个 tag（`sha-` 指向 tag 背后的 commit，annotated
+tag 亦正确 dereference）。
 
 Worker 机器侧：复制 `deploy/compose.worker.pull.example.yaml` 为
 `deploy/compose.worker.local.yaml`（Makefile 的 stack-worker-* 目标自动并入），
