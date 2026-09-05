@@ -87,30 +87,51 @@ pub struct RequestTiming {
 }
 
 /// Phase timing of one tool execution (velites extension, #469). The whole
-/// field is optional per tool and every phase inside it is optional per
-/// measurement: absent phases are skipped on the wire, never null. All
-/// durations are wall-clock milliseconds measured by the harness around the
-/// tool's own execution path.
+/// field is optional per tool and every phase inside it is optional:
+/// absent phases are skipped on the wire, never null. Durations are
+/// wall-clock milliseconds. `totalMs` is measured once at the
+/// `ToolKind::execute` dispatch boundary — every tool kind gets it, and
+/// in-process tools (`read` / `write` / `uuid` / `validate`) carry
+/// nothing else.
 ///
-/// Phase boundaries for `bash`:
+/// Phase boundaries for `bash` (the subprocess phases bash fills itself):
 ///
-/// - `totalMs`: tool dispatch start → result ready (the decomposition base:
+/// - `totalMs`: dispatch start → result ready (the decomposition base:
 ///   `total = spawnMs + firstByteMs + restMs + reapMs` on the happy path);
 /// - `spawnMs`: `Command::spawn` start → child pid returned (process
 ///   creation, sandbox wrapper exec included);
 /// - `firstByteMs`: spawn returned → first byte read from the child's
-///   stdout/stderr pipes. This phase covers the child's entire prelude —
-///   bash parsing, an internal `<<EOF` heredoc write, interpreter startup,
-///   the script's first side effect — so a stall inside the child (the #469
-///   blocking candidate: bash `heredoc_write` → `write()`) surfaces here
-///   exactly. Absent when the child produced no output at all;
+///   stdout/stderr pipes — whichever stream produced a byte first. This
+///   is when the HARNESS observed the first byte, not when the child
+///   wrote it (safe today because the agent loop awaits tools
+///   sequentially; see bash.rs's observation caveat). A scheduler-level
+///   gap between the child writing and the harness reading — exactly
+///   what a kernel pipe-path sleep (#469 spindump: `lck_mtx_sleep`)
+///   produces — lands in this phase, so the read-side semantics are the
+///   metric, not a distortion of it. The phase covers the child's entire
+///   prelude — bash parsing, an internal `<<EOF` heredoc write,
+///   interpreter startup, the script's first side effect — so a stall
+///   inside the child (the #469 blocking candidate: bash `heredoc_write`
+///   → `write()`) surfaces here exactly. Absent when the child produced
+///   no output at all;
 /// - `restMs`: first byte → child exit observed (the steady run: output
-///   streaming, waiting for completion);
-/// - `reapMs`: exit observed → process group reaped (present on the
-///   timeout/cancel kill path).
+///   streaming, waiting for completion). On a no-output child this covers
+///   the whole output window instead (there is no first byte to start
+///   from). On the timeout/cancel path it ends where the timeout fired —
+///   killing and reaping the group is `reapMs`, not part of the run;
+/// - `reapMs`: exit/timeout observed → process group reaped (present on
+///   the timeout/cancel kill path);
+/// - `requestedTimeoutMs`: the bash `timeout` argument AFTER clamping into
+///   [1s, 1h] (default 120s), in milliseconds — the effective ceiling the
+///   harness enforced on this call. Absent for tools without a timeout
+///   parameter. Analysis joins it against `totalMs` / `reapMs` to separate
+///   "the model asked for a long ceiling" from "the call hung within a
+///   normal one" (#469: models raise `timeout` after consecutive
+///   failures, so the requested value is a leading explanation variable
+///   for long-tail variance).
 ///
-/// In-process tools (`read` / `write` / `uuid` / `validate`) set only
-/// `totalMs`; the subprocess phases do not exist for them.
+/// Permanent harness capability (like `RequestTiming`): no toggles, no
+/// aggregation — phase analytics stay on the Host side.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolTiming {
@@ -120,18 +141,25 @@ pub struct ToolTiming {
     /// Process creation phase (`Command::spawn`) duration, in milliseconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spawn_ms: Option<u64>,
-    /// Spawn returned → first output byte observed, in milliseconds;
-    /// absent when the child produced no output.
+    /// Spawn returned → first output byte observed (earliest of the stdout
+    /// and stderr readers), in milliseconds; absent when the child produced
+    /// no output.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_byte_ms: Option<u64>,
     /// First output byte → child exit observed, in milliseconds; on a
-    /// no-output child this covers the whole wait instead.
+    /// no-output child this covers the whole output window instead. On the
+    /// timeout/cancel path it ends at the timeout; group termination is
+    /// accounted as `reapMs`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rest_ms: Option<u64>,
     /// Group termination + reap phase (kill/TERM → KILL grace → reaped), in
     /// milliseconds; absent on a natural exit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reap_ms: Option<u64>,
+    /// The enforced `timeout` ceiling (bash: the clamped model-supplied
+    /// argument), in milliseconds; absent for tools without a timeout.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_timeout_ms: Option<u64>,
 }
 
 /// Content block of a message (pi-compatible shapes).
@@ -647,6 +675,7 @@ mod tests {
             first_byte_ms: Some(1_980),
             rest_ms: Some(29),
             reap_ms: None,
+            requested_timeout_ms: Some(120_000),
         };
         let event = Event::ToolExecutionEnd(ToolExecutionEndEvent {
             tool_call_id: "call-1".into(),
@@ -663,6 +692,7 @@ mod tests {
         assert_eq!(value["timing"]["spawnMs"], 11);
         assert_eq!(value["timing"]["firstByteMs"], 1_980);
         assert_eq!(value["timing"]["restMs"], 29);
+        assert_eq!(value["timing"]["requestedTimeoutMs"], 120_000);
         // Absent phases (reap on a natural exit) are skipped, not null.
         assert!(value["timing"].get("reapMs").is_none());
 
@@ -673,7 +703,13 @@ mod tests {
         };
         let value = serde_json::to_value(in_process).unwrap();
         assert_eq!(value["totalMs"], 3);
-        for phase in ["spawnMs", "firstByteMs", "restMs", "reapMs"] {
+        for phase in [
+            "spawnMs",
+            "firstByteMs",
+            "restMs",
+            "reapMs",
+            "requestedTimeoutMs",
+        ] {
             assert!(value.get(phase).is_none(), "{phase} must be skipped");
         }
 
