@@ -75,3 +75,54 @@ def test_prod_down_stays_bind_agnostic() -> None:
     down = (ROOT / "scripts" / "native-prod-down.sh").read_text(encoding="utf-8")
     assert "stop_port" in down
     assert "NATIVE_BACKEND_BIND" not in down
+
+
+def test_local_worker_loopback_mismatch_warns() -> None:
+    """bind 具体网卡时的本地接入提醒接线：本地 Worker 状态副本的 host_url
+    默认 loopback，bind 非 loopback 后它会静默退避重试注册（不崩溃、
+    不易察觉），警告是唯一的操作面提示；脚本只提示不代改（#323）。"""
+    assert "binds_specific_interface" in NATIVE_PROD_UP
+    assert "host_url:[[:space:]]*https?://(127\\.|localhost)" in NATIVE_PROD_UP
+    assert "本地 Worker 状态副本的 host_url 仍指向 loopback" in NATIVE_PROD_UP
+    assert "127.0.0.1 不再监听" in NATIVE_PROD_UP
+
+
+def test_binds_specific_interface_behavior() -> None:
+    """binds_specific_interface 语义：loopback 各形态与全接口通配都不算
+    「具体网卡」，只有具体地址触发提醒。提取函数定义后真实执行。"""
+    sources = []
+    for name in ("is_loopback", "binds_specific_interface"):
+        match = re.search(rf"^{name}\(\) \{{.*?^\}}", NATIVE_PROD_UP, re.MULTILINE | re.DOTALL)
+        assert match, f"{name} 函数定义缺失"
+        sources.append(match.group(0))
+    code = (
+        "\n".join(sources)
+        + '\nfor h in "$@"; do binds_specific_interface "$h" && echo "$h specific" || echo "$h not"; done\n'
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            code,
+            "predicates",
+            "127.0.0.1",
+            "::1",
+            "localhost",
+            "0.0.0.0",
+            "::",
+            "192.0.2.1",
+            "fe80::1",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.splitlines() == [
+        "127.0.0.1 not",
+        "::1 not",
+        "localhost not",
+        "0.0.0.0 not",
+        ":: not",
+        "192.0.2.1 specific",
+        "fe80::1 specific",
+    ]

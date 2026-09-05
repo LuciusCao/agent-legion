@@ -52,6 +52,28 @@ health_host() {
 BACKEND_HEALTH_HOST="$(health_host "$BACKEND_BIND")"
 WORKER_HEALTH_HOST="$(health_host "$WORKER_BIND")"
 
+# 绑定具体网卡地址时的本地接入提醒：非 loopback 绑定后，指向 127.0.0.1 的
+# 既有接入不再可达——本地 Worker 状态副本的 host_url 会让它静默退避重试注册
+# （不崩溃、不易察觉），本机浏览器访问 127.0.0.1:8787 控制台同理。配置一律
+# 走控制台/API（#323 状态副本纪律），脚本只提示、不代改。
+is_loopback() {
+    case "$1" in
+        127.* | ::1 | localhost) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+binds_specific_interface() {
+    ! is_loopback "$1" && [[ "$1" != "0.0.0.0" && "$1" != "::" ]]
+}
+if binds_specific_interface "$BACKEND_BIND" \
+    && [[ -f data/agent-worker-service/worker.yaml ]] \
+    && grep -Eq 'host_url:[[:space:]]*https?://(127\.|localhost)' data/agent-worker-service/worker.yaml; then
+    echo "警告: 后端已绑定 $BACKEND_BIND，但本地 Worker 状态副本的 host_url 仍指向 loopback——请经 Worker 控制台改为 http://$BACKEND_BIND:$BACKEND_PORT，否则本地 Worker 将无法注册（静默退避重试）" >&2
+fi
+if binds_specific_interface "$WORKER_BIND"; then
+    echo "提示: Worker 控制台已绑定 $WORKER_BIND，本机访问地址改为 http://$WORKER_HEALTH_HOST:$WORKER_PORT（127.0.0.1 不再监听）" >&2
+fi
+
 # 1.5 材料对象存储：原生形态下后端/worker 是本机进程，对象存储仍由 docker
 # compose 托管（compose.host.yaml 里 seaweedfs/rustfs 各挂自己的 profile，
 # 显式指定服务名时 profile 自动启用）。后端选择 AGENT_LEGION_LOCAL_S3_BACKEND
