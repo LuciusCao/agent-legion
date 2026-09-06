@@ -78,7 +78,7 @@ class HeartbeatOperations:
         if status != 200:
             raise RuntimeError(f"batch heartbeat failed: HTTP {status}: {body[:300]!r}")
         document: dict[str, list[str]] = {}
-        with contextlib.suppress(ValueError, TypeError, AttributeError):
+        try:
             parsed = json.loads(body)
             document = {
                 "renewed": [str(value) for value in parsed.get("renewed", [])],
@@ -87,4 +87,9 @@ class HeartbeatOperations:
                     str(value) for value in parsed.get("cancelled_execution_ids", [])
                 ],
             }
+        except (ValueError, TypeError, AttributeError):
+            # #501（PR #497 review）：200 + 畸形 body 当「本拍无信息」处理
+            # （保守——重试可能把批量心跳整体抖死），但必须留痕：lost 被静默
+            # 丢弃曾是零日志黑洞，恢复的兜底是租约过期后的 Host 重调度。
+            print(f"batch heartbeat 200 with unparseable body: {body[:300]!r}", flush=True)
         return status, document

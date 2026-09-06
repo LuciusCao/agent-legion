@@ -263,3 +263,22 @@ def test_client_heartbeat_batch_rejects_error_status() -> None:
     client.request = lambda *a, **k: (500, b"boom")  # type: ignore[method-assign]
     with pytest.raises(RuntimeError, match="batch heartbeat failed: HTTP 500"):
         client.heartbeat_batch([("exec-1", "lease-1")])
+
+
+def test_client_heartbeat_batch_malformed_body_degrades_with_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#501（PR #497 review）：200 + 畸形 body 当「本拍无信息」降级——不抛
+    不重试（重试可能把批量心跳整体抖死），但必须留 warn 级日志：lost 被静默
+    丢弃曾是零日志黑洞（恢复兜底是租约过期后的 Host 重调度）。"""
+    client = agent_worker.Client("http://unused")
+    client.request = lambda *a, **k: (200, b"<html>not json</html>")  # type: ignore[method-assign]
+
+    outcome = client.heartbeat_batch([("exec-1", "lease-1"), ("exec-2", "lease-2")])
+
+    # 降级为空 document（{} —— 消费侧对缺失键按空集处理），状态仍是 200。
+    assert outcome == (200, {})
+    # warn 级 print（worker 侧日志惯例 flush=True）必须出现，含截断的 body。
+    captured = capsys.readouterr()
+    assert "unparseable body" in captured.out
+    assert "not json" in captured.out
