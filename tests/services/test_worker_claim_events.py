@@ -81,6 +81,8 @@ def _worker(
     runtimes: list[str] | None = None,
     models: list[dict[str, str]] | None = None,
     max_concurrency: int = 10,
+    max_code_concurrency: int = 0,
+    protocol_version: int = 1,
     allowed_workspaces: list[str] | None = None,
 ) -> None:
     if allowed_workspaces is not None:
@@ -92,6 +94,8 @@ def _worker(
         runtimes=runtimes if runtimes is not None else ["pi"],
         models=models if models is not None else [{"provider": "gateway", "model": "test-model"}],
         max_concurrency=max_concurrency,
+        max_code_concurrency=max_code_concurrency,
+        protocol_version=protocol_version,
         labels={"arch": "arm64"},
         allowed_workspaces=allowed_workspaces,
     )
@@ -200,6 +204,40 @@ def test_capacity_full_emits_rejected_with_pool_state(job_db, events) -> None:
     assert rejected[0]["agent_capacity"] == 1
 
 
+def test_agent_full_with_drained_code_queue_stays_plain_empty(job_db, events) -> None:
+    """#494 P2-2 noise shape, end to end: the agent pool is at its cap while
+    the code pool has headroom and the code queue is drained. The claim scan
+    RUNS (kinds=['code']), finds nothing, and the pass is the plain idle
+    rhythm — the pre-fix emitter read the live pool state on every empty
+    pass and filed a misleading claim.rejected/capacity_full INFO per poll."""
+    # max_code_concurrency=1 requires a v2 worker; runtimes=["pi"] keeps the
+    # agent lane servable. protocol_version=3 also satisfies the v3 model
+    # runtime requirement (models carry no runtime → wildcards).
+    _worker(
+        job_db,
+        "evt-mixed",
+        # v3 model declarations carry their runtime (the seeded request's
+        # model runs on pi); the code lane only needs to exist and be empty.
+        models=[{"runtime": "pi", "provider": "gateway", "model": "test-model"}],
+        max_concurrency=1,
+        max_code_concurrency=1,
+        protocol_version=3,
+    )
+    _seed_queued_request(job_db, "evt-mixed-job")
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+    assert broker.claim("evt-mixed") is not None  # fills the only agent slot
+
+    assert broker.claim("evt-mixed") is None  # code lane scanned, queue drained
+
+    # The noise: agent pool full + idle code headroom + empty code queue must
+    # NOT file a claim.rejected/capacity_full.
+    assert not [event for event in events if event["event"] == "claim.rejected"]
+    empties = [event for event in events if event["event"] == "claim.empty"]
+    assert len(empties) == 1
+    assert empties[0]["worker_id"] == "evt-mixed"
+    assert "reasons" not in empties[0]  # drained queue: no reason noise
+
+
 def test_scope_denied_emits_rejected(job_db, events) -> None:
     # A queued request for another workspace this worker is not scoped to.
     definition = AgentDefinition(
@@ -248,3 +286,48 @@ def test_scope_denied_emits_rejected(job_db, events) -> None:
 
     rejected = [event for event in events if event["event"] == "claim.rejected"]
     assert rejected[0]["reasons"] == {"workspace_not_allowed": 1}
+
+
+def test_result_commit_survives_claimed_at_read_failure(job_db, events, monkeypatch) -> None:
+    """#494 P1, end to end: ``note_execution_finished`` reads claimed_at on a
+    fresh connection AFTER mark_done committed the result. If that read
+    blows up (pool exhausted / query failure), the committed result must
+    still return 204, the finished event must still be emitted, and only
+    wall_seconds is lost."""
+    import json as _json
+
+    from fastapi.testclient import TestClient
+
+    from server.app.agent_broker import worker_events
+    from tests.helpers.agent_worker_api import claim as _claim
+    from tests.helpers.agent_worker_api import empty_archive as _empty_archive
+    from tests.helpers.agent_worker_api import make_app as _make_app
+    from tests.helpers.agent_worker_api import register as _register
+    from tests.helpers.agent_worker_api import seed_request as _seed_request
+
+    def _boom(dsn, execution_id):
+        raise RuntimeError("pool exhausted")
+
+    monkeypatch.setattr(worker_events, "claimed_at", _boom)
+
+    app = _make_app(job_db.jobs_dir.parent)
+    _seed_request(app.state.job_db, job_id="evt-finish-job", limit=2)
+    with TestClient(app) as client:
+        token = _register(client)["worker_token"]
+        claimed = _claim(client, token)
+        report = client.post(
+            f"/api/agent-executions/{claimed['execution_id']}/result",
+            headers={
+                "X-Agent-Worker-Token": token,
+                "X-Agent-Lease-Id": claimed["lease_id"],
+                "X-Agent-Result": _json.dumps({"status": "failed", "exit_code": 1}),
+            },
+            content=_empty_archive(),
+        )
+        assert report.status_code == 204, report.text
+
+    finished = [event for event in events if event["event"] == "execution.finished"]
+    assert len(finished) == 1
+    assert finished[0]["outcome"] == "failed"
+    assert finished[0]["exit_code"] == 1
+    assert finished[0]["wall_seconds"] is None  # the read's only cost

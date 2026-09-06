@@ -58,6 +58,26 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/490
   ceiling: 122
 - check: architecture.file_budget
+  path: server/app/agent_broker/worker_events.py
+  reason: >-
+    The #494 review round on the structured-events PR (#490) grows this
+    module past its first-registered ceiling with three never-raise /
+    classification fixes that belong next to the code they guard: the
+    claimed_at read inside note_execution_finished gets the try/except the
+    module's never-raise contract always demanded (a pool-exhausted read
+    must not turn a committed 204 into a 500), _event_level gains the
+    outcome=rejected INFO branch (the last Host-side clue of a refused
+    execution), and the pool-state synthesis in note_claim_outcome is
+    confined to the scan_skipped pass (agent full + drained code queue is
+    the idle rhythm, not a capacity_full rejection). Splitting the emitters
+    would fork the event-name/level/reason registries the module exists to
+    keep single-source. Remove when the events module gains its own
+    structural split (aggregation work) or the #490 family closes and the
+    module is re-budgeted.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/490
+  ceiling: 292
+- check: architecture.file_budget
   path: server/app/agent_broker/claim_evaluate.py
   reason: >-
     The writes stage split (#448, reviewed on PR #461) moves into

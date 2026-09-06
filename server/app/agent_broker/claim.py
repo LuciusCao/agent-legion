@@ -95,7 +95,7 @@ def claim_in_transaction(
         touch_worker(conn, worker_id)
         timer.stage("writes")
         _report_claim_stages(timer, worker_id, claimed=None, state=ScanState())
-        note_claim_outcome(worker_id, None, view, {})
+        note_claim_outcome(worker_id, None, view, {}, scan_skipped=True)
         return None, Counter()
     cursor = next(broker._fairness_counter)
     # Alternate the leading kind per pass so neither kind is systemically
