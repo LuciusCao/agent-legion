@@ -22,9 +22,15 @@ unchanged; ``reporting`` still blocks re-enqueue until the result commits.
 The expression must stay byte-identical to the one in
 ``postgres_schema.sql`` (fresh installs) — both paths share the semantics,
 and the SQL fragment is re-exported from ``manifest_guard`` for the claim
-side's active-request gate (one canonical expression, not two). Drop+create
-(not CREATE … on conflict): an upgraded database may already carry the
-two-column index under the same name.
+side's active-request gate (one canonical expression, not two). The
+schema-file replay runs FIRST on every upgrade and drops+recreates the
+index under the same name, so by the time this apply fn runs the new shape
+already exists — its job on the upgrade path is only to confirm presence
+(probe, no DDL), which keeps the expression-index build (a full-table scan
+over the active-request history on large tables) from running twice. The
+drop+create DDL stays here for a hypothetical direct invocation against a
+database the schema file never replayed (the same arms the schema file
+carries; upgrade parity is guarded by tests/db/test_schema_upgrade_parity.py).
 """
 
 from __future__ import annotations
@@ -36,14 +42,28 @@ from typing import Any
 # COALESCE is load-bearing — see the module docstring's NULL note.
 SHARD_IDENTITY_SQL = "coalesce((manifest_json::jsonb ->> 'shard_index')::integer, -1)"
 
+_INDEX_NAME = "idx_agent_requests_one_active_node"
+
 _INDEX_DDL = f"""
-drop index if exists idx_agent_requests_one_active_node;
-create unique index if not exists idx_agent_requests_one_active_node
+drop index if exists {_INDEX_NAME};
+create unique index if not exists {_INDEX_NAME}
   on agent_execution_requests(job_id, node_key, {SHARD_IDENTITY_SQL})
   where state in ('queued', 'claimed', 'reporting');
 """
 
 
 def migrate_shard_identity_index(conn: Any) -> None:
-    """Widen the one-active-request index to the shard identity (v79, #401)."""
-    conn.execute(_INDEX_DDL)
+    """Widen the one-active-request index to the shard identity (v79, #401).
+
+    The upgrade path always arrives here AFTER the schema-file replay, which
+    has already rebuilt the index in its new shape (drop + create under the
+    same name, #501): the presence probe below is then a no-op. Only when the
+    probe misses (index absent — e.g. a direct migration-chain run without the
+    replay) does the drop+create DDL execute.
+    """
+    present = conn.execute(
+        "select 1 from pg_indexes where schemaname=current_schema() and indexname=%s",
+        (_INDEX_NAME,),
+    ).fetchone()
+    if present is None:
+        conn.execute(_INDEX_DDL)
