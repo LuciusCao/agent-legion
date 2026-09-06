@@ -149,6 +149,10 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   与其余「读取后假设存在」的调用点逐一防御（`gate-jobs.sh` 对称加固）。
   排队语义零变化（slot 计数、TTL 回收、holder 打印、等待节奏不变）。
 
+版本线对齐：
+- pyproject 0.6.0 → 0.7.0 + uv.lock 同步；velites 0.5.0、frontend
+  0.4.0-alpha 落版一致性经 check_versions 解耦纪律验证通过。
+
 ## [0.6.0] - 2026-09-05
 
 ### Added
