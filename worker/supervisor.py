@@ -257,6 +257,7 @@ class WorkerSupervisor:
             self._mounted_config_diverged(),
             snapshot,
             remote,
+            runtime.get("ramp_up"),
         )
 
     def token_status(self) -> dict[str, str]:
