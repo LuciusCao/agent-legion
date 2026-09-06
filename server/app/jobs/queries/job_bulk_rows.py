@@ -1,6 +1,8 @@
 """Row/identity helpers for chunked job bulk inserts (#467 review P1-1/P2-2).
 
-Split out of ``job_bulk_sql.py`` for the file-size budget.
+Split out of ``job_bulk_sql.py`` for the file-size budget. The post-INSERT
+verification half of the #501 identity contract lives in
+``job_bulk_identity.py`` (split again for the same reason).
 """
 
 from __future__ import annotations
@@ -18,7 +20,16 @@ _IDENTITY_SQL = "select id, workspace_id, source_type, source_id from jobs where
 
 
 def fetch_identity_map(conn: Any, job_ids: list[str]) -> dict[str, Any]:
-    """``job_id → identity row`` for the ids that exist, in chunked IN reads."""
+    """``job_id → identity row`` for the ids that exist, in chunked IN reads.
+
+    #501 note: deliberately NOT a locked read — a ``FOR KEY SHARE`` probe
+    does NOT block against a concurrent uncommitted INSERT of the same id
+    (the in-flight version is invisible to the probe's snapshot; verified
+    against Postgres). The read-then-insert race is closed on the write side
+    instead: ``job_bulk_identity.verify_chunk_identities`` re-reads inside
+    each chunk's own transaction AFTER its INSERT settles, seeing the
+    arbitrated winner under every interleaving.
+    """
     by_id: dict[str, Any] = {}
     for start in range(0, len(job_ids), CHUNK_ROWS):
         chunk = job_ids[start : start + CHUNK_ROWS]

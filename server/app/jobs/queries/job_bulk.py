@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.job_bulk_identity import verify_chunk_identities
 from server.app.jobs.queries.job_bulk_rows import (
     chunk_ref_ids,
     fetch_identity_map,
@@ -120,18 +121,15 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         row_list = list(rows.values())
 
         with self.connect() as conn:
-            # Identity precheck over the WHOLE call, in chunked statements:
-            # a collision against an existing row rejects the request before
-            # the first chunk commits (nothing inserted).
+            # Existence precheck over the WHOLE call, in chunked statements:
+            # ``by_id`` feeds the storage-dir skip (resubmits keep the stored
+            # dir). #501 removed the precheck's identity-comparison loop — a
+            # locked read cannot see concurrent in-flight same-id inserts
+            # (see fetch_identity_map), so the identity contract moved to the
+            # write side: verify_chunk_identities re-checks AFTER each chunk's
+            # INSERT settles, under every interleaving, and raises the
+            # structured identity error on any mismatch (committed or raced).
             by_id = fetch_identity_map(conn, job_ids)
-            for row in row_list:
-                current = by_id.get(str(row[0]))
-                if current is not None and (
-                    current["workspace_id"] != row[1]
-                    or current["source_type"] != row[2]
-                    or current["source_id"] != row[3]
-                ):
-                    raise ValueError(f"Job identity collision for {row[0]}")
             # One commit per ≤CHUNK_ROWS jobs+nodes; each chunk locks its own
             # refs FOR KEY SHARE before its INSERT (P1-1) — a between-chunks
             # delete makes the next chunk's probe fail on the missing row
@@ -164,5 +162,12 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                     conn,
                     [(str(row[0]), node_key) for row in chunk for node_key in node_keys],
                 )
+                # #501: post-INSERT identity verification inside this chunk's
+                # transaction — the ON CONFLICT arm rebinds run/title/input
+                # but never touches source identity, so a foreign-identity
+                # row that slipped past the precheck (concurrent in-flight
+                # insert) shows up here and rolls the whole chunk back
+                # instead of being silently re-bound to this run.
+                verify_chunk_identities(conn, chunk)
                 conn.commit()
         return job_ids

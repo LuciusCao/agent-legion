@@ -623,7 +623,7 @@ def test_ref_connection_key_with_whitespace_still_resolves(service, job_db) -> N
             "insert into external_connections(key, type, display_name, config_json, enabled)"
             " values ('cms-main', 'hmac_token', 'cms-main', '{}', 1)"
         )
-    item = {"type": "ref", "connection_key": " cms-main ", "external_id": "Q-1"}
+    item = {"type": "ref", "connection_key": " cms-main", "external_id": "Q-1"}
 
     result = service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[item])
 
@@ -634,3 +634,126 @@ def test_ref_connection_key_with_whitespace_still_resolves(service, job_db) -> N
         ).fetchone()
     # entity_id 归一为 strip 后的键（探测与回查一致）。
     assert str(row["source_id"]) == "cms-main:Q-1"
+
+
+def test_identity_collision_error_carries_structured_fields(service, job_db) -> None:
+    """#501（PR #497 review）：撞 id 的身份校验错误携带结构化字段。
+
+    预置一个同 job_id 但不同 source_type 的遗留行（跨路径撞 id 的经典
+    形态），提交 material 项 → 400 InvalidOperationError，其 __cause__
+    ValueError 带 job_id / existing_source_type / existing_source_id /
+    submitted_source_type / submitted_source_id——裸消息只说 collision，
+    排障看不到是哪对身份撞了。"""
+    _insert_materials(job_db, 1)
+    # job id 由 _job_id(workspace, workflow, source_id) 派生：material 项
+    # 的 source_id 与预置行的 source_id 相同、source_type 不同。
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into jobs(id, workspace_id, source_type, source_id, run_id)"
+            " values (%s, %s, 'question', 'mat-0', 'legacy-run')",
+            (f"{WORKSPACE_ID}_{WORKFLOW_KEY}_mat-0", WORKSPACE_ID),
+        )
+
+    with pytest.raises(InvalidOperationError, match="Job identity collision") as caught:
+        service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_material_item("mat-0")])
+    cause = caught.value.__cause__
+    assert isinstance(cause, ValueError)
+    assert cause.job_id == f"{WORKSPACE_ID}_{WORKFLOW_KEY}_mat-0"  # type: ignore[attr-defined]
+    assert cause.existing_source_type == "question"  # type: ignore[attr-defined]
+    assert cause.existing_source_id == "mat-0"  # type: ignore[attr-defined]
+    assert cause.submitted_source_type == "material"  # type: ignore[attr-defined]
+    assert cause.submitted_source_id == "mat-0"  # type: ignore[attr-defined]
+    # 消息本体点名两对身份（人读面）。
+    assert "question" in str(cause) and "material" in str(cause)
+
+
+def test_identity_precheck_blocks_on_in_flight_id_insert(service, job_db) -> None:
+    """#501（PR #497 review P2-4）：post-INSERT 身份验证封住读后插竞态窗口。
+
+    并发提交撞同一 job id（``col/a`` vs ``col_a`` 归一冲突——两份不同
+    items → 不同 digest → 各自独立的 run 行，run upsert 不参与串行化）。
+    先到者 A 的 INSERT 在触发器里泊车 1.5s（行已插、事务未提交），后到者
+    B 的预查看不到 A 的在途行（快照读；FOR KEY SHARE 对未提交插入本就不
+    阻塞——这是实测过的 Postgres 行为），继续进 INSERT 并阻塞在 A 的唯
+    一索引仲裁上；A 提交后 B 的 ON CONFLICT rebind 生效，随即 chunk 内的
+    verify_chunk_identities 重读身份，发现行上的 (question→material) 身
+    份与 B 提交的不一致 → ValueError → B 整 chunk 回滚，A 的行保持原
+    run 绑定。无验证版本里 B 的 rebind 静默成功（identity 不校验）——
+    撞 id 竞态的事实面是「别人的 job 被绑到你的 run」。"""
+    # col/a（A 提交）与 col_a（B 提交）归一到同一 job id。
+    _insert_materials(job_db, 1, prefix="colx")
+    with job_db.connect() as conn:
+        conn.execute(
+            "update materials set id='col/a' where id='colx-0' and workspace_id=%s",
+            (WORKSPACE_ID,),
+        )
+        conn.execute(
+            "insert into materials(id, workspace_id, content_hash, filename, content_type,"
+            " size_bytes, storage_key, status, created_by)"
+            " values ('col_a', %s, 'hash-col_a', 'col_a.txt', 'text/plain', 10,"
+            " 'k', 'ready', 'tester')",
+            (WORKSPACE_ID,),
+        )
+        # A 的 jobs INSERT 落行后泊车（行已插、事务未提交）并 NOTIFY 主
+        # 线程——主线程据此确认 A 处于在途窗口后再放 B 进场。
+        conn.execute("drop trigger if exists jobs_park_insert on jobs")
+        conn.execute("drop function if exists jobs_park_after_insert()")
+        conn.execute("""
+            create function jobs_park_after_insert() returns trigger as $$
+            begin
+              perform pg_notify('jobs_parked', '');
+              perform pg_sleep(1.5);
+              return null;
+            end $$ language plpgsql
+        """)
+        conn.execute(
+            "create trigger jobs_park_insert after insert on jobs"
+            " for each statement execute function jobs_park_after_insert()"
+        )
+    listener = psycopg.connect(job_db.dsn_identity, autocommit=True)
+    listener.execute("listen jobs_parked")
+    import select as _select
+
+    outcome: dict[str, str] = {}
+
+    def _submit(tag: str, item: dict) -> None:
+        try:
+            service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[item])
+            outcome[tag] = "created"
+        except InvalidOperationError as exc:
+            outcome[tag] = f"invalid:{type(exc.__cause__).__name__}"
+        except BaseException as exc:  # 线程内失败带回主线程
+            outcome[tag] = f"error:{exc!r}"
+
+    thread_a = threading.Thread(target=_submit, args=("a", _material_item("col/a")))
+    thread_a.start()
+    try:
+        _select.select([listener], [], [], 10)  # 等 A 的泊车通知（行锁在途）
+        assert thread_a.is_alive(), "A should be parked inside its INSERT"
+        thread_b = threading.Thread(target=_submit, args=("b", _material_item("col_a")))
+        thread_b.start()
+        time.sleep(0.6)
+        # A 仍在泊车：B 未见决定性结果（预查空过、INSERT 阻塞在 A 的唯一
+        # 索引仲裁上，或尚未到达验证点）——B 的最终命运由验证点裁决。
+        assert thread_b.is_alive(), "B should still be in flight against A's insert"
+        assert "b" not in outcome
+        thread_a.join(timeout=15)
+        thread_b.join(timeout=15)
+    finally:
+        listener.close()
+        with job_db.connect() as conn:
+            conn.execute("drop trigger if exists jobs_park_insert on jobs")
+            conn.execute("drop function if exists jobs_park_after_insert()")
+
+    assert not thread_a.is_alive() and not thread_b.is_alive(), outcome
+    assert outcome["a"] == "created", outcome
+    # A 提交后 B 的验证点重读身份：行上是 A 的 (material, col/a)，B 提交
+    # 的是 (material, col_a) → 身份冲突（ValueError cause），B 整 chunk
+    # 回滚（rebind 未提交），A 的行保持原 run 绑定。
+    assert outcome["b"] == "invalid:ValueError", outcome
+    with job_db.connect() as conn:
+        rows = conn.execute(
+            "select count(*) as n, count(distinct id) as d from jobs where workspace_id=%s",
+            (WORKSPACE_ID,),
+        ).fetchone()
+    assert int(rows["n"]) == int(rows["d"]) == 1
