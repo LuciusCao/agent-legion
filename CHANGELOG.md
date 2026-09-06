@@ -75,8 +75,10 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 - Agent Worker 心跳批量化（issue #352，协议 v5）：per-Worker 批量续期
   端点 `POST /api/agent-executions/heartbeats`——Worker 侧每执行一条
   心跳线程合并为本机单个批量循环，一次请求覆盖全部在跑执行（含排队
-  上传任务的租约），Host 侧单写事务完成整批续期；心跳写流量从
-  O(在跑执行数) 降为 O(机器数)，不再随槽数线性增长。逐项语义与单条
+  上传任务的租约），Host 侧单写事务完成整批续期；心跳的**事务数、
+  commit fsync 与 HTTP 往返**从 O(在跑执行数) 降为 O(机器数)——DB 行级
+  写次数仍 O(槽)（逐项 lease 判定要求逐行语义），但每机每拍从 N 事务
+  收敛为 1 事务，不再随槽数线性放大事务开销。逐项语义与单条
   心跳完全一致（未知/过期/跨 worker 项逐项进 lost，不抛 5xx、不阻断
   同批其余项）；单批上限 256 项、超限自动分片（高槽位是合法配置，不
   再有超限拒打悬崖）；zombie（agent 进程已退出且未被上传收养）停跳，
