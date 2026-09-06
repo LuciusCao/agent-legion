@@ -2,13 +2,9 @@
 
 ``idx_agent_requests_one_active_node`` deduplicated active requests by
 (job_id, node_key). Remote shard executions (#389) carry their identity only
-in the persisted manifest top level (``shard_index``) and bind a
-``node_shards`` row at claim time (``try_start_shard``) — the index knew
-nothing of it, so every shard node had at most ONE remote shard in flight
-(``code_claim.has_active_request`` is the same single-active gate): a
-finished shard freed the slot and the next poll pass could enqueue exactly
-one more. Large fan-outs serialized into N poll passes and a Worker fleet's
-``max_code_concurrency`` went unused on shard work.
+in the manifest top level (``shard_index``) — the index knew nothing of it,
+so every shard node had at most ONE remote shard in flight: large fan-outs
+serialized into N poll passes and a fleet's ``max_code_concurrency`` idled.
 
 The replacement widens the uniqueness to the execution identity: a manifest
 WITHOUT ``shard_index`` keeps the old one-active-per-(job, node) semantics
@@ -26,11 +22,8 @@ side's active-request gate (one canonical expression, not two). The
 schema-file replay runs FIRST on every upgrade and drops+recreates the
 index under the same name, so by the time this apply fn runs the new shape
 already exists — its job on the upgrade path is only to confirm presence
-(probe, no DDL), which keeps the expression-index build (a full-table scan
-over the active-request history on large tables) from running twice. The
-drop+create DDL stays here for a hypothetical direct invocation against a
-database the schema file never replayed (the same arms the schema file
-carries; upgrade parity is guarded by tests/db/test_schema_upgrade_parity.py).
+(probe, no DDL), keeping the index build from running twice (#501). The
+drop+create DDL stays for a chain-only run without the replay.
 """
 
 from __future__ import annotations
@@ -55,10 +48,9 @@ create unique index if not exists {_INDEX_NAME}
 def migrate_shard_identity_index(conn: Any) -> None:
     """Widen the one-active-request index to the shard identity (v79, #401).
 
-    The upgrade path always arrives here AFTER the schema-file replay, which
-    has already rebuilt the index in its new shape (drop + create under the
-    same name, #501): the presence probe below is then a no-op. Only when the
-    probe misses (index absent — e.g. a direct migration-chain run without the
+    The upgrade path arrives here AFTER the schema-file replay, which already
+    rebuilt the index in its new shape (#501): the presence probe is then a
+    no-op. Only when the probe misses (direct migration-chain run without the
     replay) does the drop+create DDL execute.
     """
     present = conn.execute(
