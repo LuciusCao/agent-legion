@@ -155,15 +155,27 @@ class RunService:
                 continue
             existing_keys.add(key)
             fresh.append(candidate)
-        if not fresh:
-            raise InvalidOperationError("No tasks were resolved from input")
-
         digest_payload = {
             "workflow_key": workflow_key,
             "source_kind": ITEMS_SOURCE_KIND,
             "items": items,
             "node_config": node_config,
         }
+        if not fresh:
+            # #501：全量重复提交不再一律 400——同 digest 的 failed run（上次
+            # 分块提交中途失败、所有 job 已由重试/他路补齐的场景）用同一
+            # 确定性 run id 治愈：status 回 created、created_count 对齐
+            # run 实际 job 数、error_message 清空，返回 created_count=0。
+            # digest 相同意味着 items 逐字节相同——run id 与失败那次是同一
+            # 行；无 failed run（首次全重复/重复提交已成功的 run）保持
+            # 「No tasks were resolved」的现行为。
+            healed = self.job_db.heal_failed_run_if_duplicate(
+                workspace_id, workflow_key, ITEMS_SOURCE_KIND, digest_payload
+            )
+            if healed is not None:
+                return {"run": _run_record(healed), "created_count": 0, "job_ids": []}
+            raise InvalidOperationError("No tasks were resolved from input")
+
         run = self.job_db.create_run(
             workflow_key,
             ITEMS_SOURCE_KIND,

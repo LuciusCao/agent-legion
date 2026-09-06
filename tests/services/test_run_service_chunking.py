@@ -667,6 +667,74 @@ def test_identity_collision_error_carries_structured_fields(service, job_db) -> 
     assert "question" in str(cause) and "material" in str(cause)
 
 
+def test_all_duplicate_resubmission_heals_failed_run(service, job_db) -> None:
+    """#501（PR #497 review）：全量重复重提交自愈 failed run。
+
+    上次提交中途失败（run 行 failed、部分 chunk 已提交），此后所有 job
+    已由重试/他路补齐——重提交同一批 items 时 dedup 全过滤（fresh 空），
+    旧实现直接 400「No tasks were resolved」，failed run 永远无法经提交
+    路径治愈。新行为：同 digest → 同一确定性 run id → 原子 UPDATE 把
+    failed 行治愈（status='created'、error_message=''、created_count 对齐
+    run 实际 job 数），正常返回 created_count=0。"""
+    _insert_materials(job_db, 2)
+    items = [_material_item("mat-0"), _material_item("mat-1")]
+    first = service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=items)
+    run_id = first["run"]["id"]
+    # 人工制造 failed 现场（等价于 _mark_partial_run_failed 的落库形态）。
+    with job_db.connect() as conn:
+        conn.execute(
+            "update runs set status='failed', error_message='partway', created_count=1 where id=%s",
+            (run_id,),
+        )
+
+    result = service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=items)
+
+    # 同 digest → 同 run 行；治愈而非 400。
+    assert result["run"]["id"] == run_id
+    assert result["created_count"] == 0
+    assert result["job_ids"] == []
+    with job_db.connect() as conn:
+        healed = conn.execute(
+            "select status, error_message, created_count from runs where id=%s", (run_id,)
+        ).fetchone()
+    assert str(healed["status"]) == "created"
+    assert str(healed["error_message"]) == ""
+    # created_count 对齐 run 的实际 job 数（两个 job 都在）。
+    assert int(healed["created_count"]) == 2
+
+
+def test_all_duplicate_first_submission_still_rejected(service, job_db) -> None:
+    """#501：治愈分支只对 failed run 生效——无 run 行（首次全重复，jobs 由
+    旧路径/其他 run 建立）保持「No tasks were resolved」400。"""
+    _insert_materials(job_db, 1)
+    # 不经 create_run 建一个 job（无 items-run 行）。
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into jobs(id, workspace_id, source_type, source_id, run_id)"
+            " values (%s, %s, 'material', 'mat-0', 'other-run')",
+            (f"{WORKSPACE_ID}_{WORKFLOW_KEY}_mat-0", WORKSPACE_ID),
+        )
+
+    with pytest.raises(InvalidOperationError, match="No tasks were resolved"):
+        service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_material_item("mat-0")])
+    with job_db.connect() as conn:
+        runs = conn.execute(
+            "select count(*) as n from runs where workspace_id=%s", (WORKSPACE_ID,)
+        ).fetchone()
+    assert int(runs["n"]) == 0
+
+
+def test_all_duplicate_against_succeeded_run_still_rejected(service, job_db) -> None:
+    """#501：非 failed 的同 digest run（成功过）重复提交保持 400——治愈
+    语义只覆盖失败现场的恢复，不给成功 run 制造无意义的幂等返回。"""
+    _insert_materials(job_db, 1)
+    items = [_material_item("mat-0")]
+    service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=items)
+
+    with pytest.raises(InvalidOperationError, match="No tasks were resolved"):
+        service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=items)
+
+
 def test_identity_precheck_blocks_on_in_flight_id_insert(service, job_db) -> None:
     """#501（PR #497 review P2-4）：post-INSERT 身份验证封住读后插竞态窗口。
 

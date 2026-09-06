@@ -1063,6 +1063,7 @@
     "server/app/jobs/queries/job_scan_delta.py": 34,
     "server/app/jobs/queries/job_scan_marks.py": 44,
     "server/app/jobs/queries/quality_replays.py": 33,
+    "server/app/jobs/queries/run_healing.py": 70,
     "server/app/jobs/queries/run_item_probes.py": 100,
     "server/app/jobs/queries/runtime_profile.py": 88,
     "server/app/jobs/queries/scoped_token_management.py": 44,
