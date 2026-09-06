@@ -20,7 +20,7 @@ from server.app.services.job_intake_workspace import (
 )
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
-from server.app.services.run_partial_failure import compensate_partial_creation
+from server.app.services.run_partial_failure import raise_compensated_partial_creation
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import workflow_definition_from_dict
@@ -184,8 +184,11 @@ class JobIntakeService:
             # ANY creation failure must trigger the compensation — the
             # two-branch contract (empty-run delete vs partial-run
             # failed-marking) lives in the shared helper used by both sync
-            # creation paths (codex round-1 #2).
-            raise compensate_partial_creation(self.job_db, str(batch["id"]), exc) from exc
+            # creation paths (codex round-1 #2). #501: the raise-shaped
+            # wrapper over the single implementation; this path keeps the
+            # original exception type through the empty-run branch
+            # (intake's pinned contract — no ValueError conversion).
+            raise_compensated_partial_creation(self.job_db, str(batch["id"]), exc)
         if job_ids:
             notify_schedulable_work()
 

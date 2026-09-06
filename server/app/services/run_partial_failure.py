@@ -14,7 +14,7 @@ Kept out of ``run_service.py`` for the file-size budget, mirroring the
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Never
 
 import psycopg
 
@@ -60,15 +60,18 @@ def partial_failure_message(committed: int, exc: Exception) -> str:
 
 def compensate_partial_creation(
     job_db: Any, run_id: str, exc: Exception
-) -> PartialRunCreationError:
-    """Two-branch failure compensation shared by the sync creation paths.
+) -> PartialRunCreationError | None:
+    """Two-branch failure compensation — the SINGLE implementation (#501).
 
-    Returns the error to raise (the caller re-raises it, chaining ``exc``).
     Before the first chunk: the guarded run-row removal restores the old
-    single-transaction semantics. After a committed chunk: the partial run
+    single-transaction semantics; returns None (the caller re-raises the
+    original ``exc`` however its context presents it — run_service converts
+    ValueError to the user-facing 400, the legacy intake keeps the original
+    type, both pinned by tests). After a committed chunk: the partial run
     STAYS, is marked failed with its progress, and the structured
-    partial-failure error comes back — a run row left 'created' with no
-    failure trace would be actively misleading (codex round-1 #2).
+    partial-failure error is returned for the caller to raise chaining
+    ``exc``. The #204 compensation-only catches and the progress-count
+    degrade live here once, not per caller.
     """
     try:
         committed = job_db.count_jobs_in_run(run_id)
@@ -100,4 +103,13 @@ def compensate_partial_creation(
     except (OSError, psycopg.Error) as exc3:
         # #204: same compensation-only catch — programming errors propagate.
         logger.warning("run %s left orphaned after job creation failed: %s", run_id, exc3)
+    return None
+
+
+def raise_compensated_partial_creation(job_db: Any, run_id: str, exc: Exception) -> Never:
+    """Compensate then raise — the legacy-intake call shape over #501's single
+    implementation (original exception type survives the empty-run branch)."""
+    partial_error = compensate_partial_creation(job_db, run_id, exc)
+    if partial_error is not None:
+        raise partial_error from exc
     raise exc

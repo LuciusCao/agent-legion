@@ -19,10 +19,7 @@ longer materializes job rows (run id + created_count; the detail endpoint and
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any
-
-import psycopg
 
 from server.app.db.rowmap import iso_optional, parse_object
 from server.app.events import JobEventManager
@@ -35,14 +32,9 @@ from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.services.run_item_resolution import resolve_run_items
 from server.app.services.run_item_types import validate_run_item_types
-from server.app.services.run_partial_failure import (
-    PartialRunCreationError,
-    partial_failure_message,
-)
+from server.app.services.run_partial_failure import compensate_partial_creation
 from server.app.settings import Settings
 from server.app.workflows.definition import workflow_definition_from_dict
-
-logger = logging.getLogger(__name__)
 
 # Runs created from items carry this marker in source_kind; legacy rows keep
 # their intake source_kind for display (design §5.2).
@@ -202,8 +194,8 @@ class RunService:
             # converted to the user-facing InvalidOperationError) and
             # unexpected errors alike — or a run row would linger; nothing is
             # masked: the non-ValueError branch is a bare re-raise preserving
-            # type and traceback, and the failure bookkeeping below is
-            # itself #204-audited to never mask this error.
+            # type and traceback, and the compensation helper is itself
+            # #204-audited to never mask this error.
             # A fresh item can still collide at insert time: two items can
             # normalize to the same job id (``a/b`` vs ``a_w``), or an item
             # can hit a legacy-path job with a different source_type but the
@@ -213,33 +205,20 @@ class RunService:
             # marked failed with its progress so the operator sees what was
             # created; a resubmission resumes through the dedup filter.
             # With no committed chunk the compensation removes the run row
-            # exactly like the pre-chunking shape.
-            try:
-                committed = self.job_db.count_jobs_in_run(str(run["id"]))
-            except Exception:
-                # #204 broad-except audit: progress bookkeeping inside the
-                # compensate-then-re-raise path — a failure here must not
-                # mask the original creation error, so it degrades to 0
-                # (the empty-run compensation branch) and logs. Nothing is
-                # swallowed downstream: the original exception still raises.
-                logger.exception("run %s progress count failed", run["id"])
-                committed = 0
-            if committed > 0:
-                self._mark_partial_run_failed(str(run["id"]), committed, exc)
-                # #467 review P1-2/P2-1: EVERY failure mode after a committed
-                # chunk maps to the structured partial-failure error — the
-                # operator legibility requirement (created_so_far in the 400
-                # detail) does not depend on the exception family. The
-                # original exception rides along as __cause__; with no
-                # committed chunk the branches below keep the pre-chunking
-                # semantics verbatim (ValueError → 400, anything else →
-                # bare re-raise → 500).
-                raise PartialRunCreationError(
-                    partial_failure_message(committed, exc),
-                    run_id=str(run["id"]),
-                    created_so_far=committed,
-                ) from exc
-            self._discard_empty_run(str(run["id"]))
+            # exactly like the pre-chunking shape. #501: the two-branch
+            # compensation body lives ONCE in
+            # run_partial_failure.compensate_partial_creation (this path and
+            # the legacy intake shared drifted duplicates before); the only
+            # per-caller part left here is the error presentation —
+            # #467 review P1-2/P2-1: after a committed chunk EVERY failure
+            # family maps to the structured partial-failure error (the
+            # operator legibility requirement — created_so_far in the 400
+            # detail; original rides as __cause__), with no committed chunk
+            # the branches below keep the pre-chunking semantics verbatim
+            # (ValueError → 400, anything else → bare re-raise → 500).
+            partial_error = compensate_partial_creation(self.job_db, str(run["id"]), exc)
+            if partial_error is not None:
+                raise partial_error from exc
             if isinstance(exc, ValueError):
                 raise InvalidOperationError(str(exc)) from exc
             raise
@@ -282,36 +261,6 @@ class RunService:
         # 万级-items run no longer serializes a proportional JSON payload
         # inside the request thread.
         return {"run": _run_record(run), "created_count": len(job_ids), "job_ids": job_ids}
-
-    def _mark_partial_run_failed(self, run_id: str, committed: int, exc: Exception) -> None:
-        """Record the partial outcome on the run row (operator legibility).
-
-        Mirrors the async intake queue's chunk-error bookkeeping (status
-        "failed" + error_message), no new state values. Best-effort: a DB
-        failure here must not mask the original creation error.
-        """
-        try:
-            self.job_db.update_intake_run(
-                run_id,
-                created_count=committed,
-                status="failed",
-                error_message=partial_failure_message(committed, exc),
-            )
-        except (OSError, psycopg.Error) as exc2:
-            # #204: same compensation-only catch as _discard_empty_run.
-            logger.warning("run %s partial-failure marking failed: %s", run_id, exc2)
-
-    def _discard_empty_run(self, run_id: str) -> None:
-        # Best-effort cleanup of the run row after job creation failed;
-        # never mask the original failure.
-        try:
-            self.job_db.delete_run_without_jobs(run_id)
-        except (OSError, psycopg.Error) as exc:
-            # #204: the compensation is one guarded DELETE via the JobQueries
-            # facade — a DB connectivity failure here must not mask the
-            # original creation error. Programming errors propagate (the
-            # facade is exercised by every create_run test).
-            logger.warning("run %s left orphaned after job creation failed: %s", run_id, exc)
 
     def list_runs(self, workspace_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
         rows = self.job_db.list_runs(workspace_id, limit)
