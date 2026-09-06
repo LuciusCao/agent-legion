@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 ## [Unreleased]
 
 ### Changed
+- 运行提交路径分块化 + 响应瘦身（#467 子项 A，Refs #420）：`POST /runs`
+  的逐 item DB 往返改为分块集合探测（materials/bundles/ref 连接键各一个
+  IN 查询/500 条），workspace 全量 dedup 键扫描改按本次 items 的键做索引
+  点查，`create_jobs_bulk` 从单事务改为 ≤1000 行分块事务（FOR KEY SHARE
+  批量锁保持「先全部锁后插」锁序、身份冲突在首个 chunk 提交前全量检
+  测），`RunCreateResponse` 不再物化 job 行（run + created_count；前端
+  toast 只读 created_count，job 列表/详情走读取路径）。**行为变化**：
+  分块提交下中途失败不再是全有或全无——已提交 chunk 的 job 保留、run 行
+  落 `failed` 态并携带已创建进度（`created_so_far`/`run_id` 进 400
+  detail），重提交同一批 items 经 dedup 自动跳过已创建部分；剔除坏
+  item 后重提会因 digest 变化产生新 run 行（dedup 保证 job 不重复）。
 - Workflow Studio 按节点类型收口「配置 Schema」归属（#406）：
   `type: agent` 节点不再渲染节点 YAML 的 `config_schema` 区块，
   Agent schema 统一归「Agent 配置」内的 Agent Definition 编辑入口；

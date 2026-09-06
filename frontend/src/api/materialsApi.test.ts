@@ -66,7 +66,7 @@ describe('materialsApi', () => {
   })
 
   it('creates a run with material and ref items', async () => {
-    const payload = { run: { id: 'r1' }, created_count: 2, jobs: [] }
+    const payload = { run: { id: 'r1' }, created_count: 2 }
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 

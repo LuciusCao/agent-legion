@@ -105,9 +105,12 @@ def test_bundle_item_accepted_when_contract_declares_it(client, storage, job_db)
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["created_count"] == 1
-    job = payload["jobs"][0]
-    assert job["source_type"] == "bundle"
-    assert job["source_id"] == bundle_id
+    assert "jobs" not in payload
+    # #467 A4：响应不再物化 job 行；job list 是读取路径。
+    jobs = client.get(f"/api/workspaces/{workspace_id}/jobs").json()["jobs"]
+    assert len(jobs) == 1
+    assert jobs[0]["source_type"] == "bundle"
+    assert jobs[0]["source_id"] == bundle_id
 
     # (entity_type, entity_id) dedup：同一 bundle 重提交解析为零。
     second = _create_run(client, workspace_id, [{"type": "bundle", "bundle_id": bundle_id}])
