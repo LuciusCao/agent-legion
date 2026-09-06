@@ -74,8 +74,7 @@ function makeVersion(
 const PUBLISHED_HTML =
   '<!doctype html><html><body>published panel</body></html>'
 const DRAFT_HTML = '<!doctype html><html><body>draft panel</body></html>'
-const DRAFT_V2_HTML =
-  '<!doctype html><html><body>draft v2 panel</body></html>'
+const DRAFT_V2_HTML = '<!doctype html><html><body>draft v2 panel</body></html>'
 
 function renderSection(ui?: ReactElement) {
   return render(
