@@ -291,7 +291,7 @@ invariants:
         target: tests/workers/test_agent_worker_service.py
         gate: quick
       - kind: integration
-        target: tests/workers/test_agent_worker.py::test_registration_retries_transient_host_errors_without_traceback
+        target: tests/workers/test_agent_worker_client_protocol.py::test_registration_retries_transient_host_errors_without_traceback
         gate: quick
       - kind: integration
         target: tests/workers/test_worker_cli.py

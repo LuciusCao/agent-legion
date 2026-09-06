@@ -164,6 +164,6 @@ class AgentHeartbeatResponse(BaseModel):
     """Protocol v2 heartbeat body: explicit cancellations for this Worker.
 
     Only kind='code' executions are listed (batch 2 decision 6); v1 Workers
-    get the legacy empty 204 instead."""
+    get the legacy empty 204. Protocol-v5 batch contracts: ``agent_worker_heartbeat_batch``."""
 
     cancelled_execution_ids: list[str]

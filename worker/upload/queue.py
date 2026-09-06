@@ -19,9 +19,10 @@ the Host accepts the result. A crashed Worker rescans it on startup and
 re-enters through the bulk lane (artifact stores are content-addressed, so
 re-upload is harmless).
 
-Lease ownership: the per-execution heartbeat started at claim time keeps
-beating through the upload. It is quiesced for the final report and resumed
-only while a transient report failure backs off (worker/upload/heartbeat.py).
+Lease ownership: the lease heartbeat keeps beating through the upload
+(per-execution threads before #352; the per-Worker batch registry after). It
+is quiesced for the final report and resumed only while a transient report
+failure backs off (worker/upload/heartbeat.py).
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ import shutil
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from worker._atomic import atomic_write
 from worker._retry import run_with_retry
@@ -39,6 +40,9 @@ from worker.artifact.upload import DirectUploadError, upload_artifact_direct
 from worker.host.transfer import HostRequestError
 from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY
 from worker.upload import heartbeat as upload_heartbeat
+
+if TYPE_CHECKING:
+    from worker.execution.heartbeat_batch import BatchHeartbeatRegistry
 
 # MAX_ERROR_MESSAGE_CHARS 的定义在 result_metadata（failed_metadata 的截断
 # 上限）；execution_run 沿本模块导入，`as` 惯用法重导出而非再定义一份
@@ -95,6 +99,9 @@ class UploadTask:
     artifact_uploads: dict[str, Any] = field(default_factory=dict)
     heartbeat_stop: threading.Event = field(default_factory=threading.Event)
     heartbeat_thread: threading.Thread | None = None
+    # #352: 本任务租约归属的批量心跳 registry（_deliver_bulk 接管/恢复时
+    # 设置）。None = 旧单条心跳模式（无 registry 的单测路径）。
+    heartbeat_registry: Any = None
     # bulk 车道产物，交给 report 车道；运行时状态，不持久化——崩溃恢复的任务
     # 一律从 bulk 车道重进，prepare 与 artifact 上传会原样重做。
     prepared_metadata: dict[str, Any] | None = None
@@ -157,16 +164,24 @@ class UploadQueue:
         max_concurrency: int = 4,
         heartbeat_interval: float = 15.0,
         stop: threading.Event | None = None,
+        heartbeat_registry: BatchHeartbeatRegistry | None = None,
     ) -> None:
         self._client = client
         self._status = status
         self._heartbeat_interval = heartbeat_interval
+        self._heartbeat_registry = heartbeat_registry
         self._stop = stop if stop is not None else threading.Event()
         self._scheduler = LaneScheduler(
             MAX_DYNAMIC_CONCURRENCY, max_concurrency, thread_name_prefix="agent-upload"
         )
         self._lock = threading.Lock()
         self._depth = 0
+
+    def set_heartbeat_registry(self, registry: BatchHeartbeatRegistry) -> None:
+        """Attach the per-Worker batch heartbeat coordinator (#352), once,
+        after construction; queued upload tasks register their leases with
+        it instead of owning single-beat threads."""
+        self._heartbeat_registry = registry
 
     @property
     def depth(self) -> int:
@@ -233,12 +248,9 @@ class UploadQueue:
         if task.heartbeat_thread is None:
             # Restored from disk: resume heartbeating so the lease survives.
             # The status entry already exists — submit() upserted it at restore.
+            task.heartbeat_registry = self._heartbeat_registry
             task.heartbeat_thread = upload_heartbeat.start_upload_heartbeat(
-                self._client,
-                task.execution_id,
-                task.lease_id,
-                task.heartbeat_stop,
-                self._heartbeat_interval,
+                self._client, task, self._heartbeat_interval
             )
         try:
             ready = self._bulk_transfer(task)
@@ -283,7 +295,14 @@ class UploadQueue:
             self._finalize(task)
 
     def _finalize(self, task: UploadTask) -> None:
-        upload_heartbeat.quiesce_heartbeat(task.heartbeat_stop, task.heartbeat_thread, 2)
+        upload_heartbeat.prune_heartbeat(
+            task.heartbeat_registry,
+            task.heartbeat_stop,
+            task.execution_id,
+        )
+        if task.heartbeat_thread is not None:
+            task.heartbeat_thread.join(timeout=2)
+            task.heartbeat_thread = None
         self._status.finish(task.execution_id)
         with self._lock:
             self._depth -= 1
@@ -362,11 +381,7 @@ class UploadQueue:
                 # An unbounded backoff chain can outlive the lease TTL.
                 task.heartbeat_stop = threading.Event()
                 task.heartbeat_thread = upload_heartbeat.start_upload_heartbeat(
-                    self._client,
-                    task.execution_id,
-                    task.lease_id,
-                    task.heartbeat_stop,
-                    self._heartbeat_interval,
+                    self._client, task, self._heartbeat_interval
                 )
                 self._stop.wait(backoff)
                 backoff = min(backoff * 2, _RETRY_CAP_SECONDS)

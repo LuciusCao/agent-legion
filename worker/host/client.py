@@ -1,11 +1,12 @@
-"""HTTP client for the Worker's pull protocol: control calls (register/claim/
-heartbeat/metrics) live here; retried bulk transfers come from the
-``TransferOperations`` mixin in ``worker.host.transfer``.
+"""HTTP client for the local Worker Service CLI.
+
+Control calls (register/claim/metrics) live here; the heartbeat family is
+the ``HeartbeatOperations`` mixin (``worker.host.heartbeat_ops``), retried
+bulk transfers the ``TransferOperations`` mixin (``worker.host.transfer``).
 """
 
 from __future__ import annotations
 
-import contextlib
 import json
 import urllib.parse
 from pathlib import Path
@@ -15,6 +16,7 @@ import requests
 
 from shared.protocol import PROTOCOL_VERSION
 from worker.host.errors import TransientHostError, WorkerAuthError
+from worker.host.heartbeat_ops import HeartbeatOperations
 from worker.host.transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
 
 # Protocol history lives in shared/protocol.py (shipped in the worker image,
@@ -27,7 +29,7 @@ DEFAULT_TIMEOUT = 30
 __all__ = ["Client", "TransientHostError", "WorkerAuthError"]
 
 
-class Client(TransferOperations):
+class Client(HeartbeatOperations, TransferOperations):
     def __init__(
         self,
         host: str,
@@ -179,21 +181,3 @@ class Client(TransferOperations):
             raise RuntimeError(f"ops metrics failed: HTTP {status}: {body[:300]!r}")
         metrics: dict[str, Any] = json.loads(body)
         return metrics
-
-    def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
-        """Beat once; returns (status, cancelled_execution_ids).
-
-        Protocol v2 Hosts answer 200 with a body listing this Worker's
-        cancelled kind='code' executions; v1 answers 204 (no body)."""
-        status, body = self.request(
-            "POST",
-            f"/api/agent-executions/{execution_id}/heartbeat",
-            headers={"X-Agent-Lease-Id": lease_id},
-        )
-        cancelled: list[str] = []
-        if status == 200:
-            with contextlib.suppress(ValueError, TypeError, AttributeError):
-                cancelled = [
-                    str(value) for value in json.loads(body).get("cancelled_execution_ids", [])
-                ]
-        return status, cancelled
