@@ -32,13 +32,15 @@ class ExecutionHeartbeat:
         proc_ref: dict[str, subprocess.Popen[bytes] | None],
         registry: BatchHeartbeatRegistry | None,
         execution_id: str,
+        lease_id: str = "",
     ) -> None:
         self.stop, self.adopted, self.proc_ref = stop, adopted, proc_ref
         self.registry, self.execution_id = registry, execution_id
+        self.lease_id = lease_id
 
     def _forward(self, method: str) -> None:
         if self.registry is not None:
-            getattr(self.registry, method)(self.execution_id)
+            getattr(self.registry, method)(self.execution_id, self.lease_id)
 
     def adopt(self) -> None:
         """Mark the lease as adopted by an upload task (beats outlive proc)."""
@@ -46,7 +48,11 @@ class ExecutionHeartbeat:
         self._forward("set_adopted")
 
     def shutdown(self) -> None:
-        """Prune the lease from the batch registry (no beat for it anymore)."""
+        """Prune the lease from the batch registry (no beat for it anymore).
+
+        Pair-matched (execution_id + lease_id): a Host requeue the Worker
+        re-claimed installs a NEW entry under the same execution_id, and this
+        (old attempt's) shutdown must leave it alone — see the registry."""
         self.stop.set()
         self._forward("prune")
 
@@ -86,4 +92,4 @@ def start_lease_heartbeat(
     if registry is not None:
         entry = registry.register(execution_id, lease_id, ownership_lost, on_cancelled)
         proc_ref, adopted = entry.proc_ref, entry.adopted
-    return ExecutionHeartbeat(stop, adopted, proc_ref, registry, execution_id)
+    return ExecutionHeartbeat(stop, adopted, proc_ref, registry, execution_id, lease_id)

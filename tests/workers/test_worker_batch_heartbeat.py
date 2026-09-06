@@ -140,7 +140,7 @@ def test_batch_loop_degrades_to_single_beats_on_pre_v5_host() -> None:
     assert registry.degraded_to_single is True
 
     # Prune still removes a lease from the degraded beats.
-    registry.prune("exec-1")
+    registry.prune("exec-1", "lease-exec-1")
     client.single_calls.clear()
     stop2 = threading.Event()
     _run_loop_once(client, registry, stop2, runtime=0.15)
@@ -148,9 +148,9 @@ def test_batch_loop_degrades_to_single_beats_on_pre_v5_host() -> None:
 
 
 def test_degraded_single_beats_carry_short_timeout() -> None:
-    """P2-1 review 钉子：降级路径在单协调线程里串行逐条拍，每条必须带
-    短超时（SINGLE_BEAT_TIMEOUT_SECONDS），一个慢响应不得串行饿死本机
-    其余租约的续期窗口。"""
+    """P2-1 review 钉子：降级路径的每条拍必须带短超时
+    （SINGLE_BEAT_TIMEOUT_SECONDS）——慢 Host 的响应在传输层掐断，只丢这一
+    拍这一个租约。"""
     from worker.host.heartbeat_ops import SINGLE_BEAT_TIMEOUT_SECONDS
 
     registry = BatchHeartbeatRegistry()
@@ -162,6 +162,30 @@ def test_degraded_single_beats_carry_short_timeout() -> None:
 
     assert client.single_calls, "degraded mode never beat"
     assert client.single_timeouts == [SINGLE_BEAT_TIMEOUT_SECONDS] * len(client.single_calls)
+
+
+def test_degraded_single_beats_do_not_serialize_on_slow_host() -> None:
+    """#497 codex P1-2：降级拍不得串行——串行时一拍 5s 超时、20 条就是
+    100s > 90s lease TTL，列表后部的健康执行在轮到续期前就被回收。修复后
+    每条拍骑自己的短生命周期线程：每条都睡 0.3s 的「慢 Host」下，两拍的墙
+    钟必须远小于串行和（并发重合）。"""
+    registry = BatchHeartbeatRegistry()
+    _register(registry, "exec-1")
+    _register(registry, "exec-2")
+    client = FakeBatchClient(batch_status=404)
+
+    def slow_beat(execution_id: str, lease_id: str, timeout: float | None = None):
+        time.sleep(0.3)
+        return 204, []
+
+    client.heartbeat = slow_beat  # type: ignore[method-assign]
+    started = time.monotonic()
+    from worker.execution.heartbeat_batch import _beat_single
+
+    _beat_single(client, registry.snapshot())
+    # Both requests overlapped: serialized they would cost 0.6s+; concurrent
+    # they cannot finish before the first (longest) 0.3s response does.
+    assert time.monotonic() - started < 0.55, "degraded beats serialized on a slow Host"
 
 
 def test_batch_loop_single_beat_409_fires_ownership_lost() -> None:
@@ -176,7 +200,7 @@ def test_batch_loop_single_beat_409_fires_ownership_lost() -> None:
     assert lost_event.is_set()
     assert not kept_event.is_set()
     # A lost lease stops being beaten in the degraded path too.
-    registry.prune("exec-1")
+    registry.prune("exec-1", "lease-exec-1")
     client.single_calls.clear()
     stop2 = threading.Event()
     _run_loop_once(client, registry, stop2, runtime=0.15)
@@ -221,13 +245,13 @@ def test_registry_quiesce_excludes_lease_and_resume_re_includes() -> None:
     client = FakeBatchClient()
     stop = threading.Event()
 
-    registry.quiesce("exec-1")
+    registry.quiesce("exec-1", "lease-exec-1")
     thread = threading.Thread(
         target=batch_heartbeat_loop, args=(client, registry, stop, 0.02), daemon=True
     )
     thread.start()
     time.sleep(0.06)
-    registry.resume("exec-1")
+    registry.resume("exec-1", "lease-exec-1")
     time.sleep(0.06)
     stop.set()
     thread.join(timeout=2)
@@ -236,6 +260,97 @@ def test_registry_quiesce_excludes_lease_and_resume_re_includes() -> None:
     assert any(
         "exec-1" in [execution_id for execution_id, _ in call] for call in client.batch_calls
     ), "quiesced lease never resumed"
+
+
+# ---------------------------------------------------------------------------
+# #497 codex P1-1: attempt-identity discipline — lease-scoped registry
+# mutations match on (execution_id, lease_id), so an old attempt's late
+# cleanup cannot drop or silence the entry of a re-claimed new attempt.
+
+
+def test_old_attempt_prune_spares_reclaimed_entry() -> None:
+    """Host 重排后被本 Worker 重新 claim 的 execution：旧 attempt 的
+    shutdown（prune 只带旧 lease）不得删掉新 attempt 的 entry——否则新执行
+    无心跳、租约到期被 Host 再回收。"""
+    registry = BatchHeartbeatRegistry()
+    _register(registry, "exec-1", lease_id="lease-old")
+    # The Worker re-claims the requeued execution before the old attempt's
+    # cleanup arrives: register overwrites the entry with the NEW lease.
+    new_lost = _register(registry, "exec-1", lease_id="lease-new")
+
+    registry.prune("exec-1", "lease-old")  # the old attempt's shutdown
+
+    snapshot = registry.snapshot()
+    assert [entry.lease_id for entry in snapshot] == ["lease-new"], (
+        "the old attempt's prune dropped the new attempt's beats"
+    )
+    # The matching prune (the new attempt's own cleanup) still removes it.
+    registry.prune("exec-1", "lease-new")
+    assert registry.snapshot() == []
+    assert not new_lost.is_set()
+
+
+def test_old_attempt_quiesce_resume_and_adopt_spares_reclaimed_entry() -> None:
+    """quiesce/resume/set_adopted 同样按 (execution_id, lease_id) 匹配：旧
+    attempt 的静默/恢复/接管打到新 entry 上会把新执行静默到租约过期，或让
+    新执行的死进程僵尸续命。"""
+    registry = BatchHeartbeatRegistry()
+    _register(registry, "exec-1", lease_id="lease-old")
+    _register(registry, "exec-1", lease_id="lease-new")
+    entry = registry._entries["exec-1"]  # type: ignore[reportPrivateUsage]
+
+    registry.quiesce("exec-1", "lease-old")
+    assert entry.quiesced is False, "the old attempt silenced the new entry's beats"
+    registry.resume("exec-1", "lease-old")
+    registry.set_adopted("exec-1", "lease-old")
+    assert not entry.adopted.is_set(), "the old attempt adopted the new entry"
+
+    # The new attempt's own calls still land.
+    registry.quiesce("exec-1", "lease-new")
+    assert entry.quiesced is True
+    registry.resume("exec-1", "lease-new")
+    assert entry.quiesced is False
+    registry.set_adopted("exec-1", "lease-new")
+    assert entry.adopted.is_set()
+
+
+def test_facade_shutdown_prunes_only_own_lease() -> None:
+    """经生产 facade（start_lease_heartbeat → ExecutionHeartbeat.shutdown）的
+    旧 attempt 清理路径：Host 重排 + 重新 claim 后，旧 facade 的 shutdown 留
+    新 entry 一条生路。"""
+    registry = BatchHeartbeatRegistry()
+    old = start_lease_heartbeat(
+        None, "exec-1", "lease-old", 15.0, threading.Event(), registry=registry
+    )
+    start_lease_heartbeat(None, "exec-1", "lease-new", 15.0, threading.Event(), registry=registry)
+
+    old.shutdown()
+
+    assert [entry.lease_id for entry in registry.snapshot()] == ["lease-new"]
+    assert old.stop.is_set()  # facade-level state still flips
+
+
+def test_upload_prune_heartbeat_pair_matches_lease() -> None:
+    """上传侧终点（prune_heartbeat）：task 的 (execution_id, lease_id) 是自己
+    的 pair——registry 模式下旧 attempt 的收尾不得删新 entry，legacy 模式照旧
+    停线程。"""
+    from worker.upload.heartbeat import prune_heartbeat
+
+    registry = BatchHeartbeatRegistry()
+    registry.register("exec-1", "lease-new", threading.Event())
+
+    # The old attempt's final stop (its own lease, entry already overwritten).
+    prune_heartbeat(registry, threading.Event(), "exec-1", "lease-old")
+    assert [entry.lease_id for entry in registry.snapshot()] == ["lease-new"]
+
+    # The owning task's final stop removes its own entry.
+    prune_heartbeat(registry, threading.Event(), "exec-1", "lease-new")
+    assert registry.snapshot() == []
+
+    # Legacy mode (no registry) keeps the thread-stop semantics.
+    legacy_stop = threading.Event()
+    prune_heartbeat(None, legacy_stop, "exec-1", "lease-old")
+    assert legacy_stop.is_set()
 
 
 def test_registry_prunes_zombie_entry_on_snapshot() -> None:

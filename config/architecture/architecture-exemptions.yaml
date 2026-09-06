@@ -73,10 +73,13 @@ exemptions:
     would fork the event-name/level/reason registries the module exists to
     keep single-source. Remove when the events module gains its own
     structural split (aggregation work) or the #490 family closes and the
-    module is re-budgeted.
+    module is re-budgeted. Ceiling re-dated 292 to 294 for the #497 codex
+    P2: the offline memo overwrites on every online bucket (setdefault
+    froze the first observation, aging worker.offline's last_seen_at by
+    hours) — one overwritten assignment plus its why-comment.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/490
-  ceiling: 292
+  ceiling: 294
 - check: architecture.file_budget
   path: server/app/agent_broker/claim_evaluate.py
   reason: >-
@@ -965,10 +968,14 @@ exemptions:
     each method forwards to the registry. The four one-line forwards plus
     the degraded-mode contract docstring are the honest cost of that
     compatibility seam. Remove when the no-registry single-beat mode retires
-    and only the batch registry path remains.
+    and only the batch registry path remains. Ceiling re-dated 75 to 79 for
+    the #497 codex P1: lease-scoped registry mutations (prune/quiesce/
+    resume/set_adopted) match on (execution_id, lease_id) so an old
+    attempt's late cleanup cannot drop or silence the entry of a re-claimed
+    new attempt — the facade threads its lease_id through the forwards.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
-  ceiling: 75
+  ceiling: 79
 - check: architecture.file_budget
   path: worker/executor.py
   reason: >-
@@ -995,10 +1002,13 @@ exemptions:
     unit tests), prune/quiesce forward to the registry. The dual-mode
     docstrings are load-bearing: the single-beat path is the degraded
     pre-v5-Host contract. Remove when the no-registry single-beat mode
-    retires and only the batch registry path remains.
+    retires and only the batch registry path remains. Ceiling re-dated 66
+    to 68 for the #497 codex P1: prune/quiesce pair-match on the task's own
+    (execution_id, lease_id) — a re-claimed execution's entry must survive
+    an old attempt's final stop.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
-  ceiling: 66
+  ceiling: 68
 - check: architecture.file_budget
   path: worker/upload/queue.py
   reason: >-
@@ -1024,7 +1034,12 @@ exemptions:
     proc_ref wiring (zombie stop must read the same dict the executor
     writes). All three are core loop semantics, not splittable helpers.
     Revisit when the coordinator gains its own degraded-mode or sharding
-    module.
+    module. Ceiling re-dated 238 to 274 for the #497 codex round: the two
+    P1s — lease-scoped registry mutations pair-matched on
+    (execution_id, lease_id) via the _matching_entry guard, and the
+    degraded single-beat path riding one short-lived daemon thread per
+    lease (the serial N × timeout sum could cross the lease TTL) — are
+    both core loop semantics living next to the loops they fix.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
-  ceiling: 238
+  ceiling: 274

@@ -44,11 +44,18 @@ def start_upload_heartbeat(client: Any, task: Any, interval: float) -> threading
 
 
 def prune_heartbeat(
-    registry: BatchHeartbeatRegistry | None, stop: threading.Event, execution_id: str
+    registry: BatchHeartbeatRegistry | None,
+    stop: threading.Event,
+    execution_id: str,
+    lease_id: str = "",
 ) -> None:
-    """Final stop for one lease: batch prune, or legacy thread stop."""
+    """Final stop for one lease: batch prune, or legacy thread stop.
+
+    Registry prune is pair-matched (execution_id + lease_id): a Host requeue
+    the Worker re-claimed installs a NEW entry under the same execution_id,
+    and this (old attempt's) final stop must leave it alone."""
     if registry is not None:
-        registry.prune(execution_id)
+        registry.prune(execution_id, lease_id)
         return
     stop.set()
 
@@ -56,12 +63,13 @@ def prune_heartbeat(
 def quiesce_task_heartbeat(task: Any, join_seconds: float) -> None:
     """Quiesce the upload task's heartbeat and clear its thread handle.
 
-    Registry mode pauses the lease's beats (the report in flight is the last
-    proof of life; a beat racing the commit logs a spurious 409). Legacy
-    mode stops the thread and waits out any in-flight beat."""
+    Registry mode pauses the lease's beats, pair-matched on the task's own
+    (execution_id, lease_id) (the report in flight is the last proof of
+    life; a beat racing the commit logs a spurious 409). Legacy mode stops
+    the thread and waits out any in-flight beat."""
     registry = getattr(task, "heartbeat_registry", None)
     if registry is not None:
-        registry.quiesce(task.execution_id)
+        registry.quiesce(task.execution_id, task.lease_id)
         return
     task.heartbeat_stop.set()
     if task.heartbeat_thread is not None:

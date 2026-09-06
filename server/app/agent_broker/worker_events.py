@@ -343,7 +343,11 @@ class WorkerOfflineDetector:
                 if (seen_at := as_utc(last_seen)) is not None and seen_at >= online_since
             }
             for worker_id, seen_at in online_now.items():
-                self._known_workers.setdefault(worker_id, seen_at)
+                # Overwrite, not setdefault: a worker online across buckets
+                # keeps refreshing its DB last_seen, and the offline event
+                # must carry the LAST one (setdefault froze the first — hours
+                # or days early — and broke the outage timeline).
+                self._known_workers[worker_id] = seen_at
             for worker_id in sorted(self._known_workers.keys() - online_now.keys()):
                 last_seen = self._known_workers.pop(worker_id)
                 # Off-map entirely (row revoked/deleted) = management action,

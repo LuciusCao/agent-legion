@@ -14,11 +14,12 @@ import json
 
 _BULK_PATH = "/api/agent-executions/heartbeats"
 
-# Degraded per-execution beats (pre-v5 Host) run in the single coordinator
-# thread; each call gets this cap instead of the client default so one slow
-# response cannot serially starve every other lease's renewal — the worst
-# case per tick becomes leases × cap, and the transport-level error it
-# eventually raises is handled by the loop's per-beat error family.
+# Degraded per-execution beats (pre-v5 Host) run in one short-lived thread
+# per lease; each call gets this cap instead of the client default so a slow
+# Host response bounds only its own lease's beat (the thread parks, then the
+# transport-level error it eventually raises is handled by the loop's
+# per-beat error family) instead of blocking the coordinator or any other
+# lease's renewal.
 SINGLE_BEAT_TIMEOUT_SECONDS = 5.0
 
 

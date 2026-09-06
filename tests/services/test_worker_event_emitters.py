@@ -453,6 +453,27 @@ def test_offline_event_last_seen_is_the_db_truth_not_first_observation(events) -
     assert payload["last_seen_at"] != now.isoformat()
 
 
+def test_offline_last_seen_tracks_latest_heartbeat_across_buckets(events) -> None:
+    """#497 codex P2：跨采样周期持续在线的 Worker，offline 事件的
+    last_seen_at 必须是最后一次心跳时刻——setdefault 只记第一次观察，
+    事件里的时间线会早数小时甚至数天。"""
+    detector = _detector()
+    now = datetime(2026, 9, 5, 8, 0, 0, tzinfo=UTC)
+    first_seen = now - timedelta(seconds=10)
+    hours_online = now + timedelta(hours=3)
+    last_heartbeat = hours_online - timedelta(seconds=10)
+    # Online across many buckets, last_seen refreshing every time.
+    _note(detector, now, {"home-mini": first_seen})
+    _note(detector, now + timedelta(minutes=30), {"home-mini": now})
+    _note(detector, hours_online, {"home-mini": last_heartbeat})
+    # Then the worker goes silent: same map shape, timestamp frozen.
+    _note(detector, hours_online + timedelta(minutes=1), {"home-mini": last_heartbeat})
+    payload = _json_records(events)[-1]
+    assert payload["event"] == "worker.offline"
+    assert payload["last_seen_at"] == last_heartbeat.isoformat()
+    assert payload["last_seen_at"] != first_seen.isoformat()
+
+
 def test_offline_worker_vanishing_from_map_is_not_a_health_event(events) -> None:
     """A worker leaving the map entirely between buckets (row deleted /
     revoked) is a management action — no offline event; only the threshold

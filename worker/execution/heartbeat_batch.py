@@ -12,6 +12,14 @@ identical HTTP traffic and semantics older Hosts see today, from the same
 loop (the registry stays authoritative, so prune/quiesce keep working). The
 Host keeps serving the single endpoint to older Workers unchanged.
 
+Attempt-identity discipline: every lease-scoped mutation (prune/quiesce/
+resume/set_adopted) matches on the (execution_id, lease_id) pair. A Host
+requeue of an execution this Worker re-claims before the old attempt's
+cleanup finishes OVERWRITES the registry entry with the new lease, and the
+old attempt's dying cleanup must then find the entry no longer its own and
+touch nothing — pruning the new attempt's beats instead would leave the
+re-claimed execution un-heartbeated until the Host reclaims it again.
+
 Liveness semantics are shared with the single path (``lifecycle.py``): a
 lease the Host reports lost (409 family) fires the caller's
 ``ownership_lost`` and stops being batched; the zombie stop (agent process
@@ -27,6 +35,8 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
+
+from worker.host.heartbeat_ops import SINGLE_BEAT_TIMEOUT_SECONDS
 
 # Batch size guard, mirroring the Host contract limit
 # (server/app/agent_broker/heartbeat_batch.py). One batch = one write
@@ -84,6 +94,19 @@ class BatchHeartbeatRegistry:
         # loop then beats per execution from the same registry.
         self.degraded_to_single = False
 
+    def _matching_entry(self, execution_id: str, lease_id: str) -> _LeaseEntry | None:
+        """Caller holds ``_lock``: the entry for THIS (execution, lease) pair.
+
+        Keyed by execution_id but matched by the pair: a Host requeue can put
+        a NEW lease under the same execution_id before the old attempt's
+        cleanup arrives, and that entry belongs to the new attempt — the old
+        attempt's calls must find nothing (its lease_id no longer matches)
+        and touch nothing."""
+        entry = self._entries.get(execution_id)
+        if entry is not None and entry.lease_id != lease_id:
+            return None
+        return entry
+
     def register(
         self,
         execution_id: str,
@@ -101,28 +124,32 @@ class BatchHeartbeatRegistry:
             self._entries[execution_id] = entry
         return entry
 
-    def prune(self, execution_id: str) -> None:
-        """Stop beating one lease (result delivered, ownership lost, discard)."""
-        with self._lock:
-            self._entries.pop(execution_id, None)
+    def prune(self, execution_id: str, lease_id: str) -> None:
+        """Stop beating one lease (result delivered, ownership lost, discard).
 
-    def quiesce(self, execution_id: str) -> None:
+        Pair-matched: a re-claimed execution's entry (new lease) survives an
+        old attempt's late prune."""
         with self._lock:
-            entry = self._entries.get(execution_id)
+            if self._matching_entry(execution_id, lease_id) is not None:
+                del self._entries[execution_id]
+
+    def quiesce(self, execution_id: str, lease_id: str) -> None:
+        with self._lock:
+            entry = self._matching_entry(execution_id, lease_id)
             if entry is not None:
                 entry.quiesced = True
 
-    def resume(self, execution_id: str) -> None:
+    def resume(self, execution_id: str, lease_id: str) -> None:
         """Resume beats after a transient report failure backs off."""
         with self._lock:
-            entry = self._entries.get(execution_id)
+            entry = self._matching_entry(execution_id, lease_id)
             if entry is not None:
                 entry.quiesced = False
 
-    def set_adopted(self, execution_id: str) -> None:
+    def set_adopted(self, execution_id: str, lease_id: str) -> None:
         """Upload adoption: beats must outlive the exited agent process."""
         with self._lock:
-            entry = self._entries.get(execution_id)
+            entry = self._matching_entry(execution_id, lease_id)
             if entry is not None:
                 entry.adopted.set()
 
@@ -245,35 +272,45 @@ def _beat_batch_chunk(
 
 
 def _beat_single(client: Any, entries: list[_LeaseEntry]) -> None:
-    """Degraded mode: one single-beat request per entry, old semantics.
+    """Degraded mode: one single-beat request per entry, old semantics —
+    but never serial: each lease's beat rides its own short-lived thread
+    (the pre-v5 Worker's per-execution thread shape), so one slow Host
+    response delays only its own lease's renewal, not every later entry's
+    (the serial sum, N × timeout, is what could cross the lease TTL and get
+    the tail of a healthy list reclaimed).
 
-    These beats run serially in the single coordinator thread, so each call
-    carries a short timeout cap (heartbeat_ops.SINGLE_BEAT_TIMEOUT_SECONDS):
-    a slow Host response raises at the transport layer and costs one beat of
-    one lease, instead of serially delaying every later lease's renewal past
-    the lease TTL."""
-    from worker.host.heartbeat_ops import SINGLE_BEAT_TIMEOUT_SECONDS
-
+    The coordinator does NOT join the workers (the batch path's model): a
+    beat already in flight when the process dies is a daemon thread and dies
+    with it, and the requests themselves are idempotent renewals whose only
+    deadline is the Host-side lease TTL. The per-request timeout cap
+    (heartbeat_ops.SINGLE_BEAT_TIMEOUT_SECONDS) stays: it is what bounds a
+    parked worker thread when the Host is merely slow."""
     for entry in entries:
-        try:
-            status, cancelled = client.heartbeat(
-                entry.execution_id, entry.lease_id, timeout=SINGLE_BEAT_TIMEOUT_SECONDS
-            )
-        except Exception as exc:
-            # #204 broad-except audit: 同 _beat_batch 的逐拍存活语义，只是
-            # 粒度回到单条——一次逃逸只丢这一拍的这一个租约，其余条目与本
-            # 循环不受影响。日志保全：print 逐条记录。
-            print(f"heartbeat error for {entry.execution_id}: {exc}", flush=True)
-            continue
-        if cancelled and entry.on_cancelled is not None:
-            entry.on_cancelled(cancelled)
-        if status in (401, 409):
-            print(f"heartbeat lost ownership for {entry.execution_id}: HTTP {status}", flush=True)
-            entry.ownership_lost.set()
-        elif status not in (200, 204):
-            print(
-                f"heartbeat unexpected status for {entry.execution_id}: HTTP {status}", flush=True
-            )
+        thread = threading.Thread(target=_beat_single_one, args=(client, entry), daemon=True)
+        thread.start()
+
+
+def _beat_single_one(client: Any, entry: _LeaseEntry) -> None:
+    """One lease's single beat (one degraded tick, one short-lived thread)."""
+    try:
+        status, cancelled = client.heartbeat(
+            entry.execution_id, entry.lease_id, timeout=SINGLE_BEAT_TIMEOUT_SECONDS
+        )
+    except Exception as exc:
+        # #204 broad-except audit: 同 _beat_batch 的逐拍存活语义，只是
+        # 粒度回到单条——一次逃逸只丢这一拍的这一个租约，其余条目与本
+        # 循环不受影响。吞是对的：这个线程只有这一次调用，不捕获就是
+        # daemon 线程顶着一个未处理异常退出，除了 traceback 噪音没有任
+        # 何收益。日志保全：print 逐条记录。
+        print(f"heartbeat error for {entry.execution_id}: {exc}", flush=True)
+        return
+    if cancelled and entry.on_cancelled is not None:
+        entry.on_cancelled(cancelled)
+    if status in (401, 409):
+        print(f"heartbeat lost ownership for {entry.execution_id}: HTTP {status}", flush=True)
+        entry.ownership_lost.set()
+    elif status not in (200, 204):
+        print(f"heartbeat unexpected status for {entry.execution_id}: HTTP {status}", flush=True)
 
 
 def clamp_batch_interval(interval: float) -> float:

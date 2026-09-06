@@ -299,6 +299,7 @@ class UploadQueue:
             task.heartbeat_registry,
             task.heartbeat_stop,
             task.execution_id,
+            task.lease_id,
         )
         if task.heartbeat_thread is not None:
             task.heartbeat_thread.join(timeout=2)
