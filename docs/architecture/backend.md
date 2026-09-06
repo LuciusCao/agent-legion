@@ -48,6 +48,10 @@ server/app/
 │                         # 注册/鉴权/liveness、register_tokens*.py scoped token
 │                         # 生命周期、completion.py 执行结果提交、
 │                         # declarations.py 声明归一化
+├── agent_broker/           # Agent 执行请求面：dispatch/enqueue/claim*.py claim 事务、
+│                         # heartbeat_single / heartbeat_batch（#352 协议 v5）、
+│                         # worker_events.py 结构化事件日志（#490）、
+│                         # sweepers.py 租约回收、code_dispatch/code_manifest 分片派发
 ├── agent_catalog/          # Agent 定义目录：definition.py AgentDefinition 模型、
 │                         # builtin.py demo workflow 内置模板
 ├── configuration/          # 配置加载与 owned-keys 校验；executor_runtime.py
@@ -718,7 +722,7 @@ server/app/
   `owned_keys.py` 是「哪个文件拥有哪个顶层段」的权威。
 - 当 `start_worker=True` 时，生命周期内启动 `WorkflowWorkerThread`：
   - `workflows.enabled` 已退役（#385/#389）：调度线程总是启动（API 面无门禁）；部署形态由实例设置 `code_capacity` 表达——0 = 纯控制面模式（本进程不组装本地执行栈，code 节点 100% 依赖远程 code Worker，`/api/health` 报在线 code Worker 数）。
-  - 节点按 capability 分发：DB 中按 workspace 发布的 code 节点（EXEC-CODE-002/003，demo 节点在 workspace 初始化时注入）优先派发远程 code Worker（在线且 payload 合格），否则回落本地 code 池（纯远程模式下无回落，任务挂起等待 Worker）；agent 节点（pi / velites runtime）经 broker 派发给 Worker；shard 节点的分片执行同样先远程后本地（#389）——分片身份随 kind='code' manifest 持久化，broker claim 事务经 `try_start_shard` 绑定 `node_shards` 行（受 `(job_id, node_key)` 单活跃请求索引约束，远程分片逐片串行），分片输出以 `shard_output-<index>.json` 常规 expected_output 随结果归档回传。
+  - 节点按 capability 分发：DB 中按 workspace 发布的 code 节点（EXEC-CODE-002/003，demo 节点在 workspace 初始化时注入）优先派发远程 code Worker（在线且 payload 合格），否则回落本地 code 池（纯远程模式下无回落，任务挂起等待 Worker）；agent 节点（pi / velites runtime）经 broker 派发给 Worker；shard 节点的分片执行同样先远程后本地（#389）——分片身份随 kind='code' manifest 持久化，broker claim 事务经 `try_start_shard` 绑定 `node_shards` 行（单活跃请求索引自 schema v79 纳入分片身份（`coalesce(manifest_json->>'shard_index', -1)` 表达式索引，#401）——同一 shard 节点的多个分片可并发在飞，非 shard 节点的单活跃语义逐字保留；fan-out 受 `CodeStockGate.pass_budget`（`server/app/workflow_worker/code_stock.py`）单 pass 预算节流），分片输出以 `shard_output-<index>.json` 常规 expected_output 随结果归档回传（普通 `node.outputs` 不进 shard 的 expected_outputs，#401）。
 - 调度暂停是 **workspace 级**状态：每个 workspace 默认暂停，恢复经
   `POST /api/worker/resume?workspace_id=<id>`（或对应控制台开关）开始处理。
 - 后端每次启动会把全部 workspace 重置为暂停（刻意设计，防失控自跑）；恢复调度走
