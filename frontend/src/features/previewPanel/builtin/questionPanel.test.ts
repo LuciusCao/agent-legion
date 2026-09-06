@@ -239,7 +239,9 @@ describe('官方内置 question 面板 bundle', () => {
     expect(stem.querySelector('a')).toBeNull()
     expect(stem.textContent).toContain('alert(1)')
     expect(stem.textContent).toContain('链接')
-    // img：http(s) src 保留并强制 no-referrer；javascript: src 整个剥除，事件属性不落地
+    // img：http(s) src 保留并强制 no-referrer（#500 后宿主 CSP 已把
+    // img-src 收敛到 data:/平台 origin——远程图实际不加载、由 alt 空占位
+    // 降级，消毒器仍只负责不执行载荷）；javascript: src 整个剥除，事件属性不落地
     const imgs = stem.querySelectorAll('img')
     expect(imgs).toHaveLength(1)
     expect(imgs[0].getAttribute('src')).toBe('https://cdn.test/a.png')

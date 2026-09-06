@@ -370,7 +370,10 @@
         // profile：p/br/strong/em/ul/ol/li/span/div/img 标签集，属性仅
         // src/alt/referrerpolicy 且 img src 限 http(s)，其余标签 unwrap
         // 保留子节点——事件属性随属性白名单一律剥除。无外部依赖：bundle 是
-        // 单文件沙箱 HTML，DOMPurify 不可用，这里用 DOMParser 手写等价物。） ----
+        // 单文件沙箱 HTML，DOMPurify 不可用，这里用 DOMParser 手写等价物。
+        // 远程 http(s) 图经消毒器保留 src（不执行任何载荷），但宿主注入的
+        // CSP 已收敛 img-src 到 data:/平台 origin（#500）——远程图实际不
+        // 加载、降级为 alt 空占位，属安全收敛的预期取舍。） ----
         var ALLOWED_TAGS = {
           p: 1,
           br: 1,
