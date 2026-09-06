@@ -84,9 +84,16 @@ def claim_shard_locally(
         inputs=tuple(node.inputs),
         # Mirror the remote contract (#389 review P2-2): the shard output
         # file is an expected output on both paths, so a shard node whose
-        # code only writes node.outputs fails identically locally and
+        # code writes no shard payload fails identically locally and
         # remotely instead of silently yielding an empty reduce payload.
-        expected_outputs=(*node.outputs, f"shard_output-{shard_index}.json"),
+        # #401 review P1-2 (both paths): the node's ordinary outputs are
+        # EXCLUDED — a shard's product contract is only the per-index file.
+        # Concurrent shards share one job dir and one object-storage
+        # authority key per (job, node, name); with many shards of a node
+        # running at once (v79), sibling shards writing the same ordinary
+        # output name would clobber each other's artifacts and races the
+        # per-shard missing-output check.
+        expected_outputs=(f"shard_output-{shard_index}.json",),
         runtime={
             "node_execution": asdict(node.execution),
             "shard_index": shard_index,
