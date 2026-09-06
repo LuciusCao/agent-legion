@@ -210,7 +210,16 @@ def _beat_batch(client: Any, registry: BatchHeartbeatRegistry, entries: list[_Le
     A chunk's transient error aborts the rest of the tick (later chunks are
     skipped, not retried mid-tick): the next tick resends everything from
     the top — the Host-side per-item predicate is idempotent, so a fully
-    renewed prefix followed by a full retry cannot double-renew anything."""
+    renewed prefix followed by a full retry cannot double-renew anything.
+
+    Known narrow window, accepted (PR #497 review 5125358408): a
+    persistently failing first chunk starves the tail of beats (every tick
+    dies at chunk 1), so a tail lease near its TTL could expire. Not fixed:
+    the fix (per-chunk beat tracking against a mutating snapshot) costs
+    more than the window — it needs persistent (not transient) first-chunk
+    failure AND a near-TTL tail lease simultaneously, and the designed
+    backstop (Host-side sweeper requeues the expired lease) already covers
+    any missed beat."""
     for start in range(0, len(entries), MAX_BATCH_HEARTBEATS):
         chunk = entries[start : start + MAX_BATCH_HEARTBEATS]
         outcome = _beat_batch_chunk(client, registry, chunk)
