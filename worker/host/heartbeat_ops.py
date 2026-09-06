@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 _BULK_PATH = "/api/agent-executions/heartbeats"
 
@@ -74,6 +77,18 @@ class HeartbeatOperations:
             headers={"Content-Type": "application/json"},
         )
         if status in (404, 405):
+            # Degraded to single beats (PR #497 review): one INFO line per
+            # transition makes the rolling-upgrade window's cost visible —
+            # N leases × SINGLE_BEAT_TIMEOUT_SECONDS is the per-tick ceiling
+            # the coordinator now rides on short-lived per-lease threads.
+            logger.info(
+                "batch heartbeat endpoint unavailable (HTTP %s); degraded to single"
+                " beats for %d leases (per-tick ceiling %d × %.0fs)",
+                status,
+                len(executions),
+                len(executions),
+                SINGLE_BEAT_TIMEOUT_SECONDS,
+            )
             return None
         if status != 200:
             raise RuntimeError(f"batch heartbeat failed: HTTP {status}: {body[:300]!r}")

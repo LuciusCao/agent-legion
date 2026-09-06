@@ -251,11 +251,29 @@ def test_client_heartbeat_batch_posts_executions_and_parses_body() -> None:
 
 def test_client_heartbeat_batch_returns_none_on_missing_endpoint() -> None:
     """pre-v5 Host 404/405 → None，调用方据此降级为逐执行心跳。"""
-    client = agent_worker.Client("http://unused")
+    client = agent_worker.Client("http://used")
     client.request = lambda *a, **k: (404, b"not found")  # type: ignore[method-assign]
     assert client.heartbeat_batch([("exec-1", "lease-1")]) is None
     client.request = lambda *a, **k: (405, b"method not allowed")  # type: ignore[method-assign]
     assert client.heartbeat_batch([]) is None
+
+
+def test_client_heartbeat_batch_degrade_logs_lease_scale(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """>#5125358408 P2：降级到单拍时打一条规模提示——N × 5s 是滚动升级窗口
+    内该 tick 的墙钟上限，让运维看到 N 而不是只有「降级了」。"""
+    with caplog.at_level("INFO", logger="worker.host.heartbeat_ops"):
+        client = agent_worker.Client("http://unused")
+        client.request = lambda *a, **k: (404, b"not found")  # type: ignore[method-assign]
+        assert (
+            client.heartbeat_batch([("exec-1", "l1"), ("exec-2", "l2"), ("exec-3", "l3")]) is None
+        )
+    matches = [r for r in caplog.records if "degraded to single beats" in r.getMessage()]
+    assert len(matches) == 1
+    message = matches[0].getMessage()
+    assert "3 leases" in message
+    assert "5s" in message  # the per-tick ceiling: N × SINGLE_BEAT_TIMEOUT_SECONDS
 
 
 def test_client_heartbeat_batch_rejects_error_status() -> None:

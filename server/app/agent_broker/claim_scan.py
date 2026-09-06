@@ -78,6 +78,36 @@ class ScanState:
     pause_cache: dict[str, bool] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ClaimOutcome:
+    """Post-transaction event payload for one claim pass (#498).
+
+    ``claim_in_transaction`` runs inside the write transaction; committing
+    its verdicts to the event stream from in there would emit events for
+    claims whose transaction then failed (deadlock retry #437, serialization
+    conflict, connection loss) — ghost ``claim.granted`` lines that never
+    happened. The broker therefore emits AFTER the commit, same spot as
+    ``record_job_update`` (broker.py). The payload is a frozen snapshot
+    taken at the transaction's decision point so the retry path can't reuse
+    a stale mutable view: ``claim`` is None only for the empty/rejected
+    verdicts (the claimed field carries no AgentClaim on a raced discard —
+    ``ClaimRacedError`` rolls the whole attempt back and gets NO event), and
+    ``scan_skipped`` preserves the capacity-synthesis branch (#494 P2-2).
+    """
+
+    claim: AgentClaim | None
+    view: WorkerView
+    skip_reasons: dict[str, int]
+    scan_skipped: bool = False
+
+    def event_kwargs(self) -> dict[str, Any]:
+        """Keyword shape for ``note_claim_outcome`` (inversion of control)."""
+        return {
+            "skip_reasons": self.skip_reasons,
+            "scan_skipped": self.scan_skipped,
+        }
+
+
 def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> list[Any]:
     # Candidates are read WITHOUT row locks (a bounded per-workspace window
     # keeps small workspaces visible behind a deep queue); only the single
