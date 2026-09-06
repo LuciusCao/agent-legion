@@ -77,17 +77,15 @@ class HeartbeatOperations:
             headers={"Content-Type": "application/json"},
         )
         if status in (404, 405):
-            # Degraded to single beats (PR #497 review): one INFO line per
-            # transition makes the rolling-upgrade window's cost visible —
-            # N leases × SINGLE_BEAT_TIMEOUT_SECONDS is the per-tick ceiling
-            # the coordinator now rides on short-lived per-lease threads.
+            # PR #497 review：降级转场打一条 INFO——滚动升级窗口的每拍上限
+            # （N leases × 5s，per-lease 线程化后为单线程停泊上限）可见化。
+            # f-string 内插而非 %s 参数表：ruff format 的 magic-trailing-comma
+            # 会把多参数调用 explode 成每参数一行，预算装不下（exemption 83）。
+            n = len(executions)
             logger.info(
-                "batch heartbeat endpoint unavailable (HTTP %s); degraded to single"
-                " beats for %d leases (per-tick ceiling %d × %.0fs)",
-                status,
-                len(executions),
-                len(executions),
-                SINGLE_BEAT_TIMEOUT_SECONDS,
+                f"batch heartbeat endpoint unavailable (HTTP {status}); degraded to"
+                f" single beats for {n} leases"
+                f" (per-tick ceiling {n} × {SINGLE_BEAT_TIMEOUT_SECONDS:.0f}s)"
             )
             return None
         if status != 200:
