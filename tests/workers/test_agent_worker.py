@@ -454,7 +454,8 @@ def test_main_ramp_up_limits_claim_budget_until_target(
 
     max_concurrency=3、ramp_up initial=1/step=2/interval=10s：首个领取 pass
     只允许 1 个在跑（第二单在预算耗尽前领不到）；释放执行后容量仍按档位
-    走。到顶（interval 之后的 pass）恢复全量领取语义。"""
+    走。#501 起 claim 向 Host 声明的是配置目标容量（3，恒定——agent_workers
+    行/UI/stock gate 不随档位抖），档位只钳本地预算。"""
     fake = FakeClient(tmp_path / "unused.tar.gz")
     claim_calls = 0
     seen_capacities: list[int] = []
@@ -505,8 +506,8 @@ def test_main_ramp_up_limits_claim_budget_until_target(
     time.sleep(0.3)
     # 爬坡首档：exec-1 在跑占满 initial=1，预算归零——没有第二单被领走。
     assert claim_calls == 1, f"ramp should clamp the pass budget, got {claim_calls} claims"
-    # claim 上报 Host 的容量 = 生效档位（1），不是配置目标（3）。
-    assert seen_capacities[0] == 1
+    # #501：claim 声明配置目标容量（3），不是生效档位（1）——行值不随档位抖。
+    assert seen_capacities[0] == 3, seen_capacities
     # 释放首单；interval=10s 未到，档位不变（仍 1）——还是只有 1 个在跑。
     release.set()
     deadline = time.monotonic() + 2
@@ -516,18 +517,21 @@ def test_main_ramp_up_limits_claim_budget_until_target(
     thread.join(timeout=10)
     assert result == [0]
     assert claim_calls >= 2, "refill after completion must stay allowed within the tier"
-    # 到顶前所有 claim 上报的容量都是档位值（1），从未直通 3。
-    assert all(capacity == 1 for capacity in seen_capacities), seen_capacities
+    # 预算钳在档位（见上）而声明恒为目标值：爬坡全程 Host 看到的容量稳定。
+    assert all(capacity == 3 for capacity in seen_capacities), seen_capacities
 
 
 def test_main_ramp_up_reaches_target_and_releases_budget(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """#471 到顶后放开：interval=0.2s 的短爬坡，几秒内 effective 追上目标，
-    此后 claim 上报与本地预算回到全量语义（与禁用配置一致）。"""
+    本地预算回到全量语义（与禁用配置一致）。#501 起 claim 声明恒为目标
+    容量（3）——「到顶」的检测改用预算面：单 pass 内连续 3 次领取成功
+    （tier=3 前，pass 预算 ≤ 档位 < 3，一次 pass 至多领 2 单）。"""
     fake = FakeClient(tmp_path / "unused.tar.gz")
     claim_calls = 0
     seen_capacities: list[int] = []
+    claim_times: list[float] = []
     release = threading.Event()
     released_budget = threading.Event()
 
@@ -539,8 +543,11 @@ def test_main_ramp_up_reaches_target_and_releases_budget(
         nonlocal claim_calls
         claim_calls += 1
         seen_capacities.append(int(max_concurrency or 0))
-        # 到顶后的第一个 pass：预算放开（上报容量=目标 3）即触发断言点。
-        if int(max_concurrency or 0) >= 3:
+        claim_times.append(time.monotonic())
+        # 到顶后的第一个 pass：3 次领取挤进同一个预算窗口（pacing 间隔
+        # 分隔 pass；0.1s 内的连续领取即同一 pass）——预算放开铁证。
+        same_pass = [t for t in claim_times if claim_times[-1] - t <= 0.1]
+        if len(same_pass) >= 3:
             released_budget.set()
             release.wait(timeout=5)
         return _claim(f"exec-{claim_calls}")
@@ -568,19 +575,14 @@ def test_main_ramp_up_reaches_target_and_releases_budget(
         "ramp_up": {"initial": 1, "step": 2, "interval_seconds": 0.2},
     }
     thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, updates)
-    # 活跃 ~0.2s 后到顶：某次 claim 开始上报目标容量 3（本地预算同帧放开）。
+    # 活跃 ~0.2s 后到顶：tier=3 的 pass 一次领满 3 单（预算面放开）。
     assert released_budget.wait(timeout=5), "reaching the target should release the budget"
     handlers[agent_worker.signal.SIGTERM]()
     release.set()
     thread.join(timeout=10)
     assert result == [0]
-    # 爬坡期上报档位值 1，到顶后恒为目标 3——单调升，无回退。
-    assert seen_capacities[0] == 1
-    assert seen_capacities[-1] == 3
-    assert all(
-        later >= earlier
-        for earlier, later in zip(seen_capacities, seen_capacities[1:], strict=False)
-    ), seen_capacities
+    # #501：声明恒为目标容量 3（首拍到最后，不随档位抖）。
+    assert all(capacity == 3 for capacity in seen_capacities), seen_capacities
 
 
 def test_main_rejects_invalid_ramp_up_block_with_exit_code_2(
