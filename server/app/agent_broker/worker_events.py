@@ -91,12 +91,18 @@ def emit_worker_event(event: str, payload: dict[str, Any] | None = None) -> None
 
 
 def _event_level(event: str, payload: dict[str, Any] | None) -> int:
-    # The normal rhythm stays DEBUG: claim.granted / execution.finished, and
-    # claim.empty WITH non-rejection reasons — admission rejections route to
-    # claim.rejected (INFO) instead, while the skips riding claim.empty
-    # (workspace_paused — in dev every workspace is reset paused —,
-    # lock_raced, job_paused …) are the blocked-queue diagnosis an operator
-    # pulls debug for, not a per-minute INFO rhythm.
+    # The normal rhythm stays DEBUG: claim.granted / execution.finished (a
+    # committed outcome), and claim.empty WITH non-rejection reasons —
+    # admission rejections route to claim.rejected (INFO) instead, while the
+    # skips riding claim.empty (workspace_paused — in dev every workspace is
+    # reset paused —, lock_raced, job_paused …) are the blocked-queue
+    # diagnosis an operator pulls debug for, not a per-minute INFO rhythm.
+    if event == "execution.finished" and (payload or {}).get("outcome") == "rejected":
+        # A rejected terminal commit is a turn (#494 P2): the Host refused the
+        # attempt (409) and this line is the LAST Host-side clue about that
+        # execution — the Worker's own http.error is INFO on its side — so it
+        # must stay visible at the default level, not sink with the rhythm.
+        return logging.INFO
     if event in ("claim.empty", "claim.granted", "execution.started", "execution.finished"):
         return logging.DEBUG
     return logging.INFO
@@ -119,11 +125,17 @@ def note_skip_reasons(
 
 
 def note_claim_outcome(
-    worker_id: str, claim: AgentClaim | None, view: WorkerView, skip_reasons: dict[str, int]
+    worker_id: str,
+    claim: AgentClaim | None,
+    view: WorkerView,
+    skip_reasons: dict[str, int],
+    *,
+    scan_skipped: bool = False,
 ) -> None:
     """claim.granted / claim.empty / claim.rejected per claim pass, one call
     at each claim-transaction exit (rejected = admission mismatch / empty =
-    drained queue or non-admission skips)."""
+    drained queue or non-admission skips; scan_skipped = see the synthesis
+    branch below)."""
     if claim is not None:
         # `execution` may be missing, None or a non-mapping (the manifest is
         # caller-built JSON) — the observer must never raise into the claim
@@ -146,12 +158,14 @@ def note_claim_outcome(
         )
         return
     rejected, reasons = note_skip_reasons(worker_id, skip_reasons)
-    if not rejected and not reasons:
-        # The scan was skipped entirely (both pools at their cap, or only
-        # code headroom on a pre-v2 worker): the worker's own live pool
-        # state IS the admission reason — classify from the view. A pool
+    if scan_skipped and not rejected and not reasons:
+        # The scan never ran, so no skip reason fired: the worker's own live
+        # pool state IS the admission reason — classify from the view. A pool
         # with zero DECLARED capacity (0 >= 0) is not "full": the worker
-        # never advertised that lane at all.
+        # never advertised that lane at all. Every other pass carries its
+        # evidence in skip_reasons; synthesizing from the view there would
+        # misattribute (agent full + drained code queue is idle, not
+        # rejection).
         if view.agent_capacity > 0 and view.agent_active >= view.agent_capacity:
             reasons, rejected = {"capacity_full": 1}, True
         elif view.code_capacity > 0 and view.code_active >= view.code_capacity:
@@ -199,7 +213,14 @@ def note_execution_finished(
 ) -> None:
     """execution.finished at the terminal commit: outcome + wall time (claim
     → committed result, the whole download/run/upload)."""
-    started_at = claimed_at(dsn, execution_id)
+    try:
+        started_at = claimed_at(dsn, execution_id)
+    except Exception:
+        # #204 broad-except audit: claimed_at opens its own read connection
+        # AFTER mark_done committed the result — pool exhaustion or a failed
+        # query must not turn the caller's committed 204 into a 500 (this
+        # module's never-raise contract); the failure costs wall_seconds only.
+        started_at = None
     emit_worker_event(
         "execution.finished",
         {

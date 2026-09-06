@@ -108,8 +108,22 @@ def test_emit_event_normal_rhythm_is_debug(events) -> None:
     # is the dev-shape norm; promotion would be a per-minute INFO noise
     # source). Admission rejections route to claim.rejected (INFO).
     emit_worker_event("claim.empty", {"worker_id": "w", "reasons": {"workspace_paused": 3}})
+    # A COMMITTED outcome is rhythm; a rejected terminal commit is a turn
+    # (P2-1: the last Host-side clue of that execution must stay visible).
     emit_worker_event("execution.finished", {"outcome": "completed"})
     assert [record.levelno for record in events] == [logging.DEBUG] * 4
+    emit_worker_event("execution.finished", {"worker_id": "w", "outcome": "rejected"})
+    assert events[-1].levelno == logging.INFO
+
+
+def test_emit_event_rejected_finished_is_info_even_without_reason(events) -> None:
+    # Level routing keys on outcome only — payload shape variations (a
+    # missing reason field) must not sink the rejection back to DEBUG.
+    from server.app.agent_broker.worker_events import _event_level
+
+    assert _event_level("execution.finished", {"outcome": "rejected"}) == logging.INFO
+    assert _event_level("execution.finished", {"outcome": "completed"}) == logging.DEBUG
+    assert _event_level("execution.finished", None) == logging.DEBUG
 
 
 def test_emit_event_unknown_name_warns_once_without_duplicate_emission(events) -> None:
@@ -207,6 +221,111 @@ def test_note_claim_outcome_reads_model_from_execution_manifest(events) -> None:
     granted = _json_records(events)[-1]
     assert granted["event"] == "claim.granted"
     assert granted["model"] == "test-model"
+
+
+class _Pools:
+    """WorkerView stand-in with tunable pool occupancy."""
+
+    def __init__(
+        self,
+        *,
+        agent_active: int,
+        agent_capacity: int,
+        code_active: int = 0,
+        code_capacity: int = 0,
+    ) -> None:
+        self.agent_active = agent_active
+        self.agent_capacity = agent_capacity
+        self.code_active = code_active
+        self.code_capacity = code_capacity
+
+
+def test_note_claim_outcome_agent_full_with_idle_code_headroom_is_plain_empty(events) -> None:
+    """P2-2 noise shape: the agent pool is full while the code pool has idle
+    headroom and its queue is drained (scan ran, nothing fired) — the pass is
+    the plain idle rhythm, NOT a capacity_full rejection. The pre-fix code
+    read the live pool state on every empty pass, blaming capacity_full on
+    each poll."""
+    from server.app.agent_broker.worker_events import note_claim_outcome
+
+    view = _Pools(agent_active=4, agent_capacity=4, code_active=0, code_capacity=2)
+    note_claim_outcome("w", None, view, {})  # scan ran; empty code queue, no skips
+    payload = _json_records(events)[-1]
+    assert payload["event"] == "claim.empty"
+    assert "reasons" not in payload
+    assert not [p for p in _json_records(events) if p["event"] == "claim.rejected"]
+
+
+def test_note_claim_outcome_pool_state_synthesis_only_on_skipped_scan(events) -> None:
+    """The live pool state IS the admission evidence only on the pass that
+    never scanned (both pools at cap / unusable code headroom) — there it
+    must still classify as capacity_full."""
+    from server.app.agent_broker.worker_events import note_claim_outcome
+
+    both_full = _Pools(agent_active=2, agent_capacity=2, code_active=1, code_capacity=1)
+    note_claim_outcome("w", None, both_full, {}, scan_skipped=True)
+    rejected = [p for p in _json_records(events) if p["event"] == "claim.rejected"]
+    assert len(rejected) == 1
+    assert rejected[0]["reasons"] == {"capacity_full": 1}
+
+    # Code-only full (agent lane not declared): code_capacity_full.
+    code_full = _Pools(agent_active=0, agent_capacity=0, code_active=2, code_capacity=2)
+    note_claim_outcome("w", None, code_full, {}, scan_skipped=True)
+    rejected = [p for p in _json_records(events) if p["event"] == "claim.rejected"]
+    assert rejected[-1]["reasons"] == {"code_capacity_full": 1}
+
+    # Real skip-reason evidence outranks (and suppresses) the synthesis.
+    note_claim_outcome("w", None, both_full, {"workspace_paused": 2}, scan_skipped=True)
+    last = _json_records(events)[-1]
+    assert last["event"] == "claim.empty"
+    assert last["reasons"] == {"workspace_paused": 2}
+
+
+def test_note_execution_finished_survives_claimed_at_failure(events, monkeypatch) -> None:
+    """P1: claimed_at opens its own read connection AFTER the result was
+    committed — pool exhaustion or a failed query there must not turn the
+    caller's committed 204 into a 500 (the module's never-raise contract).
+    The failure costs wall_seconds only."""
+    from server.app.agent_broker import worker_events
+
+    def _boom(dsn, execution_id):
+        raise RuntimeError("pool exhausted")
+
+    monkeypatch.setattr(worker_events, "claimed_at", _boom)
+
+    class _Outcome:
+        status = "completed"
+        exit_code = 0
+
+    worker_events.note_execution_finished(
+        "exec-1", "w", {"job_id": "job-1"}, _Outcome(), "dsn://irrelevant"
+    )  # must not raise
+    finished = [p for p in _json_records(events) if p["event"] == "execution.finished"]
+    assert len(finished) == 1
+    assert finished[0]["outcome"] == "completed"
+    assert finished[0]["exit_code"] == 0
+    assert finished[0]["wall_seconds"] is None
+
+
+def test_note_execution_finished_reports_wall_seconds(events, monkeypatch) -> None:
+    from datetime import timedelta
+
+    from server.app.agent_broker import worker_events
+
+    class _Outcome:
+        status = "failed"
+        exit_code = 3
+
+    claimed = datetime.now(UTC) - timedelta(seconds=90)
+    monkeypatch.setattr(worker_events, "claimed_at", lambda dsn, execution_id: claimed)
+    worker_events.note_execution_finished(
+        "exec-2", "w", {"job_id": "job-2"}, _Outcome(), "dsn://irrelevant"
+    )
+    finished = _json_records(events)[-1]
+    assert finished["outcome"] == "failed"
+    assert finished["exit_code"] == 3
+    assert finished["wall_seconds"] is not None
+    assert finished["wall_seconds"] >= 90
 
 
 class _RegisterPayload:
