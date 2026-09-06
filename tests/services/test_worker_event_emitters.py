@@ -642,6 +642,9 @@ def test_debug_rhythm_is_hidden_at_default_info_level(monkeypatch: pytest.Monkey
         logging.config.dictConfig(config)
         emit_worker_event("claim.granted", {"worker_id": "w"})
         emit_worker_event("claim.empty", {"worker_id": "w"})
+        # Saturation rejections are rhythm too (#5125358408 P1-A): both pools
+        # full fires capacity_full on every poll — hidden at INFO like the
+        # rest of the rhythm.
         emit_worker_event("claim.rejected", {"worker_id": "w", "reasons": {"capacity_full": 1}})
     finally:
         for logger, handlers, level, propagate in saved_state:
@@ -651,5 +654,57 @@ def test_debug_rhythm_is_hidden_at_default_info_level(monkeypatch: pytest.Monkey
             logger.disabled = False
 
     payloads = [json.loads(line) for line in stream.getvalue().splitlines() if line.strip()]
-    # DEBUG hidden, INFO (transition) visible.
-    assert [p["event"] for p in payloads] == ["claim.rejected"]
+    # DEBUG hidden; only a MISCONFIGURATION rejection would be INFO here.
+    assert payloads == []
+
+
+def test_saturation_rejection_is_debug_misconfiguration_is_info(events) -> None:
+    """#5125358408 P1-A：纯容量类拒绝（饱和稳态节奏）→ DEBUG；准入错配
+    （model/runtime/scope——一次配置事实）与混合原因 → INFO。"""
+    from server.app.agent_broker.worker_events import _event_level
+
+    # Saturation families: rhythm (a saturated worker fires these every poll).
+    for reasons in ({"capacity_full": 1}, {"code_capacity_full": 1}, {"capacity_raced": 3}):
+        assert _event_level("claim.rejected", {"reasons": reasons}) == logging.DEBUG
+    # Misconfiguration families: a durable fact worth the default level.
+    for reasons in (
+        {"model_mismatch": 1},
+        {"runtime_mismatch": 1},
+        {"workspace_not_allowed": 1},
+        # Mixed: the misconfig part keeps the line visible.
+        {"capacity_full": 2, "model_mismatch": 1},
+    ):
+        assert _event_level("claim.rejected", {"reasons": reasons}) == logging.INFO
+    # No reasons at all (defensive): keep INFO.
+    assert _event_level("claim.rejected", {"worker_id": "w"}) == logging.INFO
+    assert _event_level("claim.rejected", None) == logging.INFO
+
+
+def test_emit_worker_event_skips_serialization_when_level_disabled(
+    events, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR #497 review：isEnabledFor 守卫先于 json.dumps——关掉的级别不付
+    序列化成本（sweep 的事务内发射点仍持行锁）。"""
+    from server.app.agent_broker import worker_events
+
+    calls = {"dumps": 0}
+    real_dumps = worker_events.json.dumps
+
+    def _counting_dumps(*args, **kwargs):
+        calls["dumps"] += 1
+        return real_dumps(*args, **kwargs)
+
+    monkeypatch.setattr(worker_events.json, "dumps", _counting_dumps)
+    # caplog fixture sets the logger to DEBUG, so a DEBUG event pays for
+    # serialization, an INFO event on a WARNING-threshold logger would not;
+    # here: emit one DEBUG event (serialized) and re-check the guard logic
+    # via a disabled level.
+    worker_events.emit_worker_event("claim.empty", {"worker_id": "w"})
+    assert calls["dumps"] == 1
+
+    # Now disable DEBUG on the logger entirely: the same event must not
+    # serialize at all.
+    logger = logging.getLogger("agent_legion.worker_events")
+    monkeypatch.setattr(logger, "isEnabledFor", lambda level: level >= logging.INFO)
+    worker_events.emit_worker_event("claim.empty", {"worker_id": "w"})
+    assert calls["dumps"] == 1, "a disabled level must not pay the json.dumps"

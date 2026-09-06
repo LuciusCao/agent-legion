@@ -7,12 +7,20 @@ batch, auth (worker token only, and only this Worker's leases renew — a
 foreign Worker's execution is lost), the batch size cap, and the cancel body
 for code executions. The single heartbeat endpoint's behavior is pinned by
 tests/routes/test_agent_workers.py and stays untouched here.
+
+#499: the lost items also emit one ``execution.heartbeat_rejected`` each,
+with the same reason literals the single path uses (not_owned for the
+row-miss failure point, lease_not_active for the released-lease point),
+emitted after the batch transaction commits.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.helpers.agent_worker_api import (
@@ -25,6 +33,39 @@ from tests.helpers.agent_worker_api import (
 )
 
 _BATCH_URL = "/api/agent-executions/heartbeats"
+
+
+@pytest.fixture
+def events(caplog: pytest.LogCaptureFixture) -> list[dict]:
+    """Live view of the worker-events logger as parsed JSON payloads."""
+    caplog.set_level(logging.DEBUG, logger="agent_legion.worker_events")
+    captured: list[dict] = []
+
+    class _View:
+        def __getitem__(self, index: int) -> dict:
+            return self._live[index]
+
+        def __iter__(self):
+            return iter(self._live)
+
+        def __len__(self) -> int:
+            return len(self._live)
+
+        @property
+        def _live(self) -> list[dict]:
+            fresh = [
+                json.loads(record.getMessage())
+                for record in caplog.records
+                if record.name == "agent_legion.worker_events"
+            ]
+            captured.extend(record for record in fresh if record not in captured)
+            return captured
+
+    return _View()
+
+
+def _heartbeat_events(events) -> list[dict]:
+    return [event for event in events if event["event"] == "execution.heartbeat_rejected"]
 
 
 def _register_second_worker(client: TestClient) -> str:
@@ -83,6 +124,7 @@ def test_batch_heartbeat_renews_all_owned_executions(tmp_path: Path) -> None:
 
 def test_batch_heartbeat_reports_lost_items_without_failing_the_batch(
     tmp_path: Path,
+    events,
 ) -> None:
     """未知 id / 过期 lease / 错误 lease：逐项进 lost，其余照常续期，不 5xx。"""
     app = make_app(tmp_path)
@@ -293,3 +335,197 @@ def test_single_heartbeat_endpoint_still_works_alongside_batch(tmp_path: Path) -
             [{"execution_id": claimed["execution_id"], "lease_id": claimed["lease_id"]}],
         )
         assert batch["renewed"] == [claimed["execution_id"]]
+
+
+# ---------------------------------------------------------------------------
+# #499: lost items must surface in the event stream. The single path emits
+# execution.heartbeat_rejected on both refusal points; the batch path (v5, the
+# forward default) must do the same per lost item, with the SAME reason
+# literals — and only after the batch transaction commits (#498 discipline).
+
+
+def test_batch_heartbeat_lost_items_emit_rejected_events_per_failure_point(
+    tmp_path: Path, events
+) -> None:
+    """两个失败点分开：row 缺失（未知 id / 错误 lease / 他人 execution）→
+    not_owned；行在但 lease 已释放 → lease_not_active。每项一条事件，reason
+    正确。"""
+    app = make_app(tmp_path)
+    seed_request(app.state.job_db, job_id="job-1", limit=10)
+    seed_request(app.state.job_db, job_id="job-2", limit=10)
+
+    with TestClient(app) as client:
+        authenticate_admin(client)
+        token = register(client)["worker_token"]
+        first = claim(client, token)
+        second = claim(client, token)
+        # Failure point 2: release the lease (a concurrent finish/expiry), so
+        # the row IS this Worker's under this lease but the lease is dead.
+        from server.app.db.transaction import write_transaction
+
+        with write_transaction(app.state.job_db.dsn_identity) as conn:
+            conn.execute(
+                "update executor_leases set status='released' where id=%s", (second["lease_id"],)
+            )
+        items = [
+            # Failure point 1: unknown execution id (row is None).
+            {"execution_id": "exec-unknown", "lease_id": "lease-x"},
+            # Failure point 1: right execution, wrong lease.
+            {"execution_id": first["execution_id"], "lease_id": "not-the-lease"},
+            # Failure point 2: right execution + lease, lease released.
+            {"execution_id": second["execution_id"], "lease_id": second["lease_id"]},
+        ]
+
+        outcome = _heartbeat_ok(client, token, items)
+
+    assert outcome["renewed"] == []
+    assert sorted(outcome["lost"]) == sorted(
+        ["exec-unknown", first["execution_id"], second["execution_id"]]
+    )
+    rejected = _heartbeat_events(events)
+    assert len(rejected) == 3, "one event per lost item, none for the (empty) renewed set"
+    by_execution = {event["execution_id"]: event for event in rejected}
+    assert by_execution["exec-unknown"]["reason"] == "not_owned"
+    assert by_execution["exec-unknown"]["worker_id"] == "home-mini"
+    assert by_execution[first["execution_id"]]["reason"] == "not_owned"
+    assert by_execution[second["execution_id"]]["reason"] == "lease_not_active"
+
+
+def test_batch_heartbeat_fully_renewed_batch_emits_no_rejected_events(
+    tmp_path: Path, events
+) -> None:
+    """全续期：无 lost 项即无事件（健康心跳不是事件流噪音）。"""
+    app = make_app(tmp_path)
+    seed_request(app.state.job_db, job_id="job-1", limit=10)
+
+    with TestClient(app) as client:
+        authenticate_admin(client)
+        token = register(client)["worker_token"]
+        claimed = claim(client, token)
+        outcome = _heartbeat_ok(
+            client,
+            token,
+            [{"execution_id": claimed["execution_id"], "lease_id": claimed["lease_id"]}],
+        )
+
+    assert outcome["renewed"] == [claimed["execution_id"]]
+    assert outcome["lost"] == []
+    assert _heartbeat_events(events) == []
+
+
+def test_batch_heartbeat_no_events_when_transaction_fails(
+    tmp_path: Path, events, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#498 纪律统一适用：批量事务 commit 失败（连接在 COMMIT 点丢失）时，
+    已决定的 lost verdict 不得进入事件流——回滚的事务从未发生。
+
+    纯 broker 层（不建 app/不启后台线程——采样线程的 commit 会吃掉一次性
+    注入臂）；一个未知项的 lost verdict 在事务内已决定，commit 注入失败后
+    不得出现在事件流。"""
+    from psycopg import OperationalError
+
+    import server.app.db.transaction as transaction_module
+    from server.app.agent_broker import AgentExecutionBroker
+    from server.app.agent_broker.heartbeat_batch import batch_heartbeat
+    from tests.postgres_support import TEST_DATABASE_URL
+
+    real_connect = transaction_module.connect_database
+    state = {"armed": False}
+
+    def _connect(dsn):
+        conn = real_connect(dsn)
+        real_commit = conn.commit
+
+        def _commit() -> None:
+            if state["armed"]:
+                raise OperationalError("commit lost (scripted)")
+            real_commit()
+
+        conn.commit = _commit  # type: ignore[method-assign]
+        return conn
+
+    monkeypatch.setattr(transaction_module, "connect_database", _connect)
+
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=tmp_path)
+    state["armed"] = True
+    # The lost verdict (exec-unknown → not_owned) is decided inside the
+    # transaction; the commit then fails, so it must not surface.
+    with pytest.raises(OperationalError):
+        batch_heartbeat(
+            broker,
+            "no-such-worker",
+            [{"execution_id": "exec-unknown", "lease_id": "lease-x"}],
+        )
+
+    assert _heartbeat_events(events) == []
+
+
+def test_single_heartbeat_rejection_reasons_match_batch_literals(tmp_path: Path, events) -> None:
+    """单条与批量共享 reason 字面量（worker_events.HEARTBEAT_*）：两条路径的
+    not_owned 事件逐字段一致，防漂移（issue #499 的 helper 建议）。"""
+    from server.app.agent_broker.worker_events import (
+        HEARTBEAT_LEASE_NOT_ACTIVE,
+        HEARTBEAT_NOT_OWNED,
+    )
+
+    app = make_app(tmp_path)
+    seed_request(app.state.job_db, job_id="job-1", limit=10)
+
+    with TestClient(app) as client:
+        authenticate_admin(client)
+        token = register(client)["worker_token"]
+        claimed = claim(client, token)
+        single = client.post(
+            f"/api/agent-executions/{claimed['execution_id']}/heartbeat",
+            headers={"X-Agent-Worker-Token": token, "X-Agent-Lease-Id": "not-the-lease"},
+        )
+        assert single.status_code == 409
+
+    rejected = _heartbeat_events(events)
+    assert len(rejected) == 1
+    assert rejected[0]["reason"] == HEARTBEAT_NOT_OWNED
+    assert rejected[0]["execution_id"] == claimed["execution_id"]
+    # The literals the batch path classifies with are the same strings.
+    assert HEARTBEAT_NOT_OWNED == "not_owned"
+    assert HEARTBEAT_LEASE_NOT_ACTIVE == "lease_not_active"
+
+
+def test_batch_heartbeat_takes_row_locks_in_sorted_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#5125358408 P1-B：批内 AER 行锁按 execution_id（主键）排序获取——
+    两个并发批量事务共享同一 worker 注册（运维事故场景）时锁序一致，
+    不再 A,B / B,A 交错。钉住结构防回退。"""
+    import contextlib
+
+    from server.app.agent_broker import heartbeat_batch as hb
+
+    visited: list[str] = []
+
+    @contextlib.contextmanager
+    def _fake_transaction(dsn):
+        yield object()
+
+    def _recording_renew_one(conn, broker, worker_id, execution_id, lease_id):
+        visited.append(execution_id)
+        return None  # everything renews
+
+    monkeypatch.setattr(hb, "write_transaction", _fake_transaction)
+    monkeypatch.setattr(hb, "_renew_one", _recording_renew_one)
+    monkeypatch.setattr(hb, "touch_worker", lambda conn, worker_id: None)
+
+    class _Broker:
+        database_dsn = "unused"
+
+    # Deliberately unsorted input order.
+    outcome = hb.batch_heartbeat(
+        _Broker(),
+        "w",
+        [
+            {"execution_id": "exec-c", "lease_id": "l"},
+            {"execution_id": "exec-a", "lease_id": "l"},
+            {"execution_id": "exec-b", "lease_id": "l"},
+        ],
+    )
+
+    assert visited == ["exec-a", "exec-b", "exec-c"], "row locks must be taken in PK order"
+    assert outcome["renewed"] == ["exec-a", "exec-b", "exec-c"]
+    assert outcome["lost"] == []

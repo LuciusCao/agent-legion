@@ -331,3 +331,168 @@ def test_result_commit_survives_claimed_at_read_failure(job_db, events, monkeypa
     assert finished[0]["outcome"] == "failed"
     assert finished[0]["exit_code"] == 1
     assert finished[0]["wall_seconds"] is None  # the read's only cost
+
+
+# ---------------------------------------------------------------------------
+# #498: claim events ride the post-commit discipline. The verdict is decided
+# inside claim_in_transaction but claim.granted / claim.empty / claim.rejected
+# must only reach the event stream AFTER write_transaction's commit succeeds —
+# a rolled-back transaction (deadlock retry #437, serialization conflict,
+# connection loss) never happened, so its verdict must not be observable.
+
+
+class _RecordingCommit:
+    """Patches write_transaction.commit to record ordering / inject failure.
+
+    Wrapping DatabaseConnection.commit at the transaction-module boundary
+    keeps the real claim flow (SQL, retries, rollback) intact: the recorder
+    sees every commit on the test database and can fail the next one with a
+    scripted psycopg Error, exactly like a lost connection at COMMIT. The
+    recorder must be ARMED only around the broker call under test — seeding
+    and fixture setup commit too, and those are not part of the timeline.
+    """
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from psycopg import OperationalError
+
+        import server.app.db.transaction as transaction_module
+
+        self.order: list[str] = []
+        self._fail_next = False
+        self._armed = False
+        self._operational_error = OperationalError
+        real_connect = transaction_module.connect_database
+
+        def _connect(dsn):
+            conn = real_connect(dsn)
+            real_commit = conn.commit
+
+            def _commit() -> None:
+                if self._armed:
+                    self.order.append("commit")
+                    if self._fail_next:
+                        self._fail_next = False
+                        raise self._operational_error("commit lost (scripted)")
+                real_commit()
+
+            conn.commit = _commit  # type: ignore[method-assign]
+            return conn
+
+        monkeypatch.setattr(transaction_module, "connect_database", _connect)
+
+    def arm(self, *, fail_next: bool = False) -> None:
+        """Start recording (and optionally fail the next armed commit)."""
+        self._armed = True
+        self._fail_next = fail_next
+
+
+def _claim_event_names(events) -> list[str]:
+    return [event["event"] for event in events if event["event"].startswith("claim.")]
+
+
+def test_claim_event_emits_only_after_commit(job_db, events, monkeypatch) -> None:
+    """成功路径时序：claim.granted 必须晚于事务 commit（与 record_job_update
+    同一纪律）——事件流的时间线才可信。"""
+    recorder = _RecordingCommit(monkeypatch)
+    _seed_queued_request(job_db, "evt-order-job")
+    _worker(job_db, "evt-order-worker")
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
+    recorder.arm()
+    assert broker.claim("evt-order-worker") is not None
+
+    assert recorder.order == ["commit"]
+    assert _claim_event_names(events) == ["claim.granted"]
+
+
+def test_claim_event_emits_once_after_deadlock_retry(job_db, events, monkeypatch) -> None:
+    """死锁重试（#437）后成功：第一次事务的 verdict 被回滚丢弃，重试成功的
+    commit 之后恰好一条 claim.granted ——不会因重试出现双份事件。"""
+    from psycopg.errors import DeadlockDetected
+
+    import server.app.agent_broker.claim_retry as claim_retry_module
+
+    _seed_queued_request(job_db, "evt-dlr-job")
+    _worker(job_db, "evt-dlr-worker")
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
+    real_claim = claim_retry_module.claim_in_transaction
+    calls = {"n": 0}
+
+    def deadlock_once(broker_arg, conn, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise DeadlockDetected("deadlock detected")
+        return real_claim(broker_arg, conn, *args, **kwargs)
+
+    monkeypatch.setattr(claim_retry_module, "claim_in_transaction", deadlock_once)
+
+    assert broker.claim("evt-dlr-worker") is not None
+    assert calls["n"] == 2
+
+    assert _claim_event_names(events) == ["claim.granted"]
+
+
+def test_no_claim_event_when_commit_fails(job_db, events, monkeypatch) -> None:
+    """commit 失败（连接在 COMMIT 点丢失）：事务回滚，claim 从未发生——
+    事件流里不得出现任何 claim.* 事件（幽灵 claim.granted，#498 主现场）。"""
+    recorder = _RecordingCommit(monkeypatch)
+    _seed_queued_request(job_db, "evt-ghost-job")
+    _worker(job_db, "evt-ghost-worker")
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
+    from psycopg import OperationalError
+
+    recorder.arm(fail_next=True)
+    with pytest.raises(OperationalError):
+        broker.claim("evt-ghost-worker")
+
+    assert recorder.order == ["commit"]
+    assert _claim_event_names(events) == []
+    # The request row is untouched: the claim never happened, so it stays
+    # queued and the very next claim attempt can take it.
+    with job_db.connect() as conn:
+        state = conn.execute(
+            "select state from agent_execution_requests where job_id=%s", ("evt-ghost-job",)
+        ).fetchone()
+    assert state is not None and str(state["state"]) == "queued"
+
+
+def test_empty_claim_event_also_waits_for_commit(job_db, events, monkeypatch) -> None:
+    """空 claim 的 verdict 同样受纪律约束：commit 失败的空扫描不得发
+    claim.empty——三处发射点（granted/empty/rejected）语义都搬了，不只 granted。"""
+    recorder = _RecordingCommit(monkeypatch)
+    _worker(job_db, "evt-ghost-idle")
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
+    from psycopg import OperationalError
+
+    recorder.arm(fail_next=True)
+    with pytest.raises(OperationalError):
+        broker.claim("evt-ghost-idle")
+
+    assert recorder.order == ["commit"]
+    assert _claim_event_names(events) == []
+
+
+def test_rejected_claim_event_emits_after_commit(job_db, events, monkeypatch) -> None:
+    """拒绝路径（准入不匹配）成功提交后照常发 claim.rejected——重构没有
+    丢掉 #490 的拒绝信号。"""
+    recorder = _RecordingCommit(monkeypatch)
+    _seed_queued_request(job_db, "evt-rej-commit-job")
+    _worker(
+        job_db, "evt-rej-commit-worker", models=[{"provider": "gateway", "model": "other-model"}]
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
+    recorder.arm()
+    assert broker.claim("evt-rej-commit-worker") is None
+
+    # The claim transaction's commit is the FIRST armed commit (a rejected
+    # claim also fires the debounced blocked-queue diagnostic, whose own
+    # write transaction lands after the claim's — the event still follows
+    # the claim's commit).
+    assert recorder.order[0] == "commit"
+    rejected = [event for event in events if event["event"] == "claim.rejected"]
+    assert len(rejected) == 1
+    assert rejected[0]["reasons"] == {"model_mismatch": 1}

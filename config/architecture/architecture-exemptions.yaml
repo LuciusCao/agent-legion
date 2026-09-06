@@ -52,10 +52,12 @@ exemptions:
     split the claim transaction's single flow across files for ~20 lines of
     instrumentation. The original anchor (#448) closed with phase 2
     restructured elsewhere; re-anchored to #490 by the structured-events
-    PR that added the observation calls riding the same exits. Remove when
-    the claim path's next rework re-budgets the module.
+    PR that added the observation calls riding the same exits. #498 then
+    REMOVED the in-transaction observation calls (the verdict rides out as
+    one ClaimOutcome return; the broker emits only after the commit), so
+    the ceiling stays at its committed floor.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/490
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/498
   ceiling: 122
 - check: architecture.file_budget
   path: server/app/agent_broker/worker_events.py
@@ -76,9 +78,14 @@ exemptions:
     module is re-budgeted. Ceiling re-dated 292 to 294 for the #497 codex
     P2: the offline memo overwrites on every online bucket (setdefault
     froze the first observation, aging worker.offline's last_seen_at by
-    hours) — one overwritten assignment plus its why-comment.
+    hours) — one overwritten assignment plus its why-comment. #499 and PR
+    #497 review round #5125358408 then added the shared HEARTBEAT_*
+    reason literals, the saturation→DEBUG classification (P1-A) and the
+    isEnabledFor serialization guard, all paid for inside the SAME 294
+    ceiling by compacting the module docstring, the set literals and the
+    alias indirection — no re-date.
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/490
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/499
   ceiling: 294
 - check: architecture.file_budget
   path: server/app/agent_broker/claim_evaluate.py
@@ -1043,3 +1050,68 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/352
   ceiling: 274
+- check: architecture.file_budget
+  path: server/app/agent_broker/claim_scan.py
+  reason: >-
+    #498 (PR #497 review) adds the ClaimOutcome frozen dataclass here —
+    the post-transaction event payload the broker emits only after the
+    claim transaction commits. It lives beside AgentClaim/WorkerView/
+    ScanState because it is the same family of per-claim-pass value
+    objects (the scan modules already own the claim data model), and
+    giving it its own module would split the claim's data model across
+    files for ~26 lines. Remove when the claim path's next rework
+    re-budgets the family together with claim.py's entry.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/498
+  ceiling: 151
+- check: architecture.file_budget
+  path: server/app/agent_broker/heartbeat_single.py
+  reason: >-
+    #499 (PR #497 review) applies the #498 post-commit event discipline to
+    the single heartbeat: the refusal reason is decided inside the write
+    transaction (_renew_in_transaction, None = renewed) and the
+    execution.heartbeat_rejected event fires only after the commit
+    succeeds, sharing the HEARTBEAT_* reason literals with the batch
+    path. The split (transaction inner function + post-commit emit in the
+    public wrapper) is the minimal shape that keeps the verdict and its
+    emission in one readable flow; the alternative — emitting in place —
+    is exactly the ghost-event bug this fixes. Remove when the heartbeat
+    paths gain their own shared renewal module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/499
+  ceiling: 61
+- check: architecture.file_budget
+  path: server/app/agent_broker/heartbeat_batch.py
+  reason: >-
+    #499 (PR #497 review) makes the batch path emit one
+    execution.heartbeat_rejected per lost item — _renew_one returns the
+    refusal reason (shared HEARTBEAT_* literals) instead of a bare bool,
+    the lost loop collects reasons inside the transaction, and the
+    emissions run only after the batch transaction commits (the #498
+    discipline). All three additions are the v5 path's own event
+    contract; splitting them out would fork the single/batch pairing the
+    shared literals exist to keep aligned. Ceiling re-dated 91 to 98 for
+    PR #497 review round #5125358408 P1-B: the renewal loop takes its
+    per-item row locks in sorted execution_id order (two concurrent
+    batches sharing one worker registration can no longer interleave
+    A,B / B,A) and the lock-order note now documents the real three-table
+    lock surface (AER → executor_leases → agent_workers, same direction
+    as every other renewal path). PR base is develop, where this file
+    does not exist. Remove when the heartbeat paths gain their own
+    shared renewal module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/499
+  ceiling: 98
+- check: architecture.file_budget
+  path: worker/host/heartbeat_ops.py
+  reason: >-
+    PR #497 review round #5125358408 P2: the batch endpoint's 404/405
+    branch logs one INFO line carrying the lease count — degraded to
+    single beats, N leases × SINGLE_BEAT_TIMEOUT_SECONDS is the per-tick
+    wall-clock ceiling of the rolling-upgrade window, and the transition
+    was previously visible only as a count-free mode flip. One logging
+    call plus its module logger; remove together with the heartbeat_ops
+    split when the client gains a structured-events side.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/499
+  ceiling: 83

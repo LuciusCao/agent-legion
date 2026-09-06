@@ -1,24 +1,18 @@
 """Structured JSON-lines events for the Agent Worker claim/execution path (#490).
 
-排障时「Worker 为什么拿不到任务 / 执行卡在哪」不能再靠 grep 访问日志拼
-时间线：Host 侧把 Worker 数据面的生命周期转折点各打一条**单行 JSON**
-事件（名空间见 ``_KNOWN_EVENTS``），落点是与既有日志体系同一 stderr
-管道，既有采集面（uvicorn/容器/原生）原样收到；聚合/上报是后续工作。
+排障时「Worker 为什么拿不到任务 / 执行卡在哪」不再靠 grep 访问日志拼时间
+线：Host 侧把 Worker 数据面生命周期转折点各打一条单行 JSON 事件（名空间见
+``_KNOWN_EVENTS``），落点与既有日志同一 stderr 管道，聚合/上报是后续工作。
 
-- 事件名 ``<域>.<事件>``；字段 ``ts``（ISO-8601 UTC）+ 语义载荷
-  （worker_id / execution_id / job_id / outcome / reason / 耗时秒）。
+- 事件名 ``<域>.<事件>``；字段 ``ts``（ISO-8601 UTC）+ 语义载荷。
 - ``reason`` 是重点（issue 核心缺口）：``note_skip_reasons`` 把
-  ``claim_evaluate`` 的 skip-reason 计数（判定点原命名，判定逻辑零改动）
-  折叠进 ``claim.empty`` / ``claim.rejected``——四大准入不匹配（并发池满
-  / runtime 不匹配 / model 未声明 / scope 拒绝）与其它原因保留原名。
-- 载荷组装（``_note_*`` 系列）也在本模块：发射点文件只留一条调用，
-  预算治理把观测增量集中到这个新登记的模块。
-- 级别纪律（费用边界）：正常节奏（claim.granted / claim.empty（含非
-  拒绝原因，如 workspace_paused——dev 形态所有 workspace 重置为暂停，
-  升 INFO 就是每分钟一条噪音）/ 执行完成）DEBUG；异常/转折（registered
-  / offline / rejected / lease_expired / 409/500 拒绝）INFO+，默认不开。
-- ``emit_worker_event`` 纯函数 + 模块级 logger，永不抛（观测不得击穿
-  被观测路径）；secret 已在上游被 VAULT-SECRET-001 白名单挡住。
+  ``claim_evaluate`` 的 skip-reason 计数折叠进 ``claim.empty`` /
+  ``claim.rejected``，判定点命名保留原名（完整对照见 runbook §7）。
+- 级别纪律（费用边界）：正常节奏（granted / empty（含非拒绝原因）/ 执行
+  完成 / 纯容量饱和拒绝——#5125358408）DEBUG；转折（registered / offline
+  / 错配类 rejected / lease_expired / 409/500 拒绝）INFO+，默认不开。
+- ``emit_worker_event`` 永不抛（观测不得击穿被观测路径）；secret 已在上游
+  被 VAULT-SECRET-001 白名单挡住。
 """
 
 from __future__ import annotations
@@ -28,12 +22,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from server.app.agent_control.registry import (
-    ONLINE_THRESHOLD_SECONDS as _ONLINE_THRESHOLD_SECONDS,
-)
-
-# Re-export for tests/sibling importers; registry is the single source.
-ONLINE_THRESHOLD_SECONDS = _ONLINE_THRESHOLD_SECONDS
+from server.app.agent_control.registry import ONLINE_THRESHOLD_SECONDS
 
 if TYPE_CHECKING:
     from server.app.agent_broker.claim_scan import AgentClaim, WorkerView
@@ -42,7 +31,7 @@ logger = logging.getLogger("agent_legion.worker_events")
 
 # 事件名单空间（runbook §7 的事件码表与之一一对应；测试钉住全集）。
 _KNOWN_EVENTS = frozenset(
-    [
+    (
         "worker.registered",
         "worker.register_rejected",
         "worker.offline",
@@ -53,7 +42,7 @@ _KNOWN_EVENTS = frozenset(
         "execution.finished",
         "execution.heartbeat_rejected",
         "execution.lease_expired",
-    ]
+    )
 )
 
 # claim_evaluate 的 skip-reason → 是否属于「准入拒绝」（有 stock 但这个
@@ -64,30 +53,40 @@ _KNOWN_EVENTS = frozenset(
 # execution_contract_invalid、labels_mismatch、lock_raced …）语义各异，
 # 原样透传，见 runbook §7 的完整对照。
 _REJECT_REASONS = frozenset(
-    [
+    (
         "capacity_full",
         "code_capacity_full",
         "capacity_raced",
         "runtime_mismatch",
         "model_mismatch",
         "workspace_not_allowed",
-    ]
+    )
 )
+
+# 饱和拒绝（#5125358408 P1-A）：纯容量类拒绝是饱和稳态节奏（每 poll 一
+# 条），与 workspace_paused 的 DEBUG 先例同族；错配类保持 INFO。
+_SATURATION_REASONS = frozenset(("capacity_full", "code_capacity_full", "capacity_raced"))
+
+
+def _render_event(event: str, payload: dict[str, Any] | None) -> str:
+    body = {"event": event, "ts": datetime.now(UTC).isoformat(), **(payload or {})}
+    return json.dumps(body, ensure_ascii=False, default=str, sort_keys=True)
 
 
 def emit_worker_event(event: str, payload: dict[str, Any] | None = None) -> None:
-    """Log one lifecycle event as a single JSON line; never raises (levels
-    are event-intrinsic, see the module docstring)."""
-    body = {"event": event, "ts": datetime.now(UTC).isoformat(), **(payload or {})}
-    line = json.dumps(body, ensure_ascii=False, default=str, sort_keys=True)
+    """Log one lifecycle event as a single JSON line; never raises. The
+    ``isEnabledFor`` check gates the ``json.dumps`` too — the sweep still
+    emits under row locks (PR #497 review)."""
     if event not in _KNOWN_EVENTS:
         # Unknown event name is a programming slip, not a runtime condition:
         # WARN with the full line (payload included) and drop the second
         # emission — a duplicate INFO copy of the same line is pure noise
         # (#494 review P2: the double emission rode the visibility fix).
-        logger.warning("worker event with unregistered name: %s", line)
+        logger.warning("worker event with unregistered name: %s", _render_event(event, payload))
         return
-    logger.log(_event_level(event, payload), line)
+    level = _event_level(event, payload)
+    if logger.isEnabledFor(level):
+        logger.log(level, _render_event(event, payload))
 
 
 def _event_level(event: str, payload: dict[str, Any] | None) -> int:
@@ -103,6 +102,14 @@ def _event_level(event: str, payload: dict[str, Any] | None) -> int:
         # execution — the Worker's own http.error is INFO on its side — so it
         # must stay visible at the default level, not sink with the rhythm.
         return logging.INFO
+    if event == "claim.rejected":
+        # Saturation is rhythm, not a turn (#5125358408 P1-A): capacity_full
+        # fires every poll on a saturated worker — the same shape that keeps
+        # workspace_paused at DEBUG. Misconfigurations (model/runtime/scope)
+        # and mixed lines stay INFO.
+        reasons = (payload or {}).get("reasons") or {}
+        if reasons and set(reasons) <= _SATURATION_REASONS:
+            return logging.DEBUG
     if event in ("claim.empty", "claim.granted", "execution.started", "execution.finished"):
         return logging.DEBUG
     return logging.INFO
@@ -123,6 +130,11 @@ def note_skip_reasons(
 # Payload builders: one per emit site, so the emitting file carries a single
 # call and the field selection lives next to the reason mapping above.
 
+# Heartbeat refusal reasons (#499): shared literals so the single and batch
+# renewal paths cannot drift (runbook §7 names them).
+HEARTBEAT_NOT_OWNED = "not_owned"
+HEARTBEAT_LEASE_NOT_ACTIVE = "lease_not_active"
+
 
 def note_claim_outcome(
     worker_id: str,
@@ -132,10 +144,10 @@ def note_claim_outcome(
     *,
     scan_skipped: bool = False,
 ) -> None:
-    """claim.granted / claim.empty / claim.rejected per claim pass, one call
-    at each claim-transaction exit (rejected = admission mismatch / empty =
-    drained queue or non-admission skips; scan_skipped = see the synthesis
-    branch below)."""
+    """claim.granted / claim.empty / claim.rejected per COMMITTED claim pass
+    — the broker calls this after the transaction commits (#498); rejected =
+    admission mismatch / empty = drained queue or non-admission skips;
+    scan_skipped = see the synthesis branch below."""
     if claim is not None:
         # `execution` may be missing, None or a non-mapping (the manifest is
         # caller-built JSON) — the observer must never raise into the claim
@@ -160,12 +172,9 @@ def note_claim_outcome(
     rejected, reasons = note_skip_reasons(worker_id, skip_reasons)
     if scan_skipped and not rejected and not reasons:
         # The scan never ran, so no skip reason fired: the worker's own live
-        # pool state IS the admission reason — classify from the view. A pool
-        # with zero DECLARED capacity (0 >= 0) is not "full": the worker
-        # never advertised that lane at all. Every other pass carries its
-        # evidence in skip_reasons; synthesizing from the view there would
-        # misattribute (agent full + drained code queue is idle, not
-        # rejection).
+        # pool state IS the admission reason — classify from the view. A
+        # zero-DECLARED-capacity pool (0 >= 0) is not "full": that lane was
+        # never advertised. Synthesizing on any other pass would misattribute.
         if view.agent_capacity > 0 and view.agent_active >= view.agent_capacity:
             reasons, rejected = {"capacity_full": 1}, True
         elif view.code_capacity > 0 and view.code_active >= view.code_capacity:
@@ -359,7 +368,7 @@ class WorkerOfflineDetector:
                         {
                             "worker_id": worker_id,
                             "last_seen_at": last_seen.isoformat(),
-                            "threshold_seconds": _ONLINE_THRESHOLD_SECONDS,
+                            "threshold_seconds": ONLINE_THRESHOLD_SECONDS,
                         },
                     )
         except Exception:

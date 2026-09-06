@@ -25,6 +25,7 @@ from server.app.agent_broker.heartbeat_single import single_heartbeat
 from server.app.agent_broker.manifest_guard import SHARD_IDENTITY_SQL
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
+from server.app.agent_broker.worker_events import note_claim_outcome
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.events.aggregator import record_job_update
@@ -145,17 +146,27 @@ class AgentExecutionBroker:
             # #437: one immediate retry on SQLSTATE 40P01 (claim_retry.py);
             # write_transaction rolled the deadlocked connection back and
             # closed it, so the retry re-evaluates on a clean connection.
-            claimed, skip_reasons = claim_with_retry(
+            outcome = claim_with_retry(
                 self, worker_id, declared_max_concurrency, declared_max_code_concurrency
             )
+            claimed = outcome.claim
             if claimed is None:
                 # Demand signal: a Worker found no work; restock immediately when
                 # the queue is truly empty, or surface the skip-reason histogram
                 # when unclaimable stock blocked the claim (debounced, see empty).
-                self.empty_claim.note_empty_claim(self.database_dsn, skip_reasons=skip_reasons)
+                self.empty_claim.note_empty_claim(
+                    self.database_dsn, skip_reasons=outcome.skip_reasons
+                )
             # Record only after the commit has succeeded, never inside the tx.
             if claimed is not None:
                 record_job_update(self.job_db, self.job_event_buffer, claimed.job_id)
+            # #498: claim events describe the COMMITTED claim, so they ride the
+            # same post-commit discipline as record_job_update above — emitting
+            # from inside claim_in_transaction produced ghost claim.granted lines
+            # whenever the transaction then failed (deadlock retry #437,
+            # serialization conflict, connection loss). ClaimRacedError never
+            # reaches here: a raced discard is no claim at all and gets no event.
+            note_claim_outcome(worker_id, outcome.claim, outcome.view, **outcome.event_kwargs())
             self._notify_worker_poll(worker_id, claimed)
             return claimed
         except ClaimRacedError:
