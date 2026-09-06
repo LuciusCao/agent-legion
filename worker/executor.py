@@ -98,11 +98,7 @@ def main() -> int:
         return 2 if registration is False else 0
     worker_id = str(config["worker_id"])
     # 首次同步前的兜底视图：get_self 失败时控制台仍有 worker_id 可显示。
-    host_worker: dict[str, Any] | None = {
-        "worker_id": worker_id,
-        "name": str(config.get("name", config["worker_id"])),
-        "revoked": False,
-    }
+    host_worker: dict[str, Any] | None = {"worker_id": worker_id, "revoked": False}
     try:
         host_worker = sync_host_status(client, status, metrics, host_worker)
     except WorkerAuthError as exc:

@@ -21,14 +21,13 @@ from server.app.agent_broker.claim import AgentClaim, ClaimRacedError
 from server.app.agent_broker.claim_retry import claim_with_retry
 from server.app.agent_broker.empty import EmptyClaimTrigger
 from server.app.agent_broker.enqueue import enqueue_request
+from server.app.agent_broker.heartbeat_single import single_heartbeat
 from server.app.agent_broker.manifest_guard import SHARD_IDENTITY_SQL
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
-from server.app.agent_broker.worker_events import note_heartbeat_rejected
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.events.aggregator import record_job_update
-from server.app.executors._lease_lifecycle import heartbeat_lease
 
 if TYPE_CHECKING:
     from server.app.events.agents import AgentStatusManager
@@ -203,29 +202,13 @@ class AgentExecutionBroker:
 
     def heartbeat(self, execution_id: str, worker_id: str, lease_id: str) -> bool:
         """Renew the lease, bound to the current lease_id so zombie attempts
-        from a requeued execution cannot keep a re-claimed lease alive."""
-        with write_transaction(self.database_dsn) as conn:
-            row = conn.execute(
-                "select lease_id from agent_execution_requests"
-                " where execution_id=%s and worker_id=%s and lease_id=%s"
-                " and state in ('claimed', 'reporting')"
-                " for update",
-                (execution_id, worker_id, lease_id),
-            ).fetchone()
-            if row is None:
-                note_heartbeat_rejected(execution_id, worker_id, "not_owned")
-                return False
-            conn.execute(
-                "update agent_execution_requests set heartbeat_at=current_timestamp"
-                " where execution_id=%s",
-                (execution_id,),
-            )
-            if not heartbeat_lease(conn, row["lease_id"], self.lease_ttl_seconds):
-                # Released concurrently: success would keep a zombie attempt alive.
-                note_heartbeat_rejected(execution_id, worker_id, "lease_not_active")
-                return False
-            touch_worker(conn, worker_id)
-            return True
+        from a requeued execution cannot keep a re-claimed lease alive.
+
+        Delegates to ``heartbeat_single.single_heartbeat`` (#490 rebase onto
+        0.7.0): this module sits at its #401 frozen ceiling, and the renewal
+        plus its ``execution.heartbeat_rejected`` refusal events live in the
+        sibling module beside the batch path's identical predicate."""
+        return single_heartbeat(self, execution_id, worker_id, lease_id)
 
     def claimed_payload(self, execution_id: str, worker_id: str) -> dict[str, Any] | None:
         with read_connection(self.database_dsn) as conn:
