@@ -51,16 +51,11 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
   const draft = stateQuery.data?.draft ?? null
   // #347 P1 / #500：草稿执行是逐次授权——快照、render 期派生比对与收尾
   // 复位都在 useDraftAuthorization（快照之外的一切 = 未授权）。
-  const authorization = useDraftAuthorization(
-    jobId,
-    workspaceId,
-    customizing,
-    draft
-  )
+  const auth = useDraftAuthorization(jobId, workspaceId, customizing, draft)
   // 对话开着且授权有效且有草稿 → 左栏渲染草稿（仅自己可见）；否则渲染
   // 已发布版本。同一草稿内容（hash 不变）的轮询刷新自动跟随。
   const draftPreview =
-    customizing && isAdmin && authorization.isAuthorized && draft !== null
+    customizing && isAdmin && auth.isAuthorized && draft !== null
   const bundle = draftPreview ? draft.html : published?.html
 
   const closeCustomizing = () => setCustomizing(false)
@@ -102,11 +97,11 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
         <CustomizePreviewDialog
           workspaceId={workspaceId}
           state={stateQuery.data ?? null}
-          previewDraft={authorization.isAuthorized && draft !== null}
+          previewDraft={auth.isAuthorized && draft !== null}
           onPreviewDraft={() => {
             // 真实按钮 disabled={!draft}（CustomizePreviewDialog）保证点击
             // 时草稿已可见；快照取当前轮询帧的 html_hash。
-            if (draft) authorization.authorize(draft)
+            if (draft) auth.authorize(draft)
           }}
           onClose={closeCustomizing}
         />
