@@ -882,3 +882,34 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/469
   ceiling: 159
+- check: architecture.file_budget
+  path: server/app/config_schema.py
+  reason: >-
+    codex P1 on #432: a "secret: true" property declaring a plaintext
+    "default" is the fourth vault bypass — the schema-default merge
+    (config_schema_defaults) freezes the credential verbatim into every
+    intake snapshot even when no layer ever sets the field. Rejecting it
+    lives in _validate_property (2 code lines + comment), the single
+    chokepoint every declaration channel already calls: Agent definitions,
+    node config_schema blocks, executor contracts. Splitting the validator
+    to dodge 1 line of growth would fork the schema subset's one
+    well-formedness gate. Remove when the schema validator gets its own
+    structural split or #432's secret governance consolidates.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/432
+  ceiling: 161
+- check: architecture.file_budget
+  path: server/app/services/node_config_secret_guard.py
+  reason: >-
+    codex P1 on #432: the guard gains the secret+default gate —
+    reject_secret_schema_defaults re-raises the shared validator verdict
+    with the vault-channel guide (SECRET_DEFAULT_GUIDE) so resolve/publish
+    errors point at the fix, and secret_gate_errors calls it per executable
+    draft node so publish fails before a revision can strand intake. The
+    previous 71 ceiling left 10 effective lines of headroom; the gate plus
+    its channel-pointer comment needs 7 more. Remove when the #432 guard
+    family gets its structural split or the error-guide texts move to a
+    shared errors module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/432
+  ceiling: 88

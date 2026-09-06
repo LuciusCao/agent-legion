@@ -105,6 +105,38 @@ def test_agent_definition_rejects_invalid_config_schema() -> None:
 
 
 @pytest.mark.no_db
+def test_agent_definition_rejects_secret_property_default() -> None:
+    """codex P1 on #432: an Agent definition cannot declare a secret property
+    with a default — the plaintext credential would flow through the
+    schema-default merge into every intake freeze even when no node ever
+    sets the field (VAULT-SECRET-001). Non-secret defaults and secret
+    properties without defaults stay legal."""
+    with pytest.raises(ValidationError, match="secret property cannot declare a default"):
+        AgentDefinition.model_validate(
+            {
+                "capability": "cap",
+                "runtime": "pi",
+                "config_schema": {
+                    "properties": {"api_key": {"type": "string", "secret": True, "default": "cred"}}
+                },
+            }
+        )
+    clean = AgentDefinition.model_validate(
+        {
+            "capability": "cap",
+            "runtime": "pi",
+            "config_schema": {
+                "properties": {
+                    "kept": {"type": "string", "default": "ok"},
+                    "api_key": {"type": "string", "secret": True},
+                }
+            },
+        }
+    )
+    assert clean.config_schema["properties"]["kept"]["default"] == "ok"
+
+
+@pytest.mark.no_db
 def test_agent_definition_skill_is_optional() -> None:
     """#76: skill 降为可选 legacy 兜底——缺省为 ""（未绑定），仍参与 hash。"""
     bare = AgentDefinition(capability="cap", runtime="pi")
