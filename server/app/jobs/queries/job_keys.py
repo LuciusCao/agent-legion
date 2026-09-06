@@ -5,16 +5,13 @@ from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 class JobKeyQueriesMixin(ConnectionQueriesMixin):
     def list_job_dedup_keys(self, workspace_id: str, workflow_key: str) -> set[tuple[str, str]]:
-        """Return the ``(source_type, source_id)`` dedup keys of one workspace's jobs.
+        """All dedup keys of one workspace (deprecated full-scan shape).
 
-        Dedup is scoped per workspace: an item already processed by workflow A
-        must not be dropped as a duplicate when workflow B is asked to handle
-        the same ``(source_type, source_id)``. #211 (read-layer binding): the
-        predicate keys on workspace_id alone — workflow_key equals it on
-        every row (v62), so the column filter was redundant and the signature
-        parameter is kept for callers only. Since v70 dropped the column,
-        idx_jobs_workspace_source (workspace_id, source_type, source_id)
-        covers the whole scan index-only.
+        Workspace-scoped ``(source_type, source_id)``, index-only on
+        idx_jobs_workspace_source; workflow_key is identity-only since v62
+        (#211). Retained for tests pinning the full-set contract — run
+        creation uses the chunked point lookups in run_item_probes instead
+        (#467 A2: full scans scale with workspace size, not the submission).
         """
         with self._connect_read() as conn:
             rows = conn.execute(

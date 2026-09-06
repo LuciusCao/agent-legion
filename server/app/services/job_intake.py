@@ -4,8 +4,6 @@ import json
 import logging
 from typing import Any
 
-import psycopg
-
 from server.app.db.rowmap import wire_batch_id
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
@@ -22,6 +20,7 @@ from server.app.services.job_intake_workspace import (
 )
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
+from server.app.services.run_partial_failure import compensate_partial_creation
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import workflow_definition_from_dict
@@ -170,7 +169,7 @@ class JobIntakeService:
             frozen_pins={"node_code_versions": node_code_versions},
         )
         try:
-            jobs = self.job_db.create_jobs_bulk(
+            job_ids = self.job_db.create_jobs_bulk(
                 candidates=candidates,
                 workflow_key=workflow_key,
                 run_id=batch["id"],
@@ -179,29 +178,20 @@ class JobIntakeService:
                 revision=active_revision,
                 frozen_config=node_config,
             )
-        except Exception:
-            # #204 broad-except audit: compensate-then-bare-re-raise (#233
+        except Exception as exc:
+            # #204 broad-except audit: compensate-then-re-raise (#233
             # pattern). create_run committed before create_jobs_bulk ran;
-            # without compensation the orphaned run row would make an
-            # identical resubmission hit the deterministic-id upsert and
-            # return the empty run. The width is deliberate: ANY creation
-            # failure (DB constraint, serialization, programming error)
-            # must trigger the cleanup, then the bare raise preserves the
-            # original error verbatim — nothing is swallowed.
-            # Best-effort (guarded by not-exists): never mask the
-            # original failure.
-            try:
-                self.job_db.delete_run_without_jobs(str(batch["id"]))
-            except (OSError, psycopg.Error) as exc:
-                # #204: same compensation-only catch as run_service — a DB
-                # connectivity failure must not mask the original creation
-                # error; programming errors propagate to the route's 500.
-                logger.warning(
-                    "run %s left orphaned after job creation failed: %s", batch["id"], exc
-                )
-            raise
-        if jobs:
+            # ANY creation failure must trigger the compensation — the
+            # two-branch contract (empty-run delete vs partial-run
+            # failed-marking) lives in the shared helper used by both sync
+            # creation paths (codex round-1 #2).
+            raise compensate_partial_creation(self.job_db, str(batch["id"]), exc) from exc
+        if job_ids:
             notify_schedulable_work()
+
+        # Legacy wire shape still materializes job rows (the /runs path
+        # dropped them, #467 A4); chunked facade read bounds the query.
+        jobs = self.job_db.fetch_jobs_by_ids(job_ids)
 
         for job in jobs:
             job["storage_dir"] = str(resolve_job_dir(job, self.settings.jobs_dir))

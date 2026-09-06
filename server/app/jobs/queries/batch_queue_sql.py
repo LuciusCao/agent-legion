@@ -4,14 +4,21 @@
 # while a run with live jobs keeps the pins those jobs were created with. The
 # async intake queue carrier also has no jobs yet at upsert time, so its pins
 # refresh on resubmission — the expected behavior there.
+#
+# The failed→excluded.status conversion covers both submission kinds
+# ('queued' = async intake carrier; 'created' = sync runs, #467 review P1-2):
+# a chunked sync creation that failed partway leaves the run row 'failed'
+# with its committed chunks; resubmitting the SAME items resolves to the same
+# deterministic run id and must heal the row, not keep it failed while its
+# jobs run.
 RUN_UPSERT_CONFLICT = """
 on conflict(id) do update set
   status=case
-    when excluded.status='queued' and runs.status='failed' then 'queued'
+    when excluded.status in ('queued', 'created') and runs.status='failed' then excluded.status
     else runs.status
   end,
   error_message=case
-    when excluded.status='queued' and runs.status='failed' then ''
+    when excluded.status in ('queued', 'created') and runs.status='failed' then ''
     else runs.error_message
   end,
   frozen_pins_json=case when not exists (select 1 from jobs where run_id=runs.id)

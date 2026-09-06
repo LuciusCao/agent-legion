@@ -120,7 +120,9 @@ def test_bulk_create_returns_rows_in_candidate_order_with_identity_shim(tmp_path
     db = _make_db(tmp_path)
     _seed_workspace(db, "ws-sb")
 
-    jobs = db.create_jobs_bulk(
+    # #467 A3: the return value is job ids (first-seen order); row fields
+    # are asserted from the DB read path.
+    job_ids = db.create_jobs_bulk(
         candidates=[_candidate(i) for i in range(3)],
         workflow_key="wf",
         run_id="run-sb-1",
@@ -130,14 +132,23 @@ def test_bulk_create_returns_rows_in_candidate_order_with_identity_shim(tmp_path
         frozen_config={},
     )
 
-    assert [str(job["id"]) for job in jobs] == [
+    assert [str(job_id) for job_id in job_ids] == [
         "ws-sb_wf_item-00000",
         "ws-sb_wf_item-00001",
         "ws-sb_wf_item-00002",
     ]
-    assert all(str(job["workflow_key"]) == "ws-sb" for job in jobs)
-    assert all(str(job["run_id"]) == "run-sb-1" for job in jobs)
-    assert json.loads(str(jobs[0]["input_json"]))["external_id"] == "item-00000"
+    with read_connection(TEST_DATABASE_URL) as conn:
+        rows = conn.execute(
+            "select id, workspace_id, run_id, input_json from jobs where id = any(%s)",
+            (job_ids,),
+        ).fetchall()
+    by_id = {str(row["id"]): row for row in rows}
+    # The deprecated workflow_key identity shim moved to the read paths.
+    assert all(str(row["workspace_id"]) == "ws-sb" for row in rows)
+    assert all(str(row["run_id"]) == "run-sb-1" for row in rows)
+    assert json.loads(str(by_id["ws-sb_wf_item-00000"]["input_json"]))["external_id"] == (
+        "item-00000"
+    )
 
 
 def test_bulk_resubmit_rebinds_run_and_freeze(tmp_path: Path) -> None:
@@ -162,7 +173,7 @@ def test_bulk_resubmit_rebinds_run_and_freeze(tmp_path: Path) -> None:
         revision=_REVISION,
         frozen_config={"node_a": {"k": "old"}},
     )
-    jobs = db.create_jobs_bulk(
+    job_ids = db.create_jobs_bulk(
         candidates=[_candidate(0)],
         workflow_key="wf",
         run_id="run-sb-2",
@@ -172,11 +183,10 @@ def test_bulk_resubmit_rebinds_run_and_freeze(tmp_path: Path) -> None:
         frozen_config={"node_a": {"k": "new"}},
     )
 
-    job = jobs[0]
-    assert str(job["run_id"]) == "run-sb-2"
-    assert str(job["title"]) == "Title 0"
-    assert json.loads(str(job["frozen_config_json"])) == {"node_a": {"k": "new"}}
     with read_connection(TEST_DATABASE_URL) as conn:
+        job_row = conn.execute(
+            "select run_id, title, frozen_config_json from jobs where id=%s", (job_ids[0],)
+        ).fetchone()
         nodes = conn.execute(
             "select count(*) as cnt from job_nodes where job_id=%s", ("ws-sb_wf_item-00000",)
         ).fetchone()
@@ -188,6 +198,9 @@ def test_bulk_resubmit_rebinds_run_and_freeze(tmp_path: Path) -> None:
             "select cnt from run_job_status_counts where run_id=%s and status='queued'",
             ("run-sb-2",),
         ).fetchone()
+    assert str(job_row["run_id"]) == "run-sb-2"
+    assert str(job_row["title"]) == "Title 0"
+    assert json.loads(str(job_row["frozen_config_json"])) == {"node_a": {"k": "new"}}
     # No duplicate node rows from the double submit.
     assert int(nodes["cnt"]) == len(_NODE_KEYS)
     # The rebind moved the row from run 1 to run 2 in the counters.
@@ -206,7 +219,7 @@ def test_bulk_duplicate_ids_in_one_call_take_the_last_row(tmp_path: Path) -> Non
 
     first = dict(_candidate(0), title="First Title")
     second = dict(_candidate(0), title="Second Title")
-    jobs = db.create_jobs_bulk(
+    job_ids = db.create_jobs_bulk(
         candidates=[_candidate(1), first, second],
         workflow_key="wf",
         run_id="run-sb-1",
@@ -218,12 +231,14 @@ def test_bulk_duplicate_ids_in_one_call_take_the_last_row(tmp_path: Path) -> Non
 
     # One row per unique id, in first-seen order; the duplicate carries the
     # LATER row's values (executemany's later-DO-UPDATE-wins semantics).
-    assert [str(job["id"]) for job in jobs] == [
+    assert [str(job_id) for job_id in job_ids] == [
         "ws-sb_wf_item-00001",
         "ws-sb_wf_item-00000",
     ]
-    assert str(jobs[1]["title"]) == "Second Title"
     with read_connection(TEST_DATABASE_URL) as conn:
+        title = conn.execute(
+            "select title from jobs where id=%s", ("ws-sb_wf_item-00000",)
+        ).fetchone()
         rows = conn.execute(
             "select count(*) as cnt from jobs where run_id=%s", ("run-sb-1",)
         ).fetchone()
@@ -231,6 +246,7 @@ def test_bulk_duplicate_ids_in_one_call_take_the_last_row(tmp_path: Path) -> Non
             "select count(*) as cnt from job_nodes where job_id=%s",
             ("ws-sb_wf_item-00000",),
         ).fetchone()
+    assert str(title["title"]) == "Second Title"
     assert int(rows["cnt"]) == 2
     # The duplicate id did not double-insert its node rows either.
     assert int(nodes["cnt"]) == len(_NODE_KEYS)
