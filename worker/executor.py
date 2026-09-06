@@ -240,7 +240,11 @@ def main() -> int:
                     # 发起；#472 的 RTT 打点紧贴 claim 调用。
                     events.note_claim_attempt(worker_id, budget, uploads.depth, claim_enabled)
                     claim_started = time.monotonic()
-                    claim = client.claim(worker_id, effective, max_code_concurrency)
+                    # #501：声明的是**目标容量**而非爬坡档位——agent_workers
+                    # 行（UI/ops 容量面 + stock gate 的 fleet 池）不随档位抖；
+                    # 爬坡节流本来就由上方 budget（effective-活跃数）把门，
+                    # 生效档位只走 status 文件（set_ramp_up）。
+                    claim = client.claim(worker_id, max_concurrency, max_code_concurrency)
                     if claim is None:
                         break
                     # #472 codex P2：pacing 输入是单次成功 claim 的往返
