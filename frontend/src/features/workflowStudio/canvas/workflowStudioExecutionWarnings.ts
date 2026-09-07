@@ -36,6 +36,7 @@ export function mergeNodeExecution(
     model: asConfigValue(declared?.model),
     thinking: asConfigValue(declared?.thinking),
     prompt: asConfigValue(declared?.prompt),
+    prompt_mode: asConfigValue(declared?.prompt_mode),
   }
   // 存在性判断同样走归一值：junk defaults（如 `{provider: 1}`）视为无默认。
   const hasDefaults =
@@ -50,6 +51,8 @@ export function mergeNodeExecution(
     model: values.model || asConfigValue(defaults.model),
     thinking: values.thinking || asConfigValue(defaults.thinking),
     prompt: values.prompt,
+    // #513：模式仅节点级（对齐后端 loader：顶层默认不合并该键）。
+    prompt_mode: values.prompt_mode,
   }
 }
 

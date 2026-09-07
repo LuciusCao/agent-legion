@@ -57,11 +57,18 @@ export function useNodePromptPreview(props: NodePromptPreviewPanelProps): {
 
   const draft = parseWorkflowNode(props.definitionYaml, props.node.key)
   // 草稿 prompt 可能是手写非字符串 junk（`prompt: 123`，合法 YAML 非法
-  // 契约值）：按未配置归一，不得让 .trim() 抛异常（codex P1 缺陷族）。
+  // 契约值）：按未配置归一，不得因 .trim() 抛异常（codex P1 缺陷族）。
   const customPrompt = asConfigValue(
     draft ? draft.execution?.prompt : props.node.execution?.prompt
   )
   const isDefault = customPrompt.trim() === ''
+  // #513：拼接模式（追加/覆写）；非 overwrite 一律归一 append（含
+  // junk 值与未声明）。
+  const rawMode = asConfigValue(
+    draft ? draft.execution?.prompt_mode : props.node.execution?.prompt_mode
+  )
+  const promptMode: 'append' | 'overwrite' =
+    rawMode === 'overwrite' ? 'overwrite' : 'append'
   // skill_key 以后端预览响应为准（显式 null = 未绑定）；响应未返回前用
   // agentCatalog 绑定兜底。
   const skillKey = preview
@@ -74,6 +81,7 @@ export function useNodePromptPreview(props: NodePromptPreviewPanelProps): {
         ? (preview?.default_instructions ?? '')
         : customPrompt,
       skillKey,
+      promptMode,
       previewError:
         query.error instanceof Error
           ? query.error.message
@@ -92,7 +100,19 @@ export function useNodePromptPreview(props: NodePromptPreviewPanelProps): {
             value
           )
         ),
+      onPatchMode: (mode) =>
+        props.setDefinitionYaml(
+          patchWorkflowNodeExecution(
+            props.definitionYaml,
+            props.node.key,
+            'prompt_mode',
+            mode
+          )
+        ),
     },
-    effectivePrompt: preview?.effective_prompt ?? null,
+    // #513：平台提示词面板只显示信封半区（platform_prompt，不含节点
+    // 指令尾巴——编辑区已单独呈现）；旧响应无该字段时回落整串。
+    effectivePrompt:
+      preview?.platform_prompt || (preview?.effective_prompt ?? null),
   }
 }

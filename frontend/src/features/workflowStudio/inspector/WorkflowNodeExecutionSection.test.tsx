@@ -183,6 +183,7 @@ describe('WorkflowNodeExecutionSection', () => {
         model: '',
         thinking: '',
         prompt: '',
+        prompt_mode: '',
       },
     }
     const initialYaml = `execution:\n  provider: deepseek\nnodes:\n  generate_key_info:\n    capability: generate_key_info\n    execution:\n      provider: deepseek\n`

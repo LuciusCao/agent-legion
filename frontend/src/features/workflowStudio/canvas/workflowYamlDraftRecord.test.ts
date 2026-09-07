@@ -190,12 +190,14 @@ nodes:
       model: 'gpt-5',
       thinking: '',
       prompt: '',
+      prompt_mode: '',
     })
     expect(nodes.fetch?.execution).toEqual({
       provider: 'pi',
       model: 'gpt-5',
       thinking: '',
       prompt: '',
+      prompt_mode: '',
     })
     expect(nodes._start?.execution).toBeUndefined()
   })
@@ -219,6 +221,7 @@ nodes:
       model: '',
       thinking: '',
       prompt: '',
+      prompt_mode: '',
     })
   })
 })

@@ -6,6 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Added
+- Agent 执行侧 JSON 字段级读写原语（issue #518）：velites 新增 opt-in 工具
+  `json`——`op` 三态（`get` 按路径读字段、`set` 写任意 JSON 值、`delete` 删
+  key/数组元素）+ JSON path 语法（`steps[2].content`、`["a key"].sub`）。
+  动机：模型对自己产出的较大 JSON 改单个字段时，整文件重写费 token 且易错，
+  曾退化为 bash heredoc 手写 python 读-改-写（高并发下的不稳定因素）；
+  `get` 缺失路径报 null、`set`/`delete` 对缺失中间 key 报错不自动建，文件
+  写回走 tmp+rename 原子替换（与 write 同协议）、路径沙箱同 write，skill 里
+  各自携带的 `json_patch.py` 应退役。工具目录机制（#476）验证：velites 一处
+  新增工具，catalog 契约测试与 Studio 选项面（opt-in 档）自动跟上。
+- Studio 提示词面板重命名与布局（issue #513）：「平台信封」更名「平台提示词」
+  （说明：根据 workflow 自动生成，不可修改）并上移置顶；「节点指令」更名
+  「节点附加提示词」（说明：内容由用户自由编辑，会追加到平台提示词最后组成
+  完整运行提示词，默认留空）。仅面板命名/文案/顺序调整，prompt 拼装行为
+  不变。
+- Studio 工具选项硬编码根治：velites 工具目录自描述 + per-runtime 动态
+  发现（issue #476，收编 #464-2，合并实现 #449 的 dispatch 校验）。新增
+  `velites tools list --json` 子命令输出工具目录（name/tier/description/
+  parameters，forced 档带 activation）；Host 侧 runtime catalog adapter
+  声明 per-runtime 工具目录（velites 静态镜像与二进制输出全等，跨二进制
+  契约测试钉住；pi 外部 runtime 按实测静态登记三件套），`GET
+  /api/agent-runtimes` 按 runtime 嵌套暴露。tier 三档模型：`default`
+  （read/write/bash，预选中可取消）/ `opt-in`（uuid，显式开启）/
+  `forced`（validate——非用户选择，激活条件 `--require-output` 成立时
+  harness 自动广告，UI 渲染锁定行不提供 checkbox）。velites 侧联动：
+  `--require-output` 非空且首个 skill 目录声明可解析 contract block 时
+  自动把 validate 加入广告工具集（parse error / 无 contract 不激活——
+  模型修不了只读目录里的语法错误）；`--tools validate` 向后兼容为 no-op。
+  dispatch 期工具名校验（#449）：节点级声明优先、Agent 定义兜底，两来源
+  都在 catalog 目录上 fail-fast（未知工具拒发、forced 档静默剔除），
+  Studio 动态选项面与校验同一数据源。AgentEditor 工具选项按所选
+  runtime 动态渲染（默认值不再前端硬编码三件套，来自目录 default 档），
+  runtime 切换后失效工具显式标记并提示剔除（把 dispatch fail-fast 前移
+  到编辑体验）；agent 节点详情补节点级 `tools:` 声明编辑入口（#443 的
+  Studio 补课，空 = 跟随 Agent 定义）。`AgentDefinition.tools` 默认值与
+  API/MCP 三处硬编码统一改从 catalog 目录派生（值不变，单一来源）。
+
 ## [0.7.0] - 2026-09-06
 
 ### Added

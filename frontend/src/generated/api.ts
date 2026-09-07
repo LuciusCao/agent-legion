@@ -4748,7 +4748,7 @@ export interface components {
       /** Prompt */
       prompt: string
       /** Prompt Mode */
-      prompt_mode?: string | null
+      prompt_mode?: ('append' | 'overwrite') | null
     }
     /** NodePromptSaveResponse */
     NodePromptSaveResponse: {

@@ -38,8 +38,14 @@ class WorkflowNodeExecution:
     thinking: str = ""
     # Node-level only (the top-level block rejects it): empty means the
     # platform auto-assembles the default node instructions; a non-empty
-    # value REPLACES that default wholesale in the run prompt.
+    # value joins the run prompt per ``prompt_mode`` (#513).
     prompt: str = ""
+    # ``append`` (default): the custom prompt is APPENDED after the
+    # auto-assembled default instructions — both run. ``overwrite``: the
+    # custom prompt REPLACES the default instructions wholesale. The
+    # platform envelope itself is never coverable in either mode; empty
+    # string = append (the YAML default, kept unpersisted like ``prompt``).
+    prompt_mode: str = ""
 
 
 @dataclass(frozen=True)

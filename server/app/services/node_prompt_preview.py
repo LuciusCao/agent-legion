@@ -26,6 +26,7 @@ from server.app.workflows.node_prompt import build_default_node_instructions
 from server.app.workflows.pi_protocol import (
     JOB_DIR_PLACEHOLDER,
     SKILL_DIR_PLACEHOLDER,
+    build_platform_envelope,
     build_prompt,
 )
 from server.app.workflows.revision_format import definition_to_yaml
@@ -88,6 +89,9 @@ def _skill_key_for_node(job_db: JobQueries, workspace_id: str, node: WorkflowNod
 def _preview_payload(job_db: JobQueries, workspace_id: str, node: WorkflowNode) -> dict[str, Any]:
     skill_key = _skill_key_for_node(job_db, workspace_id, node)
     custom = node.execution.prompt
+    # #513：模式随定义（append=默认+自定义，overwrite=仅自定义）；空归一
+    # 为 append。编辑器的说明文案与徽标据此渲染。
+    prompt_mode = node.execution.prompt_mode or "append"
     default_instructions = build_default_node_instructions(
         node_key=node.key,
         label=node.label or node.key,
@@ -105,17 +109,28 @@ def _preview_payload(job_db: JobQueries, workspace_id: str, node: WorkflowNode) 
         "inputs": list(node.inputs),
         "expected_outputs": list(node.outputs),
         "additional_prompt": custom,
+        "prompt_mode": prompt_mode,
     }
     effective_prompt = build_prompt(
         manifest,
         job_dir=Path(JOB_DIR_PLACEHOLDER),
         skill_dir=Path(SKILL_DIR_PLACEHOLDER),
     )
+    # #513：平台提示词面板只显示不可修改的信封半区（不含节点指令尾巴，
+    # 否则节点指令在面板里出现两次）；effective_prompt 仍返回完整拼接，
+    # 供需要「运行时整串」的消费方（MCP 工具等）。
+    platform_prompt = build_platform_envelope(
+        manifest,
+        job_dir=Path(JOB_DIR_PLACEHOLDER),
+        skill_dir=Path(SKILL_DIR_PLACEHOLDER),
+    )
     return {
         "effective_prompt": effective_prompt,
+        "platform_prompt": platform_prompt,
         "default_instructions": default_instructions,
         "custom_instructions": custom,
         "is_default": not custom.strip(),
+        "prompt_mode": prompt_mode,
         "skill_key": skill_key,
     }
 
@@ -132,14 +147,20 @@ def preview_node_prompt(
 
 
 def save_node_prompt(
-    job_db: JobQueries, workspace_id: str, node_key: str, prompt: str
+    job_db: JobQueries,
+    workspace_id: str,
+    node_key: str,
+    prompt: str,
+    prompt_mode: str | None = None,
 ) -> dict[str, Any]:
-    """Write ``execution.prompt`` for one node into the workspace draft YAML.
+    """Write ``execution.prompt`` (and optionally ``prompt_mode``) into the draft.
 
     The edit bases on the current canvas draft when one exists, otherwise on
     the active revision's canonical YAML; an empty prompt clears the key so
-    the node falls back to the auto-assembled default instructions. The new
-    draft is fully built and validated before the single upsert applies it.
+    the node falls back to the auto-assembled default instructions. #513:
+    ``prompt_mode`` (append/overwrite) may be set alongside; ``None`` leaves
+    the stored mode untouched. The new draft is fully built and validated
+    before the single upsert applies it.
     """
     draft = job_db.get_workspace_workflow_draft(workspace_id)
     base_yaml = str(draft["definition_yaml"]) if draft is not None else None
@@ -164,7 +185,17 @@ def save_node_prompt(
         except WorkflowDefinitionError as exc:
             raise InvalidOperationError(f"Current workflow draft is invalid: {exc}") from exc
     node = _locate_executable_node(base_definition, node_key)
-    updated_node = replace(node, execution=replace(node.execution, prompt=prompt))
+    # codex P2 on #527：service 也可能被 MCP 等直接调用，写入口在应用前
+    # 自行校验（HTTP 契约的 Literal 之外的第二道防线）——任意字符串写进
+    # 草稿会留下一份无法再次加载/发布的定义。
+    if prompt_mode is not None and prompt_mode not in ("append", "overwrite"):
+        raise InvalidOperationError(
+            f"prompt_mode must be 'append' or 'overwrite' (got {prompt_mode!r})"
+        )
+    updated_execution = replace(node.execution, prompt=prompt)
+    if prompt_mode is not None:
+        updated_execution = replace(updated_execution, prompt_mode=prompt_mode)
+    updated_node = replace(node, execution=updated_execution)
     updated_definition = replace(
         base_definition, nodes={**base_definition.nodes, node_key: updated_node}
     )
@@ -172,6 +203,7 @@ def save_node_prompt(
     return {
         "node_key": node_key,
         "is_default": not prompt.strip(),
+        "prompt_mode": updated_execution.prompt_mode or "append",
         "definition_yaml": saved["definition_yaml"],
         "updated_at": saved.get("updated_at"),
     }

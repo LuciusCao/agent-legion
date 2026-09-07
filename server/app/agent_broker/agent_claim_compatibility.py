@@ -65,6 +65,8 @@ def live_claim_manifest(row: Mapping[str, Any]) -> dict[str, Any]:
     # unsupported keys can only reach here empty (validation raised otherwise).
     manifest["execution"] = {**frozen, **{key: resolved[key] for key in contract_keys}}
     manifest["additional_prompt"] = str(node_execution.get("prompt") or "")
+    # #513：claim 侧重解析链与 dispatch 同源携带拼接模式。
+    manifest["prompt_mode"] = str(node_execution.get("prompt_mode") or "")
     if all(key in manifest for key in ("tools", "inputs", "expected_outputs")):
         manifest["command_spec"] = render_command_spec(manifest)
     return manifest

@@ -49,7 +49,13 @@ def create_studio_agent_prompt_tools_router(job_db: JobQueries) -> APIRouter:
         workspace_id: str, payload: NodePromptSaveRequest
     ) -> NodePromptSaveResponse:
         try:
-            result = save_node_prompt(job_db, workspace_id, payload.node_key, payload.prompt)
+            result = save_node_prompt(
+                job_db,
+                workspace_id,
+                payload.node_key,
+                payload.prompt,
+                prompt_mode=payload.prompt_mode,
+            )
         except JobServiceError as exc:
             raise_job_http_error(exc)
         return NodePromptSaveResponse(**result)

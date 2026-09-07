@@ -28,6 +28,7 @@ function makeNode(
           model: execution.model ?? '',
           thinking: execution.thinking ?? '',
           prompt: '',
+          prompt_mode: '',
         }
       : undefined,
   } as WorkflowNodeRecord
@@ -52,6 +53,7 @@ describe('mergeNodeExecution', () => {
       model: 'gpt-5',
       thinking: 'low',
       prompt: '',
+      prompt_mode: '',
     })
     expect(
       mergeNodeExecution(
@@ -63,6 +65,7 @@ describe('mergeNodeExecution', () => {
       model: 'gpt-5',
       thinking: 'low',
       prompt: '',
+      prompt_mode: '',
     })
   })
 
@@ -80,6 +83,7 @@ describe('mergeNodeExecution', () => {
       model: '',
       thinking: '',
       prompt: '',
+      prompt_mode: '',
     })
   })
 
@@ -97,12 +101,14 @@ describe('mergeNodeExecution', () => {
       model: 'gpt-5',
       thinking: 'low',
       prompt: '',
+      prompt_mode: '',
     })
     expect(mergeNodeExecution({ type: 'agent', execution: junk }, {})).toEqual({
       provider: '',
       model: '',
       thinking: '',
       prompt: '',
+      prompt_mode: '',
     })
   })
 })
@@ -140,6 +146,7 @@ describe('nodeExecutionWarning', () => {
       model: true,
       thinking: '',
       prompt: '',
+      prompt_mode: '',
     } as unknown as NonNullable<WorkflowNodeRecord['execution']>
     expect(
       nodeExecutionWarning({ ...makeNode('a', 'agent'), execution: junk })

@@ -85,16 +85,30 @@ def test_build_prompt_uses_default_instructions_when_prompt_empty(tmp_path: Path
     assert "Additional node instructions" not in prompt
 
 
-def test_build_prompt_custom_prompt_replaces_default_wholesale(tmp_path: Path) -> None:
+def test_build_prompt_custom_prompt_appends_by_default(tmp_path: Path) -> None:
+    """#513：默认模式 append——默认指令 + 自定义内容都在，信封不变。"""
     prompt = build_prompt(
         _manifest(additional_prompt="Follow the house style."),
         job_dir=tmp_path / "job",
         skill_dir=tmp_path / "skill",
     )
-    assert "Node instructions:\nFollow the house style." in prompt
-    # 自定义 prompt 整段替代默认指令：默认段一字不留，信封保持不变。
-    assert "Your task:" not in prompt
+    assert "Your task:" in prompt
+    assert prompt.endswith("Follow the house style.\n")
     assert "Additional node instructions" not in prompt
+    assert "Job ID: job-1" in prompt
+    assert "- a.txt" in prompt and "- out.json" in prompt
+
+
+def test_build_prompt_custom_prompt_overwrite_replaces_default(tmp_path: Path) -> None:
+    """#513：overwrite 模式——自定义内容整段替代默认指令，信封不变。"""
+    prompt = build_prompt(
+        _manifest(additional_prompt="Follow the house style.", prompt_mode="overwrite"),
+        job_dir=tmp_path / "job",
+        skill_dir=tmp_path / "skill",
+    )
+    assert "Node instructions:\nFollow the house style." in prompt
+    # 覆写：默认段一字不留，信封保持不变。
+    assert "Your task:" not in prompt
     assert "Job ID: job-1" in prompt
     assert "- a.txt" in prompt and "- out.json" in prompt
 

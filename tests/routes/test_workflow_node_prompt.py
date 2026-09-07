@@ -53,8 +53,11 @@ def test_preview_definition_yaml_override(client, job_db) -> None:
     payload = response.json()
     assert payload["is_default"] is False
     assert payload["custom_instructions"] == "House style only."
-    assert "Node instructions:\nHouse style only." in payload["effective_prompt"]
-    assert payload["default_instructions"] not in payload["effective_prompt"]
+    # #513：默认 append——默认指令与自定义都在，自定义在末尾。
+    assert payload["prompt_mode"] == "append"
+    assert "Node instructions:\n" in payload["effective_prompt"]
+    assert payload["default_instructions"] in payload["effective_prompt"]
+    assert payload["effective_prompt"].endswith("House style only.\n")
 
 
 def test_preview_unknown_node_gets_404(client, job_db) -> None:

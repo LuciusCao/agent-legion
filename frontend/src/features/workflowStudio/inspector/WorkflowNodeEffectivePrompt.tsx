@@ -2,7 +2,8 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useState } from 'react'
 import styles from './WorkflowNodePromptEditor.module.css'
 
-/** 完整运行 Prompt（含平台信封）只读预览：可折叠，默认展开。 */
+/** 平台提示词（#513 前叫「平台信封」）只读预览：可折叠，默认展开，
+ * 置于面板顶部——先看不可修改的平台生成部分，再编辑自定义追加。 */
 export function WorkflowNodeEffectivePrompt(props: {
   effectivePrompt: string | null
 }) {
@@ -22,12 +23,19 @@ export function WorkflowNodeEffectivePrompt(props: {
             transition: 'transform 0.15s',
           }}
         />
-        完整运行 Prompt（含平台信封）
+        平台提示词
       </button>
       {fullOpen && (
-        <pre className={styles.prompt}>
-          {props.effectivePrompt ?? '正在加载…'}
-        </pre>
+        <>
+          {/* #513 复审：说明文案与 pre 正文同缩进（padding 对齐 .prompt
+              的 0 20px），不贴面板左缘。 */}
+          <span className={styles.effectiveHint}>
+            根据 workflow 自动生成，不可修改
+          </span>
+          <pre className={styles.prompt}>
+            {props.effectivePrompt ?? '正在加载…'}
+          </pre>
+        </>
       )}
     </div>
   )

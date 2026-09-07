@@ -15,7 +15,7 @@ export function asConfigValue(value: unknown): string {
 export function patchWorkflowNodeExecution(
   rawYaml: string,
   nodeKey: string,
-  field: 'provider' | 'model' | 'thinking' | 'prompt',
+  field: 'provider' | 'model' | 'thinking' | 'prompt' | 'prompt_mode',
   value: string
 ): string {
   const draft = parseWorkflowYaml(rawYaml)
@@ -27,7 +27,7 @@ export function patchWorkflowNodeExecution(
 
 function updateExecution(
   node: WorkflowYamlNode,
-  field: 'provider' | 'model' | 'thinking' | 'prompt',
+  field: 'provider' | 'model' | 'thinking' | 'prompt' | 'prompt_mode',
   value: string
 ) {
   const execution = { ...(node.execution ?? {}), [field]: value }

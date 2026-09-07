@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from server.app.workflows.pi_protocol import (
+    build_platform_envelope,
     build_prompt,
     detect_model_error,
     render_command_spec,
@@ -38,15 +39,33 @@ def test_build_prompt_contains_all_sections(tmp_path: Path) -> None:
     assert "Node: gen" in prompt
     assert "- a.txt" in prompt
     assert "- out.json" in prompt
-    # execution.prompt 非空 → 整段替代自动组装的默认指令（不再是追加段）。
-    assert "Node instructions:\nbe careful" in prompt
+    # #513：无 prompt_mode → append（默认指令 + 自定义内容都进提示词）。
+    assert "Your task: gen" in prompt
+    assert prompt.endswith("\nbe careful\n")
     assert "Additional node instructions" not in prompt
-    assert "Your task:" not in prompt
     assert (
         "Do not read, search, or modify anything outside the working directory "
         "and the skill directory." in prompt
     )
     assert prompt.endswith("\n")
+
+
+def test_build_prompt_overwrite_mode_replaces_default_instructions(
+    tmp_path: Path,
+) -> None:
+    """#513：overwrite = 自定义内容整段替换默认指令（旧行为显式选择）。"""
+    manifest = {**MANIFEST, "prompt_mode": "overwrite"}
+    prompt = build_prompt(manifest, job_dir=tmp_path / "job", skill_dir=tmp_path / "skill")
+    assert "Node instructions:\nbe careful\n" in prompt
+    assert "Your task:" not in prompt
+
+
+def test_build_prompt_append_mode_splices_default_and_custom(tmp_path: Path) -> None:
+    """#513：append = 默认指令在前、自定义内容空行拼接在后。"""
+    manifest = {**MANIFEST, "prompt_mode": "append"}
+    prompt = build_prompt(manifest, job_dir=tmp_path / "job", skill_dir=tmp_path / "skill")
+    assert "Your task: gen (capability `generate`)" in prompt
+    assert prompt.endswith("working directory.\n\nbe careful\n")
 
 
 def test_build_prompt_empty_prompt_selects_default_instructions(tmp_path: Path) -> None:
@@ -55,6 +74,25 @@ def test_build_prompt_empty_prompt_selects_default_instructions(tmp_path: Path) 
     # 空 prompt → 自动组装的默认指令（label 缺失时回落 node_key）。
     assert "Your task: gen (capability `generate`)" in prompt
     assert "`demo_video_workflow/gen`" in prompt
+
+
+def test_platform_envelope_excludes_node_instructions(tmp_path: Path) -> None:
+    """#513：信封半区不含节点指令——平台提示词面板与编辑区各自呈现。"""
+    envelope = build_platform_envelope(
+        MANIFEST, job_dir=tmp_path / "job", skill_dir=tmp_path / "skill"
+    )
+    assert "Job ID: job-1" in envelope
+    assert "Required outputs:" in envelope
+    # 节点指令三种形态（自定义/默认组装）都不进信封。
+    assert "Node instructions:" not in envelope
+    assert "be careful" not in envelope
+    assert "Your task:" not in envelope
+    # 拼接不回归（append 默认）：build_prompt = 信封 + 节点指令段（默认
+    # 指令 + 自定义内容），dispatch 消费不变。
+    full = build_prompt(MANIFEST, job_dir=tmp_path / "job", skill_dir=tmp_path / "skill")
+    assert full.startswith(envelope)
+    assert "Node instructions:\n" in full
+    assert full.endswith("working directory.\n\nbe careful\n")
 
 
 def test_detect_model_error_finds_wrapped_message(tmp_path: Path) -> None:
