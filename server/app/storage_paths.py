@@ -147,7 +147,7 @@ def resolve_data_path(
         if resolved_candidate != resolved_data_dir and resolved_candidate.is_relative_to(
             resolved_data_dir
         ):
-            warn_legacy_absolute()
+            warn_legacy_absolute(str(stored_path))
             return resolved_candidate
 
         parts = resolved_candidate.parts
@@ -164,7 +164,7 @@ def resolve_data_path(
                 root_kind="data",
             )
 
-        warn_legacy_absolute()
+        warn_legacy_absolute(str(stored_path))
         candidate = resolved_data_dir.joinpath(*suffix_parts)
     else:
         candidate = resolved_data_dir / candidate

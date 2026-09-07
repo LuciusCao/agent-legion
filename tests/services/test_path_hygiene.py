@@ -2,7 +2,8 @@
 
 DB path columns must hold data-dir-relative paths only; the startup report
 surfaces legacy absolute rows (bare-metal era) so a deployment shape change
-is noticed before executions stall.
+is noticed before executions stall. #521 adds the per-path warn dedupe and
+the one-time rewrite that retires the legacy rows outright.
 """
 
 from __future__ import annotations
@@ -15,8 +16,11 @@ import pytest
 
 from server.app.services.path_hygiene import (
     count_absolute_db_paths,
+    migrate_absolute_db_paths,
+    migrate_absolute_db_paths_background,
     report_absolute_db_paths,
     report_absolute_db_paths_background,
+    reset_legacy_absolute_dedupe,
     warn_legacy_absolute,
 )
 
@@ -160,11 +164,17 @@ def test_start_worker_threads_kicks_background_report(settings, monkeypatch) -> 
 
     from server.app import worker_startup
 
-    calls: list = []
+    report_calls: list = []
+    rewrite_calls: list = []
     monkeypatch.setattr(
         worker_startup,
         "report_absolute_db_paths_background",
-        calls.append,
+        report_calls.append,
+    )
+    monkeypatch.setattr(
+        worker_startup,
+        "migrate_absolute_db_paths_background",
+        lambda db, data_dir: rewrite_calls.append((db, data_dir)),
     )
     monkeypatch.setattr(worker_startup, "CodeDispatchService", MagicMock())
 
@@ -178,4 +188,148 @@ def test_start_worker_threads_kicks_background_report(settings, monkeypatch) -> 
         agent_dispatch=SimpleNamespace(skill_manager=MagicMock(), artifact_store=MagicMock()),
     )
 
-    assert len(calls) == 1
+    assert len(report_calls) == 1
+    # #521: the one-time rewrite kicks on the same off-readiness contract.
+    assert len(rewrite_calls) == 1
+
+
+# --- #521: per-path warn dedupe ---------------------------------------------
+
+
+def test_warn_legacy_absolute_dedupes_per_stored_path(caplog) -> None:
+    """Same stored path warns once per process; distinct paths each warn."""
+    reset_legacy_absolute_dedupe()
+    with caplog.at_level(logging.WARNING, logger="server.app.services.path_hygiene"):
+        warn_legacy_absolute("/old/data/logs/a.log")
+        warn_legacy_absolute("/old/data/logs/a.log")
+        warn_legacy_absolute("/old/data/logs/b.log")
+    reset_legacy_absolute_dedupe()
+    messages = [record.getMessage() for record in caplog.records]
+    assert len(messages) == 2, messages
+
+
+def test_warn_legacy_absolute_empty_key_never_dedupes(caplog) -> None:
+    """Direct callers without a key keep warning every call (legacy shape)."""
+    reset_legacy_absolute_dedupe()
+    with caplog.at_level(logging.WARNING, logger="server.app.services.path_hygiene"):
+        warn_legacy_absolute()
+        warn_legacy_absolute()
+    reset_legacy_absolute_dedupe()
+    assert len(caplog.records) == 2
+
+
+def test_resolve_data_path_dedupes_repeated_legacy_reads(tmp_path, caplog) -> None:
+    """The hot-path shape #521 targets: the same stored legacy row resolved
+    repeatedly (result commit, claim, dashboard) logs once per process."""
+    from server.app.storage_paths import resolve_data_path
+
+    data_dir = tmp_path / "data"
+    (data_dir / "logs").mkdir(parents=True)
+    legacy = tmp_path / "old" / "data" / "logs" / "x.log"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("x", encoding="utf-8")
+
+    reset_legacy_absolute_dedupe()
+    with caplog.at_level(logging.WARNING, logger="server.app.services.path_hygiene"):
+        for _ in range(5):
+            resolved = resolve_data_path(str(legacy), data_dir, allow_missing=True)
+            assert resolved.name == "x.log"
+    reset_legacy_absolute_dedupe()
+    # The log emit deduped to one; the resolution itself is unaffected.
+    assert len(caplog.records) == 1, [r.getMessage() for r in caplog.records]
+
+
+# --- #521: one-time legacy-absolute rewrite ----------------------------------
+
+
+def test_migrate_absolute_db_paths_rebases_and_converges_to_clean(job_db, tmp_path) -> None:
+    _seed(
+        job_db,
+        job_id="job-legacy",
+        log_path="/srv/old/data/logs/jobs/job-legacy-generate.log",
+        run_dir="/srv/old/data/jobs/ws/job-legacy/runs/generate/w",
+        storage_dir="/srv/old/data/jobs/ws/job-legacy",
+    )
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    migrated = migrate_absolute_db_paths(job_db, data_dir)
+
+    assert migrated == {
+        "node_runs.log_path": 1,
+        "node_runs.run_dir": 1,
+        "jobs.storage_dir": 1,
+    }
+    with job_db.connect() as conn:
+        log_path = conn.execute(
+            "select log_path from node_runs where job_id='job-legacy'"
+        ).fetchone()["log_path"]
+        storage_dir = conn.execute("select storage_dir from jobs where id='job-legacy'").fetchone()[
+            "storage_dir"
+        ]
+    assert log_path == "logs/jobs/job-legacy-generate.log"
+    assert storage_dir == "jobs/ws/job-legacy"
+    # The startup report converges to zero — the #521 acceptance signal.
+    assert count_absolute_db_paths(job_db) == {
+        "log_path": 0,
+        "run_dir": 0,
+        "session_dir": 0,
+        "jobs.storage_dir": 0,
+    }
+
+
+def test_migrate_absolute_db_paths_leaves_unmappable_rows(job_db, tmp_path) -> None:
+    """A path with no <data-dir-name>/<category>/ suffix survives untouched
+    and stays visible in the report (fail-closed reads keep handling it)."""
+    _seed(
+        job_db,
+        job_id="job-unmapped",
+        log_path="/elsewhere/completely/unrelated.log",
+        run_dir="",
+        storage_dir="",
+    )
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    migrated = migrate_absolute_db_paths(job_db, data_dir)
+
+    assert migrated == {}
+    assert count_absolute_db_paths(job_db)["log_path"] == 1
+
+
+def test_migrate_absolute_db_paths_is_idempotent(job_db, tmp_path) -> None:
+    _seed(
+        job_db,
+        job_id="job-legacy",
+        log_path="/srv/old/data/logs/jobs/job-legacy-generate.log",
+        run_dir="",
+        storage_dir="",
+    )
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    first = migrate_absolute_db_paths(job_db, data_dir)
+    second = migrate_absolute_db_paths(job_db, data_dir)
+
+    assert first == {"node_runs.log_path": 1}
+    # A clean database is a no-op: the selection itself is the guard.
+    assert second == {}
+
+
+def test_rewrite_background_logs_failures_without_raising(monkeypatch, caplog) -> None:
+    """A failing rewrite must surface in logs, never abort app startup."""
+    failed = threading.Event()
+
+    def _boom(db, data_dir) -> None:
+        failed.set()
+        raise RuntimeError("db gone")
+
+    monkeypatch.setattr("server.app.services.path_hygiene.migrate_absolute_db_paths", _boom)
+    with caplog.at_level(logging.ERROR, logger="server.app.services.path_hygiene"):
+        migrate_absolute_db_paths_background(db=None, data_dir=None)
+        assert failed.wait(5)
+        deadline = time.monotonic() + 5
+        while not caplog.records and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    assert any("path-hygiene one-time rewrite failed" in r.getMessage() for r in caplog.records)
