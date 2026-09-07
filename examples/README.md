@@ -42,6 +42,6 @@ provider/model（在 workflow 顶层 `execution:` 配一处即可，也可逐节
 两个 code 节点（intake/publish）的出厂代码在绑定示例 workflow 时发布为
 workspace 作用域 node_code 版本（seed-if-absent，源自 `workflow_nodes/` 的
 git 评审文件）；它们与其他 code 节点一样在 velites 沙箱内执行（#96），
-因此运行示例的 Host 需要 velites 二进制在 PATH（或用
-`scripts/ensure-velites.sh` 安装到 `data/bin/`）且 macOS `sandbox-exec` /
-Linux `bwrap` 可用。
+因此运行示例的 Host 需要 velites 二进制在 PATH（`make install` /
+`scripts/ensure-velites.sh` 装到 `~/.local/bin`，#507）且 macOS
+`sandbox-exec` / Linux `bwrap` 可用。

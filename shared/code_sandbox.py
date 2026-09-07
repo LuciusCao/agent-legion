@@ -45,30 +45,30 @@ from shared.code_contract import MAX_CONNECTION_KEY_CHARS as MAX_CONNECTION_KEY_
 #: sandbox wrap token），调用方不需要知道解析到的是哪个。
 SANDBOX_BINARY_CANDIDATES: tuple[str, ...] = ("velites-sandbox", "velites")
 
-#: 自带二进制目录（仓库根 data/bin）：Worker 裸机部署经
-#: ``ensure-velites.sh --dest data/bin`` 安置的产物落点，沙箱解析与
-#: worker/binary_resolution.py 的 runtime 解析共用（该模块 re-export 本
-#: 常量为 BUNDLED_BINARY_DIR——单一事实源，mock 任一侧改变同一目录）。
-#: Docker 镜像内此目录不存在（runtime 二进制经 compose 挂载、沙箱包装器
-#: 在 /usr/local/bin），探测自然跳过；Host 侧同理。
+#: 自带二进制目录（仓库根 data/bin）：Docker 形态的外挂注入点（compose 把
+#: `VELITES_BIN` bind mount 到镜像内 /app/data/bin/velites——容器内 PATH 上
+#: 只有镜像内置的沙箱包装器，data/bin 是 runtime 二进制的唯一落点）。
+#: 原生/裸机形态 velites 收敛为 PATH 单一副本（#507：~/.local/bin，
+#: ensure-velites.sh 维护），data/bin 不再播种、仅作兜底。沙箱解析与
+#: worker/binary_resolution.py 共用（单一事实源，mock 任一侧同一目录）。
 BUNDLED_SANDBOX_DIR = Path(__file__).resolve().parents[1] / "data" / "bin"
 
 
 def resolve_sandbox_binary() -> str | None:
     """Resolve the sandbox wrapper; None when no candidate exists.
 
-    解析面（Host 与 Worker 共用）：候选名按序探测「自带副本目录 → PATH」；
-    裸机 Worker 的 data/bin 自带副本（ensure-velites.sh 安置）与 PATH 上的
-    全量二进制都命中。与 agent runtime 解析（worker/binary_resolution.py
-    的 runtime 目录语义）刻意分开：沙箱是基础设施、不是 runtime。
+    解析面（Host 与 Worker 共用）：候选名按序探测「PATH → 自带副本目录」。
+    PATH 优先（#507）：原生/裸机形态 velites 是机器级单一副本（~/.local/bin，
+    ensure-velites.sh 的指纹闸门维护的就是它）；data/bin 兜底只服务 Docker 外挂形态（容器内 PATH 无 velites，挂载的 /app/data/bin 即唯一来源；裸机存量旧副本不再遮蔽 PATH——那正是 #507 修的漂移）。两侧都找不到返回 None，调用方 fail-closed（EXEC-CODE-003）；与 agent runtime 解析
+    （worker/binary_resolution.py）刻意分开：沙箱是基础设施、不是 runtime。
     """
     for name in SANDBOX_BINARY_CANDIDATES:
-        bundled = BUNDLED_SANDBOX_DIR / name
-        if bundled.is_file() and os.access(bundled, os.X_OK):
-            return str(bundled)
         resolved = shutil.which(name)
         if resolved:
             return resolved
+        bundled = BUNDLED_SANDBOX_DIR / name
+        if bundled.is_file() and os.access(bundled, os.X_OK):
+            return str(bundled)
     return None
 
 

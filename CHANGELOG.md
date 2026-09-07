@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+### Changed
+- 原生形态 velites 二进制收敛为 PATH 单一副本（issue #507）：解析顺序从
+  「data/bin 自带副本优先、PATH 兜底」反转为「PATH 优先、data/bin 兜底」
+  （`shared/code_sandbox.py::resolve_sandbox_binary` 与
+  `worker/binary_resolution.py::resolve_binary` 同步反转；fail-closed 语义
+  不变——两侧都找不到仍拒绝执行/拒绝启动，EXEC-CODE-003）。背景：data/bin
+  副本由旧版 `make install` 一次性播种后无任何维护方，而 `make prod-up`
+  刷新的是 PATH 副本——data/bin 存在即永久遮蔽，升级后 prod 静默跑旧
+  velites（0.6.0→0.7.0 实测复现）。收敛后：`install-deps.sh` 不再
+  `--dest data/bin` 播种（PATH 形态安装到 `~/.local/bin`），检测到存量
+  data/bin 旧副本时打印删除指引（不代删）；data/bin 目录保留为 Docker
+  形态的外挂注入点（compose bind mount `/app/data/bin/velites`），容器内
+  PATH 上无 velites、兜底即命中，Docker 部署零变化。裸机部署迁移：升级后
+  删除 `data/bin/velites*` 即落到被维护的 PATH 副本。
+
 ## [0.7.0] - 2026-09-06
 
 ### Added

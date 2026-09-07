@@ -73,7 +73,7 @@ def prepare_execution(
     prompt_file.write_text(substitute(str(command_spec["prompt"]), paths), encoding="utf-8")
     command = [substitute(str(part), paths) for part in command_spec["command"]]
     if command and "/" not in command[0]:
-        # 与启动预检同一解析（自带副本 data/bin 优先、PATH 兜底）：预检放行
-        # 的 runtime 必须在 spawn 时解析到同一个二进制。
+        # 与启动预检同一解析（PATH 优先、自带副本 data/bin 兜底，#507）：
+        # 预检放行的 runtime 必须在 spawn 时解析到同一个二进制。
         command[0] = resolve_binary(command[0]) or command[0]
     return PreparedExecution(manifest=manifest, command=command)

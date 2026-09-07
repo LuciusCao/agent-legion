@@ -43,7 +43,9 @@ def ensure_velites_binary() -> Path:
 
     Both execution paths are fail-closed without it: Host-side code nodes
     need ``velites sandbox wrap`` on PATH (the runner prepends data/bin to
-    the backend env), and the Worker resolves its own copy from data/bin.
+    the backend env), and the Worker picks the same copy up via the same
+    PATH prepend (data/bin is a smoke-run staging dir — #507 moved the
+    first-choice resolution to PATH; nothing else seeds this directory).
     """
     binary = _PROJECT_ROOT / "data" / "bin" / "velites"
     result = subprocess.run(

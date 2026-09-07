@@ -803,7 +803,9 @@ jobs:
 
       # velites binary: the main-flow spec's Host code sandbox and the
       # standalone Worker's agent runtime are both fail-closed without it
-      # (the runner builds it via scripts/ensure-velites.sh --dest data/bin).
+      # (the runner builds it via ensure-velites.sh --dest data/bin — a
+      # smoke-run staging dir prepended to PATH; production installs go to
+      # ~/.local/bin per #507).
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2

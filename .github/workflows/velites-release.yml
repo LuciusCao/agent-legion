@@ -1,8 +1,9 @@
 # velites 二进制发布管道（issue #381）：worker 镜像不再内置任何 agent runtime
 # 执行器后，velites 以平台匹配的独立二进制分发——docker worker 经 compose
 # bind mount 挂到 /app/data/bin/velites，裸机部署经 scripts/ensure-velites.sh
-# --dest data/bin 安置。本 workflow 在 velites-v* tag push 时构建三平台产物
-# 并创建 GitHub Release。
+# 装到 PATH（~/.local/bin，#507；无源码/工具链的机器直接取本 Release 产物
+# 放进 PATH 上的任意目录）。本 workflow 在 velites-v* tag push 时构建三平台
+# 产物并创建 GitHub Release。
 #
 # tag 命名：velites-v<Cargo.toml version>（如 velites-v0.4.0-alpha）。版本线
 # 独立于仓库版本（scripts/check_versions.py 强制解耦纪律），所以不能用仓库

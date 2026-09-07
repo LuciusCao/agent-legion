@@ -16,10 +16,10 @@ issue #254 起，agent runtime 的注册声明不再是手工勾选，而是读�
    统一经 ``velites sandbox wrap`` 沙箱（EXEC-CODE-003，fail-closed），
    与是否启用 velites *agent* runtime 无关。
 
-二进制解析（自带副本 data/bin 优先、PATH 兜底）统一走
-``worker/binary_resolution.py::resolve_binary``。期望值必须是
-``worker/runtime/catalog.py`` 的 SUPPORTED_RUNTIMES 子集，未知值同样
-fail-fast（拼写错误按部署错误处理，不静默忽略）。
+二进制解析（PATH 优先、自带副本 data/bin 兜底——Docker 外挂注入点，#507 起
+原生形态只装 PATH）统一走 ``worker/binary_resolution.py::resolve_binary``。
+期望值必须是 ``worker/runtime/catalog.py`` 的 SUPPORTED_RUNTIMES 子集，未知值
+同样 fail-fast（拼写错误按部署错误处理，不静默忽略）。
 """
 
 from __future__ import annotations

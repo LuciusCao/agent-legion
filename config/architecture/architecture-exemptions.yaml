@@ -514,7 +514,7 @@ exemptions:
 - check: architecture.file_budget
   path: shared/code_sandbox.py
   reason: '#383 added the sandbox-binary resolution primitive here (candidates velites-sandbox -> velites;
-    bundled data/bin dir then PATH) because the module is already the stdlib-only shared home both the
+    PATH first then the bundled data/bin dir as the Docker mount-point fallback, #507) because the module is already the stdlib-only shared home both the
     Host executor and the Worker code runner import. The primitive keeps one probe surface for both sides
     so "preflight passes = runtime resolves the same wrapper"; BUNDLED_SANDBOX_DIR is re-exported by worker/binary_resolution.py
     as the single source of truth for the shared directory.'

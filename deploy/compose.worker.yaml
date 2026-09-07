@@ -18,8 +18,9 @@ services:
     volumes:
       - ${AGENT_WORKER_CONFIG:-../deploy/worker.remote.example.yaml}:/etc/agent-legion/worker.yaml:ro
       # velites 二进制外挂（issue #381）：worker 镜像不含任何 agent runtime
-      # 执行器，velites 以平台匹配的二进制挂到自带副本目录（/app/data/bin，
-      # binary_resolution.py 自带副本优先、PATH 兜底）。产物来自
+      # 执行器，velites 以平台匹配的二进制挂到自带副本目录（/app/data/bin；
+      # PATH 优先解析、data/bin 兜底命中——容器内 PATH 上没有 velites，
+      # 挂载点即唯一来源，见 binary_resolution.py）。产物来自
       # velites-release workflow 的 GitHub Release（velites-v* tag）：x86_64
       # 主机取 *-x86_64-unknown-linux-gnu.tar.gz、arm64 取
       # *-aarch64-unknown-linux-gnu.tar.gz，解出的 velites chmod +x 后放这里；

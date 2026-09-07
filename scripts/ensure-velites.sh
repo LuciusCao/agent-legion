@@ -9,10 +9,13 @@
 #   scripts/ensure-velites.sh              安装/刷新 PATH 上的 velites（默认）
 #   scripts/ensure-velites.sh --dest DIR   安装/刷新 DIR/velites（跳过 PATH 探测）
 #
-# --dest 用于 Worker 自带沙箱副本：--dest data/bin 把二进制安置到
-# data/bin/velites（Worker 解析顺序：自带副本优先于 PATH，见
-# worker/binary_resolution.py resolve_binary）。二进制按平台构建——给哪台
-# Worker 用就在同 OS/架构的机器上执行本脚本。
+# 无参形态是 #507 收敛后的唯一原生安装通道：velites 装到
+# ~/.local/bin（VELITES_INSTALL_DIR 可覆盖），机器级单副本，Worker/Host
+# 解析均以 PATH 为权威（data/bin 不再是原生形态的落点）。
+# --dest 仅供显式安置副本到指定目录（如 Docker 形态把 Release 产物
+# 安置到 compose VELITES_BIN 的宿主路径）；本仓库的原生/开发链路
+# （install-deps.sh、native-prod-up.sh）不再使用它。二进制按平台构建——
+# 给哪台 Worker 用就在同 OS/架构的机器上执行本脚本。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

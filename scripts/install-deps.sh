@@ -14,7 +14,8 @@
 #   4. .env 缺失时从 .env.example 复制并生成随机 S3 凭据写入（本地 RustFS
 #      用）；.env 已存在但凭据为空时幂等补填（非空值不覆盖）
 #   5. deploy/secrets/vault_master_key 缺失时生成（同 init-worktree.sh）
-#   6. scripts/ensure-velites.sh --dest data/bin（指纹一致自动跳过）
+#   6. scripts/ensure-velites.sh（PATH 形态，指纹一致自动跳过；#507 起
+#      data/bin 不再播种，检测到存量副本时提示删除）
 #   7. frontend/node_modules 缺失时 npm ci
 #   8. worker 状态副本 data/agent-worker-service/worker.yaml 缺失时写入最小
 #      本机 dev 配置（host_url/work_root 为本机 dev 值）
@@ -185,8 +186,18 @@ if [[ ! -s deploy/secrets/vault_master_key ]]; then
 fi
 chmod 600 deploy/secrets/vault_master_key
 
-# 6. velites 二进制（指纹一致自动跳过）
-./scripts/ensure-velites.sh --dest data/bin
+# 6. velites 二进制（指纹一致自动跳过；#507 起装到 PATH——~/.local/bin，
+#    data/bin 不再是 velites 落点）
+./scripts/ensure-velites.sh
+# 存量 data/bin 旧副本迁移提示（#507）：旧版 install-deps.sh 曾往 data/bin
+# 播种一次性副本，升级后无人维护且解析顺序已改为 PATH 优先——它不再遮蔽
+# PATH，但留着易误导（「这里有一份 velites」的假象）。探测到即指引删除；
+# 不代删（data/bin 可能还有部署方手工安置的其他二进制）。
+if [[ -e data/bin/velites ]]; then
+    echo "提示: 检测到 data/bin/velites（旧版一次性播种的副本，#507 起已退役）" >&2
+    echo "  velites 现由 PATH 上的 ~/.local/bin 单一副本提供（ensure-velites.sh 维护）" >&2
+    echo "  确认不再需要后可删除：rm -f data/bin/velites data/bin/velites.src-stamp" >&2
+fi
 
 # 7. 前端依赖
 if [[ ! -d frontend/node_modules ]]; then
