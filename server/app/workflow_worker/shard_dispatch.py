@@ -18,6 +18,11 @@ from server.app.executors.models import (
     LeaseClaimRequest,
 )
 from server.app.executors.scheduling.capacity import CapacitySnapshot
+from server.app.services.job_errors import JobServiceError
+from server.app.services.vault import VaultError
+from server.app.workflow_worker.agent_claim import cached_run_payload, fail_node_config
+from server.app.workflow_worker.code_dispatch import resolve_code_node_dispatch
+from server.app.workflow_worker.dispatch_config import resolve_dispatch_node_config
 from server.app.workflow_worker.execution import submit_claim
 from server.app.workflows.definition import WorkflowNode
 
@@ -40,10 +45,56 @@ def claim_shard_locally(
     allowed_node_keys: frozenset[str] | None,
     snapshot: CapacitySnapshot,
 ) -> bool:
-    """Lease and submit one shard on the local code pool; False = no capacity."""
+    """Lease and submit one shard on the local code pool; False = no capacity.
+
+    #495: the local shard lane used to build its ExecutionContext without
+    ``node_code``, so every shard of a pure-local deployment died on the
+    EXEC-CODE-002 backstop with a misleading "no published node code" error
+    while the remote lane (``code_claim``) resolved the same code fine. The
+    resolution now mirrors the ordinary local path (``schedule`` →
+    ``code_dispatch``): resolve first and fail the node with the true reason
+    when the code is unrunnable — the backstop stays a backstop.
+
+    PR #520 review P2: the same gap held for config — a shard node's
+    declared ``config_schema``/``config`` (secrets, connections,
+    ``timeout_seconds`` …) never resolved, so ``ExecutionContext.node_config``
+    stayed empty and ``config_snapshot_json`` blank while the remote lane
+    shipped the fully resolved config. Config now rides the same
+    ``resolve_dispatch_node_config`` chain as ``schedule``.
+    """
     workspace_id = workspace["id"]
+    # Schema v61: workspace id IS the workflow key — the same source the lease
+    # request below and the shard remote lane (code_claim) use.
+    workflow_key = str(job["workspace_id"])
     if not snapshot.has_capacity(workspace_id, node.key):
         return False
+    run_payload = cached_run_payload(worker, job)
+    # Config first, then code — the order of the ordinary local path
+    # (schedule.py): both resolve before the lease, and an unresolvable
+    # value fails the node with the true reason instead of surfacing as a
+    # mid-execution crash or a silently ignored config.
+    try:
+        # Frozen snapshot (runtime-mutable keys re-resolved live) → vault
+        # secret_refs → connection config + token; in-memory only
+        # (VAULT-SECRET-001). The non-secret snapshot rides the lease as the
+        # dispatch-time audit (CONFIG-RUNTIME-MUTABLE-001).
+        node_config, config_snapshot_json = resolve_dispatch_node_config(
+            worker, node, workflow_key, workspace_id, workspace, run_payload
+        )
+    except (ValueError, VaultError, JobServiceError) as exc:
+        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+    # #495: same resolve order as the ordinary local path (#115) and the
+    # shard remote lane — the currently published workspace code; frozen
+    # pins apply only to quality-replay batches (per-pass memo inside).
+    # resolve raises (ValueError) exactly when the node can never run; the
+    # message then names the real reason instead of the executor backstop's
+    # generic text.
+    try:
+        node_code = resolve_code_node_dispatch(
+            worker, workspace_id, workflow_key, node, run_payload, job.get("node_code_pins")
+        )
+    except ValueError as exc:
+        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
     claim = worker.leases.try_claim(
         LeaseClaimRequest(
             executor_id=CODE_EXECUTOR_ID,
@@ -62,6 +113,9 @@ def claim_shard_locally(
             target_node_key=control_snapshot.get("target_node_key") if control_snapshot else None,
             allowed_node_keys=tuple(sorted(allowed_node_keys)) if allowed_node_keys else (),
             shard_index=shard_index,
+            # Non-secret resolved config audit, same channel as the ordinary
+            # local path (CONFIG-RUNTIME-MUTABLE-001).
+            config_snapshot_json=config_snapshot_json,
         )
     )
     if claim is None:
@@ -99,6 +153,8 @@ def claim_shard_locally(
             "shard_index": shard_index,
             "shard_input": shard_input,
         },
+        node_code=node_code,
+        node_config=node_config,
     )
     submit_claim(worker, CODE_EXECUTOR_ID, claim, context)
     return True

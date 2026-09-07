@@ -1168,3 +1168,24 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/532
   ceiling: 76
+  path: server/app/workflow_worker/shard_dispatch.py
+  reason: >-
+    Issue #495: the shard local lane built its ExecutionContext without
+    node_code AND without resolved node_config, so every shard of a
+    pure-local deployment (code_capacity>0, no remote code Worker taking
+    the shard) died on the EXEC-CODE-002 backstop with a misleading
+    "no published node code" error while the remote lane resolved both
+    fine; config (defaults, workspace overrides, vault secrets,
+    connections) was silently dropped. The fix routes the lane through
+    the same resolve chains as the ordinary local path
+    (resolve_code_node_dispatch + resolve_dispatch_node_config +
+    fail_node_config with the true reason): two try/excepts with the
+    resolve calls (~23 effective lines) — the lane's claim/context
+    assembly already lives here and the resolves belong with them;
+    splitting them out would fork the resolve semantics the two local
+    paths must share. Anchored to #522 (the long-lived budget-anchor
+    tracker): harvest when the shard claim paths consolidate their
+    context assembly, not when a single fix issue closes.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/522
+  ceiling: 123

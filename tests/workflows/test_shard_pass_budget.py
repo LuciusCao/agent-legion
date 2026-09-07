@@ -239,9 +239,23 @@ def test_local_shard_context_expected_outputs_exclude_ordinary_outputs(job_db) -
 
     worker = MagicMock()
     worker.leases.try_claim = fake_try_claim
+    # #495: the local lane now resolves the published node code first (same
+    # chain as the ordinary local path); hand it the JobQueries facade the
+    # resolve chain reads through and the per-pass memo dicts it populates.
+    worker.job_db = job_db
+    worker.state.batch_payload_cache = {}
+    worker.state.node_code_cache = {}
     snapshot = MagicMock()
     snapshot.has_capacity.return_value = True
-    with patch("server.app.workflow_worker.shard_dispatch.submit_claim", fake_submit):
+    with (
+        patch("server.app.workflow_worker.shard_dispatch.submit_claim", fake_submit),
+        # This harness publishes no code (it pins the expected-outputs shape
+        # only); stub the resolve so the claim proceeds without one.
+        patch(
+            "server.app.workflow_worker.shard_dispatch.resolve_code_node_dispatch",
+            lambda *args, **kwargs: "def run(job, job_dir, runtime):\n    pass\n",
+        ),
+    ):
         claimed = claim_shard_locally(
             worker,
             {"id": "ws-budget"},
