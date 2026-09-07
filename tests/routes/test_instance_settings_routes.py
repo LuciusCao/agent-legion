@@ -37,7 +37,11 @@ def _payload() -> dict:
         "materials_ttl_days": 0,
         "execution_retention_days": 0,
         "workflows": {"max_items_per_run": 20_000},
-        "agent_workers": {"max_archive_bytes": 64 * 1024 * 1024, "min_protocol_version": 1},
+        "agent_workers": {
+            "max_archive_bytes": 64 * 1024 * 1024,
+            "min_protocol_version": 1,
+            "max_concurrent_result_commits": 16,
+        },
     }
 
 

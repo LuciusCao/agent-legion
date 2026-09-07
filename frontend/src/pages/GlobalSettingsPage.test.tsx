@@ -120,7 +120,11 @@ const instanceSettings: InstanceSettingsResponse = {
   materials_ttl_days: 0,
   execution_retention_days: 0,
   workflows: { max_items_per_run: 20000 },
-  agent_workers: { max_archive_bytes: 104857600, min_protocol_version: 2 },
+  agent_workers: {
+    max_archive_bytes: 104857600,
+    min_protocol_version: 2,
+    max_concurrent_result_commits: 16,
+  },
   skills_root: '~/.agents/skills',
 }
 

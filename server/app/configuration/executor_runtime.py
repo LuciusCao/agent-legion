@@ -57,6 +57,14 @@ class AgentWorkersRuntimeConfig(BaseModel):
     # section no longer carries any credential.
     max_archive_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
     min_protocol_version: int = Field(default=1, ge=1)
+    # #521 peak-shaving gate on the result commit: completion waves (a
+    # DAG's same-phase nodes reporting together) otherwise occupy the
+    # shared threadpool with GIL-bound commit work and starve claim/
+    # heartbeat on the single-process control plane. The gate bounds
+    # concurrent commits; queued reporters wait as coroutines (no
+    # threadpool tokens). 0 disables the gate (kill-switch for A/B).
+    # Instance-settings managed, takes effect on restart.
+    max_concurrent_result_commits: int = Field(default=16, ge=0)
 
 
 class ExecutorRuntimeConfig(BaseModel):

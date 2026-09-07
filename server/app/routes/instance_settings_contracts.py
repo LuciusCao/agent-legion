@@ -41,6 +41,9 @@ class InstanceAgentWorkersSettings(BaseModel):
 
     max_archive_bytes: int = Field(gt=0)
     min_protocol_version: int = Field(ge=1)
+    # #521 peak-shaving gate on the result commit; restart-effective. 0 =
+    # disabled (the kill-switch), ge=0 mirrors ExecutorRuntimeConfig.
+    max_concurrent_result_commits: int = Field(ge=0)
 
 
 class InstanceSettingsDocument(BaseModel):

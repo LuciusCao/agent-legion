@@ -38,9 +38,11 @@ export function toFormValues(doc: InstanceSettingsResponse): FormValues {
     'agent_workers.min_protocol_version': String(
       doc.agent_workers.min_protocol_version
     ),
+    'agent_workers.max_concurrent_result_commits': String(
+      doc.agent_workers.max_concurrent_result_commits
+    ),
   }
 }
-
 function parseNumber(values: FormValues, path: string): number {
   const def = fieldDef(path)
   const raw = String(values[path] ?? '').trim()
@@ -103,6 +105,10 @@ export function buildPayload(values: FormValues): InstanceSettingsUpdate {
       min_protocol_version: parseNumber(
         values,
         'agent_workers.min_protocol_version'
+      ),
+      max_concurrent_result_commits: parseNumber(
+        values,
+        'agent_workers.max_concurrent_result_commits'
       ),
     },
   }

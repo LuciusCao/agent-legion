@@ -111,6 +111,12 @@ export const FIELD_GROUPS: FieldGroup[] = [
         label: '最低协议版本',
         integer: true,
       },
+      {
+        path: 'agent_workers.max_concurrent_result_commits',
+        label: 'result 提交并发上限（0 不限制）',
+        integer: true,
+        allowZero: true,
+      },
     ],
     toggles: [],
   },
