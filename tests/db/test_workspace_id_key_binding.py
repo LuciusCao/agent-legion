@@ -52,15 +52,17 @@ def test_schema_version_pin() -> None:
     # (claim_stage_profile, #448) owns
     # tests/db/test_claim_stage_profile_migration.py; v79
     # (shard_identity_index, #401) owns
-    # tests/db/test_agent_request_shard_index.py — this copy stays as
+    # tests/db/test_agent_request_shard_index.py; v80
+    # (result_stage_profile, #521) owns
+    # tests/db/test_result_stage_profile_migration.py — this copy stays as
     # a backstop that the chain tail stays in sync.
-    assert SCHEMA_VERSION == 79
+    assert SCHEMA_VERSION == 80
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "shard_identity_index"
+    assert row["name"] == "result_stage_profile"
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:

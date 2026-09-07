@@ -8,7 +8,7 @@ unit on transient PostgreSQL transaction conflicts.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from server.app.db.connection import DatabaseConnection
 from server.app.db.transaction import read_connection, write_transaction
@@ -60,13 +60,24 @@ def heartbeat(repo: ExecutorLeaseRepository, lease_id: str, ttl_seconds: int) ->
         return heartbeat_lease(conn, lease_id, ttl_seconds)
 
 
-def finish(repo: ExecutorLeaseRepository, lease_id: str, result: ExecutionResult) -> bool:
+def finish(
+    repo: ExecutorLeaseRepository,
+    lease_id: str,
+    result: ExecutionResult,
+    *,
+    stage_timer: Any | None = None,
+) -> bool:
     with write_transaction(repo.path) as conn:
         lease = conn.execute(
             "select job_id from executor_leases where id=%s", (lease_id,)
         ).fetchone()
         job_id = str(lease["job_id"]) if lease else None
         result_flag = finish_lease(conn, lease_id, result, repo.data_dir)
+    # #521 result-stage split: the terminal-state write transaction is its
+    # own segment; the events post-processing below (two full events.jsonl
+    # scans today) is the next one. ``stage_timer`` is None on every
+    # code-plane caller — only the Agent result commit threads it through.
+    _mark_result_stage(stage_timer, "lease_write")
 
     # Parse events.jsonl outside the main write transaction; the
     # capture helper opens its own short write tx only for the persist.
@@ -79,11 +90,18 @@ def finish(repo: ExecutorLeaseRepository, lease_id: str, result: ExecutionResult
         if result.run_dir:
             run_dir = resolve_data_path(result.run_dir, repo.data_dir, allow_missing=True)
             compress_pi_events(run_dir / "events.jsonl")
+    _mark_result_stage(stage_timer, "events")
 
     # Broadcast only after the commit has succeeded, never inside the tx.
     if job_id is not None and result_flag:
         repo._broadcast_job_update(job_id)
     return result_flag
+
+
+def _mark_result_stage(stage_timer: Any | None, name: str) -> None:
+    """Close one #521 result-stage segment on an optional timer."""
+    if stage_timer is not None:
+        stage_timer.stage(name)
 
 
 def expire_stale(repo: ExecutorLeaseRepository, now: datetime) -> list[str]:

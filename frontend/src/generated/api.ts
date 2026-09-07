@@ -4001,6 +4001,8 @@ export interface components {
     InstanceAgentWorkersSettings: {
       /** Max Archive Bytes */
       max_archive_bytes: number
+      /** Max Concurrent Result Commits */
+      max_concurrent_result_commits: number
       /** Min Protocol Version */
       min_protocol_version: number
     }
@@ -4979,12 +4981,40 @@ export interface components {
       pass_seconds_total: number
       /** Pass Slow Count */
       pass_slow_count: number
+      /** Result Artifacts Upload Seconds Max */
+      result_artifacts_upload_seconds_max: number
+      /** Result Artifacts Upload Seconds Total */
+      result_artifacts_upload_seconds_total: number
+      /** Result Artifacts Verify Seconds Max */
+      result_artifacts_verify_seconds_max: number
+      /** Result Artifacts Verify Seconds Total */
+      result_artifacts_verify_seconds_total: number
       /** Result Count */
       result_count: number
+      /** Result Events Seconds Max */
+      result_events_seconds_max: number
+      /** Result Events Seconds Total */
+      result_events_seconds_total: number
+      /** Result Lease Write Seconds Max */
+      result_lease_write_seconds_max: number
+      /** Result Lease Write Seconds Total */
+      result_lease_write_seconds_total: number
+      /** Result Mark Done Seconds Max */
+      result_mark_done_seconds_max: number
+      /** Result Mark Done Seconds Total */
+      result_mark_done_seconds_total: number
       /** Result Seconds Max */
       result_seconds_max: number
       /** Result Seconds Total */
       result_seconds_total: number
+      /** Result Unpack Seconds Max */
+      result_unpack_seconds_max: number
+      /** Result Unpack Seconds Total */
+      result_unpack_seconds_total: number
+      /** Result Validate Seconds Max */
+      result_validate_seconds_max: number
+      /** Result Validate Seconds Total */
+      result_validate_seconds_total: number
     }
     /** ProfileVerdict */
     ProfileVerdict: {

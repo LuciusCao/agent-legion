@@ -10,6 +10,7 @@ from starlette import concurrency
 
 from server.app.agent_broker import AgentExecutionBroker, worker_events
 from server.app.agent_broker.agent_result_commit import commit_agent_result
+from server.app.agent_broker.result_gate import build_result_commit_gate, run_gated_result_commit
 from server.app.agent_broker.result_spool import discard_staged_result, spool_result_body
 from server.app.agent_control.completion import AgentCompletionHandler
 from server.app.agent_control.register_key_guard import RegisterKeyDeleted
@@ -46,6 +47,9 @@ def create_agent_workers_router(
 ) -> APIRouter:
     router = APIRouter(tags=["agent-workers"])
     config = settings.executor_runtime.agent_workers
+    # #521 peak-shaving gate (result_gate.py owns the semantics): built once
+    # at wiring; None = the max_concurrent_result_commits=0 kill-switch.
+    result_commit_gate = build_result_commit_gate(config.max_concurrent_result_commits)
 
     def resolve_registration_scope(request: Request) -> list[dict[str, Any]]:
         """Resolve the presented registration credentials to a workspace scope.
@@ -260,22 +264,16 @@ def create_agent_workers_router(
         from server.app.services.runtime_profile import profile
 
         result_timer = profile.result_timer()
+        commit_args = (broker, completion, execution_id, worker_id, lease_id, outcome, record)
         try:
             staged = await spool_result_body(request, broker.bundle_dir, config.max_archive_bytes)
             try:
-                # The blocking DB/disk commit runs in the threadpool: at agent scale
-                # (multiple reports per second) holding the event loop here stalls
-                # every heartbeat, claim, and dashboard stream behind it.
-                await concurrency.run_in_threadpool(
-                    commit_agent_result,
-                    broker,
-                    completion,
-                    execution_id,
-                    worker_id,
-                    lease_id,
-                    outcome,
-                    record,
-                    staged,
+                # The blocking commit runs in the threadpool (holding the
+                # loop would stall heartbeat/claim); the #521 gate
+                # (result_gate.py) bounds how many share it. Spooling
+                # stays outside the gate.
+                await run_gated_result_commit(
+                    result_commit_gate, commit_agent_result, *commit_args, staged
                 )
             finally:
                 # A successful commit atomically renamed the staging file into

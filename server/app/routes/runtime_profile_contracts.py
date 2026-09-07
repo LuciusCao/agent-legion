@@ -39,6 +39,20 @@ class ProfileBucket(BaseModel):
     result_count: int
     result_seconds_total: float
     result_seconds_max: float
+    result_unpack_seconds_total: float
+    result_unpack_seconds_max: float
+    result_artifacts_verify_seconds_total: float
+    result_artifacts_verify_seconds_max: float
+    result_validate_seconds_total: float
+    result_validate_seconds_max: float
+    result_artifacts_upload_seconds_total: float
+    result_artifacts_upload_seconds_max: float
+    result_lease_write_seconds_total: float
+    result_lease_write_seconds_max: float
+    result_events_seconds_total: float
+    result_events_seconds_max: float
+    result_mark_done_seconds_total: float
+    result_mark_done_seconds_max: float
     db_pool_waiting: int
     db_pool_wait_seconds_total: float
 

@@ -888,3 +888,53 @@ def test_code_result_with_expected_outputs_commits_completed(tmp_path: Path) -> 
         ).fetchone()
     assert run["status"] == "completed"
     assert ref["hash"] == digest
+
+
+def test_result_commit_records_stage_timings_in_profile(tmp_path: Path) -> None:
+    """#521 end-to-end: a real result commit folds per-stage timings into the
+    runtime profile — the unpack/artifacts/lease_write/events/mark_done chain
+    runs inside commit_agent_result, so a 204 report must leave non-zero
+    stage totals behind (the route-level note_result counter doubles as the
+    control: it fires on the same request)."""
+    from server.app.services.runtime_profile import profile
+
+    app = _make_app(tmp_path)
+    _seed_code_request(app, expected_outputs=["out.json"])
+
+    with TestClient(app) as client:
+        _authenticate_admin(client)
+        token = _register_code_worker(client)
+        claimed = _claim_code(client, token)
+        (app.state.settings.jobs_dir / "job-code-1").mkdir(parents=True, exist_ok=True)
+        upload = client.post(
+            "/api/artifacts",
+            headers={"X-Agent-Worker-Token": token},
+            content=b"{}\n",
+        )
+        assert upload.status_code == 201, upload.text
+        digest = upload.json()["hash"]
+        report = client.post(
+            f"/api/agent-executions/{claimed['execution_id']}/result",
+            headers={
+                "X-Agent-Worker-Token": token,
+                "X-Agent-Lease-Id": claimed["lease_id"],
+                "X-Agent-Result": json.dumps(
+                    {
+                        "status": "completed",
+                        "exit_code": 0,
+                        "output_artifacts": {"out.json": f"sha256:{digest}"},
+                    }
+                ),
+            },
+            content=_archive_with_files({"out.json": "{}\n", "node.log": "done\n"}),
+        )
+        assert report.status_code == 204, report.text
+
+    deltas = profile.counters.snapshot_and_reset()
+    assert deltas["result_count"] >= 1
+    assert deltas["result_seconds_total"] > 0.0
+    # The stage chain: every stage marker the commit path closed shows up.
+    assert deltas["result_unpack_seconds_total"] > 0.0
+    assert deltas["result_artifacts_verify_seconds_total"] > 0.0
+    assert deltas["result_lease_write_seconds_total"] > 0.0
+    assert deltas["result_mark_done_seconds_total"] > 0.0

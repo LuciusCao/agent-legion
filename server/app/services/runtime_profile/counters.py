@@ -22,19 +22,19 @@ plain integer/float attributes under a single ``Lock``-free discipline:
 Everything lives in one process (single-uvicorn deployment shape, see
 ``docs/architecture``); multi-replica aggregation is out of scope and would
 need a sum-per-bucket at read time instead of this registry.
+
+The stage-gauge families (#448 claim, #521 result) live in
+``stage_gauges.py`` and compose onto ``RuntimeProfile`` below — the tuples,
+the reset/snapshot loops, and the note_* folds stay single-source there.
 """
 
 from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Mapping
 from typing import Any
 
-# Claim-stage gauges (#448): for each stage a (total, max) float pair, set
-# from ``claim_timing`` stage names. Kept as one tuple so reset/snapshot stay
-# single-source loops instead of 12 hand-written lines drifting apart.
-_CLAIM_STAGES = ("scan", "evaluate", "writes")
+from server.app.services.runtime_profile.stage_gauges import STAGE_FAMILIES, StageGaugesMixin
 
 
 class RuntimeProfileCounters:
@@ -59,12 +59,13 @@ class RuntimeProfileCounters:
         self.claim_empty_count = 0
         self.claim_seconds_total = 0.0
         self.claim_seconds_max = 0.0
-        for stage in _CLAIM_STAGES:
-            setattr(self, f"claim_{stage}_seconds_total", 0.0)
-            setattr(self, f"claim_{stage}_seconds_max", 0.0)
         self.result_count = 0
         self.result_seconds_total = 0.0
         self.result_seconds_max = 0.0
+        for _prefix, stages in STAGE_FAMILIES:
+            for stage in stages:
+                setattr(self, f"{_prefix}_{stage}_seconds_total", 0.0)
+                setattr(self, f"{_prefix}_{stage}_seconds_max", 0.0)
         self.execute_done = 0
         self.execute_requeued = 0
 
@@ -96,16 +97,17 @@ class RuntimeProfileCounters:
                 "execute_done": self.execute_done,
                 "execute_requeued": self.execute_requeued,
             }
-            for stage in _CLAIM_STAGES:
-                values[f"claim_{stage}_seconds_total"] = getattr(
-                    self, f"claim_{stage}_seconds_total"
-                )
-                values[f"claim_{stage}_seconds_max"] = getattr(self, f"claim_{stage}_seconds_max")
+            for _prefix, stages in STAGE_FAMILIES:
+                for stage in stages:
+                    for kind in ("total", "max"):
+                        values[f"{_prefix}_{stage}_seconds_{kind}"] = getattr(
+                            self, f"{_prefix}_{stage}_seconds_{kind}"
+                        )
             self.reset()
         return values
 
 
-class RuntimeProfile:
+class RuntimeProfile(StageGaugesMixin):
     """Process-wide registry the hot paths call into.
 
     Instrumentation sites hold the module-level ``profile`` singleton (set
@@ -165,31 +167,7 @@ class RuntimeProfile:
         if empty:
             self.counters.claim_empty_count += 1
 
-    def note_claim_stages(self, stages: Mapping[str, float]) -> None:
-        """Fold one claim's per-stage timings into the claim gauges (#448).
-
-        Unknown keys are ignored (worker_setup/commit fold into nothing — the
-        claim-wide totals above already carry them); same undercount
-        discipline as the sibling counters. Claim COUNTING lives only in
-        ``note_claim`` — the broker's claim lifecycle owns it; an earlier
-        variant also bumped ``claim_empty_count`` here, double-counting every
-        empty claim and doubling the classifier's empty_claim_ratio
-        (#461 review).
-        """
-        for stage in _CLAIM_STAGES:
-            seconds = stages.get(stage, 0.0)
-            if not seconds:
-                continue
-            setattr(
-                self.counters,
-                f"claim_{stage}_seconds_total",
-                getattr(self.counters, f"claim_{stage}_seconds_total") + seconds,
-            )
-            setattr(
-                self.counters,
-                f"claim_{stage}_seconds_max",
-                max(getattr(self.counters, f"claim_{stage}_seconds_max"), seconds),
-            )
+    note_claim_stages = StageGaugesMixin.note_claim_stages
 
     # --- execute ------------------------------------------------------------
 
@@ -212,8 +190,8 @@ class RuntimeProfile:
     class _Timed:
         """Pure wall-time measurement handed to the note_* call (Codex P2 on
         #367): stop() only RETURNS the elapsed seconds — the note_* method
-        owns every accumulation. An earlier variant also accumulated into
-        the total here, double-counting every claim/result latency."""
+        owns every accumulation. An earlier variant also accumulated into the
+        total here, double-counting every claim/result latency."""
 
         __slots__ = ("_start",)
 

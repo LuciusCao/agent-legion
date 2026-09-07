@@ -760,6 +760,8 @@ create table if not exists ops_runtime_profile_samples (
   result_count integer not null default 0,
   result_seconds_total double precision not null default 0,
   result_seconds_max double precision not null default 0,
+  -- result-stage split (v80) likewise lives in the v80 migration's
+  -- guarded ALTERs, not here (the v78 DDL-home rule).
   db_pool_waiting integer not null default 0,
   db_pool_wait_seconds_total double precision not null default 0,
   created_at timestamptz not null default current_timestamp
