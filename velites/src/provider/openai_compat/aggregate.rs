@@ -400,11 +400,26 @@ pub(super) fn wire_message(message: &Message) -> Value {
             }
             Value::Object(wire)
         }
-        Role::ToolResult => json!({
-            "role": "tool",
-            "tool_call_id": message.tool_call_id.as_deref().unwrap_or_default(),
-            "content": joined_text(message),
-        }),
+        Role::ToolResult => {
+            // OpenAI wire 的 tool 消息没有 is_error 字段：失败标志以
+            // `[ERROR]` 文本前缀透传（该协议下的通用做法）。不透传时模型
+            // 只能靠读文本里的 invalid 行自行判断，会把错误输出当成功结果
+            // 继续推理（#450）。Anthropic 走原生 `is_error` 字段，语义不变。
+            let mut content = joined_text(message);
+            if message.is_error.unwrap_or(false) {
+                // 空文本退化为裸 `[ERROR]`，不留尾随空格。
+                content = if content.is_empty() {
+                    "[ERROR]".to_string()
+                } else {
+                    format!("[ERROR] {content}")
+                };
+            }
+            json!({
+                "role": "tool",
+                "tool_call_id": message.tool_call_id.as_deref().unwrap_or_default(),
+                "content": content,
+            })
+        }
     }
 }
 

@@ -492,6 +492,86 @@ async fn full_tool_round_over_gateway() {
 }
 
 #[tokio::test]
+async fn failed_tool_round_carries_error_prefix_to_next_request() {
+    // #450: read 一个不存在的文件 → is_error=true 的 tool result。OpenAI
+    // wire 的 tool 消息没有 is_error 字段，失败信号以 `[ERROR]` 文本前缀
+    // 透传到下一个请求——不能静默丢失，否则模型把错误输出当成功结果继续
+    // 推理。事件流仍原生携带 isError（golden events 不受影响）。
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().canonicalize().unwrap();
+
+    let first = sse_body(&[
+        json!({"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "id": "call_1", "function": {"name": "read", "arguments": "{\"path\": \"missing.txt\"}"}}
+        ]}, "finish_reason": null}]}),
+        json!({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]}),
+        json!({"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 2}}),
+    ]);
+    let second = sse_body(&[
+        json!({"choices": [{"delta": {"content": "The read failed."}, "finish_reason": "stop"}]}),
+        json!({"choices": [], "usage": {"prompt_tokens": 20, "completion_tokens": 5}}),
+    ]);
+    let server = MockServer::start(vec![MockResponse::sse(first), MockResponse::sse(second)]).await;
+    let provider = retrying(&server, 0);
+
+    let config = velites::agent::AgentConfig {
+        name: Some("tool-round-error".into()),
+        provider_name: "gateway".into(),
+        model: "kimi-k2.6".into(),
+        thinking: None,
+        system_prompt: "sys".into(),
+        instruction: "read missing.txt".into(),
+        tools: vec![ToolKind::Read],
+        budget: velites::budget::Budget::new(Some(5), None, std::time::Duration::from_secs(600)),
+        require_output: Vec::new(),
+        session: None,
+        cwd,
+        read_roots: Vec::new(),
+        skill_dirs: Vec::new(),
+        sandbox: None,
+        cancel: velites::cancel::CancelToken::default(),
+    };
+    let mut sink = MemorySink::default();
+    let exit = velites::agent::run(config, &provider, &mut sink)
+        .await
+        .unwrap();
+    assert_eq!(exit, 0);
+
+    // 事件流照常携带 isError（回传方向的修复不影响事件契约）。
+    let tool_end = sink
+        .events
+        .iter()
+        .find_map(|event| match event {
+            Event::ToolExecutionEnd(payload) => Some(payload),
+            _ => None,
+        })
+        .expect("a tool_execution_end event must be emitted");
+    assert!(tool_end.is_error);
+
+    let recorded = server.recorded();
+    assert_eq!(recorded.len(), 2);
+    let second_request = recorded[1].body_json();
+    let wire_messages = second_request["messages"].as_array().unwrap();
+    // system, user, assistant(tool_calls), tool result.
+    assert_eq!(wire_messages.len(), 4);
+    assert_eq!(wire_messages[3]["role"], "tool");
+    assert_eq!(wire_messages[3]["tool_call_id"], "call_1");
+    let content = wire_messages[3]["content"].as_str().unwrap_or_default();
+    assert!(
+        content.starts_with("[ERROR] "),
+        "failed tool result must carry the [ERROR] prefix, got: {content}"
+    );
+    assert!(
+        content.contains("No such file"),
+        "underlying error text must stay readable, got: {content}"
+    );
+
+    // 成功路径的对照：上一个用例（full_tool_round_over_gateway）已断言
+    // 成功 tool result 无前缀；此处只需确认错误路径改写 content 本身，
+    // tool_call_id 与 role 不受影响。
+}
+
+#[tokio::test]
 async fn sse_tolerates_dialect_noise_lines() {
     // Comments, event: lines, crlf endings, and data: without a space.
     let body = ": keep-alive\n\

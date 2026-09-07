@@ -262,10 +262,60 @@ fn truncate(text: &str, max: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::aggregate::{
-        apply_sse_line, extract_error_detail, parse_usage, Aggregated, SseLineBuffer,
+        apply_sse_line, extract_error_detail, parse_usage, wire_message, Aggregated, SseLineBuffer,
     };
     use super::*;
     use crate::events::ContentBlock;
+
+    #[test]
+    fn wire_tool_result_marks_is_error_with_text_prefix() {
+        // #450: OpenAI wire 没有 is_error 字段，失败标志以 `[ERROR]` 文本
+        // 前缀透传；成功结果与 is_error 缺失（None，会话回放等路径）不加前缀。
+        let failed = Message::tool_result(
+            "call_1".into(),
+            "read".into(),
+            vec![ContentBlock::Text {
+                text: "No such file or directory (os error 2)".into(),
+            }],
+            true,
+        );
+        let wire = wire_message(&failed);
+        assert_eq!(wire["role"], "tool");
+        assert_eq!(wire["tool_call_id"], "call_1");
+        assert_eq!(
+            wire["content"],
+            "[ERROR] No such file or directory (os error 2)"
+        );
+
+        let ok = Message::tool_result(
+            "call_2".into(),
+            "read".into(),
+            vec![ContentBlock::Text {
+                text: "fine".into(),
+            }],
+            false,
+        );
+        assert_eq!(wire_message(&ok)["content"], "fine");
+
+        let no_flag = Message::bare(
+            Role::ToolResult,
+            vec![ContentBlock::Text {
+                text: "bare".into(),
+            }],
+        );
+        assert_eq!(wire_message(&no_flag)["content"], "bare");
+
+        // 空文本的失败结果退化为裸前缀，不留尾随空格。
+        let empty = Message::tool_result(
+            "call_3".into(),
+            "bash".into(),
+            vec![ContentBlock::Text {
+                text: String::new(),
+            }],
+            true,
+        );
+        assert_eq!(wire_message(&empty)["content"], "[ERROR]");
+    }
 
     #[test]
     fn extract_error_detail_openai_shape() {
@@ -432,6 +482,7 @@ mod tests {
 
     #[test]
     fn non_streaming_parse_full_response() {
+        // One JSON object per line, no per-field explanation.
         let body = json!({
             "choices": [{
                 "message": {
@@ -449,12 +500,19 @@ mod tests {
         })
         .to_string();
         let aggregated = parse_non_streaming(&body).unwrap();
-        assert_eq!(aggregated.text, "done");
-        assert_eq!(aggregated.thinking, "thought");
-        assert_eq!(aggregated.usage.input, 8);
-        assert_eq!(aggregated.usage.cache_read, 1);
-        assert_eq!(aggregated.tool_calls[0].name, "write");
-        assert_eq!(aggregated.tool_calls[0].arguments, "{\"path\":\"x\"}");
+        let calls = &aggregated.tool_calls;
+        assert_eq!(
+            (aggregated.text.as_str(), aggregated.thinking.as_str()),
+            ("done", "thought")
+        );
+        assert_eq!(
+            (aggregated.usage.input, aggregated.usage.cache_read),
+            (8, 1)
+        );
+        assert_eq!(
+            (calls[0].name.as_str(), calls[0].arguments.as_str()),
+            ("write", "{\"path\":\"x\"}")
+        );
     }
 
     #[test]
@@ -484,6 +542,41 @@ mod tests {
         }
         assert_eq!(aggregated.text, "hi");
         assert_eq!(aggregated.finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn wire_assistant_without_text_degrades_to_empty_string_not_null() {
+        // A thinking-only assistant message must NOT serialize as
+        // `content: null` — the gateway kills the SSE stream for
+        // tool-call-less null content (verified against production gateway).
+        let thinking_only = Message::bare(
+            Role::Assistant,
+            vec![ContentBlock::Thinking {
+                thinking: "hmm".into(),
+            }],
+        );
+        let wire = wire_message(&thinking_only);
+        assert_eq!(wire["content"], json!(""));
+        assert!(wire.get("tool_calls").is_none());
+
+        // With tool calls, null content stays (OpenAI-conventional and
+        // accepted by the gateway).
+        let with_call = Message::bare(
+            Role::Assistant,
+            vec![
+                ContentBlock::Thinking {
+                    thinking: "hmm".into(),
+                },
+                ContentBlock::ToolCall {
+                    id: "c1".into(),
+                    name: "read".into(),
+                    arguments: json!({"path": "a"}),
+                },
+            ],
+        );
+        let wire = wire_message(&with_call);
+        assert_eq!(wire["content"], Value::Null);
+        assert_eq!(wire["tool_calls"][0]["id"], json!("c1"));
     }
 
     #[test]
@@ -534,40 +627,5 @@ mod tests {
         assert_eq!(truncate("héllo", 2), "hé");
         assert_eq!(truncate("héllo", 3), "hél");
         assert_eq!(truncate("hi", 500), "hi");
-    }
-
-    #[test]
-    fn wire_assistant_without_text_degrades_to_empty_string_not_null() {
-        // A thinking-only assistant message must NOT serialize as
-        // `content: null` — the gateway kills the SSE stream for
-        // tool-call-less null content (verified against production gateway).
-        let thinking_only = Message::bare(
-            Role::Assistant,
-            vec![ContentBlock::Thinking {
-                thinking: "hmm".into(),
-            }],
-        );
-        let wire = wire_message(&thinking_only);
-        assert_eq!(wire["content"], json!(""));
-        assert!(wire.get("tool_calls").is_none());
-
-        // With tool calls, null content stays (OpenAI-conventional and
-        // accepted by the gateway).
-        let with_call = Message::bare(
-            Role::Assistant,
-            vec![
-                ContentBlock::Thinking {
-                    thinking: "hmm".into(),
-                },
-                ContentBlock::ToolCall {
-                    id: "c1".into(),
-                    name: "read".into(),
-                    arguments: json!({"path": "a"}),
-                },
-            ],
-        );
-        let wire = wire_message(&with_call);
-        assert_eq!(wire["content"], Value::Null);
-        assert_eq!(wire["tool_calls"][0]["id"], json!("c1"));
     }
 }
