@@ -68,21 +68,31 @@ def _repo_relative(path: str, repo_root: Path | None = None) -> str | None:
             return "/".join(reversed(seen))
 
 
-def changed_source_files(base: str | None) -> list[str]:
-    """Repo-relative changed files (uncommitted + committed vs base)."""
+def changed_source_files(base: str | None, repo_root: Path | None = None) -> list[str]:
+    """Repo-relative changed files (uncommitted + committed vs base).
+
+    The two git forms differ: porcelain prefixes each path with a 3-char
+    ``XY `` status code, while ``git diff --name-only`` emits bare paths —
+    stripping the prefix from the latter too mangles ``server/...`` into
+    ``ver/...``, so no committed-vs-base path ever matched a tracked prefix
+    and the aff selection came back empty (#502).
+    """
+    root = repo_root if repo_root is not None else REPO_ROOT
     files: set[str] = set()
-    commands = [["git", "status", "--porcelain=v1", "--untracked-files=all"]]
+    commands: list[tuple[list[str], bool]] = [
+        (["git", "status", "--porcelain=v1", "--untracked-files=all"], True),
+    ]
     if base:
-        commands.append(["git", "diff", "--name-only", f"{base}..HEAD"])
-    for command in commands:
+        commands.append((["git", "diff", "--name-only", f"{base}..HEAD"], False))
+    for command, has_status_prefix in commands:
         try:
             output = subprocess.run(
-                command, capture_output=True, text=True, check=True, cwd=REPO_ROOT
+                command, capture_output=True, text=True, check=True, cwd=root
             ).stdout
         except (subprocess.CalledProcessError, OSError):
             continue
         for line in output.splitlines():
-            path = line[3:] if line[:2] in ("??", "!!") else line[3:]
+            path = line[3:] if has_status_prefix else line
             path = path.split(" -> ")[-1].strip()
             if path.startswith('"') and path.endswith('"'):
                 path = path[1:-1]
