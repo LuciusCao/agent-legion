@@ -4,6 +4,11 @@
 //! script queue. Supports SSE bodies, JSON bodies, arbitrary status codes,
 //! and mid-body truncation (simulating an interrupted stream). Every request
 //! line + body is recorded for assertions.
+//!
+//! Shared fixture library: each integration-test binary compiles this module
+//! on its own, and no single consumer touches every member — consumers that
+//! leave members unused declare `#[allow(dead_code)] mod common;` (see
+//! anthropic.rs; surfaced by the #450 sibling split).
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
