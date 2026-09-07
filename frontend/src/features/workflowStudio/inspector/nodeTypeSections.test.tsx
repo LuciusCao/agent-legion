@@ -9,7 +9,10 @@ import { api } from '../../../api'
 import { useSettingStore } from '../../../stores/settingStore'
 import { createTestQueryClient } from '../../../testing/testQueryClient'
 
-vi.mock('../../../api', () => ({ api: vi.fn() }))
+vi.mock('../../../api', () => ({
+  api: vi.fn(),
+  fetchAgentRuntimes: vi.fn(() => Promise.resolve({ runtimes: {} })),
+}))
 
 const mockApi = vi.mocked(api)
 

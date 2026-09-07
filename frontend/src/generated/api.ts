@@ -485,6 +485,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/agent-runtimes': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Agent Runtimes */
+    get: operations['get_agent_runtimes_api_agent_runtimes_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/agent-workers': {
     parameters: {
       query?: never
@@ -3414,6 +3431,19 @@ export interface components {
       /** Version */
       version: number
     }
+    /**
+     * AgentRuntimesResponse
+     * @description Per-runtime 工具目录（#476）：按 runtime 嵌套，不做扁平全局清单。
+     *
+     *     同名工具交集不是契约——description/parameters 随 runtime 走，消费方
+     *     （Studio）不得借交集建立跨 runtime 统一语义。
+     */
+    AgentRuntimesResponse: {
+      /** Runtimes */
+      runtimes: {
+        [key: string]: components['schemas']['RuntimeTools']
+      }
+    }
     /** AgentStatusResponse */
     AgentStatusResponse: {
       /** Busy */
@@ -4698,6 +4728,16 @@ export interface components {
       effective_prompt: string
       /** Is Default */
       is_default: boolean
+      /**
+       * Platform Prompt
+       * @default
+       */
+      platform_prompt: string
+      /**
+       * Prompt Mode
+       * @default append
+       */
+      prompt_mode: string
       /** Skill Key */
       skill_key?: string | null
     }
@@ -4707,6 +4747,8 @@ export interface components {
       node_key: string
       /** Prompt */
       prompt: string
+      /** Prompt Mode */
+      prompt_mode?: string | null
     }
     /** NodePromptSaveResponse */
     NodePromptSaveResponse: {
@@ -4716,6 +4758,11 @@ export interface components {
       is_default: boolean
       /** Node Key */
       node_key: string
+      /**
+       * Prompt Mode
+       * @default append
+       */
+      prompt_mode: string
       /** Updated At */
       updated_at?: string | null
     }
@@ -5546,6 +5593,41 @@ export interface components {
       /** Buckets */
       buckets: components['schemas']['ProfileBucket'][]
       verdict: components['schemas']['ProfileVerdict']
+    }
+    /**
+     * RuntimeToolEntry
+     * @description 一个工具的目录条目（#476）。
+     *
+     *     ``tier`` 三档：``default``（预选中可取消）/ ``opt-in``（显式开启）/
+     *     ``forced``（非用户选择，激活条件成立时 harness 强制启用，UI 渲染锁定行）。
+     *     ``activation`` 仅 forced 档出现（激活条件的 CLI flag 名）；路由以
+     *     ``response_model_exclude_none`` 序列化，其余档不携带该键——与 velites
+     *     侧 ``tools list --json`` 的 skip_serializing_if 对齐。
+     */
+    RuntimeToolEntry: {
+      /** Activation */
+      activation?: string | null
+      /**
+       * Description
+       * @default
+       */
+      description: string
+      /** Name */
+      name: string
+      /** Parameters */
+      parameters?: {
+        [key: string]: unknown
+      }
+      /** Tier */
+      tier: string
+    }
+    /**
+     * RuntimeTools
+     * @description 单个 runtime 的工具目录（嵌套在响应的 runtimes 映射里）。
+     */
+    RuntimeTools: {
+      /** Tools */
+      tools?: components['schemas']['RuntimeToolEntry'][]
     }
     /**
      * SkillDetailResponse
@@ -6938,6 +7020,11 @@ export interface components {
        * @default
        */
       prompt: string
+      /**
+       * Prompt Mode
+       * @default
+       */
+      prompt_mode: string
       /**
        * Provider
        * @default
@@ -8450,6 +8537,26 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_agent_runtimes_api_agent_runtimes_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentRuntimesResponse']
         }
       }
     }

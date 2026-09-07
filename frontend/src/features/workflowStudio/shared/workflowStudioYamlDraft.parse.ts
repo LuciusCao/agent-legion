@@ -20,6 +20,9 @@ export type WorkflowYamlNode = {
   // #76：节点级 skill 内容绑定。字符串形态（`skill: <key>`）与 mapping 形态
   // （`skill: {key, ref}`）都合法；ref 空 = latest（跟随仓库 HEAD，#322）。
   skill?: string | { key?: string; ref?: string }
+  // #443：节点级工具声明（仅 agent 节点）；空/缺省 = 未声明，dispatch
+  // 回落 Agent 定义的 tools。
+  tools?: string[]
   after?: string[]
   inputs?: string[]
   outputs?: string[]
@@ -30,7 +33,7 @@ export type WorkflowYamlNode = {
   // 白名单（后端 loader 校验，写路径 patchWorkflowNodeApprovalConfig）。
   config?: Record<string, unknown>
   // prettier-ignore
-  execution?: { provider?: string; model?: string; thinking?: string; prompt?: string }
+  execution?: { provider?: string; model?: string; thinking?: string; prompt?: string; prompt_mode?: string }
 }
 
 /** 持久化 schema-v2 YAML 的边格式（loader._load_edges / revision_format

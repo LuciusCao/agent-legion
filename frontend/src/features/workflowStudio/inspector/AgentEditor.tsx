@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Button, MenuItem, TextField } from '@mui/material'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Button, Chip, MenuItem, TextField } from '@mui/material'
 import {
   archiveAgent,
   createAgentDefinition,
@@ -10,12 +10,18 @@ import {
 import type { AgentDefinitionPayload, AgentRuntime } from '../../../types'
 import { useUiStore } from '../../../stores/uiStore'
 import { AgentVersionsDialog } from './AgentVersionsDialog'
+import { useRuntimeToolEntries } from './useAgentRuntimes'
 import styles from './AgentsPanel.module.css'
 
 // #408：velites（自研 harness，流式事件 + token 计量）是默认且优先级
 // 更高的 runtime，排在选项首位；pi 是外部 runtime，仅作备选。
 const runtimes: AgentRuntime[] = ['velites', 'pi']
-const toolOptions = ['read', 'write', 'bash']
+
+// #476：forced 档的锁定行说明（validate 不渲染成可勾选开关——退出契约
+// 门由节点 outputs 声明激活，勾不勾 validate 关不掉校验，渲染成开关是
+// 语义陷阱）。
+const forcedTierHint =
+  'harness 强制：节点声明 outputs 时经 --require-output 激活，退出契约门不可取消；工具开关仅控制模型 mid-run 自检'
 
 type Props = {
   /** 当前 workspace（Agent 定义为 workspace 作用域，schema v46） */
@@ -42,6 +48,11 @@ const isConflictError = (err: unknown) =>
  * 保存一份新草稿再发布。#407：创建表单不再收集 agent_id——服务端按
  * capability 生成实体键（一个 capability 一个主草稿，占用时返回 409
  * 引导直接编辑）；编辑态 agent_id 只读展示。
+ *
+ * #476：工具选项面按所选 runtime 从 GET /api/agent-runtimes 动态拉取
+ * （目录与 dispatch 校验同源）——default 预选中、opt-in 显式开启、
+ * forced 渲染锁定行；runtime 切换后失效工具显式标记（uuid 在 pi 下
+ * 不存在），把 dispatch fail-fast 前移到编辑体验。
  */
 export function AgentEditor({
   workspaceId,
@@ -57,7 +68,9 @@ export function AgentEditor({
   // #76：skill 不是表单字段（绑定在节点级）；这里只缓存已加载定义的现值，
   // 保存草稿时原样保留（legacy 兜底），新建 Agent 才传空。
   const [skill, setSkill] = useState('')
-  const [tools, setTools] = useState<string[]>(['read', 'write', 'bash'])
+  // #476：null = 用户未改动且定义未回填——生效值由目录 default 档派生
+  //（预选不再前端硬编码）；一旦用户改动或定义回填即固化。
+  const [toolsOverride, setToolsOverride] = useState<string[] | null>(null)
   const [requiresLabels, setRequiresLabels] = useState<
     Record<string, string> | undefined
   >(undefined)
@@ -68,6 +81,17 @@ export function AgentEditor({
   const [error, setError] = useState('')
   const [versionsOpen, setVersionsOpen] = useState(false)
   const showToast = useUiStore((s) => s.showToast)
+
+  const toolEntries = useRuntimeToolEntries(runtime)
+  const defaultToolNames = useMemo(
+    () =>
+      (toolEntries ?? [])
+        .filter((entry) => entry.tier === 'default')
+        .map((entry) => entry.name),
+    [toolEntries]
+  )
+  // 生效值：用户/定义值优先，否则目录 default 预选（目录未加载时暂空）。
+  const tools = toolsOverride ?? defaultToolNames
 
   const load = useCallback(() => {
     if (creating) return Promise.resolve()
@@ -80,8 +104,8 @@ export function AgentEditor({
         setCapability(String(definition.capability ?? ''))
         setRuntime((definition.runtime as AgentRuntime) ?? 'velites')
         setSkill(String(definition.skill ?? ''))
-        setTools(
-          Array.isArray(definition.tools) ? definition.tools.map(String) : []
+        setToolsOverride(
+          Array.isArray(definition.tools) ? definition.tools.map(String) : null
         )
         setRequiresLabels(
           definition.requires_labels as Record<string, string> | undefined
@@ -103,12 +127,34 @@ export function AgentEditor({
     if (creating) return
     let cancelled = false
     void load().finally(() => {
-      if (!cancelled) setLoading(false)
+      if (!cancelled) {
+        setLoading(false)
+      }
     })
     return () => {
       cancelled = true
     }
   }, [load, creating])
+
+  // 选项面：default / opt-in 可选；forced 不进可勾选集。
+  const selectableEntries = useMemo(
+    () => (toolEntries ?? []).filter((entry) => entry.tier !== 'forced'),
+    [toolEntries]
+  )
+  const selectableNames = useMemo(
+    () => new Set(selectableEntries.map((entry) => entry.name)),
+    [selectableEntries]
+  )
+  const forcedEntries = useMemo(
+    () => (toolEntries ?? []).filter((entry) => entry.tier === 'forced'),
+    [toolEntries]
+  )
+  // runtime 切换后的失效项：已选但当前 runtime 目录不提供（dispatch 会
+  // fail-fast；编辑期显式标记引导剔除）。
+  const invalidTools = useMemo(
+    () => tools.filter((tool) => !selectableNames.has(tool)),
+    [tools, selectableNames]
+  )
 
   function buildPayload(): AgentDefinitionPayload | null {
     let configSchema: Record<string, unknown> | undefined
@@ -260,17 +306,46 @@ export function AgentEditor({
           value={tools}
           onChange={(e) => {
             const next = e.target.value
-            setTools(typeof next === 'string' ? next.split(',') : next)
+            setToolsOverride(typeof next === 'string' ? next.split(',') : next)
           }}
           fullWidth
+          disabled={!toolEntries}
           slotProps={{ select: { multiple: true } }}
         >
-          {toolOptions.map((tool) => (
-            <MenuItem key={tool} value={tool}>
-              {tool}
+          {selectableEntries.map((entry) => (
+            <MenuItem key={entry.name} value={entry.name}>
+              {entry.name}
+              {entry.tier === 'opt-in' ? '（可选开启）' : ''}
             </MenuItem>
           ))}
         </TextField>
+        {/* #476：forced 档锁定行——不是可勾选开关，语义见 forcedTierHint。 */}
+        {forcedEntries.map((entry) => (
+          <p key={entry.name} className={styles.hint}>
+            {entry.name}（harness 强制，{entry.activation}）——{forcedTierHint}
+          </p>
+        ))}
+        {/* codex P2 on #527：失效项渲染为可点的移除 chip——多选下拉无法
+            取消禁用项，留剔除去处（原先只提示「请剔除」却无入口）。 */}
+        {invalidTools.length > 0 && (
+          <div className={styles.error} role="alert">
+            已选工具不在 runtime {runtime} 的目录里——dispatch 会拒绝，请移除：
+            {invalidTools.map((tool) => (
+              <Chip
+                key={tool}
+                size="small"
+                color="error"
+                label={tool}
+                onDelete={() =>
+                  setToolsOverride(
+                    tools.filter((selected) => selected !== tool)
+                  )
+                }
+                sx={{ marginLeft: 1 }}
+              />
+            ))}
+          </div>
+        )}
       </div>
       <div className={styles.field}>
         <TextField

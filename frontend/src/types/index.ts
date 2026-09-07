@@ -91,6 +91,13 @@ export type AgentDefinitionPayload = ApiSchemas['AgentDefinitionPayload']
 export type AgentCreateRequest = ApiSchemas['AgentCreateRequest']
 export type AgentRuntime = AgentDefinitionPayload['runtime']
 
+// #476：per-runtime 工具目录（GET /api/agent-runtimes）。tier 三档：
+// default（预选中可取消）/ opt-in（显式开启）/ forced（非用户选择，
+// 激活条件成立时 harness 强制启用——activation 是 CLI flag 名）。
+export type AgentRuntimeToolEntry = ApiSchemas['RuntimeToolEntry']
+export type AgentRuntimeTools = ApiSchemas['RuntimeTools']
+export type AgentRuntimesResponse = ApiSchemas['AgentRuntimesResponse']
+
 export type SkillValidateResponse = ApiSchemas['SkillValidateResponse']
 export type SkillTagsResponse = ApiSchemas['SkillTagsResponse']
 export type SkillDirectoriesResponse = ApiSchemas['SkillDirectoriesResponse']

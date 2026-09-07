@@ -66,6 +66,23 @@ export function patchWorkflowNodeOutputs(
   })
 }
 
+// #443/#476：节点级工具声明（仅 agent 节点）。空数组 = 回到未声明
+// （dispatch 回落 Agent 定义的 tools），与 outputs 的「空即未声明」
+// 语义一致——空数组从 YAML 里整个删键，避免 loader 收到显式空列表。
+export function patchWorkflowNodeTools(
+  rawYaml: string,
+  nodeKey: string,
+  tools: string[]
+): string {
+  return patchNode(rawYaml, nodeKey, (node) => {
+    if (tools.length === 0) {
+      delete node.tools
+      return
+    }
+    node.tools = tools
+  })
+}
+
 export function patchWorkflowNodeTerminalOutcome(
   rawYaml: string,
   nodeKey: string,

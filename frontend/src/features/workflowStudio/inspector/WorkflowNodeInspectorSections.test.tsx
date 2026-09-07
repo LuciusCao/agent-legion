@@ -6,6 +6,7 @@ import { useSettingStore } from '../../../stores/settingStore'
 import type { WorkflowNodeRecord } from '../../../types'
 
 vi.mock('../../../api', () => ({
+  fetchAgentRuntimes: vi.fn(() => Promise.resolve({ runtimes: {} })),
   api: vi.fn(),
 }))
 

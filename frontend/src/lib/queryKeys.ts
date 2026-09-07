@@ -23,4 +23,7 @@ export const queryKeys = {
     ['studio-chat-agents', workspaceId] as const,
   studioChatSessions: (workspaceId: string) =>
     ['studio-chat-sessions', workspaceId] as const,
+  // #476：per-runtime 工具目录（AgentEditor 动态选项面）；全局静态声明，
+  // 无参 key。
+  agentRuntimes: () => ['agentRuntimes'] as const,
 }

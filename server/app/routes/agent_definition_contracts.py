@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from server.app.agent_catalog.definition import DEFAULT_TOOLS
+
 
 class AgentDefinitionPayload(BaseModel):
     """Editable Agent definition fields (pure: no provider/model/thinking)."""
@@ -11,7 +13,8 @@ class AgentDefinitionPayload(BaseModel):
     runtime: Literal["pi", "velites"]
     # Optional legacy fallback for the node's skill binding (issue #76).
     skill: str = ""
-    tools: list[str] = Field(default_factory=lambda: ["read", "write", "bash"])
+    # #476：默认值与 AgentDefinition 同源（catalog default 档）。
+    tools: list[str] = Field(default_factory=lambda: list(DEFAULT_TOOLS))
     requires_labels: dict[str, str] = Field(default_factory=dict)
     config_schema: dict[str, Any] = Field(default_factory=dict)
 

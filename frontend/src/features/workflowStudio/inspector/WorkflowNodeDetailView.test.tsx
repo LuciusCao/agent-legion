@@ -10,7 +10,10 @@ import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import { WorkflowNodeDetailView } from './WorkflowNodeDetailView'
 
 // inspector 各 section（code/config/agent 执行详情）统一走 '../../api' 的 api。
-vi.mock('../../../api', () => ({ api: vi.fn() }))
+vi.mock('../../../api', () => ({
+  api: vi.fn(),
+  fetchAgentRuntimes: vi.fn(() => Promise.resolve({ runtimes: {} })),
+}))
 // 技能预览经 agentCatalogApi wrapper（直连 './core'，不经 '../../api' 聚合层）。
 vi.mock('../../../api/agentCatalogApi', () => ({
   getAgentCatalog: vi.fn().mockResolvedValue({ agents: [] }),

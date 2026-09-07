@@ -7,7 +7,15 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from server.app.agent_runtime.tool_catalog import VELITES_TOOL_CATALOG, default_tool_names
 from server.app.config_schema import validate_config_schema
+
+# #476：默认三件套来自 velites 工具目录的 default 档（与
+# `velites tools list --json` 同源；值历史上就是 read/write/bash，这里只是
+# 把单一事实来源从前端硬编码挪到 catalog 声明）。velites 是默认 runtime
+# （#408），定义级默认不随所选 runtime 漂移——runtime 切换后的失效标记
+# 与 dispatch 校验（#449）兜底。
+DEFAULT_TOOLS: tuple[str, ...] = default_tool_names(VELITES_TOOL_CATALOG)
 
 
 class AgentDefinition(BaseModel):
@@ -20,7 +28,7 @@ class AgentDefinition(BaseModel):
     # Legacy fallback for the node's skill binding (issue #76): "" means the
     # definition binds no skill and the workflow node must declare one.
     skill: str = ""
-    tools: tuple[str, ...] = ("read", "write", "bash")
+    tools: tuple[str, ...] = DEFAULT_TOOLS
     requires_labels: dict[str, str] = Field(default_factory=dict)
     config_schema: dict[str, Any] = Field(default_factory=dict)
 

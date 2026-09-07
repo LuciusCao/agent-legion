@@ -29,6 +29,7 @@ from mcp.server.fastmcp import FastMCP
 # Workflow read/validate/compare/publish-request tools (issue #416 grouped
 # them with their draft lifecycle) live in workflow_tools; skill/prompt/
 # preview/job tools in their sibling modules (file-size budget).
+from server.app.agent_catalog.definition import DEFAULT_TOOLS
 from server.app.mcp_server import (
     job_tools,
     preview_tools,
@@ -138,7 +139,8 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
                 "capability": capability,
                 "runtime": runtime,
                 "skill": skill,
-                "tools": tools or ["read", "write", "bash"],
+                # #476：默认三件套与 AgentDefinition 同源（catalog default 档）。
+                "tools": tools or list(DEFAULT_TOOLS),
             },
         )
 

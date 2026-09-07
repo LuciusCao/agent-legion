@@ -13,7 +13,44 @@ const mocks = {
   archiveAgent: vi.fn(),
 }
 
+// #476：目录 mock 与后端 catalog 契约同形——pi 三件套（default），
+// velites 六工具（uuid/json=opt-in、validate=forced 带 activation，#518）。
+const runtimeTools = (tiers: Record<string, string>) =>
+  Object.entries(tiers).map(([name, tier]) => ({
+    name,
+    tier,
+    description: '',
+    parameters: {},
+  }))
+
 vi.mock('../../../api', () => ({
+  fetchAgentRuntimes: vi.fn(() =>
+    Promise.resolve({
+      runtimes: {
+        pi: {
+          tools: runtimeTools({
+            read: 'default',
+            write: 'default',
+            bash: 'default',
+          }),
+        },
+        velites: {
+          tools: runtimeTools({
+            read: 'default',
+            write: 'default',
+            bash: 'default',
+            uuid: 'opt-in',
+            json: 'opt-in',
+            validate: 'forced',
+          }).map((entry) =>
+            entry.name === 'validate'
+              ? { ...entry, activation: '--require-output' }
+              : entry
+          ),
+        },
+      },
+    })
+  ),
   fetchAgentDefinition: (...args: unknown[]) =>
     mocks.fetchAgentDefinition(...args),
   createAgentDefinition: (...args: unknown[]) =>

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.agent_runtime.adapter import ExecutionContract, ExecutionKeyRule, RuntimeAdapter
+from server.app.agent_runtime.tool_catalog import PI_TOOL_CATALOG
 
 
 def build_command(
@@ -60,4 +61,7 @@ ADAPTER = RuntimeAdapter(
             "thinking": ExecutionKeyRule(False, "思考档位 → --thinking（空 = runtime 决定）"),
         }
     ),
+    # #476：外部 runtime 无自描述通道，按实测静态登记（同名三件套只是
+    # 命名巧合，语义由 pi 自身决定）。
+    tool_catalog=PI_TOOL_CATALOG,
 )

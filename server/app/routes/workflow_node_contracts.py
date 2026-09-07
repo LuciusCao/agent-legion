@@ -10,6 +10,8 @@ class WorkflowNodeExecutionResponse(BaseModel):
     model: str = ""
     thinking: str = ""
     prompt: str = ""
+    # #513：自定义提示词拼接模式（append/overwrite）；空 = append。
+    prompt_mode: str = ""
 
 
 class WorkflowNodeSkillResponse(BaseModel):
