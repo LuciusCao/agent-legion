@@ -9,8 +9,10 @@
 //! symlinks) are rejected before any filesystem mutation happens.
 
 pub mod bash;
+pub mod catalog;
 pub mod command_guard;
 pub(super) mod command_paths;
+pub mod json;
 pub mod read;
 mod specs;
 pub mod truncate;
@@ -115,27 +117,23 @@ pub enum ToolError {
     Io(#[from] std::io::Error),
 }
 
-/// The tool kinds, keyed by their wire name. `Uuid` and `Validate` are
-/// opt-in only (never in the default `--tools` set).
+/// The tool kinds, keyed by their wire name. `Uuid`, `Json` and `Validate`
+/// are opt-in only (never in the default `--tools` set).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolKind {
     Read,
     Write,
     Bash,
     Uuid,
+    Json,
     Validate,
 }
 
 impl ToolKind {
     pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "read" => Some(Self::Read),
-            "write" => Some(Self::Write),
-            "bash" => Some(Self::Bash),
-            "uuid" => Some(Self::Uuid),
-            "validate" => Some(Self::Validate),
-            _ => None,
-        }
+        // Table lookup over the catalog order — one place to extend when a
+        // tool is added (the wire name mapping and `all()` stay in lockstep).
+        Self::all().into_iter().find(|kind| kind.name() == name)
     }
 
     pub fn name(self) -> &'static str {
@@ -144,6 +142,7 @@ impl ToolKind {
             Self::Write => "write",
             Self::Bash => "bash",
             Self::Uuid => "uuid",
+            Self::Json => "json",
             Self::Validate => "validate",
         }
     }
@@ -176,6 +175,7 @@ impl ToolKind {
             Self::Write => write::run(args, ctx).await,
             Self::Bash => bash::run(args, ctx).await,
             Self::Uuid => uuid::run(args, ctx).await,
+            Self::Json => json::run(args, ctx).await,
             Self::Validate => validate::run(args, ctx).await,
         };
         // Unmeasured failures (error + no phases recorded) stay timing-free;

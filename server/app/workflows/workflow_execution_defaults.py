@@ -20,9 +20,10 @@ from server.app.workflows.schema import (
 def load_workflow_execution(raw: dict[str, Any]) -> WorkflowNodeExecution:
     """Optional top-level ``execution`` defaults (provider/model/thinking).
 
-    Same validation as the node-level block, minus ``prompt`` — a default
-    prompt makes no sense across nodes. Snapshots (asdict round-trips) carry
-    an empty ``prompt`` key, which is tolerated; a non-empty one is rejected.
+    Same validation as the node-level block, minus ``prompt``/``prompt_mode``
+    (#513) — a default prompt or prompt mode makes no sense across nodes.
+    Snapshots (asdict round-trips) carry empty keys, which is tolerated;
+    non-empty ones are rejected.
     """
     raw_execution = raw.get("execution")
     if raw_execution is None:
@@ -37,6 +38,10 @@ def load_workflow_execution(raw: dict[str, Any]) -> WorkflowNodeExecution:
         values[field_name] = value
     if raw_execution.get("prompt"):
         raise WorkflowDefinitionError("Workflow execution.prompt is not allowed (node-level only)")
+    if raw_execution.get("prompt_mode"):
+        raise WorkflowDefinitionError(
+            "Workflow execution.prompt_mode is not allowed (node-level only)"
+        )
     return WorkflowNodeExecution(**values)
 
 
@@ -56,6 +61,7 @@ def merge_execution_defaults(node: WorkflowNode, defaults: WorkflowNodeExecution
         model=execution.model or defaults.model,
         thinking=execution.thinking or defaults.thinking,
         prompt=execution.prompt,
+        prompt_mode=execution.prompt_mode,
     )
     if merged == execution:
         return node

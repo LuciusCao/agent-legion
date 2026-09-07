@@ -35,7 +35,7 @@ pub struct Cli {
     #[arg(long)]
     pub skill: Vec<PathBuf>,
 
-    /// Enabled tools: comma-separated subset of read,write,bash,uuid,validate.
+    /// Enabled tools: comma-separated subset of read,write,bash,uuid,json,validate.
     /// The default stays the core triple; `uuid` (#442) and `validate` (#443)
     /// are opt-in via the workflow's tool selection.
     #[arg(long, value_delimiter = ',', default_value = "read,write,bash")]

@@ -71,8 +71,8 @@ export function WorkflowNodeRuntimeSettings(props: {
         readOnly={props.readOnly}
         onChange={(value) => patch('thinking', value)}
       />
-      {/* execution.prompt（节点指令）的编辑统一在「查看 Prompt」预览面板
-          （默认组装 + 整段替代 + 重置），此处不再重复提供文本框。 */}
+      {/* execution.prompt（节点附加提示词）的编辑统一在「查看 Prompt」预览
+          面板（默认组装 + 整段替代 + 重置），此处不再重复提供文本框。 */}
     </div>
   )
 }

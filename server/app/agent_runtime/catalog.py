@@ -13,11 +13,11 @@ Worker 注册白名单（agent_control/registry.py）、Worker 侧
 
 from __future__ import annotations
 
-from server.app.agent_runtime.adapter import RuntimeAdapter
+from server.app.agent_runtime.adapter import RuntimeAdapter, ToolCatalogEntry
 from server.app.agent_runtime.pi import ADAPTER as _PI_ADAPTER
 from server.app.agent_runtime.velites import ADAPTER as _VELITES_ADAPTER
 
-__all__ = ["AGENT_RUNTIMES", "get_adapter"]
+__all__ = ["AGENT_RUNTIMES", "get_adapter", "get_tool_catalog"]
 
 # 与三处 Literal 的书写顺序一致（集合相等由一致性测试钉住，顺序只影响文案）。
 _ADAPTERS: tuple[RuntimeAdapter, ...] = (_PI_ADAPTER, _VELITES_ADAPTER)
@@ -33,3 +33,8 @@ def get_adapter(runtime: str) -> RuntimeAdapter:
     raise ValueError(
         f"unknown agent runtime {runtime!r} (known runtimes: {', '.join(AGENT_RUNTIMES)})"
     )
+
+
+def get_tool_catalog(runtime: str) -> tuple[ToolCatalogEntry, ...]:
+    """per-runtime 工具目录（#476）；未知 runtime 同 get_adapter fail-fast。"""
+    return get_adapter(runtime).tool_catalog

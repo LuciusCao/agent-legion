@@ -8,6 +8,7 @@ import { useSettingStore } from '../../../stores/settingStore'
 import type { WorkspaceSettings } from '../../../types'
 
 vi.mock('../../../api', () => ({
+  fetchAgentRuntimes: vi.fn(() => Promise.resolve({ runtimes: {} })),
   api: vi.fn(),
 }))
 

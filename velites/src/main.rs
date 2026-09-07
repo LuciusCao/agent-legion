@@ -33,6 +33,30 @@ async fn main() -> ExitCode {
             }
         };
     }
+    if args.get(1).map(String::as_str) == Some("tools") {
+        // `velites tools list --json`: tool catalog self-description (#476),
+        // dispatched before the agent-run CLI parse like `models list`.
+        if args.get(2).map(String::as_str) != Some("list") {
+            eprintln!("error: expected `velites tools list --json`");
+            return ExitCode::from(2);
+        }
+        let parse_args = std::iter::once(args[0].clone()).chain(args.into_iter().skip(3));
+        let cli = velites::tools::catalog::ToolsListCli::parse_from(parse_args);
+        if !cli.json {
+            eprintln!("error: `velites tools list` requires --json");
+            return ExitCode::from(2);
+        }
+        return match velites::tools::catalog::to_json() {
+            Ok(output) => {
+                println!("{output}");
+                ExitCode::SUCCESS
+            }
+            Err(err) => {
+                eprintln!("error: {err:#}");
+                ExitCode::from(2)
+            }
+        };
+    }
     if args.get(1).map(String::as_str) == Some("sandbox") {
         if args.get(2).map(String::as_str) != Some("wrap") {
             eprintln!("error: expected `velites sandbox wrap --cwd <dir> -- <cmd...>`");

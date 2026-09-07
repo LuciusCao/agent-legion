@@ -1,10 +1,12 @@
-"""Default node instructions for Agent-routed workflow nodes.
+"""Node instructions for Agent-routed workflow nodes.
 
 The Agent run prompt is a fixed platform envelope (job/skill paths, declared
 inputs/outputs, output discipline) plus one node-instructions section. The
-node's ``execution.prompt`` selects that section: empty means the
-auto-assembled default built here; a non-empty value replaces the default
-wholesale — it is never appended to it.
+node's ``execution.prompt`` (``prompt_mode`` #513) selects how the section
+is built: empty prompt means the auto-assembled default alone; a non-empty
+prompt joins it per the mode — ``append`` (default) keeps the default and
+adds the custom text after it, ``overwrite`` replaces the default
+wholesale. The platform envelope itself is never coverable in either mode.
 """
 
 from __future__ import annotations
@@ -19,16 +21,15 @@ def build_node_instructions(manifest: Mapping[str, Any]) -> str:
     """The node-instructions section of the run prompt for one manifest.
 
     The node's ``execution.prompt`` (manifest key ``additional_prompt``)
-    selects the section: a non-empty custom prompt REPLACES the
-    auto-assembled default wholesale — it is never appended as
-    "Additional node instructions" anymore; an empty prompt selects the
-    default. ``node_label`` feeds the default; legacy manifests without it
-    fall back to the node key.
+    joins the auto-assembled default per ``prompt_mode`` (manifest key
+    ``prompt_mode``, #513): ``overwrite`` replaces the default wholesale;
+    anything else (``append``, the default) appends the custom text after
+    the default. ``node_label`` feeds the default; legacy manifests without
+    it fall back to the node key.
     """
     custom = str(manifest.get("additional_prompt", "")).strip()
-    if custom:
-        return custom
-    return build_default_node_instructions(
+    mode = str(manifest.get("prompt_mode", "")).strip()
+    default = build_default_node_instructions(
         node_key=str(manifest["node_key"]),
         label=str(manifest.get("node_label") or manifest["node_key"]),
         capability=str(manifest.get("capability") or ""),
@@ -36,6 +37,11 @@ def build_node_instructions(manifest: Mapping[str, Any]) -> str:
         inputs=[str(item) for item in manifest["inputs"]],
         expected_outputs=[str(item) for item in manifest["expected_outputs"]],
     )
+    if not custom:
+        return default
+    if mode == "overwrite":
+        return custom
+    return f"{default}\n\n{custom}"
 
 
 def _names(items: Sequence[str]) -> str:

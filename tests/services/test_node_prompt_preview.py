@@ -118,9 +118,11 @@ def test_preview_definition_yaml_override_with_custom_prompt(job_db) -> None:
 
     assert payload["is_default"] is False
     assert payload["custom_instructions"] == "Follow the house style."
-    # 自定义 prompt 整段替代默认指令；信封保留。
-    assert "Node instructions:\nFollow the house style." in payload["effective_prompt"]
-    assert payload["default_instructions"] not in payload["effective_prompt"]
+    # #513：默认 append——默认指令与自定义内容都在；信封保留。
+    assert payload["prompt_mode"] == "append"
+    assert "Node instructions:\n" in payload["effective_prompt"]
+    assert payload["default_instructions"] in payload["effective_prompt"]
+    assert payload["effective_prompt"].endswith("Follow the house style.\n")
     assert "Job ID: <job_id>" in payload["effective_prompt"]
     # 草稿节点自带 skill 绑定时优先于 Agent 定义（与 definition_yaml 同行）。
     assert payload["skill_key"] == _DEMO_SKILL
@@ -234,6 +236,17 @@ def test_save_node_prompt_edits_existing_draft_without_touching_other_nodes(job_
     assert draft is not None
     assert "Script rules" in draft["definition_yaml"]
     assert "Question rules" in draft["definition_yaml"]
+
+
+def test_save_node_prompt_rejects_invalid_prompt_mode(job_db) -> None:
+    """codex P2 on #527：非法 prompt_mode 在写草稿前拒绝——不留无法加载的草稿。"""
+    workspace_id = _workspace(job_db, "ws-prompt-save-mode")
+
+    with pytest.raises(InvalidOperationError, match="prompt_mode must be"):
+        save_node_prompt(job_db, workspace_id, "write_script", "x", prompt_mode="append-ish")
+    # 合法值放行（append/overwrite）。
+    result = save_node_prompt(job_db, workspace_id, "write_script", "x", prompt_mode="overwrite")
+    assert result["prompt_mode"] == "overwrite"
 
 
 def test_save_node_prompt_unknown_targets_raise_not_found(job_db) -> None:

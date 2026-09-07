@@ -58,6 +58,7 @@ const mocks = {
 }
 
 vi.mock('../../../api', () => ({
+  fetchAgentRuntimes: vi.fn(() => Promise.resolve({ runtimes: {} })),
   fetchActiveWorkflowRevision: (...args: unknown[]) =>
     mocks.fetchActiveWorkflowRevision(...args),
   fetchWorkflowRevisions: (...args: unknown[]) =>

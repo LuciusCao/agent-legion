@@ -31,8 +31,8 @@ PoC（pi_agent_rust 替换验证）同时证明了两件事：
 - 完整复刻 Host 侧消费的事件流契约（见 §4），Host 三处消费方（日志渲染、token 计量、
   失败判定）零改动切换；
 - skill 注入（显式 `--skill` 目录）+ `read`/`write`/`bash` 核心三工具，外加少量
-  opt-in 的通用工具原语（§8，`uuid` #442、`validate` #443，均不进默认 `--tools`
-  集合）——只收跨 skill 通用能力，不收业务逻辑，不演变为插件机制（非目标不变）；
+  opt-in 的通用工具原语（§8，`uuid` #442、`json` #518、`validate` #443，均不进默认
+  `--tools` 集合）——只收跨 skill 通用能力，不收业务逻辑，不演变为插件机制（非目标不变）；
 - OpenAI-compatible Chat Completions 与 Anthropic Messages streaming；
 - **可控性内建**（§5）：预算、优雅取消、输出自检、零自动发现；
 - 单进程单执行，进程模型与现状一致（worker 隔离语义不变）。
@@ -60,7 +60,7 @@ velites/                 # Cargo crate（本仓库根下新目录）
     models.rs            # ~/.velites/models.json provider/model registry
     config.rs            # 旧 gateway 凭据迁移桥
     session.rs           # session.jsonl 镜像落盘（--session-dir）
-    tools/{mod,read,write,bash,uuid,validate,specs,command_guard,truncate}.rs
+    tools/{mod,read,write,bash,uuid,json,validate,specs,catalog,command_guard,truncate}.rs
     contract.rs          # 输出契约引擎（#443）
     contract_gate.rs     # 契约关卡/validate 子命令 glue（#443，自 contract.rs 预算拆分）
     provider/{mod,openai_compat,anthropic,retry,stub}.rs
@@ -355,6 +355,17 @@ fail-closed 报错，内置节点不受影响。
   不触碰文件系统与沙箱；默认不进 `--tools`（核心三件套之外按需启用，避免把
   runtime 不认识的工具名透传给 pi——pi 定义请勿声明 `uuid`，dispatch 期的
   per-runtime 工具名校验在后续 issue 收口）；
+- **json（#518，opt-in，仅 velites runtime）**：JSON 字段级读-改-写原语，`op` 三态
+  （`get`/`set`/`delete`）+ `path`（文件）+ `query`（JSON path：点分 key 与
+  `[index]` 段，如 `steps[2].content`；带引号 key 可含点号）。`get` 返回路径值
+  （缺失报 `null` 不报错）；`set` 写任意 JSON 值并整文件写回（pretty-print，
+  tmp+rename 原子替换，与 write 同协议）；`delete` 删 key 或数组元素。set/delete
+  对缺失中间 key 报错不自动建（模型应显式建父级或用 write）。动机：模型对自己
+  产出的较大 JSON 只改一个字段时，整文件重写费 token 且易引入新错误，曾退化为
+  bash heredoc 手写 python 读-改-写（高并发下的不稳定因素）——本工具把该形态
+  收编为一等原语；skill 里各自携带的 `json_patch.py` 应随之退役（平台侧统一
+  提供，同一能力不再留 N 份拷贝）。文件路径走 write 同款 cwd 沙箱
+  （resolve_in_cwd），`get` 输出受 §8 双阈值截断；
 - **validate**（#443，opt-in，不进默认 `--tools`）：无参数，对 cwd 跑输出契约检查，供
   agent 跑中自查、就地修复。三态：全过返回 `contract ok (N files checked)`；有违约返回
   编号违约清单（`is_error`，文案面向模型可行动）；skill 目录都没有可解析契约段时返回

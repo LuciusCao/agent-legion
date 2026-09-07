@@ -10,6 +10,7 @@ import { useSettingStore } from '../../../stores/settingStore'
 import { createTestQueryClient } from '../../../testing/testQueryClient'
 
 vi.mock('../../../api', () => ({
+  fetchAgentRuntimes: vi.fn(() => Promise.resolve({ runtimes: {} })),
   api: vi.fn(),
 }))
 

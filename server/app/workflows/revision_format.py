@@ -167,10 +167,12 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
         # subtract them back out key by key so the echo only carries genuine
         # node-level overrides — otherwise a later edit of the top-level
         # defaults would silently lose to the baked per-node values.
+        # prompt/prompt_mode 是节点级专属键（顶层块 loader 拒绝），非空即
+        # 节点自身声明，随 echo 保留。
         execution = {
             key: value
             for key, value in asdict(node.execution).items()
-            if value and (key == "prompt" or value != top_execution.get(key))
+            if value and (key in ("prompt", "prompt_mode") or value != top_execution.get(key))
         }
         if execution:
             raw_node["execution"] = execution

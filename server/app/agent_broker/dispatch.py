@@ -23,6 +23,7 @@ from server.app.agent_broker.broker import AgentExecutionBroker, AgentExecutionR
 from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
 from server.app.agent_broker.execution_resolution import resolve_execution_block
 from server.app.agent_catalog import AgentDefinition
+from server.app.agent_runtime.tools_validation import manifest_tools
 from server.app.config_schema import manifest_safe_config
 from server.app.executors.models import ExecutionContext
 from server.app.services.artifact_store import ArtifactStore
@@ -89,9 +90,13 @@ class AgentDispatchService:
                 "inputs": list(inputs),
                 "expected_outputs": list(node.outputs),
                 "additional_prompt": node.execution.prompt,
+                # #513：自定义提示词拼接模式（append=默认指令+自定义，
+                # overwrite=仅自定义）；空 = append。平台信封不受影响。
+                "prompt_mode": node.execution.prompt_mode,
                 # CONFIG-MANIFEST-001: only schema-whitelisted, non-secret keys.
                 "config": manifest_safe_config(definition.config_schema, node_config or {}),
-                "tools": list(node.tools or definition.tools),
+                # #449/#476：节点级优先、定义兜底，均在 catalog 目录上校验。
+                "tools": manifest_tools(node.key, definition.runtime, node.tools, definition.tools),
                 **skill.manifest_pins(),
                 "log_path": str(log_path),
                 "execution": execution,

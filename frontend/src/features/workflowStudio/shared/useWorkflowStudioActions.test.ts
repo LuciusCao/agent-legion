@@ -12,6 +12,7 @@ const mocks = {
 }
 
 vi.mock('../../../api', () => ({
+  fetchAgentRuntimes: vi.fn(() => Promise.resolve({ runtimes: {} })),
   publishWorkflowDraft: (...args: unknown[]) =>
     mocks.publishWorkflowDraft(...args),
   validateWorkflowDraft: (...args: unknown[]) =>

@@ -159,6 +159,7 @@ describe('buildDagNodes', () => {
                 model: 'gpt-5',
                 thinking: '',
                 prompt: '',
+                prompt_mode: '',
               },
             }
           : node

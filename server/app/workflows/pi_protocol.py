@@ -21,6 +21,7 @@ __all__ = [
     "SESSION_DIR_PLACEHOLDER",
     "SESSION_NAME_PLACEHOLDER",
     "SKILL_DIR_PLACEHOLDER",
+    "build_platform_envelope",
     "build_prompt",
     "detect_model_error",
     "fold_model_error",
@@ -37,12 +38,14 @@ SESSION_NAME_PLACEHOLDER = "{session_name}"
 PROMPT_FILE_PLACEHOLDER = "{prompt_file}"
 
 
-def build_prompt(manifest: dict[str, Any], *, job_dir: Path, skill_dir: Path) -> str:
-    """Fixed platform envelope plus exactly one node-instructions section.
+def build_platform_envelope(manifest: dict[str, Any], *, job_dir: Path, skill_dir: Path) -> str:
+    """The fixed platform half of the run prompt (#513 前与节点指令合称信封).
 
-    The envelope (job/skill paths, validator, declared IO, output discipline)
-    never varies; the closing section semantics live in
-    ``node_prompt.build_node_instructions``.
+    Job/skill paths, validator, declared IO and output discipline — never
+    varies with the node's ``execution.prompt``. The node-instructions
+    section (``build_node_instructions``) is appended by ``build_prompt``
+    at dispatch; the Studio prompt panel shows the halves separately so
+    the immutable part and the user-editable part stay distinct.
     """
     lines = [
         "Execute the loaded node skill for this Agent Legion workflow job.",
@@ -68,11 +71,19 @@ def build_prompt(manifest: dict[str, Any], *, job_dir: Path, skill_dir: Path) ->
             "and the skill directory. "
             "Finish after all required outputs are written and correct."
         ),
-        "",
-        "Node instructions:",
-        build_node_instructions(manifest),
     ]
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines)
+
+
+def build_prompt(manifest: dict[str, Any], *, job_dir: Path, skill_dir: Path) -> str:
+    """Fixed platform envelope plus exactly one node-instructions section.
+
+    The envelope (job/skill paths, validator, declared IO, output discipline)
+    never varies; the closing section semantics live in
+    ``node_prompt.build_node_instructions``.
+    """
+    envelope = build_platform_envelope(manifest, job_dir=job_dir, skill_dir=skill_dir)
+    return f"{envelope}\n\nNode instructions:\n{build_node_instructions(manifest)}\n"
 
 
 def render_command_spec(manifest: dict[str, Any]) -> dict[str, Any]:

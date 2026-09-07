@@ -45,8 +45,8 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
             Some(_) => {}
             None => {
                 return Err(anyhow!(
-                    "unknown tool `{name}` in --tools (available: read,write,bash,uuid,validate)"
-                ))
+                "unknown tool `{name}` in --tools (available: read,write,bash,uuid,json,validate)"
+            ))
             }
         }
     }
@@ -91,6 +91,23 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
                 format!("failed to canonicalize session dir `{}`", dir.display())
             })?,
         );
+    }
+
+    // #476 forced-tool activation: `--require-output` non-empty AND the first
+    // --skill directory declares a parseable contract block → advertise
+    // `validate` regardless of `--tools`. The exit-contract gate is forced
+    // (never a user choice); the tool is only the model-side mid-run entry
+    // into the same engine, so it is advertised exactly when using it can
+    // succeed. A parse-error or missing contract block skips the activation —
+    // the model cannot fix a syntax error in the read-only skill dir, and
+    // without a contract there is nothing to self-check. `--tools validate`
+    // alone (no --require-output) stays accepted as a no-op for backward
+    // compatibility: the gate below simply does not trigger.
+    if !cli.require_output.is_empty()
+        && matches!(contract::first_contract(&skill_dirs), Some(Ok(_)))
+        && !tools.contains(&ToolKind::Validate)
+    {
+        tools.push(ToolKind::Validate);
     }
 
     // OS-level filesystem sandbox (design §5, M4.5). Fail-closed: when the

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Query
 
 from server.app.jobs import JobQueries
 from server.app.routes.agent_catalog_contracts import AgentCatalogResponse
+from server.app.routes.agent_runtimes import create_agent_runtimes_router
 from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.skill_catalog_route import create_skill_catalog_router
 from server.app.routes.workspace_execution_contracts import (
@@ -47,4 +48,6 @@ def create_workspace_agent_catalog_router(
             raise_job_http_error(exc)
 
     router.include_router(create_skill_catalog_router(settings, job_db))
+    # #476：per-runtime 工具目录随 catalog 面挂载（无 DB 依赖，同族只读目录）。
+    router.include_router(create_agent_runtimes_router())
     return router

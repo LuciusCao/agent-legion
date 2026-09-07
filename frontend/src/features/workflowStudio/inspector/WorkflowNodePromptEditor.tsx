@@ -1,4 +1,4 @@
-import { Button, Chip } from '@mui/material'
+import { Button, Chip, MenuItem, TextField } from '@mui/material'
 import { useShowNodeDetailPreview } from './nodeDetailPreviewContext'
 import styles from './WorkflowNodePromptEditor.module.css'
 
@@ -9,11 +9,16 @@ export type NodePromptEditorProps = {
   previewError: string
   loading: boolean
   readOnly: boolean
+  /** #513：自定义提示词拼接模式（append/overwrite），由草稿 YAML 归一。 */
+  promptMode: 'append' | 'overwrite'
   onPatch: (value: string) => void
+  onPatchMode: (mode: 'append' | 'overwrite') => void
 }
 
 /** 运行 Prompt 面板的编辑半区：绑定技能芯片（点击跳技能文件预览）+
- * 「节点指令」编辑区（留空 = 默认组装并标注；自定义整段替代；可重置为默认）。 */
+ * 「自定义提示词」编辑区（#513 定稿：默认为空追加；模式开关
+ * 追加/覆写，追加=默认指令+自定义，覆写=仅自定义。平台提示词
+ * 两种模式下都不可覆盖）。 */
 export function WorkflowNodePromptEditor(props: NodePromptEditorProps) {
   const showPreview = useShowNodeDetailPreview()
   return (
@@ -33,20 +38,39 @@ export function WorkflowNodePromptEditor(props: NodePromptEditorProps) {
       </div>
       <div className={styles.editor}>
         <div className={styles.editorHeader}>
-          <span className={styles.editorTitle}>节点指令</span>
-          {props.isDefault && (
-            <span className={styles.defaultBadge}>
-              默认（按节点信息自动组装）
-            </span>
+          <span className={styles.editorTitle}>自定义提示词</span>
+          {/* #513 复审：默认留空是常态，不挂徽标；仅自定义时提示（重置
+              按钮同态出现）。 */}
+          {!props.isDefault && (
+            <span className={styles.defaultBadge}>已自定义</span>
           )}
           {!props.isDefault && !props.readOnly && (
             <Button size="small" onClick={() => props.onPatch('')}>
-              重置为默认
+              清空
             </Button>
           )}
         </div>
+        {/* #513 定稿：说明只讲行为本身 + 模式开关说明。 */}
+        <span className={styles.hint}>
+          自定义提示词默认为空，如果填写，将按下方模式拼入平台提示词，构成运行时使用的提示词。
+        </span>
+        <TextField
+          select
+          label="模式"
+          variant="outlined"
+          size="small"
+          className={styles.modeSelect}
+          value={props.promptMode}
+          disabled={props.readOnly}
+          onChange={(e) =>
+            props.onPatchMode(e.target.value as 'append' | 'overwrite')
+          }
+        >
+          <MenuItem value="append">追加（平台提示词 + 自定义提示词）</MenuItem>
+          <MenuItem value="overwrite">覆写（仅自定义提示词）</MenuItem>
+        </TextField>
         <textarea
-          aria-label="节点指令"
+          aria-label="自定义提示词"
           className={styles.instructions}
           value={props.instructions}
           rows={10}
@@ -54,9 +78,6 @@ export function WorkflowNodePromptEditor(props: NodePromptEditorProps) {
           placeholder={props.loading ? '正在加载默认指令…' : ''}
           onChange={(event) => props.onPatch(event.target.value)}
         />
-        <span className={styles.hint}>
-          自定义内容将整段替代自动组装的默认指令；重置为默认后恢复自动组装。
-        </span>
         {props.previewError && (
           <span className={styles.error} role="alert">
             预览加载失败：{props.previewError}

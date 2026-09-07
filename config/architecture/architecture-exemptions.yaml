@@ -1115,3 +1115,205 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/499
   ceiling: 83
+- check: architecture.file_budget
+  path: server/app/agent_runtime/adapter.py
+  reason: >-
+    #476 adds the tool-catalog half to the runtime adapter contract:
+    ToolCatalogEntry (tier/activation semantics) and the tool_catalog
+    field on RuntimeAdapter. The two contract halves (execution keys,
+    tool catalog) belong in one file — every consumer (dispatch
+    validation, claim, the Studio API projection) resolves them through
+    the same adapter object. Remove when a runtime contract split
+    becomes warranted by a third contract family.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  ceiling: 62
+- check: architecture.file_budget
+  path: server/app/agent_runtime/velites.py
+  reason: >-
+    #476 wires the velites static tool-catalog mirror (the
+    `velites tools list --json` reflection pinned by the cross-binary
+    contract test) into the adapter declaration — one dataclass field.
+    The mirror itself lives in tool_catalog.py; this file only carries
+    the reference. Remove together with the mirror if velites ever
+    self-describes over the wire instead of via static declaration.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  ceiling: 19
+- check: architecture.file_budget
+  path: server/app/agent_runtime/pi.py
+  reason: >-
+    #476 registers pi's static tool catalog (external runtime, no
+    self-description channel — names-only triple by design). One
+    import plus one adapter field; the argv builder below it is
+    untouched. Remove if pi gains a self-description command or the
+    adapter drops per-runtime tool declarations.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  ceiling: 59
+- check: architecture.file_budget
+  path: server/app/agent_broker/dispatch.py
+  reason: >-
+    #449/#476 turn the manifest tools freeze from a bare list copy into
+    a catalog-validated call (manifest_tools) — one import plus one
+    call site replacing the previous one-liner. The validation logic
+    lives in agent_runtime/tools_validation.py; dispatch keeps only the
+    freeze point. Remove when the manifest assembly is extracted into
+    its own module.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  ceiling: 136
+- check: architecture.file_budget
+  path: velites/src/main.rs
+  reason: >-
+    #476 dispatches the `tools list` token before the agent-run CLI
+    parse — the same pre-parse dispatch block as `models list` /
+    `sandbox wrap` / `validate` (that CLI requires a positional, so
+    subcommands must be peeled off first). The handler itself is one
+    catalog call in tools/catalog.rs. Remove if the pre-parse dispatch
+    moves into a shared argv router.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  ceiling: 85
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/inspector/AgentEditor.tsx
+  reason: >-
+    #476 makes the tool picker catalog-driven: option-surface derivation
+    (selectable/forced/invalid sets as memoized maps), the forced-tier
+    locked-row hint, and the runtime-switch invalid-tool banner join the
+    existing form lifecycle. The catalog plumbing is already split out
+    (useAgentRuntimes hook); what stays here is the interaction itself —
+    splitting render from state would separate the two halves of every
+    conditional being tested. Remove when the editor gains a shared
+    tool-picker component with WorkflowNodeToolsEditor.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  ceiling: 359
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.ts
+  reason: >-
+    #443/#476 add patchWorkflowNodeTools — one patchNode call site with the
+    empty-means-undeclared delete-key semantics, same shape as the sibling
+    patch functions in this table. Remove together with the node-level
+    tools declaration if it ever retires.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  ceiling: 123
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.parse.ts
+  reason: >-
+    #443: WorkflowYamlNode gains the optional tools field (one line plus
+    its contract comment). The node shape lives in one type by design.
+    Remove with the field itself.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  ceiling: 85
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/inspector/WorkflowAgentExecutionDetails.tsx
+  reason: >-
+    #443/#476 mount WorkflowNodeToolsEditor below the runtime settings —
+    one import plus one JSX block (9 lines) in the agent execution body.
+    The editor itself is a sibling component; this file is only the
+    composition point. Remove if the composition is restructured.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  ceiling: 65
+- check: architecture.file_budget
+  path: velites/src/tools/specs.rs
+  reason: >-
+    #518 adds the json tool's provider spec (description + JSON Schema
+    parameters) — the file is the per-tool spec table by design, one arm
+    per ToolKind; the spec IS the content, there is nothing to split
+    without separating a tool's spec from its siblings' in a way no
+    consumer wants. Remove only with the json tool itself.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/518
+  ceiling: 116
+- check: architecture.file_budget
+  path: server/app/agent_runtime/tool_catalog.py
+  reason: >-
+    #518 adds the json tool's entry to the velites static mirror — the
+    file is the declared mirror of `velites tools list --json`, pinned
+    equal by the cross-binary contract test; its size is the catalog's
+    size plus the pi triple. The entry must live here in full
+    (description/parameters verbatim) or the parity test fails by
+    design. Remove if the mirror is replaced by runtime probing.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/518
+  ceiling: 208
+- check: architecture.file_budget
+  path: velites/src/lib.rs
+  reason: >-
+    #476/#518: lib.rs carries the forced-tool activation at the one point
+    where all three inputs exist (parsed --tools, canonicalized skill
+    dirs, --require-output) and the tools-listing error message that
+    must name the full tool set. The activation is a harness
+    run-assembly concern, not a tool-module one. Remove if the run
+    assembler is extracted from the provider wiring.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/518
+  ceiling: 211
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/inspector/WorkflowNodePromptEditor.tsx
+  reason: >-
+    #513 adds the prompt-mode selector (append/overwrite) to the custom
+    prompt editor: one TextField select with two labeled options plus the
+    state-switching hint line — the interaction the whole feature is about.
+    The data layer lives in useNodePromptPreview; splitting the selector
+    out would separate the mode from the textarea it governs. Remove if
+    the prompt panel is restructured.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/513
+  ceiling: 84
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/inspector/useNodePromptPreview.ts
+  reason: >-
+    #513: the hook derives the prompt mode from the draft YAML (junk-tolerant
+    normalization mirroring the prompt field) and exposes onPatchMode —
+    data-layer counterparts of the editor's mode selector. Same P1
+    normalization family as customPrompt above it. Remove with the mode
+    selector.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/513
+  ceiling: 100
+- check: architecture.file_budget
+  path: server/app/agent_broker/agent_claim_compatibility.py
+  reason: >-
+    #513: the claim-side re-resolution chain carries prompt_mode alongside
+    additional_prompt — one line keeping claim-time rebuilds byte-equal
+    with dispatch-time manifests (EXEC-RUNTIME-DISPATCH-001 symmetry).
+    Remove if the manifest prompt fields centralize into one builder.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/513
+  ceiling: 58
+- check: architecture.file_budget
+  path: server/app/services/node_prompt_preview.py
+  reason: >-
+    #513: the preview payload gains prompt_mode (normalized to append) and
+    save_node_prompt accepts it — the API surface of the mode feature. The
+    service is the single preview/save implementation shared by the Studio
+    route and the MCP tools; the growth is the feature, not drift. Remove
+    if prompt previewing is extracted from the draft-editing service.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/513
+  ceiling: 183
+- check: architecture.file_budget
+  path: server/app/workflows/workflow_execution_defaults.py
+  reason: >-
+    #513: prompt_mode is node-level-only like prompt — the top-level loader
+    rejects it (one guard) and the merge preserves it (one field passthru).
+    Same shape as the prompt guards right above. Remove with prompt_mode.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/513
+  ceiling: 76
+- check: architecture.file_budget
+  path: frontend/src/features/workflowStudio/inspector/WorkflowNodeToolsEditor.tsx
+  reason: >-
+    codex P2 on #527: invalid declared tools render as removable chips
+    (MUI multi-select cannot deselect a disabled option, so the removal
+    needs its own surface) — one Chip row inside the existing alert.
+    The editor is already the node-level counterpart of AgentEditor's
+    picker. Remove together with the AgentEditor tool-picker exemption.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/476
+  ceiling: 91

@@ -7,6 +7,7 @@ import type { WorkflowNodeRecord } from '../../../types'
 import { useShowNodeDetailPreview } from './nodeDetailPreviewContext'
 import { useWorkspaceRuntimeModels } from '../shared/useWorkspaceRuntimeModels'
 import { WorkflowNodeRuntimeSettings } from './WorkflowNodeRuntimeSettings'
+import { WorkflowNodeToolsEditor } from './WorkflowNodeToolsEditor'
 import { parseWorkflowExecutionDefaults } from '../shared/workflowStudioYamlDraft.executionDefaults'
 import styles from './WorkflowAgentExecutionDetails.module.css'
 
@@ -50,6 +51,14 @@ export function WorkflowAgentExecutionDetails(props: {
         runtime={props.runtime}
         defaults={defaults}
         runtimeModels={useWorkspaceRuntimeModels(workspaceId).data?.runtimes}
+        definitionYaml={props.definitionYaml}
+        setDefinitionYaml={props.setDefinitionYaml}
+        readOnly={props.readOnly}
+      />
+      {/* #443/#476：节点级 tools 声明编辑入口（选项与 AgentEditor 同源）。 */}
+      <WorkflowNodeToolsEditor
+        node={props.node}
+        runtime={props.runtime}
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}
         readOnly={props.readOnly}

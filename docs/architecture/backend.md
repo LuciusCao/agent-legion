@@ -111,6 +111,7 @@ server/app/
 | POST | `/agent-register-tokens` | `create_register_token` | routes/agent_register_tokens.py |
 | GET | `/agent-register-tokens` | `list_register_tokens` | routes/agent_register_tokens.py |
 | DELETE | `/agent-register-tokens/{token_id}` | `delete_register_token` | routes/agent_register_tokens.py |
+| GET | `/agent-runtimes` | `get_agent_runtimes` | routes/agent_runtimes.py |
 | POST | `/agent-executions/claim` | `claim` | routes/agent_worker_claims.py |
 | POST | `/agent-executions/{execution_id}/heartbeat` | `heartbeat` | routes/agent_worker_heartbeat.py |
 | POST | `/agent-executions/heartbeats` | `heartbeat_batch` | routes/agent_worker_heartbeat_batch.py |
@@ -327,6 +328,9 @@ server/app/
 | AgentDetailResponse | BaseModel | agent_id: str, latest: AgentVersionResponse | None, published: AgentVersionRe... | app/routes/agent_definition_contracts.py |
 | AgentVersionsResponse | BaseModel | versions: list[AgentVersionSummary] | app/routes/agent_definition_contracts.py |
 | AgentArchiveResponse | BaseModel | archived: int | app/routes/agent_definition_contracts.py |
+| RuntimeToolEntry | BaseModel | name: str, tier: str, description: str, parameters: dict[str, Any], activatio... | app/routes/agent_runtimes_contracts.py |
+| RuntimeTools | BaseModel | tools: list[RuntimeToolEntry] | app/routes/agent_runtimes_contracts.py |
+| AgentRuntimesResponse | BaseModel | runtimes: dict[str, RuntimeTools] | app/routes/agent_runtimes_contracts.py |
 | BatchHeartbeatItem | BaseModel | execution_id: str, lease_id: str | app/routes/agent_worker_heartbeat_batch.py |
 | BatchHeartbeatRequest | BaseModel | executions: list[BatchHeartbeatItem] | app/routes/agent_worker_heartbeat_batch.py |
 | BatchHeartbeatResponse | BaseModel | renewed: list[str], lost: list[str], cancelled_execution_ids: list[str] | app/routes/agent_worker_heartbeat_batch.py |
@@ -589,13 +593,13 @@ server/app/
 | WorkflowNodeCodeRollbackRequest | BaseModel | version: int | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeArchiveResponse | BaseModel | archived: int | app/routes/workflow_node_code_contracts.py |
 | WorkflowTerminalResponse | BaseModel | outcome: str | app/routes/workflow_node_contracts.py |
-| WorkflowNodeExecutionResponse | BaseModel | provider: str, model: str, thinking: str, prompt: str | app/routes/workflow_node_contracts.py |
+| WorkflowNodeExecutionResponse | BaseModel | provider: str, model: str, thinking: str, prompt: str, prompt_mode: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeSkillResponse | BaseModel | key: str, ref: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeResponse | BaseModel | key: str, label: str, capability: str, node_type: str, accepted_item_types: l... | app/routes/workflow_node_contracts.py |
 | NodePromptPreviewRequest | BaseModel | node_key: str, definition_yaml: str | None | app/routes/workflow_node_prompt_contracts.py |
-| NodePromptPreviewResponse | BaseModel | effective_prompt: str, default_instructions: str, custom_instructions: str, i... | app/routes/workflow_node_prompt_contracts.py |
-| NodePromptSaveRequest | BaseModel | node_key: str, prompt: str | app/routes/workflow_node_prompt_contracts.py |
-| NodePromptSaveResponse | BaseModel | node_key: str, is_default: bool, definition_yaml: str, updated_at: str | None | app/routes/workflow_node_prompt_contracts.py |
+| NodePromptPreviewResponse | BaseModel | effective_prompt: str, platform_prompt: str, default_instructions: str, custo... | app/routes/workflow_node_prompt_contracts.py |
+| NodePromptSaveRequest | BaseModel | node_key: str, prompt: str, prompt_mode: Literal['append', 'overwrite'] | None | app/routes/workflow_node_prompt_contracts.py |
+| NodePromptSaveResponse | BaseModel | node_key: str, is_default: bool, prompt_mode: str, definition_yaml: str, upda... | app/routes/workflow_node_prompt_contracts.py |
 | WorkflowRevisionSummary | BaseModel | id: str, workspace_id: str, workflow_key: str, version: int, status: str, def... | app/routes/workflow_revisions_contracts.py |
 | WorkflowRevisionsResponse | BaseModel | revisions: list[WorkflowRevisionSummary] | app/routes/workflow_revisions_contracts.py |
 | WorkflowDraftRequest | BaseModel | definition_yaml: str | app/routes/workflow_revisions_contracts.py |

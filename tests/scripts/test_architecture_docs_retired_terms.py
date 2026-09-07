@@ -108,8 +108,23 @@ def test_hits_prose_aliases_that_motivated_the_check() -> None:
     # Chinese form that reintroduced the retired concepts.
     prose = (RetiredTerm(pattern=r"\bpipeline nodes?\b"),)
     chinese = (RetiredTerm(pattern=r"外部 skill"),)
-    assert find_retired_term_hits(["pipeline nodes run the stages"], prose) != []
-    assert find_retired_term_hits(["外部 skill 仓库按锁定 commit 固定版本"], chinese) != []
+    hits = find_retired_term_hits(["pipeline nodes run the stages"], prose)
+    assert hits == [(1, prose[0])]
+    hits = find_retired_term_hits(["外部 skill 仓库按锁定 commit 固定版本"], chinese)
+    assert hits == [(1, chinese[0])]
+
+
+def test_repo_config_keeps_the_prose_aliases() -> None:
+    # The inline patterns above only prove the matcher; this guards the real
+    # config against silent pattern deletion (subagent review on #377) —
+    # removing either entry would otherwise go unnoticed.
+    repo_root = Path(__file__).resolve().parents[2]
+    config = load_docs_retired_terms_config(
+        repo_root / "config/architecture/docs-retired-terms.yaml"
+    )
+    patterns = {term.pattern for term in config.terms}
+    assert r"\bpipeline nodes?\b" in patterns
+    assert "外部 skill" in patterns
 
 
 def test_exempts_retirement_phrase_in_same_line() -> None:
