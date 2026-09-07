@@ -13,7 +13,10 @@ from server.app.executors.sweeper import SweeperThread
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import register_wakeup
 from server.app.services.health_status import record_pure_remote_startup
-from server.app.services.path_hygiene import report_absolute_db_paths_background
+from server.app.services.path_hygiene import (
+    migrate_absolute_db_paths_background,
+    report_absolute_db_paths_background,
+)
 from server.app.settings import Settings
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.workflow_worker.agent_gate import request_restock
@@ -44,6 +47,12 @@ def start_worker_threads(
     # queries seq-scan jobs/node_runs, so the report runs on a background
     # thread — readiness must not wait on it (issue #106).
     report_absolute_db_paths_background(job_db)
+    # #521: the same legacy rows cost a deduped-warning lookup on every hot
+    # read (result commit, claim, dashboard); retire them outright with the
+    # one-time suffix-rebase rewrite, on its own background thread with the
+    # same off-readiness contract. Unmappable rows survive and stay visible
+    # in the report above; a clean database does no writes.
+    migrate_absolute_db_paths_background(job_db, settings.data_dir)
     worker_startup: dict[str, str] = {}
     # ``workflows.enabled`` is retired (#385/#389): the worker always starts;
     # the deployment shape is expressed by code_capacity below.
