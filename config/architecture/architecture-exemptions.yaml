@@ -1,5 +1,105 @@
 exemptions:
 - check: architecture.file_budget
+  path: frontend/src/pages/globalSettings/instanceSettingsFields.ts
+  reason: >-
+    Issue #521 adds the result-commit gate knob to the Worker-limits field
+    group: one field entry (path, label, integer, allowZero) in the same
+    table shape as its agent_workers siblings. The list IS the form surface.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  ceiling: 122
+- check: architecture.file_budget
+  path: frontend/src/pages/globalSettings/instanceSettingsForm.tsx
+  reason: >-
+    Issue #521 threads the gate knob through the form value mapping: one
+    entry in toFormValues, one in the document builder, both keyed by the
+    same path string the field table declares. The mapping IS the form
+    contract.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  ceiling: 160
+- check: architecture.file_budget
+  path: server/app/agent_control/completion.py
+  reason: >-
+    Issue #521 adds the stage boundary marks (unpack/artifacts_verify/
+    validate/artifacts_upload) inline between the physical steps they
+    separate; each mark is one line at the exact boundary it names. The
+    marks retire with the stage split's phase 2 rework (per-stage slimming
+    restructures finish() and re-budgets the module).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  ceiling: 184
+- check: architecture.file_budget
+  path: server/app/executors/_lease_write_paths.py
+  reason: >-
+    Issue #521 closes the lease_write and events stage marks around the
+    finish() body's two already-physical segments (terminal write tx; the
+    events.jsonl post-processing). The marks are boundary annotations, not
+    new logic; they retire with the events single-pass merge (0.7.3).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  ceiling: 166
+- check: architecture.file_budget
+  path: server/app/executors/leases.py
+  reason: >-
+    Issue #521 threads the optional stage_timer keyword through finish()
+    into _lease_write_paths; the parameter must ride the same retry wrapper
+    as the result it instruments (a retry re-runs the stages it re-measures).
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  ceiling: 133
+- check: architecture.file_budget
+  path: server/app/services/path_hygiene.py
+  reason: >-
+    Issue #521 adds the per-path warn dedupe (set + lock + keyed signature)
+    and the one-time rewrite orchestration (rebase rule, chunk loop, two
+    daemon-thread kickers). The rewrite rides the facade queries added in
+    jobs/queries/path_hygiene; the service keeps the warnings/report/rewrite
+    story in one module. Shrinks back once every deployment's stored
+    absolute-path rows have been rewritten and the rewrite pass can drop.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  ceiling: 150
+- check: architecture.file_budget
+  path: server/app/services/runtime_profile/counters.py
+  reason: >-
+    Issue #521 splits the stage-gauge families out (stage_gauges.py owns
+    the tuples and folds); the registry keeps the counter table, the
+    reset/snapshot loops, and the family-wide note_* methods. The #448
+    exemption retired with that split; this one tracks the new floor.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  ceiling: 170
+- check: architecture.file_budget
+  path: server/app/services/runtime_profile/sampling.py
+  reason: >-
+    Issue #521 splits the wide-window rollup out (rollup.py) and widens
+    the persisted values with the result-stage comprehension; the value
+    marshalling stays with its only caller. The #359 exemption retired
+    with the split; this one tracks the new floor.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  ceiling: 98
+- check: architecture.file_budget
+  path: server/app/jobs/queries/runtime_profile.py
+  reason: >-
+    Issue #521 widens the upsert column list with the result-stage
+    comprehension (fourteen columns), the same single-source shape the v78
+    claim-stage split added. The list IS the column contract; splitting it
+    would fork the sync the migration test pins.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  ceiling: 103
+- check: architecture.file_budget
+  path: server/app/routes/runtime_profile_contracts.py
+  reason: >-
+    Issue #521 mirrors the fourteen result-stage gauge columns into
+    ProfileBucket, the same field-list growth the v78 claim-stage split
+    made. The model IS the response contract.
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/521
+  ceiling: 61
+- check: architecture.file_budget
   path: worker/cli_args.py
   reason: >-
     The workerctl --proxy flag (#444 rework) gives headless workers (Docker
@@ -121,21 +221,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
   ceiling: 77
-- check: architecture.file_budget
-  path: server/app/services/runtime_profile/counters.py
-  reason: >-
-    Issue #448 phase 1 adds the claim-stage gauge family to the #359
-    runtime profile: note_claim_stages (one fold per claim) plus the six
-    (scan/evaluate/writes total+max) counters kept single-source through
-    the _CLAIM_STAGES loop in reset/snapshot/note — the loop is what keeps
-    twelve hand-written counter lines from drifting apart. Splitting the
-    claim gauges into a sibling module would fork the one undercount
-    discipline the whole registry documents. Remove when the runtime
-    profile gains a structural split of its own or the claim-stage gauges
-    retire.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/448
-  ceiling: 185
 - check: architecture.file_budget
   path: server/app/db/migration_chain.py
   reason: >-
@@ -612,15 +697,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 145
-- check: architecture.file_budget
-  path: server/app/services/runtime_profile/sampling.py
-  reason: 'Issue #359''s P0/P1 review round grew the sampler: per-bucket DB-pool wait DELTAS (cumulative-counter
-    memo) and the wide-window bin rollup both belong with the values they prepare, next to the facade
-    calls they feed. Splitting either into the queries layer would move value marshalling away from the
-    only caller; revisit if a second gauge family joins the sampler.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 108
 - check: architecture.file_budget
   path: server/app/services/ops_metrics/service.py
   reason: 'Issue #359 extends the sampling pass to persist the runtime-profile gauge row (one call plus
