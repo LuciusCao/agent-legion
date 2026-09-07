@@ -187,7 +187,9 @@ fi
 chmod 600 deploy/secrets/vault_master_key
 
 # 6. velites 二进制（指纹一致自动跳过；#507 起装到 PATH——~/.local/bin，
-#    data/bin 不再是 velites 落点）
+#    data/bin 不再是 velites 落点。安装目录不在当前 PATH 时脚本向 stderr
+#    打加入 PATH 的指引；native-prod-up.sh / dev_stack.sh 起服务前已自动
+#    前置该目录，服务链不受用户 shell PATH 影响）
 ./scripts/ensure-velites.sh
 # 存量 data/bin 旧副本迁移提示（#507）：旧版 install-deps.sh 曾往 data/bin
 # 播种一次性副本，升级后无人维护且解析顺序已改为 PATH 优先——它不再遮蔽

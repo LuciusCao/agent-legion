@@ -277,6 +277,25 @@ def test_warning_host_url_uses_bracketed_host() -> None:
     assert "http://$BACKEND_BIND:" not in NATIVE_PROD_UP
 
 
+def test_prepends_velites_install_dir_to_service_path() -> None:
+    """服务启动器把 velites 实际安装目录前置到本进程 PATH（PR #519 codex
+    P1）：调用方 shell 的 PATH 可能不含 ~/.local/bin（或 VELITES_INSTALL_DIR
+    指向的目录），脚本改不了父 shell 环境；不前置则后端/Worker 解析不到
+    velites（或回落 data/bin 存量旧副本——#507 修的静默漂移）。目录经
+    ensure-velites.sh --print-bin-dir 查询（单一事实源，启动器不得自写探测
+    逻辑），且查询必须先于两个服务的 nohup 启动（后启动无效）。"""
+    assert 'VELITES_BIN_DIR="$(./scripts/ensure-velites.sh --print-bin-dir)"' in NATIVE_PROD_UP
+    assert 'export PATH="$VELITES_BIN_DIR:$PATH"' in NATIVE_PROD_UP
+    # 单一事实源守卫：安装目录的兜底默认（~/.local/bin）只活在 ensure-velites.sh，
+    # 启动器不得内嵌第二份目录探测。
+    assert ".local/bin" not in NATIVE_PROD_UP
+    # 前置必须先于两个服务的 nohup 启动（对已起进程前置无效）。
+    export_at = NATIVE_PROD_UP.index('export PATH="$VELITES_BIN_DIR:$PATH"')
+    assert export_at < NATIVE_PROD_UP.index(
+        "nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m uvicorn"
+    )
+
+
 def test_prod_down_locates_by_bind_address() -> None:
     """down 脚本与 up 同一组 bind 变量、按「地址 + 端口 + 族别」定位 pid：
     up 支持同端口多地址并存后，按端口 head -1 会杀错进程；listener_pids

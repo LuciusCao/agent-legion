@@ -76,6 +76,19 @@ def test_makefile_wires_install_target() -> None:
     assert "scripts/install-deps.sh" in MAKEFILE
 
 
+def test_dev_stack_up_prepends_velites_bin_dir_to_path() -> None:
+    """cmd_up 把 velites 实际安装目录前置到本进程 PATH（PR #519 codex P1）：
+    dev 进程经 nohup make 起在后台、继承用户 shell 的 PATH，而 install 装到的
+    目录（默认 ~/.local/bin）可能不在其中——不前置则 backend/worker 解析不到
+    velites（或回落 data/bin 存量旧副本）。目录经 ensure-velites.sh
+    --print-bin-dir 查询（单一事实源），启动器不得自写探测逻辑。"""
+    assert "scripts/ensure-velites.sh --print-bin-dir" in DEV_STACK
+    assert 'export PATH="$velites_bin_dir:$PATH"' in DEV_STACK
+    # 单一事实源守卫：安装目录的兜底默认（~/.local/bin）只活在 ensure-velites.sh，
+    # 启动器不得内嵌第二份目录探测。
+    assert ".local/bin" not in DEV_STACK
+
+
 # --- ensure_local_object_store 行为级桩测试（合成仓库 + PATH 桩） ---
 
 DEV_STACK_SCRIPT = ROOT / "scripts" / "dev_stack.sh"
@@ -113,6 +126,16 @@ echo "uv $*" >> "${STUB_LOG}"
 exit 0
 """
 
+# ensure-velites 桩（cmd_up 经 --print-bin-dir 查询 velites 安装目录并前置
+# PATH，PR #519 codex P1）：记录调用；查询形态输出 STUB_VELITES_BIN_DIR。
+_ENSURE_VELITES_STUB = """#!/usr/bin/env bash
+echo "ensure-velites $*" >> "${STUB_LOG}"
+if [[ "$1" == "--print-bin-dir" ]]; then
+  echo "${STUB_VELITES_BIN_DIR:-/stub-velites-bin}"
+fi
+exit 0
+"""
+
 # 端口全部视为已监听（组件跳过启动）、HTTP 全部视为就绪（curl 成功），
 # 让 cmd_up 在本地存储段之后直接走到 print_summary。
 _EXIT_OK_STUB = """#!/usr/bin/env bash
@@ -133,6 +156,7 @@ def _setup(tmp_path: Path, *, with_docker: bool = True) -> tuple[Path, Path]:
     (main / "frontend" / "node_modules").mkdir(parents=True)
     shutil.copy(DEV_STACK_SCRIPT, main / "scripts" / DEV_STACK_SCRIPT.name)
     _write_stub(main / "scripts" / "local-s3-decide.sh", _DECIDE_STUB)
+    _write_stub(main / "scripts" / "ensure-velites.sh", _ENSURE_VELITES_STUB)
     (main / "deploy" / "compose.host.yaml").write_text("name: agent-legion\n")
     (main / ".env").write_text("AGENT_LEGION_S3_ACCESS_KEY=ak\nAGENT_LEGION_S3_SECRET_KEY=sk\n")
     bin_dir = tmp_path / "bin"
@@ -277,3 +301,17 @@ def test_rustfs_backend_dispatches_service(tmp_path: Path) -> None:
     assert "up -d rustfs" in log
     assert "up -d seaweedfs" not in log
     assert "ensure-s3-bucket.py" in log
+
+
+def test_cmd_up_queries_velites_bin_dir_before_starting_components(tmp_path: Path) -> None:
+    """cmd_up 启动组件前经 ensure-velites.sh --print-bin-dir 查询安装目录
+    并前置 PATH（查询必须发生在 start_component 之前，后前置对已起进程
+    无效）。桩记录调用确证查询链路。"""
+    main, bin_dir = _setup(tmp_path)
+    stub_log = tmp_path / "stub.log"
+
+    result = _run_up(main, bin_dir, stub_log)
+
+    assert result.returncode == 0, result.stderr
+    assert "ensure-velites --print-bin-dir" in stub_log.read_text()
+    assert "开发环境已就绪" in result.stdout

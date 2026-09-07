@@ -162,6 +162,17 @@ ensure_local_object_store() {
 
 cmd_up() {
     mkdir -p "$LOG_DIR"
+    # 把 velites 实际安装目录前置到本进程 PATH（PR #519 codex P1）：dev 侧
+    # 安装发生在 make install（install-deps.sh 第 6 步），用户 shell 的 PATH
+    # 不含该目录时，下方 nohup make 起的 backend/worker 同样解析不到 velites
+    # （PATH 优先、data/bin 兜底——兜底是无人维护的存量旧副本）。目录经
+    # ensure-velites.sh --print-bin-dir 查询（单一事实源，与 native-prod-up.sh
+    # 同一手法）；对尚无 velites 的目录 prepend 无副作用。查询先落独立赋值
+    # 再 export——直接内插在 export 里时替换失败被 set -e 吞掉，会静默前置
+    # 空 PATH 条目（PATH 的 CWD 注入）。
+    local velites_bin_dir
+    velites_bin_dir="$(scripts/ensure-velites.sh --print-bin-dir)"
+    export PATH="$velites_bin_dir:$PATH"
     ensure_local_object_store
     if [[ ! -d frontend/node_modules ]]; then
         echo "安装前端依赖…"

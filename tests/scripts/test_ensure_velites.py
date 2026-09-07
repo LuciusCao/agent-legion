@@ -169,3 +169,75 @@ def test_dest_skips_rebuild_when_stamp_matches(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert "跳过构建" in result.stdout
     assert log.read_text() == ""
+
+
+# --- --print-bin-dir：安装目录查询通道（服务启动器 prepend PATH 的单一事实源） ---
+
+
+def test_print_bin_dir_defaults_to_install_dir_without_path_velites(tmp_path: Path) -> None:
+    """--print-bin-dir：PATH 无 velites → 输出 VELITES_INSTALL_DIR（默认
+    ~/.local/bin 的覆盖位）。查询形态不触发 git 探测/构建，可直接在无工具链
+    环境调用。"""
+    main, env, log = _setup(tmp_path)
+    result = _run(main, env, "--print-bin-dir")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == env["VELITES_INSTALL_DIR"]
+    assert not log.exists()  # 查询形态不触发构建
+
+
+def test_print_bin_dir_follows_path_velites_and_wins_over_override(tmp_path: Path) -> None:
+    """--print-bin-dir：PATH 上已有 velites → 输出其所在目录，且优先于
+    VELITES_INSTALL_DIR——与无参安装形态维护既有副本所在地的决策一致。"""
+    main, env, log = _setup(tmp_path)
+    bin_dir = Path(env["PATH"].split(":")[0])
+    _write_stub(bin_dir / "velites", "#!/usr/bin/env bash\n")
+    result = _run(main, env, "--print-bin-dir")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(bin_dir)
+    assert not log.exists()  # 查询形态不触发构建
+
+
+# --- 安装侧 PATH 守门（PR #519 codex P1：装了但当前环境解析不到不再是静默态） ---
+
+
+def test_install_warns_when_install_dir_not_on_path(tmp_path: Path) -> None:
+    """安装目录不在调用方 PATH → stderr 打明确指引（含 export PATH 提示），
+    退出码仍为 0——保留 data/bin 存量副本的机器可能仍靠兜底在服务，交互
+    场景不误伤。"""
+    main, env, log = _setup(tmp_path)
+    result = _run(main, env)
+    assert result.returncode == 0, result.stderr
+    assert "不在当前 PATH" in result.stderr
+    assert "export PATH=" in result.stderr
+
+
+def test_warning_repeats_on_freshness_skip(tmp_path: Path) -> None:
+    """指纹一致跳过构建时守门同样生效——「装了但解析不到」不能因跳过构建
+    而被掩盖（升级机器的常态路径：pull 后指纹一致，但 shell 一直没配 PATH）。"""
+    main, env, log = _setup(tmp_path)
+    assert _run(main, env).returncode == 0
+    result = _run(main, env)
+    assert result.returncode == 0, result.stderr
+    assert "跳过构建" in result.stdout
+    assert "不在当前 PATH" in result.stderr
+
+
+def test_no_warning_when_install_dir_on_path(tmp_path: Path) -> None:
+    """安装目录已在 PATH 上（command -v 命中刚装的副本）→ 无警告。"""
+    main, env, log = _setup(tmp_path)
+    assert _run(main, env).returncode == 0
+    env["PATH"] = f"{env['PATH']}:{env['VELITES_INSTALL_DIR']}"
+    log.write_text("")
+    result = _run(main, env)
+    assert result.returncode == 0, result.stderr
+    assert "不在当前 PATH" not in result.stderr
+    assert "跳过构建" in result.stdout
+
+
+def test_dest_install_never_warns_about_path(tmp_path: Path) -> None:
+    """--dest 是显式安置通道（Docker 外挂/compose VELITES_BIN），不期望
+    PATH 命中，守门不触发。"""
+    main, env, log = _setup(tmp_path)
+    result = _run(main, env, "--dest", "data/bin")
+    assert result.returncode == 0, result.stderr
+    assert "不在当前 PATH" not in result.stderr
