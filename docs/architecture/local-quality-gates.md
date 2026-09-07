@@ -175,7 +175,10 @@ the same ref:
 - **backend-unit** — static checks (ruff, format, mypy, architecture contracts,
   invariant registry, spec health, version-manifest consistency via
   `scripts/check_versions.py` — the decoupled versioning discipline for
-  velites/frontend, see CONTRIBUTING "House rules") plus the
+  velites/frontend, see CONTRIBUTING "House rules" — and release-pin
+  consistency via `scripts/check_release_pins.py`, which pins the
+  installer defaults and standalone-deploy compose image tags to the
+  current release line, issue #504) plus the
   PostgreSQL-offline unit tier (`GATE_TIER=unit`), uploading its coverage
   data file as a 1-day artifact.
 - **api-check** — the api:check OpenAPI contract step (Python + Postgres +

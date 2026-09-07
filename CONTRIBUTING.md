@@ -67,7 +67,12 @@ See [README.md](README.md) for the full quick start and the demo workflow.
   freshness fingerprint (`ensure-velites.sh`) and the Docker layer cache key
   off the component's source tree. Lockfile versions must stay in sync with
   their manifest (`uv lock` / `cargo update -w` /
-  `npm install --package-lock-only`).
+  `npm install --package-lock-only`). Consumer-side pins must follow the
+  release line: the installer defaults in `scripts/install-worker.sh` and
+  the GHCR image tags in the standalone-deploy compose files are checked
+  against the manifests by `scripts/check_release_pins.py` (same static
+  round, issue #504) — bumping `pyproject.toml` or `velites/Cargo.toml`
+  without updating those pins fails the gate.
 
 ## Reporting issues
 

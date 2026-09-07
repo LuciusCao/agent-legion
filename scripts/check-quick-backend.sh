@@ -19,6 +19,12 @@ run_static_checks() {
   # 禁止锁步 bump——无谓的版本前进会击穿 velites 二进制指纹与 Docker 缓存层）。
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_versions
 
+  echo "=== Release Pins ==="
+  # 消费者侧版本钉点对齐发布线（issue #504）：install-worker.sh 默认版本、
+  # 独立部署 compose 的 GHCR 镜像默认 tag 必须钉在 pyproject / velites
+  # 当前版本——发布时漏 bump 在 0.7.0 被人肉记忆坑过一次，此后交给门禁。
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_release_pins
+
   # The business skill shared-assets check (scripts/check-skills-shared.py)
   # retired with the business skill sources; the script itself leaves with the
   # business runtime code in P4.
