@@ -196,6 +196,13 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   修正、measured 失败样本保 totalMs、边界后首字节不进 firstByteMs、
   requestedTimeoutMs），独立版本线随源码前进——三平台二进制经
   velites-v0.5.1 tag 发布。
+- velites 0.5.1 → 0.5.2 落版（0.7.1 补丁线后置提交）：velites-v0.5.1 tag
+  之后 velites/ 子树有 0.7.1 的两批源码改动——#476 工具目录自描述
+  （`velites tools list --json`、三档 tier、validate 的 --require-output
+  forced 联动）与 #518 json 工具（get/set/delete JSON path 读改写），
+  json 为新工具面（旧 0.5.1 二进制遇 `--tools json` 启动即报错，Host
+  catalog 已 advertise——版本号区分二进制新旧避免部署漂移误判）。
+  独立版本线随源码前进——三平台二进制经 velites-v0.5.2 tag 发布。
 
 ## [0.6.0] - 2026-09-05
 
