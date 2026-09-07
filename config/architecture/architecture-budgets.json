@@ -844,6 +844,7 @@
     "scripts/stress/run_e2e_stress.py": 311,
     "scripts/stress/simulate_agents.py": 363,
     "scripts/studio_chat_smoke.py": 119,
+    "scripts/submit_campaign.py": 492,
     "scripts/summarize_test_results.py": 159,
     "scripts/trim_terminal_code_manifests.py": 85,
     "server/app/__init__.py": 10,
