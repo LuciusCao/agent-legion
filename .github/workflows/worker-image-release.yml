@@ -71,12 +71,15 @@ jobs:
       # 轻量 tag（git tag worker-vX 不带 -a）下 GITHUB_SHA 即 commit，本步
       # dereference 幂等；annotated tag 则必须剥到 commit。显式 fetch tag
       # refspec 而不依赖 checkout 的内部 ref（确定性：checkout 不保证在
-      # 本地留下 refs/tags/*）。
+      # 本地留下 refs/tags/*）。--force：actions/checkout 的 fetch-depth: 0
+      # 已把 tag 引用留在本地（浅对象），不带 force 的同名 refspec fetch
+      # 会被「would clobber existing tag」拒绝（worker-v0.7.0 实测）——
+      # 覆盖为远端权威引用正是本步的目的。
       - name: Resolve commit sha
         id: commit
         run: |
           set -euo pipefail
-          git fetch --depth=1 origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          git fetch --depth=1 --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
           echo "sha=$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")" >> "$GITHUB_OUTPUT"
 
   build:
