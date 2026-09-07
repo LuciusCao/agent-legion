@@ -178,8 +178,15 @@ class CodeDispatchService:
         (top-level keys) — the remote Worker reads them from there to rebuild
         the same runtime dict the local executor hands to node code, and the
         claim transaction reads ``shard_index`` to bind the execution to its
-        ``node_shards`` row (dedup + shard-aware completion)."""
-        if self.broker.has_active_request(str(job["id"]), node.key):
+        ``node_shards`` row (dedup + shard-aware completion). #401: the
+        active-request gate below matches the broker index's identity —
+        per-shard for shard rows, plain node-level otherwise."""
+        if shard_runtime is not None:
+            if self.broker.has_active_request(
+                str(job["id"]), node.key, shard_index=int(shard_runtime["shard_index"])
+            ):
+                return False
+        elif self.broker.has_active_request(str(job["id"]), node.key):
             return False
         execution_id = str(uuid.uuid4())
         digest = hashlib.sha256(code_text.encode("utf-8")).hexdigest()
@@ -221,8 +228,18 @@ class CodeDispatchService:
             # output (same filename contract as the local executor,
             # _shard_contract.shard_output_name): no size-capped metadata
             # channel; completion reads it from the unpacked job_dir.
+            # #401 review P1-2: the node's ordinary outputs are EXCLUDED —
+            # a shard's product contract is only the per-index file.
+            # Concurrent shards share one job dir and one object-storage
+            # authority key per (job, node, name); with v79 letting many
+            # shards of a node run at once, sibling shards writing the same
+            # ordinary output name would clobber each other's artifacts
+            # (last-writer-wins upsert + same-key object overwrite) and
+            # race the per-shard result validation. Undeclared files are
+            # ignored by every consumer: the Worker packs/uploads only
+            # expected members, the Host unpack promotes only expected
+            # names, and object-storage refs are declared-only.
             manifest["expected_outputs"] = [
-                *manifest["expected_outputs"],
                 f"shard_output-{shard_runtime['shard_index']}.json",
             ]
         context = ExecutionContext(

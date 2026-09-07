@@ -51,9 +51,7 @@ def evaluate_candidate(
     selected_workspace = str(selected["workspace_id"])
     if selected_workspace not in state.pause_cache:
         check = broker.is_workspace_paused
-        state.pause_cache[selected_workspace] = (
-            bool(check(selected_workspace)) if check is not None else False
-        )
+        state.pause_cache[selected_workspace] = bool(check and check(selected_workspace))
     if state.pause_cache[selected_workspace]:
         # Paused workspace: keep the request queued for resume.
         state.skip_reasons["workspace_paused"] += 1
@@ -74,8 +72,7 @@ def evaluate_candidate(
             state.skip_reasons["execution_contract_invalid"] += 1
             return None
     # Workspace admission scope from the server-side registration snapshot
-    # (EXEC-WORKERACL-001): [] means all workspaces; a non-empty list
-    # restricts this Worker to those workspaces. Never trust Worker-
+    # (EXEC-WORKERACL-001): [] means all workspaces. Never trust Worker-
     # supplied fields for this.
     if view.allowed_workspaces and selected_workspace not in view.allowed_workspaces:
         state.skip_reasons["workspace_not_allowed"] += 1
@@ -83,18 +80,17 @@ def evaluate_candidate(
     # Dual capacity pools: a candidate whose pool is exhausted is skipped,
     # not fatal — the other pool may still have claimable candidates.
     if kind == "code":
-        # Defense in depth behind the register-time rejection: a v1 row that
-        # predates it must never hold code executions (v1 heartbeats carry no
-        # cancel body, and old binaries cannot unpack code bundles).
+        # Defense in depth behind the register-time rejection: a v1 row
+        # predating it must never hold code executions (v1 heartbeats carry
+        # no cancel body, and old binaries cannot unpack code bundles).
         if view.protocol_version < CODE_PROTOCOL_VERSION:
             state.skip_reasons["protocol_version_too_old"] += 1
             return None
         if view.code_active >= view.code_capacity:
             state.skip_reasons["code_capacity_full"] += 1
             return None
-        # Code claim admission stops here (issue #284): protocol version plus
-        # code-pool capacity plus the workspace ACL above — capabilities no
-        # longer gate anything (the code text rides the bundle).
+        # Admission stops here (issue #284): protocol + code-pool capacity +
+        # the workspace ACL above — capabilities no longer gate anything.
     else:
         if view.agent_active >= view.agent_capacity:
             state.skip_reasons["capacity_full"] += 1
@@ -139,20 +135,18 @@ def evaluate_candidate(
         cancel_request(conn, selected["execution_id"])
         state.skip_reasons["job_terminal"] += 1
         return None
-    # Fixed lock order across all capacity domains: the workspace-level Agent
-    # capacity domain first, then the Worker machine domain (issue #351): a
-    # code claim skips the workspace lock entirely — that domain is agent-only
-    # (see the capacity check below), so taking it for code would be pure
-    # queueing overhead against concurrent agent claims. The order stays
-    # acyclic: agent takes ws→worker, code takes only worker.
+    # Fixed lock order across all capacity domains (issue #351): workspace
+    # Agent domain first, then the Worker machine domain. A code claim skips
+    # the workspace lock entirely — that domain is agent-only, so taking it
+    # for code would be pure queueing overhead. The order stays acyclic:
+    # agent takes ws→worker, code takes only worker.
     if kind != "code":
         ws_domain = f"agent-ws:{selected['workspace_id']}"
         conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (ws_domain,))
     conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"agent-worker:{worker_id}",))
 
-    # Workspace-level capacity is agent-only; code has no workspace cap in
-    # this phase (batch 2 decision 2), so the ws lock and the cap check are
-    # both agent-branch-only.
+    # Workspace-level capacity is agent-only (batch 2 decision 2); the ws
+    # lock and the cap check are both agent-branch-only.
     if kind != "code":
         capacity = conn.execute(
             "select max_concurrency from workspace_agent_capacities where workspace_id=%s",
@@ -170,14 +164,12 @@ def evaluate_candidate(
                 return None
 
     # Writes stage boundary (#448, #461 review): everything above is evaluate
-    # (locks + admission checks); from here on the claim only writes — the
-    # node flip, node_runs/executor_leases inserts, request claim and jobs
-    # promote. Close evaluate so the two segments split here, not inside
-    # claim_windows's loop close. Known noise (#461 review): the two
-    # post-boundary skips below (shard_not_pending / node_not_pending) run
-    # their cancel_request write on the evaluate side of the NEXT candidate's
-    # boundary — one rare terminal-write leak per raced node, accepted rather
-    # than pre-boundary-guessing which candidate will race.
+    # (locks + admission checks); from here on the claim only writes. Close
+    # evaluate here, not inside claim_windows's loop close. Known noise
+    # (#461): the two post-boundary skips below (shard_not_pending /
+    # node_not_pending) run their cancel_request write on the evaluate side
+    # of the NEXT candidate's boundary — one rare terminal-write leak per
+    # raced node, accepted rather than pre-boundary-guessing races.
     if timer is not None:
         timer.stage("evaluate")
 
@@ -283,4 +275,6 @@ def evaluate_candidate(
         node_run_id=int(run["id"]),
         manifest=manifest,
         kind=kind,
+        # #490: claim.granted reads the resolved runtime off the claim.
+        runtime=str(selected["runtime"]),
     )

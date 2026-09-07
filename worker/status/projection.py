@@ -60,6 +60,7 @@ def status_payload(
     mounted_config_diverged: bool,
     snapshot: dict[str, Any],
     remote: dict[str, Any],
+    ramp_up: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compose the /api/status payload from its independently-read inputs."""
     return {
@@ -68,6 +69,7 @@ def status_payload(
         "claim_enabled": config["claim_enabled"],
         "max_concurrency": config["max_concurrency"],
         "upload_max_concurrency": config.get("upload_max_concurrency", 4),
+        "ramp_up": ramp_up,
         **execution_counts(executions),
         "bootstrap_error": bootstrap_error,
         "mounted_config_diverged": mounted_config_diverged,

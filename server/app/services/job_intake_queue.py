@@ -133,8 +133,17 @@ class JobIntakeQueue:
         # #211 M2: runs rows no longer carry workflow_key (v70); the service
         # signatures keep the argument, but the identity value (workspace_id)
         # is what every write/read path uses now.
-        existing_keys = self.job_db.list_job_dedup_keys(
-            str(batch["workspace_id"]), str(batch["workspace_id"])
+        # #467 A2: point lookups over this chunk's keys (indexed IN probes)
+        # instead of the whole workspace's key set — same workspace-scoped
+        # dedup semantics, and the async consumer no longer reloads the
+        # workspace keys for every 25-value chunk. Every registered resolver
+        # derives a candidate's dedup key as (entity, input_value) — the
+        # entity is the registry key and every candidate() call sites passes
+        # the entity param (or the literal "video") as entity_type — so the
+        # keys are computable without running the resolver.
+        existing_keys = self.job_db.filter_existing_dedup_keys(
+            str(batch["workspace_id"]),
+            ((entity, str(value)) for value in values),
         )
         candidates, _ = resolve_fresh_candidates(
             spec,
@@ -147,7 +156,7 @@ class JobIntakeQueue:
             str(batch["workspace_id"]),
             existing_keys,
         )
-        jobs = self.job_db.create_jobs_bulk(
+        job_ids = self.job_db.create_jobs_bulk(
             candidates=candidates,
             workflow_key=str(batch["workspace_id"]),
             run_id=str(batch["id"]),
@@ -156,9 +165,9 @@ class JobIntakeQueue:
             revision=revision,
             frozen_config=payload.get("node_config") or {},
         )
-        if jobs:
+        if job_ids:
             notify_schedulable_work()
-        if self.job_event_buffer is not None and jobs:
+        if self.job_event_buffer is not None and job_ids:
             self.job_event_buffer.record_jobs_created(
-                str(batch["workspace_id"]), [str(job["id"]) for job in jobs]
+                str(batch["workspace_id"]), [str(job_id) for job_id in job_ids]
             )

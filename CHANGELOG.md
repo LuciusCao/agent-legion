@@ -6,7 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-06
+
 ### Added
+- Agent Worker 执行链路结构化事件日志（issue #490）：Host 与 Worker 两侧
+  统一 JSON lines 事件（`event` / `ts` + 语义载荷），按 `execution_id` /
+  `worker_id` 对齐时间线。Host 侧 `worker.registered` / `worker.offline`
+  （last_seen 越过 30s 阈值的转移检测，每转移一条）/ `claim.granted` /
+  `claim.empty` / `claim.rejected`（reason 码直读归因：capacity_full /
+  runtime_mismatch / model_mismatch / workspace_not_allowed 等，判定点
+  命名与 claim 逻辑一一对应）/ `execution.finished` /
+  `execution.lease_expired` 落 `agent_legion.worker_events` logger——
+  uvicorn log-config 显式挂载 `agent_legion` logger，转折事件 INFO 默认
+  可见、正常节奏 DEBUG 排障窗口按需拉起；Worker 侧 `claim.attempt` /
+  `claim.backoff` / `execution.completed` / `http.error`（中间层 5xx 的
+  唯一观测位：状态码 + 目标 URL + 截断 body，URL 剥查询串防 token 泄漏）
+  沿 supervisor console 流。uvicorn 访问日志 formatter 补时间戳，跨
+  worker 时间线从行号近似升级为墙钟对齐。事件码表与 reason 对照见
+  remote-execution-runbook §7.1。
+- 冷启动容量爬坡节流 ramp-up（issue #471）：Worker 的 `ramp_up` 配置块
+  （`initial` / `step` / `interval_seconds`，缺省 1 / 1 / 60s；null 或缺
+  块 = 禁用回现状）控制积压释放节奏——发布重启 / claim 重启 / 批量
+  run 提交后恢复调度时，数百个 agent 不再同时发起首次 LLM 请求打满
+  provider。生效容量从 initial 起步、按 interval 阶梯放量到目标后窗口
+  永久关闭；只升不降（窗口内热更更小 initial 不回撤在途档位）；claim
+  暂停期间虚拟时钟不前进（恢复时折回暂停跨度，停领一小时的 Worker
+  恢复后不直接跳到高档）；控制台高级参数区可编辑（未勾选提交 null 即
+  时禁用），容量卡显示「容量爬坡中 e/t」进度。与 claim pacing
+  （#472）正交：pacing 管两次 claim 之间的等待，ramp-up 管本 pass 最多
+  领多少。
 - Worker 一键安装脚本 `scripts/install-worker.sh` + 独立部署编排
   `deploy/compose.worker.standalone.yaml`：无仓库克隆的机器经
   `curl | sh` 组装独立 Worker 部署（拉取发布 compose、sha256 校验下载
@@ -20,6 +48,112 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   示例 `deploy/compose.worker.pull.example.yaml`（`!reset` 清 build 段后
   `make stack-worker-up` 直接用 registry 镜像），部署文档 §5 增补「拉取式
   部署」小节。
+- 原生形态绑定地址覆盖（#480/#482）：`NATIVE_BACKEND_BIND` /
+  `NATIVE_WORKER_BIND`（默认 `127.0.0.1`，不设置行为不变）把 `make
+  prod-up` 原生形态的 uvicorn / worker.service `--host` 从硬编码 loopback
+  放开到局域网 / overlay 地址；健康检查探测地址按 bind 派生（通配归一
+  loopback、IPv6 括号化），幂等判定与停机定位按「bind 地址 + 端口」精确
+  匹配（同端口不同地址可并存不误判、不杀错进程）。对象存储
+  `AGENT_LEGION_S3_BIND` 两形态通用，绑具体 IP 时原生后端的
+  `AGENT_LEGION_S3_ENDPOINT` 需同步指向该地址（见部署文档 §2）。
+
+### Changed
+- 运行提交路径分块化 + 响应瘦身（#467 子项 A，Refs #420）：`POST /runs`
+  的逐 item DB 往返改为分块集合探测（materials/bundles/ref 连接键各一个
+  IN 查询/500 条），workspace 全量 dedup 键扫描改按本次 items 的键做索引
+  点查，`create_jobs_bulk` 从单事务改为 ≤1000 行分块事务（每块事务内
+  FOR KEY SHARE 先锁本块引用的 material/bundle 行再插入，块提交即释放
+  ——任何删除时序下都不会插入引用已删材料的 job；身份冲突在首个 chunk
+  提交前全量检测），`RunCreateResponse` 不再物化 job 行（run +
+  created_count；前端 toast 只读 created_count，job 列表/详情走读取
+  路径）。**行为变化**：分块提交下中途失败不再是全有或全无——已提交
+  chunk 的 job 保留、run 行落 `failed` 态并携带已创建进度
+  （`created_so_far`/`run_id` 进 400 detail），重提交同一批 items 经
+  dedup 自动跳过已创建部分（run 行治愈为 created、计数累计）；剔除坏
+  item 后重提会因 digest 变化产生新 run 行（dedup 保证 job 不重复）。
+  验收实测：单请求 5000 items 提交 6.9s，`/api/health` p95 29ms。
+- Agent Worker 心跳批量化（issue #352，协议 v5）：per-Worker 批量续期
+  端点 `POST /api/agent-executions/heartbeats`——Worker 侧每执行一条
+  心跳线程合并为本机单个批量循环，一次请求覆盖全部在跑执行（含排队
+  上传任务的租约），Host 侧单写事务完成整批续期；心跳的**事务数、
+  commit fsync 与 HTTP 往返**从 O(在跑执行数) 降为 O(机器数)——DB 行级
+  写次数仍 O(槽)（逐项 lease 判定要求逐行语义），但每机每拍从 N 事务
+  收敛为 1 事务，不再随槽数线性放大事务开销。逐项语义与单条
+  心跳完全一致（未知/过期/跨 worker 项逐项进 lost，不抛 5xx、不阻断
+  同批其余项）；单批上限 256 项、超限自动分片（高槽位是合法配置，不
+  再有超限拒打悬崖）；zombie（agent 进程已退出且未被上传收养）停跳，
+  Host 孤儿 sweeper 可回收。混合舰队兼容：单条端点保留且行为完全不变
+  （旧 Worker 对升级后 Host 语义零变化）；新 Worker 对批量路由缺席
+  （404/405）的 Host 自动降级逐条心跳（降级路径逐条带 5s 短超时；严格
+  的 pre-v5 Host 在注册握手处即拒绝新 Worker，该组合走不到降级路径）。
+  升级顺序 Host first, Worker second；协议 v4↔v5 双向兼容经实测验收。
+- Worker claim 成功路径自适应 pacing（issue #472）：0.2s 固定等待改为
+  「上一次单次成功 claim 往返 × 0.5，钳入 [10ms, 100ms] 带」——旧固定
+  间隔把有效 claim 速率钉在 1/(0.2s + 往返)（~5/s 量级）的数学上限，
+  带内映射后随往返实测自适应（往返变快立即回落、变慢按比例抬升；
+  往返 70ms 场景 ~3.7/s → ~12.5/s，且随往返继续改善自动跟进；验收
+  实测 pacing 落位 10ms 下沿）。三路径分工不变：空队列维持
+  `poll_interval`、错误路径维持 #437 的指数退避序列；批量 pass 喂给
+  pacing 的是最后一次成功 claim 的单次往返（非批次总墙钟，爬坡期不被
+  批次规模稀释）。10ms 下沿为 claim 写事务间的锁争用保留呼吸护栏。
+  pacing 变化经 `worker claim pacing <N>ms` 日志判变（同显示精度内不
+  重记，稳态零日志量）。
+- 远程分片并发解除串行化（issue #401，schema v79）：`agent_execution_
+  requests` 的单活跃请求索引从 `(job_id, node_key)` 宽化为纳入分片身份
+  的表达式索引（`coalesce(manifest_json->>'shard_index', -1)`；非 shard
+  行身份恒为 -1，单活跃语义逐字保留）——多分片大节点不再每个同时只有
+  1 个远程分片在飞，并发上限回到 fleet 声明容量（与本地 lease 路径
+  对齐；验收实测 2 shard 并发在飞）。配套：code_stock 门新增单 pass
+  fan-out 预算（拆串行化后单 pass 不再可灌洪峰，跨 pass 自然续消费）；
+  shard 产物契约收窄为 per-index 的 `shard_output-<index>.json`（普通
+  `node.outputs` 从 shard 的 expected_outputs 排除，兄弟分片产物不再
+  互踩；本地路径同步收窄，两侧行为一致）。
+- 预览面板安全收口（issue #347，PR #475/#477）：定制预览对话框期间的
+  agent 草稿不再自动执行——左栏默认渲染已发布版本，对话框 footer 显式
+  「预览此草稿」动作点击后才挂载草稿 iframe；授权随草稿 null 过渡
+  （发布/归档）与路由身份（jobId/workspaceId）变化复位，同会话的新
+  草稿 / 新 job 上下文不继承旧授权，重新打开对话框回到默认态。published
+  路径自动渲染行为不变。questionPanel 的 boot 竞态（慢的旧 init 结果
+  覆盖新内容且不再自愈）加 generation 守卫（#475）。
+- velites 工具执行四相位打点（issue #469）：`tool_execution_end.timing`
+  新增 `ToolTiming`（velites 扩展，全 Option 字段、缺省跳过）：
+  `totalMs`（分发开始 → 结果就绪，分解基座 total ≈ spawnMs + firstByteMs
+  + restMs + reapMs）、`spawnMs`（进程创建，含沙箱包装 exec）、
+  `firstByteMs`（spawn 返回 → 管道首字节，完整覆盖子进程前置链路：
+  bash 解析、内部 heredoc write、解释器启动）、`restMs`（首字节 → 子
+  进程退出）、`reapMs`（仅超时/取消击杀路径）、`requestedTimeoutMs`
+  （实际执行的 timeout 上限，区分「模型要了长上限」与「正常上限内挂
+  死」）。判读表：write 侧阻塞（子进程卡在产出首字节前——#469 的
+  spindump 主形态）表现为 `firstByteMs` ABSENT（整窗落入 restMs 后超时
+  击杀）、read 侧阻塞（harness 读挂起）表现为 firstByteMs ELEVATED。
+  进程内工具（read/write/uuid/validate）仅报 totalMs；测量前失败（参数
+  校验 / guard 拒绝）不携带 timing。bash 的 stdout/stderr 读取从
+  read_to_end 改增量读以观测首块边界，字节收集 / 顺序 / 截断 / 超时
+  语义全部不变。Host 消费面向后兼容（不识别新字段时忽略）。
+
+### Fixed
+- secret 三通道 fail-fast（issue #432）：draft YAML `node.config` 通道的
+  secret 值（明文字符串或 `{"secret_set": true}` 回显形态）在 intake /
+  dispatch 重解析 / job workflow upgrade 三链拒绝（错误只报字段名与
+  vault 通道指引，绝不回显提交值），发布门禁同步收紧（publish 即失败，
+  而非发布后该 workspace 每个新 job 的 intake 一起挂）；`config_schema`
+  与 Agent 定义声明 `secret: true` 属性带明文 `default` 即拒（声明侧
+  唯一校验点，Agent 定义 draft 保存即失败）。修复前经旧缺口发布的存量
+  active revision，升级后其新 job intake 会 422 硬失败（fail-closed 是
+  刻意立场：这类明文本身已是 VAULT-SECRET-001 违规数据）——恢复路径：
+  draft 删除 secret 字段 → 发布干净 revision → 经 settings nodeConfig
+  PATCH（唯一 vault 通道）重新写入。
+- gate 排队 TOCTOU（issue #488）：`scripts/gate-queue.sh` 的 `_slot_mtime`
+  probe-then-query 两次 `stat` 之间 slot 文件并发消失（正常排队行为的
+  yielding 设计）被 `set -e` 放大为整个 pre-push 失败——多 gate 排队时
+  排队几十分钟白排。修为单次捕获调用，文件消失读作「无 mtime」回退
+  age 0；同族的真实 kill 路径（`_reclaim_stale_gate_slots` 的 head 读取）
+  与其余「读取后假设存在」的调用点逐一防御（`gate-jobs.sh` 对称加固）。
+  排队语义零变化（slot 计数、TTL 回收、holder 打印、等待节奏不变）。
+
+版本线对齐：
+- pyproject 0.6.0 → 0.7.0 + uv.lock 同步；velites 0.5.0、frontend
+  0.4.0-alpha 落版一致性经 check_versions 解耦纪律验证通过。
 
 ## [0.6.0] - 2026-09-05
 
@@ -603,7 +737,8 @@ Initial open-source release.
   runnable out of the box against a real LLM.
 - Docker deployment stacks (`deploy/`) and remote worker deployment runbook.
 
-[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/LuciusCao/agent-legion/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/LuciusCao/agent-legion/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/LuciusCao/agent-legion/compare/v0.4.0-alpha...v0.5.0
 [0.4.0-alpha]: https://github.com/LuciusCao/agent-legion/compare/v0.3.0-alpha...v0.4.0-alpha

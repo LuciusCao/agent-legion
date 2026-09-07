@@ -17,11 +17,13 @@ import threading
 import time
 import urllib.error
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from server.app.agent_broker.agent_bundle import build_agent_bundle
 from worker import executor as agent_worker
+from worker.execution.heartbeat_batch import BatchHeartbeatRegistry, batch_heartbeat_loop
 from worker.status import ExecutionStatusReporter
 from worker.upload.queue import PENDING_FILENAME, UploadQueue
 
@@ -57,13 +59,22 @@ class FakeClient:
     """In-memory stand-in for agent_worker.Client."""
 
     def __init__(
-        self, bundle: Path, *, heartbeat_status: int = 204, release_status: int = 204
+        self,
+        bundle: Path,
+        *,
+        heartbeat_status: int = 204,
+        release_status: int = 204,
+        batch_status: int = 200,
     ) -> None:
         self._bundle = bundle
         self._heartbeat_status = heartbeat_status
         self._release_status = release_status
+        # #352: 批量心跳端点的状态码（200 正常；404/405 = pre-v5 Host，
+        # 协调器降级为逐执行心跳）。
+        self.batch_status = batch_status
         self.heartbeats = 0
         self.heartbeat_lease_ids: list[str] = []
+        self.batch_calls: list[list[tuple[str, str]]] = []
         self.reports: list[dict] = []
         self.report_lease_ids: list[str] = []
         self.release_calls = 0
@@ -86,10 +97,29 @@ class FakeClient:
             "online": True,
         }
 
-    def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
+    def heartbeat(
+        self, execution_id: str, lease_id: str, timeout: float | None = None
+    ) -> tuple[int, list[str]]:
         self.heartbeats += 1
         self.heartbeat_lease_ids.append(lease_id)
         return self._heartbeat_status, []
+
+    def heartbeat_batch(
+        self, executions: list[tuple[str, str]]
+    ) -> tuple[int, dict[str, list[str]]] | None:
+        self.batch_calls.append(list(executions))
+        if self.batch_status in (404, 405):
+            return None
+        lost = (
+            [execution_id for execution_id, _ in executions]
+            if self._heartbeat_status in (401, 409)
+            else []
+        )
+        renewed = [execution_id for execution_id, _ in executions if execution_id not in lost]
+        return (
+            self.batch_status,
+            {"renewed": renewed, "lost": lost, "cancelled_execution_ids": []},
+        )
 
     def release_slot(self, execution_id: str, lease_id: str) -> int:
         self.release_calls += 1
@@ -103,13 +133,20 @@ class FakeClient:
         return 204, b""
 
 
-def _run(client: FakeClient, work_root: Path, shutdown: threading.Event | None = None) -> None:
+def _run(
+    client: FakeClient,
+    work_root: Path,
+    shutdown: threading.Event | None = None,
+    *,
+    heartbeat_registry: Any | None = None,
+) -> None:
     uploads = UploadQueue(
         client,
         ExecutionStatusReporter(None),
         max_concurrency=2,
         heartbeat_interval=0.05,
         stop=threading.Event(),
+        heartbeat_registry=heartbeat_registry,
     )
     agent_worker.run_execution(
         client,
@@ -122,6 +159,7 @@ def _run(client: FakeClient, work_root: Path, shutdown: threading.Event | None =
         ExecutionStatusReporter(None),
         uploads,
         threading.Semaphore(4),
+        heartbeat_registry,
     )
     # Uploads are asynchronous now; drain the queue before asserting.
     uploads.shutdown()
@@ -144,16 +182,48 @@ def test_run_execution_completed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         'time.sleep(0.2)\nPath("output.json").write_text("{}", encoding="utf-8")\n',
     )
     client = FakeClient(_make_bundle(tmp_path, _manifest([script])))
-    _run(client, tmp_path / "work")
+    # #352：per-Worker 批量心跳——本执行的租约经 registry 一次批量续期，
+    # 不再有独立心跳线程。
+    registry = BatchHeartbeatRegistry()
+    stop = threading.Event()
+    coordinator = threading.Thread(
+        target=batch_heartbeat_loop, args=(client, registry, stop, 0.05), daemon=True
+    )
+    coordinator.start()
+    _run(client, tmp_path / "work", heartbeat_registry=registry)
+    stop.set()
+    coordinator.join(timeout=2)
     assert len(client.reports) == 1
     report = client.reports[0]
     assert report["status"] == "completed"
     assert report["exit_code"] == 0
     assert "output.json" in report["output_artifacts"]
-    assert client.heartbeats >= 1
-    # Every heartbeat and the result report carry the claimed lease_id.
-    assert client.heartbeat_lease_ids and set(client.heartbeat_lease_ids) == {"lease-1"}
+    # The lease renewed through the batch channel, not per-execution beats.
+    assert client.batch_calls and client.batch_calls[0] == [("exec-1", "lease-1")]
+    assert client.heartbeats == 0
     assert client.report_lease_ids == ["lease-1"]
+
+
+def test_run_execution_409_kills_run_and_skips_report(tmp_path: Path) -> None:
+    """Batch heartbeat lost (409 family) must kill the run and skip the
+    report — same ownership semantics as the single-beat path."""
+    script = _write_executable(
+        tmp_path / "sleeper", "#!/usr/bin/env python3\nimport time\ntime.sleep(60)\n"
+    )
+    client = FakeClient(_make_bundle(tmp_path, _manifest([script])), heartbeat_status=409)
+    registry = BatchHeartbeatRegistry()
+    stop = threading.Event()
+    coordinator = threading.Thread(
+        target=batch_heartbeat_loop, args=(client, registry, stop, 0.05), daemon=True
+    )
+    coordinator.start()
+    started = time.monotonic()
+    _run(client, tmp_path / "work", heartbeat_registry=registry)
+    elapsed = time.monotonic() - started
+    stop.set()
+    coordinator.join(timeout=2)
+    assert client.reports == []
+    assert elapsed < 20, f"ownership-lost run was not killed promptly ({elapsed:.1f}s)"
 
 
 def test_run_execution_pre_spawn_failure_reports_failed(tmp_path: Path) -> None:
@@ -194,14 +264,27 @@ def test_run_execution_model_error_with_exit_zero_reports_failed(tmp_path: Path)
     assert "401" in report["error_message"]
 
 
-def test_run_execution_heartbeat_409_kills_run_and_skips_report(tmp_path: Path) -> None:
+def test_run_execution_degraded_single_heartbeat_409_kills_run(
+    tmp_path: Path,
+) -> None:
+    """降级路径（pre-v5 Host）下的 409 语义：批量端点 404 → 同一循环内逐
+    执行心跳 → 409 杀运行、跳过 report（与旧单条线程一致）。"""
     script = _write_executable(
         tmp_path / "sleeper", "#!/usr/bin/env python3\nimport time\ntime.sleep(60)\n"
     )
     client = FakeClient(_make_bundle(tmp_path, _manifest([script])), heartbeat_status=409)
+    client.batch_status = 404
+    registry = BatchHeartbeatRegistry()
+    stop = threading.Event()
+    coordinator = threading.Thread(
+        target=batch_heartbeat_loop, args=(client, registry, stop, 0.05), daemon=True
+    )
+    coordinator.start()
     started = time.monotonic()
-    _run(client, tmp_path / "work")
+    _run(client, tmp_path / "work", heartbeat_registry=registry)
     elapsed = time.monotonic() - started
+    stop.set()
+    coordinator.join(timeout=2)
     assert client.reports == []
     assert elapsed < 20, f"ownership-lost run was not killed promptly ({elapsed:.1f}s)"
 

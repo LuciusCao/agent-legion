@@ -65,20 +65,17 @@ def try_claim_code_worker_node(
         return False
     workspace_id = str(workspace["id"])
     job_id = str(job["id"])
-    # Shard identity keys the in-flight marker per shard (#389): the broker's
-    # one-active-request index ((job_id, node_key)) still serializes remote
-    # shards to one in flight per node — a finished shard frees the slot for
-    # the next pass to enqueue the following shard.
-    in_flight_key = node.key
-    if shard_runtime is not None:
-        in_flight_key = f"{node.key}#shard{shard_runtime['shard_index']}"
-    if dispatch.is_in_flight(job_id, in_flight_key):
-        return True
-    if dispatch.broker.has_active_request(job_id, node.key):
-        # Already queued/claimed for a Worker: never double-execute locally,
-        # even if the last code Worker went away (no queued-timeout fallback,
-        # batch-2 decision 3). For shard nodes this also throttles to one
-        # remote shard at a time (see above).
+    # #401: shard identity keys the in-flight marker (#389) and the
+    # one-active gate — the broker index dedups per (job_id, node_key,
+    # shard_index), so multi-shard nodes keep many shards in flight.
+    shard_index = int(shard_runtime["shard_index"]) if shard_runtime is not None else None
+    in_flight_key = f"{node.key}#shard{shard_index}" if shard_index is not None else node.key
+    if dispatch.is_in_flight(job_id, in_flight_key) or dispatch.broker.has_active_request(
+        job_id, node.key, shard_index=shard_index
+    ):
+        # Identity queued/claimed/in-flight for a Worker (node, or shard of
+        # it): never double-execute locally even if the Worker went away (no
+        # queued-timeout fallback, batch-2 decision 3).
         return True
     if not dispatch.online_code_worker_available(node.capability, workspace_id):
         return False

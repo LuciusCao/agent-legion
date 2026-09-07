@@ -20,13 +20,12 @@ would miss). Merging the two would force one of those contracts to lie.
 
 from __future__ import annotations
 
-from collections import Counter
 from typing import TYPE_CHECKING
 
 from psycopg import Error
 
 from server.app.agent_broker.claim import claim_in_transaction
-from server.app.agent_broker.claim_scan import AgentClaim
+from server.app.agent_broker.claim_scan import ClaimOutcome
 from server.app.db.transaction import write_transaction
 
 if TYPE_CHECKING:
@@ -41,7 +40,7 @@ def claim_with_retry(
     worker_id: str,
     declared_max_concurrency: int | None,
     declared_max_code_concurrency: int | None,
-) -> tuple[AgentClaim | None, Counter[str]]:
+) -> ClaimOutcome:
     """Run the single claim transaction, retrying one SQLSTATE 40P01.
 
     ``write_transaction`` rolls the deadlocked transaction back and closes

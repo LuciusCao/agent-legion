@@ -25,6 +25,7 @@ from server.app.config_schema import (
 )
 from server.app.services.node_config_batch import frozen_node_config
 from server.app.services.node_config_runtime import runtime_mutable_keys
+from server.app.services.node_config_secret_guard import reject_secret_violations
 from server.app.services.node_execution_config import merge_reserved_execution_schema
 from server.app.services.node_secrets import strip_secret_fields
 from server.app.workflows.schema import WorkflowDefinition, WorkflowNode
@@ -112,12 +113,13 @@ def resolve_node_config(
 ) -> dict[str, Any]:
     """Merge defaults → node config → workspace override, validating each layer.
 
-    Secret fields are vault-managed markers; they bypass validation (VAULT-SECRET-001).
+    Secret fields are vault-managed markers; they bypass generic validation (VAULT-SECRET-001). #432: secret values in the node config layer must be the exact vault marker.
     """
     if not config_schema:
         if node_config or workspace_override:
             raise ConfigSchemaError("node declares config but its capability has no config_schema")
         return {}
+    reject_secret_violations(config_schema, node_config, "node config")
     plain_node = strip_secret_fields(config_schema, dict(node_config))
     plain_override = strip_secret_fields(config_schema, dict(workspace_override))
     validate_config_values(config_schema, plain_node, partial=True, path="node config")
@@ -170,14 +172,13 @@ def dispatch_effective_config(
 ) -> dict[str, Any]:
     """Effective config at dispatch time: the job's frozen config wins.
 
-    Jobs intaken before this mechanism existed (or replayed without a frozen
-    config) fall back to live resolution from the node and workspace layers.
-    Frozen snapshots predating the reserved execution keys get
-    *fallback_defaults* underneath (frozen values always win), so in-flight
-    old jobs keep their node-declared timeout/network behavior (P-0.5).
-
-    Frozen snapshots are overlaid with a live re-resolution of the keys
-    declared ``runtime_mutable: true`` (CONFIG-RUNTIME-MUTABLE-001); everything
+    Pre-mechanism jobs (or replays without a frozen config) fall back to
+    live resolution from the node and workspace layers. Frozen snapshots
+    predating the reserved execution keys get *fallback_defaults*
+    underneath (frozen values always win), so in-flight old jobs keep their
+    node-declared timeout/network behavior (P-0.5). Frozen snapshots are
+    overlaid with a live re-resolution of the keys declared
+    ``runtime_mutable: true`` (CONFIG-RUNTIME-MUTABLE-001); everything
     else — including the platform-reserved execution keys — stays frozen.
     """
     frozen = frozen_node_config(run_payload, node.key)

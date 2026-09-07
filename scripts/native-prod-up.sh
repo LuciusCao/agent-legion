@@ -156,6 +156,7 @@ else
     nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m uvicorn \
         server.app.main:create_prod_app --factory --host "$BACKEND_BIND" --port "$BACKEND_PORT" \
         --timeout-graceful-shutdown 3 \
+        --log-config deploy/uvicorn-log-config.json \
         > data/logs/prod-backend.log 2>&1 &
 fi
 

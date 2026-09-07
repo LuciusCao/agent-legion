@@ -223,7 +223,14 @@ def test_direct_ids_batch_creates_one_job_per_value(client):
     body = response.json()
     assert body["created_count"] == 2
     assert {job["source_id"] for job in body["jobs"]} == {"Q1", "Q2"}
-    assert all(job["workflow_key"] == "education_video_problems_generation" for job in body["jobs"])
+    assert all(job["workspace_id"] == ws_id for job in body["jobs"])
+    # #211 M2 + #467 A3：workflow_key shim 与行物化移到读取路径（list_jobs
+    # 的 summary 投影仍带 deprecated workflow_key 字段）。
+    jobs_response = client.get(f"/api/workspaces/{ws_id}/jobs")
+    assert jobs_response.status_code == 200
+    listed = jobs_response.json()["jobs"]
+    assert len(listed) == 2
+    assert all(job["workflow_key"] == ws_id for job in listed)
 
 
 def test_workspace_job_batch_without_workflow_key_defaults_to_workspace_id(client):
@@ -244,7 +251,9 @@ def test_workspace_job_batch_without_workflow_key_defaults_to_workspace_id(clien
     assert absent.status_code == 200, absent.text
     body = absent.json()
     assert body["created_count"] == 1
-    assert all(job["workflow_key"] == ws_id for job in body["jobs"])
+    assert all(job["workspace_id"] == ws_id for job in body["jobs"])
+    listed = client.get(f"/api/workspaces/{ws_id}/jobs").json()["jobs"]
+    assert all(job["workflow_key"] == ws_id for job in listed)
 
 
 def test_workspace_job_batch_explicit_workflow_key_still_accepted(client):
@@ -261,7 +270,9 @@ def test_workspace_job_batch_explicit_workflow_key_still_accepted(client):
 
     assert explicit.status_code == 200, explicit.text
     assert explicit.json()["created_count"] == 1
-    assert all(job["workflow_key"] == ws_id for job in explicit.json()["jobs"])
+    assert all(job["workspace_id"] == ws_id for job in explicit.json()["jobs"])
+    listed = client.get(f"/api/workspaces/{ws_id}/jobs").json()["jobs"]
+    assert all(job["workflow_key"] == ws_id for job in listed)
 
 
 def test_async_batch_resubmit_after_job_deletion_requeues_and_rebuilds(tmp_path, monkeypatch):

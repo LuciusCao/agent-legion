@@ -21,12 +21,14 @@ from server.app.agent_broker.claim import AgentClaim, ClaimRacedError
 from server.app.agent_broker.claim_retry import claim_with_retry
 from server.app.agent_broker.empty import EmptyClaimTrigger
 from server.app.agent_broker.enqueue import enqueue_request
+from server.app.agent_broker.heartbeat_single import single_heartbeat
+from server.app.agent_broker.manifest_guard import SHARD_IDENTITY_SQL
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
+from server.app.agent_broker.worker_events import note_claim_outcome
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.events.aggregator import record_job_update
-from server.app.executors._lease_lifecycle import heartbeat_lease
 
 if TYPE_CHECKING:
     from server.app.events.agents import AgentStatusManager
@@ -98,12 +100,28 @@ class AgentExecutionBroker:
         # Debounced empty-claim restock signal, see empty.
         self.empty_claim = EmptyClaimTrigger()
 
-    def has_active_request(self, job_id: str, node_key: str) -> bool:
+    def has_active_request(
+        self, job_id: str, node_key: str, shard_index: int | None = None
+    ) -> bool:
+        """True when the node (or that shard of it, #401) has an active request.
+
+        A shard query matches the one-active index's identity and ignores
+        OTHER shards' rows; a non-shard query keeps the ordinary-node
+        single-active semantics (it sees every active row of the node — the
+        non-shard re-enqueue of a sharded node would pass the index's
+        identity -1, so the gate is what blocks it).
+        """
+        predicate = f" and {SHARD_IDENTITY_SQL}=%s" if shard_index is not None else ""
+        params: tuple[str | int, ...] = (
+            (job_id, node_key, shard_index) if shard_index is not None else (job_id, node_key)
+        )
         with read_connection(self.database_dsn) as conn:
             row = conn.execute(
                 "select 1 from agent_execution_requests"
-                " where job_id=%s and node_key=%s and state in ('queued', 'claimed', 'reporting') limit 1",
-                (job_id, node_key),
+                " where job_id=%s and node_key=%s"
+                + predicate
+                + " and state in ('queued', 'claimed', 'reporting') limit 1",
+                params,
             ).fetchone()
         return row is not None
 
@@ -128,17 +146,27 @@ class AgentExecutionBroker:
             # #437: one immediate retry on SQLSTATE 40P01 (claim_retry.py);
             # write_transaction rolled the deadlocked connection back and
             # closed it, so the retry re-evaluates on a clean connection.
-            claimed, skip_reasons = claim_with_retry(
+            outcome = claim_with_retry(
                 self, worker_id, declared_max_concurrency, declared_max_code_concurrency
             )
+            claimed = outcome.claim
             if claimed is None:
                 # Demand signal: a Worker found no work; restock immediately when
                 # the queue is truly empty, or surface the skip-reason histogram
                 # when unclaimable stock blocked the claim (debounced, see empty).
-                self.empty_claim.note_empty_claim(self.database_dsn, skip_reasons=skip_reasons)
+                self.empty_claim.note_empty_claim(
+                    self.database_dsn, skip_reasons=outcome.skip_reasons
+                )
             # Record only after the commit has succeeded, never inside the tx.
             if claimed is not None:
                 record_job_update(self.job_db, self.job_event_buffer, claimed.job_id)
+            # #498: claim events describe the COMMITTED claim, so they ride the
+            # same post-commit discipline as record_job_update above — emitting
+            # from inside claim_in_transaction produced ghost claim.granted lines
+            # whenever the transaction then failed (deadlock retry #437,
+            # serialization conflict, connection loss). ClaimRacedError never
+            # reaches here: a raced discard is no claim at all and gets no event.
+            note_claim_outcome(worker_id, outcome.claim, outcome.view, **outcome.event_kwargs())
             self._notify_worker_poll(worker_id, claimed)
             return claimed
         except ClaimRacedError:
@@ -185,27 +213,13 @@ class AgentExecutionBroker:
 
     def heartbeat(self, execution_id: str, worker_id: str, lease_id: str) -> bool:
         """Renew the lease, bound to the current lease_id so zombie attempts
-        from a requeued execution cannot keep a re-claimed lease alive."""
-        with write_transaction(self.database_dsn) as conn:
-            row = conn.execute(
-                "select lease_id from agent_execution_requests"
-                " where execution_id=%s and worker_id=%s and lease_id=%s"
-                " and state in ('claimed', 'reporting')"
-                " for update",
-                (execution_id, worker_id, lease_id),
-            ).fetchone()
-            if row is None:
-                return False
-            conn.execute(
-                "update agent_execution_requests set heartbeat_at=current_timestamp"
-                " where execution_id=%s",
-                (execution_id,),
-            )
-            if not heartbeat_lease(conn, row["lease_id"], self.lease_ttl_seconds):
-                # Released concurrently: success would keep a zombie attempt alive.
-                return False
-            touch_worker(conn, worker_id)
-            return True
+        from a requeued execution cannot keep a re-claimed lease alive.
+
+        Delegates to ``heartbeat_single.single_heartbeat`` (#490 rebase onto
+        0.7.0): this module sits at its #401 frozen ceiling, and the renewal
+        plus its ``execution.heartbeat_rejected`` refusal events live in the
+        sibling module beside the batch path's identical predicate."""
+        return single_heartbeat(self, execution_id, worker_id, lease_id)
 
     def claimed_payload(self, execution_id: str, worker_id: str) -> dict[str, Any] | None:
         with read_connection(self.database_dsn) as conn:

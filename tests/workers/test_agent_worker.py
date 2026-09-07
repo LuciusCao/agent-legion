@@ -1,9 +1,11 @@
 """Unit tests for the Agent Worker executor (worker/executor.py).
 
-Host 协议面（claim/heartbeat/registration 协议）、supervisor main() 治理
-（热更/退避/撤销）、work-root 清理与状态文件读写。``run_execution`` 的单执行
-生命周期（含 #203 pending-marker claim 语义）拆到
-tests/workers/test_execution_run.py（测试文件行数预算）。
+supervisor main() 治理（热更/退避/撤销/爬坡）、work-root 清理与状态文件
+读写。``run_execution`` 的单执行生命周期（含 #203 pending-marker claim
+语义）拆到 tests/workers/test_execution_run.py；Host client 协议面
+（claim/heartbeat/registration，含 #352 批量心跳）拆到
+tests/workers/test_agent_worker_client_protocol.py（均为测试文件行数
+预算拆分，断言语义不变）。
 """
 
 from __future__ import annotations
@@ -21,11 +23,9 @@ import urllib.error
 from pathlib import Path
 
 import pytest
-import requests
 
 from worker import executor as agent_worker
 from worker.process_lifecycle import terminate
-from worker.registration.retry import register_with_retry
 from worker.status import ExecutionStatusReporter, read_runtime_status
 
 
@@ -185,201 +185,6 @@ def test_terminate_kills_sigterm_ignoring_process_group(tmp_path: Path) -> None:
     assert proc.poll() is not None
 
 
-def test_client_claim_raises_auth_error_on_409() -> None:
-    client = agent_worker.Client("http://unused")
-    client.request = lambda *a, **k: (409, b"unknown or revoked Agent Worker")  # type: ignore[method-assign]
-    with pytest.raises(agent_worker.WorkerAuthError):
-        client.claim("w1")
-
-
-def test_client_heartbeat_returns_status() -> None:
-    client = agent_worker.Client("http://unused")
-    client.request = lambda *a, **k: (409, b"")  # type: ignore[method-assign]
-    assert client.heartbeat("exec-1", "lease-1") == (409, [])
-
-
-def test_client_heartbeat_parses_protocol_v2_cancel_body() -> None:
-    # 批次 2：v2 Host 的 heartbeat 应答 200 + 取消列表；v1 的 204 无 body。
-    client = agent_worker.Client("http://unused")
-    client.request = lambda *a, **k: (  # type: ignore[method-assign]
-        200,
-        b'{"cancelled_execution_ids": ["exec-9", "exec-10"]}',
-    )
-    assert client.heartbeat("exec-1", "lease-1") == (200, ["exec-9", "exec-10"])
-    client.request = lambda *a, **k: (204, b"")  # type: ignore[method-assign]
-    assert client.heartbeat("exec-1", "lease-1") == (204, [])
-
-
-def test_client_claim_declares_live_capacity() -> None:
-    client = agent_worker.Client("http://unused")
-    seen: list[dict] = []
-    client.request = lambda *a, **k: (seen.append(json.loads(k["data"])), (204, b""))[1]  # type: ignore[method-assign]
-
-    assert client.claim("w1", 70) is None
-
-    assert seen == [{"worker_id": "w1", "max_concurrency": 70}]
-
-
-def test_client_claim_declares_code_capacity() -> None:
-    # 批次 2：每次 poll 重声明 code 池容量（Host 记录并强制）。
-    client = agent_worker.Client("http://unused")
-    seen: list[dict] = []
-    client.request = lambda *a, **k: (seen.append(json.loads(k["data"])), (204, b""))[1]  # type: ignore[method-assign]
-
-    assert client.claim("w1", 70, 4) is None
-
-    assert seen == [{"worker_id": "w1", "max_concurrency": 70, "max_code_concurrency": 4}]
-
-
-def test_client_registration_declares_latest_protocol_and_code_capacity() -> None:
-    client = agent_worker.Client("http://unused")
-    seen: list[dict] = []
-    headers: dict[str, str] = {}
-
-    def stub(*args, **kwargs):  # type: ignore[no-untyped-def]
-        seen.append(json.loads(kwargs["data"]))
-        headers.update(kwargs["headers"])
-        return (
-            201,
-            b'{"worker_token": "tok", "host_protocol_version": 4, "allowed_workspaces": []}',
-        )
-
-    client.request = stub  # type: ignore[method-assign]
-
-    client.register(
-        {
-            "worker_id": "w1",
-            "runtimes": ["velites"],
-            "max_concurrency": 1,
-            "max_code_concurrency": 3,
-            # #381 版本握手：prepare_runtime_models 产出的映射必须原样进
-            # payload（informational 字段无守卫，改名/漏传会静默降级为 {}，
-            # 此断言钉住接线——subagent 二轮评审 P3-1）。
-            "runtime_versions": {"velites": "velites 0.4.0-alpha"},
-        },
-        ["token-a", "token-b"],
-    )
-
-    assert seen[0]["protocol_version"] == 4
-    assert seen[0]["max_code_concurrency"] == 3
-    assert seen[0]["runtime_versions"] == {"velites": "velites 0.4.0-alpha"}
-    # issue #35：全部 scoped token 逗号拼进同一个注册请求。
-    assert headers["X-Agent-Worker-Register-Tokens"] == "token-a,token-b"
-
-
-def test_client_registration_fails_closed_against_v3_host() -> None:
-    """#338：v4 worker 对只懂 v3 的旧 Host 拒绝注册（升级顺序：先 Host 后 Worker）。"""
-    client = agent_worker.Client("http://unused")
-    client.request = lambda *a, **k: (  # type: ignore[method-assign]
-        201,
-        b'{"worker_token": "tok", "host_protocol_version": 3, "allowed_workspaces": []}',
-    )
-
-    with pytest.raises(agent_worker.WorkerAuthError, match="upgrade Host before Worker"):
-        client.register(
-            {"worker_id": "w1", "runtimes": ["pi"], "max_concurrency": 1},
-            ["token-a"],
-        )
-
-
-def test_client_registration_rejects_empty_token_list() -> None:
-    client = agent_worker.Client("http://unused")
-    with pytest.raises(agent_worker.WorkerAuthError, match="no register token"):
-        client.register({"worker_id": "w1", "runtimes": ["pi"], "max_concurrency": 1}, [])
-
-
-def test_client_registration_rejects_old_host_before_claiming() -> None:
-    client = agent_worker.Client("http://unused")
-    client.request = lambda *a, **k: (  # type: ignore[method-assign]
-        201,
-        b'{"worker_token": "old-host-token", "allowed_workspaces": []}',
-    )
-
-    with pytest.raises(agent_worker.WorkerAuthError, match="upgrade Host before Worker"):
-        client.register(
-            {"worker_id": "w1", "runtimes": ["pi", "velites"], "max_concurrency": 1},
-            ["management-token"],
-        )
-
-    assert client.token == ""
-
-
-def test_client_registration_rejects_permanent_http_errors() -> None:
-    client = agent_worker.Client("http://unused")
-    client.request = lambda *a, **k: (401, b"bad token")  # type: ignore[method-assign]
-    with pytest.raises(agent_worker.WorkerAuthError, match="registration rejected"):
-        client.register(
-            {"worker_id": "w1", "runtimes": ["pi"], "max_concurrency": 1},
-            ["bad-token"],
-        )
-
-
-def test_registration_retries_transient_host_errors_without_traceback(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    client = agent_worker.Client("http://unused")
-    calls = 0
-
-    def flaky_register(config: dict, token: str) -> dict:
-        nonlocal calls
-        del config, token
-        calls += 1
-        if calls < 3:
-            # The transport-level failure register_with_retry treats as
-            # "Host temporarily unavailable" (requests raises RequestException
-            # subclasses; arbitrary exceptions are NOT retried anymore).
-            raise requests.ConnectionError("host unavailable")
-        return {"worker_token": "worker-token", "workspaces": []}
-
-    client.register = flaky_register  # type: ignore[method-assign]
-    assert register_with_retry(client, {}, ["token"], threading.Event(), 0.001)
-    output = capsys.readouterr().out
-    assert calls == 3
-    assert "retrying" in output
-    assert "Traceback" not in output
-
-
-def test_registration_retries_transient_http_status_errors(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """5xx/429 answers surface as TransientHostError and stay in the retry loop."""
-    client = agent_worker.Client("http://unused")
-    statuses = [503, 429, 201]
-
-    def flaky_request(*args: object, **kwargs: object) -> tuple[int, bytes]:
-        del args, kwargs
-        status = statuses.pop(0)
-        if status == 201:
-            return (status, b'{"worker_token": "tok", "host_protocol_version": 4}')
-        return (status, b"temporarily unavailable")
-
-    client.request = flaky_request  # type: ignore[method-assign]
-    config = {"worker_id": "w1", "runtimes": ["pi"], "max_concurrency": 1}
-    assert register_with_retry(client, config, ["token"], threading.Event(), 0.001)
-    output = capsys.readouterr().out
-    assert "retrying" in output
-    assert "HTTP 503" in output
-
-
-def test_registration_unexpected_client_error_crashes_loudly() -> None:
-    """A non-retriable unexpected status (e.g. 404) must not enter the loop."""
-    client = agent_worker.Client("http://unused")
-    client.request = lambda *a, **k: (404, b"not found")  # type: ignore[method-assign]
-    config = {"worker_id": "w1", "runtimes": ["pi"], "max_concurrency": 1}
-    with pytest.raises(RuntimeError, match="HTTP 404"):
-        register_with_retry(client, config, ["token"], threading.Event(), 0.001)
-
-
-def test_client_heartbeat_and_report_send_lease_header() -> None:
-    client = agent_worker.Client("http://unused")
-    seen: list[dict] = []
-    client.request = lambda *a, **k: (seen.append(k.get("headers") or {}), (204, b""))[1]  # type: ignore[method-assign]
-    client.heartbeat("exec-1", "lease-9")
-    archive = Path(__file__)
-    client.report("exec-1", "lease-9", {"status": "completed"}, archive)
-    assert [call.get("X-Agent-Lease-Id") for call in seen] == ["lease-9", "lease-9"]
-
-
 def _write_main_config(tmp_path: Path) -> Path:
     token_file = tmp_path / "register_token"
     token_file.write_text("management-token", encoding="utf-8")
@@ -404,7 +209,7 @@ def test_load_claim_controls_reads_hot_fields_and_validates_types(tmp_path: Path
     config.update({"max_concurrency": 7, "claim_enabled": False})
     config_path.write_text(json.dumps(config), encoding="utf-8")
 
-    assert agent_worker.runtime_controls.load_claim_controls(config_path) == (7, False)
+    assert agent_worker.runtime_controls.load_claim_controls(config_path) == (7, False, None)
 
     config["max_concurrency"] = True
     config_path.write_text(json.dumps(config), encoding="utf-8")
@@ -415,7 +220,7 @@ def test_load_claim_controls_reads_hot_fields_and_validates_types(tmp_path: Path
 def test_load_claim_controls_defaults_to_disabled(tmp_path: Path) -> None:
     config_path = _write_main_config(tmp_path)
 
-    assert agent_worker.runtime_controls.load_claim_controls(config_path) == (1, False)
+    assert agent_worker.runtime_controls.load_claim_controls(config_path) == (1, False, None)
 
 
 def _run_main(
@@ -480,6 +285,75 @@ def test_main_survives_transient_claim_errors(
     assert result == [0]
 
 
+def test_main_error_pass_waits_via_backoff_not_pacing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """P2-3（#481 review）：成功 claim 之后的错误 pass，等待必须来自
+    ClaimBackoffSequence（#437 序列），而不是 pacing 的自适应短等待。
+
+    现有 test_error_path_pacing_untouched 只验证状态机属性持久性；
+    这里在 main() 级钉接线——spy 记录 backoff.next_wait 与
+    pacing.wait_after_pass 的每次返回值（它们就是 stop.wait 的时长
+    来源），断言错误轮的等待是 backoff 首退避（1s 量级）而非 pacing
+    带内值（≤100ms 上沿）。
+    """
+    fake = FakeClient(tmp_path / "unused.tar.gz")
+    claim_calls = 0
+    backoff_waits: list[float] = []
+    pacing_waits: list[float] = []
+
+    def claim_then_error(
+        worker_id: str,
+        max_concurrency: int | None = None,
+        max_code_concurrency: int | None = None,
+    ) -> dict | None:
+        nonlocal claim_calls
+        claim_calls += 1
+        if claim_calls == 1:
+            return _claim("exec-1")
+        if claim_calls == 2:
+            raise urllib.error.URLError("connection refused")
+        return None
+
+    class RecordingBackoff(agent_worker.ClaimBackoffSequence):
+        def next_wait(self) -> float:  # type: ignore[override]
+            wait = super().next_wait()
+            backoff_waits.append(wait)
+            return wait
+
+    class RecordingPacing(agent_worker.ClaimPacing):
+        def wait_after_pass(self, claimed: bool, round_trip: float, empty_wait: float) -> float:
+            wait = super().wait_after_pass(claimed, round_trip, empty_wait)
+            pacing_waits.append(wait)
+            return wait
+
+    fake.claim = claim_then_error  # type: ignore[attr-defined]
+    # 执行生命周期不在本用例范围：no-op 掉 run_execution（FakeClient 的
+    # bundle 路径不存在，真实 run_execution 会在 download 处炸掉）。
+    monkeypatch.setattr(agent_worker, "run_execution", lambda *a, **k: None)
+    monkeypatch.setattr(agent_worker, "ClaimBackoffSequence", RecordingBackoff)
+    monkeypatch.setattr(agent_worker, "ClaimPacing", RecordingPacing)
+
+    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, {"claim_enabled": True})
+    deadline = time.monotonic() + 10
+    while claim_calls < 3 and time.monotonic() < deadline:
+        time.sleep(0.02)
+    handlers[agent_worker.signal.SIGTERM]()
+    thread.join(timeout=10)
+
+    assert claim_calls >= 3, "claim loop stalled before the error pass"
+    assert result == [0]
+    # 第一轮（成功 claim）：等待来自 pacing（自适应短等待，带内 ≤100ms）。
+    assert pacing_waits and pacing_waits[0] <= 0.1 + 1e-9
+    # 第二轮（claim 抛错）：等待来自 backoff（#437 首退避 1s 固定）——
+    # 错误轮 pacing 不被调用，如果误走 pacing 这里会是 ≤100ms。
+    assert backoff_waits and backoff_waits[0] >= 1.0 - 1e-9
+    # 错误轮之后恢复（claim None）：pacing 重新被调用，返回 poll_interval
+    # （0.05s 配置值）——空队列语义回到调用方，未被错误路径污染。
+    assert len(pacing_waits) == 2
+    assert pacing_waits[1] == pytest.approx(0.05)
+
+
 def test_main_hot_reloads_claim_switch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     fake = FakeClient(tmp_path / "unused.tar.gz")
     claim_calls = 0
@@ -540,6 +414,7 @@ def test_main_hot_resizes_capacity_without_cancelling_active_work(
         status,
         uploads,
         download_slots,
+        heartbeat_registry=None,
     ):
         while not stop.is_set() and not releases[claimed["execution_id"]].wait(0.01):
             pass
@@ -570,6 +445,228 @@ def test_main_hot_resizes_capacity_without_cancelling_active_work(
     handlers[agent_worker.signal.SIGTERM]()
     thread.join(timeout=10)
     assert result == [0]
+
+
+def test_main_ramp_up_limits_claim_budget_until_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#471 main() 级接线：爬坡期 claim 预算被当前档位钳住，到顶后放开。
+
+    max_concurrency=3、ramp_up initial=1/step=2/interval=10s：首个领取 pass
+    只允许 1 个在跑（第二单在预算耗尽前领不到）；释放执行后容量仍按档位
+    走。#501 起 claim 向 Host 声明的是配置目标容量（3，恒定——agent_workers
+    行/UI/stock gate 不随档位抖），档位只钳本地预算。"""
+    fake = FakeClient(tmp_path / "unused.tar.gz")
+    claim_calls = 0
+    seen_capacities: list[int] = []
+    release = threading.Event()
+    claimed_first = threading.Event()
+
+    def claim(
+        worker_id: str,
+        max_concurrency: int | None = None,
+        max_code_concurrency: int | None = None,
+    ) -> dict | None:
+        nonlocal claim_calls
+        claim_calls += 1
+        seen_capacities.append(int(max_concurrency or 0))
+        if claim_calls == 1:
+            claimed_first.set()
+            return _claim("exec-1")
+        if not release.is_set():
+            # 预算耗尽的 pass 不该走到这里再领第二单——先挡住，配合外层断言。
+            return None
+        return _claim(f"exec-{claim_calls}")
+
+    def block_execution(  # type: ignore[no-untyped-def]
+        client,
+        claimed,
+        work_root,
+        environment,
+        interval,
+        stop,
+        grace,
+        status,
+        uploads,
+        slots,
+        heartbeat_registry=None,
+    ):
+        claimed_first.wait(timeout=5)
+        release.wait(timeout=5)
+
+    fake.claim = claim  # type: ignore[attr-defined]
+    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
+    updates = {
+        "claim_enabled": True,
+        "max_concurrency": 3,
+        "ramp_up": {"initial": 1, "step": 2, "interval_seconds": 10},
+    }
+    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, updates)
+    assert claimed_first.wait(timeout=5), "first claim never happened"
+    time.sleep(0.3)
+    # 爬坡首档：exec-1 在跑占满 initial=1，预算归零——没有第二单被领走。
+    assert claim_calls == 1, f"ramp should clamp the pass budget, got {claim_calls} claims"
+    # #501：claim 声明配置目标容量（3），不是生效档位（1）——行值不随档位抖。
+    assert seen_capacities[0] == 3, seen_capacities
+    # 释放首单；interval=10s 未到，档位不变（仍 1）——还是只有 1 个在跑。
+    release.set()
+    deadline = time.monotonic() + 2
+    while claim_calls < 2 and time.monotonic() < deadline:
+        time.sleep(0.02)
+    handlers[agent_worker.signal.SIGTERM]()
+    thread.join(timeout=10)
+    assert result == [0]
+    assert claim_calls >= 2, "refill after completion must stay allowed within the tier"
+    # 预算钳在档位（见上）而声明恒为目标值：爬坡全程 Host 看到的容量稳定。
+    assert all(capacity == 3 for capacity in seen_capacities), seen_capacities
+
+
+def test_main_ramp_up_reaches_target_and_releases_budget(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#471 到顶后放开：interval=0.2s 的短爬坡，几秒内 effective 追上目标，
+    本地预算回到全量语义（与禁用配置一致）。#501 起 claim 声明恒为目标
+    容量（3）——「到顶」的检测改用预算面：单 pass 内连续 3 次领取成功
+    （tier=3 前，pass 预算 ≤ 档位 < 3，一次 pass 至多领 2 单）。"""
+    fake = FakeClient(tmp_path / "unused.tar.gz")
+    claim_calls = 0
+    seen_capacities: list[int] = []
+    claim_times: list[float] = []
+    release = threading.Event()
+    released_budget = threading.Event()
+
+    def claim(
+        worker_id: str,
+        max_concurrency: int | None = None,
+        max_code_concurrency: int | None = None,
+    ) -> dict | None:
+        nonlocal claim_calls
+        claim_calls += 1
+        seen_capacities.append(int(max_concurrency or 0))
+        claim_times.append(time.monotonic())
+        # 到顶后的第一个 pass：3 次领取挤进同一个预算窗口（pacing 间隔
+        # 分隔 pass；0.1s 内的连续领取即同一 pass）——预算放开铁证。
+        same_pass = [t for t in claim_times if claim_times[-1] - t <= 0.1]
+        if len(same_pass) >= 3:
+            released_budget.set()
+            release.wait(timeout=5)
+        return _claim(f"exec-{claim_calls}")
+
+    def block_execution(  # type: ignore[no-untyped-def]
+        client,
+        claimed,
+        work_root,
+        environment,
+        interval,
+        stop,
+        grace,
+        status,
+        uploads,
+        slots,
+        heartbeat_registry=None,
+    ):
+        pass
+
+    fake.claim = claim  # type: ignore[attr-defined]
+    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
+    updates = {
+        "claim_enabled": True,
+        "max_concurrency": 3,
+        "ramp_up": {"initial": 1, "step": 2, "interval_seconds": 0.2},
+    }
+    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, updates)
+    # 活跃 ~0.2s 后到顶：tier=3 的 pass 一次领满 3 单（预算面放开）。
+    assert released_budget.wait(timeout=5), "reaching the target should release the budget"
+    handlers[agent_worker.signal.SIGTERM]()
+    release.set()
+    thread.join(timeout=10)
+    assert result == [0]
+    # #501：声明恒为目标容量 3（首拍到最后，不随档位抖）。
+    assert all(capacity == 3 for capacity in seen_capacities), seen_capacities
+
+
+def test_main_rejects_invalid_ramp_up_block_with_exit_code_2(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#493 P1-2：非法 ramp_up 块必须退出码 2（supervisor 不自动重启）。
+
+    镜像 prepare_runtime_models 的预检模式：配置错误重试无意义，裸抛
+    ValueError 会变成退出码 1 + traceback → supervisor 无限 crash loop。
+    消息点名非法字段（fail-fast 带指引），且不进主循环（无 claim）。"""
+    fake = FakeClient(tmp_path / "unused.tar.gz")
+    claim_calls = 0
+
+    def claim(*args: object, **kwargs: object) -> dict | None:
+        nonlocal claim_calls
+        claim_calls += 1
+        return None
+
+    fake.claim = claim  # type: ignore[method-assign]
+    thread, _, result = _run_main(
+        monkeypatch,
+        tmp_path,
+        fake,
+        {"claim_enabled": True, "ramp_up": {"initial": 0, "step": 64, "interval_seconds": 120}},
+    )
+    thread.join(timeout=10)
+    assert result == [2]
+    assert claim_calls == 0, "预检失败不得进入主循环发起 claim"
+    output = capsys.readouterr().out
+    assert "ramp_up.initial" in output, "错误消息必须点名非法字段"
+    assert "Traceback" not in output, "配置错误不该以裸 traceback 形态退出"
+
+
+def test_main_ramp_up_disabled_claims_full_budget(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """禁用（无 ramp_up 块）= 一次性全量：首 pass 即按 max_concurrency 领满。"""
+    fake = FakeClient(tmp_path / "unused.tar.gz")
+    claim_calls = 0
+    seen_capacities: list[int] = []
+    release = threading.Event()
+    filled = threading.Event()
+
+    def claim(
+        worker_id: str,
+        max_concurrency: int | None = None,
+        max_code_concurrency: int | None = None,
+    ) -> dict | None:
+        nonlocal claim_calls
+        claim_calls += 1
+        seen_capacities.append(int(max_concurrency or 0))
+        if claim_calls >= 3:
+            filled.set()
+            release.wait(timeout=5)
+        return _claim(f"exec-{claim_calls}")
+
+    def block_execution(  # type: ignore[no-untyped-def]
+        client,
+        claimed,
+        work_root,
+        environment,
+        interval,
+        stop,
+        grace,
+        status,
+        uploads,
+        slots,
+        heartbeat_registry=None,
+    ):
+        pass
+
+    fake.claim = claim  # type: ignore[attr-defined]
+    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
+    thread, handlers, result = _run_main(
+        monkeypatch, tmp_path, fake, {"claim_enabled": True, "max_concurrency": 3}
+    )
+    assert filled.wait(timeout=5), "full budget should claim 3 in the first pass"
+    handlers[agent_worker.signal.SIGTERM]()
+    release.set()
+    thread.join(timeout=10)
+    assert result == [0]
+    # 无 ramp_up：claim 上报的容量恒为配置目标（3），首 pass 领满 3 单。
+    assert claim_calls == 3
+    assert seen_capacities == [3, 3, 3]
 
 
 def test_main_exits_cleanly_on_revoked_worker(
@@ -664,7 +761,7 @@ def test_read_runtime_status_returns_empty_for_dead_writer(tmp_path: Path) -> No
         json.dumps({"pid": 99999999, "executions": {"exec-1": {"execution_id": "exec-1"}}}),
         encoding="utf-8",
     )
-    assert read_runtime_status(path) == {"executions": [], "remote": {}}
+    assert read_runtime_status(path) == {"executions": [], "remote": {}, "ramp_up": None}
 
 
 def test_read_runtime_status_returns_empty_for_corrupt_or_missing_file(
@@ -672,8 +769,12 @@ def test_read_runtime_status_returns_empty_for_corrupt_or_missing_file(
 ) -> None:
     path = tmp_path / "current_executions.json"
     path.write_text("not json", encoding="utf-8")
-    assert read_runtime_status(path) == {"executions": [], "remote": {}}
-    assert read_runtime_status(tmp_path / "missing.json") == {"executions": [], "remote": {}}
+    assert read_runtime_status(path) == {"executions": [], "remote": {}, "ramp_up": None}
+    assert read_runtime_status(tmp_path / "missing.json") == {
+        "executions": [],
+        "remote": {},
+        "ramp_up": None,
+    }
 
 
 def test_read_runtime_status_sorts_executions_by_started_at(tmp_path: Path) -> None:

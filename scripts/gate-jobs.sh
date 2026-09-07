@@ -46,7 +46,9 @@ other_worktree_gate_running() {
     lock="$worktree/.quick-gate.lock"
     [[ -d "$lock" ]] || continue
     [[ -f "$lock/pid" ]] || continue
-    pid="$(cat "$lock/pid" 2>/dev/null)"
+    # The pid file can vanish mid-read (the holder released the lock); never
+    # fatal — symmetric with gate-queue.sh's vanishing-slot reads.
+    pid="$(cat "$lock/pid" 2>/dev/null)" || true
     [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && return 0
   done < <(git worktree list --porcelain 2>/dev/null)
   return 1

@@ -42,11 +42,29 @@ class CodeStockGate:
         """True while the global queued code stock is below target."""
         if not self._config.enabled:
             return True
+        self._ensure_fresh()
+        return self._queued < self._target
+
+    def pass_budget(self) -> int | None:
+        """Requests THIS poll pass may still enqueue; None when the gate is off.
+
+        #401: within one pass ``allows()`` cannot see the shards this pass
+        just submitted (enqueue pool is asynchronous, the gate counts only
+        committed rows). The shard fan-out caps its own submissions at this
+        budget — same target/clamps/TTL as ``allows()``; the next pass
+        continues where this one stopped.
+        """
+        if not self._config.enabled:
+            return None
+        self._ensure_fresh()
+        return max(self._target - self._queued, 0)
+
+    def _ensure_fresh(self) -> None:
+        """Refresh the snapshot when the TTL expired (enabled gate only)."""
         now = time.monotonic()
         if now - self._loaded_at >= self._config.refresh_seconds:
             self._refresh()
             self._loaded_at = now
-        return self._queued < self._target
 
     def _refresh(self) -> None:
         with read_connection(self._dsn) as conn:

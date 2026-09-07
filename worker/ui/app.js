@@ -3,6 +3,7 @@
 // chartSeriesData / hasChartData / foldLogLines 是纯函数，
 // 由 app.test.mjs（node:test）直接 import；
 // 因此本文件以 ES module 加载（见 index.html 的 script type="module"），DOM 访问做存在性守卫。
+import { RAMP_UP_DEFAULTS, rampUpFormValues, rampUpFromForm, rampUpLine } from "./ramp_up.js";
 const hasDom = typeof document !== "undefined";
 const form = hasDom ? document.querySelector("#config-form") : null;
 const errorBox = hasDom ? document.querySelector("#form-error") : null;
@@ -103,6 +104,8 @@ function renderStatus(status) {
   const capacity = status.max_concurrency ?? 0;
   setText("capacity-state", `${runningCount} / ${capacity || "—"}`);
   document.querySelector("#capacity-meter").style.width = `${capacity ? Math.min(100, (runningCount / capacity) * 100) : 0}%`;
+  const rampEl = document.querySelector("#ramp-up-state"); // #471 爬坡进度行
+  if (rampEl) { const line = rampUpLine(status.ramp_up); rampEl.textContent = line; rampEl.hidden = !line; }
   const uploadActive = status.upload_active_count ?? 0;
   const uploadQueued = status.upload_queued_count ?? 0;
   const uploadCapacity = status.upload_max_concurrency ?? 4;
@@ -171,6 +174,11 @@ function fillForm(config) {
       form.elements.models.value = value.map((item) => `${item.runtime ? `${item.runtime}:` : ""}${item.provider}/${item.model}`).join("\n");
     } else if (key === "labels") {
       form.elements.labels.value = Object.entries(value).map(([label, item]) => `${label}=${item}`).join("\n");
+    } else if (key === "ramp_up") {
+      const { enabled, values } = rampUpFormValues(value); // #471 爬坡表单
+      if (form.elements.ramp_up_enabled) form.elements.ramp_up_enabled.checked = enabled;
+      for (const [field, item] of Object.entries(values))
+        if (form.elements[`ramp_up_${field}`]) form.elements[`ramp_up_${field}`].value = item;
     } else if (form.elements[key]) {
       form.elements[key].value = value;
     }
@@ -273,6 +281,9 @@ export function phaseProgress(phase) {
 export function runOccupancy(executions = []) {
   return (executions || []).filter((execution) => ["claimed", "downloading", "running"].includes(execution.phase)).length;
 }
+
+// #471：rampUpLine / rampUpFromForm 等纯函数在 ./ramp_up.js（预算腾挪），
+// app.test.mjs 从那里 import；本文件只保留 DOM 接线。
 
 function phaseLabel(phase) {
   return { claimed: "已领取", downloading: "下载中", running: "运行中", queued_upload: "排队上传", uploading: "上传中" }[phase] || phase || "未知";
@@ -791,6 +802,7 @@ if (hasDom) {
         poll_interval_seconds: numberField(data, "poll_interval_seconds"),
         heartbeat_interval_seconds: numberField(data, "heartbeat_interval_seconds"),
         shutdown_grace_seconds: numberField(data, "shutdown_grace_seconds"),
+        ramp_up: rampUpFromForm(data),
         proxy: (data.get("proxy") || "").trim(),
       };
       const result = await api("/api/config", { method: "PUT", body: JSON.stringify(payload) });
