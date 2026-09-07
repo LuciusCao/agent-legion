@@ -152,8 +152,13 @@ adheres to [Semantic Versioning](https://semver.org/) once 1.0.0 is released.
   排队语义零变化（slot 计数、TTL 回收、holder 打印、等待节奏不变）。
 
 版本线对齐：
-- pyproject 0.6.0 → 0.7.0 + uv.lock 同步；velites 0.5.0、frontend
-  0.4.0-alpha 落版一致性经 check_versions 解耦纪律验证通过。
+- pyproject 0.6.0 → 0.7.0 + uv.lock 同步；frontend 0.4.0-alpha 落版一致
+  性经 check_versions 解耦纪律验证通过。
+- velites 0.5.0 → 0.5.1 落版（0.7.0 后置提交）：velites-v0.5.0 tag 之后
+  velites/ 子树有 #469 工具相位打点的四个源码 commit（判读表内核取证
+  修正、measured 失败样本保 totalMs、边界后首字节不进 firstByteMs、
+  requestedTimeoutMs），独立版本线随源码前进——三平台二进制经
+  velites-v0.5.1 tag 发布。
 
 ## [0.6.0] - 2026-09-05
 
