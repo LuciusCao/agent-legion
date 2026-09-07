@@ -76,6 +76,29 @@ pub fn spec(kind: ToolKind) -> ToolSpec {
                 "required": ["op"]
             }),
         ),
+        ToolKind::Json => (
+            "Read or modify one field of a JSON file via a JSON path — the \
+             read-modify-write primitive for patching large JSON artifacts \
+             you produced. NEVER rewrite a whole JSON file (write tool) to \
+             change one field, and NEVER shell out to python for this. `get` \
+             returns the value at the path (null when absent). `set` writes \
+             any JSON value at the path and saves the file (pretty-printed, \
+             atomically). `delete` removes the key/array element at the \
+             path. Paths: dotted keys and [index] segments, e.g. \
+             `steps[2].content` or `[\"a key.with.dots\"].sub`; missing \
+             intermediate keys are an error for set/delete (no auto-create), \
+             and get reports null instead.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "op": {"type": "string", "enum": ["get", "set", "delete"], "description": "Operation to perform."},
+                    "path": {"type": "string", "description": "JSON file path, relative to the working directory."},
+                    "query": {"type": "string", "description": "JSON path to the field, e.g. `steps[2].content` or `[\"a key\"].sub` (max 512 chars)."},
+                    "value": {"description": "set: any JSON value to write at the path (objects/arrays/strings/numbers/booleans/null)."}
+                },
+                "required": ["op", "path", "query"]
+            }),
+        ),
         ToolKind::Validate => (
             "Check working-directory outputs against the skill's output contract \
              (the ```yaml contract block in its references/output-contract.md). \
